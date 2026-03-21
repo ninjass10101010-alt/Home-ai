@@ -6,6 +6,7 @@ import TopBar from "@/components/ui/TopBar";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import Avatar from "@/components/ui/Avatar";
+import SyncManager from "@/components/ui/SyncManager";
 
 const familyMembers = [
   { name: "Sarah (Mom)", role: "Parent", emoji: "👩", color: "green", age: "38", joined: "Feb 2024" },
@@ -110,21 +111,10 @@ export default function SettingsPage() {
           </Card>
         </section>
 
-        {/* Integrations */}
+        {/* Sync & Integrations */}
         <section>
-          <h3 className="text-text-primary font-semibold text-sm mb-3">Integrations</h3>
-          <Card>
-            <div className="space-y-1 divide-y divide-surface-3">
-              {[
-                { icon: "📅", label: "Google Calendar", value: "Connected · sarah@gmail.com" },
-                { icon: "🍎", label: "Apple Calendar", value: "Connect" },
-                { icon: "🛍️", label: "Instacart", value: "Connected" },
-                { icon: "🔔", label: "Push Notifications", value: "All members" },
-              ].map((item) => (
-                <SettingsRow key={item.label} {...item} />
-              ))}
-            </div>
-          </Card>
+          <h3 className="text-text-primary font-semibold text-sm mb-3">Sync & Integrations</h3>
+          <SyncManager />
         </section>
 
         {/* Notifications */}

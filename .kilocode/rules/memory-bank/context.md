@@ -16,7 +16,7 @@ Consuela is a production-ready AI-powered family organizer web app with 6 core s
 - [x] Meal Planner — weekly strip, meal detail with nutrition toggle, AI suggestions, pantry status, dietary preferences, recipe import (Pinterest, TikTok, browser, PDF) with basic parsing capabilities
 - [x] Grocery List — categorized items, check-off, progress bar, add item, store integrations (Instacart/Walmart/Amazon)
 - [x] Tasks & Chores — task list with priority indicators, member filter, recurring chores, completion tracking, Leaderboard + Rewards tabs
-- [x] Settings — family profile, member roles, integrations, notification toggles, AI preferences, privacy
+- [x] Settings — family profile, member roles, integrations (Google & Apple iCloud services), notification toggles, AI preferences, privacy
 
 ## File Structure
 
@@ -40,6 +40,7 @@ src/
     Badge.tsx             — Colored pill badges
     Avatar.tsx            — Family member avatars with emoji/initials
     PageShell.tsx         — Shared page wrapper with BottomNav
+    SyncManager.tsx       — Google & Apple iCloud services sync manager
 ```
 
 ## Design System
