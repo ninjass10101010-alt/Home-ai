@@ -26,7 +26,7 @@ const initialMessages: Message[] = [
     id: 1,
     role: "assistant",
     content:
-      "Hey there! 👋 I'm Nori, your family assistant. I can help you manage your calendar, plan meals, organize tasks, and build grocery lists.\n\nJust tell me what you need!",
+      "Hey there! 👋 I'm Consuela, your family assistant. I can help you manage your calendar, plan meals, organize tasks, and build grocery lists.\n\nJust tell me what you need!",
     timestamp: "Now",
   },
 ];
@@ -240,11 +240,11 @@ export default function ChatPage() {
           borderBottom: "1px solid rgba(255,255,255,0.04)",
         }}
       >
-        <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl shrink-0 bg-nori-500/15 nori-glow">
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl shrink-0 bg-nori-500/15 consuela-glow">
           ✨
         </div>
         <div className="flex-1 min-w-0">
-          <h1 className="text-base font-semibold text-text-primary">Nori</h1>
+          <h1 className="text-base font-semibold text-text-primary">Consuela</h1>
           <div className="flex items-center gap-1.5">
             <div className="w-1.5 h-1.5 rounded-full bg-nori-400 animate-pulse" />
             <span className="text-xs text-text-secondary">AI Family Assistant</span>
@@ -379,7 +379,7 @@ export default function ChatPage() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Message Nori…"
+            placeholder="Message Consuela…"
             rows={1}
             className="flex-1 bg-transparent text-text-primary text-sm placeholder:text-text-muted resize-none outline-none leading-relaxed py-1.5 max-h-28"
             style={{ minHeight: "36px" }}

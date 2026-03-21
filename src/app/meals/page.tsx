@@ -246,7 +246,7 @@ export default function MealsPage() {
         {/* AI Suggestions */}
         <section>
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-text-primary font-semibold text-sm">Nori Suggests</h3>
+            <h3 className="text-text-primary font-semibold text-sm">Consuela Suggests</h3>
             <Badge variant="violet">✨ AI picks</Badge>
           </div>
           <div className="grid grid-cols-2 gap-2">
@@ -271,7 +271,7 @@ export default function MealsPage() {
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-text-primary font-semibold text-sm">Pantry Check</h3>
             <Link href="/chat?q=What+can+I+make+with+pantry+items" className="text-nori-400 text-xs hover:text-nori-300">
-              Ask Nori →
+              Ask Consuela →
             </Link>
           </div>
           <Card className="!p-3">

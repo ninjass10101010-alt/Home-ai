@@ -11,7 +11,7 @@ export default function Card({ children, className = "", onClick, glow }: CardPr
   const interactive = onClick
     ? "cursor-pointer hover:border-nori-500/20 active:scale-[0.98]"
     : "";
-  const glowClass = glow ? "nori-glow border-nori-500/20" : "";
+  const glowClass = glow ? "consuela-glow border-nori-500/20" : "";
 
   if (onClick) {
     return (

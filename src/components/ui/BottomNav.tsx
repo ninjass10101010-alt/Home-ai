@@ -35,7 +35,7 @@ const navItems = [
   },
   {
     href: "/chat",
-    label: "Ask Nori",
+    label: "Ask Consuela",
     icon: (active: boolean) => (
       <svg
         viewBox="0 0 24 24"
@@ -139,7 +139,7 @@ export default function BottomNav() {
                   <span
                     className={`flex items-center justify-center w-12 h-10 rounded-xl transition-all duration-200 ${
                       isActive
-                        ? "bg-nori-500 text-surface-0 nori-glow"
+                        ? "bg-nori-500 text-surface-0 consuela-glow"
                         : "bg-nori-500/15 text-nori-400 group-hover:bg-nori-500/25"
                     }`}
                   >

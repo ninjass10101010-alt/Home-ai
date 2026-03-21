@@ -129,7 +129,7 @@ export default function HomePage() {
               ✨
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-text-primary text-sm font-medium">Ask Nori anything…</p>
+              <p className="text-text-primary text-sm font-medium">Ask Consuela anything…</p>
               <p className="text-text-muted text-xs mt-0.5 truncate">
                 &ldquo;Add Jake&apos;s dentist on Thursday at 2pm&rdquo;
               </p>

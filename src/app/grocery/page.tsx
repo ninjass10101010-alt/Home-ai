@@ -19,17 +19,17 @@ interface GroceryItem {
 }
 
 const initialItems: GroceryItem[] = [
-  { id: 1, name: "Chicken breast", quantity: "2 lbs", category: "Meat & Seafood", urgent: true, checked: false, addedBy: "Nori", emoji: "🍗" },
-  { id: 2, name: "Shrimp", quantity: "1 lb", category: "Meat & Seafood", urgent: true, checked: false, addedBy: "Nori", emoji: "🦐" },
+  { id: 1, name: "Chicken breast", quantity: "2 lbs", category: "Meat & Seafood", urgent: true, checked: false, addedBy: "Consuela", emoji: "🍗" },
+  { id: 2, name: "Shrimp", quantity: "1 lb", category: "Meat & Seafood", urgent: true, checked: false, addedBy: "Consuela", emoji: "🦐" },
   { id: 3, name: "Ground beef", quantity: "1.5 lbs", category: "Meat & Seafood", urgent: false, checked: false, addedBy: "Mom", emoji: "🥩" },
-  { id: 4, name: "Broccoli", quantity: "1 head", category: "Produce", urgent: true, checked: false, addedBy: "Nori", emoji: "🥦" },
-  { id: 5, name: "Bell peppers", quantity: "3", category: "Produce", urgent: false, checked: false, addedBy: "Nori", emoji: "🫑" },
+  { id: 4, name: "Broccoli", quantity: "1 head", category: "Produce", urgent: true, checked: false, addedBy: "Consuela", emoji: "🥦" },
+  { id: 5, name: "Bell peppers", quantity: "3", category: "Produce", urgent: false, checked: false, addedBy: "Consuela", emoji: "🫑" },
   { id: 6, name: "Zucchini", quantity: "2", category: "Produce", urgent: false, checked: true, addedBy: "Mom", emoji: "🥒" },
-  { id: 7, name: "Mozzarella", quantity: "8 oz", category: "Dairy", urgent: false, checked: false, addedBy: "Nori", emoji: "🧀" },
-  { id: 8, name: "Parmesan", quantity: "4 oz", category: "Dairy", urgent: false, checked: false, addedBy: "Nori", emoji: "🧀" },
-  { id: 9, name: "Penne pasta", quantity: "1 box", category: "Pantry", urgent: false, checked: false, addedBy: "Nori", emoji: "🍝" },
-  { id: 10, name: "Tomato sauce", quantity: "2 cans", category: "Pantry", urgent: true, checked: false, addedBy: "Nori", emoji: "🥫" },
-  { id: 11, name: "Taco shells", quantity: "1 box", category: "Pantry", urgent: false, checked: false, addedBy: "Nori", emoji: "🌮" },
+  { id: 7, name: "Mozzarella", quantity: "8 oz", category: "Dairy", urgent: false, checked: false, addedBy: "Consuela", emoji: "🧀" },
+  { id: 8, name: "Parmesan", quantity: "4 oz", category: "Dairy", urgent: false, checked: false, addedBy: "Consuela", emoji: "🧀" },
+  { id: 9, name: "Penne pasta", quantity: "1 box", category: "Pantry", urgent: false, checked: false, addedBy: "Consuela", emoji: "🍝" },
+  { id: 10, name: "Tomato sauce", quantity: "2 cans", category: "Pantry", urgent: true, checked: false, addedBy: "Consuela", emoji: "🥫" },
+  { id: 11, name: "Taco shells", quantity: "1 box", category: "Pantry", urgent: false, checked: false, addedBy: "Consuela", emoji: "🌮" },
   { id: 12, name: "Salsa", quantity: "1 jar", category: "Pantry", urgent: false, checked: false, addedBy: "Dad", emoji: "🫙" },
 ];
 

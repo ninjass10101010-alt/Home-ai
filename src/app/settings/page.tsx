@@ -81,7 +81,7 @@ export default function SettingsPage() {
             ))}
           </div>
           <h2 className="text-text-primary font-bold text-xl">Johnson Family</h2>
-          <p className="text-text-secondary text-sm mt-1">4 members · Plan: Nori Pro 🌟</p>
+          <p className="text-text-secondary text-sm mt-1">4 members · Plan: Consuela Pro 🌟</p>
           <div className="flex gap-2 mt-3">
             <Badge variant="green">Pro Plan</Badge>
             <Badge variant="cyan">Since Feb 2024</Badge>
@@ -120,7 +120,7 @@ export default function SettingsPage() {
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <p className="text-text-primary font-semibold text-sm">Nori Pro</p>
+                  <p className="text-text-primary font-semibold text-sm">Consuela Pro</p>
                   <Badge variant="amber">Active</Badge>
                 </div>
                 <p className="text-text-secondary text-xs mt-0.5">$9.99/month · Renews Apr 15</p>
@@ -177,7 +177,7 @@ export default function SettingsPage() {
           <h3 className="text-text-primary font-semibold text-sm mb-3">AI Preferences</h3>
           <Card>
             <ToggleRow label="Voice input" description="Use microphone for commands" defaultOn={true} />
-            <ToggleRow label="Smart suggestions" description="Nori proactively helps" defaultOn={true} />
+            <ToggleRow label="Smart suggestions" description="Consuela proactively helps" defaultOn={true} />
             <ToggleRow label="Context memory" description="Remember past conversations" defaultOn={true} />
             <ToggleRow label="Meal suggestions" description="Based on dietary preferences" defaultOn={true} />
           </Card>

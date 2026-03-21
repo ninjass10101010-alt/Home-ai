@@ -1,10 +1,10 @@
-# Active Context: Nori — AI Family Organizer
+# Active Context: Consuela — AI Family Organizer
 
 ## Current State
 
 **Status**: ✅ Full V1 application built and deployed
 
-Nori is a production-ready AI-powered family organizer web app with 6 core screens, a full design system, and interactive UI. Built on Next.js 16 + React 19 + Tailwind CSS 4.
+Consuela is a production-ready AI-powered family organizer web app with 6 core screens, a full design system, and interactive UI. Built on Next.js 16 + React 19 + Tailwind CSS 4.
 
 ## Recently Completed
 
@@ -44,7 +44,7 @@ src/
 
 ## Design System
 
-- **Brand**: Nori green (#22c55e) as primary accent
+- **Brand**: Consuela green (#22c55e) as primary accent
 - **Theme**: Dark (#0f1117 background), glass morphism cards
 - **Secondary accents**: violet, amber, cyan, rose
 - **Typography**: Geist Sans (variable font)
@@ -75,7 +75,7 @@ src/
 | Date | Changes |
 |------|---------|
 | Initial | Template created with base Next.js setup |
-| Mar 2026 | Full Nori V1 app built — 7 pages, design system, AI chat, all core features |
+| Mar 2026 | Full Consuela V1 app built — 7 pages, design system, AI chat, all core features |
 
 ## Next Steps (V2)
 

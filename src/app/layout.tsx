@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Nori — AI Family Organizer",
+  title: "Consuela — AI Family Organizer",
   description:
-    "Nori is your AI-powered family organizer. Manage calendars, meals, groceries, and chores through a single conversational interface.",
+    "Consuela is your AI-powered family organizer. Manage calendars, meals, groceries, and chores through a single conversational interface.",
   keywords: [
     "family organizer",
     "AI assistant",
@@ -25,9 +25,9 @@ export const metadata: Metadata = {
     "grocery list",
   ],
   openGraph: {
-    title: "Nori — AI Family Organizer",
+    title: "Consuela — AI Family Organizer",
     description: "Your AI-powered family coordinator.",
-    siteName: "Nori",
+    siteName: "Consuela",
     type: "website",
   },
 };

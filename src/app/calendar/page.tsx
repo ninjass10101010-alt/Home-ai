@@ -231,7 +231,7 @@ export default function CalendarPage() {
                 href="/chat?q=Add+event"
                 className="text-nori-400 text-xs mt-1 hover:text-nori-300"
               >
-                Ask Nori to add one →
+                Ask Consuela to add one →
               </Link>
             </Card>
           ) : (
