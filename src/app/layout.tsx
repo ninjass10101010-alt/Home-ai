@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -13,8 +13,30 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Next.js Template",
-  description: "A minimal Next.js starter template",
+  title: "Nori — AI Family Organizer",
+  description:
+    "Nori is your AI-powered family organizer. Manage calendars, meals, groceries, and chores through a single conversational interface.",
+  keywords: [
+    "family organizer",
+    "AI assistant",
+    "meal planning",
+    "family calendar",
+    "chore management",
+    "grocery list",
+  ],
+  openGraph: {
+    title: "Nori — AI Family Organizer",
+    description: "Your AI-powered family coordinator.",
+    siteName: "Nori",
+    type: "website",
+  },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  themeColor: "#0f1117",
 };
 
 export default function RootLayout({
