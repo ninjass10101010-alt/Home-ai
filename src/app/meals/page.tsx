@@ -291,6 +291,52 @@ export default function MealsPage() {
           </Card>
         </section>
 
+        {/* Recipe Import */}
+        <section className="pb-2">
+          <h3 className="text-text-primary font-semibold text-sm mb-3">Import Recipes</h3>
+          <div className="flex flex-wrap gap-2">
+            <button
+              className="px-3 py-1.5 rounded-full text-xs font-medium transition-all bg-nori-500/15 text-nori-400 border border-nori-500/20"
+              onClick={() => {
+                // Placeholder for Pinterest import
+                alert("Pinterest import coming soon!");
+              }}
+            >
+              📌 Pinterest
+            </button>
+            <button
+              className="px-3 py-1.5 rounded-full text-xs font-medium transition-all bg-nori-500/15 text-nori-400 border border-nori-500/20"
+              onClick={() => {
+                // Placeholder for TikTok import
+                alert("TikTok import coming soon!");
+              }}
+            >
+              🎵 TikTok
+            </button>
+            <button
+              className="px-3 py-1.5 rounded-full text-xs font-medium transition-all bg-nori-500/15 text-nori-400 border border-nori-500/20"
+              onClick={() => {
+                // Placeholder for browser import
+                alert("Browser import coming soon!");
+              }}
+            >
+              🌐 Browser
+            </button>
+            <button
+              className="px-3 py-1.5 rounded-full text-xs font-medium transition-all bg-nori-500/15 text-nori-400 border border-nori-500/20"
+              onClick={() => {
+                // Placeholder for PDF import
+                alert("PDF import coming soon!");
+              }}
+            >
+              📄 PDF
+            </button>
+          </div>
+          <p className="text-text-muted text-xs mt-2">
+            Save recipes from your favorite apps and websites directly to your meal planner
+          </p>
+        </section>
+
         {/* Dietary preferences */}
         <section className="pb-2">
           <h3 className="text-text-primary font-semibold text-sm mb-3">Family Preferences</h3>
