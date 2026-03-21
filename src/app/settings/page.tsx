@@ -110,39 +110,6 @@ export default function SettingsPage() {
           </Card>
         </section>
 
-        {/* Subscription */}
-        <section>
-          <h3 className="text-text-primary font-semibold text-sm mb-3">Subscription</h3>
-          <Card glow>
-            <div className="flex items-start gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/15 flex items-center justify-center text-xl shrink-0">
-                🌟
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <p className="text-text-primary font-semibold text-sm">Consuela Pro</p>
-                  <Badge variant="amber">Active</Badge>
-                </div>
-                <p className="text-text-secondary text-xs mt-0.5">$9.99/month · Renews Apr 15</p>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { label: "AI Messages", used: "347", limit: "Unlimited" },
-                { label: "Family Members", used: "4", limit: "10 max" },
-                { label: "Calendars", used: "3", limit: "Unlimited" },
-                { label: "Meal Plans", used: "8", limit: "Unlimited" },
-              ].map((stat) => (
-                <div key={stat.label} className="bg-surface-2 rounded-xl p-2.5">
-                  <p className="text-text-primary font-bold text-sm">{stat.used}</p>
-                  <p className="text-text-muted text-[10px]">{stat.label}</p>
-                  <p className="text-nori-400 text-[10px]">{stat.limit}</p>
-                </div>
-              ))}
-            </div>
-          </Card>
-        </section>
-
         {/* Integrations */}
         <section>
           <h3 className="text-text-primary font-semibold text-sm mb-3">Integrations</h3>
