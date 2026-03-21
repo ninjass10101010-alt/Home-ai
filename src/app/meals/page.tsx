@@ -114,6 +114,64 @@ export default function MealsPage() {
 
   const activeMeal = mealDb.find((m) => m.time === activeDay);
 
+  // Function to import recipe from URL
+  const importRecipeFromUrl = (url: string, source: string) => {
+    // In a real implementation, this would:
+    // 1. Fetch the URL content
+    // 2. Parse the recipe data based on the source
+    // 3. Extract ingredients, instructions, etc.
+    // 4. Add to meal database or show preview
+    
+    // For now, we'll simulate with a mock response
+    alert(`Importing recipe from ${source}:\n${url}\n\nIn a real implementation, this would parse the URL and extract the recipe data.`);
+    
+    // Example of what parsed data might look like:
+    const mockRecipe = {
+      name: "Imported Recipe",
+      emoji: "🍳",
+      time: "Today",
+      prepTime: "30 min",
+      tags: ["Imported"],
+      ingredients: ["Ingredient 1", "Ingredient 2", "Ingredient 3"],
+      servings: 4,
+      calories: 350
+    };
+    
+    // In a real app, we might add this to our meal database or show a preview
+    console.log("Parsed recipe:", mockRecipe);
+  };
+
+  // Function to handle file upload (text-based recipes)
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      // In a real implementation, parse the content based on file type
+      // For now, just show the content
+      alert(`File content:\n${content.substring(0, 200)}${content.length > 200 ? '...' : ''}\n\nIn a real implementation, this would parse the recipe data.`);
+    };
+    reader.readAsText(file);
+    
+    // Reset input to allow same file upload again
+    e.target.value = '';
+  };
+
+  // Function to handle PDF upload
+  const handlePdfUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    // In a real implementation, we would use a PDF parsing library
+    // like pdf.js or pdftotext to extract text from the PDF
+    alert(`PDF file selected: ${file.name}\n\nIn a real implementation, this would extract text from the PDF and parse the recipe data.`);
+    
+    // Reset input to allow same file upload again
+    e.target.value = '';
+  };
+
   return (
     <PageShell>
       <TopBar
@@ -294,43 +352,73 @@ export default function MealsPage() {
         {/* Recipe Import */}
         <section className="pb-2">
           <h3 className="text-text-primary font-semibold text-sm mb-3">Import Recipes</h3>
-          <div className="flex flex-wrap gap-2">
-            <button
-              className="px-3 py-1.5 rounded-full text-xs font-medium transition-all bg-nori-500/15 text-nori-400 border border-nori-500/20"
-              onClick={() => {
-                // Placeholder for Pinterest import
-                alert("Pinterest import coming soon!");
-              }}
-            >
-              📌 Pinterest
-            </button>
-            <button
-              className="px-3 py-1.5 rounded-full text-xs font-medium transition-all bg-nori-500/15 text-nori-400 border border-nori-500/20"
-              onClick={() => {
-                // Placeholder for TikTok import
-                alert("TikTok import coming soon!");
-              }}
-            >
-              🎵 TikTok
-            </button>
-            <button
-              className="px-3 py-1.5 rounded-full text-xs font-medium transition-all bg-nori-500/15 text-nori-400 border border-nori-500/20"
-              onClick={() => {
-                // Placeholder for browser import
-                alert("Browser import coming soon!");
-              }}
-            >
-              🌐 Browser
-            </button>
-            <button
-              className="px-3 py-1.5 rounded-full text-xs font-medium transition-all bg-nori-500/15 text-nori-400 border border-nori-500/20"
-              onClick={() => {
-                // Placeholder for PDF import
-                alert("PDF import coming soon!");
-              }}
-            >
-              📄 PDF
-            </button>
+          <div className="space-y-4">
+            {/* URL-based imports for Pinterest/TikTok */}
+            <div className="space-y-3">
+              <h4 className="text-text-secondary text-sm font-medium mb-1">From URL</h4>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all bg-nori-500/15 text-nori-400 border border-nori-500/20 hover:bg-nori-500/25"
+                  onClick={() => {
+                    const url = prompt("Enter Pinterest URL:");
+                    if (url) {
+                      importRecipeFromUrl(url, "pinterest");
+                    }
+                  }}
+                >
+                  📌 Pinterest
+                </button>
+                <button
+                  className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all bg-nori-500/15 text-nori-400 border border-nori-500/20 hover:bg-nori-500/25"
+                  onClick={() => {
+                    const url = prompt("Enter TikTok URL:");
+                    if (url) {
+                      importRecipeFromUrl(url, "tiktok");
+                    }
+                  }}
+                >
+                  🎵 TikTok
+                </button>
+              </div>
+            </div>
+            
+            {/* File upload for browser/PDF */}
+            <div className="space-y-3">
+              <h4 className="text-text-secondary text-sm font-medium mb-1">From File</h4>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all bg-nori-500/15 text-nori-400 border border-nori-500/20 hover:bg-nori-500/25"
+                  onClick={() => {
+                    document.getElementById("file-upload")?.click();
+                  }}
+                >
+                  🌐 Browser
+                </button>
+                <button
+                  className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all bg-nori-500/15 text-nori-400 border border-nori-500/20 hover:bg-nori-500/25"
+                  onClick={() => {
+                    document.getElementById("pdf-upload")?.click();
+                  }}
+                >
+                  📄 PDF
+                </button>
+                {/* Hidden file inputs */}
+                <input
+                  type="file"
+                  id="file-upload"
+                  accept=".txt,.json,.csv"
+                  className="hidden"
+                  onChange={handleFileUpload}
+                />
+                <input
+                  type="file"
+                  id="pdf-upload"
+                  accept=".pdf"
+                  className="hidden"
+                  onChange={handlePdfUpload}
+                />
+              </div>
+            </div>
           </div>
           <p className="text-text-muted text-xs mt-2">
             Save recipes from your favorite apps and websites directly to your meal planner
