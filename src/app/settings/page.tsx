@@ -77,7 +77,7 @@ export default function SettingsPage() {
           <div className="flex -space-x-2 mb-4">
             {familyMembers.map((m) => (
               <div key={m.name} className="ring-2 ring-surface-0 rounded-full">
-                <Avatar name={m.name} color={m.color} emoji={m.emoji} size="lg" />
+                <Avatar name={m.name} color={m.color} emoji={m.emoji} size="lg" variant="emoji" />
               </div>
             ))}
           </div>
@@ -99,7 +99,7 @@ export default function SettingsPage() {
             <div className="space-y-3">
               {familyMembers.map((member) => (
                 <div key={member.name} className="flex items-center gap-3">
-                  <Avatar name={member.name} color={member.color} emoji={member.emoji} size="md" />
+                  <Avatar name={member.name} color={member.color} emoji={member.emoji} size="md" variant="emoji" />
                   <div className="flex-1 min-w-0">
                     <p className="text-text-primary text-sm font-medium truncate">{member.name}</p>
                     <p className="text-text-muted text-xs">Age {member.age} · Joined {member.joined}</p>

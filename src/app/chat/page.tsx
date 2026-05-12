@@ -271,7 +271,7 @@ export default function ChatPage() {
               </div>
             )}
             {msg.role === "user" && (
-              <Avatar name="Mom" color="green" emoji="👩" size="sm" />
+              <Avatar name="Mom" color="green" emoji="👩" size="sm" variant="emoji" />
             )}
             <div className={`max-w-[82%] space-y-2 ${msg.role === "user" ? "items-end" : "items-start"} flex flex-col`}>
               <div

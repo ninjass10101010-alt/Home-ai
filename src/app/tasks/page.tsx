@@ -214,7 +214,7 @@ export default function TasksPage() {
                         <p className="text-text-primary text-sm font-medium truncate">{chore.title}</p>
                         <p className="text-text-muted text-xs">{chore.schedule}</p>
                       </div>
-                      <Avatar name={chore.assignee} color={chore.color} size="sm" />
+                      <Avatar name={chore.assignee} color={chore.color} size="sm" variant="emoji" />
                     </div>
                   </Card>
                 ))}

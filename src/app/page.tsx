@@ -117,8 +117,13 @@ export default function HomePage() {
       </div>
 
       {/* Weather Widget */}
-      <div className="px-4 space-y-1">
+      <div className="px-4 pb-2">
         <WeatherWidget />
+      </div>
+
+      {/* Divider between weather and AI */}
+      <div className="px-4 mb-2">
+        <div className="h-px bg-surface-3"></div>
       </div>
 
       <div className="px-4 space-y-5">
