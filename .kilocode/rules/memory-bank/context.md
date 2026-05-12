@@ -8,7 +8,7 @@ Consuela is a production-ready AI-powered family organizer web app with 6 core s
 
 ## Recently Completed
 
-- [x] Global design system: dark theme, nori-green brand palette, glass morphism, custom CSS tokens
+- [x] Global design system: dark theme, nori-blue brand palette, glass morphism, custom CSS tokens
 - [x] Shared UI components: BottomNav, TopBar, Card, Button, Badge, Avatar, PageShell
 - [x] Home Dashboard — family greeting, today's events, meal strip, task summary, grocery snapshot, AI quick-ask CTA
 - [x] Chat/AI Assistant — conversational UI, mock NLP responses, action cards, voice button, typing indicator, suggested prompts
@@ -45,7 +45,7 @@ src/
 
 ## Design System
 
-- **Brand**: Consuela green (#22c55e) as primary accent
+- **Brand**: Consuela blue (#3b82f6) as primary accent
 - **Theme**: Dark (#0f1117 background), glass morphism cards
 - **Secondary accents**: violet, amber, cyan, rose
 - **Typography**: Geist Sans (variable font)

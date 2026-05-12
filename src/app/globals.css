@@ -2,17 +2,17 @@
 
 @theme {
   /* Brand palette */
-  --color-nori-50: #f0fdf4;
-  --color-nori-100: #dcfce7;
-  --color-nori-200: #bbf7d0;
-  --color-nori-300: #86efac;
-  --color-nori-400: #4ade80;
-  --color-nori-500: #22c55e;
-  --color-nori-600: #16a34a;
-  --color-nori-700: #15803d;
-  --color-nori-800: #166534;
-  --color-nori-900: #14532d;
-  --color-nori-950: #052e16;
+  --color-nori-50: #eff6ff;
+  --color-nori-100: #dbeafe;
+  --color-nori-200: #bfdbfe;
+  --color-nori-300: #93c5fd;
+  --color-nori-400: #60a5fa;
+  --color-nori-500: #3b82f6;
+  --color-nori-600: #2563eb;
+  --color-nori-700: #1d4ed8;
+  --color-nori-800: #1e40af;
+  --color-nori-900: #1e3a8a;
+  --color-nori-950: #172554;
 
   --color-surface-0: #0f1117;
   --color-surface-1: #181c24;
@@ -69,7 +69,7 @@ body {
 
 /* Gradient text utility */
 .gradient-text {
-  background: linear-gradient(135deg, #4ade80 0%, #06b6d4 100%);
+  background: linear-gradient(135deg, #60a5fa 0%, #06b6d4 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -85,7 +85,7 @@ body {
 
 /* Consuela glow */
 .consuela-glow {
-  box-shadow: 0 0 24px rgba(34, 197, 94, 0.2), 0 0 48px rgba(34, 197, 94, 0.08);
+  box-shadow: 0 0 24px rgba(59, 130, 246, 0.2), 0 0 48px rgba(59, 130, 246, 0.08);
 }
 
 /* Tap highlight removal for mobile */

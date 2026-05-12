@@ -75,7 +75,7 @@ export default function HomePage() {
         <div
           className="absolute -top-16 -right-16 w-64 h-64 rounded-full opacity-10 pointer-events-none"
           style={{
-            background: "radial-gradient(circle, #22c55e 0%, transparent 70%)",
+            background: "radial-gradient(circle, #3b82f6 0%, transparent 70%)",
           }}
         />
 
