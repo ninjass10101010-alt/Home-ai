@@ -70,14 +70,14 @@ export default function SettingsPage() {
         <div
           className="rounded-2xl p-5 flex flex-col items-center text-center"
           style={{
-            background: "linear-gradient(135deg, rgba(59,130,246,0.1) 0%, rgba(6,182,212,0.08) 100%)",
-            border: "1px solid rgba(59,130,246,0.15)",
+            background: "linear-gradient(135deg, rgba(34,197,94,0.1) 0%, rgba(6,182,212,0.08) 100%)",
+            border: "1px solid rgba(34,197,94,0.15)",
           }}
         >
           <div className="flex -space-x-2 mb-4">
             {familyMembers.map((m) => (
               <div key={m.name} className="ring-2 ring-surface-0 rounded-full">
-                <Avatar name={m.name} color={m.color} emoji={m.emoji} size="lg" variant="emoji" />
+                <Avatar name={m.name} color={m.color} emoji={m.emoji} size="lg" />
               </div>
             ))}
           </div>
@@ -99,7 +99,7 @@ export default function SettingsPage() {
             <div className="space-y-3">
               {familyMembers.map((member) => (
                 <div key={member.name} className="flex items-center gap-3">
-                  <Avatar name={member.name} color={member.color} emoji={member.emoji} size="md" variant="emoji" />
+                  <Avatar name={member.name} color={member.color} emoji={member.emoji} size="md" />
                   <div className="flex-1 min-w-0">
                     <p className="text-text-primary text-sm font-medium truncate">{member.name}</p>
                     <p className="text-text-muted text-xs">Age {member.age} · Joined {member.joined}</p>
