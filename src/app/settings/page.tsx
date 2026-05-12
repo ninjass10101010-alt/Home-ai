@@ -70,8 +70,8 @@ export default function SettingsPage() {
         <div
           className="rounded-2xl p-5 flex flex-col items-center text-center"
           style={{
-            background: "linear-gradient(135deg, rgba(34,197,94,0.1) 0%, rgba(6,182,212,0.08) 100%)",
-            border: "1px solid rgba(34,197,94,0.15)",
+            background: "linear-gradient(135deg, rgba(59,130,246,0.1) 0%, rgba(6,182,212,0.08) 100%)",
+            border: "1px solid rgba(59,130,246,0.15)",
           }}
         >
           <div className="flex -space-x-2 mb-4">

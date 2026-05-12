@@ -362,7 +362,7 @@ export default function ChatPage() {
       >
         <div
           className="flex items-end gap-2 rounded-2xl glass px-3 py-2"
-          style={{ border: "1px solid rgba(34,197,94,0.15)" }}
+          style={{ border: "1px solid rgba(59,130,246,0.15)" }}
         >
           {/* Voice button */}
           <button className="w-9 h-9 flex items-center justify-center rounded-xl text-text-secondary hover:text-nori-400 transition-colors shrink-0 mb-0.5">

@@ -229,8 +229,8 @@ export default function TasksPage() {
             <div
               className="rounded-2xl p-4 text-center"
               style={{
-                background: "linear-gradient(135deg, rgba(34,197,94,0.12) 0%, rgba(124,111,247,0.12) 100%)",
-                border: "1px solid rgba(34,197,94,0.15)",
+                background: "linear-gradient(135deg, rgba(59,130,246,0.12) 0%, rgba(124,111,247,0.12) 100%)",
+                border: "1px solid rgba(59,130,246,0.15)",
               }}
             >
               <p className="text-text-secondary text-xs mb-1">This week&apos;s champion</p>

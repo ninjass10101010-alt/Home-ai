@@ -3,6 +3,7 @@ import PageShell from "@/components/ui/PageShell";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import Avatar from "@/components/ui/Avatar";
+import WeatherWidget from "@/components/ui/WeatherWidget";
 
 const familyMembers = [
   { name: "Mom", color: "green", emoji: "👩" },
@@ -115,14 +116,19 @@ export default function HomePage() {
         </div>
       </div>
 
+      {/* Weather Widget */}
+      <div className="px-4 space-y-1">
+        <WeatherWidget />
+      </div>
+
       <div className="px-4 space-y-5">
         {/* AI Quick Ask */}
         <Link href="/chat">
           <div
             className="rounded-2xl p-4 flex items-center gap-3 cursor-pointer active:scale-[0.98] transition-transform"
             style={{
-              background: "linear-gradient(135deg, rgba(34,197,94,0.12) 0%, rgba(6,182,212,0.08) 100%)",
-              border: "1px solid rgba(34,197,94,0.2)",
+              background: "linear-gradient(135deg, rgba(59,130,246,0.12) 0%, rgba(6,182,212,0.08) 100%)",
+              border: "1px solid rgba(59,130,246,0.2)",
             }}
           >
             <div className="w-10 h-10 rounded-xl bg-nori-500/20 flex items-center justify-center text-xl shrink-0">

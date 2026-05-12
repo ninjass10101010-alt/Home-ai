@@ -231,7 +231,7 @@ export default function GroceryPage() {
           <h3 className="text-text-primary font-semibold text-sm mb-3">Order Online</h3>
           <div className="grid grid-cols-3 gap-2">
             {[
-              { name: "Instacart", emoji: "🛍️", color: "bg-green-500/10 border-green-500/20 text-green-400" },
+              { name: "Instacart", emoji: "🛍️", color: "bg-nori-500/10 border-nori-500/20 text-nori-400" },
               { name: "Walmart", emoji: "🟡", color: "bg-blue-500/10 border-blue-500/20 text-blue-400" },
               { name: "Amazon Fresh", emoji: "📦", color: "bg-amber-500/10 border-amber-500/20 text-amber-400" },
             ].map((store) => (
