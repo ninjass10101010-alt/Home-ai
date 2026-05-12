@@ -4,6 +4,7 @@ import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import Avatar from "@/components/ui/Avatar";
 import WeatherWidget from "@/components/ui/WeatherWidget";
+import { Icon3D } from "@/components/3d";
 
 const familyMembers = [
   { name: "Mom", color: "green", emoji: "👩" },
@@ -19,7 +20,8 @@ const todayEvents = [
     time: "4:00 PM",
     member: "Jake",
     color: "violet",
-    icon: "⚽",
+    icon: "calendar",
+    iconVariant: "clock",
   },
   {
     id: 2,
@@ -28,6 +30,7 @@ const todayEvents = [
     member: "Lily",
     color: "amber",
     icon: "🦷",
+    iconVariant: "family",
   },
   {
     id: 3,
@@ -36,6 +39,7 @@ const todayEvents = [
     member: "Dad",
     color: "cyan",
     icon: "🍽️",
+    iconVariant: "meals",
   },
 ];
 
@@ -69,9 +73,11 @@ export default function HomePage() {
     <PageShell>
       {/* Background Gradient Orbs */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="gradient-orb w-72 h-72 -top-20 -right-20" style={{ background: "radial-gradient(circle, var(--color-accent-lavender), transparent)" }} />
-        <div className="gradient-orb w-80 h-80 -bottom-20 -left-20" style={{ background: "radial-gradient(circle, var(--color-accent-coral), transparent)" }} />
-        <div className="gradient-orb w-64 h-64 top-1/2 left-1/4" style={{ background: "radial-gradient(circle, var(--color-accent-mint), transparent)" }} />
+        <div className="gradient-orb w-72 h-72 -top-20 -right-20" style={{ background: "radial-gradient(circle, var(--color-accent-lavender), transparent)", animationDelay: "0s" }} />
+        <div className="gradient-orb w-80 h-80 -bottom-20 -left-20" style={{ background: "radial-gradient(circle, var(--color-accent-coral), transparent)", animationDelay: "2s" }} />
+        <div className="gradient-orb w-64 h-64 top-1/2 left-1/4" style={{ background: "radial-gradient(circle, var(--color-accent-mint), transparent)", animationDelay: "4s" }} />
+        <div className="gradient-orb w-56 h-56 top-1/3 right-1/3" style={{ background: "radial-gradient(circle, var(--color-accent-amber), transparent)", animationDelay: "6s" }} />
+        <div className="gradient-orb w-48 h-48 bottom-1/4 right-1/4" style={{ background: "radial-gradient(circle, var(--color-accent-violet), transparent)", animationDelay: "1s" }} />
       </div>
 
       {/* Header */}
@@ -130,7 +136,7 @@ export default function HomePage() {
         <Link href="/chat">
           <div className="rounded-2xl p-4 flex items-center gap-3 cursor-pointer active:scale-[0.98] transition-all isometric-card glass-strong">
             <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-nori-500/30 to-accent-cyan/20 flex items-center justify-center text-2xl shrink-0 floating">
-              ✨
+              <Icon3D variant="chat" size="md" />
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-text-primary text-sm font-medium">Ask Nori anything…</p>
@@ -176,7 +182,7 @@ export default function HomePage() {
               <Card key={ev.id} className="!p-3 isometric-card">
                 <div className="flex items-center gap-3">
                   <div className={`w-10 h-10 rounded-xl bg-gradient-to-br from-${ev.color}-500/20 to-${ev.color}-600/10 flex items-center justify-center text-lg shrink-0`}>
-                    {ev.icon}
+                    {ev.iconVariant ? <Icon3D variant={ev.iconVariant as any} size="sm" /> : ev.icon}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-text-primary text-sm font-medium truncate">{ev.title}</p>
@@ -275,7 +281,7 @@ export default function HomePage() {
           <Card className="!p-3 isometric-card">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500/20 to-accent-rose/10 flex items-center justify-center text-xl shrink-0">
-                🛒
+                <Icon3D variant="grocery" size="sm" />
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-text-primary text-sm font-medium">12 items needed</p>

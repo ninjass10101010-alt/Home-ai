@@ -1,0 +1,1 @@
+export { default as Icon3D } from "./Icon3D";

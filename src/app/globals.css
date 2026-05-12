@@ -111,12 +111,17 @@ body {
 
 /* 3D floating animation */
 @keyframes float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-8px); }
+  0%, 100% { transform: translateY(0) rotateX(5deg) rotateY(-5deg); }
+  50% { transform: translateY(-8px) rotateX(0) rotateY(0); }
 }
 
 .floating {
   animation: float 6s ease-in-out infinite;
+}
+
+@keyframes melt {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
 }
 
 /* Gradient orbs */
@@ -125,7 +130,8 @@ body {
   border-radius: 50%;
   filter: blur(40px);
   opacity: 0.15;
-  animation: pulse 8s ease-in-out infinite;
+  animation: pulse 8s ease-in-out infinite, melt 12s linear infinite;
+  background-size: 200% 200%;
 }
 
 @keyframes pulse {
