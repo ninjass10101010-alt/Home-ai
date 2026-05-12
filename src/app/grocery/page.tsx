@@ -19,29 +19,29 @@ interface GroceryItem {
 }
 
 const initialItems: GroceryItem[] = [
-  { id: 1, name: "Chicken breast", quantity: "2 lbs", category: "Meat & Seafood", urgent: true, checked: false, addedBy: "Consuela", emoji: "🍗" },
-  { id: 2, name: "Shrimp", quantity: "1 lb", category: "Meat & Seafood", urgent: true, checked: false, addedBy: "Consuela", emoji: "🦐" },
-  { id: 3, name: "Ground beef", quantity: "1.5 lbs", category: "Meat & Seafood", urgent: false, checked: false, addedBy: "Mom", emoji: "🥩" },
-  { id: 4, name: "Broccoli", quantity: "1 head", category: "Produce", urgent: true, checked: false, addedBy: "Consuela", emoji: "🥦" },
-  { id: 5, name: "Bell peppers", quantity: "3", category: "Produce", urgent: false, checked: false, addedBy: "Consuela", emoji: "🫑" },
+  { id: 1, name: "Chicken breast", quantity: "2 lbs", category: "Meat & Seafood", urgent: true, checked: false, addedBy: "Consuela", emoji: "🐔" },
+  { id: 2, name: "Shrimp", quantity: "1 lb", category: "Meat & Seafood", urgent: true, checked: false, addedBy: "Consuela", emoji: "🍤" },
+  { id: 3, name: "Ground beef", quantity: "1.5 lbs", category: "Meat & Seafood", urgent: false, checked: false, addedBy: "Mom", emoji: "🍔" },
+  { id: 4, name: "Broccoli", quantity: "1 head", category: "Produce", urgent: true, checked: false, addedBy: "Consuela", emoji: "⚦" },
+  { id: 5, name: "Bell peppers", quantity: "3", category: "Produce", urgent: false, checked: false, addedBy: "Consuela", emoji: "🌶️" },
   { id: 6, name: "Zucchini", quantity: "2", category: "Produce", urgent: false, checked: true, addedBy: "Mom", emoji: "🥒" },
   { id: 7, name: "Mozzarella", quantity: "8 oz", category: "Dairy", urgent: false, checked: false, addedBy: "Consuela", emoji: "🧀" },
   { id: 8, name: "Parmesan", quantity: "4 oz", category: "Dairy", urgent: false, checked: false, addedBy: "Consuela", emoji: "🧀" },
-  { id: 9, name: "Penne pasta", quantity: "1 box", category: "Pantry", urgent: false, checked: false, addedBy: "Consuela", emoji: "🍝" },
-  { id: 10, name: "Tomato sauce", quantity: "2 cans", category: "Pantry", urgent: true, checked: false, addedBy: "Consuela", emoji: "🥫" },
+  { id: 9, name: "Penne pasta", quantity: "1 box", category: "Pantry", urgent: false, checked: false, addedBy: "Consuela", emoji: "🍜" },
+  { id: 10, name: "Tomato sauce", quantity: "2 cans", category: "Pantry", urgent: true, checked: false, addedBy: "Consuela", emoji: "🍅" },
   { id: 11, name: "Taco shells", quantity: "1 box", category: "Pantry", urgent: false, checked: false, addedBy: "Consuela", emoji: "🌮" },
-  { id: 12, name: "Salsa", quantity: "1 jar", category: "Pantry", urgent: false, checked: false, addedBy: "Dad", emoji: "🫙" },
+  { id: 12, name: "Salsa", quantity: "1 jar", category: "Pantry", urgent: false, checked: false, addedBy: "Dad", emoji: "🥣" },
 ];
 
 const categories = ["All", "Meat & Seafood", "Produce", "Dairy", "Pantry", "Frozen", "Other"];
 
 const categoryEmojis: Record<string, string> = {
   "All": "🛒",
-  "Meat & Seafood": "🥩",
-  "Produce": "🥦",
+  "Meat & Seafood": "🍗",
+  "Produce": "🥬",
   "Dairy": "🥛",
-  "Pantry": "🫙",
-  "Frozen": "🧊",
+  "Pantry": "🍚",
+  "Frozen": "❄️",
   "Other": "📦",
 };
 
@@ -50,6 +50,127 @@ export default function GroceryPage() {
   const [activeCategory, setActiveCategory] = useState("All");
   const [newItem, setNewItem] = useState("");
   const [showChecked, setShowChecked] = useState(false);
+
+  // Emoji mapping for common grocery items
+  const emojiMap: Record<string, string> = {
+    // Fruits
+    apple: "🍎",
+    bananas: "🍌",
+    berries: "🫐",
+    blueberries: "🫐",
+    strawberries: "🍓",
+    grapes: "🍇",
+    orange: "🍊",
+    peach: "🍑",
+    pear: "🍐",
+    pineapple: "🍍",
+    watermelon: "🍉",
+    lemon: "🍋",
+    lime: "🟢",
+    mango: "🥭",
+    avocado: "🥑",
+    
+    // Vegetables
+    broccoli: "⚦",
+    carrot: "🥕",
+    celery: "🌿",
+    corn: "🌽",
+    cucumber: "🥒",
+    garlic: "🧄",
+    lettuce: "🥬",
+    mushrooms: "🍄",
+    onion: "🧅",
+    pepper: "🫑",
+    potato: "🥔",
+    spinach: "🥬",
+    tomato: "🍅",
+    zucchini: "🥒",
+    asparagus: "🫚",
+    
+    // Proteins
+    bacon: "🥓",
+    beef: "🍖",
+    chicken: "🍗",
+    fish: "🐟",
+    hamburger: "🍔",
+    pork: "🐷",
+    sausage: "🌭",
+    shrimp: "🍤",
+    salmon: "🐟",
+    tuna: "🐟",
+    turkey: "🦃",
+    tofu: "🫘",
+    eggs: "🥚",
+    
+    // Dairy
+    butter: "🧈",
+    cheese: "🧀",
+    milk: "🥛",
+    yogurt: "🥣",
+    cream: "🥛",
+    
+    // Bakery
+    bread: "🍞",
+    bagel: "🥯",
+    croissant: "🥐",
+    muffin: "🧁",
+    donut: "🍩",
+    tortilla: "🫓",
+    
+    // Pantry
+    beans: "int",
+    cereal: "🥣",
+    chips: "🥨",
+    crackers: "🥖",
+    coffee: "☕",
+    flour: "🌾",
+    honey: "🍯",
+    jam: "🍯",
+    juice: "🥤",
+    nuts: "🥜",
+    oats: "🌾",
+    pasta: "🍝",
+    peanut: "🥜",
+    rice: "🍚",
+    soup: "🥣",
+    sugar: "🧂",
+    tea: "🫖",
+    water: "💧",
+    
+    // Snacks & Sweets
+    candy: "🍬",
+    chocolate: "🍫",
+    cookie: "🍪",
+    icecream: "🍦",
+    
+    // Household
+    "paper towels": "🧻",
+    "toilet paper": "🧻",
+    detergent: "🧴",
+    soap: "🧼",
+    sponge: "🧽",
+    "trash bags": "🗑️",
+    
+    // Others
+    salt: "🧂",
+    vinegar: "🫙",
+  };
+
+  // Function to get emoji for an item
+  const getEmojiForItem = (itemName: string): string => {
+    const lowerName = itemName.toLowerCase().trim();
+    
+    // Direct match
+    if (emojiMap[lowerName]) return emojiMap[lowerName];
+    
+    // Partial match for common words
+    for (const [key, emoji] of Object.entries(emojiMap)) {
+      if (lowerName.includes(key)) return emoji;
+    }
+    
+    // Default emoji
+    return "🛒";
+  };
 
   const toggleItem = (id: number) => {
     setItems((prev) =>
@@ -67,7 +188,7 @@ export default function GroceryPage() {
       urgent: false,
       checked: false,
       addedBy: "You",
-      emoji: "🛒",
+      emoji: getEmojiForItem(newItem),
     };
     setItems((prev) => [newEntry, ...prev]);
     setNewItem("");
