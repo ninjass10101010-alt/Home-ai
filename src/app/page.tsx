@@ -67,19 +67,18 @@ export default function HomePage() {
 
   return (
     <PageShell>
+      {/* Background Gradient Orbs */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="gradient-orb w-72 h-72 -top-20 -right-20" style={{ background: "radial-gradient(circle, var(--color-accent-lavender), transparent)" }} />
+        <div className="gradient-orb w-80 h-80 -bottom-20 -left-20" style={{ background: "radial-gradient(circle, var(--color-accent-coral), transparent)" }} />
+        <div className="gradient-orb w-64 h-64 top-1/2 left-1/4" style={{ background: "radial-gradient(circle, var(--color-accent-mint), transparent)" }} />
+      </div>
+
       {/* Header */}
       <div
-        className="px-4 pt-12 pb-4 relative overflow-hidden"
+        className="px-4 pt-12 pb-4 relative z-10"
         style={{ paddingTop: "calc(env(safe-area-inset-top) + 2rem)" }}
       >
-        {/* Background orb */}
-        <div
-          className="absolute -top-16 -right-16 w-64 h-64 rounded-full opacity-10 pointer-events-none"
-          style={{
-            background: "radial-gradient(circle, #3b82f6 0%, transparent 70%)",
-          }}
-        />
-
         {/* Family row */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-2">
@@ -89,7 +88,7 @@ export default function HomePage() {
           </div>
           <Link
             href="/settings"
-            className="w-9 h-9 flex items-center justify-center rounded-full bg-surface-2 text-text-secondary hover:text-text-primary transition-colors"
+            className="w-9 h-9 flex items-center justify-center rounded-full glass text-text-secondary hover:text-text-primary transition-colors"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
               <circle cx="12" cy="8" r="4" strokeLinecap="round" />
@@ -98,8 +97,8 @@ export default function HomePage() {
           </Link>
         </div>
 
-        {/* Greeting */}
-        <div className="mb-2">
+        {/* Greeting with gradient text */}
+        <div className="mb-4">
           <p className="text-text-secondary text-sm">
             {dayName}, {dateStr}
           </p>
@@ -108,39 +107,33 @@ export default function HomePage() {
           </h1>
         </div>
 
-        {/* Quick summary pills */}
+        {/* Quick summary pills with glass effect */}
         <div className="flex gap-2 flex-wrap mt-3">
-          <Badge variant="green">3 events today</Badge>
-          <Badge variant="amber">2 tasks pending</Badge>
-          <Badge variant="violet">Taco night 🌮</Badge>
+          <Badge variant="green" glass>3 events today</Badge>
+          <Badge variant="amber" glass>2 tasks pending</Badge>
+          <Badge variant="violet" glass>Taco night 🌮</Badge>
         </div>
       </div>
 
       {/* Weather Widget */}
-      <div className="px-4 pb-2">
+      <div className="px-4 pb-2 relative z-10">
         <WeatherWidget />
       </div>
 
-      {/* Divider between weather and AI */}
-      <div className="px-4 mb-2">
-        <div className="h-px bg-surface-3"></div>
+      {/* Divider */}
+      <div className="px-4 mb-2 relative z-10">
+        <div className="h-px bg-white/5"></div>
       </div>
 
-      <div className="px-4 space-y-5">
-        {/* AI Quick Ask */}
+      <div className="px-4 space-y-5 relative z-10">
+        {/* AI Quick Ask - Enhanced glass card */}
         <Link href="/chat">
-          <div
-            className="rounded-2xl p-4 flex items-center gap-3 cursor-pointer active:scale-[0.98] transition-transform"
-            style={{
-              background: "linear-gradient(135deg, rgba(59,130,246,0.12) 0%, rgba(6,182,212,0.08) 100%)",
-              border: "1px solid rgba(59,130,246,0.2)",
-            }}
-          >
-            <div className="w-10 h-10 rounded-xl bg-nori-500/20 flex items-center justify-center text-xl shrink-0">
+          <div className="rounded-2xl p-4 flex items-center gap-3 cursor-pointer active:scale-[0.98] transition-all isometric-card glass-strong">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-nori-500/30 to-accent-cyan/20 flex items-center justify-center text-2xl shrink-0 floating">
               ✨
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-text-primary text-sm font-medium">Ask Consuela anything…</p>
+              <p className="text-text-primary text-sm font-medium">Ask Nori anything…</p>
               <p className="text-text-muted text-xs mt-0.5 truncate">
                 &ldquo;Add Jake&apos;s dentist on Thursday at 2pm&rdquo;
               </p>
@@ -158,12 +151,12 @@ export default function HomePage() {
         </Link>
 
         {/* Quick prompts */}
-        <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 scrollbar-hide">
+        <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4">
           {quickPrompts.map((p) => (
             <Link
               key={p}
               href={`/chat?q=${encodeURIComponent(p)}`}
-              className="shrink-0 px-3 py-1.5 rounded-full glass text-text-secondary text-xs border border-surface-3 hover:border-nori-500/30 hover:text-nori-400 transition-colors"
+              className="shrink-0 px-3 py-1.5 rounded-full glass text-text-secondary text-xs border border-white/10 hover:border-nori-500/30 hover:text-nori-400 transition-all"
             >
               {p}
             </Link>
@@ -180,9 +173,9 @@ export default function HomePage() {
           </div>
           <div className="space-y-2">
             {todayEvents.map((ev) => (
-              <Card key={ev.id} className="!p-3">
+              <Card key={ev.id} className="!p-3 isometric-card">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-surface-3 flex items-center justify-center text-lg shrink-0">
+                  <div className={`w-10 h-10 rounded-xl bg-gradient-to-br from-${ev.color}-500/20 to-${ev.color}-600/10 flex items-center justify-center text-lg shrink-0`}>
                     {ev.icon}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -196,7 +189,7 @@ export default function HomePage() {
           </div>
         </section>
 
-        {/* Meal This Week */}
+        {/* Meal This Week - Enhanced with gradient backgrounds */}
         <section>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-text-primary font-semibold text-base">This Week&apos;s Meals</h2>
@@ -206,13 +199,13 @@ export default function HomePage() {
           </div>
           <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4">
             {mealPlan.map((m, i) => {
-              const isToday = i === 1; // Tuesday in demo
+              const isToday = i === 1;
               return (
                 <div
                   key={m.day}
                   className={`shrink-0 flex flex-col items-center gap-1.5 rounded-2xl px-3 py-3 min-w-[72px] transition-all ${
                     isToday
-                      ? "bg-nori-500/15 border border-nori-500/25"
+                      ? "bg-gradient-to-br from-nori-500/20 to-accent-cyan/15 border border-nori-500/30"
                       : "glass"
                   }`}
                 >
@@ -233,7 +226,7 @@ export default function HomePage() {
               View all →
             </Link>
           </div>
-          <Card>
+          <Card className="isometric-card">
             <div className="space-y-3">
               {pendingTasks.map((task) => (
                 <div key={task.id} className="flex items-center gap-3">
@@ -279,9 +272,9 @@ export default function HomePage() {
               Open →
             </Link>
           </div>
-          <Card className="!p-3">
+          <Card className="!p-3 isometric-card">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/15 flex items-center justify-center text-xl shrink-0">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500/20 to-accent-rose/10 flex items-center justify-center text-xl shrink-0">
                 🛒
               </div>
               <div className="flex-1 min-w-0">
@@ -290,7 +283,7 @@ export default function HomePage() {
                   Chicken, pasta, tomatoes, +9 more
                 </p>
               </div>
-              <Badge variant="amber">3 urgent</Badge>
+              <Badge variant="amber" glass>3 urgent</Badge>
             </div>
           </Card>
         </section>

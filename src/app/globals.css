@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 @theme {
-  /* Brand palette */
+  /* Brand palette - Gradient Glass Colors */
   --color-nori-50: #eff6ff;
   --color-nori-100: #dbeafe;
   --color-nori-200: #bfdbfe;
@@ -28,6 +28,13 @@
   --color-accent-amber: #f59e0b;
   --color-accent-rose: #f43f5e;
   --color-accent-cyan: #06b6d4;
+  --color-accent-lavender: #b583ff;
+  --color-accent-coral: #ff6b8a;
+  --color-accent-mint: #4ade80;
+
+  /* Gradient palette */
+  --color-gradient-start: #b583ff;
+  --color-gradient-end: #ff6b8a;
 
   /* Fonts */
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
@@ -75,12 +82,55 @@ body {
   background-clip: text;
 }
 
-/* Glass card */
+/* Glass card - Enhanced glass morphism */
 .glass {
-  background: rgba(30, 35, 48, 0.7);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(30, 35, 48, 0.5);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+}
+
+.glass-strong {
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+}
+
+.isometric-card {
+  transform: perspective(1000px) rotateX(5deg) rotateY(-5deg);
+  transform-style: preserve-3d;
+  transition: transform 0.3s ease;
+}
+
+.isometric-card:hover {
+  transform: perspective(1000px) rotateX(0) rotateY(0) translateY(-4px);
+}
+
+/* 3D floating animation */
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+.floating {
+  animation: float 6s ease-in-out infinite;
+}
+
+/* Gradient orbs */
+.gradient-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(40px);
+  opacity: 0.15;
+  animation: pulse 8s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.15; transform: scale(1); }
+  50% { opacity: 0.25; transform: scale(1.1); }
 }
 
 /* Consuela glow */

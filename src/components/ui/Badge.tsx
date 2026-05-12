@@ -1,6 +1,9 @@
 interface BadgeProps {
   children: React.ReactNode;
   variant?: "green" | "amber" | "rose" | "violet" | "cyan" | "gray";
+  glass?: boolean;
+  size?: "sm" | "md";
+  className?: string;
 }
 
 const variantMap = {
@@ -12,10 +15,12 @@ const variantMap = {
   gray: "bg-surface-3 text-text-secondary border-surface-4",
 };
 
-export default function Badge({ children, variant = "gray" }: BadgeProps) {
+export default function Badge({ children, variant = "gray", glass, size = "md" }: BadgeProps) {
+  const sizeClass = size === "sm" ? "px-1.5 py-0 text-[10px]" : "px-2 py-0.5 text-[11px]";
+  const glassClass = glass ? "glass backdrop-blur-xl" : "";
   return (
     <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${variantMap[variant]}`}
+      className={`inline-flex items-center ${sizeClass} rounded-full font-medium border ${variantMap[variant]} ${glassClass}`}
     >
       {children}
     </span>
