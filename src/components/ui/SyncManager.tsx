@@ -22,13 +22,13 @@ interface SyncManagerProps {
 
 export default function SyncManager({ onConnect, onDisconnect, onSync }: SyncManagerProps) {
   const [services, setServices] = useState<SyncService[]>([
-    { id: "google-calendar", name: "Google Calendar", icon: "🥘", connected: true, email: "sarah@gmail.com", lastSync: "2 min ago", type: "google" },
-    { id: "google-tasks", name: "Google Tasks", icon: "🥕", connected: false, type: "google" },
-    { id: "google-keep", name: "Google Keep", icon: "📋", connected: false, type: "google" },
+    { id: "google-calendar", name: "Google Calendar", icon: "📅", connected: true, email: "sarah@gmail.com", lastSync: "2 min ago", type: "google" },
+    { id: "google-tasks", name: "Google Tasks", icon: "✅", connected: false, type: "google" },
+    { id: "google-keep", name: "Google Keep", icon: "📝", connected: false, type: "google" },
     { id: "google-shopping", name: "Google Shopping List", icon: "🛒", connected: false, type: "google" },
     { id: "apple-calendar", name: "Apple Calendar", icon: "🍎", connected: false, type: "apple" },
-    { id: "apple-reminders", name: "Apple Reminders", icon: "🥦", connected: false, type: "apple" },
-    { id: "apple-notes", name: "Apple Notes", icon: "📖", connected: false, type: "apple" },
+    { id: "apple-reminders", name: "Apple Reminders", icon: "📋", connected: false, type: "apple" },
+    { id: "apple-notes", name: "Apple Notes", icon: "📒", connected: false, type: "apple" },
   ]);
 
   const handleConnect = (serviceId: string) => {
@@ -67,7 +67,7 @@ export default function SyncManager({ onConnect, onDisconnect, onSync }: SyncMan
       {/* Google Services */}
       <section>
         <div className="flex items-center gap-2 mb-3">
-          <span className="text-xl">🍳</span>
+          <span className="text-xl">🔍</span>
           <h3 className="text-text-primary font-semibold text-sm">Google Services</h3>
         </div>
         <Card>
@@ -123,7 +123,7 @@ export default function SyncManager({ onConnect, onDisconnect, onSync }: SyncMan
       {/* Apple iCloud Services */}
       <section>
         <div className="flex items-center gap-2 mb-3">
-          <span className="text-xl">🍏</span>
+          <span className="text-xl">🍎</span>
           <h3 className="text-text-primary font-semibold text-sm">Apple iCloud Services</h3>
         </div>
         <Card>
