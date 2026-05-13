@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import BottomNav from "@/components/ui/BottomNav";
 import Avatar from "@/components/ui/Avatar";
 import Badge from "@/components/ui/Badge";
+import { getAIResponse } from "@/actions/chat";
 
 interface Message {
   id: number;
@@ -194,7 +195,7 @@ export default function ChatPage() {
 
   const msgCounter = useRef(100);
 
-  const sendMessage = (text: string) => {
+  const sendMessage = async (text: string) => {
     if (!text.trim()) return;
 
     msgCounter.current += 1;
@@ -212,12 +213,32 @@ export default function ChatPage() {
     setIsTyping(true);
     setShowSuggestions(false);
 
-    setTimeout(() => {
+    try {
+      const aiResponse = await getAIResponse(text);
       setIsTyping(false);
       msgCounter.current += 1;
-      const response = { ...getResponse(text), id: msgCounter.current };
+      const response: Message = {
+        id: msgCounter.current,
+        role: "assistant",
+        content: aiResponse.content,
+        timestamp: "Just now",
+        actions: aiResponse.actions?.map(action => ({
+          ...action,
+          confirmed: true, // Assume confirmed for now
+        })),
+      };
       setMessages((prev) => [...prev, response]);
-    }, 1400);
+    } catch (error) {
+      setIsTyping(false);
+      msgCounter.current += 1;
+      const errorResponse: Message = {
+        id: msgCounter.current,
+        role: "assistant",
+        content: "Sorry, I'm having trouble right now. Please try again.",
+        timestamp: "Just now",
+      };
+      setMessages((prev) => [...prev, errorResponse]);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

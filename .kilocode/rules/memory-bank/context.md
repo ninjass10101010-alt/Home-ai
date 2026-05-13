@@ -20,6 +20,7 @@ Consuela is a production-ready AI-powered family organizer web app with 6 core s
 - [x] Add Grocery tab to BottomNav for dedicated grocery list navigation
 - [x] Implement manual pantry item entry in Meals page with status selector
 - [x] Fixed family icon consistency between dashboard and settings pages by standardizing Avatar variant="emoji"
+- [x] Database persistence implemented with Drizzle ORM + SQLite (tables: members, events, meals, tasks, grocery_items, pantry_items)
 
 ## File Structure
 
@@ -44,6 +45,11 @@ src/
     Avatar.tsx            — Family member avatars with emoji/initials
     PageShell.tsx         — Shared page wrapper with BottomNav
     SyncManager.tsx       — Google & Apple iCloud services sync manager
+  db/
+    index.ts              — Database client
+    schema.ts             — Table definitions
+    migrate.ts            — Migration script
+    migrations/           — Generated migration files
 ```
 
 ## Design System
