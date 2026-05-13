@@ -83,9 +83,9 @@ export default function GroceryPage() {
   const checkedItems = items.filter(item => item.checked);
 
   return (
-    <PageShell>
-      <TopBar 
-        title="Supermarket Run" 
+    <PageShell className="pb-32">
+      <TopBar
+        title="Supermarket Run"
         subtitle={`${uncheckedItems.length} items to grab`}
         right={
           <button
@@ -226,7 +226,7 @@ export default function GroceryPage() {
       </div>
 
       {/* Quick Add Bar */}
-      <div className="fixed bottom-20 left-0 right-0 px-4">
+      <div className="fixed bottom-24 left-0 right-0 px-4 z-40">
         <Card className="!p-3">
           <div className="flex gap-2">
             <input
