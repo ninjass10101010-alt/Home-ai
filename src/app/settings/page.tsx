@@ -74,13 +74,13 @@ export default function SettingsPage() {
             border: "1px solid rgba(34,197,94,0.15)",
           }}
         >
-          <div className="flex -space-x-2 mb-4">
-            {familyMembers.map((m) => (
-              <div key={m.name} className="ring-2 ring-surface-0 rounded-full">
-                <Avatar name={m.name} color={m.color} emoji={m.emoji} size="lg" />
-              </div>
-            ))}
-          </div>
+        <div className="flex -space-x-2 mb-4">
+          {familyMembers.map((m) => (
+            <div key={m.name} className="ring-2 ring-surface-0 rounded-full">
+              <Avatar name={m.name} color={m.color} emoji={m.emoji} size="lg" variant="emoji" />
+            </div>
+          ))}
+        </div>
           <h2 className="text-text-primary font-bold text-xl">Johnson Family</h2>
           <p className="text-text-secondary text-sm mt-1">4 members · Plan: Consuela Pro 🌟</p>
           <div className="flex gap-2 mt-3">
@@ -98,8 +98,8 @@ export default function SettingsPage() {
           <Card>
             <div className="space-y-3">
               {familyMembers.map((member) => (
-                <div key={member.name} className="flex items-center gap-3">
-                  <Avatar name={member.name} color={member.color} emoji={member.emoji} size="md" />
+            <div key={member.name} className="flex items-center gap-3">
+              <Avatar name={member.name} color={member.color} emoji={member.emoji} size="md" variant="emoji" />
                   <div className="flex-1 min-w-0">
                     <p className="text-text-primary text-sm font-medium truncate">{member.name}</p>
                     <p className="text-text-muted text-xs">Age {member.age} · Joined {member.joined}</p>

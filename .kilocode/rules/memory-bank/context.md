@@ -19,6 +19,7 @@ Consuela is a production-ready AI-powered family organizer web app with 6 core s
 - [x] Settings — family profile, member roles, integrations (Google & Apple iCloud services), notification toggles, AI preferences, privacy
 - [x] Add Grocery tab to BottomNav for dedicated grocery list navigation
 - [x] Implement manual pantry item entry in Meals page with status selector
+- [x] Fixed family icon consistency between dashboard and settings pages by standardizing Avatar variant="emoji"
 
 ## File Structure
 
@@ -81,6 +82,7 @@ src/
 | Mar 2026 | Full Consuela V1 app built — 7 pages, design system, AI chat, all core features |
 | May 2026 | Fixed Avatar component, added Grocery nav tab, implemented pantry manual entry, fixed dashboard event emojis and styling |
 | May 2026 | Redesigned grocery page as supermarket-style shopping experience with aisles, cart sidebar, quick add bar |
+| May 2026 | Fixed family icon consistency by standardizing Avatar variant="emoji" in settings page |
 
 ## Next Steps (V2)
 
