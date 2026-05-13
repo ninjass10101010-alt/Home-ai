@@ -79,6 +79,7 @@ src/
 |------|---------|
 | Initial | Template created with base Next.js setup |
 | Mar 2026 | Full Consuela V1 app built — 7 pages, design system, AI chat, all core features |
+| May 2026 | Fixed Avatar component, added Grocery nav tab, implemented pantry manual entry, fixed dashboard event emojis and styling |
 
 ## Next Steps (V2)
 

@@ -1,3 +1,5 @@
+"use client";
+
 interface AvatarProps {
   name: string;
   color?: string;

@@ -19,6 +19,7 @@ const todayEvents = [
     title: "Soccer Practice",
     time: "4:00 PM",
     member: "Jake",
+    emoji: "🧒",
     color: "violet",
     icon: "calendar",
     iconVariant: "clock",
@@ -28,6 +29,7 @@ const todayEvents = [
     title: "Dentist — Lily",
     time: "5:30 PM",
     member: "Lily",
+    emoji: "👧",
     color: "amber",
     icon: "🦷",
     iconVariant: "family",
@@ -37,6 +39,7 @@ const todayEvents = [
     title: "Team dinner",
     time: "7:00 PM",
     member: "Dad",
+    emoji: "👨",
     color: "cyan",
     icon: "🍽️",
     iconVariant: "meals",
@@ -88,9 +91,9 @@ export default function HomePage() {
         {/* Family row */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-2">
-{familyMembers.map((m) => (
-  <Avatar key={m.name} name={m.name} color={m.color} emoji={m.emoji} size="md" variant="emoji" />
-))}
+            {familyMembers.map((m) => (
+              <Avatar key={m.name} name={m.name} color={m.color} emoji={m.emoji} size="md" variant="emoji" />
+            ))}
           </div>
           <Link
             href="/settings"
@@ -181,14 +184,30 @@ export default function HomePage() {
             {todayEvents.map((ev) => (
               <Card key={ev.id} className="!p-3 isometric-card">
                 <div className="flex items-center gap-3">
-                  <div className={`w-10 h-10 rounded-xl bg-gradient-to-br from-${ev.color}-500/20 to-${ev.color}-600/10 flex items-center justify-center text-lg shrink-0`}>
+                  <div
+                    className="w-10 h-10 rounded-xl flex items-center justify-center text-lg shrink-0"
+                    style={{
+                      background:
+                        ev.color === "green"
+                          ? "linear-gradient(135deg, rgba(34,197,94,0.2), rgba(187,247,208,0.1))"
+                          : ev.color === "violet"
+                          ? "linear-gradient(135deg, rgba(124,111,247,0.2), rgba(221,214,254,0.1))"
+                          : ev.color === "amber"
+                          ? "linear-gradient(135deg, rgba(245,158,11,0.2), rgba(253,230,138,0.1))"
+                          : ev.color === "cyan"
+                          ? "linear-gradient(135deg, rgba(6,182,212,0.2), rgba(207,250,254,0.1))"
+                          : ev.color === "rose"
+                          ? "linear-gradient(135deg, rgba(244,63,94,0.2), rgba(255,228,230,0.1))"
+                          : "linear-gradient(135deg, rgba(59,130,246,0.2), rgba(219,234,254,0.1))",
+                    }}
+                  >
                     {ev.iconVariant ? <Icon3D variant={ev.iconVariant as any} size="sm" /> : ev.icon}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-text-primary text-sm font-medium truncate">{ev.title}</p>
                     <p className="text-text-muted text-xs mt-0.5">{ev.time}</p>
                   </div>
-                  <Avatar name={ev.member} color={ev.color} size="sm" />
+                  <Avatar name={ev.member} color={ev.color} size="sm" emoji={ev.emoji} variant="emoji" />
                 </div>
               </Card>
             ))}
@@ -206,14 +225,16 @@ export default function HomePage() {
           <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4">
             {mealPlan.map((m, i) => {
               const isToday = i === 1;
+              const bgStyle = isToday
+                ? "linear-gradient(135deg, rgba(34,197,94,0.2), rgba(6,182,212,0.15))"
+                : "";
               return (
                 <div
                   key={m.day}
                   className={`shrink-0 flex flex-col items-center gap-1.5 rounded-2xl px-3 py-3 min-w-[72px] transition-all ${
-                    isToday
-                      ? "bg-gradient-to-br from-nori-500/20 to-accent-cyan/15 border border-nori-500/30"
-                      : "glass"
+                    isToday ? "border border-nori-500/30" : "glass"
                   }`}
+                  style={isToday ? { background: bgStyle } : undefined}
                 >
                   <span className="text-xs font-medium text-text-secondary">{m.day}</span>
                   <span className="text-2xl">{m.emoji}</span>
@@ -238,9 +259,7 @@ export default function HomePage() {
                 <div key={task.id} className="flex items-center gap-3">
                   <div
                     className={`w-5 h-5 rounded-full border-2 shrink-0 flex items-center justify-center transition-all ${
-                      task.done
-                        ? "border-nori-500 bg-nori-500"
-                        : "border-surface-4"
+                      task.done ? "border-nori-500 bg-nori-500" : "border-surface-4"
                     }`}
                   >
                     {task.done && (
