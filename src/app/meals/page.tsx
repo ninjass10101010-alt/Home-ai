@@ -19,6 +19,12 @@ interface Meal {
   calories: number;
 }
 
+interface PantryItem {
+  id: number;
+  item: string;
+  status: "plenty" | "low" | "out";
+}
+
 const mealDb: Meal[] = [
   {
     id: 1,
