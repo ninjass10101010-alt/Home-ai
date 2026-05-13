@@ -5,6 +5,8 @@ import Badge from "@/components/ui/Badge";
 import Avatar from "@/components/ui/Avatar";
 import WeatherWidget from "@/components/ui/WeatherWidget";
 import { Icon3D } from "@/components/3d";
+import EmergencyButton from "@/components/ui/EmergencyButton";
+import ScheduleDisplay from "@/components/ui/ScheduleDisplay";
 
 const familyMembers = [
   { name: "Mom", color: "green", emoji: "👩" },
@@ -43,6 +45,13 @@ const todayEvents = [
   },
 ];
 
+const scheduleItems = [
+  { id: 1, title: "Lunch", time: "12:00 PM", emoji: "🍽️", type: "routine" as const, color: "amber" },
+  { id: 2, title: "Emily bedtime", time: "9:00 PM", member: "Emily", memberColor: "amber", emoji: "🧒", type: "routine" as const, color: "violet" },
+  { id: 3, title: "Family movie night", time: "7:30 PM", emoji: "🎬", type: "routine" as const, color: "nori" },
+  { id: 4, title: "Take medication", time: "8:00 AM", member: "Grandma", memberColor: "amber", emoji: "💊", type: "reminder" as const, color: "rose" },
+];
+
 const pendingTasks = [
   { id: 1, title: "Take out trash", assigned: "Jake", due: "Today", points: 10, done: false },
   { id: 2, title: "Grocery run", assigned: "Mom", due: "Today", points: 20, done: false },
@@ -71,6 +80,7 @@ export default function HomePage() {
 
   return (
     <PageShell>
+      <EmergencyButton />
       {/* Background Gradient Orbs */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="gradient-orb w-72 h-72 -top-20 -right-20" style={{ background: "radial-gradient(circle, var(--color-accent-lavender), transparent)", animationDelay: "0s" }} />
@@ -92,15 +102,6 @@ export default function HomePage() {
               <Avatar key={m.name} name={m.name} color={m.color} emoji={m.emoji} size="md" variant="emoji" />
             ))}
           </div>
-          <Link
-            href="/settings"
-            className="w-9 h-9 flex items-center justify-center rounded-full glass text-text-secondary hover:text-text-primary transition-colors"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
-              <circle cx="12" cy="8" r="4" strokeLinecap="round" />
-              <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" strokeLinecap="round" />
-            </svg>
-          </Link>
         </div>
 
         {/* Greeting with gradient text */}
@@ -210,6 +211,9 @@ export default function HomePage() {
             ))}
           </div>
         </section>
+
+        {/* Schedule Display */}
+        <ScheduleDisplay schedule={scheduleItems} title="Daily Schedule" />
 
         {/* Meal This Week - Enhanced with gradient backgrounds */}
         <section>

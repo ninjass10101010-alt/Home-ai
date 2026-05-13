@@ -123,6 +123,38 @@ const navItems = [
       </svg>
     ),
   },
+  {
+    href: "/emergency",
+    label: "Emergency",
+    icon: (active: boolean) => (
+      <svg
+        viewBox="0 0 24 24"
+        fill={active ? "currentColor" : "none"}
+        stroke="currentColor"
+        strokeWidth={active ? 0 : 1.8}
+        className="w-6 h-6"
+      >
+        <path d="M12 2L4 7v6c0 5 3.5 9.7 8 11 4.5-1.3 8-6 8-11V7l-8-5z" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M12 8v4M12 16h.01" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
+    href: "/settings",
+    label: "Settings",
+    icon: (active: boolean) => (
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={active ? 2.5 : 1.8}
+        className="w-6 h-6"
+      >
+        <circle cx="12" cy="12" r="3" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M12 2v2M12 20v2M20 12h-2M6 12H4M17.66 6.34l-1.41 1.41M8.76 16.24l-1.41 1.41M17.66 17.66l-1.41-1.41M8.76 7.76l-1.41-1.41" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
 ];
 
 export default function BottomNav() {

@@ -21,13 +21,17 @@ Consuela is a production-ready AI-powered family organizer web app with 6 core s
 - [x] Implement manual pantry item entry in Meals page with status selector
 - [x] Fixed family icon consistency between dashboard and settings pages by standardizing Avatar variant="emoji"
 - [x] Database persistence implemented with Drizzle ORM + SQLite (tables: members, events, meals, tasks, grocery_items, pantry_items)
+- [x] **Emergency Button feature** - Red floating emergency button on homepage with modal for selecting fire/water/injury/general emergency types, triggers API notification to parents
+- [x] **Emergency Contacts page** - Dedicated `/emergency` page with contact cards for Mom, Dad, Grandma, Step-Dad, Step-Mom and common urgency scenarios
+- [x] **Family Schedule display** - ScheduleDisplay component showing daily routines (lunch, bedtime, etc.) with time-sorted timeline
+- [x] **BottomNav updates** - Added Emergency and Settings tabs to navigation
 
 ## File Structure
 
 ```
 src/
   app/
-    page.tsx              — Home Dashboard
+    page.tsx              — Home Dashboard (with EmergencyButton, ScheduleDisplay)
     layout.tsx            — Root layout (metadata, fonts)
     globals.css           — Design tokens + Tailwind theme
     chat/page.tsx         — AI Chat Interface
@@ -36,8 +40,11 @@ src/
     grocery/page.tsx      — Grocery List
     tasks/page.tsx        — Tasks & Chores + Leaderboard
     settings/page.tsx     — Family Profile & Settings
+    emergency/page.tsx    — Emergency Contacts page
+    api/
+      emergency/route.ts  — Emergency notification API endpoint
   components/ui/
-    BottomNav.tsx         — 6-tab mobile nav (Home, Chat, Calendar, Meals, Tasks, Grocery)
+    BottomNav.tsx         — 8-tab mobile nav (Home, Chat, Calendar, Meals, Tasks, Grocery, Emergency, Settings)
     TopBar.tsx            — Sticky top navigation
     Card.tsx              — Glass morphism card
     Button.tsx            — Primary/secondary/ghost/danger variants
@@ -45,9 +52,11 @@ src/
     Avatar.tsx            — Family member avatars with emoji/initials
     PageShell.tsx         — Shared page wrapper with BottomNav
     SyncManager.tsx       — Google & Apple iCloud services sync manager
+    EmergencyButton.tsx   — Red emergency button with type selection modal
+    ScheduleDisplay.tsx   — Daily schedule/timeline display component
   db/
     index.ts              — Database client
-    schema.ts             — Table definitions
+    schema.ts             — Table definitions (added schedules, emergency_contacts)
     migrate.ts            — Migration script
     migrations/           — Generated migration files
 ```
@@ -72,6 +81,7 @@ src/
 | `/grocery` | Grocery List |
 | `/tasks` | Tasks & Chores |
 | `/settings` | Family Profile |
+| `/emergency` | Emergency Contacts & 911 button |
 
 ### AI Chat Features (mock)
 - Intent matching for: events, meals, chores, grocery, weekly summary, reminders

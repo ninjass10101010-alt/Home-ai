@@ -66,3 +66,25 @@ export const pantryItems = sqliteTable("pantry_items", {
   addedBy: integer("added_by").references(() => members.id),
   createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
 });
+
+export const schedules = sqliteTable("schedules", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  title: text("title").notNull(),
+  time: text("time").notNull(), // HH:MM format (24-hour)
+  days: text("days").notNull(), // JSON array of day names: ["mon", "tue", "wed"] or ["all"]
+  memberId: integer("member_id").references(() => members.id),
+  type: text("type").$type<"routine" | "reminder">().notNull(),
+  icon: text("icon"),
+  color: text("color").default("nori"),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+});
+
+export const emergencyContacts = sqliteTable("emergency_contacts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull(),
+  phone: text("phone").notNull(),
+  email: text("email"),
+  relationship: text("relationship").$type<"parent" | "grandparent" | "other">().notNull(),
+  isPrimary: integer("is_primary", { mode: "boolean" }).default(false),
+  createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+});
