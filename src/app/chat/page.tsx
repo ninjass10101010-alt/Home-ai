@@ -184,14 +184,46 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(true);
+  const [isListening, setIsListening] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const recognitionRef = useRef<any>(null);
 
 
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isTyping]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && ("webkitSpeechRecognition" in window || "SpeechRecognition" in window)) {
+      const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.continuous = false;
+      recognitionRef.current.interimResults = false;
+      recognitionRef.current.lang = "en-US";
+
+      recognitionRef.current.onresult = (event: any) => {
+        const transcript = event.results[0][0].transcript;
+        setInput(transcript);
+        setIsListening(false);
+      };
+
+      recognitionRef.current.onerror = () => {
+        setIsListening(false);
+      };
+
+      recognitionRef.current.onend = () => {
+        setIsListening(false);
+      };
+    }
+
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+    };
+  }, []);
 
   const msgCounter = useRef(100);
 
@@ -238,6 +270,18 @@ export default function ChatPage() {
         timestamp: "Just now",
       };
       setMessages((prev) => [...prev, errorResponse]);
+    }
+  };
+
+  const toggleListening = () => {
+    if (!recognitionRef.current) return;
+
+    if (isListening) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+    } else {
+      recognitionRef.current.start();
+      setIsListening(true);
     }
   };
 
@@ -386,7 +430,12 @@ export default function ChatPage() {
           style={{ border: "1px solid rgba(59,130,246,0.15)" }}
         >
           {/* Voice button */}
-          <button className="w-9 h-9 flex items-center justify-center rounded-xl text-text-secondary hover:text-nori-400 transition-colors shrink-0 mb-0.5">
+          <button
+            onClick={toggleListening}
+            className={`w-9 h-9 flex items-center justify-center rounded-xl transition-colors shrink-0 mb-0.5 ${
+              isListening ? "text-red-400 bg-red-500/10" : "text-text-secondary hover:text-nori-400"
+            }`}
+          >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
               <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" strokeLinecap="round" />
               <path d="M19 10v2a7 7 0 01-14 0v-2" strokeLinecap="round" />
