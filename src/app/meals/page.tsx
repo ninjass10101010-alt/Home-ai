@@ -117,6 +117,14 @@ const weekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 export default function MealsPage() {
   const [activeDay, setActiveDay] = useState("Tue");
   const [showNutrition, setShowNutrition] = useState(false);
+  const [pantryItems, setPantryItems] = useState<PantryItem[]>([
+    { id: 1, item: "Chicken breast", status: "plenty" },
+    { id: 2, item: "Pasta", status: "low" },
+    { id: 3, item: "Olive oil", status: "plenty" },
+    { id: 4, item: "Tomato sauce", status: "out" },
+  ]);
+  const [newPantryItem, setNewPantryItem] = useState("");
+  const [newPantryStatus, setNewPantryStatus] = useState<"plenty" | "low" | "out">("plenty");
 
   const activeMeal = mealDb.find((m) => m.time === activeDay);
 
@@ -330,30 +338,62 @@ export default function MealsPage() {
           </div>
         </section>
 
-        {/* Pantry status */}
-        <section>
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-text-primary font-semibold text-sm">Pantry Check</h3>
-            <Link href="/chat?q=What+can+I+make+with+pantry+items" className="text-nori-400 text-xs hover:text-nori-300">
-              Ask Consuela →
-            </Link>
-          </div>
-          <Card className="!p-3">
-            <div className="space-y-2.5">
-              {[
-                { item: "Chicken breast", status: "plenty", color: "green" },
-                { item: "Pasta", status: "low", color: "amber" },
-                { item: "Olive oil", status: "plenty", color: "green" },
-                { item: "Tomato sauce", status: "out", color: "rose" },
-              ].map((p) => (
-                <div key={p.item} className="flex items-center justify-between">
-                  <span className="text-text-primary text-sm">{p.item}</span>
-                  <Badge variant={p.color as "green" | "amber" | "rose"}>{p.status}</Badge>
-                </div>
-              ))}
-            </div>
-          </Card>
-        </section>
+{/* Pantry status */}
+         <section>
+           <div className="flex items-center justify-between mb-3">
+             <h3 className="text-text-primary font-semibold text-sm">Pantry Check</h3>
+             <Link href="/chat?q=What+can+I+make+with+pantry+items" className="text-nori-400 text-xs hover:text-nori-300">
+               Ask Consuela →
+             </Link>
+           </div>
+           <Card className="!p-3">
+             <div className="space-y-3">
+               <div className="space-y-2">
+                 {pantryItems.map((p) => (
+                   <div key={p.id} className="flex items-center justify-between">
+                     <span className="text-text-primary text-sm">{p.item}</span>
+                     <Badge variant={p.status === "plenty" ? "green" : p.status === "low" ? "amber" : "rose"}>{p.status}</Badge>
+                   </div>
+                 ))}
+               </div>
+               <div className="flex gap-2 pt-2 border-t border-surface-3">
+                 <input
+                   value={newPantryItem}
+                   onChange={(e) => setNewPantryItem(e.target.value)}
+                   onKeyDown={(e) => {
+                     if (e.key === "Enter" && newPantryItem.trim()) {
+                       setPantryItems([...pantryItems, { id: Date.now(), item: newPantryItem.trim(), status: newPantryStatus }]);
+                       setNewPantryItem("");
+                     }
+                   }}
+                   placeholder="Add item..."
+                   className="flex-1 bg-transparent text-text-primary text-xs outline-none placeholder:text-text-muted"
+                 />
+                 <select
+                   value={newPantryStatus}
+                   onChange={(e) => setNewPantryStatus(e.target.value as "plenty" | "low" | "out")}
+                   className="bg-surface-2 text-text-secondary text-xs rounded px-2 outline-none"
+                 >
+                   <option value="plenty">plenty</option>
+                   <option value="low">low</option>
+                   <option value="out">out</option>
+                 </select>
+                 <button
+                   onClick={() => {
+                     if (newPantryItem.trim()) {
+                       setPantryItems([...pantryItems, { id: Date.now(), item: newPantryItem.trim(), status: newPantryStatus }]);
+                       setNewPantryItem("");
+                     }
+                   }}
+                   disabled={!newPantryItem.trim()}
+                   className="px-3 py-1 rounded-lg bg-nori-500/15 text-nori-400 text-xs font-medium hover:bg-nori-500/25 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                 >
+                   Add
+                 </button>
+               </div>
+             </div>
+           </Card>
+         </section>
 
         {/* Recipe Import */}
         <section className="pb-2">
