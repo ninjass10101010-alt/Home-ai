@@ -135,7 +135,7 @@ export default function GroceryPage() {
       </div>
 
       {/* Shopping List by Aisle */}
-      <div className="px-4 mt-4 space-y-5 pb-32">
+      <div className="px-4 mt-4 space-y-4">
         {activeCategory === "all" ? (
           // Group by category
           groceryCategories.map((cat) => {
