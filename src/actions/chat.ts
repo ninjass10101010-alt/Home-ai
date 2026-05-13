@@ -15,9 +15,13 @@ interface AIResponse {
   }>;
 }
 
+import { addEvent, addTask, addGroceryItem } from "./db-utils";
+
 export async function getAIResponse(message: string): Promise<AIResponse> {
   try {
-    // Try OpenRouter first (supports Claude, GPT, etc.)
+    let result: AIResponse = { content: "" };
+
+    // Try OpenRouter first
     if (openRouterApiKey) {
       const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
@@ -26,91 +30,79 @@ export async function getAIResponse(message: string): Promise<AIResponse> {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "anthropic/claude-3.5-sonnet", // or user preference
+          model: "anthropic/claude-3.5-sonnet",
           messages: [
             {
               role: "system",
-              content: `You are Consuela, a helpful AI family assistant. You help manage family calendars, meal planning, tasks, and grocery lists.
+              content: `You are Consuela, a helpful AI family assistant. 
+Current date: ${new Date().toISOString().split('T')[0]}
 
-When responding to user requests, you should:
-1. Be friendly and helpful
-2. Take action on their requests (add events, plan meals, etc.)
-3. Use structured actions when appropriate
-4. Keep responses concise
+When responding, identify if the user wants to:
+1. Add an event (e.g., "Add soccer practice at 4pm")
+2. Add a task/chore (e.g., "Remind Jake to take out trash")
+3. Add a grocery item (e.g., "Add milk to the list")
 
-For actions, respond with JSON format:
+Respond with JSON:
 {
-  "content": "Your response text",
+  "content": "Friendly confirmation message",
   "actions": [
     {
-      "type": "event|meal|task|grocery",
-      "title": "Brief title",
-      "detail": "Details",
-      "emoji": "relevant emoji"
+      "type": "event|task|grocery|meal",
+      "title": "Title of the item",
+      "detail": "Time/Assignee/Quantity",
+      "emoji": "Relevant emoji",
+      "metadata": {
+        "memberName": "Name of person if mentioned",
+        "time": "HH:MM if mentioned",
+        "date": "YYYY-MM-DD if mentioned"
+      }
     }
   ]
-}
-
-If no action needed, just return content string.`
+}`
             },
-            {
-              role: "user",
-              content: message,
-            },
+            { role: "user", content: message },
           ],
-          temperature: 0.7,
-          max_tokens: 1000,
         }),
       });
 
       const data = await response.json();
       const aiMessage = data.choices[0].message.content;
-
-      // Try to parse as JSON
       try {
-        const parsed = JSON.parse(aiMessage);
-        return parsed;
+        result = JSON.parse(aiMessage);
       } catch {
-        // Plain text response
-        return { content: aiMessage };
+        result = { content: aiMessage };
       }
-    }
-
-    // Fallback to Google AI
-    if (googleApiKey) {
+    } else if (googleApiKey) {
+      // Fallback to Gemini with similar prompt...
       const genAI = new GoogleGenerativeAI(googleApiKey);
       const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
-
-      const prompt = `You are Consuela, a helpful AI family assistant. Respond to: "${message}"
-
-Guidelines:
-- Be friendly and helpful
-- Take action on requests when possible
-- Keep responses concise
-- If adding something, mention it was added
-
-Return response as plain text unless it's an action, then use JSON format with content and actions array.`;
-
-      const result = await model.generateContent(prompt);
-      const aiMessage = result.response.text();
-
+      const prompt = `You are Consuela, an AI family assistant. Respond to "${message}" in JSON format with content and optional actions array. Today is ${new Date().toISOString().split('T')[0]}.`;
+      const aiResult = await model.generateContent(prompt);
+      const aiMessage = aiResult.response.text();
       try {
-        const parsed = JSON.parse(aiMessage);
-        return parsed;
+        result = JSON.parse(aiMessage);
       } catch {
-        return { content: aiMessage };
+        result = { content: aiMessage };
       }
     }
 
-    // Fallback to mock if no APIs
-    return {
-      content: "I'm here to help with your family organization! What would you like me to assist with?",
-    };
+    // Perform database operations based on identified actions
+    if (result.actions) {
+      for (const action of result.actions) {
+        const meta = (action as any).metadata || {};
+        if (action.type === "event") {
+          await addEvent(action.title, meta.date || new Date().toISOString().split('T')[0], meta.time || "", meta.memberName);
+        } else if (action.type === "task") {
+          await addTask(action.title, meta.memberName);
+        } else if (action.type === "grocery") {
+          await addGroceryItem(action.title, action.detail);
+        }
+      }
+    }
 
+    return result;
   } catch (error) {
     console.error("AI API error:", error);
-    return {
-      content: "Sorry, I'm having trouble connecting right now. Please try again later.",
-    };
+    return { content: "Sorry, I'm having trouble right now." };
   }
 }

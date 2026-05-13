@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import BottomNav from "@/components/ui/BottomNav";
 import Avatar from "@/components/ui/Avatar";
 import Badge from "@/components/ui/Badge";
+import { Icon3D } from "@/components/3d";
 import { getAIResponse } from "@/actions/chat";
 
 interface Message {
@@ -305,8 +306,8 @@ export default function ChatPage() {
           borderBottom: "1px solid rgba(255,255,255,0.04)",
         }}
       >
-        <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl shrink-0 bg-nori-500/15 consuela-glow">
-          ✨
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 bg-nori-500/10 consuela-glow border border-nori-500/20">
+          <Icon3D variant="chat" size="sm" />
         </div>
         <div className="flex-1 min-w-0">
           <h1 className="text-base font-semibold text-text-primary">Consuela</h1>

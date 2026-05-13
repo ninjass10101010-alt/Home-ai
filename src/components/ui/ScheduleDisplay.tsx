@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState, useEffect } from "react";
+import Card from "./Card";
 
 interface ScheduleItem {
   id: number;
@@ -21,6 +22,12 @@ interface ScheduleDisplayProps {
 }
 
 export default function ScheduleDisplay({ schedule, title = "Today's Schedule", className = "" }: ScheduleDisplayProps) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const sortedSchedule = useMemo(() => {
     return [...schedule].sort((a, b) => {
       const timeA = a.time.replace(":", "");
@@ -31,38 +38,42 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
 
   if (schedule.length === 0) return null;
 
+  const currentHour = mounted ? new Date().getHours() : 0;
+
   return (
     <section className={className}>
       <h2 className="text-text-primary font-semibold text-base mb-3">{title}</h2>
-      <div className="space-y-2">
-        {sortedSchedule.map((item) => {
-          const hour = parseInt(item.time.split(":")[0]);
-          const isPast = hour < new Date().getHours();
-          const colorClass = item.color === "green" ? "bg-green-500/20" :
-                            item.color === "amber" ? "bg-amber-500/20" :
-                            item.color === "cyan" ? "bg-cyan-500/20" :
-                            item.color === "violet" ? "bg-violet-500/20" :
-                            "bg-nori-500/20";
+      <Card className="!p-2">
+        <div className="space-y-1">
+          {sortedSchedule.map((item) => {
+            const hour = parseInt(item.time.split(":")[0]);
+            const isPast = mounted && hour < currentHour;
+            const colorClass = item.color === "green" ? "bg-green-500/10 border-green-500/20" :
+                              item.color === "amber" ? "bg-amber-500/10 border-amber-500/20" :
+                              item.color === "cyan" ? "bg-cyan-500/10 border-cyan-500/20" :
+                              item.color === "violet" ? "bg-violet-500/10 border-violet-500/20" :
+                              "bg-nori-500/10 border-nori-500/20";
 
-          return (
-            <div
-              key={item.id}
-              className={`flex items-center gap-3 px-3 py-2 rounded-xl ${colorClass} ${
-                isPast ? "opacity-50" : ""
-              }`}
-            >
-              <span className="text-xs font-medium text-text-primary w-14">{item.time}</span>
-              <span className="text-lg">{item.emoji || item.icon || "•"}</span>
-              <span className="text-sm text-text-primary flex-1">{item.title}</span>
-              {item.member && (
-                <span className={`text-xs px-2 py-0.5 rounded-full bg-${item.memberColor || "surface"}-500/20 text-text-secondary`}>
-                  {item.member.split(" ")[0]}
-                </span>
-              )}
-            </div>
-          );
-        })}
-      </div>
+            return (
+              <div
+                key={item.id}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border ${colorClass} ${
+                  isPast ? "opacity-40" : ""
+                }`}
+              >
+                <span className="text-xs font-bold text-text-primary w-12">{item.time}</span>
+                <span className="text-xl">{item.emoji || item.icon || "•"}</span>
+                <span className="text-sm font-medium text-text-primary flex-1">{item.title}</span>
+                {item.member && (
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-white/5 text-text-secondary">
+                    {item.member.split(" ")[0]}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </Card>
     </section>
   );
 }

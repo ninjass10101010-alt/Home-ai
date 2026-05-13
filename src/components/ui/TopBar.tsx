@@ -21,21 +21,21 @@ export default function TopBar({ title, subtitle, right, back }: TopBarProps) {
         {back && (
           <Link
             href="/"
-            className="flex items-center justify-center w-9 h-9 rounded-xl bg-surface-2 text-text-secondary hover:text-text-primary transition-colors"
+            className="flex items-center justify-center w-10 h-10 rounded-2xl bg-surface-2/50 border border-white/5 text-text-secondary hover:text-nori-400 hover:border-nori-500/30 transition-all active:scale-95"
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
-              <path d="M19 12H5M12 19l-7-7 7-7" strokeLinecap="round" strokeLinejoin="round" />
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="w-5 h-5">
+              <path d="M15 18l-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </Link>
         )}
         <div className="flex-1 min-w-0">
           {title && (
-            <h1 className="text-base font-semibold text-text-primary truncate leading-tight">
+            <h1 className="text-lg font-bold text-text-primary truncate leading-tight tracking-tight">
               {title}
             </h1>
           )}
           {subtitle && (
-            <p className="text-xs text-text-secondary truncate leading-tight">{subtitle}</p>
+            <p className="text-[11px] font-medium text-nori-400/80 uppercase tracking-widest truncate leading-tight mt-0.5">{subtitle}</p>
           )}
         </div>
         {right && <div className="flex items-center gap-2 shrink-0">{right}</div>}
