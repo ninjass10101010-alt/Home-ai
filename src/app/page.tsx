@@ -88,9 +88,9 @@ export default function HomePage() {
         {/* Family row */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-2">
-            {familyMembers.map((m) => (
-              <Avatar key={m.name} name={m.name} color={m.color} emoji={m.emoji} size="md" />
-            ))}
+{familyMembers.map((m) => (
+  <Avatar key={m.name} name={m.name} color={m.color} emoji={m.emoji} size="md" variant="emoji" />
+))}
           </div>
           <Link
             href="/settings"
@@ -270,29 +270,6 @@ export default function HomePage() {
           </Card>
         </section>
 
-        {/* Grocery Snapshot */}
-        <section className="pb-2">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-text-primary font-semibold text-base">Grocery List</h2>
-            <Link href="/grocery" className="text-nori-400 text-xs font-medium hover:text-nori-300">
-              Open →
-            </Link>
-          </div>
-          <Card className="!p-3 isometric-card">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500/20 to-accent-rose/10 flex items-center justify-center text-xl shrink-0">
-                <Icon3D variant="grocery" size="sm" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-text-primary text-sm font-medium">12 items needed</p>
-                <p className="text-text-muted text-xs mt-0.5">
-                  Chicken, pasta, tomatoes, +9 more
-                </p>
-              </div>
-              <Badge variant="amber" glass>3 urgent</Badge>
-            </div>
-          </Card>
-        </section>
       </div>
     </PageShell>
   );
