@@ -73,7 +73,6 @@ export default function EmergencyPage() {
             <Button
               variant="danger"
               className="mt-3 w-full"
-              onClick={() => alert("Dialing 911...")}
             >
               Call 911
             </Button>
