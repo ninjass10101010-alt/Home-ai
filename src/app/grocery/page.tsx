@@ -83,7 +83,7 @@ export default function GroceryPage() {
   const checkedItems = items.filter(item => item.checked);
 
   return (
-    <PageShell className="pb-32">
+    <PageShell>
       <TopBar
         title="Supermarket Run"
         subtitle={`${uncheckedItems.length} items to grab`}
@@ -103,6 +103,37 @@ export default function GroceryPage() {
           </button>
         }
       />
+
+      {/* Quick Add Bar */}
+      <div className="px-4 mt-4">
+        <Card className="!p-3">
+          <div className="flex gap-2">
+            <input
+              value={newItem}
+              onChange={(e) => setNewItem(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && addItem()}
+              placeholder="Quick add item..."
+              className="flex-1 bg-transparent text-text-primary text-sm outline-none placeholder:text-text-muted"
+            />
+            <select
+              value={newItemCategory}
+              onChange={(e) => setNewItemCategory(e.target.value)}
+              className="bg-surface-2 text-text-secondary text-xs rounded px-2 outline-none"
+            >
+              {groceryCategories.map((cat) => (
+                <option key={cat.id} value={cat.id}>{cat.name}</option>
+              ))}
+            </select>
+            <button
+              onClick={addItem}
+              disabled={!newItem.trim()}
+              className="px-4 py-1.5 rounded-lg bg-nori-500 text-surface-0 text-xs font-medium hover:bg-nori-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              Add
+            </button>
+          </div>
+        </Card>
+      </div>
 
       {/* Category Filter */}
       <div className="px-4 mt-3">
@@ -141,7 +172,7 @@ export default function GroceryPage() {
           groceryCategories.map((cat) => {
             const catItems = items.filter(item => item.category === cat.id);
             if (catItems.length === 0) return null;
-            
+
             return (
               <section key={cat.id}>
                 <div className="flex items-center gap-2 mb-3">
@@ -158,8 +189,8 @@ export default function GroceryPage() {
                         className="w-full flex items-center gap-3 p-3 text-left hover:bg-surface-2/50 transition-colors"
                       >
                         <div className={`w-6 h-6 rounded-full border flex items-center justify-center ${
-                          item.checked 
-                            ? "bg-nori-500 border-nori-500" 
+                          item.checked
+                            ? "bg-nori-500 border-nori-500"
                             : "border-surface-4"
                         }`}>
                           {item.checked && (
@@ -201,8 +232,8 @@ export default function GroceryPage() {
                     className="w-full flex items-center gap-3 p-3 text-left hover:bg-surface-2/50 transition-colors"
                   >
                     <div className={`w-6 h-6 rounded-full border flex items-center justify-center ${
-                      item.checked 
-                        ? "bg-nori-500 border-nori-500" 
+                      item.checked
+                        ? "bg-nori-500 border-nori-500"
                         : "border-surface-4"
                     }`}>
                       {item.checked && (
@@ -223,37 +254,6 @@ export default function GroceryPage() {
             </Card>
           </section>
         )}
-      </div>
-
-      {/* Quick Add Bar */}
-      <div className="fixed bottom-24 left-0 right-0 px-4 z-40">
-        <Card className="!p-3">
-          <div className="flex gap-2">
-            <input
-              value={newItem}
-              onChange={(e) => setNewItem(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && addItem()}
-              placeholder="Quick add item..."
-              className="flex-1 bg-transparent text-text-primary text-sm outline-none placeholder:text-text-muted"
-            />
-            <select
-              value={newItemCategory}
-              onChange={(e) => setNewItemCategory(e.target.value)}
-              className="bg-surface-2 text-text-secondary text-xs rounded px-2 outline-none"
-            >
-              {groceryCategories.map((cat) => (
-                <option key={cat.id} value={cat.id}>{cat.name}</option>
-              ))}
-            </select>
-            <button
-              onClick={addItem}
-              disabled={!newItem.trim()}
-              className="px-4 py-1.5 rounded-lg bg-nori-500 text-surface-0 text-xs font-medium hover:bg-nori-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              Add
-            </button>
-          </div>
-        </Card>
       </div>
 
       {/* Cart Sidebar */}
