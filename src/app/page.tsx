@@ -21,8 +21,7 @@ const todayEvents = [
     member: "Jake",
     emoji: "🧒",
     color: "violet",
-    icon: "calendar",
-    iconVariant: "clock",
+    icon: "⚽",
   },
   {
     id: 2,
@@ -32,7 +31,6 @@ const todayEvents = [
     emoji: "👧",
     color: "amber",
     icon: "🦷",
-    iconVariant: "family",
   },
   {
     id: 3,
@@ -42,7 +40,6 @@ const todayEvents = [
     emoji: "👨",
     color: "cyan",
     icon: "🍽️",
-    iconVariant: "meals",
   },
 ];
 
@@ -201,7 +198,7 @@ export default function HomePage() {
                           : "linear-gradient(135deg, rgba(59,130,246,0.2), rgba(219,234,254,0.1))",
                     }}
                   >
-                    {ev.iconVariant ? <Icon3D variant={ev.iconVariant as any} size="sm" /> : ev.icon}
+                    {ev.icon}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-text-primary text-sm font-medium truncate">{ev.title}</p>
