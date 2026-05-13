@@ -87,11 +87,10 @@ src/
 
 ## Next Steps (V2)
 
-- Real OpenAI/Claude API integration for chat
-- Authentication (NextAuth or Clerk)
-- Database (Drizzle + SQLite or Postgres)
-- Google/Apple Calendar OAuth sync
-- Push notifications (Web Push API)
-- Instacart/Walmart grocery API integration
-- Voice-first mode with Web Speech API
-- React Native mobile app (shared logic)
+- Real AI API integration with OpenClaw/OpenRouter/Google AI for chat
+- Database persistence (Drizzle + SQLite) for family data
+- Push notifications (Web Push API) for reminders and alerts
+- Speech API option for voice-first interactions
+- Grocery API integrations (Walmart/Instacart and other services)
+- Google/Apple Calendar OAuth sync (future)
+- React Native mobile app (shared logic, future)
