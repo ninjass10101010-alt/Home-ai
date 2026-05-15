@@ -29,31 +29,61 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
     });
   }, [schedule]);
 
-  if (schedule.length === 0) return null;
+  if (schedule.length === 0) {
+    return (
+      <section className={className}>
+        <h2 className="text-text-primary font-semibold text-base mb-3">{title}</h2>
+        <div className="flex flex-col items-center gap-2 py-6 text-text-muted">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-8 h-8 text-surface-5">
+            <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83" strokeLinecap="round" />
+          </svg>
+          <p className="text-xs">No items scheduled</p>
+        </div>
+      </section>
+    );
+  }
+
+  const upcomingCount = schedule.filter(item => {
+    const hour = parseInt(item.time.split(":")[0]);
+    return hour >= new Date().getHours();
+  }).length;
+
+  const colorBgMap: Record<string, string> = {
+    green:  "bg-nori-500/15",
+    amber:  "bg-amber-500/15",
+    cyan:   "bg-cyan-500/15",
+    violet: "bg-accent-violet/15",
+    rose:   "bg-accent-rose/15",
+  };
+  const colorDotMap: Record<string, string> = {
+    green:  "bg-nori-500/50",
+    amber:  "bg-amber-500/50",
+    cyan:   "bg-cyan-500/50",
+    violet: "bg-accent-violet/50",
+    rose:   "bg-accent-rose/50",
+  };
 
   return (
     <section className={className}>
-      <h2 className="text-text-primary font-semibold text-base mb-3">{title}</h2>
-      <div className="space-y-2">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-text-primary font-semibold text-base">{title}</h2>
+        <span className="text-text-muted text-[10px] font-medium">
+          {upcomingCount} upcoming
+        </span>
+      </div>
+      <div className="space-y-1.5">
         {sortedSchedule.map((item) => {
           const hour = parseInt(item.time.split(":")[0]);
           const isPast = hour < new Date().getHours();
-          const colorClass = item.color === "green" ? "bg-green-500/20" :
-                            item.color === "amber" ? "bg-amber-500/20" :
-                            item.color === "cyan" ? "bg-cyan-500/20" :
-                            item.color === "violet" ? "bg-violet-500/20" :
-                            "bg-nori-500/20";
 
           return (
             <div
               key={item.id}
-              className={`flex items-center gap-3 px-3 py-2 rounded-xl ${colorClass} ${
-                isPast ? "opacity-50" : ""
-              }`}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl ${colorBgMap[item.color ?? "green"] ?? "bg-nori-500/15"} transition-all hover:bg-white/[0.03]`}
             >
-              <span className="text-xs font-medium text-text-primary w-14">{item.time}</span>
-              <span className="text-lg">{item.emoji || item.icon || "•"}</span>
-              <span className="text-sm text-text-primary flex-1">{item.title}</span>
+              <span className="text-xs font-mono text-text-muted w-12 shrink-0 tabular-nums">{item.time}</span>
+              <span className="text-lg shrink-0">{item.emoji || item.icon || "•"}</span>
+              <span className={`text-sm flex-1 min-w-0 ${isPast ? 'line-through text-text-muted' : 'text-text-primary'}`}>{item.title}</span>
               {item.member && (
                 <span className={`text-xs px-2 py-0.5 rounded-full bg-${item.memberColor || "surface"}-500/20 text-text-secondary`}>
                   {item.member.split(" ")[0]}

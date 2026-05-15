@@ -25,8 +25,7 @@ const quickPrompts = [
 ];
 
 export default function HomePage() {
-  // Fetch real data from database
-  const familyMembers = db.selectMembers().map(member => ({
+  const familyMembers = db.selectMembers().map((member) => ({
     name: member.name,
     color: member.id === 1 ? "green" : member.id === 2 ? "cyan" : member.id === 3 ? "violet" : "amber",
     emoji: member.emoji,
@@ -37,8 +36,34 @@ export default function HomePage() {
   const scheduleItems = db.selectTodaysSchedules();
 
   const today = new Date();
-  const dayName = today.toLocaleDateString("en-US", { weekday: "long" });
-  const dateStr = today.toLocaleDateString("en-US", { month: "long", day: "numeric" });
+  const hour = today.getHours();
+  const timeOfDay = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
+
+  // Date pill
+  const dayOfWeek = today.toLocaleDateString("en-US", { weekday: "short" });
+  const dayMonth = today.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
+  // Meal highlight by actual day
+  const dayToMealIndex: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4 };
+  const todayShort = today.toLocaleDateString("en-US", { weekday: "short" });
+  const todayMealIndex = dayToMealIndex[todayShort] ?? 0;
+
+  // Event color → border color mapping
+  const eventBorderColor: Record<string, string> = {
+    green: "!border-l-nori-500",
+    violet: "!border-l-accent-violet",
+    amber: "!border-l-amber-500",
+    cyan: "!border-l-cyan-500",
+    rose: "!border-l-accent-rose",
+    blue: "!border-l-blue-500",
+  };
+
+  // Task point → accent mapping
+  const taskPointBorder = (points: number): string => {
+    if (points > 15) return "border-l-2 border-l-accent-rose/60 bg-accent-rose/5";
+    if (points > 10) return "border-l-2 border-l-accent-amber/60 bg-accent-amber/5";
+    return "border-l-2 border-l-surface-4";
+  };
 
   return (
     <PageShell>
@@ -48,8 +73,7 @@ export default function HomePage() {
         <div className="gradient-orb w-72 h-72 -top-20 -right-20" style={{ background: "radial-gradient(circle, var(--color-accent-lavender), transparent)", animationDelay: "0s" }} />
         <div className="gradient-orb w-80 h-80 -bottom-20 -left-20" style={{ background: "radial-gradient(circle, var(--color-accent-coral), transparent)", animationDelay: "2s" }} />
         <div className="gradient-orb w-64 h-64 top-1/2 left-1/4" style={{ background: "radial-gradient(circle, var(--color-accent-mint), transparent)", animationDelay: "4s" }} />
-        <div className="gradient-orb w-56 h-56 top-1/3 right-1/3" style={{ background: "radial-gradient(circle, var(--color-accent-amber), transparent)", animationDelay: "6s" }} />
-        <div className="gradient-orb w-48 h-48 bottom-1/4 right-1/4" style={{ background: "radial-gradient(circle, var(--color-accent-violet), transparent)", animationDelay: "1s" }} />
+        <div className="gradient-orb w-48 h-48 bottom-1/4 right-1/4" style={{ background: "radial-gradient(circle, var(--color-accent-amber), transparent)", animationDelay: "6s" }} />
       </div>
 
       {/* Header */}
@@ -66,21 +90,52 @@ export default function HomePage() {
           </div>
         </div>
 
+        {/* Date pill */}
+        <div className="flex items-center gap-2 mb-4 animate-in">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full glass-subtle border border-white/5">
+            <span className="text-xs text-text-secondary font-medium">{dayOfWeek}</span>
+            <span className="text-xs text-accent-lavender font-semibold">{dayMonth}</span>
+          </div>
+        </div>
+
         {/* Greeting with gradient text */}
-        <div className="mb-4">
-          <p className="text-text-secondary text-sm">
-            {dayName}, {dateStr}
-          </p>
+        <div className="mb-4 animate-in animate-in-delay-100">
           <h1 className="text-2xl font-bold text-text-primary mt-0.5">
-            Good afternoon, <span className="gradient-text">Johnson family</span> 👋
+            Good {timeOfDay}, <span className="gradient-text">Johnson family</span> 👋
           </h1>
         </div>
 
-        {/* Quick summary pills with glass effect */}
-        <div className="flex gap-2 flex-wrap mt-3">
-          <Badge variant="green" glass>3 events today</Badge>
-          <Badge variant="amber" glass>2 tasks pending</Badge>
-          <Badge variant="violet" glass>Taco night 🌮</Badge>
+        {/* Quick stat links */}
+        <div className="flex gap-2 flex-wrap mt-3 animate-in animate-in-delay-200">
+          <Link
+            href="/calendar"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl glass-subtle border border-white/5 text-text-secondary text-[11px] font-medium shrink-0 transition-all cursor-pointer hover:text-text-primary active:scale-95"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3 h-3">
+              <rect x="3" y="4" width="18" height="18" rx="2" />
+              <path d="M16 2v4M8 2v4M3 10h18" strokeLinecap="round" />
+            </svg>
+            <span>3 events</span>
+          </Link>
+          <Link
+            href="/tasks"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl glass-subtle border border-white/5 text-text-secondary text-[11px] font-medium shrink-0 transition-all cursor-pointer hover:text-text-primary active:scale-95"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3 h-3">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" strokeLinecap="round" />
+              <path d="M9.53 16.15a1.5 1.5 0 0 0 2.11 2.09l3.28-3.28a1.5 1.5 0 0 0 0-2.1l-3.28-3.28a1.5 1.5 0 0 0-2.1 0L7.9 11.17" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <span>2 tasks</span>
+          </Link>
+          <Link
+            href="/chat?q=taco%20night"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl glass-subtle border border-white/5 text-text-secondary text-[11px] font-medium shrink-0 transition-all cursor-pointer hover:text-text-primary active:scale-95"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3 h-3">
+              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <span>Taco night 🌮</span>
+          </Link>
         </div>
       </div>
 
@@ -102,9 +157,9 @@ export default function HomePage() {
               <Icon3D variant="chat" size="md" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-text-primary text-sm font-medium">Ask Nori anything…</p>
-              <p className="text-text-muted text-xs mt-0.5 truncate">
-                &ldquo;Add Jake&apos;s dentist on Thursday at 2pm&rdquo;
+              <p className="text-text-primary text-sm font-medium">Ask Consuela anything…</p>
+              <p className="text-text-secondary/60 text-xs mt-0.5 truncate">
+                &ldquo;Plan dinner, add an event, or check on the kids…&rdquo;
               </p>
             </div>
             <svg
@@ -142,7 +197,10 @@ export default function HomePage() {
           </div>
           <div className="space-y-2">
             {todayEvents.map((ev) => (
-              <Card key={ev.id} className="!p-3 isometric-card">
+              <Card
+                key={ev.id}
+                className={`!p-3 isometric-card ${eventBorderColor[ev.color] ?? "!border-l-surface-4"}`}
+              >
                 <div className="flex items-center gap-3">
                   <div
                     className="w-10 h-10 rounded-xl flex items-center justify-center text-lg shrink-0"
@@ -176,7 +234,7 @@ export default function HomePage() {
 
         {/* Schedule Display */}
         <ScheduleDisplay
-          schedule={scheduleItems.map(item => ({
+          schedule={scheduleItems.map((item) => ({
             id: item.id,
             title: item.title,
             time: item.time,
@@ -189,7 +247,7 @@ export default function HomePage() {
           title="Daily Schedule"
         />
 
-        {/* Meal This Week - Enhanced with gradient backgrounds */}
+        {/* Meal This Week */}
         <section>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-text-primary font-semibold text-base">This Week&apos;s Meals</h2>
@@ -199,19 +257,28 @@ export default function HomePage() {
           </div>
           <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4">
             {mealPlan.map((m, i) => {
-              const isToday = i === 1;
-              const bgStyle = isToday
-                ? "linear-gradient(135deg, rgba(34,197,94,0.2), rgba(6,182,212,0.15))"
-                : "";
+              const isToday = i === todayMealIndex;
               return (
                 <div
                   key={m.day}
                   className={`shrink-0 flex flex-col items-center gap-1.5 rounded-2xl px-3 py-3 min-w-[72px] transition-all ${
-                    isToday ? "border border-nori-500/30" : "glass"
+                    isToday
+                      ? "border-2 border-nori-500/40 accent-glow glass-subtle"
+                      : "glass hover:border-white/8 hover:bg-surface-2/60"
                   }`}
-                  style={isToday ? { background: bgStyle } : undefined}
                 >
-                  <span className="text-xs font-medium text-text-secondary">{m.day}</span>
+                  <span
+                    className={`text-[10px] font-semibold uppercase tracking-wide ${
+                      isToday ? "text-accent-nori-400" : "text-text-secondary/80"
+                    }`}
+                  >
+                    {m.day}
+                  </span>
+                  {isToday && (
+                    <span className="bg-nori-500/20 text-nori-400 text-[9px] px-1.5 py-0.5 rounded-full font-medium">
+                      TODAY
+                    </span>
+                  )}
                   <span className="text-2xl">{m.emoji}</span>
                   <span className="text-[10px] text-text-muted text-center leading-tight">{m.meal}</span>
                 </div>
@@ -230,36 +297,47 @@ export default function HomePage() {
           </div>
           <Card className="isometric-card">
             <div className="space-y-3">
-              {pendingTasks.map((task) => (
-                <div key={task.id} className="flex items-center gap-3">
-                  <div
-                    className={`w-5 h-5 rounded-full border-2 shrink-0 flex items-center justify-center transition-all ${
-                      task.done ? "border-nori-500 bg-nori-500" : "border-surface-4"
-                    }`}
-                  >
-                    {task.done && (
-                      <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={3} className="w-3 h-3">
-                        <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p
-                      className={`text-sm truncate ${
-                        task.done ? "line-through text-text-muted" : "text-text-primary"
+              {pendingTasks.map((task) => {
+                const pts = task.points;
+                const isHigh = pts > 15;
+                return (
+                  <div key={task.id} className={`flex items-center gap-3 ${taskPointBorder(pts)} rounded-lg pl-3 pr-2 py-2 -mx-3`}>
+                    <div
+                      className={`w-5 h-5 rounded-full border-2 shrink-0 flex items-center justify-center transition-all ${
+                        task.done
+                          ? "border-nori-500 bg-nori-500 ring-2 ring-nori-500/30"
+                          : "border-surface-4"
                       }`}
                     >
-                      {task.title}
-                    </p>
-                    <p className="text-xs text-text-muted">
-                      {task.assigned} · {task.due}
-                    </p>
+                      {task.done && (
+                        <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={3} className="w-3 h-3">
+                          <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p
+                        className={`text-sm truncate ${
+                          task.done ? "line-through text-text-muted" : "text-text-primary"
+                        }`}
+                      >
+                        {task.title}
+                      </p>
+                      <p className="text-xs text-text-muted">
+                        {task.assigned} · {task.due}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {isHigh && (
+                        <span className="text-[9px] text-accent-rose font-bold uppercase tracking-wide">high</span>
+                      )}
+                      <span className={`text-xs font-medium shrink-0 ${isHigh ? "text-accent-rose" : "text-amber-400"}`}>
+                        +{task.points}pts
+                      </span>
+                    </div>
                   </div>
-                  <span className="text-xs text-amber-400 font-medium shrink-0">
-                    +{task.points}pts
-                  </span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </Card>
         </section>
