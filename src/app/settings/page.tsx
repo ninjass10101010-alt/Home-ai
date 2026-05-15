@@ -71,6 +71,7 @@ export default function SettingsPage() {
   const [name, setName] = useState("");
   const [role, setRole] = useState<MemberRole>("other");
   const [emoji, setEmoji] = useState("👤");
+  const [age, setAge] = useState("");
   const [profileImage, setProfileImage] = useState<string | undefined>(undefined);
   const [isGenerating, setIsGenerating] = useState(false);
 
@@ -92,7 +93,7 @@ export default function SettingsPage() {
   async function handleAddMember() {
     if (!name) return;
     setLoading(true);
-    await pb.collection("members").create({ name, role, emoji, profileImage });
+    await pb.collection("members").create({ name, role, emoji, age, profileImage });
     resetForm();
     await loadMembers();
   }
@@ -100,7 +101,7 @@ export default function SettingsPage() {
   async function handleUpdateMember() {
     if (!editingMember || !name) return;
     setLoading(true);
-    await pb.collection("members").update(editingMember.id, { name, role, emoji, profileImage });
+    await pb.collection("members").update(editingMember.id, { name, role, emoji, age, profileImage });
     setEditingMember(null);
     resetForm();
     await loadMembers();
@@ -110,6 +111,7 @@ export default function SettingsPage() {
     setName("");
     setRole("other");
     setEmoji("👤");
+    setAge("");
     setProfileImage(undefined);
     setIsAdding(false);
   }
@@ -126,6 +128,7 @@ export default function SettingsPage() {
     setName(member.name);
     setRole(member.role);
     setEmoji(member.emoji || "👤");
+    setAge(member.age || "");
     setProfileImage(member.profileImage);
   }
 
@@ -146,15 +149,13 @@ export default function SettingsPage() {
   async function generateAIEmoji() {
     setIsGenerating(true);
     
-    // Mock the backend action since we removed the server actions
+    // Mock the backend action
     await new Promise(r => setTimeout(r, 1500));
     const result = { success: true, emoji: "🤖" };
     
     if (result.success) {
       setEmoji(result.emoji || "👤");
-      // In a real app, result.url would be set here as well
     } else {
-
       alert("Failed to generate AI emoji. Please try again.");
     }
     
@@ -245,7 +246,9 @@ export default function SettingsPage() {
                       />
                       <div className="flex-1 min-w-0">
                         <p className="text-text-primary text-base font-semibold truncate">{member.name}</p>
-                        <p className="text-text-muted text-xs capitalize">{member.role}</p>
+                        <p className="text-text-muted text-xs capitalize">
+                          {member.role} {member.age ? `· Age ${member.age}` : ""}
+                        </p>
                       </div>
                       <div className="flex gap-2">
                         <button 
@@ -362,6 +365,17 @@ export default function SettingsPage() {
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="Enter name..."
+                    className="w-full px-4 py-3 rounded-2xl bg-surface-2 border border-surface-3 text-text-primary focus:outline-none focus:border-nori-500/50 transition-all"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-text-muted uppercase tracking-wider">Age</label>
+                  <input
+                    type="number"
+                    value={age}
+                    onChange={(e) => setAge(e.target.value)}
+                    placeholder="Enter age..."
                     className="w-full px-4 py-3 rounded-2xl bg-surface-2 border border-surface-3 text-text-primary focus:outline-none focus:border-nori-500/50 transition-all"
                   />
                 </div>

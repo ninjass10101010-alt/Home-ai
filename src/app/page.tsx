@@ -11,7 +11,6 @@ import WeatherWidget from "@/components/ui/WeatherWidget";
 import { Icon3D } from "@/components/3d";
 import EmergencyButton from "@/components/ui/EmergencyButton";
 import ScheduleDisplay from "@/components/ui/ScheduleDisplay";
-
 import pb from "@/lib/pocketbase";
 
 export default function HomePage() {
