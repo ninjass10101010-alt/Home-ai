@@ -7,7 +7,7 @@ import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import Avatar from "@/components/ui/Avatar";
 import Link from "next/link";
-import { db } from "@/db";
+import { db, getMembersForCalendarSync } from "@/db";
 
 const DAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 const MONTHS = [
@@ -15,7 +15,7 @@ const MONTHS = [
   "July", "August", "September", "October", "November", "December",
 ];
 
-const members = db.selectMembersForCalendar();
+const members = getMembersForCalendarSync();
 
 interface CalEvent {
   id: number;

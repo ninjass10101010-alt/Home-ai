@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Modal from "@/components/ui/Modal";
 import Button from "@/components/ui/Button";
 import pb from "@/lib/pocketbase";
+import MealPlanningSync from "@/lib/mealPlanningSync";
 
 interface PantryEditorProps {
   isOpen: boolean;
@@ -21,33 +22,55 @@ const PANTRY_EMOJI_CATEGORIES: Record<string, string[]> = {
 export default function PantryEditor({ isOpen, onClose, pantryItem }: PantryEditorProps) {
   const [loading, setLoading] = useState(false);
   const [activeEmojiCategory, setActiveEmojiCategory] = useState<string>("pantry");
+  const [ingredients, setIngredients] = useState<any[]>([]);
+  const [showIngredientPicker, setShowIngredientPicker] = useState(false);
+
   const [formData, setFormData] = useState({
     name: "",
     emoji: "📦",
     status: "enough",
     category: "pantry",
+    ingredientId: "",
   });
+
+  // Fetch ingredients when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      pb.collection("ingredients").getFullList({ sort: 'name' })
+        .then(setIngredients)
+        .catch(console.error);
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     if (isOpen) {
+      const selectedIngredient = ingredients.find(i => i.id === pantryItem?.ingredientId);
       setFormData({
-        name: pantryItem?.name || "",
-        emoji: pantryItem?.emoji || "📦",
+        name: pantryItem?.name || selectedIngredient?.name || "",
+        emoji: pantryItem?.emoji || selectedIngredient?.emoji || "📦",
         status: pantryItem?.status || "enough",
         category: pantryItem?.category || "pantry",
+        ingredientId: pantryItem?.ingredientId || "",
       });
     }
-  }, [isOpen, pantryItem]);
+  }, [isOpen, pantryItem, ingredients]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
+      let savedItem;
       if (pantryItem) {
-        await pb.collection("pantry_items").update(pantryItem.id, formData);
+        savedItem = await pb.collection("pantry_items").update(pantryItem.id, formData);
       } else {
-        await pb.collection("pantry_items").create(formData);
+        savedItem = await pb.collection("pantry_items").create(formData);
       }
+
+      // Trigger sync to update grocery list if pantry now satisfies needs
+      if (savedItem && formData.ingredientId) {
+        await MealPlanningSync.syncPantryToGrocery(savedItem);
+      }
+
       onClose();
     } catch (error) {
       console.error("Failed to save pantry item:", error);
@@ -100,12 +123,59 @@ export default function PantryEditor({ isOpen, onClose, pantryItem }: PantryEdit
 
         <div className="space-y-2">
           <label className="text-xs font-bold text-text-muted uppercase">Item Name</label>
-          <input
-            value={formData.name}
-            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-            className="w-full bg-surface-2 border border-surface-3 rounded-2xl p-4 text-text-primary"
-            placeholder="e.g. Olive Oil"
-          />
+          <div className="flex gap-2">
+            <input
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              className="flex-1 bg-surface-2 border border-surface-3 rounded-2xl p-4 text-text-primary"
+              placeholder="e.g. Olive Oil"
+            />
+            <button
+              type="button"
+              onClick={() => setShowIngredientPicker(!showIngredientPicker)}
+              className={`px-4 rounded-2xl text-sm font-bold transition-all ${
+                formData.ingredientId
+                  ? "bg-nori-500 text-white"
+                  : "bg-surface-2 border border-surface-3 text-text-primary"
+              }`}
+            >
+              {formData.ingredientId ? "✓" : "Link"}
+            </button>
+          </div>
+
+          {showIngredientPicker && (
+            <div className="p-3 bg-surface-2 rounded-2xl border border-surface-3 max-h-40 overflow-y-auto">
+              {ingredients.length === 0 ? (
+                <p className="text-xs text-text-muted text-center">No ingredients found</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {ingredients.map((ing) => (
+                    <button
+                      key={ing.id}
+                      type="button"
+                      onClick={() => {
+                        setFormData({
+                          ...formData,
+                          ingredientId: ing.id,
+                          name: ing.name,
+                          emoji: ing.emoji || "📦",
+                        });
+                        setShowIngredientPicker(false);
+                      }}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-xl border transition-all ${
+                        formData.ingredientId === ing.id
+                          ? "bg-nori-500/20 border-nori-500 text-nori-400"
+                          : "bg-surface-3 border-surface-4 text-text-secondary hover:border-nori-500/30"
+                      }`}
+                    >
+                      <span className="text-sm">{ing.emoji || "📦"}</span>
+                      <span className="text-xs truncate max-w-[100px]">{ing.name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="space-y-2">

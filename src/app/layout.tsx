@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import Providers from "./providers";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -39,8 +40,6 @@ export const viewport: Viewport = {
   themeColor: "#0f1117",
 };
 
-import OpenClawDrive from "@/components/ui/OpenClawDrive";
-
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -48,11 +47,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
-        <OpenClawDrive />
-        {children}
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

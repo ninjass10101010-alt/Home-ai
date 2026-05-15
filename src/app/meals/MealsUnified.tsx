@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
+import { useToast } from "@/components/ui/Toast";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   ShoppingBasket, 
@@ -28,6 +29,7 @@ import Button from "@/components/ui/Button";
 import MealEditor from "@/components/meals/MealEditor";
 import PantryEditor from "@/components/meals/PantryEditor";
 import pb from "@/lib/pocketbase";
+import MealPlanningSync from "@/lib/mealPlanningSync";
 
 interface MealsUnifiedProps {
   initialMeals: any[];
@@ -59,7 +61,38 @@ const categoryEmojis: Record<string, string[]> = {
 
 const weekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
+// Skeleton Components
+const SkeletonCard = () => (
+  <div className="shrink-0 w-48 !p-3 rounded-2xl bg-surface-2 border border-surface-3 overflow-hidden">
+    <div className="flex items-center gap-3">
+      <div className="w-12 h-12 rounded-xl bg-surface-3 shimmer" />
+      <div className="flex-1 space-y-2">
+        <div className="h-3 w-20 bg-surface-3 rounded shimmer" />
+        <div className="h-2 w-16 bg-surface-3 rounded shimmer" />
+      </div>
+    </div>
+  </div>
+);
+
+const SkeletonButton = () => (
+  <div className="shrink-0 flex items-center gap-2 px-3 py-2 rounded-xl glass border border-surface-3 overflow-hidden">
+    <div className="w-5 h-5 bg-surface-3 rounded shimmer" />
+    <div className="h-3 w-20 bg-surface-3 rounded shimmer" />
+  </div>
+);
+
+const SkeletonExpiringCard = () => (
+  <div className="shrink-0 w-36 !p-3 rounded-2xl bg-surface-2 border border-red-500/20 overflow-hidden">
+    <div className="flex flex-col items-center gap-2">
+      <div className="w-10 h-10 rounded-xl bg-surface-3 shimmer" />
+      <div className="h-3 w-20 bg-surface-3 rounded shimmer" />
+      <div className="h-2 w-10 bg-surface-3 rounded shimmer" />
+    </div>
+  </div>
+);
+
 export default function MealsUnified({ initialMeals, initialGrocery, initialPantry }: MealsUnifiedProps) {
+   const { showToast } = useToast();
   const [activeTab, setActiveTab] = useState<"planner" | "pantry" | "grocery">("planner");
   
   // Planner State
@@ -80,9 +113,21 @@ export default function MealsUnified({ initialMeals, initialGrocery, initialPant
   const [newItemCategory, setNewItemCategory] = useState("produce");
   const [newItemEmoji, setNewItemEmoji] = useState("🥬");
 
-  // Pantry State
+// Pantry State
   const [isPantryModalOpen, setIsPantryModalOpen] = useState(false);
   const [editingPantryItem, setEditingPantryItem] = useState<any>(null);
+  const [loadingExpiring, setLoadingExpiring] = useState(false);
+
+  useEffect(() => {
+    if (activeTab === "pantry") {
+      setLoadingExpiring(true);
+      const timer = setTimeout(() => setLoadingExpiring(false), 300);
+      return () => clearTimeout(timer);
+    }
+  }, [activeTab]);
+
+  // Servings adjustment
+  const [mealServings, setMealServings] = useState<Record<string, number>>({});
 
   useEffect(() => {
     const defaultEmoji = categoryEmojis[newItemCategory]?.[0] || "📦";
@@ -118,6 +163,147 @@ export default function MealsUnified({ initialMeals, initialGrocery, initialPant
     return initialPantry.filter(p => p.status === "low" || p.status === "out");
   }, [initialPantry]);
 
+  // Meal suggestions based on pantry items
+  const [mealSuggestions, setMealSuggestions] = useState<any[]>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+
+  // Recently purchased items
+  const [recentPurchases, setRecentPurchases] = useState<any[]>([]);
+  const [loadingPurchases, setLoadingPurchases] = useState(false);
+
+  // Calculate expiration status for pantry items
+  const getExpirationStatus = (item: any) => {
+    if (!item.expirationDate) return null;
+
+    const expirationDate = new Date(item.expirationDate);
+    const now = new Date();
+    const daysUntilExpiration = Math.ceil((expirationDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+    if (daysUntilExpiration < 0) return { status: 'expired', days: daysUntilExpiration, color: 'red' };
+    if (daysUntilExpiration <= 3) return { status: 'expiring-soon', days: daysUntilExpiration, color: 'red' };
+    if (daysUntilExpiration <= 7) return { status: 'expires-soon', days: daysUntilExpiration, color: 'amber' };
+    if (daysUntilExpiration <= 14) return { status: 'fresh', days: daysUntilExpiration, color: 'yellow' };
+    return { status: 'fresh', days: daysUntilExpiration, color: 'green' };
+  };
+
+  // Get items expiring soon for priority suggestions
+  const expiringSoonItems = useMemo(() => {
+    return initialPantry
+      .map(item => ({ ...item, expirationInfo: getExpirationStatus(item) }))
+      .filter(item => item.expirationInfo && ['expiring-soon', 'expires-soon'].includes(item.expirationInfo.status))
+      .sort((a, b) => a.expirationInfo.days - b.expirationInfo.days);
+  }, [initialPantry]);
+
+  useEffect(() => {
+    const fetchMealSuggestions = async () => {
+      if (activeTab !== "grocery" || activeCategory !== "all") return;
+
+      setLoadingSuggestions(true);
+      try {
+        // Get pantry ingredients with sufficient stock
+        const pantryIngredientIds = initialPantry
+          .filter(p => p.status === "plenty" || p.status === "enough" || p.status === "available")
+          .map(p => p.ingredientId)
+          .filter(id => id); // Filter out null/undefined
+
+        if (pantryIngredientIds.length < 2) return; // Need at least 2 ingredients for suggestions
+
+        // Get all recipes
+        const recipes = await pb.collection("recipes").getFullList();
+
+        // Get expiring soon ingredient IDs for priority boost
+        const expiringSoonIds = expiringSoonItems.map(item => item.ingredientId);
+
+        const suggestions = [];
+        for (const recipe of recipes.slice(0, 8)) { // Check more recipes for better suggestions
+          // Get recipe ingredients
+          const recipeIngredients = await pb.collection("recipe_ingredients")
+            .getFullList({ filter: `recipeId = "${recipe.id}"` });
+
+          const totalIngredients = recipeIngredients.length;
+          const availableIngredients = recipeIngredients.filter(ri =>
+            pantryIngredientIds.includes(ri.ingredientId)
+          ).length;
+
+          // Check if recipe uses expiring ingredients
+          const usesExpiringIngredients = recipeIngredients.some(ri =>
+            expiringSoonIds.includes(ri.ingredientId)
+          );
+
+          const matchPercentage = availableIngredients / totalIngredients;
+
+          // Only suggest recipes with 50%+ pantry match (lower threshold to include expiring item recipes)
+          if (matchPercentage >= 0.5) {
+            const missingCount = totalIngredients - availableIngredients;
+            suggestions.push({
+              ...recipe,
+              matchPercentage,
+              missingCount,
+              availableIngredients,
+              totalIngredients,
+              usesExpiringIngredients,
+              priority: usesExpiringIngredients ? 2 : 1 // Boost priority for expiring ingredient recipes
+            });
+          }
+        }
+
+        // Sort by priority (expiring ingredients first), then by match percentage
+        suggestions.sort((a, b) => {
+          if (a.priority !== b.priority) return b.priority - a.priority;
+          return b.matchPercentage - a.matchPercentage;
+        });
+setMealSuggestions(suggestions.slice(0, 3)); // Top 3 suggestions
+
+       } catch (error) {
+         console.error("Failed to fetch meal suggestions:", error);
+       } finally {
+         setLoadingSuggestions(false);
+       }
+     };
+
+    fetchMealSuggestions();
+  }, [activeTab, activeCategory, initialPantry]);
+
+// Fetch recent purchases for "Recently Purchased" section
+   useEffect(() => {
+     const fetchRecentPurchases = async () => {
+       if (activeTab !== "grocery" || activeCategory !== "all") return;
+
+       setLoadingPurchases(true);
+       try {
+        // Get recent purchase history (last 14 days)
+        const twoWeeksAgo = new Date();
+        twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+
+        const purchases = await pb.collection("purchase_history").getFullList({
+          filter: `purchaseDate >= "${twoWeeksAgo.toISOString()}"`,
+          sort: '-purchaseDate',
+          expand: 'ingredientId'
+        });
+
+        // Group by ingredient and take most recent
+        const uniquePurchases = new Map();
+        purchases.forEach(purchase => {
+          if (purchase.expand?.ingredientId && !uniquePurchases.has(purchase.ingredientId)) {
+            uniquePurchases.set(purchase.ingredientId, {
+              ...purchase,
+              ingredient: purchase.expand.ingredientId
+            });
+          }
+        });
+
+setRecentPurchases(Array.from(uniquePurchases.values()).slice(0, 8)); // Limit to 8 items
+
+       } catch (error) {
+         console.error("Failed to fetch recent purchases:", error);
+       } finally {
+         setLoadingPurchases(false);
+       }
+     };
+
+fetchRecentPurchases();
+  }, [activeTab, activeCategory]);
+
   // Handlers
   const handleToggleGroceryStatus = async (item: any) => {
     if (isShoppingMode) {
@@ -129,36 +315,86 @@ export default function MealsUnified({ initialMeals, initialGrocery, initialPant
     }
 
     let newStatus = item.status;
-    if (item.status === "suggested") newStatus = "needed";
+    let changes: any = {};
+
+    if (item.status === "suggested") {
+      newStatus = "needed";
+      changes.source = "manual";
+    }
     else if (item.status === "purchased") newStatus = "needed";
     else if (item.status === "needed") newStatus = "purchased";
-    
+
     if (newStatus !== item.status) {
-      await pb.collection("grocery_items").update(item.id, { status: newStatus });
+      changes.status = newStatus;
+      if (newStatus === "purchased") {
+        changes.purchasedAt = new Date().toISOString();
+
+        try {
+          await pb.collection("purchase_history").create({
+            ingredientId: item.ingredientId,
+            quantity: item.quantityNeeded,
+            unit: item.unit,
+            purchaseDate: new Date().toISOString(),
+            pricePaid: item.priceEstimate || 0,
+            store: "Unknown",
+            displayPriority: 1,
+          });
+        } catch (e) {
+          console.error("Failed to create purchase history:", e);
+          showToast("Failed to record purchase", "error");
+        }
+      }
+
+      try {
+        await pb.collection("grocery_items").update(item.id, changes);
+        await MealPlanningSync.handleManualGroceryEdit(item, changes);
+      } catch (e) {
+        console.error("Failed to update grocery item:", e);
+        showToast("Failed to update item", "error");
+      }
     }
   };
 
   const handleAddGroceryItem = async () => {
     if (!newItemName.trim()) return;
-    await pb.collection("grocery_items").create({
-      name: newItemName.trim(),
-      emoji: newItemEmoji,
-      category: newItemCategory,
-      priority: "medium",
-      status: "needed"
-    });
-    setNewItemName("");
-    setShowAddModal(false);
+    try {
+      await pb.collection("grocery_items").create({
+        name: newItemName.trim(),
+        emoji: newItemEmoji,
+        category: newItemCategory,
+        priority: "medium",
+        status: "needed"
+      });
+      setNewItemName("");
+      setShowAddModal(false);
+    } catch (e) {
+      showToast("Failed to add item", "error");
+    }
   };
 
   const addPantryToGrocery = async (pantryItem: any) => {
-    await pb.collection("grocery_items").create({
-      name: pantryItem.name,
-      emoji: pantryItem.emoji,
-      category: pantryItem.category || "pantry",
-      priority: "high",
-      status: "needed"
-    });
+    try {
+      let category = pantryItem.category || "pantry";
+
+      if (pantryItem.ingredientId) {
+        try {
+          const ingredient = await pb.collection("ingredients").getOne(pantryItem.ingredientId);
+          category = ingredient?.category || category;
+        } catch (e) {
+          console.error("Failed to fetch ingredient category:", e);
+        }
+      }
+
+      await pb.collection("grocery_items").create({
+        name: pantryItem.name,
+        emoji: pantryItem.emoji,
+        category: category,
+        priority: "high",
+        status: "needed"
+      });
+    } catch (error) {
+      showToast("Failed to add item to grocery list", "error");
+    }
   };
 
   return (
@@ -295,6 +531,63 @@ export default function MealsUnified({ initialMeals, initialGrocery, initialPant
                           <Badge variant="green" glass>Homemade</Badge>
                           <Badge variant="violet" glass>Family Fav</Badge>
                         </div>
+                        {/* Servings Control */}
+                        <div className="flex items-center gap-3 mt-4 p-3 rounded-2xl bg-surface-2/50 border border-surface-3">
+                          <span className="text-xs font-bold text-text-muted uppercase tracking-widest">Servings</span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => {
+                                const currentServings = mealServings[activeMeal.id] || 4;
+                                const newServings = Math.max(1, currentServings - 1);
+                                setMealServings(prev => ({ ...prev, [activeMeal.id]: newServings }));
+                              }}
+                              className="w-8 h-8 rounded-lg bg-surface-3 flex items-center justify-center text-text-muted hover:text-text-primary transition-colors"
+                            >
+                              <span className="text-lg font-bold">-</span>
+                            </button>
+                            <span className="text-sm font-bold text-text-primary min-w-[2rem] text-center">
+                              {mealServings[activeMeal.id] || 4}
+                            </span>
+                            <button
+                              onClick={() => {
+                                const currentServings = mealServings[activeMeal.id] || 4;
+                                const newServings = Math.min(12, currentServings + 1);
+                                setMealServings(prev => ({ ...prev, [activeMeal.id]: newServings }));
+                              }}
+                              className="w-8 h-8 rounded-lg bg-surface-3 flex items-center justify-center text-text-muted hover:text-text-primary transition-colors"
+                            >
+                              <span className="text-lg font-bold">+</span>
+                            </button>
+                          </div>
+                          <Button
+                            onClick={async () => {
+                              const servings = mealServings[activeMeal.id] || 4;
+                              // Create/update meal plan entry with new servings
+                              try {
+                                const mealPlanEntry = await pb.collection("meal_plan_entries").create({
+                                  recipeId: activeMeal.recipeId || activeMeal.id,
+                                  scheduledFor: activeDay,
+                                  servings: servings,
+                                  autoGenerated: false,
+                                  lastSyncedAt: new Date().toISOString(),
+                                });
+
+// Trigger sync with new servings
+                                await MealPlanningSync.syncMealPlanToGrocery(mealPlanEntry);
+
+                                // Show feedback
+                                console.log(`Updated servings to ${servings}`);
+                              } catch (error) {
+                                console.error("Failed to update servings:", error);
+                                showToast("Failed to update servings", "error");
+                              }
+                            }}
+                            variant="primary"
+                            className="text-xs px-3 py-1 h-auto"
+                          >
+                            Update
+                          </Button>
+                        </div>
                       </div>
                     </div>
                     {activeMeal.ingredients && (
@@ -345,33 +638,112 @@ export default function MealsUnified({ initialMeals, initialGrocery, initialPant
                   </button>
                 </div>
                 <div className="space-y-3">
-                  {initialPantry.map((item) => (
-                    <Card key={item.id} className="!p-4 flex items-center justify-between group">
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-2xl bg-surface-2 flex items-center justify-center text-2xl">
-                          {item.emoji}
+                  {initialPantry.map((item) => {
+                    const expirationInfo = getExpirationStatus(item);
+                    return (
+                      <Card key={item.id} className="!p-4 flex items-center justify-between group">
+                        <div className="flex items-center gap-4">
+                          <div className={`w-12 h-12 rounded-2xl flex items-center justify-center text-2xl relative ${
+                            expirationInfo?.color === 'red' ? 'ring-2 ring-red-500/50' :
+                            expirationInfo?.color === 'amber' ? 'ring-2 ring-amber-500/50' :
+                            'bg-surface-2'
+                          }`}>
+                            {item.emoji}
+                            {expirationInfo && expirationInfo.status === 'expiring-soon' && (
+                              <div className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center">
+                                <span className="text-[8px] text-white font-black">!</span>
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex-1">
+                            <p className="text-sm font-bold text-text-primary">{item.name}</p>
+                            <p className="text-[10px] text-text-muted font-bold uppercase">{item.category || "Pantry"}</p>
+                            {expirationInfo && (
+                              <p className={`text-[8px] font-bold uppercase tracking-widest ${
+                                expirationInfo.color === 'red' ? 'text-red-400' :
+                                expirationInfo.color === 'amber' ? 'text-amber-400' :
+                                'text-green-400'
+                              }`}>
+                                {expirationInfo.status === 'expired' ? 'Expired' :
+                                 expirationInfo.days === 0 ? 'Expires today' :
+                                 expirationInfo.days === 1 ? 'Expires tomorrow' :
+                                 `Expires in ${expirationInfo.days} days`}
+                              </p>
+                            )}
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-sm font-bold text-text-primary">{item.name}</p>
-                          <p className="text-[10px] text-text-muted font-bold uppercase">{item.category || "Pantry"}</p>
+                        <div className="flex items-center gap-3">
+                          <div className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border ${
+                            (item.status === "plenty" || item.status === "available") ? "bg-green-500/10 text-green-400 border-green-500/20" :
+                            item.status === "enough" ? "bg-blue-500/10 text-blue-400 border-blue-500/20" :
+                            item.status === "low" ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
+                            "bg-rose-500/10 text-rose-400 border-rose-500/20"
+                          }`}>
+                            {item.status}
+                          </div>
+                          <button onClick={() => { setEditingPantryItem(item); setIsPantryModalOpen(true); }} className="p-2 text-text-muted hover:text-text-primary">
+                            <Edit2 className="w-4 h-4" />
+                          </button>
                         </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <div className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border ${
-                          (item.status === "plenty" || item.status === "available") ? "bg-green-500/10 text-green-400 border-green-500/20" :
-                          item.status === "enough" ? "bg-blue-500/10 text-blue-400 border-blue-500/20" :
-                          item.status === "low" ? "bg-amber-500/10 text-amber-400 border-amber-500/20" :
-                          "bg-rose-500/10 text-rose-400 border-rose-500/20"
-                        }`}>
-                          {item.status}
-                        </div>
-                        <button onClick={() => { setEditingPantryItem(item); setIsPantryModalOpen(true); }} className="p-2 text-text-muted hover:text-text-primary">
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </Card>
-                  ))}
+                      </Card>
+                    );
+                  })}
                 </div>
+
+                {loadingExpiring ? (
+                   <section className="mt-6 pt-6 border-t border-surface-3">
+                     <div className="flex items-center justify-between mb-4">
+                       <h3 className="text-text-primary font-bold text-sm flex items-center gap-2">
+                         <Clock className="w-4 h-4 text-red-400" /> Use Soon
+                       </h3>
+                     </div>
+                     <div className="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide">
+                       <SkeletonExpiringCard />
+                       <SkeletonExpiringCard />
+                       <SkeletonExpiringCard />
+                     </div>
+                   </section>
+                 ) : expiringSoonItems.length > 0 && (
+                  <section className="mt-6 pt-6 border-t border-surface-3">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-text-primary font-bold text-sm flex items-center gap-2">
+                        <Clock className="w-4 h-4 text-red-400" /> Use Soon
+                      </h3>
+                      <Badge variant="rose" glass>{expiringSoonItems.length} items</Badge>
+                    </div>
+                    <div className="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide">
+                      {expiringSoonItems.map((item) => (
+                        <Card
+                          key={item.id}
+                          className="shrink-0 w-36 !p-3 border-red-500/20 hover:border-red-500/50 hover:shadow-[0_0_15px_rgba(239,68,68,0.15)] transition-all cursor-pointer group"
+                          onClick={() => {
+                            // Suggest recipes using this expiring item
+                            setActiveTab("grocery"); // Switch to grocery to see meal suggestions
+                          }}
+                        >
+                          <div className="flex flex-col items-center gap-2 text-center">
+                            <div className="relative">
+                              <span className="text-2xl">{item.emoji}</span>
+                              <div className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center">
+                                <span className="text-[8px] text-white font-black">!</span>
+                              </div>
+                            </div>
+                            <div>
+                              <p className="text-text-primary text-xs font-bold leading-tight truncate w-full">{item.name}</p>
+                              <p className={`text-[8px] font-black uppercase ${
+                                item.expirationInfo.days <= 1 ? 'text-red-400' : 'text-amber-400'
+                              }`}>
+                                {item.expirationInfo.days === 0 ? 'Today' :
+                                 item.expirationInfo.days === 1 ? 'Tomorrow' :
+                                 `${item.expirationInfo.days}d`}
+                              </p>
+                            </div>
+                          </div>
+                        </Card>
+                      ))}
+                    </div>
+                  </section>
+                )}
 
                 <section className="mt-8 pt-6 border-t border-surface-3">
                   <div className="flex items-center justify-between mb-4">
@@ -489,6 +861,124 @@ export default function MealsUnified({ initialMeals, initialGrocery, initialPant
                                 <p className="text-[8px] text-amber-400 font-black uppercase">Low</p>
                               </div>
                               <Plus className="w-4 h-4 text-nori-400" />
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+{loadingSuggestions ? (
+                       <div className="space-y-3">
+                         <p className="text-[10px] font-black text-green-400 uppercase tracking-[0.2em] mb-2 flex items-center gap-2">
+                           <Sparkles className="w-3 h-3" /> Make Tonight
+                         </p>
+                         <div className="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide">
+                           <SkeletonCard />
+                           <SkeletonCard />
+                           <SkeletonCard />
+                         </div>
+                       </div>
+                     ) : mealSuggestions.length > 0 && activeCategory === "all" && (
+                       <div className="space-y-3">
+                         <p className="text-[10px] font-black text-green-400 uppercase tracking-[0.2em] mb-2 flex items-center gap-2">
+                           <Sparkles className="w-3 h-3" /> Make Tonight
+                         </p>
+                         <div className="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide">
+                           {mealSuggestions.map((recipe) => (
+                            <Card
+                              key={recipe.id}
+                              className="shrink-0 w-48 !p-3 border-green-500/20 hover:border-green-500/50 hover:shadow-[0_0_15px_rgba(34,197,94,0.15)] transition-all cursor-pointer group"
+                              onClick={async () => {
+                                // Create meal plan entry and sync to grocery
+                                try {
+                                  const mealPlanEntry = await pb.collection("meal_plan_entries").create({
+                                    recipeId: recipe.id,
+                                    scheduledFor: new Date().toISOString().split('T')[0],
+                                    servings: 4,
+                                    autoGenerated: false,
+                                    lastSyncedAt: new Date().toISOString(),
+                                  });
+
+await MealPlanningSync.syncMealPlanToGrocery(mealPlanEntry);
+
+                                  // Switch to planner tab to show the planned meal
+                                  setActiveTab("planner");
+                                } catch (error) {
+                                  console.error("Failed to plan suggested meal:", error);
+                                  showToast("Failed to plan meal", "error");
+                                }
+                              }}
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className="w-12 h-12 rounded-xl bg-green-500/10 flex items-center justify-center text-2xl">
+                                  🍽️
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs font-bold text-text-primary truncate">{recipe.name}</p>
+                                  <p className="text-[8px] text-green-400 font-black uppercase">
+                                    {recipe.availableIngredients}/{recipe.totalIngredients} ingredients
+                                  </p>
+                                  {recipe.missingCount > 0 && (
+                                    <p className="text-[8px] text-text-muted">
+                                      Need {recipe.missingCount} more
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            </Card>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {loadingPurchases ? (
+                       <div className="space-y-3">
+                         <div className="flex items-center justify-between mb-2">
+                           <h3 className="text-[10px] font-black text-nori-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                             <Clock className="w-3 h-3" /> Your Regulars
+                           </h3>
+                         </div>
+                         <div className="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide">
+                           <SkeletonButton />
+                           <SkeletonButton />
+                           <SkeletonButton />
+                           <SkeletonButton />
+                           <SkeletonButton />
+                         </div>
+                       </div>
+                     ) : recentPurchases.length > 0 && activeCategory === "all" && (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <h3 className="text-[10px] font-black text-nori-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                            <Clock className="w-3 h-3" /> Your Regulars
+                          </h3>
+                          <Badge variant="violet" glass>{recentPurchases.length} items</Badge>
+                        </div>
+                        <div className="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide">
+                          {recentPurchases.map((purchase) => (
+                            <button
+                              key={purchase.id}
+onClick={async () => {
+                                 try {
+                                   await pb.collection("grocery_items").create({
+                                     ingredientId: purchase.ingredientId,
+                                     quantityNeeded: purchase.quantity,
+                                     unit: purchase.unit,
+                                     priority: "medium",
+                                     source: "manual",
+                                     addedAt: new Date().toISOString(),
+                                     isFavorite: true,
+                                   });
+                                 } catch (error) {
+                                   console.error("Failed to re-add item:", error);
+                                   showToast("Failed to re-add item", "error");
+                                 }
+                               }}
+                              className="shrink-0 flex items-center gap-2 px-3 py-2 rounded-xl glass border border-nori-500/20 text-text-secondary text-xs font-medium hover:border-nori-500/50 hover:text-text-primary transition-all active:scale-95 group"
+                            >
+                              <span className="text-lg">{purchase.ingredient.emoji || "📦"}</span>
+                              <span>{purchase.ingredient.name}</span>
+                              <Plus className="w-3 h-3 text-nori-400 group-hover:scale-110 transition-transform" />
                             </button>
                           ))}
                         </div>
