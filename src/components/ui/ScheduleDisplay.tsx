@@ -19,10 +19,14 @@ interface ScheduleDisplayProps {
   schedule: ScheduleItem[];
   title?: string;
   className?: string;
+  onEdit?: (id: number, time: string, title: string) => void;
 }
 
-export default function ScheduleDisplay({ schedule, title = "Today's Schedule", className = "" }: ScheduleDisplayProps) {
+export default function ScheduleDisplay({ schedule, title = "Today's Schedule", className = "", onEdit }: ScheduleDisplayProps) {
   const [mounted, setMounted] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editTime, setEditTime] = useState("");
+  const [editTitle, setEditTitle] = useState("");
 
   useEffect(() => {
     setMounted(true);
@@ -54,6 +58,16 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
                               item.color === "violet" ? "bg-violet-500/10 border-violet-500/20" :
                               "bg-nori-500/10 border-nori-500/20";
 
+            const startEdit = () => {
+              setEditingId(item.id);
+              setEditTime(item.time);
+              setEditTitle(item.title);
+            };
+            const saveEdit = () => {
+              if (editingId !== null) onEdit?.(editingId, editTime, editTitle);
+              setEditingId(null);
+            };
+            const cancelEdit = () => setEditingId(null);
             return (
               <div
                 key={item.id}
@@ -61,9 +75,18 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
                   isPast ? "opacity-40" : ""
                 }`}
               >
-                <span className="text-xs font-bold text-text-primary w-12">{item.time}</span>
-                <span className="text-xl">{item.emoji || item.icon || "•"}</span>
-                <span className="text-sm font-medium text-text-primary flex-1">{item.title}</span>
+                {editingId === item.id ? (
+                  <>
+                    <input type="time" value={editTime} onChange={e=>setEditTime(e.target.value)} className="w-16 text-xs bg-surface-2 rounded" aria-label="Edit time" />
+                    <input value={editTitle} onChange={e=>setEditTitle(e.target.value)} className="flex-1 text-sm bg-surface-2 rounded px-1" placeholder="Title" aria-label="Edit title" onBlur={saveEdit} onKeyDown={e=>{if(e.key==='Enter')saveEdit(); if(e.key==='Escape')cancelEdit();}} autoFocus />
+                  </>
+                ) : (
+                  <>
+                    <span className="text-xs font-bold text-text-primary w-12 cursor-pointer" onClick={startEdit}>{item.time}</span>
+                    <span className="text-xl">{item.emoji || item.icon || "•"}</span>
+                    <span className="text-sm font-medium text-text-primary flex-1 cursor-pointer" onClick={startEdit}>{item.title}</span>
+                  </>
+                )}
                 {item.member && (
                   <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-white/5 text-text-secondary">
                     {item.member.split(" ")[0]}

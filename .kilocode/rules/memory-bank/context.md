@@ -29,6 +29,7 @@ Consuela is a production-ready AI-powered family organizer web app with 6 core s
 - [x] **Weather Widget** - Added clickable location editing for custom city management
 - [x] **Settings Add Member** - Fixed non-functional Add button by removing premature resetForm call
 - [x] **Sync Status Widget** - Made Total Links count and status text dynamic based on connected services
+- [x] **Inline Edit UI** - Added click-to-edit for time/title fields in ScheduleDisplay widget; audited all Add button handlers for resetForm side-effects
 
 ## File Structure
 
