@@ -26,6 +26,8 @@ Consuela is a production-ready AI-powered family organizer web app with 6 core s
 - [x] **Family Schedule display** - ScheduleDisplay component showing daily routines (lunch, bedtime, etc.) with time-sorted timeline
 - [x] **BottomNav updates** - Added Emergency and Settings tabs to navigation
 - [x] **Real Database Queries** - Replaced all hardcoded dashboard data with real database queries for family members, events, tasks, and schedules
+- [x] **Dashboard UI refresh** - Redesigned hero header with date pill and time-of-day greeting, replaced Badge stat pills with icon+label links, fixed today's meal highlight to dynamically detect the actual day, added left-border accent colors to event cards and task items
+- [x] **ScheduleDisplay component polish** - Added "X upcoming" count in header, improved past-item styling with strikethrough, added friendly empty state with clock SVG
 
 ## File Structure
 
@@ -101,6 +103,7 @@ src/
 | May 2026 | Redesigned grocery page as supermarket-style shopping experience with aisles, cart sidebar, quick add bar |
 | May 2026 | Fixed family icon consistency by standardizing Avatar variant="emoji" in settings page |
 | May 2026 | Enhanced grocery page as hybrid creation/list experience with priorities, quantities, notes, and inline editing |
+| May 2026 | Dashboard UI improvements: date pill, stat chips, dynamic meal highlight, event/task polish, ScheduleDisplay refresh |
 
 ## Next Steps (V2)
 

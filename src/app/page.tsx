@@ -106,10 +106,10 @@ export default function HomePage() {
         </div>
 
         {/* Quick stat links */}
-        <div className="flex gap-2 flex-wrap mt-3 animate-in animate-in-delay-200">
+        <div className="flex gap-2 flex-wrap mt-3 animate-in animate-in-delay-300">
           <Link
             href="/calendar"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl glass-subtle border border-white/5 text-text-secondary text-[11px] font-medium shrink-0 transition-all cursor-pointer hover:text-text-primary active:scale-95"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl glass-subtle border border-white/5 text-text-secondary text-[11px] font-medium shrink-0 transition-all duration-200 cursor-pointer hover:text-text-primary hover:border-nori-500/20 active:scale-95"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3 h-3">
               <rect x="3" y="4" width="18" height="18" rx="2" />
@@ -119,7 +119,7 @@ export default function HomePage() {
           </Link>
           <Link
             href="/tasks"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl glass-subtle border border-white/5 text-text-secondary text-[11px] font-medium shrink-0 transition-all cursor-pointer hover:text-text-primary active:scale-95"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl glass-subtle border border-white/5 text-text-secondary text-[11px] font-medium shrink-0 transition-all duration-200 cursor-pointer hover:text-text-primary hover:border-nori-500/20 active:scale-95"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3 h-3">
               <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" strokeLinecap="round" />
@@ -129,7 +129,7 @@ export default function HomePage() {
           </Link>
           <Link
             href="/chat?q=taco%20night"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl glass-subtle border border-white/5 text-text-secondary text-[11px] font-medium shrink-0 transition-all cursor-pointer hover:text-text-primary active:scale-95"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl glass-subtle border border-white/5 text-text-secondary text-[11px] font-medium shrink-0 transition-all duration-200 cursor-pointer hover:text-text-primary hover:border-nori-500/20 active:scale-95"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3 h-3">
               <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" strokeLinecap="round" strokeLinejoin="round" />
@@ -175,12 +175,13 @@ export default function HomePage() {
         </Link>
 
         {/* Quick prompts */}
-        <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4">
-          {quickPrompts.map((p) => (
+        <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 scroll-smooth-x no-scrollbar">
+          {quickPrompts.map((p, idx) => (
             <Link
               key={p}
               href={`/chat?q=${encodeURIComponent(p)}`}
-              className="shrink-0 px-3 py-1.5 rounded-full glass text-text-secondary text-xs border border-white/10 hover:border-nori-500/30 hover:text-nori-400 transition-all"
+              style={{ animationDelay: `${0.24 + idx * 0.08}s` }}
+              className="scroll-snap-child shrink-0 px-3 py-1.5 rounded-full glass text-text-secondary text-xs border border-white/10 hover:border-nori-500/30 hover:text-nori-400 transition-all duration-200 animate-in"
             >
               {p}
             </Link>
@@ -255,13 +256,13 @@ export default function HomePage() {
               Plan →
             </Link>
           </div>
-          <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4">
+          <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 scroll-smooth-x no-scrollbar">
             {mealPlan.map((m, i) => {
               const isToday = i === todayMealIndex;
               return (
                 <div
                   key={m.day}
-                  className={`shrink-0 flex flex-col items-center gap-1.5 rounded-2xl px-3 py-3 min-w-[72px] transition-all ${
+                  className={`scroll-snap-child shrink-0 flex flex-col items-center gap-1.5 rounded-2xl px-3 py-3 min-w-[72px] transition-all duration-200 ${
                     isToday
                       ? "border-2 border-nori-500/40 accent-glow glass-subtle"
                       : "glass hover:border-white/8 hover:bg-surface-2/60"

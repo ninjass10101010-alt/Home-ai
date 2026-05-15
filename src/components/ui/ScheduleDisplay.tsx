@@ -72,14 +72,15 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
         </span>
       </div>
       <div className="space-y-1.5">
-        {sortedSchedule.map((item) => {
+        {sortedSchedule.map((item, idx) => {
           const hour = parseInt(item.time.split(":")[0]);
           const isPast = hour < new Date().getHours();
 
           return (
             <div
               key={item.id}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl ${colorBgMap[item.color ?? "green"] ?? "bg-nori-500/15"} transition-all hover:bg-white/[0.03]`}
+              style={{ animationDelay: `${idx * 0.05}s` }}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl ${colorBgMap[item.color ?? "green"] ?? "bg-nori-500/15"} transition-all duration-200 hover:bg-white/[0.06] animate-in`}
             >
               <span className="text-xs font-mono text-text-muted w-12 shrink-0 tabular-nums">{item.time}</span>
               <span className="text-lg shrink-0">{item.emoji || item.icon || "•"}</span>
