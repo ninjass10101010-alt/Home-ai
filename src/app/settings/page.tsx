@@ -7,13 +7,8 @@ import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import Avatar from "@/components/ui/Avatar";
 import SyncManager from "@/components/ui/SyncManager";
-
-const familyMembers = [
-  { name: "Sarah (Mom)", role: "Parent", emoji: "👩", color: "green", age: "38", joined: "Feb 2024" },
-  { name: "Mike (Dad)", role: "Parent", emoji: "👨", color: "cyan", age: "40", joined: "Feb 2024" },
-  { name: "Jake", role: "Child", emoji: "🧒", color: "violet", age: "12", joined: "Mar 2024" },
-  { name: "Lily", role: "Child", emoji: "👧", color: "amber", age: "9", joined: "Mar 2024" },
-];
+import MemberModal from "@/components/ui/MemberModal";
+import { db } from "@/db";
 
 interface ToggleProps {
   label: string;
@@ -61,6 +56,51 @@ function SettingsRow({ icon, label, value, danger }: { icon: string; label: stri
 }
 
 export default function SettingsPage() {
+  const [familyMembers, setFamilyMembers] = useState(db.selectMembersDetailed());
+  const [showMemberModal, setShowMemberModal] = useState(false);
+  const [editingMember, setEditingMember] = useState<typeof familyMembers[0] | undefined>();
+
+  const handleAddMember = () => {
+    setEditingMember(undefined);
+    setShowMemberModal(true);
+  };
+
+  const handleEditMember = (member: typeof familyMembers[0]) => {
+    setEditingMember(member);
+    setShowMemberModal(true);
+  };
+
+  const handleSaveMember = (memberData: any) => {
+    if (editingMember) {
+      // Update existing member
+      db.updateMember(editingMember.name, {
+        name: memberData.name,
+        role: memberData.role.toLowerCase(),
+        emoji: memberData.emoji,
+        age: parseInt(memberData.age),
+      });
+    } else {
+      // Add new member
+      db.insertMember({
+        name: memberData.name,
+        role: memberData.role.toLowerCase(),
+        emoji: memberData.emoji,
+        age: parseInt(memberData.age),
+      });
+    }
+    // Refresh the members list
+    setFamilyMembers(db.selectMembersDetailed());
+    setShowMemberModal(false);
+    setEditingMember(undefined);
+  };
+
+  const handleDeleteMember = (memberName: string) => {
+    db.deleteMember(memberName);
+    // Refresh the members list
+    setFamilyMembers(db.selectMembersDetailed());
+    setShowMemberModal(false);
+  };
+
   return (
     <PageShell>
       <TopBar title="Family Profile" subtitle="heynori.com" back />
@@ -93,13 +133,22 @@ export default function SettingsPage() {
         <section>
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-text-primary font-semibold text-sm">Members</h3>
-            <button className="text-nori-400 text-xs hover:text-nori-300">+ Invite</button>
+            <button
+              onClick={handleAddMember}
+              className="text-nori-400 text-xs hover:text-nori-300"
+            >
+              + Invite
+            </button>
           </div>
           <Card>
             <div className="space-y-3">
               {familyMembers.map((member) => (
-            <div key={member.name} className="flex items-center gap-3">
-              <Avatar name={member.name} color={member.color} emoji={member.emoji} size="md" variant="emoji" />
+                <div
+                  key={member.name}
+                  className="flex items-center gap-3 cursor-pointer hover:bg-surface-2 p-2 -m-2 rounded-lg transition-colors"
+                  onClick={() => handleEditMember(member)}
+                >
+                  <Avatar name={member.name} color={member.color} emoji={member.emoji} size="md" variant="emoji" />
                   <div className="flex-1 min-w-0">
                     <p className="text-text-primary text-sm font-medium truncate">{member.name}</p>
                     <p className="text-text-muted text-xs">Age {member.age} · Joined {member.joined}</p>
@@ -169,6 +218,18 @@ export default function SettingsPage() {
           </Card>
         </section>
       </div>
+
+      <MemberModal
+        isOpen={showMemberModal}
+        onClose={() => setShowMemberModal(false)}
+        member={editingMember ? {
+          ...editingMember,
+          role: editingMember.role as "Parent" | "Child",
+          color: editingMember.color as "green" | "cyan" | "violet" | "amber"
+        } : undefined}
+        onSave={handleSaveMember}
+        onDelete={handleDeleteMember}
+      />
     </PageShell>
   );
 }

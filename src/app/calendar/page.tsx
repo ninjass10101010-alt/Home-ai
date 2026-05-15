@@ -7,6 +7,7 @@ import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import Avatar from "@/components/ui/Avatar";
 import Link from "next/link";
+import { db } from "@/db";
 
 const DAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 const MONTHS = [
@@ -14,13 +15,7 @@ const MONTHS = [
   "July", "August", "September", "October", "November", "December",
 ];
 
-const members = [
-  { name: "All", color: "green", emoji: "👨‍👩‍👧‍👦" },
-  { name: "Mom", color: "green", emoji: "👩" },
-  { name: "Dad", color: "cyan", emoji: "👨" },
-  { name: "Jake", color: "violet", emoji: "🧒" },
-  { name: "Lily", color: "amber", emoji: "👧" },
-];
+const members = db.selectMembersForCalendar();
 
 interface CalEvent {
   id: number;

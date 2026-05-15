@@ -7,56 +7,7 @@ import WeatherWidget from "@/components/ui/WeatherWidget";
 import { Icon3D } from "@/components/3d";
 import EmergencyButton from "@/components/ui/EmergencyButton";
 import ScheduleDisplay from "@/components/ui/ScheduleDisplay";
-
-const familyMembers = [
-  { name: "Mom", color: "green", emoji: "👩" },
-  { name: "Dad", color: "cyan", emoji: "👨" },
-  { name: "Jake", color: "violet", emoji: "🧒" },
-  { name: "Lily", color: "amber", emoji: "👧" },
-];
-
-const todayEvents = [
-  {
-    id: 1,
-    title: "Soccer Practice",
-    time: "4:00 PM",
-    member: "Jake",
-    emoji: "🧒",
-    color: "violet",
-    icon: "⚽",
-  },
-  {
-    id: 2,
-    title: "Dentist — Lily",
-    time: "5:30 PM",
-    member: "Lily",
-    emoji: "👧",
-    color: "amber",
-    icon: "🦷",
-  },
-  {
-    id: 3,
-    title: "Team dinner",
-    time: "7:00 PM",
-    member: "Dad",
-    emoji: "👨",
-    color: "cyan",
-    icon: "🍽️",
-  },
-];
-
-const scheduleItems = [
-  { id: 1, title: "Lunch", time: "12:00 PM", emoji: "🍽️", type: "routine" as const, color: "amber" },
-  { id: 2, title: "Emily bedtime", time: "9:00 PM", member: "Emily", memberColor: "amber", emoji: "🧒", type: "routine" as const, color: "violet" },
-  { id: 3, title: "Family movie night", time: "7:30 PM", emoji: "🎬", type: "routine" as const, color: "nori" },
-  { id: 4, title: "Take medication", time: "8:00 AM", member: "Grandma", memberColor: "amber", emoji: "💊", type: "reminder" as const, color: "rose" },
-];
-
-const pendingTasks = [
-  { id: 1, title: "Take out trash", assigned: "Jake", due: "Today", points: 10, done: false },
-  { id: 2, title: "Grocery run", assigned: "Mom", due: "Today", points: 20, done: false },
-  { id: 3, title: "Clean bathroom", assigned: "Lily", due: "Tomorrow", points: 15, done: true },
-];
+import { db } from "@/db";
 
 const mealPlan = [
   { day: "Mon", meal: "Pasta Primavera", emoji: "🍝" },
@@ -74,6 +25,17 @@ const quickPrompts = [
 ];
 
 export default function HomePage() {
+  // Fetch real data from database
+  const familyMembers = db.selectMembers().map(member => ({
+    name: member.name,
+    color: member.id === 1 ? "green" : member.id === 2 ? "cyan" : member.id === 3 ? "violet" : "amber",
+    emoji: member.emoji,
+  }));
+
+  const todayEvents = db.selectTodaysEvents();
+  const pendingTasks = db.selectPendingTasks();
+  const scheduleItems = db.selectTodaysSchedules();
+
   const today = new Date();
   const dayName = today.toLocaleDateString("en-US", { weekday: "long" });
   const dateStr = today.toLocaleDateString("en-US", { month: "long", day: "numeric" });
@@ -213,7 +175,19 @@ export default function HomePage() {
         </section>
 
         {/* Schedule Display */}
-        <ScheduleDisplay schedule={scheduleItems} title="Daily Schedule" />
+        <ScheduleDisplay
+          schedule={scheduleItems.map(item => ({
+            id: item.id,
+            title: item.title,
+            time: item.time,
+            emoji: item.emoji,
+            type: item.type as "routine" | "reminder",
+            color: item.color,
+            member: item.member,
+            memberColor: item.memberColor,
+          }))}
+          title="Daily Schedule"
+        />
 
         {/* Meal This Week - Enhanced with gradient backgrounds */}
         <section>

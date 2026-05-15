@@ -7,6 +7,7 @@ import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import Avatar from "@/components/ui/Avatar";
 import Link from "next/link";
+import { db } from "@/db";
 
 interface Task {
   id: number;
@@ -41,6 +42,8 @@ const initialTasks: Task[] = [
   { id: 9, title: "Car oil change", assignee: "Dad", assigneeEmoji: "👨", due: "Sat", points: 0, recurring: null, category: "Errands", completed: false, priority: "low" },
 ];
 
+// Get members data from database
+const membersData = db.selectMembers();
 const leaderboard: LeaderboardEntry[] = [
   { name: "Jake", emoji: "🧒", points: 145, streak: 5, rank: 1 },
   { name: "Lily", emoji: "👧", points: 120, streak: 3, rank: 2 },
@@ -48,9 +51,14 @@ const leaderboard: LeaderboardEntry[] = [
   { name: "Dad", emoji: "👨", points: 60, streak: 2, rank: 4 },
 ];
 
-const allMembers = ["All", "Mom", "Dad", "Jake", "Lily"];
-const memberEmojis: Record<string, string> = { All: "👨‍👩‍👧‍👦", Mom: "👩", Dad: "👨", Jake: "🧒", Lily: "👧" };
-const memberColors: Record<string, string> = { Mom: "green", Dad: "cyan", Jake: "violet", Lily: "amber" };
+const allMembers = ["All", ...membersData.map(m => m.name)];
+const memberEmojis: Record<string, string> = {
+  All: "👨‍👩‍👧‍👦",
+  ...Object.fromEntries(membersData.map(m => [m.name, m.emoji]))
+};
+const memberColors: Record<string, string> = {
+  ...Object.fromEntries(membersData.map(m => [m.name, m.color]))
+};
 const priorityColors: Record<string, string> = { high: "bg-rose-500", medium: "bg-amber-500", low: "bg-surface-4" };
 
 export default function TasksPage() {
@@ -200,10 +208,10 @@ export default function TasksPage() {
               <h3 className="text-text-primary font-semibold text-sm mb-3">Recurring Chores</h3>
               <div className="space-y-2">
                 {[
-                  { title: "Take out trash", assignee: "Jake", schedule: "Every Thursday", emoji: "🗑️", color: "violet" },
-                  { title: "Load dishwasher", assignee: "Lily", schedule: "Daily after dinner", emoji: "🍽️", color: "amber" },
-                  { title: "Walk the dog", assignee: "Jake", schedule: "Daily morning", emoji: "🐕", color: "violet" },
-                  { title: "Pay bills", assignee: "Dad", schedule: "1st of month", emoji: "💳", color: "cyan" },
+                  { title: "Take out trash", assignee: "Jake", schedule: "Every Thursday", emoji: "🗑️", color: memberColors["Jake"] || "violet" },
+                  { title: "Load dishwasher", assignee: "Lily", schedule: "Daily after dinner", emoji: "🍽️", color: memberColors["Lily"] || "amber" },
+                  { title: "Walk the dog", assignee: "Jake", schedule: "Daily morning", emoji: "🐕", color: memberColors["Jake"] || "violet" },
+                  { title: "Pay bills", assignee: "Dad", schedule: "1st of month", emoji: "💳", color: memberColors["Dad"] || "cyan" },
                 ].map((chore) => (
                   <Card key={chore.title} className="!p-3">
                     <div className="flex items-center gap-3">
