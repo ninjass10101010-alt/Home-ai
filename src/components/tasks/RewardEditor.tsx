@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Modal from "@/components/ui/Modal";
 import Button from "@/components/ui/Button";
-import { addReward, updateReward } from "@/actions/rewards";
+import pb from "@/lib/pocketbase";
 
 interface RewardEditorProps {
   isOpen: boolean;
@@ -27,9 +27,9 @@ export default function RewardEditor({ isOpen, onClose, reward }: RewardEditorPr
     setLoading(true);
     try {
       if (reward) {
-        await updateReward(reward.id, formData);
+        await pb.collection("rewards").update(reward.id, formData);
       } else {
-        await addReward(formData);
+        await pb.collection("rewards").create(formData);
       }
       onClose();
     } catch (error) {

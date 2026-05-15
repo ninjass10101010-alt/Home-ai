@@ -3,13 +3,13 @@
 import { useState } from "react";
 import Modal from "@/components/ui/Modal";
 import Button from "@/components/ui/Button";
-import { addTask, updateTask } from "@/actions/tasks";
-import { MemberRole } from "@/actions/members";
+import pb from "@/lib/pocketbase";
+import { Trash2 } from "lucide-react";
 
 interface TaskEditorProps {
   isOpen: boolean;
   onClose: () => void;
-  members: { id: number; name: string; emoji: string | null }[];
+  members: { id: string; name: string; emoji: string | null }[];
   task?: any; // If provided, we are editing
 }
 
@@ -29,20 +29,33 @@ export default function TaskEditor({ isOpen, onClose, members, task }: TaskEdito
     dueDate: task?.dueDate || new Date().toISOString().split("T")[0],
   });
 
+  const handleDelete = async () => {
+    if (!task) return;
+    setLoading(true);
+    try {
+      await pb.collection("tasks").delete(task.id);
+      onClose();
+    } catch (error) {
+      console.error("Failed to delete task:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
       const data = {
         ...formData,
-        assignedTo: formData.assignedTo ? Number(formData.assignedTo) : undefined,
+        assignedTo: formData.assignedTo || null,
         status: task?.status || "pending",
       } as any;
 
       if (task) {
-        await updateTask(task.id, data);
+        await pb.collection("tasks").update(task.id, data);
       } else {
-        await addTask(data);
+        await pb.collection("tasks").create(data);
       }
       onClose();
     } catch (error) {
@@ -135,9 +148,9 @@ export default function TaskEditor({ isOpen, onClose, members, task }: TaskEdito
               <button
                 key={member.id}
                 type="button"
-                onClick={() => setFormData({ ...formData, assignedTo: member.id.toString() })}
+                onClick={() => setFormData({ ...formData, assignedTo: member.id })}
                 className={`flex items-center gap-3 p-3 rounded-2xl border transition-all ${
-                  formData.assignedTo == member.id.toString()
+                  formData.assignedTo === member.id
                     ? "bg-nori-500/10 border-nori-500 text-nori-400"
                     : "bg-surface-2 border-surface-3 text-text-secondary hover:border-surface-4"
                 }`}
@@ -174,6 +187,15 @@ export default function TaskEditor({ isOpen, onClose, members, task }: TaskEdito
         </div>
 
         <div className="pt-4 flex gap-3">
+          {task && (
+            <button
+              type="button"
+              onClick={handleDelete}
+              className="flex-none px-4 rounded-2xl bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 transition-all flex items-center justify-center border border-rose-500/20"
+            >
+              <Trash2 className="w-5 h-5" />
+            </button>
+          )}
           <Button type="button" variant="ghost" onClick={onClose} className="flex-1">
             Cancel
           </Button>

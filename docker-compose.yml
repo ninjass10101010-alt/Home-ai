@@ -1,0 +1,58 @@
+version: "3.8"
+
+services:
+  pocketbase:
+    image: ghcr.io/muchobien/pocketbase:latest
+    container_name: pocketbase
+    restart: unless-stopped
+    environment:
+      - PB_ENCRYPTION_KEY=my_secure_encryption_key_consuela
+    ports:
+      - "8091:8090"
+    volumes:
+      - ./pb_data:/pb_data
+    networks:
+      - family-net
+
+  dashboard:
+    build:
+      context: .
+      args:
+        - NEXT_PUBLIC_PB_URL=http://192.168.0.27:8091
+        - NEXT_PUBLIC_OPENCLAW_BRIDGE_URL=ws://192.168.0.27:3005
+    container_name: consuela-dashboard
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_PB_URL=http://192.168.0.27:8091
+      - NEXT_PUBLIC_OPENCLAW_BRIDGE_URL=ws://192.168.0.27:3005
+    depends_on:
+      - pocketbase
+    networks:
+      - family-net
+      - media-stack_default
+
+  bridge:
+    image: node:20-alpine
+    container_name: consuela-bridge
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - .:/app
+    command: sh -c "npm install && node scripts/bridge.mjs"
+    environment:
+      - OPENCLAW_WS_URL=ws://openclaw:18789
+      - OPENCLAW_TOKEN=openclaw-key-998877
+      - PORT=3005
+    ports:
+      - "3000:3005"
+    networks:
+      - family-net
+      - media-stack_default
+
+networks:
+  family-net:
+    driver: bridge
+  media-stack_default:
+    external: true

@@ -101,7 +101,7 @@ export default function CalendarPage() {
     <PageShell>
       <TopBar
         title="Calendar"
-        subtitle="Johnson Family"
+        subtitle="Garcia Family"
         right={
           <Link
             href="/chat?q=Add+new+event"

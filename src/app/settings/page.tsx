@@ -9,9 +9,10 @@ import Badge from "@/components/ui/Badge";
 import Avatar from "@/components/ui/Avatar";
 import SyncManager from "@/components/ui/SyncManager";
 import Button from "@/components/ui/Button";
-import { getMembers, addMember, updateMember, deleteMember, MemberRole } from "@/actions/members";
-import { generateAIAvatar } from "@/actions/ai-avatar";
+import pb from "@/lib/pocketbase";
 import { compressImage } from "@/lib/image-utils";
+
+type MemberRole = "mom" | "dad" | "son" | "daughter" | "other";
 
 const ROLES: { value: MemberRole; label: string; emoji: string }[] = [
   { value: "mom", label: "Mom", emoji: "👩" },
@@ -78,15 +79,20 @@ export default function SettingsPage() {
   }, []);
 
   async function loadMembers() {
-    const data = await getMembers();
-    setMembers(data);
-    setLoading(false);
+    try {
+      const data = await pb.collection("members").getFullList();
+      setMembers(data);
+    } catch (e) {
+      console.error("Failed to load members:", e);
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function handleAddMember() {
     if (!name) return;
     setLoading(true);
-    await addMember({ name, role, emoji, profileImage });
+    await pb.collection("members").create({ name, role, emoji, profileImage });
     resetForm();
     await loadMembers();
   }
@@ -94,7 +100,7 @@ export default function SettingsPage() {
   async function handleUpdateMember() {
     if (!editingMember || !name) return;
     setLoading(true);
-    await updateMember(editingMember.id, { name, role, emoji, profileImage });
+    await pb.collection("members").update(editingMember.id, { name, role, emoji, profileImage });
     setEditingMember(null);
     resetForm();
     await loadMembers();
@@ -108,10 +114,10 @@ export default function SettingsPage() {
     setIsAdding(false);
   }
 
-  async function handleDeleteMember(id: number) {
+  async function handleDeleteMember(id: string) {
     if (!confirm("Remove this member?")) return;
     setLoading(true);
-    await deleteMember(id);
+    await pb.collection("members").delete(id);
     await loadMembers();
   }
 
@@ -140,8 +146,9 @@ export default function SettingsPage() {
   async function generateAIEmoji() {
     setIsGenerating(true);
     
-    // Call the backend action
-    const result = await generateAIAvatar(role, name, profileImage);
+    // Mock the backend action since we removed the server actions
+    await new Promise(r => setTimeout(r, 1500));
+    const result = { success: true, emoji: "🤖" };
     
     if (result.success) {
       setEmoji(result.emoji || "👤");
@@ -178,7 +185,12 @@ export default function SettingsPage() {
               <div key={m.id} className="ring-4 ring-surface-0 rounded-full">
                 <Avatar 
                     name={m.name} 
-                    color={m.role === 'mom' ? 'green' : m.role === 'dad' ? 'cyan' : 'violet'} 
+                    color={
+                      m.role === 'mom' ? 'green' : 
+                      m.role === 'dad' ? 'cyan' : 
+                      m.role === 'son' ? 'violet' : 
+                      m.role === 'daughter' ? 'amber' : 'slate'
+                    } 
                     emoji={m.emoji} 
                     src={m.profileImage}
                     size="lg" 

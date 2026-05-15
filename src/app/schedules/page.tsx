@@ -5,8 +5,7 @@ import PageShell from "@/components/ui/PageShell";
 import TopBar from "@/components/ui/TopBar";
 import Card from "@/components/ui/Card";
 import Avatar from "@/components/ui/Avatar";
-import { getSchedules, addSchedule, updateSchedule, deleteSchedule } from "@/actions/schedules";
-import { getMembers } from "@/actions/members";
+import pb from "@/lib/pocketbase";
 import { motion, AnimatePresence } from "framer-motion";
 
 export default function SchedulesPage() {
@@ -17,7 +16,10 @@ export default function SchedulesPage() {
   const [isFormOpen, setIsFormOpen] = useState(false);
 
   useEffect(() => {
-    Promise.all([getSchedules(), getMembers()]).then(([sData, mData]) => {
+    Promise.all([
+      pb.collection("schedules").getFullList(), 
+      pb.collection("members").getFullList()
+    ]).then(([sData, mData]) => {
       setSchedules(sData);
       setMembers(mData);
       setLoading(false);
@@ -53,25 +55,25 @@ export default function SchedulesPage() {
       type: (formData.get("type") as "routine" | "reminder") || "routine",
       icon: formData.get("icon") as string,
       color: formData.get("color") as string || "nori",
-      memberId: formData.get("memberId") ? parseInt(formData.get("memberId") as string) : null,
+      memberId: formData.get("memberId") || null,
     };
 
     if (editingSchedule.id) {
-      await updateSchedule(editingSchedule.id, data);
+      await pb.collection("schedules").update(editingSchedule.id, data);
     } else {
-      await addSchedule(data as any);
+      await pb.collection("schedules").create(data);
     }
 
-    const updatedSchedules = await getSchedules();
+    const updatedSchedules = await pb.collection("schedules").getFullList();
     setSchedules(updatedSchedules);
     setIsFormOpen(false);
     setEditingSchedule(null);
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: string) => {
     if (confirm("Are you sure you want to delete this schedule?")) {
-      await deleteSchedule(id);
-      const updatedSchedules = await getSchedules();
+      await pb.collection("schedules").delete(id);
+      const updatedSchedules = await pb.collection("schedules").getFullList();
       setSchedules(updatedSchedules);
     }
   };

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Modal from "@/components/ui/Modal";
 import Button from "@/components/ui/Button";
-import { addMeal, updateMeal, syncMealToGrocery, deleteMeal } from "@/actions/meals";
+import pb from "@/lib/pocketbase";
 import { Trash2 } from "lucide-react";
 
 interface MealEditorProps {
@@ -41,14 +41,34 @@ export default function MealEditor({ isOpen, onClose, meal, pantryItems = [] }: 
     try {
       let savedMeal;
       if (meal) {
-        savedMeal = await updateMeal(meal.id, formData);
+        savedMeal = await pb.collection("meals").update(meal.id, formData);
       } else {
-        savedMeal = await addMeal(formData);
+        savedMeal = await pb.collection("meals").create(formData);
       }
 
       if (syncToGrocery && formData.ingredients && savedMeal) {
-        const ingredients = formData.ingredients.split("\n");
-        await syncMealToGrocery(savedMeal.id, ingredients);
+        const ingredients = formData.ingredients.split("\n").filter((i: string) => i.trim() !== "");
+        for (const item of ingredients) {
+          // Extract emoji if present at start
+          let emoji = "📦";
+          let name = item.trim();
+          
+          const match = name.match(/^(\p{Emoji_Presentation}|\p{Emoji}\uFE0F)\s*(.*)/u);
+          if (match) {
+             emoji = match[1];
+             name = match[2];
+          }
+
+          try {
+            await pb.collection("grocery_items").create({
+              name,
+              emoji,
+              status: "needed"
+            });
+          } catch (e) {
+            console.error("Failed to add grocery item:", e);
+          }
+        }
       }
       
       onClose();
@@ -63,7 +83,7 @@ export default function MealEditor({ isOpen, onClose, meal, pantryItems = [] }: 
     if (!meal) return;
     setLoading(true);
     try {
-      await deleteMeal(meal.id);
+      await pb.collection("meals").delete(meal.id);
       onClose();
     } catch (error) {
       console.error("Failed to delete meal:", error);

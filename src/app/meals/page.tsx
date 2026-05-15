@@ -1,13 +1,19 @@
-import { getMeals } from "@/actions/meals";
-import { getGroceryItems, getPantryItems } from "@/actions/grocery";
+import pb from "@/lib/pocketbase";
 import MealsUnified from "./MealsUnified";
 
+export const dynamic = "force-dynamic";
+
 export default async function MealsPage() {
-  const [meals, groceryItems, pantryItems] = await Promise.all([
-    getMeals(),
-    getGroceryItems(),
-    getPantryItems()
-  ]);
+  let meals: any[] = [], groceryItems: any[] = [], pantryItems: any[] = [];
+  try {
+    [meals, groceryItems, pantryItems] = await Promise.all([
+      pb.collection("meals").getFullList(),
+      pb.collection("grocery_items").getFullList(),
+      pb.collection("pantry_items").getFullList()
+    ]);
+  } catch(e) {
+    console.error(e);
+  }
 
   return (
     <MealsUnified 

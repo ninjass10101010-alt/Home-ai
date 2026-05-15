@@ -27,7 +27,7 @@ import Badge from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import MealEditor from "@/components/meals/MealEditor";
 import PantryEditor from "@/components/meals/PantryEditor";
-import { addGroceryItem, updateGroceryItem, deleteGroceryItem, updatePantryItem } from "@/actions/grocery";
+import pb from "@/lib/pocketbase";
 
 interface MealsUnifiedProps {
   initialMeals: any[];
@@ -72,7 +72,7 @@ export default function MealsUnified({ initialMeals, initialGrocery, initialPant
 
   // Grocery State
   const [isShoppingMode, setIsShoppingMode] = useState(false);
-  const [checkedItems, setCheckedItems] = useState<Set<number>>(new Set());
+  const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set());
   const [activeCategory, setActiveCategory] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [showAddModal, setShowAddModal] = useState(false);
@@ -134,13 +134,13 @@ export default function MealsUnified({ initialMeals, initialGrocery, initialPant
     else if (item.status === "needed") newStatus = "purchased";
     
     if (newStatus !== item.status) {
-      await updateGroceryItem(item.id, { status: newStatus });
+      await pb.collection("grocery_items").update(item.id, { status: newStatus });
     }
   };
 
   const handleAddGroceryItem = async () => {
     if (!newItemName.trim()) return;
-    await addGroceryItem({
+    await pb.collection("grocery_items").create({
       name: newItemName.trim(),
       emoji: newItemEmoji,
       category: newItemCategory,
@@ -152,7 +152,7 @@ export default function MealsUnified({ initialMeals, initialGrocery, initialPant
   };
 
   const addPantryToGrocery = async (pantryItem: any) => {
-    await addGroceryItem({
+    await pb.collection("grocery_items").create({
       name: pantryItem.name,
       emoji: pantryItem.emoji,
       category: pantryItem.category || "pantry",
@@ -422,7 +422,7 @@ export default function MealsUnified({ initialMeals, initialGrocery, initialPant
                       if (isShoppingMode && checkedItems.size > 0) {
                         // Exit and clear checked items
                         for (const id of Array.from(checkedItems)) {
-                          await updateGroceryItem(id, { status: "purchased" });
+                          await pb.collection("grocery_items").update(id, { status: "purchased" });
                         }
                         setCheckedItems(new Set());
                       }
@@ -549,7 +549,7 @@ export default function MealsUnified({ initialMeals, initialGrocery, initialPant
                           </p>
                         </div>
                         {!isShoppingMode && (
-                          <button onClick={(e) => { e.stopPropagation(); deleteGroceryItem(item.id); }} className="p-2 text-text-muted hover:text-rose-400"><Trash2 className="w-4 h-4" /></button>
+                          <button onClick={async (e) => { e.stopPropagation(); await pb.collection("grocery_items").delete(item.id); }} className="p-2 text-text-muted hover:text-rose-400"><Trash2 className="w-4 h-4" /></button>
                         )}
                       </Card>
                     );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import PageShell from "@/components/ui/PageShell";
 import TopBar from "@/components/ui/TopBar";
 import Card from "@/components/ui/Card";
@@ -10,7 +10,7 @@ import Button from "@/components/ui/Button";
 import TaskEditor from "@/components/tasks/TaskEditor";
 import RewardEditor from "@/components/tasks/RewardEditor";
 import Modal from "@/components/ui/Modal";
-import { toggleTaskStatus, completeTask } from "@/actions/tasks";
+import pb from "@/lib/pocketbase";
 
 interface TasksContentProps {
   initialTasks: any[];
@@ -33,8 +33,12 @@ const priorityColors: Record<string, string> = {
 };
 
 export default function TasksContent({ initialTasks, members, rewards }: TasksContentProps) {
+  const [activeTasks, setActiveTasks] = useState(initialTasks);
+  const [activeMembers, setActiveMembers] = useState(members);
+  const [activeRewards, setActiveRewards] = useState(rewards);
+  
   const [activeTab, setActiveTab] = useState<"tasks" | "leaderboard">("tasks");
-  const [filterMemberId, setFilterMemberId] = useState<number | "all">("all");
+  const [filterMemberId, setFilterMemberId] = useState<string | "all">("all");
   const [showCompleted, setShowCompleted] = useState(false);
   const [isTaskEditorOpen, setIsTaskEditorOpen] = useState(false);
   const [isRewardEditorOpen, setIsRewardEditorOpen] = useState(false);
@@ -43,23 +47,45 @@ export default function TasksContent({ initialTasks, members, rewards }: TasksCo
   const [completingTask, setCompletingTask] = useState<any>(null);
   const [editingReward, setEditingReward] = useState<any>(null);
 
+  useEffect(() => {
+    const refreshData = async () => {
+      const [t, m, r] = await Promise.all([
+        pb.collection("tasks").getFullList(),
+        pb.collection("members").getFullList(),
+        pb.collection("rewards").getFullList()
+      ]);
+      setActiveTasks(t);
+      setActiveMembers(m);
+      setActiveRewards(r);
+    };
+
+    const collections = ['tasks', 'members', 'rewards'];
+    collections.forEach(col => {
+      pb.collection(col).subscribe('*', refreshData);
+    });
+
+    return () => {
+      collections.forEach(col => pb.collection(col).unsubscribe('*'));
+    };
+  }, []);
+
   const memberMap = useMemo(() => {
-    const map: Record<number, any> = {};
-    members.forEach(m => map[m.id] = m);
+    const map: Record<string, any> = {};
+    activeMembers.forEach(m => map[m.id] = m);
     return map;
-  }, [members]);
+  }, [activeMembers]);
 
   const leaderboard = useMemo(() => {
-    const scores: Record<number, number> = {};
-    members.forEach(m => scores[m.id] = 0);
+    const scores: Record<string, number> = {};
+    activeMembers.forEach(m => scores[m.id] = 0);
     
-    initialTasks.forEach(task => {
+    activeTasks.forEach(task => {
       if (task.status === "completed" && task.assignedTo) {
         scores[task.assignedTo] = (scores[task.assignedTo] || 0) + (task.points || 0);
       }
     });
 
-    return members
+    return activeMembers
       .map(m => ({
         ...m,
         points: scores[m.id] || 0,
@@ -67,9 +93,9 @@ export default function TasksContent({ initialTasks, members, rewards }: TasksCo
       }))
       .sort((a, b) => b.points - a.points)
       .map((m, i) => ({ ...m, rank: i + 1 }));
-  }, [initialTasks, members]);
+  }, [activeTasks, activeMembers]);
 
-  const filteredTasks = initialTasks.filter((t) => {
+  const filteredTasks = activeTasks.filter((t) => {
     const memberMatch = filterMemberId === "all" || t.assignedTo === filterMemberId;
     const completedMatch = showCompleted ? true : t.status === "pending";
     return memberMatch && completedMatch;
@@ -77,7 +103,7 @@ export default function TasksContent({ initialTasks, members, rewards }: TasksCo
 
   const pendingTasks = filteredTasks.filter((t) => t.status === "pending");
   const completedTasks = filteredTasks.filter((t) => t.status === "completed");
-  const completedTotal = initialTasks.filter((t) => t.status === "completed").length;
+  const completedTotal = activeTasks.filter((t) => t.status === "completed").length;
 
   const handleToggleTask = async (task: any) => {
     if (task.status === "pending" && !task.assignedTo) {
@@ -85,12 +111,16 @@ export default function TasksContent({ initialTasks, members, rewards }: TasksCo
       setIsMemberSelectOpen(true);
       return;
     }
-    await toggleTaskStatus(task.id, task.status);
+    const newStatus = task.status === "pending" ? "completed" : "pending";
+    await pb.collection("tasks").update(task.id, { status: newStatus });
   };
 
-  const handleMemberComplete = async (memberId: number) => {
+  const handleMemberComplete = async (memberId: string) => {
     if (completingTask) {
-      await completeTask(completingTask.id, memberId);
+      await pb.collection("tasks").update(completingTask.id, { 
+        status: "completed", 
+        assignedTo: memberId 
+      });
       setIsMemberSelectOpen(false);
       setCompletingTask(null);
     }

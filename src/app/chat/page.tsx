@@ -5,7 +5,7 @@ import BottomNav from "@/components/ui/BottomNav";
 import Avatar from "@/components/ui/Avatar";
 import Badge from "@/components/ui/Badge";
 import { Icon3D } from "@/components/3d";
-import { getAIResponse } from "@/actions/chat";
+// Deleted server action import removed
 
 interface Message {
   id: number;
@@ -247,27 +247,36 @@ export default function ChatPage() {
     setShowSuggestions(false);
 
     try {
-      const aiResponse = await getAIResponse(text);
+      const bridgeBase = process.env.NEXT_PUBLIC_OPENCLAW_BRIDGE_URL?.replace("ws://", "http://") || "http://192.168.0.27:3005";
+      const res = await fetch(`${bridgeBase}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text }),
+      });
+      
+      const data = await res.json();
       setIsTyping(false);
-      msgCounter.current += 1;
-      const response: Message = {
-        id: msgCounter.current,
-        role: "assistant",
-        content: aiResponse.content,
-        timestamp: "Just now",
-        actions: aiResponse.actions?.map(action => ({
-          ...action,
-          confirmed: true, // Assume confirmed for now
-        })),
-      };
-      setMessages((prev) => [...prev, response]);
+      
+      if (data.reply) {
+        msgCounter.current += 1;
+        const response: Message = {
+          id: msgCounter.current,
+          role: "assistant",
+          content: data.reply,
+          timestamp: "Just now",
+        };
+        setMessages((prev) => [...prev, response]);
+      } else {
+        throw new Error(data.error || "Failed to get reply");
+      }
     } catch (error) {
+      console.error("Chat error:", error);
       setIsTyping(false);
       msgCounter.current += 1;
       const errorResponse: Message = {
         id: msgCounter.current,
         role: "assistant",
-        content: "Sorry, I'm having trouble right now. Please try again.",
+        content: "Sorry, I'm having trouble connecting to Consuela right now. Please make sure the OpenClaw bridge is running.",
         timestamp: "Just now",
       };
       setMessages((prev) => [...prev, errorResponse]);

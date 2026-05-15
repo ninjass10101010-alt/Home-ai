@@ -12,7 +12,7 @@ import { Icon3D } from "@/components/3d";
 import EmergencyButton from "@/components/ui/EmergencyButton";
 import ScheduleDisplay from "@/components/ui/ScheduleDisplay";
 
-import { getHomeData } from "@/actions/home";
+import pb from "@/lib/pocketbase";
 
 export default function HomePage() {
   const [greeting, setGreeting] = useState("Good afternoon");
@@ -32,20 +32,120 @@ export default function HomePage() {
       dateStr: today.toLocaleDateString("en-US", { month: "long", day: "numeric" }),
     });
 
-    getHomeData().then(setData);
+    const fetchData = async () => {
+      try {
+        const [members, events, tasks, schedules, meals] = await Promise.all([
+          pb.collection("members").getFullList(),
+          pb.collection("events").getFullList({ sort: 'date,time' }),
+          pb.collection("tasks").getFullList({ filter: "status = 'pending'", sort: '-points' }),
+          pb.collection("schedules").getFullList({ sort: 'time' }),
+          pb.collection("meals").getFullList({ sort: 'date' })
+        ]);
+        
+        const getMemberColor = (role: string) => {
+          if (role === "mom") return "green";
+          if (role === "dad") return "cyan";
+          if (role === "son") return "violet";
+          if (role === "daughter") return "amber";
+          return "slate";
+        };
+
+        setData({
+          members: members.map((m: any) => ({
+            id: m.id,
+            name: m.name,
+            emoji: m.emoji || "👤",
+            color: getMemberColor(m.role),
+            role: m.role
+          })),
+          events: events.slice(0, 3).map((e: any) => {
+            const member = members.find((m: any) => m.id === e.memberId);
+            return {
+              id: e.id,
+              title: e.title,
+              time: e.time || "All Day",
+              member: member?.name || "Family",
+              emoji: member?.emoji || "👤",
+              color: member ? getMemberColor(member.role) : "blue",
+              icon: "📅"
+            };
+          }),
+          tasks: tasks.slice(0, 3).map((t: any) => {
+            const member = members.find((m: any) => m.id === t.assignedTo);
+            return {
+              id: t.id,
+              title: t.title,
+              emoji: t.emoji || "📝",
+              done: t.status === "completed",
+              assigned: member?.name || "Anyone",
+              assigneeEmoji: member?.emoji || "👤",
+              assigneeColor: member ? getMemberColor(member.role) : "slate",
+              due: t.dueDate || "No date",
+              points: t.points || 10
+            };
+          }),
+          schedules: schedules.slice(0, 5),
+          meals: meals.slice(0, 5),
+          stats: {
+            eventsCount: events.filter(e => e.date === new Date().toISOString().split('T')[0]).length,
+            tasksCount: tasks.length
+          }
+        });
+      } catch(e) {
+        console.error("Failed to fetch home data:", e);
+        setData({
+          members: [],
+          events: [],
+          tasks: [],
+          schedules: [],
+          meals: [],
+          stats: { eventsCount: 0, tasksCount: 0 }
+        });
+      }
+    };
+
+    fetchData();
+
+    // Realtime subscriptions
+    const collections = ['members', 'events', 'tasks', 'schedules', 'meals'];
+    collections.forEach(col => {
+      pb.collection(col).subscribe('*', () => {
+        fetchData();
+      });
+    });
+
+    return () => {
+      collections.forEach(col => pb.collection(col).unsubscribe('*'));
+    };
   }, []);
 
-  if (!data) return null; // Or a loading skeleton
+  if (!data) {
+    return (
+      <PageShell>
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <div className="text-center">
+            <div className="w-12 h-12 border-4 border-purple-500/30 border-t-purple-500 rounded-full animate-spin mx-auto mb-4"></div>
+            <p className="text-slate-400 animate-pulse">Loading dashboard...</p>
+          </div>
+        </div>
+      </PageShell>
+    );
+  }
 
-  const { members: familyMembers, events: todayEvents, tasks: pendingTasks, schedules: scheduleItems } = data;
+  const { 
+    members: familyMembers, 
+    events: todayEvents, 
+    tasks: pendingTasks, 
+    schedules: scheduleItems, 
+    meals: mealPlanItems,
+    stats 
+  } = data;
 
-  const mealPlan = [
-    { day: "Mon", meal: "Pasta Primavera", emoji: "🍝" },
-    { day: "Tue", meal: "Taco Night", emoji: "🌮" },
-    { day: "Wed", meal: "Grilled Chicken", emoji: "🍗" },
-    { day: "Thu", meal: "Stir Fry", emoji: "🥢" },
-    { day: "Fri", meal: "Pizza Night", emoji: "🍕" },
-  ];
+  const mealPlan = mealPlanItems.map((m: any) => ({
+    day: new Date(m.date).toLocaleDateString('en-US', { weekday: 'short' }),
+    meal: m.name,
+    emoji: m.emoji || "🍽️"
+  }));
 
   const quickPrompts = [
     "What's for dinner?",
@@ -111,9 +211,11 @@ export default function HomePage() {
 
           {/* Quick summary pills with glass effect */}
           <motion.div variants={item} className="flex gap-2 flex-wrap mt-3">
-            <Badge variant="green" glass>3 events today</Badge>
-            <Badge variant="amber" glass>2 tasks pending</Badge>
-            <Badge variant="violet" glass>Taco night 🌮</Badge>
+            <Badge variant="green" glass>{stats.eventsCount} events today</Badge>
+            <Badge variant="amber" glass>{stats.tasksCount} tasks pending</Badge>
+            {mealPlan[0] && (
+              <Badge variant="violet" glass>{mealPlan[0].meal} {mealPlan[0].emoji}</Badge>
+            )}
           </motion.div>
         </div>
 
@@ -233,7 +335,7 @@ export default function HomePage() {
             </div>
             <Card className="!p-4 overflow-hidden">
               <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
-                {mealPlan.map((m, i) => {
+                {mealPlan.map((m: any, i: number) => {
                   const isToday = i === 1;
                   const bgStyle = isToday
                     ? "linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(167, 139, 250, 0.1))"

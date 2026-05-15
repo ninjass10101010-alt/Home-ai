@@ -39,6 +39,8 @@ export const viewport: Viewport = {
   themeColor: "#0f1117",
 };
 
+import OpenClawDrive from "@/components/ui/OpenClawDrive";
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -49,6 +51,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
+        <OpenClawDrive />
         {children}
       </body>
     </html>

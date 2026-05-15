@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Modal from "@/components/ui/Modal";
 import Button from "@/components/ui/Button";
-import { updatePantryItem, addPantryItem } from "@/actions/grocery";
+import pb from "@/lib/pocketbase";
 
 interface PantryEditorProps {
   isOpen: boolean;
@@ -44,9 +44,9 @@ export default function PantryEditor({ isOpen, onClose, pantryItem }: PantryEdit
     setLoading(true);
     try {
       if (pantryItem) {
-        await updatePantryItem(pantryItem.id, formData);
+        await pb.collection("pantry_items").update(pantryItem.id, formData);
       } else {
-        await addPantryItem(formData);
+        await pb.collection("pantry_items").create(formData);
       }
       onClose();
     } catch (error) {
