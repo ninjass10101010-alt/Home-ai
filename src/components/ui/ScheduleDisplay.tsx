@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState, useEffect } from "react";
+import Card from "./Card";
 
 interface ScheduleItem {
   id: number;
@@ -21,6 +22,12 @@ interface ScheduleDisplayProps {
 }
 
 export default function ScheduleDisplay({ schedule, title = "Today's Schedule", className = "" }: ScheduleDisplayProps) {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const sortedSchedule = useMemo(() => {
     return [...schedule].sort((a, b) => {
       const timeA = a.time.replace(":", "");
@@ -63,6 +70,8 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
     rose:   "bg-accent-rose/50",
   };
 
+  const currentHour = mounted ? new Date().getHours() : 0;
+
   return (
     <section className={className}>
       <div className="flex items-center justify-between mb-3">
@@ -74,19 +83,19 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
       <div className="space-y-1.5">
         {sortedSchedule.map((item, idx) => {
           const hour = parseInt(item.time.split(":")[0]);
-          const isPast = hour < new Date().getHours();
+          const isPast = mounted && hour < currentHour;
 
           return (
             <div
               key={item.id}
               style={{ animationDelay: `${idx * 0.05}s` }}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl ${colorBgMap[item.color ?? "green"] ?? "bg-nori-500/15"} transition-all duration-200 hover:bg-white/[0.06] animate-in`}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl ${colorBgMap[item.color ?? "green"] ?? "bg-nori-500/15"} transition-all duration-200 hover:bg-white/[0.06] animate-in ${isPast ? 'opacity-40' : ''}`}
             >
               <span className="text-xs font-mono text-text-muted w-12 shrink-0 tabular-nums">{item.time}</span>
               <span className="text-lg shrink-0">{item.emoji || item.icon || "•"}</span>
               <span className={`text-sm flex-1 min-w-0 ${isPast ? 'line-through text-text-muted' : 'text-text-primary'}`}>{item.title}</span>
               {item.member && (
-                <span className={`text-xs px-2 py-0.5 rounded-full bg-${item.memberColor || "surface"}-500/20 text-text-secondary`}>
+                <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-white/5 text-text-secondary`}>
                   {item.member.split(" ")[0]}
                 </span>
               )}
@@ -94,6 +103,7 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
           );
         })}
       </div>
+
     </section>
   );
 }

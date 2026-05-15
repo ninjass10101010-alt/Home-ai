@@ -4,7 +4,8 @@ import { useState, useRef, useEffect } from "react";
 import BottomNav from "@/components/ui/BottomNav";
 import Avatar from "@/components/ui/Avatar";
 import Badge from "@/components/ui/Badge";
-import { getAIResponse } from "@/actions/chat";
+import { Icon3D } from "@/components/3d";
+// Deleted server action import removed
 
 interface Message {
   id: number;
@@ -246,27 +247,36 @@ export default function ChatPage() {
     setShowSuggestions(false);
 
     try {
-      const aiResponse = await getAIResponse(text);
+      const bridgeBase = process.env.NEXT_PUBLIC_OPENCLAW_BRIDGE_URL?.replace("ws://", "http://") || "http://192.168.0.27:3005";
+      const res = await fetch(`${bridgeBase}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text }),
+      });
+      
+      const data = await res.json();
       setIsTyping(false);
-      msgCounter.current += 1;
-      const response: Message = {
-        id: msgCounter.current,
-        role: "assistant",
-        content: aiResponse.content,
-        timestamp: "Just now",
-        actions: aiResponse.actions?.map(action => ({
-          ...action,
-          confirmed: true, // Assume confirmed for now
-        })),
-      };
-      setMessages((prev) => [...prev, response]);
+      
+      if (data.reply) {
+        msgCounter.current += 1;
+        const response: Message = {
+          id: msgCounter.current,
+          role: "assistant",
+          content: data.reply,
+          timestamp: "Just now",
+        };
+        setMessages((prev) => [...prev, response]);
+      } else {
+        throw new Error(data.error || "Failed to get reply");
+      }
     } catch (error) {
+      console.error("Chat error:", error);
       setIsTyping(false);
       msgCounter.current += 1;
       const errorResponse: Message = {
         id: msgCounter.current,
         role: "assistant",
-        content: "Sorry, I'm having trouble right now. Please try again.",
+        content: "Sorry, I'm having trouble connecting to Consuela right now. Please make sure the OpenClaw bridge is running.",
         timestamp: "Just now",
       };
       setMessages((prev) => [...prev, errorResponse]);
@@ -305,8 +315,8 @@ export default function ChatPage() {
           borderBottom: "1px solid rgba(255,255,255,0.04)",
         }}
       >
-        <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl shrink-0 bg-nori-500/15 consuela-glow">
-          ✨
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 bg-nori-500/10 consuela-glow border border-nori-500/20">
+          <Icon3D variant="chat" size="sm" />
         </div>
         <div className="flex-1 min-w-0">
           <h1 className="text-base font-semibold text-text-primary">Consuela</h1>

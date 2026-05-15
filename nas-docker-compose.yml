@@ -1,0 +1,24 @@
+version: '3.8'
+services:
+  home-dashboard:
+    build: .
+    container_name: home-dashboard
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_PB_URL=http://192.168.0.27:8090
+    networks:
+      - media-stack_default
+
+  openclaw-proxy:
+    image: alpine/socat
+    container_name: openclaw-proxy
+    restart: unless-stopped
+    network_mode: "container:openclaw"
+    command: tcp-listen:18800,fork,reuseaddr tcp-connect:127.0.0.1:18789
+
+networks:
+  media-stack_default:
+    external: true

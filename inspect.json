@@ -1,0 +1,243 @@
+[
+    {
+        "Id": "6a0e4efb91e2bc2d77f2209c3bec60aaed29486e897dfe22a3e69f5488155b51",
+        "Created": "2026-05-14T20:54:16.686378212Z",
+        "Path": "docker-entrypoint.sh",
+        "Args": [
+            "node",
+            "server.js"
+        ],
+        "State": {
+            "Status": "running",
+            "Running": true,
+            "Paused": false,
+            "Restarting": false,
+            "OOMKilled": false,
+            "Dead": false,
+            "Pid": 27492,
+            "ExitCode": 0,
+            "Error": "",
+            "StartedAt": "2026-05-14T20:54:25.73468131Z",
+            "FinishedAt": "0001-01-01T00:00:00Z"
+        },
+        "Image": "sha256:cc8ca35edaa48159ebd79b2660024060470fcd6ae2f42bb1f2c1e895944828cc",
+        "ResolvConfPath": "/share/CACHEDEV1_DATA/Container/container-station-data/lib/docker/containers/6a0e4efb91e2bc2d77f2209c3bec60aaed29486e897dfe22a3e69f5488155b51/resolv.conf",
+        "HostnamePath": "/share/CACHEDEV1_DATA/Container/container-station-data/lib/docker/containers/6a0e4efb91e2bc2d77f2209c3bec60aaed29486e897dfe22a3e69f5488155b51/hostname",
+        "HostsPath": "/share/CACHEDEV1_DATA/Container/container-station-data/lib/docker/containers/6a0e4efb91e2bc2d77f2209c3bec60aaed29486e897dfe22a3e69f5488155b51/hosts",
+        "LogPath": "/share/CACHEDEV1_DATA/Container/container-station-data/lib/docker/containers/6a0e4efb91e2bc2d77f2209c3bec60aaed29486e897dfe22a3e69f5488155b51/6a0e4efb91e2bc2d77f2209c3bec60aaed29486e897dfe22a3e69f5488155b51-json.log",
+        "Name": "/consuela-bridge",
+        "RestartCount": 0,
+        "Driver": "overlay2",
+        "Platform": "linux",
+        "MountLabel": "",
+        "ProcessLabel": "",
+        "AppArmorProfile": "docker-default",
+        "ExecIDs": null,
+        "HostConfig": {
+            "Binds": [
+                "/share/CACHEDEV1_DATA/Multimedia/Personal/consuela-data:/app/consuela-data"
+            ],
+            "ContainerIDFile": "",
+            "LogConfig": {
+                "Type": "json-file",
+                "Config": {
+                    "max-file": "10",
+                    "max-size": "10m"
+                }
+            },
+            "NetworkMode": "bridge",
+            "PortBindings": {
+                "3005/tcp": [
+                    {
+                        "HostIp": "",
+                        "HostPort": "3005"
+                    }
+                ]
+            },
+            "RestartPolicy": {
+                "Name": "unless-stopped",
+                "MaximumRetryCount": 0
+            },
+            "AutoRemove": false,
+            "VolumeDriver": "",
+            "VolumesFrom": null,
+            "ConsoleSize": [
+                0,
+                0
+            ],
+            "CapAdd": null,
+            "CapDrop": null,
+            "CgroupnsMode": "host",
+            "Dns": [],
+            "DnsOptions": [],
+            "DnsSearch": [],
+            "ExtraHosts": null,
+            "GroupAdd": null,
+            "IpcMode": "private",
+            "Cgroup": "",
+            "Links": null,
+            "OomScoreAdj": 0,
+            "PidMode": "",
+            "Privileged": false,
+            "PublishAllPorts": false,
+            "ReadonlyRootfs": false,
+            "SecurityOpt": null,
+            "UTSMode": "",
+            "UsernsMode": "",
+            "ShmSize": 67108864,
+            "Runtime": "runc",
+            "Isolation": "",
+            "CpuShares": 0,
+            "Memory": 0,
+            "NanoCpus": 0,
+            "CgroupParent": "",
+            "BlkioWeight": 0,
+            "BlkioWeightDevice": [],
+            "BlkioDeviceReadBps": [],
+            "BlkioDeviceWriteBps": [],
+            "BlkioDeviceReadIOps": [],
+            "BlkioDeviceWriteIOps": [],
+            "CpuPeriod": 0,
+            "CpuQuota": 0,
+            "CpuRealtimePeriod": 0,
+            "CpuRealtimeRuntime": 0,
+            "CpusetCpus": "",
+            "CpusetMems": "",
+            "Devices": [],
+            "DeviceCgroupRules": null,
+            "DeviceRequests": null,
+            "MemoryReservation": 0,
+            "MemorySwap": 0,
+            "MemorySwappiness": null,
+            "OomKillDisable": false,
+            "PidsLimit": null,
+            "Ulimits": [
+                {
+                    "Name": "nofile",
+                    "Hard": 65535,
+                    "Soft": 65535
+                }
+            ],
+            "CpuCount": 0,
+            "CpuPercent": 0,
+            "IOMaximumIOps": 0,
+            "IOMaximumBandwidth": 0,
+            "MaskedPaths": [
+                "/proc/asound",
+                "/proc/acpi",
+                "/proc/kcore",
+                "/proc/keys",
+                "/proc/latency_stats",
+                "/proc/timer_list",
+                "/proc/timer_stats",
+                "/proc/sched_debug",
+                "/proc/scsi",
+                "/sys/firmware",
+                "/sys/devices/virtual/powercap"
+            ],
+            "ReadonlyPaths": [
+                "/proc/bus",
+                "/proc/fs",
+                "/proc/irq",
+                "/proc/sys",
+                "/proc/sysrq-trigger"
+            ]
+        },
+        "GraphDriver": {
+            "Data": {
+                "LowerDir": "/share/CACHEDEV1_DATA/Container/container-station-data/lib/docker/overlay2/3bc74b986cfc03549308648740429f3c8d8b3741fd5fe41910b19316ea59fcc5-init/diff:/share/CACHEDEV1_DATA/Container/container-station-data/lib/docker/overlay2/tgxawra5dt1z7c013dtajaikh/diff:/share/CACHEDEV1_DATA/Container/container-station-data/lib/docker/overlay2/t456h61bfmhc64g42ax9ls2px/diff:/share/CACHEDEV1_DATA/Container/container-station-data/lib/docker/overlay2/wbrzv77k7zcguz7h6s3pmjdc9/diff:/share/CACHEDEV1_DATA/Container/container-station-data/lib/docker/overlay2/xsjc2srggzddm0zzpi7qk5a1w/diff:/share/CACHEDEV1_DATA/Container/container-station-data/lib/docker/overlay2/1ea4e183ca75e88c90e9ccd8904905346ee9a0c1f4a98a8be1c8c4696fa92d09/diff:/share/CACHEDEV1_DATA/Container/container-station-data/lib/docker/overlay2/59a89c1e50b71642f0c009b28ce32b05e119d9eb2104adb2cfa1a01284c4588c/diff:/share/CACHEDEV1_DATA/Container/container-station-data/lib/docker/overlay2/4538b8c48883f961eba8aaa6798d49f1ee1ddfcf1887d48e22b16814ed60ed1b/diff:/share/CACHEDEV1_DATA/Container/container-station-data/lib/docker/overlay2/fe72fa38a5cfb6fc5cf2756c3b7694bfa8ede817247a132c46277fe65725b454/diff",
+                "MergedDir": "/share/CACHEDEV1_DATA/Container/container-station-data/lib/docker/overlay2/3bc74b986cfc03549308648740429f3c8d8b3741fd5fe41910b19316ea59fcc5/merged",
+                "UpperDir": "/share/CACHEDEV1_DATA/Container/container-station-data/lib/docker/overlay2/3bc74b986cfc03549308648740429f3c8d8b3741fd5fe41910b19316ea59fcc5/diff",
+                "WorkDir": "/share/CACHEDEV1_DATA/Container/container-station-data/lib/docker/overlay2/3bc74b986cfc03549308648740429f3c8d8b3741fd5fe41910b19316ea59fcc5/work"
+            },
+            "Name": "overlay2"
+        },
+        "Mounts": [
+            {
+                "Type": "bind",
+                "Source": "/share/CACHEDEV1_DATA/Multimedia/Personal/consuela-data",
+                "Destination": "/app/consuela-data",
+                "Mode": "",
+                "RW": true,
+                "Propagation": "rprivate"
+            }
+        ],
+        "Config": {
+            "Hostname": "6a0e4efb91e2",
+            "Domainname": "",
+            "User": "",
+            "AttachStdin": false,
+            "AttachStdout": false,
+            "AttachStderr": false,
+            "ExposedPorts": {
+                "3005/tcp": {}
+            },
+            "Tty": false,
+            "OpenStdin": false,
+            "StdinOnce": false,
+            "Env": [
+                "DATA_DIR=/app/consuela-data",
+                "PORT=3005",
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "NODE_VERSION=24.15.0",
+                "YARN_VERSION=1.22.22"
+            ],
+            "Cmd": [
+                "node",
+                "server.js"
+            ],
+            "Image": "consuela-bridge",
+            "Volumes": null,
+            "WorkingDir": "/app",
+            "Entrypoint": [
+                "docker-entrypoint.sh"
+            ],
+            "OnBuild": null,
+            "Labels": {}
+        },
+        "NetworkSettings": {
+            "Bridge": "lxcbr0",
+            "SandboxID": "22dd29ed9c2bc9fecfb9e0677265e92d1d48954146a458306f84aa8dfb5a52b7",
+            "SandboxKey": "/var/run/docker/netns/22dd29ed9c2b",
+            "Ports": {
+                "3005/tcp": [
+                    {
+                        "HostIp": "0.0.0.0",
+                        "HostPort": "3005"
+                    }
+                ]
+            },
+            "HairpinMode": false,
+            "LinkLocalIPv6Address": "",
+            "LinkLocalIPv6PrefixLen": 0,
+            "SecondaryIPAddresses": null,
+            "SecondaryIPv6Addresses": null,
+            "EndpointID": "b0ed1411a07e1df0066cdeb0086b93b05ead58433db381fe8c8d213b6f88a27f",
+            "Gateway": "10.0.3.1",
+            "GlobalIPv6Address": "",
+            "GlobalIPv6PrefixLen": 0,
+            "IPAddress": "10.0.3.2",
+            "IPPrefixLen": 24,
+            "IPv6Gateway": "",
+            "MacAddress": "02:42:0a:00:03:02",
+            "Networks": {
+                "bridge": {
+                    "IPAMConfig": null,
+                    "Links": null,
+                    "Aliases": null,
+                    "MacAddress": "02:42:0a:00:03:02",
+                    "DriverOpts": null,
+                    "NetworkID": "978344701ff80946a6c41df202405a89d470d3b62c1edae5a6741295f58217ee",
+                    "EndpointID": "b0ed1411a07e1df0066cdeb0086b93b05ead58433db381fe8c8d213b6f88a27f",
+                    "Gateway": "10.0.3.1",
+                    "IPAddress": "10.0.3.2",
+                    "IPPrefixLen": 24,
+                    "IPv6Gateway": "",
+                    "GlobalIPv6Address": "",
+                    "GlobalIPv6PrefixLen": 0,
+                    "DNSNames": null
+                }
+            }
+        }
+    }
+]
