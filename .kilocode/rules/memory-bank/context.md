@@ -26,6 +26,9 @@ Consuela is a production-ready AI-powered family organizer web app with 6 core s
 - [x] **Family Schedule display** - ScheduleDisplay component showing daily routines (lunch, bedtime, etc.) with time-sorted timeline
 - [x] **BottomNav updates** - Added Emergency and Settings tabs to navigation
 - [x] **Real Database Queries** - Replaced all hardcoded dashboard data with real database queries for family members, events, tasks, and schedules
+- [x] **Weather Widget** - Added clickable location editing for custom city management
+- [x] **Settings Add Member** - Fixed non-functional Add button by removing premature resetForm call
+- [x] **Sync Status Widget** - Made Total Links count and status text dynamic based on connected services
 
 ## File Structure
 
@@ -102,6 +105,7 @@ src/
 | May 2026 | Fixed family icon consistency by standardizing Avatar variant="emoji" in settings page |
 | May 2026 | Enhanced grocery page as hybrid creation/list experience with priorities, quantities, notes, and inline editing |
 | May 2026 | Fixed layout.tsx Next.js architecture issue by removing "use client" from root layout and creating providers.tsx wrapper for ToastProvider and OpenClawDrive client components, allowing proper metadata and viewport exports |
+| May 2026 | Fixed Settings Add button, added editable location to Weather widget, dynamic sync status/links count in SyncManager; pushed updates to GitHub |
 
 ## Next Steps (V2)
 
