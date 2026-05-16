@@ -1,0 +1,147 @@
+version: "3.8"
+
+# =============================================================================
+# Hermes Agent - Standalone Docker Compose Configuration
+# =============================================================================
+# Deploy as: docker compose -f docker-compose.hermes.yml up -d
+# Build first: docker compose -f docker-compose.hermes.yml build
+# Requires: hermes/ directory with source code at same level
+# =============================================================================
+
+volumes:
+  # Named persistent volume for Hermes agent state, memory bank, and task data
+  # Survives container restarts and re-creations
+  hermes_data:
+    name: hermes_data
+
+services:
+  hermes:
+    build:
+      context: ./hermes
+      dockerfile: Dockerfile
+    container_name: hermes
+    restart: unless-stopped
+    ports:
+      # Map host 8080 to container 8080 (Hermes API server)
+      - "8080:8080"
+    environment:
+      # -----------------------------------------------------------------------
+      # OpenRouter Configuration (primary AI provider)
+      # -----------------------------------------------------------------------
+      # API key for OpenRouter (set in .env or replace directly)
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY?err}
+
+      # OpenRouter base URL for API calls
+      - OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+
+      # Primary model for chat and agent tasks
+      - OPENROUTER_MODEL=anthropic/claude-3.5-sonnet
+
+      # Fallback model if primary is rate-limited or unavailable
+      - OPENROUTER_FALLBACK_MODEL=google/gemini-2.0-flash-001
+
+      # Additional OpenRouter models available for routing (10+ models)
+      # Reasoning / coding models
+      - MODEL_ANTHROPIC_CLAUDE_OPUS=anthropic/claude-3-opus:beta
+      - MODEL_ANTHROPIC_CLAUDE_SONNET=anthropic/claude-3.5-sonnet
+      - MODEL_ANTHROPIC_CLAUDE_HAIKU=anthropic/claude-3.5-haiku
+      - MODEL_OPENAI_GPT4O=openai/gpt-4o
+      - MODEL_OPENAI_GPT4O_MINI=openai/gpt-4o-mini
+      - MODEL_OPENAI_O1=openai/o1-preview
+      - MODEL_OPENAI_O3_MINI=openai/o3-mini
+
+      # Fast / cost-effective models
+      - MODEL_GOOGLE_GEMINI_FLASH=google/gemini-2.0-flash-001
+      - MODEL_GOOGLE_GEMINI_PRO=google/gemini-2.0-pro-exp-02-05
+      - MODEL_MISTRAL_MIXTRAL=mistralai/mixtral-8x22b-instruct
+      - MODEL_MISTRAL_CODESTRAL=mistralai/codestral-2501
+      - MODEL_META_LLAMA=meta-llama/llama-3.3-70b-instruct
+      - MODEL_DEEPSEEK_CHAT=deepseek/deepseek-chat
+      - MODEL_QWEN_QWQ=qwen/qwq-32b-preview
+
+      # -----------------------------------------------------------------------
+      # Telegram Bot Configuration
+      # -----------------------------------------------------------------------
+      # Bot token for Telegram notifications and command interface
+      - TELEGRAM_BOT_TOKEN=8752546510:AAE523dDchdKnhgSaQqlWSR1GBiyLkHQJ4I
+
+      # Default chat ID for notifications (override per-deployment)
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:--1001234567890}
+
+      # -----------------------------------------------------------------------
+      # Ollama Configuration (local model provider fallback)
+      # -----------------------------------------------------------------------
+      # Ollama server URL on the local network
+      - OLLAMA_URL=http://192.168.0.12:11434
+
+      # Default Ollama model for local inference
+      - OLLAMA_MODEL=llama3.2:latest
+
+      # -----------------------------------------------------------------------
+      # Gateway Configuration (Hermes-to-openclaw bridge compatibility)
+      # -----------------------------------------------------------------------
+      # Gateway authentication token for inter-agent communication
+      - GATEWAY_TOKEN=openclaw-key-998877-aBcDeFgHiJkLmNoPqRsTuVwXyZ
+
+      # Gateway listen port (internal)
+      - GATEWAY_PORT=8080
+
+      # -----------------------------------------------------------------------
+      # Hermes Application Settings
+      # -----------------------------------------------------------------------
+      # HTTP server port
+      - HERMES_PORT=8080
+
+      # Node environment
+      - NODE_ENV=production
+
+      # Path to memory bank directory inside container
+      - MEMORY_BANK_PATH=/app/data/.kilocode/rules/memory-bank
+
+      # Path to Kilo config inside container
+      - KILO_CONFIG_PATH=/app/data/.kilo
+
+    volumes:
+      # Mount the named volume for persistent data at /app/data
+      - hermes_data:/app/data
+
+      # Mount the NAS backup archive read-only for first-run data restoration
+      - /share/CACHEDEV1_DATA/homes/admin/hermes-migration-20260515/openclaw-full.tar.gz:/backups/openclaw-backup.tar.gz:ro
+
+    depends_on:
+      - pocketbase
+
+    healthcheck:
+      # Health check against the Hermes /health endpoint
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+    networks:
+      - family-net
+      - media-stack_default
+
+  pocketbase:
+    image: ghcr.io/muchobien/pocketbase:latest
+    container_name: pocketbase
+    restart: unless-stopped
+    command:
+      - --encryptionEnv
+      - PB_ENCRYPTION_KEY
+    environment:
+      - PB_ENCRYPTION_KEY=my_secure_encryption_key_consuela
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./pb_data:/pb_data
+      - ./pb_public:/pb_public
+    networks:
+      - family-net
+
+networks:
+  family-net:
+    driver: bridge
+  media-stack_default:
+    external: true

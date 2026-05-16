@@ -6,9 +6,7 @@
 
 Consuela is a production-ready AI-powered family organizer web app with 6 core screens, a full design system, and interactive UI. Built on Next.js 16 + React 19 + Tailwind CSS 4. Dashboard now fetches real data from database instead of hardcoded mock data.
 
-Migration planning complete — OpenClaw bridge to be replaced by Hermes container. Telegram ready for Hermes post-migration alerts.
-
-Hermes deployment artifacts created (docker-compose.hermes.yml, Dockerfile.hermes, docs/hermes-deployment-guide.md). Full OpenClaw backup archived to NAS (1.4GB). Pending source code migration to enable full Hermes container replacement.
+Migration planning complete — OpenClaw bridge to be replaced by Hermes container.
 
 ## Recently Completed
 
@@ -35,13 +33,7 @@ Hermes deployment artifacts created (docker-compose.hermes.yml, Dockerfile.herme
 - [x] **Sync Status Widget** - Made Total Links count and status text dynamic based on connected services
 - [x] **Inline Edit UI** - Added click-to-edit for time/title fields in ScheduleDisplay with onEdit callback, Escape/Enter support; audited Add buttons (all clean)
 - [x] **Hermes Migration Guide** — Created comprehensive OpenClaw → Hermes migration guide (docs/hermes-migration-guide.md) ensuring zero data loss
-- [x] Telegram integration — Added Telegram bot support following free-communication patterns for Hermes agent completion messages, no breakage to existing emergency/SMS flows
-- [x] Created docker-compose.hermes.yml with named persistent volume (hermes_data), 14 OpenRouter models, Telegram/Ollama/Gateway configs from discovered OpenClaw settings
-- [x] Created Dockerfile.hermes template (node:20-alpine, bun, healthcheck)
-- [x] Created docs/hermes-deployment-guide.md with SSH, build, deploy, and full data restoration instructions
-- [x] Backed up all OpenClaw container data to NAS (1.4GB archive at /share/CACHEDEV1_DATA/homes/admin/hermes-migration-20260515/openclaw-full.tar.gz)
-- [x] Discovered OpenClaw identity: agent "Drogon", user "Jeff", Telegram bot token active, 10+ OpenRouter models, 3 sub-agents
-
+ 
 ## File Structure
 
 ```
@@ -119,8 +111,6 @@ src/
 | May 2026 | Fixed layout.tsx Next.js architecture issue by removing "use client" from root layout and creating providers.tsx wrapper for ToastProvider and OpenClawDrive client components, allowing proper metadata and viewport exports |
 | May 2026 | Fixed Settings Add button, added editable location to Weather widget, dynamic sync status/links count in SyncManager; pushed updates to GitHub |
 | 2026-05-15 | Developed comprehensive OpenClaw → Hermes migration guide ensuring zero data loss |
-| 2026-05-15 | Added Telegram bot support via sendTelegramMessage and /api/telegram for agent notifications while preserving all prior connections |
-| 2026-05-16 | Created Hermes deployment infrastructure (compose file, Dockerfile, deployment guide) with data restoration from OpenClaw backup and NAS backup archive |
 
 ## Next Steps (V2)
 

@@ -128,3 +128,34 @@ export async function sendEmailAlert(to: string, subject: string, message: strin
     };
   }
 }
+
+export async function sendTelegramMessage(chatId: string, text: string) {
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  if (!botToken) {
+    return { success: false, error: 'TELEGRAM_BOT_TOKEN not configured' };
+  }
+
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      return {
+        success: false,
+        error: errorData.description || `Telegram API error: ${response.status}`,
+      };
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error('Telegram message failed:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
+}
