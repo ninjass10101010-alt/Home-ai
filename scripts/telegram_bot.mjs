@@ -117,9 +117,9 @@ bot.on('text', async (ctx) => {
 
 // --- Daily 8:00 AM Morning Briefing ---
 
-const getNewYorkDateStrings = () => {
+const getDetroitDateStrings = () => {
   const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York',
+    timeZone: 'America/Detroit',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -144,7 +144,7 @@ const getNewYorkDateStrings = () => {
 
 async function sendDailyBriefing(chatId) {
   try {
-    const { dateStr } = getNewYorkDateStrings();
+    const { dateStr } = getDetroitDateStrings();
     console.log(`⏰ Checking daily briefing for ${dateStr} at chatId: ${chatId}`);
 
     // Fetch meals scheduled for today
@@ -253,7 +253,7 @@ async function sendDailyBriefing(chatId) {
 let lastBriefingDate = "";
 
 setInterval(() => {
-  const { dateStr, hour, minute } = getNewYorkDateStrings();
+  const { dateStr, hour, minute } = getDetroitDateStrings();
   
   if (hour === 8 && minute === 0 && lastBriefingDate !== dateStr) {
     lastBriefingDate = dateStr;

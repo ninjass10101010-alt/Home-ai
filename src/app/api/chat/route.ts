@@ -103,7 +103,7 @@ export async function POST(req: Request) {
       .map((m) => `- "${m.name}" scheduled for ${m.date} (${m.emoji || "🍽️"})`)
       .join("\n");
 
-    const currentDate = new Date().toLocaleString("en-US", { timeZone: "America/New_York" });
+    const currentDate = new Date().toLocaleString("en-US", { timeZone: "America/Detroit" });
 
     // 4. Build system prompt
     const systemPrompt = `${dynamicSoul || "You are Consuela, the unyielding, direct, casual, and highly competent AI family assistant."}
