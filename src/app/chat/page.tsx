@@ -181,7 +181,7 @@ function renderContent(text: string) {
 }
 
 export default function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>(initialMessages);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(true);
@@ -190,7 +190,33 @@ export default function ChatPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<any>(null);
 
+  // Load from localStorage on client mount
+  useEffect(() => {
+    const saved = localStorage.getItem("consuela_chat_history");
+    if (saved) {
+      try {
+        setMessages(JSON.parse(saved));
+        setShowSuggestions(false);
+      } catch (e) {
+        setMessages(initialMessages);
+      }
+    } else {
+      setMessages(initialMessages);
+    }
+  }, []);
 
+  // Save to localStorage whenever messages change
+  useEffect(() => {
+    if (messages.length > 0) {
+      localStorage.setItem("consuela_chat_history", JSON.stringify(messages));
+    }
+  }, [messages]);
+
+  const clearChat = () => {
+    localStorage.removeItem("consuela_chat_history");
+    setMessages(initialMessages);
+    setShowSuggestions(true);
+  };
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -241,7 +267,8 @@ export default function ChatPage() {
       timestamp: "Just now",
     };
 
-    setMessages((prev) => [...prev, userMsg]);
+    const updatedHistory = [...messages, userMsg];
+    setMessages(updatedHistory);
     setInput("");
     setIsTyping(true);
     setShowSuggestions(false);
@@ -250,7 +277,10 @@ export default function ChatPage() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text.trim() }),
+        body: JSON.stringify({
+          message: text.trim(),
+          history: updatedHistory.map(m => ({ role: m.role, content: m.content }))
+        }),
       });
 
       if (!res.ok) {
@@ -328,10 +358,18 @@ export default function ChatPage() {
             <span className="text-xs text-text-secondary">AI Family Assistant</span>
           </div>
         </div>
-        <button className="w-9 h-9 flex items-center justify-center rounded-xl bg-surface-2 text-text-secondary hover:text-text-primary transition-colors">
+        
+        {/* Clear chat button */}
+        <button
+          onClick={clearChat}
+          title="Clear Chat History"
+          className="w-9 h-9 flex items-center justify-center rounded-xl bg-surface-2 text-text-secondary hover:text-red-400 transition-colors"
+        >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
-            <circle cx="11" cy="11" r="8" />
-            <path d="m21 21-4.35-4.35" strokeLinecap="round" />
+            <path d="M3 6h18" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" strokeLinecap="round" strokeLinejoin="round" />
+            <line x1="10" y1="11" x2="10" y2="17" strokeLinecap="round" strokeLinejoin="round" />
+            <line x1="14" y1="11" x2="14" y2="17" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
       </div>

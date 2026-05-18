@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   try {
-    const { message } = await req.json();
+    const { message, history } = await req.json();
     if (!message || !message.trim()) {
       return NextResponse.json({ error: "Message is required." }, { status: 400 });
     }
@@ -186,6 +186,13 @@ YOUR RESPONSE MUST STRICTLY BE A VALID JSON OBJECT matching this exact structure
 
     // 5. Call OpenRouter
     const callOpenRouter = async (modelName: string) => {
+      const formattedHistory = Array.isArray(history)
+        ? history.slice(-10).map((h: any) => ({
+            role: h.role === "assistant" ? "assistant" : "user",
+            content: h.content
+          }))
+        : [];
+
       const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -196,6 +203,7 @@ YOUR RESPONSE MUST STRICTLY BE A VALID JSON OBJECT matching this exact structure
           model: modelName,
           messages: [
             { role: "system", content: systemPrompt },
+            ...formattedHistory,
             { role: "user", content: message },
           ],
           response_format: { type: "json_object" },
