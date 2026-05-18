@@ -38,7 +38,10 @@ export default function HomePage() {
           pb.collection("events").getFullList({ sort: 'date,time' }),
           pb.collection("tasks").getFullList({ filter: "status = 'pending'", sort: '-points' }),
           pb.collection("schedules").getFullList({ sort: 'time' }),
-          pb.collection("meals").getFullList({ sort: 'date' })
+          pb.collection("meals").getFullList({ 
+            filter: `date >= "${new Date().toISOString().split('T')[0]}"`,
+            sort: 'date' 
+          })
         ]);
         
         const getMemberColor = (role: string) => {

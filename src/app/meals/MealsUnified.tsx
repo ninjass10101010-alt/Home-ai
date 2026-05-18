@@ -95,6 +95,37 @@ export default function MealsUnified({ initialMeals, initialGrocery, initialPant
    const { showToast } = useToast();
   const [activeTab, setActiveTab] = useState<"planner" | "pantry" | "grocery">("planner");
   
+  const [meals, setMeals] = useState(initialMeals);
+  const [groceryItems, setGroceryItems] = useState(initialGrocery);
+  const [pantryItems, setPantryItems] = useState(initialPantry);
+
+  useEffect(() => {
+    const fetchAll = async () => {
+      try {
+        const [m, g, p] = await Promise.all([
+          pb.collection("meals").getFullList(),
+          pb.collection("grocery_items").getFullList(),
+          pb.collection("pantry_items").getFullList()
+        ]);
+        setMeals(m);
+        setGroceryItems(g);
+        setPantryItems(p);
+      } catch (e) {
+        console.error("Sync error:", e);
+      }
+    };
+
+    pb.collection("meals").subscribe('*', fetchAll);
+    pb.collection("grocery_items").subscribe('*', fetchAll);
+    pb.collection("pantry_items").subscribe('*', fetchAll);
+
+    return () => {
+      pb.collection("meals").unsubscribe('*');
+      pb.collection("grocery_items").unsubscribe('*');
+      pb.collection("pantry_items").unsubscribe('*');
+    };
+  }, []);
+
   // Planner State
   const [activeDay, setActiveDay] = useState(() => {
     const today = new Date().toLocaleDateString('en-US', { weekday: 'short' });
@@ -137,31 +168,31 @@ export default function MealsUnified({ initialMeals, initialGrocery, initialPant
   // Derived Data
   const mealMap = useMemo(() => {
     const map: Record<string, any> = {};
-    initialMeals.forEach(meal => {
+    meals.forEach(meal => {
       const date = new Date(meal.date + 'T12:00:00');
       const day = date.toLocaleDateString('en-US', { weekday: 'short' });
       map[day] = meal;
     });
     return map;
-  }, [initialMeals]);
+  }, [meals]);
 
   const activeMeal = mealMap[activeDay];
 
-  const neededGroceryItems = useMemo(() => initialGrocery.filter(item => item.status === "needed"), [initialGrocery]);
-  const suggestedGroceryItems = useMemo(() => initialGrocery.filter(item => item.status === "suggested"), [initialGrocery]);
+  const neededGroceryItems = useMemo(() => groceryItems.filter(item => item.status === "needed"), [groceryItems]);
+  const suggestedGroceryItems = useMemo(() => groceryItems.filter(item => item.status === "suggested"), [groceryItems]);
   
   const filteredGroceryItems = useMemo(() => {
-    return initialGrocery.filter(item => {
+    return groceryItems.filter(item => {
       const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesCategory = activeCategory === "all" || item.category === activeCategory;
       if (isShoppingMode) return matchesSearch && matchesCategory && item.status === "needed";
       return matchesSearch && matchesCategory && item.status === "needed";
     });
-  }, [initialGrocery, searchQuery, activeCategory, isShoppingMode]);
+  }, [groceryItems, searchQuery, activeCategory, isShoppingMode]);
 
   const lowPantryItems = useMemo(() => {
-    return initialPantry.filter(p => p.status === "low" || p.status === "out");
-  }, [initialPantry]);
+    return pantryItems.filter(p => p.status === "low" || p.status === "out");
+  }, [pantryItems]);
 
   // Meal suggestions based on pantry items
   const [mealSuggestions, setMealSuggestions] = useState<any[]>([]);
@@ -188,11 +219,11 @@ export default function MealsUnified({ initialMeals, initialGrocery, initialPant
 
   // Get items expiring soon for priority suggestions
   const expiringSoonItems = useMemo(() => {
-    return initialPantry
+    return pantryItems
       .map(item => ({ ...item, expirationInfo: getExpirationStatus(item) }))
       .filter(item => item.expirationInfo && ['expiring-soon', 'expires-soon'].includes(item.expirationInfo.status))
       .sort((a, b) => a.expirationInfo.days - b.expirationInfo.days);
-  }, [initialPantry]);
+  }, [pantryItems]);
 
   useEffect(() => {
     const fetchMealSuggestions = async () => {
@@ -201,7 +232,7 @@ export default function MealsUnified({ initialMeals, initialGrocery, initialPant
       setLoadingSuggestions(true);
       try {
         // Get pantry ingredients with sufficient stock
-        const pantryIngredientIds = initialPantry
+        const pantryIngredientIds = pantryItems
           .filter(p => p.status === "plenty" || p.status === "enough" || p.status === "available")
           .map(p => p.ingredientId)
           .filter(id => id); // Filter out null/undefined
@@ -262,7 +293,7 @@ setMealSuggestions(suggestions.slice(0, 3)); // Top 3 suggestions
      };
 
     fetchMealSuggestions();
-  }, [activeTab, activeCategory, initialPantry]);
+  }, [activeTab, activeCategory, pantryItems]);
 
 // Fetch recent purchases for "Recently Purchased" section
    useEffect(() => {
@@ -638,7 +669,7 @@ fetchRecentPurchases();
                   </button>
                 </div>
                 <div className="space-y-3">
-                  {initialPantry.map((item) => {
+                  {pantryItems.map((item) => {
                     const expirationInfo = getExpirationStatus(item);
                     return (
                       <Card key={item.id} className="!p-4 flex items-center justify-between group">
