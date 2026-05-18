@@ -313,7 +313,7 @@ export default function SettingsPage() {
               initial={{ opacity: 0, y: 100, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 100, scale: 0.95 }}
-              className="fixed bottom-0 left-0 right-0 max-w-md mx-auto z-[70] p-6 bg-surface-1 rounded-t-[32px] shadow-2xl border-t border-white/10"
+              className="fixed bottom-0 left-0 right-0 max-w-md mx-auto z-[70] p-6 bg-surface-1 rounded-t-[32px] shadow-2xl border-t border-white/10 max-h-[90vh] overflow-y-auto"
             >
               <div className="w-12 h-1.5 bg-surface-4 rounded-full mx-auto mb-6" />
               <h3 className="text-xl font-bold text-text-primary mb-6">

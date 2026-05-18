@@ -209,13 +209,19 @@ export default function ChatPage() {
           setMessages(initialMessages);
         }
       } catch (e) {
-        setMessages(initialMessages);
+        const saved = sessionStorage.getItem("chat_history_fallback");
+        if (saved) {
+          setMessages(JSON.parse(saved));
+          setShowSuggestions(false);
+        } else {
+          setMessages(initialMessages);
+        }
       }
     };
 
     fetchHistory();
 
-    // Subscribe to chat_history additions and deletions
+    // Save to sessionStorage whenever messages change
     pb.collection("chat_history").subscribe("*", (e) => {
       if (e.action === "create") {
         const newMsg: Message = {
@@ -249,10 +255,14 @@ export default function ChatPage() {
       console.warn("Failed to clear database history:", e);
     }
     setMessages(initialMessages);
+    sessionStorage.removeItem("chat_history_fallback");
     setShowSuggestions(true);
   };
 
   useEffect(() => {
+    if (messages.length > 0) {
+      sessionStorage.setItem("chat_history_fallback", JSON.stringify(messages));
+    }
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isTyping]);
 
