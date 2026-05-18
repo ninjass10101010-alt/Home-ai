@@ -1,0 +1,24 @@
+#!/usr/bin/expect -f
+set timeout 60
+set password "26649_alan"
+set host "192.168.0.27"
+set user "admin"
+set cmd [lindex $argv 0]
+
+if { $cmd == "" } {
+    puts "Error: No command provided."
+    exit 1
+}
+
+spawn ssh -o StrictHostKeyChecking=no $user@$host $cmd
+expect {
+    "*assword:*" {
+        send "$password\r"
+        exp_continue
+    }
+    timeout {
+        puts "Timeout waiting for NAS response"
+        exit 1
+    }
+    eof
+}

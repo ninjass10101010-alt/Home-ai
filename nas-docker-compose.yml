@@ -1,23 +1,53 @@
-version: '3.8'
 services:
-  home-dashboard:
-    build: .
-    container_name: home-dashboard
+  pocketbase:
+    image: ghcr.io/muchobien/pocketbase:latest
+    container_name: pocketbase
     restart: unless-stopped
     ports:
-      - "3000:3000"
-    environment:
-      - NODE_ENV=production
-      - NEXT_PUBLIC_PB_URL=http://192.168.0.27:8090
+      - "8091:8090"
+    volumes:
+      - ./pb_data:/pb_data
     networks:
       - media-stack_default
 
-  openclaw-proxy:
-    image: alpine/socat
-    container_name: openclaw-proxy
+  home-dashboard:
+    build:
+      context: .
+      args:
+        - NEXT_PUBLIC_PB_URL=http://192.168.0.27:8091
+        - NEXT_PUBLIC_OPENCLAW_BRIDGE_URL=ws://192.168.0.27:3000
+    container_name: home-dashboard
     restart: unless-stopped
-    network_mode: "container:openclaw"
-    command: tcp-listen:18800,fork,reuseaddr tcp-connect:127.0.0.1:18789
+    ports:
+      - "3001:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_PB_URL=http://192.168.0.27:8091
+      - NEXT_PUBLIC_OPENCLAW_BRIDGE_URL=ws://192.168.0.27:3000
+    networks:
+      - media-stack_default
+    depends_on:
+      - pocketbase
+      - telegram-bot
+
+  telegram-bot:
+    image: node:20-alpine
+    container_name: consuela-telegram-bot
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - .:/app
+    ports:
+      - "3005:3005"
+    command: sh -c "npm install && npm run bot"
+    environment:
+      - TELEGRAM_BOT_TOKEN=8509642029:AAGBeZ3hxu-PAkV1ujDe0irGAy5xmZHph5Q
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - PB_URL=http://pocketbase:8090
+    networks:
+      - media-stack_default
+    depends_on:
+      - pocketbase
 
 networks:
   media-stack_default:

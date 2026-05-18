@@ -794,7 +794,7 @@ fetchRecentPurchases();
                       if (isShoppingMode && checkedItems.size > 0) {
                         // Exit and clear checked items
                         for (const id of Array.from(checkedItems)) {
-                          await pb.collection("grocery_items").update(id, { status: "purchased" });
+                          await pb.collection("grocery_items").update(String(id), { status: "purchased" });
                         }
                         setCheckedItems(new Set());
                       }

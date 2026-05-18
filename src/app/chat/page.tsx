@@ -247,39 +247,42 @@ export default function ChatPage() {
     setShowSuggestions(false);
 
     try {
-      const bridgeBase = process.env.NEXT_PUBLIC_OPENCLAW_BRIDGE_URL?.replace("ws://", "http://") || "http://192.168.0.27:3005";
-      const res = await fetch(`${bridgeBase}/api/chat`, {
+      const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({ message: text.trim() }),
       });
-      
-      const data = await res.json();
-      setIsTyping(false);
-      
-      if (data.reply) {
-        msgCounter.current += 1;
-        const response: Message = {
-          id: msgCounter.current,
-          role: "assistant",
-          content: data.reply,
-          timestamp: "Just now",
-        };
-        setMessages((prev) => [...prev, response]);
-      } else {
-        throw new Error(data.error || "Failed to get reply");
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
       }
-    } catch (error) {
-      console.error("Chat error:", error);
-      setIsTyping(false);
+
+      const data = await res.json() as { reply: string; actions?: any[] };
       msgCounter.current += 1;
-      const errorResponse: Message = {
+
+      const assistantMsg: Message = {
         id: msgCounter.current,
         role: "assistant",
-        content: "Sorry, I'm having trouble connecting to Consuela right now. Please make sure the OpenClaw bridge is running.",
+        content: data.reply,
         timestamp: "Just now",
+        actions: data.actions
       };
-      setMessages((prev) => [...prev, errorResponse]);
+
+      setMessages((prev) => [...prev, assistantMsg]);
+    } catch (err: any) {
+      console.error("❌ Failed to send chat message:", err);
+      msgCounter.current += 1;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: msgCounter.current,
+          role: "assistant",
+          content: `⚠️ Sorry, I ran into an error connecting to my AI brain: ${err.message}`,
+          timestamp: "Just now"
+        }
+      ]);
+    } finally {
+      setIsTyping(false);
     }
   };
 

@@ -43,7 +43,7 @@ services:
     command: sh -c "npm install && node scripts/bridge.mjs"
     environment:
       - OPENCLAW_WS_URL=ws://openclaw:18789
-      - OPENCLAW_TOKEN=openclaw-key-998877
+      - OPENCLAW_TOKEN=openclaw-key-998877-aBcDeFgHiJkLmNoPqRsTuVwXyZ
       - PORT=3005
     ports:
       - "3000:3005"

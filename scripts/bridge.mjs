@@ -3,7 +3,7 @@ import http from 'http';
 import crypto from 'crypto';
 
 const GATEWAY_URL = process.env.OPENCLAW_WS_URL || 'ws://openclaw:18789';
-const TOKEN = process.env.OPENCLAW_TOKEN || 'openclaw-key-998877';
+const TOKEN = process.env.OPENCLAW_TOKEN || 'openclaw-key-998877-aBcDeFgHiJkLmNoPqRsTuVwXyZ';
 const PORT = process.env.PORT || 3005;
 
 // HTTP Server for Dashboard Chat (HTTP POST)
@@ -63,21 +63,34 @@ function talkToConsuela(message) {
       }
     }, 60000);
 
-    ws.on('open', () => {
+    let authSent = false;
+    const sendAuth = () => {
+      if (authSent) return;
+      authSent = true;
       ws.send(JSON.stringify({
         type: 'req', id: 'auth', method: 'connect',
         params: {
-          minProtocol: 3, maxProtocol: 3,
-          client: { id: 'webchat-ui', version: '2.0.0', platform: 'linux', mode: 'backend' },
+          minProtocol: 4, maxProtocol: 4,
+          client: { id: 'node-host', version: '2.0.0', platform: 'linux', mode: 'backend' },
           auth: { token: TOKEN },
-          scopes: ['operator.admin', 'operator.agent']
+          scopes: ['operator.read', 'operator.write', 'operator.admin', 'operator.agent']
         }
       }));
+    };
+
+    ws.on('open', () => {
+      // Wait briefly — gateway sends a challenge first in protocol 4
+      // Fall back to sending auth if no challenge arrives within 1s
+      setTimeout(() => sendAuth(), 1000);
     });
 
     ws.on('message', (data) => {
       try {
         const msg = JSON.parse(data.toString());
+
+        if (msg.event === 'connect.challenge') {
+          sendAuth();
+        }
 
         // Auth success -> Run Agent
         if (msg.id === 'auth' && msg.ok) {
