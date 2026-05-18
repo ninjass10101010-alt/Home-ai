@@ -4,11 +4,12 @@ import { useState, useRef, useEffect } from "react";
 import BottomNav from "@/components/ui/BottomNav";
 import Avatar from "@/components/ui/Avatar";
 import Badge from "@/components/ui/Badge";
+import pb from "@/lib/pocketbase";
 import { Icon3D } from "@/components/3d";
 // Deleted server action import removed
 
 interface Message {
-  id: number;
+  id: string | number;
   role: "user" | "assistant";
   content: string;
   timestamp: string;
