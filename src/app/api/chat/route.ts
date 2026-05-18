@@ -153,8 +153,6 @@ export async function POST(req: Request) {
 
     const currentDate = new Date().toLocaleString("en-US", { timeZone: "America/Detroit" });
 
-    const currentDate = new Date().toLocaleString("en-US", { timeZone: "America/Detroit" });
-
     // 4. Build system prompt — full dashboard awareness
     const systemPrompt = `${dynamicSoul || "You are Consuela, the unyielding, direct, casual, and highly competent AI family assistant."}
 
