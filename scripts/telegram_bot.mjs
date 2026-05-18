@@ -17,8 +17,12 @@ dotenv.config({ path: path.join(__dirname, '../.env') });
 const pbUrl = process.env.PB_URL || process.env.NEXT_PUBLIC_PB_URL || 'http://127.0.0.1:8091';
 const pb = new PocketBase(pbUrl);
 
-// Use hardcoded token for now as provided, but fallback to environment variable
-const botToken = process.env.TELEGRAM_BOT_TOKEN || '8509642029:AAGBeZ3hxu-PAkV1ujDe0irGAy5xmZHph5Q';
+// Fetch token from environment variable
+const botToken = process.env.TELEGRAM_BOT_TOKEN;
+if (!botToken) {
+  console.error("❌ TELEGRAM_BOT_TOKEN environment variable is required!");
+  process.exit(1);
+}
 const bot = new Telegraf(botToken);
 
 // --- Configuration ---
