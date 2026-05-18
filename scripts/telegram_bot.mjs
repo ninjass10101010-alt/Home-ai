@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import http from 'http';
 import { fileURLToPath } from 'url';
+import PocketBase from 'pocketbase';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,6 +12,10 @@ const __dirname = path.dirname(__filename);
 // Load .env from the project root
 dotenv.config({ path: path.join(__dirname, '../.env.local') });
 dotenv.config({ path: path.join(__dirname, '../.env') });
+
+// Initialize PocketBase
+const pbUrl = process.env.PB_URL || process.env.NEXT_PUBLIC_PB_URL || 'http://127.0.0.1:8091';
+const pb = new PocketBase(pbUrl);
 
 // Use hardcoded token for now as provided, but fallback to environment variable
 const botToken = process.env.TELEGRAM_BOT_TOKEN || '8509642029:AAGBeZ3hxu-PAkV1ujDe0irGAy5xmZHph5Q';
@@ -109,6 +114,157 @@ bot.on('text', async (ctx) => {
     ctx.reply("Sorry, there was an error processing your message.");
   }
 });
+
+// --- Daily 8:00 AM Morning Briefing ---
+
+const getNewYorkDateStrings = () => {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: false
+  });
+  
+  const parts = formatter.formatToParts(new Date());
+  const year = parts.find(p => p.type === 'year').value;
+  const month = parts.find(p => p.type === 'month').value;
+  const day = parts.find(p => p.type === 'day').value;
+  const hour = parseInt(parts.find(p => p.type === 'hour').value, 10);
+  const minute = parseInt(parts.find(p => p.type === 'minute').value, 10);
+  
+  return {
+    dateStr: `${year}-${month}-${day}`,
+    hour,
+    minute
+  };
+};
+
+async function sendDailyBriefing(chatId) {
+  try {
+    const { dateStr } = getNewYorkDateStrings();
+    console.log(`⏰ Checking daily briefing for ${dateStr} at chatId: ${chatId}`);
+
+    // Fetch meals scheduled for today
+    let todayMeals = [];
+    try {
+      todayMeals = await pb.collection('meals').getFullList({
+        filter: `date = "${dateStr}"`
+      });
+    } catch (e) {
+      console.warn("Failed to fetch meals for briefing:", e.message);
+    }
+
+    // Fetch tasks due today
+    let todayTasks = [];
+    try {
+      todayTasks = await pb.collection('tasks').getFullList({
+        filter: `dueDate = "${dateStr}"`
+      });
+    } catch (e) {
+      console.warn("Failed to fetch tasks for briefing:", e.message);
+    }
+
+    // If there are no meals and no tasks/events today, STAY QUIET!
+    if (todayMeals.length === 0 && todayTasks.length === 0) {
+      console.log("🤫 No scheduled meals or tasks for today. Staying quiet!");
+      return;
+    }
+
+    let briefingText = "";
+    
+    // Generate briefing using Next.js central AI API
+    try {
+      const prompt = `It is 8:00 AM. Generate a morning briefing for the family based on today's scheduled items. Keep it direct, casual, and highly competent. Use HTML tags for Telegram formatting (<b>bold</b>, <code>code</code>, bullet points).
+      
+      TODAY'S DATE: ${dateStr}
+      TODAY'S SCHEDULED MEALS:
+      ${todayMeals.map(m => `- ${m.name} (${m.description || "No description"}) [Emoji: ${m.emoji || "🍽️"}]`).join('\n') || "- None"}
+      
+      TODAY'S DUE TASKS/EVENTS:
+      ${todayTasks.map(t => `- ${t.title} (${t.description || "No description"}) [Priority: ${t.priority || "medium"}, Emoji: ${t.emoji || "📋"}]`).join('\n') || "- None"}
+      
+      Directives:
+      - Act as Consuela, the unyielding, direct, casual, and highly competent AI family assistant.
+      - If there's a meal, highlight it (e.g. "Tonight we are having pizza for dinner! 🍕").
+      - Highlight scheduled events and due tasks with times if available.
+      - Keep it short, actionable, and warm but direct. Do not use polite/robotic greetings.`;
+
+      const urls = [
+        'http://localhost:3000/api/chat',
+        'http://192.168.0.27:3001/api/chat',
+        'http://home-dashboard:3000/api/chat',
+        'http://127.0.0.1:3000/api/chat'
+      ];
+
+      let aiResponse = null;
+      for (const url of urls) {
+        try {
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: prompt })
+          });
+          if (res.ok) {
+            const data = await res.json();
+            aiResponse = data.reply;
+            break;
+          }
+        } catch (err) {}
+      }
+
+      if (aiResponse) {
+        briefingText = aiResponse;
+      }
+    } catch (aiErr) {
+      console.warn("Failed to generate briefing via AI:", aiErr.message);
+    }
+
+    // Manual fallback if AI fails
+    if (!briefingText) {
+      briefingText = `🌞 <b>Morning Briefing — ${dateStr}</b>\n\n`;
+      if (todayMeals.length > 0) {
+        briefingText += `🍽️ <b>Today's Menu:</b>\n`;
+        todayMeals.forEach(m => {
+          briefingText += `- ${m.emoji || "🍽️"} <b>${m.name}</b>${m.description ? ` (<i>${m.description}</i>)` : ""}\n`;
+        });
+        briefingText += `\n`;
+      }
+      if (todayTasks.length > 0) {
+        briefingText += `📋 <b>Today's Schedule & Chores:</b>\n`;
+        todayTasks.forEach(t => {
+          briefingText += `- ${t.emoji || "📋"} <b>${t.title}</b>${t.description ? ` - <i>${t.description}</i>` : ""}\n`;
+        });
+      }
+    }
+
+    // Send to Telegram only
+    await bot.telegram.sendMessage(chatId, briefingText, { parse_mode: 'HTML' });
+    console.log("✅ Proactive daily briefing successfully sent!");
+
+  } catch (error) {
+    console.error("❌ Failed to compile or send daily briefing:", error);
+  }
+}
+
+// Scheduled check once every minute
+let lastBriefingDate = "";
+
+setInterval(() => {
+  const { dateStr, hour, minute } = getNewYorkDateStrings();
+  
+  if (hour === 8 && minute === 0 && lastBriefingDate !== dateStr) {
+    lastBriefingDate = dateStr;
+    const targetChatId = process.env.TELEGRAM_CHAT_ID || process.env.USER_CHAT_ID;
+    if (targetChatId) {
+      sendDailyBriefing(targetChatId);
+    } else {
+      console.warn("⚠️ Cannot send daily briefing: TELEGRAM_CHAT_ID or USER_CHAT_ID is missing from environment variables.");
+    }
+  }
+}, 60000);
 
 // Start the bot
 console.log('Starting Telegram Bot with Long Polling...');
