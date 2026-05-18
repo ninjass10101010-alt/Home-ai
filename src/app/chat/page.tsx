@@ -190,30 +190,63 @@ export default function ChatPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<any>(null);
 
-  // Load from localStorage on client mount
+  // Fetch initial chat logs from PocketBase and subscribe to real-time additions
   useEffect(() => {
-    const saved = localStorage.getItem("consuela_chat_history");
-    if (saved) {
+    const fetchHistory = async () => {
       try {
-        setMessages(JSON.parse(saved));
-        setShowSuggestions(false);
+        const history = await pb.collection("chat_history").getFullList({ sort: "created" });
+        if (history.length > 0) {
+          setMessages(history.map((h: any) => ({
+            id: h.id,
+            role: h.role,
+            content: h.content,
+            timestamp: h.timestamp || "Just now",
+            actions: h.actions || []
+          })));
+          setShowSuggestions(false);
+        } else {
+          setMessages(initialMessages);
+        }
       } catch (e) {
         setMessages(initialMessages);
       }
-    } else {
-      setMessages(initialMessages);
-    }
+    };
+
+    fetchHistory();
+
+    // Subscribe to chat_history additions and deletions
+    pb.collection("chat_history").subscribe("*", (e) => {
+      if (e.action === "create") {
+        const newMsg: Message = {
+          id: e.record.id,
+          role: e.record.role as "user" | "assistant",
+          content: e.record.content,
+          timestamp: e.record.timestamp || "Just now",
+          actions: e.record.actions || []
+        };
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === newMsg.id)) return prev;
+          return [...prev, newMsg];
+        });
+        setShowSuggestions(false);
+      } else if (e.action === "delete") {
+        setMessages(initialMessages);
+        setShowSuggestions(true);
+      }
+    });
+
+    return () => {
+      pb.collection("chat_history").unsubscribe("*");
+    };
   }, []);
 
-  // Save to localStorage whenever messages change
-  useEffect(() => {
-    if (messages.length > 0) {
-      localStorage.setItem("consuela_chat_history", JSON.stringify(messages));
+  const clearChat = async () => {
+    try {
+      const list = await pb.collection("chat_history").getFullList();
+      await Promise.all(list.map(item => pb.collection("chat_history").delete(item.id)));
+    } catch (e) {
+      console.warn("Failed to clear database history:", e);
     }
-  }, [messages]);
-
-  const clearChat = () => {
-    localStorage.removeItem("consuela_chat_history");
     setMessages(initialMessages);
     setShowSuggestions(true);
   };
@@ -257,17 +290,28 @@ export default function ChatPage() {
   const sendMessage = async (text: string) => {
     if (!text.trim()) return;
 
-    msgCounter.current += 1;
-    const msgId = msgCounter.current;
+    // 1. Create User message in PocketBase so it is persisted in the database history
+    let userRecord: any = null;
+    const clientTimestamp = new Date().toLocaleTimeString("en-US", { timeZone: "America/Detroit", hour: '2-digit', minute: '2-digit' });
+    try {
+      userRecord = await pb.collection("chat_history").create({
+        role: "user",
+        content: text.trim(),
+        timestamp: clientTimestamp,
+        sessionId: "default-session"
+      });
+    } catch (e) {
+      console.warn("⚠️ Failed to write user message to PocketBase history:", e);
+    }
 
-    const userMsg: Message = {
-      id: msgId,
+    const localUserMsg: Message = {
+      id: userRecord?.id || String(Date.now()),
       role: "user",
       content: text.trim(),
-      timestamp: "Just now",
+      timestamp: clientTimestamp,
     };
 
-    const updatedHistory = [...messages, userMsg];
+    const updatedHistory = [...messages, localUserMsg];
     setMessages(updatedHistory);
     setInput("");
     setIsTyping(true);
@@ -287,25 +331,29 @@ export default function ChatPage() {
         throw new Error(`HTTP ${res.status}`);
       }
 
+      // The backend API route now writes the AI's reply to the chat_history collection.
+      // PocketBase subscriptions will catch and render the AI message in real-time.
+      // We also handle JSON mapping here just in case.
       const data = await res.json() as { reply: string; actions?: any[] };
-      msgCounter.current += 1;
-
+      
+      // Update locally immediately to ensure instant response if subscription has any lag
       const assistantMsg: Message = {
-        id: msgCounter.current,
+        id: String(Date.now() + 1),
         role: "assistant",
         content: data.reply,
-        timestamp: "Just now",
+        timestamp: new Date().toLocaleTimeString("en-US", { timeZone: "America/Detroit", hour: '2-digit', minute: '2-digit' }),
         actions: data.actions
       };
-
-      setMessages((prev) => [...prev, assistantMsg]);
+      setMessages((prev) => {
+        if (prev.some((m) => m.content === assistantMsg.content && m.role === "assistant")) return prev;
+        return [...prev, assistantMsg];
+      });
     } catch (err: any) {
       console.error("❌ Failed to send chat message:", err);
-      msgCounter.current += 1;
       setMessages((prev) => [
         ...prev,
         {
-          id: msgCounter.current,
+          id: String(Date.now() + 2),
           role: "assistant",
           content: `⚠️ Sorry, I ran into an error connecting to my AI brain: ${err.message}`,
           timestamp: "Just now"

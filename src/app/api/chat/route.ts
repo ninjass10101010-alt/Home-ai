@@ -11,6 +11,33 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Message is required." }, { status: 400 });
     }
 
+    // Self-healing PocketBase Schema Check for chat_history
+    try {
+      await pb.collections.getOne("chat_history");
+    } catch (e) {
+      try {
+        await pb.collections.create({
+          name: "chat_history",
+          type: "base",
+          schema: [
+            { name: "role", type: "text", required: true },
+            { name: "content", type: "text", required: true },
+            { name: "timestamp", type: "text" },
+            { name: "sessionId", type: "text" },
+            { name: "actions", type: "json" }
+          ],
+          listRule: "",
+          viewRule: "",
+          createRule: "",
+          updateRule: "",
+          deleteRule: "",
+        });
+        console.log("✅ Created 'chat_history' collection successfully.");
+      } catch (createErr: any) {
+        console.warn("⚠️ Could not create chat_history collection dynamically:", createErr.message);
+      }
+    }
+
     const openrouterApiKey = process.env.OPENROUTER_API_KEY;
     if (!openrouterApiKey) {
       return NextResponse.json({ error: "OPENROUTER_API_KEY is not configured." }, { status: 500 });
@@ -122,7 +149,8 @@ YOUR DYNAMIC SELF-MODIFICATION & CODE POWERS:
 You have read and write permissions inside the dashboard repository.
 1. If the user asks you to edit your personality guidelines, rewrite rules, or add instructions, return a "write_file" action targeting "soul.md".
 2. If the user asks you to modify the dashboard UI (e.g. changing styles, layouts, or adding components to "src/app/chat/page.tsx", etc.), read the code context from the ACTIVE FILE CONTEXT above, make the modifications, and output a "write_file" action to save the updated codebase.
-3. You can also output a "trigger_rebuild" action to ask the user to deploy your modified code.
+3. When editing code, ALWAYS output a "validate_and_build" action to trigger a TypeScript compile validation check and ensure your code contains zero compilation errors.
+4. You can also output a "trigger_rebuild" action to redeploy your modified code container stack.
 
 YOUR RESPONSE MUST STRICTLY BE A VALID JSON OBJECT matching this exact structure (do not wrap in markdown blocks, do not include any text before or after):
 {
@@ -356,11 +384,48 @@ YOUR RESPONSE MUST STRICTLY BE A VALID JSON OBJECT matching this exact structure
               emoji: "⚡",
               confirmed: true,
             });
+          } else if (action.type === "validate_and_build") {
+            let compileSuccess = false;
+            let compileOutput = "";
+            try {
+              const { execSync } = await import("child_process");
+              execSync("npx tsc --noEmit", { stdio: "pipe", cwd: process.cwd() });
+              compileSuccess = true;
+              compileOutput = "All TypeScript and build checks passed with 0 compile errors!";
+            } catch (compileErr: any) {
+              compileSuccess = false;
+              compileOutput = compileErr.stdout?.toString() || compileErr.stderr?.toString() || compileErr.message;
+            }
+
+            executedActions.push({
+              type: "validate_and_build",
+              title: "Code Compilation Check",
+              detail: compileSuccess ? "Build Success! 0 errors" : "Build Failed! Check errors",
+              emoji: compileSuccess ? "✅" : "❌",
+              confirmed: true,
+              payload: {
+                success: compileSuccess,
+                output: compileOutput
+              }
+            });
           }
         } catch (actErr: any) {
           console.error(`❌ Failed to execute action ${action.type}:`, actErr.message);
         }
       }
+    }
+
+    // Log assistant response to database chat history
+    try {
+      await pb.collection("chat_history").create({
+        role: "assistant",
+        content: parsed.reply,
+        timestamp: new Date().toLocaleTimeString("en-US", { timeZone: "America/Detroit", hour: '2-digit', minute: '2-digit' }),
+        sessionId: "default-session",
+        actions: executedActions
+      });
+    } catch (dbErr: any) {
+      console.warn("⚠️ Failed to write assistant reply to chat_history:", dbErr.message);
     }
 
     return NextResponse.json({
