@@ -6,9 +6,7 @@
 
 Consuela is a production-ready AI-powered family organizer web app with 6 core screens, a full design system, and interactive UI. Built on Next.js 16 + React 19 + Tailwind CSS 4. Dashboard now fetches real data from database instead of hardcoded mock data.
 
-Migration planning complete — OpenClaw bridge to be replaced by Hermes container. Telegram ready for Hermes post-migration alerts.
-
-Hermes deployment artifacts created (docker-compose.hermes.yml, Dockerfile.hermes, docs/hermes-deployment-guide.md). Full OpenClaw backup archived to NAS (1.4GB). Pending source code migration to enable full Hermes container replacement.
+Migration planning complete — OpenClaw bridge to be replaced by Hermes container.
 
 ## Recently Completed
 
@@ -30,20 +28,12 @@ Hermes deployment artifacts created (docker-compose.hermes.yml, Dockerfile.herme
 - [x] **Family Schedule display** - ScheduleDisplay component showing daily routines (lunch, bedtime, etc.) with time-sorted timeline
 - [x] **BottomNav updates** - Added Emergency and Settings tabs to navigation
 - [x] **Real Database Queries** - Replaced all hardcoded dashboard data with real database queries for family members, events, tasks, and schedules
-- [x] **Dashboard UI refresh** - Redesigned hero header with date pill and time-of-day greeting, replaced Badge stat pills with icon+label links, fixed today's meal highlight to dynamically detect the actual day, added left-border accent colors to event cards and task items
-- [x] **ScheduleDisplay component polish** - Added "X upcoming" count in header, improved past-item styling with strikethrough, added friendly empty state with clock SVG
 - [x] **Weather Widget** - Added clickable location editing for custom city management
 - [x] **Settings Add Member** - Fixed non-functional Add button by removing premature resetForm call
 - [x] **Sync Status Widget** - Made Total Links count and status text dynamic based on connected services
 - [x] **Inline Edit UI** - Added click-to-edit for time/title fields in ScheduleDisplay with onEdit callback, Escape/Enter support; audited Add buttons (all clean)
 - [x] **Hermes Migration Guide** — Created comprehensive OpenClaw → Hermes migration guide (docs/hermes-migration-guide.md) ensuring zero data loss
-- [x] Telegram integration — Added Telegram bot support following free-communication patterns for Hermes agent completion messages, no breakage to existing emergency/SMS flows
-- [x] Created docker-compose.hermes.yml with named persistent volume (hermes_data), 14 OpenRouter models, Telegram/Ollama/Gateway configs from discovered OpenClaw settings
-- [x] Created Dockerfile.hermes template (node:20-alpine, bun, healthcheck)
-- [x] Created docs/hermes-deployment-guide.md with SSH, build, deploy, and full data restoration instructions
-- [x] Backed up all OpenClaw container data to NAS (1.4GB archive at /share/CACHEDEV1_DATA/homes/admin/hermes-migration-20260515/openclaw-full.tar.gz)
-- [x] Discovered OpenClaw identity: agent "Drogon", user "Jeff", Telegram bot token active, 10+ OpenRouter models, 3 sub-agents
-
+ 
 ## File Structure
 
 ```
@@ -61,8 +51,6 @@ src/
     emergency/page.tsx    — Emergency Contacts page
     api/
       emergency/route.ts  — Emergency notification API endpoint
-    api/
-      chat/route.ts       — Chat API router (dynamic agent responses)
   components/ui/
     BottomNav.tsx         — 8-tab mobile nav (Home, Chat, Calendar, Meals, Tasks, Grocery, Emergency, Settings)
     TopBar.tsx            — Sticky top navigation
@@ -120,12 +108,9 @@ src/
 | May 2026 | Redesigned grocery page as supermarket-style shopping experience with aisles, cart sidebar, quick add bar |
 | May 2026 | Fixed family icon consistency by standardizing Avatar variant="emoji" in settings page |
 | May 2026 | Enhanced grocery page as hybrid creation/list experience with priorities, quantities, notes, and inline editing |
-| May 2026 | Dashboard UI improvements: date pill, stat chips, dynamic meal highlight, event/task polish, ScheduleDisplay refresh |
 | May 2026 | Fixed layout.tsx Next.js architecture issue by removing "use client" from root layout and creating providers.tsx wrapper for ToastProvider and OpenClawDrive client components, allowing proper metadata and viewport exports |
 | May 2026 | Fixed Settings Add button, added editable location to Weather widget, dynamic sync status/links count in SyncManager; pushed updates to GitHub |
 | 2026-05-15 | Developed comprehensive OpenClaw → Hermes migration guide ensuring zero data loss |
-| 2026-05-15 | Added Telegram bot support via sendTelegramMessage and /api/telegram for agent notifications while preserving all prior connections |
-| 2026-05-16 | Created Hermes deployment infrastructure (compose file, Dockerfile, deployment guide) with data restoration from OpenClaw backup and NAS backup archive |
 
 ## Next Steps (V2)
 

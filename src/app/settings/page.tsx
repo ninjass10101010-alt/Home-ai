@@ -216,10 +216,7 @@ export default function SettingsPage() {
             <Button 
                 variant="primary" 
                 size="sm" 
-                onClick={() => {
-                    setIsAdding(true);
-                    resetForm();
-                }}
+                onClick={() => setIsAdding(true)}
             >
                 + Add Member
             </Button>

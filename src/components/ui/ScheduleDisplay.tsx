@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState, useEffect } from "react";
-import Card from "./Card";
 
 interface ScheduleItem {
   id: number;
@@ -19,10 +18,14 @@ interface ScheduleDisplayProps {
   schedule: ScheduleItem[];
   title?: string;
   className?: string;
+  onEdit?: (id: number, time: string, title: string) => void;
 }
 
-export default function ScheduleDisplay({ schedule, title = "Today's Schedule", className = "" }: ScheduleDisplayProps) {
+export default function ScheduleDisplay({ schedule, title = "Today's Schedule", className = "", onEdit }: ScheduleDisplayProps) {
   const [mounted, setMounted] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editTime, setEditTime] = useState("");
+  const [editTitle, setEditTitle] = useState("");
 
   useEffect(() => {
     setMounted(true);
@@ -62,13 +65,6 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
     violet: "bg-accent-violet/15",
     rose:   "bg-accent-rose/15",
   };
-  const colorDotMap: Record<string, string> = {
-    green:  "bg-nori-500/50",
-    amber:  "bg-amber-500/50",
-    cyan:   "bg-cyan-500/50",
-    violet: "bg-accent-violet/50",
-    rose:   "bg-accent-rose/50",
-  };
 
   const currentHour = mounted ? new Date().getHours() : 0;
 
@@ -85,17 +81,69 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
           const hour = parseInt(item.time.split(":")[0]);
           const isPast = mounted && hour < currentHour;
 
+          const startEdit = () => {
+            if (onEdit) {
+              setEditingId(item.id);
+              setEditTime(item.time);
+              setEditTitle(item.title);
+            }
+          };
+
+          const saveEdit = () => {
+            if (editingId !== null) onEdit?.(editingId, editTime, editTitle);
+            setEditingId(null);
+          };
+
+          const cancelEdit = () => setEditingId(null);
+
           return (
             <div
               key={item.id}
               style={{ animationDelay: `${idx * 0.05}s` }}
               className={`flex items-center gap-3 px-3 py-2.5 rounded-xl ${colorBgMap[item.color ?? "green"] ?? "bg-nori-500/15"} transition-all duration-200 hover:bg-white/[0.06] animate-in ${isPast ? 'opacity-40' : ''}`}
             >
-              <span className="text-xs font-mono text-text-muted w-12 shrink-0 tabular-nums">{item.time}</span>
-              <span className="text-lg shrink-0">{item.emoji || item.icon || "•"}</span>
-              <span className={`text-sm flex-1 min-w-0 ${isPast ? 'line-through text-text-muted' : 'text-text-primary'}`}>{item.title}</span>
+              {editingId === item.id ? (
+                <>
+                  <input
+                    type="time"
+                    value={editTime}
+                    onChange={(e) => setEditTime(e.target.value)}
+                    className="w-20 text-xs bg-white/10 rounded px-1.5 py-0.5 text-text-primary border border-white/20 focus:outline-none focus:border-white/40"
+                    aria-label="Edit time"
+                  />
+                  <input
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    className="flex-1 text-sm bg-white/10 rounded px-2 py-0.5 text-text-primary border border-white/20 focus:outline-none focus:border-white/40"
+                    placeholder="Title"
+                    aria-label="Edit title"
+                    onBlur={saveEdit}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") saveEdit();
+                      if (e.key === "Escape") cancelEdit();
+                    }}
+                    autoFocus
+                  />
+                </>
+              ) : (
+                <>
+                  <span
+                    className={`text-xs font-mono text-text-muted w-12 shrink-0 tabular-nums ${onEdit ? 'cursor-pointer hover:text-text-primary transition-colors' : ''}`}
+                    onClick={startEdit}
+                  >
+                    {item.time}
+                  </span>
+                  <span className="text-lg shrink-0">{item.emoji || item.icon || "•"}</span>
+                  <span
+                    className={`text-sm flex-1 min-w-0 ${isPast ? 'line-through text-text-muted' : 'text-text-primary'} ${onEdit ? 'cursor-pointer hover:text-text-secondary transition-colors' : ''}`}
+                    onClick={startEdit}
+                  >
+                    {item.title}
+                  </span>
+                </>
+              )}
               {item.member && (
-                <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-white/5 text-text-secondary`}>
+                <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-white/5 text-text-secondary shrink-0`}>
                   {item.member.split(" ")[0]}
                 </span>
               )}
@@ -103,7 +151,6 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
           );
         })}
       </div>
-
     </section>
   );
 }

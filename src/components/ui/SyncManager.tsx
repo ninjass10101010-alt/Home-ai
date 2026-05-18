@@ -131,15 +131,15 @@ export default function SyncManager({ onConnect, onDisconnect, onSync }: SyncMan
               <p className="text-text-muted text-[10px] uppercase tracking-widest font-bold">Active Connections</p>
             </div>
             <div className="text-center p-3 rounded-2xl bg-surface-2/50 border border-white/5">
-              <p className="text-2xl font-bold text-nori-400">142</p>
-              <p className="text-text-muted text-[10px] uppercase tracking-widest font-bold">Total Items</p>
+              <p className="text-2xl font-bold text-nori-400">{services.length}</p>
+              <p className="text-text-muted text-[10px] uppercase tracking-widest font-bold">Total Links</p>
             </div>
           </div>
           <div className="mt-4 pt-4 border-t border-surface-3">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-text-primary text-sm font-semibold">Consuela Brain Sync</p>
-                <p className="text-text-muted text-xs">Everything is up to date</p>
+                <p className="text-text-muted text-xs">{services.filter(s => s.connected).length === services.length ? "All links synced" : "Some links need attention"}</p>
               </div>
               <Button variant="secondary" size="sm" className="!text-[10px] uppercase tracking-widest font-bold">
                 Sync All
