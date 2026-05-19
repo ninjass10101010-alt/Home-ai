@@ -291,6 +291,43 @@ export default function SettingsPage() {
           </Card>
         </section>
 
+        {/* Widgets / Home Dashboard Settings */}
+        <section>
+          <h3 className="text-text-primary font-semibold text-base mb-4">Widgets &amp; Home Dashboard</h3>
+          <Card>
+            <div className="space-y-4 py-2">
+              <div>
+                <p className="text-sm text-text-primary mb-1.5">Weather Location</p>
+                <input
+                  type="text"
+                  defaultValue="New York, NY"
+                  className="w-full px-4 py-3 rounded-2xl bg-surface-2 border border-surface-3 text-text-primary focus:outline-none focus:border-nori-500/50 transition-all text-sm"
+                  onBlur={(e) => {
+                    // Persist to localStorage for widget consumption
+                    localStorage.setItem('weather-location', e.target.value);
+                  }}
+                />
+                <p className="text-[10px] text-text-muted mt-1">Used by Weather widget on Home</p>
+              </div>
+              <div>
+                <p className="text-sm text-text-primary mb-2">Default Temperature Unit</p>
+                <div className="flex gap-2">
+                  {(['F', 'C'] as const).map((u) => (
+                    <button
+                      key={u}
+                      onClick={() => localStorage.setItem('weather-unit', u)}
+                      className="px-4 py-1.5 text-sm rounded-xl border border-surface-3 hover:border-nori-500/50 active:bg-surface-2"
+                    >
+                      °{u}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <p className="text-[10px] text-text-muted">Drag widgets on Home to reorder. Changes sync across sessions via localStorage.</p>
+            </div>
+          </Card>
+        </section>
+
         <section className="pb-10">
           <Card>
              <SettingsRow icon="🚪" label="Sign out" danger />

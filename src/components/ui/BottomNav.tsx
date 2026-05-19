@@ -160,20 +160,16 @@ export default function BottomNav() {
         >
           {navItems.map((item) => {
             const isActive = pathname === item.href;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="flex flex-col items-center gap-0.5 flex-1 py-1 group"
-                aria-label={item.label}
-              >
+            const isSelfRef = item.href === "/chat" && isActive;
+            const content = (
+              <>
                 {item.primary ? (
                   <span
                     className={`flex items-center justify-center w-10 h-10 rounded-xl transition-all duration-200 ${
                       isActive
                         ? "text-nori-400 bg-nori-500/10 widget-glow"
                         : "text-text-secondary group-hover:text-text-primary group-hover:bg-white/5"
-                    }`}
+                    } ${isSelfRef ? "opacity-60" : ""}`}
                   >
                     {item.icon(isActive)}
                   </span>
@@ -183,7 +179,7 @@ export default function BottomNav() {
                       isActive
                         ? "text-nori-400 bg-nori-500/10"
                         : "text-text-secondary group-hover:text-text-primary group-hover:bg-white/5"
-                    }`}
+                    } ${isSelfRef ? "opacity-60" : ""}`}
                   >
                     {item.icon(isActive)}
                   </span>
@@ -197,6 +193,25 @@ export default function BottomNav() {
                 >
                   {item.label === "Ask Consuela" ? "Consuela" : item.label}
                 </span>
+              </>
+            );
+            return isSelfRef ? (
+              <div
+                key={item.href}
+                className="flex flex-col items-center gap-0.5 flex-1 py-1 cursor-default"
+                aria-label={item.label}
+                aria-current="page"
+              >
+                {content}
+              </div>
+            ) : (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="flex flex-col items-center gap-0.5 flex-1 py-1 group"
+                aria-label={item.label}
+              >
+                {content}
               </Link>
             );
           })}

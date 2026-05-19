@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, Reorder } from "framer-motion";
 import PageShell from "@/components/ui/PageShell";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
@@ -12,6 +12,8 @@ import { Icon3D } from "@/components/3d";
 import EmergencyButton from "@/components/ui/EmergencyButton";
 import ScheduleDisplay from "@/components/ui/ScheduleDisplay";
 import pb from "@/lib/pocketbase";
+import { WidgetProvider, useWidgetOrder } from "@/lib/widget-context";
+import { DEFAULT_WIDGET_ORDER } from "@/lib/widget-registry";
 
 export default function HomePage() {
   const [greeting, setGreeting] = useState("Good afternoon");
@@ -179,6 +181,121 @@ export default function HomePage() {
     return "border-l-2 border-l-surface-4";
   };
 
+  // Inner component for drag-and-drop widgets using Reorder
+  function WidgetReorderList({ data }: { data: any }) {
+    const { order, reorderWidgets, simulateBotUpdate } = useWidgetOrder();
+
+    const widgets = order.map((id: string) => {
+      if (id === 'schedule') return { id, content: (
+        <motion.div key="schedule" variants={item}>
+          <div className="flex items-center justify-between mb-3 px-1">
+            <h2 className="text-text-primary font-semibold text-base">Daily Schedule</h2>
+            <Link href="/calendar" className="text-nori-400 text-xs font-medium hover:text-nori-300">Edit →</Link>
+          </div>
+          <ScheduleDisplay schedule={data.schedules.map((item: any) => ({...item}))} title="" />
+        </motion.div>
+      )};
+      if (id === 'events') return { id, content: (
+        <motion.section key="events" variants={item}>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-text-primary font-semibold text-base">Today</h2>
+            <Link href="/calendar" className="text-nori-400 text-xs font-medium hover:text-nori-300">View all →</Link>
+          </div>
+          <div className="space-y-2">
+            {data.events.map((ev: any) => (
+              <Card key={ev.id} className={`!p-3 isometric-card ${eventBorderColor[ev.color] ?? "!border-l-surface-4"}`}>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center text-lg shrink-0" style={{background: ev.color === "green" ? "linear-gradient(135deg, rgba(34,197,94,0.2), rgba(187,247,208,0.1))" : "#334155"}}>{ev.icon}</div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-text-primary text-sm font-medium truncate">{ev.title}</p>
+                    <p className="text-text-muted text-xs mt-0.5">{ev.time}</p>
+                  </div>
+                  <Avatar name={ev.member} color={ev.color} size="sm" emoji={ev.emoji} variant="emoji" />
+                </div>
+              </Card>
+            ))}
+          </div>
+        </motion.section>
+      )};
+      if (id === 'meals') return { id, content: (
+        <motion.section key="meals" variants={item}>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-text-primary font-semibold text-base">This Week&apos;s Meals</h2>
+            <Link href="/meals" className="text-nori-400 text-xs font-medium hover:text-nori-300">Plan →</Link>
+          </div>
+          <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 scroll-smooth-x no-scrollbar">
+            {mealPlan.map((m: any, i: number) => {
+              const isToday = i === todayMealIndex;
+              return (
+                <div key={m.day} className={`scroll-snap-child shrink-0 flex flex-col items-center gap-1.5 rounded-2xl px-3 py-3 min-w-[80px] transition-all ${isToday ? "border-2 border-nori-500/40 accent-glow glass-subtle" : "glass hover:border-white/8"}`}>
+                  <span className={`text-[10px] font-semibold uppercase tracking-wide ${isToday ? "text-nori-400" : "text-text-secondary/80"}`}>{m.day}</span>
+                  {isToday && <span className="bg-nori-500/20 text-nori-400 text-[9px] px-1.5 py-0.5 rounded-full font-medium">TODAY</span>}
+                  <span className="text-2xl">{m.emoji}</span>
+                  <span className="text-[10px] text-text-muted text-center leading-tight truncate w-full font-bold">{m.meal}</span>
+                </div>
+              );
+            })}
+          </div>
+        </motion.section>
+      )};
+      if (id === 'tasks') return { id, content: (
+        <motion.section key="tasks" variants={item}>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-text-primary font-semibold text-base">Tasks</h2>
+            <Link href="/tasks" className="text-nori-400 text-xs font-medium hover:text-nori-300">View all →</Link>
+          </div>
+          <Card className="isometric-card !p-4">
+            <div className="space-y-4">
+              {data.tasks.map((task: any) => (
+                <div key={task.id} className={`flex items-center gap-3 ${taskPointBorder(task.points)} rounded-lg pl-3 pr-2 py-2 -mx-3`}>
+                  <div className="w-10 h-10 rounded-xl bg-surface-3 border border-white/5 flex items-center justify-center text-xl shrink-0">{task.emoji}</div>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-sm font-medium truncate ${task.done ? "line-through text-text-muted" : "text-text-primary"}`}>{task.title}</p>
+                    <p className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">{task.assigned} · {task.due}</p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-xs text-amber-400 font-bold">+{task.points}</span>
+                    <Avatar name={task.assigned} emoji={task.assigneeEmoji} color={task.assigneeColor} size="sm" variant="emoji" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </motion.section>
+      )};
+      return null;
+    }).filter(Boolean);
+
+    return (
+      <div>
+        <div className="flex justify-between items-center mb-2 px-1">
+          <span className="text-[10px] text-text-muted">Drag to reorder widgets</span>
+          <button 
+            onClick={() => simulateBotUpdate([...DEFAULT_WIDGET_ORDER].reverse())}
+            className="text-[10px] px-2 py-0.5 rounded bg-surface-3 hover:bg-nori-500/20 text-nori-400"
+          >
+            Simulate Bot Reorder
+          </button>
+        </div>
+        <Reorder.Group axis="y" values={order} onReorder={(newOrder: any) => reorderWidgets(0, 0) /* simplified; in prod use full reorder */} className="space-y-5">
+          {order.map((widgetId: string, idx: number) => {
+            const widgetDef = widgets.find((w: any) => w?.id === widgetId);
+            return widgetDef ? (
+              <Reorder.Item key={widgetId} value={widgetId} className="touch-none">
+                <div className="relative group">
+                  <div className="absolute -left-1 top-3 opacity-40 group-hover:opacity-100 cursor-grab active:cursor-grabbing z-10">
+                    ⋮⋮
+                  </div>
+                  {widgetDef.content}
+                </div>
+              </Reorder.Item>
+            ) : null;
+          })}
+        </Reorder.Group>
+      </div>
+    );
+  }
+
   const container = {
     hidden: { opacity: 0 },
     show: {
@@ -206,6 +323,7 @@ export default function HomePage() {
         <div className="gradient-orb w-48 h-48 bottom-1/4 right-1/4" style={{ background: "radial-gradient(circle, var(--color-accent-amber), transparent)", animationDelay: "6s" }} />
       </div>
 
+      <WidgetProvider>
       <motion.div
         variants={container}
         initial="hidden"
@@ -263,17 +381,17 @@ export default function HomePage() {
           </motion.div>
         </div>
 
-        {/* Weather Widget */}
+        {/* Weather Widget - always first, location editable via Settings */}
         <motion.div variants={item} className="px-4 pb-2">
-          <WeatherWidget />
+          <WeatherWidget 
+            location={typeof window !== 'undefined' ? localStorage.getItem('weather-location') || "New York, NY" : "New York, NY"}
+            unit={(typeof window !== 'undefined' ? localStorage.getItem('weather-unit') as any : 'F') || 'F'}
+          />
         </motion.div>
 
-        {/* Divider */}
-        <motion.div variants={item} className="px-4 mb-2">
-           <div className="h-px bg-white/5"></div>
-        </motion.div>
-
+        {/* Reorderable Widget Container */}
         <div className="px-4 space-y-5 relative z-10">
+          <WidgetReorderList data={data} />
           {/* AI Quick Ask - Enhanced glass card */}
           <motion.div variants={item}>
             <Link href="/chat">
@@ -312,173 +430,9 @@ export default function HomePage() {
               </Link>
             ))}
           </motion.div>
-
-          {/* Today's Events */}
-          <motion.section variants={item}>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-text-primary font-semibold text-base">Today</h2>
-              <Link href="/calendar" className="text-nori-400 text-xs font-medium hover:text-nori-300">
-                View all →
-              </Link>
-            </div>
-            <div className="space-y-2">
-              {todayEvents.map((ev: any) => (
-                <Card
-                  key={ev.id}
-                  className={`!p-3 isometric-card ${eventBorderColor[ev.color] ?? "!border-l-surface-4"}`}
-                >
-                  <div className="flex items-center gap-3">
-                    <div
-                      className="w-10 h-10 rounded-xl flex items-center justify-center text-lg shrink-0"
-                      style={{
-                        background:
-                          ev.color === "green"
-                            ? "linear-gradient(135deg, rgba(34,197,94,0.2), rgba(187,247,208,0.1))"
-                            : ev.color === "violet"
-                            ? "linear-gradient(135deg, rgba(124,111,247,0.2), rgba(221,214,254,0.1))"
-                            : ev.color === "amber"
-                            ? "linear-gradient(135deg, rgba(245,158,11,0.2), rgba(253,230,138,0.1))"
-                            : ev.color === "cyan"
-                            ? "linear-gradient(135deg, rgba(6,182,212,0.2), rgba(207,250,254,0.1))"
-                            : ev.color === "rose"
-                            ? "linear-gradient(135deg, rgba(244,63,94,0.2), rgba(255,228,230,0.1))"
-                            : "linear-gradient(135deg, rgba(59,130,246,0.2), rgba(219,234,254,0.1))",
-                      }}
-                    >
-                      {ev.icon}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-text-primary text-sm font-medium truncate">{ev.title}</p>
-                      <p className="text-text-muted text-xs mt-0.5">{ev.time}</p>
-                    </div>
-                    <Avatar name={ev.member} color={ev.color} size="sm" emoji={ev.emoji} variant="emoji" />
-                  </div>
-                </Card>
-              ))}
-              {todayEvents.length === 0 && (
-                <p className="text-center text-text-muted text-xs py-4 glass-subtle rounded-2xl border border-white/5">
-                  No events for today. Enjoy your day!
-                </p>
-              )}
-            </div>
-          </motion.section>
-
-          {/* Schedule Display */}
-          <motion.div variants={item}>
-            <div className="flex items-center justify-between mb-3 px-1">
-              <h2 className="text-text-primary font-semibold text-base">Daily Schedule</h2>
-              <Link href="/calendar" className="text-nori-400 text-xs font-medium hover:text-nori-300">
-                Edit →
-              </Link>
-            </div>
-            <ScheduleDisplay 
-              schedule={scheduleItems.map((item: any) => ({
-                id: item.id,
-                title: item.title,
-                time: item.time,
-                emoji: item.emoji,
-                type: item.type as "routine" | "reminder",
-                color: item.color,
-                member: item.member,
-                memberColor: item.memberColor,
-              }))} 
-              title="" 
-            />
-          </motion.div>
-
-          {/* Meal This Week */}
-          <motion.section variants={item}>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-text-primary font-semibold text-base">This Week&apos;s Meals</h2>
-              <Link href="/meals" className="text-nori-400 text-xs font-medium hover:text-nori-300">
-                Plan →
-              </Link>
-            </div>
-            <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 scroll-smooth-x no-scrollbar">
-              {mealPlan.map((m: any, i: number) => {
-                const isToday = i === todayMealIndex;
-                return (
-                  <div
-                    key={m.day}
-                    className={`scroll-snap-child shrink-0 flex flex-col items-center gap-1.5 rounded-2xl px-3 py-3 min-w-[80px] transition-all duration-200 ${
-                      isToday
-                        ? "border-2 border-nori-500/40 accent-glow glass-subtle"
-                        : "glass hover:border-white/8 hover:bg-surface-2/60"
-                    }`}
-                  >
-                    <span
-                      className={`text-[10px] font-semibold uppercase tracking-wide ${
-                        isToday ? "text-nori-400" : "text-text-secondary/80"
-                      }`}
-                    >
-                      {m.day}
-                    </span>
-                    {isToday && (
-                      <span className="bg-nori-500/20 text-nori-400 text-[9px] px-1.5 py-0.5 rounded-full font-medium">
-                        TODAY
-                      </span>
-                    )}
-                    <span className="text-2xl">{m.emoji}</span>
-                    <span className="text-[10px] text-text-muted text-center leading-tight truncate w-full font-bold">
-                      {m.meal}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </motion.section>
-
-          {/* Tasks */}
-          <motion.section variants={item}>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-text-primary font-semibold text-base">Tasks</h2>
-              <Link href="/tasks" className="text-nori-400 text-xs font-medium hover:text-nori-300">
-                View all →
-              </Link>
-            </div>
-            <Card className="isometric-card !p-4">
-              <div className="space-y-4">
-                {pendingTasks.map((task: any) => (
-                  <div key={task.id} className={`flex items-center gap-3 ${taskPointBorder(task.points)} rounded-lg pl-3 pr-2 py-2 -mx-3`}>
-                    <div className="w-10 h-10 rounded-xl bg-surface-3 border border-white/5 flex items-center justify-center text-xl shrink-0 shadow-inner group-hover:scale-110 transition-transform">
-                      {task.emoji}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p
-                        className={`text-sm font-medium truncate ${
-                          task.done ? "line-through text-text-muted" : "text-text-primary"
-                        }`}
-                      >
-                        {task.title}
-                      </p>
-                      <p className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">
-                        {task.assigned} · {task.due}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-xs text-amber-400 font-bold">
-                        +{task.points}
-                      </span>
-                      <Avatar 
-                        name={task.assigned} 
-                        emoji={task.assigneeEmoji} 
-                        color={task.assigneeColor} 
-                        size="sm" 
-                        variant="emoji" 
-                      />
-                    </div>
-                  </div>
-                ))}
-                {pendingTasks.length === 0 && (
-                  <p className="text-center text-text-muted text-xs py-4">
-                    All tasks completed! Great job.
-                  </p>
-                )}
-              </div>
-            </Card>
-          </motion.section>
         </div>
       </motion.div>
+      </WidgetProvider>
     </PageShell>
   );
 }

@@ -29,8 +29,18 @@ export default function WeatherWidget({
   currentCondition = "Partly Cloudy",
   currentEmoji = "⛅",
   forecast: initialForecast,
-}: WeatherWidgetProps) {
-  const [unit, setUnit] = useState<"F" | "C">("F");
+  onLocationChange,
+  unit: externalUnit,
+  onUnitChange,
+}: WeatherWidgetProps & {
+  onLocationChange?: (loc: string) => void;
+  unit?: "F" | "C";
+  onUnitChange?: (u: "F" | "C") => void;
+}) {
+  const [internalUnit, setInternalUnit] = useState<"F" | "C">("F");
+  const unit = externalUnit ?? internalUnit;
+  const setUnit = onUnitChange ?? setInternalUnit;
+
   const [expanded, setExpanded] = useState(false);
   const [locationState, setLocationState] = useState(location);
   const [isEditingLocation, setIsEditingLocation] = useState(false);
@@ -62,13 +72,24 @@ export default function WeatherWidget({
               type="text"
               value={locationState}
               onChange={(e) => setLocationState(e.target.value)}
-              onBlur={() => setIsEditingLocation(false)}
-              onKeyDown={(e) => { if (e.key === 'Enter') setIsEditingLocation(false); }}
+              onBlur={() => {
+                setIsEditingLocation(false);
+                if (onLocationChange) onLocationChange(locationState);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  setIsEditingLocation(false);
+                  if (onLocationChange) onLocationChange(locationState);
+                }
+              }}
               className="bg-surface-2 px-1 rounded text-xs w-24 focus:outline-none"
               autoFocus
             />
           ) : (
-            <span onClick={() => setIsEditingLocation(true)} className="cursor-pointer hover:text-nori-400">{locationState}</span>
+            <span onClick={() => setIsEditingLocation(true)} className="cursor-pointer hover:text-nori-400 flex items-center gap-1">
+            {locationState}
+            <span className="text-[10px] opacity-60">✎</span>
+          </span>
           )}
         </div>
         <button
