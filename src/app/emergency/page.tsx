@@ -32,9 +32,10 @@ const DEFAULT_SITUATIONS: EmergencySituation[] = [
 
 export default function EmergencyPage() {
   const [contacts, setContacts] = useState<EmergencyContact[]>([]);
-  const [situations] = useState<EmergencySituation[]>(DEFAULT_SITUATIONS);
+  const [situations, setSituations] = useState<EmergencySituation[]>(DEFAULT_SITUATIONS);
   const [isAdding, setIsAdding] = useState(false);
   const [editingContact, setEditingContact] = useState<EmergencyContact | null>(null);
+  const [editingSituation, setEditingSituation] = useState<EmergencySituation | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Form state
@@ -42,9 +43,15 @@ export default function EmergencyPage() {
   const [phone, setPhone] = useState("");
   const [emoji, setEmoji] = useState("👤");
   const [relationship, setRelationship] = useState("");
+  // Situation form state
+  const [sitLabel, setSitLabel] = useState("");
+  const [sitIcon, setSitIcon] = useState("❓");
+  const [sitDesc, setSitDesc] = useState("");
+  const [sitContact, setSitContact] = useState("");
 
   useEffect(() => {
     loadContacts();
+    loadSituations();
 
     // Real-time subscription — Consuela can push contact updates live
     pb.collection("emergency_contacts").subscribe("*", () => {
@@ -65,6 +72,13 @@ export default function EmergencyPage() {
       setContacts([]);
     } finally {
       setLoading(false);
+    }
+  }
+
+  function loadSituations() {
+    const saved = localStorage.getItem("customSituations");
+    if (saved) {
+      setSituations([...DEFAULT_SITUATIONS, ...JSON.parse(saved)]);
     }
   }
 
@@ -107,6 +121,52 @@ export default function EmergencyPage() {
     setRelationship("");
     setIsAdding(false);
     setEditingContact(null);
+    // reset situation form too
+    setSitLabel("");
+    setSitIcon("❓");
+    setSitDesc("");
+    setSitContact("");
+    setEditingSituation(null);
+  }
+
+  function saveCustomSituations(customs: EmergencySituation[]) {
+    localStorage.setItem("customSituations", JSON.stringify(customs));
+    setSituations([...DEFAULT_SITUATIONS, ...customs]);
+  }
+
+  function startEditingSituation(sit: EmergencySituation) {
+    setEditingSituation(sit);
+    setSitLabel(sit.label);
+    setSitIcon(sit.icon);
+    setSitDesc(sit.desc);
+    setSitContact(sit.contact);
+    setIsAdding(true);
+  }
+
+  async function handleSaveSituation() {
+    if (!sitLabel || !sitDesc) return;
+    const newSit: EmergencySituation = {
+      id: editingSituation ? editingSituation.id : `custom-${Date.now()}`,
+      label: sitLabel,
+      icon: sitIcon,
+      desc: sitDesc,
+      contact: sitContact || "Call home",
+    };
+    const customs = situations.filter(s => s.id.startsWith("custom-")).filter(s => editingSituation ? s.id !== editingSituation.id : true);
+    if (editingSituation) {
+      const idx = customs.findIndex(s => s.id === editingSituation.id);
+      if (idx >= 0) customs[idx] = newSit; else customs.push(newSit);
+    } else {
+      customs.push(newSit);
+    }
+    saveCustomSituations(customs);
+    resetForm();
+  }
+
+  function handleDeleteSituation(id: string) {
+    if (!confirm("Remove this situation?")) return;
+    const customs = situations.filter(s => s.id.startsWith("custom-") && s.id !== id);
+    saveCustomSituations(customs);
   }
 
   return (
@@ -190,16 +250,34 @@ export default function EmergencyPage() {
 
         {/* Common Situations */}
         <section>
-          <h2 className="text-text-primary font-semibold text-base mb-3">Common Situations</h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-text-primary font-semibold text-base">Common Situations</h2>
+            <button
+              onClick={() => { resetForm(); setEditingSituation(null); setIsAdding(true); }}
+              className="w-8 h-8 flex items-center justify-center rounded-xl bg-nori-500/15 text-nori-400 hover:bg-nori-500/25 transition-colors"
+            >
+              +
+            </button>
+          </div>
           <div className="space-y-2">
             {situations.map((type) => (
-              <Card key={type.id} className="flex items-center gap-3">
+              <Card key={type.id} className="flex items-center gap-3 relative group">
                 <span className="text-2xl">{type.icon}</span>
                 <div className="flex-1">
                   <p className="text-text-primary text-sm font-medium">{type.label}</p>
                   <p className="text-text-muted text-xs">{type.desc}</p>
                 </div>
                 <span className="text-xs text-text-secondary">{type.contact}</span>
+                {type.id.startsWith("custom-") && (
+                  <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => startEditingSituation(type)} className="w-6 h-6 rounded-lg bg-surface-2 hover:bg-nori-500/10 text-text-muted hover:text-nori-400 flex items-center justify-center transition-all">
+                      ✏️
+                    </button>
+                    <button onClick={() => handleDeleteSituation(type.id)} className="w-6 h-6 rounded-lg bg-surface-2 hover:bg-rose-500/10 text-text-muted hover:text-rose-400 flex items-center justify-center transition-all">
+                      🗑
+                    </button>
+                  </div>
+                )}
               </Card>
             ))}
           </div>
@@ -230,47 +308,66 @@ export default function EmergencyPage() {
           <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto z-[70] p-6 bg-surface-1 rounded-t-[32px] shadow-2xl border-t border-white/10">
             <div className="w-12 h-1.5 bg-surface-4 rounded-full mx-auto mb-6" />
             <h3 className="text-xl font-bold text-text-primary mb-6">
-              {editingContact ? "Edit Contact" : "Add Emergency Contact"}
+              {editingContact ? "Edit Contact" : editingSituation ? "Edit Situation" : "Add Emergency Contact"}
             </h3>
             <div className="space-y-4">
-              <div className="flex gap-3">
-                <input
-                  type="text"
-                  value={emoji}
-                  onChange={(e) => setEmoji(e.target.value)}
-                  placeholder="😊"
-                  className="w-16 px-3 py-3 rounded-2xl bg-surface-2 border border-surface-3 text-text-primary text-center text-xl focus:outline-none focus:border-nori-500/50"
-                />
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Name..."
-                  className="flex-1 px-4 py-3 rounded-2xl bg-surface-2 border border-surface-3 text-text-primary focus:outline-none focus:border-nori-500/50"
-                />
-              </div>
-              <input
-                type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="Phone number..."
-                className="w-full px-4 py-3 rounded-2xl bg-surface-2 border border-surface-3 text-text-primary focus:outline-none focus:border-nori-500/50"
-              />
-              <input
-                type="text"
-                value={relationship}
-                onChange={(e) => setRelationship(e.target.value)}
-                placeholder="Relationship (Mom, Dad, etc.)..."
-                className="w-full px-4 py-3 rounded-2xl bg-surface-2 border border-surface-3 text-text-primary focus:outline-none focus:border-nori-500/50"
-              />
-              <div className="flex gap-3 pt-2">
-                <Button variant="ghost" className="flex-1" onClick={resetForm}>
-                  Cancel
-                </Button>
-                <Button variant="primary" className="flex-1" disabled={!name || !phone} onClick={handleSave}>
-                  {editingContact ? "Save Changes" : "Add Contact"}
-                </Button>
-              </div>
+              {editingSituation ? (
+                <>
+                  <div className="flex gap-3">
+                    <input type="text" value={sitIcon} onChange={(e) => setSitIcon(e.target.value)} placeholder="❓" className="w-16 px-3 py-3 rounded-2xl bg-surface-2 border border-surface-3 text-text-primary text-center text-xl focus:outline-none focus:border-nori-500/50" />
+                    <input type="text" value={sitLabel} onChange={(e) => setSitLabel(e.target.value)} placeholder="Label..." className="flex-1 px-4 py-3 rounded-2xl bg-surface-2 border border-surface-3 text-text-primary focus:outline-none focus:border-nori-500/50" />
+                  </div>
+                  <input type="text" value={sitDesc} onChange={(e) => setSitDesc(e.target.value)} placeholder="Description..." className="w-full px-4 py-3 rounded-2xl bg-surface-2 border border-surface-3 text-text-primary focus:outline-none focus:border-nori-500/50" />
+                  <input type="text" value={sitContact} onChange={(e) => setSitContact(e.target.value)} placeholder="Suggested contact..." className="w-full px-4 py-3 rounded-2xl bg-surface-2 border border-surface-3 text-text-primary focus:outline-none focus:border-nori-500/50" />
+                  <div className="flex gap-3 pt-2">
+                    <Button variant="ghost" className="flex-1" onClick={resetForm}>Cancel</Button>
+                    <Button variant="primary" className="flex-1" disabled={!sitLabel || !sitDesc} onClick={handleSaveSituation}>
+                      {editingSituation ? "Save Changes" : "Add Situation"}
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex gap-3">
+                    <input
+                      type="text"
+                      value={emoji}
+                      onChange={(e) => setEmoji(e.target.value)}
+                      placeholder="😊"
+                      className="w-16 px-3 py-3 rounded-2xl bg-surface-2 border border-surface-3 text-text-primary text-center text-xl focus:outline-none focus:border-nori-500/50"
+                    />
+                    <input
+                      type="text"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="Name..."
+                      className="flex-1 px-4 py-3 rounded-2xl bg-surface-2 border border-surface-3 text-text-primary focus:outline-none focus:border-nori-500/50"
+                    />
+                  </div>
+                  <input
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="Phone number..."
+                    className="w-full px-4 py-3 rounded-2xl bg-surface-2 border border-surface-3 text-text-primary focus:outline-none focus:border-nori-500/50"
+                  />
+                  <input
+                    type="text"
+                    value={relationship}
+                    onChange={(e) => setRelationship(e.target.value)}
+                    placeholder="Relationship (Mom, Dad, etc.)..."
+                    className="w-full px-4 py-3 rounded-2xl bg-surface-2 border border-surface-3 text-text-primary focus:outline-none focus:border-nori-500/50"
+                  />
+                  <div className="flex gap-3 pt-2">
+                    <Button variant="ghost" className="flex-1" onClick={resetForm}>
+                      Cancel
+                    </Button>
+                    <Button variant="primary" className="flex-1" disabled={!name || !phone} onClick={handleSave}>
+                      {editingContact ? "Save Changes" : "Add Contact"}
+                    </Button>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </>

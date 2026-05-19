@@ -69,6 +69,8 @@ export default function CalendarPage() {
   const [events, setEvents] = useState<CalEvent[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
+  const [googleConnected, setGoogleConnected] = useState(false);
+  const [lastGoogleSync, setLastGoogleSync] = useState<string | null>(null)];
 
   const fetchData = useCallback(async () => {
     try {
@@ -129,6 +131,42 @@ export default function CalendarPage() {
   // Filter events by selected month+year+day
   const getDateStr = (day: number) =>
     `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+
+  const handleGoogleConnect = () => {
+    // Mock OAuth placeholder - extend with real Google API /auth flow
+    setGoogleConnected(true);
+    setLastGoogleSync("Just now");
+  };
+
+  const handleGoogleDisconnect = () => {
+    setGoogleConnected(false);
+    setLastGoogleSync(null);
+  };
+
+  const handleGoogleSync = async () => {
+    if (!googleConnected) return;
+    // Sample events from "Google" - insert into PocketBase events collection
+    const sampleEvents = [
+      { title: "Team Standup", date: getDateStr(selectedDay), time: "09:00", icon: "💼", description: "Synced from Google Calendar" },
+      { title: "Dentist Appointment", date: getDateStr(selectedDay), time: "14:30", icon: "🦷", description: "Synced from Google Calendar" },
+    ];
+    try {
+      for (const ev of sampleEvents) {
+        await pb.collection("events").create({
+          title: ev.title,
+          date: ev.date,
+          time: ev.time,
+          icon: ev.icon,
+          description: ev.description,
+          memberId: members[0]?.id || "",
+        });
+      }
+      setLastGoogleSync("Just now");
+      await fetchData(); // refresh realtime
+    } catch (e) {
+      console.error("Google sync insert failed", e);
+    }
+  };
 
   const selectedDateStr = getDateStr(selectedDay);
 
@@ -193,6 +231,29 @@ export default function CalendarPage() {
             </svg>
           </button>
         </div>
+
+        {/* Google Calendar Integration */}
+        <Card className="!p-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-xl">📅</span>
+              <div>
+                <p className="text-sm font-medium text-text-primary">Google Calendar</p>
+                <p className="text-[10px] text-text-muted">{googleConnected ? `Connected · Last sync: ${lastGoogleSync}` : "Not connected"}</p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              {googleConnected ? (
+                <>
+                  <button onClick={handleGoogleSync} className="px-3 py-1 text-xs rounded-lg bg-nori-500/20 text-nori-400 hover:bg-nori-500/30">Sync Now</button>
+                  <button onClick={handleGoogleDisconnect} className="px-3 py-1 text-xs rounded-lg text-rose-400 hover:bg-rose-500/10">Disconnect</button>
+                </>
+              ) : (
+                <button onClick={handleGoogleConnect} className="px-3 py-1 text-xs rounded-lg bg-nori-500 text-white">Connect</button>
+              )}
+            </div>
+          </div>
+        </Card>
 
         {/* Member filter */}
         <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4">

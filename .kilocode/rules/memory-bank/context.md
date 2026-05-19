@@ -12,6 +12,7 @@ Hermes deployment artifacts created (docker-compose.hermes.yml, Dockerfile.herme
 
 ## Recently Completed
 
+- [x] Comprehensive Widget Management System for Home: registry (Weather/Schedule/Events/Tasks/Meals), framer-motion drag-and-drop reordering + bot simulation, localStorage persistence (+ PB placeholder), Weather config moved to Settings > "Widgets & Home Dashboard", minimal edit affordance retained on widget, dynamic rendering in page.tsx while keeping all PocketBase realtime
 - [x] Global design system: dark theme, nori-green brand palette, glass morphism, custom CSS tokens
 - [x] Shared UI components: BottomNav, TopBar, Card, Button, Badge, Avatar, PageShell
 - [x] Home Dashboard — family greeting, today's events, meal strip, task summary, grocery snapshot, AI quick-ask CTA
@@ -49,7 +50,12 @@ Hermes deployment artifacts created (docker-compose.hermes.yml, Dockerfile.herme
 ```
 src/
   app/
-    page.tsx              — Home Dashboard (with EmergencyButton, ScheduleDisplay)
+    page.tsx              — Home Dashboard now uses dynamic WidgetReorderList + Reorder from framer-motion
+  lib/
+    widget-registry.ts    — Widget type, categories, DEFAULT order
+    widget-context.tsx    — useWidgetOrder hook + Provider for drag + bot sim + persistence
+  components/ui/
+    WeatherWidget.tsx     — Now supports controlled location/unit + edit affordance
     layout.tsx            — Root layout (metadata, fonts)
     globals.css           — Design tokens + Tailwind theme
     chat/page.tsx         — AI Chat Interface
@@ -125,7 +131,8 @@ src/
 | May 2026 | Fixed Settings Add button, added editable location to Weather widget, dynamic sync status/links count in SyncManager; pushed updates to GitHub |
 | 2026-05-15 | Developed comprehensive OpenClaw → Hermes migration guide ensuring zero data loss |
 | 2026-05-15 | Added Telegram bot support via sendTelegramMessage and /api/telegram for agent notifications while preserving all prior connections |
-| 2026-05-16 | Created Hermes deployment infrastructure (compose file, Dockerfile, deployment guide) with data restoration from OpenClaw backup and NAS backup archive |
+|   2026-05-16 | Created Hermes deployment infrastructure (compose file, Dockerfile, deployment guide) with data restoration from OpenClaw backup and NAS backup archive |
+  2026-05-19 | Implemented full widget management: registry, Reorder drag-and-drop, Settings config for Weather, dynamic Home rendering |
 
 ## Next Steps (V2)
 

@@ -35,6 +35,10 @@ export default function SyncManager({ onConnect, onDisconnect, onSync }: SyncMan
         : service
     ));
     onConnect?.(serviceId);
+    if (serviceId === "google-calendar") {
+      // Mock OAuth success - extend here for real Google OAuth
+      console.log("[Google Calendar] Mock OAuth connected");
+    }
   };
 
   const handleDisconnect = (serviceId: string) => {
@@ -53,6 +57,10 @@ export default function SyncManager({ onConnect, onDisconnect, onSync }: SyncMan
         : service
     ));
     onSync?.(serviceId);
+    if (serviceId === "google-calendar") {
+      // Placeholder: extend to real Google Calendar API fetch + PB insert
+      console.log("[Google Calendar] Sync triggered - mock events can be pulled");
+    }
   };
 
   return (
