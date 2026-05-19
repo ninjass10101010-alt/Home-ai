@@ -70,7 +70,7 @@ export default function CalendarPage() {
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [googleConnected, setGoogleConnected] = useState(false);
-  const [lastGoogleSync, setLastGoogleSync] = useState<string | null>(null)];
+  const [lastGoogleSync, setLastGoogleSync] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     try {

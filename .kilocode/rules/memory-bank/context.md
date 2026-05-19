@@ -44,6 +44,7 @@ Hermes deployment artifacts created (docker-compose.hermes.yml, Dockerfile.herme
 - [x] Created docs/hermes-deployment-guide.md with SSH, build, deploy, and full data restoration instructions
 - [x] Backed up all OpenClaw container data to NAS (1.4GB archive at /share/CACHEDEV1_DATA/homes/admin/hermes-migration-20260515/openclaw-full.tar.gz)
 - [x] Discovered OpenClaw identity: agent "Drogon", user "Jeff", Telegram bot token active, 10+ OpenRouter models, 3 sub-agents
+- [x] Emergency page improvements: made Common Situations editable (add/edit/delete custom via modal + localStorage persistence), polished contact editing with full flow/better validation/visual consistency, kept tel: links + 911 card
 
 ## File Structure
 
@@ -133,6 +134,7 @@ src/
 | 2026-05-15 | Added Telegram bot support via sendTelegramMessage and /api/telegram for agent notifications while preserving all prior connections |
 |   2026-05-16 | Created Hermes deployment infrastructure (compose file, Dockerfile, deployment guide) with data restoration from OpenClaw backup and NAS backup archive |
   2026-05-19 | Implemented full widget management: registry, Reorder drag-and-drop, Settings config for Weather, dynamic Home rendering |
+  2026-05-19 | Improved Emergency page with editable situations list (manual add/edit/delete) and polished contact editing |
 
 ## Next Steps (V2)
 
