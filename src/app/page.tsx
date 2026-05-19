@@ -14,11 +14,15 @@ import ScheduleDisplay from "@/components/ui/ScheduleDisplay";
 import pb from "@/lib/pocketbase";
 import { WidgetProvider, useWidgetOrder } from "@/lib/widget-context";
 import { DEFAULT_WIDGET_ORDER } from "@/lib/widget-registry";
+import TaskEditor from "@/components/tasks/TaskEditor";
+import MealEditor from "@/components/meals/MealEditor";
 
 export default function HomePage() {
   const [greeting, setGreeting] = useState("Good afternoon");
   const [data, setData] = useState<any>(null);
   const [dateInfo, setDateInfo] = useState({ dayName: "", dateStr: "" });
+  const [showTaskEditor, setShowTaskEditor] = useState(false);
+  const [showMealEditor, setShowMealEditor] = useState(false);
 
   useEffect(() => {
     const today = new Date();
@@ -198,8 +202,11 @@ export default function HomePage() {
       if (id === 'events') return { id, content: (
         <motion.section key="events" variants={item}>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-text-primary font-semibold text-base">Today</h2>
-            <Link href="/calendar" className="text-nori-400 text-xs font-medium hover:text-nori-300">View all →</Link>
+            <h2 className="text-text-primary font-semibold text-base">Today&apos;s Events</h2>
+            <div className="flex gap-2">
+              <Link href="/calendar" className="text-nori-400 text-xs font-medium hover:text-nori-300">Edit →</Link>
+              <Link href="/calendar" className="text-nori-400 text-xs font-medium hover:text-nori-300">View all →</Link>
+            </div>
           </div>
           <div className="space-y-2">
             {data.events.map((ev: any) => (
@@ -221,7 +228,10 @@ export default function HomePage() {
         <motion.section key="meals" variants={item}>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-text-primary font-semibold text-base">This Week&apos;s Meals</h2>
-            <Link href="/meals" className="text-nori-400 text-xs font-medium hover:text-nori-300">Plan →</Link>
+            <div className="flex gap-2">
+              <button onClick={() => setShowMealEditor(true)} className="text-nori-400 text-xs font-medium hover:text-nori-300">Edit</button>
+              <Link href="/meals" className="text-nori-400 text-xs font-medium hover:text-nori-300">Plan →</Link>
+            </div>
           </div>
           <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 scroll-smooth-x no-scrollbar">
             {mealPlan.map((m: any, i: number) => {
@@ -242,7 +252,10 @@ export default function HomePage() {
         <motion.section key="tasks" variants={item}>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-text-primary font-semibold text-base">Tasks</h2>
-            <Link href="/tasks" className="text-nori-400 text-xs font-medium hover:text-nori-300">View all →</Link>
+            <div className="flex gap-2">
+              <button onClick={() => setShowTaskEditor(true)} className="text-nori-400 text-xs font-medium hover:text-nori-300">Edit</button>
+              <Link href="/tasks" className="text-nori-400 text-xs font-medium hover:text-nori-300">View all →</Link>
+            </div>
           </div>
           <Card className="isometric-card !p-4">
             <div className="space-y-4">
@@ -433,6 +446,10 @@ export default function HomePage() {
         </div>
       </motion.div>
       </WidgetProvider>
+
+      {/* Editors for consistent edit paths on home widgets */}
+      <TaskEditor isOpen={showTaskEditor} onClose={() => setShowTaskEditor(false)} members={familyMembers} />
+      <MealEditor isOpen={showMealEditor} onClose={() => setShowMealEditor(false)} />
     </PageShell>
   );
 }

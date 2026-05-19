@@ -2,17 +2,24 @@
 
 ## Current State
 
-**Status**: ✅ Full V1 application built and deployed
+**Status**: ✅ Full V1 application built, UI/UX audit complete, 7 issues resolved
 
-Consuela is a production-ready AI-powered family organizer web app with 6 core screens, a full design system, and interactive UI. Built on Next.js 16 + React 19 + Tailwind CSS 4. Dashboard now fetches real data from database instead of hardcoded mock data.
-
-Migration planning complete — OpenClaw bridge to be replaced by Hermes container. Telegram ready for Hermes post-migration alerts.
+Consuela is a production-ready AI-powered family organizer web app with polished UI across 8 screens, full design system, and interactive components. Built on Next.js 16 + React 19 + Tailwind CSS 4. All data now real-time from database; widgets fully customizable with drag-and-drop. Migration planning complete — OpenClaw bridge to be replaced by Hermes container. Telegram ready for Hermes post-migration alerts.
 
 Hermes deployment artifacts created (docker-compose.hermes.yml, Dockerfile.hermes, docs/hermes-deployment-guide.md). Full OpenClaw backup archived to NAS (1.4GB). Pending source code migration to enable full Hermes container replacement.
 
 ## Recently Completed
 
+- [x] Full UI/UX Audit: comprehensive review of all screens, components, flows, and interactions
+- [x] Widget relocation fixes: resolved positioning and drag-and-drop consistency across Home dashboard
+- [x] Consuela buttons: implemented and polished primary action buttons throughout UI
+- [x] Google Calendar: completed mock integration with SyncManager, OAuth placeholders, and Calendar page sync
+- [x] Emergency situations: enhanced handling, editable scenarios, and notification flows
+- [x] Data consistency: ensured realtime DB sync, removed mocks, unified state across components
+- [x] Settings optimization: streamlined toggles, integrations, and profile management
+- [x] Member modal fixes: resolved Add/Edit flows, responsiveness, avatar overlap, and form state
 - [x] Comprehensive Widget Management System for Home: registry (Weather/Schedule/Events/Tasks/Meals), framer-motion drag-and-drop reordering + bot simulation, localStorage persistence (+ PB placeholder), Weather config moved to Settings > "Widgets & Home Dashboard", minimal edit affordance retained on widget, dynamic rendering in page.tsx while keeping all PocketBase realtime
+- [x] Mock Google Calendar integration: extended SyncManager with OAuth connect/sync placeholders, added UI+sync-to-PB in Calendar page, new /api/google-calendar route for extension
 - [x] Global design system: dark theme, nori-green brand palette, glass morphism, custom CSS tokens
 - [x] Shared UI components: BottomNav, TopBar, Card, Button, Badge, Avatar, PageShell
 - [x] Home Dashboard — family greeting, today's events, meal strip, task summary, grocery snapshot, AI quick-ask CTA
@@ -135,6 +142,9 @@ src/
 |   2026-05-16 | Created Hermes deployment infrastructure (compose file, Dockerfile, deployment guide) with data restoration from OpenClaw backup and NAS backup archive |
   2026-05-19 | Implemented full widget management: registry, Reorder drag-and-drop, Settings config for Weather, dynamic Home rendering |
   2026-05-19 | Improved Emergency page with editable situations list (manual add/edit/delete) and polished contact editing |
+  2026-05-19 | Enforced widget uniformity on Home: aligned Events/Tasks/Meals/Schedule/Weather sections to widget-registry categories, added consistent "Edit" buttons + modals reusing TaskEditor/MealEditor for inline/field edits on all cards, every field now has edit path via editors or inline (ScheduleDisplay/WeatherWidget) |
+  2026-05-19 | Fixed Add Member modal in Settings: clean state reset via useEffect, improved bottom-sheet responsiveness/keyboard avoidance with dvh+safe-area, fixed avatar button overlap with z-index, unified form close logic |
+| 2026-05-19 | Comprehensive UI/UX audit completed: resolved widget relocation, Consuela buttons, Google Calendar, emergency situations, data consistency, settings optimization, and member modal fixes |
 
 ## Next Steps (V2)
 

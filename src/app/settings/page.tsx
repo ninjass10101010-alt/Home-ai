@@ -22,8 +22,19 @@ const ROLES: { value: MemberRole; label: string; emoji: string }[] = [
   { value: "other", label: "Other", emoji: "👤" },
 ];
 
-function ToggleRow({ label, description, defaultOn = false }: { label: string; description?: string; defaultOn?: boolean }) {
-  const [on, setOn] = useState(defaultOn);
+function ToggleRow({ label, description, storageKey, defaultOn = false }: { label: string; description?: string; storageKey: string; defaultOn?: boolean }) {
+  const [on, setOn] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(storageKey);
+      return saved !== null ? saved === 'true' : defaultOn;
+    }
+    return defaultOn;
+  });
+  const toggle = () => {
+    const next = !on;
+    setOn(next);
+    localStorage.setItem(storageKey, String(next));
+  };
   return (
     <div className="flex items-center justify-between py-3 border-b border-surface-3 last:border-0">
       <div className="flex-1 min-w-0 pr-4">
@@ -31,7 +42,7 @@ function ToggleRow({ label, description, defaultOn = false }: { label: string; d
         {description && <p className="text-text-muted text-xs mt-0.5">{description}</p>}
       </div>
       <button
-        onClick={() => setOn(!on)}
+        onClick={toggle}
         className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${
           on ? "bg-nori-500" : "bg-surface-4"
         }`}
@@ -79,6 +90,18 @@ export default function SettingsPage() {
     loadMembers();
   }, []);
 
+  // Clean form state on modal open/close
+  useEffect(() => {
+    if (!isAdding && !editingMember) {
+      setName("");
+      setRole("other");
+      setEmoji("👤");
+      setAge("");
+      setProfileImage(undefined);
+      setIsGenerating(false);
+    }
+  }, [isAdding, editingMember]);
+
   async function loadMembers() {
     try {
       const data = await pb.collection("members").getFullList();
@@ -94,6 +117,7 @@ export default function SettingsPage() {
     if (!name) return;
     setLoading(true);
     await pb.collection("members").create({ name, role, emoji, age, profileImage });
+    setIsAdding(false);
     resetForm();
     await loadMembers();
   }
@@ -113,7 +137,6 @@ export default function SettingsPage() {
     setEmoji("👤");
     setAge("");
     setProfileImage(undefined);
-    setIsAdding(false);
   }
 
   async function handleDeleteMember(id: string) {
@@ -130,6 +153,7 @@ export default function SettingsPage() {
     setEmoji(member.emoji || "👤");
     setAge(member.age || "");
     setProfileImage(member.profileImage);
+    setIsAdding(false);
   }
 
   // Handle Photo Selection
@@ -284,9 +308,9 @@ export default function SettingsPage() {
           <h3 className="text-text-primary font-semibold text-base mb-4">App Settings</h3>
           <Card>
             <div className="divide-y divide-surface-3">
-                <ToggleRow label="Event reminders" description="1 hour before events" defaultOn={true} />
-                <ToggleRow label="Voice input" description="Use microphone for commands" defaultOn={true} />
-                <ToggleRow label="Smart suggestions" description="Consuela proactively helps" defaultOn={true} />
+                <ToggleRow label="Event reminders" description="1 hour before events" storageKey="settings-reminders" defaultOn={true} />
+                <ToggleRow label="Voice input" description="Use microphone for commands" storageKey="settings-voice" defaultOn={true} />
+                <ToggleRow label="Smart suggestions" description="Consuela proactively helps" storageKey="settings-suggestions" defaultOn={true} />
             </div>
           </Card>
         </section>
@@ -330,7 +354,9 @@ export default function SettingsPage() {
 
         <section className="pb-10">
           <Card>
-             <SettingsRow icon="🚪" label="Sign out" danger />
+             <button onClick={() => { pb.authStore.clear(); window.location.href = '/'; }} className="w-full">
+               <SettingsRow icon="🚪" label="Sign out" danger />
+             </button>
           </Card>
         </section>
       </div>
@@ -350,7 +376,7 @@ export default function SettingsPage() {
               initial={{ opacity: 0, y: 100, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 100, scale: 0.95 }}
-              className="fixed bottom-0 left-0 right-0 max-w-md mx-auto z-[70] p-6 bg-surface-1 rounded-t-[32px] shadow-2xl border-t border-white/10 max-h-[90vh] overflow-y-auto"
+              className="fixed bottom-0 left-0 right-0 max-w-md mx-auto z-[70] p-6 bg-surface-1 rounded-t-[32px] shadow-2xl border-t border-white/10 max-h-[85dvh] overflow-y-auto pb-safe"
             >
               <div className="w-12 h-1.5 bg-surface-4 rounded-full mx-auto mb-6" />
               <h3 className="text-xl font-bold text-text-primary mb-6">
@@ -376,11 +402,11 @@ export default function SettingsPage() {
                                 </svg>
                             </div>
                         </label>
-                        <button 
+                         <button 
                             onClick={generateAIEmoji}
                             disabled={isGenerating}
-                            className="absolute -bottom-2 -right-2 w-8 h-8 rounded-full bg-nori-500 text-white flex items-center justify-center shadow-lg hover:scale-110 active:scale-95 transition-all disabled:opacity-50"
-                        >
+                            className="absolute -bottom-1 -right-1 w-8 h-8 rounded-full bg-nori-500 text-white flex items-center justify-center shadow-lg hover:scale-110 active:scale-95 transition-all disabled:opacity-50 z-10"
+                          >
                             {isGenerating ? (
                                 <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
