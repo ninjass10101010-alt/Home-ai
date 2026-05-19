@@ -17,8 +17,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid emergency type" }, { status: 400 });
     }
 
-    // Fetch emergency contacts from database (members with phone numbers)
-    const contacts = await db.select().from("members").where("phone != ''").execute();
+    // Fetch emergency contacts from database
+    const contacts = await db.select().from().where().execute();
 
     if (contacts.length === 0) {
       console.error("No primary emergency contacts configured");

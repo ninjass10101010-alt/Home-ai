@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import PageShell from "@/components/ui/PageShell";
 import TopBar from "@/components/ui/TopBar";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import Avatar from "@/components/ui/Avatar";
 import Link from "next/link";
-import pb from "@/lib/pocketbase";
+import { db } from "@/db";
 
 const DAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 const MONTHS = [
@@ -15,25 +15,30 @@ const MONTHS = [
   "July", "August", "September", "October", "November", "December",
 ];
 
+const members = db.selectMembersForCalendar();
+
 interface CalEvent {
-  id: string;
+  id: number;
   title: string;
   time: string;
-  date: string; // YYYY-MM-DD
-  memberId?: string;
-  member?: string;
-  memberEmoji?: string;
+  member: string;
   color: "green" | "violet" | "amber" | "cyan" | "rose";
   emoji: string;
-  description?: string;
+  day: number;
 }
 
-interface Member {
-  id: string;
-  name: string;
-  emoji: string;
-  role: string;
-}
+const events: CalEvent[] = [
+  { id: 1, title: "Soccer Practice", time: "4:00 PM", member: "Jake", color: "violet", emoji: "⚽", day: 18 },
+  { id: 2, title: "Piano Lesson", time: "3:00 PM", member: "Lily", color: "amber", emoji: "🎹", day: 19 },
+  { id: 3, title: "Team Dinner", time: "7:00 PM", member: "Dad", color: "cyan", emoji: "🍽️", day: 19 },
+  { id: 4, title: "Dentist — Lily", time: "2:00 PM", member: "Lily", color: "amber", emoji: "🦷", day: 21 },
+  { id: 5, title: "Car Service", time: "10:00 AM", member: "Dad", color: "cyan", emoji: "🚗", day: 21 },
+  { id: 6, title: "Movie Night", time: "8:00 PM", member: "All", color: "green", emoji: "🎬", day: 22 },
+  { id: 7, title: "Park Picnic", time: "11:00 AM", member: "All", color: "green", emoji: "🌳", day: 23 },
+  { id: 8, title: "Grocery Run", time: "10:00 AM", member: "Mom", color: "green", emoji: "🛒", day: 20 },
+  { id: 9, title: "Swim Class", time: "9:00 AM", member: "Jake", color: "violet", emoji: "🏊", day: 25 },
+  { id: 10, title: "Book Club", time: "6:30 PM", member: "Mom", color: "green", emoji: "📚", day: 26 },
+];
 
 const dotColors: Record<string, string> = {
   green: "bg-nori-400",
@@ -51,74 +56,12 @@ const badgeVariants: Record<string, "green" | "violet" | "amber" | "cyan" | "ros
   rose: "rose",
 };
 
-function getMemberColor(role: string): "green" | "violet" | "amber" | "cyan" | "rose" {
-  const r = role?.toLowerCase() || "";
-  if (r === "mom" || r === "parent") return "green";
-  if (r === "dad") return "cyan";
-  if (r === "son" || r === "child") return "violet";
-  if (r === "daughter") return "amber";
-  return "rose";
-}
-
 export default function CalendarPage() {
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
   const [selectedDay, setSelectedDay] = useState(today.getDate());
   const [filterMember, setFilterMember] = useState("All");
-  const [events, setEvents] = useState<CalEvent[]>([]);
-  const [members, setMembers] = useState<Member[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [googleConnected, setGoogleConnected] = useState(false);
-  const [lastGoogleSync, setLastGoogleSync] = useState<string | null>(null);
-
-  const fetchData = useCallback(async () => {
-    try {
-      const [rawMembers, rawEvents] = await Promise.all([
-        pb.collection("members").getFullList<Member>(),
-        pb.collection("events").getFullList({ sort: "date,time" }),
-      ]);
-
-      setMembers(rawMembers);
-
-      const mapped: CalEvent[] = rawEvents.map((e: any) => {
-        const m = rawMembers.find((rm) => rm.id === e.memberId);
-        return {
-          id: e.id,
-          title: e.title,
-          time: e.time || "All Day",
-          date: e.date || "",
-          memberId: e.memberId,
-          member: m?.name || e.member || "Family",
-          memberEmoji: m?.emoji || "👤",
-          color: m ? getMemberColor(m.role) : "violet",
-          emoji: e.icon || e.emoji || "📅",
-          description: e.description || "",
-        };
-      });
-
-      setEvents(mapped);
-    } catch (err) {
-      console.error("Failed to load calendar data:", err);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchData();
-
-    // Real-time subscriptions
-    pb.collection("events").subscribe("*", fetchData);
-    pb.collection("members").subscribe("*", fetchData);
-
-    return () => {
-      pb.collection("events").unsubscribe("*");
-      pb.collection("members").unsubscribe("*");
-    };
-  }, [fetchData]);
-
-  const allMembers = [{ id: "All", name: "All", emoji: "👨‍👩‍👧‍👦", role: "" }, ...members];
 
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -128,74 +71,32 @@ export default function CalendarPage() {
     ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
   ];
 
-  // Filter events by selected month+year+day
-  const getDateStr = (day: number) =>
-    `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-
-  const handleGoogleConnect = () => {
-    // Mock OAuth placeholder - extend with real Google API /auth flow
-    setGoogleConnected(true);
-    setLastGoogleSync("Just now");
-  };
-
-  const handleGoogleDisconnect = () => {
-    setGoogleConnected(false);
-    setLastGoogleSync(null);
-  };
-
-  const handleGoogleSync = async () => {
-    if (!googleConnected) return;
-    // Sample events from "Google" - insert into PocketBase events collection
-    const sampleEvents = [
-      { title: "Team Standup", date: getDateStr(selectedDay), time: "09:00", icon: "💼", description: "Synced from Google Calendar" },
-      { title: "Dentist Appointment", date: getDateStr(selectedDay), time: "14:30", icon: "🦷", description: "Synced from Google Calendar" },
-    ];
-    try {
-      for (const ev of sampleEvents) {
-        await pb.collection("events").create({
-          title: ev.title,
-          date: ev.date,
-          time: ev.time,
-          icon: ev.icon,
-          description: ev.description,
-          memberId: members[0]?.id || "",
-        });
-      }
-      setLastGoogleSync("Just now");
-      await fetchData(); // refresh realtime
-    } catch (e) {
-      console.error("Google sync insert failed", e);
-    }
-  };
-
-  const selectedDateStr = getDateStr(selectedDay);
-
   const selectedEvents = events.filter(
     (e) =>
-      e.date === selectedDateStr &&
-      (filterMember === "All" || e.member === filterMember || e.member === "Family")
+      e.day === selectedDay &&
+      (filterMember === "All" || e.member === filterMember || e.member === "All")
   );
 
-  const dayEventMap = new Map<string, CalEvent[]>();
+  const dayEventMap = new Map<number, CalEvent[]>();
   events.forEach((e) => {
-    if (!dayEventMap.has(e.date)) dayEventMap.set(e.date, []);
-    dayEventMap.get(e.date)!.push(e);
+    if (!dayEventMap.has(e.day)) dayEventMap.set(e.day, []);
+    dayEventMap.get(e.day)!.push(e);
   });
 
   const prevMonth = () => {
-    if (month === 0) { setMonth(11); setYear((y) => y - 1); }
-    else setMonth((m) => m - 1);
+    if (month === 0) { setMonth(11); setYear(y => y - 1); }
+    else setMonth(m => m - 1);
   };
   const nextMonth = () => {
-    if (month === 11) { setMonth(0); setYear((y) => y + 1); }
-    else setMonth((m) => m + 1);
+    if (month === 11) { setMonth(0); setYear(y => y + 1); }
+    else setMonth(m => m + 1);
   };
 
   return (
     <PageShell>
       <TopBar
         title="Calendar"
-        subtitle="Garcia Family"
+        subtitle="Johnson Family"
         right={
           <Link
             href="/chat?q=Add+new+event"
@@ -232,32 +133,9 @@ export default function CalendarPage() {
           </button>
         </div>
 
-        {/* Google Calendar Integration */}
-        <Card className="!p-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="text-xl">📅</span>
-              <div>
-                <p className="text-sm font-medium text-text-primary">Google Calendar</p>
-                <p className="text-[10px] text-text-muted">{googleConnected ? `Connected · Last sync: ${lastGoogleSync}` : "Not connected"}</p>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              {googleConnected ? (
-                <>
-                  <button onClick={handleGoogleSync} className="px-3 py-1 text-xs rounded-lg bg-nori-500/20 text-nori-400 hover:bg-nori-500/30">Sync Now</button>
-                  <button onClick={handleGoogleDisconnect} className="px-3 py-1 text-xs rounded-lg text-rose-400 hover:bg-rose-500/10">Disconnect</button>
-                </>
-              ) : (
-                <button onClick={handleGoogleConnect} className="px-3 py-1 text-xs rounded-lg bg-nori-500 text-white">Connect</button>
-              )}
-            </div>
-          </div>
-        </Card>
-
         {/* Member filter */}
         <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4">
-          {allMembers.map((m) => (
+          {members.map((m) => (
             <button
               key={m.name}
               onClick={() => setFilterMember(m.name)}
@@ -275,6 +153,7 @@ export default function CalendarPage() {
 
         {/* Calendar grid */}
         <Card className="!p-3">
+          {/* Day headers */}
           <div className="grid grid-cols-7 mb-2">
             {DAYS.map((d) => (
               <div key={d} className="text-center text-[11px] font-medium text-text-muted py-1">
@@ -283,13 +162,13 @@ export default function CalendarPage() {
             ))}
           </div>
 
+          {/* Day cells */}
           <div className="grid grid-cols-7 gap-y-1">
             {cells.map((day, i) => {
               if (!day) return <div key={i} />;
-              const dateStr = getDateStr(day);
               const isToday = day === today.getDate() && month === today.getMonth() && year === today.getFullYear();
               const isSelected = day === selectedDay;
-              const dayEvents = dayEventMap.get(dateStr) ?? [];
+              const dayEvents = dayEventMap.get(day) ?? [];
               const visibleDots = dayEvents.slice(0, 3);
 
               return (
@@ -329,9 +208,7 @@ export default function CalendarPage() {
                 ? "Today"
                 : `${MONTHS[month].slice(0, 3)} ${selectedDay}`}
               {" "}
-              <span className="text-text-muted font-normal">
-                {loading ? "loading..." : `(${selectedEvents.length} events)`}
-              </span>
+              <span className="text-text-muted font-normal">({selectedEvents.length} events)</span>
             </h3>
             <Link
               href={`/chat?q=Add+event+on+${MONTHS[month]}+${selectedDay}`}
@@ -341,11 +218,7 @@ export default function CalendarPage() {
             </Link>
           </div>
 
-          {loading ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="w-8 h-8 border-4 border-nori-500/30 border-t-nori-500 rounded-full animate-spin" />
-            </div>
-          ) : selectedEvents.length === 0 ? (
+          {selectedEvents.length === 0 ? (
             <Card className="!p-6 flex flex-col items-center gap-2">
               <span className="text-3xl">📅</span>
               <p className="text-text-secondary text-sm text-center">No events this day</p>
@@ -367,10 +240,9 @@ export default function CalendarPage() {
                     <div className="flex-1 min-w-0">
                       <p className="text-text-primary text-sm font-medium truncate">{ev.title}</p>
                       <p className="text-text-muted text-xs mt-0.5">{ev.time}</p>
-                      {ev.description && <p className="text-text-muted text-xs mt-0.5 truncate">{ev.description}</p>}
                     </div>
                     <div className="flex flex-col items-end gap-1.5">
-                      <Badge variant={badgeVariants[ev.color] ?? "green"}>{ev.member}</Badge>
+                      <Badge variant={badgeVariants[ev.color] ?? "gray"}>{ev.member}</Badge>
                     </div>
                   </div>
                 </Card>
@@ -379,32 +251,34 @@ export default function CalendarPage() {
           )}
         </section>
 
-        {/* Upcoming events */}
-        <section className="pb-24">
+        {/* Upcoming */}
+        <section className="pb-2">
           <h3 className="text-text-primary font-semibold text-sm mb-3">Upcoming</h3>
           <div className="space-y-2">
             {events
-              .filter((e) => e.date > selectedDateStr)
-              .slice(0, 5)
-              .map((ev) => {
-                const d = new Date(ev.date + "T12:00:00");
-                return (
-                  <div key={ev.id} className="flex items-center gap-3 px-1">
-                    <div className={`w-1 h-8 rounded-full shrink-0 ${dotColors[ev.color]}`} />
-                    <div className="w-10 text-center">
-                      <p className="text-[10px] text-text-muted">
-                        {MONTHS[d.getMonth()].slice(0, 3)}
-                      </p>
-                      <p className="text-sm font-semibold text-text-primary leading-tight">{d.getDate()}</p>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-text-primary text-sm truncate">{ev.title}</p>
-                      <p className="text-text-muted text-xs">{ev.time} · {ev.member}</p>
-                    </div>
-                    <span className="text-lg shrink-0">{ev.emoji}</span>
+              .filter((e) => e.day > selectedDay)
+              .slice(0, 4)
+              .map((ev) => (
+                <div
+                  key={ev.id}
+                  className="flex items-center gap-3 px-1"
+                >
+                  <div
+                    className={`w-1 h-8 rounded-full shrink-0 ${dotColors[ev.color]}`}
+                  />
+                  <div className="w-10 text-center">
+                    <p className="text-[10px] text-text-muted">
+                      {MONTHS[month].slice(0, 3)}
+                    </p>
+                    <p className="text-sm font-semibold text-text-primary leading-tight">{ev.day}</p>
                   </div>
-                );
-              })}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-text-primary text-sm truncate">{ev.title}</p>
+                    <p className="text-text-muted text-xs">{ev.time} · {ev.member}</p>
+                  </div>
+                  <span className="text-lg shrink-0">{ev.emoji}</span>
+                </div>
+              ))}
           </div>
         </section>
       </div>

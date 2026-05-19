@@ -4,12 +4,10 @@ import { useState, useRef, useEffect } from "react";
 import BottomNav from "@/components/ui/BottomNav";
 import Avatar from "@/components/ui/Avatar";
 import Badge from "@/components/ui/Badge";
-import pb from "@/lib/pocketbase";
-import { Icon3D } from "@/components/3d";
-// Deleted server action import removed
+import { getAIResponse } from "@/actions/chat";
 
 interface Message {
-  id: string | number;
+  id: number;
   role: "user" | "assistant";
   content: string;
   timestamp: string;
@@ -182,7 +180,7 @@ function renderContent(text: string) {
 }
 
 export default function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(true);
@@ -191,78 +189,9 @@ export default function ChatPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<any>(null);
 
-  // Fetch initial chat logs from PocketBase and subscribe to real-time additions
-  useEffect(() => {
-    const fetchHistory = async () => {
-      try {
-        const history = await pb.collection("chat_history").getFullList({ sort: "created" });
-        if (history.length > 0) {
-          setMessages(history.map((h: any) => ({
-            id: h.id,
-            role: h.role,
-            content: h.content,
-            timestamp: h.timestamp || "Just now",
-            actions: h.actions || []
-          })));
-          setShowSuggestions(false);
-        } else {
-          setMessages(initialMessages);
-        }
-      } catch (e) {
-        const saved = sessionStorage.getItem("chat_history_fallback");
-        if (saved) {
-          setMessages(JSON.parse(saved));
-          setShowSuggestions(false);
-        } else {
-          setMessages(initialMessages);
-        }
-      }
-    };
 
-    fetchHistory();
-
-    // Save to sessionStorage whenever messages change
-    pb.collection("chat_history").subscribe("*", (e) => {
-      if (e.action === "create") {
-        const newMsg: Message = {
-          id: e.record.id,
-          role: e.record.role as "user" | "assistant",
-          content: e.record.content,
-          timestamp: e.record.timestamp || "Just now",
-          actions: e.record.actions || []
-        };
-        setMessages((prev) => {
-          if (prev.some((m) => m.id === newMsg.id)) return prev;
-          return [...prev, newMsg];
-        });
-        setShowSuggestions(false);
-      } else if (e.action === "delete") {
-        setMessages(initialMessages);
-        setShowSuggestions(true);
-      }
-    });
-
-    return () => {
-      pb.collection("chat_history").unsubscribe("*");
-    };
-  }, []);
-
-  const clearChat = async () => {
-    try {
-      const list = await pb.collection("chat_history").getFullList();
-      await Promise.all(list.map(item => pb.collection("chat_history").delete(item.id)));
-    } catch (e) {
-      console.warn("Failed to clear database history:", e);
-    }
-    setMessages(initialMessages);
-    sessionStorage.removeItem("chat_history_fallback");
-    setShowSuggestions(true);
-  };
 
   useEffect(() => {
-    if (messages.length > 0) {
-      sessionStorage.setItem("chat_history_fallback", JSON.stringify(messages));
-    }
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isTyping]);
 
@@ -301,77 +230,46 @@ export default function ChatPage() {
   const sendMessage = async (text: string) => {
     if (!text.trim()) return;
 
-    // 1. Create User message in PocketBase so it is persisted in the database history
-    let userRecord: any = null;
-    const clientTimestamp = new Date().toLocaleTimeString("en-US", { timeZone: "America/Detroit", hour: '2-digit', minute: '2-digit' });
-    try {
-      userRecord = await pb.collection("chat_history").create({
-        role: "user",
-        content: text.trim(),
-        timestamp: clientTimestamp,
-        sessionId: "default-session"
-      });
-    } catch (e) {
-      console.warn("⚠️ Failed to write user message to PocketBase history:", e);
-    }
+    msgCounter.current += 1;
+    const msgId = msgCounter.current;
 
-    const localUserMsg: Message = {
-      id: userRecord?.id || String(Date.now()),
+    const userMsg: Message = {
+      id: msgId,
       role: "user",
       content: text.trim(),
-      timestamp: clientTimestamp,
+      timestamp: "Just now",
     };
 
-    const updatedHistory = [...messages, localUserMsg];
-    setMessages(updatedHistory);
+    setMessages((prev) => [...prev, userMsg]);
     setInput("");
     setIsTyping(true);
     setShowSuggestions(false);
 
     try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: text.trim(),
-          history: updatedHistory.map(m => ({ role: m.role, content: m.content }))
-        }),
-      });
-
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-
-      // The backend API route now writes the AI's reply to the chat_history collection.
-      // PocketBase subscriptions will catch and render the AI message in real-time.
-      // We also handle JSON mapping here just in case.
-      const data = await res.json() as { reply: string; actions?: any[] };
-      
-      // Update locally immediately to ensure instant response if subscription has any lag
-      const assistantMsg: Message = {
-        id: String(Date.now() + 1),
-        role: "assistant",
-        content: data.reply,
-        timestamp: new Date().toLocaleTimeString("en-US", { timeZone: "America/Detroit", hour: '2-digit', minute: '2-digit' }),
-        actions: data.actions
-      };
-      setMessages((prev) => {
-        if (prev.some((m) => m.content === assistantMsg.content && m.role === "assistant")) return prev;
-        return [...prev, assistantMsg];
-      });
-    } catch (err: any) {
-      console.error("❌ Failed to send chat message:", err);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: String(Date.now() + 2),
-          role: "assistant",
-          content: `⚠️ Sorry, I ran into an error connecting to my AI brain: ${err.message}`,
-          timestamp: "Just now"
-        }
-      ]);
-    } finally {
+      const aiResponse = await getAIResponse(text);
       setIsTyping(false);
+      msgCounter.current += 1;
+      const response: Message = {
+        id: msgCounter.current,
+        role: "assistant",
+        content: aiResponse.content,
+        timestamp: "Just now",
+        actions: aiResponse.actions?.map(action => ({
+          ...action,
+          confirmed: true, // Assume confirmed for now
+        })),
+      };
+      setMessages((prev) => [...prev, response]);
+    } catch (error) {
+      setIsTyping(false);
+      msgCounter.current += 1;
+      const errorResponse: Message = {
+        id: msgCounter.current,
+        role: "assistant",
+        content: "Sorry, I'm having trouble right now. Please try again.",
+        timestamp: "Just now",
+      };
+      setMessages((prev) => [...prev, errorResponse]);
     }
   };
 
@@ -407,8 +305,8 @@ export default function ChatPage() {
           borderBottom: "1px solid rgba(255,255,255,0.04)",
         }}
       >
-        <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 bg-nori-500/10 consuela-glow border border-nori-500/20">
-          <Icon3D variant="chat" size="sm" />
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl shrink-0 bg-nori-500/15 consuela-glow">
+          ✨
         </div>
         <div className="flex-1 min-w-0">
           <h1 className="text-base font-semibold text-text-primary">Consuela</h1>
@@ -417,18 +315,10 @@ export default function ChatPage() {
             <span className="text-xs text-text-secondary">AI Family Assistant</span>
           </div>
         </div>
-        
-        {/* Clear chat button */}
-        <button
-          onClick={clearChat}
-          title="Clear Chat History"
-          className="w-9 h-9 flex items-center justify-center rounded-xl bg-surface-2 text-text-secondary hover:text-red-400 transition-colors"
-        >
+        <button className="w-9 h-9 flex items-center justify-center rounded-xl bg-surface-2 text-text-secondary hover:text-text-primary transition-colors">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
-            <path d="M3 6h18" strokeLinecap="round" strokeLinejoin="round" />
-            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" strokeLinecap="round" strokeLinejoin="round" />
-            <line x1="10" y1="11" x2="10" y2="17" strokeLinecap="round" strokeLinejoin="round" />
-            <line x1="14" y1="11" x2="14" y2="17" strokeLinecap="round" strokeLinejoin="round" />
+            <circle cx="11" cy="11" r="8" />
+            <path d="m21 21-4.35-4.35" strokeLinecap="round" />
           </svg>
         </button>
       </div>

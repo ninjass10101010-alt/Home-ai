@@ -109,6 +109,21 @@ const navItems = [
     ),
   },
   {
+    href: "/grocery",
+    label: "Grocery",
+    icon: (active: boolean) => (
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={active ? 2.5 : 1.8}
+        className="w-6 h-6"
+      >
+        <path d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13l-1.35 2.7a1 1 0 001.35 1.3h12M7 13h10M10 21a2 2 0 100-4 2 2 0 000 4zm8 0a2 2 0 100-4 2 2 0 000 4z" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
     href: "/emergency",
     label: "Emergency",
     icon: (active: boolean) => (
@@ -160,58 +175,45 @@ export default function BottomNav() {
         >
           {navItems.map((item) => {
             const isActive = pathname === item.href;
-            const isSelfRef = item.href === "/chat" && isActive;
-            const content = (
-              <>
-                {item.primary ? (
-                  <span
-                    className={`flex items-center justify-center w-10 h-10 rounded-xl transition-all duration-200 ${
-                      isActive
-                        ? "text-nori-400 bg-nori-500/10 widget-glow"
-                        : "text-text-secondary group-hover:text-text-primary group-hover:bg-white/5"
-                    } ${isSelfRef ? "opacity-60" : ""}`}
-                  >
-                    {item.icon(isActive)}
-                  </span>
-                ) : (
-                  <span
-                    className={`flex items-center justify-center w-10 h-10 rounded-xl transition-all duration-200 ${
-                      isActive
-                        ? "text-nori-400 bg-nori-500/10"
-                        : "text-text-secondary group-hover:text-text-primary group-hover:bg-white/5"
-                    } ${isSelfRef ? "opacity-60" : ""}`}
-                  >
-                    {item.icon(isActive)}
-                  </span>
-                )}
-                <span
-                  className={`text-[8px] font-bold uppercase tracking-tighter transition-colors duration-200 ${
-                    isActive
-                      ? "text-nori-400"
-                      : "text-text-muted"
-                  }`}
-                >
-                  {item.label === "Ask Consuela" ? "Consuela" : item.label}
-                </span>
-              </>
-            );
-            return isSelfRef ? (
-              <div
-                key={item.href}
-                className="flex flex-col items-center gap-0.5 flex-1 py-1 cursor-default"
-                aria-label={item.label}
-                aria-current="page"
-              >
-                {content}
-              </div>
-            ) : (
+            return (
               <Link
                 key={item.href}
                 href={item.href}
                 className="flex flex-col items-center gap-0.5 flex-1 py-1 group"
                 aria-label={item.label}
               >
-                {content}
+                {item.primary ? (
+                  <span
+                    className={`flex items-center justify-center w-12 h-10 rounded-xl transition-all duration-200 ${
+                      isActive
+                        ? "bg-nori-500 text-surface-0 consuela-glow"
+                        : "bg-nori-500/15 text-nori-400 group-hover:bg-nori-500/25"
+                    }`}
+                  >
+                    {item.icon(isActive)}
+                  </span>
+                ) : (
+                  <span
+                    className={`flex items-center justify-center w-10 h-8 rounded-lg transition-all duration-200 ${
+                      isActive
+                        ? "text-nori-400"
+                        : "text-text-secondary group-hover:text-text-primary"
+                    }`}
+                  >
+                    {item.icon(isActive)}
+                  </span>
+                )}
+                <span
+                  className={`text-[10px] font-medium transition-colors duration-200 ${
+                    isActive
+                      ? item.primary
+                        ? "text-nori-400"
+                        : "text-nori-400"
+                      : "text-text-muted"
+                  }`}
+                >
+                  {item.label}
+                </span>
               </Link>
             );
           })}
