@@ -54,6 +54,65 @@
   --radius-full: 9999px;
 }
 
+/* ─── Light Mode Color Tokens ─── */
+@media (prefers-color-scheme: light), [data-theme="light"] {
+  :root {
+    --color-nori-50: #eff6ff;
+    --color-nori-100: #dbeafe;
+    --color-nori-200: #bfdbfe;
+    --color-nori-300: #93c5fd;
+    --color-nori-400: #60a5fa;
+    --color-nori-500: #3b82f6;
+    --color-nori-600: #2563eb;
+    --color-nori-700: #1d4ed8;
+    --color-nori-800: #1e40af;
+    --color-nori-900: #1e3a8a;
+    --color-nori-950: #172554;
+
+    --color-surface-0: #ffffff;
+    --color-surface-1: #f8f9fb;
+    --color-surface-2: #f0f2f7;
+    --color-surface-3: #e7ebf3;
+    --color-surface-4: #dde3ed;
+    --color-surface-5: #d3dae7;
+    --color-surface-6: #c9d1e0;
+    --color-surface-7: #bfc6d8;
+
+    --color-text-primary: #1a1a1a;
+    --color-text-secondary: #5a5a5a;
+    --color-text-muted: #8a8a8a;
+    --color-text-dim: #ababab;
+
+    --color-accent-violet: #7c3aed;
+    --color-accent-amber: #d97706;
+    --color-accent-rose: #e11d48;
+    --color-accent-cyan: #0891b2;
+    --color-accent-lavender: #9333ea;
+    --color-accent-coral: #f97316;
+    --color-accent-mint: #059669;
+    --color-accent-pink: #ec4899;
+    --color-accent-sky: #0ea5e9;
+    --color-accent-teal: #14b8a6;
+
+    --color-gradient-start: #7c3aed;
+    --color-gradient-end: #e11d48;
+  }
+}
+
+/* ─── High Contrast Mode ─── */
+@media (prefers-contrast: more), [data-contrast="boost"] {
+  :root {
+    --color-text-primary: #000000;
+    --color-text-secondary: #2d2d2d;
+    --color-text-muted: #666666;
+  }
+
+  [data-theme="dark"] {
+    --color-text-primary: #ffffff;
+    --color-surface-0: #000000;
+  }
+}
+
 /* Smooth scrolling */
 html {
   scroll-behavior: smooth;
@@ -80,6 +139,7 @@ body {
   color: var(--color-text-primary);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 /* ─── Gradient text variants ─── */
@@ -111,6 +171,15 @@ body {
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+  transition: background 0.15s ease, border 0.15s ease, box-shadow 0.15s ease;
+}
+
+@media (prefers-color-scheme: light), [data-theme="light"] {
+  .glass {
+    background: rgba(255, 255, 255, 0.6);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+  }
 }
 
 .glass-strong {
@@ -119,6 +188,15 @@ body {
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid rgba(255, 255, 255, 0.3);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+  transition: background 0.15s ease, border 0.15s ease, box-shadow 0.15s ease;
+}
+
+@media (prefers-color-scheme: light), [data-theme="light"] {
+  .glass-strong {
+    background: rgba(255, 255, 255, 0.8);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  }
 }
 
 /* Darker glass for subtle surfaces (blends into deep color backgrounds) */
@@ -128,6 +206,15 @@ body {
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.05);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+  transition: background 0.15s ease, border 0.15s ease, box-shadow 0.15s ease;
+}
+
+@media (prefers-color-scheme: light), [data-theme="light"] {
+  .glass-subtle {
+    background: rgba(255, 255, 255, 0.4);
+    border: 1px solid rgba(0, 0, 0, 0.03);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  }
 }
 
 /* ─── Isometric card ─── */
