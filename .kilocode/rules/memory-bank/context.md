@@ -52,6 +52,7 @@ Hermes deployment artifacts created (docker-compose.hermes.yml, Dockerfile.herme
 - [x] Backed up all OpenClaw container data to NAS (1.4GB archive at /share/CACHEDEV1_DATA/homes/admin/hermes-migration-20260515/openclaw-full.tar.gz)
 - [x] Discovered OpenClaw identity: agent "Drogon", user "Jeff", Telegram bot token active, 10+ OpenRouter models, 3 sub-agents
 - [x] Emergency page improvements: made Common Situations editable (add/edit/delete custom via modal + localStorage persistence), polished contact editing with full flow/better validation/visual consistency, kept tel: links + 911 card
+- [x] UI integration wave for now-functional meal pantry sync system: direct mealSyncService calls in meals/page.tsx (bypass API, two sync buttons with loading/disable, counts, error toasts), grocery/page.tsx (all mutations now persist via upsert/deleteGroceryItem, prefer db on load with mapper for emojis/categories, added Sync from Pantry + recent affected by lastSyncedAt count/note, loading on sync/bulks), db/index.ts (seeding at stores bottom with length===0 once flag, variety statuses/sources from pages, added deleteGroceryItem). Form validation, no new deps, uses existing glass/nori design. Type/lint run (pre-existing unrelated errs).
 
 ## File Structure
 
@@ -145,6 +146,7 @@ src/
   2026-05-19 | Enforced widget uniformity on Home: aligned Events/Tasks/Meals/Schedule/Weather sections to widget-registry categories, added consistent "Edit" buttons + modals reusing TaskEditor/MealEditor for inline/field edits on all cards, every field now has edit path via editors or inline (ScheduleDisplay/WeatherWidget) |
   2026-05-19 | Fixed Add Member modal in Settings: clean state reset via useEffect, improved bottom-sheet responsiveness/keyboard avoidance with dvh+safe-area, fixed avatar button overlap with z-index, unified form close logic |
 | 2026-05-19 | Comprehensive UI/UX audit completed: resolved widget relocation, Consuela buttons, Google Calendar, emergency situations, data consistency, settings optimization, and member modal fixes |
+| 2026-05-20 | UI integration wave for functional meal/pantry/grocery sync: wired direct calls + dual sync buttons + toasts + loading in meals/page, full persist + Sync from Pantry + recent-sync note in grocery/page, conditional once seeding + delete in db/index.ts. Verified via targeted checks. |
 
 ## Next Steps (V2)
 
