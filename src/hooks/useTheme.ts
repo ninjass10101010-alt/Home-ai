@@ -1,3 +1,5 @@
+'use client';
+
 import { useState, useEffect, useCallback, createContext, useContext, ReactNode } from 'react';
 import { ThemeConfig, ThemeMode, AccentColor, defaultThemeConfig, THEME_STORAGE_KEY } from '@/lib/theme-config';
 

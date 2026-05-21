@@ -53,7 +53,7 @@
 }
 
 /* ─── Light Mode Color Tokens ─── */
-@media (prefers-color-scheme: light), [data-theme="light"] {
+@media (prefers-color-scheme: light) {
   :root {
     /* LIGHT MODE PALETTE */
     --color-surface-0: #ffffff   /* Main background */
@@ -94,10 +94,7 @@
   /* No subtle/translucent elements */
   
   /* Override for light mode in high contrast */
-  [data-theme="light"] & {
-    --color-text-primary: #ffffff;
-    --color-text-secondary: #f0f0f0;
-  }
+  /* Removed nested selector for compatibility */
 }
 
 /* Ensure all borders increase to 2px in high contrast mode */
@@ -171,7 +168,7 @@ body {
   transition: background 0.15s ease, border 0.15s ease, box-shadow 0.15s ease;
 }
 
-@media (prefers-color-scheme: light), [data-theme="light"] {
+@media (prefers-color-scheme: light) {
   .glass {
     background: rgba(255, 255, 255, 0.6);
     border: 1px solid rgba(0, 0, 0, 0.06);
@@ -188,7 +185,7 @@ body {
   transition: background 0.15s ease, border 0.15s ease, box-shadow 0.15s ease;
 }
 
-@media (prefers-color-scheme: light), [data-theme="light"] {
+@media (prefers-color-scheme: light) {
   .glass-strong {
     background: rgba(255, 255, 255, 0.8);
     border: 1px solid rgba(0, 0, 0, 0.08);
@@ -206,7 +203,7 @@ body {
   transition: background 0.15s ease, border 0.15s ease, box-shadow 0.15s ease;
 }
 
-@media (prefers-color-scheme: light), [data-theme="light"] {
+@media (prefers-color-scheme: light) {
   .glass-subtle {
     background: rgba(255, 255, 255, 0.4);
     border: 1px solid rgba(0, 0, 0, 0.03);
