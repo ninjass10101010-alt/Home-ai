@@ -1,8 +1,10 @@
+'use client';
+
 import { useTheme } from '@/hooks/useTheme';
 
 export const ThemeToggle = () => {
   const { theme, toggleTheme } = useTheme();
-  const isDark = theme.mode === 'dark' || (theme.mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const isDark = theme.mode === 'dark' || (theme.mode === 'system' && typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches);
 
   return (
     <button

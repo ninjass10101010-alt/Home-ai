@@ -1,8 +1,6 @@
-import { useTheme } from "@/hooks/useTheme";
-
 interface BadgeProps {
   children: React.ReactNode;
-  variant?: "default" | "accent" | "outline" | "status";
+  variant?: "default" | "accent" | "outline" | "status" | "green" | "violet" | "amber" | "cyan" | "rose" | "gray" | string;
   statusVariant?: "success" | "pending" | "urgent";
   size?: "sm" | "md" | "lg";
   className?: string;
@@ -15,7 +13,6 @@ export default function Badge({
   size = "md", 
   className = "" 
 }: BadgeProps) {
-  const { theme } = useTheme();
   
   // Size configurations
   const sizeMap: Record<string, string> = {
@@ -56,6 +53,12 @@ export default function Badge({
       border-none
       text-[var(--color-text-on-accent)]
     `,
+    green: `bg-[var(--color-accent-mint)]/20 text-[var(--color-accent-mint)] border-none`,
+    violet: `bg-[var(--color-accent-violet)]/20 text-[var(--color-accent-violet)] border-none`,
+    amber: `bg-[var(--color-accent-amber)]/20 text-[var(--color-accent-amber)] border-none`,
+    cyan: `bg-[var(--color-accent-cyan)]/20 text-[var(--color-accent-cyan)] border-none`,
+    rose: `bg-[var(--color-accent-rose)]/20 text-[var(--color-accent-rose)] border-none`,
+    gray: `bg-[var(--color-surface-3)] text-[var(--color-text-secondary)] border-none`,
   };
 
   // Status-specific background colors

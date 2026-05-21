@@ -25,22 +25,24 @@ export const useTheme = () => {
 export const ThemeProvider = ({ children }: { children: ReactNode }) => {
   // Initialize theme state from localStorage or defaults
   const [theme, setTheme] = useState<ThemeConfig>(() => {
-    const saved = localStorage.getItem(THEME_STORAGE_KEY);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        // Validate the parsed object has the required properties
-        if (
-          parsed.mode &&
-          ['light', 'dark', 'system'].includes(parsed.mode) &&
-          parsed.accentColor &&
-          ['nori', 'violet', 'rose', 'cyan', 'mint', 'amber'].includes(parsed.accentColor) &&
-          typeof parsed.contrastBoost === 'boolean'
-        ) {
-          return parsed;
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(THEME_STORAGE_KEY);
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          // Validate the parsed object has the required properties
+          if (
+            parsed.mode &&
+            ['light', 'dark', 'system'].includes(parsed.mode) &&
+            parsed.accentColor &&
+            ['nori', 'violet', 'rose', 'cyan', 'mint', 'amber'].includes(parsed.accentColor) &&
+            typeof parsed.contrastBoost === 'boolean'
+          ) {
+            return parsed;
+          }
+        } catch (e) {
+          console.error('Failed to parse theme config from localStorage', e);
         }
-      } catch (e) {
-        console.error('Failed to parse theme config from localStorage', e);
       }
     }
     return defaultThemeConfig;
@@ -126,11 +128,9 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
     setTheme((prev) => ({ ...prev, contrastBoost: boost }));
   }, []);
 
-  return {
-    theme,
-    toggleTheme,
-    setMode,
-    setAccentColor,
-    setContrastBoost,
-  };
+  return (
+    <ThemeContext.Provider value={{ theme, toggleTheme, setMode, setAccentColor, setContrastBoost }}>
+      {children}
+    </ThemeContext.Provider>
+  );
 };

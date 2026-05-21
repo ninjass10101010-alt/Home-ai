@@ -1,5 +1,3 @@
-import { useTheme } from "@/hooks/useTheme";
-
 interface CardProps {
   children: React.ReactNode;
   className?: string;
@@ -15,7 +13,6 @@ export default function Card({
   glow, 
   variant = "standard" 
 }: CardProps) {
-  const { theme } = useTheme();
   
   // Base styles for all card variants
   const baseStyles = `

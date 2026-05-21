@@ -38,11 +38,11 @@ export default function SettingsPage() {
     { id: 'cyan', label: 'Cyan', dark: '#06b6d4', light: '#0891b2' },
     { id: 'mint', label: 'Mint', dark: '#4ade80', light: '#059669' },
     { id: 'amber', label: 'Amber', dark: '#f59e0b', light: '#d97706' },
-  ];
+  ] as const;
   
   // Determine current accent color values based on mode
-  const getAccentColor = (option) => {
-    const isDark = mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const getAccentColor = (option: typeof accentOptions[number]) => {
+    const isDark = mode === 'dark' || (mode === 'system' && typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches);
     return isDark ? option.dark : option.light;
   };
 
@@ -143,11 +143,17 @@ export default function SettingsPage() {
                     className="sr-only"
                   />
                   <div className="flex flex-col items-center">
-                    <div className={`w-10 h-10 rounded-xl bg-[var(--color-accent-${option.id})]/80 hover:bg-[var(--color-accent-${option.id})]/100 transition-[background-color,opacity] duration-200 border-[2px] border-transparent ${accentColor === option.id ? `border-[var(--color-accent-${option.id})] scale-[1.05]` : ''} `} 
-                         inset-shadow-[0_0_20px_var(--color-accent-${option.id})/50] 
-                         drop-shadow-[0_0_24px_var(--color-accent-${option.id})/40] 
-                         ${accentColor === option.id ? 'scale-[1.05]' : ''}">
-                    </div>
+                    <div 
+                      className={`w-10 h-10 rounded-xl transition-[background-color,transform,border-color] duration-200 border-2 ${
+                        accentColor === option.id 
+                          ? 'border-[var(--color-accent-selected)] scale-105' 
+                          : 'border-transparent hover:scale-105'
+                      }`}
+                      style={{ 
+                        backgroundColor: `var(--color-accent-${option.id})`,
+                        boxShadow: accentColor === option.id ? `0 0 12px var(--color-accent-${option.id})` : 'none'
+                      }}
+                    />
                     <p className="text-xs text-text-secondary mt-1 capitalize">{option.label}</p>
                   </div>
                 </label>
