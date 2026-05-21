@@ -186,8 +186,8 @@ export default function BottomNav() {
                   <span
                     className={`flex items-center justify-center w-12 h-10 rounded-xl transition-all duration-200 ${
                       isActive
-                        ? "bg-nori-500 text-surface-0 consuela-glow"
-                        : "bg-nori-500/15 text-nori-400 group-hover:bg-nori-500/25"
+                        ? "bg-[var(--color-accent-selected)] text-[var(--color-text-on-accent)] consuela-glow"
+                        : "bg-[var(--color-accent-selected)]/15 text-[var(--color-accent-selected)] group-hover:bg-[var(--color-accent-selected)]/25"
                     }`}
                   >
                     {item.icon(isActive)}
@@ -196,7 +196,7 @@ export default function BottomNav() {
                   <span
                     className={`flex items-center justify-center w-10 h-8 rounded-lg transition-all duration-200 ${
                       isActive
-                        ? "text-nori-400"
+                        ? "text-[var(--color-accent-selected)]"
                         : "text-text-secondary group-hover:text-text-primary"
                     }`}
                   >
@@ -206,9 +206,7 @@ export default function BottomNav() {
                 <span
                   className={`text-[10px] font-medium transition-colors duration-200 ${
                     isActive
-                      ? item.primary
-                        ? "text-nori-400"
-                        : "text-nori-400"
+                      ? "text-[var(--color-accent-selected)]"
                       : "text-text-muted"
                   }`}
                 >

@@ -1,26 +1,84 @@
+import { useTheme } from "@/hooks/useTheme";
+
 interface BadgeProps {
   children: React.ReactNode;
-  variant?: "green" | "amber" | "rose" | "violet" | "cyan" | "gray";
-  glass?: boolean;
-  size?: "sm" | "md";
+  variant?: "default" | "accent" | "outline" | "status";
+  statusVariant?: "success" | "pending" | "urgent";
+  size?: "sm" | "md" | "lg";
   className?: string;
 }
 
-const variantMap = {
-  green: "bg-nori-500/15 text-nori-400 border-nori-500/20",
-  amber: "bg-amber-500/15 text-amber-400 border-amber-500/20",
-  rose: "bg-rose-500/15 text-rose-400 border-rose-500/20",
-  violet: "bg-violet-500/15 text-violet-400 border-violet-500/20",
-  cyan: "bg-cyan-500/15 text-cyan-400 border-cyan-500/20",
-  gray: "bg-surface-3 text-text-secondary border-surface-4",
-};
+export default function Badge({ 
+  children, 
+  variant = "default", 
+  statusVariant, 
+  size = "md", 
+  className = "" 
+}: BadgeProps) {
+  const { theme } = useTheme();
+  
+  // Size configurations
+  const sizeMap: Record<string, string> = {
+    sm: "px-1.5 py-0.375 text-[0.75rem]",
+    md: "px-2.5 py-0.5 text-[0.875rem]",
+    lg: "px-3 py-0.625 text-[1rem]",
+  };
 
-export default function Badge({ children, variant = "gray", glass, size = "md" }: BadgeProps) {
-  const sizeClass = size === "sm" ? "px-1.5 py-0 text-[10px]" : "px-2 py-0.5 text-[11px]";
-  const glassClass = glass ? "glass backdrop-blur-xl" : "";
+  // Base styles
+  const baseStyles = `
+    inline-flex items-center
+    rounded-full
+    font-medium
+    transition-all duration-200
+    focus-visible:outline-none
+    focus-visible:ring-2 focus-visible:ring-[var(--color-accent-selected)] focus-visible:ring-offset-2
+  `;
+
+  // Variant styles using CSS variables
+  const variantStyles: Record<string, string> = {
+    default: `
+      bg-[var(--color-surface-3)]
+      text-[var(--color-text-secondary)]
+      border-none
+    `,
+    accent: `
+      bg-[var(--color-accent-selected)]
+      text-[var(--color-text-on-accent)]
+      border-none
+    `,
+    outline: `
+      bg-transparent
+      border-[1px] border-[var(--color-accent-selected)]
+      text-[var(--color-accent-selected)]
+    `,
+    status: `
+      bg-transparent
+      border-none
+      text-[var(--color-text-on-accent)]
+    `,
+  };
+
+  // Status-specific background colors
+  const statusBgStyles: Record<string, string> = {
+    success: `
+      bg-[var(--color-accent-mint)]
+    `,
+    pending: `
+      bg-[var(--color-accent-amber)]
+    `,
+    urgent: `
+      bg-[var(--color-accent-rose)]
+    `,
+  };
+
+  // Combine status variant with base variant if status is specified
+  const finalVariantStyles = statusVariant && variant === "status"
+    ? `${variantStyles.status} ${statusBgStyles[statusVariant]}`
+    : variantStyles[variant];
+
   return (
     <span
-      className={`inline-flex items-center ${sizeClass} rounded-full font-medium border ${variantMap[variant]} ${glassClass}`}
+      className={`${baseStyles} ${sizeMap[size]} ${finalVariantStyles} ${className}`}
     >
       {children}
     </span>

@@ -102,7 +102,7 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
                 {!result.success && (
                   <button
                     onClick={() => setResult(null)}
-                    className="w-full px-3 py-2 rounded-xl bg-nori-500 text-white hover:bg-nori-400 transition-colors"
+                    className="w-full px-3 py-2 rounded-xl bg-[var(--color-accent-rose)] text-[var(--color-text-on-accent)] hover:bg-[var(--color-accent-rose)]/90 transition-colors"
                   >
                     Try Again
                   </button>

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ThemeToggle } from "@/components/ui/ThemeToggle";
 
 interface TopBarProps {
   title?: string;
@@ -38,7 +39,10 @@ export default function TopBar({ title, subtitle, right, back }: TopBarProps) {
             <p className="text-xs text-text-secondary truncate leading-tight">{subtitle}</p>
           )}
         </div>
-        {right && <div className="flex items-center gap-2 shrink-0">{right}</div>}
+        <div className="flex items-center gap-2 shrink-0">
+          {right && <div>{right}</div>}
+          <ThemeToggle />
+        </div>
       </div>
     </div>
   );

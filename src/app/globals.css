@@ -14,30 +14,28 @@
   --color-nori-900: #1e3a8a;
   --color-nori-950: #172554;
 
-  --color-surface-0: #0f1117;
-  --color-surface-1: #181c24;
-  --color-surface-2: #1e2330;
-  --color-surface-3: #252c3a;
-  --color-surface-4: #2d3548;
-  --color-surface-5: #323b4d;
-  --color-surface-6: #3a4456;
-  --color-surface-7: #434e60;
+  /* DARK MODE PALETTE (Default) */
+  --color-surface-0: #0f1117   /* Main background */
+  --color-surface-1: #181c24
+  --color-surface-2: #1e2330
+  --color-surface-3: #252c3a
+  --color-surface-4: #2d3548
+  --color-surface-5: #323b4d
+  --color-surface-6: #3a4456
+  --color-surface-7: #434e60   /* Darkest for depth */
 
-  --color-text-primary: #f0f4ff;
-  --color-text-secondary: #8892aa;
-  --color-text-muted: #4e5a72;
-  --color-text-dim: #363e50;
+  --color-text-primary: #f0f4ff   /* Main body text */
+  --color-text-secondary: #8892aa   /* Hints, secondary text */
+  --color-text-muted: #4e5a72   /* Disabled text */
+  --color-text-dim: #363e50   /* Placeholders */
 
-  --color-accent-violet: #7c6ff7;
-  --color-accent-amber: #f59e0b;
-  --color-accent-rose: #f43f5e;
-  --color-accent-cyan: #06b6d4;
-  --color-accent-lavender: #b583ff;
-  --color-accent-coral: #ff6b8a;
-  --color-accent-mint: #4ade80;
-  --color-accent-pink: #f472b6;
-  --color-accent-sky: #38bdf8;
-  --color-accent-teal: #2dd4bf;
+  /* ACCENT COLORS (Dark mode variants) */
+  --color-accent-nori: #3b82f6   /* Selected by default */
+  --color-accent-violet: #7c6ff7
+  --color-accent-rose: #f43f5e
+  --color-accent-cyan: #06b6d4
+  --color-accent-mint: #4ade80
+  --color-accent-amber: #f59e0b
 
   /* Gradient palette */
   --color-gradient-start: #b583ff;
@@ -57,60 +55,59 @@
 /* ─── Light Mode Color Tokens ─── */
 @media (prefers-color-scheme: light), [data-theme="light"] {
   :root {
-    --color-nori-50: #eff6ff;
-    --color-nori-100: #dbeafe;
-    --color-nori-200: #bfdbfe;
-    --color-nori-300: #93c5fd;
-    --color-nori-400: #60a5fa;
-    --color-nori-500: #3b82f6;
-    --color-nori-600: #2563eb;
-    --color-nori-700: #1d4ed8;
-    --color-nori-800: #1e40af;
-    --color-nori-900: #1e3a8a;
-    --color-nori-950: #172554;
+    /* LIGHT MODE PALETTE */
+    --color-surface-0: #ffffff   /* Main background */
+    --color-surface-1: #f8f9fb
+    --color-surface-2: #f0f2f7
+    --color-surface-3: #e7ebf3
+    --color-surface-4: #dde3ed
+    --color-surface-5: #d3dae7
+    --color-surface-6: #c9d1e0
+    --color-surface-7: #bfc6d8   /* Darkest for depth */
 
-    --color-surface-0: #ffffff;
-    --color-surface-1: #f8f9fb;
-    --color-surface-2: #f0f2f7;
-    --color-surface-3: #e7ebf3;
-    --color-surface-4: #dde3ed;
-    --color-surface-5: #d3dae7;
-    --color-surface-6: #c9d1e0;
-    --color-surface-7: #bfc6d8;
+    --color-text-primary: #1a1a1a   /* Main body text */
+    --color-text-secondary: #5a5a5a   /* Hints, secondary text */
+    --color-text-muted: #8a8a8a   /* Disabled text */
+    --color-text-dim: #ababab   /* Placeholders */
 
-    --color-text-primary: #1a1a1a;
-    --color-text-secondary: #5a5a5a;
-    --color-text-muted: #8a8a8a;
-    --color-text-dim: #ababab;
+    /* ACCENT COLORS (Light mode variants - darker for better contrast) */
+    --color-accent-nori: #2563eb   /* Darker shade */
+    --color-accent-violet: #7c3aed
+    --color-accent-rose: #e11d48
+    --color-accent-cyan: #0891b2
+    --color-accent-mint: #059669
+    --color-accent-amber: #d97706
 
-    --color-accent-violet: #7c3aed;
-    --color-accent-amber: #d97706;
-    --color-accent-rose: #e11d48;
-    --color-accent-cyan: #0891b2;
-    --color-accent-lavender: #9333ea;
-    --color-accent-coral: #f97316;
-    --color-accent-mint: #059669;
-    --color-accent-pink: #ec4899;
-    --color-accent-sky: #0ea5e9;
-    --color-accent-teal: #14b8a6;
-
+    /* Gradient palette */
     --color-gradient-start: #7c3aed;
     --color-gradient-end: #e11d48;
   }
 }
 
 /* ─── High Contrast Mode ─── */
-@media (prefers-contrast: more), [data-contrast="boost"] {
-  :root {
-    --color-text-primary: #000000;
-    --color-text-secondary: #2d2d2d;
-    --color-text-muted: #666666;
-  }
-
-  [data-theme="dark"] {
+/* Activates when [data-contrast="boost"] is present on html element */
+[data-contrast="boost"] {
+  --color-text-primary: #000000;  /* Pure black (dark) or #ffffff (light) */
+  --color-text-secondary: #2d2d2d; /* Much darker */
+  
+  /* All elements with opacity > 70% */
+  /* No subtle/translucent elements */
+  
+  /* Override for light mode in high contrast */
+  [data-theme="light"] & {
     --color-text-primary: #ffffff;
-    --color-surface-0: #000000;
+    --color-text-secondary: #f0f0f0;
   }
+}
+
+/* Ensure all borders increase to 2px in high contrast mode */
+[data-contrast="boost"] * {
+  border-width: 2px !important;
+}
+
+/* Ensure no opacity below 70% in high contrast mode */
+[data-contrast="boost"] * {
+  opacity: 0.7 !important;
 }
 
 /* Smooth scrolling */

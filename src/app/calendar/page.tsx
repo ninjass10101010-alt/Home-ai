@@ -41,7 +41,7 @@ const events: CalEvent[] = [
 ];
 
 const dotColors: Record<string, string> = {
-  green: "bg-nori-400",
+  green: "bg-[var(--color-accent-selected)]/400",
   violet: "bg-violet-400",
   amber: "bg-amber-400",
   cyan: "bg-cyan-400",
@@ -100,7 +100,7 @@ export default function CalendarPage() {
         right={
           <Link
             href="/chat?q=Add+new+event"
-            className="w-9 h-9 flex items-center justify-center rounded-xl bg-nori-500/15 text-nori-400 hover:bg-nori-500/25 transition-colors"
+            className="w-9 h-9 flex items-center justify-center rounded-xl bg-[var(--color-accent-selected)]/500/15 text-nori-400 hover:bg-[var(--color-accent-selected)]/500/25 transition-colors"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="w-5 h-5">
               <path d="M12 5v14M5 12h14" strokeLinecap="round" />
@@ -141,7 +141,7 @@ export default function CalendarPage() {
               onClick={() => setFilterMember(m.name)}
               className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${
                 filterMember === m.name
-                  ? "bg-nori-500/20 text-nori-400 border border-nori-500/30"
+                  ? "bg-[var(--color-accent-selected)]/500/20 text-nori-400 border border-nori-500/30"
                   : "glass text-text-secondary border border-surface-3 hover:text-text-primary"
               }`}
             >
@@ -177,9 +177,9 @@ export default function CalendarPage() {
                   onClick={() => setSelectedDay(day)}
                   className={`flex flex-col items-center py-1.5 rounded-xl transition-all ${
                     isSelected
-                      ? "bg-nori-500 text-white"
+                      ? "bg-[var(--color-accent-selected)]/500 text-white"
                       : isToday
-                      ? "bg-nori-500/15 text-nori-400"
+                      ? "bg-[var(--color-accent-selected)]/500/15 text-nori-400"
                       : "text-text-secondary hover:bg-surface-2 hover:text-text-primary"
                   }`}
                 >

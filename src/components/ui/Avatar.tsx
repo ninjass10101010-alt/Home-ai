@@ -9,22 +9,22 @@ interface AvatarProps {
 }
 
 const colorMap: Record<string, string> = {
-  green: "bg-nori-600 text-nori-100",
-  violet: "bg-accent-violet/20 text-accent-violet",
-  amber: "bg-amber-600/20 text-amber-400",
-  cyan: "bg-cyan-600/20 text-cyan-400",
-  rose: "bg-rose-500/20 text-rose-400",
-  blue: "bg-blue-600/20 text-blue-400",
+  green: "bg-[var(--color-accent-mint)] text-[var(--color-text-on-accent)]",
+  violet: "bg-[var(--color-accent-violet)]/20 text-[var(--color-accent-violet)]",
+  amber: "bg-[var(--color-accent-amber)]/20 text-[var(--color-accent-amber)]",
+  cyan: "bg-[var(--color-accent-cyan)]/20 text-[var(--color-accent-cyan)]",
+  rose: "bg-[var(--color-accent-rose)]/20 text-[var(--color-accent-rose)]",
+  blue: "bg-[var(--color-accent-nori)]/20 text-[var(--color-accent-nori)]",
 };
 
 // Ring color mapping for emoji variant
 const ringMap: Record<string, string> = {
-  green: "ring-nori-500/30",
-  violet: "ring-accent-violet/40",
-  amber: "ring-amber-500/30",
-  cyan: "ring-cyan-500/30",
-  rose: "ring-rose-500/30",
-  blue: "ring-blue-500/30",
+  green: "ring-[var(--color-accent-mint)]/30",
+  violet: "ring-[var(--color-accent-violet)]/40",
+  amber: "ring-[var(--color-accent-amber)]/30",
+  cyan: "ring-[var(--color-accent-cyan)]/30",
+  rose: "ring-[var(--color-accent-rose)]/30",
+  blue: "ring-[var(--color-accent-nori)]/30",
 };
 
 // Avatar sizing map - typed as Record<string, string> to allow indexing
