@@ -1,0 +1,38 @@
+[
+  {
+    "id": "1",
+    "name": "Sarah (Mom)",
+    "role": "Parent",
+    "emoji": "👩",
+    "color": "green",
+    "age": "38",
+    "joined": "Feb 2024"
+  },
+  {
+    "id": "2",
+    "name": "Mike (Dad)",
+    "role": "Parent",
+    "emoji": "👨",
+    "color": "cyan",
+    "age": "40",
+    "joined": "Feb 2024"
+  },
+  {
+    "id": "3",
+    "name": "Jake",
+    "role": "Child",
+    "emoji": "🧒",
+    "color": "violet",
+    "age": "12",
+    "joined": "Mar 2024"
+  },
+  {
+    "id": "4",
+    "name": "Lily",
+    "role": "Child",
+    "emoji": "👧",
+    "color": "amber",
+    "age": "9",
+    "joined": "Mar 2024"
+  }
+]
