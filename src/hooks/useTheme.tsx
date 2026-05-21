@@ -23,33 +23,43 @@ export const useTheme = () => {
 
 // Theme Provider component
 export const ThemeProvider = ({ children }: { children: ReactNode }) => {
-  // Initialize theme state from localStorage or defaults
-  const [theme, setTheme] = useState<ThemeConfig>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem(THEME_STORAGE_KEY);
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          // Validate the parsed object has the required properties
-          if (
-            parsed.mode &&
-            ['light', 'dark', 'system'].includes(parsed.mode) &&
-            parsed.accentColor &&
-            ['nori', 'violet', 'rose', 'cyan', 'mint', 'amber'].includes(parsed.accentColor) &&
-            typeof parsed.contrastBoost === 'boolean'
-          ) {
-            return parsed;
-          }
-        } catch (e) {
-          console.error('Failed to parse theme config from localStorage', e);
+  // Initialize theme state to defaults for SSR/initial client render compatibility
+  const [theme, setTheme] = useState<ThemeConfig>(defaultThemeConfig);
+  const [mounted, setMounted] = useState(false);
+
+  // Load theme from localStorage after component mounts on the client
+  useEffect(() => {
+    setMounted(true);
+    const saved = localStorage.getItem(THEME_STORAGE_KEY);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (
+          parsed.mode &&
+          ['light', 'dark', 'system'].includes(parsed.mode) &&
+          parsed.accentColor &&
+          ['nori', 'violet', 'rose', 'cyan', 'mint', 'amber'].includes(parsed.accentColor) &&
+          typeof parsed.contrastBoost === 'boolean'
+        ) {
+          setTheme(parsed);
         }
+      } catch (e) {
+        console.error('Failed to parse theme config from localStorage', e);
       }
     }
-    return defaultThemeConfig;
-  });
+  }, []);
 
-  // Effect to handle system mode and update html attributes
+  // Save theme to localStorage only after component mounts and theme changes
   useEffect(() => {
+    if (mounted) {
+      localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(theme));
+    }
+  }, [theme, mounted]);
+
+  // Effect to handle system mode and update html attributes (only runs on client after mount)
+  useEffect(() => {
+    if (!mounted) return;
+
     const updateHtmlAttributes = () => {
       // Determine if we should be in dark mode based on theme mode and system preference
       let isDark = false;
@@ -81,7 +91,6 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
       document.documentElement.style.setProperty('--color-text-on-accent', '#ffffff');
     };
 
-    // Run on initial render and whenever theme changes
     updateHtmlAttributes();
 
     // Create a media listener for system mode changes
@@ -91,12 +100,7 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
       mediaQuery.addEventListener('change', handleChange);
       return () => mediaQuery.removeEventListener('change', handleChange);
     }
-  }, [theme.mode, theme.accentColor, theme.contrastBoost]);
-
-  // Effect to save theme to localStorage whenever it changes
-  useEffect(() => {
-    localStorage.setItem(THEME_STORAGE_KEY, JSON.stringify(theme));
-  }, [theme]);
+  }, [theme.mode, theme.accentColor, theme.contrastBoost, mounted]);
 
   // Function to toggle between light and dark (ignores system mode for toggle)
   const toggleTheme = useCallback(() => {

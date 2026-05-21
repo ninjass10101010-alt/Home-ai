@@ -6,6 +6,7 @@ import TopBar from "@/components/ui/TopBar";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import Avatar from "@/components/ui/Avatar";
+import AnimatedEmoji from "@/components/ui/AnimatedEmoji";
 import Link from "next/link";
 import { db } from "@/db";
 
@@ -37,9 +38,12 @@ const initialTasks: Task[] = [
   { id: 4, title: "Vacuum living room", assignee: "Jake", assigneeEmoji: "🧒", due: "Tomorrow", points: 15, recurring: "Weekly", category: "Chores", completed: false, priority: "medium" },
   { id: 5, title: "Pay electric bill", assignee: "Dad", assigneeEmoji: "👨", due: "Fri", points: 0, recurring: "Monthly", category: "Admin", completed: false, priority: "high" },
   { id: 6, title: "Clean bathroom", assignee: "Lily", assigneeEmoji: "👧", due: "Tomorrow", points: 15, recurring: "Weekly", category: "Chores", completed: true, priority: "medium" },
-  { id: 7, title: "Walk the dog", assignee: "Jake", assigneeEmoji: "🧒", due: "Today", points: 12, recurring: "Daily", category: "Pets", completed: true, priority: "low" },
+  { id: 7, title: "Walk Buster", assignee: "Jake", assigneeEmoji: "🐶", due: "Today", points: 12, recurring: "Daily", category: "Pets", completed: true, priority: "low" },
   { id: 8, title: "Book dentist appt", assignee: "Mom", assigneeEmoji: "👩", due: "This week", points: 0, recurring: null, category: "Health", completed: false, priority: "medium" },
   { id: 9, title: "Car oil change", assignee: "Dad", assigneeEmoji: "👨", due: "Sat", points: 0, recurring: null, category: "Errands", completed: false, priority: "low" },
+  { id: 10, title: "Chew the bone", assignee: "Buster", assigneeEmoji: "🐶", due: "Today", points: 5, recurring: "Daily", category: "Pets", completed: false, priority: "low" },
+  { id: 11, title: "Grooming appointment", assignee: "Coco", assigneeEmoji: "🐩", due: "Tomorrow", points: 0, recurring: "Monthly", category: "Pets", completed: false, priority: "medium" },
+  { id: 12, title: "Swim in circles", assignee: "Bubbles", assigneeEmoji: "🐟", due: "Today", points: 1, recurring: "Daily", category: "Pets", completed: true, priority: "low" },
 ];
 
 // Get members data from database
@@ -132,7 +136,7 @@ export default function TasksPage() {
                       : "glass text-text-secondary border border-surface-3 hover:text-text-primary"
                   }`}
                 >
-                  <span>{memberEmojis[m]}</span>
+                  <AnimatedEmoji emoji={memberEmojis[m]} name={m} size="sm" />
                   <span>{m}</span>
                 </button>
               ))}
@@ -216,7 +220,7 @@ export default function TasksPage() {
                   <Card key={chore.title} className="!p-3">
                     <div className="flex items-center gap-3">
                       <div className="w-9 h-9 rounded-xl bg-surface-3 flex items-center justify-center text-base shrink-0">
-                        {chore.emoji}
+                        <AnimatedEmoji emoji={chore.emoji} size="sm" />
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-text-primary text-sm font-medium truncate">{chore.title}</p>
@@ -242,7 +246,7 @@ export default function TasksPage() {
               }}
             >
               <p className="text-text-secondary text-xs mb-1">This week&apos;s champion</p>
-              <p className="text-4xl mb-2">{leaderboard[0].emoji}</p>
+              <div className="mb-2"><AnimatedEmoji emoji={leaderboard[0].emoji} size="lg" /></div>
               <p className="text-text-primary font-bold text-lg">{leaderboard[0].name}</p>
               <p className="text-nori-400 font-semibold text-sm mt-1">
                 {leaderboard[0].points} pts · {leaderboard[0].streak} day streak 🔥
@@ -267,7 +271,7 @@ export default function TasksPage() {
                     >
                       {i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `#${i + 1}`}
                     </div>
-                    <span className="text-2xl">{entry.emoji}</span>
+                    <AnimatedEmoji emoji={entry.emoji} size="sm" />
                     <div className="flex-1 min-w-0">
                       <p className="text-text-primary font-semibold text-sm">{entry.name}</p>
                       <p className="text-text-muted text-xs">🔥 {entry.streak} day streak</p>
@@ -299,7 +303,7 @@ export default function TasksPage() {
                 ].map((reward) => (
                   <Card key={reward.name} className={`!p-3 ${!reward.unlocked ? "opacity-50" : ""}`}>
                     <div className="flex flex-col items-center gap-1.5 text-center">
-                      <span className="text-2xl">{reward.emoji}</span>
+                      <AnimatedEmoji emoji={reward.emoji} size="sm" />
                       <p className="text-text-primary text-xs font-medium leading-tight">{reward.name}</p>
                       <Badge variant={reward.unlocked ? "amber" : "gray"}>{reward.cost} pts</Badge>
                     </div>
@@ -328,7 +332,6 @@ function TaskRow({ task, onToggle, memberColors, priorityColors }: TaskRowProps)
       className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all active:scale-[0.98] ${
         task.completed ? "opacity-50" : "glass hover:border-surface-4"
       }`}
-      style={{ border: "1px solid rgba(255,255,255,0.05)" }}
     >
       <div
         className={`w-5 h-5 rounded-full border-2 shrink-0 flex items-center justify-center transition-all ${

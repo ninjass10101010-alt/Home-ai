@@ -14,7 +14,7 @@ export default function TopBar({ title, subtitle, right, back }: TopBarProps) {
       <div
         className="px-4 py-3 flex items-center gap-3"
         style={{
-          background: "linear-gradient(to bottom, rgba(15,17,23,0.95) 80%, rgba(15,17,23,0))",
+          background: "linear-gradient(to bottom, var(--color-surface-0) 80%, transparent)",
           backdropFilter: "blur(16px)",
           WebkitBackdropFilter: "blur(16px)",
         }}

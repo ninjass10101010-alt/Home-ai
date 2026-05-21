@@ -49,9 +49,9 @@ const navItems = [
           strokeLinecap="round"
           strokeLinejoin="round"
         />
-        <circle cx="8.5" cy="11" r="1" fill="currentColor" className={active ? "fill-[#0f1117]" : "fill-current"} stroke="none" />
-        <circle cx="12" cy="11" r="1" fill="currentColor" className={active ? "fill-[#0f1117]" : "fill-current"} stroke="none" />
-        <circle cx="15.5" cy="11" r="1" fill="currentColor" className={active ? "fill-[#0f1117]" : "fill-current"} stroke="none" />
+        <circle cx="8.5" cy="11" r="1" fill="currentColor" className={active ? "fill-[var(--color-accent-selected)]" : "fill-current"} stroke="none" />
+        <circle cx="12" cy="11" r="1" fill="currentColor" className={active ? "fill-[var(--color-accent-selected)]" : "fill-current"} stroke="none" />
+        <circle cx="15.5" cy="11" r="1" fill="currentColor" className={active ? "fill-[var(--color-accent-selected)]" : "fill-current"} stroke="none" />
       </svg>
     ),
     primary: true,
@@ -165,13 +165,12 @@ export default function BottomNav() {
       <div
         className="pointer-events-auto w-full max-w-lg mx-auto"
         style={{
-          background: "linear-gradient(to top, rgba(15,17,23,1) 60%, rgba(15,17,23,0))",
+          background: "linear-gradient(to top, var(--color-surface-0) 60%, transparent)",
           paddingBottom: "env(safe-area-inset-bottom)",
         }}
       >
         <div
           className="mx-4 mb-3 flex items-center justify-around rounded-2xl glass px-2 py-2"
-          style={{ border: "1px solid rgba(255,255,255,0.07)" }}
         >
           {navItems.map((item) => {
             const isActive = pathname === item.href;

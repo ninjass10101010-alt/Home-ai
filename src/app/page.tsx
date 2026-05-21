@@ -3,6 +3,7 @@ import PageShell from "@/components/ui/PageShell";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import Avatar from "@/components/ui/Avatar";
+import AnimatedEmoji from "@/components/ui/AnimatedEmoji";
 import WeatherWidget from "@/components/ui/WeatherWidget";
 import { Icon3D } from "@/components/3d";
 import EmergencyButton from "@/components/ui/EmergencyButton";
@@ -274,7 +275,7 @@ export default function HomePage() {
                       TODAY
                     </span>
                   )}
-                  <span className="text-2xl">{m.emoji}</span>
+                  <AnimatedEmoji emoji={m.emoji} size="sm" />
                   <span className="text-[10px] text-text-muted text-center leading-tight">{m.meal}</span>
                 </div>
               );

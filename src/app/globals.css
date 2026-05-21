@@ -15,27 +15,30 @@
   --color-nori-950: #172554;
 
   /* DARK MODE PALETTE (Default) */
-  --color-surface-0: #0f1117   /* Main background */
-  --color-surface-1: #181c24
-  --color-surface-2: #1e2330
-  --color-surface-3: #252c3a
-  --color-surface-4: #2d3548
-  --color-surface-5: #323b4d
-  --color-surface-6: #3a4456
-  --color-surface-7: #434e60   /* Darkest for depth */
+  --color-surface-0: #0f1117;   /* Main background */
+  --color-surface-1: #181c24;
+  --color-surface-2: #1e2330;
+  --color-surface-3: #252c3a;
+  --color-surface-4: #2d3548;
+  --color-surface-5: #323b4d;
+  --color-surface-6: #3a4456;
+  --color-surface-7: #434e60;   /* Darkest for depth */
 
-  --color-text-primary: #f0f4ff   /* Main body text */
-  --color-text-secondary: #8892aa   /* Hints, secondary text */
-  --color-text-muted: #4e5a72   /* Disabled text */
-  --color-text-dim: #363e50   /* Placeholders */
+  --color-text-primary: #f0f4ff;   /* Main body text */
+  --color-text-secondary: #8892aa;   /* Hints, secondary text */
+  --color-text-muted: #4e5a72;   /* Disabled text */
+  --color-text-dim: #363e50;   /* Placeholders */
 
   /* ACCENT COLORS (Dark mode variants) */
-  --color-accent-nori: #3b82f6   /* Selected by default */
-  --color-accent-violet: #7c6ff7
-  --color-accent-rose: #f43f5e
-  --color-accent-cyan: #06b6d4
-  --color-accent-mint: #4ade80
-  --color-accent-amber: #f59e0b
+  --color-accent-nori: #3b82f6;   /* Selected by default */
+  --color-accent-violet: #7c6ff7;
+  --color-accent-rose: #f43f5e;
+  --color-accent-cyan: #06b6d4;
+  --color-accent-mint: #4ade80;
+  --color-accent-amber: #f59e0b;
+  --color-accent-coral: #fb7185;
+  --color-accent-lavender: #a78bfa;
+  --color-accent-selected: var(--color-accent-nori);
 
   /* Gradient palette */
   --color-gradient-start: #b583ff;
@@ -53,30 +56,63 @@
 }
 
 /* ─── Light Mode Color Tokens ─── */
+:root[data-theme="light"] {
+  /* LIGHT MODE PALETTE */
+  --color-surface-0: #ffffff;   /* Main background */
+  --color-surface-1: #f8f9fb;
+  --color-surface-2: #f0f2f7;
+  --color-surface-3: #e7ebf3;
+  --color-surface-4: #dde3ed;
+  --color-surface-5: #d3dae7;
+  --color-surface-6: #c9d1e0;
+  --color-surface-7: #bfc6d8;   /* Darkest for depth */
+
+  --color-text-primary: #1a1a1a;   /* Main body text */
+  --color-text-secondary: #5a5a5a;   /* Hints, secondary text */
+  --color-text-muted: #8a8a8a;   /* Disabled text */
+  --color-text-dim: #ababab;   /* Placeholders */
+
+  /* ACCENT COLORS (Light mode variants - darker for better contrast) */
+  --color-accent-nori: #2563eb;   /* Darker shade */
+  --color-accent-violet: #7c3aed;
+  --color-accent-rose: #e11d48;
+  --color-accent-cyan: #0891b2;
+  --color-accent-mint: #059669;
+  --color-accent-amber: #d97706;
+  --color-accent-coral: #e11d48;
+  --color-accent-lavender: #6d28d9;
+
+  /* Gradient palette */
+  --color-gradient-start: #7c3aed;
+  --color-gradient-end: #e11d48;
+}
+
 @media (prefers-color-scheme: light) {
-  :root {
+  :root:not([data-theme="dark"]) {
     /* LIGHT MODE PALETTE */
-    --color-surface-0: #ffffff   /* Main background */
-    --color-surface-1: #f8f9fb
-    --color-surface-2: #f0f2f7
-    --color-surface-3: #e7ebf3
-    --color-surface-4: #dde3ed
-    --color-surface-5: #d3dae7
-    --color-surface-6: #c9d1e0
-    --color-surface-7: #bfc6d8   /* Darkest for depth */
+    --color-surface-0: #ffffff;
+    --color-surface-1: #f8f9fb;
+    --color-surface-2: #f0f2f7;
+    --color-surface-3: #e7ebf3;
+    --color-surface-4: #dde3ed;
+    --color-surface-5: #d3dae7;
+    --color-surface-6: #c9d1e0;
+    --color-surface-7: #bfc6d8;
 
-    --color-text-primary: #1a1a1a   /* Main body text */
-    --color-text-secondary: #5a5a5a   /* Hints, secondary text */
-    --color-text-muted: #8a8a8a   /* Disabled text */
-    --color-text-dim: #ababab   /* Placeholders */
+    --color-text-primary: #1a1a1a;
+    --color-text-secondary: #5a5a5a;
+    --color-text-muted: #8a8a8a;
+    --color-text-dim: #ababab;
 
-    /* ACCENT COLORS (Light mode variants - darker for better contrast) */
-    --color-accent-nori: #2563eb   /* Darker shade */
-    --color-accent-violet: #7c3aed
-    --color-accent-rose: #e11d48
-    --color-accent-cyan: #0891b2
-    --color-accent-mint: #059669
-    --color-accent-amber: #d97706
+    /* ACCENT COLORS */
+    --color-accent-nori: #2563eb;
+    --color-accent-violet: #7c3aed;
+    --color-accent-rose: #e11d48;
+    --color-accent-cyan: #0891b2;
+    --color-accent-mint: #059669;
+    --color-accent-amber: #d97706;
+    --color-accent-coral: #e11d48;
+    --color-accent-lavender: #6d28d9;
 
     /* Gradient palette */
     --color-gradient-start: #7c3aed;
@@ -84,17 +120,54 @@
   }
 }
 
+/* ─── Dark Mode Explicit Override Color Tokens ─── */
+:root[data-theme="dark"] {
+  /* DARK MODE PALETTE */
+  --color-surface-0: #0f1117;   /* Main background */
+  --color-surface-1: #181c24;
+  --color-surface-2: #1e2330;
+  --color-surface-3: #252c3a;
+  --color-surface-4: #2d3548;
+  --color-surface-5: #323b4d;
+  --color-surface-6: #3a4456;
+  --color-surface-7: #434e60;   /* Darkest for depth */
+
+  --color-text-primary: #f0f4ff;   /* Main body text */
+  --color-text-secondary: #8892aa;   /* Hints, secondary text */
+  --color-text-muted: #4e5a72;   /* Disabled text */
+  --color-text-dim: #363e50;   /* Placeholders */
+
+  /* ACCENT COLORS (Dark mode variants) */
+  --color-accent-nori: #3b82f6;   /* Selected by default */
+  --color-accent-violet: #7c6ff7;
+  --color-accent-rose: #f43f5e;
+  --color-accent-cyan: #06b6d4;
+  --color-accent-mint: #4ade80;
+  --color-accent-amber: #f59e0b;
+
+  /* Gradient palette */
+  --color-gradient-start: #b583ff;
+  --color-gradient-end: #ff6b8a;
+}
+
 /* ─── High Contrast Mode ─── */
 /* Activates when [data-contrast="boost"] is present on html element */
 [data-contrast="boost"] {
-  --color-text-primary: #000000;  /* Pure black (dark) or #ffffff (light) */
-  --color-text-secondary: #2d2d2d; /* Much darker */
-  
-  /* All elements with opacity > 70% */
-  /* No subtle/translucent elements */
-  
-  /* Override for light mode in high contrast */
-  /* Removed nested selector for compatibility */
+  --color-text-primary: #ffffff;  /* Pure white in dark mode */
+  --color-text-secondary: #e2e8f0; /* Very bright secondary text */
+}
+
+/* High contrast mode overrides for Light Mode */
+:root[data-theme="light"][data-contrast="boost"] {
+  --color-text-primary: #000000;  /* Pure black in light mode */
+  --color-text-secondary: #1a1a1a; /* Very dark secondary text */
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"])[data-contrast="boost"] {
+    --color-text-primary: #000000;  /* Pure black in light mode */
+    --color-text-secondary: #1a1a1a; /* Very dark secondary text */
+  }
 }
 
 /* Ensure all borders increase to 2px in high contrast mode */
@@ -168,8 +241,15 @@ body {
   transition: background 0.15s ease, border 0.15s ease, box-shadow 0.15s ease;
 }
 
+/* Light mode overrides for glass */
+:root[data-theme="light"] .glass {
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+}
+
 @media (prefers-color-scheme: light) {
-  .glass {
+  :root:not([data-theme="dark"]) .glass {
     background: rgba(255, 255, 255, 0.6);
     border: 1px solid rgba(0, 0, 0, 0.06);
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
@@ -185,8 +265,14 @@ body {
   transition: background 0.15s ease, border 0.15s ease, box-shadow 0.15s ease;
 }
 
+:root[data-theme="light"] .glass-strong {
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+}
+
 @media (prefers-color-scheme: light) {
-  .glass-strong {
+  :root:not([data-theme="dark"]) .glass-strong {
     background: rgba(255, 255, 255, 0.8);
     border: 1px solid rgba(0, 0, 0, 0.08);
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
@@ -203,8 +289,14 @@ body {
   transition: background 0.15s ease, border 0.15s ease, box-shadow 0.15s ease;
 }
 
+:root[data-theme="light"] .glass-subtle {
+  background: rgba(255, 255, 255, 0.4);
+  border: 1px solid rgba(0, 0, 0, 0.03);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
 @media (prefers-color-scheme: light) {
-  .glass-subtle {
+  :root:not([data-theme="dark"]) .glass-subtle {
     background: rgba(255, 255, 255, 0.4);
     border: 1px solid rgba(0, 0, 0, 0.03);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
@@ -344,3 +436,108 @@ body {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* ─── Weather Widget Animations ─── */
+
+/* Sun: outer ring spin */
+@keyframes weatherSpin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* Sun rays: breathe in/out */
+@keyframes weatherRayPulse {
+  0%, 100% { opacity: 0.45; transform: scaleY(1); }
+  50%       { opacity: 1;    transform: scaleY(1.35); }
+}
+
+/* Cloud: gentle vertical bob */
+@keyframes weatherCloudBob {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-5px); }
+}
+
+/* Rain drops: fall and fade */
+@keyframes weatherRainDrop {
+  0%   { transform: translateY(-6px);  opacity: 0; }
+  15%  { opacity: 1; }
+  85%  { opacity: 1; }
+  100% { transform: translateY(16px); opacity: 0; }
+}
+
+/* Snow flakes: drift and sway */
+@keyframes weatherSnowDrift {
+  0%   { transform: translateY(-4px) translateX(0px);  opacity: 0; }
+  20%  { opacity: 1; }
+  50%  { transform: translateY(10px) translateX(4px); }
+  80%  { opacity: 1; }
+  100% { transform: translateY(20px) translateX(-3px); opacity: 0; }
+}
+
+/* Glow orb: pulse in place */
+@keyframes weatherGlowPulse {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50%       { opacity: 0.9; transform: scale(1.12); }
+}
+
+/* Card entrance */
+@keyframes weatherCardEnter {
+  from { opacity: 0; transform: translateY(14px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0)   scale(1); }
+}
+
+/* Forecast rows slide in */
+@keyframes weatherForecastIn {
+  from { opacity: 0; transform: translateX(-6px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* Temp number pop on unit switch */
+@keyframes weatherTempPop {
+  0%   { transform: scale(1); }
+  35%  { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+
+/* Background particles – rain */
+@keyframes weatherParticleRain {
+  0%   { transform: translateY(-5%) rotate(-12deg); opacity: 0; }
+  8%   { opacity: 0.75; }
+  92%  { opacity: 0.75; }
+  100% { transform: translateY(130%) rotate(-12deg); opacity: 0; }
+}
+
+/* Background particles – snow */
+@keyframes weatherParticleSnow {
+  0%   { transform: translateY(-5%) translateX(0);   opacity: 0; }
+  10%  { opacity: 0.85; }
+  50%  { transform: translateY(55%) translateX(7px); }
+  90%  { opacity: 0.85; }
+  100% { transform: translateY(115%) translateX(-4px); opacity: 0; }
+}
+
+/* Background particles – sun sparkles */
+@keyframes weatherParticleSun {
+  0%   { transform: translateY(0)    scale(0); opacity: 0; }
+  25%  { transform: translateY(-18px) scale(1); opacity: 0.75; }
+  100% { transform: translateY(-52px) scale(0.2); opacity: 0; }
+}
+
+/* Reduce-motion: disable all weather animations */
+@media (prefers-reduced-motion: reduce) {
+  [class*="weather"],
+  [style*="weatherSpin"],
+  [style*="weatherRayPulse"],
+  [style*="weatherCloudBob"],
+  [style*="weatherRainDrop"],
+  [style*="weatherSnowDrift"],
+  [style*="weatherGlowPulse"],
+  [style*="weatherCardEnter"],
+  [style*="weatherForecastIn"],
+  [style*="weatherTempPop"],
+  [style*="weatherParticle"] {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+

@@ -296,13 +296,9 @@ export default function ChatPage() {
     <div className="min-h-screen bg-surface-0 max-w-lg mx-auto flex flex-col">
       {/* Top bar */}
       <div
-        className="sticky top-0 z-40 px-4 py-3 flex items-center gap-3"
+        className="sticky top-0 z-40 px-4 py-3 flex items-center gap-3 bg-surface-0/90 backdrop-blur-md border-b border-surface-3/20"
         style={{
           paddingTop: "calc(env(safe-area-inset-top) + 0.75rem)",
-          background: "rgba(15,17,23,0.92)",
-          backdropFilter: "blur(16px)",
-          WebkitBackdropFilter: "blur(16px)",
-          borderBottom: "1px solid rgba(255,255,255,0.04)",
         }}
       >
         <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl shrink-0 bg-nori-500/15 consuela-glow">
@@ -405,7 +401,6 @@ export default function ChatPage() {
                   key={s.label}
                   onClick={() => sendMessage(s.prompt)}
                   className="glass rounded-xl px-3 py-2.5 text-left text-xs text-text-secondary hover:text-text-primary hover:border-nori-500/30 transition-all active:scale-95"
-                  style={{ border: "1px solid rgba(255,255,255,0.06)" }}
                 >
                   {s.label}
                 </button>
@@ -421,13 +416,12 @@ export default function ChatPage() {
       <div
         className="sticky bottom-0 px-4 pb-24 pt-3"
         style={{
-          background: "linear-gradient(to top, rgba(15,17,23,1) 70%, rgba(15,17,23,0))",
+          background: "linear-gradient(to top, var(--color-surface-0) 70%, transparent)",
           paddingBottom: "calc(env(safe-area-inset-bottom) + 5.5rem)",
         }}
       >
         <div
-          className="flex items-end gap-2 rounded-2xl glass px-3 py-2"
-          style={{ border: "1px solid rgba(59,130,246,0.15)" }}
+          className="flex items-end gap-2 rounded-2xl glass px-3 py-2 border border-accent-selected/15"
         >
           {/* Voice button */}
           <button

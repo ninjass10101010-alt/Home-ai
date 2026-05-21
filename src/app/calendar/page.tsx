@@ -6,6 +6,7 @@ import TopBar from "@/components/ui/TopBar";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import Avatar from "@/components/ui/Avatar";
+import AnimatedEmoji from "@/components/ui/AnimatedEmoji";
 import Link from "next/link";
 import { db } from "@/db";
 
@@ -145,7 +146,7 @@ export default function CalendarPage() {
                   : "glass text-text-secondary border border-surface-3 hover:text-text-primary"
               }`}
             >
-              <span>{m.emoji}</span>
+              <AnimatedEmoji emoji={m.emoji} name={m.name} size="sm" />
               <span>{m.name}</span>
             </button>
           ))}
@@ -235,7 +236,7 @@ export default function CalendarPage() {
                 <Card key={ev.id} className="!p-3">
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-xl bg-surface-3 flex items-center justify-center text-lg shrink-0">
-                      {ev.emoji}
+                      <AnimatedEmoji emoji={ev.emoji} size="sm" />
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-text-primary text-sm font-medium truncate">{ev.title}</p>
@@ -276,7 +277,7 @@ export default function CalendarPage() {
                     <p className="text-text-primary text-sm truncate">{ev.title}</p>
                     <p className="text-text-muted text-xs">{ev.time} · {ev.member}</p>
                   </div>
-                  <span className="text-lg shrink-0">{ev.emoji}</span>
+                  <div className="shrink-0"><AnimatedEmoji emoji={ev.emoji} size="sm" /></div>
                 </div>
               ))}
           </div>

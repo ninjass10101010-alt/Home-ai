@@ -3,10 +3,13 @@
 
 // Seed data for demonstration - in production this would be user-managed
 const membersData = [
-  { id: 1, name: "Sarah (Mom)", role: "parent", emoji: "👩", fullName: "Sarah Johnson", age: 38, joined: "Feb 2024" },
-  { id: 2, name: "Mike (Dad)", role: "parent", emoji: "👨", fullName: "Mike Johnson", age: 40, joined: "Feb 2024" },
-  { id: 3, name: "Jake", role: "child", emoji: "🧒", fullName: "Jake Johnson", age: 12, joined: "Mar 2024" },
-  { id: 4, name: "Lily", role: "child", emoji: "👧", fullName: "Lily Johnson", age: 9, joined: "Mar 2024" },
+  { id: 1, name: "Sarah (Mom)", role: "parent", emoji: "👩", fullName: "Sarah Johnson", age: 38, joined: "Feb 2024", skinColor: "#fdbcb4", hairColor: "#b45309" },
+  { id: 2, name: "Mike (Dad)", role: "parent", emoji: "👨", fullName: "Mike Johnson", age: 40, joined: "Feb 2024", skinColor: "#fdbcb4", hairColor: "#1e40af" },
+  { id: 3, name: "Jake", role: "child", emoji: "🧒", fullName: "Jake Johnson", age: 12, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#166534" },
+  { id: 4, name: "Lily", role: "child", emoji: "👧", fullName: "Lily Johnson", age: 9, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#5b21b6" },
+  { id: 5, name: "Buster", role: "pet", emoji: "🐶", fullName: "Buster (Frenchie)", age: 3, joined: "Feb 2024" },
+  { id: 6, name: "Coco", role: "pet", emoji: "🐩", fullName: "Coco (Poodle)", age: 5, joined: "Feb 2024" },
+  { id: 7, name: "Bubbles", role: "pet", emoji: "🐟", fullName: "Bubbles (Fish)", age: 1, joined: "Mar 2024" },
 ];
 
 const eventsData = [
@@ -174,8 +177,10 @@ export const db = {
   selectMembers: () => membersStore.map(m => ({
     id: m.id,
     name: m.name.split(' ')[0], // Just first name for dashboard
-    color: m.id === 1 ? "green" : m.id === 2 ? "cyan" : m.id === 3 ? "violet" : "amber",
+    color: ["green", "cyan", "violet", "amber", "rose", "blue", "cyan"][m.id - 1] || "green",
     emoji: m.emoji,
+    skinColor: m.skinColor,
+    hairColor: m.hairColor,
   })),
 
   // Members - detailed view for settings
@@ -183,9 +188,11 @@ export const db = {
     name: m.name,
     role: m.role === 'parent' ? 'Parent' : 'Child',
     emoji: m.emoji,
-    color: m.id === 1 ? "green" : m.id === 2 ? "cyan" : m.id === 3 ? "violet" : "amber",
+    color: ["green", "cyan", "violet", "amber", "rose", "blue", "cyan"][m.id - 1] || "green",
     age: m.age.toString(),
     joined: m.joined,
+    skinColor: m.skinColor,
+    hairColor: m.hairColor,
   })),
 
   // Members - calendar filter view (includes "All" option)
@@ -193,8 +200,10 @@ export const db = {
     { name: "All", color: "green", emoji: "👨‍👩‍👧‍👦" },
     ...membersStore.map(m => ({
       name: m.name.split(' ')[0], // Just first name
-      color: m.id === 1 ? "green" : m.id === 2 ? "cyan" : m.id === 3 ? "violet" : "amber",
+      color: ["green", "cyan", "violet", "amber", "rose", "blue", "cyan"][m.id - 1] || "green",
       emoji: m.emoji,
+      skinColor: m.skinColor,
+      hairColor: m.hairColor,
     }))
   ],
 
