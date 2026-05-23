@@ -54,7 +54,7 @@ const emergencyContactsData = [
 
 ### 4. Test the System
 
-1. Start the development server: `bun dev`
+1. Start the development server: `npm run dev`
 2. Navigate to the home page
 3. Click the red emergency button in the top-right
 4. Select an emergency type and confirm

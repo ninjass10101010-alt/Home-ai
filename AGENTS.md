@@ -8,9 +8,9 @@
 **Current Dashboard Snapshot** (maintain on every relevant change)  
 - **Last Updated:** 2026-05-23 | Source of truth: commit `adbe770` ("feat(dashboard): 2026-05-21 daily update") + later hermes-api work  
 - **Last major UI refresh:** 2026-05-21 — motion icons, 3D floating elements, AnimatedEmoji, glass/isometric cards, gradient orbs  
-- **Active integrations:** Meals ↔ Pantry ↔ Grocery bidirectional sync (`mealSyncService`), Emergency SMS + Email (free Gmail + carrier gateways), AI Chat ("Ask Consuela"), full theme system (3 modes + 6 accent colors)  
-- **Navigation model:** Persistent bottom tab bar (8 items) + always-visible floating red Emergency shield button (top-right on Home)  
-- **Tech surface for ops:** Next.js 16 + React 19, in-memory DB (`src/db/index.ts`), API routes under `src/app/api/`, custom SVG animations (no framer-motion)
+- **Active integrations:** Meals ↔ Pantry ↔ Grocery bidirectional sync (`mealSyncService`), Emergency SMS + Email (free Gmail + carrier gateways), AI Chat ("Ask Consuela"), full theme system (3 modes + 6 accent colors), PocketBase data layer
+- **Navigation model:** Persistent bottom tab bar (8 items) + always-visible floating red Emergency shield button (top-right on Home)
+- **Tech surface for ops:** Next.js 16 + React 19 + Tailwind CSS 4, PocketBase backend (`pocketbase` SDK), API routes under `src/app/api/`, custom SVG animations (no framer-motion)
 
 ---
 

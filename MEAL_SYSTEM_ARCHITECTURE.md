@@ -343,12 +343,12 @@ graph TD
 - **Local First Option**: Consider client-side sync for sensitive households
 
 ### Integration with Existing System
-- Leverages existing Next.js/PocketBase stack
-- Uses real-time subscriptions for instant sync updates
+- Leverages existing Next.js 16 + React 19 + Tailwind CSS 4 stack
+- Uses PocketBase for data persistence, auth, and real-time subscriptions
 - Extends current meal/pantry/grocery concepts from dashboard
-- Maintains auth/user model consistency
+- Maintains auth/user model consistency via PocketBase auth store
 
 This architecture provides a solid foundation for a truly intelligent meal planning system that reduces cognitive load while respecting user autonomy. The phased approach delivers value early while building toward advanced AI capabilities.
 
 ---
-*Architecture designed for integration with existing Next.js/Tailwind/PocketBase tech stack. All proposed features maintain backward compatibility with current meal planning implementation.*
+*Architecture designed for integration with existing Next.js/Tailwind/PocketBase tech stack. Meal planning data persists in PocketBase collections, enabling real-time sync across devices.*

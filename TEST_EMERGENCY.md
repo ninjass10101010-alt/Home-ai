@@ -8,7 +8,7 @@ echo "GMAIL_USER=your-gmail@gmail.com" >> .env.local
 echo "GMAIL_APP_PASSWORD=your-app-password" >> .env.local
 
 # 2. Start the development server
-bun dev
+npm run dev
 
 # 3. Test the emergency endpoint directly
 curl -X POST http://localhost:3000/api/emergency \
