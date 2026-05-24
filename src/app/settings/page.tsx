@@ -8,19 +8,43 @@ import TopBar from "@/components/ui/TopBar";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 
+import { db } from "@/db";
+
+const emojiOptions = ["👨","👩","👧","🧒","👶","👴","👵","🐶","🐱","🐩","🐕","🐈","🐠","🐹","🐰","🦊","🐻","🐼","🐨","🐯","🦁","🐮","🐷","🐸","🐵"];
+
 export default function SettingsPage() {
   const { theme, setMode, setAccentColor, setContrastBoost } = useTheme();
   const { weather, setLocation, setUnit, setTimeOfDay, setSeason } = useWeatherConfig();
   const [mounted, setMounted] = useState(false);
 
-  // ─── Weather local state ─────────────────────────────────────────────────
-  const [locationDraft, setLocationDraft] = useState("");
-  const [locationSaved, setLocationSaved] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  // ─── Family Member editing state ────────────────────────────────────────
+  const [membersList, setMembersList] = useState<any[]>([]);
+  const [editingMemberIdx, setEditingMemberIdx] = useState<number | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editEmoji, setEditEmoji] = useState("");
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
   useEffect(() => {
     setMounted(true);
+    setMembersList(db.selectMembersDetailed());
   }, []);
+
+  const startEditMember = (idx: number, member: any) => {
+    setEditingMemberIdx(idx);
+    setEditName(member.name);
+    setEditEmoji(member.emoji);
+  };
+
+  const saveMember = (idx: number) => {
+    const member = membersList[idx];
+    if (!member || !editName.trim()) return;
+    db.updateMember(member.name, { name: editName.trim(), emoji: editEmoji });
+    setMembersList(prev => prev.map((m, i) => i === idx ? { ...m, name: editName.trim(), emoji: editEmoji } : m));
+    setEditingMemberIdx(null);
+  };
+  const [locationDraft, setLocationDraft] = useState("");
+  const [locationSaved, setLocationSaved] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // Keep draft in sync with stored location after mount
   useEffect(() => {
@@ -404,6 +428,75 @@ export default function SettingsPage() {
               </div>
               <span className="text-text-primary">Enable high contrast mode</span>
             </label>
+          </div>
+        </section>
+
+        <div className="h-px bg-[var(--color-surface-3)]" />
+
+        {/* ── Family Members ──────────────────────────────────────────────── */}
+        <section className="space-y-6">
+          <div>
+            <h2 className="text-text-primary font-semibold text-2xl">Family Members</h2>
+            <p className="text-text-secondary mt-1">Edit names, emojis, and colors</p>
+          </div>
+
+          <div className="space-y-3">
+            {membersList.map((member: any, idx: number) => {
+              const isEditing = editingMemberIdx === idx;
+              return (
+                <div key={member.name} className="flex items-center gap-3 p-4 rounded-xl border border-[var(--color-surface-3)] bg-[var(--color-surface-1)]">
+                  {isEditing ? (
+                    <div className="flex-1 space-y-3">
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                          className="w-12 h-12 rounded-xl bg-[var(--color-surface-2)] flex items-center justify-center text-2xl hover:bg-[var(--color-surface-3)] transition-colors"
+                        >
+                          {editEmoji}
+                        </button>
+                        <input
+                          value={editName}
+                          onChange={e => setEditName(e.target.value)}
+                          className="flex-1 bg-[var(--color-surface-2)] text-text-primary text-sm rounded-xl px-3 py-2 outline-none border border-[var(--color-surface-3)] focus:border-[var(--color-accent-selected)]"
+                          autoFocus
+                        />
+                      </div>
+                      {showEmojiPicker && (
+                        <div className="flex flex-wrap gap-1 p-2 rounded-xl bg-[var(--color-surface-2)]">
+                          {emojiOptions.map(e => (
+                            <button key={e} onClick={() => { setEditEmoji(e); setShowEmojiPicker(false); }}
+                              className={`w-9 h-9 rounded-lg text-lg flex items-center justify-center hover:bg-[var(--color-accent-selected)]/20 transition-all ${editEmoji === e ? "bg-[var(--color-accent-selected)]/20" : ""}`}
+                            >{e}</button>
+                          ))}
+                        </div>
+                      )}
+                      <div className="flex gap-2">
+                        <button onClick={() => saveMember(idx)}
+                          className="px-4 py-2 rounded-xl bg-[var(--color-accent-selected)] text-white text-xs font-semibold">Save</button>
+                        <button onClick={() => setEditingMemberIdx(null)}
+                          className="px-4 py-2 rounded-xl bg-[var(--color-surface-2)] text-text-secondary text-xs">Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="w-12 h-12 rounded-xl bg-[var(--color-surface-2)] flex items-center justify-center text-2xl shrink-0">
+                        {member.emoji}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-text-primary text-sm font-semibold truncate">{member.name}</p>
+                        <p className="text-text-muted text-xs">{member.role} · {member.age}y</p>
+                      </div>
+                      <button
+                        onClick={() => startEditMember(idx, member)}
+                        className="px-3 py-2 rounded-xl glass text-text-secondary text-xs font-medium hover:text-text-primary transition-colors"
+                      >
+                        ✏️ Edit
+                      </button>
+                    </>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </section>
 

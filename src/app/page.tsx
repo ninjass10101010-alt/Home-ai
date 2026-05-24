@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { useState, useEffect } from "react";
 import PageShell from "@/components/ui/PageShell";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
@@ -76,6 +79,14 @@ export default function HomePage() {
     return "border-l-2 border-l-[var(--color-surface-4)]";
   };
 
+  // Live clock
+  const [now, setNow] = useState(new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const timeStr = now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+
   return (
     <PageShell>
       <EmergencyButton />
@@ -106,6 +117,8 @@ export default function HomePage() {
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full glass-subtle border border-[var(--color-surface-7)]/20">
             <span className="text-xs text-text-secondary font-medium">{dayOfWeek}</span>
             <span className="text-xs text-[var(--color-accent-selected)] font-semibold">{dayMonth}</span>
+            <span className="w-px h-3 bg-[var(--color-surface-7)]/30" />
+            <span className="text-xs text-[var(--color-accent-cyan)] font-medium tabular-nums tracking-tight">{timeStr}</span>
           </div>
         </div>
 
