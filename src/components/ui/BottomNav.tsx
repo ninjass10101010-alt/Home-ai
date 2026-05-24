@@ -109,21 +109,6 @@ const navItems = [
     ),
   },
   {
-    href: "/grocery",
-    label: "Grocery",
-    icon: (active: boolean) => (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={active ? 2.5 : 1.8}
-        className="w-6 h-6"
-      >
-        <path d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13l-1.35 2.7a1 1 0 001.35 1.3h12M7 13h10M10 21a2 2 0 100-4 2 2 0 000 4zm8 0a2 2 0 100-4 2 2 0 000 4z" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    ),
-  },
-  {
     href: "/emergency",
     label: "Emergency",
     icon: (active: boolean) => (
