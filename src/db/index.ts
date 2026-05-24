@@ -3,7 +3,7 @@
 
 // Seed data for demonstration - in production this would be user-managed
 const membersData = [
-  { id: 1, name: "Rebecca (Mom)", role: "parent", emoji: "(=^.w.^=)", fullName: "Rebecca Garcia", age: 38, joined: "Feb 2024", skinColor: "#fdbcb4", hairColor: "#b45309" },
+  { id: 1, name: "Rebecca (Mom)", role: "parent", emoji: "https://media.giphy.com/media/JIX9t2j0ZTN9S/giphy.gif", fullName: "Rebecca Garcia", age: 38, joined: "Feb 2024", skinColor: "#fdbcb4", hairColor: "#b45309" },
   { id: 2, name: "Jeffery (Dad)", role: "parent", emoji: "👨", fullName: "Jeffery Garcia", age: 40, joined: "Feb 2024", skinColor: "#fdbcb4", hairColor: "#1e40af" },
   { id: 3, name: "Emily", role: "child", emoji: "👧", fullName: "Emily Garcia", age: 14, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#5b21b6" },
   { id: 4, name: "Bailey", role: "child", emoji: "👧", fullName: "Bailey Garcia", age: 12, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#166534" },
