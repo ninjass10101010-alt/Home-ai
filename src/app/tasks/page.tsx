@@ -7,7 +7,6 @@ import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import Avatar from "@/components/ui/Avatar";
 import AnimatedEmoji from "@/components/ui/AnimatedEmoji";
-import Link from "next/link";
 import { db } from "@/db";
 
 interface Task {
@@ -45,7 +44,6 @@ const initialTasks: Task[] = [
   { id: 11, title: "Grooming appointment", assignee: "Rico", assigneeEmoji: "🐩", due: "Tomorrow", points: 0, recurring: "Monthly", category: "Pets", completed: false, priority: "medium" },
 ];
 
-// Get members data from database
 const membersData = db.selectMembers();
 const leaderboard: LeaderboardEntry[] = [
   { name: "Caspian", emoji: "🧒", points: 145, streak: 5, rank: 1 },
@@ -63,6 +61,21 @@ const memberColors: Record<string, string> = {
   ...Object.fromEntries(membersData.map(m => [m.name, m.color]))
 };
 const priorityColors: Record<string, string> = { high: "bg-rose-500", medium: "bg-amber-500", low: "bg-surface-4" };
+const categories = ["Chores", "Errands", "Admin", "Health", "Pets", "School"];
+const dueOptions = ["Today", "Tomorrow", "This week", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed", "Thu"];
+
+const emptyTask = (): Task => ({
+  id: Date.now(),
+  title: "",
+  assignee: membersData[0]?.name || "Caspian",
+  assigneeEmoji: membersData[0]?.emoji || "🧒",
+  due: "Today",
+  points: 5,
+  recurring: null,
+  category: "Chores",
+  completed: false,
+  priority: "medium" as const,
+});
 
 export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>(initialTasks);
@@ -70,10 +83,60 @@ export default function TasksPage() {
   const [activeTab, setActiveTab] = useState<"tasks" | "leaderboard">("tasks");
   const [showCompleted, setShowCompleted] = useState(false);
 
+  // Edit state
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState<Task>(emptyTask());
+  const [isAdding, setIsAdding] = useState(false);
+
   const toggleTask = (id: number) => {
     setTasks((prev) =>
       prev.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t))
     );
+  };
+
+  const startEdit = (task: Task) => {
+    setEditingId(task.id);
+    setEditForm({ ...task });
+    setIsAdding(false);
+  };
+
+  const startAdd = () => {
+    setEditingId(null);
+    setEditForm(emptyTask());
+    setIsAdding(true);
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setIsAdding(false);
+  };
+
+  const saveTask = () => {
+    if (!editForm.title.trim()) return;
+    if (isAdding) {
+      setTasks(prev => [...prev, { ...editForm, id: Date.now() }]);
+    } else {
+      setTasks(prev => prev.map(t => t.id === editingId ? { ...editForm } : t));
+    }
+    setEditingId(null);
+    setIsAdding(false);
+  };
+
+  const deleteTask = (id: number) => {
+    setTasks(prev => prev.filter(t => t.id !== id));
+    setEditingId(null);
+    setIsAdding(false);
+  };
+
+  const updateForm = (field: keyof Task, value: any) => {
+    setEditForm(prev => {
+      const updated = { ...prev, [field]: value };
+      if (field === "assignee") {
+        const member = membersData.find(m => m.name === value);
+        if (member) updated.assigneeEmoji = member.emoji;
+      }
+      return updated;
+    });
   };
 
   const filtered = tasks.filter((t) => {
@@ -92,14 +155,14 @@ export default function TasksPage() {
         title="Tasks & Chores"
         subtitle={`${pending.length} pending`}
         right={
-          <Link
-            href="/chat?q=Add+new+chore"
+          <button
+            onClick={startAdd}
             className="w-9 h-9 flex items-center justify-center rounded-xl bg-nori-500/15 text-nori-400 hover:bg-nori-500/25 transition-colors"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="w-5 h-5">
               <path d="M12 5v14M5 12h14" strokeLinecap="round" />
             </svg>
-          </Link>
+          </button>
         }
       />
 
@@ -141,13 +204,100 @@ export default function TasksPage() {
               ))}
             </div>
 
+            {/* Add/Edit Form */}
+            {(isAdding || editingId !== null) && (
+              <Card className="!p-4 space-y-3">
+                <h4 className="text-text-primary font-semibold text-sm">
+                  {isAdding ? "Add Task" : "Edit Task"}
+                </h4>
+                <input
+                  type="text"
+                  placeholder="Task title"
+                  value={editForm.title}
+                  onChange={e => updateForm("title", e.target.value)}
+                  className="w-full bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3 focus:border-nori-500/50 placeholder:text-text-muted"
+                  autoFocus
+                />
+                <div className="grid grid-cols-2 gap-2">
+                  <select
+                    value={editForm.assignee}
+                    onChange={e => updateForm("assignee", e.target.value)}
+                    className="bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3"
+                  >
+                    {membersData.map(m => (
+                      <option key={m.name} value={m.name}>{m.emoji} {m.name}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={editForm.due}
+                    onChange={e => updateForm("due", e.target.value)}
+                    className="bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3"
+                  >
+                    {dueOptions.map(d => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                  <select
+                    value={editForm.priority}
+                    onChange={e => updateForm("priority", e.target.value)}
+                    className="bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3"
+                  >
+                    <option value="high">🔴 High</option>
+                    <option value="medium">🟡 Medium</option>
+                    <option value="low">⚪ Low</option>
+                  </select>
+                  <select
+                    value={editForm.category}
+                    onChange={e => updateForm("category", e.target.value)}
+                    className="bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3"
+                  >
+                    {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    placeholder="Points"
+                    value={editForm.points}
+                    onChange={e => updateForm("points", parseInt(e.target.value) || 0)}
+                    className="w-20 bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Recurring (e.g. Daily)"
+                    value={editForm.recurring || ""}
+                    onChange={e => updateForm("recurring", e.target.value || null)}
+                    className="flex-1 bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3 placeholder:text-text-muted"
+                  />
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <button
+                    onClick={saveTask}
+                    disabled={!editForm.title.trim()}
+                    className="flex-1 py-2 rounded-lg bg-nori-500 text-white text-sm font-medium disabled:opacity-40 hover:bg-nori-400 transition-colors"
+                  >
+                    {isAdding ? "Add Task" : "Save"}
+                  </button>
+                  <button onClick={cancelEdit} className="flex-1 py-2 rounded-lg bg-surface-2 text-text-secondary text-sm font-medium hover:text-text-primary transition-colors">
+                    Cancel
+                  </button>
+                  {!isAdding && (
+                    <button
+                      onClick={() => deleteTask(editForm.id)}
+                      className="px-3 py-2 rounded-lg bg-rose-500/15 text-rose-400 text-sm font-medium hover:bg-rose-500/25 transition-colors"
+                    >
+                      🗑️
+                    </button>
+                  )}
+                </div>
+              </Card>
+            )}
+
             {/* Pending tasks */}
             <section>
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-text-primary font-semibold text-sm">Pending ({pending.length})</h3>
-                <Link href="/chat?q=Assign+new+task" className="text-nori-400 text-xs hover:text-nori-300">
+                <button onClick={startAdd} className="text-nori-400 text-xs hover:text-nori-300">
                   + Assign task
-                </Link>
+                </button>
               </div>
 
               {pending.length === 0 ? (
@@ -158,13 +308,17 @@ export default function TasksPage() {
               ) : (
                 <div className="space-y-2">
                   {pending.map((task) => (
-                    <TaskRow
-                      key={task.id}
-                      task={task}
-                      onToggle={toggleTask}
-                      memberColors={memberColors}
-                      priorityColors={priorityColors}
-                    />
+                    <div key={task.id} className="flex items-center gap-1">
+                      <div className="flex-1">
+                        <TaskRow
+                          task={task}
+                          onToggle={toggleTask}
+                          onEdit={startEdit}
+                          memberColors={memberColors}
+                          priorityColors={priorityColors}
+                        />
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}
@@ -197,6 +351,7 @@ export default function TasksPage() {
                         key={task.id}
                         task={task}
                         onToggle={toggleTask}
+                        onEdit={startEdit}
                         memberColors={memberColors}
                         priorityColors={priorityColors}
                       />
@@ -205,38 +360,11 @@ export default function TasksPage() {
                 )}
               </section>
             )}
-
-            {/* Recurring tasks */}
-            <section className="pb-2">
-              <h3 className="text-text-primary font-semibold text-sm mb-3">Recurring Chores</h3>
-              <div className="space-y-2">
-                {[
-                  { title: "Take out trash", assignee: "Caspian", schedule: "Every Thursday", emoji: "🗑️", color: memberColors["Caspian"] || "violet", assigneeEmoji: "🧒" },
-                  { title: "Load dishwasher", assignee: "Jasmine", schedule: "Daily after dinner", emoji: "🍽️", color: memberColors["Jasmine"] || "amber", assigneeEmoji: "👧" },
-                  { title: "Walk the dog", assignee: "Caspian", schedule: "Daily morning", emoji: "🐕", color: memberColors["Caspian"] || "violet", assigneeEmoji: "🧒" },
-                  { title: "Pay bills", assignee: "Jeffery (Dad)", schedule: "1st of month", emoji: "💳", color: memberColors["Jeffery (Dad)"] || "cyan", assigneeEmoji: "👨" },
-                ].map((chore) => (
-                  <Card key={chore.title} className="!p-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-xl bg-surface-3 flex items-center justify-center text-base shrink-0">
-                        <AnimatedEmoji emoji={chore.emoji} size="sm" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-text-primary text-sm font-medium truncate">{chore.title}</p>
-                        <p className="text-text-muted text-xs">{chore.schedule}</p>
-                      </div>
-                      <Avatar name={chore.assignee} color={chore.color} size="sm" variant="emoji" emoji={chore.assigneeEmoji} />
-                    </div>
-                  </Card>
-                ))}
-              </div>
-            </section>
           </>
         )}
 
         {activeTab === "leaderboard" && (
           <div className="space-y-4 pb-2">
-            {/* Champion banner */}
             <div
               className="rounded-2xl p-4 text-center"
               style={{
@@ -251,23 +379,16 @@ export default function TasksPage() {
                 {leaderboard[0].points} pts · {leaderboard[0].streak} day streak 🔥
               </p>
             </div>
-
-            {/* Leaderboard list */}
             <div className="space-y-2">
               {leaderboard.map((entry, i) => (
                 <Card key={entry.name} className="!p-3">
                   <div className="flex items-center gap-3">
-                    <div
-                      className={`w-8 h-8 rounded-xl flex items-center justify-center text-sm font-bold shrink-0 ${
-                        i === 0
-                          ? "bg-amber-500/20 text-amber-400"
-                          : i === 1
-                          ? "bg-surface-3 text-text-secondary"
-                          : i === 2
-                          ? "bg-amber-900/20 text-amber-700"
-                          : "bg-surface-2 text-text-muted"
-                      }`}
-                    >
+                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-sm font-bold shrink-0 ${
+                      i === 0 ? "bg-amber-500/20 text-amber-400" :
+                      i === 1 ? "bg-surface-3 text-text-secondary" :
+                      i === 2 ? "bg-amber-900/20 text-amber-700" :
+                      "bg-surface-2 text-text-muted"
+                    }`}>
                       {i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `#${i + 1}`}
                     </div>
                     <AnimatedEmoji emoji={entry.emoji} size="sm" />
@@ -281,16 +402,11 @@ export default function TasksPage() {
                     </div>
                   </div>
                   <div className="mt-2.5 w-full h-1.5 rounded-full bg-surface-3 overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-nori-500 transition-all"
-                      style={{ width: `${(entry.points / 200) * 100}%` }}
-                    />
+                    <div className="h-full rounded-full bg-nori-500 transition-all" style={{ width: `${(entry.points / 200) * 100}%` }} />
                   </div>
                 </Card>
               ))}
             </div>
-
-            {/* Rewards */}
             <section>
               <h3 className="text-text-primary font-semibold text-sm mb-3">Rewards</h3>
               <div className="grid grid-cols-2 gap-2">
@@ -320,59 +436,61 @@ export default function TasksPage() {
 interface TaskRowProps {
   task: Task;
   onToggle: (id: number) => void;
+  onEdit: (task: Task) => void;
   memberColors: Record<string, string>;
   priorityColors: Record<string, string>;
 }
 
-function TaskRow({ task, onToggle, memberColors, priorityColors }: TaskRowProps) {
+function TaskRow({ task, onToggle, onEdit, memberColors, priorityColors }: TaskRowProps) {
   return (
-    <button
-      onClick={() => onToggle(task.id)}
-      className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all active:scale-[0.98] ${
-        task.completed ? "opacity-50" : "glass hover:border-surface-4"
-      }`}
-    >
-      <div
-        className={`w-5 h-5 rounded-full border-2 shrink-0 flex items-center justify-center transition-all ${
-          task.completed ? "border-nori-500 bg-nori-500" : "border-surface-4"
+    <div className="flex items-center gap-1">
+      <button
+        onClick={() => onToggle(task.id)}
+        className={`flex-1 flex items-center gap-3 px-3 py-3 rounded-xl transition-all active:scale-[0.98] text-left ${
+          task.completed ? "opacity-50" : "glass hover:border-surface-4"
         }`}
       >
-        {task.completed && (
-          <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={3} className="w-3 h-3">
-            <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        )}
-      </div>
+        <div
+          className={`w-5 h-5 rounded-full border-2 shrink-0 flex items-center justify-center transition-all ${
+            task.completed ? "border-nori-500 bg-nori-500" : "border-surface-4"
+          }`}
+        >
+          {task.completed && (
+            <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={3} className="w-3 h-3">
+              <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          )}
+        </div>
 
-      <div className="flex-1 min-w-0 text-left">
-        <div className="flex items-center gap-1.5">
-          <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${priorityColors[task.priority]}`} />
-          <p
-            className={`text-sm font-medium truncate ${
-              task.completed ? "line-through text-text-muted" : "text-text-primary"
-            }`}
-          >
-            {task.title}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5">
+            <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${priorityColors[task.priority]}`} />
+            <p className={`text-sm font-medium truncate ${task.completed ? "line-through text-text-muted" : "text-text-primary"}`}>
+              {task.title}
+            </p>
+          </div>
+          <p className="text-xs text-text-muted mt-0.5">
+            {task.due}
+            {task.recurring && ` · 🔄 ${task.recurring}`}
           </p>
         </div>
-        <p className="text-xs text-text-muted mt-0.5">
-          {task.due}
-          {task.recurring && ` · 🔄 ${task.recurring}`}
-        </p>
-      </div>
 
-      <div className="flex items-center gap-2 shrink-0">
-        {task.points > 0 && (
-          <span className="text-xs font-semibold text-amber-400">+{task.points}pts</span>
-        )}
-        <Avatar
-          name={task.assignee}
-          color={memberColors[task.assignee] ?? "green"}
-          emoji={task.assigneeEmoji}
-          size="sm"
-          variant="emoji"
-        />
-      </div>
-    </button>
+        <div className="flex items-center gap-2 shrink-0">
+          {task.points > 0 && (
+            <span className="text-xs font-semibold text-amber-400">+{task.points}pts</span>
+          )}
+          <Avatar name={task.assignee} color={memberColors[task.assignee] ?? "green"} emoji={task.assigneeEmoji} size="sm" variant="emoji" />
+        </div>
+      </button>
+      <button
+        onClick={(e) => { e.stopPropagation(); onEdit(task); }}
+        className="w-7 h-7 flex items-center justify-center rounded-lg text-text-muted hover:text-nori-400 hover:bg-nori-500/10 transition-colors shrink-0"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
+          <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+    </div>
   );
 }
