@@ -115,6 +115,8 @@ export default function CalendarPage() {
   const [selectedDay, setSelectedDay] = useState(today.getDate());
   const [filterMember, setFilterMember] = useState("All");
   const [activeTab, setActiveTab] = useState<"calendar" | "schedule">("calendar");
+  const [toast, setToast] = useState<string | null>(null);
+  const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
   // Calendar events state
   const [calEvents, setCalEvents] = useState<CalEvent[]>(() => loadFromStorage(EVENTS_STORAGE_KEY, events));
@@ -216,6 +218,14 @@ export default function CalendarPage() {
 
   return (
     <PageShell>
+      {/* Toast */}
+      {toast && (
+        <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-2 px-4 py-2.5 rounded-2xl text-sm font-medium shadow-2xl border transition-all animate-[slideDown_0.3s_ease] ${
+          toast.includes("❌") ? "bg-rose-500/20 border-rose-500/30 text-rose-300" : "bg-nori-500/20 border-nori-500/30 text-nori-300"
+        }`} style={{ backdropFilter: "blur(20px)" }}>
+          {toast}
+        </div>
+      )}
       <TopBar
         title="Calendar"
         subtitle="Garcia Family"
@@ -254,6 +264,47 @@ export default function CalendarPage() {
 
         {activeTab === "calendar" && (
           <>
+            {/* Google Calendar sync button */}
+            <div className="flex items-center justify-end mb-1">
+              <button
+                onClick={async () => {
+                  try {
+                    const res = await fetch("/api/google-calendar");
+                    const data = await res.json();
+                    if (data.events?.length) {
+                      const merged = [...calEvents];
+                      for (const ge of data.events) {
+                        if (!merged.find(e => e.title === ge.title && e.day === new Date(ge.date).getDate())) {
+                          merged.push({
+                            id: Date.now() + Math.random(),
+                            title: ge.title,
+                            time: ge.time || "12:00 PM",
+                            member: "Google",
+                            color: "cyan" as const,
+                            emoji: "📅",
+                            day: new Date(ge.date).getDate(),
+                          });
+                        }
+                      }
+                      setCalEvents(merged);
+                      showToast(`✅ Synced ${data.events.length} Google events`);
+                    } else {
+                      showToast("No Google Calendar events found");
+                    }
+                  } catch {
+                    showToast("❌ Sync failed");
+                  }
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-500/10 text-cyan-400 text-xs font-medium border border-cyan-500/20 hover:bg-cyan-500/20 transition-colors"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
+                  <path d="M21 12a9 9 0 11-6.219-8.56" strokeLinecap="round" />
+                  <path d="M21 3v4h-4" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M21 3l-7 7" strokeLinecap="round" />
+                </svg>
+                Sync Google
+              </button>
+            </div>
             {/* Member filter */}
             <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4">
               <button
@@ -499,6 +550,12 @@ export default function CalendarPage() {
           </>
         )}
       </div>
+      <style jsx global>{`
+        @keyframes slideDown {
+          from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+          to { opacity: 1; transform: translateX(-50%) translateY(0); }
+        }
+      `}</style>
     </PageShell>
   );
 }
