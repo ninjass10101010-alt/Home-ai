@@ -4,7 +4,6 @@ import { useState, useRef, useEffect } from "react";
 import BottomNav from "@/components/ui/BottomNav";
 import Avatar from "@/components/ui/Avatar";
 import Badge from "@/components/ui/Badge";
-import { getAIResponse } from "@/actions/chat";
 
 interface Message {
   id: number;
@@ -246,17 +245,22 @@ export default function ChatPage() {
     setShowSuggestions(false);
 
     try {
-      const aiResponse = await getAIResponse(text);
+      const res = await fetch('/api/hermes/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text }),
+      });
+      const aiResponse = await res.json();
       setIsTyping(false);
       msgCounter.current += 1;
       const response: Message = {
         id: msgCounter.current,
         role: "assistant",
-        content: aiResponse.content,
+        content: aiResponse.content || aiResponse.reply || "I processed that.",
         timestamp: "Just now",
-        actions: aiResponse.actions?.map(action => ({
+        actions: aiResponse.actions?.map((action: any) => ({
           ...action,
-          confirmed: true, // Assume confirmed for now
+          confirmed: true,
         })),
       };
       setMessages((prev) => [...prev, response]);
