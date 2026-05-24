@@ -33,14 +33,14 @@ interface LeaderboardEntry {
 
 const initialTasks: Task[] = [
   { id: 1, title: "Take out trash", assignee: "Caspian", assigneeEmoji: "🧒", due: "Today", points: 10, recurring: "Weekly · Thu", category: "Chores", completed: false, priority: "high" },
-  { id: 2, title: "Grocery run", assignee: "Mom", assigneeEmoji: "👩", due: "Today", points: 20, recurring: null, category: "Errands", completed: false, priority: "high" },
+  { id: 2, title: "Grocery run", assignee: "Rebecca (Mom)", assigneeEmoji: "👩", due: "Today", points: 20, recurring: null, category: "Errands", completed: false, priority: "high" },
   { id: 3, title: "Load dishwasher", assignee: "Jasmine", assigneeEmoji: "👧", due: "Today", points: 8, recurring: "Daily", category: "Chores", completed: false, priority: "medium" },
   { id: 4, title: "Vacuum living room", assignee: "Caspian", assigneeEmoji: "🧒", due: "Tomorrow", points: 15, recurring: "Weekly", category: "Chores", completed: false, priority: "medium" },
-  { id: 5, title: "Pay electric bill", assignee: "Dad", assigneeEmoji: "👨", due: "Fri", points: 0, recurring: "Monthly", category: "Admin", completed: false, priority: "high" },
+  { id: 5, title: "Pay electric bill", assignee: "Jeffery (Dad)", assigneeEmoji: "👨", due: "Fri", points: 0, recurring: "Monthly", category: "Admin", completed: false, priority: "high" },
   { id: 6, title: "Clean bathroom", assignee: "Jasmine", assigneeEmoji: "👧", due: "Tomorrow", points: 15, recurring: "Weekly", category: "Chores", completed: true, priority: "medium" },
   { id: 7, title: "Walk Rocco", assignee: "Caspian", assigneeEmoji: "🐶", due: "Today", points: 12, recurring: "Daily", category: "Pets", completed: true, priority: "low" },
-  { id: 8, title: "Book dentist appt", assignee: "Mom", assigneeEmoji: "👩", due: "This week", points: 0, recurring: null, category: "Health", completed: false, priority: "medium" },
-  { id: 9, title: "Car oil change", assignee: "Dad", assigneeEmoji: "👨", due: "Sat", points: 0, recurring: null, category: "Errands", completed: false, priority: "low" },
+  { id: 8, title: "Book dentist appt", assignee: "Rebecca (Mom)", assigneeEmoji: "👩", due: "This week", points: 0, recurring: null, category: "Health", completed: false, priority: "medium" },
+  { id: 9, title: "Car oil change", assignee: "Jeffery (Dad)", assigneeEmoji: "👨", due: "Sat", points: 0, recurring: null, category: "Errands", completed: false, priority: "low" },
   { id: 10, title: "Chew the bone", assignee: "Rocco", assigneeEmoji: "🐶", due: "Today", points: 5, recurring: "Daily", category: "Pets", completed: false, priority: "low" },
   { id: 11, title: "Grooming appointment", assignee: "Rico", assigneeEmoji: "🐩", due: "Tomorrow", points: 0, recurring: "Monthly", category: "Pets", completed: false, priority: "medium" },
 ];
@@ -50,8 +50,8 @@ const membersData = db.selectMembers();
 const leaderboard: LeaderboardEntry[] = [
   { name: "Caspian", emoji: "🧒", points: 145, streak: 5, rank: 1 },
   { name: "Emily", emoji: "👧", points: 120, streak: 3, rank: 2 },
-  { name: "Mom", emoji: "👩", points: 95, streak: 7, rank: 3 },
-  { name: "Dad", emoji: "👨", points: 60, streak: 2, rank: 4 },
+  { name: "Rebecca (Mom)", emoji: "👩", points: 95, streak: 7, rank: 3 },
+  { name: "Jeffery (Dad)", emoji: "👨", points: 60, streak: 2, rank: 4 },
 ];
 
 const allMembers = ["All", ...membersData.map(m => m.name)];
@@ -214,7 +214,7 @@ export default function TasksPage() {
                   { title: "Take out trash", assignee: "Caspian", schedule: "Every Thursday", emoji: "🗑️", color: memberColors["Caspian"] || "violet" },
                   { title: "Load dishwasher", assignee: "Jasmine", schedule: "Daily after dinner", emoji: "🍽️", color: memberColors["Jasmine"] || "amber" },
                   { title: "Walk the dog", assignee: "Caspian", schedule: "Daily morning", emoji: "🐕", color: memberColors["Caspian"] || "violet" },
-                  { title: "Pay bills", assignee: "Dad", schedule: "1st of month", emoji: "💳", color: memberColors["Dad"] || "cyan" },
+                  { title: "Pay bills", assignee: "Jeffery (Dad)", schedule: "1st of month", emoji: "💳", color: memberColors["Jeffery (Dad)"] || "cyan" },
                 ].map((chore) => (
                   <Card key={chore.title} className="!p-3">
                     <div className="flex items-center gap-3">
