@@ -38,7 +38,7 @@ const initialTasks: Task[] = [
   { id: 4, title: "Vacuum living room", assignee: "Caspian", assigneeEmoji: "🧒", due: "Tomorrow", points: 15, recurring: "Weekly", category: "Chores", completed: false, priority: "medium" },
   { id: 5, title: "Pay electric bill", assignee: "Jeffery (Dad)", assigneeEmoji: "👨", due: "Fri", points: 0, recurring: "Monthly", category: "Admin", completed: false, priority: "high" },
   { id: 6, title: "Clean bathroom", assignee: "Jasmine", assigneeEmoji: "👧", due: "Tomorrow", points: 15, recurring: "Weekly", category: "Chores", completed: true, priority: "medium" },
-  { id: 7, title: "Walk Rocco", assignee: "Caspian", assigneeEmoji: "🐶", due: "Today", points: 12, recurring: "Daily", category: "Pets", completed: true, priority: "low" },
+  { id: 7, title: "Walk Rocco", assignee: "Caspian", assigneeEmoji: "🧒", due: "Today", points: 12, recurring: "Daily", category: "Pets", completed: true, priority: "low" },
   { id: 8, title: "Book dentist appt", assignee: "Rebecca (Mom)", assigneeEmoji: "👩", due: "This week", points: 0, recurring: null, category: "Health", completed: false, priority: "medium" },
   { id: 9, title: "Car oil change", assignee: "Jeffery (Dad)", assigneeEmoji: "👨", due: "Sat", points: 0, recurring: null, category: "Errands", completed: false, priority: "low" },
   { id: 10, title: "Chew the bone", assignee: "Rocco", assigneeEmoji: "🐶", due: "Today", points: 5, recurring: "Daily", category: "Pets", completed: false, priority: "low" },
