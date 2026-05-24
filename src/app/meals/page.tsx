@@ -132,6 +132,7 @@ function MealHubContent() {
 
   // Recipe Creator
   const [showRecipeModal, setShowRecipeModal] = useState(false);
+  const [editingMealId, setEditingMealId] = useState<number | null>(null);
   const [recipe, setRecipe] = useState({ ...emptyRecipe });
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
@@ -195,9 +196,34 @@ function MealHubContent() {
   const activeMeal = meals.find(m => m.time === activeDay);
 
   // ─── Recipe Creator ───────────────────────────────────────────
-  const openRecipeModal = () => {
-    setRecipe({ ...emptyRecipe });
+  const openRecipeModal = (meal?: Meal) => {
+    if (meal) {
+      setEditingMealId(meal.id);
+      setRecipe({
+        name: meal.name,
+        emoji: meal.emoji,
+        time: meal.time,
+        prepTime: meal.prepTime,
+        servings: meal.servings,
+        calories: meal.calories,
+        protein: meal.protein ?? 0,
+        carbs: meal.carbs ?? 0,
+        fat: meal.fat ?? 0,
+        tags: [...meal.tags],
+        ingredients: [...meal.ingredients],
+        instructions: meal.instructions ?? "",
+      });
+    } else {
+      setEditingMealId(null);
+      setRecipe({ ...emptyRecipe, time: activeDay });
+    }
     setShowRecipeModal(true);
+  };
+
+  const deleteMeal = (id: number) => {
+    const meal = meals.find(m => m.id === id);
+    setMeals(prev => prev.filter(m => m.id !== id));
+    if (meal) showToast(`🗑️ Deleted "${meal.name}"`);
   };
 
   const updateIngredient = (idx: number, val: string) => {
@@ -218,30 +244,54 @@ function MealHubContent() {
 
   const saveRecipe = () => {
     if (!recipe.name.trim()) return;
-    const newMeal: Meal = {
-      id: Date.now(),
-      name: recipe.name.trim(),
-      emoji: recipe.emoji,
-      time: recipe.time,
-      prepTime: recipe.prepTime || "30 min",
-      tags: recipe.tags,
-      ingredients: recipe.ingredients.filter(i => i.trim()),
-      servings: recipe.servings,
-      calories: recipe.calories,
-      protein: recipe.protein,
-      carbs: recipe.carbs,
-      fat: recipe.fat,
-      instructions: recipe.instructions,
-    };
-    db.insertMeal(newMeal);
-    setMeals(prev => {
-      const filtered = prev.filter(m => m.time !== newMeal.time);
-      return [...filtered, newMeal];
-    });
-    setActiveDay(newMeal.time);
+    if (editingMealId !== null) {
+      // Update existing meal
+      const updated: Meal = {
+        id: editingMealId,
+        name: recipe.name.trim(),
+        emoji: recipe.emoji,
+        time: recipe.time,
+        prepTime: recipe.prepTime || "30 min",
+        tags: recipe.tags,
+        ingredients: recipe.ingredients.filter(i => i.trim()),
+        servings: recipe.servings,
+        calories: recipe.calories,
+        protein: recipe.protein,
+        carbs: recipe.carbs,
+        fat: recipe.fat,
+        instructions: recipe.instructions,
+      };
+      setMeals(prev => prev.map(m => m.id === editingMealId ? updated : m));
+      if (updated.time !== activeDay) setActiveDay(updated.time);
+      showToast(`✅ "${updated.name}" updated!`);
+    } else {
+      // Create new meal
+      const newMeal: Meal = {
+        id: Date.now(),
+        name: recipe.name.trim(),
+        emoji: recipe.emoji,
+        time: recipe.time,
+        prepTime: recipe.prepTime || "30 min",
+        tags: recipe.tags,
+        ingredients: recipe.ingredients.filter(i => i.trim()),
+        servings: recipe.servings,
+        calories: recipe.calories,
+        protein: recipe.protein,
+        carbs: recipe.carbs,
+        fat: recipe.fat,
+        instructions: recipe.instructions,
+      };
+      db.insertMeal(newMeal);
+      setMeals(prev => {
+        const filtered = prev.filter(m => m.time !== newMeal.time);
+        return [...filtered, newMeal];
+      });
+      setActiveDay(newMeal.time);
+      showToast(`✅ "${newMeal.name}" added to ${newMeal.time}!`);
+    }
     setShowRecipeModal(false);
+    setEditingMealId(null);
     setShowNutrition(false);
-    showToast(`✅ "${newMeal.name}" added to ${newMeal.time}!`);
   };
 
   // ─── Grocery ─────────────────────────────────────────────────
@@ -441,7 +491,7 @@ function MealHubContent() {
 
           {/* Create Recipe Button */}
           <button
-            onClick={openRecipeModal}
+            onClick={() => openRecipeModal()}
             className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border-2 border-dashed border-nori-500/30 text-nori-400 text-sm font-medium hover:border-nori-500/60 hover:bg-nori-500/5 transition-all group"
           >
             <span className="text-lg group-hover:scale-110 transition-transform" style={{ display: "inline-block" }}>🍳</span>
@@ -515,6 +565,20 @@ function MealHubContent() {
 
               {/* Actions */}
               <div className="flex gap-2 mt-4">
+                <button
+                  onClick={() => activeMeal && openRecipeModal(activeMeal)}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl glass text-text-secondary text-sm font-medium hover:text-text-primary hover:bg-surface-2 transition-colors"
+                >
+                  ✏️ Edit
+                </button>
+                <button
+                  onClick={() => activeMeal && deleteMeal(activeMeal.id)}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-rose-500/10 text-rose-400 text-sm font-medium hover:bg-rose-500/20 transition-colors"
+                >
+                  🗑️ Delete
+                </button>
+              </div>
+              <div className="flex gap-2 mt-2">
                 <button
                   onClick={() => setActiveTab("grocery")}
                   className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-nori-500/15 text-nori-400 text-sm font-medium hover:bg-nori-500/25 transition-colors"
@@ -932,8 +996,8 @@ function MealHubContent() {
             {/* Header */}
             <div className="px-5 pb-4 flex items-center justify-between border-b border-surface-3">
               <div>
-                <h2 className="text-text-primary font-bold text-lg">🍳 Create Recipe</h2>
-                <p className="text-text-muted text-xs">Add your own recipe to the meal planner</p>
+                <h2 className="text-text-primary font-bold text-lg">{editingMealId !== null ? "✏️ Edit Recipe" : "🍳 Create Recipe"}</h2>
+                <p className="text-text-muted text-xs">{editingMealId !== null ? "Update your recipe" : "Add your own recipe to the meal planner"}</p>
               </div>
               <button
                 onClick={() => setShowRecipeModal(false)}
@@ -1110,8 +1174,8 @@ function MealHubContent() {
                 disabled={!recipe.name.trim()}
                 className="w-full py-4 rounded-2xl bg-nori-500 text-surface-0 font-bold text-base hover:bg-nori-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-nori-500/30 flex items-center justify-center gap-2"
               >
-                <span className="text-xl">🍳</span>
-                Save Recipe
+                <span className="text-xl">{editingMealId !== null ? "💾" : "🍳"}</span>
+                {editingMealId !== null ? "Save Changes" : "Save Recipe"}
               </button>
             </div>
           </div>
