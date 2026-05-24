@@ -97,6 +97,8 @@ const emptySchedule = (): ScheduleItem => ({
 
 const EVENTS_STORAGE_KEY = "consuela-events";
 const SCHEDULES_STORAGE_KEY = "consuela-schedules";
+const SCHEDULES_VERSION_KEY = "consuela-schedules-v";
+const SCHEDULES_VERSION = 2; // bump to clear stale localStorage
 
 function loadFromStorage<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
@@ -125,7 +127,18 @@ export default function CalendarPage() {
   const [isAddingEvent, setIsAddingEvent] = useState(false);
 
   // Schedule state
-  const [schedules, setSchedules] = useState<ScheduleItem[]>(() => loadFromStorage(SCHEDULES_STORAGE_KEY, initialSchedules));
+  const [schedules, setSchedules] = useState<ScheduleItem[]>(() => {
+    if (typeof window !== "undefined") {
+      const storedVersion = localStorage.getItem(SCHEDULES_VERSION_KEY);
+      if (storedVersion === String(SCHEDULES_VERSION)) {
+        return loadFromStorage(SCHEDULES_STORAGE_KEY, initialSchedules);
+      }
+      // Version mismatch — clear stale data
+      localStorage.removeItem(SCHEDULES_STORAGE_KEY);
+      localStorage.setItem(SCHEDULES_VERSION_KEY, String(SCHEDULES_VERSION));
+    }
+    return initialSchedules;
+  });
   const [editingSchedId, setEditingSchedId] = useState<number | null>(null);
   const [schedForm, setSchedForm] = useState<ScheduleItem>(emptySchedule());
   const [isAddingSched, setIsAddingSched] = useState(false);
@@ -527,7 +540,11 @@ export default function CalendarPage() {
                 </Card>
               ) : (
                 <div className="space-y-1.5">
-                  {[...schedules].sort((a, b) => a.time.localeCompare(b.time)).map((item) => (
+                  {[...schedules].sort((a, b) => {
+                    // Handle both raw "HH:MM" and formatted "H:MM AM/PM" times
+                    const getMinutes = (t: string) => parseTimeToMinutes(t) || parseInt(t.replace(':', ''), 10);
+                    return getMinutes(a.time) - getMinutes(b.time);
+                  }).map((item) => (
                     <div key={item.id} className="flex items-center gap-1">
                       <div className={`flex-1 flex items-center gap-3 px-3 py-2.5 rounded-xl ${colorBG[item.color] ?? "bg-nori-500/15"}`}>
                         <span className="text-xs font-mono text-text-muted w-12 shrink-0 tabular-nums">{item.time}</span>
