@@ -20,14 +20,27 @@ interface ScheduleDisplayProps {
   className?: string;
 }
 
+/** Parse "8:00 AM" | "2:30 PM" → minutes since midnight for accurate sort + comparison */
+function parseTimeToMinutes(timeStr: string): number {
+  const match = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!match) return 0;
+  let hours = parseInt(match[1], 10);
+  const minutes = parseInt(match[2], 10);
+  const ampm = match[3].toUpperCase();
+  if (ampm === "PM" && hours !== 12) hours += 12;
+  if (ampm === "AM" && hours === 12) hours = 0;
+  return hours * 60 + minutes;
+}
+
 export default function ScheduleDisplay({ schedule, title = "Today's Schedule", className = "" }: ScheduleDisplayProps) {
-  const sortedSchedule = useMemo(() => {
-    return [...schedule].sort((a, b) => {
-      const timeA = a.time.replace(":", "");
-      const timeB = b.time.replace(":", "");
-      return timeA.localeCompare(timeB);
-    });
-  }, [schedule]);
+  const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
+
+  const { sortedSchedule, upcomingCount } = useMemo(() => {
+    // Filter out past items, then sort by time
+    const upcoming = schedule.filter(item => parseTimeToMinutes(item.time) >= nowMinutes);
+    const sorted = [...upcoming].sort((a, b) => parseTimeToMinutes(a.time) - parseTimeToMinutes(b.time));
+    return { sortedSchedule: sorted, upcomingCount: sorted.length };
+  }, [schedule, nowMinutes]);
 
   if (schedule.length === 0) {
     return (
@@ -43,24 +56,12 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
     );
   }
 
-  const upcomingCount = schedule.filter(item => {
-    const hour = parseInt(item.time.split(":")[0]);
-    return hour >= new Date().getHours();
-  }).length;
-
   const colorBgMap: Record<string, string> = {
     green:  "bg-nori-500/15",
     amber:  "bg-amber-500/15",
     cyan:   "bg-cyan-500/15",
     violet: "bg-accent-violet/15",
     rose:   "bg-accent-rose/15",
-  };
-  const colorDotMap: Record<string, string> = {
-    green:  "bg-nori-500/50",
-    amber:  "bg-amber-500/50",
-    cyan:   "bg-cyan-500/50",
-    violet: "bg-accent-violet/50",
-    rose:   "bg-accent-rose/50",
   };
 
   return (
@@ -71,12 +72,13 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
           {upcomingCount} upcoming
         </span>
       </div>
-      <div className="space-y-1.5">
-        {sortedSchedule.map((item, idx) => {
-          const hour = parseInt(item.time.split(":")[0]);
-          const isPast = hour < new Date().getHours();
-
-          return (
+      {sortedSchedule.length === 0 ? (
+        <div className="flex flex-col items-center gap-2 py-4 text-text-muted">
+          <p className="text-xs">All done for today 🎉</p>
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          {sortedSchedule.map((item, idx) => (
             <div
               key={item.id}
               style={{ animationDelay: `${idx * 0.05}s` }}
@@ -84,16 +86,16 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
             >
               <span className="text-xs font-mono text-text-muted w-12 shrink-0 tabular-nums">{item.time}</span>
               <span className="text-lg shrink-0">{item.emoji || item.icon || "•"}</span>
-              <span className={`text-sm flex-1 min-w-0 ${isPast ? 'line-through text-text-muted' : 'text-text-primary'}`}>{item.title}</span>
+              <span className="text-sm flex-1 min-w-0 text-text-primary">{item.title}</span>
               {item.member && (
                 <span className={`text-xs px-2 py-0.5 rounded-full bg-${item.memberColor || "surface"}-500/20 text-text-secondary`}>
                   {item.member.split(" ")[0]}
                 </span>
               )}
             </div>
-          );
-        })}
-      </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 }

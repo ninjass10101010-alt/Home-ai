@@ -299,6 +299,7 @@ export const db = {
     const today = new Date().toISOString().split('T')[0];
     return eventsData
       .filter(event => event.date === today)
+      .sort((a, b) => (a.time || '').localeCompare(b.time || '')) // sort by raw 24h time before formatting
       .map(event => {
         const member = membersData.find(m => m.id === event.memberId);
         return {
@@ -343,6 +344,7 @@ export const db = {
     const today = new Date().toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase(); // 'mon', 'tue', etc.
     return schedulesData
       .filter(schedule => schedule.days === 'all' || schedule.days.includes(today))
+      .sort((a, b) => a.time.localeCompare(b.time)) // sort by raw 24h time BEFORE formatting to AM/PM
       .map(schedule => {
         const member = schedule.memberId ? membersData.find(m => m.id === schedule.memberId) : null;
         return {
@@ -359,8 +361,7 @@ export const db = {
           member: member?.name,
           memberColor: member?.id === 1 ? 'green' : member?.id === 2 ? 'cyan' : member?.id === 3 ? 'violet' : 'amber',
         };
-      })
-      .sort((a, b) => a.time.localeCompare(b.time)); // Sort by time
+      });
   },
 
   // Emergency contacts (existing)
