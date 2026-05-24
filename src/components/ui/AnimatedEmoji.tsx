@@ -22,7 +22,7 @@ export default function AnimatedEmoji({ emoji, name, size = "md", className = ""
   const cy = s / 2;
 
   // Render specific animal animations based on emoji or name
-  if (emoji === "🐶" || name?.toLowerCase().includes("frenchie") || name?.toLowerCase().includes("buster")) {
+  if (emoji === "🐶" || name?.toLowerCase().includes("frenchie") || name?.toLowerCase().includes("buster") || name?.toLowerCase().includes("rocco")) {
     return (
       <svg width={s} height={s} viewBox="0 0 64 64" fill="none" className={className}>
         <style>{`
@@ -75,7 +75,7 @@ export default function AnimatedEmoji({ emoji, name, size = "md", className = ""
     );
   }
 
-  if (emoji === "🐩" || name?.toLowerCase().includes("poodle") || name?.toLowerCase().includes("coco")) {
+  if (emoji === "🐩" || name?.toLowerCase().includes("poodle") || name?.toLowerCase().includes("coco") || name?.toLowerCase().includes("rico")) {
     return (
       <svg width={s} height={s} viewBox="0 0 64 64" fill="none" className={className}>
         <style>{`
