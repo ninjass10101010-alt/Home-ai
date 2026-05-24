@@ -486,8 +486,12 @@ export default function SettingsPage() {
                     </div>
                   ) : (
                     <>
-                      <div className="w-12 h-12 rounded-xl bg-[var(--color-surface-2)] flex items-center justify-center text-2xl shrink-0">
-                        {member.emoji}
+                      <div className="w-12 h-12 rounded-xl bg-[var(--color-surface-2)] flex items-center justify-center text-2xl shrink-0 overflow-hidden">
+                        {/^(https?:)?\/\/|\.(gif|png|jpg|jpeg|webp)(\?|$)/i.test(member.emoji) ? (
+                          <img src={member.emoji.startsWith("http") ? member.emoji : `https://${member.emoji}`} alt={member.name} className="w-full h-full object-cover rounded-lg" />
+                        ) : (
+                          member.emoji
+                        )}
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-text-primary text-sm font-semibold truncate">{member.name}</p>
