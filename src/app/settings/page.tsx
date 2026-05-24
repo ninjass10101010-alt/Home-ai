@@ -461,6 +461,14 @@ export default function SettingsPage() {
                           autoFocus
                         />
                       </div>
+                      {/* Custom emoji input — type or paste any emoji */}
+                      <input
+                        value={editEmoji}
+                        onChange={e => setEditEmoji(e.target.value || "👤")}
+                        placeholder="Paste any emoji or type custom..."
+                        maxLength={4}
+                        className="w-full bg-[var(--color-surface-2)] text-text-primary text-sm rounded-xl px-3 py-2 outline-none border border-[var(--color-surface-3)] focus:border-[var(--color-accent-selected)] placeholder:text-text-muted"
+                      />
                       {showEmojiPicker && (
                         <div className="flex flex-wrap gap-1 p-2 rounded-xl bg-[var(--color-surface-2)]">
                           {emojiOptions.map(e => (
