@@ -211,10 +211,10 @@ export default function TasksPage() {
               <h3 className="text-text-primary font-semibold text-sm mb-3">Recurring Chores</h3>
               <div className="space-y-2">
                 {[
-                  { title: "Take out trash", assignee: "Caspian", schedule: "Every Thursday", emoji: "🗑️", color: memberColors["Caspian"] || "violet" },
-                  { title: "Load dishwasher", assignee: "Jasmine", schedule: "Daily after dinner", emoji: "🍽️", color: memberColors["Jasmine"] || "amber" },
-                  { title: "Walk the dog", assignee: "Caspian", schedule: "Daily morning", emoji: "🐕", color: memberColors["Caspian"] || "violet" },
-                  { title: "Pay bills", assignee: "Jeffery (Dad)", schedule: "1st of month", emoji: "💳", color: memberColors["Jeffery (Dad)"] || "cyan" },
+                  { title: "Take out trash", assignee: "Caspian", schedule: "Every Thursday", emoji: "🗑️", color: memberColors["Caspian"] || "violet", assigneeEmoji: "🧒" },
+                  { title: "Load dishwasher", assignee: "Jasmine", schedule: "Daily after dinner", emoji: "🍽️", color: memberColors["Jasmine"] || "amber", assigneeEmoji: "👧" },
+                  { title: "Walk the dog", assignee: "Caspian", schedule: "Daily morning", emoji: "🐕", color: memberColors["Caspian"] || "violet", assigneeEmoji: "🧒" },
+                  { title: "Pay bills", assignee: "Jeffery (Dad)", schedule: "1st of month", emoji: "💳", color: memberColors["Jeffery (Dad)"] || "cyan", assigneeEmoji: "👨" },
                 ].map((chore) => (
                   <Card key={chore.title} className="!p-3">
                     <div className="flex items-center gap-3">
@@ -225,7 +225,7 @@ export default function TasksPage() {
                         <p className="text-text-primary text-sm font-medium truncate">{chore.title}</p>
                         <p className="text-text-muted text-xs">{chore.schedule}</p>
                       </div>
-                      <Avatar name={chore.assignee} color={chore.color} size="sm" variant="emoji" />
+                      <Avatar name={chore.assignee} color={chore.color} size="sm" variant="emoji" emoji={chore.assigneeEmoji} />
                     </div>
                   </Card>
                 ))}
@@ -370,6 +370,7 @@ function TaskRow({ task, onToggle, memberColors, priorityColors }: TaskRowProps)
           color={memberColors[task.assignee] ?? "green"}
           emoji={task.assigneeEmoji}
           size="sm"
+          variant="emoji"
         />
       </div>
     </button>

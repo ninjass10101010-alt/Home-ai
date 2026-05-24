@@ -39,7 +39,16 @@ export default function HomePage() {
 
   const today = new Date();
   const hour = today.getHours();
-  const timeOfDay = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
+  const timeOfDay = hour < 5 ? "night" : hour < 12 ? "morning" : hour < 17 ? "afternoon" : hour < 21 ? "evening" : "night";
+
+  const getSeason = () => {
+    const month = new Date().getMonth();
+    if (month >= 2 && month <= 4) return { name: "Spring", emoji: "🌸" };
+    if (month >= 5 && month <= 7) return { name: "Summer", emoji: "☀️" };
+    if (month >= 8 && month <= 10) return { name: "Autumn", emoji: "🍂" };
+    return { name: "Winter", emoji: "❄️" };
+  };
+  const season = getSeason();
 
   // Date pill
   const dayOfWeek = today.toLocaleDateString("en-US", { weekday: "short" });
@@ -105,6 +114,9 @@ export default function HomePage() {
           <h1 className="text-2xl font-bold text-text-primary mt-0.5">
             Good {timeOfDay}, <span className="bg-[linear-gradient(135deg,var(--color-accent-selected),var(--color-accent-cyan))] bg-clip-text text-transparent">Garcia family</span> 👋
           </h1>
+          <div className="flex items-center gap-1.5 mb-1">
+            <span className="text-xs text-text-muted">{season.emoji} {season.name}</span>
+          </div>
         </div>
 
         {/* Quick stat links */}

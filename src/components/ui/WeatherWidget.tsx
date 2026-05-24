@@ -29,19 +29,7 @@ interface Particle {
   color?: string;
 }
 
-// ─── Static mock data ───────────────────────────────────────────────────────
-
-const CURRENT_TEMP = 72;
-const CURRENT_CONDITION = "Partly Cloudy";
-const FEELS_LIKE = 74;
-
-const FORECAST: ForecastDay[] = [
-  { day: "Tue", high: 75, low: 62, condition: "Partly Cloudy", emoji: "⛅", precipitation: 10, humidity: 55, wind: 8 },
-  { day: "Wed", high: 78, low: 64, condition: "Sunny",         emoji: "☀️", precipitation: 0,  humidity: 45, wind: 6 },
-  { day: "Thu", high: 71, low: 58, condition: "Rainy",         emoji: "🌧️", precipitation: 80, humidity: 75, wind: 12 },
-  { day: "Fri", high: 68, low: 55, condition: "Cloudy",        emoji: "☁️", precipitation: 30, humidity: 65, wind: 10 },
-  { day: "Sat", high: 74, low: 60, condition: "Sunny",         emoji: "🌤️", precipitation: 5,  humidity: 50, wind: 7 },
-];
+// ─── State for real API data (declared inside component) ─────────────────────
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -465,6 +453,56 @@ export default function WeatherWidget() {
   const [tempKey, setTempKey] = useState(0);
   const prevUnitRef = useRef(weather.unit);
 
+  // ─── Weather data from Open-Meteo API ──────────────────────────────────
+  const [weatherData, setWeatherData] = useState<{currentTemp: number, currentCondition: string, feelsLike: number, forecast: ForecastDay[], humidity: number, wind: number} | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const lat = 42.7875;
+    const lon = -86.1089;
+    fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto&forecast_days=6`)
+      .then(r => r.json())
+      .then(data => {
+        const current = data.current;
+        const daily = data.daily;
+        const wmoToCondition = (code: number) => {
+          if (code === 0) return { condition: "Clear", emoji: "☀️" };
+          if (code <= 3) return { condition: "Partly Cloudy", emoji: "⛅" };
+          if (code <= 48) return { condition: "Foggy", emoji: "🌫️" };
+          if (code <= 57) return { condition: "Drizzle", emoji: "🌦️" };
+          if (code <= 67) return { condition: "Rainy", emoji: "🌧️" };
+          if (code <= 77) return { condition: "Snowy", emoji: "❄️" };
+          if (code <= 82) return { condition: "Rain Showers", emoji: "🌧️" };
+          return { condition: "Thunderstorm", emoji: "⛈️" };
+        };
+        const currentWMO = wmoToCondition(current.weather_code);
+        const days = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+        const forecast: ForecastDay[] = daily.time.slice(1, 6).map((date: string, i: number) => {
+          const wmo = wmoToCondition(daily.weather_code[i+1]);
+          return {
+            day: days[new Date(date).getDay()],
+            high: Math.round(daily.temperature_2m_max[i+1]),
+            low: Math.round(daily.temperature_2m_min[i+1]),
+            condition: wmo.condition,
+            emoji: wmo.emoji,
+            precipitation: daily.precipitation_probability_max[i+1] || 0,
+            humidity: current.relative_humidity_2m,
+            wind: Math.round(current.wind_speed_10m),
+          };
+        });
+        setWeatherData({
+          currentTemp: Math.round(current.temperature_2m),
+          currentCondition: currentWMO.condition,
+          feelsLike: Math.round(current.apparent_temperature),
+          forecast,
+          humidity: current.relative_humidity_2m,
+          wind: Math.round(current.wind_speed_10m),
+        });
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
+
   useEffect(() => { setMounted(true); }, []);
 
   // Pop animation when unit changes
@@ -475,16 +513,16 @@ export default function WeatherWidget() {
     }
   }, [weather.unit]);
 
-  const condition = detectCondition(CURRENT_CONDITION);
-  
+  const condition = detectCondition(weatherData?.currentCondition ?? "Partly Cloudy");
+
   const tod = weather.timeOfDay === "auto" ? getRealTimeOfDay() : weather.timeOfDay as TimeOfDayFlag;
   const season = weather.season === "auto" ? getRealSeason() : weather.season;
 
   const meta = getConditionMeta(condition, tod, season);
   const Icon = ICONS[condition];
 
-  const displayTemp   = weather.unit === "C" ? toC(CURRENT_TEMP)  : CURRENT_TEMP;
-  const displayFeels  = weather.unit === "C" ? toC(FEELS_LIKE)    : FEELS_LIKE;
+  const displayTemp   = weather.unit === "C" ? toC(weatherData?.currentTemp ?? 72)  : (weatherData?.currentTemp ?? 72);
+  const displayFeels  = weather.unit === "C" ? toC(weatherData?.feelsLike ?? 74)    : (weatherData?.feelsLike ?? 74);
 
   return (
     <div style={{ animation: mounted ? "weatherCardEnter 0.65s cubic-bezier(0.34,1.56,0.64,1) both" : undefined }}>
@@ -560,7 +598,7 @@ export default function WeatherWidget() {
                 <span className="text-2xl text-text-muted font-light mt-2 ml-1">°</span>
               </div>
 
-              <p className="text-text-primary text-sm font-semibold mb-0.5">{CURRENT_CONDITION}</p>
+              <p className="text-text-primary text-sm font-semibold mb-0.5">{weatherData?.currentCondition ?? "Partly Cloudy"}</p>
               <p className="text-text-muted text-[11px]">
                 Feels like {displayFeels}°{weather.unit}
               </p>
@@ -590,9 +628,9 @@ export default function WeatherWidget() {
 
               {/* Stats grid */}
               <div className="grid grid-cols-3 gap-2">
-                <StatPill icon="💧" label="Rain"     value="10%"   delay="0s"     accentColor={meta.statColor} />
-                <StatPill icon="🌫️" label="Humidity" value="55%"   delay="0.07s"  accentColor={meta.statColor} />
-                <StatPill icon="💨" label="Wind"     value="8 mph" delay="0.14s"  accentColor={meta.statColor} />
+                <StatPill icon="💧" label="Rain"     value={`${weatherData?.forecast?.[0]?.precipitation ?? 10}%`}   delay="0s"     accentColor={meta.statColor} />
+                <StatPill icon="🌫️" label="Humidity" value={`${weatherData?.humidity ?? 55}%`}   delay="0.07s"  accentColor={meta.statColor} />
+                <StatPill icon="💨" label="Wind"     value={`${weatherData?.wind ?? 8} mph`} delay="0.14s"  accentColor={meta.statColor} />
               </div>
 
               {/* 5-day forecast */}
@@ -601,7 +639,7 @@ export default function WeatherWidget() {
                   5-Day Forecast
                 </p>
                 <div className="flex justify-between gap-1.5">
-                  {FORECAST.map((day, i) => (
+                  {(weatherData?.forecast ?? []).map((day, i) => (
                     <div
                       key={day.day}
                       className="flex-1 flex flex-col items-center gap-1 py-2.5 rounded-xl cursor-default"
