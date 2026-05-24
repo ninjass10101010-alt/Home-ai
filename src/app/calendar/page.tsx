@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import PageShell from "@/components/ui/PageShell";
 import TopBar from "@/components/ui/TopBar";
 import Card from "@/components/ui/Card";
@@ -98,7 +98,7 @@ const emptySchedule = (): ScheduleItem => ({
 const EVENTS_STORAGE_KEY = "consuela-events";
 const SCHEDULES_STORAGE_KEY = "consuela-schedules";
 const SCHEDULES_VERSION_KEY = "consuela-schedules-v";
-const SCHEDULES_VERSION = 2; // bump to clear stale localStorage
+const SCHEDULES_VERSION = 3; // bump to clear stale localStorage
 
 function loadFromStorage<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
@@ -149,6 +149,14 @@ export default function CalendarPage() {
 
   useEffect(() => {
     localStorage.setItem(SCHEDULES_STORAGE_KEY, JSON.stringify(schedules));
+  }, [schedules]);
+
+  // Pre-sort schedules for display (handles both raw 24h and formatted AM/PM)
+  const sortedSchedules = useMemo(() => {
+    return [...schedules].sort((a, b) => {
+      const getMinutes = (t: string) => parseTimeToMinutes(t) || parseInt(t.replace(':', ''), 10);
+      return getMinutes(a.time) - getMinutes(b.time);
+    });
   }, [schedules]);
 
   const firstDay = new Date(year, month, 1).getDay();
@@ -540,11 +548,7 @@ export default function CalendarPage() {
                 </Card>
               ) : (
                 <div className="space-y-1.5">
-                  {[...schedules].sort((a, b) => {
-                    // Handle both raw "HH:MM" and formatted "H:MM AM/PM" times
-                    const getMinutes = (t: string) => parseTimeToMinutes(t) || parseInt(t.replace(':', ''), 10);
-                    return getMinutes(a.time) - getMinutes(b.time);
-                  }).map((item) => (
+                  {sortedSchedules.map((item) => (
                     <div key={item.id} className="flex items-center gap-1">
                       <div className={`flex-1 flex items-center gap-3 px-3 py-2.5 rounded-xl ${colorBG[item.color] ?? "bg-nori-500/15"}`}>
                         <span className="text-xs font-mono text-text-muted w-12 shrink-0 tabular-nums">{item.time}</span>
