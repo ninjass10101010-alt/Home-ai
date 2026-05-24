@@ -103,7 +103,7 @@ export default function HomePage() {
         {/* Greeting with gradient text */}
         <div className="mb-4 animate-in animate-in-delay-100">
           <h1 className="text-2xl font-bold text-text-primary mt-0.5">
-            Good {timeOfDay}, <span className="bg-[linear-gradient(135deg,var(--color-accent-selected),var(--color-accent-cyan))] bg-clip-text text-transparent">Johnson family</span> 👋
+            Good {timeOfDay}, <span className="bg-[linear-gradient(135deg,var(--color-accent-selected),var(--color-accent-cyan))] bg-clip-text text-transparent">Garcia family</span> 👋
           </h1>
         </div>
 

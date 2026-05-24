@@ -3,10 +3,10 @@
 
 // Seed data for demonstration - in production this would be user-managed
 const membersData = [
-  { id: 1, name: "Sarah (Mom)", role: "parent", emoji: "👩", fullName: "Sarah Johnson", age: 38, joined: "Feb 2024", skinColor: "#fdbcb4", hairColor: "#b45309" },
-  { id: 2, name: "Mike (Dad)", role: "parent", emoji: "👨", fullName: "Mike Johnson", age: 40, joined: "Feb 2024", skinColor: "#fdbcb4", hairColor: "#1e40af" },
-  { id: 3, name: "Jake", role: "child", emoji: "🧒", fullName: "Jake Johnson", age: 12, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#166534" },
-  { id: 4, name: "Lily", role: "child", emoji: "👧", fullName: "Lily Johnson", age: 9, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#5b21b6" },
+  { id: 1, name: "Sarah (Mom)", role: "parent", emoji: "👩", fullName: "Sarah Garcia", age: 38, joined: "Feb 2024", skinColor: "#fdbcb4", hairColor: "#b45309" },
+  { id: 2, name: "Mike (Dad)", role: "parent", emoji: "👨", fullName: "Mike Garcia", age: 40, joined: "Feb 2024", skinColor: "#fdbcb4", hairColor: "#1e40af" },
+  { id: 3, name: "Jake", role: "child", emoji: "🧒", fullName: "Jake Garcia", age: 12, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#166534" },
+  { id: 4, name: "Lily", role: "child", emoji: "👧", fullName: "Lily Garcia", age: 9, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#5b21b6" },
   { id: 5, name: "Buster", role: "pet", emoji: "🐶", fullName: "Buster (Frenchie)", age: 3, joined: "Feb 2024" },
   { id: 6, name: "Coco", role: "pet", emoji: "🐩", fullName: "Coco (Poodle)", age: 5, joined: "Feb 2024" },
   { id: 7, name: "Bubbles", role: "pet", emoji: "🐟", fullName: "Bubbles (Fish)", age: 1, joined: "Mar 2024" },
