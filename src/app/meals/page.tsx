@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import PageShell from "@/components/ui/PageShell";
 import TopBar from "@/components/ui/TopBar";
 import Card from "@/components/ui/Card";
@@ -119,7 +119,7 @@ const emptyRecipe = {
 
 type Tab = "meals" | "grocery" | "pantry";
 
-export default function MealHubPage() {
+function MealHubContent() {
   const searchParams = useSearchParams();
   const initialTab = (searchParams.get("tab") as Tab) || "meals";
   const [activeTab, setActiveTab] = useState<Tab>(initialTab);
@@ -1117,5 +1117,13 @@ export default function MealHubPage() {
         }
       `}</style>
     </PageShell>
+  );
+}
+
+export default function MealHubPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center min-h-screen"><div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary-500"></div></div>}>
+      <MealHubContent />
+    </Suspense>
   );
 }

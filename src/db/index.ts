@@ -215,7 +215,7 @@ export const db = {
       id: Math.max(...membersStore.map(m => m.id)) + 1,
       joined: new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
     };
-    membersStore.push(newMember);
+    membersStore.push(newMember as any);
     return newMember;
   },
 
@@ -223,7 +223,7 @@ export const db = {
   updateMember: (name: string, updates: Partial<typeof membersData[0]>) => {
     const index = membersStore.findIndex(m => m.name === name);
     if (index !== -1) {
-      membersStore[index] = { ...membersStore[index], ...updates };
+      membersStore[index] = { ...membersStore[index], ...updates } as any;
       return membersStore[index];
     }
     return null;
