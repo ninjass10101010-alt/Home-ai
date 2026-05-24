@@ -83,8 +83,8 @@ function FamilyIllustration({
 
     switch (name) {
       case "Mom":
-      case "Sarah":
-      case "Sarah (Mom)":
+      case "Rebecca":
+      case "Rebecca (Mom)":
         return (
           <svg {...baseProps} xmlns="http://www.w3.org/2000/svg">
             {defsAndStyles}
@@ -115,8 +115,8 @@ function FamilyIllustration({
           </svg>
         );
       case "Dad":
-      case "Mike":
-      case "Mike (Dad)":
+      case "Jeffery":
+      case "Jeffery (Dad)":
         return (
           <svg {...baseProps} xmlns="http://www.w3.org/2000/svg">
             {defsAndStyles}
@@ -141,7 +141,7 @@ function FamilyIllustration({
             </g>
           </svg>
         );
-      case "Jake":
+      case "Caspian":
         return (
           <svg {...baseProps} xmlns="http://www.w3.org/2000/svg">
             {defsAndStyles}
@@ -164,7 +164,7 @@ function FamilyIllustration({
             </g>
           </svg>
         );
-      case "Lily":
+      case "Emily":
         return (
           <svg {...baseProps} xmlns="http://www.w3.org/2000/svg">
             {defsAndStyles}
@@ -188,15 +188,57 @@ function FamilyIllustration({
             </g>
           </svg>
         );
-      case "Buster":
-      case "Buster (Frenchie)":
-        return <AnimatedEmoji emoji="🐶" name="Buster" size={size as any} />;
-      case "Coco":
-      case "Coco (Poodle)":
-        return <AnimatedEmoji emoji="🐩" name="Coco" size={size as any} />;
-      case "Bubbles":
-      case "Bubbles (Fish)":
-        return <AnimatedEmoji emoji="🐟" name="Bubbles" size={size as any} />;
+      case "Bailey":
+        return (
+          <svg {...baseProps} xmlns="http://www.w3.org/2000/svg">
+            {defsAndStyles}
+            <circle cx={w/2} cy={h/2} r={w/2 - 1} fill={c.bg} opacity="0.15" />
+            <g style={headStyle} transform-origin={`${w/2}px ${h/2}px`}>
+              <circle cx={w/2} cy={h/2} r={isLarge ? 10 : 6} fill={actualSkin} />
+              <g style={blinkStyle} transform-origin={`${w/2}px ${h/2-1}px`}>
+                <circle cx={w/2-2} cy={h/2-1} r="1.5" fill={actualHair} />
+                <circle cx={w/2+2} cy={h/2-1} r="1.5" fill={actualHair} />
+              </g>
+              <path d={`M${w/2-2} ${h/2+2} Q${w/2} ${h/2+5} ${w/2+2} ${h/2+2}`} stroke={actualHair} strokeWidth="1" fill="none" />
+            </g>
+          </svg>
+        );
+      case "Jasmine":
+        return (
+          <svg {...baseProps} xmlns="http://www.w3.org/2000/svg">
+            {defsAndStyles}
+            <circle cx={w/2} cy={h/2} r={w/2 - 1} fill={c.bg} opacity="0.15" />
+            <g style={headStyle} transform-origin={`${w/2}px ${h/2}px`}>
+              <circle cx={w/2} cy={h/2} r={isLarge ? 10 : 6} fill={actualSkin} />
+              <g style={blinkStyle} transform-origin={`${w/2}px ${h/2-1}px`}>
+                <circle cx={w/2-2} cy={h/2-1} r="1.5" fill={actualHair} />
+                <circle cx={w/2+2} cy={h/2-1} r="1.5" fill={actualHair} />
+              </g>
+              <path d={`M${w/2-2} ${h/2+2} Q${w/2} ${h/2+5} ${w/2+2} ${h/2+2}`} stroke={actualHair} strokeWidth="1" fill="none" />
+            </g>
+          </svg>
+        );
+      case "Aurora":
+        return (
+          <svg {...baseProps} xmlns="http://www.w3.org/2000/svg">
+            {defsAndStyles}
+            <circle cx={w/2} cy={h/2} r={w/2 - 1} fill={c.bg} opacity="0.15" />
+            <g style={headStyle} transform-origin={`${w/2}px ${h/2}px`}>
+              <circle cx={w/2} cy={h/2} r={isLarge ? 10 : 6} fill={actualSkin} />
+              <g style={blinkStyle} transform-origin={`${w/2}px ${h/2-1}px`}>
+                <circle cx={w/2-2} cy={h/2-1} r="1.5" fill={actualHair} />
+                <circle cx={w/2+2} cy={h/2-1} r="1.5" fill={actualHair} />
+              </g>
+              <path d={`M${w/2-2} ${h/2+2} Q${w/2} ${h/2+5} ${w/2+2} ${h/2+2}`} stroke={actualHair} strokeWidth="1" fill="none" />
+            </g>
+          </svg>
+        );
+      case "Rocco":
+      case "Rocco (Frenchie)":
+        return <AnimatedEmoji emoji="🐶" name="Rocco" size={size as any} />;
+      case "Rico":
+      case "Rico (Poodle)":
+        return <AnimatedEmoji emoji="🐩" name="Rico" size={size as any} />;
       default:
         return (
           <svg {...baseProps} xmlns="http://www.w3.org/2000/svg">
@@ -215,7 +257,7 @@ function FamilyIllustration({
     }
   };
 
-  const isPet = ["Buster", "Coco", "Bubbles"].some(p => name.includes(p));
+  const isPet = ["Rocco", "Rico"].some(p => name.includes(p));
 
   return (
     <div

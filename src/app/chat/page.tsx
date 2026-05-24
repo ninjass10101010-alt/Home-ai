@@ -32,9 +32,9 @@ const initialMessages: Message[] = [
 ];
 
 const suggestedPrompts = [
-  { label: "📅 Add event", prompt: "Add soccer practice tomorrow at 4pm for Jake" },
+  { label: "📅 Add event", prompt: "Add soccer practice tomorrow at 4pm for Caspian" },
   { label: "🍽️ Plan meals", prompt: "Plan dinners for this week" },
-  { label: "✅ Assign chore", prompt: "Assign trash duty to Jake every Thursday" },
+  { label: "✅ Assign chore", prompt: "Assign trash duty to Caspian every Thursday" },
   { label: "🛒 Grocery list", prompt: "Generate grocery list for this week's meals" },
   { label: "📊 Family update", prompt: "What does the family have going on this week?" },
   { label: "🔔 Reminder", prompt: "Remind Dad about car service on Friday at 10am" },
@@ -44,13 +44,13 @@ const mockResponses: Record<string, Message> = {
   soccer: {
     id: 0,
     role: "assistant",
-    content: "Done! I've added **Soccer Practice** to Jake's calendar for tomorrow at 4:00 PM. I'll send Jake a reminder an hour before. 📅",
+    content: "Done! I've added **Soccer Practice** to Caspian's calendar for tomorrow at 4:00 PM. I'll send Caspian a reminder an hour before. 📅",
     timestamp: "Just now",
     actions: [
       {
         type: "event",
         title: "Soccer Practice",
-        detail: "Jake · Tomorrow · 4:00 PM",
+        detail: "Caspian · Tomorrow · 4:00 PM",
         emoji: "⚽",
         confirmed: true,
       },
@@ -76,13 +76,13 @@ const mockResponses: Record<string, Message> = {
     id: 0,
     role: "assistant",
     content:
-      "Got it! I've set up a **recurring chore** for Jake: take out the trash every Thursday evening. He'll earn **10 points** per completion. 💪\n\nWant me to set a reminder for him at a specific time?",
+      "Got it! I've set up a **recurring chore** for Caspian: take out the trash every Thursday evening. He'll earn **10 points** per completion. 💪\n\nWant me to set a reminder for him at a specific time?",
     timestamp: "Just now",
     actions: [
       {
         type: "task",
         title: "Take Out Trash",
-        detail: "Jake · Every Thursday · 10pts",
+        detail: "Caspian · Every Thursday · 10pts",
         emoji: "🗑️",
         confirmed: true,
       },
@@ -108,7 +108,7 @@ const mockResponses: Record<string, Message> = {
     id: 0,
     role: "assistant",
     content:
-      "Here's the family's week at a glance:\n\n**Monday** — Jake: Soccer 4pm\n**Tuesday** — Lily: Piano 3pm, Taco Night 🌮\n**Wednesday** — Family: Movie Night\n**Thursday** — Jake: Trash duty, Dad: Car service\n**Friday** — Lily: Dentist 2pm, Pizza Night 🍕\n**Saturday** — Family: Park picnic (tentative)\n\nYou have **3 pending tasks** and the grocery list needs a top-up. Need me to do anything?",
+      "Here's the family's week at a glance:\n\n**Monday** — Caspian: Soccer 4pm\n**Tuesday** — Emily: Piano 3pm, Taco Night 🌮\n**Wednesday** — Family: Movie Night\n**Thursday** — Caspian: Trash duty, Dad: Car service\n**Friday** — Emily: Dentist 2pm, Pizza Night 🍕\n**Saturday** — Family: Park picnic (tentative)\n\nYou have **3 pending tasks** and the grocery list needs a top-up. Need me to do anything?",
     timestamp: "Just now",
   },
   reminder: {

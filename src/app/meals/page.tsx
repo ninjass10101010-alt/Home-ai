@@ -573,7 +573,7 @@ function MealHubContent() {
                 { label: "🥦 Vegetarian options", active: true },
                 { label: "🐟 Seafood twice/week", active: true },
                 { label: "🌶️ Not too spicy", active: true },
-                { label: "🥜 Nut-free (Lily)", active: true },
+                { label: "🥜 Nut-free (Jasmine)", active: true },
                 { label: "🍖 Low-carb", active: false },
               ].map(pref => (
                 <span

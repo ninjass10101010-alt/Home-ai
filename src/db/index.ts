@@ -3,13 +3,15 @@
 
 // Seed data for demonstration - in production this would be user-managed
 const membersData = [
-  { id: 1, name: "Sarah (Mom)", role: "parent", emoji: "👩", fullName: "Sarah Garcia", age: 38, joined: "Feb 2024", skinColor: "#fdbcb4", hairColor: "#b45309" },
-  { id: 2, name: "Mike (Dad)", role: "parent", emoji: "👨", fullName: "Mike Garcia", age: 40, joined: "Feb 2024", skinColor: "#fdbcb4", hairColor: "#1e40af" },
-  { id: 3, name: "Jake", role: "child", emoji: "🧒", fullName: "Jake Garcia", age: 12, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#166534" },
-  { id: 4, name: "Lily", role: "child", emoji: "👧", fullName: "Lily Garcia", age: 9, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#5b21b6" },
-  { id: 5, name: "Buster", role: "pet", emoji: "🐶", fullName: "Buster (Frenchie)", age: 3, joined: "Feb 2024" },
-  { id: 6, name: "Coco", role: "pet", emoji: "🐩", fullName: "Coco (Poodle)", age: 5, joined: "Feb 2024" },
-  { id: 7, name: "Bubbles", role: "pet", emoji: "🐟", fullName: "Bubbles (Fish)", age: 1, joined: "Mar 2024" },
+  { id: 1, name: "Rebecca (Mom)", role: "parent", emoji: "👩", fullName: "Rebecca Garcia", age: 38, joined: "Feb 2024", skinColor: "#fdbcb4", hairColor: "#b45309" },
+  { id: 2, name: "Jeffery (Dad)", role: "parent", emoji: "👨", fullName: "Jeffery Garcia", age: 40, joined: "Feb 2024", skinColor: "#fdbcb4", hairColor: "#1e40af" },
+  { id: 3, name: "Emily", role: "child", emoji: "👧", fullName: "Emily Garcia", age: 14, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#5b21b6" },
+  { id: 4, name: "Bailey", role: "child", emoji: "👧", fullName: "Bailey Garcia", age: 12, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#166534" },
+  { id: 5, name: "Jasmine", role: "child", emoji: "👧", fullName: "Jasmine Garcia", age: 10, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#b45309" },
+  { id: 6, name: "Aurora", role: "child", emoji: "👧", fullName: "Aurora Garcia", age: 7, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#5b21b6" },
+  { id: 7, name: "Caspian", role: "child", emoji: "🧒", fullName: "Caspian Garcia", age: 5, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#166534" },
+  { id: 8, name: "Rocco", role: "pet", emoji: "🐶", fullName: "Rocco (Frenchie)", age: 3, joined: "Feb 2024" },
+  { id: 9, name: "Rico", role: "pet", emoji: "🐩", fullName: "Rico (Poodle)", age: 5, joined: "Feb 2024" },
 ];
 
 const eventsData = [
@@ -20,16 +22,16 @@ const eventsData = [
     time: "16:00",
     memberId: 3,
     type: "event",
-    description: "Jake's soccer practice at the field",
+    description: "Emily's soccer practice at the field",
   },
   {
     id: 2,
-    title: "Dentist — Lily",
+    title: "Dentist — Bailey",
     date: new Date().toISOString().split('T')[0], // Today
     time: "17:30",
     memberId: 4,
     type: "event",
-    description: "Lily's regular checkup",
+    description: "Bailey's regular checkup",
   },
   {
     id: 3,
@@ -49,7 +51,7 @@ const tasksData = [
     description: "Empty kitchen and bathroom trash bins",
     dueDate: new Date().toISOString().split('T')[0], // Today
     priority: "medium",
-    assignedTo: 3, // Jake
+    assignedTo: 3, // Emily
     status: "pending",
     recurring: false,
   },
@@ -69,7 +71,7 @@ const tasksData = [
     description: "Clean upstairs bathroom thoroughly",
     dueDate: new Date(Date.now() + 86400000).toISOString().split('T')[0], // Tomorrow
     priority: "medium",
-    assignedTo: 4, // Lily
+    assignedTo: 5, // Jasmine
     status: "completed",
     recurring: true,
     frequency: "weekly",
@@ -91,7 +93,7 @@ const schedulesData = [
     title: "Emily bedtime",
     time: "21:00",
     days: "all",
-    memberId: 4, // Lily
+    memberId: 5, // Jasmine
     type: "routine",
     icon: "🧒",
     color: "violet",

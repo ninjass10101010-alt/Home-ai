@@ -29,15 +29,15 @@ interface CalEvent {
 }
 
 const events: CalEvent[] = [
-  { id: 1, title: "Soccer Practice", time: "4:00 PM", member: "Jake", color: "violet", emoji: "⚽", day: 18 },
-  { id: 2, title: "Piano Lesson", time: "3:00 PM", member: "Lily", color: "amber", emoji: "🎹", day: 19 },
+  { id: 1, title: "Soccer Practice", time: "4:00 PM", member: "Caspian", color: "violet", emoji: "⚽", day: 18 },
+  { id: 2, title: "Piano Lesson", time: "3:00 PM", member: "Emily", color: "amber", emoji: "🎹", day: 19 },
   { id: 3, title: "Team Dinner", time: "7:00 PM", member: "Dad", color: "cyan", emoji: "🍽️", day: 19 },
-  { id: 4, title: "Dentist — Lily", time: "2:00 PM", member: "Lily", color: "amber", emoji: "🦷", day: 21 },
+  { id: 4, title: "Dentist — Emily", time: "2:00 PM", member: "Emily", color: "amber", emoji: "🦷", day: 21 },
   { id: 5, title: "Car Service", time: "10:00 AM", member: "Dad", color: "cyan", emoji: "🚗", day: 21 },
   { id: 6, title: "Movie Night", time: "8:00 PM", member: "All", color: "green", emoji: "🎬", day: 22 },
   { id: 7, title: "Park Picnic", time: "11:00 AM", member: "All", color: "green", emoji: "🌳", day: 23 },
   { id: 8, title: "Grocery Run", time: "10:00 AM", member: "Mom", color: "green", emoji: "🛒", day: 20 },
-  { id: 9, title: "Swim Class", time: "9:00 AM", member: "Jake", color: "violet", emoji: "🏊", day: 25 },
+  { id: 9, title: "Swim Class", time: "9:00 AM", member: "Caspian", color: "violet", emoji: "🏊", day: 25 },
   { id: 10, title: "Book Club", time: "6:30 PM", member: "Mom", color: "green", emoji: "📚", day: 26 },
 ];
 
