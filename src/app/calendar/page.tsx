@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import PageShell from "@/components/ui/PageShell";
 import TopBar from "@/components/ui/TopBar";
 import Card from "@/components/ui/Card";
@@ -83,6 +83,19 @@ const emptySchedule = (): ScheduleItem => ({
   id: Date.now(), title: "", time: "08:00", days: "all", type: "routine", icon: "⏰", color: "green",
 });
 
+const EVENTS_STORAGE_KEY = "consuela-events";
+const SCHEDULES_STORAGE_KEY = "consuela-schedules";
+
+function loadFromStorage<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const stored = localStorage.getItem(key);
+    return stored ? JSON.parse(stored) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export default function CalendarPage() {
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
@@ -92,16 +105,24 @@ export default function CalendarPage() {
   const [activeTab, setActiveTab] = useState<"calendar" | "schedule">("calendar");
 
   // Calendar events state
-  const [calEvents, setCalEvents] = useState<CalEvent[]>(events);
+  const [calEvents, setCalEvents] = useState<CalEvent[]>(() => loadFromStorage(EVENTS_STORAGE_KEY, events));
   const [editingEventId, setEditingEventId] = useState<number | null>(null);
   const [eventForm, setEventForm] = useState<CalEvent>({ id: 0, title: "", time: "", member: "All", color: "green", emoji: "📅", day: selectedDay });
   const [isAddingEvent, setIsAddingEvent] = useState(false);
 
   // Schedule state
-  const [schedules, setSchedules] = useState<ScheduleItem[]>(initialSchedules);
+  const [schedules, setSchedules] = useState<ScheduleItem[]>(() => loadFromStorage(SCHEDULES_STORAGE_KEY, initialSchedules));
   const [editingSchedId, setEditingSchedId] = useState<number | null>(null);
   const [schedForm, setSchedForm] = useState<ScheduleItem>(emptySchedule());
   const [isAddingSched, setIsAddingSched] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem(EVENTS_STORAGE_KEY, JSON.stringify(calEvents));
+  }, [calEvents]);
+
+  useEffect(() => {
+    localStorage.setItem(SCHEDULES_STORAGE_KEY, JSON.stringify(schedules));
+  }, [schedules]);
 
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();

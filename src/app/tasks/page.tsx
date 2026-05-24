@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import PageShell from "@/components/ui/PageShell";
 import TopBar from "@/components/ui/TopBar";
 import Card from "@/components/ui/Card";
@@ -77,8 +77,24 @@ const emptyTask = (): Task => ({
   priority: "medium" as const,
 });
 
+const TASKS_STORAGE_KEY = "consuela-tasks";
+
+function loadFromStorage<T>(key: string, fallback: T): T {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const stored = localStorage.getItem(key);
+    return stored ? JSON.parse(stored) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export default function TasksPage() {
-  const [tasks, setTasks] = useState<Task[]>(initialTasks);
+  const [tasks, setTasks] = useState<Task[]>(() => loadFromStorage(TASKS_STORAGE_KEY, initialTasks));
+
+  useEffect(() => {
+    localStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify(tasks));
+  }, [tasks]);
   const [filterMember, setFilterMember] = useState("All");
   const [activeTab, setActiveTab] = useState<"tasks" | "leaderboard">("tasks");
   const [showCompleted, setShowCompleted] = useState(false);

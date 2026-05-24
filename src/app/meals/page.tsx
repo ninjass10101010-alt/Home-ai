@@ -151,14 +151,35 @@ function MealHubContent() {
   const [editQuantity, setEditQuantity] = useState("");
   const [editNotes, setEditNotes] = useState("");
 
+  // localStorage helpers
+  const MEALS_KEY = "consuela-meals";
+  const PANTRY_KEY = "consuela-pantry";
+  const GROCERY_KEY = "consuela-grocery";
+  const loadJSON = <T,>(key: string, fallback: T): T => {
+    if (typeof window === "undefined") return fallback;
+    try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : fallback; }
+    catch { return fallback; }
+  };
+
   useEffect(() => {
     const loaded = db.selectMeals();
-    setMeals(loaded.length ? loaded : defaultMeals);
+    const mealDefaults = loaded.length ? loaded : defaultMeals;
+    // Check localStorage first
+    const saved = loadJSON(MEALS_KEY, mealDefaults);
+    setMeals(saved);
     const pantry = db.selectPantry().map((p: any) => ({ id: p.id, item: p.name, status: p.status }));
-    setPantryItems(pantry.length ? pantry : []);
+    const savedPantry = loadJSON(PANTRY_KEY, pantry.length ? pantry : []);
+    setPantryItems(savedPantry);
     const grocery = db.selectGrocery();
-    setGroceryItems(grocery.length ? grocery.map(mapDbToGrocery) : initialGroceryItems);
+    const defaultGrocery = grocery.length ? grocery.map(mapDbToGrocery) : initialGroceryItems;
+    const savedGrocery = loadJSON(GROCERY_KEY, defaultGrocery);
+    setGroceryItems(savedGrocery);
   }, []);
+
+  // Persist on change
+  useEffect(() => { if (meals.length) localStorage.setItem(MEALS_KEY, JSON.stringify(meals)); }, [meals]);
+  useEffect(() => { if (pantryItems.length) localStorage.setItem(PANTRY_KEY, JSON.stringify(pantryItems)); }, [pantryItems]);
+  useEffect(() => { if (groceryItems.length) localStorage.setItem(GROCERY_KEY, JSON.stringify(groceryItems)); }, [groceryItems]);
 
   const mapDbToGrocery = (g: any): GroceryItem => {
     const cat = g.category || "pantry";
