@@ -21,6 +21,22 @@ export default function AnimatedEmoji({ emoji, name, size = "md", className = ""
   const cx = s / 2;
   const cy = s / 2;
 
+  // Render GIFs and image URLs as <img>
+  const isImageUrl = /^(https?:)?\/\/|\.(gif|png|jpg|jpeg|webp)(\?|$)/i.test(emoji);
+  if (isImageUrl) {
+    const url = emoji.startsWith("http") ? emoji : `https://${emoji}`;
+    return (
+      <img
+        src={url}
+        alt={name || "avatar"}
+        width={s}
+        height={s}
+        className={`rounded-full object-cover ${className}`}
+        style={{ width: s, height: s }}
+      />
+    );
+  }
+
   // Render specific animal animations based on emoji or name
   if (emoji === "🐶" || name?.toLowerCase().includes("frenchie") || name?.toLowerCase().includes("buster") || name?.toLowerCase().includes("rocco")) {
     return (

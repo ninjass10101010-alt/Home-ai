@@ -465,7 +465,7 @@ export default function SettingsPage() {
                       <input
                         value={editEmoji}
                         onChange={e => { const v = e.target.value; if (v !== "") setEditEmoji(v); }}
-                        placeholder="Paste any emoji or type custom..."
+                        placeholder="Paste emoji or GIF URL..."
                         className="w-full bg-[var(--color-surface-2)] text-text-primary text-sm rounded-xl px-3 py-2 outline-none border border-[var(--color-surface-3)] focus:border-[var(--color-accent-selected)] placeholder:text-text-muted"
                       />
                       {showEmojiPicker && (
