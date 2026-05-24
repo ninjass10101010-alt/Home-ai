@@ -339,12 +339,33 @@ export const db = {
       });
   },
 
-  // Today's schedules
-  selectTodaysSchedules: () => {
-    const today = new Date().toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase(); // 'mon', 'tue', etc.
+  // Today's schedules (raw 24h time strings, no AM/PM formatting)
+  selectTodaysSchedulesRaw: () => {
+    const today = new Date().toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
     return schedulesData
       .filter(schedule => schedule.days === 'all' || schedule.days.includes(today))
-      .sort((a, b) => a.time.localeCompare(b.time)) // sort by raw 24h time BEFORE formatting to AM/PM
+      .sort((a, b) => a.time.localeCompare(b.time))
+      .map(schedule => {
+        const member = schedule.memberId ? membersData.find(m => m.id === schedule.memberId) : null;
+        return {
+          id: schedule.id,
+          title: schedule.title,
+          time: schedule.time, // raw "HH:MM" format
+          emoji: schedule.icon,
+          type: schedule.type,
+          color: schedule.color,
+          member: member?.name,
+          memberColor: member?.id === 1 ? 'green' : member?.id === 2 ? 'cyan' : member?.id === 3 ? 'violet' : 'amber',
+        };
+      });
+  },
+
+  // Today's schedules (formatted for display in ScheduleDisplay)
+  selectTodaysSchedules: () => {
+    const today = new Date().toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
+    return schedulesData
+      .filter(schedule => schedule.days === 'all' || schedule.days.includes(today))
+      .sort((a, b) => a.time.localeCompare(b.time))
       .map(schedule => {
         const member = schedule.memberId ? membersData.find(m => m.id === schedule.memberId) : null;
         return {

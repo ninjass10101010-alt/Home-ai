@@ -16,6 +16,18 @@ const MONTHS = [
   "July", "August", "September", "October", "November", "December",
 ];
 
+/** Parse "4:00 PM" | "10:00 AM" → minutes since midnight for accurate sort */
+function parseTimeToMinutes(timeStr: string): number {
+  const match = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!match) return 0;
+  let hours = parseInt(match[1], 10);
+  const minutes = parseInt(match[2], 10);
+  const ampm = match[3].toUpperCase();
+  if (ampm === "PM" && hours !== 12) hours += 12;
+  if (ampm === "AM" && hours === 12) hours = 0;
+  return hours * 60 + minutes;
+}
+
 const members = db.selectMembersForCalendar();
 
 interface CalEvent {
@@ -63,7 +75,7 @@ interface ScheduleItem {
   color: string;
 }
 
-const initialSchedules: ScheduleItem[] = db.selectTodaysSchedules().map((s: any) => ({
+const initialSchedules: ScheduleItem[] = db.selectTodaysSchedulesRaw().map((s: any) => ({
   ...s,
   days: "all" as string,
   icon: s.emoji || s.icon || "⏰",
@@ -357,7 +369,7 @@ export default function CalendarPage() {
                 </Card>
               ) : (
                 <div className="space-y-2">
-                  {selectedEvents.map((ev) => (
+                  {[...selectedEvents].sort((a, b) => parseTimeToMinutes(a.time) - parseTimeToMinutes(b.time)).map((ev) => (
                     <div key={ev.id} className="flex items-center gap-1">
                       <Card className="!p-3 flex-1">
                         <div className="flex items-center gap-3">
@@ -389,7 +401,7 @@ export default function CalendarPage() {
             <section className="pb-2">
               <h3 className="text-text-primary font-semibold text-sm mb-3">Upcoming</h3>
               <div className="space-y-2">
-                {calEvents.filter((e) => e.day > selectedDay).slice(0, 4).map((ev) => (
+                {calEvents.filter((e) => e.day > selectedDay).sort((a, b) => parseTimeToMinutes(a.time) - parseTimeToMinutes(b.time)).slice(0, 4).map((ev) => (
                   <div key={ev.id} className="flex items-center gap-3 px-1">
                     <div className={`w-1 h-8 rounded-full shrink-0 ${dotColors[ev.color]}`} />
                     <div className="w-10 text-center">
