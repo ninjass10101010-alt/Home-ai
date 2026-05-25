@@ -618,6 +618,7 @@ function MealHubContent() {
             { id: "meals", label: "🍽️ Meals" },
             { id: "grocery", label: "🛒 Grocery" },
             { id: "pantry", label: "🥫 Pantry" },
+            { id: "recipes", label: "📖 Recipes" },
           ] as { id: Tab; label: string }[]).map(tab => (
             <button
               key={tab.id}
@@ -1173,6 +1174,124 @@ function MealHubContent() {
           >
             ✨ Ask Consuela what to cook with my pantry
           </Link>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════ */}
+      {/* RECIPES TAB */}
+      {/* ═══════════════════════════════════════════════════════ */}
+      {activeTab === "recipes" && (
+        <div className="px-4 space-y-4 pb-4">
+          {/* Add Recipe + Import buttons */}
+          <div className="flex gap-2">
+            <button onClick={startAddRecipe}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-nori-500/15 text-nori-400 text-sm font-medium hover:bg-nori-500/25 transition-colors">
+              + New Recipe
+            </button>
+            <button onClick={() => document.getElementById("recipe-pdf-upload")?.click()}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl glass text-text-secondary text-sm border border-surface-3 hover:text-text-primary transition-colors">
+              📄 Import
+            </button>
+          </div>
+
+          {/* Recipe editor modal (inline) */}
+          {showRecipeEditor && (
+            <Card className="!p-4 space-y-3">
+              <h4 className="text-text-primary font-semibold text-sm">{editingRecipeId ? "Edit Recipe" : "New Recipe"}</h4>
+              <div className="flex items-center gap-2">
+                <input value={recipeForm.emoji} onChange={e => setRecipeForm(p => ({...p, emoji: e.target.value}))}
+                  className="w-12 h-10 text-center text-lg bg-surface-2 rounded-lg outline-none border border-surface-3" />
+                <input value={recipeForm.name} onChange={e => setRecipeForm(p => ({...p, name: e.target.value}))}
+                  placeholder="Recipe name" autoFocus
+                  className="flex-1 bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3 focus:border-nori-500/50" />
+              </div>
+              <div className="flex gap-2">
+                <input value={recipeForm.prepTime} onChange={e => setRecipeForm(p => ({...p, prepTime: e.target.value}))}
+                  placeholder="Prep time (e.g. 30 min)" className="flex-1 bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3" />
+                <input value={recipeForm.servings} onChange={e => setRecipeForm(p => ({...p, servings: parseInt(e.target.value)||4}))}
+                  type="number" placeholder="Servings" className="w-20 bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3" />
+              </div>
+              <div>
+                <p className="text-text-muted text-[10px] mb-1">Ingredients (one per line)</p>
+                <textarea value={recipeForm.ingredients.join("\n")}
+                  onChange={e => setRecipeForm(p => ({...p, ingredients: e.target.value.split("\n")}))}
+                  rows={4} placeholder="Ground beef&#10;Breadcrumbs&#10;Eggs&#10;Parmesan"
+                  className="w-full bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3 focus:border-nori-500/50 resize-none" />
+              </div>
+              <div>
+                <p className="text-text-muted text-[10px] mb-1">Instructions</p>
+                <textarea value={recipeForm.instructions}
+                  onChange={e => setRecipeForm(p => ({...p, instructions: e.target.value}))}
+                  rows={4} placeholder="1. Mix ingredients&#10;2. Cook until done&#10;3. Serve hot"
+                  className="w-full bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3 focus:border-nori-500/50 resize-none" />
+              </div>
+              <div className="flex gap-2">
+                <button onClick={saveCatalogRecipe} disabled={!recipeForm.name.trim()}
+                  className="flex-1 py-2 rounded-lg bg-nori-500 text-white text-sm font-medium disabled:opacity-40">Save</button>
+                <button onClick={() => setShowRecipeEditor(false)}
+                  className="flex-1 py-2 rounded-lg bg-surface-2 text-text-secondary text-sm">Cancel</button>
+                {editingRecipeId && (
+                  <button onClick={() => { deleteCatalogRecipe(editingRecipeId); setShowRecipeEditor(false); }}
+                    className="px-3 py-2 rounded-lg bg-rose-500/15 text-rose-400 text-sm">🗑️</button>
+                )}
+              </div>
+            </Card>
+          )}
+
+          {/* Recipe list */}
+          <div className="space-y-2">
+            {recipes.length === 0 ? (
+              <div className="text-center py-10">
+                <span className="text-4xl block mb-3">📖</span>
+                <p className="text-text-secondary text-sm">No recipes yet</p>
+                <p className="text-text-muted text-xs mt-1">Create one or import a PDF</p>
+              </div>
+            ) : (
+              recipes.map(recipe => (
+                <Card key={recipe.id} className="!p-4">
+                  <div className="flex items-start gap-3">
+                    <span className="text-2xl shrink-0">{recipe.emoji}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-text-primary text-sm font-semibold">{recipe.name}</p>
+                      <p className="text-text-muted text-xs mt-0.5">{recipe.prepTime} · {recipe.servings} servings</p>
+                      {recipe.tags.length > 0 && (
+                        <div className="flex gap-1 mt-1.5 flex-wrap">
+                          {recipe.tags.map(t => <Badge key={t} variant="gray">{t}</Badge>)}
+                        </div>
+                      )}
+                      {recipe.ingredients.length > 0 && (
+                        <p className="text-text-secondary text-[11px] mt-1.5 line-clamp-2">
+                          {recipe.ingredients.join(" · ")}
+                        </p>
+                      )}
+                      <div className="flex gap-1.5 mt-2">
+                        {/* Add to Plan with day picker */}
+                        <div className="relative group">
+                          <button className="px-2.5 py-1 rounded-lg bg-nori-500/15 text-nori-400 text-[10px] font-semibold hover:bg-nori-500/25 transition-colors">
+                            + Meal Plan
+                          </button>
+                          <div className="absolute bottom-full left-0 mb-1 hidden group-hover:flex bg-surface-0 border border-surface-3 rounded-xl shadow-xl p-1 gap-0.5 z-50">
+                            {weekDays.map(day => (
+                              <button key={day} onClick={() => { addRecipeToPlan(recipe, day); }}
+                                className="px-2 py-1 rounded-lg text-[10px] font-medium text-text-secondary hover:bg-nori-500/15 hover:text-nori-400 whitespace-nowrap">
+                                {day}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <button onClick={() => addRecipeToGrocery(recipe)}
+                          className="px-2.5 py-1 rounded-lg bg-amber-500/15 text-amber-400 text-[10px] font-semibold hover:bg-amber-500/25 transition-colors">
+                          🛒 Grocery
+                        </button>
+                        <button onClick={() => startEditRecipe(recipe)}
+                          className="px-2 py-1 rounded-lg text-text-muted text-[10px] hover:text-text-secondary">✏️</button>
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+              ))
+            )}
+          </div>
         </div>
       )}
 
