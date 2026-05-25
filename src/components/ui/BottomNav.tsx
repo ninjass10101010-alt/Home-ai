@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import ConsuelaFAB from "./ConsuelaFAB";
-import DashboardEffects from "./DashboardEffects";
 
 const navItems = [
   {
@@ -203,7 +202,6 @@ export default function BottomNav() {
           })}
         </div>
       </div>
-      <DashboardEffects />
       <ConsuelaFAB />
     </nav>
   );
