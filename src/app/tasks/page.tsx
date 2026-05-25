@@ -115,6 +115,99 @@ export default function TasksPage() {
   const [aiSuggesting, setAiSuggesting] = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState<Task[]>([]);
 
+  // Rewards state
+  interface Reward {
+    id: number;
+    name: string;
+    emoji: string;
+    cost: number;
+  }
+  const REWARDS_KEY = "consuela-rewards";
+  const defaultRewards: Reward[] = [
+    { id: 1, name: "Movie pick", emoji: "🎬", cost: 50 },
+    { id: 2, name: "Skip 1 chore", emoji: "🎟️", cost: 75 },
+    { id: 3, name: "Extra screen time", emoji: "📱", cost: 100 },
+    { id: 4, name: "Family outing", emoji: "🎡", cost: 200 },
+  ];
+  const [rewards, setRewards] = useState<Reward[]>(() => loadFromStorage(REWARDS_KEY, defaultRewards));
+  useEffect(() => { localStorage.setItem(REWARDS_KEY, JSON.stringify(rewards)); }, [rewards]);
+
+  // Reward editing
+  const [editingRewardId, setEditingRewardId] = useState<number | null>(null);
+  const [rewardForm, setRewardForm] = useState<Reward>({ id: 0, name: "", emoji: "🎁", cost: 50 });
+  const [addingReward, setAddingReward] = useState(false);
+  const [aiRewardSuggesting, setAiRewardSuggesting] = useState(false);
+  const [aiRewards, setAiRewards] = useState<Reward[]>([]);
+
+  const startEditReward = (r: Reward) => {
+    setEditingRewardId(r.id); setAddingReward(false);
+    setRewardForm({ ...r });
+  };
+  const startAddReward = () => {
+    setEditingRewardId(null); setAddingReward(true);
+    setRewardForm({ id: Date.now(), name: "", emoji: "🎁", cost: 50 });
+  };
+  const saveReward = () => {
+    if (!rewardForm.name.trim()) return;
+    if (addingReward) {
+      setRewards(prev => [...prev, { ...rewardForm, id: Date.now() }]);
+    } else {
+      setRewards(prev => prev.map(r => r.id === editingRewardId ? { ...rewardForm } : r));
+    }
+    setEditingRewardId(null); setAddingReward(false);
+  };
+  const deleteReward = (id: number) => {
+    setRewards(prev => prev.filter(r => r.id !== id));
+    setEditingRewardId(null);
+  };
+
+  // AI Reward Suggestions
+  const generateAiRewards = async () => {
+    setAiRewardSuggesting(true);
+    try {
+      const familyList = membersData
+        .filter((m: any) => m.role !== "pet")
+        .map((m: any) => `${m.name} (${(m as any).age || "?"}yo)`)
+        .join(", ");
+      const res = await fetch('/api/hermes/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: `Suggest 4 fun rewards for the Garcia family: ${familyList}. Mix small (10-30pts), medium (40-75pts), and big (80-200pts) rewards. Return as JSON: {"actions":[{"type":"reward","title":"Reward Name","detail":"Cost pts","emoji":"🎁"}]}. Make them exciting for kids!`
+        }),
+      });
+      const data = await res.json();
+      const actions = data.actions || [];
+      const ideas: Reward[] = actions
+        .filter((a: any) => a.type === "reward" || a.type === "task")
+        .map((a: any, i: number) => ({
+          id: Date.now() + i,
+          name: a.title,
+          emoji: a.emoji || "🎁",
+          cost: parseInt(a.detail?.match(/(\d+)/)?.[1] || "50"),
+        }));
+      setAiRewards(ideas.length > 0 ? ideas : [
+        { id: Date.now()+1, name: "Pick dessert", emoji: "🍰", cost: 25 },
+        { id: Date.now()+2, name: "Stay up 30min late", emoji: "🌙", cost: 50 },
+        { id: Date.now()+3, name: "Choose weekend activity", emoji: "🎯", cost: 100 },
+        { id: Date.now()+4, name: "New video game", emoji: "🎮", cost: 200 },
+      ]);
+    } catch {
+      setAiRewards([
+        { id: Date.now()+1, name: "Pick dessert", emoji: "🍰", cost: 25 },
+        { id: Date.now()+2, name: "Stay up 30min late", emoji: "🌙", cost: 50 },
+        { id: Date.now()+3, name: "Choose weekend activity", emoji: "🎯", cost: 100 },
+        { id: Date.now()+4, name: "New video game", emoji: "🎮", cost: 200 },
+      ]);
+    }
+    setAiRewardSuggesting(false);
+  };
+
+  const adoptReward = (r: Reward) => {
+    setRewards(prev => [...prev, { ...r, id: Date.now() }]);
+    setAiRewards(prev => prev.filter(rr => rr.name !== r.name));
+  };
+
   // ─── PIN completion flow ────────────────────────────────
   const openPinEntry = (taskId: number) => {
     setPinTaskId(taskId);
@@ -189,12 +282,19 @@ export default function TasksPage() {
   // ─── AI Task Suggestions ─────────────────────────────────
   const generateAiTasks = async () => {
     setAiSuggesting(true);
+    // Build dynamic family member list with ages
+    const familyList = membersData
+      .filter((m: any) => m.role !== "pet")
+      .map((m: any) => `${m.name} (${(m as any).age || "?"}yo)`)
+      .join(", ");
+    const adults = membersData.filter((m: any) => m.role === "parent").map((m: any) => m.name).join(", ");
+    const kids = membersData.filter((m: any) => m.role === "child").map((m: any) => m.name).join(", ");
     try {
       const res = await fetch('/api/hermes/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: `Suggest 4 age-appropriate chores for the Garcia family kids (Caspian-5, Aurora-7, Jasmine-10, Bailey-12, Emily-14) with fair point values. Return as JSON: {"actions":[{"type":"task","title":"...","detail":"AssigneeName · Xpts","emoji":"..."}]}. Points: easy=5-8, medium=10-15, hard=20. Make them varied (chores, pets, school, helping).`,
+          message: `Suggest 4 age-appropriate chores for the Garcia family: ${familyList}. Adults (${adults}) can handle harder tasks (15-25pts). Kids (${kids}) get easier tasks based on their age (5-15pts). Return as JSON: {"actions":[{"type":"task","title":"...","detail":"AssigneeName · Xpts","emoji":"..."}]}. Make them varied (chores, pets, school, helping, errands).`
         }),
       });
       const data = await res.json();
@@ -561,21 +661,79 @@ export default function TasksPage() {
               ))}
             </div>
             <section>
-              <h3 className="text-text-primary font-semibold text-sm mb-3">Rewards</h3>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-text-primary font-semibold text-sm">Rewards</h3>
+                <div className="flex gap-1">
+                  <button
+                    onClick={generateAiRewards}
+                    disabled={aiRewardSuggesting}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-medium bg-violet-500/15 text-violet-400 border border-violet-500/25 hover:bg-violet-500/25 transition-all disabled:opacity-50"
+                  >
+                    {aiRewardSuggesting ? "⏳" : "🤖"} Suggest
+                  </button>
+                  <button onClick={startAddReward}
+                    className="w-6 h-6 flex items-center justify-center rounded-lg text-text-muted hover:text-nori-400 hover:bg-nori-500/10 transition-colors text-xs">
+                    +
+                  </button>
+                </div>
+              </div>
+
+              {/* Reward edit form */}
+              {(addingReward || editingRewardId !== null) && (
+                <Card className="!p-3 mb-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <input value={rewardForm.emoji} onChange={e => setRewardForm(p => ({...p, emoji: e.target.value}))}
+                      className="w-12 h-10 text-center text-lg bg-surface-2 rounded-lg outline-none border border-surface-3" />
+                    <input value={rewardForm.name} onChange={e => setRewardForm(p => ({...p, name: e.target.value}))}
+                      placeholder="Reward name" autoFocus
+                      className="flex-1 bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3 focus:border-nori-500/50" />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input type="number" value={rewardForm.cost}
+                      onChange={e => setRewardForm(p => ({...p, cost: parseInt(e.target.value) || 0}))}
+                      className="w-20 bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3" />
+                    <span className="text-text-muted text-xs">pts</span>
+                    <div className="flex-1" />
+                    <button onClick={saveReward} disabled={!rewardForm.name.trim()}
+                      className="px-3 py-1.5 rounded-lg bg-nori-500 text-white text-xs font-medium disabled:opacity-40">Save</button>
+                    <button onClick={() => { setEditingRewardId(null); setAddingReward(false); }}
+                      className="px-3 py-1.5 rounded-lg bg-surface-2 text-text-secondary text-xs">Cancel</button>
+                    {!addingReward && (
+                      <button onClick={() => deleteReward(rewardForm.id)}
+                        className="px-2 py-1.5 rounded-lg bg-rose-500/15 text-rose-400 text-xs">🗑️</button>
+                    )}
+                  </div>
+                </Card>
+              )}
+
+              {/* AI reward suggestions */}
+              {aiRewards.length > 0 && (
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  {aiRewards.map(r => (
+                    <Card key={r.id} className="!p-3 border-dashed border-violet-500/25">
+                      <div className="flex flex-col items-center gap-1.5 text-center">
+                        <span className="text-xl">{r.emoji}</span>
+                        <p className="text-text-primary text-xs font-medium">{r.name}</p>
+                        <Badge variant="violet">{r.cost} pts</Badge>
+                        <button onClick={() => adoptReward(r)}
+                          className="w-full py-1 rounded-lg bg-nori-500/15 text-nori-400 text-[10px] font-semibold hover:bg-nori-500/25">+ Add</button>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-2">
-                {[
-                  { name: "Movie pick", emoji: "🎬", cost: 50 },
-                  { name: "Skip 1 chore", emoji: "🎟️", cost: 75 },
-                  { name: "Extra screen time", emoji: "📱", cost: 100 },
-                  { name: "Family outing", emoji: "🎡", cost: 200 },
-                ].map((reward) => {
+                {rewards.map((reward) => {
                   const unlocked = (earnedPoints[topScorer.name] || 0) >= reward.cost;
                   return (
-                    <Card key={reward.name} className={`!p-3 ${!unlocked ? "opacity-50" : ""}`}>
+                    <Card key={reward.id} className={`!p-3 ${!unlocked ? "opacity-50" : ""}`}>
                       <div className="flex flex-col items-center gap-1.5 text-center">
                         <AnimatedEmoji emoji={reward.emoji} size="sm" />
                         <p className="text-text-primary text-xs font-medium leading-tight">{reward.name}</p>
                         <Badge variant={unlocked ? "amber" : "gray"}>{reward.cost} pts</Badge>
+                        <button onClick={() => startEditReward(reward)}
+                          className="text-[10px] text-text-muted hover:text-text-secondary mt-0.5">✏️ Edit</button>
                       </div>
                     </Card>
                   );
