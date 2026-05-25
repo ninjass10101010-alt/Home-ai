@@ -498,6 +498,13 @@ export default function WeatherWidget() {
           humidity: current.relative_humidity_2m,
           wind: Math.round(current.wind_speed_10m),
         });
+        // Save condition for global effects
+        try { localStorage.setItem('consuela-weather-condition', JSON.stringify({
+          condition: currentWMO.condition,
+          code: current.weather_code,
+          temp: Math.round(current.temperature_2m),
+          updated: Date.now()
+        })); } catch {}
         setLoading(false);
       })
       .catch(() => setLoading(false));
