@@ -12,6 +12,26 @@ import { db } from "@/db";
 
 const emojiOptions = ["👨","👩","👧","🧒","👶","👴","👵","🐶","🐱","🐩","🐕","🐈","🐠","🐹","🐰","🦊","🐻","🐼","🐨","🐯","🦁","🐮","🐷","🐸","🐵"];
 
+const carrierOptions = [
+  { id: "att", label: "AT&T", gateway: "@txt.att.net" },
+  { id: "verizon", label: "Verizon", gateway: "@vtext.com" },
+  { id: "tmobile", label: "T-Mobile", gateway: "@tmomail.net" },
+  { id: "sprint", label: "Sprint", gateway: "@messaging.sprintpcs.com" },
+  { id: "virgin", label: "Virgin Mobile", gateway: "@vmobl.com" },
+  { id: "cricket", label: "Cricket", gateway: "@sms.cricketwireless.net" },
+  { id: "metropcs", label: "MetroPCS", gateway: "@mymetropcs.com" },
+  { id: "straighttalk", label: "Straight Talk", gateway: "@vtext.com" },
+  { id: "boost", label: "Boost Mobile", gateway: "@sms.myboostmobile.com" },
+];
+
+const relationshipOptions = [
+  { id: "parent", label: "Parent", icon: "👨‍👩‍👧" },
+  { id: "guardian", label: "Guardian", icon: "🛡️" },
+  { id: "grandparent", label: "Grandparent", icon: "👴" },
+  { id: "neighbor", label: "Neighbor", icon: "🏠" },
+  { id: "other", label: "Other", icon: "👤" },
+];
+
 export default function SettingsPage() {
   const { theme, setMode, setAccentColor, setContrastBoost } = useTheme();
   const { weather, setLocation, setUnit, setTimeOfDay, setSeason } = useWeatherConfig();
@@ -24,10 +44,46 @@ export default function SettingsPage() {
   const [editEmoji, setEditEmoji] = useState("");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
+  // ─── Emergency Contacts editing state ────────────────────────────────────
+  const [emergencyList, setEmergencyList] = useState<any[]>([]);
+  const [editingEmergencyIdx, setEditingEmergencyIdx] = useState<number | null>(null);
+  const [addingEmergency, setAddingEmergency] = useState(false);
+  const [editECName, setEditECName] = useState("");
+  const [editECPhone, setEditECPhone] = useState("");
+  const [editECEmail, setEditECEmail] = useState("");
+  const [editECCarrier, setEditECCarrier] = useState("att");
+  const [editECRelationship, setEditECRelationship] = useState("parent");
+  const [editECIsPrimary, setEditECIsPrimary] = useState(true);
+  const [editECEmoji, setEditECEmoji] = useState("👤");
+  const [showECEmojiPicker, setShowECEmojiPicker] = useState(false);
+
   useEffect(() => {
     setMounted(true);
     setMembersList(db.selectMembersDetailed());
+    // Load emergency contacts from localStorage, fallback to DB seed
+    const stored = (() => {
+      if (typeof window === "undefined") return null;
+      try { const d = localStorage.getItem("consuela-emergency"); return d ? JSON.parse(d) : null; } catch { return null; }
+    })();
+    if (stored && stored.length > 0) {
+      // Seed DB from localStorage
+      stored.forEach((c: any) => {
+        const exists = db.selectEmergencyContacts().find((ec: any) => ec.id === c.id);
+        if (!exists) db.insertEmergencyContact(c);
+        else db.updateEmergencyContact(c.id, c);
+      });
+      setEmergencyList(stored);
+    } else {
+      setEmergencyList(db.selectEmergencyContacts());
+    }
   }, []);
+
+  // Persist emergency contacts to localStorage on every change
+  useEffect(() => {
+    if (mounted && emergencyList.length > 0) {
+      localStorage.setItem("consuela-emergency", JSON.stringify(emergencyList));
+    }
+  }, [emergencyList, mounted]);
 
   const startEditMember = (idx: number, member: any) => {
     setEditingMemberIdx(idx);
@@ -42,6 +98,88 @@ export default function SettingsPage() {
     setMembersList(prev => prev.map((m, i) => i === idx ? { ...m, name: editName.trim(), emoji: editEmoji } : m));
     setEditingMemberIdx(null);
   };
+
+  // ─── Emergency Contacts CRUD ─────────────────────────────────────────
+  const startEditEmergency = (idx: number) => {
+    setAddingEmergency(false);
+    setEditingEmergencyIdx(idx);
+    const c = emergencyList[idx];
+    setEditECName(c.name);
+    setEditECPhone(c.phone);
+    setEditECEmail(c.email);
+    setEditECCarrier(c.carrier || "att");
+    setEditECRelationship(c.relationship || "parent");
+    setEditECIsPrimary(c.isPrimary);
+    setEditECEmoji(c.emoji || "👤");
+  };
+
+  const startAddEmergency = () => {
+    setEditingEmergencyIdx(null);
+    setAddingEmergency(true);
+    setEditECName("");
+    setEditECPhone("");
+    setEditECEmail("");
+    setEditECCarrier("att");
+    setEditECRelationship("parent");
+    setEditECIsPrimary(true);
+    setEditECEmoji("👤");
+  };
+
+  const saveEmergency = (idx: number | null) => {
+    if (!editECName.trim() || !editECPhone.trim()) return;
+    if (idx !== null) {
+      // Update existing
+      const contact = emergencyList[idx];
+      db.updateEmergencyContact(contact.id, {
+        name: editECName.trim(),
+        phone: editECPhone.trim(),
+        email: editECEmail.trim(),
+        carrier: editECCarrier,
+        relationship: editECRelationship as any,
+        isPrimary: editECIsPrimary,
+        emoji: editECEmoji,
+      });
+      setEmergencyList(prev => prev.map((c, i) => i === idx ? {
+        ...c,
+        name: editECName.trim(),
+        phone: editECPhone.trim(),
+        email: editECEmail.trim(),
+        carrier: editECCarrier,
+        relationship: editECRelationship,
+        isPrimary: editECIsPrimary,
+        emoji: editECEmoji,
+      } : c));
+      setEditingEmergencyIdx(null);
+    } else {
+      // Add new
+      const newContact = db.insertEmergencyContact({
+        name: editECName.trim(),
+        phone: editECPhone.trim(),
+        email: editECEmail.trim(),
+        carrier: editECCarrier,
+        relationship: editECRelationship as any,
+        isPrimary: editECIsPrimary,
+        emoji: editECEmoji,
+      });
+      setEmergencyList(prev => [...prev, newContact]);
+      setAddingEmergency(false);
+    }
+  };
+
+  const deleteEmergency = (idx: number) => {
+    const contact = emergencyList[idx];
+    db.deleteEmergencyContact(contact.id);
+    setEmergencyList(prev => prev.filter((_, i) => i !== idx));
+    if (editingEmergencyIdx === idx) {
+      setEditingEmergencyIdx(null);
+    }
+  };
+
+  const cancelEmergency = () => {
+    setEditingEmergencyIdx(null);
+    setAddingEmergency(false);
+  };
+
   const [locationDraft, setLocationDraft] = useState("");
   const [locationSaved, setLocationSaved] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -123,7 +261,6 @@ export default function SettingsPage() {
 
             <div className="flex gap-2 items-stretch">
               <div className="relative flex-1">
-                {/* Map pin icon */}
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4">
                     <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
@@ -414,7 +551,6 @@ export default function SettingsPage() {
                 onChange={(e) => setContrastBoost(e.target.checked)}
                 className="sr-only"
               />
-              {/* Custom toggle */}
               <div
                 className={`relative w-10 h-6 rounded-full shrink-0 transition-colors duration-200 ${
                   contrastBoost ? "bg-[var(--color-accent-selected)]" : "bg-[var(--color-surface-4)]"
@@ -461,7 +597,6 @@ export default function SettingsPage() {
                           autoFocus
                         />
                       </div>
-                      {/* Custom emoji input — type or paste any emoji/sticker */}
                       <input
                         value={editEmoji}
                         onChange={e => { const v = e.target.value; if (v !== "") setEditEmoji(v); }}
@@ -508,6 +643,254 @@ export default function SettingsPage() {
                 </div>
               );
             })}
+          </div>
+        </section>
+
+        <div className="h-px bg-[var(--color-surface-3)]" />
+
+        {/* ── Emergency Contacts ───────────────────────────────────────────── */}
+        <section className="space-y-6" id="emergency">
+          <div>
+            <h2 className="text-text-primary font-semibold text-2xl">Emergency Contacts</h2>
+            <p className="text-text-secondary mt-1">
+              Contacts used for SMS/email alerts. Uses free Gmail-to-SMS gateways.
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            {emergencyList.map((contact: any, idx: number) => {
+              const isEditing = editingEmergencyIdx === idx;
+              return (
+                <div key={contact.id} className="flex items-center gap-3 p-4 rounded-xl border border-[var(--color-surface-3)] bg-[var(--color-surface-1)]">
+                  {isEditing ? (
+                    <div className="flex-1 space-y-3">
+                      {/* Emoji + Name */}
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => setShowECEmojiPicker(!showECEmojiPicker)}
+                          className="w-12 h-12 rounded-xl bg-[var(--color-surface-2)] flex items-center justify-center text-2xl hover:bg-[var(--color-surface-3)] transition-colors shrink-0"
+                        >
+                          {editECEmoji}
+                        </button>
+                        <input
+                          value={editECName}
+                          onChange={e => setEditECName(e.target.value)}
+                          placeholder="Contact name"
+                          className="flex-1 bg-[var(--color-surface-2)] text-text-primary text-sm rounded-xl px-3 py-2 outline-none border border-[var(--color-surface-3)] focus:border-[var(--color-accent-selected)]"
+                          autoFocus
+                        />
+                      </div>
+
+                      {/* Emoji picker */}
+                      {showECEmojiPicker && (
+                        <div className="flex flex-wrap gap-1 p-2 rounded-xl bg-[var(--color-surface-2)]">
+                          {emojiOptions.map(e => (
+                            <button key={e} onClick={() => { setEditECEmoji(e); setShowECEmojiPicker(false); }}
+                              className={`w-9 h-9 rounded-lg text-lg flex items-center justify-center hover:bg-[var(--color-accent-selected)]/20 transition-all ${editECEmoji === e ? "bg-[var(--color-accent-selected)]/20" : ""}`}
+                            >{e}</button>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Phone */}
+                      <input
+                        value={editECPhone}
+                        onChange={e => setEditECPhone(e.target.value)}
+                        placeholder="Phone (+15551234567)"
+                        type="tel"
+                        className="w-full bg-[var(--color-surface-2)] text-text-primary text-sm rounded-xl px-3 py-2 outline-none border border-[var(--color-surface-3)] focus:border-[var(--color-accent-selected)] placeholder:text-text-muted"
+                      />
+
+                      {/* Email */}
+                      <input
+                        value={editECEmail}
+                        onChange={e => setEditECEmail(e.target.value)}
+                        placeholder="Email address"
+                        type="email"
+                        className="w-full bg-[var(--color-surface-2)] text-text-primary text-sm rounded-xl px-3 py-2 outline-none border border-[var(--color-surface-3)] focus:border-[var(--color-accent-selected)] placeholder:text-text-muted"
+                      />
+
+                      {/* Carrier + Relationship row */}
+                      <div className="flex gap-2">
+                        <select
+                          value={editECCarrier}
+                          onChange={e => setEditECCarrier(e.target.value)}
+                          className="flex-1 bg-[var(--color-surface-2)] text-text-primary text-sm rounded-xl px-3 py-2 outline-none border border-[var(--color-surface-3)] focus:border-[var(--color-accent-selected)]"
+                        >
+                          {carrierOptions.map(c => (
+                            <option key={c.id} value={c.id}>{c.label} ({c.gateway})</option>
+                          ))}
+                        </select>
+                        <select
+                          value={editECRelationship}
+                          onChange={e => setEditECRelationship(e.target.value)}
+                          className="flex-1 bg-[var(--color-surface-2)] text-text-primary text-sm rounded-xl px-3 py-2 outline-none border border-[var(--color-surface-3)] focus:border-[var(--color-accent-selected)]"
+                        >
+                          {relationshipOptions.map(r => (
+                            <option key={r.id} value={r.id}>{r.icon} {r.label}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Primary toggle */}
+                      <label className="flex items-center gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={editECIsPrimary}
+                          onChange={e => setEditECIsPrimary(e.target.checked)}
+                          className="sr-only"
+                        />
+                        <div className={`relative w-10 h-6 rounded-full shrink-0 transition-colors duration-200 ${editECIsPrimary ? "bg-rose-500" : "bg-[var(--color-surface-4)]"}`}>
+                          <div className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-all duration-200 ${editECIsPrimary ? "left-5" : "left-1"}`} />
+                        </div>
+                        <span className="text-text-primary text-sm">Primary contact (receives emergency alerts)</span>
+                      </label>
+
+                      {/* Action buttons */}
+                      <div className="flex gap-2">
+                        <button onClick={() => saveEmergency(idx)}
+                          className="px-4 py-2 rounded-xl bg-[var(--color-accent-selected)] text-white text-xs font-semibold">Save</button>
+                        <button onClick={cancelEmergency}
+                          className="px-4 py-2 rounded-xl bg-[var(--color-surface-2)] text-text-secondary text-xs">Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="w-12 h-12 rounded-xl bg-[var(--color-surface-2)] flex items-center justify-center text-2xl shrink-0 overflow-hidden">
+                        <span>{contact.emoji || "👤"}</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <p className="text-text-primary text-sm font-semibold truncate">{contact.name}</p>
+                          {contact.isPrimary && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-rose-500/20 text-rose-400 font-medium">Primary</span>
+                          )}
+                        </div>
+                        <p className="text-text-muted text-xs">{contact.phone}</p>
+                        <p className="text-text-muted text-[10px]">
+                          {contact.email} · {carrierOptions.find(c => c.id === contact.carrier)?.label || "Unknown carrier"}
+                        </p>
+                      </div>
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => startEditEmergency(idx)}
+                          className="px-3 py-2 rounded-xl glass text-text-secondary text-xs font-medium hover:text-text-primary transition-colors"
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          onClick={() => deleteEmergency(idx)}
+                          className="px-3 py-2 rounded-xl glass text-rose-400 text-xs font-medium hover:text-rose-300 transition-colors"
+                        >
+                          🗑️
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Add new emergency contact form */}
+            {addingEmergency && (
+              <div className="p-4 rounded-xl border-2 border-dashed border-[var(--color-accent-selected)]/50 bg-[var(--color-surface-1)] space-y-3">
+                <p className="text-text-primary text-sm font-semibold">New Emergency Contact</p>
+
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setShowECEmojiPicker(!showECEmojiPicker)}
+                    className="w-12 h-12 rounded-xl bg-[var(--color-surface-2)] flex items-center justify-center text-2xl hover:bg-[var(--color-surface-3)] transition-colors shrink-0"
+                  >
+                    {editECEmoji || "👤"}
+                  </button>
+                  <input
+                    value={editECName}
+                    onChange={e => setEditECName(e.target.value)}
+                    placeholder="Contact name"
+                    className="flex-1 bg-[var(--color-surface-2)] text-text-primary text-sm rounded-xl px-3 py-2 outline-none border border-[var(--color-surface-3)] focus:border-[var(--color-accent-selected)]"
+                    autoFocus
+                  />
+                </div>
+
+                {showECEmojiPicker && (
+                  <div className="flex flex-wrap gap-1 p-2 rounded-xl bg-[var(--color-surface-2)]">
+                    {emojiOptions.map(e => (
+                      <button key={e} onClick={() => { setEditECEmoji(e); setShowECEmojiPicker(false); }}
+                        className={`w-9 h-9 rounded-lg text-lg flex items-center justify-center hover:bg-[var(--color-accent-selected)]/20 transition-all ${editECEmoji === e ? "bg-[var(--color-accent-selected)]/20" : ""}`}
+                      >{e}</button>
+                    ))}
+                  </div>
+                )}
+
+                <input
+                  value={editECPhone}
+                  onChange={e => setEditECPhone(e.target.value)}
+                  placeholder="Phone (+15551234567)"
+                  type="tel"
+                  className="w-full bg-[var(--color-surface-2)] text-text-primary text-sm rounded-xl px-3 py-2 outline-none border border-[var(--color-surface-3)] focus:border-[var(--color-accent-selected)] placeholder:text-text-muted"
+                />
+
+                <input
+                  value={editECEmail}
+                  onChange={e => setEditECEmail(e.target.value)}
+                  placeholder="Email address"
+                  type="email"
+                  className="w-full bg-[var(--color-surface-2)] text-text-primary text-sm rounded-xl px-3 py-2 outline-none border border-[var(--color-surface-3)] focus:border-[var(--color-accent-selected)] placeholder:text-text-muted"
+                />
+
+                <div className="flex gap-2">
+                  <select
+                    value={editECCarrier}
+                    onChange={e => setEditECCarrier(e.target.value)}
+                    className="flex-1 bg-[var(--color-surface-2)] text-text-primary text-sm rounded-xl px-3 py-2 outline-none border border-[var(--color-surface-3)] focus:border-[var(--color-accent-selected)]"
+                  >
+                    {carrierOptions.map(c => (
+                      <option key={c.id} value={c.id}>{c.label} ({c.gateway})</option>
+                    ))}
+                  </select>
+                  <select
+                    value={editECRelationship}
+                    onChange={e => setEditECRelationship(e.target.value)}
+                    className="flex-1 bg-[var(--color-surface-2)] text-text-primary text-sm rounded-xl px-3 py-2 outline-none border border-[var(--color-surface-3)] focus:border-[var(--color-accent-selected)]"
+                  >
+                    {relationshipOptions.map(r => (
+                      <option key={r.id} value={r.id}>{r.icon} {r.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editECIsPrimary}
+                    onChange={e => setEditECIsPrimary(e.target.checked)}
+                    className="sr-only"
+                  />
+                  <div className={`relative w-10 h-6 rounded-full shrink-0 transition-colors duration-200 ${editECIsPrimary ? "bg-rose-500" : "bg-[var(--color-surface-4)]"}`}>
+                    <div className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-all duration-200 ${editECIsPrimary ? "left-5" : "left-1"}`} />
+                  </div>
+                  <span className="text-text-primary text-sm">Primary contact (receives emergency alerts)</span>
+                </label>
+
+                <div className="flex gap-2">
+                  <button onClick={() => saveEmergency(null)}
+                    className="px-4 py-2 rounded-xl bg-[var(--color-accent-selected)] text-white text-xs font-semibold">Add Contact</button>
+                  <button onClick={cancelEmergency}
+                    className="px-4 py-2 rounded-xl bg-[var(--color-surface-2)] text-text-secondary text-xs">Cancel</button>
+                </div>
+              </div>
+            )}
+
+            {/* Add button */}
+            {!addingEmergency && (
+              <button
+                onClick={startAddEmergency}
+                className="w-full p-4 rounded-xl border-2 border-dashed border-[var(--color-surface-4)] text-text-muted text-sm hover:border-[var(--color-accent-selected)]/50 hover:text-text-secondary transition-all flex items-center justify-center gap-2"
+              >
+                <span className="text-lg">+</span>
+                Add Emergency Contact
+              </button>
+            )}
           </div>
         </section>
 

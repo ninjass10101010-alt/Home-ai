@@ -28,8 +28,6 @@ function parseTimeToMinutes(timeStr: string): number {
   return hours * 60 + minutes;
 }
 
-const members = db.selectMembersForCalendar();
-
 interface CalEvent {
   id: number;
   title: string;
@@ -75,7 +73,7 @@ interface ScheduleItem {
   color: string;
 }
 
-const initialSchedules: ScheduleItem[] = db.selectTodaysSchedulesRaw().map((s: any) => ({
+const getInitialSchedules = (): ScheduleItem[] => db.selectTodaysSchedulesRaw().map((s: any) => ({
   ...s,
   days: "all" as string,
   icon: s.emoji || s.icon || "⏰",
@@ -112,6 +110,7 @@ function loadFromStorage<T>(key: string, fallback: T): T {
 
 export default function CalendarPage() {
   const today = new Date();
+  const members = useMemo(() => db.selectMembersForCalendar(), []);
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
   const [selectedDay, setSelectedDay] = useState(today.getDate());
@@ -131,13 +130,13 @@ export default function CalendarPage() {
     if (typeof window !== "undefined") {
       const storedVersion = localStorage.getItem(SCHEDULES_VERSION_KEY);
       if (storedVersion === String(SCHEDULES_VERSION)) {
-        return loadFromStorage(SCHEDULES_STORAGE_KEY, initialSchedules);
+        return loadFromStorage(SCHEDULES_STORAGE_KEY, getInitialSchedules());
       }
       // Version mismatch — clear stale data
       localStorage.removeItem(SCHEDULES_STORAGE_KEY);
       localStorage.setItem(SCHEDULES_VERSION_KEY, String(SCHEDULES_VERSION));
     }
-    return initialSchedules;
+    return getInitialSchedules();
   });
   const [editingSchedId, setEditingSchedId] = useState<number | null>(null);
   const [schedForm, setSchedForm] = useState<ScheduleItem>(emptySchedule());

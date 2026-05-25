@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import PageShell from "@/components/ui/PageShell";
 import TopBar from "@/components/ui/TopBar";
 import Card from "@/components/ui/Card";
@@ -44,7 +44,10 @@ const initialTasks: Task[] = [
   { id: 11, title: "Grooming appointment", assignee: "Rico", assigneeEmoji: "🐩", due: "Tomorrow", points: 0, recurring: "Monthly", category: "Pets", completed: false, priority: "medium" },
 ];
 
-const membersData = db.selectMembers();
+const priorityColors: Record<string, string> = { high: "bg-rose-500", medium: "bg-amber-500", low: "bg-surface-4" };
+const categories = ["Chores", "Errands", "Admin", "Health", "Pets", "School"];
+const dueOptions = ["Today", "Tomorrow", "This week", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed", "Thu"];
+
 const leaderboard: LeaderboardEntry[] = [
   { name: "Caspian", emoji: "🧒", points: 145, streak: 5, rank: 1 },
   { name: "Emily", emoji: "👧", points: 120, streak: 3, rank: 2 },
@@ -52,30 +55,20 @@ const leaderboard: LeaderboardEntry[] = [
   { name: "Jeffery (Dad)", emoji: "👨", points: 60, streak: 2, rank: 4 },
 ];
 
-const allMembers = ["All", ...membersData.map(m => m.name)];
-const memberEmojis: Record<string, string> = {
-  All: "👨‍👩‍👧‍👦",
-  ...Object.fromEntries(membersData.map(m => [m.name, m.emoji]))
-};
-const memberColors: Record<string, string> = {
-  ...Object.fromEntries(membersData.map(m => [m.name, m.color]))
-};
-const priorityColors: Record<string, string> = { high: "bg-rose-500", medium: "bg-amber-500", low: "bg-surface-4" };
-const categories = ["Chores", "Errands", "Admin", "Health", "Pets", "School"];
-const dueOptions = ["Today", "Tomorrow", "This week", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed", "Thu"];
-
-const emptyTask = (): Task => ({
-  id: Date.now(),
-  title: "",
-  assignee: membersData[0]?.name || "Caspian",
-  assigneeEmoji: membersData[0]?.emoji || "🧒",
-  due: "Today",
-  points: 5,
-  recurring: null,
-  category: "Chores",
-  completed: false,
-  priority: "medium" as const,
-});
+function emptyTask(firstMember?: { name?: string; emoji?: string }): Task {
+  return {
+    id: Date.now(),
+    title: "",
+    assignee: firstMember?.name || "Caspian",
+    assigneeEmoji: firstMember?.emoji || "🧒",
+    due: "Today",
+    points: 5,
+    recurring: null,
+    category: "Chores",
+    completed: false,
+    priority: "medium" as const,
+  };
+}
 
 const TASKS_STORAGE_KEY = "consuela-tasks";
 
@@ -90,6 +83,16 @@ function loadFromStorage<T>(key: string, fallback: T): T {
 }
 
 export default function TasksPage() {
+  const membersData = useMemo(() => db.selectMembers(), []);
+  const allMembers = useMemo(() => ["All", ...membersData.map((m: any) => m.name)], [membersData]);
+  const memberEmojis: Record<string, string> = useMemo(() => ({
+    All: "👨‍👩‍👧‍👦",
+    ...Object.fromEntries(membersData.map((m: any) => [m.name, m.emoji]))
+  }), [membersData]);
+  const memberColors: Record<string, string> = useMemo(() => 
+    Object.fromEntries(membersData.map((m: any) => [m.name, m.color]))
+  , [membersData]);
+
   const [tasks, setTasks] = useState<Task[]>(() => loadFromStorage(TASKS_STORAGE_KEY, initialTasks));
 
   useEffect(() => {
@@ -101,7 +104,7 @@ export default function TasksPage() {
 
   // Edit state
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editForm, setEditForm] = useState<Task>(emptyTask());
+  const [editForm, setEditForm] = useState<Task>(emptyTask(membersData[0]));
   const [isAdding, setIsAdding] = useState(false);
 
   const toggleTask = (id: number) => {
@@ -118,7 +121,7 @@ export default function TasksPage() {
 
   const startAdd = () => {
     setEditingId(null);
-    setEditForm(emptyTask());
+    setEditForm(emptyTask(membersData[0]));
     setIsAdding(true);
   };
 

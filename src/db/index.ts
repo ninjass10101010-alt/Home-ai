@@ -172,22 +172,36 @@ const schedulesData = [
   },
 ];
 
-const emergencyContactsData = [
+// Emergency contacts — mutable store for CRUD
+let emergencyContactsStore: Array<{
+  id: number;
+  name: string;
+  phone: string;
+  email: string;
+  carrier?: string;
+  relationship: "parent" | "guardian" | "grandparent" | "neighbor" | "other";
+  isPrimary: boolean;
+  emoji?: string;
+}> = [
   {
     id: 1,
-    name: "Emergency Contact 1",
-    phone: "+15551234567", // Replace with real phone number (E.164 format: +1XXXXXXXXXX)
-    email: "emergency1@example.com", // Replace with real email
-    relationship: "parent" as const,
+    name: "Rebecca",
+    phone: "+16163448104",
+    email: "Ninjass10101010@gmail.com",
+    carrier: "verizon",
+    relationship: "parent",
     isPrimary: true,
+    emoji: "👩",
   },
   {
     id: 2,
-    name: "Emergency Contact 2",
-    phone: "+15552345678", // Replace with real phone number (E.164 format: +1XXXXXXXXXX)
-    email: "emergency2@example.com", // Replace with real email
-    relationship: "parent" as const,
+    name: "Test Contact",
+    phone: "+16167452736",
+    email: "Ninjass10101010@gmail.com",
+    carrier: "verizon",
+    relationship: "parent",
     isPrimary: true,
+    emoji: "👨",
   },
 ];
 
@@ -301,7 +315,7 @@ export const db = {
       .filter(event => event.date === today)
       .sort((a, b) => (a.time || '').localeCompare(b.time || '')) // sort by raw 24h time before formatting
       .map(event => {
-        const member = membersData.find(m => m.id === event.memberId);
+        const member = membersStore.find(m => m.id === event.memberId);
         return {
           id: event.id,
           title: event.title,
@@ -324,7 +338,7 @@ export const db = {
       .filter(task => task.status === 'pending')
       .slice(0, 3) // Show only first 3
       .map(task => {
-        const member = membersData.find(m => m.id === task.assignedTo);
+        const member = membersStore.find(m => m.id === task.assignedTo);
         const isToday = task.dueDate === new Date().toISOString().split('T')[0];
         const isTomorrow = task.dueDate === new Date(Date.now() + 86400000).toISOString().split('T')[0];
 
@@ -346,7 +360,7 @@ export const db = {
       .filter(schedule => schedule.days === 'all' || schedule.days.includes(today))
       .sort((a, b) => a.time.localeCompare(b.time))
       .map(schedule => {
-        const member = schedule.memberId ? membersData.find(m => m.id === schedule.memberId) : null;
+        const member = schedule.memberId ? membersStore.find(m => m.id === schedule.memberId) : null;
         return {
           id: schedule.id,
           title: schedule.title,
@@ -367,7 +381,7 @@ export const db = {
       .filter(schedule => schedule.days === 'all' || schedule.days.includes(today))
       .sort((a, b) => a.time.localeCompare(b.time))
       .map(schedule => {
-        const member = schedule.memberId ? membersData.find(m => m.id === schedule.memberId) : null;
+        const member = schedule.memberId ? membersStore.find(m => m.id === schedule.memberId) : null;
         return {
           id: schedule.id,
           title: schedule.title,
@@ -385,14 +399,35 @@ export const db = {
       });
   },
 
-  // Emergency contacts (existing)
-  select: () => ({
-    from: () => ({
-      where: () => ({
-        execute: () => emergencyContactsData
-      })
-    })
-  }),
+  // Emergency contacts — proper CRUD
+  selectEmergencyContacts: () => emergencyContactsStore.map(c => ({ ...c })),
+  
+  insertEmergencyContact: (data: Omit<typeof emergencyContactsStore[0], "id">) => {
+    const newContact = {
+      ...data,
+      id: emergencyContactsStore.length > 0 ? Math.max(...emergencyContactsStore.map(c => c.id)) + 1 : 1,
+    };
+    emergencyContactsStore.push(newContact);
+    return newContact;
+  },
+  
+  updateEmergencyContact: (id: number, updates: Partial<typeof emergencyContactsStore[0]>) => {
+    const idx = emergencyContactsStore.findIndex(c => c.id === id);
+    if (idx !== -1) {
+      emergencyContactsStore[idx] = { ...emergencyContactsStore[idx], ...updates };
+      return emergencyContactsStore[idx];
+    }
+    return null;
+  },
+  
+  deleteEmergencyContact: (id: number) => {
+    const idx = emergencyContactsStore.findIndex(c => c.id === id);
+    if (idx !== -1) {
+      emergencyContactsStore.splice(idx, 1);
+      return true;
+    }
+    return false;
+  },
 
   // === Meal Architecture (from plan) - now functional with module-scoped stores ===
   // Reference the module lets so direct db.xxxStore access still works (backward compat)

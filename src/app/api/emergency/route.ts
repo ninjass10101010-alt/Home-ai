@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { sendSMSViaEmail, sendEmailAlert } from "@/lib/free-communication";
 
+export const dynamic = "force-dynamic";
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -18,9 +20,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Fetch emergency contacts from database
-    const contacts = await db.select().from().where().execute();
+    const contacts = db.selectEmergencyContacts();
+    const primaryContacts = contacts.filter(c => c.isPrimary);
 
-    if (contacts.length === 0) {
+    if (primaryContacts.length === 0) {
       console.error("No primary emergency contacts configured");
       return NextResponse.json({
         error: "No emergency contacts configured. Please set up emergency contacts in settings."
@@ -45,12 +48,16 @@ export async function POST(request: NextRequest) {
     }
 
     // Send notifications to all primary contacts using free services
-    const notificationPromises = contacts.map(async (contact) => {
+    const notificationPromises = primaryContacts.map(async (contact) => {
       const results = [];
 
       // Try SMS via email-to-SMS gateway first (most immediate)
       try {
-        const smsResult = await sendSMSViaEmail(contact.phone, `${message}\nFrom: ${contact.name}`);
+        const smsResult = await sendSMSViaEmail(
+          contact.phone,
+          `${message}\nFrom: ${contact.name}`,
+          contact.carrier as any
+        );
         results.push({ method: 'SMS', ...smsResult });
       } catch (error) {
         console.error(`SMS failed for ${contact.name}:`, error);
@@ -84,7 +91,7 @@ export async function POST(request: NextRequest) {
     const failedContacts = notificationResults.filter(r => !r.overallSuccess).length;
 
     console.log(`[EMERGENCY ALERT] ${type} - ${timestamp}`);
-    console.log(`Total contacts: ${contacts.length}, Successful: ${successfulContacts}, Failed: ${failedContacts}`);
+    console.log(`Total primary contacts: ${primaryContacts.length}, Successful: ${successfulContacts}, Failed: ${failedContacts}`);
 
     // Log detailed results for debugging
     notificationResults.forEach(result => {
@@ -101,7 +108,7 @@ export async function POST(request: NextRequest) {
       success: true,
       message: `Emergency alert sent to ${successfulContacts} contact${successfulContacts > 1 ? 's' : ''} via SMS and/or email`,
       details: {
-        total: contacts.length,
+        total: primaryContacts.length,
         successful: successfulContacts,
         failed: failedContacts,
         results: notificationResults
