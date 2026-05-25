@@ -209,36 +209,57 @@ export default function TasksPage() {
   };
 
   // ─── Reward redemption ──────────────────────────────────
-  const [redeemReward, setRedeemReward] = useState<Reward | null>(null);
-  const [redeemMember, setRedeemMember] = useState("");
-
-  const confirmRedeem = () => {
-    if (!redeemReward || !redeemMember) return;
-    setEarnedPoints(prev => {
-      const current = prev[redeemMember] || 0;
-      if (current < redeemReward.cost) return prev;
-      return { ...prev, [redeemMember]: current - redeemReward.cost };
-    });
-    setRedeemReward(null);
-    setRedeemMember("");
-  };
+  const [pinReward, setPinReward] = useState<Reward | null>(null);
 
   // ─── PIN completion flow ────────────────────────────────
   const openPinEntry = (taskId: number) => {
     setPinTaskId(taskId);
+    setPinReward(null);
+    setPinInput("");
+    setPinError("");
+    setPinSuccess("");
+  };
+
+  const openRewardPin = (reward: Reward) => {
+    setPinReward(reward);
+    setPinTaskId(null);
     setPinInput("");
     setPinError("");
     setPinSuccess("");
   };
 
   const submitPin = () => {
-    if (!pinInput || pinTaskId === null) return;
+    if (!pinInput) return;
+
+    // Reward redemption mode
+    if (pinReward) {
+      const members = db.selectMembers();
+      const match = members.find((m: any) => (m as any).pin === pinInput);
+      if (match) {
+        const name = match.name;
+        const cost = pinReward.cost;
+        setEarnedPoints(prev => {
+          const current = prev[name] || 0;
+          if (current < cost) return prev;
+          return { ...prev, [name]: current - cost };
+        });
+        setPinSuccess(`🎁 ${name} redeemed ${pinReward.name}! -${cost}pts`);
+        setTimeout(() => { setPinReward(null); setPinSuccess(""); }, 1500);
+      } else {
+        setPinError("Wrong PIN. Try again.");
+        setPinInput("");
+        setTimeout(() => setPinError(""), 2000);
+      }
+      return;
+    }
+
+    // Task completion mode
+    if (pinTaskId === null) return;
     const task = tasks.find(t => t.id === pinTaskId);
     if (!task) return;
 
     const verified = db.verifyMemberPin(task.assignee, pinInput);
     if (verified) {
-      // Complete the task and credit points
       setTasks(prev => prev.map(t => t.id === pinTaskId ? { ...t, completed: true, completedBy: (verified as any).name } : t));
       setEarnedPoints(prev => {
         const name = (verified as any).name;
@@ -397,7 +418,7 @@ export default function TasksPage() {
         subtitle={`${pending.length} pending`}
         right={
           <button
-            onClick={startAdd}
+            onClick={() => activeTab === "tasks" ? startAdd() : startAddReward()}
             className="w-9 h-9 flex items-center justify-center rounded-xl bg-nori-500/15 text-nori-400 hover:bg-nori-500/25 transition-colors"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="w-5 h-5">
@@ -408,14 +429,17 @@ export default function TasksPage() {
       />
 
       {/* PIN Entry Modal */}
-      {pinTaskId !== null && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setPinTaskId(null)}>
+      {(pinTaskId !== null || pinReward !== null) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => { setPinTaskId(null); setPinReward(null); }}>
           <div className="bg-surface-0 rounded-2xl p-6 mx-4 w-full max-w-sm border border-surface-3 shadow-2xl" onClick={e => e.stopPropagation()}>
             <div className="text-center mb-4">
-              <span className="text-4xl">🔐</span>
+              <span className="text-4xl">{pinReward ? pinReward.emoji : "🔐"}</span>
               <h3 className="text-text-primary font-semibold mt-2">Enter Your PIN</h3>
               <p className="text-text-secondary text-sm mt-1">
-                Complete "{tasks.find(t => t.id === pinTaskId)?.title}"
+                {pinReward
+                  ? `Redeem "${pinReward.name}" for ${pinReward.cost}pts`
+                  : `Complete "${tasks.find(t => t.id === pinTaskId)?.title}"`
+                }
               </p>
             </div>
             <input
@@ -436,50 +460,7 @@ export default function TasksPage() {
                 className="flex-1 py-2.5 rounded-xl bg-nori-500 text-white font-semibold text-sm disabled:opacity-40 hover:bg-nori-400 transition-colors">
                 Submit
               </button>
-              <button onClick={() => setPinTaskId(null)}
-                className="flex-1 py-2.5 rounded-xl bg-surface-2 text-text-secondary text-sm font-medium hover:text-text-primary transition-colors">
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Redeem Reward Modal */}
-      {redeemReward !== null && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setRedeemReward(null)}>
-          <div className="bg-surface-0 rounded-2xl p-6 mx-4 w-full max-w-sm border border-surface-3 shadow-2xl" onClick={e => e.stopPropagation()}>
-            <div className="text-center mb-4">
-              <span className="text-4xl">{redeemReward.emoji}</span>
-              <h3 className="text-text-primary font-semibold mt-2">Redeem {redeemReward.name}</h3>
-              <p className="text-text-secondary text-sm mt-1">Cost: {redeemReward.cost} pts</p>
-            </div>
-            <p className="text-text-secondary text-xs mb-3">Who is redeeming this reward?</p>
-            <div className="flex flex-wrap gap-2 mb-4">
-              {membersData.filter((m: any) => m.role !== "pet").map((m: any) => (
-                <button
-                  key={m.name}
-                  onClick={() => setRedeemMember(m.name)}
-                  className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all ${
-                    redeemMember === m.name
-                      ? "bg-nori-500/20 text-nori-400 border border-nori-500/30"
-                      : "glass text-text-secondary border border-surface-3 hover:text-text-primary"
-                  }`}
-                >
-                  <span>{m.emoji}</span> {m.name.split(" ")[0]}
-                  <span className="text-text-muted ml-1">({(earnedPoints[m.name] || 0)}pts)</span>
-                </button>
-              ))}
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={confirmRedeem}
-                disabled={!redeemMember || (earnedPoints[redeemMember] || 0) < redeemReward.cost}
-                className="flex-1 py-2.5 rounded-xl bg-amber-500 text-white font-semibold text-sm disabled:opacity-40 hover:bg-amber-400 transition-colors"
-              >
-                Redeem 🎁
-              </button>
-              <button onClick={() => { setRedeemReward(null); setRedeemMember(""); }}
+              <button onClick={() => { setPinTaskId(null); setPinReward(null); }}
                 className="flex-1 py-2.5 rounded-xl bg-surface-2 text-text-secondary text-sm font-medium hover:text-text-primary transition-colors">
                 Cancel
               </button>
@@ -785,21 +766,16 @@ export default function TasksPage() {
                 {rewards.map((reward) => {
                   const unlocked = (earnedPoints[topScorer.name] || 0) >= reward.cost;
                   return (
-                    <Card key={reward.id} className={`!p-3 ${!unlocked ? "opacity-50" : ""}`}>
+                    <Card key={reward.id} className={`!p-3 ${!unlocked ? "opacity-50" : "cursor-pointer hover:border-nori-500/30 transition-colors"}`}
+                      onClick={() => { if (unlocked) openRewardPin(reward); }}>
                       <div className="flex flex-col items-center gap-1.5 text-center">
                         <AnimatedEmoji emoji={reward.emoji} size="sm" />
                         <p className="text-text-primary text-xs font-medium leading-tight">{reward.name}</p>
                         <Badge variant={unlocked ? "amber" : "gray"}>{reward.cost} pts</Badge>
                         <div className="flex gap-1 mt-0.5">
-                          {unlocked && (
-                            <button onClick={() => setRedeemReward(reward)}
-                              className="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-400 text-[10px] font-semibold hover:bg-amber-500/25 transition-colors">
-                              🎁 Redeem
-                            </button>
-                          )}
-                          <button onClick={() => startEditReward(reward)}
+                          <button onClick={(e) => { e.stopPropagation(); startEditReward(reward); }}
                             className="px-1.5 py-0.5 rounded-md text-[10px] text-text-muted hover:text-text-secondary">✏️</button>
-                          <button onClick={() => deleteReward(reward.id)}
+                          <button onClick={(e) => { e.stopPropagation(); deleteReward(reward.id); }}
                             className="px-1.5 py-0.5 rounded-md text-[10px] text-text-muted hover:text-rose-400">🗑️</button>
                         </div>
                       </div>
