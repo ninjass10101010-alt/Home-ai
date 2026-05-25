@@ -79,12 +79,42 @@ function executeAction(action: ActionCard): { success: boolean; message: string 
   try {
     switch (action.type) {
       case "meal": {
-        db.insertMeal({
-          name: action.title, emoji: action.emoji || "🍽️", time: "Mon",
-          prepTime: "30 min", tags: ["AI Suggested"], ingredients: [],
-          servings: 4, calories: 500, userId: "demo",
-        });
-        return { success: true, message: `Added "${action.title}" to meals` };
+        const MEALS_KEY = "consuela-meals";
+        // Try to extract day from detail or title (e.g., "Monday", "Mon")
+        const dayMatch = action.detail?.match(/\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b/i);
+        const dayMap: Record<string, string> = {
+          monday: "Mon", tuesday: "Tue", wednesday: "Wed", thursday: "Thu",
+          friday: "Fri", saturday: "Sat", sunday: "Sun",
+        };
+        let day = "Mon";
+        if (dayMatch) {
+          const raw = dayMatch[1].toLowerCase();
+          day = dayMap[raw] || raw.charAt(0).toUpperCase() + raw.slice(1, 3);
+        }
+        const newMeal = {
+          id: Date.now(),
+          name: action.title,
+          emoji: action.emoji || "🍽️",
+          time: day,
+          prepTime: "30 min",
+          tags: ["AI Suggested"],
+          ingredients: [] as string[],
+          servings: 4,
+          calories: 500,
+          userId: "demo",
+        };
+        // Write to in-memory store
+        db.insertMeal(newMeal);
+        // Also write to localStorage so meals page sees it
+        if (typeof window !== "undefined") {
+          try {
+            const stored = localStorage.getItem(MEALS_KEY);
+            const meals = stored ? JSON.parse(stored) : [];
+            meals.push(newMeal);
+            localStorage.setItem(MEALS_KEY, JSON.stringify(meals));
+          } catch {}
+        }
+        return { success: true, message: `Added "${action.title}" to ${day}` };
       }
       case "task": {
         const TASKS_KEY = "consuela-tasks";
