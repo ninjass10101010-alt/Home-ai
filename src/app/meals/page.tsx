@@ -489,11 +489,88 @@ function MealHubContent() {
     showToast(`📥 Importing from ${source}... (coming soon)`);
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    showToast(`📄 Parsing "${file.name}"... (coming soon)`);
+    showToast(`📄 Reading "${file.name}"...`);
+
+    try {
+      let text = "";
+      if (file.name.endsWith(".pdf")) {
+        // Use pdf.js from CDN to extract text
+        text = await extractPdfText(file);
+      } else {
+        text = await file.text();
+      }
+
+      if (!text || text.length < 20) {
+        showToast("❌ Could not extract text from file");
+        e.target.value = "";
+        return;
+      }
+
+      showToast("🤖 Asking Consuela to parse recipe...");
+      const res = await fetch('/api/hermes/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: `Parse this recipe text into a structured recipe. Return as JSON: {"actions":[{"type":"recipe","title":"Recipe Name","detail":"Prep time · Ingredient1 · Ingredient2 · Ingredient3","emoji":"🍽️"}]}.\n\nRecipe text:\n${text.substring(0, 3000)}`,
+        }),
+      });
+      const data = await res.json();
+      const actions = data.actions || [];
+
+      if (actions.length > 0 && actions[0].type === "recipe") {
+        const a = actions[0];
+        const ingredients = a.detail?.split("·").map((s: string) => s.trim()).filter(Boolean).filter((s: string) => !s.match(/\d+\s*min/i)) || [];
+        const prepMatch = a.detail?.match(/(\d+\s*min)/);
+        const newRecipe: Recipe = {
+          id: Date.now(),
+          name: a.title || file.name.replace(/\.\w+$/, ""),
+          emoji: a.emoji || "📖",
+          prepTime: prepMatch?.[1] || "30 min",
+          tags: ["Imported"],
+          ingredients,
+          instructions: text.substring(0, 500),
+          servings: 4,
+          calories: 500,
+          createdAt: new Date().toISOString(),
+          source: file.name,
+        };
+        setRecipes(prev => [...prev, newRecipe]);
+        showToast(`✅ Added "${newRecipe.name}" to recipe catalog`);
+      } else {
+        showToast("❌ Could not parse recipe. Try again or add manually.");
+      }
+    } catch (err) {
+      showToast("❌ Error reading file");
+    }
     e.target.value = "";
+  };
+
+  // PDF text extraction via pdf.js CDN
+  const extractPdfText = async (file: File): Promise<string> => {
+    return new Promise((resolve) => {
+      const script = document.createElement("script");
+      script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+      script.onload = async () => {
+        try {
+          const pdfjsLib = (window as any).pdfjsLib;
+          pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+          const arrayBuffer = await file.arrayBuffer();
+          const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+          let text = "";
+          for (let i = 1; i <= Math.min(pdf.numPages, 5); i++) {
+            const page = await pdf.getPage(i);
+            const content = await page.getTextContent();
+            text += content.items.map((item: any) => item.str).join(" ") + "\n";
+          }
+          resolve(text);
+        } catch { resolve(""); }
+      };
+      script.onerror = () => resolve("");
+      document.head.appendChild(script);
+    });
   };
 
   const neededCount = groceryItems.filter(i => i.needed).length;
