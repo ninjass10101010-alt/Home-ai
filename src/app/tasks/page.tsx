@@ -479,6 +479,7 @@ export default function TasksPage() {
                       onComplete={openPinEntry}
                       onEdit={startEdit}
                       memberColors={memberColors}
+                      memberEmojis={memberEmojis}
                       priorityColors={priorityColors}
                     />
                   ))}
@@ -508,6 +509,7 @@ export default function TasksPage() {
                         onComplete={openPinEntry}
                         onEdit={startEdit}
                         memberColors={memberColors}
+                        memberEmojis={memberEmojis}
                         priorityColors={priorityColors}
                       />
                     ))}
@@ -592,10 +594,11 @@ interface TaskRowProps {
   onComplete: (id: number) => void;
   onEdit: (task: Task) => void;
   memberColors: Record<string, string>;
+  memberEmojis: Record<string, string>;
   priorityColors: Record<string, string>;
 }
 
-function TaskRow({ task, onComplete, onEdit, memberColors, priorityColors }: TaskRowProps) {
+function TaskRow({ task, onComplete, onEdit, memberColors, memberEmojis, priorityColors }: TaskRowProps) {
   return (
     <div className="flex items-center gap-1">
       <button
@@ -634,7 +637,7 @@ function TaskRow({ task, onComplete, onEdit, memberColors, priorityColors }: Tas
           {task.points > 0 && (
             <span className="text-xs font-semibold text-amber-400">+{task.points}pts</span>
           )}
-          <Avatar name={task.assignee} color={memberColors[task.assignee] ?? "green"} emoji={task.assigneeEmoji} size="sm" variant="emoji" />
+          <Avatar name={task.assignee} color={memberColors[task.assignee] ?? "green"} emoji={memberEmojis[task.assignee] || task.assigneeEmoji} size="sm" variant="emoji" />
         </div>
       </button>
       <button
