@@ -208,6 +208,21 @@ export default function TasksPage() {
     setAiRewards(prev => prev.filter(rr => rr.name !== r.name));
   };
 
+  // ─── Reward redemption ──────────────────────────────────
+  const [redeemReward, setRedeemReward] = useState<Reward | null>(null);
+  const [redeemMember, setRedeemMember] = useState("");
+
+  const confirmRedeem = () => {
+    if (!redeemReward || !redeemMember) return;
+    setEarnedPoints(prev => {
+      const current = prev[redeemMember] || 0;
+      if (current < redeemReward.cost) return prev;
+      return { ...prev, [redeemMember]: current - redeemReward.cost };
+    });
+    setRedeemReward(null);
+    setRedeemMember("");
+  };
+
   // ─── PIN completion flow ────────────────────────────────
   const openPinEntry = (taskId: number) => {
     setPinTaskId(taskId);
@@ -422,6 +437,49 @@ export default function TasksPage() {
                 Submit
               </button>
               <button onClick={() => setPinTaskId(null)}
+                className="flex-1 py-2.5 rounded-xl bg-surface-2 text-text-secondary text-sm font-medium hover:text-text-primary transition-colors">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Redeem Reward Modal */}
+      {redeemReward !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setRedeemReward(null)}>
+          <div className="bg-surface-0 rounded-2xl p-6 mx-4 w-full max-w-sm border border-surface-3 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="text-center mb-4">
+              <span className="text-4xl">{redeemReward.emoji}</span>
+              <h3 className="text-text-primary font-semibold mt-2">Redeem {redeemReward.name}</h3>
+              <p className="text-text-secondary text-sm mt-1">Cost: {redeemReward.cost} pts</p>
+            </div>
+            <p className="text-text-secondary text-xs mb-3">Who is redeeming this reward?</p>
+            <div className="flex flex-wrap gap-2 mb-4">
+              {membersData.filter((m: any) => m.role !== "pet").map((m: any) => (
+                <button
+                  key={m.name}
+                  onClick={() => setRedeemMember(m.name)}
+                  className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all ${
+                    redeemMember === m.name
+                      ? "bg-nori-500/20 text-nori-400 border border-nori-500/30"
+                      : "glass text-text-secondary border border-surface-3 hover:text-text-primary"
+                  }`}
+                >
+                  <span>{m.emoji}</span> {m.name.split(" ")[0]}
+                  <span className="text-text-muted ml-1">({(earnedPoints[m.name] || 0)}pts)</span>
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={confirmRedeem}
+                disabled={!redeemMember || (earnedPoints[redeemMember] || 0) < redeemReward.cost}
+                className="flex-1 py-2.5 rounded-xl bg-amber-500 text-white font-semibold text-sm disabled:opacity-40 hover:bg-amber-400 transition-colors"
+              >
+                Redeem 🎁
+              </button>
+              <button onClick={() => { setRedeemReward(null); setRedeemMember(""); }}
                 className="flex-1 py-2.5 rounded-xl bg-surface-2 text-text-secondary text-sm font-medium hover:text-text-primary transition-colors">
                 Cancel
               </button>
@@ -732,8 +790,18 @@ export default function TasksPage() {
                         <AnimatedEmoji emoji={reward.emoji} size="sm" />
                         <p className="text-text-primary text-xs font-medium leading-tight">{reward.name}</p>
                         <Badge variant={unlocked ? "amber" : "gray"}>{reward.cost} pts</Badge>
-                        <button onClick={() => startEditReward(reward)}
-                          className="text-[10px] text-text-muted hover:text-text-secondary mt-0.5">✏️ Edit</button>
+                        <div className="flex gap-1 mt-0.5">
+                          {unlocked && (
+                            <button onClick={() => setRedeemReward(reward)}
+                              className="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-400 text-[10px] font-semibold hover:bg-amber-500/25 transition-colors">
+                              🎁 Redeem
+                            </button>
+                          )}
+                          <button onClick={() => startEditReward(reward)}
+                            className="px-1.5 py-0.5 rounded-md text-[10px] text-text-muted hover:text-text-secondary">✏️</button>
+                          <button onClick={() => deleteReward(reward.id)}
+                            className="px-1.5 py-0.5 rounded-md text-[10px] text-text-muted hover:text-rose-400">🗑️</button>
+                        </div>
                       </div>
                     </Card>
                   );
