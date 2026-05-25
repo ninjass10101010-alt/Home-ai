@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import ConsuelaFAB from "./ConsuelaFAB";
 
 const navItems = [
   {
@@ -201,6 +202,7 @@ export default function BottomNav() {
           })}
         </div>
       </div>
+      <ConsuelaFAB />
     </nav>
   );
 }
