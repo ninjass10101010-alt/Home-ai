@@ -256,7 +256,7 @@ export const db = {
   // Members - detailed view for settings
   selectMembersDetailed: () => membersStore.map(m => ({
     name: m.name,
-    role: m.role === 'parent' ? 'Parent' : 'Child',
+    role: m.role === 'parent' ? 'Parent' : m.role === 'pet' ? 'Pet' : 'Child',
     emoji: m.emoji,
     color: ["green", "cyan", "violet", "amber", "rose", "blue", "cyan"][m.id - 1] || "green",
     age: m.age.toString(),
