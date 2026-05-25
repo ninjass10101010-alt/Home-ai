@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import BottomNav from "@/components/ui/BottomNav";
 import Avatar from "@/components/ui/Avatar";
 import Badge from "@/components/ui/Badge";
+import { db } from "@/db";
 
 interface Message {
   id: number;
@@ -34,130 +35,11 @@ const initialMessages: Message[] = [
 const suggestedPrompts = [
   { label: "📅 Add event", prompt: "Add soccer practice tomorrow at 4pm for Caspian" },
   { label: "🍽️ Plan meals", prompt: "Plan dinners for this week" },
-  { label: "✅ Assign chore", prompt: "Assign trash duty to Caspian every Thursday" },
+  { label: "✅ Assign chore", prompt: "Assign trash duty to Caspian every Thursday with 10 points" },
   { label: "🛒 Grocery list", prompt: "Generate grocery list for this week's meals" },
   { label: "📊 Family update", prompt: "What does the family have going on this week?" },
   { label: "🔔 Reminder", prompt: "Remind Dad about car service on Friday at 10am" },
 ];
-
-const mockResponses: Record<string, Message> = {
-  soccer: {
-    id: 0,
-    role: "assistant",
-    content: "Done! I've added **Soccer Practice** to Caspian's calendar for tomorrow at 4:00 PM. I'll send Caspian a reminder an hour before. 📅",
-    timestamp: "Just now",
-    actions: [
-      {
-        type: "event",
-        title: "Soccer Practice",
-        detail: "Caspian · Tomorrow · 4:00 PM",
-        emoji: "⚽",
-        confirmed: true,
-      },
-    ],
-  },
-  meal: {
-    id: 0,
-    role: "assistant",
-    content:
-      "Here's a meal plan for this week based on your family's preferences and what's in your pantry:\n\n**Mon** — Pasta Primavera 🍝\n**Tue** — Taco Night 🌮\n**Wed** — Grilled Chicken & Veggies 🍗\n**Thu** — Shrimp Stir Fry 🥢\n**Fri** — Homemade Pizza 🍕\n**Sat** — BBQ Night 🍖\n**Sun** — Slow Cooker Chili 🫕\n\nShould I generate the grocery list for these meals?",
-    timestamp: "Just now",
-    actions: [
-      {
-        type: "meal",
-        title: "7-Day Meal Plan Created",
-        detail: "Tap 'Meals' to view and edit",
-        emoji: "🍽️",
-        confirmed: true,
-      },
-    ],
-  },
-  chore: {
-    id: 0,
-    role: "assistant",
-    content:
-      "Got it! I've set up a **recurring chore** for Caspian: take out the trash every Thursday evening. He'll earn **10 points** per completion. 💪\n\nWant me to set a reminder for him at a specific time?",
-    timestamp: "Just now",
-    actions: [
-      {
-        type: "task",
-        title: "Take Out Trash",
-        detail: "Caspian · Every Thursday · 10pts",
-        emoji: "🗑️",
-        confirmed: true,
-      },
-    ],
-  },
-  grocery: {
-    id: 0,
-    role: "assistant",
-    content:
-      "Based on this week's meal plan, here's your grocery list:\n\n🥩 Chicken breast · Shrimp · Ground beef\n🥦 Broccoli · Bell peppers · Zucchini\n🧀 Mozzarella · Parmesan\n🍅 Crushed tomatoes · Pasta sauce\n🌮 Taco shells · Salsa · Sour cream\n\nAdded **14 items** to your grocery list. Want me to organize by store section?",
-    timestamp: "Just now",
-    actions: [
-      {
-        type: "grocery",
-        title: "Grocery List Updated",
-        detail: "14 items added · Tap to view",
-        emoji: "🛒",
-        confirmed: true,
-      },
-    ],
-  },
-  week: {
-    id: 0,
-    role: "assistant",
-    content:
-      "Here's the family's week at a glance:\n\n**Monday** — Caspian: Soccer 4pm\n**Tuesday** — Emily: Piano 3pm, Taco Night 🌮\n**Wednesday** — Family: Movie Night\n**Thursday** — Caspian: Trash duty, Dad: Car service\n**Friday** — Emily: Dentist 2pm, Pizza Night 🍕\n**Saturday** — Family: Park picnic (tentative)\n\nYou have **3 pending tasks** and the grocery list needs a top-up. Need me to do anything?",
-    timestamp: "Just now",
-  },
-  reminder: {
-    id: 0,
-    role: "assistant",
-    content:
-      "Done! I've added a reminder for **Dad**: Car service on Friday at 10:00 AM. He'll also get a notification Thursday evening as a heads-up. 🔔",
-    timestamp: "Just now",
-    actions: [
-      {
-        type: "event",
-        title: "Car Service",
-        detail: "Dad · Friday · 10:00 AM",
-        emoji: "🚗",
-        confirmed: true,
-      },
-    ],
-  },
-  default: {
-    id: 0,
-    role: "assistant",
-    content:
-      "I understood that! Let me take care of it for you. Is there anything else you'd like me to help with — events, meals, tasks, or grocery items?",
-    timestamp: "Just now",
-  },
-};
-
-function getResponse(input: string): Message {
-  const lower = input.toLowerCase();
-  if (lower.includes("soccer") || lower.includes("event") || lower.includes("add")) {
-    return { ...mockResponses.soccer, id: Date.now() };
-  }
-  if (lower.includes("meal") || lower.includes("dinner") || lower.includes("plan")) {
-    return { ...mockResponses.meal, id: Date.now() };
-  }
-  if (lower.includes("trash") || lower.includes("chore") || lower.includes("assign")) {
-    return { ...mockResponses.chore, id: Date.now() };
-  }
-  if (lower.includes("grocery") || lower.includes("shop") || lower.includes("list")) {
-    return { ...mockResponses.grocery, id: Date.now() };
-  }
-  if (lower.includes("week") || lower.includes("going on") || lower.includes("update")) {
-    return { ...mockResponses.week, id: Date.now() };
-  }
-  if (lower.includes("remind") || lower.includes("reminder")) {
-    return { ...mockResponses.reminder, id: Date.now() };
-  }
-  return { ...mockResponses.default, id: Date.now() };
-}
 
 const actionColors: Record<string, string> = {
   event: "border-violet-500/25 bg-violet-500/8",
@@ -178,17 +60,102 @@ function renderContent(text: string) {
   });
 }
 
+// Execute AI actions against the real dashboard data
+function executeAction(action: ActionCard): { success: boolean; message: string } {
+  try {
+    switch (action.type) {
+      case "meal": {
+        const existing = db.selectMeals();
+        db.insertMeal({
+          name: action.title,
+          emoji: action.emoji || "🍽️",
+          time: "Mon",
+          prepTime: "30 min",
+          tags: ["AI Suggested"],
+          ingredients: [],
+          servings: 4,
+          calories: 500,
+          userId: "demo",
+        });
+        return { success: true, message: `Added "${action.title}" to meals` };
+      }
+      case "task": {
+        const TASKS_KEY = "consuela-tasks";
+        const stored = (() => {
+          if (typeof window === "undefined") return [];
+          try { const d = localStorage.getItem(TASKS_KEY); return d ? JSON.parse(d) : []; } catch { return []; }
+        })();
+        const members = db.selectMembers();
+        const assignee = action.detail?.match(/^(\w+)/)?.[1] || members[0]?.name || "Caspian";
+        const member = members.find((m: any) => m.name === assignee || m.name.startsWith(assignee));
+        const points = parseInt(action.detail?.match(/(\d+)\s*pts?/)?.[1] || "10");
+        const newTask = {
+          id: Date.now(),
+          title: action.title,
+          assignee: member?.name || assignee,
+          assigneeEmoji: member?.emoji || "🧒",
+          due: "Today",
+          points,
+          recurring: null,
+          category: "AI Suggested",
+          completed: false,
+          priority: "medium" as const,
+        };
+        stored.push(newTask);
+        if (typeof window !== "undefined") localStorage.setItem(TASKS_KEY, JSON.stringify(stored));
+        return { success: true, message: `Created task "${action.title}" for ${member?.name || assignee} (${points}pts)` };
+      }
+      case "grocery": {
+        db.upsertGroceryItem({
+          name: action.title,
+          category: "pantry",
+          aisle: "1",
+          quantity: "1",
+          priority: "medium",
+          needed: true,
+          source: "ai",
+          autoGenerated: false,
+          userId: "demo",
+        });
+        return { success: true, message: `Added "${action.title}" to grocery list` };
+      }
+      case "event": {
+        const EVENTS_KEY = "consuela-events";
+        const stored = (() => {
+          if (typeof window === "undefined") return [];
+          try { const d = localStorage.getItem(EVENTS_KEY); return d ? JSON.parse(d) : []; } catch { return []; }
+        })();
+        const newEvent = {
+          id: Date.now(),
+          title: action.title,
+          time: "4:00 PM",
+          member: action.detail?.split("·")?.[0]?.trim() || "All",
+          color: "green" as const,
+          emoji: action.emoji || "📅",
+          day: new Date().getDate(),
+        };
+        stored.push(newEvent);
+        if (typeof window !== "undefined") localStorage.setItem(EVENTS_KEY, JSON.stringify(stored));
+        return { success: true, message: `Added event "${action.title}"` };
+      }
+      default:
+        return { success: false, message: `Unknown action type: ${action.type}` };
+    }
+  } catch (err) {
+    return { success: false, message: err instanceof Error ? err.message : "Failed" };
+  }
+}
+
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(true);
   const [isListening, setIsListening] = useState(false);
+  const [actionResults, setActionResults] = useState<Record<number, string>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<any>(null);
-
-
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -208,19 +175,12 @@ export default function ChatPage() {
         setIsListening(false);
       };
 
-      recognitionRef.current.onerror = () => {
-        setIsListening(false);
-      };
-
-      recognitionRef.current.onend = () => {
-        setIsListening(false);
-      };
+      recognitionRef.current.onerror = () => setIsListening(false);
+      recognitionRef.current.onend = () => setIsListening(false);
     }
 
     return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
+      if (recognitionRef.current) recognitionRef.current.stop();
     };
   }, []);
 
@@ -252,16 +212,30 @@ export default function ChatPage() {
       });
       const aiResponse = await res.json();
       setIsTyping(false);
+
+      // Execute any actions the AI returned
+      const actions = aiResponse.actions || [];
+      const executedActions = actions.map((action: ActionCard) => {
+        const result = executeAction(action);
+        return { ...action, confirmed: result.success };
+      });
+
+      // Build result messages for feedback
+      const resultMsgs = executedActions
+        .filter((a: ActionCard) => a.confirmed)
+        .map((a: ActionCard) => `✅ ${a.title}`);
+      const content = aiResponse.content || aiResponse.reply || "I processed that.";
+      const fullContent = resultMsgs.length > 0
+        ? content + "\n\n" + resultMsgs.join("\n")
+        : content;
+
       msgCounter.current += 1;
       const response: Message = {
         id: msgCounter.current,
         role: "assistant",
-        content: aiResponse.content || aiResponse.reply || "I processed that.",
+        content: fullContent,
         timestamp: "Just now",
-        actions: aiResponse.actions?.map((action: any) => ({
-          ...action,
-          confirmed: true,
-        })),
+        actions: executedActions,
       };
       setMessages((prev) => [...prev, response]);
     } catch (error) {
@@ -279,7 +253,6 @@ export default function ChatPage() {
 
   const toggleListening = () => {
     if (!recognitionRef.current) return;
-
     if (isListening) {
       recognitionRef.current.stop();
       setIsListening(false);
@@ -301,9 +274,7 @@ export default function ChatPage() {
       {/* Top bar */}
       <div
         className="sticky top-0 z-40 px-4 py-3 flex items-center gap-3 bg-surface-0/90 backdrop-blur-md border-b border-surface-3/20"
-        style={{
-          paddingTop: "calc(env(safe-area-inset-top) + 0.75rem)",
-        }}
+        style={{ paddingTop: "calc(env(safe-area-inset-top) + 0.75rem)" }}
       >
         <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl shrink-0 bg-nori-500/15 consuela-glow">
           ✨
@@ -386,9 +357,7 @@ export default function ChatPage() {
                 <div
                   key={i}
                   className="w-2 h-2 rounded-full bg-nori-400"
-                  style={{
-                    animation: `bounce 1s ease-in-out ${i * 0.15}s infinite`,
-                  }}
+                  style={{ animation: `bounce 1s ease-in-out ${i * 0.15}s infinite` }}
                 />
               ))}
             </div>
@@ -424,10 +393,7 @@ export default function ChatPage() {
           paddingBottom: "calc(env(safe-area-inset-bottom) + 5.5rem)",
         }}
       >
-        <div
-          className="flex items-end gap-2 rounded-2xl glass px-3 py-2 border border-accent-selected/15"
-        >
-          {/* Voice button */}
+        <div className="flex items-end gap-2 rounded-2xl glass px-3 py-2 border border-accent-selected/15">
           <button
             onClick={toggleListening}
             className={`w-9 h-9 flex items-center justify-center rounded-xl transition-colors shrink-0 mb-0.5 ${

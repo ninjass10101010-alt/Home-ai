@@ -136,6 +136,39 @@ function MealHubContent() {
   const [recipe, setRecipe] = useState({ ...emptyRecipe });
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
+  // AI meal suggestions
+  const [aiMealIdeas, setAiMealIdeas] = useState<Array<{ name: string; emoji: string; tags: string[] }>>([]);
+  const [aiMealLoading, setAiMealLoading] = useState(false);
+  const [showAiSuggestions, setShowAiSuggestions] = useState(false);
+
+  const generateAiMeals = async () => {
+    setAiMealLoading(true);
+    setShowAiSuggestions(true);
+    try {
+      const pantry = db.selectPantry().map((p: any) => p.name).join(", ");
+      const res = await fetch('/api/hermes/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: `Suggest 4 meal ideas for a family of 7 (kids ages 5-14). Pantry has: ${pantry || "basic ingredients"}. Return as JSON: {"actions":[{"type":"meal","title":"Meal Name","detail":"Prep time · Kid-friendly tags","emoji":"🍝"}]}. Make them varied, practical, and family-friendly.`,
+        }),
+      });
+      const data = await res.json();
+      const actions = data.actions || [];
+      const ideas = actions
+        .filter((a: any) => a.type === "meal")
+        .map((a: any) => ({
+          name: a.title,
+          emoji: a.emoji || "🍽️",
+          tags: a.detail?.split("·").map((t: string) => t.trim()).filter(Boolean) || ["Family"],
+        }));
+      setAiMealIdeas(ideas.length > 0 ? ideas : mealIdeas);
+    } catch {
+      setAiMealIdeas(mealIdeas);
+    }
+    setAiMealLoading(false);
+  };
+
   // Pantry
   const [pantryItems, setPantryItems] = useState<PantryItem[]>([]);
   const [newPantryItem, setNewPantryItem] = useState("");
@@ -418,15 +451,16 @@ function MealHubContent() {
         subtitle={activeTab === "meals" ? "This week" : activeTab === "grocery" ? `${neededCount} items needed` : `${pantryItems.length} items tracked`}
         right={
           activeTab === "meals" ? (
-            <Link
-              href="/chat?q=Plan+meals+for+this+week"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-nori-500/15 text-nori-400 text-xs font-medium hover:bg-nori-500/25 transition-colors"
+            <button
+              onClick={generateAiMeals}
+              disabled={aiMealLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-nori-500/15 text-nori-400 text-xs font-medium hover:bg-nori-500/25 transition-colors disabled:opacity-50"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
                 <path d="M12 2l2 7h7l-5.7 4.1 2.2 6.9L12 16l-5.5 4 2.2-6.9L3 9h7z" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-              AI Suggest
-            </Link>
+              {aiMealLoading ? "Thinking..." : "AI Suggest"}
+            </button>
           ) : null
         }
       />
@@ -597,25 +631,47 @@ function MealHubContent() {
           )}
 
           {/* AI Suggestions */}
-          <section>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-text-primary font-semibold text-sm">✨ Consuela Suggests</h3>
-              <Badge variant="violet">AI picks</Badge>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              {mealIdeas.map(idea => (
-                <Card key={idea.name} onClick={() => {}} className="!p-3">
-                  <div className="flex flex-col items-center gap-2 text-center">
-                    <span className="text-2xl" style={{ animation: "float 3s ease-in-out infinite" }}>{idea.emoji}</span>
-                    <p className="text-text-primary text-xs font-medium leading-tight">{idea.name}</p>
-                    <div className="flex gap-1 flex-wrap justify-center">
-                      {idea.tags.map(t => <Badge key={t} variant="gray">{t}</Badge>)}
+          {showAiSuggestions && (
+            <section>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-text-primary font-semibold text-sm">✨ Consuela Suggests</h3>
+                <Badge variant="violet">AI picks</Badge>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {(aiMealIdeas.length > 0 ? aiMealIdeas : mealIdeas).map(idea => (
+                  <Card key={idea.name} className="!p-3 cursor-pointer hover:border-nori-500/30 transition-colors"
+                    onClick={() => {
+                      const newMeal: Meal = {
+                        id: Date.now(),
+                        name: idea.name,
+                        emoji: idea.emoji,
+                        time: activeDay,
+                        prepTime: "30 min",
+                        tags: idea.tags,
+                        ingredients: [],
+                        servings: 4,
+                        calories: 500,
+                      };
+                      db.insertMeal(newMeal);
+                      setMeals(prev => [...prev, newMeal]);
+                      showToast(`✅ Added ${idea.name} to ${activeDay}`);
+                    }}
+                  >
+                    <div className="flex flex-col items-center gap-2 text-center">
+                      <span className="text-2xl" style={{ animation: "float 3s ease-in-out infinite" }}>{idea.emoji}</span>
+                      <p className="text-text-primary text-xs font-medium leading-tight">{idea.name}</p>
+                      <div className="flex gap-1 flex-wrap justify-center">
+                        {idea.tags.map(t => <Badge key={t} variant="gray">{t}</Badge>)}
+                      </div>
                     </div>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          </section>
+                  </Card>
+                ))}
+              </div>
+              {aiMealLoading && (
+                <p className="text-text-muted text-xs text-center mt-2">Asking Consuela for ideas...</p>
+              )}
+            </section>
+          )}
 
           {/* Import Recipes */}
           <section className="pb-2">

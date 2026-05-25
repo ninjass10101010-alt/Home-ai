@@ -20,6 +20,7 @@ interface Task {
   category: string;
   completed: boolean;
   priority: "high" | "medium" | "low";
+  completedBy?: string;
 }
 
 interface LeaderboardEntry {
@@ -36,24 +37,24 @@ const initialTasks: Task[] = [
   { id: 3, title: "Load dishwasher", assignee: "Jasmine", assigneeEmoji: "👧", due: "Today", points: 8, recurring: "Daily", category: "Chores", completed: false, priority: "medium" },
   { id: 4, title: "Vacuum living room", assignee: "Caspian", assigneeEmoji: "🧒", due: "Tomorrow", points: 15, recurring: "Weekly", category: "Chores", completed: false, priority: "medium" },
   { id: 5, title: "Pay electric bill", assignee: "Jeffery (Dad)", assigneeEmoji: "👨", due: "Fri", points: 0, recurring: "Monthly", category: "Admin", completed: false, priority: "high" },
-  { id: 6, title: "Clean bathroom", assignee: "Jasmine", assigneeEmoji: "👧", due: "Tomorrow", points: 15, recurring: "Weekly", category: "Chores", completed: true, priority: "medium" },
-  { id: 7, title: "Walk Rocco", assignee: "Caspian", assigneeEmoji: "🧒", due: "Today", points: 12, recurring: "Daily", category: "Pets", completed: true, priority: "low" },
+  { id: 6, title: "Clean bathroom", assignee: "Jasmine", assigneeEmoji: "👧", due: "Tomorrow", points: 15, recurring: "Weekly", category: "Chores", completed: false, priority: "medium" },
+  { id: 7, title: "Walk Rocco", assignee: "Caspian", assigneeEmoji: "🧒", due: "Today", points: 12, recurring: "Daily", category: "Pets", completed: false, priority: "low" },
   { id: 8, title: "Book dentist appt", assignee: "Rebecca (Mom)", assigneeEmoji: "👩", due: "This week", points: 0, recurring: null, category: "Health", completed: false, priority: "medium" },
   { id: 9, title: "Car oil change", assignee: "Jeffery (Dad)", assigneeEmoji: "👨", due: "Sat", points: 0, recurring: null, category: "Errands", completed: false, priority: "low" },
   { id: 10, title: "Chew the bone", assignee: "Rocco", assigneeEmoji: "🐶", due: "Today", points: 5, recurring: "Daily", category: "Pets", completed: false, priority: "low" },
   { id: 11, title: "Grooming appointment", assignee: "Rico", assigneeEmoji: "🐩", due: "Tomorrow", points: 0, recurring: "Monthly", category: "Pets", completed: false, priority: "medium" },
 ];
 
-const priorityColors: Record<string, string> = { high: "bg-rose-500", medium: "bg-amber-500", low: "bg-surface-4" };
-const categories = ["Chores", "Errands", "Admin", "Health", "Pets", "School"];
-const dueOptions = ["Today", "Tomorrow", "This week", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed", "Thu"];
-
-const leaderboard: LeaderboardEntry[] = [
+const staticLeaderboard: LeaderboardEntry[] = [
   { name: "Caspian", emoji: "🧒", points: 145, streak: 5, rank: 1 },
   { name: "Emily", emoji: "👧", points: 120, streak: 3, rank: 2 },
   { name: "Rebecca (Mom)", emoji: "👩", points: 95, streak: 7, rank: 3 },
   { name: "Jeffery (Dad)", emoji: "👨", points: 60, streak: 2, rank: 4 },
 ];
+
+const priorityColors: Record<string, string> = { high: "bg-rose-500", medium: "bg-amber-500", low: "bg-surface-4" };
+const categories = ["Chores", "Errands", "Admin", "Health", "Pets", "School"];
+const dueOptions = ["Today", "Tomorrow", "This week", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed", "Thu"];
 
 function emptyTask(firstMember?: { name?: string; emoji?: string }): Task {
   return {
@@ -71,15 +72,11 @@ function emptyTask(firstMember?: { name?: string; emoji?: string }): Task {
 }
 
 const TASKS_STORAGE_KEY = "consuela-tasks";
+const POINTS_STORAGE_KEY = "consuela-points";
 
 function loadFromStorage<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
-  try {
-    const stored = localStorage.getItem(key);
-    return stored ? JSON.parse(stored) : fallback;
-  } catch {
-    return fallback;
-  }
+  try { const stored = localStorage.getItem(key); return stored ? JSON.parse(stored) : fallback; } catch { return fallback; }
 }
 
 export default function TasksPage() {
@@ -94,10 +91,11 @@ export default function TasksPage() {
   , [membersData]);
 
   const [tasks, setTasks] = useState<Task[]>(() => loadFromStorage(TASKS_STORAGE_KEY, initialTasks));
+  const [earnedPoints, setEarnedPoints] = useState<Record<string, number>>(() => loadFromStorage(POINTS_STORAGE_KEY, {}));
 
-  useEffect(() => {
-    localStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify(tasks));
-  }, [tasks]);
+  useEffect(() => { localStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify(tasks)); }, [tasks]);
+  useEffect(() => { localStorage.setItem(POINTS_STORAGE_KEY, JSON.stringify(earnedPoints)); }, [earnedPoints]);
+
   const [filterMember, setFilterMember] = useState("All");
   const [activeTab, setActiveTab] = useState<"tasks" | "leaderboard">("tasks");
   const [showCompleted, setShowCompleted] = useState(false);
@@ -107,12 +105,47 @@ export default function TasksPage() {
   const [editForm, setEditForm] = useState<Task>(emptyTask(membersData[0]));
   const [isAdding, setIsAdding] = useState(false);
 
-  const toggleTask = (id: number) => {
-    setTasks((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t))
-    );
+  // PIN completion state
+  const [pinTaskId, setPinTaskId] = useState<number | null>(null);
+  const [pinInput, setPinInput] = useState("");
+  const [pinError, setPinError] = useState("");
+  const [pinSuccess, setPinSuccess] = useState("");
+
+  // AI suggestions state
+  const [aiSuggesting, setAiSuggesting] = useState(false);
+  const [aiSuggestions, setAiSuggestions] = useState<Task[]>([]);
+
+  // ─── PIN completion flow ────────────────────────────────
+  const openPinEntry = (taskId: number) => {
+    setPinTaskId(taskId);
+    setPinInput("");
+    setPinError("");
+    setPinSuccess("");
   };
 
+  const submitPin = () => {
+    if (!pinInput || pinTaskId === null) return;
+    const task = tasks.find(t => t.id === pinTaskId);
+    if (!task) return;
+
+    const verified = db.verifyMemberPin(task.assignee, pinInput);
+    if (verified) {
+      // Complete the task and credit points
+      setTasks(prev => prev.map(t => t.id === pinTaskId ? { ...t, completed: true, completedBy: (verified as any).name } : t));
+      setEarnedPoints(prev => {
+        const name = (verified as any).name;
+        return { ...prev, [name]: (prev[name] || 0) + task.points };
+      });
+      setPinSuccess(`✅ +${task.points}pts to ${(verified as any).name}!`);
+      setTimeout(() => { setPinTaskId(null); setPinSuccess(""); }, 1500);
+    } else {
+      setPinError("Wrong PIN. Try again.");
+      setPinInput("");
+      setTimeout(() => setPinError(""), 2000);
+    }
+  };
+
+  // ─── Task CRUD ──────────────────────────────────────────
   const startEdit = (task: Task) => {
     setEditingId(task.id);
     setEditForm({ ...task });
@@ -125,10 +158,7 @@ export default function TasksPage() {
     setIsAdding(true);
   };
 
-  const cancelEdit = () => {
-    setEditingId(null);
-    setIsAdding(false);
-  };
+  const cancelEdit = () => { setEditingId(null); setIsAdding(false); };
 
   const saveTask = () => {
     if (!editForm.title.trim()) return;
@@ -137,14 +167,12 @@ export default function TasksPage() {
     } else {
       setTasks(prev => prev.map(t => t.id === editingId ? { ...editForm } : t));
     }
-    setEditingId(null);
-    setIsAdding(false);
+    setEditingId(null); setIsAdding(false);
   };
 
   const deleteTask = (id: number) => {
     setTasks(prev => prev.filter(t => t.id !== id));
-    setEditingId(null);
-    setIsAdding(false);
+    setEditingId(null); setIsAdding(false);
   };
 
   const updateForm = (field: keyof Task, value: any) => {
@@ -158,6 +186,66 @@ export default function TasksPage() {
     });
   };
 
+  // ─── AI Task Suggestions ─────────────────────────────────
+  const generateAiTasks = async () => {
+    setAiSuggesting(true);
+    try {
+      const res = await fetch('/api/hermes/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: `Suggest 4 age-appropriate chores for the Garcia family kids (Caspian-5, Aurora-7, Jasmine-10, Bailey-12, Emily-14) with fair point values. Return as JSON: {"actions":[{"type":"task","title":"...","detail":"AssigneeName · Xpts","emoji":"..."}]}. Points: easy=5-8, medium=10-15, hard=20. Make them varied (chores, pets, school, helping).`,
+        }),
+      });
+      const data = await res.json();
+      const actions = data.actions || [];
+      const suggestions: Task[] = actions
+        .filter((a: any) => a.type === "task")
+        .map((a: any) => {
+          const assignee = a.detail?.split("·")?.[0]?.trim() || "Caspian";
+          const points = parseInt(a.detail?.match(/(\d+)\s*pts?/)?.[1] || "8");
+          const member = membersData.find((m: any) => m.name.startsWith(assignee) || m.name === assignee);
+          return {
+            id: Date.now() + Math.random(),
+            title: a.title,
+            assignee: member?.name || assignee,
+            assigneeEmoji: member?.emoji || "🧒",
+            due: "Today",
+            points,
+            recurring: null,
+            category: "AI Suggested",
+            completed: false,
+            priority: points >= 15 ? "high" : points >= 10 ? "medium" : "low",
+          } as Task;
+        });
+      setAiSuggestions(suggestions.length > 0 ? suggestions : [
+        { id: Date.now()+1, title: "Make your bed", assignee: "Caspian", assigneeEmoji: "🧒", due: "Today", points: 5, recurring: "Daily", category: "AI Suggested", completed: false, priority: "low" },
+        { id: Date.now()+2, title: "Help set the table", assignee: "Aurora", assigneeEmoji: "👧", due: "Today", points: 8, recurring: "Daily", category: "AI Suggested", completed: false, priority: "medium" },
+        { id: Date.now()+3, title: "Sweep the kitchen", assignee: "Jasmine", assigneeEmoji: "👧", due: "Today", points: 12, recurring: null, category: "AI Suggested", completed: false, priority: "medium" },
+        { id: Date.now()+4, title: "Organize the pantry", assignee: "Bailey", assigneeEmoji: "👧", due: "Today", points: 15, recurring: "Weekly", category: "AI Suggested", completed: false, priority: "high" },
+      ]);
+    } catch {
+      // Fallback suggestions
+      setAiSuggestions([
+        { id: Date.now()+1, title: "Make your bed", assignee: "Caspian", assigneeEmoji: "🧒", due: "Today", points: 5, recurring: "Daily", category: "AI Suggested", completed: false, priority: "low" },
+        { id: Date.now()+2, title: "Help set the table", assignee: "Aurora", assigneeEmoji: "👧", due: "Today", points: 8, recurring: "Daily", category: "AI Suggested", completed: false, priority: "medium" },
+        { id: Date.now()+3, title: "Sweep the kitchen", assignee: "Jasmine", assigneeEmoji: "👧", due: "Today", points: 12, recurring: null, category: "AI Suggested", completed: false, priority: "medium" },
+        { id: Date.now()+4, title: "Organize the pantry", assignee: "Bailey", assigneeEmoji: "👧", due: "Today", points: 15, recurring: "Weekly", category: "AI Suggested", completed: false, priority: "high" },
+      ]);
+    }
+    setAiSuggesting(false);
+  };
+
+  const adoptSuggestion = (suggestion: Task) => {
+    setTasks(prev => [...prev, { ...suggestion, id: Date.now() }]);
+    setAiSuggestions(prev => prev.filter(s => s.title !== suggestion.title));
+  };
+
+  const dismissSuggestion = (title: string) => {
+    setAiSuggestions(prev => prev.filter(s => s.title !== title));
+  };
+
+  // ─── Computed ────────────────────────────────────────────
   const filtered = tasks.filter((t) => {
     const memberMatch = filterMember === "All" || t.assignee === filterMember;
     const completedMatch = showCompleted ? true : !t.completed;
@@ -167,6 +255,25 @@ export default function TasksPage() {
   const pending = filtered.filter((t) => !t.completed);
   const completed = filtered.filter((t) => t.completed);
   const completedTotal = tasks.filter((t) => t.completed).length;
+
+  // Dynamic leaderboard from earned points
+  const dynamicLeaderboard: LeaderboardEntry[] = useMemo(() => {
+    const entries = membersData
+      .filter((m: any) => m.role !== "pet")
+      .map((m: any) => ({
+        name: m.name,
+        emoji: m.emoji,
+        points: earnedPoints[m.name] || 0,
+        streak: 0,
+        rank: 0,
+      }))
+      .sort((a: any, b: any) => b.points - a.points);
+    // Fall back to static if no points earned yet
+    if (entries.every((e: any) => e.points === 0)) return staticLeaderboard;
+    return entries.map((e: any, i: number) => ({ ...e, rank: i + 1, streak: Math.floor(e.points / 10) }));
+  }, [earnedPoints, membersData]);
+
+  const topScorer = dynamicLeaderboard[0];
 
   return (
     <PageShell>
@@ -184,6 +291,44 @@ export default function TasksPage() {
           </button>
         }
       />
+
+      {/* PIN Entry Modal */}
+      {pinTaskId !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setPinTaskId(null)}>
+          <div className="bg-surface-0 rounded-2xl p-6 mx-4 w-full max-w-sm border border-surface-3 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="text-center mb-4">
+              <span className="text-4xl">🔐</span>
+              <h3 className="text-text-primary font-semibold mt-2">Enter Your PIN</h3>
+              <p className="text-text-secondary text-sm mt-1">
+                Complete "{tasks.find(t => t.id === pinTaskId)?.title}"
+              </p>
+            </div>
+            <input
+              type="password"
+              inputMode="numeric"
+              maxLength={4}
+              value={pinInput}
+              onChange={e => { setPinInput(e.target.value.replace(/[^0-9]/g, "")); setPinError(""); }}
+              onKeyDown={e => { if (e.key === "Enter") submitPin(); }}
+              placeholder="4-digit PIN"
+              className="w-full bg-surface-2 text-text-primary text-center text-2xl tracking-[0.5em] rounded-xl px-4 py-3 outline-none border-2 border-surface-3 focus:border-nori-500/50 placeholder:text-text-muted"
+              autoFocus
+            />
+            {pinError && <p className="text-rose-400 text-xs text-center mt-2">{pinError}</p>}
+            {pinSuccess && <p className="text-nori-400 text-xs text-center mt-2">{pinSuccess}</p>}
+            <div className="flex gap-2 mt-4">
+              <button onClick={submitPin} disabled={pinInput.length < 4}
+                className="flex-1 py-2.5 rounded-xl bg-nori-500 text-white font-semibold text-sm disabled:opacity-40 hover:bg-nori-400 transition-colors">
+                Submit
+              </button>
+              <button onClick={() => setPinTaskId(null)}
+                className="flex-1 py-2.5 rounded-xl bg-surface-2 text-text-secondary text-sm font-medium hover:text-text-primary transition-colors">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="px-4 space-y-4">
         {/* Tabs */}
@@ -229,96 +374,97 @@ export default function TasksPage() {
                 <h4 className="text-text-primary font-semibold text-sm">
                   {isAdding ? "Add Task" : "Edit Task"}
                 </h4>
-                <input
-                  type="text"
-                  placeholder="Task title"
-                  value={editForm.title}
+                <input type="text" placeholder="Task title" value={editForm.title}
                   onChange={e => updateForm("title", e.target.value)}
-                  className="w-full bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3 focus:border-nori-500/50 placeholder:text-text-muted"
-                  autoFocus
-                />
+                  className="w-full bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3 focus:border-nori-500/50 placeholder:text-text-muted" autoFocus />
                 <div className="grid grid-cols-2 gap-2">
-                  <select
-                    value={editForm.assignee}
-                    onChange={e => updateForm("assignee", e.target.value)}
-                    className="bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3"
-                  >
-                    {membersData.map(m => (
-                      <option key={m.name} value={m.name}>{m.emoji} {m.name}</option>
-                    ))}
+                  <select value={editForm.assignee} onChange={e => updateForm("assignee", e.target.value)}
+                    className="bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3">
+                    {membersData.map(m => <option key={m.name} value={m.name}>{m.emoji} {m.name}</option>)}
                   </select>
-                  <select
-                    value={editForm.due}
-                    onChange={e => updateForm("due", e.target.value)}
-                    className="bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3"
-                  >
+                  <select value={editForm.due} onChange={e => updateForm("due", e.target.value)}
+                    className="bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3">
                     {dueOptions.map(d => <option key={d} value={d}>{d}</option>)}
                   </select>
-                  <select
-                    value={editForm.priority}
-                    onChange={e => updateForm("priority", e.target.value)}
-                    className="bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3"
-                  >
+                  <select value={editForm.priority} onChange={e => updateForm("priority", e.target.value)}
+                    className="bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3">
                     <option value="high">🔴 High</option>
                     <option value="medium">🟡 Medium</option>
                     <option value="low">⚪ Low</option>
                   </select>
-                  <select
-                    value={editForm.category}
-                    onChange={e => updateForm("category", e.target.value)}
-                    className="bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3"
-                  >
+                  <select value={editForm.category} onChange={e => updateForm("category", e.target.value)}
+                    className="bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3">
                     {categories.map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
                 <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    placeholder="Points"
-                    value={editForm.points}
+                  <input type="number" placeholder="Points" value={editForm.points}
                     onChange={e => updateForm("points", parseInt(e.target.value) || 0)}
-                    className="w-20 bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Recurring (e.g. Daily)"
-                    value={editForm.recurring || ""}
+                    className="w-20 bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3" />
+                  <input type="text" placeholder="Recurring (e.g. Daily)" value={editForm.recurring || ""}
                     onChange={e => updateForm("recurring", e.target.value || null)}
-                    className="flex-1 bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3 placeholder:text-text-muted"
-                  />
+                    className="flex-1 bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3 placeholder:text-text-muted" />
                 </div>
                 <div className="flex gap-2 pt-1">
-                  <button
-                    onClick={saveTask}
-                    disabled={!editForm.title.trim()}
-                    className="flex-1 py-2 rounded-lg bg-nori-500 text-white text-sm font-medium disabled:opacity-40 hover:bg-nori-400 transition-colors"
-                  >
+                  <button onClick={saveTask} disabled={!editForm.title.trim()}
+                    className="flex-1 py-2 rounded-lg bg-nori-500 text-white text-sm font-medium disabled:opacity-40 hover:bg-nori-400 transition-colors">
                     {isAdding ? "Add Task" : "Save"}
                   </button>
-                  <button onClick={cancelEdit} className="flex-1 py-2 rounded-lg bg-surface-2 text-text-secondary text-sm font-medium hover:text-text-primary transition-colors">
-                    Cancel
-                  </button>
+                  <button onClick={cancelEdit} className="flex-1 py-2 rounded-lg bg-surface-2 text-text-secondary text-sm font-medium hover:text-text-primary transition-colors">Cancel</button>
                   {!isAdding && (
-                    <button
-                      onClick={() => deleteTask(editForm.id)}
-                      className="px-3 py-2 rounded-lg bg-rose-500/15 text-rose-400 text-sm font-medium hover:bg-rose-500/25 transition-colors"
-                    >
-                      🗑️
-                    </button>
+                    <button onClick={() => deleteTask(editForm.id)} className="px-3 py-2 rounded-lg bg-rose-500/15 text-rose-400 text-sm font-medium hover:bg-rose-500/25 transition-colors">🗑️</button>
                   )}
                 </div>
               </Card>
             )}
 
+            {/* AI Task Suggestions */}
+            <section>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-text-primary font-semibold text-sm">✨ Consuela Suggests</h3>
+                <button
+                  onClick={generateAiTasks}
+                  disabled={aiSuggesting}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-violet-500/15 text-violet-400 border border-violet-500/25 hover:bg-violet-500/25 transition-all disabled:opacity-50"
+                >
+                  {aiSuggesting ? "⏳ Thinking..." : "🤖 Generate Tasks"}
+                </button>
+              </div>
+              {aiSuggestions.length > 0 && (
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  {aiSuggestions.map(s => (
+                    <Card key={s.title} className="!p-3">
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-start gap-2">
+                          <span className="text-lg shrink-0">{s.assigneeEmoji}</span>
+                          <div className="min-w-0">
+                            <p className="text-text-primary text-xs font-medium leading-tight">{s.title}</p>
+                            <p className="text-text-muted text-[10px] mt-0.5">{s.assignee} · +{s.points}pts</p>
+                          </div>
+                        </div>
+                        <div className="flex gap-1">
+                          <button onClick={() => adoptSuggestion(s)}
+                            className="flex-1 py-1.5 rounded-lg bg-nori-500/15 text-nori-400 text-[10px] font-semibold hover:bg-nori-500/25 transition-colors">
+                            + Add
+                          </button>
+                          <button onClick={() => dismissSuggestion(s.title)}
+                            className="px-2 py-1.5 rounded-lg bg-surface-2 text-text-muted text-[10px] hover:text-text-secondary transition-colors">
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </section>
+
             {/* Pending tasks */}
             <section>
               <div className="flex items-center justify-between mb-3">
                 <h3 className="text-text-primary font-semibold text-sm">Pending ({pending.length})</h3>
-                <button onClick={startAdd} className="text-nori-400 text-xs hover:text-nori-300">
-                  + Assign task
-                </button>
+                <button onClick={startAdd} className="text-nori-400 text-xs hover:text-nori-300">+ Assign task</button>
               </div>
-
               {pending.length === 0 ? (
                 <Card className="!p-6 flex flex-col items-center gap-2">
                   <span className="text-3xl">✅</span>
@@ -327,17 +473,14 @@ export default function TasksPage() {
               ) : (
                 <div className="space-y-2">
                   {pending.map((task) => (
-                    <div key={task.id} className="flex items-center gap-1">
-                      <div className="flex-1">
-                        <TaskRow
-                          task={task}
-                          onToggle={toggleTask}
-                          onEdit={startEdit}
-                          memberColors={memberColors}
-                          priorityColors={priorityColors}
-                        />
-                      </div>
-                    </div>
+                    <TaskRow
+                      key={task.id}
+                      task={task}
+                      onComplete={openPinEntry}
+                      onEdit={startEdit}
+                      memberColors={memberColors}
+                      priorityColors={priorityColors}
+                    />
                   ))}
                 </div>
               )}
@@ -346,20 +489,13 @@ export default function TasksPage() {
             {/* Completed */}
             {completedTotal > 0 && (
               <section>
-                <button
-                  onClick={() => setShowCompleted(!showCompleted)}
-                  className="w-full flex items-center justify-between mb-3 group"
-                >
+                <button onClick={() => setShowCompleted(!showCompleted)}
+                  className="w-full flex items-center justify-between mb-3 group">
                   <h3 className="text-text-secondary font-semibold text-sm group-hover:text-text-primary transition-colors">
                     Completed ({completedTotal})
                   </h3>
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={2}
-                    className={`w-4 h-4 text-text-muted transition-transform ${showCompleted ? "rotate-180" : ""}`}
-                  >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
+                    className={`w-4 h-4 text-text-muted transition-transform ${showCompleted ? "rotate-180" : ""}`}>
                     <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                 </button>
@@ -369,7 +505,7 @@ export default function TasksPage() {
                       <TaskRow
                         key={task.id}
                         task={task}
-                        onToggle={toggleTask}
+                        onComplete={openPinEntry}
                         onEdit={startEdit}
                         memberColors={memberColors}
                         priorityColors={priorityColors}
@@ -384,22 +520,17 @@ export default function TasksPage() {
 
         {activeTab === "leaderboard" && (
           <div className="space-y-4 pb-2">
-            <div
-              className="rounded-2xl p-4 text-center"
-              style={{
-                background: "linear-gradient(135deg, rgba(59,130,246,0.12) 0%, rgba(124,111,247,0.12) 100%)",
-                border: "1px solid rgba(59,130,246,0.15)",
-              }}
-            >
+            <div className="rounded-2xl p-4 text-center"
+              style={{ background: "linear-gradient(135deg, rgba(59,130,246,0.12) 0%, rgba(124,111,247,0.12) 100%)", border: "1px solid rgba(59,130,246,0.15)" }}>
               <p className="text-text-secondary text-xs mb-1">This week&apos;s champion</p>
-              <div className="mb-2"><AnimatedEmoji emoji={leaderboard[0].emoji} size="lg" /></div>
-              <p className="text-text-primary font-bold text-lg">{leaderboard[0].name}</p>
+              <div className="mb-2"><AnimatedEmoji emoji={topScorer.emoji} size="lg" /></div>
+              <p className="text-text-primary font-bold text-lg">{topScorer.name}</p>
               <p className="text-nori-400 font-semibold text-sm mt-1">
-                {leaderboard[0].points} pts · {leaderboard[0].streak} day streak 🔥
+                {topScorer.points} pts · {topScorer.streak} day streak 🔥
               </p>
             </div>
             <div className="space-y-2">
-              {leaderboard.map((entry, i) => (
+              {dynamicLeaderboard.map((entry, i) => (
                 <Card key={entry.name} className="!p-3">
                   <div className="flex items-center gap-3">
                     <div className={`w-8 h-8 rounded-xl flex items-center justify-center text-sm font-bold shrink-0 ${
@@ -421,7 +552,8 @@ export default function TasksPage() {
                     </div>
                   </div>
                   <div className="mt-2.5 w-full h-1.5 rounded-full bg-surface-3 overflow-hidden">
-                    <div className="h-full rounded-full bg-nori-500 transition-all" style={{ width: `${(entry.points / 200) * 100}%` }} />
+                    <div className="h-full rounded-full bg-nori-500 transition-all"
+                      style={{ width: `${Math.min((entry.points / (topScorer.points || 1)) * 100, 100)}%` }} />
                   </div>
                 </Card>
               ))}
@@ -430,19 +562,22 @@ export default function TasksPage() {
               <h3 className="text-text-primary font-semibold text-sm mb-3">Rewards</h3>
               <div className="grid grid-cols-2 gap-2">
                 {[
-                  { name: "Movie pick", emoji: "🎬", cost: 50, unlocked: true },
-                  { name: "Skip 1 chore", emoji: "🎟️", cost: 75, unlocked: true },
-                  { name: "Extra screen time", emoji: "📱", cost: 100, unlocked: false },
-                  { name: "Family outing", emoji: "🎡", cost: 200, unlocked: false },
-                ].map((reward) => (
-                  <Card key={reward.name} className={`!p-3 ${!reward.unlocked ? "opacity-50" : ""}`}>
-                    <div className="flex flex-col items-center gap-1.5 text-center">
-                      <AnimatedEmoji emoji={reward.emoji} size="sm" />
-                      <p className="text-text-primary text-xs font-medium leading-tight">{reward.name}</p>
-                      <Badge variant={reward.unlocked ? "amber" : "gray"}>{reward.cost} pts</Badge>
-                    </div>
-                  </Card>
-                ))}
+                  { name: "Movie pick", emoji: "🎬", cost: 50 },
+                  { name: "Skip 1 chore", emoji: "🎟️", cost: 75 },
+                  { name: "Extra screen time", emoji: "📱", cost: 100 },
+                  { name: "Family outing", emoji: "🎡", cost: 200 },
+                ].map((reward) => {
+                  const unlocked = (earnedPoints[topScorer.name] || 0) >= reward.cost;
+                  return (
+                    <Card key={reward.name} className={`!p-3 ${!unlocked ? "opacity-50" : ""}`}>
+                      <div className="flex flex-col items-center gap-1.5 text-center">
+                        <AnimatedEmoji emoji={reward.emoji} size="sm" />
+                        <p className="text-text-primary text-xs font-medium leading-tight">{reward.name}</p>
+                        <Badge variant={unlocked ? "amber" : "gray"}>{reward.cost} pts</Badge>
+                      </div>
+                    </Card>
+                  );
+                })}
               </div>
             </section>
           </div>
@@ -454,17 +589,17 @@ export default function TasksPage() {
 
 interface TaskRowProps {
   task: Task;
-  onToggle: (id: number) => void;
+  onComplete: (id: number) => void;
   onEdit: (task: Task) => void;
   memberColors: Record<string, string>;
   priorityColors: Record<string, string>;
 }
 
-function TaskRow({ task, onToggle, onEdit, memberColors, priorityColors }: TaskRowProps) {
+function TaskRow({ task, onComplete, onEdit, memberColors, priorityColors }: TaskRowProps) {
   return (
     <div className="flex items-center gap-1">
       <button
-        onClick={() => onToggle(task.id)}
+        onClick={() => onComplete(task.id)}
         className={`flex-1 flex items-center gap-3 px-3 py-3 rounded-xl transition-all active:scale-[0.98] text-left ${
           task.completed ? "opacity-50" : "glass hover:border-surface-4"
         }`}
@@ -491,6 +626,7 @@ function TaskRow({ task, onToggle, onEdit, memberColors, priorityColors }: TaskR
           <p className="text-xs text-text-muted mt-0.5">
             {task.due}
             {task.recurring && ` · 🔄 ${task.recurring}`}
+            {task.completedBy && ` · done by ${task.completedBy}`}
           </p>
         </div>
 
