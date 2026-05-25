@@ -17,7 +17,7 @@ interface Message {
 }
 
 interface ActionCard {
-  type: "event" | "meal" | "task" | "grocery";
+  type: "event" | "meal" | "task" | "grocery" | "recipe" | "reward";
   title: string;
   detail: string;
   emoji: string;
@@ -61,6 +61,8 @@ const actionColors: Record<string, string> = {
   meal: "border-amber-500/25 bg-amber-500/8",
   task: "border-cyan-500/25 bg-cyan-500/8",
   grocery: "border-nori-500/25 bg-nori-500/8",
+  recipe: "border-rose-500/25 bg-rose-500/8",
+  reward: "border-yellow-500/25 bg-yellow-500/8",
 };
 
 function renderContent(text: string) {
@@ -91,11 +93,15 @@ function executeAction(action: ActionCard): { success: boolean; message: string 
           const raw = dayMatch[1].toLowerCase();
           day = dayMap[raw] || raw.charAt(0).toUpperCase() + raw.slice(1, 3);
         }
+        // Try to extract meal type
+        const typeMatch = action.detail?.match(/\b(breakfast|lunch|dinner|snack)\b/i);
+        const mealType = typeMatch ? typeMatch[1].toLowerCase() as any : "dinner";
         const newMeal = {
           id: Date.now(),
           name: action.title,
           emoji: action.emoji || "🍽️",
           time: day,
+          mealType,
           prepTime: "30 min",
           tags: ["AI Suggested"],
           ingredients: [] as string[],
@@ -154,6 +160,44 @@ function executeAction(action: ActionCard): { success: boolean; message: string 
         });
         if (typeof window !== "undefined") localStorage.setItem(EVENTS_KEY, JSON.stringify(stored));
         return { success: true, message: `Added event "${action.title}"` };
+      }
+      case "recipe": {
+        const RECIPES_KEY = "consuela-recipes";
+        const newRecipe = {
+          id: Date.now(),
+          name: action.title,
+          emoji: action.emoji || "📖",
+          prepTime: action.detail?.match(/(\d+\s*min)/)?.[1] || "30 min",
+          tags: ["AI Created"],
+          ingredients: action.detail?.split("·").map((s: string) => s.trim()).filter(Boolean) || [],
+          instructions: action.detail || "",
+          servings: 4,
+          calories: 500,
+          createdAt: new Date().toISOString(),
+        };
+        if (typeof window !== "undefined") {
+          try {
+            const stored = localStorage.getItem(RECIPES_KEY);
+            const recipes = stored ? JSON.parse(stored) : [];
+            recipes.push(newRecipe);
+            localStorage.setItem(RECIPES_KEY, JSON.stringify(recipes));
+          } catch {}
+        }
+        return { success: true, message: `Created recipe "${action.title}"` };
+      }
+      case "reward": {
+        const REWARDS_KEY = "consuela-rewards";
+        const points = parseInt(action.detail?.match(/(\d+)/)?.[1] || "50");
+        const newReward = { id: Date.now(), name: action.title, emoji: action.emoji || "🎁", cost: points };
+        if (typeof window !== "undefined") {
+          try {
+            const stored = localStorage.getItem(REWARDS_KEY);
+            const rewards = stored ? JSON.parse(stored) : [];
+            rewards.push(newReward);
+            localStorage.setItem(REWARDS_KEY, JSON.stringify(rewards));
+          } catch {}
+        }
+        return { success: true, message: `Added reward "${action.title}" (${points}pts)` };
       }
       default:
         return { success: false, message: `Unknown action type` };
