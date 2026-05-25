@@ -467,8 +467,8 @@ export default function SettingsPage() {
                   <div className="flex items-center gap-3 flex-1">
                     <span className="text-xl">⚙️</span>
                     <div>
-                      <p className="text-text-primary font-semibold">System (Default)</p>
-                      <p className="text-text-secondary text-xs">Follows your device settings</p>
+                      <p className="text-text-primary font-semibold">🌅 Smart Auto (Default)</p>
+                      <p className="text-text-secondary text-xs">Light by day, dark by night — based on actual daylight</p>
                     </div>
                   </div>
                   <div className="shrink-0 w-5 h-5 rounded-full border-2 border-[var(--color-surface-4)] flex items-center justify-center">

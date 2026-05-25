@@ -61,15 +61,36 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
     if (!mounted) return;
 
     const updateHtmlAttributes = () => {
-      // Determine if we should be in dark mode based on theme mode and system preference
+      // Smart auto-detection: use time of day + season for dark/light
       let isDark = false;
       if (theme.mode === 'dark') {
         isDark = true;
       } else if (theme.mode === 'light') {
         isDark = false;
       } else if (theme.mode === 'system') {
-        // Check system preference
-        isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        // Smart auto: check actual daylight based on current hour + month
+        const now = new Date();
+        const hour = now.getHours();
+        const month = now.getMonth(); // 0-11
+
+        // Approximate sunrise/sunset by month for northern US (Holland, MI ~42.8°N)
+        // Winter (Nov-Feb): dark 5pm-7am, light 7am-5pm
+        // Spring/Fall (Mar-Apr, Sep-Oct): dark 7pm-6:30am, light 6:30am-7pm
+        // Summer (May-Aug): dark 9pm-6am, light 6am-9pm
+        let sunsetHour = 19; // default 7pm
+        let sunriseHour = 7; // default 7am
+
+        if (month >= 4 && month <= 7) { // May-Aug
+          sunsetHour = 21; sunriseHour = 6;
+        } else if (month >= 2 && month <= 3) { // Mar-Apr
+          sunsetHour = 19; sunriseHour = 7;
+        } else if (month >= 8 && month <= 9) { // Sep-Oct
+          sunsetHour = 19; sunriseHour = 7;
+        } else { // Nov-Feb
+          sunsetHour = 17; sunriseHour = 7;
+        }
+
+        isDark = hour >= sunsetHour || hour < sunriseHour;
       }
 
       // Set data-theme attribute on html element
@@ -86,20 +107,25 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
         document.documentElement.removeAttribute('data-contrast');
       }
 
-      // Update CSS variables for accent selected and text on accent
+      // Update CSS variables
       document.documentElement.style.setProperty('--color-accent-selected', `var(--color-accent-${theme.accentColor})`);
       document.documentElement.style.setProperty('--color-text-on-accent', '#ffffff');
     };
 
     updateHtmlAttributes();
 
-    // Create a media listener for system mode changes
-    if (theme.mode === 'system') {
-      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-      const handleChange = () => updateHtmlAttributes();
-      mediaQuery.addEventListener('change', handleChange);
-      return () => mediaQuery.removeEventListener('change', handleChange);
-    }
+    // Re-check every 15 minutes for day/night transition
+    const interval = setInterval(updateHtmlAttributes, 15 * 60 * 1000);
+
+    // Also listen for system preference changes
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = () => updateHtmlAttributes();
+    mediaQuery.addEventListener('change', handleChange);
+
+    return () => {
+      clearInterval(interval);
+      mediaQuery.removeEventListener('change', handleChange);
+    };
   }, [theme.mode, theme.accentColor, theme.contrastBoost, mounted]);
 
   // Function to toggle between light and dark (ignores system mode for toggle)
