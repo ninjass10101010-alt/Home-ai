@@ -3,25 +3,14 @@
 import Link from "next/link";
 import { useState, useEffect } from "react";
 import PageShell from "@/components/ui/PageShell";
-import Card from "@/components/ui/Card";
-import Badge from "@/components/ui/Badge";
 import Avatar from "@/components/ui/Avatar";
-import AnimatedEmoji from "@/components/ui/AnimatedEmoji";
 import WeatherWidget from "@/components/ui/WeatherWidget";
 import { Icon3D } from "@/components/3d";
 import EmergencyButton from "@/components/ui/EmergencyButton";
 import ScheduleDisplay from "@/components/ui/ScheduleDisplay";
-import { useTheme } from "@/hooks/useTheme";
 import { db } from "@/db";
 import CurrentMealWidget from "@/components/meals/CurrentMealWidget";
 
-const mealPlan = [
-  { day: "Mon", meal: "Pasta Primavera", emoji: "🍝" },
-  { day: "Tue", meal: "Taco Night", emoji: "🌮" },
-  { day: "Wed", meal: "Grilled Chicken", emoji: "🍗" },
-  { day: "Thu", meal: "Stir Fry", emoji: "🥢" },
-  { day: "Fri", meal: "Pizza Night", emoji: "🍕" },
-];
 
 const quickPrompts = [
   "What's for dinner?",
@@ -58,27 +47,7 @@ export default function HomePage() {
   const dayOfWeek = today.toLocaleDateString("en-US", { weekday: "short" });
   const dayMonth = today.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
-  // Meal highlight by actual day
-  const dayToMealIndex: Record<string, number> = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4 };
-  const todayShort = today.toLocaleDateString("en-US", { weekday: "short" });
-  const todayMealIndex = dayToMealIndex[todayShort] ?? 0;
 
-  // Event color → border color mapping (using CSS variables for theme compliance)
-  const eventBorderColor: Record<string, string> = {
-    green: "!border-l-[var(--color-accent-mint)]",
-    violet: "!border-l-[var(--color-accent-violet)]",
-    amber: "!border-l-[var(--color-accent-amber)]",
-    cyan: "!border-l-[var(--color-accent-cyan)]",
-    rose: "!border-l-[var(--color-accent-rose)]",
-    blue: "!border-l-[var(--color-accent-nori)]",
-  };
-
-  // Task point → accent mapping (theme-aware)
-  const taskPointBorder = (points: number): string => {
-    if (points > 15) return "border-l-2 border-l-[var(--color-accent-rose)]/60 bg-[var(--color-accent-rose)]/5";
-    if (points > 10) return "border-l-2 border-l-[var(--color-accent-amber)]/60 bg-[var(--color-accent-amber)]/5";
-    return "border-l-2 border-l-[var(--color-surface-4)]";
-  };
 
   // Live clock
   const [now, setNow] = useState(new Date());
@@ -221,36 +190,51 @@ export default function HomePage() {
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-text-primary font-semibold text-base">Today</h2>
             <Link href="/calendar" className="text-[var(--color-accent-selected)] text-xs font-medium hover:opacity-80">
-              View all →
+              {todayEvents.length} events →
             </Link>
           </div>
-          <div className="space-y-2">
-            {todayEvents.map((ev) => (
-              <Card
-                key={ev.id}
-                className={`!p-3 isometric-card ${eventBorderColor[ev.color] ?? "!border-l-surface-4"}`}
-              >
-                <div className="flex items-center gap-3">
-                   <div
-                     className={`w-10 h-10 rounded-xl flex items-center justify-center text-lg shrink-0 ${
-                       ev.color === "green" ? "bg-[linear-gradient(135deg,var(--color-accent-mint)/20,var(--color-accent-mint)/10)]" :
-                       ev.color === "violet" ? "bg-[linear-gradient(135deg,var(--color-accent-violet)/20,var(--color-accent-violet)/10)]" :
-                       ev.color === "amber" ? "bg-[linear-gradient(135deg,var(--color-accent-amber)/20,var(--color-accent-amber)/10)]" :
-                       ev.color === "cyan" ? "bg-[linear-gradient(135deg,var(--color-accent-cyan)/20,var(--color-accent-cyan)/10)]" :
-                       ev.color === "rose" ? "bg-[linear-gradient(135deg,var(--color-accent-rose)/20,var(--color-accent-rose)/10)]" :
-                       "bg-[linear-gradient(135deg,var(--color-accent-nori)/20,var(--color-accent-nori)/10)]"
-                     }`}
-                   >
-                    {ev.icon}
-                  </div>
+          <div className="space-y-1.5">
+            {todayEvents.map((ev, idx) => {
+              const colorBgMap: Record<string, string> = {
+                green:  "bg-[var(--color-accent-mint)]/10",
+                violet: "bg-[var(--color-accent-violet)]/10",
+                amber:  "bg-[var(--color-accent-amber)]/10",
+                cyan:   "bg-[var(--color-accent-cyan)]/10",
+                rose:   "bg-[var(--color-accent-rose)]/10",
+                blue:   "bg-[var(--color-accent-nori)]/10",
+              };
+              const colorBarMap: Record<string, string> = {
+                green:  "bg-[var(--color-accent-mint)]",
+                violet: "bg-[var(--color-accent-violet)]",
+                amber:  "bg-[var(--color-accent-amber)]",
+                cyan:   "bg-[var(--color-accent-cyan)]",
+                rose:   "bg-[var(--color-accent-rose)]",
+                blue:   "bg-[var(--color-accent-nori)]",
+              };
+              return (
+                <div
+                  key={ev.id}
+                  style={{ animationDelay: `${idx * 0.06}s` }}
+                  className={`flex items-center gap-3 px-3 py-2.5 rounded-xl animate-in transition-all duration-200 hover:bg-white/[0.06] ${
+                    colorBgMap[ev.color] ?? "bg-[var(--color-accent-nori)]/10"
+                  }`}
+                >
+                  {/* Accent bar */}
+                  <div className={`w-1 h-8 rounded-full shrink-0 ${colorBarMap[ev.color] ?? "bg-[var(--color-accent-nori)]"}`} />
+                  {/* Icon */}
+                  <span className="text-lg shrink-0">{ev.icon}</span>
+                  {/* Content */}
                   <div className="flex-1 min-w-0">
-                    <p className="text-text-primary text-sm font-medium truncate">{ev.title}</p>
-                    <p className="text-text-muted text-xs mt-0.5">{ev.time}</p>
+                    <p className="text-sm text-text-primary font-medium truncate">{ev.title}</p>
+                    <p className="text-xs text-text-muted tabular-nums">{ev.time}</p>
                   </div>
-                  <Avatar name={ev.member} color={ev.color} size="sm" emoji={ev.emoji} variant="emoji" />
+                  {/* Member badge */}
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-[var(--color-surface-3)] text-text-secondary shrink-0">
+                    {ev.member.split(" ")[0]}
+                  </span>
                 </div>
-              </Card>
-            ))}
+              );
+            })}
           </div>
         </section>
 
@@ -285,54 +269,66 @@ export default function HomePage() {
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-text-primary font-semibold text-base">Tasks</h2>
             <Link href="/tasks" className="text-[var(--color-accent-selected)] text-xs font-medium hover:opacity-80">
-              View all →
+              {pendingTasks.length} pending →
             </Link>
           </div>
-          <Card className="isometric-card">
-            <div className="space-y-3">
-              {pendingTasks.map((task) => {
-                const pts = task.points;
-                const isHigh = pts > 15;
-                return (
-                  <div key={task.id} className={`flex items-center gap-3 ${taskPointBorder(pts)} rounded-lg pl-3 pr-2 py-2 -mx-3`}>
-                    <div
-                      className={`w-5 h-5 rounded-full border-2 shrink-0 flex items-center justify-center transition-all ${
-                        task.done
-                          ? "border-[var(--color-accent-selected)] bg-[var(--color-accent-selected)] ring-2 ring-[var(--color-accent-selected)]/30"
-                          : "border-[var(--color-surface-4)]"
-                      }`}
-                    >
-                      {task.done && (
-                        <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={3} className="w-3 h-3">
-                          <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p
-                        className={`text-sm truncate ${
-                          task.done ? "line-through text-text-muted" : "text-text-primary"
-                        }`}
-                      >
-                        {task.title}
-                      </p>
-                      <p className="text-xs text-text-muted">
-                        {task.assigned} · {task.due}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {isHigh && (
-                        <span className="text-[9px] text-[var(--color-accent-rose)] font-bold uppercase tracking-wide">high</span>
-                      )}
-                      <span className={`text-xs font-medium shrink-0 ${isHigh ? "text-[var(--color-accent-rose)]" : "text-[var(--color-accent-amber)]"}`}>
-                        +{task.points}pts
-                      </span>
-                    </div>
+          <div className="space-y-1.5">
+            {pendingTasks.map((task, idx) => {
+              const pts = task.points;
+              const isHigh = pts > 15;
+              const isMed = pts > 10 && !isHigh;
+              const accentBg = isHigh
+                ? "bg-[var(--color-accent-rose)]/10"
+                : isMed
+                ? "bg-[var(--color-accent-amber)]/10"
+                : "bg-[var(--color-accent-mint)]/10";
+              const accentBar = isHigh
+                ? "bg-[var(--color-accent-rose)]"
+                : isMed
+                ? "bg-[var(--color-accent-amber)]"
+                : "bg-[var(--color-accent-mint)]";
+              const ptColor = isHigh
+                ? "text-[var(--color-accent-rose)]"
+                : "text-[var(--color-accent-amber)]";
+              return (
+                <div
+                  key={task.id}
+                  style={{ animationDelay: `${idx * 0.06}s` }}
+                  className={`flex items-center gap-3 px-3 py-2.5 rounded-xl animate-in transition-all duration-200 hover:bg-white/[0.06] ${accentBg}`}
+                >
+                  {/* Priority bar */}
+                  <div className={`w-1 h-8 rounded-full shrink-0 ${accentBar}`} />
+                  {/* Checkbox */}
+                  <div
+                    className={`w-5 h-5 rounded-full border-2 shrink-0 flex items-center justify-center transition-all ${
+                      task.done
+                        ? "border-[var(--color-accent-selected)] bg-[var(--color-accent-selected)]"
+                        : "border-[var(--color-surface-4)]"
+                    }`}
+                  >
+                    {task.done && (
+                      <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={3} className="w-3 h-3">
+                        <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    )}
                   </div>
-                );
-              })}
-            </div>
-          </Card>
+                  {/* Content */}
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-sm truncate ${task.done ? "line-through text-text-muted" : "text-text-primary"}`}>
+                      {task.title}
+                    </p>
+                    <p className="text-xs text-text-muted">
+                      {task.assigned} · {task.due}
+                    </p>
+                  </div>
+                  {/* Points badge */}
+                  <span className={`text-xs font-semibold shrink-0 px-2 py-0.5 rounded-full bg-[var(--color-surface-3)] ${ptColor}`}>
+                    +{pts}pts
+                  </span>
+                </div>
+              );
+            })}
+          </div>
         </section>
 
       </div>
