@@ -42,6 +42,7 @@ export default function SettingsPage() {
   const [editingMemberIdx, setEditingMemberIdx] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
   const [editEmoji, setEditEmoji] = useState("");
+  const [editAge, setEditAge] = useState("");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
   // ─── Emergency Contacts editing state ────────────────────────────────────
@@ -89,13 +90,14 @@ export default function SettingsPage() {
     setEditingMemberIdx(idx);
     setEditName(member.name);
     setEditEmoji(member.emoji);
+    setEditAge(member.age || "");
   };
 
   const saveMember = (idx: number) => {
     const member = membersList[idx];
     if (!member || !editName.trim()) return;
-    db.updateMember(member.name, { name: editName.trim(), emoji: editEmoji });
-    setMembersList(prev => prev.map((m, i) => i === idx ? { ...m, name: editName.trim(), emoji: editEmoji } : m));
+    db.updateMember(member.name, { name: editName.trim(), emoji: editEmoji, age: parseInt(editAge) || 0 });
+    setMembersList(prev => prev.map((m, i) => i === idx ? { ...m, name: editName.trim(), emoji: editEmoji, age: editAge } : m));
     setEditingMemberIdx(null);
   };
 
@@ -465,8 +467,8 @@ export default function SettingsPage() {
                   <div className="flex items-center gap-3 flex-1">
                     <span className="text-xl">⚙️</span>
                     <div>
-                      <p className="text-text-primary font-semibold">System (Default)</p>
-                      <p className="text-text-secondary text-xs">Follows your device settings</p>
+                      <p className="text-text-primary font-semibold">🌅 Smart Auto (Default)</p>
+                      <p className="text-text-secondary text-xs">Light by day, dark by night — based on actual daylight</p>
                     </div>
                   </div>
                   <div className="shrink-0 w-5 h-5 rounded-full border-2 border-[var(--color-surface-4)] flex items-center justify-center">
@@ -603,6 +605,18 @@ export default function SettingsPage() {
                         placeholder="Paste emoji or GIF URL..."
                         className="w-full bg-[var(--color-surface-2)] text-text-primary text-sm rounded-xl px-3 py-2 outline-none border border-[var(--color-surface-3)] focus:border-[var(--color-accent-selected)] placeholder:text-text-muted"
                       />
+                      <div className="flex items-center gap-2">
+                        <input
+                          value={editAge}
+                          onChange={e => setEditAge(e.target.value.replace(/[^0-9]/g, ""))}
+                          placeholder="Age"
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={2}
+                          className="w-20 bg-[var(--color-surface-2)] text-text-primary text-sm rounded-xl px-3 py-2 outline-none border border-[var(--color-surface-3)] focus:border-[var(--color-accent-selected)] placeholder:text-text-muted"
+                        />
+                        <span className="text-text-muted text-xs">years old</span>
+                      </div>
                       {showEmojiPicker && (
                         <div className="flex flex-wrap gap-1 p-2 rounded-xl bg-[var(--color-surface-2)]">
                           {emojiOptions.map(e => (

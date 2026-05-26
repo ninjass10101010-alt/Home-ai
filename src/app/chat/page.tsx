@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import BottomNav from "@/components/ui/BottomNav";
 import Avatar from "@/components/ui/Avatar";
 import Badge from "@/components/ui/Badge";
+import { db } from "@/db";
 
 interface Message {
   id: number;
@@ -11,159 +12,57 @@ interface Message {
   content: string;
   timestamp: string;
   actions?: ActionCard[];
+  speaker?: string;
+  speakerEmoji?: string;
 }
 
 interface ActionCard {
-  type: "event" | "meal" | "task" | "grocery";
+  type: "event" | "meal" | "task" | "grocery" | "recipe" | "reward";
   title: string;
   detail: string;
   emoji: string;
   confirmed?: boolean;
 }
 
-const initialMessages: Message[] = [
-  {
-    id: 1,
-    role: "assistant",
-    content:
-      "Hey there! 👋 I'm Consuela, your family assistant. I can help you manage your calendar, plan meals, organize tasks, and build grocery lists.\n\nJust tell me what you need!",
-    timestamp: "Now",
-  },
-];
+const CHAT_STORAGE_KEY = "consuela-chat-messages";
+const SPEAKER_STORAGE_KEY = "consuela-chat-speaker";
+
+function loadChatHistory(): Message[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const d = localStorage.getItem(CHAT_STORAGE_KEY);
+    return d ? JSON.parse(d) : [];
+  } catch { return []; }
+}
+
+function saveChatHistory(msgs: Message[]) {
+  if (typeof window === "undefined") return;
+  try { localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(msgs)); } catch {}
+}
+
+const initialGreeting: Message = {
+  id: 1,
+  role: "assistant",
+  content: "Hey there! 👋 I'm Consuela, your family assistant. I can help you manage your calendar, plan meals, organize tasks, and build grocery lists.\n\nJust tell me what you need!",
+  timestamp: "Now",
+};
 
 const suggestedPrompts = [
   { label: "📅 Add event", prompt: "Add soccer practice tomorrow at 4pm for Caspian" },
   { label: "🍽️ Plan meals", prompt: "Plan dinners for this week" },
-  { label: "✅ Assign chore", prompt: "Assign trash duty to Caspian every Thursday" },
+  { label: "✅ Assign chore", prompt: "Assign trash duty to Caspian every Thursday with 10 points" },
   { label: "🛒 Grocery list", prompt: "Generate grocery list for this week's meals" },
   { label: "📊 Family update", prompt: "What does the family have going on this week?" },
   { label: "🔔 Reminder", prompt: "Remind Dad about car service on Friday at 10am" },
 ];
-
-const mockResponses: Record<string, Message> = {
-  soccer: {
-    id: 0,
-    role: "assistant",
-    content: "Done! I've added **Soccer Practice** to Caspian's calendar for tomorrow at 4:00 PM. I'll send Caspian a reminder an hour before. 📅",
-    timestamp: "Just now",
-    actions: [
-      {
-        type: "event",
-        title: "Soccer Practice",
-        detail: "Caspian · Tomorrow · 4:00 PM",
-        emoji: "⚽",
-        confirmed: true,
-      },
-    ],
-  },
-  meal: {
-    id: 0,
-    role: "assistant",
-    content:
-      "Here's a meal plan for this week based on your family's preferences and what's in your pantry:\n\n**Mon** — Pasta Primavera 🍝\n**Tue** — Taco Night 🌮\n**Wed** — Grilled Chicken & Veggies 🍗\n**Thu** — Shrimp Stir Fry 🥢\n**Fri** — Homemade Pizza 🍕\n**Sat** — BBQ Night 🍖\n**Sun** — Slow Cooker Chili 🫕\n\nShould I generate the grocery list for these meals?",
-    timestamp: "Just now",
-    actions: [
-      {
-        type: "meal",
-        title: "7-Day Meal Plan Created",
-        detail: "Tap 'Meals' to view and edit",
-        emoji: "🍽️",
-        confirmed: true,
-      },
-    ],
-  },
-  chore: {
-    id: 0,
-    role: "assistant",
-    content:
-      "Got it! I've set up a **recurring chore** for Caspian: take out the trash every Thursday evening. He'll earn **10 points** per completion. 💪\n\nWant me to set a reminder for him at a specific time?",
-    timestamp: "Just now",
-    actions: [
-      {
-        type: "task",
-        title: "Take Out Trash",
-        detail: "Caspian · Every Thursday · 10pts",
-        emoji: "🗑️",
-        confirmed: true,
-      },
-    ],
-  },
-  grocery: {
-    id: 0,
-    role: "assistant",
-    content:
-      "Based on this week's meal plan, here's your grocery list:\n\n🥩 Chicken breast · Shrimp · Ground beef\n🥦 Broccoli · Bell peppers · Zucchini\n🧀 Mozzarella · Parmesan\n🍅 Crushed tomatoes · Pasta sauce\n🌮 Taco shells · Salsa · Sour cream\n\nAdded **14 items** to your grocery list. Want me to organize by store section?",
-    timestamp: "Just now",
-    actions: [
-      {
-        type: "grocery",
-        title: "Grocery List Updated",
-        detail: "14 items added · Tap to view",
-        emoji: "🛒",
-        confirmed: true,
-      },
-    ],
-  },
-  week: {
-    id: 0,
-    role: "assistant",
-    content:
-      "Here's the family's week at a glance:\n\n**Monday** — Caspian: Soccer 4pm\n**Tuesday** — Emily: Piano 3pm, Taco Night 🌮\n**Wednesday** — Family: Movie Night\n**Thursday** — Caspian: Trash duty, Dad: Car service\n**Friday** — Emily: Dentist 2pm, Pizza Night 🍕\n**Saturday** — Family: Park picnic (tentative)\n\nYou have **3 pending tasks** and the grocery list needs a top-up. Need me to do anything?",
-    timestamp: "Just now",
-  },
-  reminder: {
-    id: 0,
-    role: "assistant",
-    content:
-      "Done! I've added a reminder for **Dad**: Car service on Friday at 10:00 AM. He'll also get a notification Thursday evening as a heads-up. 🔔",
-    timestamp: "Just now",
-    actions: [
-      {
-        type: "event",
-        title: "Car Service",
-        detail: "Dad · Friday · 10:00 AM",
-        emoji: "🚗",
-        confirmed: true,
-      },
-    ],
-  },
-  default: {
-    id: 0,
-    role: "assistant",
-    content:
-      "I understood that! Let me take care of it for you. Is there anything else you'd like me to help with — events, meals, tasks, or grocery items?",
-    timestamp: "Just now",
-  },
-};
-
-function getResponse(input: string): Message {
-  const lower = input.toLowerCase();
-  if (lower.includes("soccer") || lower.includes("event") || lower.includes("add")) {
-    return { ...mockResponses.soccer, id: Date.now() };
-  }
-  if (lower.includes("meal") || lower.includes("dinner") || lower.includes("plan")) {
-    return { ...mockResponses.meal, id: Date.now() };
-  }
-  if (lower.includes("trash") || lower.includes("chore") || lower.includes("assign")) {
-    return { ...mockResponses.chore, id: Date.now() };
-  }
-  if (lower.includes("grocery") || lower.includes("shop") || lower.includes("list")) {
-    return { ...mockResponses.grocery, id: Date.now() };
-  }
-  if (lower.includes("week") || lower.includes("going on") || lower.includes("update")) {
-    return { ...mockResponses.week, id: Date.now() };
-  }
-  if (lower.includes("remind") || lower.includes("reminder")) {
-    return { ...mockResponses.reminder, id: Date.now() };
-  }
-  return { ...mockResponses.default, id: Date.now() };
-}
 
 const actionColors: Record<string, string> = {
   event: "border-violet-500/25 bg-violet-500/8",
   meal: "border-amber-500/25 bg-amber-500/8",
   task: "border-cyan-500/25 bg-cyan-500/8",
   grocery: "border-nori-500/25 bg-nori-500/8",
+  recipe: "border-rose-500/25 bg-rose-500/8",
+  reward: "border-yellow-500/25 bg-yellow-500/8",
 };
 
 function renderContent(text: string) {
@@ -178,17 +77,181 @@ function renderContent(text: string) {
   });
 }
 
+function executeAction(action: ActionCard): { success: boolean; message: string } {
+  try {
+    switch (action.type) {
+      case "meal": {
+        const MEALS_KEY = "consuela-meals";
+        // Try to extract day from detail or title (e.g., "Monday", "Mon")
+        const dayMatch = action.detail?.match(/\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b/i);
+        const dayMap: Record<string, string> = {
+          monday: "Mon", tuesday: "Tue", wednesday: "Wed", thursday: "Thu",
+          friday: "Fri", saturday: "Sat", sunday: "Sun",
+        };
+        let day = "Mon";
+        if (dayMatch) {
+          const raw = dayMatch[1].toLowerCase();
+          day = dayMap[raw] || raw.charAt(0).toUpperCase() + raw.slice(1, 3);
+        }
+        // Try to extract meal type
+        const typeMatch = action.detail?.match(/\b(breakfast|lunch|dinner|snack)\b/i);
+        const mealType = typeMatch ? typeMatch[1].toLowerCase() as any : "dinner";
+        const newMeal = {
+          id: Date.now(),
+          name: action.title,
+          emoji: action.emoji || "🍽️",
+          time: day,
+          mealType,
+          prepTime: "30 min",
+          tags: ["AI Suggested"],
+          ingredients: [] as string[],
+          servings: 4,
+          calories: 500,
+          userId: "demo",
+        };
+        // Write to in-memory store
+        db.insertMeal(newMeal);
+        // Also write to localStorage so meals page sees it
+        if (typeof window !== "undefined") {
+          try {
+            const stored = localStorage.getItem(MEALS_KEY);
+            const meals = stored ? JSON.parse(stored) : [];
+            meals.push(newMeal);
+            localStorage.setItem(MEALS_KEY, JSON.stringify(meals));
+          } catch {}
+        }
+        return { success: true, message: `Added "${action.title}" to ${day}` };
+      }
+      case "task": {
+        const TASKS_KEY = "consuela-tasks";
+        const stored = (() => {
+          if (typeof window === "undefined") return [];
+          try { const d = localStorage.getItem(TASKS_KEY); return d ? JSON.parse(d) : []; } catch { return []; }
+        })();
+        const members = db.selectMembers();
+        const assignee = action.detail?.match(/^(\w+)/)?.[1] || members[0]?.name || "Caspian";
+        const member = members.find((m: any) => m.name === assignee || m.name.startsWith(assignee));
+        const points = parseInt(action.detail?.match(/(\d+)\s*pts?/)?.[1] || "10");
+        stored.push({
+          id: Date.now(), title: action.title, assignee: member?.name || assignee,
+          assigneeEmoji: member?.emoji || "🧒", due: "Today", points,
+          recurring: null, category: "AI Suggested", completed: false, priority: "medium" as const,
+        });
+        if (typeof window !== "undefined") localStorage.setItem(TASKS_KEY, JSON.stringify(stored));
+        return { success: true, message: `Created task "${action.title}" for ${member?.name || assignee} (${points}pts)` };
+      }
+      case "grocery": {
+        db.upsertGroceryItem({
+          name: action.title, category: "pantry", aisle: "1", quantity: "1",
+          priority: "medium", needed: true, source: "ai", autoGenerated: false, userId: "demo",
+        });
+        return { success: true, message: `Added "${action.title}" to grocery list` };
+      }
+      case "event": {
+        const EVENTS_KEY = "consuela-events";
+        const stored = (() => {
+          if (typeof window === "undefined") return [];
+          try { const d = localStorage.getItem(EVENTS_KEY); return d ? JSON.parse(d) : []; } catch { return []; }
+        })();
+        stored.push({
+          id: Date.now(), title: action.title, time: "4:00 PM",
+          member: action.detail?.split("·")?.[0]?.trim() || "All",
+          color: "green" as const, emoji: action.emoji || "📅", day: new Date().getDate(),
+        });
+        if (typeof window !== "undefined") localStorage.setItem(EVENTS_KEY, JSON.stringify(stored));
+        return { success: true, message: `Added event "${action.title}"` };
+      }
+      case "recipe": {
+        const RECIPES_KEY = "consuela-recipes";
+        const newRecipe = {
+          id: Date.now(),
+          name: action.title,
+          emoji: action.emoji || "📖",
+          prepTime: action.detail?.match(/(\d+\s*min)/)?.[1] || "30 min",
+          tags: ["AI Created"],
+          ingredients: action.detail?.split("·").map((s: string) => s.trim()).filter(Boolean) || [],
+          instructions: action.detail || "",
+          servings: 4,
+          calories: 500,
+          createdAt: new Date().toISOString(),
+        };
+        if (typeof window !== "undefined") {
+          try {
+            const stored = localStorage.getItem(RECIPES_KEY);
+            const recipes = stored ? JSON.parse(stored) : [];
+            recipes.push(newRecipe);
+            localStorage.setItem(RECIPES_KEY, JSON.stringify(recipes));
+          } catch {}
+        }
+        return { success: true, message: `Created recipe "${action.title}"` };
+      }
+      case "reward": {
+        const REWARDS_KEY = "consuela-rewards";
+        const points = parseInt(action.detail?.match(/(\d+)/)?.[1] || "50");
+        const newReward = { id: Date.now(), name: action.title, emoji: action.emoji || "🎁", cost: points };
+        if (typeof window !== "undefined") {
+          try {
+            const stored = localStorage.getItem(REWARDS_KEY);
+            const rewards = stored ? JSON.parse(stored) : [];
+            rewards.push(newReward);
+            localStorage.setItem(REWARDS_KEY, JSON.stringify(rewards));
+          } catch {}
+        }
+        return { success: true, message: `Added reward "${action.title}" (${points}pts)` };
+      }
+      default:
+        return { success: false, message: `Unknown action type` };
+    }
+  } catch (err) {
+    return { success: false, message: err instanceof Error ? err.message : "Failed" };
+  }
+}
+
 export default function ChatPage() {
-  const [messages, setMessages] = useState<Message[]>(initialMessages);
+  const membersData = useMemo(() => db.selectMembers(), []);
+  const memberOptions = useMemo(() =>
+    membersData.filter((m: any) => m.role !== "pet").map((m: any) => ({
+      name: m.name,
+      emoji: m.emoji,
+      color: m.color,
+    })), [membersData]);
+
+  // Load saved speaker or default to first member
+  const [currentSpeaker, setCurrentSpeaker] = useState<{ name: string; emoji: string; color: string }>(() => {
+    if (typeof window === "undefined") return memberOptions[0] || { name: "Mom", emoji: "👩", color: "green" };
+    try {
+      const saved = localStorage.getItem(SPEAKER_STORAGE_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return memberOptions[0] || { name: "Mom", emoji: "👩", color: "green" };
+  });
+
+  const saveSpeaker = (speaker: typeof currentSpeaker) => {
+    setCurrentSpeaker(speaker);
+    if (typeof window !== "undefined") {
+      localStorage.setItem(SPEAKER_STORAGE_KEY, JSON.stringify(speaker));
+    }
+  };
+
+  // Load persisted messages
+  const [messages, setMessages] = useState<Message[]>(() => {
+    const saved = loadChatHistory();
+    return saved.length > 0 ? saved : [initialGreeting];
+  });
+
+  // Save messages on every change
+  useEffect(() => {
+    if (messages.length > 0) saveChatHistory(messages);
+  }, [messages]);
+
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(true);
   const [isListening, setIsListening] = useState(false);
+  const [showSpeakerPicker, setShowSpeakerPicker] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<any>(null);
-
-
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -201,45 +264,33 @@ export default function ChatPage() {
       recognitionRef.current.continuous = false;
       recognitionRef.current.interimResults = false;
       recognitionRef.current.lang = "en-US";
-
       recognitionRef.current.onresult = (event: any) => {
-        const transcript = event.results[0][0].transcript;
-        setInput(transcript);
+        setInput(event.results[0][0].transcript);
         setIsListening(false);
       };
-
-      recognitionRef.current.onerror = () => {
-        setIsListening(false);
-      };
-
-      recognitionRef.current.onend = () => {
-        setIsListening(false);
-      };
+      recognitionRef.current.onerror = () => setIsListening(false);
+      recognitionRef.current.onend = () => setIsListening(false);
     }
-
-    return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
-    };
+    return () => { if (recognitionRef.current) recognitionRef.current.stop(); };
   }, []);
 
-  const msgCounter = useRef(100);
+  const msgCounter = useRef(Math.max(100, ...messages.map(m => m.id)));
 
   const sendMessage = async (text: string) => {
     if (!text.trim()) return;
 
     msgCounter.current += 1;
-    const msgId = msgCounter.current;
-
     const userMsg: Message = {
-      id: msgId,
+      id: msgCounter.current,
       role: "user",
       content: text.trim(),
       timestamp: "Just now",
+      speaker: currentSpeaker.name,
+      speakerEmoji: currentSpeaker.emoji,
     };
 
-    setMessages((prev) => [...prev, userMsg]);
+    const updated = [...messages, userMsg];
+    setMessages(updated);
     setInput("");
     setIsTyping(true);
     setShowSuggestions(false);
@@ -248,45 +299,80 @@ export default function ChatPage() {
       const res = await fetch('/api/hermes/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({
+          message: text,
+          context: (() => {
+            const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+            const events = db.selectTodaysEvents();
+            const schedules = db.selectTodaysSchedules();
+            const tasks = db.selectPendingTasks();
+            const meals = db.selectMeals();
+            const members = db.selectMembers();
+
+            let ctx = `Current date: ${today}. Current speaker: ${currentSpeaker.name}. Family: ${memberOptions.map(m => `${m.name} (${m.emoji})`).join(", ")}.`;
+
+            if (events.length > 0) {
+              ctx += ` Today's events: ${events.map((e: any) => `${e.title} at ${e.time} (${e.member})`).join("; ")}.`;
+            }
+            if (schedules.length > 0) {
+              ctx += ` Today's schedule: ${schedules.slice(0, 8).map((s: any) => `${s.time} ${s.title}`).join("; ")}.`;
+            }
+            if (tasks.length > 0) {
+              ctx += ` Pending tasks: ${tasks.map((t: any) => `${t.title} (${t.assigned}, ${t.points}pts)`).join("; ")}.`;
+            }
+            if (meals.length > 0) {
+              const weekMeals = meals.filter((m: any) => m.time).map((m: any) => `${m.time}: ${m.name}`).join(", ");
+              if (weekMeals) ctx += ` This week's meals: ${weekMeals}.`;
+            }
+            return ctx;
+          })(),
+        }),
       });
       const aiResponse = await res.json();
       setIsTyping(false);
+
+      const actions = aiResponse.actions || [];
+      const executedActions = actions.map((action: ActionCard) => {
+        const result = executeAction(action);
+        return { ...action, confirmed: result.success };
+      });
+
+      const resultMsgs = executedActions
+        .filter((a: ActionCard) => a.confirmed)
+        .map((a: ActionCard) => `✅ ${a.title}`);
+      const content = aiResponse.content || aiResponse.reply || "I processed that.";
+      const fullContent = resultMsgs.length > 0 ? content + "\n\n" + resultMsgs.join("\n") : content;
+
       msgCounter.current += 1;
       const response: Message = {
         id: msgCounter.current,
         role: "assistant",
-        content: aiResponse.content || aiResponse.reply || "I processed that.",
+        content: fullContent,
         timestamp: "Just now",
-        actions: aiResponse.actions?.map((action: any) => ({
-          ...action,
-          confirmed: true,
-        })),
+        actions: executedActions,
       };
-      setMessages((prev) => [...prev, response]);
+      setMessages(prev => [...prev, response]);
     } catch (error) {
       setIsTyping(false);
       msgCounter.current += 1;
-      const errorResponse: Message = {
+      setMessages(prev => [...prev, {
         id: msgCounter.current,
         role: "assistant",
         content: "Sorry, I'm having trouble right now. Please try again.",
         timestamp: "Just now",
-      };
-      setMessages((prev) => [...prev, errorResponse]);
+      }]);
     }
+  };
+
+  const clearChat = () => {
+    setMessages([initialGreeting]);
+    saveChatHistory([initialGreeting]);
   };
 
   const toggleListening = () => {
     if (!recognitionRef.current) return;
-
-    if (isListening) {
-      recognitionRef.current.stop();
-      setIsListening(false);
-    } else {
-      recognitionRef.current.start();
-      setIsListening(true);
-    }
+    isListening ? recognitionRef.current.stop() : recognitionRef.current.start();
+    setIsListening(!isListening);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -301,9 +387,7 @@ export default function ChatPage() {
       {/* Top bar */}
       <div
         className="sticky top-0 z-40 px-4 py-3 flex items-center gap-3 bg-surface-0/90 backdrop-blur-md border-b border-surface-3/20"
-        style={{
-          paddingTop: "calc(env(safe-area-inset-top) + 0.75rem)",
-        }}
+        style={{ paddingTop: "calc(env(safe-area-inset-top) + 0.75rem)" }}
       >
         <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl shrink-0 bg-nori-500/15 consuela-glow">
           ✨
@@ -315,11 +399,41 @@ export default function ChatPage() {
             <span className="text-xs text-text-secondary">AI Family Assistant</span>
           </div>
         </div>
-        <button className="w-9 h-9 flex items-center justify-center rounded-xl bg-surface-2 text-text-secondary hover:text-text-primary transition-colors">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
-            <circle cx="11" cy="11" r="8" />
-            <path d="m21 21-4.35-4.35" strokeLinecap="round" />
-          </svg>
+
+        {/* Speaker selector */}
+        <div className="relative">
+          <button
+            onClick={() => setShowSpeakerPicker(!showSpeakerPicker)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-surface-2 text-text-secondary hover:text-text-primary transition-colors text-xs"
+          >
+            <span>{currentSpeaker.emoji}</span>
+            <span className="max-w-[60px] truncate">{currentSpeaker.name.split(" ")[0]}</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3 h-3">
+              <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          {showSpeakerPicker && (
+            <div className="absolute right-0 top-full mt-1 bg-surface-0 border border-surface-3 rounded-xl shadow-xl z-50 py-1 min-w-[160px]"
+              onClick={() => setShowSpeakerPicker(false)}>
+              {memberOptions.map(m => (
+                <button
+                  key={m.name}
+                  onClick={() => saveSpeaker(m)}
+                  className={`w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-surface-2 transition-colors ${
+                    currentSpeaker.name === m.name ? "text-nori-400 bg-nori-500/10" : "text-text-primary"
+                  }`}
+                >
+                  <span>{m.emoji}</span>
+                  <span>{m.name}</span>
+                  {currentSpeaker.name === m.name && <span className="ml-auto text-nori-400">✓</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <button onClick={clearChat} className="w-9 h-9 flex items-center justify-center rounded-xl bg-surface-2 text-text-secondary hover:text-text-primary transition-colors text-xs" title="Clear chat">
+          🗑️
         </button>
       </div>
 
@@ -331,14 +445,19 @@ export default function ChatPage() {
             className={`flex gap-2.5 ${msg.role === "user" ? "flex-row-reverse" : "flex-row"}`}
           >
             {msg.role === "assistant" && (
-              <div className="w-8 h-8 rounded-xl bg-nori-500/15 flex items-center justify-center text-sm shrink-0 mt-0.5">
-                ✨
-              </div>
+              <div className="w-8 h-8 rounded-xl bg-nori-500/15 flex items-center justify-center text-sm shrink-0 mt-0.5">✨</div>
             )}
             {msg.role === "user" && (
-              <Avatar name="Mom" color="green" emoji="👩" size="sm" variant="emoji" />
+              <Avatar name={msg.speaker || currentSpeaker.name}
+                color={currentSpeaker.color || "green"}
+                emoji={msg.speakerEmoji || currentSpeaker.emoji}
+                size="sm" variant="emoji" />
             )}
             <div className={`max-w-[82%] space-y-2 ${msg.role === "user" ? "items-end" : "items-start"} flex flex-col`}>
+              {/* Speaker label */}
+              {msg.role === "user" && msg.speaker && (
+                <span className="text-[10px] text-text-muted px-1">{msg.speaker.split(" ")[0]}</span>
+              )}
               <div
                 className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                   msg.role === "user"
@@ -349,12 +468,9 @@ export default function ChatPage() {
                 {renderContent(msg.content)}
               </div>
 
-              {/* Action cards */}
               {msg.actions?.map((action, i) => (
-                <div
-                  key={i}
-                  className={`rounded-xl px-3 py-2.5 flex items-center gap-2.5 border w-full max-w-xs ${actionColors[action.type]}`}
-                >
+                <div key={i}
+                  className={`rounded-xl px-3 py-2.5 flex items-center gap-2.5 border w-full max-w-xs ${actionColors[action.type]}`}>
                   <span className="text-xl shrink-0">{action.emoji}</span>
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-semibold text-text-primary truncate">{action.title}</p>
@@ -375,37 +491,25 @@ export default function ChatPage() {
           </div>
         ))}
 
-        {/* Typing indicator */}
         {isTyping && (
           <div className="flex gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-nori-500/15 flex items-center justify-center text-sm shrink-0">
-              ✨
-            </div>
+            <div className="w-8 h-8 rounded-xl bg-nori-500/15 flex items-center justify-center text-sm shrink-0">✨</div>
             <div className="glass rounded-2xl rounded-tl-sm px-4 py-3 flex items-center gap-1">
               {[0, 1, 2].map((i) => (
-                <div
-                  key={i}
-                  className="w-2 h-2 rounded-full bg-nori-400"
-                  style={{
-                    animation: `bounce 1s ease-in-out ${i * 0.15}s infinite`,
-                  }}
-                />
+                <div key={i} className="w-2 h-2 rounded-full bg-nori-400"
+                  style={{ animation: `bounce 1s ease-in-out ${i * 0.15}s infinite` }} />
               ))}
             </div>
           </div>
         )}
 
-        {/* Suggestions */}
         {showSuggestions && messages.length <= 1 && (
           <div className="pt-2">
             <p className="text-text-muted text-xs mb-3 text-center">Try asking…</p>
             <div className="grid grid-cols-2 gap-2">
               {suggestedPrompts.map((s) => (
-                <button
-                  key={s.label}
-                  onClick={() => sendMessage(s.prompt)}
-                  className="glass rounded-xl px-3 py-2.5 text-left text-xs text-text-secondary hover:text-text-primary hover:border-nori-500/30 transition-all active:scale-95"
-                >
+                <button key={s.label} onClick={() => sendMessage(s.prompt)}
+                  className="glass rounded-xl px-3 py-2.5 text-left text-xs text-text-secondary hover:text-text-primary hover:border-nori-500/30 transition-all active:scale-95">
                   {s.label}
                 </button>
               ))}
@@ -424,16 +528,10 @@ export default function ChatPage() {
           paddingBottom: "calc(env(safe-area-inset-bottom) + 5.5rem)",
         }}
       >
-        <div
-          className="flex items-end gap-2 rounded-2xl glass px-3 py-2 border border-accent-selected/15"
-        >
-          {/* Voice button */}
-          <button
-            onClick={toggleListening}
+        <div className="flex items-end gap-2 rounded-2xl glass px-3 py-2 border border-accent-selected/15">
+          <button onClick={toggleListening}
             className={`w-9 h-9 flex items-center justify-center rounded-xl transition-colors shrink-0 mb-0.5 ${
-              isListening ? "text-red-400 bg-red-500/10" : "text-text-secondary hover:text-nori-400"
-            }`}
-          >
+              isListening ? "text-red-400 bg-red-500/10" : "text-text-secondary hover:text-nori-400"}`}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
               <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" strokeLinecap="round" />
               <path d="M19 10v2a7 7 0 01-14 0v-2" strokeLinecap="round" />
@@ -447,21 +545,15 @@ export default function ChatPage() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Message Consuela…"
+            placeholder={`Message Consuela as ${currentSpeaker.name.split(" ")[0]}…`}
             rows={1}
             className="flex-1 bg-transparent text-text-primary text-sm placeholder:text-text-muted resize-none outline-none leading-relaxed py-1.5 max-h-28"
             style={{ minHeight: "36px" }}
           />
 
-          <button
-            onClick={() => sendMessage(input)}
-            disabled={!input.trim()}
+          <button onClick={() => sendMessage(input)} disabled={!input.trim()}
             className={`w-9 h-9 flex items-center justify-center rounded-xl shrink-0 mb-0.5 transition-all ${
-              input.trim()
-                ? "bg-nori-500 text-white hover:bg-nori-400 active:scale-95"
-                : "bg-surface-3 text-text-muted cursor-not-allowed"
-            }`}
-          >
+              input.trim() ? "bg-nori-500 text-white hover:bg-nori-400 active:scale-95" : "bg-surface-3 text-text-muted cursor-not-allowed"}`}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="w-4 h-4">
               <path d="M22 2L11 13" strokeLinecap="round" strokeLinejoin="round" />
               <path d="M22 2L15 22l-4-9-9-4 20-7z" strokeLinecap="round" strokeLinejoin="round" />
@@ -469,7 +561,6 @@ export default function ChatPage() {
           </button>
         </div>
 
-        {/* Context pills */}
         <div className="flex gap-2 mt-2.5 overflow-x-auto pb-0.5">
           <Badge variant="gray">📅 Calendar</Badge>
           <Badge variant="gray">🍽️ Meals</Badge>
