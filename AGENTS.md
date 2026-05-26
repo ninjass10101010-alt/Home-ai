@@ -330,6 +330,7 @@ After completing a user request that changes architecture, tech, or goals, updat
 
 ## Change Log (this manual only)
 
+- 2026-05-26 — feat: enhance weather widget with summer/winter particle effects. Added summer (heat waves) and winter (ice crystals) particle effects to weather widget. Updated AGENTS.md to document the change.
 - 2026-05-23 — Initial comprehensive operational manual created per quiet-wizard plan. Added full UI navigation (including motion refresh), meal & emergency workflows, agent role definition, SOP template + examples, and appendix of all existing design docs. Preserved original recipe/memory-bank guidance at the bottom.
 
 ---
