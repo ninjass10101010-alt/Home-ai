@@ -112,7 +112,9 @@ function getConditionMeta(condition: Condition, tod: TimeOfDayFlag, season: stri
   // Season overrides for particles if condition allows
   if (condition === "sunny" || condition === "partly-cloudy") {
     if (season === "spring") meta.particleType = "petal";
+    if (season === "summer") meta.particleType = "heat";
     if (season === "autumn") meta.particleType = "leaf";
+    if (season === "winter") meta.particleType = "ice";
   }
 
   return meta;
@@ -329,7 +331,7 @@ const ICONS: Record<Condition, (props: { tod: TimeOfDayFlag }) => React.ReactEle
 
 // ─── Particle System ─────────────────────────────────────────────────────────
 
-function WeatherParticles({ type, tod }: { type: "rain" | "snow" | "sparkle" | "petal" | "leaf" | "none", tod: TimeOfDayFlag }) {
+function WeatherParticles({ type, tod }: { type: "rain" | "snow" | "sparkle" | "petal" | "leaf" | "heat" | "ice" | "none", tod: TimeOfDayFlag }) {
   const [particles, setParticles] = useState<Particle[]>([]);
 
   useEffect(() => {
@@ -340,10 +342,14 @@ function WeatherParticles({ type, tod }: { type: "rain" | "snow" | "sparkle" | "
     if (type === "sparkle") count = 9;
     if (type === "petal") count = 10;
     if (type === "leaf") count = 8;
+    if (type === "heat") count = 15;
+    if (type === "ice") count = 12;
     
     const colors = {
         petal: ["#fbcfe8", "#f472b6", "#fce7f3"],
         leaf: ["#fbbf24", "#f59e0b", "#d97706", "#ea580c"],
+        heat: ["#fbbf24", "#f59e0b", "#d97706", "#ea580c", "#f97316"],
+        ice: ["#dbeafe", "#bfdbfe", "#93c5fd", "#60a5fa", "#3b82f6"],
     };
 
     setParticles(
@@ -354,9 +360,15 @@ function WeatherParticles({ type, tod }: { type: "rain" | "snow" | "sparkle" | "
         delay: `${(Math.random() * 3).toFixed(2)}s`,
         duration: `${(1.2 + Math.random() * 2).toFixed(2)}s`,
         size: type === "rain" ? 1.5 + Math.random() * 0.8 : 
-              (type === "petal" || type === "leaf" ? 4 + Math.random() * 6 : 2.5 + Math.random() * 2),
+              (type === "petal" || type === "leaf" ? 4 + Math.random() * 6 : 
+               type === "heat" ? 2 + Math.random() * 3 :
+               type === "ice" ? 3 + Math.random() * 4 :
+               2.5 + Math.random() * 2),
         color: type === "petal" ? colors.petal[Math.floor(Math.random() * colors.petal.length)] :
-               type === "leaf" ? colors.leaf[Math.floor(Math.random() * colors.leaf.length)] : undefined
+               type === "leaf" ? colors.leaf[Math.floor(Math.random() * colors.leaf.length)] :
+               type === "heat" ? colors.heat[Math.floor(Math.random() * colors.heat.length)] :
+               type === "ice" ? colors.ice[Math.floor(Math.random() * colors.ice.length)] :
+               undefined
       }))
     );
   }, [type]);
@@ -401,6 +413,34 @@ function WeatherParticles({ type, tod }: { type: "rain" | "snow" | "sparkle" | "
                   background: p.color,
                   opacity: 0.8,
                   animation: `weatherSnowDrift ${p.duration} ease-in-out ${p.delay} infinite`,
+                  transform: `rotate(${Math.random() * 360}deg)`
+                }} />
+            );
+        }
+        if (type === "heat") {
+            return (
+              <div key={p.id} className="absolute top-0"
+                style={{
+                  left: `${p.x}%`,
+                  width: `${p.size}px`,
+                  height: `${p.size}px`,
+                  background: p.color,
+                  opacity: 0.7,
+                  animation: `weatherParticleHeat ${p.duration} ease-out ${p.delay} infinite`,
+                  filter: "blur(1px)"
+                }} />
+            );
+        }
+        if (type === "ice") {
+            return (
+              <div key={p.id} className="absolute top-0 rounded-full"
+                style={{
+                  left: `${p.x}%`,
+                  width: `${p.size}px`,
+                  height: `${p.size}px`,
+                  background: p.color,
+                  opacity: 0.8,
+                  animation: `weatherParticleIce ${p.duration} ease-in-out ${p.delay} infinite`,
                   transform: `rotate(${Math.random() * 360}deg)`
                 }} />
             );
