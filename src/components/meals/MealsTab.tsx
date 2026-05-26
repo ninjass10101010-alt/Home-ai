@@ -1,13 +1,15 @@
+"use client";
+import { useState } from "react";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
-import { weekDays, mealIdeas } from "@/data/meals";
+import { weekDays, mealIdeas, mealPresets } from "@/data/meals";
 import { Meal } from "@/types/meals";
 
 export default function MealsTab({
   meals,
   activeDay,
   setActiveDay,
-  activeMeals, // Changed from activeMeal
+  activeMeals,
   deleteMeal,
   openRecipeModal,
   setActiveTab,
@@ -17,21 +19,39 @@ export default function MealsTab({
   aiMealIdeas,
   aiMealLoading,
   importRecipeFromUrl,
-  handleFileUpload
+  handleFileUpload,
 }: any) {
-  
+
   const mealTypes = [
     { id: "breakfast", label: "Breakfast", icon: "🌅", color: "amber" },
     { id: "lunch", label: "Lunch", icon: "☀️", color: "sky" },
     { id: "dinner", label: "Dinner", icon: "🌙", color: "indigo" },
   ];
 
+  // Preset picker state
+  const [presetPickerType, setPresetPickerType] = useState<string | null>(null);
+
+  const presetsForType = (type: string) =>
+    mealPresets.find(p => p.mealType === type)?.ideas ?? [];
+
+  const handlePresetSelect = (idea: any, mealType: string) => {
+    // Build a pre-filled meal object and open the recipe modal with it
+    openRecipeModal({
+      mealType,
+      name: idea.name,
+      emoji: idea.emoji,
+      tags: idea.tags,
+      prepTime: idea.prepTime,
+      ingredients: idea.ingredients,
+    } as Partial<Meal>);
+    setPresetPickerType(null);
+  };
+
   return (
     <div className="px-4 space-y-5 pb-4">
-      {/* Weekly strip */}
-      <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4">
+      {/* ── Weekly Strip ──────────────────────────────── */}
+      <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 no-scrollbar">
         {weekDays.map(day => {
-          // Just show one icon for the day if any meal exists, or a plus
           const dayMeals = meals.filter((m: Meal) => m.time === day);
           const dinner = dayMeals.find((m: Meal) => m.mealType === "dinner") || dayMeals[0];
           const isActive = day === activeDay;
@@ -41,15 +61,12 @@ export default function MealsTab({
               onClick={() => setActiveDay(day)}
               className={`shrink-0 flex flex-col items-center gap-1.5 rounded-2xl px-3 py-3 min-w-[72px] transition-all active:scale-95 ${
                 isActive
-                  ? "bg-nori-500/15 border border-nori-500/30"
-                  : "glass border border-transparent hover:border-surface-4"
+                  ? "bg-[var(--color-accent-nori)]/15 border border-[var(--color-accent-nori)]/30"
+                  : "glass border border-transparent hover:border-[var(--color-surface-4)]"
               }`}
             >
-              <span className={`text-xs font-semibold ${isActive ? "text-nori-400" : "text-text-secondary"}`}>{day}</span>
-              <span
-                className="text-2xl"
-                style={{ animation: isActive ? "bounce 1s ease infinite" : "none" }}
-              >
+              <span className={`text-xs font-semibold ${isActive ? "text-[var(--color-accent-nori)]" : "text-text-secondary"}`}>{day}</span>
+              <span className="text-2xl" style={{ animation: isActive ? "bounce 1s ease infinite" : "none" }}>
                 {dinner?.emoji ?? "➕"}
               </span>
               <span className="text-[10px] text-text-muted text-center leading-tight w-full truncate">
@@ -60,11 +77,11 @@ export default function MealsTab({
         })}
       </div>
 
-      {/* Daily Meals Breakdown */}
+      {/* ── Daily Meals Breakdown ─────────────────────── */}
       <div className="space-y-3">
         {mealTypes.map(type => {
           const mealForType = activeMeals.find((m: Meal) => m.mealType === type.id);
-          
+
           if (mealForType) {
             return (
               <Card key={type.id} glow className="!p-4 border-l-4" style={{ borderLeftColor: `var(--color-accent-${type.color}, #64748b)` }}>
@@ -73,21 +90,19 @@ export default function MealsTab({
                     <span>{type.icon}</span> {type.label}
                   </h3>
                   <div className="flex gap-1.5">
-                    <button onClick={() => openRecipeModal(mealForType)} className="p-1.5 text-text-muted hover:text-text-primary rounded-lg hover:bg-surface-2 transition-colors">✏️</button>
-                    <button onClick={() => deleteMeal(mealForType.id)} className="p-1.5 text-text-muted hover:text-rose-400 rounded-lg hover:bg-rose-500/10 transition-colors">🗑️</button>
+                    <button onClick={() => openRecipeModal(mealForType)} className="p-1.5 text-text-muted hover:text-text-primary rounded-lg hover:bg-[var(--color-surface-2)] transition-colors">✏️</button>
+                    <button onClick={() => deleteMeal(mealForType.id)} className="p-1.5 text-text-muted hover:text-[var(--color-accent-rose)] rounded-lg hover:bg-[var(--color-accent-rose)]/10 transition-colors">🗑️</button>
                   </div>
                 </div>
                 <div className="flex items-center gap-4">
-                  <div className="w-14 h-14 rounded-2xl bg-surface-0/50 flex items-center justify-center text-3xl shrink-0 shadow-sm border border-surface-3">
+                  <div className="w-14 h-14 rounded-2xl bg-[var(--color-surface-0)]/50 flex items-center justify-center text-3xl shrink-0 shadow-sm border border-[var(--color-surface-3)]">
                     {mealForType.emoji || "🍽️"}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-text-primary font-bold text-lg leading-tight truncate">
-                      {mealForType.name}
-                    </p>
+                    <p className="text-text-primary font-bold text-lg leading-tight truncate">{mealForType.name}</p>
                     <div className="flex gap-1.5 mt-1.5 flex-wrap">
                       {mealForType.tags?.map((t: string) => (
-                        <span key={t} className="px-2 py-0.5 rounded-md bg-surface-2 text-text-secondary text-[10px] font-medium border border-surface-3">
+                        <span key={t} className="px-2 py-0.5 rounded-md bg-[var(--color-surface-2)] text-text-secondary text-[10px] font-medium border border-[var(--color-surface-3)]">
                           {t}
                         </span>
                       ))}
@@ -97,26 +112,84 @@ export default function MealsTab({
               </Card>
             );
           } else {
+            // Empty slot — show add button OR preset picker
+            const isPickerOpen = presetPickerType === type.id;
+            const presets = presetsForType(type.id);
+
             return (
-              <button
-                key={type.id}
-                onClick={() => openRecipeModal({ mealType: type.id } as Meal)} // Passes the intended meal type
-                className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl border-2 border-dashed border-surface-4 text-text-muted text-sm font-medium hover:border-nori-500/40 hover:text-nori-400 hover:bg-nori-500/5 transition-all group"
-              >
-                <span className="text-lg opacity-50 group-hover:opacity-100 group-hover:scale-110 transition-all">{type.icon}</span>
-                Plan {type.label}
-              </button>
+              <div key={type.id}>
+                <button
+                  onClick={() => setPresetPickerType(isPickerOpen ? null : type.id)}
+                  className={`w-full flex items-center justify-center gap-2 py-4 rounded-2xl border-2 border-dashed text-sm font-medium transition-all group ${
+                    isPickerOpen
+                      ? "border-[var(--color-accent-nori)]/50 text-[var(--color-accent-nori)] bg-[var(--color-accent-nori)]/5"
+                      : "border-[var(--color-surface-4)] text-text-muted hover:border-[var(--color-accent-nori)]/40 hover:text-[var(--color-accent-nori)] hover:bg-[var(--color-accent-nori)]/5"
+                  }`}
+                >
+                  <span className={`text-lg transition-all ${isPickerOpen ? "opacity-100 scale-110" : "opacity-50 group-hover:opacity-100 group-hover:scale-110"}`}>
+                    {type.icon}
+                  </span>
+                  {isPickerOpen ? `Hide ${type.label} ideas ↑` : `Plan ${type.label}`}
+                </button>
+
+                {/* Preset picker panel */}
+                {isPickerOpen && (
+                  <div className="mt-2 animate-in">
+                    <p className="text-[11px] text-text-muted font-semibold mb-2 px-1">
+                      ⚡ Quick pick a {type.label.toLowerCase()}:
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {presets.map((idea: any) => (
+                        <button
+                          key={idea.name}
+                          onClick={() => handlePresetSelect(idea, type.id)}
+                          className="flex items-center gap-3 p-3 rounded-2xl glass border border-[var(--color-surface-7)]/20
+                            hover:border-[var(--color-accent-nori)]/30 hover:bg-[var(--color-accent-nori)]/5
+                            transition-all active:scale-95 text-left group"
+                        >
+                          <span
+                            className="text-2xl shrink-0 group-hover:scale-110 transition-transform"
+                            style={{ animation: "float 3s ease-in-out infinite" }}
+                          >
+                            {idea.emoji}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-text-primary text-xs font-semibold leading-tight truncate">{idea.name}</p>
+                            <p className="text-text-muted text-[10px] mt-0.5">{idea.prepTime}</p>
+                            <div className="flex gap-1 flex-wrap mt-1">
+                              {idea.tags.slice(0, 2).map((t: string) => (
+                                <span key={t} className="px-1.5 py-0.5 rounded-md bg-[var(--color-surface-2)] text-text-secondary text-[9px] font-medium">
+                                  {t}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                      {/* Manual entry option */}
+                      <button
+                        onClick={() => { openRecipeModal({ mealType: type.id } as Meal); setPresetPickerType(null); }}
+                        className="flex items-center justify-center gap-2 p-3 rounded-2xl border-2 border-dashed border-[var(--color-surface-4)]
+                          text-text-muted text-xs font-medium hover:border-[var(--color-accent-nori)]/30 hover:text-[var(--color-accent-nori)]
+                          transition-all active:scale-95 col-span-2"
+                      >
+                        ✏️ Enter custom meal…
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             );
           }
         })}
       </div>
 
-      {/* Actions (if any meal exists) */}
+      {/* ── Actions ──────────────────────────────────── */}
       {activeMeals.length > 0 && (
         <div className="flex gap-2 mt-4">
           <button
             onClick={() => setActiveTab("grocery")}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-nori-500/15 text-nori-400 text-sm font-medium hover:bg-nori-500/25 transition-colors"
+            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-[var(--color-accent-nori)]/15 text-[var(--color-accent-nori)] text-sm font-medium hover:bg-[var(--color-accent-nori)]/25 transition-colors"
           >
             🛒 Grocery List
           </button>
@@ -130,7 +203,7 @@ export default function MealsTab({
         </div>
       )}
 
-      {/* AI Suggestions */}
+      {/* ── AI Suggestions ────────────────────────────── */}
       {showAiSuggestions && (
         <section className="pt-2">
           <div className="flex items-center justify-between mb-3">
@@ -139,7 +212,7 @@ export default function MealsTab({
           </div>
           <div className="grid grid-cols-2 gap-2">
             {(aiMealIdeas.length > 0 ? aiMealIdeas : mealIdeas).map((idea: any) => (
-              <Card key={idea.name} className="!p-3 cursor-pointer hover:border-nori-500/30 transition-colors"
+              <Card key={idea.name} className="!p-3 cursor-pointer hover:border-[var(--color-accent-nori)]/30 transition-colors"
                 onClick={() => {
                   alert(`Need to add ${idea.name} to ${activeDay}`);
                 }}
@@ -160,7 +233,7 @@ export default function MealsTab({
         </section>
       )}
 
-      {/* Import Recipes */}
+      {/* ── Import Recipes ────────────────────────────── */}
       <section className="pb-2 pt-2">
         <h3 className="text-text-primary font-semibold text-sm mb-3">📥 Import Recipes</h3>
         <div className="grid grid-cols-2 gap-2">
@@ -171,26 +244,26 @@ export default function MealsTab({
             <button
               key={s.source}
               onClick={() => { const url = prompt(`Enter ${s.source} URL:`); if (url) importRecipeFromUrl(url, s.source); }}
-              className="flex items-center justify-center gap-2 px-3 py-3 rounded-xl text-xs font-medium bg-nori-500/10 text-nori-400 border border-nori-500/20 hover:bg-nori-500/20 transition-all"
+              className="flex items-center justify-center gap-2 px-3 py-3 rounded-xl text-xs font-medium bg-[var(--color-accent-nori)]/10 text-[var(--color-accent-nori)] border border-[var(--color-accent-nori)]/20 hover:bg-[var(--color-accent-nori)]/20 transition-all"
             >
               {s.label}
             </button>
           ))}
           <button
             onClick={() => document.getElementById("recipe-file-upload")?.click()}
-            className="flex items-center justify-center gap-2 px-3 py-3 rounded-xl text-xs font-medium glass text-text-secondary border border-surface-3 hover:text-text-primary transition-all"
+            className="flex items-center justify-center gap-2 px-3 py-3 rounded-xl text-xs font-medium glass text-text-secondary border border-[var(--color-surface-3)] hover:text-text-primary transition-all"
           >
             📄 Upload File
           </button>
           <button
             onClick={() => document.getElementById("recipe-pdf-upload")?.click()}
-            className="flex items-center justify-center gap-2 px-3 py-3 rounded-xl text-xs font-medium glass text-text-secondary border border-surface-3 hover:text-text-primary transition-all"
+            className="flex items-center justify-center gap-2 px-3 py-3 rounded-xl text-xs font-medium glass text-text-secondary border border-[var(--color-surface-3)] hover:text-text-primary transition-all"
           >
             🗒️ Upload PDF
           </button>
         </div>
-        <input type="file" id="recipe-file-upload" accept=".txt,.json,.csv" className="hidden" onChange={(e) => {if(e.target.files?.[0]) handleFileUpload(e.target.files[0])}} />
-        <input type="file" id="recipe-pdf-upload" accept=".pdf" className="hidden" onChange={(e) => {if(e.target.files?.[0]) handleFileUpload(e.target.files[0])}} />
+        <input type="file" id="recipe-file-upload" accept=".txt,.json,.csv" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handleFileUpload(e.target.files[0]); }} />
+        <input type="file" id="recipe-pdf-upload" accept=".pdf" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handleFileUpload(e.target.files[0]); }} />
       </section>
     </div>
   );
