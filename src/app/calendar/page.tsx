@@ -71,6 +71,7 @@ interface ScheduleItem {
   type: "routine" | "reminder";
   icon: string;
   color: string;
+  mealType?: "breakfast" | "lunch" | "dinner" | "snack" | "none";
 }
 
 const getInitialSchedules = (): ScheduleItem[] => db.selectTodaysSchedulesRaw().map((s: any) => ({
@@ -90,7 +91,7 @@ const colorBG: Record<string, string> = {
 };
 
 const emptySchedule = (): ScheduleItem => ({
-  id: Date.now(), title: "", time: "08:00", days: "all", type: "routine", icon: "⏰", color: "green",
+  id: Date.now(), title: "", time: "08:00", days: "all", type: "routine", icon: "⏰", color: "green", mealType: "none",
 });
 
 const EVENTS_STORAGE_KEY = "consuela-events";
@@ -513,6 +514,14 @@ export default function CalendarPage() {
                     <option value="routine">🔄 Routine</option>
                     <option value="reminder">🔔 Reminder</option>
                   </select>
+                  <select value={schedForm.mealType ?? "none"} onChange={e => setSchedForm({ ...schedForm, mealType: e.target.value as any })}
+                    className="bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3">
+                    <option value="none">— Not a meal —</option>
+                    <option value="breakfast">🌅 Breakfast</option>
+                    <option value="lunch">☀️ Lunch</option>
+                    <option value="dinner">🌙 Dinner</option>
+                    <option value="snack">🍎 Snack</option>
+                  </select>
                 </div>
                 <div className="flex gap-2">
                   {(["green","amber","cyan","violet","rose"] as const).map(c => (
@@ -555,6 +564,11 @@ export default function CalendarPage() {
                         <span className="text-sm text-text-primary flex-1 min-w-0">{item.title}</span>
                         <span className="text-[10px] text-text-muted px-1.5 py-0.5 rounded-full bg-surface-3">{dayLabels[item.days] ?? item.days}</span>
                         <Badge variant={item.type === "routine" ? "amber" : "rose"}>{item.type}</Badge>
+                        {item.mealType && item.mealType !== "none" && (
+                          <Badge variant={item.mealType === "breakfast" ? "amber" : item.mealType === "lunch" ? "cyan" : item.mealType === "dinner" ? "violet" : "green"}>
+                            {item.mealType === "breakfast" ? "🌅" : item.mealType === "lunch" ? "☀️" : item.mealType === "dinner" ? "🌙" : "🍎"} {item.mealType}
+                          </Badge>
+                        )}
                       </div>
                       <button onClick={() => startEditSched(item)} className="w-7 h-7 flex items-center justify-center rounded-lg text-text-muted hover:text-nori-400 hover:bg-nori-500/10 transition-colors shrink-0">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
