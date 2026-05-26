@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, Suspense } from "react";
 import BottomNav from "@/components/ui/BottomNav";
 import Avatar from "@/components/ui/Avatar";
 import Badge from "@/components/ui/Badge";
 import { db } from "@/db";
+import { useSearchParams } from "next/navigation";
 
 interface Message {
   id: number;
@@ -207,7 +208,7 @@ function executeAction(action: ActionCard): { success: boolean; message: string 
   }
 }
 
-export default function ChatPage() {
+function ChatContent() {
   const membersData = useMemo(() => db.selectMembers(), []);
   const memberOptions = useMemo(() =>
     membersData.filter((m: any) => m.role !== "pet").map((m: any) => ({
@@ -252,10 +253,23 @@ export default function ChatPage() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<any>(null);
+  const searchParams = useSearchParams();
+  const queryParam = searchParams.get("q");
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isTyping]);
+
+  useEffect(() => {
+    if (queryParam) {
+      sendMessage(queryParam);
+      if (typeof window !== "undefined") {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("q");
+        window.history.replaceState({}, "", url.toString());
+      }
+    }
+  }, [queryParam]);
 
   useEffect(() => {
     if (typeof window !== "undefined" && ("webkitSpeechRecognition" in window || "SpeechRecognition" in window)) {
@@ -578,5 +592,13 @@ export default function ChatPage() {
         }
       `}</style>
     </div>
+  );
+}
+
+export default function ChatPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center min-h-screen"><div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary-500"></div></div>}>
+      <ChatContent />
+    </Suspense>
   );
 }
