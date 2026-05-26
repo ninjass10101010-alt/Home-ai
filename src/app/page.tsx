@@ -13,6 +13,7 @@ import EmergencyButton from "@/components/ui/EmergencyButton";
 import ScheduleDisplay from "@/components/ui/ScheduleDisplay";
 import { useTheme } from "@/hooks/useTheme";
 import { db } from "@/db";
+import CurrentMealWidget from "@/components/meals/CurrentMealWidget";
 
 const mealPlan = [
   { day: "Mon", meal: "Pasta Primavera", emoji: "🍝" },
@@ -268,44 +269,15 @@ export default function HomePage() {
           title="Daily Schedule"
         />
 
-        {/* Meal This Week */}
+        {/* Meal Highlight */}
         <section>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-text-primary font-semibold text-base">This Week&apos;s Meals</h2>
+            <h2 className="text-text-primary font-semibold text-base">Current Meal</h2>
             <Link href="/meals" className="text-[var(--color-accent-selected)] text-xs font-medium hover:opacity-80">
               Plan →
             </Link>
           </div>
-          <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 scroll-smooth-x no-scrollbar">
-            {mealPlan.map((m, i) => {
-              const isToday = i === todayMealIndex;
-              return (
-                <div
-                  key={m.day}
-                  className={`scroll-snap-child shrink-0 flex flex-col items-center gap-1.5 rounded-2xl px-3 py-3 min-w-[72px] transition-all duration-200 ${
-                    isToday
-                      ? "border-2 border-[var(--color-accent-selected)]/40 accent-glow glass-subtle"
-                      : "glass hover:border-[var(--color-surface-7)]/20 hover:bg-[var(--color-surface-2)]/60"
-                  }`}
-                >
-                  <span
-                    className={`text-[10px] font-semibold uppercase tracking-wide ${
-                      isToday ? "text-[var(--color-accent-selected)]" : "text-text-secondary/80"
-                    }`}
-                  >
-                    {m.day}
-                  </span>
-                  {isToday && (
-                    <span className="bg-[var(--color-accent-selected)]/20 text-[var(--color-accent-selected)] text-[9px] px-1.5 py-0.5 rounded-full font-medium">
-                      TODAY
-                    </span>
-                  )}
-                  <AnimatedEmoji emoji={m.emoji} size="sm" />
-                  <span className="text-[10px] text-text-muted text-center leading-tight">{m.meal}</span>
-                </div>
-              );
-            })}
-          </div>
+          <CurrentMealWidget />
         </section>
 
         {/* Tasks */}

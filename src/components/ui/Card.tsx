@@ -4,6 +4,7 @@ interface CardProps {
   onClick?: () => void;
   glow?: boolean;
   variant?: "standard" | "strong" | "subtle";
+  style?: React.CSSProperties;
 }
 
 export default function Card({ 
@@ -11,7 +12,8 @@ export default function Card({
   className = "", 
   onClick, 
   glow, 
-  variant = "standard" 
+  variant = "standard",
+  style
 }: CardProps) {
   
   // Base styles for all card variants
@@ -73,6 +75,7 @@ export default function Card({
         type="button"
         onClick={onClick}
         className={`${baseClass} ${className} w-full text-left`}
+        style={style}
       >
         {children}
       </button>
@@ -80,7 +83,7 @@ export default function Card({
   }
 
   return (
-    <div className={`${baseClass} ${className}`}>
+    <div className={`${baseClass} ${className}`} style={style}>
       {children}
     </div>
   );
