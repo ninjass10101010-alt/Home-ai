@@ -85,22 +85,7 @@ export default function EmergencyPage() {
   }, []);
 
   if (!mounted) {
-    return (
-      <PageShell>
-        <div className="px-4 pt-12 pb-4 relative z-10" style={{ paddingTop: "calc(env(safe-area-inset-top) + 2rem)" }}>
-          <Link href="/" className="text-nori-400 text-xs font-medium mb-4 inline-block">
-            ← Back to Home
-          </Link>
-          <h1 className="text-2xl font-bold text-text-primary">Emergency Contacts</h1>
-          <p className="text-text-secondary text-sm mt-1">Quick access for urgent situations</p>
-        </div>
-        <div className="px-4 space-y-6 relative z-10 animate-pulse">
-          <div className="grid grid-cols-2 gap-3">
-            {[1,2,3,4].map(i => <div key={i} className="h-32 bg-[var(--color-surface-2)] rounded-xl" />)}
-          </div>
-        </div>
-      </PageShell>
-    );
+    return null;
   }
 
   const primaryContacts = contacts.filter(c => c.isPrimary);

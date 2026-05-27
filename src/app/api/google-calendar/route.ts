@@ -3,16 +3,29 @@ import { readFile } from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const filePath = path.join(process.cwd(), "public", "google-events.json");
-    if (!existsSync(filePath)) {
-      return NextResponse.json({ events: [] });
+    const { searchParams } = new URL(request.url);
+    const type = searchParams.get("type") || "event";
+
+    const eventsFile = path.join(process.cwd(), "public", "google-events.json");
+    const tasksFile = path.join(process.cwd(), "public", "google-tasks.json");
+
+    let events: any[] = [];
+
+    if (type === "event" && existsSync(eventsFile)) {
+      const data = await readFile(eventsFile, "utf-8");
+      const parsed = JSON.parse(data);
+      events = parsed.filter((e: any) => !type || e.type === type);
     }
-    const data = await readFile(filePath, "utf-8");
-    const events = JSON.parse(data);
+
+    if (type === "task" && existsSync(tasksFile)) {
+      const data = await readFile(tasksFile, "utf-8");
+      events = JSON.parse(data);
+    }
+
     return NextResponse.json({ events });
   } catch {
-    return NextResponse.json({ events: [], error: "Failed to read Google Calendar events" });
+    return NextResponse.json({ events: [], error: "Failed to read events" });
   }
 }

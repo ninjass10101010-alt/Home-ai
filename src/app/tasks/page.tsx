@@ -113,7 +113,10 @@ export default function TasksPage() {
 
   // AI suggestions state
   const [aiSuggesting, setAiSuggesting] = useState(false);
+  const [googleSyncing, setGoogleSyncing] = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState<Task[]>([]);
+  const [toast, setToast] = useState<string | null>(null);
+  const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
   // Rewards state
   interface Reward {
@@ -372,6 +375,41 @@ export default function TasksPage() {
     setAiSuggesting(false);
   };
 
+  // Google Tasks sync
+  const syncGoogleTasks = async () => {
+    setGoogleSyncing(true);
+    try {
+      const res = await fetch("/api/google-calendar?type=task");
+      const data = await res.json();
+      if (data.events?.length) {
+        const existing = [...tasks];
+        for (const ge of data.events) {
+          if (!existing.find(t => t.title === ge.title)) {
+            existing.push({
+              id: Date.now() + Math.random(),
+              title: ge.title,
+              assignee: "All",
+              assigneeEmoji: "👨‍👩‍👧‍👧",
+              due: "Today",
+              points: 5,
+              recurring: null,
+              category: "Google Tasks",
+              completed: false,
+              priority: "medium" as const,
+            });
+          }
+        }
+        setTasks(existing);
+        showToast(`✅ Synced ${data.events.length} Google tasks`);
+      } else {
+        showToast("No Google tasks found");
+      }
+    } catch {
+      showToast("Failed to sync Google tasks");
+    }
+    setGoogleSyncing(false);
+  };
+
   const adoptSuggestion = (suggestion: Task) => {
     setTasks(prev => [...prev, { ...suggestion, id: Date.now() }]);
     setAiSuggestions(prev => prev.filter(s => s.title !== suggestion.title));
@@ -427,6 +465,13 @@ export default function TasksPage() {
           </button>
         }
       />
+
+      {/* Toast */}
+      {toast && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-xl text-sm font-medium bg-nori-500/20 border border-nori-500/30 text-nori-300 shadow-lg backdrop-blur-sm animate-in fade-in slide-in-from-top-2">
+          {toast}
+        </div>
+      )}
 
       {/* PIN Entry Modal */}
       {(pinTaskId !== null || pinReward !== null) && (
@@ -567,6 +612,13 @@ export default function TasksPage() {
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-violet-500/15 text-violet-400 border border-violet-500/25 hover:bg-violet-500/25 transition-all disabled:opacity-50"
                 >
                   {aiSuggesting ? "⏳ Thinking..." : "🤖 Generate Tasks"}
+                </button>
+                <button
+                  onClick={syncGoogleTasks}
+                  disabled={googleSyncing}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-cyan-500/15 text-cyan-400 border border-cyan-500/25 hover:bg-cyan-500/25 transition-all disabled:opacity-50"
+                >
+                  {googleSyncing ? "⏳ Syncing..." : "📅 Google Tasks"}
                 </button>
               </div>
               {aiSuggestions.length > 0 && (

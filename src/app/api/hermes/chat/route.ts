@@ -7,7 +7,7 @@ const DROGON_API = process.env.DROGON_API_URL || "http://localhost:6789/chat";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { message, history } = body;
+    const { message, history, context } = body;
 
     if (!message) {
       return NextResponse.json({ error: "Message is required" }, { status: 400 });
@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
     const response = await fetch(DROGON_API, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message, history: history || [] }),
+      body: JSON.stringify({ message, history: history || [], context }),
     });
 
     const data = await response.json();

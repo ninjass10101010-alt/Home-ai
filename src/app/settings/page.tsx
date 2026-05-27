@@ -223,22 +223,7 @@ export default function SettingsPage() {
   ] as const;
 
   if (!mounted) {
-    return (
-      <PageShell>
-        <TopBar title="Settings" subtitle="Customize your Consuela experience" />
-        <div className="px-4 py-6 space-y-8 animate-pulse">
-          <div className="space-y-4">
-            <div className="h-8 w-48 bg-[var(--color-surface-2)] rounded-lg" />
-            <div className="h-4 w-64 bg-[var(--color-surface-2)] rounded-lg opacity-60" />
-          </div>
-          <div className="space-y-3">
-            <div className="h-20 bg-[var(--color-surface-2)] rounded-xl" />
-            <div className="h-20 bg-[var(--color-surface-2)] rounded-xl" />
-            <div className="h-20 bg-[var(--color-surface-2)] rounded-xl" />
-          </div>
-        </div>
-      </PageShell>
-    );
+    return null;
   }
 
   return (

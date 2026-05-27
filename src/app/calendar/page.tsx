@@ -290,24 +290,26 @@ export default function CalendarPage() {
               <button
                 onClick={async () => {
                   try {
-                    const res = await fetch("/api/google-calendar");
+                    const res = await fetch("/api/google-calendar?type=event");
                     const data = await res.json();
                     if (data.events?.length) {
-                      const merged = [...calEvents];
+                      // Remove old Google-synced events, then re-add from current data
+                      const filtered = calEvents.filter((e: any) => e.member !== "Google");
                       for (const ge of data.events) {
-                        if (!merged.find(e => e.title === ge.title && e.day === new Date(ge.date).getDate())) {
-                          merged.push({
+                        const dayNum = parseInt(ge.date.split('-')[2], 10);
+                        if (!filtered.find(e => e.title === ge.title && e.day === dayNum)) {
+                          filtered.push({
                             id: Date.now() + Math.random(),
                             title: ge.title,
                             time: ge.time || "12:00 PM",
                             member: "Google",
                             color: "cyan" as const,
                             emoji: "📅",
-                            day: new Date(ge.date).getDate(),
+                            day: dayNum,
                           });
                         }
                       }
-                      setCalEvents(merged);
+                      setCalEvents(filtered);
                       showToast(`✅ Synced ${data.events.length} Google events`);
                     } else {
                       showToast("No Google Calendar events found");
