@@ -720,4 +720,84 @@ body {
   }
 }
 
+/* ─── Enhanced Seasonal & Holiday Animations ─── */
 
+/* Embers float upward (Autumn night) */
+@keyframes weatherEmberFloat {
+  0%   { transform: translateY(0px) translateX(0px) scale(1) rotate(0deg); opacity: 0; }
+  10%  { opacity: 0.9; }
+  30%  { transform: translateY(-20px) translateX(6px) scale(0.9) rotate(15deg); }
+  55%  { transform: translateY(-45px) translateX(-4px) scale(0.8) rotate(-10deg); opacity: 0.7; }
+  80%  { transform: translateY(-70px) translateX(8px) scale(0.5) rotate(20deg); opacity: 0.3; }
+  100% { transform: translateY(-95px) translateX(-2px) scale(0.1) rotate(45deg); opacity: 0; }
+}
+
+/* Aurora borealis pulse */
+@keyframes weatherAuroraPulse {
+  0%   { opacity: 0.08; transform: scaleX(1) translateY(0px); }
+  33%  { opacity: 0.22; transform: scaleX(1.04) translateY(-6px); }
+  66%  { opacity: 0.12; transform: scaleX(0.98) translateY(4px); }
+  100% { opacity: 0.08; transform: scaleX(1) translateY(0px); }
+}
+
+/* Sun halo breathe */
+@keyframes weatherSunHalo {
+  0%, 100% { opacity: 0.06; transform: scale(1); }
+  50%       { opacity: 0.18; transform: scale(1.10); }
+}
+
+/* Firefly wander: figure-8 style drift */
+@keyframes weatherFireflyWander {
+  0%   { transform: translate(0px, 0px); opacity: 0; }
+  12%  { opacity: 0.95; }
+  25%  { transform: translate(14px, -10px); }
+  50%  { transform: translate(-8px, -20px); opacity: 0.7; }
+  75%  { transform: translate(10px, -32px); }
+  88%  { opacity: 0.3; }
+  100% { transform: translate(-4px, -45px); opacity: 0; }
+}
+
+/* Leaf swirl (stronger tumble) */
+@keyframes weatherLeafSwirl {
+  0%   { transform: translateY(-10px) translateX(0px) rotate(0deg) scale(1); opacity: 0; }
+  8%   { opacity: 1; }
+  20%  { transform: translateY(20%) translateX(20px) rotate(120deg) scale(0.9); }
+  40%  { transform: translateY(42%) translateX(-15px) rotate(260deg) scale(1.05); }
+  60%  { transform: translateY(63%) translateX(22px) rotate(380deg) scale(0.85); }
+  80%  { transform: translateY(85%) translateX(-8px) rotate(500deg) scale(0.9); opacity: 0.7; }
+  100% { transform: translateY(115%) translateX(5px) rotate(620deg) scale(0.6); opacity: 0; }
+}
+
+/* Snow crystal fall */
+@keyframes weatherSnowAccumulate {
+  0%   { transform: translateY(-5px) translateX(0) rotate(0deg); opacity: 0; }
+  10%  { opacity: 0.9; }
+  40%  { transform: translateY(40%) translateX(8px) rotate(45deg); }
+  70%  { transform: translateY(75%) translateX(-5px) rotate(90deg); opacity: 0.7; }
+  100% { transform: translateY(112%) translateX(3px) rotate(135deg); opacity: 0; }
+}
+
+/* Confetti burst + drift (Cinco de Mayo / party) */
+@keyframes weatherConfettiFall {
+  0%   { transform: translateY(-5%) rotate(0deg) scaleX(1); opacity: 0; }
+  8%   { opacity: 1; }
+  25%  { transform: translateY(22%) rotate(90deg) scaleX(-1); }
+  50%  { transform: translateY(52%) rotate(200deg) scaleX(1); }
+  75%  { transform: translateY(78%) rotate(310deg) scaleX(-1); opacity: 0.7; }
+  100% { transform: translateY(112%) rotate(430deg) scaleX(1); opacity: 0; }
+}
+
+/* Shamrock float */
+@keyframes weatherShamrockFloat {
+  0%   { transform: translateY(0px) rotate(0deg) scale(0.8); opacity: 0; }
+  12%  { opacity: 0.9; }
+  33%  { transform: translateY(-18px) rotate(45deg) scale(1); }
+  66%  { transform: translateY(-40px) rotate(-20deg) scale(0.9); opacity: 0.6; }
+  100% { transform: translateY(-65px) rotate(60deg) scale(0.5); opacity: 0; }
+}
+
+/* Harvest float (Thanksgiving) */
+@keyframes weatherHarvestFloat {
+  0%, 100% { transform: translateY(0px) rotate(-5deg) scale(1); opacity: 0.7; }
+  50%       { transform: translateY(-10px) rotate(5deg) scale(1.05); opacity: 1; }
+}

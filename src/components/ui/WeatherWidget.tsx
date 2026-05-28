@@ -74,10 +74,16 @@ function detectAutoHoliday(): HolidayOverride {
   if (month === 0 && day <= 7) return "newyears";
   // Valentine's: Feb 10-16
   if (month === 1 && day >= 10 && day <= 16) return "valentines";
+  // St. Patrick's Day: Mar 14-17
+  if (month === 2 && day >= 14 && day <= 17) return "stpatricks";
+  // Cinco de Mayo: May 3-6
+  if (month === 4 && day >= 3 && day <= 6) return "cincodemayo";
   // 4th of July: July 1-7
   if (month === 6 && day >= 1 && day <= 7) return "july4th";
   // Halloween season: Oct 25 - Oct 31
   if (month === 9 && day >= 25) return "halloween";
+  // Thanksgiving: 4th Thursday of November (approx Nov 22-28)
+  if (month === 10 && day >= 22 && day <= 28) return "thanksgiving";
 
   return "none";
 }
@@ -180,6 +186,30 @@ function getHolidayTheme(holiday: HolidayOverride): Partial<VisualTheme> | null 
         accentColor: "#eab308",
         overlayType: "newyears",
         particleType: "spark",
+      };
+    case "cincodemayo":
+      return {
+        bgGradient: "linear-gradient(160deg, #0a1a00 0%, #1a0a00 25%, #1a0000 50%, #00001a 75%, #001a0a 100%)",
+        glowColor: "rgba(220,38,38,0.30)",
+        accentColor: "#f59e0b",
+        overlayType: "cincodemayo",
+        particleType: "confetti",
+      };
+    case "thanksgiving":
+      return {
+        bgGradient: "linear-gradient(160deg, #1c0a00 0%, #2d1600 35%, #1a0f00 65%, #0d0a00 100%)",
+        glowColor: "rgba(217,119,6,0.30)",
+        accentColor: "#d97706",
+        overlayType: "thanksgiving",
+        particleType: "harvest",
+      };
+    case "stpatricks":
+      return {
+        bgGradient: "linear-gradient(160deg, #001a00 0%, #002d00 35%, #001500 65%, #000d00 100%)",
+        glowColor: "rgba(34,197,94,0.30)",
+        accentColor: "#22c55e",
+        overlayType: "stpatricks",
+        particleType: "shamrock",
       };
     default:
       return null;
@@ -324,39 +354,103 @@ const ICONS: Record<Condition, (props: { tod: TimeOfDayFlag }) => React.ReactEle
 // ─── Season Background Art ────────────────────────────────────────────────────
 
 function SpringBackdrop({ tod }: { tod: TimeOfDayFlag }) {
+  const branchColor = tod === "night" ? "#f9a8d4" : "#be185d";
+  const blossomFill = tod === "night" ? "#fbcfe8" : "#fce7f3";
+  const blossomCenter = tod === "night" ? "#f472b6" : "#ec4899";
+  const grassColor = tod === "night" ? "#4ade80" : "#16a34a";
+
   return (
     <svg className="absolute inset-0 w-full h-full" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-      {/* Cherry blossom branches - top right */}
-      <g opacity="0.22">
-        <line x1="260" y1="0" x2="220" y2="60" stroke={tod === "night" ? "#f9a8d4" : "#db2777"} strokeWidth="3" strokeLinecap="round"/>
-        <line x1="220" y1="60" x2="190" y2="100" stroke={tod === "night" ? "#f9a8d4" : "#db2777"} strokeWidth="2.5" strokeLinecap="round"/>
-        <line x1="220" y1="60" x2="260" y2="90" stroke={tod === "night" ? "#f9a8d4" : "#db2777"} strokeWidth="2" strokeLinecap="round"/>
-        <line x1="190" y1="100" x2="160" y2="130" stroke={tod === "night" ? "#f9a8d4" : "#db2777"} strokeWidth="2" strokeLinecap="round"/>
-        <line x1="190" y1="100" x2="215" y2="125" stroke={tod === "night" ? "#f9a8d4" : "#db2777"} strokeWidth="1.5" strokeLinecap="round"/>
-        {/* Blossoms */}
-        {[
-          [230, 55], [240, 68], [215, 48], [255, 80], [265, 58],
-          [196, 97], [208, 88], [183, 105], [170, 115], [158, 128],
-        ].map(([cx, cy], i) => (
-          <g key={i} transform={`translate(${cx},${cy})`} style={{ animation: `weatherGlowPulse ${2 + i * 0.3}s ease-in-out ${i * 0.2}s infinite` }}>
-            {[0, 72, 144, 216, 288].map((angle, j) => (
-              <ellipse key={j} cx={Math.cos(angle * Math.PI / 180) * 4} cy={Math.sin(angle * Math.PI / 180) * 4}
-                rx="3.5" ry="2.5" transform={`rotate(${angle})`}
-                fill={tod === "night" ? "#fbcfe8" : "#fce7f3"} opacity="0.9" />
+      {/* Sky gradient overlay */}
+      <defs>
+        <linearGradient id="springSkyday" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={tod === "night" ? "#1a0d2e" : "#fce7f3"} stopOpacity="0.4" />
+          <stop offset="100%" stopColor="transparent" />
+        </linearGradient>
+      </defs>
+      <rect width="320" height="120" fill="url(#springSkyday)" />
+
+      {/* Left branch cluster */}
+      <g opacity="0.30">
+        <line x1="0" y1="100" x2="35" y2="55" stroke={branchColor} strokeWidth="5" strokeLinecap="round"/>
+        <line x1="35" y1="55" x2="15" y2="20" stroke={branchColor} strokeWidth="3.5" strokeLinecap="round"/>
+        <line x1="35" y1="55" x2="65" y2="30" stroke={branchColor} strokeWidth="3" strokeLinecap="round"/>
+        <line x1="15" y1="20" x2="5" y2="0" stroke={branchColor} strokeWidth="2.5" strokeLinecap="round"/>
+        <line x1="15" y1="20" x2="30" y2="5" stroke={branchColor} strokeWidth="2" strokeLinecap="round"/>
+        <line x1="65" y1="30" x2="80" y2="10" stroke={branchColor} strokeWidth="2" strokeLinecap="round"/>
+        <line x1="65" y1="30" x2="50" y2="10" stroke={branchColor} strokeWidth="2" strokeLinecap="round"/>
+        {/* Left blossoms */}
+        {[[5,0],[18,6],[32,5],[50,10],[65,10],[80,10],[10,20],[25,15],[38,22],[60,30],[70,28]].map(([cx,cy],i) => (
+          <g key={i} transform={`translate(${cx},${cy})`} style={{ animation: `weatherGlowPulse ${1.8+i*0.25}s ease-in-out ${i*0.18}s infinite` }}>
+            {[0,72,144,216,288].map((angle,j) => (
+              <ellipse key={j} cx={Math.cos(angle*Math.PI/180)*4} cy={Math.sin(angle*Math.PI/180)*4} rx="3.8" ry="2.6" transform={`rotate(${angle})`} fill={blossomFill} opacity="0.95"/>
             ))}
-            <circle cx="0" cy="0" r="1.5" fill={tod === "night" ? "#f472b6" : "#ec4899"} />
+            <circle cx="0" cy="0" r="1.6" fill={blossomCenter}/>
           </g>
         ))}
       </g>
-      {/* Grass at bottom */}
-      <g opacity="0.15">
-        {[10, 30, 50, 70, 90, 110, 130, 150, 170, 190, 210, 230, 250, 270, 290, 310].map((x, i) => (
-          <path key={i} d={`M${x} 200 Q${x - 5} ${175 + (i % 3) * 5} ${x + 3} ${160 + (i % 4) * 8}`}
-            stroke={tod === "night" ? "#4ade80" : "#22c55e"} strokeWidth="1.5" fill="none" strokeLinecap="round" />
+
+      {/* Right branch cluster */}
+      <g opacity="0.28">
+        <line x1="320" y1="80" x2="285" y2="40" stroke={branchColor} strokeWidth="5" strokeLinecap="round"/>
+        <line x1="285" y1="40" x2="260" y2="10" stroke={branchColor} strokeWidth="3.5" strokeLinecap="round"/>
+        <line x1="285" y1="40" x2="310" y2="15" stroke={branchColor} strokeWidth="3" strokeLinecap="round"/>
+        <line x1="260" y1="10" x2="245" y2="0" stroke={branchColor} strokeWidth="2" strokeLinecap="round"/>
+        {[[260,10],[250,2],[270,5],[295,15],[308,15],[285,40],[272,32],[295,32]].map(([cx,cy],i) => (
+          <g key={i} transform={`translate(${cx},${cy})`} style={{ animation: `weatherGlowPulse ${2+i*0.2}s ease-in-out ${i*0.15}s infinite` }}>
+            {[0,72,144,216,288].map((angle,j) => (
+              <ellipse key={j} cx={Math.cos(angle*Math.PI/180)*3.5} cy={Math.sin(angle*Math.PI/180)*3.5} rx="3.2" ry="2.2" transform={`rotate(${angle})`} fill={blossomFill} opacity="0.9"/>
+            ))}
+            <circle cx="0" cy="0" r="1.4" fill={blossomCenter}/>
+          </g>
         ))}
       </g>
-      {/* Spring mist at bottom */}
-      <ellipse cx="160" cy="200" rx="180" ry="40" fill={tod === "night" ? "rgba(217,70,239,0.06)" : "rgba(249,168,212,0.15)"} />
+
+      {/* Rolling meadow hills */}
+      <g opacity={tod === "night" ? 0.18 : 0.28}>
+        <ellipse cx="60" cy="195" rx="120" ry="30" fill={grassColor} />
+        <ellipse cx="260" cy="198" rx="100" ry="25" fill={grassColor} />
+      </g>
+
+      {/* Swaying tall grass blades */}
+      <g opacity={tod === "night" ? 0.15 : 0.22}>
+        {[8,22,38,54,70,86,102,118,134,150,166,182,198,214,230,246,262,278,294,310].map((x,i) => (
+          <path key={i} d={`M${x} 200 Q${x+(i%2===0?-6:6)} ${178+(i%3)*4} ${x+(i%2===0?3:-3)} ${160+(i%4)*6}`}
+            stroke={grassColor} strokeWidth="1.8" fill="none" strokeLinecap="round"
+            style={{ animation: `weatherCloudBob ${2.5+i*0.1}s ease-in-out ${i*0.08}s infinite` }} />
+        ))}
+      </g>
+
+      {/* Night: moon glow + firefly bokeh */}
+      {tod === "night" && (
+        <g>
+          <circle cx="60" cy="35" r="28" fill="rgba(249,168,212,0.08)" style={{ animation: "weatherSunHalo 5s ease-in-out infinite" }}/>
+          <circle cx="60" cy="35" r="18" fill="rgba(249,168,212,0.15)"/>
+          <path d="M58 22 A14 14 0 1 0 72 36 A18 18 0 0 1 58 22 Z" fill="rgba(253,164,175,0.7)"/>
+          {/* Bokeh dots */}
+          {[[40,90],[80,70],[140,110],[200,80],[250,95],[170,60],[110,85],[280,75]].map(([x,y],i) => (
+            <circle key={i} cx={x} cy={y} r={1.5+i%2} fill="rgba(249,168,212,0.5)"
+              style={{ animation: `weatherGlowPulse ${1.5+i*0.3}s ease-in-out ${i*0.2}s infinite` }}/>
+          ))}
+        </g>
+      )}
+
+      {/* Day: sun rays peaking from top-left */}
+      {tod === "day" && (
+        <g opacity="0.18">
+          <circle cx="30" cy="25" r="45" fill="rgba(251,207,232,0.3)" style={{ animation: "weatherSunHalo 4s ease-in-out infinite" }}/>
+          {[0,30,60,90,120,150,180].map((a,i) => {
+            const rad = a * Math.PI / 180;
+            return <line key={i} x1={30+Math.cos(rad)*22} y1={25+Math.sin(rad)*22} x2={30+Math.cos(rad)*38} y2={25+Math.sin(rad)*38}
+              stroke="#fce7f3" strokeWidth="2" strokeLinecap="round"
+              style={{ animation: `weatherRayPulse 2.5s ease-in-out ${i*0.3}s infinite` }}/>;
+          })}
+          <circle cx="30" cy="25" r="18" fill="rgba(252,231,243,0.5)"/>
+        </g>
+      )}
+
+      {/* Ground mist */}
+      <ellipse cx="160" cy="202" rx="200" ry="35" fill={tod === "night" ? "rgba(217,70,239,0.07)" : "rgba(249,168,212,0.18)"} />
     </svg>
   );
 }
@@ -364,42 +458,86 @@ function SpringBackdrop({ tod }: { tod: TimeOfDayFlag }) {
 function SummerBackdrop({ tod }: { tod: TimeOfDayFlag }) {
   return (
     <svg className="absolute inset-0 w-full h-full" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+      <defs>
+        <radialGradient id="summerSunGlow" cx="85%" cy="15%" r="50%">
+          <stop offset="0%" stopColor="rgba(251,191,36,0.18)" />
+          <stop offset="100%" stopColor="transparent" />
+        </radialGradient>
+        <radialGradient id="summerMoonGlow" cx="15%" cy="15%" r="40%">
+          <stop offset="0%" stopColor="rgba(167,139,250,0.12)" />
+          <stop offset="100%" stopColor="transparent" />
+        </radialGradient>
+      </defs>
+
       {tod === "night" ? (
-        /* Night: galaxy & stars */
+        /* Night: rich galaxy scene */
         <g>
-          {/* Milky way swirl */}
-          <ellipse cx="160" cy="100" rx="200" ry="60" fill="none" stroke="rgba(167,139,250,0.07)" strokeWidth="30" />
-          {/* Stars */}
-          {Array.from({ length: 40 }, (_, i) => (
-            <circle key={i} cx={(i * 73 + 11) % 320} cy={(i * 47 + 17) % 200} r={0.5 + (i % 3) * 0.5}
-              fill="white" opacity={0.4 + (i % 5) * 0.1}
-              style={{ animation: `weatherGlowPulse ${1.5 + (i % 4)}s ease-in-out ${i * 0.15}s infinite` }} />
+          <rect width="320" height="200" fill="url(#summerMoonGlow)" />
+          {/* Milky way arch */}
+          <ellipse cx="160" cy="80" rx="210" ry="55" fill="none" stroke="rgba(167,139,250,0.08)" strokeWidth="32" />
+          <ellipse cx="160" cy="80" rx="210" ry="55" fill="none" stroke="rgba(196,181,253,0.04)" strokeWidth="10" />
+          {/* Stars — varied brightness */}
+          {Array.from({ length: 55 }, (_, i) => (
+            <circle key={i}
+              cx={(i * 83 + 17) % 320} cy={(i * 53 + 11) % 200}
+              r={i%7===0 ? 2 : i%3===0 ? 1.2 : 0.6}
+              fill="white" opacity={0.3 + (i % 5) * 0.12}
+              style={{ animation: `weatherGlowPulse ${1.2+(i%5)*0.4}s ease-in-out ${i*0.12}s infinite` }} />
           ))}
-          {/* Shooting star */}
-          <line x1="280" y1="30" x2="220" y2="70" stroke="rgba(255,255,255,0.6)" strokeWidth="1"
-            strokeLinecap="round" style={{ animation: "weatherParticleSun 4s ease-out 2s infinite" }} />
+          {/* Shooting star 1 */}
+          <line x1="260" y1="20" x2="190" y2="65" stroke="rgba(255,255,255,0.7)" strokeWidth="1.2"
+            strokeLinecap="round" style={{ animation: "weatherParticleSun 5s ease-out 0.5s infinite" }} />
+          {/* Shooting star 2 */}
+          <line x1="100" y1="15" x2="40" y2="50" stroke="rgba(255,255,255,0.5)" strokeWidth="0.8"
+            strokeLinecap="round" style={{ animation: "weatherParticleSun 5s ease-out 2.8s infinite" }} />
+          {/* Crescent moon */}
+          <circle cx="275" cy="35" r="22" fill="rgba(254,240,138,0.14)" style={{ animation: "weatherSunHalo 5s ease-in-out infinite" }}/>
+          <path d="M272 20 A16 16 0 1 0 290 36 A20 20 0 0 1 272 20 Z" fill="rgba(253,224,71,0.65)"/>
+          {/* Warm sea glow at bottom */}
+          <ellipse cx="160" cy="200" rx="200" ry="30" fill="rgba(56,189,248,0.06)" style={{ animation: "weatherCloudBob 6s ease-in-out infinite" }}/>
         </g>
       ) : (
-        /* Day: tropical vibes */
+        /* Day: blazing tropical scene */
         <g>
-          {/* Sun aura rings */}
-          <circle cx="280" cy="30" r="55" fill="rgba(251,191,36,0.06)" style={{ animation: "weatherGlowPulse 3s ease-in-out infinite" }} />
-          <circle cx="280" cy="30" r="38" fill="rgba(251,191,36,0.08)" style={{ animation: "weatherGlowPulse 2.5s ease-in-out 0.5s infinite" }} />
-          {/* Stylized palm silhouette */}
-          <g opacity="0.18">
-            <line x1="280" y1="200" x2="268" y2="110" stroke="#15803d" strokeWidth="5" strokeLinecap="round"/>
-            {/* Palm leaves */}
-            <path d="M268 115 Q240 90 220 105" stroke="#15803d" strokeWidth="3" fill="none" strokeLinecap="round"/>
-            <path d="M268 120 Q295 85 315 95" stroke="#15803d" strokeWidth="3" fill="none" strokeLinecap="round"/>
-            <path d="M268 125 Q250 100 245 80" stroke="#15803d" strokeWidth="2.5" fill="none" strokeLinecap="round"/>
-            <path d="M268 115 Q285 100 300 110" stroke="#15803d" strokeWidth="2.5" fill="none" strokeLinecap="round"/>
-            <circle cx="265" cy="78" r="6" fill="#854d0e" opacity="0.5"/>
+          <rect width="320" height="200" fill="url(#summerSunGlow)" />
+          {/* Sun halo rings */}
+          <circle cx="285" cy="28" r="70" fill="rgba(251,191,36,0.05)" style={{ animation: "weatherSunHalo 3s ease-in-out infinite" }}/>
+          <circle cx="285" cy="28" r="50" fill="rgba(251,191,36,0.08)" style={{ animation: "weatherSunHalo 2.5s ease-in-out 0.5s infinite" }}/>
+          <circle cx="285" cy="28" r="30" fill="rgba(251,191,36,0.12)" style={{ animation: "weatherSunHalo 2s ease-in-out 1s infinite" }}/>
+          {/* Sun rays */}
+          {Array.from({length:12},(_, i) => {
+            const a = (i/12)*Math.PI*2;
+            return <line key={i} x1={285+Math.cos(a)*32} y1={28+Math.sin(a)*32} x2={285+Math.cos(a)*52} y2={28+Math.sin(a)*52}
+              stroke="rgba(251,191,36,0.25)" strokeWidth="2" strokeLinecap="round"
+              style={{ animation: `weatherRayPulse 2s ease-in-out ${i*0.17}s infinite` }}/>;
+          })}
+          <circle cx="285" cy="28" r="18" fill="rgba(251,191,36,0.9)"/>
+          <circle cx="285" cy="28" r="14" fill="#f59e0b"/>
+          {/* Tall palm tree — left side */}
+          <g opacity="0.22">
+            <path d="M55 200 Q52 160 50 120 Q48 90 58 70" stroke="#15803d" strokeWidth="6" fill="none" strokeLinecap="round"/>
+            <path d="M58 70 Q30 48 10 62" stroke="#15803d" strokeWidth="4" fill="none" strokeLinecap="round"/>
+            <path d="M58 70 Q85 42 105 55" stroke="#15803d" strokeWidth="4" fill="none" strokeLinecap="round"/>
+            <path d="M58 70 Q40 50 35 30" stroke="#15803d" strokeWidth="3" fill="none" strokeLinecap="round"/>
+            <path d="M58 70 Q80 52 88 35" stroke="#15803d" strokeWidth="3" fill="none" strokeLinecap="round"/>
+            <path d="M58 70 Q60 48 55 25" stroke="#15803d" strokeWidth="2.5" fill="none" strokeLinecap="round"/>
+            <circle cx="40" cy="65" r="5" fill="#78350f" opacity="0.6"/>
+            <circle cx="74" cy="60" r="4" fill="#78350f" opacity="0.6"/>
           </g>
+          {/* Distant palm — right */}
+          <g opacity="0.14">
+            <path d="M290 200 Q288 170 287 145 Q286 125 292 110" stroke="#166534" strokeWidth="4" fill="none" strokeLinecap="round"/>
+            <path d="M292 112 Q272 95 258 104" stroke="#166534" strokeWidth="3" fill="none" strokeLinecap="round"/>
+            <path d="M292 112 Q312 92 320 102" stroke="#166534" strokeWidth="3" fill="none" strokeLinecap="round"/>
+            <path d="M292 112 Q280 96 277 82" stroke="#166534" strokeWidth="2.5" fill="none" strokeLinecap="round"/>
+          </g>
+          {/* Ocean horizon glow */}
+          <ellipse cx="160" cy="200" rx="220" ry="28" fill="rgba(56,189,248,0.18)" />
           {/* Heat shimmer waves */}
-          {[0, 1, 2].map(i => (
-            <path key={i} d={`M0 ${160 + i * 15} Q80 ${155 + i * 15} 160 ${162 + i * 15} Q240 ${169 + i * 15} 320 ${160 + i * 15}`}
-              stroke="rgba(251,191,36,0.08)" strokeWidth="2" fill="none"
-              style={{ animation: `weatherCloudBob ${3 + i}s ease-in-out ${i * 0.7}s infinite` }} />
+          {[0,1,2,3].map(i => (
+            <path key={i} d={`M0 ${155+i*12} Q80 ${150+i*12} 160 ${157+i*12} Q240 ${164+i*12} 320 ${155+i*12}`}
+              stroke="rgba(251,191,36,0.07)" strokeWidth="3" fill="none"
+              style={{ animation: `weatherCloudBob ${2.5+i*0.8}s ease-in-out ${i*0.6}s infinite` }}/>
           ))}
         </g>
       )}
@@ -408,69 +546,209 @@ function SummerBackdrop({ tod }: { tod: TimeOfDayFlag }) {
 }
 
 function AutumnBackdrop({ tod }: { tod: TimeOfDayFlag }) {
+  const trunkColor = tod === "night" ? "#92400e" : "#6b2d0a";
   return (
     <svg className="absolute inset-0 w-full h-full" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-      {/* Bare oak tree silhouette */}
-      <g opacity="0.20">
-        <line x1="30" y1="200" x2="35" y2="130" stroke={tod === "night" ? "#92400e" : "#78350f"} strokeWidth="6" strokeLinecap="round"/>
-        <line x1="35" y1="130" x2="25" y2="80" stroke={tod === "night" ? "#92400e" : "#78350f"} strokeWidth="4" strokeLinecap="round"/>
-        <line x1="35" y1="130" x2="55" y2="100" stroke={tod === "night" ? "#92400e" : "#78350f"} strokeWidth="3.5" strokeLinecap="round"/>
-        <line x1="25" y1="80" x2="15" y2="50" stroke={tod === "night" ? "#92400e" : "#78350f"} strokeWidth="3" strokeLinecap="round"/>
-        <line x1="25" y1="80" x2="40" y2="55" stroke={tod === "night" ? "#92400e" : "#78350f"} strokeWidth="2.5" strokeLinecap="round"/>
-        <line x1="55" y1="100" x2="70" y2="75" stroke={tod === "night" ? "#92400e" : "#78350f"} strokeWidth="2.5" strokeLinecap="round"/>
-        <line x1="55" y1="100" x2="45" y2="70" stroke={tod === "night" ? "#92400e" : "#78350f"} strokeWidth="2" strokeLinecap="round"/>
+      <defs>
+        <radialGradient id="autumnMoon" cx="85%" cy="18%" r="20%">
+          <stop offset="0%" stopColor="rgba(251,191,36,0.22)" />
+          <stop offset="100%" stopColor="transparent" />
+        </radialGradient>
+      </defs>
+
+      {/* Sky wash */}
+      {tod === "night" && <rect width="320" height="200" fill="url(#autumnMoon)" />}
+
+      {/* Large oak tree — left, with full foliage crown */}
+      <g opacity={tod === "night" ? 0.28 : 0.32}>
+        {/* Trunk + main branches */}
+        <line x1="60" y1="200" x2="62" y2="140" stroke={trunkColor} strokeWidth="8" strokeLinecap="round"/>
+        <line x1="62" y1="140" x2="45" y2="90" stroke={trunkColor} strokeWidth="5.5" strokeLinecap="round"/>
+        <line x1="62" y1="140" x2="85" y2="100" stroke={trunkColor} strokeWidth="5" strokeLinecap="round"/>
+        <line x1="45" y1="90" x2="28" y2="55" stroke={trunkColor} strokeWidth="4" strokeLinecap="round"/>
+        <line x1="45" y1="90" x2="62" y2="58" stroke={trunkColor} strokeWidth="3.5" strokeLinecap="round"/>
+        <line x1="85" y1="100" x2="105" y2="68" stroke={trunkColor} strokeWidth="3.5" strokeLinecap="round"/>
+        <line x1="85" y1="100" x2="72" y2="72" stroke={trunkColor} strokeWidth="3" strokeLinecap="round"/>
+        <line x1="28" y1="55" x2="15" y2="28" stroke={trunkColor} strokeWidth="2.5" strokeLinecap="round"/>
+        <line x1="28" y1="55" x2="38" y2="30" stroke={trunkColor} strokeWidth="2.5" strokeLinecap="round"/>
+        <line x1="62" y1="58" x2="52" y2="35" stroke={trunkColor} strokeWidth="2.5" strokeLinecap="round"/>
+        <line x1="62" y1="58" x2="75" y2="35" stroke={trunkColor} strokeWidth="2" strokeLinecap="round"/>
+        <line x1="105" y1="68" x2="118" y2="42" stroke={trunkColor} strokeWidth="2.5" strokeLinecap="round"/>
+        <line x1="105" y1="68" x2="96" y2="42" stroke={trunkColor} strokeWidth="2" strokeLinecap="round"/>
+        {/* Foliage cloud clusters — warm autumn colors */}
+        {[
+          [20, 22, 35, tod === "night" ? "rgba(154,52,18,0.55)" : "rgba(234,88,12,0.60)"],
+          [40, 28, 30, tod === "night" ? "rgba(180,83,9,0.50)" : "rgba(245,158,11,0.58)"],
+          [62, 30, 28, tod === "night" ? "rgba(161,47,0,0.55)" : "rgba(220,38,38,0.55)"],
+          [80, 38, 32, tod === "night" ? "rgba(154,52,18,0.45)" : "rgba(234,88,12,0.50)"],
+          [105, 45, 30, tod === "night" ? "rgba(120,53,15,0.50)" : "rgba(202,138,4,0.55)"],
+          [48, 55, 25, tod === "night" ? "rgba(180,83,9,0.40)" : "rgba(249,115,22,0.50)"],
+          [72, 55, 22, tod === "night" ? "rgba(161,47,0,0.40)" : "rgba(239,68,68,0.48)"],
+          [28, 50, 20, tod === "night" ? "rgba(120,53,15,0.35)" : "rgba(202,138,4,0.45)"],
+          [95, 60, 20, tod === "night" ? "rgba(154,52,18,0.35)" : "rgba(234,88,12,0.42)"],
+        ].map(([cx, cy, r, fill], i) => (
+          <ellipse key={i} cx={cx as number} cy={cy as number} rx={(r as number) * 1.4} ry={r as number}
+            fill={fill as string}
+            style={{ animation: `weatherCloudBob ${3.5+i*0.4}s ease-in-out ${i*0.25}s infinite` }}/>
+        ))}
       </g>
-      {/* Fog layers */}
-      {[0, 1, 2].map(i => (
-        <ellipse key={i} cx={80 + i * 70} cy={180 + i * 10} rx={100 + i * 20} ry={30 + i * 5}
-          fill={tod === "night" ? `rgba(180,140,100,0.0${4 + i})` : `rgba(253,186,116,0.0${8 + i * 2})`}
-          style={{ animation: `weatherCloudBob ${5 + i * 2}s ease-in-out ${i}s infinite` }} />
-      ))}
-      {/* Moon or sun through haze */}
+
+      {/* Smaller bare tree — right */}
+      <g opacity={tod === "night" ? 0.20 : 0.22}>
+        <line x1="280" y1="200" x2="278" y2="155" stroke={trunkColor} strokeWidth="5" strokeLinecap="round"/>
+        <line x1="278" y1="155" x2="265" y2="115" stroke={trunkColor} strokeWidth="3.5" strokeLinecap="round"/>
+        <line x1="278" y1="155" x2="295" y2="125" stroke={trunkColor} strokeWidth="3" strokeLinecap="round"/>
+        <line x1="265" y1="115" x2="252" y2="88" stroke={trunkColor} strokeWidth="2.5" strokeLinecap="round"/>
+        <line x1="265" y1="115" x2="274" y2="88" stroke={trunkColor} strokeWidth="2" strokeLinecap="round"/>
+        <line x1="295" y1="125" x2="308" y2="100" stroke={trunkColor} strokeWidth="2.5" strokeLinecap="round"/>
+        <line x1="295" y1="125" x2="285" y2="100" stroke={trunkColor} strokeWidth="2" strokeLinecap="round"/>
+        {/* Small foliage clumps */}
+        {[
+          [252, 82, 18, tod === "night" ? "rgba(180,83,9,0.40)" : "rgba(234,88,12,0.45)"],
+          [278, 82, 16, tod === "night" ? "rgba(154,52,18,0.35)" : "rgba(245,158,11,0.40)"],
+          [308, 94, 15, tod === "night" ? "rgba(120,53,15,0.35)" : "rgba(220,38,38,0.40)"],
+        ].map(([cx, cy, r, fill], i) => (
+          <ellipse key={i} cx={cx as number} cy={cy as number} rx={(r as number)*1.3} ry={r as number}
+            fill={fill as string}
+            style={{ animation: `weatherCloudBob ${4+i*0.5}s ease-in-out ${i*0.3}s infinite` }}/>
+        ))}
+      </g>
+
+      {/* Harvest moon (night) or warm sun (day) */}
       {tod === "night" ? (
-        <circle cx="280" cy="35" r="22" fill="rgba(251,191,36,0.12)" style={{ animation: "weatherGlowPulse 4s ease-in-out infinite" }}>
-          <animate attributeName="r" values="22;25;22" dur="4s" repeatCount="indefinite" />
-        </circle>
+        <g>
+          <circle cx="240" cy="30" r="36" fill="rgba(251,191,36,0.10)" style={{ animation: "weatherSunHalo 5s ease-in-out infinite" }}/>
+          <circle cx="240" cy="30" r="24" fill="rgba(251,191,36,0.18)"/>
+          <circle cx="240" cy="30" r="18" fill="rgba(253,224,71,0.55)"/>
+          <circle cx="233" cy="24" r="5" fill="rgba(245,158,11,0.3)"/>
+          <circle cx="245" cy="32" r="3" fill="rgba(245,158,11,0.25)"/>
+        </g>
       ) : (
-        <circle cx="280" cy="35" r="35" fill="rgba(251,191,36,0.15)" style={{ animation: "weatherGlowPulse 3s ease-in-out infinite" }} />
+        <g>
+          <circle cx="260" cy="25" r="45" fill="rgba(251,191,36,0.10)" style={{ animation: "weatherSunHalo 3.5s ease-in-out infinite" }}/>
+          <circle cx="260" cy="25" r="28" fill="rgba(251,191,36,0.18)"/>
+        </g>
       )}
+
+      {/* Rolling ground */}
+      <path d="M0 185 Q55 175 110 182 Q165 189 220 178 Q270 167 320 178 L320 200 L0 200 Z"
+        fill={tod === "night" ? "rgba(120,53,15,0.18)" : "rgba(146,64,14,0.28)"} />
+
+      {/* Fog banks */}
+      {[0,1,2].map(i => (
+        <ellipse key={i} cx={70+i*90} cy={190+i*6} rx={85+i*15} ry={22+i*4}
+          fill={tod === "night" ? `rgba(180,140,100,0.06)` : `rgba(253,186,116,0.10)`}
+          style={{ animation: `weatherCloudBob ${5+i*2}s ease-in-out ${i}s infinite` }} />
+      ))}
     </svg>
   );
 }
 
 function WinterBackdrop({ tod }: { tod: TimeOfDayFlag }) {
+  const iceColor = tod === "night" ? "rgba(147,197,253,0.30)" : "rgba(219,234,254,0.55)";
+  const snowColor = tod === "night" ? "rgba(186,230,253,0.14)" : "rgba(219,234,254,0.50)";
+  const treeColor = tod === "night" ? "#1e3a5f" : "#1d4ed8";
+
   return (
     <svg className="absolute inset-0 w-full h-full" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-      {/* Aurora borealis (night) */}
+      <defs>
+        <linearGradient id="auroraGrad1" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor="rgba(52,211,153,0)" />
+          <stop offset="30%" stopColor="rgba(52,211,153,0.22)" />
+          <stop offset="70%" stopColor="rgba(99,102,241,0.18)" />
+          <stop offset="100%" stopColor="rgba(99,102,241,0)" />
+        </linearGradient>
+        <linearGradient id="auroraGrad2" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor="rgba(167,139,250,0)" />
+          <stop offset="40%" stopColor="rgba(167,139,250,0.16)" />
+          <stop offset="60%" stopColor="rgba(52,211,153,0.12)" />
+          <stop offset="100%" stopColor="rgba(52,211,153,0)" />
+        </linearGradient>
+        <linearGradient id="auroraGrad3" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor="rgba(236,72,153,0)" />
+          <stop offset="50%" stopColor="rgba(236,72,153,0.10)" />
+          <stop offset="100%" stopColor="rgba(147,197,253,0)" />
+        </linearGradient>
+      </defs>
+
+      {/* Aurora borealis bands (night) */}
       {tod === "night" && (
         <g>
-          <path d="M0 60 Q80 20 160 50 Q240 80 320 40" stroke="rgba(52,211,153,0.18)" strokeWidth="25" fill="none" strokeLinecap="round"
-            style={{ animation: "weatherCloudBob 6s ease-in-out infinite" }} />
-          <path d="M0 80 Q90 40 170 65 Q250 90 320 55" stroke="rgba(99,102,241,0.14)" strokeWidth="20" fill="none" strokeLinecap="round"
-            style={{ animation: "weatherCloudBob 8s ease-in-out 1s infinite" }} />
-          <path d="M0 100 Q100 55 180 80 Q260 105 320 70" stroke="rgba(167,139,250,0.10)" strokeWidth="15" fill="none" strokeLinecap="round"
-            style={{ animation: "weatherCloudBob 7s ease-in-out 2s infinite" }} />
+          <path d="M-20 55 Q80 15 160 45 Q240 75 340 35" stroke="url(#auroraGrad1)" strokeWidth="30" fill="none" strokeLinecap="round"
+            style={{ animation: "weatherAuroraPulse 7s ease-in-out infinite" }} />
+          <path d="M-20 75 Q90 35 175 60 Q260 85 340 50" stroke="url(#auroraGrad2)" strokeWidth="22" fill="none" strokeLinecap="round"
+            style={{ animation: "weatherAuroraPulse 9s ease-in-out 1.5s infinite" }} />
+          <path d="M-20 95 Q100 50 185 75 Q265 100 340 65" stroke="url(#auroraGrad3)" strokeWidth="15" fill="none" strokeLinecap="round"
+            style={{ animation: "weatherAuroraPulse 8s ease-in-out 3s infinite" }} />
+          <path d="M-20 115 Q110 65 195 90 Q270 115 340 80" stroke="url(#auroraGrad1)" strokeWidth="10" fill="none" strokeLinecap="round"
+            style={{ animation: "weatherAuroraPulse 6s ease-in-out 4.5s infinite" }} />
+          {/* Stars */}
+          {Array.from({ length: 30 }, (_, i) => (
+            <circle key={i} cx={(i * 97 + 23) % 320} cy={(i * 41 + 8) % 130} r={0.5 + (i % 3) * 0.6}
+              fill="white" opacity={0.35 + (i % 4) * 0.12}
+              style={{ animation: `weatherGlowPulse ${1.8+(i%4)*0.4}s ease-in-out ${i*0.1}s infinite` }}/>
+          ))}
+          {/* Moon */}
+          <circle cx="265" cy="28" r="30" fill="rgba(147,197,253,0.10)" style={{ animation: "weatherSunHalo 6s ease-in-out infinite" }}/>
+          <circle cx="265" cy="28" r="18" fill="rgba(186,230,253,0.22)"/>
+          <path d="M263 14 A16 16 0 1 0 281 30 A20 20 0 0 1 263 14 Z" fill="rgba(219,234,254,0.65)"/>
         </g>
       )}
-      {/* Snow ground */}
-      <path d="M0 175 Q40 168 80 172 Q120 176 160 170 Q200 164 240 171 Q280 178 320 172 L320 200 L0 200 Z"
-        fill={tod === "night" ? "rgba(186,230,253,0.12)" : "rgba(219,234,254,0.40)"} />
-      {/* Icicles from top */}
-      {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => {
-        const x = 10 + i * 32;
-        const h = 8 + (i % 3) * 6;
+
+      {/* Day: bright overcast glow */}
+      {tod === "day" && (
+        <g>
+          <circle cx="160" cy="-10" r="80" fill="rgba(219,234,254,0.30)" style={{ animation: "weatherSunHalo 5s ease-in-out infinite" }}/>
+        </g>
+      )}
+
+      {/* Dense pine forest — left */}
+      {[0, 30, 58].map((ox, j) => (
+        <g key={j} opacity={0.22 - j*0.04}>
+          <polygon points={`${ox+10} 200,${ox+36} 200,${ox+23} 145`} fill={treeColor} />
+          <polygon points={`${ox+5} 168,${ox+41} 168,${ox+23} 120`} fill={treeColor} />
+          <polygon points={`${ox+10} 143,${ox+36} 143,${ox+23} 100`} fill={treeColor} />
+          <polygon points={`${ox+14} 120,${ox+32} 120,${ox+23} 82`} fill={treeColor} />
+          {/* Snow caps on each tier */}
+          <ellipse cx={ox+23} cy={145} rx="14" ry="4" fill={iceColor}/>
+          <ellipse cx={ox+23} cy={120} rx="12" ry="3.5" fill={iceColor}/>
+          <ellipse cx={ox+23} cy={100} rx="10" ry="3" fill={iceColor}/>
+          <ellipse cx={ox+23} cy={82} rx="7" ry="2.5" fill={iceColor}/>
+        </g>
+      ))}
+
+      {/* Dense pine forest — right */}
+      {[250, 278, 305].map((ox, j) => (
+        <g key={j} opacity={0.20 - j*0.03}>
+          <polygon points={`${ox+10} 200,${ox+36} 200,${ox+23} 150`} fill={treeColor} />
+          <polygon points={`${ox+4} 172,${ox+42} 172,${ox+23} 125`} fill={treeColor} />
+          <polygon points={`${ox+10} 148,${ox+36} 148,${ox+23} 108`} fill={treeColor} />
+          <ellipse cx={ox+23} cy={150} rx="14" ry="4" fill={iceColor}/>
+          <ellipse cx={ox+23} cy={125} rx="12" ry="3.5" fill={iceColor}/>
+          <ellipse cx={ox+23} cy={108} rx="9" ry="3" fill={iceColor}/>
+        </g>
+      ))}
+
+      {/* Icicles row — varied lengths */}
+      {Array.from({length: 14}, (_, i) => {
+        const x = 8 + i * 22;
+        const h = 8 + (i % 4) * 7;
         return (
-          <path key={i} d={`M${x - 3} 0 L${x} ${h} L${x + 3} 0`}
-            fill={tod === "night" ? "rgba(186,230,253,0.25)" : "rgba(219,234,254,0.50)"} />
+          <g key={i}>
+            <path d={`M${x-4} 0 L${x} ${h} L${x+4} 0`} fill={iceColor}/>
+            <ellipse cx={x} cy={0} rx="4" ry="2" fill={iceColor}/>
+          </g>
         );
       })}
-      {/* Pine tree silhouettes */}
-      {[5, 290].map((bx, j) => (
-        <g key={j} opacity="0.15">
-          <polygon points={`${bx} 200, ${bx + 20} 200, ${bx + 10} 130`} fill={tod === "night" ? "#1e3a5f" : "#1e3a8a"} />
-          <polygon points={`${bx - 5} 165, ${bx + 25} 165, ${bx + 10} 110`} fill={tod === "night" ? "#1e3a5f" : "#1e3a8a"} />
-          <polygon points={`${bx} 145, ${bx + 20} 145, ${bx + 10} 95`} fill={tod === "night" ? "#1e3a5f" : "#1e3a8a"} />
-        </g>
+
+      {/* Snow ground — layered bumps */}
+      <path d="M0 182 Q28 172 58 178 Q88 184 118 176 Q148 168 178 175 Q208 182 238 174 Q268 166 298 173 Q312 177 320 175 L320 200 L0 200 Z"
+        fill={snowColor} />
+      <path d="M0 192 Q50 188 100 191 Q150 194 200 189 Q250 184 320 190 L320 200 L0 200 Z"
+        fill={tod === "night" ? "rgba(186,230,253,0.20)" : "rgba(219,234,254,0.65)"} />
+      {/* Footprints in snow */}
+      {[[80,188],[90,185],[100,188],[110,185]].map(([x,y],i) => (
+        <ellipse key={i} cx={x} cy={y} rx="4" ry="2.5" fill={tod === "night" ? "rgba(147,197,253,0.15)" : "rgba(186,230,253,0.35)"}/>
       ))}
     </svg>
   );
@@ -616,9 +894,157 @@ function NewYearsOverlay() {
   );
 }
 
+function CincoDeMayoOverlay() {
+  // Papel picado banner string + colorful triangle cut-outs
+  const bannerColors = ["#ef4444","#f59e0b","#22c55e","#3b82f6","#a855f7","#ec4899","#ffffff"];
+  return (
+    <svg className="absolute inset-0 w-full h-full" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style={{ pointerEvents: "none" }}>
+      {/* Fiesta string 1 — main banner */}
+      <path d="M0 6 Q40 2 80 8 Q120 14 160 6 Q200 -2 240 6 Q280 14 320 6" stroke="rgba(80,40,0,0.6)" strokeWidth="1.5" fill="none"/>
+      {/* Papel picado flags */}
+      {bannerColors.map((color, i) => {
+        const x = 15 + i * 42;
+        const ys = 6 + Math.sin((x/320)*Math.PI*2)*4;
+        return (
+          <g key={i} style={{ animation: `weatherCloudBob ${2+i*0.3}s ease-in-out ${i*0.2}s infinite` }}>
+            <polygon points={`${x-10} ${ys+2},${x+10} ${ys+2},${x} ${ys+22}`} fill={color} opacity="0.88"/>
+            {/* Cut-out diamond */}
+            <polygon points={`${x-5} ${ys+10},${x} ${ys+6},${x+5} ${ys+10},${x} ${ys+14}`} fill="rgba(0,0,0,0.25)"/>
+            {/* Glow */}
+            <circle cx={x} cy={ys+12} r="8" fill={color} opacity="0.10" style={{ filter: `drop-shadow(0 0 6px ${color})` }}/>
+          </g>
+        );
+      })}
+
+      {/* Fiesta string 2 — lower */}
+      <path d="M0 30 Q50 26 100 32 Q150 38 200 30 Q260 22 320 30" stroke="rgba(80,40,0,0.4)" strokeWidth="1" fill="none"/>
+      {["#fbbf24","#ef4444","#22c55e","#60a5fa","#d946ef"].map((color, i) => {
+        const x = 30 + i * 60;
+        const ys = 30 + Math.sin((x/320)*Math.PI*2)*3;
+        return (
+          <g key={i} style={{ animation: `weatherCloudBob ${2.5+i*0.25}s ease-in-out ${i*0.35}s infinite` }}>
+            <polygon points={`${x-8} ${ys+2},${x+8} ${ys+2},${x} ${ys+18}`} fill={color} opacity="0.82"/>
+            <polygon points={`${x-4} ${ys+9},${x} ${ys+5},${x+4} ${ys+9},${x} ${ys+13}`} fill="rgba(0,0,0,0.2)"/>
+          </g>
+        );
+      })}
+
+      {/* Warm golden glow at bottom */}
+      <ellipse cx="160" cy="210" rx="180" ry="45" fill="rgba(245,158,11,0.08)"/>
+      {/* Mexico flag color bands at base */}
+      <rect x="0" y="188" width="107" height="4" fill="rgba(34,197,94,0.25)" rx="2"/>
+      <rect x="107" y="188" width="106" height="4" fill="rgba(255,255,255,0.20)" rx="2"/>
+      <rect x="213" y="188" width="107" height="4" fill="rgba(220,38,38,0.25)" rx="2"/>
+      {/* Starburst lantern decorations */}
+      {[[50,50],[270,45],[160,35]].map(([cx,cy],i) => (
+        <g key={i} style={{ animation: `weatherGlowPulse ${2+i*0.6}s ease-in-out ${i*0.4}s infinite` }}>
+          {Array.from({length:8},(_,j) => {
+            const a=(j/8)*Math.PI*2;
+            return <line key={j} x1={cx} y1={cy} x2={cx+Math.cos(a)*12} y2={cy+Math.sin(a)*12}
+              stroke={bannerColors[(i+j)%bannerColors.length]} strokeWidth="1.5" strokeLinecap="round" opacity="0.7"/>;
+          })}
+          <circle cx={cx} cy={cy} r="5" fill={bannerColors[i*2%bannerColors.length]} opacity="0.8"/>
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+function ThanksgivingOverlay() {
+  return (
+    <svg className="absolute inset-0 w-full h-full" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style={{ pointerEvents: "none" }}>
+      {/* Harvest moon backdrop */}
+      <circle cx="260" cy="38" r="50" fill="rgba(217,119,6,0.08)" style={{ animation: "weatherSunHalo 5s ease-in-out infinite" }}/>
+      <circle cx="260" cy="38" r="32" fill="rgba(245,158,11,0.15)"/>
+      <circle cx="260" cy="38" r="22" fill="rgba(251,191,36,0.35)"/>
+
+      {/* Cornucopia horn silhouette — right side */}
+      <g opacity="0.28">
+        <path d="M180 120 Q220 100 265 90 Q295 85 310 95 Q295 105 280 110 Q260 115 240 120 Q210 128 180 145 Z"
+          fill="rgba(146,64,14,0.7)" />
+        <path d="M180 120 Q170 130 175 140 Q178 143 180 145 Z" fill="rgba(120,53,15,0.8)"/>
+        {/* Horn spiral */}
+        <path d="M195 130 Q205 120 215 122 Q210 127 200 128 Q195 130 195 130" stroke="rgba(253,186,116,0.5)" strokeWidth="1.5" fill="none" strokeLinecap="round"/>
+      </g>
+
+      {/* Autumn leaf crown — scattered leaves */}
+      {[
+        {x:15,y:22,r:0,color:"rgba(239,68,68,0.50)",size:14},
+        {x:40,y:15,r:20,color:"rgba(249,115,22,0.55)",size:12},
+        {x:70,y:18,r:-15,color:"rgba(202,138,4,0.50)",size:16},
+        {x:100,y:12,r:10,color:"rgba(234,88,12,0.50)",size:13},
+        {x:130,y:20,r:-10,color:"rgba(245,158,11,0.55)",size:11},
+        {x:25,y:32,r:30,color:"rgba(220,38,38,0.45)",size:10},
+        {x:55,y:28,r:-20,color:"rgba(251,191,36,0.45)",size:14},
+        {x:85,y:30,r:15,color:"rgba(239,68,68,0.40)",size:12},
+      ].map(({x,y,r,color,size},i) => (
+        <g key={i} transform={`translate(${x},${y}) rotate(${r})`}
+          style={{ animation: `weatherHarvestFloat ${3+i*0.4}s ease-in-out ${i*0.3}s infinite` }}>
+          {/* Leaf shape */}
+          <path d={`M0 0 Q${size*0.5} ${-size*0.7} ${size} 0 Q${size*0.5} ${size*0.7} 0 0`} fill={color}/>
+          <line x1="0" y1="0" x2={size} y2="0" stroke="rgba(255,255,255,0.3)" strokeWidth="0.8"/>
+        </g>
+      ))}
+
+      {/* Ground fog + warm harvest glow */}
+      {[0,1,2].map(i => (
+        <ellipse key={i} cx={80+i*80} cy={195+i*4} rx={75+i*12} ry={18+i*3}
+          fill={`rgba(217,119,6,0.0${5+i*2})`}
+          style={{ animation: `weatherCloudBob ${5+i*1.5}s ease-in-out ${i}s infinite` }}/>
+      ))}
+      <ellipse cx="160" cy="210" rx="190" ry="40" fill="rgba(180,83,9,0.07)"/>
+    </svg>
+  );
+}
+
+function StPatricksOverlay() {
+  return (
+    <svg className="absolute inset-0 w-full h-full" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style={{ pointerEvents: "none" }}>
+      {/* Rainbow arc */}
+      <g opacity="0.20">
+        <path d="M-10 200 Q80 50 160 40 Q240 50 330 200" stroke="rgba(239,68,68,0.8)" strokeWidth="5" fill="none" strokeLinecap="round"/>
+        <path d="M-10 200 Q80 62 160 52 Q240 62 330 200" stroke="rgba(249,115,22,0.8)" strokeWidth="5" fill="none" strokeLinecap="round"/>
+        <path d="M-10 200 Q80 74 160 64 Q240 74 330 200" stroke="rgba(234,179,8,0.8)" strokeWidth="5" fill="none" strokeLinecap="round"/>
+        <path d="M-10 200 Q80 86 160 76 Q240 86 330 200" stroke="rgba(34,197,94,0.9)" strokeWidth="5" fill="none" strokeLinecap="round"/>
+        <path d="M-10 200 Q80 98 160 88 Q240 98 330 200" stroke="rgba(59,130,246,0.8)" strokeWidth="5" fill="none" strokeLinecap="round"/>
+        <path d="M-10 200 Q80 110 160 100 Q240 110 330 200" stroke="rgba(139,92,246,0.8)" strokeWidth="5" fill="none" strokeLinecap="round"/>
+      </g>
+
+      {/* Pot of gold — bottom right */}
+      <g transform="translate(250,155)" opacity="0.40">
+        <ellipse cx="0" cy="-5" rx="25" ry="8" fill="rgba(234,179,8,0.8)"/>
+        <path d="M-22 0 Q-24 25 0 28 Q24 25 22 0 Z" fill="rgba(120,53,15,0.7)"/>
+        <path d="M-20 2 Q-22 22 0 25 Q22 22 20 2 Z" fill="rgba(146,64,14,0.8)"/>
+        {/* Gold coins peeking */}
+        {[-10,0,10].map((x,i) => (
+          <ellipse key={i} cx={x} cy={-3+i*2} rx="6" ry="4" fill="rgba(251,191,36,0.9)" style={{ animation: `weatherGlowPulse ${1.5+i*0.3}s ease-in-out ${i*0.2}s infinite` }}/>
+        ))}
+      </g>
+
+      {/* Clover field at base */}
+      {[15,40,65,90,115,140,165,190,215,240,265,290].map((x,i) => (
+        <g key={i} transform={`translate(${x},${182+(i%3)*5})`} opacity={0.35+i%3*0.08}
+          style={{ animation: `weatherCloudBob ${3+i*0.2}s ease-in-out ${i*0.15}s infinite` }}>
+          {/* 3-leaf clover */}
+          <circle cx="0" cy="-6" r="4.5" fill="rgba(34,197,94,0.8)"/>
+          <circle cx="-5" cy="0" r="4.5" fill="rgba(22,163,74,0.8)"/>
+          <circle cx="5" cy="0" r="4.5" fill="rgba(21,128,61,0.8)"/>
+          {i%4===0 && <circle cx="0" cy="6" r="4.5" fill="rgba(34,197,94,0.75)"/>}
+          <line x1="0" y1="0" x2="0" y2="10" stroke="rgba(21,128,61,0.7)" strokeWidth="1.5" strokeLinecap="round"/>
+        </g>
+      ))}
+
+      {/* Emerald green glow */}
+      <ellipse cx="160" cy="210" rx="200" ry="45" fill="rgba(34,197,94,0.07)"/>
+      <circle cx="160" cy="100" r="120" fill="rgba(34,197,94,0.03)" style={{ animation: "weatherSunHalo 6s ease-in-out infinite" }}/>
+    </svg>
+  );
+}
+
 // ─── Particle System ─────────────────────────────────────────────────────────
 
-type ParticleKind = "blossom" | "leaf" | "firefly" | "snowflake" | "christmas-snow" | "bat" | "spark" | "heart" | "none";
+type ParticleKind = "blossom" | "leaf" | "firefly" | "snowflake" | "christmas-snow" | "bat" | "spark" | "heart" | "confetti" | "harvest" | "shamrock" | "none";
+
 
 function WeatherParticles({ type, tod }: { type: ParticleKind; tod: TimeOfDayFlag }) {
   const [particles, setParticles] = useState<Particle[]>([]);
@@ -627,14 +1053,17 @@ function WeatherParticles({ type, tod }: { type: ParticleKind; tod: TimeOfDayFla
     if (type === "none") { setParticles([]); return; }
 
     const counts: Record<ParticleKind, number> = {
-      blossom: 18,
-      leaf: 16,
-      firefly: 14,
-      snowflake: 22,
-      "christmas-snow": 20,
-      bat: 5,
-      spark: 30,
-      heart: 12,
+      blossom: 22,
+      leaf: 20,
+      firefly: 16,
+      snowflake: 26,
+      "christmas-snow": 24,
+      bat: 6,
+      spark: 35,
+      heart: 14,
+      confetti: 28,
+      harvest: 10,
+      shamrock: 18,
       none: 0,
     };
 
@@ -775,6 +1204,57 @@ function WeatherParticles({ type, tod }: { type: ParticleKind; tod: TimeOfDayFla
           );
         }
 
+        // ── Confetti (Cinco de Mayo / party) ──
+        if (type === "confetti") {
+          const confettiColors = ["#ef4444", "#22c55e", "#3b82f6", "#f59e0b", "#a855f7", "#ec4899", "#ffffff"];
+          const color = confettiColors[p.id % confettiColors.length];
+          const isRect = p.id % 3 !== 0;
+          return (
+            <div key={p.id} className="absolute top-0"
+              style={{
+                left: `${p.x}%`,
+                width: isRect ? `${p.size * 0.5}px` : `${p.size * 0.7}px`,
+                height: isRect ? `${p.size * 1.2}px` : `${p.size * 0.7}px`,
+                background: color,
+                borderRadius: isRect ? "1px" : "50%",
+                opacity: p.opacity,
+                animation: `weatherConfettiFall ${p.duration} ease-in ${p.delay} infinite`,
+                boxShadow: `0 0 ${p.size}px ${color}55`,
+              }} />
+          );
+        }
+
+        // ── Harvest leaves (Thanksgiving) ──
+        if (type === "harvest") {
+          const harvestEmojis = ["🍂", "🍁", "🌽", "🎃", "🍄"];
+          const emoji = harvestEmojis[p.id % harvestEmojis.length];
+          return (
+            <div key={p.id} className="absolute"
+              style={{
+                left: `${p.x}%`,
+                top: `${20 + (p.y || 0) * 0.6}%`,
+                fontSize: `${p.size + 4}px`,
+                opacity: p.opacity,
+                animation: `weatherHarvestFloat ${p.duration} ease-in-out ${p.delay} infinite`,
+              }}>{emoji}</div>
+          );
+        }
+
+        // ── Shamrocks (St. Patrick's) ──
+        if (type === "shamrock") {
+          const stEmojis = ["🍀", "☘️", "🌈", "💚"];
+          const emoji = stEmojis[p.id % stEmojis.length];
+          return (
+            <div key={p.id} className="absolute top-0"
+              style={{
+                left: `${p.x}%`,
+                fontSize: `${p.size + 2}px`,
+                opacity: p.opacity,
+                animation: `weatherShamrockFloat ${p.duration} ease-in-out ${p.delay} infinite`,
+              }}>{emoji}</div>
+          );
+        }
+
         return null;
       })}
     </div>
@@ -887,8 +1367,11 @@ export default function WeatherWidget() {
 
   // Holiday label badge
   const holidayLabels: Record<HolidayOverride, string> = {
-    auto: "", none: "", christmas: "🎄 Christmas", halloween: "🎃 Halloween",
-    july4th: "🎆 4th of July", valentines: "💝 Valentine's", newyears: "🥂 New Year's"
+    auto: "", none: "",
+    christmas: "🎄 Christmas", halloween: "🎃 Halloween",
+    july4th: "🎆 4th of July", valentines: "💝 Valentine's",
+    newyears: "🥂 New Year's", cincodemayo: "🪅 Cinco de Mayo",
+    thanksgiving: "🦃 Thanksgiving", stpatricks: "🍀 St. Patrick's",
   };
 
   return (
@@ -920,6 +1403,9 @@ export default function WeatherWidget() {
                 {activeHoliday === "july4th" && <FireworksOverlay />}
                 {activeHoliday === "valentines" && <ValentinesOverlay />}
                 {activeHoliday === "newyears" && <NewYearsOverlay />}
+                {activeHoliday === "cincodemayo" && <CincoDeMayoOverlay />}
+                {activeHoliday === "thanksgiving" && <ThanksgivingOverlay />}
+                {activeHoliday === "stpatricks" && <StPatricksOverlay />}
               </>
             )}
           </>
