@@ -1,17 +1,15 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
 
 const SCHEDULES_STORAGE_KEY = "consuela-schedules";
 const MEALS_KEY = "consuela-meals";
 
-// Parse "HH:MM" or "7:30 AM" → minutes since midnight
 function parseTimeToMinutes(timeStr: string): number {
   if (!timeStr) return 0;
-  // HH:MM 24h format
   const raw = timeStr.match(/^(\d{1,2}):(\d{2})$/);
   if (raw) return parseInt(raw[1]) * 60 + parseInt(raw[2]);
-  // 12h format "7:30 AM"
   const ampm = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
   if (ampm) {
     let h = parseInt(ampm[1]);
@@ -24,10 +22,9 @@ function parseTimeToMinutes(timeStr: string): number {
   return 0;
 }
 
-// Format "HH:MM" → "7:30 AM"
 function formatTime(t: string): string {
   const mins = parseTimeToMinutes(t);
-  if (!mins && t.includes("AM") || t.includes("PM")) return t;
+  if (!mins && (t.includes("AM") || t.includes("PM"))) return t;
   const h = Math.floor(mins / 60);
   const m = mins % 60;
   const period = h >= 12 ? "PM" : "AM";
@@ -35,14 +32,15 @@ function formatTime(t: string): string {
   return `${displayH}:${m.toString().padStart(2, "0")} ${period}`;
 }
 
-const MEAL_THEMES: Record<string, { bg: string; border: string; text: string; icon: string; label: string }> = {
-  breakfast: { bg: "from-amber-400/20 to-orange-500/20", border: "border-amber-400/30", text: "text-amber-400", icon: "🌅", label: "Breakfast" },
-  lunch:     { bg: "from-sky-400/20 to-blue-500/20",    border: "border-sky-400/30",    text: "text-sky-400",   icon: "☀️",  label: "Lunch" },
-  dinner:    { bg: "from-indigo-500/20 to-purple-600/20", border: "border-indigo-400/30", text: "text-indigo-400", icon: "🌙", label: "Dinner" },
-  snack:     { bg: "from-green-400/20 to-emerald-500/20", border: "border-green-400/30", text: "text-green-400", icon: "🍎", label: "Snack" },
+const MEAL_THEMES: Record<string, { icon: string; label: string }> = {
+  breakfast: { icon: "🌅", label: "Breakfast" },
+  lunch:     { icon: "☀️", label: "Lunch" },
+  dinner:    { icon: "🌙", label: "Dinner" },
+  snack:     { icon: "🍎", label: "Snack" },
 };
 
 export default function CurrentMealWidget() {
+  const atm = useAtmosphericTheme();
   const [currentMealType, setCurrentMealType] = useState<string>("dinner");
   const [currentTimeStr, setCurrentTimeStr] = useState("");
   const [scheduledTime, setScheduledTime] = useState<string>("");
@@ -54,20 +52,17 @@ export default function CurrentMealWidget() {
       setCurrentTimeStr(now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }));
       const nowMinutes = now.getHours() * 60 + now.getMinutes();
 
-      // 1. Load schedules from localStorage (written by calendar/page.tsx)
       let schedules: any[] = [];
       try {
         const raw = localStorage.getItem(SCHEDULES_STORAGE_KEY);
         schedules = raw ? JSON.parse(raw) : [];
       } catch { schedules = []; }
 
-      // 2. Filter to meal-type schedule items only
       const mealSchedules = schedules
         .filter((s: any) => s.mealType && s.mealType !== "none")
         .map((s: any) => ({ ...s, minutes: parseTimeToMinutes(s.time) }))
         .sort((a: any, b: any) => a.minutes - b.minutes);
 
-      // 3. If no meal-tagged items yet, fallback to detecting by title keywords
       const activeMealSchedules = mealSchedules.length > 0 ? mealSchedules : schedules
         .map((s: any) => {
           const t = s.title?.toLowerCase() ?? "";
@@ -81,9 +76,7 @@ export default function CurrentMealWidget() {
         .filter(Boolean)
         .sort((a: any, b: any) => a.minutes - b.minutes);
 
-      // 4. Determine which meal is currently active:
-      //    Last scheduled meal whose time has already passed
-      let current = activeMealSchedules[0]; // default to first (e.g., breakfast)
+      let current = activeMealSchedules[0];
       for (const meal of activeMealSchedules) {
         if (meal.minutes <= nowMinutes) current = meal;
       }
@@ -93,14 +86,13 @@ export default function CurrentMealWidget() {
         setScheduledTime(formatTime(current.time));
       }
 
-      // 5. Find the actual meal plan entry for today + this meal type
       const todayShort = now.toLocaleDateString("en-US", { weekday: "short" });
       try {
         const mealsRaw = localStorage.getItem(MEALS_KEY);
         const meals: any[] = mealsRaw ? JSON.parse(mealsRaw) : [];
         const meal = meals.find(
           (m: any) => m.time === todayShort && m.mealType === (current?.mealType || "dinner")
-        ) || meals.find((m: any) => m.time === todayShort); // fallback
+        ) || meals.find((m: any) => m.time === todayShort);
         setActiveMealData(meal || null);
       } catch { setActiveMealData(null); }
     };
@@ -110,69 +102,111 @@ export default function CurrentMealWidget() {
     return () => clearInterval(interval);
   }, []);
 
-  const theme = MEAL_THEMES[currentMealType] ?? MEAL_THEMES.dinner;
+  const mealInfo = MEAL_THEMES[currentMealType] ?? MEAL_THEMES.dinner;
 
   return (
     <div
-      className={`relative overflow-hidden rounded-3xl p-5 border bg-gradient-to-br ${theme.bg} ${theme.border} shadow-xl`}
-      style={{ backdropFilter: "blur(16px)" }}
+      className="relative overflow-hidden rounded-2xl"
+      style={{
+        background: atm.bgGradient,
+        border: `1px solid ${atm.glowColor}`,
+        boxShadow: `0 0 40px ${atm.glowColor}, 0 8px 32px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.06)`,
+        transition: "box-shadow 0.6s ease, border-color 0.6s ease, background 0.6s ease",
+      }}
     >
-      {/* Decorative bg emoji */}
+      {/* Seasonal backdrop art trickling in */}
       <div
-        className="absolute top-[-15%] right-[-8%] text-9xl opacity-10 pointer-events-none select-none"
-        style={{ filter: "blur(4px)", animation: "pulse 4s ease-in-out infinite" }}
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          background: `radial-gradient(ellipse at 80% 120%, ${atm.glowColor} 0%, transparent 60%)`,
+          opacity: atm.atmosphereOpacity,
+        }}
+      />
+
+      {/* Floating seasonal emoji in corner */}
+      <div
+        className="absolute top-2 right-2 text-4xl pointer-events-none select-none meal-float-gentle"
+        style={{
+          opacity: atm.atmosphereOpacity * 1.8,
+          filter: `drop-shadow(0 0 8px ${atm.glowColor})`,
+        }}
       >
-        {theme.icon}
+        {atm.particleEmoji}
       </div>
 
-      <div className="flex items-center justify-between mb-2 relative z-10">
-        <h2 className="text-text-primary font-bold text-base flex items-center gap-2">
-          <span>{theme.icon}</span>
-          {theme.label} Time
-        </h2>
-        <span className={`text-xs font-bold px-2.5 py-1 rounded-lg bg-black/20 backdrop-blur-sm ${theme.text}`}>
-          {currentTimeStr}
-        </span>
-      </div>
+      <div className="relative z-10 p-4">
+        {/* Header row */}
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-text-primary font-bold text-base flex items-center gap-2">
+            <span className="meal-icon-pulse">{mealInfo.icon}</span>
+            {mealInfo.label} Time
+          </h2>
+          <span
+            className="text-xs font-bold px-2.5 py-1 rounded-lg meal-time-badge"
+            style={{
+              color: atm.accentColor,
+              background: `${atm.accentColor}18`,
+              border: `1px solid ${atm.accentColor}30`,
+              transition: "color 0.4s ease, background 0.4s ease",
+            }}
+          >
+            {currentTimeStr}
+          </span>
+        </div>
 
-      <p className="text-text-secondary text-xs mb-4 relative z-10">
-        {scheduledTime ? `Scheduled at ${scheduledTime}` : "Set a meal schedule to see times"}
-      </p>
+        <p className="text-text-secondary text-xs mb-4">
+          {scheduledTime ? `Scheduled at ${scheduledTime}` : "Set a meal schedule to see times"}
+        </p>
 
-      {/* Meal display card */}
-      <div className="bg-black/20 border border-white/10 rounded-2xl p-3.5 flex items-center gap-3 relative z-10 backdrop-blur-md">
+        {/* Meal card */}
         <div
-          className="w-14 h-14 rounded-2xl bg-white/10 flex items-center justify-center text-3xl shrink-0 shadow-lg border border-white/10"
-          style={{ animation: "float 3s ease-in-out infinite" }}
+          className="rounded-2xl p-3.5 flex items-center gap-3"
+          style={{
+            background: `${atm.accentColor}0a`,
+            border: `1px solid ${atm.accentColor}15`,
+            backdropFilter: "blur(12px)",
+            transition: "border-color 0.4s ease, background 0.4s ease",
+          }}
         >
-          {activeMealData?.emoji || "🍽️"}
-        </div>
-        <div className="flex-1 min-w-0">
-          <h3 className="text-text-primary font-bold text-lg leading-tight truncate">
-            {activeMealData ? activeMealData.name : "No meal planned yet"}
-          </h3>
-          {activeMealData ? (
-            <div className="flex gap-1.5 mt-1.5 flex-wrap">
-              {activeMealData.tags?.map((t: string) => (
-                <span key={t} className="px-2 py-0.5 rounded-md bg-white/10 text-text-primary text-[10px] font-medium">
-                  {t}
-                </span>
-              ))}
-            </div>
-          ) : (
-            <p className="text-text-muted text-xs mt-1">
-              Plan {theme.label.toLowerCase()} in the Kitchen tab
-            </p>
-          )}
+          <div
+            className="w-14 h-14 rounded-2xl flex items-center justify-center text-3xl shrink-0 meal-emoji-bob"
+            style={{
+              background: `${atm.accentColor}12`,
+              border: `1px solid ${atm.accentColor}20`,
+              boxShadow: `0 0 16px ${atm.glowColor}`,
+              transition: "box-shadow 0.4s ease, background 0.4s ease",
+            }}
+          >
+            {activeMealData?.emoji || "🍽️"}
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="text-text-primary font-bold text-lg leading-tight truncate">
+              {activeMealData ? activeMealData.name : "No meal planned yet"}
+            </h3>
+            {activeMealData ? (
+              <div className="flex gap-1.5 mt-1.5 flex-wrap">
+                {activeMealData.tags?.map((t: string) => (
+                  <span
+                    key={t}
+                    className="px-2 py-0.5 rounded-md text-[10px] font-medium"
+                    style={{
+                      color: atm.accentColor,
+                      background: `${atm.accentColor}15`,
+                      transition: "color 0.4s ease, background 0.4s ease",
+                    }}
+                  >
+                    {t}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="text-text-muted text-xs mt-1">
+                Plan {mealInfo.label.toLowerCase()} in the Kitchen tab
+              </p>
+            )}
+          </div>
         </div>
       </div>
-
-      <style jsx global>{`
-        @keyframes float {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-4px); }
-        }
-      `}</style>
     </div>
   );
 }

@@ -538,15 +538,50 @@ body {
 @keyframes weatherParticleIce {
   0%   { transform: translateY(0) scale(0) rotate(0deg); opacity: 0; }
   10%  { opacity: 0.5; }
-  20%  { transform: translateY(-4px) scale(0.6) rotate(-10deg); opacity: 0.7; }
-  30%  { transform: translateY(-2px) scale(0.8) rotate(5deg); opacity: 0.8; }
   40%  { transform: translateY(0) scale(1) rotate(0deg); opacity: 0.85; }
-  50%  { transform: translateY(-2px) scale(0.9) rotate(-5deg); opacity: 0.8; }
-  60%  { transform: translateY(-4px) scale(0.8) rotate(10deg); opacity: 0.7; }
-  70%  { transform: translateY(-2px) scale(0.7) rotate(0deg); opacity: 0.6; }
-  80%  { opacity: 0.5; }
-  90%  { transform: translateY(-4px) scale(0.6) rotate(-10deg); opacity: 0.4; }
   100% { transform: translateY(-8px) scale(0.3) rotate(0deg); opacity: 0; }
+}
+
+/* Blossom / petal fall with gentle sway */
+@keyframes weatherBlossomFall {
+  0%   { transform: translateY(-10px) translateX(0px) rotate(0deg);   opacity: 0; }
+  8%   { opacity: 0.85; }
+  25%  { transform: translateY(25%) translateX(8px) rotate(45deg); }
+  50%  { transform: translateY(55%) translateX(-6px) rotate(120deg); }
+  75%  { transform: translateY(80%) translateX(10px) rotate(220deg); }
+  92%  { opacity: 0.75; }
+  100% { transform: translateY(110%) translateX(-4px) rotate(360deg); opacity: 0; }
+}
+
+/* Leaf tumbling fall */
+@keyframes weatherLeafFall {
+  0%   { transform: translateY(-5px) translateX(0px) rotate(0deg) scale(1);    opacity: 0; }
+  10%  { opacity: 0.9; }
+  30%  { transform: translateY(28%) translateX(14px) rotate(90deg) scale(0.9); }
+  55%  { transform: translateY(56%) translateX(-10px) rotate(200deg) scale(1); }
+  80%  { transform: translateY(82%) translateX(8px) rotate(310deg) scale(0.95); }
+  92%  { opacity: 0.8; }
+  100% { transform: translateY(112%) translateX(0px) rotate(400deg) scale(0.85); opacity: 0; }
+}
+
+/* Firefly bob and glow */
+@keyframes weatherFirefly {
+  0%   { transform: translateY(0px) translateX(0px); opacity: 0;   }
+  15%  { opacity: 0.9; }
+  30%  { transform: translateY(-12px) translateX(8px); }
+  50%  { transform: translateY(-8px) translateX(-5px); opacity: 0.7; }
+  70%  { transform: translateY(-18px) translateX(12px); }
+  85%  { opacity: 0.4; }
+  100% { transform: translateY(-6px) translateX(-8px); opacity: 0; }
+}
+
+/* Sparkle pop */
+@keyframes weatherSparkle {
+  0%   { transform: scale(0) rotate(0deg);   opacity: 0; }
+  20%  { transform: scale(1.5) rotate(45deg); opacity: 1; }
+  50%  { transform: scale(1) rotate(90deg);  opacity: 0.8; }
+  80%  { transform: scale(0.5) rotate(180deg); opacity: 0.4; }
+  100% { transform: scale(0) rotate(360deg); opacity: 0; }
 }
 
 /* Reduce-motion: disable all weather animations */
@@ -561,9 +596,128 @@ body {
   [style*="weatherCardEnter"],
   [style*="weatherForecastIn"],
   [style*="weatherTempPop"],
-  [style*="weatherParticle"] {
+  [style*="weatherParticle"],
+  [style*="weatherBlossom"],
+  [style*="weatherLeaf"],
+  [style*="weatherFirefly"],
+  [style*="weatherSparkle"],
+  [style*="weatherParticleSun"],
+  [style*="weatherParticleHeat"],
+  [style*="weatherParticleIce"] {
     animation: none !important;
     transition: none !important;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ATMOSPHERIC CONTINUITY SYSTEM
+   Connects Weather → Consuela → Meal widgets with flowing visuals
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Atmospheric card wrapper */
+.atmospheric-card {
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow:
+    0 0 30px rgba(255, 255, 255, 0.03),
+    0 8px 24px rgba(0, 0, 0, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition: box-shadow 0.4s ease, border-color 0.4s ease, background 0.4s ease;
+}
+
+/* Atmospheric bridge connector */
+.atmospheric-bridge {
+  overflow: hidden;
+}
+
+/* Particles drifting down through the bridge */
+@keyframes driftDownParticle {
+  0% {
+    transform: translateY(-8px) translateX(0px) scale(0.6);
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.7;
+    transform: translateY(0px) translateX(2px) scale(1);
+  }
+  80% {
+    opacity: 0.5;
+    transform: translateY(12px) translateX(-3px) scale(0.9);
+  }
+  100% {
+    transform: translateY(18px) translateX(1px) scale(0.5);
+    opacity: 0;
+  }
+}
+
+.drift-down-particle {
+  animation: driftDownParticle 3.5s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+/* Meal widget gentle float for seasonal emoji */
+@keyframes mealFloatGentle {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+    opacity: 0.15;
+  }
+  33% {
+    transform: translateY(-6px) rotate(3deg);
+    opacity: 0.25;
+  }
+  66% {
+    transform: translateY(-3px) rotate(-2deg);
+    opacity: 0.18;
+  }
+}
+
+.meal-float-gentle {
+  animation: mealFloatGentle 6s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+/* Meal icon subtle pulse */
+@keyframes mealIconPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+
+.meal-icon-pulse {
+  display: inline-block;
+  animation: mealIconPulse 3s ease-in-out infinite;
+  will-change: transform;
+}
+
+/* Meal emoji bob */
+@keyframes mealEmojiBob {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  25% { transform: translateY(-3px) rotate(2deg); }
+  75% { transform: translateY(-1px) rotate(-1deg); }
+}
+
+.meal-emoji-bob {
+  animation: mealEmojiBob 4s ease-in-out infinite;
+  will-change: transform;
+}
+
+/* Atmospheric section wrapper */
+.atmospheric-meal-section {
+  position: relative;
+}
+
+/* Reduce-motion: disable atmospheric animations */
+@media (prefers-reduced-motion: reduce) {
+  .drift-down-particle,
+  .meal-float-gentle,
+  .meal-icon-pulse,
+  .meal-emoji-bob,
+  .atmospheric-bridge {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
 

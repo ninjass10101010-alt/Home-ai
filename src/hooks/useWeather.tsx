@@ -13,6 +13,7 @@ import {
   TemperatureUnit,
   TimeOfDay,
   Season,
+  HolidayOverride,
   defaultWeatherConfig,
   WEATHER_STORAGE_KEY,
 } from '@/lib/weather-config';
@@ -25,6 +26,7 @@ interface WeatherContextValue {
   setUnit: (unit: TemperatureUnit) => void;
   setTimeOfDay: (timeOfDay: TimeOfDay) => void;
   setSeason: (season: Season) => void;
+  setHolidayOverride: (holidayOverride: HolidayOverride) => void;
 }
 
 const WeatherContext = createContext<WeatherContextValue | undefined>(undefined);
@@ -41,6 +43,7 @@ export const useWeatherConfig = (): WeatherContextValue => {
 
 const VALID_TOD: TimeOfDay[] = ['auto', 'day', 'night'];
 const VALID_SEASONS: Season[] = ['auto', 'spring', 'summer', 'autumn', 'winter'];
+const VALID_HOLIDAYS: HolidayOverride[] = ['auto', 'none', 'christmas', 'halloween', 'july4th', 'valentines', 'newyears'];
 
 export const WeatherProvider = ({ children }: { children: ReactNode }) => {
   const [weather, setWeather] = useState<WeatherConfig>(defaultWeatherConfig);
@@ -65,6 +68,9 @@ export const WeatherProvider = ({ children }: { children: ReactNode }) => {
           season: VALID_SEASONS.includes(parsed.season as Season)
             ? (parsed.season as Season)
             : defaultWeatherConfig.season,
+          holidayOverride: VALID_HOLIDAYS.includes(parsed.holidayOverride as HolidayOverride)
+            ? (parsed.holidayOverride as HolidayOverride)
+            : defaultWeatherConfig.holidayOverride,
         });
       }
     } catch {
@@ -95,8 +101,12 @@ export const WeatherProvider = ({ children }: { children: ReactNode }) => {
     setWeather((prev) => ({ ...prev, season }));
   }, []);
 
+  const setHolidayOverride = useCallback((holidayOverride: HolidayOverride) => {
+    setWeather((prev) => ({ ...prev, holidayOverride }));
+  }, []);
+
   return (
-    <WeatherContext.Provider value={{ weather, setLocation, setUnit, setTimeOfDay, setSeason }}>
+    <WeatherContext.Provider value={{ weather, setLocation, setUnit, setTimeOfDay, setSeason, setHolidayOverride }}>
       {children}
     </WeatherContext.Provider>
   );

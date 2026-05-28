@@ -34,7 +34,7 @@ const relationshipOptions = [
 
 export default function SettingsPage() {
   const { theme, setMode, setAccentColor, setContrastBoost } = useTheme();
-  const { weather, setLocation, setUnit, setTimeOfDay, setSeason } = useWeatherConfig();
+  const { weather, setLocation, setUnit, setTimeOfDay, setSeason, setHolidayOverride } = useWeatherConfig();
   const [mounted, setMounted] = useState(false);
 
   // ─── Family Member editing state ────────────────────────────────────────
@@ -369,20 +369,64 @@ export default function SettingsPage() {
             <h3 className="text-text-primary font-semibold">Season</h3>
             <p className="text-text-secondary text-sm">Force specific season visuals or auto-sync</p>
             <div className="grid grid-cols-3 gap-3">
-              {(["auto", "spring", "summer", "autumn", "winter"] as const).map((s) => (
+              {([
+                { id: "auto", label: "Auto", emoji: "🔄" },
+                { id: "spring", label: "Spring", emoji: "🌸" },
+                { id: "summer", label: "Summer", emoji: "☀️" },
+                { id: "autumn", label: "Autumn", emoji: "🍂" },
+                { id: "winter", label: "Winter", emoji: "❄️" },
+              ] as const).map((s) => (
                 <button
-                  key={s}
-                  onClick={() => setSeason(s)}
+                  key={s.id}
+                  onClick={() => setSeason(s.id)}
                   className={`
-                    py-3 rounded-xl border-2 text-sm font-semibold capitalize
-                    transition-all duration-200 active:scale-95 ${s === "auto" ? "col-span-3" : ""}
-                    ${weather.season === s
+                    py-3 rounded-xl border-2 text-sm font-semibold capitalize flex flex-col items-center gap-1
+                    transition-all duration-200 active:scale-95 ${s.id === "auto" ? "col-span-3 flex-row justify-center gap-2" : ""}
+                    ${weather.season === s.id
                       ? "border-[var(--color-accent-selected)] bg-[var(--color-accent-selected)]/10 text-[var(--color-accent-selected)]"
                       : "border-[var(--color-surface-3)] text-text-secondary hover:border-[var(--color-surface-5)] hover:text-text-primary"
                     }
                   `}
                 >
-                  {s}
+                  <span className="text-lg">{s.emoji}</span>
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Holiday / Special Event Theme */}
+          <div className="space-y-3">
+            <h3 className="text-text-primary font-semibold">🎉 Holiday / Event Theme</h3>
+            <p className="text-text-secondary text-sm">
+              Auto-detects nearby holidays or force a specific festive look
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              {([
+                { id: "auto",       label: "Auto-detect",    emoji: "✨", desc: "Syncs to upcoming holidays" },
+                { id: "none",       label: "None",           emoji: "🚫", desc: "Season only, no holiday" },
+                { id: "christmas",  label: "Christmas",      emoji: "🎄", desc: "Lights, snow & warm glow" },
+                { id: "halloween",  label: "Halloween",      emoji: "🎃", desc: "Spooky mist & bats" },
+                { id: "july4th",    label: "4th of July",    emoji: "🎆", desc: "Fireworks & patriotic" },
+                { id: "valentines", label: "Valentine's",    emoji: "💝", desc: "Hearts & rose glow" },
+                { id: "newyears",   label: "New Year's",     emoji: "🥂", desc: "Midnight sparkles" },
+              ] as const).map((h) => (
+                <button
+                  key={h.id}
+                  onClick={() => setHolidayOverride(h.id)}
+                  className={`
+                    py-3 px-3 rounded-xl border-2 text-left
+                    transition-all duration-200 active:scale-95
+                    ${h.id === "auto" || h.id === "none" ? "col-span-1" : ""}
+                    ${weather.holidayOverride === h.id
+                      ? "border-[var(--color-accent-selected)] bg-[var(--color-accent-selected)]/10"
+                      : "border-[var(--color-surface-3)] hover:border-[var(--color-surface-5)]"
+                    }
+                  `}
+                >
+                  <span className="text-2xl block mb-1">{h.emoji}</span>
+                  <p className={`text-sm font-semibold ${weather.holidayOverride === h.id ? "text-[var(--color-accent-selected)]" : "text-text-primary"}`}>{h.label}</p>
+                  <p className="text-text-muted text-xs mt-0.5">{h.desc}</p>
                 </button>
               ))}
             </div>

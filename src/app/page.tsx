@@ -10,6 +10,8 @@ import EmergencyButton from "@/components/ui/EmergencyButton";
 import ScheduleDisplay from "@/components/ui/ScheduleDisplay";
 import { db } from "@/db";
 import CurrentMealWidget from "@/components/meals/CurrentMealWidget";
+import { AtmosphericProvider } from "@/hooks/useAtmosphericTheme";
+import AtmosphericBridge from "@/components/ui/AtmosphericBridge";
 
 
 const quickPrompts = [
@@ -138,7 +140,10 @@ export default function HomePage() {
 
       {/* Weather Widget */}
       <div className="px-4 pb-2 relative z-10">
-        <WeatherWidget />
+        <AtmosphericProvider>
+          <WeatherWidget />
+          <AtmosphericBridge />
+        </AtmosphericProvider>
       </div>
 
       {/* Divider */}
@@ -148,28 +153,30 @@ export default function HomePage() {
 
       <div className="px-4 space-y-5 relative z-10">
         {/* AI Quick Ask - Enhanced glass card */}
-        <Link href="/chat">
-          <div className="rounded-2xl p-4 flex items-center gap-3 cursor-pointer active:scale-[0.98] transition-all isometric-card glass-strong">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[var(--color-accent-selected)]/30 to-[var(--color-accent-cyan)]/20 flex items-center justify-center text-2xl shrink-0 floating">
-              <Icon3D variant="chat" size="md" />
+        <AtmosphericProvider>
+          <Link href="/chat">
+            <div className="atmospheric-card rounded-2xl p-4 flex items-center gap-3 cursor-pointer active:scale-[0.98] transition-all">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[var(--color-accent-selected)]/30 to-[var(--color-accent-cyan)]/20 flex items-center justify-center text-2xl shrink-0 floating">
+                <Icon3D variant="chat" size="md" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-text-primary text-sm font-medium">Ask Consuela anything…</p>
+                <p className="text-text-secondary/60 text-xs mt-0.5 truncate">
+                  &ldquo;Plan dinner, add an event, or check on the kids…&rdquo;
+                </p>
+              </div>
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                className="w-5 h-5 text-[var(--color-accent-selected)] shrink-0"
+              >
+                <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-text-primary text-sm font-medium">Ask Consuela anything…</p>
-              <p className="text-text-secondary/60 text-xs mt-0.5 truncate">
-                &ldquo;Plan dinner, add an event, or check on the kids…&rdquo;
-              </p>
-            </div>
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-              className="w-5 h-5 text-[var(--color-accent-selected)] shrink-0"
-            >
-              <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </div>
-        </Link>
+          </Link>
+        </AtmosphericProvider>
 
         {/* Quick prompts */}
         <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 scroll-smooth-x no-scrollbar">
@@ -254,15 +261,17 @@ export default function HomePage() {
         />
 
         {/* Meal Highlight */}
-        <section>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-text-primary font-semibold text-base">Current Meal</h2>
-            <Link href="/meals" className="text-[var(--color-accent-selected)] text-xs font-medium hover:opacity-80">
-              Plan →
-            </Link>
-          </div>
-          <CurrentMealWidget />
-        </section>
+        <AtmosphericProvider>
+          <section className="atmospheric-meal-section">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-text-primary font-semibold text-base">Current Meal</h2>
+              <Link href="/meals" className="text-[var(--color-accent-selected)] text-xs font-medium hover:opacity-80">
+                Plan →
+              </Link>
+            </div>
+            <CurrentMealWidget />
+          </section>
+        </AtmosphericProvider>
 
         {/* Tasks */}
         <section>

@@ -6,7 +6,7 @@
 > **Mandatory:** After any code change that touches UI, navigation, meals, emergency, or integrations, update this file in the same session.
 
 **Current Dashboard Snapshot** (maintain on every relevant change)  
-- **Last Updated:** 2026-05-23 | Source of truth: commit `adbe770` ("feat(dashboard): 2026-05-21 daily update") + later hermes-api work  
+- **Last Updated:** 2026-05-27 | Source of truth: immersive weather widget implementation + hermes-api work  
 - **Last major UI refresh:** 2026-05-21 — motion icons, 3D floating elements, AnimatedEmoji, glass/isometric cards, gradient orbs  
 - **Active integrations:** Meals ↔ Pantry ↔ Grocery bidirectional sync (`mealSyncService`), Emergency SMS + Email (free Gmail + carrier gateways), AI Chat ("Ask Consuela"), full theme system (3 modes + 6 accent colors), PocketBase data layer
 - **Navigation model:** Persistent bottom tab bar (8 items) + always-visible floating red Emergency shield button (top-right on Home)
@@ -61,14 +61,14 @@ Use this exact delta format in the "What's New" area and update 1.5 journeys:
 
 ### 1.2 Documenting Recent & Future UI Updates
 
-**Current "What's New" (2026-05-21 motion refresh):**
-As of commit `adbe770`, the Home dashboard features:
-- **Icon3D** (`src/components/3d/Icon3D.tsx`): 8 variants (calendar, grocery, meals, tasks, chat, weather, family, clock) using linear gradients + optional `animated` prop. Renders inside `.floating` containers on Home quick actions and cards.
-- **AnimatedEmoji** (`src/components/ui/AnimatedEmoji.tsx`): Custom SVG with CSS `@keyframes` for Frenchie (ear wiggle + tongue pant), Poodle (bounce + tail wag), Fish (swim + tail flip + rising bubbles), Soccer ball (roll), Plate & utensils (clink). Also fallback pop-bounce for regular emojis used in meal cards and family avatars.
-- `.floating` class in `globals.css:329` — 6s ease-in-out translateY loop.
-- All new elements respect the live theme (CSS custom properties for accents and surfaces).
-
-When the user asks "what's new on the dashboard?" or "how do the icons move?", read this subsection first, then point them to the exact components if they want to customize.
+**Current "What's New" (2026-05-26 immersive weather refresh):**
+As of the latest build, the Home dashboard weather widget features:
+- **Immersive Weather Widget** (`src/components/ui/WeatherWidget.tsx`): Full-bleed glassmorphism backgrounds with seasonal/holiday themes.
+- **Season backdrops**: `SpringBackdrop` (cherry blossoms, mist), `SummerBackdrop` (palm silhouettes, heat haze, galaxy stars), `AutumnBackdrop` (bare oak trees, fog), `WinterBackdrop` (aurora borealis, icicles, pine silhouettes).
+- **Holiday overlays**: `ChristmasOverlay` (fairy lights, snow), `HalloweenOverlay` (bats, moon, mist), `FireworksOverlay` (4th of July bursts), `ValentinesOverlay` (floating hearts, rose glow), `NewYearsOverlay` (golden sparkles, champagne fizz).
+- **Particle system**: `WeatherParticles` component with animated SVG/CSS particles — blossom petals, autumn leaves, fireflies, snowflakes, sparks, hearts.
+- **Settings integration**: Holiday/Event Theme selector in Settings (`src/app/settings/page.tsx`) with live preview.
+- Users can force-enable any holiday theme or use auto-detection based on date.
 
 ### 1.3 Motion & Animated Elements
 
@@ -310,6 +310,9 @@ One-sentence goal from the human user's perspective.
 - `SETTINGS_PAGE_DESIGN.md` — Theme + family + emergency contact UI details
 - `QUICK_REFERENCE_CARD.md` — One-page cheat sheet for humans
 - `src/components/3d/Icon3D.tsx` and `src/components/ui/AnimatedEmoji.tsx` — the actual motion source
+- `src/components/ui/WeatherWidget.tsx` — immersive weather visuals, season/holiday backdrops, particle system
+- `src/hooks/useWidgetTheme.ts` — shared theme hook for weather and other widgets
+- `src/lib/weather-config.ts` — weather configuration types and defaults
 
 ### Project Scaffolding Recipes (original content preserved for the coding agent)
 When users request features beyond the base template, check `.kilocode/recipes/`.
@@ -330,6 +333,7 @@ After completing a user request that changes architecture, tech, or goals, updat
 
 ## Change Log (this manual only)
 
+- 2026-05-26 — feat: Immersive Weather Widget Visuals. Full glassmorphism backgrounds with season-specific SVG backdrops (Spring: cherry blossoms, Summer: palm/heat haze, Autumn: oak/fog, Winter: aurora/icicles) and holiday overlays (Christmas: fairy lights, Halloween: bats, 4th of July: fireworks, Valentine's: hearts, New Year's: gold sparkles). Added Holiday/Event Theme selector in Settings with live preview. Fixed CSS reduce-motion query to include all particle animations.
 - 2026-05-26 — feat: enhance weather widget with summer/winter particle effects. Added summer (heat waves) and winter (ice crystals) particle effects to weather widget. Updated AGENTS.md to document the change.
 - 2026-05-23 — Initial comprehensive operational manual created per quiet-wizard plan. Added full UI navigation (including motion refresh), meal & emergency workflows, agent role definition, SOP template + examples, and appendix of all existing design docs. Preserved original recipe/memory-bank guidance at the bottom.
 
