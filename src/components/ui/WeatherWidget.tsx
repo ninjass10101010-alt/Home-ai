@@ -78,12 +78,18 @@ function detectAutoHoliday(): HolidayOverride {
   if (month === 2 && day >= 14 && day <= 17) return "stpatricks";
   // Cinco de Mayo: May 3-6
   if (month === 4 && day >= 3 && day <= 6) return "cincodemayo";
+  // Mexican Independence: Sep 15-16
+  if (month === 8 && day >= 15 && day <= 16) return "mexicanindependence";
+  // Halloween season: Oct 25 - Oct 30 (Día de los Muertos starts 31st)
+  if (month === 9 && day >= 25 && day <= 30) return "halloween";
+  // Día de los Muertos: Oct 31 - Nov 2
+  if ((month === 9 && day === 31) || (month === 10 && day >= 1 && day <= 2)) return "diadelosmuertos";
   // 4th of July: July 1-7
   if (month === 6 && day >= 1 && day <= 7) return "july4th";
-  // Halloween season: Oct 25 - Oct 31
-  if (month === 9 && day >= 25) return "halloween";
-  // Thanksgiving: 4th Thursday of November (approx Nov 22-28)
+  // Thanksgiving: approx Nov 22-28
   if (month === 10 && day >= 22 && day <= 28) return "thanksgiving";
+  // Virgin of Guadalupe: Dec 11 - Dec 13
+  if (month === 11 && day >= 11 && day <= 13) return "virginguadalupe";
 
   return "none";
 }
@@ -210,6 +216,30 @@ function getHolidayTheme(holiday: HolidayOverride): Partial<VisualTheme> | null 
         accentColor: "#22c55e",
         overlayType: "stpatricks",
         particleType: "shamrock",
+      };
+    case "diadelosmuertos":
+      return {
+        bgGradient: "linear-gradient(160deg, #1b0222 0%, #3a003f 40%, #580c2f 70%, #d97706 100%)",
+        glowColor: "rgba(245,158,11,0.25)",
+        accentColor: "#ec4899",
+        overlayType: "diadelosmuertos",
+        particleType: "marigold",
+      };
+    case "mexicanindependence":
+      return {
+        bgGradient: "linear-gradient(160deg, #021a0c 0%, #0c351c 30%, #1c2d3a 65%, #3c0c14 100%)",
+        glowColor: "rgba(34,197,94,0.25)",
+        accentColor: "#22c55e",
+        overlayType: "mexicanindependence",
+        particleType: "tricolor-sparks",
+      };
+    case "virginguadalupe":
+      return {
+        bgGradient: "linear-gradient(160deg, #061f2d 0%, #0d3846 45%, #2c1628 75%, #4c1130 100%)",
+        glowColor: "rgba(45,212,191,0.20)",
+        accentColor: "#0d9488",
+        overlayType: "virginguadalupe",
+        particleType: "holy-roses",
       };
     default:
       return null;
@@ -1041,9 +1071,231 @@ function StPatricksOverlay() {
   );
 }
 
+function DiaDeLosMuertosOverlay() {
+  const flags = [
+    { color: "#d946ef", label: "💀" },
+    { color: "#ea580c", label: "🌼" },
+    { color: "#8b5cf6", label: "💀" },
+    { color: "#ec4899", label: "🌼" },
+    { color: "#fbbf24", label: "💀" },
+    { color: "#a855f7", label: "🌼" },
+    { color: "#f97316", label: "💀" }
+  ];
+  return (
+    <svg className="absolute inset-0 w-full h-full" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style={{ pointerEvents: "none" }}>
+      {/* Papel Picado string */}
+      <path d="M-10 10 Q40 2 80 12 Q120 22 160 12 Q200 2 240 12 Q280 22 330 10" stroke="rgba(255,255,255,0.25)" strokeWidth="1" fill="none"/>
+      
+      {/* Hanging papel picado flags */}
+      {flags.map((f, i) => {
+        const x = 20 + i * 40;
+        const y = 10 + Math.sin((x / 320) * Math.PI * 2) * 5;
+        return (
+          <g key={i} transform={`translate(${x}, ${y})`} style={{ animation: `weatherCloudBob ${2.5 + i * 0.3}s ease-in-out ${i * 0.1}s infinite` }}>
+            <path d="M-15 0 L15 0 L15 22 L5 22 L0 16 L-5 22 L-15 22 Z" fill={f.color} opacity="0.82" />
+            {/* Traditional cut-out detail */}
+            <circle cx="0" cy="8" r="4.5" fill="rgba(0,0,0,0.3)" />
+            <text x="0" y="11" fontSize="8" textAnchor="middle" fill="rgba(255,255,255,0.85)" style={{ userSelect: "none" }}>{f.label}</text>
+            {/* Tiny glow */}
+            <circle cx="0" cy="8" r="10" fill={f.color} opacity="0.08" style={{ filter: `drop-shadow(0 0 4px ${f.color})` }} />
+          </g>
+        );
+      })}
+
+      {/* Ofrenda Altar Arch - Silhouette in gold/marigold */}
+      <g opacity="0.25">
+        {/* Arch */}
+        <path d="M40 200 Q40 100 160 100 Q280 100 280 200" stroke="#f59e0b" strokeWidth="8" fill="none" strokeLinecap="round"/>
+        {/* Flower circles along the arch */}
+        {[0, 15, 30, 45, 60, 75, 90, 105, 120, 135, 150, 165, 180].map((angle, i) => {
+          const rad = (angle * Math.PI) / 180;
+          const cx = 160 + Math.cos(rad) * 120;
+          const cy = 200 - Math.sin(rad) * 100;
+          return <circle key={i} cx={cx} cy={cy} r="4.5" fill="#f97316" />;
+        })}
+      </g>
+
+      {/* Altar steps at base */}
+      <path d="M20 200 L300 200 L280 188 L40 188 Z" fill="rgba(88,12,47,0.4)" opacity="0.7"/>
+      <path d="M50 188 L270 188 L255 178 L65 178 Z" fill="rgba(58,0,63,0.5)" opacity="0.8"/>
+
+      {/* Altar decorations: candles + cempasúchil flower heads */}
+      {[[75, 184], [105, 174], [135, 174], [160, 172], [185, 174], [215, 174], [245, 184]].map(([cx, cy], i) => (
+        <g key={i} transform={`translate(${cx}, ${cy})`}>
+          {/* Candle body */}
+          <rect x="-2" y="2" width="4" height="12" fill="#fff" rx="1"/>
+          {/* Flame with pulse animation */}
+          <path d="M-1.5 2 Q0 -6 1.5 2 Z" fill="#f59e0b" style={{ animation: `weatherGlowPulse ${1 + i * 0.2}s ease-in-out ${i * 0.15}s infinite` }}/>
+          <circle cx="0" cy="-2" r="5" fill="#f97316" opacity="0.3" style={{ animation: `weatherGlowPulse ${1 + i * 0.2}s ease-in-out ${i * 0.15}s infinite` }}/>
+        </g>
+      ))}
+
+      {/* Marigold flowers piled at base */}
+      {[25, 45, 60, 90, 120, 150, 170, 200, 230, 260, 280, 295].map((x, i) => (
+        <g key={i} transform={`translate(${x}, ${192 + (i % 3) * 3})`} opacity="0.75" style={{ animation: `weatherCloudBob ${3.5 + i * 0.15}s ease-in-out ${i * 0.2}s infinite` }}>
+          <circle cx="0" cy="0" r="5.5" fill="#f97316"/>
+          <circle cx="0" cy="0" r="3.5" fill="#fbbf24"/>
+          <circle cx="0" cy="0" r="1.5" fill="#ef4444"/>
+        </g>
+      ))}
+
+      {/* Warm golden light projection */}
+      <ellipse cx="160" cy="195" rx="150" ry="35" fill="rgba(245,158,11,0.06)" />
+      <circle cx="160" cy="150" r="80" fill="rgba(236,72,153,0.02)" style={{ animation: "weatherSunHalo 8s ease-in-out infinite" }} />
+    </svg>
+  );
+}
+
+function MexicanIndependenceOverlay() {
+  return (
+    <svg className="absolute inset-0 w-full h-full" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style={{ pointerEvents: "none" }}>
+      {/* Independence Bell (Campana de Dolores) at top center */}
+      <g transform="translate(160, 32)" opacity="0.75">
+        {/* Support beam */}
+        <rect x="-24" y="-12" width="48" height="4" fill="rgba(120,53,15,0.8)" rx="1"/>
+        <rect x="-18" y="-8" width="36" height="2" fill="rgba(78,53,15,0.9)" />
+        {/* Hanger */}
+        <path d="M-4 -8 L-4 -2 L4 -2 L4 -8 Z" fill="rgba(156,163,175,0.9)" />
+        {/* Bell curve */}
+        <path d="M-12 12 Q-14 -2 0 -2 Q14 -2 12 12 Q16 16 16 19 L-16 19 Q-16 16 -12 12 Z" fill="rgba(217,119,6,0.9)" />
+        <path d="M-10 12 Q-12 0 0 0 Q12 0 10 12 Q13 14 13 17 L-13 17 Q-13 14 -10 12 Z" fill="rgba(251,191,36,0.95)" />
+        {/* Clapper (bell tongue) */}
+        <circle cx="0" cy="22" r="3" fill="rgba(120,53,15,0.9)" style={{ animation: "weatherCloudBob 1.5s ease-in-out infinite", transformOrigin: "0px 10px" }}/>
+        {/* Sound waves glowing */}
+        <circle cx="0" cy="14" r="28" fill="rgba(251,191,36,0.05)" style={{ animation: "weatherSunHalo 3s ease-in-out infinite" }}/>
+      </g>
+
+      {/* Elegant tricolor flag-drape banners at top corners */}
+      <g opacity="0.35">
+        {/* Left corner banner */}
+        <path d="M0 0 L60 0 C45 20 25 35 0 40 Z" fill="rgba(22,163,74,0.7)" />
+        <path d="M0 0 L45 0 C32 15 18 25 0 30 Z" fill="rgba(255,255,255,0.6)" />
+        <path d="M0 0 L30 0 C20 10 10 18 0 20 Z" fill="rgba(220,38,38,0.7)" />
+        
+        {/* Right corner banner */}
+        <path d="M320 0 L260 0 C275 20 295 35 320 40 Z" fill="rgba(220,38,38,0.7)" />
+        <path d="M320 0 L275 0 C288 15 302 25 320 30 Z" fill="rgba(255,255,255,0.6)" />
+        <path d="M320 0 L290 0 C300 10 310 18 320 20 Z" fill="rgba(22,163,74,0.7)" />
+      </g>
+
+      {/* Angel of Independence Silhouette — Bottom center rising elegantly */}
+      <g transform="translate(160, 200)" opacity="0.22">
+        {/* Column pedestal */}
+        <rect x="-8" y="-45" width="16" height="45" fill="rgba(255,255,255,0.6)" rx="1"/>
+        <path d="-14 -45 L14 -45 L8 -55 L-8 -55 Z" fill="rgba(255,255,255,0.5)"/>
+        <rect x="-16" y="-3" width="32" height="3" fill="rgba(255,255,255,0.7)" rx="1"/>
+        
+        {/* Winged Angel Statue Silhouette */}
+        <g transform="translate(0, -66)">
+          {/* Body */}
+          <ellipse cx="0" cy="3" rx="3.5" ry="7" fill="rgba(251,191,36,0.8)"/>
+          <circle cx="0" cy="-6" r="2.8" fill="rgba(251,191,36,0.8)"/>
+          {/* Wings */}
+          <path d="M0 0 Q-15 -18 -18 -8 Q-12 -2 0 4 Z" fill="rgba(251,191,36,0.7)"/>
+          <path d="M0 0 Q15 -18 18 -8 Q12 -2 0 4 Z" fill="rgba(251,191,36,0.7)"/>
+          {/* Raised arms with wreath */}
+          <path d="M0 -3 Q-6 -10 -9 -8" stroke="rgba(251,191,36,0.8)" strokeWidth="1.8" fill="none" strokeLinecap="round"/>
+          <path d="M0 -3 Q6 -10 9 -8" stroke="rgba(251,191,36,0.8)" strokeWidth="1.8" fill="none" strokeLinecap="round"/>
+          <circle cx="-10" cy="-9" r="2" fill="none" stroke="rgba(34,197,94,0.8)" strokeWidth="1"/>
+        </g>
+      </g>
+
+      {/* Tricolor flag base line highlight */}
+      <rect x="0" y="194" width="107" height="6" fill="rgba(34,197,94,0.3)" rx="2"/>
+      <rect x="107" y="194" width="106" height="6" fill="rgba(255,255,255,0.22)" rx="2"/>
+      <rect x="213" y="194" width="107" height="6" fill="rgba(220,38,38,0.3)" rx="2"/>
+
+      {/* Festive sparkles glow */}
+      <circle cx="160" cy="35" r="50" fill="rgba(34,197,94,0.04)" style={{ animation: "weatherSunHalo 4s ease-in-out infinite" }}/>
+      <circle cx="160" cy="130" r="90" fill="rgba(220,38,38,0.03)" style={{ animation: "weatherSunHalo 6s ease-in-out 1s infinite" }}/>
+    </svg>
+  );
+}
+
+function VirginGuadalupeOverlay() {
+  return (
+    <svg className="absolute inset-0 w-full h-full" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style={{ pointerEvents: "none" }}>
+      {/* Holy Ray Sunburst (Resplandor) in center background */}
+      <g transform="translate(160, 95)" opacity="0.18">
+        <circle cx="0" cy="0" r="50" fill="rgba(253,224,71,0.25)" style={{ animation: "weatherSunHalo 5s ease-in-out infinite" }}/>
+        {Array.from({ length: 16 }, (_, i) => {
+          const a = (i / 16) * Math.PI * 2;
+          const isLong = i % 2 === 0;
+          const r1 = 15;
+          const r2 = isLong ? 68 : 45;
+          return (
+            <line key={i} x1={Math.cos(a) * r1} y1={Math.sin(a) * r1} x2={Math.cos(a) * r2} y2={Math.sin(a) * r2}
+              stroke="rgba(253,224,71,0.7)" strokeWidth={isLong ? 2.5 : 1.5} strokeLinecap="round"
+              style={{ animation: `weatherRayPulse ${2.8 + (i % 3) * 0.4}s ease-in-out ${(i * 0.15).toFixed(2)}s infinite` }} />
+          );
+        })}
+      </g>
+
+      {/* Starry Constellation Backdrop (Mantle design stars) */}
+      <g opacity="0.30">
+        {[
+          [80, 50], [95, 38], [115, 42], [105, 65],
+          [240, 50], [225, 38], [205, 42], [215, 65],
+          [60, 90], [75, 110], [100, 100], [90, 125],
+          [260, 90], [245, 110], [220, 100], [230, 125],
+          [130, 70], [190, 70], [125, 120], [195, 120]
+        ].map(([cx, cy], i) => (
+          <g key={i} transform={`translate(${cx}, ${cy})`} style={{ animation: `weatherGlowPulse ${2 + i * 0.25}s ease-in-out ${i * 0.1}s infinite` }}>
+            {/* 8-pointed gold stars */}
+            <path d="M-3 0 L3 0 M0 -3 L0 3 M-2 -2 L2 2 M-2 2 L2 -2" stroke="#fde047" strokeWidth="1" />
+            <circle cx="0" cy="0" r="1" fill="#fff" />
+          </g>
+        ))}
+      </g>
+
+      {/* Castile roses blooming at base */}
+      {[
+        { x: 35, y: 188, size: 8, color: "#ef4444" },
+        { x: 65, y: 184, size: 9, color: "#ec4899" },
+        { x: 95, y: 188, size: 7.5, color: "#ef4444" },
+        { x: 130, y: 182, size: 10, color: "#f43f5e" },
+        { x: 160, y: 185, size: 11, color: "#ef4444" },
+        { x: 190, y: 182, size: 10, color: "#f43f5e" },
+        { x: 225, y: 188, size: 7.5, color: "#ef4444" },
+        { x: 255, y: 184, size: 9, color: "#ec4899" },
+        { x: 285, y: 188, size: 8, color: "#ef4444" },
+        // Front layer
+        { x: 50, y: 192, size: 7, color: "#ec4899" },
+        { x: 110, y: 191, size: 8.5, color: "#f43f5e" },
+        { x: 145, y: 190, size: 9.5, color: "#ef4444" },
+        { x: 175, y: 190, size: 9.5, color: "#ef4444" },
+        { x: 210, y: 191, size: 8.5, color: "#f43f5e" },
+        { x: 270, y: 192, size: 7, color: "#ec4899" }
+      ].map((rose, i) => (
+        <g key={i} transform={`translate(${rose.x}, ${rose.y})`} opacity="0.8" style={{ animation: `weatherCloudBob ${3 + i * 0.2}s ease-in-out ${i * 0.15}s infinite` }}>
+          {/* Castile Rose Vector */}
+          <circle cx="0" cy="0" r={rose.size} fill={rose.color}/>
+          <circle cx="-3" cy="-1" r={rose.size * 0.7} fill="#f43f5e" opacity="0.9"/>
+          <circle cx="3" cy="-1" r={rose.size * 0.7} fill="#ec4899" opacity="0.9"/>
+          <circle cx="0" cy="3" r={rose.size * 0.7} fill="#ef4444" opacity="0.9"/>
+          <circle cx="0" cy="0" r={rose.size * 0.35} fill="#fb7185"/>
+          {/* Leaves */}
+          <path d={`M${-rose.size} 2 Q${-rose.size - 4} 6 ${-rose.size} 8 Q${-rose.size + 4} 6 ${-rose.size} 2`} fill="rgba(13,148,136,0.6)" />
+          <path d={`M${rose.size} 2 Q${rose.size + 4} 6 ${rose.size} 8 Q${rose.size - 4} 6 ${rose.size} 2`} fill="rgba(13,148,136,0.6)" />
+        </g>
+      ))}
+
+      {/* Subtle crescent moon silhouette at bottom center */}
+      <g transform="translate(160, 168)" opacity="0.22">
+        <circle cx="0" cy="0" r="14" fill="rgba(255,255,255,0.06)" style={{ animation: "weatherGlowPulse 4s ease-in-out infinite" }} />
+        <path d="M-10 -4 A10 10 0 1 0 10 4 A12 12 0 0 1 -10 -4 Z" fill="rgba(156,163,175,0.95)" />
+      </g>
+
+      {/* Heavenly turquoise and gold base glow */}
+      <ellipse cx="160" cy="205" rx="160" ry="32" fill="rgba(45,212,191,0.08)"/>
+      <ellipse cx="160" cy="210" rx="100" ry="20" fill="rgba(253,224,71,0.05)"/>
+    </svg>
+  );
+}
+
 // ─── Particle System ─────────────────────────────────────────────────────────
 
-type ParticleKind = "blossom" | "leaf" | "firefly" | "snowflake" | "christmas-snow" | "bat" | "spark" | "heart" | "confetti" | "harvest" | "shamrock" | "none";
+type ParticleKind = "blossom" | "leaf" | "firefly" | "snowflake" | "christmas-snow" | "bat" | "spark" | "heart" | "confetti" | "harvest" | "shamrock" | "marigold" | "tricolor-sparks" | "holy-roses" | "none";
 
 
 function WeatherParticles({ type, tod }: { type: ParticleKind; tod: TimeOfDayFlag }) {
@@ -1064,6 +1316,9 @@ function WeatherParticles({ type, tod }: { type: ParticleKind; tod: TimeOfDayFla
       confetti: 28,
       harvest: 10,
       shamrock: 18,
+      marigold: 20,
+      "tricolor-sparks": 32,
+      "holy-roses": 18,
       none: 0,
     };
 
@@ -1078,8 +1333,9 @@ function WeatherParticles({ type, tod }: { type: ParticleKind; tod: TimeOfDayFla
             : type === "blossom" ? 5 + Math.random() * 7
             : type === "leaf" ? 6 + Math.random() * 8
             : type === "heart" ? 6 + Math.random() * 6
-            : type === "spark" ? 2 + Math.random() * 3
+            : type === "spark" || type === "tricolor-sparks" ? 2 + Math.random() * 3
             : type === "firefly" ? 3 + Math.random() * 3
+            : type === "marigold" || type === "holy-roses" ? 8 + Math.random() * 8
             : 4 + Math.random() * 4,
         rotate: Math.random() * 360,
         opacity: 0.6 + Math.random() * 0.4,
@@ -1255,6 +1511,74 @@ function WeatherParticles({ type, tod }: { type: ParticleKind; tod: TimeOfDayFla
           );
         }
 
+        // ── Marigolds, Sugar Skulls & Candles (Día de los Muertos) ──
+        if (type === "marigold") {
+          const muertosEmojis = ["🌼", "💀", "🕯️", "🏵️", "🍂", "💀"];
+          const emoji = muertosEmojis[p.id % muertosEmojis.length];
+          return (
+            <div key={p.id} className="absolute"
+              style={{
+                left: `${p.x}%`,
+                top: `${(p.y || 0) * 0.9}%`,
+                fontSize: `${p.size + 3}px`,
+                opacity: p.opacity,
+                animation: `weatherHarvestFloat ${p.duration} ease-in-out ${p.delay} infinite`,
+                filter: emoji === "🕯️" ? "drop-shadow(0 0 6px rgba(251,191,36,0.8))" : "none",
+              }}>{emoji}</div>
+          );
+        }
+
+        // ── Tricolor Sparks & Independence Bells (Mexican Independence) ──
+        if (type === "tricolor-sparks") {
+          const flagColors = ["#22c55e", "#ffffff", "#ef4444"];
+          const color = flagColors[p.id % flagColors.length];
+          const isBell = p.id % 6 === 0;
+          return isBell ? (
+            <div key={p.id} className="absolute top-0"
+              style={{
+                left: `${p.x}%`,
+                fontSize: `${p.size + 4}px`,
+                opacity: p.opacity,
+                animation: `weatherConfettiFall ${p.duration} ease-in-out ${p.delay} infinite`,
+              }}>🔔</div>
+          ) : (
+            <div key={p.id} className="absolute rounded-full"
+              style={{
+                left: `${p.x}%`,
+                top: `${p.y}%`,
+                width: `${p.size}px`,
+                height: `${p.size}px`,
+                background: color,
+                boxShadow: `0 0 ${p.size * 2}px ${p.size}px ${color}55`,
+                animation: `weatherSparkle ${p.duration} ease-out ${p.delay} infinite`,
+              }} />
+          );
+        }
+
+        // ── Castile Roses & Heavenly Stars (Virgin of Guadalupe) ──
+        if (type === "holy-roses") {
+          const isStar = p.id % 2 === 0;
+          return isStar ? (
+            <div key={p.id} className="absolute"
+              style={{
+                left: `${p.x}%`,
+                top: `${p.y}%`,
+                fontSize: `${p.size + 1}px`,
+                opacity: p.opacity,
+                animation: `weatherSparkle ${p.duration} ease-in-out ${p.delay} infinite`,
+                filter: "drop-shadow(0 0 4px rgba(253,224,71,0.8))",
+              }}>⭐</div>
+          ) : (
+            <div key={p.id} className="absolute top-0"
+              style={{
+                left: `${p.x}%`,
+                fontSize: `${p.size + 4}px`,
+                opacity: p.opacity,
+                animation: `weatherBlossomFall ${p.duration} ease-in-out ${p.delay} infinite`,
+              }}>🌹</div>
+          );
+        }
+
         return null;
       })}
     </div>
@@ -1372,6 +1696,9 @@ export default function WeatherWidget() {
     july4th: "🎆 4th of July", valentines: "💝 Valentine's",
     newyears: "🥂 New Year's", cincodemayo: "🪅 Cinco de Mayo",
     thanksgiving: "🦃 Thanksgiving", stpatricks: "🍀 St. Patrick's",
+    diadelosmuertos: "💀 Día de los Muertos",
+    mexicanindependence: "🔔 Independence Day",
+    virginguadalupe: "🌹 Virgin of Guadalupe",
   };
 
   return (
@@ -1406,6 +1733,9 @@ export default function WeatherWidget() {
                 {activeHoliday === "cincodemayo" && <CincoDeMayoOverlay />}
                 {activeHoliday === "thanksgiving" && <ThanksgivingOverlay />}
                 {activeHoliday === "stpatricks" && <StPatricksOverlay />}
+                {activeHoliday === "diadelosmuertos" && <DiaDeLosMuertosOverlay />}
+                {activeHoliday === "mexicanindependence" && <MexicanIndependenceOverlay />}
+                {activeHoliday === "virginguadalupe" && <VirginGuadalupeOverlay />}
               </>
             )}
           </>

@@ -410,6 +410,12 @@ export default function SettingsPage() {
                 { id: "july4th",    label: "4th of July",    emoji: "🎆", desc: "Fireworks & patriotic" },
                 { id: "valentines", label: "Valentine's",    emoji: "💝", desc: "Hearts & rose glow" },
                 { id: "newyears",   label: "New Year's",     emoji: "🥂", desc: "Midnight sparkles" },
+                { id: "cincodemayo", label: "Cinco de Mayo",  emoji: "🪅", desc: "Confetti & tricolor glow" },
+                { id: "thanksgiving", label: "Thanksgiving",  emoji: "🦃", desc: "Warm foliage & turkey" },
+                { id: "stpatricks",  label: "St. Patrick's",  emoji: "🍀", desc: "Rainbow & pot of gold" },
+                { id: "diadelosmuertos", label: "Día de los Muertos", emoji: "💀", desc: "Calaveras & marigolds" },
+                { id: "mexicanindependence", label: "Independence Day", emoji: "🔔", desc: "Historic Dolores bell" },
+                { id: "virginguadalupe", label: "Virgin of Guadalupe", emoji: "🌹", desc: "Stars & blooming roses" },
               ] as const).map((h) => (
                 <button
                   key={h.id}

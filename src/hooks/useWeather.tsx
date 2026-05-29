@@ -43,7 +43,7 @@ export const useWeatherConfig = (): WeatherContextValue => {
 
 const VALID_TOD: TimeOfDay[] = ['auto', 'day', 'night'];
 const VALID_SEASONS: Season[] = ['auto', 'spring', 'summer', 'autumn', 'winter'];
-const VALID_HOLIDAYS: HolidayOverride[] = ['auto', 'none', 'christmas', 'halloween', 'july4th', 'valentines', 'newyears', 'cincodemayo', 'thanksgiving', 'stpatricks'];
+const VALID_HOLIDAYS: HolidayOverride[] = ['auto', 'none', 'christmas', 'halloween', 'july4th', 'valentines', 'newyears', 'cincodemayo', 'thanksgiving', 'stpatricks', 'diadelosmuertos', 'mexicanindependence', 'virginguadalupe'];
 
 export const WeatherProvider = ({ children }: { children: ReactNode }) => {
   const [weather, setWeather] = useState<WeatherConfig>(defaultWeatherConfig);

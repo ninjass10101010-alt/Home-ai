@@ -2,7 +2,7 @@
 export type TemperatureUnit = 'F' | 'C';
 export type TimeOfDay = 'auto' | 'day' | 'night';
 export type Season = 'auto' | 'spring' | 'summer' | 'autumn' | 'winter';
-export type HolidayOverride = 'auto' | 'none' | 'christmas' | 'halloween' | 'july4th' | 'valentines' | 'newyears' | 'cincodemayo' | 'thanksgiving' | 'stpatricks';
+export type HolidayOverride = 'auto' | 'none' | 'christmas' | 'halloween' | 'july4th' | 'valentines' | 'newyears' | 'cincodemayo' | 'thanksgiving' | 'stpatricks' | 'diadelosmuertos' | 'mexicanindependence' | 'virginguadalupe';
 
 
 export interface WeatherConfig {
