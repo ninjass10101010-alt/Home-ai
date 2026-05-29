@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef } from "react";
 import { useTheme } from "@/hooks/useTheme";
 import { useWeatherConfig } from "@/hooks/useWeather";
+import { useHomeLayout } from "@/hooks/useHomeLayout";
+import { ALL_WIDGETS } from "@/lib/layout-config";
 import PageShell from "@/components/ui/PageShell";
 import TopBar from "@/components/ui/TopBar";
 import Card from "@/components/ui/Card";
@@ -35,6 +37,7 @@ const relationshipOptions = [
 export default function SettingsPage() {
   const { theme, setMode, setAccentColor, setContrastBoost } = useTheme();
   const { weather, setLocation, setUnit, setTimeOfDay, setSeason, setHolidayOverride } = useWeatherConfig();
+  const { widgets, moveUp, moveDown, toggle, getIndex } = useHomeLayout();
   const [mounted, setMounted] = useState(false);
 
   // ─── Family Member editing state ────────────────────────────────────────
@@ -43,6 +46,7 @@ export default function SettingsPage() {
   const [editName, setEditName] = useState("");
   const [editEmoji, setEditEmoji] = useState("");
   const [editAge, setEditAge] = useState("");
+  const [editPin, setEditPin] = useState("");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
   // ─── Emergency Contacts editing state ────────────────────────────────────
@@ -91,13 +95,14 @@ export default function SettingsPage() {
     setEditName(member.name);
     setEditEmoji(member.emoji);
     setEditAge(member.age || "");
+    setEditPin(member.pin || "");
   };
 
   const saveMember = (idx: number) => {
     const member = membersList[idx];
     if (!member || !editName.trim()) return;
-    db.updateMember(member.name, { name: editName.trim(), emoji: editEmoji, age: parseInt(editAge) || 0 });
-    setMembersList(prev => prev.map((m, i) => i === idx ? { ...m, name: editName.trim(), emoji: editEmoji, age: editAge } : m));
+    db.updateMember(member.name, { name: editName.trim(), emoji: editEmoji, age: parseInt(editAge) || 0, pin: editPin });
+    setMembersList(prev => prev.map((m, i) => i === idx ? { ...m, name: editName.trim(), emoji: editEmoji, age: editAge, pin: editPin } : m));
     setEditingMemberIdx(null);
   };
 
@@ -410,12 +415,9 @@ export default function SettingsPage() {
                 { id: "july4th",    label: "4th of July",    emoji: "🎆", desc: "Fireworks & patriotic" },
                 { id: "valentines", label: "Valentine's",    emoji: "💝", desc: "Hearts & rose glow" },
                 { id: "newyears",   label: "New Year's",     emoji: "🥂", desc: "Midnight sparkles" },
-                { id: "cincodemayo", label: "Cinco de Mayo",  emoji: "🪅", desc: "Confetti & tricolor glow" },
-                { id: "thanksgiving", label: "Thanksgiving",  emoji: "🦃", desc: "Warm foliage & turkey" },
-                { id: "stpatricks",  label: "St. Patrick's",  emoji: "🍀", desc: "Rainbow & pot of gold" },
-                { id: "diadelosmuertos", label: "Día de los Muertos", emoji: "💀", desc: "Calaveras & marigolds" },
-                { id: "mexicanindependence", label: "Independence Day", emoji: "🔔", desc: "Historic Dolores bell" },
-                { id: "virginguadalupe", label: "Virgin of Guadalupe", emoji: "🌹", desc: "Stars & blooming roses" },
+                { id: "cincodemayo",label: "Cinco de Mayo",  emoji: "🪅", desc: "Piñatas & festive colors" },
+                { id: "thanksgiving",label: "Thanksgiving",  emoji: "🦃", desc: "Fall harvest & warm tones" },
+                { id: "stpatricks", label: "St. Patrick's",  emoji: "☘️", desc: "Green magic & leprechauns" },
               ] as const).map((h) => (
                 <button
                   key={h.id}
@@ -652,6 +654,18 @@ export default function SettingsPage() {
                         />
                         <span className="text-text-muted text-xs">years old</span>
                       </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          value={editPin}
+                          onChange={e => setEditPin(e.target.value.replace(/[^0-9]/g, "").slice(0, 4))}
+                          placeholder="PIN"
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={4}
+                          className="w-24 bg-[var(--color-surface-2)] text-text-primary text-sm rounded-xl px-3 py-2 outline-none border border-[var(--color-surface-3)] focus:border-[var(--color-accent-selected)] placeholder:text-text-muted"
+                        />
+                        <span className="text-text-muted text-xs">4-digit PIN</span>
+                      </div>
                       {showEmojiPicker && (
                         <div className="flex flex-wrap gap-1 p-2 rounded-xl bg-[var(--color-surface-2)]">
                           {emojiOptions.map(e => (
@@ -679,7 +693,7 @@ export default function SettingsPage() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-text-primary text-sm font-semibold truncate">{member.name}</p>
-                        <p className="text-text-muted text-xs">{member.role} · {member.age}y</p>
+                        <p className="text-text-muted text-xs">{member.role} · {member.age}y{member.pin && member.role !== "Pet" ? ` · PIN: ${member.pin}` : ""}</p>
                       </div>
                       <button
                         onClick={() => startEditMember(idx, member)}
@@ -940,6 +954,194 @@ export default function SettingsPage() {
                 Add Emergency Contact
               </button>
             )}
+          </div>
+        </section>
+
+        <div className="h-px bg-[var(--color-surface-3)]" />
+
+        {/* ── Home Layout ─────────────────────────────────────────────────── */}
+        <section className="space-y-6">
+          <div>
+            <h2 className="text-text-primary font-semibold text-2xl">Home Layout</h2>
+            <p className="text-text-secondary mt-1">Show, hide, and reorder widgets on your home screen</p>
+          </div>
+
+          <div className="space-y-1">
+            {widgets.map((id, idx) => {
+              const def = ALL_WIDGETS.find((w) => w.id === id);
+              if (!def) return null;
+              const isFirst = idx === 0;
+              const isLast = idx === widgets.length - 1;
+              return (
+                <div
+                  key={id}
+                  className="flex items-center gap-3 p-3 rounded-xl border border-[var(--color-surface-3)] bg-[var(--color-surface-1)]"
+                >
+                  {/* Drag handle / reorder buttons */}
+                  <div className="flex flex-col gap-0.5 shrink-0">
+                    <button
+                      onClick={() => moveUp(id)}
+                      disabled={isFirst}
+                      aria-label="Move up"
+                      className={`w-6 h-5 rounded flex items-center justify-center transition-all text-xs ${
+                        isFirst
+                          ? "text-text-muted opacity-30 cursor-not-allowed"
+                          : "text-text-secondary hover:text-text-primary hover:bg-[var(--color-surface-2)]"
+                      }`}
+                    >
+                      ▲
+                    </button>
+                    <button
+                      onClick={() => moveDown(id)}
+                      disabled={isLast}
+                      aria-label="Move down"
+                      className={`w-6 h-5 rounded flex items-center justify-center transition-all text-xs ${
+                        isLast
+                          ? "text-text-muted opacity-30 cursor-not-allowed"
+                          : "text-text-secondary hover:text-text-primary hover:bg-[var(--color-surface-2)]"
+                      }`}
+                    >
+                      ▼
+                    </button>
+                  </div>
+
+                  {/* Widget info */}
+                  <div className="flex-1 min-w-0 flex items-center gap-3">
+                    <span className="text-xl shrink-0">{def.emoji}</span>
+                    <div className="min-w-0">
+                      <p className="text-text-primary text-sm font-medium">{def.label}</p>
+                      <p className="text-text-muted text-xs truncate">{def.description}</p>
+                    </div>
+                  </div>
+
+                  {/* Toggle switch */}
+                  <label className="shrink-0 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={widgets.includes(id)}
+                      onChange={() => toggle(id)}
+                      className="sr-only"
+                    />
+                    <div
+                      className={`relative w-10 h-6 rounded-full transition-colors duration-200 ${
+                        widgets.includes(id) ? "bg-[var(--color-accent-selected)]" : "bg-[var(--color-surface-4)]"
+                      }`}
+                    >
+                      <div
+                        className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-all duration-200 ${
+                          widgets.includes(id) ? "left-5" : "left-1"
+                        }`}
+                      />
+                    </div>
+                  </label>
+                </div>
+              );
+            })}
+          </div>
+
+          <p className="text-text-muted text-xs px-1">
+            Changes apply immediately on your home screen. The header (greeting, date, family) is always visible.
+          </p>
+        </section>
+
+        <div className="h-px bg-[var(--color-surface-3)]" />
+
+        {/* ── Data Sync & Backup ─────────────────────────────────────────── */}
+        <section className="space-y-6">
+          <div>
+            <h2 className="text-text-primary font-semibold text-2xl">Data Sync & Backup</h2>
+            <p className="text-text-secondary mt-1">Export your dashboard data or sync with the server</p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* Export All Data */}
+            <button
+              onClick={() => {
+                const exportData: Record<string, any> = {};
+                const keys = [
+                  "consuela-events",
+                  "consuela-tasks",
+                  "consuela-schedules",
+                  "consuela-meals",
+                  "consuela-rewards",
+                  "consuela-recipes",
+                  "consuela-home-layout",
+                  "consuela-emergency",
+                  "home-ai-theme-config",
+                  "consuela-weather-config",
+                  "consuela-grocery",
+                  "consuela-pantry",
+                ];
+                for (const key of keys) {
+                  try {
+                    const raw = localStorage.getItem(key);
+                    if (raw) exportData[key] = JSON.parse(raw);
+                  } catch {}
+                }
+                // Include family members from DB
+                exportData["family-members"] = membersList;
+                const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `consuela-backup-${new Date().toISOString().split("T")[0]}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+              className="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-dashed border-[var(--color-surface-4)] bg-[var(--color-surface-1)] hover:border-[var(--color-accent-selected)]/50 hover:bg-[var(--color-accent-selected)]/5 transition-all active:scale-[0.98] cursor-pointer"
+            >
+              <span className="text-2xl">📥</span>
+              <span className="text-text-primary text-sm font-semibold">Export All Data</span>
+              <span className="text-text-muted text-xs text-center">Download a complete JSON backup of your dashboard data</span>
+            </button>
+
+            {/* Sync to Server */}
+            <button
+              onClick={async () => {
+                const types: [string, string][] = [
+                  ["events", "consuela-events"],
+                  ["tasks", "consuela-tasks"],
+                  ["schedules", "consuela-schedules"],
+                  ["meals", "consuela-meals"],
+                  ["rewards", "consuela-rewards"],
+                  ["recipes", "consuela-recipes"],
+                ];
+                let synced = 0;
+                for (const [type, key] of types) {
+                  try {
+                    const raw = localStorage.getItem(key);
+                    if (!raw) continue;
+                    const data = JSON.parse(raw);
+                    await fetch("http://100.120.64.66:6789/data/sync", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ type, data }),
+                    });
+                    synced++;
+                  } catch {}
+                }
+                alert(`Sync complete: ${synced}/${types.length} data types pushed to server.`);
+              }}
+              className="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-dashed border-[var(--color-surface-4)] bg-[var(--color-surface-1)] hover:border-[var(--color-accent-cyan)]/50 hover:bg-[var(--color-accent-cyan)]/5 transition-all active:scale-[0.98] cursor-pointer"
+            >
+              <span className="text-2xl">🔄</span>
+              <span className="text-text-primary text-sm font-semibold">Sync to Server</span>
+              <span className="text-text-muted text-xs text-center">Push all local data to the Hermes API server</span>
+            </button>
+          </div>
+
+          {/* Auto-sync status */}
+          <div className="p-4 rounded-xl border border-[var(--color-surface-3)] bg-[var(--color-surface-1)]">
+            <div className="flex items-center gap-3">
+              <div className="w-3 h-3 rounded-full bg-[var(--color-accent-mint)] animate-pulse" />
+              <div>
+                <p className="text-text-primary text-sm font-medium">Auto-Sync Active</p>
+                <p className="text-text-muted text-xs">
+                  Data is synced on app load via <code className="text-[var(--color-accent-cyan)]">SyncInit</code>.
+                  Use the buttons above for manual backup or full push.
+                </p>
+              </div>
+            </div>
           </div>
         </section>
 

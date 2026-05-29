@@ -12,6 +12,8 @@ import { db } from "@/db";
 import CurrentMealWidget from "@/components/meals/CurrentMealWidget";
 import { AtmosphericProvider } from "@/hooks/useAtmosphericTheme";
 import AtmosphericBridge from "@/components/ui/AtmosphericBridge";
+import { useHomeLayout } from "@/hooks/useHomeLayout";
+import type { WidgetId } from "@/lib/layout-config";
 
 
 const quickPrompts = [
@@ -53,6 +55,7 @@ export default function HomePage() {
 
   // Live clock
   const [now, setNow] = useState(new Date());
+  const { isVisible, widgets } = useHomeLayout();
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(timer);
@@ -138,207 +141,233 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* Weather Widget */}
-      <div className="px-4 pb-2 relative z-10">
-        <AtmosphericProvider>
-          <WeatherWidget />
-          <AtmosphericBridge />
-        </AtmosphericProvider>
-      </div>
+      {/* Weather Widget - always renders first with its special wrapper */}
+      {isVisible("weather") && (
+        <div className="px-4 pb-2 relative z-10">
+          <AtmosphericProvider>
+            <WeatherWidget />
+            <AtmosphericBridge />
+          </AtmosphericProvider>
+        </div>
+      )}
 
-      {/* Divider */}
-      <div className="px-4 mb-2 relative z-10">
-        <div className="h-px bg-white/5"></div>
-      </div>
+      {/* Divider - only show if weather is visible AND at least one other widget is visible */}
+      {isVisible("weather") && widgets.filter((id) => id !== "weather").some((id) => isVisible(id)) && (
+        <div className="px-4 mb-2 relative z-10">
+          <div className="h-px bg-white/5"></div>
+        </div>
+      )}
 
       <div className="px-4 space-y-5 relative z-10">
-        {/* AI Quick Ask - Enhanced glass card */}
-        <AtmosphericProvider>
-          <Link href="/chat">
-            <div className="atmospheric-card rounded-2xl p-4 flex items-center gap-3 cursor-pointer active:scale-[0.98] transition-all">
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[var(--color-accent-selected)]/30 to-[var(--color-accent-cyan)]/20 flex items-center justify-center text-2xl shrink-0 floating">
-                <Icon3D variant="chat" size="md" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-text-primary text-sm font-medium">Ask Consuela anything…</p>
-                <p className="text-text-secondary/60 text-xs mt-0.5 truncate">
-                  &ldquo;Plan dinner, add an event, or check on the kids…&rdquo;
-                </p>
-              </div>
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-                className="w-5 h-5 text-[var(--color-accent-selected)] shrink-0"
-              >
-                <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </div>
-          </Link>
-        </AtmosphericProvider>
+        {widgets.filter((id) => id !== "weather").map((id) => {
+          if (!isVisible(id)) return null;
 
-        {/* Quick prompts */}
-        <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 scroll-smooth-x no-scrollbar">
-          {quickPrompts.map((p, idx) => (
-            <Link
-              key={p}
-              href={`/chat?q=${encodeURIComponent(p)}`}
-              style={{ animationDelay: `${0.24 + idx * 0.08}s` }}
-              className="scroll-snap-child shrink-0 px-3 py-1.5 rounded-full glass text-text-secondary text-xs border border-[var(--color-surface-7)]/20 hover:border-[var(--color-accent-selected)]/40 hover:text-[var(--color-accent-selected)] transition-all duration-200 animate-in"
-            >
-              {p}
-            </Link>
-          ))}
-        </div>
-
-        {/* Today's Events */}
-        <section>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-text-primary font-semibold text-base">Today</h2>
-            <Link href="/calendar" className="text-[var(--color-accent-selected)] text-xs font-medium hover:opacity-80">
-              {todayEvents.length} events →
-            </Link>
-          </div>
-          <div className="space-y-1.5">
-            {todayEvents.map((ev, idx) => {
-              const colorBgMap: Record<string, string> = {
-                green:  "bg-[var(--color-accent-mint)]/10",
-                violet: "bg-[var(--color-accent-violet)]/10",
-                amber:  "bg-[var(--color-accent-amber)]/10",
-                cyan:   "bg-[var(--color-accent-cyan)]/10",
-                rose:   "bg-[var(--color-accent-rose)]/10",
-                blue:   "bg-[var(--color-accent-nori)]/10",
-              };
-              const colorBarMap: Record<string, string> = {
-                green:  "bg-[var(--color-accent-mint)]",
-                violet: "bg-[var(--color-accent-violet)]",
-                amber:  "bg-[var(--color-accent-amber)]",
-                cyan:   "bg-[var(--color-accent-cyan)]",
-                rose:   "bg-[var(--color-accent-rose)]",
-                blue:   "bg-[var(--color-accent-nori)]",
-              };
+          switch (id as WidgetId) {
+            case "aiQuickAsk":
               return (
-                <div
-                  key={ev.id}
-                  style={{ animationDelay: `${idx * 0.06}s` }}
-                  className={`flex items-center gap-3 px-3 py-2.5 rounded-xl animate-in transition-all duration-200 hover:bg-white/[0.06] ${
-                    colorBgMap[ev.color] ?? "bg-[var(--color-accent-nori)]/10"
-                  }`}
-                >
-                  {/* Accent bar */}
-                  <div className={`w-1 h-8 rounded-full shrink-0 ${colorBarMap[ev.color] ?? "bg-[var(--color-accent-nori)]"}`} />
-                  {/* Icon */}
-                  <span className="text-lg shrink-0">{ev.icon}</span>
-                  {/* Content */}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-text-primary font-medium truncate">{ev.title}</p>
-                    <p className="text-xs text-text-muted tabular-nums">{ev.time}</p>
+                <AtmosphericProvider key="aiQuickAsk">
+                  <Link href="/chat">
+                  <div className="atmospheric-card rounded-2xl p-4 flex items-center gap-3 cursor-pointer active:scale-[0.98] transition-all">
+                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[var(--color-accent-selected)]/30 to-[var(--color-accent-cyan)]/20 flex items-center justify-center text-2xl shrink-0 floating">
+                      <Icon3D variant="chat" size="md" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-text-primary text-sm font-medium">Ask Consuela anything…</p>
+                      <p className="text-text-secondary/60 text-xs mt-0.5 truncate">
+                        &ldquo;Plan dinner, add an event, or check on the kids…&rdquo;
+                      </p>
+                    </div>
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      className="w-5 h-5 text-[var(--color-accent-selected)] shrink-0"
+                    >
+                      <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
                   </div>
-                  {/* Member badge */}
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-[var(--color-surface-3)] text-text-secondary shrink-0">
-                    {ev.member.split(" ")[0]}
-                  </span>
+                </Link>
+              </AtmosphericProvider>
+              );
+
+            case "quickPrompts":
+              return (
+                <div key="quickPrompts" className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 scroll-smooth-x no-scrollbar">
+                  {quickPrompts.map((p, idx) => (
+                    <Link
+                      key={p}
+                      href={`/chat?q=${encodeURIComponent(p)}`}
+                      style={{ animationDelay: `${0.24 + idx * 0.08}s` }}
+                      className="scroll-snap-child shrink-0 px-3 py-1.5 rounded-full glass text-text-secondary text-xs border border-[var(--color-surface-7)]/20 hover:border-[var(--color-accent-selected)]/40 hover:text-[var(--color-accent-selected)] transition-all duration-200 animate-in"
+                    >
+                      {p}
+                    </Link>
+                  ))}
                 </div>
               );
-            })}
-          </div>
-        </section>
 
-        {/* Schedule Display */}
-        <ScheduleDisplay
-          schedule={scheduleItems.map((item) => ({
-            id: item.id,
-            title: item.title,
-            time: item.time,
-            emoji: item.emoji,
-            type: item.type as "routine" | "reminder",
-            color: item.color,
-            member: item.member,
-            memberColor: item.memberColor,
-          }))}
-          title="Daily Schedule"
-        />
-
-        {/* Meal Highlight */}
-        <AtmosphericProvider>
-          <section className="atmospheric-meal-section">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-text-primary font-semibold text-base">Current Meal</h2>
-              <Link href="/meals" className="text-[var(--color-accent-selected)] text-xs font-medium hover:opacity-80">
-                Plan →
-              </Link>
-            </div>
-            <CurrentMealWidget />
-          </section>
-        </AtmosphericProvider>
-
-        {/* Tasks */}
-        <section>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-text-primary font-semibold text-base">Tasks</h2>
-            <Link href="/tasks" className="text-[var(--color-accent-selected)] text-xs font-medium hover:opacity-80">
-              {pendingTasks.length} pending →
-            </Link>
-          </div>
-          <div className="space-y-1.5">
-            {pendingTasks.map((task, idx) => {
-              const pts = task.points;
-              const isHigh = pts > 15;
-              const isMed = pts > 10 && !isHigh;
-              const accentBg = isHigh
-                ? "bg-[var(--color-accent-rose)]/10"
-                : isMed
-                ? "bg-[var(--color-accent-amber)]/10"
-                : "bg-[var(--color-accent-mint)]/10";
-              const accentBar = isHigh
-                ? "bg-[var(--color-accent-rose)]"
-                : isMed
-                ? "bg-[var(--color-accent-amber)]"
-                : "bg-[var(--color-accent-mint)]";
-              const ptColor = isHigh
-                ? "text-[var(--color-accent-rose)]"
-                : "text-[var(--color-accent-amber)]";
+            case "todayEvents":
               return (
-                <div
-                  key={task.id}
-                  style={{ animationDelay: `${idx * 0.06}s` }}
-                  className={`flex items-center gap-3 px-3 py-2.5 rounded-xl animate-in transition-all duration-200 hover:bg-white/[0.06] ${accentBg}`}
-                >
-                  {/* Priority bar */}
-                  <div className={`w-1 h-8 rounded-full shrink-0 ${accentBar}`} />
-                  {/* Checkbox */}
-                  <div
-                    className={`w-5 h-5 rounded-full border-2 shrink-0 flex items-center justify-center transition-all ${
-                      task.done
-                        ? "border-[var(--color-accent-selected)] bg-[var(--color-accent-selected)]"
-                        : "border-[var(--color-surface-4)]"
-                    }`}
-                  >
-                    {task.done && (
-                      <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={3} className="w-3 h-3">
-                        <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    )}
+                <section key="todayEvents">
+                  <div className="flex items-center justify-between mb-3">
+                    <h2 className="text-text-primary font-semibold text-base">Today</h2>
+                    <Link href="/calendar" className="text-[var(--color-accent-selected)] text-xs font-medium hover:opacity-80">
+                      {todayEvents.length} events →
+                    </Link>
                   </div>
-                  {/* Content */}
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-sm truncate ${task.done ? "line-through text-text-muted" : "text-text-primary"}`}>
-                      {task.title}
-                    </p>
-                    <p className="text-xs text-text-muted">
-                      {task.assigned} · {task.due}
-                    </p>
+                  <div className="space-y-1.5">
+                    {todayEvents.map((ev, idx) => {
+                      const colorBgMap: Record<string, string> = {
+                        green:  "bg-[var(--color-accent-mint)]/10",
+                        violet: "bg-[var(--color-accent-violet)]/10",
+                        amber:  "bg-[var(--color-accent-amber)]/10",
+                        cyan:   "bg-[var(--color-accent-cyan)]/10",
+                        rose:   "bg-[var(--color-accent-rose)]/10",
+                        blue:   "bg-[var(--color-accent-nori)]/10",
+                      };
+                      const colorBarMap: Record<string, string> = {
+                        green:  "bg-[var(--color-accent-mint)]",
+                        violet: "bg-[var(--color-accent-violet)]",
+                        amber:  "bg-[var(--color-accent-amber)]",
+                        cyan:   "bg-[var(--color-accent-cyan)]",
+                        rose:   "bg-[var(--color-accent-rose)]",
+                        blue:   "bg-[var(--color-accent-nori)]",
+                      };
+                      return (
+                        <div
+                          key={ev.id}
+                          style={{ animationDelay: `${idx * 0.06}s` }}
+                          className={`flex items-center gap-3 px-3 py-2.5 rounded-xl animate-in transition-all duration-200 hover:bg-white/[0.06] ${
+                            colorBgMap[ev.color] ?? "bg-[var(--color-accent-nori)]/10"
+                          }`}
+                        >
+                          {/* Accent bar */}
+                          <div className={`w-1 h-8 rounded-full shrink-0 ${colorBarMap[ev.color] ?? "bg-[var(--color-accent-nori)]"}`} />
+                          {/* Icon */}
+                          <span className="text-lg shrink-0">{ev.icon}</span>
+                          {/* Content */}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-text-primary font-medium truncate">{ev.title}</p>
+                            <p className="text-xs text-text-muted tabular-nums">{ev.time}</p>
+                          </div>
+                          {/* Member badge */}
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-[var(--color-surface-3)] text-text-secondary shrink-0">
+                            {ev.member.split(" ")[0]}
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
-                  {/* Points badge */}
-                  <span className={`text-xs font-semibold shrink-0 px-2 py-0.5 rounded-full bg-[var(--color-surface-3)] ${ptColor}`}>
-                    +{pts}pts
-                  </span>
-                </div>
+                </section>
               );
-            })}
-          </div>
-        </section>
+
+            case "schedule":
+              return (
+                <ScheduleDisplay
+                  key="schedule"
+                  schedule={scheduleItems.map((item) => ({
+                    id: item.id,
+                    title: item.title,
+                    time: item.time,
+                    emoji: item.emoji,
+                    type: item.type as "routine" | "reminder",
+                    color: item.color,
+                    member: item.member,
+                    memberColor: item.memberColor,
+                  }))}
+                  title="Daily Schedule"
+                />
+              );
+
+            case "currentMeal":
+              return (
+                <AtmosphericProvider key="currentMeal">
+                  <section className="atmospheric-meal-section">
+                    <div className="flex items-center justify-between mb-3">
+                      <h2 className="text-text-primary font-semibold text-base">Current Meal</h2>
+                      <Link href="/meals" className="text-[var(--color-accent-selected)] text-xs font-medium hover:opacity-80">
+                        Plan →
+                      </Link>
+                    </div>
+                    <CurrentMealWidget />
+                  </section>
+                </AtmosphericProvider>
+              );
+
+            case "tasks":
+              return (
+                <section key="tasks">
+                  <div className="flex items-center justify-between mb-3">
+                    <h2 className="text-text-primary font-semibold text-base">Tasks</h2>
+                    <Link href="/tasks" className="text-[var(--color-accent-selected)] text-xs font-medium hover:opacity-80">
+                      {pendingTasks.length} pending →
+                    </Link>
+                  </div>
+                  <div className="space-y-1.5">
+                    {pendingTasks.map((task, idx) => {
+                      const pts = task.points;
+                      const isHigh = pts > 15;
+                      const isMed = pts > 10 && !isHigh;
+                      const accentBg = isHigh
+                        ? "bg-[var(--color-accent-rose)]/10"
+                        : isMed
+                        ? "bg-[var(--color-accent-amber)]/10"
+                        : "bg-[var(--color-accent-mint)]/10";
+                      const accentBar = isHigh
+                        ? "bg-[var(--color-accent-rose)]"
+                        : isMed
+                        ? "bg-[var(--color-accent-amber)]"
+                        : "bg-[var(--color-accent-mint)]";
+                      const ptColor = isHigh
+                        ? "text-[var(--color-accent-rose)]"
+                        : "text-[var(--color-accent-amber)]";
+                      return (
+                        <div
+                          key={task.id}
+                          style={{ animationDelay: `${idx * 0.06}s` }}
+                          className={`flex items-center gap-3 px-3 py-2.5 rounded-xl animate-in transition-all duration-200 hover:bg-white/[0.06] ${accentBg}`}
+                        >
+                          {/* Priority bar */}
+                          <div className={`w-1 h-8 rounded-full shrink-0 ${accentBar}`} />
+                          {/* Checkbox */}
+                          <div
+                            className={`w-5 h-5 rounded-full border-2 shrink-0 flex items-center justify-center transition-all ${
+                              task.done
+                                ? "border-[var(--color-accent-selected)] bg-[var(--color-accent-selected)]"
+                                : "border-[var(--color-surface-4)]"
+                            }`}
+                          >
+                            {task.done && (
+                              <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={3} className="w-3 h-3">
+                                <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                            )}
+                          </div>
+                          {/* Content */}
+                          <div className="flex-1 min-w-0">
+                            <p className={`text-sm truncate ${task.done ? "line-through text-text-muted" : "text-text-primary"}`}>
+                              {task.title}
+                            </p>
+                            <p className="text-xs text-text-muted">
+                              {task.assigned} · {task.due}
+                            </p>
+                          </div>
+                          {/* Points badge */}
+                          <span className={`text-xs font-semibold shrink-0 px-2 py-0.5 rounded-full bg-[var(--color-surface-3)] ${ptColor}`}>
+                            +{pts}pts
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              );
+
+            default:
+              return null;
+          }
+        })}
 
       </div>
     </PageShell>
