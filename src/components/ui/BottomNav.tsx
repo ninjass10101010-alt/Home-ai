@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import ConsuelaFAB from "./ConsuelaFAB";
+import SyncInit from "./SyncInit";
 
 const navItems = [
   {
@@ -219,6 +220,7 @@ export default function BottomNav() {
           })}
         </div>
       </div>
+      <SyncInit />
       <ConsuelaFAB />
     </nav>
   );
