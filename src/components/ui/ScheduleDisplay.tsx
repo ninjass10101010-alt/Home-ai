@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
 
 interface ScheduleItem {
   id: number;
@@ -35,6 +36,8 @@ function parseTimeToMinutes(timeStr: string): number {
 export default function ScheduleDisplay({ schedule, title = "Today's Schedule", className = "" }: ScheduleDisplayProps) {
   const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
 
+  const { colors, accentRgb } = useAtmosphericTheme();
+
   const { sortedSchedule, upcomingCount } = useMemo(() => {
     // Filter out past items, then sort by time
     const upcoming = schedule.filter(item => parseTimeToMinutes(item.time) >= nowMinutes);
@@ -44,8 +47,8 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
 
   if (schedule.length === 0) {
     return (
-      <section className={className}>
-        <h2 className="text-text-primary font-semibold text-base mb-3">{title}</h2>
+        <section className={`${className} glass isometric-card`} style={{ boxShadow: `0 0 24px ${colors.glow}` }}>
+        <h2 className={`font-semibold text-base mb-3`} style={{ color: colors.accentColor }}>{title}</h2>
         <div className="flex flex-col items-center gap-2 py-6 text-text-muted">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-8 h-8 text-surface-5">
             <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83" strokeLinecap="round" />
@@ -56,12 +59,13 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
     );
   }
 
-  const colorBgMap: Record<string, string> = {
-    green:  "bg-nori-500/15",
-    amber:  "bg-amber-500/15",
-    cyan:   "bg-cyan-500/15",
-    violet: "bg-accent-violet/15",
-    rose:   "bg-accent-rose/15",
+  const getAccentBg = (colorName: string): string => {
+    if (colorName === "green") return `rgba(${accentRgb},0.15)`;
+    if (colorName === "amber") return `rgba(251,191,36,0.15)`;
+    if (colorName === "cyan") return `rgba(6,182,212,0.15)`;
+    if (colorName === "violet") return `rgba(139,92,246,0.15)`;
+    if (colorName === "rose") return `rgba(244,63,94,0.15)`;
+    return `rgba(${accentRgb},0.15)`;
   };
 
   return (
@@ -79,20 +83,20 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
       ) : (
         <div className="space-y-1.5">
           {sortedSchedule.map((item, idx) => (
-            <div
-              key={item.id}
-              style={{ animationDelay: `${idx * 0.05}s` }}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl ${colorBgMap[item.color ?? "green"] ?? "bg-nori-500/15"} transition-all duration-200 hover:bg-white/[0.06] animate-in`}
-            >
-              <span className="text-xs font-mono text-text-muted w-12 shrink-0 tabular-nums">{item.time}</span>
-              <span className="text-lg shrink-0">{item.emoji || item.icon || "•"}</span>
-              <span className="text-sm flex-1 min-w-0 text-text-primary">{item.title}</span>
-              {item.member && (
-                <span className={`text-xs px-2 py-0.5 rounded-full bg-${item.memberColor || "surface"}-500/20 text-text-secondary`}>
-                  {item.member.split(" ")[0]}
-                </span>
-              )}
-            </div>
+                 <div
+                    key={item.id}
+                    style={{ animationDelay: `${idx * 0.05}s`, boxShadow: `0 0 24px ${colors.glow}` }}
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-xl glass isometric-card transition-all duration-200 hover:bg-white/[0.06] animate-in`}
+                  >
+               <span className="text-xs font-mono text-text-muted w-12 shrink-0 tabular-nums">{item.time}</span>
+               <span className="text-lg shrink-0">{item.emoji || item.icon || "•"}</span>
+                <span className="text-sm flex-1 min-w-0" style={{ color: colors.accentColor }}>{item.title}</span>
+               {item.member && (
+                  <span className="text-xs px-2 py-0.5 rounded-full text-text-secondary transition-all duration-200" style={{ background: `${colors.accentColor}20` }}>
+                     {item.member.split(" ")[0]}
+                   </span>
+               )}
+             </div>
           ))}
         </div>
       )}

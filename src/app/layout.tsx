@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { WeatherProvider } from "@/hooks/useWeather";
+import { AtmosphericProvider } from "@/hooks/useAtmosphericTheme";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -91,7 +92,9 @@ export default function RootLayout({
       >
         <ThemeProvider>
           <WeatherProvider>
-            {children}
+            <AtmosphericProvider>
+              {children}
+            </AtmosphericProvider>
           </WeatherProvider>
         </ThemeProvider>
       </body>

@@ -1,3 +1,6 @@
+"use client";
+import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
+
 interface CardProps {
   children: React.ReactNode;
   className?: string;
@@ -16,6 +19,8 @@ export default function Card({
   style
 }: CardProps) {
   
+  const { colors, accentRgb } = useAtmosphericTheme();
+
   // Base styles for all card variants
   const baseStyles = `
     rounded-2xl p-4 transition-all duration-300 will-change-transform
@@ -54,8 +59,12 @@ export default function Card({
     `
     : "";
 
-  // Glow effect
-  const glowClass = glow ? "consuela-glow" : "";
+  // Glow effect - use theme accent for seasonal glow
+  const glowClass = glow ? "" : "";
+  const combinedStyle = {
+    ...style,
+    ...(glow ? { boxShadow: `0 0 24px ${colors.glow}` } : {}),
+  };
 
   // Isometric transform
   const transformClass = "isometric-card";
@@ -67,6 +76,7 @@ export default function Card({
     ${interactiveStyles}
     ${glowClass}
     ${transformClass}
+    glass
   `;
 
   if (onClick) {
@@ -75,7 +85,7 @@ export default function Card({
         type="button"
         onClick={onClick}
         className={`${baseClass} ${className} w-full text-left`}
-        style={style}
+        style={combinedStyle}
       >
         {children}
       </button>
@@ -83,7 +93,7 @@ export default function Card({
   }
 
   return (
-    <div className={`${baseClass} ${className}`} style={style}>
+    <div className={`${baseClass} ${className}`} style={combinedStyle}>
       {children}
     </div>
   );

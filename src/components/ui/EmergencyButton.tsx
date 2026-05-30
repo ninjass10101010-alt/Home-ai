@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
 
 interface EmergencyButtonProps {
   className?: string;
@@ -20,6 +21,8 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
   const [isSending, setIsSending] = useState(false);
   const [result, setResult] = useState<{success: boolean, message: string, details?: any} | null>(null);
   const router = useRouter();
+
+  const { colors, accentRgb } = useAtmosphericTheme();
 
   const handleEmergency = async (type: string) => {
     setSelectedType(type);
@@ -60,7 +63,11 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
     <>
       <button
         onClick={() => setShowModal(true)}
-        className={`fixed top-4 right-4 z-50 w-10 h-10 rounded-full bg-rose-500 text-white shadow-lg shadow-rose-500/30 hover:bg-rose-400 active:scale-95 transition-all ${className}`}
+        className={`fixed top-4 right-4 z-50 w-10 h-10 rounded-full text-white shadow-lg hover:opacity-90 active:scale-95 transition-all ${className}`}
+        style={{
+          background: colors.accentColor,
+          boxShadow: `0 0 24px ${colors.glow}`,
+        }}
         aria-label="Emergency"
       >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-6 h-6 mx-auto">
@@ -71,15 +78,15 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
 
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowModal(false)}>
-          <div className="glass rounded-2xl p-5 w-full max-w-xs" onClick={(e) => e.stopPropagation()}>
+          <div className="glass rounded-2xl p-5 w-full max-w-xs" style={{ boxShadow: `0 0 24px ${colors.glow}` }} onClick={(e) => e.stopPropagation()}>
             {result ? (
               // Result screen
               <div className="text-center">
-                <div className={`w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center ${
-                  result.success
-                    ? "bg-green-500/20 text-green-400"
-                    : "bg-red-500/20 text-red-400"
-                }`}>
+                <div className="w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center"
+                  style={{
+                    background: `${colors.accentColor}20`,
+                    color: colors.accentColor,
+                  }}>
                   {result.success ? (
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-8 h-8">
                       <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
@@ -102,7 +109,7 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
                 {!result.success && (
                   <button
                     onClick={() => setResult(null)}
-                    className="w-full px-3 py-2 rounded-xl bg-[var(--color-accent-rose)] text-[var(--color-text-on-accent)] hover:bg-[var(--color-accent-rose)]/90 transition-colors"
+                    className="w-full px-3 py-2 rounded-xl bg-rose-500/15 text-rose-400 text-sm font-medium hover:bg-rose-500/25 transition-colors"
                   >
                     Try Again
                   </button>
@@ -119,9 +126,8 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
                       key={type.id}
                       onClick={() => handleEmergency(type.id)}
                       disabled={isSending}
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-text-primary transition-all ${
-                        isSending ? "opacity-50 cursor-not-allowed" : `bg-${type.color}-500/15 hover:bg-${type.color}-500/25`
-                      }`}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-text-primary transition-all hover:bg-white/[0.06]"
+                      style={{ background: `rgba(${accentRgb},0.15)` }}
                     >
                       {isSending && selectedType === type.id ? (
                         <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />

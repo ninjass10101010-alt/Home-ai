@@ -203,10 +203,35 @@ function detectAutoHoliday(): HolidayOverride {
 
 const AtmosphericContext = createContext<AtmosphericContextValue | null>(null);
 
-export function useAtmosphericTheme(): AtmosphericTheme {
+/**
+ * Parses an accent color hex string to RGB for use in rgba() backgrounds.
+ * Returns a default teal RGB if parsing fails.
+ */
+function parseAccentRgb(hex: string): string {
+  const m = hex.match(/#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i);
+  if (m) return `${parseInt(m[1], 16)},${parseInt(m[2], 16)},${parseInt(m[3], 16)}`;
+  return "59,130,246"; // default teal
+}
+
+export function useAtmosphericTheme(): AtmosphericTheme & {
+  colors: { glow: string; gradientStop: string; accentColor: string };
+  accentRgb: string;
+} {
   const ctx = useContext(AtmosphericContext);
   if (!ctx) throw new Error("useAtmosphericTheme must be used within AtmosphericProvider");
-  return ctx.theme;
+  
+  const theme = ctx.theme;
+  const colors = {
+    glow: theme.glowColor,
+    gradientStop: theme.bgGradient,
+    accentColor: theme.accentColor,
+  };
+  
+  return {
+    ...theme,
+    colors,
+    accentRgb: parseAccentRgb(theme.accentColor),
+  };
 }
 
 export function useAtmosphericContext(): AtmosphericContextValue {

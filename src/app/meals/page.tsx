@@ -13,6 +13,7 @@ import { useMeals } from "@/hooks/useMeals";
 import { useGrocery } from "@/hooks/useGrocery";
 import { usePantry } from "@/hooks/usePantry";
 import { useRecipes } from "@/hooks/useRecipes";
+import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
 
 // Components
 import MealsTab from "@/components/meals/MealsTab";
@@ -26,6 +27,7 @@ function MealHubContent() {
   const initialTab = (searchParams.get("tab") as Tab) || "meals";
   const [activeTab, setActiveTab] = useState<Tab>(initialTab);
   const [notification, setNotification] = useState<string | null>(null);
+  const { colors, accentRgb } = useAtmosphericTheme();
 
   const showToast = (msg: string) => {
     setNotification(msg);

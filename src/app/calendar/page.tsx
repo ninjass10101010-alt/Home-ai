@@ -8,6 +8,7 @@ import Badge from "@/components/ui/Badge";
 import Avatar from "@/components/ui/Avatar";
 import AnimatedEmoji from "@/components/ui/AnimatedEmoji";
 import Link from "next/link";
+import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
 import { db } from "@/db";
 
 const DAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
@@ -86,9 +87,16 @@ const dayLabels: Record<string, string> = {
 const colorLabels: Record<string, string> = {
   green: "Green", amber: "Amber", cyan: "Cyan", violet: "Violet", rose: "Rose",
 };
-const colorBG: Record<string, string> = {
-  green: "bg-nori-500/15", amber: "bg-amber-500/15", cyan: "bg-cyan-500/15", violet: "bg-accent-violet/15", rose: "bg-accent-rose/15",
-};
+
+function getColorBG(accentRgb: string): Record<string, string> {
+  return {
+    green: `rgba(${accentRgb},0.15)`,
+    amber: "rgba(251,191,36,0.15)",
+    cyan: "rgba(6,182,212,0.15)",
+    violet: "rgba(139,92,246,0.15)",
+    rose: "rgba(244,63,94,0.15)",
+  };
+}
 
 const emptySchedule = (): ScheduleItem => ({
   id: Date.now(), title: "", time: "08:00", days: "all", type: "routine", icon: "⏰", color: "green", mealType: "none",
@@ -112,6 +120,7 @@ function loadFromStorage<T>(key: string, fallback: T): T {
 export default function CalendarPage() {
   const today = new Date();
   const members = useMemo(() => db.selectMembersForCalendar(), []);
+  const { colors, accentRgb } = useAtmosphericTheme();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
   const [selectedDay, setSelectedDay] = useState(today.getDate());
@@ -558,28 +567,32 @@ export default function CalendarPage() {
                 </Card>
               ) : (
                 <div className="space-y-1.5">
-                  {sortedSchedules.map((item) => (
-                    <div key={item.id} className="flex items-center gap-1">
-                      <div className={`flex-1 flex items-center gap-3 px-3 py-2.5 rounded-xl ${colorBG[item.color] ?? "bg-nori-500/15"}`}>
-                        <span className="text-xs font-mono text-text-muted w-12 shrink-0 tabular-nums">{item.time}</span>
-                        <span className="text-lg shrink-0">{item.icon}</span>
-                        <span className="text-sm text-text-primary flex-1 min-w-0">{item.title}</span>
-                        <span className="text-[10px] text-text-muted px-1.5 py-0.5 rounded-full bg-surface-3">{dayLabels[item.days] ?? item.days}</span>
-                        <Badge variant={item.type === "routine" ? "amber" : "rose"}>{item.type}</Badge>
-                        {item.mealType && item.mealType !== "none" && (
-                          <Badge variant={item.mealType === "breakfast" ? "amber" : item.mealType === "lunch" ? "cyan" : item.mealType === "dinner" ? "violet" : "green"}>
-                            {item.mealType === "breakfast" ? "🌅" : item.mealType === "lunch" ? "☀️" : item.mealType === "dinner" ? "🌙" : "🍎"} {item.mealType}
-                          </Badge>
-                        )}
+                  {sortedSchedules.map((item) => {
+                    const itemColor = item.color ?? "green";
+                    const colorBG = getColorBG(accentRgb);
+                    return (
+                      <div key={item.id} className="flex items-center gap-1">
+                        <div className="flex-1 flex items-center gap-3 px-3 py-2.5 rounded-xl glass isometric-card" style={{ background: colorBG[itemColor] }}>
+                          <span className="text-xs font-mono text-text-muted w-12 shrink-0 tabular-nums">{item.time}</span>
+                          <span className="text-lg shrink-0">{item.icon}</span>
+                          <span className="text-sm flex-1 min-w-0 text-text-primary">{item.title}</span>
+                          <span className="text-[10px] text-text-muted px-1.5 py-0.5 rounded-full bg-surface-3">{dayLabels[item.days] ?? item.days}</span>
+                          <Badge variant={item.type === "routine" ? "amber" : "rose"}>{item.type}</Badge>
+                          {item.mealType && item.mealType !== "none" && (
+                            <Badge variant={item.mealType === "breakfast" ? "amber" : item.mealType === "lunch" ? "cyan" : item.mealType === "dinner" ? "violet" : "green"}>
+                              {item.mealType === "breakfast" ? "🌅" : item.mealType === "lunch" ? "☀️" : item.mealType === "dinner" ? "🌙" : "🍎"} {item.mealType}
+                            </Badge>
+                          )}
+                        </div>
+                        <button onClick={() => startEditSched(item)} className="w-7 h-7 flex items-center justify-center rounded-lg text-text-muted hover:text-nori-400 hover:bg-nori-500/10 transition-colors shrink-0">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
+                            <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </button>
                       </div>
-                      <button onClick={() => startEditSched(item)} className="w-7 h-7 flex items-center justify-center rounded-lg text-text-muted hover:text-nori-400 hover:bg-nori-500/10 transition-colors shrink-0">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
-                          <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" strokeLinecap="round" strokeLinejoin="round" />
-                          <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                      </button>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </section>
