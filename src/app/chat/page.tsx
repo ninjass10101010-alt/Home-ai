@@ -18,7 +18,7 @@ interface Message {
 }
 
 interface ActionCard {
-  type: "event" | "meal" | "task" | "grocery" | "recipe" | "reward";
+  type: "event" | "meal" | "task" | "grocery" | "recipe" | "reward" | "clear" | "schedule";
   title: string;
   detail: string;
   emoji: string;
@@ -199,6 +199,12 @@ function executeAction(action: ActionCard): { success: boolean; message: string 
           } catch {}
         }
         return { success: true, message: `Added reward "${action.title}" (${points}pts)` };
+      }
+      case "clear": {
+        if (typeof window !== "undefined") {
+          localStorage.removeItem("consuela-points");
+        }
+        return { success: true, message: "Cleared leaderboard" };
       }
       default:
         return { success: false, message: `Unknown action type` };
