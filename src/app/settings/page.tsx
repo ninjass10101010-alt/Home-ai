@@ -65,7 +65,20 @@ export default function SettingsPage() {
 
   useEffect(() => {
     setMounted(true);
-    setMembersList(db.selectMembersDetailed());
+    // Load family members from localStorage, fallback to DB seed
+    const storedMembers = (() => {
+      if (typeof window === "undefined") return null;
+      try { const d = localStorage.getItem("consuela-members"); return d ? JSON.parse(d) : null; } catch { return null; }
+    })();
+    if (storedMembers && storedMembers.length > 0) {
+      storedMembers.forEach((m: any) => {
+        const exists = db.selectMembersDetailed().find((em: any) => em.name === m.name);
+        if (exists) db.updateMember(m.name, { emoji: m.emoji, name: m.name, age: parseInt(m.age) || 0, pin: m.pin || "" });
+      });
+      setMembersList(storedMembers);
+    } else {
+      setMembersList(db.selectMembersDetailed());
+    }
     // Load emergency contacts from localStorage, fallback to DB seed
     const stored = (() => {
       if (typeof window === "undefined") return null;
@@ -83,6 +96,13 @@ export default function SettingsPage() {
       setEmergencyList(db.selectEmergencyContacts());
     }
   }, []);
+
+  // Persist family members to localStorage on every change
+  useEffect(() => {
+    if (mounted && membersList.length > 0) {
+      localStorage.setItem("consuela-members", JSON.stringify(membersList));
+    }
+  }, [membersList, mounted]);
 
   // Persist emergency contacts to localStorage on every change
   useEffect(() => {

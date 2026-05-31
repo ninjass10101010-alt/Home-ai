@@ -1,6 +1,6 @@
 // Type definitions for the theme system
 export type ThemeMode = 'light' | 'dark' | 'system';
-export type AccentColor = 'nori' | 'violet' | 'rose' | 'cyan' | 'mint' | 'amber';
+export type AccentColor = 'nori' | 'violet' | 'rose' | 'coral' | 'lavender' | 'cyan' | 'mint' | 'amber';
 
 export interface ThemeConfig {
   mode: ThemeMode;

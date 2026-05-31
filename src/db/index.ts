@@ -207,7 +207,20 @@ let emergencyContactsStore: Array<{
 
 // Mock database interface - replace with real Drizzle queries later
 // In-memory storage for demo purposes
-let membersStore = [...membersData];
+let membersStore: any[] = [];
+const __membersStoreInit = () => {
+  const d = typeof window !== "undefined" ? window.localStorage.getItem("consuela-members") : null;
+  if (d) {
+    try {
+      const parsed = JSON.parse(d);
+      membersStore = parsed.map(function(m: any) {
+        const seed = membersData.find(function(s: any) { return s.name === m.name; });
+        return seed ? Object.assign({}, seed, { emoji: m.emoji || seed.emoji, age: parseInt(m.age) || seed.age, pin: m.pin || (seed.pin || "") }) : (seed || membersData[0]);
+      });
+    } catch(e) { membersStore = [...membersData]; }
+  } else { membersStore = [...membersData]; }
+};
+__membersStoreInit();
 
 // === Meal/Pantry/Grocery in-memory stores (module-scoped lets for reliable mutation) ===
 // This fixes the previous (this as any) binding issues in object literal methods.
