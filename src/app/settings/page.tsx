@@ -220,12 +220,14 @@ export default function SettingsPage() {
   const contrastBoost = theme.contrastBoost;
 
   const accentOptions = [
-    { id: "nori",   label: "Nori",   dark: "#3b82f6", light: "#2563eb" },
-    { id: "violet", label: "Violet", dark: "#7c6ff7", light: "#7c3aed" },
-    { id: "rose",   label: "Rose",   dark: "#f43f5e", light: "#e11d48" },
-    { id: "cyan",   label: "Cyan",   dark: "#06b6d4", light: "#0891b2" },
-    { id: "mint",   label: "Mint",   dark: "#4ade80", light: "#059669" },
-    { id: "amber",  label: "Amber",  dark: "#f59e0b", light: "#d97706" },
+    { id: "nori",    label: "Nori",    dark: "#3b82f6", light: "#2563eb" },
+    { id: "violet",  label: "Violet",  dark: "#7c6ff7", light: "#7c3aed" },
+    { id: "rose",    label: "Rose",    dark: "#f43f5e", light: "#e11d48" },
+    { id: "coral",   label: "Coral",   dark: "#fb7185", light: "#e11d48" },
+    { id: "lavender",label: "Lavender",dark: "#a78bfa", light: "#6d28d9" },
+    { id: "cyan",    label: "Cyan",    dark: "#06b6d4", light: "#0891b2" },
+    { id: "mint",    label: "Mint",    dark: "#4ade80", light: "#059669" },
+    { id: "amber",   label: "Amber",   dark: "#f59e0b", light: "#d97706" },
   ] as const;
 
   if (!mounted) {

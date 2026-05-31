@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import SigmaImage from "./SigmaImage";
 
 interface AnimatedEmojiProps {
   emoji: string;
@@ -26,14 +27,9 @@ export default function AnimatedEmoji({ emoji, name, size = "md", className = ""
   if (isImageUrl) {
     const url = emoji.startsWith("http") ? emoji : `https://${emoji}`;
     return (
-      <img
-        src={url}
-        alt={name || "avatar"}
-        width={s}
-        height={s}
-        className={`rounded-full object-cover ${className}`}
-        style={{ width: s, height: s }}
-      />
+      <div style={{ width: s, height: s }} className="overflow-hidden rounded-full">
+        <SigmaImage src={url} alt={name || "avatar"} shape="circle" />
+      </div>
     );
   }
 
