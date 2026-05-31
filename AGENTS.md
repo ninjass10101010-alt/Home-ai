@@ -6,9 +6,11 @@
 > **Mandatory:** After any code change that touches UI, navigation, meals, emergency, or integrations, update this file in the same session.
 
 **Current Dashboard Snapshot** (maintain on every relevant change)  
-- **Last Updated:** 2026-05-27 | Source of truth: immersive weather widget implementation + hermes-api work  
-- **Last major UI refresh:** 2026-05-21 — motion icons, 3D floating elements, AnimatedEmoji, glass/isometric cards, gradient orbs  
-- **Active integrations:** Meals ↔ Pantry ↔ Grocery bidirectional sync (`mealSyncService`), Emergency SMS + Email (free Gmail + carrier gateways), AI Chat ("Ask Consuela"), full theme system (3 modes + 6 accent colors), PocketBase data layer
+- **Last Updated:** 2026-05-31 | Avatar system overhaul + theme expansion  
+- **Last major UI refresh:** 2026-05-31 — SigmaImage/SigmaAvatar integration, 8 accent colors, avatar size/glow controls, localStorage persistence for family members  
+- **Active integrations:** Meals ↔ Pantry ↔ Grocery bidirectional sync (`mealSyncService`), Emergency SMS + Email (free Gmail + carrier gateways), AI Chat ("Ask Consuela"), full theme system (3 modes + **8 accent colors** + high-contrast), PocketBase data layer
+- **IMPORTANT BUILD NOTE:** After every `npm run build`, the CSS chunks can go out of sync (Next.js 16.2.6 bug). If the dashboard loads with broken layout (big icons, wrong nav styles), **restart the container**: `docker restart consuela-dashboard`. This is faster than a rebuild.
+- **IMPORTANT BUILD NOTE:** After every `npm run build`, the CSS chunks can go out of sync (Next.js 16.2.6 Turbopack bug). If the dashboard loads with broken layout (big icons, wrong nav styles), **restart the container**: `docker restart consuela-dashboard`. This is faster than a rebuild.
 - **Navigation model:** Persistent bottom tab bar (8 items) + always-visible floating red Emergency shield button (top-right on Home)
 - **Tech surface for ops:** Next.js 16 + React 19 + Tailwind CSS 4, PocketBase backend (`pocketbase` SDK), API routes under `src/app/api/`, custom SVG animations (no framer-motion)
 
@@ -82,7 +84,7 @@ See files:
 ### 1.4 Theme & Accessibility Controls
 
 - Three modes (dark default, light, system) persisted in `localStorage` under `home-ai-theme-config`
-- 6 accent colors (mint, cyan, violet, amber, rose, nori)
+- 8 accent colors (nori, violet, rose, coral, lavender, cyan, mint, amber)
 - High-contrast boost toggle
 - All colors via CSS variables (`--color-accent-*`, `--color-surface-*`, etc.)
 - Controlled by `useTheme` hook (`src/hooks/useTheme.tsx`) and inline anti-FOUC script in `layout.tsx`
