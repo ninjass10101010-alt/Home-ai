@@ -88,6 +88,7 @@ export default function SigmaImage({
             <img
               src={src}
               alt={alt}
+              referrerPolicy="no-referrer"
               onError={handleError}
               onLoad={handleLoad}
               className={`${isLoading ? "hidden" : ""} z-[2] relative animate-fade-in w-full h-full object-cover rounded-md`}

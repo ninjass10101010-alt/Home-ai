@@ -11,6 +11,7 @@ import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import AnimatedEmoji from "@/components/ui/AnimatedEmoji";
 import SigmaImage from "@/components/ui/SigmaImage";
+import SigmaAvatar from "@/components/ui/SigmaAvatar";
 import { db } from "@/db";
 
 const emojiOptions = ["👨","👩","👧","🧒","👶","👴","👵","🐶","🐱","🐩","🐕","🐈","🐠","🐹","🐰","🦊","🐻","🐼","🐨","🐯","🦁","🐮","🐷","🐸","🐵"];
@@ -49,6 +50,8 @@ export default function SettingsPage() {
   const [editAge, setEditAge] = useState("");
   const [editPin, setEditPin] = useState("");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [editAvatarSize, setEditAvatarSize] = useState<string>("base");
+  const [editGlow, setEditGlow] = useState(false);
 
   // ─── Emergency Contacts editing state ────────────────────────────────────
   const [emergencyList, setEmergencyList] = useState<any[]>([]);
@@ -117,13 +120,15 @@ export default function SettingsPage() {
     setEditEmoji(member.emoji);
     setEditAge(member.age || "");
     setEditPin(member.pin || "");
+    setEditAvatarSize(member.avatarSize || "md");
+    setEditGlow(member.glow || false);
   };
 
   const saveMember = (idx: number) => {
     const member = membersList[idx];
     if (!member || !editName.trim()) return;
     db.updateMember(member.name, { name: editName.trim(), emoji: editEmoji, age: parseInt(editAge) || 0, pin: editPin });
-    setMembersList(prev => prev.map((m, i) => i === idx ? { ...m, name: editName.trim(), emoji: editEmoji, age: editAge, pin: editPin } : m));
+    setMembersList(prev => prev.map((m, i) => i === idx ? { ...m, name: editName.trim(), emoji: editEmoji, age: editAge, pin: editPin, avatarSize: editAvatarSize, glow: editGlow } : m));
     setEditingMemberIdx(null);
   };
 
@@ -689,6 +694,23 @@ export default function SettingsPage() {
                         />
                         <span className="text-text-muted text-xs">4-digit PIN</span>
                       </div>
+                      {/* Avatar Size */}
+                      <div className="flex items-center gap-2">
+                        <span className="text-text-muted text-xs">Size:</span>
+                        {["xs", "sm", "base", "lg"].map(s => (
+                          <button key={s} onClick={() => setEditAvatarSize(s)}
+                            className={`px-2 py-1 rounded-lg text-xs font-medium transition-all ${editAvatarSize === s ? "bg-[var(--color-accent-selected)] text-white" : "bg-[var(--color-surface-2)] text-text-secondary hover:bg-[var(--color-surface-3)]"}`}
+                          >{s}</button>
+                        ))}
+                      </div>
+                      {/* Glow toggle */}
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={editGlow} onChange={e => setEditGlow(e.target.checked)} className="sr-only" />
+                        <div className={`relative w-9 h-5 rounded-full transition-colors ${editGlow ? "bg-[var(--color-accent-selected)]" : "bg-[var(--color-surface-4)]"}`}>
+                          <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${editGlow ? "left-[18px]" : "left-0.5"}`} />
+                        </div>
+                        <span className="text-text-muted text-xs">Glow effect</span>
+                      </label>
                       {showEmojiPicker && (
                         <div className="flex flex-wrap gap-1 p-2 rounded-xl bg-[var(--color-surface-2)]">
                           {emojiOptions.map(e => (
@@ -707,11 +729,13 @@ export default function SettingsPage() {
                     </div>
                   ) : (
                     <>
-                      <div className="w-12 h-12 rounded-xl bg-[var(--color-surface-2)] flex items-center justify-center text-2xl shrink-0 overflow-hidden">
+                      <div className="shrink-0">
                         {member.emoji && (member.emoji.startsWith("http") || member.emoji.startsWith("//")) ? (
-                          <SigmaImage src={member.emoji} alt={member.name} shape="rounded" />
+                          <SigmaAvatar src={member.emoji} alt={member.name} size={member.avatarSize || "base"} glow={member.glow || false} shape="circle" />
                         ) : (
-                          <span>{member.emoji || "👤"}</span>
+                          <div className="w-10 h-10 rounded-full bg-[var(--color-surface-2)] flex items-center justify-center text-xl">
+                            <span>{member.emoji || "👤"}</span>
+                          </div>
                         )}
                       </div>
                       <div className="flex-1 min-w-0">
