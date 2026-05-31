@@ -9,7 +9,8 @@ import PageShell from "@/components/ui/PageShell";
 import TopBar from "@/components/ui/TopBar";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
-
+import AnimatedEmoji from "@/components/ui/AnimatedEmoji";
+import SigmaImage from "@/components/ui/SigmaImage";
 import { db } from "@/db";
 
 const emojiOptions = ["👨","👩","👧","🧒","👶","👴","👵","🐶","🐱","🐩","🐕","🐈","🐠","🐹","🐰","🦊","🐻","🐼","🐨","🐯","🦁","🐮","🐷","🐸","🐵"];
@@ -686,7 +687,7 @@ export default function SettingsPage() {
                     <>
                       <div className="w-12 h-12 rounded-xl bg-[var(--color-surface-2)] flex items-center justify-center text-2xl shrink-0 overflow-hidden">
                         {member.emoji && (member.emoji.startsWith("http") || member.emoji.startsWith("//")) ? (
-                          <img src={member.emoji} alt={member.name} className="w-full h-full object-cover rounded-lg" />
+                          <SigmaImage src={member.emoji} alt={member.name} shape="rounded" />
                         ) : (
                           <span>{member.emoji || "👤"}</span>
                         )}
