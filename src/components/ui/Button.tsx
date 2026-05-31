@@ -9,7 +9,7 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variantMap = {
   primary:
-    "bg-nori-500 text-white hover:bg-nori-400 active:bg-nori-600 font-semibold shadow-lg shadow-nori-500/20",
+    "bg-[var(--color-accent-selected)] text-white hover:brightness-110 active:brightness-90 font-semibold shadow-lg",
   secondary:
     "bg-surface-3 text-text-primary hover:bg-surface-4 active:bg-surface-2 border border-surface-4",
   ghost:
