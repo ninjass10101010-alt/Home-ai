@@ -39,6 +39,17 @@ interface CalEvent {
   day: number;
 }
 
+type ScheduleColor =
+  | "green"
+  | "amber"
+  | "cyan"
+  | "violet"
+  | "rose"
+  | "blue"
+  | "indigo"
+  | "pink"
+  | "teal";
+
 const events: CalEvent[] = [
   { id: 1, title: "Soccer Practice", time: "4:00 PM", member: "Caspian", color: "violet", emoji: "⚽", day: 18 },
   { id: 2, title: "Piano Lesson", time: "3:00 PM", member: "Emily", color: "amber", emoji: "🎹", day: 19 },
@@ -71,7 +82,7 @@ interface ScheduleItem {
   days: string;
   type: "routine" | "reminder";
   icon: string;
-  color: string;
+  color: ScheduleColor;
   mealType?: "breakfast" | "lunch" | "dinner" | "snack" | "none";
 }
 
@@ -79,27 +90,47 @@ const getInitialSchedules = (): ScheduleItem[] => db.selectTodaysSchedulesRaw().
   ...s,
   days: "all" as string,
   icon: s.emoji || s.icon || "⏰",
+  color: (s.color as ScheduleColor) || "green",
 }));
 
 const dayLabels: Record<string, string> = {
   all: "Every day", weekdays: "Weekdays", weekends: "Weekends", friday: "Fridays",
 };
-const colorLabels: Record<string, string> = {
-  green: "Green", amber: "Amber", cyan: "Cyan", violet: "Violet", rose: "Rose",
+const colorLabels: Record<ScheduleColor, string> = {
+  green: "Green",
+  amber: "Amber",
+  cyan: "Cyan",
+  violet: "Violet",
+  rose: "Rose",
+  blue: "Blue",
+  indigo: "Indigo",
+  pink: "Pink",
+  teal: "Teal",
 };
 
-function getColorBG(accentRgb: string): Record<string, string> {
+function getColorBG(accentRgb: string): Record<ScheduleColor, string> {
   return {
     green: `rgba(${accentRgb},0.15)`,
     amber: "rgba(251,191,36,0.15)",
     cyan: "rgba(6,182,212,0.15)",
     violet: "rgba(139,92,246,0.15)",
     rose: "rgba(244,63,94,0.15)",
+    blue: "rgba(59,130,246,0.15)",
+    indigo: "rgba(99,102,241,0.15)",
+    pink: "rgba(236,72,153,0.15)",
+    teal: "rgba(20,184,166,0.15)",
   };
 }
 
 const emptySchedule = (): ScheduleItem => ({
-  id: Date.now(), title: "", time: "08:00", days: "all", type: "routine", icon: "⏰", color: "green", mealType: "none",
+  id: Date.now(),
+  title: "",
+  time: "08:00",
+  days: "all",
+  type: "routine",
+  icon: "⏰",
+  color: "green",
+  mealType: "none",
 });
 
 const EVENTS_STORAGE_KEY = "consuela-events";
@@ -535,11 +566,25 @@ export default function CalendarPage() {
                   </select>
                 </div>
                 <div className="flex gap-2">
-                  {(["green","amber","cyan","violet","rose"] as const).map(c => (
-                    <button key={c} onClick={() => setSchedForm({ ...schedForm, color: c })}
-                      className={`w-8 h-8 rounded-full border-2 transition-all ${schedForm.color === c ? "border-white scale-110" : "border-transparent"} ${
-                        c === "green" ? "bg-nori-500" : c === "amber" ? "bg-amber-500" : c === "cyan" ? "bg-cyan-500" : c === "violet" ? "bg-violet-500" : "bg-rose-500"
-                      }`} />
+                  {(["green","amber","cyan","violet","rose","blue","indigo","pink","teal"] as const).map(c => (
+                    <button
+                      key={c}
+                      onClick={() => setSchedForm({ ...schedForm, color: c })}
+                      aria-label={`Set color ${c}`}
+                      className={`w-8 h-8 rounded-full border-2 transition-all ${
+                        schedForm.color === c ? "border-white scale-110" : "border-transparent"
+                      } ${
+                        c === "green" ? "bg-nori-500" :
+                        c === "amber" ? "bg-amber-500" :
+                        c === "cyan" ? "bg-cyan-500" :
+                        c === "violet" ? "bg-violet-500" :
+                        c === "rose" ? "bg-rose-500" :
+                        c === "blue" ? "bg-blue-500" :
+                        c === "indigo" ? "bg-indigo-500" :
+                        c === "pink" ? "bg-pink-500" :
+                        "bg-teal-500"
+                      }`}
+                    />
                   ))}
                 </div>
                 <div className="flex gap-2 pt-1">

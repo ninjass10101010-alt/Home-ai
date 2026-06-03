@@ -27,6 +27,8 @@ export default function SigmaImage({
   const [isLoading, setIsLoading] = useState(!!src);
 
   const shapeClass = shape === "circle" ? "rounded-full [&_img]:rounded-full" : "rounded-md [&_img]:rounded-md";
+  const imgCornerClass = shape === "circle" ? "rounded-full" : "rounded-md";
+
 
   const handleError = () => {
     onError?.();
@@ -79,19 +81,19 @@ export default function SigmaImage({
               alt={alt}
               onError={handleError}
               onLoad={handleLoad}
-              className={`${isLoading ? "hidden" : ""} z-[1] animate-fade-in absolute left-0 top-[2%] w-full h-full scale-105 object-cover blur-lg brightness-200 saturate-200 dark:brightness-100 rounded-md`}
+              className={`${isLoading ? "hidden" : ""} z-[1] animate-fade-in absolute left-0 top-[2%] w-full h-full scale-105 object-cover blur-lg brightness-200 saturate-200 dark:brightness-100 ${imgCornerClass}`}
             />
           )}
 
           {/* Main image */}
           {!isError && src && (
-            <img
+          <img
               src={src}
               alt={alt}
               referrerPolicy="no-referrer"
               onError={handleError}
               onLoad={handleLoad}
-              className={`${isLoading ? "hidden" : ""} z-[2] relative animate-fade-in w-full h-full object-cover rounded-md`}
+              className={`${isLoading ? "hidden" : ""} z-[2] relative animate-fade-in w-full h-full object-cover ${imgCornerClass}`}
             />
           )}
         </div>

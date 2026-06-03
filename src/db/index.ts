@@ -277,6 +277,9 @@ export const db = {
     skinColor: m.skinColor,
     hairColor: m.hairColor,
     pin: (m as any).pin || "",
+    // Persist avatar sizing choice from Settings
+    avatarSize: (m as any).avatarSize || "md",
+    glow: (m as any).glow || false,
   })),
 
   // Members - calendar filter view (includes "All" option)

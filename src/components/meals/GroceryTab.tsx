@@ -248,8 +248,8 @@ export default function GroceryTab({
             </div>
             <Card className="!p-0 overflow-hidden">
               <div className="divide-y divide-[var(--color-surface-3)]">
-                {catItems.map((item: any) => (
-                  <div key={`${cat.id}-${item.id}`} className="p-3">
+                {catItems.map((item: any, idx: number) => (
+                  <div key={`${cat.id}-${item.id}-${idx}`} className="p-3">
                     {editingGroceryId === item.id ? (
                       <div className="space-y-2">
                         <div className="flex gap-2">

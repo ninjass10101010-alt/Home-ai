@@ -23,14 +23,27 @@ interface ScheduleDisplayProps {
 
 /** Parse "8:00 AM" | "2:30 PM" → minutes since midnight for accurate sort + comparison */
 function parseTimeToMinutes(timeStr: string): number {
-  const match = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-  if (!match) return 0;
-  let hours = parseInt(match[1], 10);
-  const minutes = parseInt(match[2], 10);
-  const ampm = match[3].toUpperCase();
-  if (ampm === "PM" && hours !== 12) hours += 12;
-  if (ampm === "AM" && hours === 12) hours = 0;
-  return hours * 60 + minutes;
+  // Supports:
+  // - "8:00 AM" / "2:30 PM"
+  // - "07:00" / "18:30" (24h from calendar schedule editor)
+  const ampmMatch = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (ampmMatch) {
+    let hours = parseInt(ampmMatch[1], 10);
+    const minutes = parseInt(ampmMatch[2], 10);
+    const ampm = ampmMatch[3].toUpperCase();
+    if (ampm === "PM" && hours !== 12) hours += 12;
+    if (ampm === "AM" && hours === 12) hours = 0;
+    return hours * 60 + minutes;
+  }
+
+  const time24Match = timeStr.match(/^(\d{1,2}):(\d{2})$/);
+  if (time24Match) {
+    const hours = parseInt(time24Match[1], 10);
+    const minutes = parseInt(time24Match[2], 10);
+    return hours * 60 + minutes;
+  }
+
+  return 0;
 }
 
 export default function ScheduleDisplay({ schedule, title = "Today's Schedule", className = "" }: ScheduleDisplayProps) {
@@ -65,7 +78,35 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
     if (colorName === "cyan") return `rgba(6,182,212,0.15)`;
     if (colorName === "violet") return `rgba(139,92,246,0.15)`;
     if (colorName === "rose") return `rgba(244,63,94,0.15)`;
+    if (colorName === "blue") return `rgba(59,130,246,0.15)`;
+    if (colorName === "indigo") return `rgba(99,102,241,0.15)`;
+    if (colorName === "pink") return `rgba(236,72,153,0.15)`;
+    if (colorName === "teal") return `rgba(20,184,166,0.15)`;
     return `rgba(${accentRgb},0.15)`;
+  };
+
+  const getItemAccentTextColor = (colorName: string): string => {
+    // Color-tint the title text to match Calendar schedule color chips.
+    // We only have accentRgb from atmospheric theme, so use fixed Tailwind-compatible
+    // rgba values via inline styles.
+    if (!colorName) return colors.accentColor;
+
+    const map: Record<string, { r: number; g: number; b: number }> = {
+      green: { r: 34, g: 197, b: 94 }, // emerald-ish
+      amber: { r: 245, g: 158, b: 11 }, // amber-ish
+      cyan: { r: 6, g: 182, b: 212 }, // cyan-ish
+      violet: { r: 139, g: 92, b: 246 }, // violet-ish
+      rose: { r: 244, g: 63, b: 94 }, // rose-ish
+      blue: { r: 59, g: 130, b: 246 },
+      indigo: { r: 99, g: 102, b: 241 },
+      pink: { r: 236, g: 72, b: 153 },
+      teal: { r: 20, g: 184, b: 166 },
+    };
+
+    const rgb = map[colorName];
+    if (!rgb) return colors.accentColor;
+
+    return `rgba(${rgb.r},${rgb.g},${rgb.b},1)`;
   };
 
   return (
@@ -83,23 +124,41 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
       ) : (
         <div className="space-y-1.5">
           {sortedSchedule.map((item, idx) => (
-                 <div
-                    key={item.id}
-                    style={{ animationDelay: `${idx * 0.05}s`, boxShadow: `0 0 24px ${colors.glow}` }}
-                    className={`flex items-center gap-3 px-3 py-2.5 rounded-xl glass isometric-card transition-all duration-200 hover:bg-white/[0.06] animate-in`}
-                  >
-               <span className="text-xs font-mono text-text-muted w-12 shrink-0 tabular-nums">{item.time}</span>
-               <span className="text-lg shrink-0">{item.emoji || item.icon || "•"}</span>
-                <span className="text-sm flex-1 min-w-0" style={{ color: colors.accentColor }}>{item.title}</span>
-               {item.member && (
-                  <span className="text-xs px-2 py-0.5 rounded-full text-text-secondary transition-all duration-200" style={{ background: `${colors.accentColor}20` }}>
-                     {item.member.split(" ")[0]}
-                   </span>
-               )}
-             </div>
+            <div
+              key={item.id}
+              style={{
+                animationDelay: `${idx * 0.05}s`,
+                boxShadow: `0 0 24px ${colors.glow}`,
+                background: getAccentBg(item.color || "green"),
+              }}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 animate-in`}
+            >
+              <span className="text-xs font-mono text-text-muted w-12 shrink-0 tabular-nums">{item.time}</span>
+              <span className="text-lg shrink-0">{item.emoji || item.icon || "•"}</span>
+
+              <span
+                className="text-sm flex-1 min-w-0"
+                style={{ color: "#000000" }}
+              >
+                {item.title}
+              </span>
+
+              {item.member && (
+                <span
+                  className="text-xs px-2 py-0.5 rounded-full transition-all duration-200"
+                  style={{
+                    background: getAccentBg(item.color || "green"),
+                    color: "#000000",
+                  }}
+                >
+                  {item.member.split(" ")[0]}
+                </span>
+              )}
+            </div>
           ))}
         </div>
       )}
+
     </section>
   );
 }

@@ -83,7 +83,14 @@ export const WeatherProvider = ({ children }: { children: ReactNode }) => {
     if (mounted) {
       localStorage.setItem(WEATHER_STORAGE_KEY, JSON.stringify(weather));
     }
+
+    // Expose Time-of-day to ThemeProvider for "system" override without importing WeatherConfig.
+    if (typeof window !== 'undefined') {
+      const tod = weather.timeOfDay;
+      (window as any).__consuelaTod = tod === 'day' ? 'day' : tod === 'night' ? 'night' : undefined;
+    }
   }, [weather, mounted]);
+
 
   const setLocation = useCallback((location: string) => {
     setWeather((prev) => ({ ...prev, location }));

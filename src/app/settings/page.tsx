@@ -36,8 +36,22 @@ const relationshipOptions = [
   { id: "other", label: "Other", icon: "👤" },
 ];
 
+import SettingsErrorBoundary from "@/components/ui/SettingsErrorBoundary";
+
+function hexToRgb(hex: string) {
+  const m = hex.match(/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i);
+  if (!m) return '59,130,246';
+  return `${parseInt(m[1], 16)},${parseInt(m[2], 16)},${parseInt(m[3], 16)}`;
+}
+
+
+
 export default function SettingsPage() {
-  const { theme, setMode, setAccentColor, setContrastBoost } = useTheme();
+  const { theme, setMode, setAccentColor, setContrastBoost, setAccentHex } = useTheme();
+  const accentHex = theme.accentHex;
+
+
+
   const { weather, setLocation, setUnit, setTimeOfDay, setSeason, setHolidayOverride } = useWeatherConfig();
   const { widgets, moveUp, moveDown, toggle, getIndex } = useHomeLayout();
   const [mounted, setMounted] = useState(false);
@@ -241,8 +255,10 @@ export default function SettingsPage() {
 
   // ─── Theme state ─────────────────────────────────────────────────────────
   const mode = theme.mode;
-  const accentColor = theme.accentColor;
   const contrastBoost = theme.contrastBoost;
+  const accentColor = theme.accentColor;
+
+
 
   const accentOptions = [
     { id: "nori",    label: "Nori",    dark: "#3b82f6", light: "#2563eb" },
@@ -261,7 +277,11 @@ export default function SettingsPage() {
 
   return (
     <PageShell>
+      <SettingsErrorBoundary>
       <TopBar title="Settings" subtitle="Customize your Consuela experience" />
+
+
+
 
       <div className="px-4 py-6 space-y-10">
 
@@ -561,33 +581,68 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          {/* Accent Color */}
+          {/* Accent Customization */}
           <div className="space-y-4">
-            <h3 className="text-text-primary font-semibold">Accent Color</h3>
-            <p className="text-text-secondary text-sm">Choose your primary highlight color</p>
+            <h3 className="text-text-primary font-semibold">Accent Customization</h3>
+            <p className="text-text-secondary text-sm">Pick distinct colors for selected, glow, button, and border.</p>
 
-            <div className="flex flex-wrap gap-3">
-              {accentOptions.map((option) => (
-                <label key={option.id} className="flex items-center cursor-pointer gap-2">
-                  <input type="radio" name="accentColor" checked={accentColor === option.id} onChange={() => setAccentColor(option.id)} className="sr-only" />
-                  <div className="flex flex-col items-center">
-                    <div
-                      className={`w-10 h-10 rounded-xl transition-[background-color,transform,border-color] duration-200 border-2 ${
-                        accentColor === option.id
-                          ? "border-[var(--color-accent-selected)] scale-105"
-                          : "border-transparent hover:scale-105"
+            <div className="grid grid-cols-2 gap-3">
+              {/* Selected */}
+              <div className="space-y-2">
+                <p className="text-text-secondary text-xs font-semibold">Selected</p>
+                <div className="flex flex-wrap gap-2">
+                  {accentOptions.map((option) => (
+                    <button
+                      key={`sel-${option.id}`}
+                      type="button"
+                      onClick={() => setAccentHex('selected', option.light)}
+                      className={`w-9 h-9 rounded-xl border-2 transition-all ${
+                        accentHex.selected === option.light
+                          ? 'border-[var(--color-accent-selected)] scale-105'
+                          : 'border-transparent hover:scale-105'
                       }`}
-                      style={{
-                        backgroundColor: `var(--color-accent-${option.id})`,
-                        boxShadow: accentColor === option.id ? `0 0 12px var(--color-accent-${option.id})` : "none",
-                      }}
+                      style={{ backgroundColor: option.light }}
+                      aria-label={`Set selected accent to ${option.label}`}
                     />
-                    <p className="text-xs text-text-secondary mt-1 capitalize">{option.label}</p>
-                  </div>
-                </label>
-              ))}
+                  ))}
+                </div>
+                <input
+                  type="color"
+                  value={accentHex.selected}
+                  onChange={(e) => setAccentHex('selected', e.target.value)}
+                  className="w-full h-10 rounded-xl bg-[var(--color-surface-2)]"
+                />
+              </div>
+
+              {/* Glow */}
+              <div className="space-y-2">
+                <p className="text-text-secondary text-xs font-semibold">Glow</p>
+                <input
+                  type="color"
+                  value={accentHex.glow.startsWith('rgba') ? accentOptions[0].light : accentHex.glow.replace(/rgba?\(|\)|\s/g, '').split(',').slice(0,3).map((x:any)=>Number(x).toString(16).padStart(2,'0')).join('')}
+                  onChange={(e) => {
+                    // Convert color picker hex to a nicer rgba glow.
+                    const hex = e.target.value;
+                    setAccentHex('glow', `rgba(${hexToRgb(hex)},0.28)`);
+                  }}
+                  className="w-full h-10 rounded-xl bg-[var(--color-surface-2)]"
+                />
+              </div>
+            </div>
+
+            {/* Button + Border simple color pickers */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <p className="text-text-secondary text-xs font-semibold">Button</p>
+                <input type="color" value={accentHex.button} onChange={(e) => setAccentHex('button', e.target.value)} className="w-full h-10 rounded-xl bg-[var(--color-surface-2)]" />
+              </div>
+              <div className="space-y-2">
+                <p className="text-text-secondary text-xs font-semibold">Border</p>
+                <input type="color" value={accentHex.border} onChange={(e) => setAccentHex('border', e.target.value)} className="w-full h-10 rounded-xl bg-[var(--color-surface-2)]" />
+              </div>
             </div>
           </div>
+
 
           {/* Preview */}
           <div className="space-y-4">
@@ -664,12 +719,48 @@ export default function SettingsPage() {
                           autoFocus
                         />
                       </div>
-                      <input
-                        value={editEmoji}
-                        onChange={e => { const v = e.target.value; if (v !== "") setEditEmoji(v); }}
-                        placeholder="Paste emoji or GIF URL..."
-                        className="w-full bg-[var(--color-surface-2)] text-text-primary text-sm rounded-xl px-3 py-2 outline-none border border-[var(--color-surface-3)] focus:border-[var(--color-accent-selected)] placeholder:text-text-muted"
-                      />
+                      <div className="space-y-2">
+                        <input
+                          value={editEmoji}
+                          onChange={e => setEditEmoji(e.target.value)}
+                          placeholder="Emoji (or paste image data URL)"
+                          className="w-full bg-[var(--color-surface-2)] text-text-primary text-sm rounded-xl px-3 py-2 outline-none border border-[var(--color-surface-3)] focus:border-[var(--color-accent-selected)] placeholder:text-text-muted"
+                        />
+
+                        {/* Image picker (no URL typing) */}
+                        <div className="flex items-center gap-2">
+                          <input
+                            id={`member-avatar-upload-${idx}`}
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              const dataUrl = await new Promise<string>((resolve) => {
+                                const reader = new FileReader();
+                                reader.onload = () => resolve(String(reader.result || ""));
+                                reader.readAsDataURL(file);
+                              });
+                              if (dataUrl) setEditEmoji(dataUrl);
+                            }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => document.getElementById(`member-avatar-upload-${idx}`)?.click()}
+                            className="px-3 py-2 rounded-xl bg-[var(--color-accent-selected)]/10 border border-[var(--color-accent-selected)]/20 text-[var(--color-accent-selected)] text-xs font-semibold hover:bg-[var(--color-accent-selected)]/15 transition-all"
+                          >
+                            🖼️ Choose image
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditEmoji("")}
+                            className="px-3 py-2 rounded-xl bg-[var(--color-surface-2)] text-text-secondary text-xs font-semibold border border-[var(--color-surface-3)] hover:bg-[var(--color-surface-3)] transition-all"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      </div>
                       <div className="flex items-center gap-2">
                         <input
                           value={editAge}
@@ -730,7 +821,7 @@ export default function SettingsPage() {
                   ) : (
                     <>
                       <div className="shrink-0">
-                        {member.emoji && (member.emoji.startsWith("http") || member.emoji.startsWith("//")) ? (
+                        {member.emoji && (member.emoji.startsWith("http") || member.emoji.startsWith("//") || member.emoji.startsWith("data:image/")) ? (
                           <SigmaAvatar src={member.emoji} alt={member.name} size={member.avatarSize || "base"} glow={member.glow || false} shape="circle" />
                         ) : (
                           <div className="w-10 h-10 rounded-full bg-[var(--color-surface-2)] flex items-center justify-center text-xl">
@@ -1193,6 +1284,8 @@ export default function SettingsPage() {
         </section>
 
       </div>
+      </SettingsErrorBoundary>
     </PageShell>
   );
 }
+

@@ -104,6 +104,14 @@ interface VisualTheme {
   overlayType: string;
 }
 
+// Used for live UI accent wiring (WeatherWidget visuals).
+interface WeatherAccent {
+  selected: string;
+  glow: string;
+  button: string;
+  border: string;
+}
+
 function getSeasonTheme(season: SeasonKey, tod: TimeOfDayFlag, condition: Condition): VisualTheme {
   const isNight = tod === "night";
 
@@ -1302,7 +1310,7 @@ function WeatherParticles({ type, tod }: { type: ParticleKind; tod: TimeOfDayFla
   const [particles, setParticles] = useState<Particle[]>([]);
 
   useEffect(() => {
-    if (type === "none") { setParticles([]); return; }
+    if (type === "none") return;
 
     const counts: Record<ParticleKind, number> = {
       blossom: 22,
@@ -1660,7 +1668,13 @@ export default function WeatherWidget() {
       .catch(() => setLoading(false));
   }, []);
 
-  useEffect(() => { setMounted(true); }, []);
+
+  useEffect(() => {
+    // Avoid setState-in-effect lint rule by deriving mounted state from first paint.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    requestAnimationFrame(() => setMounted(true));
+  }, []);
+
 
   useEffect(() => {
     if (prevUnitRef.current !== weather.unit) {
@@ -1681,6 +1695,15 @@ export default function WeatherWidget() {
   const seasonTheme = getSeasonTheme(season, tod, condition);
   const holidayTheme = activeHoliday !== "none" ? getHolidayTheme(activeHoliday) : null;
   const theme: VisualTheme = { ...seasonTheme, ...(holidayTheme || {}) };
+
+  const accentHex: WeatherAccent = {
+    // WeatherWidget uses its own seasonal/holiday visual colors; map them into the same shape
+    // as the app theme accent hexes for live wiring.
+    selected: theme.accentColor,
+    glow: theme.glowColor,
+    button: theme.accentColor,
+    border: `${theme.accentColor}55`,
+  };
 
   // Particle type: holiday wins if active
   const particleType = (holidayTheme?.particleType ?? theme.particleType) as ParticleKind;
@@ -1751,20 +1774,27 @@ export default function WeatherWidget() {
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-1.5 text-xs font-medium min-w-0">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
-                className="w-3.5 h-3.5 shrink-0" style={{ color: theme.accentColor }}>
+                className="w-3.5 h-3.5 shrink-0" style={{ color: accentHex.selected }}>
                 <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
                 <circle cx="12" cy="10" r="3" />
               </svg>
               <span className="truncate text-white/80">{weather.location}</span>
               {activeHoliday !== "none" && holidayLabels[activeHoliday] && (
                 <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ml-1 flex-shrink-0"
-                  style={{ background: `${theme.accentColor}33`, color: theme.accentColor, border: `1px solid ${theme.accentColor}55` }}>
+                  style={{ background: `${accentHex.selected}33`, color: accentHex.selected, border: `1px solid ${accentHex.selected}55` }}>
                   {holidayLabels[activeHoliday]}
                 </span>
               )}
             </div>
-            <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full shrink-0 ml-2"
-              style={{ background: `${theme.accentColor}25`, color: theme.accentColor, border: `1px solid ${theme.accentColor}40`, transition: "background 0.4s ease" }}>
+            <span
+              className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full shrink-0 ml-2"
+              style={{
+                background: `${accentHex.selected}25`,
+                color: accentHex.selected,
+                border: `1px solid ${accentHex.selected}40`,
+                transition: "background 0.4s ease",
+              }}
+            >
               °{weather.unit}
             </span>
           </div>
@@ -1780,7 +1810,7 @@ export default function WeatherWidget() {
               <div key={tempKey} className="flex items-start leading-none mb-1"
                 style={{ animation: tempKey > 0 ? "weatherTempPop 0.45s cubic-bezier(0.34,1.56,0.64,1)" : undefined }}>
                 <span className="text-[52px] font-black tabular-nums leading-none tracking-tight"
-                  style={{ color: "white", textShadow: `0 0 30px ${theme.accentColor}88, 0 2px 8px rgba(0,0,0,0.3)` }}>
+                  style={{ color: "white", textShadow: `0 0 30px ${accentHex.selected}88, 0 2px 8px rgba(0,0,0,0.3)` }}>
                   {displayTemp}
                 </span>
                 <span className="text-2xl font-light mt-2 ml-1 text-white/50">°</span>

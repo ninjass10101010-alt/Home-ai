@@ -82,14 +82,16 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      {/* eslint-disable-next-line @next/next/no-head-element */}
-      <head>
-        {/* Inline script runs before any CSS or React — prevents flash of wrong theme */}
-        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
-      </head>
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+        {/* Anti-FOUC script: must run before Next/React hydrates */}
+        {/* eslint-disable-next-line @next/next/no-sync-scripts */}
+        <script
+          dangerouslySetInnerHTML={{ __html: themeScript }}
+          // keep it deterministic and as early as possible
+          defer={false}
+          suppressHydrationWarning
+        />
+
         <ThemeProvider>
           <WeatherProvider>
             <AtmosphericProvider>

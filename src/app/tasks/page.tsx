@@ -21,6 +21,7 @@ interface Task {
   completed: boolean;
   priority: "high" | "medium" | "low";
   completedBy?: string;
+  universal?: boolean; // if true: anyone can claim; points go to the claimant
 }
 
 interface LeaderboardEntry {
@@ -68,6 +69,7 @@ function emptyTask(firstMember?: { name?: string; emoji?: string }): Task {
     category: "Chores",
     completed: false,
     priority: "medium" as const,
+    universal: false,
   };
 }
 
@@ -107,6 +109,7 @@ export default function TasksPage() {
 
   // PIN completion state
   const [pinTaskId, setPinTaskId] = useState<number | null>(null);
+  const [snatchForMember, setSnatchForMember] = useState<string>(""); // universal claim target
   const [pinInput, setPinInput] = useState("");
   const [pinError, setPinError] = useState("");
   const [pinSuccess, setPinSuccess] = useState("");
@@ -213,22 +216,37 @@ export default function TasksPage() {
 
   // ─── Reward redemption ──────────────────────────────────
   const [pinReward, setPinReward] = useState<Reward | null>(null);
+  const [redeemForMember, setRedeemForMember] = useState<string>(""); // member name (must not be pet)
 
   // ─── PIN completion flow ────────────────────────────────
   const openPinEntry = (taskId: number) => {
+    const t = tasks.find((x) => x.id === taskId);
     setPinTaskId(taskId);
     setPinReward(null);
     setPinInput("");
     setPinError("");
     setPinSuccess("");
+
+    if (t?.universal) {
+      const defaultSnatcher =
+        membersData.find((m: any) => m.role !== "pet")?.name ??
+        t.assignee;
+      setSnatchForMember(defaultSnatcher);
+    } else {
+      setSnatchForMember("");
+    }
   };
 
-  const openRewardPin = (reward: Reward) => {
+  const openRewardPin = (reward: Reward, memberName?: string) => {
     setPinReward(reward);
     setPinTaskId(null);
     setPinInput("");
     setPinError("");
     setPinSuccess("");
+    const defaultMember =
+      memberName ||
+      (membersData.find((m: any) => m.role !== "pet")?.name ?? "");
+    setRedeemForMember(defaultMember);
   };
 
   const submitPin = () => {
@@ -236,20 +254,27 @@ export default function TasksPage() {
 
     // Reward redemption mode
     if (pinReward) {
-      const members = db.selectMembers();
-      const match = members.find((m: any) => (m as any).pin === pinInput);
-      if (match) {
-        const name = match.name;
+      const memberName = redeemForMember;
+      if (!memberName) {
+        setPinError("Select who is redeeming the reward.");
+        setPinInput("");
+        setTimeout(() => setPinError(""), 2000);
+        return;
+      }
+
+      // Verify PIN for the selected member
+      const verified = db.verifyMemberPin(memberName, pinInput);
+      if (verified) {
         const cost = pinReward.cost;
         setEarnedPoints(prev => {
-          const current = prev[name] || 0;
+          const current = prev[memberName] || 0;
           if (current < cost) return prev;
-          return { ...prev, [name]: current - cost };
+          return { ...prev, [memberName]: current - cost };
         });
-        setPinSuccess(`🎁 ${name} redeemed ${pinReward.name}! -${cost}pts`);
+        setPinSuccess(`🎁 ${memberName.split(" ")[0]} redeemed ${pinReward.name}! -${cost}pts`);
         setTimeout(() => { setPinReward(null); setPinSuccess(""); }, 1500);
       } else {
-        setPinError("Wrong PIN. Try again.");
+        setPinError("Wrong code for selected member. Try again.");
         setPinInput("");
         setTimeout(() => setPinError(""), 2000);
       }
@@ -261,6 +286,50 @@ export default function TasksPage() {
     const task = tasks.find(t => t.id === pinTaskId);
     if (!task) return;
 
+    // Universal task: claim for selected member; points go to that claimant
+    if (task.universal) {
+      const claimant = snatchForMember;
+      if (!claimant) {
+        setPinError("Select who is claiming this task.");
+        setPinInput("");
+        setTimeout(() => setPinError(""), 2000);
+        return;
+      }
+
+      const verified = db.verifyMemberPin(claimant, pinInput);
+      if (verified) {
+        const claimantName = (verified as any).name;
+        const claimantEmoji = (membersData.find((m: any) => m.name === claimantName)?.emoji) || task.assigneeEmoji;
+
+        setTasks(prev =>
+          prev.map(t =>
+            t.id === pinTaskId
+              ? {
+                  ...t,
+                  completed: true,
+                  completedBy: claimantName,
+                  assignee: claimantName,
+                  assigneeEmoji: claimantEmoji,
+                }
+              : t
+          )
+        );
+
+        setEarnedPoints(prev => {
+          return { ...prev, [claimantName]: (prev[claimantName] || 0) + task.points };
+        });
+
+        setPinSuccess(`✅ +${task.points}pts to ${claimantName.split(" ")[0]}!`);
+        setTimeout(() => { setPinTaskId(null); setPinSuccess(""); setSnatchForMember(""); }, 1500);
+      } else {
+        setPinError("Wrong code for selected member. Try again.");
+        setPinInput("");
+        setTimeout(() => setPinError(""), 2000);
+      }
+      return;
+    }
+
+    // Non-universal task: verify against fixed assignee
     const verified = db.verifyMemberPin(task.assignee, pinInput);
     if (verified) {
       setTasks(prev => prev.map(t => t.id === pinTaskId ? { ...t, completed: true, completedBy: (verified as any).name } : t));
@@ -269,7 +338,7 @@ export default function TasksPage() {
         return { ...prev, [name]: (prev[name] || 0) + task.points };
       });
       setPinSuccess(`✅ +${task.points}pts to ${(verified as any).name}!`);
-      setTimeout(() => { setPinTaskId(null); setPinSuccess(""); }, 1500);
+      setTimeout(() => { setPinTaskId(null); setPinSuccess(""); setSnatchForMember(""); }, 1500);
     } else {
       setPinError("Wrong PIN. Try again.");
       setPinInput("");
@@ -309,11 +378,13 @@ export default function TasksPage() {
 
   const updateForm = (field: keyof Task, value: any) => {
     setEditForm(prev => {
-      const updated = { ...prev, [field]: value };
+      const updated: Task = { ...prev, [field]: value };
+
       if (field === "assignee") {
         const member = membersData.find(m => m.name === value);
         if (member) updated.assigneeEmoji = member.emoji;
       }
+
       return updated;
     });
   };
@@ -486,6 +557,44 @@ export default function TasksPage() {
                   : `Complete "${tasks.find(t => t.id === pinTaskId)?.title}"`
                 }
               </p>
+
+              {!pinReward && tasks.find((t) => t.id === pinTaskId)?.universal && (
+                <div className="mt-3">
+                  <p className="text-text-muted text-xs font-semibold mb-1">Snatch for</p>
+                  <select
+                    value={snatchForMember}
+                    onChange={(e) => setSnatchForMember(e.target.value)}
+                    className="w-full bg-surface-2 text-text-primary text-xs rounded-lg px-3 py-2 outline-none border border-surface-3"
+                  >
+                    {membersData
+                      .filter((m: any) => m.role !== "pet")
+                      .map((m: any) => (
+                        <option key={m.name} value={m.name}>
+                          {m.emoji} {m.name}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              )}
+
+              {pinReward && (
+                <div className="mt-3">
+                  <p className="text-text-muted text-xs font-semibold mb-1">Redeem for</p>
+                  <select
+                    value={redeemForMember}
+                    onChange={(e) => setRedeemForMember(e.target.value)}
+                    className="w-full bg-surface-2 text-text-primary text-xs rounded-lg px-3 py-2 outline-none border border-surface-3"
+                  >
+                    {membersData
+                      .filter((m: any) => m.role !== "pet")
+                      .map((m: any) => (
+                        <option key={m.name} value={m.name}>
+                          {m.emoji} {m.name}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              )}
             </div>
             <input
               type="password"
@@ -581,6 +690,20 @@ export default function TasksPage() {
                     {categories.map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
+
+                <div className="flex items-center gap-2 pt-1">
+                  <input
+                    id="universal-task"
+                    type="checkbox"
+                    checked={!!editForm.universal}
+                    onChange={(e) => updateForm("universal", e.target.checked)}
+                    className="w-4 h-4 rounded border-surface-3 text-nori-500 focus:ring-nori-500/30"
+                  />
+                  <label htmlFor="universal-task" className="text-xs text-text-muted font-medium select-none">
+                    Universal (any member can snatch)
+                  </label>
+                </div>
+
                 <div className="flex items-center gap-2">
                   <input type="number" placeholder="Points" value={editForm.points}
                     onChange={e => updateForm("points", parseInt(e.target.value) || 0)}
@@ -653,8 +776,11 @@ export default function TasksPage() {
             {/* Pending tasks */}
             <section>
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-text-primary font-semibold text-sm">Pending ({pending.length})</h3>
+          <h3 className="text-text-primary font-semibold text-sm">
+                  Pending <span suppressHydrationWarning>({pending.length})</span>
+                </h3>
                 <button onClick={startAdd} className="text-nori-400 text-xs hover:text-nori-300">+ Assign task</button>
+
               </div>
               {pending.length === 0 ? (
                 <Card className="!p-6 flex flex-col items-center gap-2">
@@ -713,14 +839,30 @@ export default function TasksPage() {
 
         {activeTab === "leaderboard" && (
           <div className="space-y-4 pb-2">
-            <div className="rounded-2xl p-4 text-center"
-              style={{ background: "linear-gradient(135deg, rgba(59,130,246,0.12) 0%, rgba(124,111,247,0.12) 100%)", border: "1px solid rgba(59,130,246,0.15)" }}>
-              <p className="text-text-secondary text-xs mb-1">This week&apos;s champion</p>
-              <div className="mb-2"><AnimatedEmoji emoji={topScorer.emoji} size="lg" /></div>
-              <p className="text-text-primary font-bold text-lg">{topScorer.name}</p>
-              <p className="text-nori-400 font-semibold text-sm mt-1">
-                {topScorer.points} pts · {topScorer.streak} day streak 🔥
-              </p>
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex-1 rounded-2xl p-4 text-center"
+                style={{ background: "linear-gradient(135deg, rgba(59,130,246,0.12) 0%, rgba(124,111,247,0.12) 100%)", border: "1px solid rgba(59,130,246,0.15)" }}>
+                <p className="text-text-secondary text-xs mb-1">This week&apos;s champion</p>
+                <div className="mb-2"><AnimatedEmoji emoji={topScorer.emoji} size="lg" /></div>
+                <p className="text-text-primary font-bold text-lg">{topScorer.name}</p>
+                <p className="text-nori-400 font-semibold text-sm mt-1">
+                  {topScorer.points} pts · {topScorer.streak} day streak 🔥
+                </p>
+              </div>
+
+              <div className="shrink-0">
+                <button
+                  onClick={() => {
+                    if (typeof window === "undefined") return;
+                    localStorage.removeItem(POINTS_STORAGE_KEY);
+                    setEarnedPoints({});
+                    showToast("Leaderboard reset ✅");
+                  }}
+                  className="px-3 py-2 rounded-xl bg-surface-2 text-text-secondary text-xs font-semibold hover:text-text-primary hover:bg-surface-3 transition-colors"
+                >
+                  Reset
+                </button>
+              </div>
             </div>
             <div className="space-y-2">
               {dynamicLeaderboard.map((entry, i) => (
@@ -819,7 +961,14 @@ export default function TasksPage() {
                   const unlocked = (earnedPoints[topScorer.name] || 0) >= reward.cost;
                   return (
                     <Card key={reward.id} className={`!p-3 ${!unlocked ? "opacity-50" : "cursor-pointer hover:border-nori-500/30 transition-colors"}`}
-                      onClick={() => { if (unlocked) openRewardPin(reward); }}>
+                      onClick={() => {
+                        if (!unlocked) return;
+                        // default redeem-for member: current top scorer if eligible, else first non-pet member
+                        const defaultRedeem =
+                          membersData.find((m: any) => m.role !== "pet" && m.name === topScorer.name)?.name ||
+                          membersData.find((m: any) => m.role !== "pet")?.name;
+                        openRewardPin(reward, defaultRedeem);
+                      }}>
                       <div className="flex flex-col items-center gap-1.5 text-center">
                         <AnimatedEmoji emoji={reward.emoji} size="sm" />
                         <p className="text-text-primary text-xs font-medium leading-tight">{reward.name}</p>
@@ -854,9 +1003,9 @@ interface TaskRowProps {
 
 function TaskRow({ task, onComplete, onEdit, memberColors, memberEmojis, priorityColors }: TaskRowProps) {
   return (
-    <div className="flex items-center gap-1">
-      <button
-        onClick={() => onComplete(task.id)}
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => onComplete(task.id)}
         className={`flex-1 flex items-center gap-3 px-3 py-3 rounded-xl transition-all active:scale-[0.98] text-left ${
           task.completed ? "opacity-50" : "glass hover:border-surface-4"
         }`}
@@ -866,6 +1015,7 @@ function TaskRow({ task, onComplete, onEdit, memberColors, memberEmojis, priorit
             task.completed ? "border-nori-500 bg-nori-500" : "border-surface-4"
           }`}
         >
+
           {task.completed && (
             <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={3} className="w-3 h-3">
               <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
@@ -887,12 +1037,28 @@ function TaskRow({ task, onComplete, onEdit, memberColors, memberEmojis, priorit
           </p>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
-          {task.points > 0 && (
-            <span className="text-xs font-semibold text-amber-400">+{task.points}pts</span>
-          )}
-          <Avatar name={task.assignee} color={memberColors[task.assignee] ?? "green"} emoji={memberEmojis[task.assignee] || task.assigneeEmoji} size="sm" variant="emoji" />
+        <div className="flex flex-col shrink-0">
+          <div className="flex items-center justify-center gap-2">
+            {task.points > 0 && (
+              <span className="text-xs font-semibold text-amber-400">+{task.points}pts</span>
+            )}
+            <Avatar
+              name={task.assignee}
+              color={memberColors[task.assignee] ?? "green"}
+              emoji={memberEmojis[task.assignee] || task.assigneeEmoji}
+              size="sm"
+              variant="emoji"
+            />
+          </div>
+          {/* Align assignee label exactly under the points/emoji block */}
+          <div className="flex justify-center mt-0.5">
+            <p className="text-[10px] font-semibold text-text-muted/70 leading-none truncate max-w-[70px] text-center">
+              {task.assignee.split(" ")[0]}
+            </p>
+          </div>
         </div>
+
+
       </button>
       <button
         onClick={(e) => { e.stopPropagation(); onEdit(task); }}

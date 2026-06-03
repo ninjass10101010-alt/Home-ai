@@ -24,15 +24,59 @@ const quickPrompts = [
 ];
 
 export default function HomePage() {
-  const familyMembers = db.selectMembers().map((member) => ({
-    name: member.name,
-    color: member.id === 1 ? "green" : member.id === 2 ? "cyan" : member.id === 3 ? "violet" : "amber",
-    emoji: member.emoji,
-  }));
+  const familyMembers = db.selectMembersDetailed().map((member: any, idx: number) => {
+    const size = member.avatarSize || "md";
+    return {
+      name: member.name,
+      // Prefer the DB-provided color if present; otherwise fall back to stable ordering.
+      color: member.color || (idx % 4 === 0 ? "green" : idx % 4 === 1 ? "cyan" : idx % 4 === 2 ? "violet" : "amber"),
+      emoji: member.emoji,
+      avatarSize: size,
+    };
+  });
 
   const todayEvents = db.selectTodaysEvents();
   const pendingTasks = db.selectPendingTasks();
   const scheduleItems = db.selectTodaysSchedules();
+
+  const [homeScheduleItems, setHomeScheduleItems] = useState<any[]>(() => scheduleItems);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    // Hydrate from the same storage Calendar uses.
+    // If parsing fails, keep the DB fallback.
+    const SCHEDULES_STORAGE_KEY = "consuela-schedules";
+
+    try {
+      const stored = localStorage.getItem(SCHEDULES_STORAGE_KEY);
+      if (!stored) return;
+
+      const parsed = JSON.parse(stored);
+      if (!Array.isArray(parsed)) return;
+
+      setHomeScheduleItems(
+        parsed.map((s: any) => ({
+          id: s.id,
+          title: s.title,
+          time: s.time,
+          emoji: s.icon,
+          type: s.type,
+          color: s.color || "green",
+          member: s.member,
+          memberColor: s.memberColor,
+          icon: s.icon,
+        }))
+      );
+    } catch {
+      // ignore
+    }
+  }, []);
+
+
+
+
+
 
   const today = new Date();
   const hour = today.getHours();
@@ -82,7 +126,14 @@ export default function HomePage() {
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-2">
             {familyMembers.map((m) => (
-              <Avatar key={m.name} name={m.name} color={m.color} emoji={m.emoji} size="md" variant="emoji" />
+              <Avatar
+                key={m.name}
+                name={m.name}
+                color={m.color}
+                emoji={m.emoji}
+                size={m.avatarSize || "md"}
+                variant="emoji"
+              />
             ))}
           </div>
         </div>
@@ -266,7 +317,7 @@ export default function HomePage() {
               return (
                 <ScheduleDisplay
                   key="schedule"
-                  schedule={scheduleItems.map((item) => ({
+                  schedule={homeScheduleItems.map((item) => ({
                     id: item.id,
                     title: item.title,
                     time: item.time,

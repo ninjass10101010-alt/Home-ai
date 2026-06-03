@@ -1,7 +1,10 @@
 'use client';
 
 import { useState, useEffect, useCallback, createContext, useContext, ReactNode } from 'react';
-import { ThemeConfig, ThemeMode, AccentColor, defaultThemeConfig, THEME_STORAGE_KEY } from '@/lib/theme-config';
+
+import { ThemeConfig, ThemeMode, AccentColor, defaultThemeConfig, THEME_STORAGE_KEY, defaultAccentHex, type AccentHexByTarget, type AccentTarget } from '@/lib/theme-config';
+
+
 
 // Create the Theme Context
 const ThemeContext = createContext<{
@@ -10,7 +13,9 @@ const ThemeContext = createContext<{
   setMode: (mode: ThemeMode) => void;
   setAccentColor: (color: AccentColor) => void;
   setContrastBoost: (boost: boolean) => void;
+  setAccentHex: (target: AccentTarget, value: string) => void;
 } | undefined>(undefined);
+
 
 // Custom hook to use the theme
 export const useTheme = () => {
@@ -38,11 +43,20 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
           parsed.mode &&
           ['light', 'dark', 'system'].includes(parsed.mode) &&
           parsed.accentColor &&
-          ['nori', 'violet', 'rose', 'cyan', 'mint', 'amber'].includes(parsed.accentColor) &&
-          typeof parsed.contrastBoost === 'boolean'
+          ['nori', 'violet', 'rose', 'coral', 'lavender', 'cyan', 'mint', 'amber'].includes(parsed.accentColor) &&
+          typeof parsed.contrastBoost === 'boolean' &&
+          (!parsed.accentHex || typeof parsed.accentHex === 'object')
         ) {
-          setTheme(parsed);
+          setTheme({
+            ...defaultThemeConfig,
+            ...parsed,
+            accentHex: {
+              ...defaultAccentHex,
+              ...(parsed.accentHex as Partial<AccentHexByTarget>),
+            },
+          });
         }
+
       } catch (e) {
         console.error('Failed to parse theme config from localStorage', e);
       }
@@ -61,37 +75,33 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
     if (!mounted) return;
 
     const updateHtmlAttributes = () => {
-      // Smart auto-detection: use time of day + season for dark/light
       let isDark = false;
-      if (theme.mode === 'dark') {
-        isDark = true;
-      } else if (theme.mode === 'light') {
-        isDark = false;
-      } else if (theme.mode === 'system') {
-        // Smart auto: check actual daylight based on current hour + month
+
+    // When Time-of-day is "day"/"night" we let it override system.
+    const tod = (typeof window !== 'undefined' && (window as any).__consuelaTod) as 'day' | 'night' | undefined;
+
+    if (theme.mode === 'dark') {
+      isDark = true;
+    } else if (theme.mode === 'light') {
+      isDark = false;
+    } else if (theme.mode === 'system') {
+      if (tod === 'day') isDark = false;
+      else if (tod === 'night') isDark = true;
+      else {
+        // fallback to actual daylight
         const now = new Date();
         const hour = now.getHours();
-        const month = now.getMonth(); // 0-11
-
-        // Approximate sunrise/sunset by month for northern US (Holland, MI ~42.8°N)
-        // Winter (Nov-Feb): dark 5pm-7am, light 7am-5pm
-        // Spring/Fall (Mar-Apr, Sep-Oct): dark 7pm-6:30am, light 6:30am-7pm
-        // Summer (May-Aug): dark 9pm-6am, light 6am-9pm
-        let sunsetHour = 19; // default 7pm
-        let sunriseHour = 7; // default 7am
-
-        if (month >= 4 && month <= 7) { // May-Aug
-          sunsetHour = 21; sunriseHour = 6;
-        } else if (month >= 2 && month <= 3) { // Mar-Apr
-          sunsetHour = 19; sunriseHour = 7;
-        } else if (month >= 8 && month <= 9) { // Sep-Oct
-          sunsetHour = 19; sunriseHour = 7;
-        } else { // Nov-Feb
-          sunsetHour = 17; sunriseHour = 7;
-        }
-
+        const month = now.getMonth();
+        let sunsetHour = 19;
+        let sunriseHour = 7;
+        if (month >= 4 && month <= 7) { sunsetHour = 21; sunriseHour = 6; }
+        else if (month >= 2 && month <= 3) { sunsetHour = 19; sunriseHour = 7; }
+        else if (month >= 8 && month <= 9) { sunsetHour = 19; sunriseHour = 7; }
+        else { sunsetHour = 17; sunriseHour = 7; }
         isDark = hour >= sunsetHour || hour < sunriseHour;
       }
+    }
+
 
       // Set data-theme attribute on html element
       if (isDark) {
@@ -107,9 +117,13 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
         document.documentElement.removeAttribute('data-contrast');
       }
 
-      // Update CSS variables
-      document.documentElement.style.setProperty('--color-accent-selected', `var(--color-accent-${theme.accentColor})`);
+      // Update CSS variables (per-target overrides)
+      document.documentElement.style.setProperty('--color-accent-selected', theme.accentHex.selected);
+      document.documentElement.style.setProperty('--color-accent-glow', theme.accentHex.glow);
+      document.documentElement.style.setProperty('--color-accent-button', theme.accentHex.button);
+      document.documentElement.style.setProperty('--color-accent-border', theme.accentHex.border);
       document.documentElement.style.setProperty('--color-text-on-accent', '#ffffff');
+
     };
 
     updateHtmlAttributes();
@@ -122,14 +136,42 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
     const handleChange = () => updateHtmlAttributes();
     mediaQuery.addEventListener('change', handleChange);
 
+    // Keep a global hint for Time-of-day override when display mode is "system".
+    // This avoids importing WeatherConfig into ThemeProvider.
+    if (typeof window !== 'undefined') {
+      const todOverride = (window as any).__consuelaTod;
+      void todOverride;
+    }
+
     return () => {
       clearInterval(interval);
       mediaQuery.removeEventListener('change', handleChange);
-    };
-  }, [theme.mode, theme.accentColor, theme.contrastBoost, mounted]);
+    }
+  }, [
+    theme.mode,
+    theme.contrastBoost,
+    theme.accentHex.selected,
+    theme.accentHex.glow,
+    theme.accentHex.button,
+    theme.accentHex.border,
+    mounted,
+  ]);
+
+
 
   // Function to toggle between light and dark (ignores system mode for toggle)
+  const setAccentHex = useCallback((target: AccentTarget, value: string) => {
+    setTheme((prev) => ({
+      ...prev,
+      accentHex: {
+        ...prev.accentHex,
+        [target]: value,
+      },
+    }));
+  }, []);
+
   const toggleTheme = useCallback(() => {
+
     setTheme((prev) => {
       if (prev.mode === 'system') {
         // If in system mode, toggle based on current system preference
@@ -159,8 +201,9 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   return (
-    <ThemeContext.Provider value={{ theme, toggleTheme, setMode, setAccentColor, setContrastBoost }}>
+    <ThemeContext.Provider value={{ theme, toggleTheme, setMode, setAccentColor, setContrastBoost, setAccentHex }}>
       {children}
+
     </ThemeContext.Provider>
   );
 };
