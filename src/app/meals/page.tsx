@@ -130,6 +130,24 @@ function MealHubContent() {
     showToast(`✅ Added ${recipeData.name} to ${day}`);
   };
 
+  const addRecipeToMealSlot = (recipeData: Recipe, day: string, mealType: Meal["mealType"]) => {
+    const newMeal: Meal = {
+      id: Date.now(),
+      name: recipeData.name,
+      emoji: recipeData.emoji,
+      time: day,
+      mealType,
+      prepTime: recipeData.prepTime,
+      tags: recipeData.tags,
+      ingredients: recipeData.ingredients,
+      servings: recipeData.servings,
+      calories: recipeData.calories,
+      instructions: recipeData.instructions,
+    };
+    setMeals(prev => [...prev, newMeal]);
+    showToast(`✅ Added ${recipeData.name} to ${day} (${mealType})`);
+  };
+
   const addRecipeToGrocery = (recipeData: Recipe) => {
     recipeData.ingredients.forEach(ing => {
       if (ing.trim()) {
@@ -201,7 +219,7 @@ function MealHubContent() {
       </div>
 
       {activeTab === "meals" && (
-        <MealsTab 
+        <MealsTab
           meals={meals}
           activeDay={activeDay}
           setActiveDay={setActiveDay}
@@ -214,6 +232,8 @@ function MealHubContent() {
           showAiSuggestions={showAiSuggestions}
           aiMealIdeas={aiMealIdeas}
           aiMealLoading={aiMealLoading}
+          recipes={recipes}
+          addRecipeToMealSlot={addRecipeToMealSlot}
           importRecipeFromUrl={async (url: string, source?: string) => {
             const label = source ? source : "Web";
             showToast(`📥 Importing from ${label}: ${url}...`);

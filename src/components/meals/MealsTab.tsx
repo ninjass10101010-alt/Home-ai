@@ -18,6 +18,8 @@ export default function MealsTab({
   showAiSuggestions,
   aiMealIdeas,
   aiMealLoading,
+  recipes,
+  addRecipeToMealSlot,
   importRecipeFromUrl,
   handleFileUpload,
 }: any) {
@@ -134,47 +136,96 @@ export default function MealsTab({
 
                 {/* Preset picker panel */}
                 {isPickerOpen && (
-                  <div className="mt-2 animate-in">
-                    <p className="text-[11px] text-text-muted font-semibold mb-2 px-1">
-                      ⚡ Quick pick a {type.label.toLowerCase()}:
-                    </p>
-                    <div className="grid grid-cols-2 gap-2">
-                      {presets.map((idea: any) => (
-                        <button
-                          key={idea.name}
-                          onClick={() => handlePresetSelect(idea, type.id)}
-                          className="flex items-center gap-3 p-3 rounded-2xl glass border border-[var(--color-surface-7)]/20
-                            hover:border-[var(--color-accent-nori)]/30 hover:bg-[var(--color-accent-nori)]/5
-                            transition-all active:scale-95 text-left group"
-                        >
-                          <span
-                            className="text-2xl shrink-0 group-hover:scale-110 transition-transform"
-                            style={{ animation: "float 3s ease-in-out infinite" }}
+                  <div className="mt-2 animate-in space-y-3">
+                    <div>
+                      <p className="text-[11px] text-text-muted font-semibold mb-2 px-1">
+                        ⚡ Quick pick a {type.label.toLowerCase()}:
+                      </p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {presets.map((idea: any) => (
+                          <button
+                            key={idea.name}
+                            onClick={() => handlePresetSelect(idea, type.id)}
+                            className="flex items-center gap-3 p-3 rounded-2xl glass border border-[var(--color-surface-7)]/20
+                              hover:border-[var(--color-accent-nori)]/30 hover:bg-[var(--color-accent-nori)]/5
+                              transition-all active:scale-95 text-left group"
                           >
-                            {idea.emoji}
-                          </span>
-                          <div className="min-w-0">
-                            <p className="text-text-primary text-xs font-semibold leading-tight truncate">{idea.name}</p>
-                            <p className="text-text-muted text-[10px] mt-0.5">{idea.prepTime}</p>
-                            <div className="flex gap-1 flex-wrap mt-1">
-                              {idea.tags.slice(0, 2).map((t: string) => (
-                                <span key={t} className="px-1.5 py-0.5 rounded-md bg-[var(--color-surface-2)] text-text-secondary text-[9px] font-medium">
-                                  {t}
-                                </span>
-                              ))}
+                            <span
+                              className="text-2xl shrink-0 group-hover:scale-110 transition-transform"
+                              style={{ animation: "float 3s ease-in-out infinite" }}
+                            >
+                              {idea.emoji}
+                            </span>
+                            <div className="min-w-0">
+                              <p className="text-text-primary text-xs font-semibold leading-tight truncate">{idea.name}</p>
+                              <p className="text-text-muted text-[10px] mt-0.5">{idea.prepTime}</p>
+                              <div className="flex gap-1 flex-wrap mt-1">
+                                {idea.tags.slice(0, 2).map((t: string) => (
+                                  <span key={t} className="px-1.5 py-0.5 rounded-md bg-[var(--color-surface-2)] text-text-secondary text-[9px] font-medium">
+                                    {t}
+                                  </span>
+                                ))}
+                              </div>
                             </div>
-                          </div>
+                          </button>
+                        ))}
+                        {/* Manual entry option */}
+                        <button
+                          onClick={() => { openRecipeModal({ mealType: type.id } as Meal); setPresetPickerType(null); }}
+                          className="flex items-center justify-center gap-2 p-3 rounded-2xl border-2 border-dashed border-[var(--color-surface-4)]
+                            text-text-muted text-xs font-medium hover:border-[var(--color-accent-nori)]/30 hover:text-[var(--color-accent-nori)]
+                            transition-all active:scale-95 col-span-2"
+                        >
+                          ✏️ Enter custom meal…
                         </button>
-                      ))}
-                      {/* Manual entry option */}
-                      <button
-                        onClick={() => { openRecipeModal({ mealType: type.id } as Meal); setPresetPickerType(null); }}
-                        className="flex items-center justify-center gap-2 p-3 rounded-2xl border-2 border-dashed border-[var(--color-surface-4)]
-                          text-text-muted text-xs font-medium hover:border-[var(--color-accent-nori)]/30 hover:text-[var(--color-accent-nori)]
-                          transition-all active:scale-95 col-span-2"
-                      >
-                        ✏️ Enter custom meal…
-                      </button>
+                      </div>
+                    </div>
+
+                    {/* Recipe catalog picker (recipe-log style) */}
+                    <div className="pt-2 border-t border-[var(--color-surface-4)]/60">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-[11px] text-text-muted font-semibold px-1">
+                          📖 Recipe catalog → add to {activeDay} ({type.label}):
+                        </p>
+                        <span className="text-[10px] text-text-muted px-2 py-0.5 rounded-md bg-[var(--color-surface-2)] border border-[var(--color-surface-3)]">
+                          {recipes?.length ? `${recipes.length} recipes` : "No recipes"}
+                        </span>
+                      </div>
+
+                      {recipes?.length ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {recipes.map((r: any) => (
+                            <button
+                              key={r.id}
+                              onClick={() => {
+                                addRecipeToMealSlot(r, activeDay, type.id);
+                                setPresetPickerType(null);
+                              }}
+                              className="flex items-start gap-3 p-3 rounded-2xl glass border border-[var(--color-surface-7)]/20
+                                hover:border-[var(--color-accent-nori)]/30 hover:bg-[var(--color-accent-nori)]/5
+                                transition-all active:scale-95 text-left group"
+                            >
+                              <span
+                                className="text-2xl shrink-0"
+                                style={{ animation: "float 3s ease-in-out infinite" }}
+                              >
+                                {r.emoji}
+                              </span>
+                              <div className="min-w-0">
+                                <p className="text-text-primary text-xs font-semibold leading-tight truncate">{r.name}</p>
+                                <p className="text-text-muted text-[10px] mt-0.5">
+                                  {r.prepTime} · {r.servings} servings
+                                </p>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-center py-4">
+                          <p className="text-text-muted text-xs">No recipes in your catalog yet.</p>
+                          <p className="text-text-muted text-[10px] mt-1">Go to 📖 Recipes tab to add/import.</p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
