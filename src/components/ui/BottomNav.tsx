@@ -110,23 +110,8 @@ const navItems = [
       </svg>
     ),
   },
-  {
-    href: "/grocery",
-    label: "Grocery",
-    icon: (active: boolean) => (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={active ? 2.5 : 1.8}
-        className="w-6 h-6"
-      >
-        <circle cx="9" cy="21" r="1" fill="currentColor" stroke="none" />
-        <circle cx="20" cy="21" r="1" fill="currentColor" stroke="none" />
-        <path d="M1 1h4l2.5 13h11l3-7H6" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    ),
-  },
+  // Grocery removed from bottom navigation; grocery content remains available inside the Meals page.
+
   {
     href: "/emergency",
     label: "Emergency",

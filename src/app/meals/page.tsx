@@ -95,7 +95,11 @@ function MealHubContent() {
       } as Meal;
       db.insertMeal(newMeal);
       setMeals(prev => {
-        const filtered = prev.filter(m => m.time !== newMeal.time);
+        // Replace only the meal slot (same day + same mealType),
+        // instead of removing every meal for that day.
+        const filtered = prev.filter(
+          m => !(m.time === newMeal.time && m.mealType === newMeal.mealType)
+        );
         return [...filtered, newMeal];
       });
       setActiveDay(newMeal.time);
@@ -210,10 +214,36 @@ function MealHubContent() {
           showAiSuggestions={showAiSuggestions}
           aiMealIdeas={aiMealIdeas}
           aiMealLoading={aiMealLoading}
-          importRecipeFromUrl={(url: string) => showToast(`📥 Importing from ${url}... (coming soon)`)}
+          importRecipeFromUrl={async (url: string, source?: string) => {
+            const label = source ? source : "Web";
+            showToast(`📥 Importing from ${label}: ${url}...`);
+            try {
+              const res = await fetch("/api/recipes/ingest", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ type: "url", url, sourceLabel: label }),
+              });
+              const data = await res.json();
+              if (!res.ok) {
+                showToast(`❌ ${data?.error || "Import failed"}`);
+                return;
+              }
+
+              // Add into recipe catalog (consistent across dashboards)
+              // useRecipes hook stores recipes state; we reuse saveCatalogRecipe
+              saveCatalogRecipe(data.recipe);
+              showToast(`✅ Added "${data?.recipe?.title || "Imported Recipe"}" to recipe catalog`);
+            } catch (e: any) {
+              showToast(`❌ Import failed: ${e?.message || "Unknown error"}`);
+            }
+          }}
           handleFileUpload={handleFileUpload}
         />
       )}
+
+
+
+
 
       {activeTab === "grocery" && (
         <GroceryTab 
@@ -234,6 +264,7 @@ function MealHubContent() {
       )}
 
       {activeTab === "pantry" && (
+
         <PantryTab 
           pantryItems={pantryItems}
           addPantryItem={addPantryItem}

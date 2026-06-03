@@ -313,6 +313,13 @@ export default function GroceryTab({
           Mark All Needed
         </button>
         <button
+          onClick={() => {
+            // Clear all grocery items that are not needed (completed)
+            // Assumes `needed === false` means completed.
+            groceryItems
+              .filter((i: any) => !i.needed)
+              .forEach((i: any) => deleteGroceryItem(i.id));
+          }}
           className="flex-1 py-2 rounded-xl bg-[var(--color-surface-2)] text-text-secondary text-xs font-medium hover:bg-[var(--color-accent-rose)]/15 hover:text-[var(--color-accent-rose)] transition-colors"
         >
           Clear Completed

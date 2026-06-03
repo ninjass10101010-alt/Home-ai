@@ -187,12 +187,7 @@ export default function MealsTab({
       {/* ── Actions ──────────────────────────────────── */}
       {activeMeals.length > 0 && (
         <div className="flex gap-2 mt-4">
-          <button
-            onClick={() => setActiveTab("grocery")}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-[var(--color-accent-nori)]/15 text-[var(--color-accent-nori)] text-sm font-medium hover:bg-[var(--color-accent-nori)]/25 transition-colors"
-          >
-            🛒 Grocery List
-          </button>
+          {/* Removed cross-tab nav grocery button; grocery list is shown within the Meals section. */}
           <button
             onClick={handleSyncMealToGrocery}
             disabled={isSyncing}
@@ -212,9 +207,21 @@ export default function MealsTab({
           </div>
           <div className="grid grid-cols-2 gap-2">
             {(aiMealIdeas.length > 0 ? aiMealIdeas : mealIdeas).map((idea: any) => (
-              <Card key={idea.name} className="!p-3 cursor-pointer hover:border-[var(--color-accent-nori)]/30 transition-colors"
+              <Card
+                key={idea.name}
+                className="!p-3 cursor-pointer hover:border-[var(--color-accent-nori)]/30 transition-colors"
                 onClick={() => {
-                  alert(`Need to add ${idea.name} to ${activeDay}`);
+                  // Default AI pick to dinner so it appears in the planner.
+                  // User can change day/meal type inside the modal.
+                  openRecipeModal({
+                    time: activeDay,
+                    mealType: "dinner",
+                    name: idea.name,
+                    emoji: idea.emoji,
+                    tags: idea.tags,
+                    prepTime: "30 min",
+                    ingredients: [""],
+                  } as Partial<Meal>);
                 }}
               >
                 <div className="flex flex-col items-center gap-2 text-center">
@@ -238,12 +245,14 @@ export default function MealsTab({
         <h3 className="text-text-primary font-semibold text-sm mb-3">📥 Import Recipes</h3>
         <div className="grid grid-cols-2 gap-2">
           {[
-            { label: "📌 Pinterest", source: "Pinterest" },
-            { label: "🎵 TikTok", source: "TikTok" },
+            { label: "🌐 Web Import", source: "Web" },
           ].map(s => (
             <button
               key={s.source}
-              onClick={() => { const url = prompt(`Enter ${s.source} URL:`); if (url) importRecipeFromUrl(url, s.source); }}
+              onClick={() => {
+                const url = prompt(`Enter recipe URL (Pinterest/TikTok/etc):`);
+                if (url) importRecipeFromUrl(url, s.source);
+              }}
               className="flex items-center justify-center gap-2 px-3 py-3 rounded-xl text-xs font-medium bg-[var(--color-accent-nori)]/10 text-[var(--color-accent-nori)] border border-[var(--color-accent-nori)]/20 hover:bg-[var(--color-accent-nori)]/20 transition-all"
             >
               {s.label}

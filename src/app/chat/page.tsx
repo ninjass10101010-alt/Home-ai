@@ -18,11 +18,37 @@ interface Message {
   speakerEmoji?: string;
 }
 
+type LocalActionType =
+  | "event"
+  | "meal"
+  | "task"
+  | "grocery"
+  | "recipe"
+  | "reward"
+  | "clear"
+  | "schedule";
+
+type HermesActionType =
+  | LocalActionType
+  | "add_event"
+  | "remove_event"
+  | "add_task"
+  | "complete_task"
+  | "clear_leaderboard"
+  | "add_meal"
+  | "remove_meal"
+  | "update_grocery"
+  | "update_pantry"
+  | "send_message";
+
 interface ActionCard {
-  type: "event" | "meal" | "task" | "grocery" | "recipe" | "reward" | "clear" | "schedule";
+  // Client supports both the legacy local types and the OpenRouter action types
+  type: HermesActionType;
   title: string;
-  detail: string;
-  emoji: string;
+  detail?: string;
+  emoji?: string;
+  // OpenRouter uses `data` (per system prompt)
+  data?: any;
   confirmed?: boolean;
 }
 
@@ -81,11 +107,45 @@ function renderContent(text: string) {
 
 function executeAction(action: ActionCard): { success: boolean; message: string } {
   try {
-    switch (action.type) {
+    // Normalize OpenRouter payload shape.
+    const payload = (action as any).data;
+    const detailFromAction = action.detail;
+
+    const getEmoji = () => action.emoji || payload?.emoji || "✨";
+    const getTitle = () => action.title || payload?.title || action.detail || "";
+
+    const getDetailString = () => {
+      if (typeof detailFromAction === "string") return detailFromAction;
+      if (typeof payload === "string") return payload;
+      if (payload && typeof payload === "object") {
+        // Preserve existing parsing behavior as much as possible.
+        // For task/event actions, client often expects `detail` to contain free-form text like "Emily 10pts".
+        // We'll synthesize a minimal detail string when possible.
+        if (payload?.assignedTo && payload?.points) {
+          return `${payload.assignedTo} ${payload.points}pts`;
+        }
+        if (payload?.member && payload?.time) {
+          return `${payload.member} · ${payload.time}`;
+        }
+        if (payload?.items && Array.isArray(payload.items)) {
+          return payload.items.join("· ");
+        }
+      }
+      return "";
+    };
+
+    const normalizedAction: ActionCard = {
+      ...action,
+      title: getTitle(),
+      emoji: getEmoji(),
+      detail: getDetailString(),
+    };
+
+    switch (normalizedAction.type) {
       case "meal": {
         const MEALS_KEY = "consuela-meals";
         // Try to extract day from detail or title (e.g., "Monday", "Mon")
-        const dayMatch = action.detail?.match(/\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b/i);
+        const dayMatch = normalizedAction.detail?.match(/\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b/i);
         const dayMap: Record<string, string> = {
           monday: "Mon", tuesday: "Tue", wednesday: "Wed", thursday: "Thu",
           friday: "Fri", saturday: "Sat", sunday: "Sun",
@@ -96,7 +156,7 @@ function executeAction(action: ActionCard): { success: boolean; message: string 
           day = dayMap[raw] || raw.charAt(0).toUpperCase() + raw.slice(1, 3);
         }
         // Try to extract meal type
-        const typeMatch = action.detail?.match(/\b(breakfast|lunch|dinner|snack)\b/i);
+        const typeMatch = normalizedAction.detail?.match(/\b(breakfast|lunch|dinner|snack)\b/i);
         const mealType = typeMatch ? typeMatch[1].toLowerCase() as any : "dinner";
         const newMeal = {
           id: Date.now(),
@@ -247,6 +307,9 @@ function ChatContent() {
     return saved.length > 0 ? saved : [initialGreeting];
   });
 
+  // Defer query-param send until after `sendMessage` is declared.
+  const queryParamRef = useRef<string | null>(null);
+
   // Save messages on every change
   useEffect(() => {
     if (messages.length > 0) saveChatHistory(messages);
@@ -269,7 +332,8 @@ function ChatContent() {
 
   useEffect(() => {
     if (queryParam) {
-      sendMessage(queryParam);
+      queryParamRef.current = queryParam;
+
       if (typeof window !== "undefined") {
         const url = new URL(window.location.href);
         url.searchParams.delete("q");
