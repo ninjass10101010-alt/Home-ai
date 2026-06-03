@@ -81,14 +81,21 @@ export default function Card({
 
   if (onClick) {
     return (
-      <button
-        type="button"
+      <div
+        role="button"
+        tabIndex={0}
         onClick={onClick}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onClick();
+          }
+        }}
         className={`${baseClass} ${className} w-full text-left`}
         style={combinedStyle}
       >
         {children}
-      </button>
+      </div>
     );
   }
 

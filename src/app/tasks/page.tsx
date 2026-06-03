@@ -82,6 +82,11 @@ function loadFromStorage<T>(key: string, fallback: T): T {
 }
 
 export default function TasksPage() {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const membersData = useMemo(() => db.selectMembers(), []);
   const allMembers = useMemo(() => ["All", ...membersData.map((m: any) => m.name)], [membersData]);
   const memberEmojis: Record<string, string> = useMemo(() => ({
@@ -144,6 +149,82 @@ export default function TasksPage() {
   const [addingReward, setAddingReward] = useState(false);
   const [aiRewardSuggesting, setAiRewardSuggesting] = useState(false);
   const [aiRewards, setAiRewards] = useState<Reward[]>([]);
+
+  // ─── Penalties (point deductions) ───────────────────────
+  interface Penalty {
+    id: number;
+    name: string;
+    emoji: string;
+    points: number; // positive number = how many pts to deduct
+  }
+  const PENALTIES_KEY = "consuela-penalties";
+  const defaultPenalties: Penalty[] = [
+    { id: 1, name: "Missed chore", emoji: "🧹", points: 10 },
+    { id: 2, name: "Left mess", emoji: "🗑️", points: 8 },
+    { id: 3, name: "Forgot homework", emoji: "📚", points: 15 },
+    { id: 4, name: "Late bedtime", emoji: "🌙", points: 5 },
+    { id: 5, name: "Rude behavior", emoji: "😤", points: 20 },
+  ];
+  const [penalties, setPenalties] = useState<Penalty[]>(() => loadFromStorage(PENALTIES_KEY, defaultPenalties));
+  useEffect(() => { localStorage.setItem(PENALTIES_KEY, JSON.stringify(penalties)); }, [penalties]);
+
+  const [editingPenaltyId, setEditingPenaltyId] = useState<number | null>(null);
+  const [penaltyForm, setPenaltyForm] = useState<Penalty>({ id: 0, name: "", emoji: "⚠️", points: 10 });
+  const [addingPenalty, setAddingPenalty] = useState(false);
+
+  const startEditPenalty = (p: Penalty) => { setEditingPenaltyId(p.id); setAddingPenalty(false); setPenaltyForm({ ...p }); };
+  const startAddPenalty = () => { setEditingPenaltyId(null); setAddingPenalty(true); setPenaltyForm({ id: Date.now(), name: "", emoji: "⚠️", points: 10 }); };
+  const savePenalty = () => {
+    if (!penaltyForm.name.trim()) return;
+    if (addingPenalty) setPenalties(prev => [...prev, { ...penaltyForm, id: Date.now() }]);
+    else setPenalties(prev => prev.map(p => p.id === editingPenaltyId ? { ...penaltyForm } : p));
+    setEditingPenaltyId(null); setAddingPenalty(false);
+  };
+  const deletePenalty = (id: number) => { setPenalties(prev => prev.filter(p => p.id !== id)); setEditingPenaltyId(null); };
+
+  // PIN state for applying a penalty
+  const [pinPenalty, setPinPenalty] = useState<Penalty | null>(null);
+  const [penaltyForMember, setPenaltyForMember] = useState<string>("");
+
+  const openPenaltyPin = (penalty: Penalty) => {
+    setPinPenalty(penalty);
+    setPinTaskId(null); setPinReward(null);
+    setPinInput(""); setPinError(""); setPinSuccess("");
+    const defaultMember = membersData.find((m: any) => m.role !== "pet")?.name ?? "";
+    setPenaltyForMember(defaultMember);
+  };
+
+  // ─── Manual Point Adjust ─────────────────────────────────
+  const [adjustMember, setAdjustMember] = useState<string | null>(null);
+  const [adjustAmount, setAdjustAmount] = useState<string>("10");
+  const [adjustDir, setAdjustDir] = useState<"+" | "-">("-");
+  const [adjustReason, setAdjustReason] = useState("");
+  const [adjustPin, setAdjustPin] = useState("");
+  const [adjustError, setAdjustError] = useState("");
+  const [adjustSuccess, setAdjustSuccess] = useState("");
+
+  const openAdjust = (name: string) => {
+    setAdjustMember(name); setAdjustAmount("10"); setAdjustDir("-"); setAdjustReason("");
+    setAdjustPin(""); setAdjustError(""); setAdjustSuccess("");
+  };
+
+  const submitAdjust = () => {
+    if (!adjustMember || !adjustPin) return;
+    // Any parent can authorize manual adjustments
+    const parent = membersData.find((m: any) => m.role === "parent" && db.verifyMemberPin(m.name, adjustPin));
+    if (!parent) {
+      setAdjustError("Parent PIN required. Try again.");
+      setAdjustPin("");
+      setTimeout(() => setAdjustError(""), 2500);
+      return;
+    }
+    const delta = parseInt(adjustAmount) || 0;
+    const change = adjustDir === "+" ? delta : -delta;
+    setEarnedPoints(prev => ({ ...prev, [adjustMember]: Math.max(0, (prev[adjustMember] || 0) + change) }));
+    const label = adjustDir === "+" ? `+${delta}` : `-${delta}`;
+    setAdjustSuccess(`${label} pts applied to ${adjustMember.split(" ")[0]}!`);
+    setTimeout(() => { setAdjustMember(null); setAdjustSuccess(""); }, 1500);
+  };
 
   const startEditReward = (r: Reward) => {
     setEditingRewardId(r.id); setAddingReward(false);
@@ -520,6 +601,17 @@ export default function TasksPage() {
 
   const topScorer = dynamicLeaderboard[0];
 
+  if (!mounted) {
+    return (
+      <PageShell>
+        <TopBar title="Tasks & Chores" subtitle="Loading..." />
+        <div className="flex items-center justify-center min-h-[50vh]">
+          <div className="animate-spin rounded-full h-8 w-8 border-2 border-t-transparent border-[var(--color-accent-selected)]"></div>
+        </div>
+      </PageShell>
+    );
+  }
+
   return (
     <PageShell>
       <TopBar
@@ -544,16 +636,79 @@ export default function TasksPage() {
         </div>
       )}
 
-      {/* PIN Entry Modal */}
-      {(pinTaskId !== null || pinReward !== null) && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => { setPinTaskId(null); setPinReward(null); }}>
+      {/* Manual Adjust Modal */}
+      {adjustMember && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setAdjustMember(null)}>
           <div className="bg-surface-0 rounded-2xl p-6 mx-4 w-full max-w-sm border border-surface-3 shadow-2xl" onClick={e => e.stopPropagation()}>
             <div className="text-center mb-4">
-              <span className="text-4xl">{pinReward ? pinReward.emoji : "🔐"}</span>
+              <span className="text-4xl">⚙️</span>
+              <h3 className="text-text-primary font-semibold mt-2">Manual Point Adjust</h3>
+              <p className="text-text-secondary text-sm mt-1">Adjust points for <span className="font-semibold text-text-primary">{adjustMember.split(" ")[0]}</span></p>
+              <p className="text-text-muted text-xs mt-0.5">Current: <span className="text-nori-400 font-bold">{earnedPoints[adjustMember] || 0} pts</span></p>
+            </div>
+            {/* Member selector */}
+            <div className="mb-3">
+              <p className="text-text-muted text-xs font-semibold mb-1">Member</p>
+              <select value={adjustMember} onChange={e => setAdjustMember(e.target.value)}
+                className="w-full bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3">
+                {membersData.filter((m: any) => m.role !== "pet").map((m: any) => (
+                  <option key={m.name} value={m.name}>{m.emoji} {m.name}</option>
+                ))}
+              </select>
+            </div>
+            {/* +/- toggle + amount */}
+            <div className="flex gap-2 mb-3">
+              <div className="flex rounded-lg overflow-hidden border border-surface-3">
+                <button onClick={() => setAdjustDir("+")}
+                  className={`px-4 py-2 text-sm font-bold transition-colors ${adjustDir === "+" ? "bg-nori-500 text-white" : "bg-surface-2 text-text-muted"}`}>+</button>
+                <button onClick={() => setAdjustDir("-")}
+                  className={`px-4 py-2 text-sm font-bold transition-colors ${adjustDir === "-" ? "bg-rose-500 text-white" : "bg-surface-2 text-text-muted"}`}>−</button>
+              </div>
+              <input type="number" min="1" max="999" value={adjustAmount}
+                onChange={e => setAdjustAmount(e.target.value)}
+                className="flex-1 bg-surface-2 text-text-primary text-center text-lg font-bold rounded-lg px-3 py-2 outline-none border border-surface-3 focus:border-nori-500/50" />
+              <span className="flex items-center text-text-muted text-sm font-medium">pts</span>
+            </div>
+            {/* Reason */}
+            <input type="text" placeholder="Reason (optional)" value={adjustReason}
+              onChange={e => setAdjustReason(e.target.value)}
+              className="w-full mb-3 bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3 focus:border-nori-500/50 placeholder:text-text-muted" />
+            {/* Parent PIN */}
+            <input type="password" inputMode="numeric" maxLength={4} value={adjustPin}
+              onChange={e => { setAdjustPin(e.target.value.replace(/[^0-9]/g, "")); setAdjustError(""); }}
+              onKeyDown={e => { if (e.key === "Enter") submitAdjust(); }}
+              placeholder="Parent PIN" autoFocus
+              className="w-full bg-surface-2 text-text-primary text-center text-2xl tracking-[0.5em] rounded-xl px-4 py-3 outline-none border-2 border-surface-3 focus:border-nori-500/50 placeholder:text-text-muted placeholder:text-sm placeholder:tracking-normal" />
+            {adjustError && <p className="text-rose-400 text-xs text-center mt-2">{adjustError}</p>}
+            {adjustSuccess && <p className="text-nori-400 text-xs text-center mt-2 font-semibold">{adjustSuccess}</p>}
+            <div className="flex gap-2 mt-4">
+              <button onClick={submitAdjust} disabled={adjustPin.length < 4 || !adjustAmount}
+                className={`flex-1 py-2.5 rounded-xl font-semibold text-sm disabled:opacity-40 transition-colors text-white ${
+                  adjustDir === "+" ? "bg-nori-500 hover:bg-nori-400" : "bg-rose-500 hover:bg-rose-400"
+                }`}>
+                {adjustDir === "+" ? `+${adjustAmount} pts` : `−${adjustAmount} pts`}
+              </button>
+              <button onClick={() => setAdjustMember(null)}
+                className="flex-1 py-2.5 rounded-xl bg-surface-2 text-text-secondary text-sm font-medium hover:text-text-primary transition-colors">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PIN Entry Modal */}
+      {(pinTaskId !== null || pinReward !== null || pinPenalty !== null) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => { setPinTaskId(null); setPinReward(null); setPinPenalty(null); }}>
+          <div className="bg-surface-0 rounded-2xl p-6 mx-4 w-full max-w-sm border border-surface-3 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="text-center mb-4">
+              <span className="text-4xl">{pinReward ? pinReward.emoji : pinPenalty ? pinPenalty.emoji : "🔐"}</span>
               <h3 className="text-text-primary font-semibold mt-2">Enter Your PIN</h3>
               <p className="text-text-secondary text-sm mt-1">
                 {pinReward
                   ? `Redeem "${pinReward.name}" for ${pinReward.cost}pts`
+                  : pinPenalty
+                  ? `Apply "${pinPenalty.name}" penalty (−${pinPenalty.points}pts)`
                   : `Complete "${tasks.find(t => t.id === pinTaskId)?.title}"`
                 }
               </p>
@@ -595,6 +750,25 @@ export default function TasksPage() {
                   </select>
                 </div>
               )}
+
+              {pinPenalty && (
+                <div className="mt-3">
+                  <p className="text-text-muted text-xs font-semibold mb-1">Apply penalty to</p>
+                  <select
+                    value={penaltyForMember}
+                    onChange={(e) => setPenaltyForMember(e.target.value)}
+                    className="w-full bg-surface-2 text-text-primary text-xs rounded-lg px-3 py-2 outline-none border border-surface-3"
+                  >
+                    {membersData
+                      .filter((m: any) => m.role !== "pet")
+                      .map((m: any) => (
+                        <option key={m.name} value={m.name}>
+                          {m.emoji} {m.name}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              )}
             </div>
             <input
               type="password"
@@ -610,11 +784,26 @@ export default function TasksPage() {
             {pinError && <p className="text-rose-400 text-xs text-center mt-2">{pinError}</p>}
             {pinSuccess && <p className="text-nori-400 text-xs text-center mt-2">{pinSuccess}</p>}
             <div className="flex gap-2 mt-4">
-              <button onClick={submitPin} disabled={pinInput.length < 4}
-                className="flex-1 py-2.5 rounded-xl bg-nori-500 text-white font-semibold text-sm disabled:opacity-40 hover:bg-nori-400 transition-colors">
-                Submit
+              <button onClick={pinPenalty ? () => {
+                if (!penaltyForMember) { setPinError("Select a member."); return; }
+                const verified = db.verifyMemberPin(penaltyForMember, pinInput) ||
+                  membersData.find((m: any) => m.role === "parent" && db.verifyMemberPin(m.name, pinInput));
+                if (verified) {
+                  setEarnedPoints(prev => ({ ...prev, [penaltyForMember]: Math.max(0, (prev[penaltyForMember] || 0) - (pinPenalty?.points ?? 0)) }));
+                  setPinSuccess(`⚠️ −${pinPenalty?.points}pts from ${penaltyForMember.split(" ")[0]}`);
+                  setTimeout(() => { setPinPenalty(null); setPinSuccess(""); }, 1500);
+                } else {
+                  setPinError("Wrong PIN. Try again.");
+                  setPinInput("");
+                  setTimeout(() => setPinError(""), 2000);
+                }
+              } : submitPin} disabled={pinInput.length < 4}
+                className={`flex-1 py-2.5 rounded-xl font-semibold text-sm disabled:opacity-40 transition-colors text-white ${
+                  pinPenalty ? "bg-rose-500 hover:bg-rose-400" : "bg-nori-500 hover:bg-nori-400"
+                }`}>
+                {pinPenalty ? `Deduct ${pinPenalty?.points} pts` : "Submit"}
               </button>
-              <button onClick={() => { setPinTaskId(null); setPinReward(null); }}
+              <button onClick={() => { setPinTaskId(null); setPinReward(null); setPinPenalty(null); }}
                 className="flex-1 py-2.5 rounded-xl bg-surface-2 text-text-secondary text-sm font-medium hover:text-text-primary transition-colors">
                 Cancel
               </button>
@@ -881,9 +1070,21 @@ export default function TasksPage() {
                       <p className="text-text-primary font-semibold text-sm">{entry.name}</p>
                       <p className="text-text-muted text-xs">🔥 {entry.streak} day streak</p>
                     </div>
-                    <div className="text-right">
-                      <p className="text-nori-400 font-bold text-base">{entry.points}</p>
-                      <p className="text-text-muted text-[10px]">pts</p>
+                    <div className="flex items-center gap-2">
+                      <div className="text-right">
+                        <p className="text-nori-400 font-bold text-base">{entry.points}</p>
+                        <p className="text-text-muted text-[10px]">pts</p>
+                      </div>
+                      <button
+                        onClick={() => openAdjust(entry.name)}
+                        title="Manually adjust points"
+                        className="w-7 h-7 flex items-center justify-center rounded-lg text-text-muted hover:text-amber-400 hover:bg-amber-500/10 transition-colors shrink-0"
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
+                          <circle cx="12" cy="12" r="3" />
+                          <path d="M19.07 4.93A10 10 0 1 0 4.93 19.07M19.07 4.93L21 3M19.07 4.93l-2 2" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </button>
                     </div>
                   </div>
                   <div className="mt-2.5 w-full h-1.5 rounded-full bg-surface-3 overflow-hidden">
@@ -985,6 +1186,68 @@ export default function TasksPage() {
                 })}
               </div>
             </section>
+
+            {/* ─── Penalties Section ───────────────────────────── */}
+            <section>
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h3 className="text-text-primary font-semibold text-sm">⚠️ Penalties</h3>
+                  <p className="text-text-muted text-[10px] mt-0.5">Deduct points for missed tasks or bad behavior</p>
+                </div>
+                <button onClick={startAddPenalty}
+                  className="w-6 h-6 flex items-center justify-center rounded-lg text-text-muted hover:text-rose-400 hover:bg-rose-500/10 transition-colors text-xs">+</button>
+              </div>
+
+              {/* Penalty edit form */}
+              {(addingPenalty || editingPenaltyId !== null) && (
+                <Card className="!p-3 mb-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <input value={penaltyForm.emoji} onChange={e => setPenaltyForm(p => ({...p, emoji: e.target.value}))}
+                      className="w-12 h-10 text-center text-lg bg-surface-2 rounded-lg outline-none border border-surface-3" />
+                    <input value={penaltyForm.name} onChange={e => setPenaltyForm(p => ({...p, name: e.target.value}))}
+                      placeholder="Penalty name" autoFocus
+                      className="flex-1 bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3 focus:border-rose-500/50" />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input type="number" value={penaltyForm.points}
+                      onChange={e => setPenaltyForm(p => ({...p, points: parseInt(e.target.value) || 0}))}
+                      className="w-20 bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3" />
+                    <span className="text-rose-400 text-xs font-semibold">pts deducted</span>
+                    <div className="flex-1" />
+                    <button onClick={savePenalty} disabled={!penaltyForm.name.trim()}
+                      className="px-3 py-1.5 rounded-lg bg-rose-500 text-white text-xs font-medium disabled:opacity-40">Save</button>
+                    <button onClick={() => { setEditingPenaltyId(null); setAddingPenalty(false); }}
+                      className="px-3 py-1.5 rounded-lg bg-surface-2 text-text-secondary text-xs">Cancel</button>
+                    {!addingPenalty && (
+                      <button onClick={() => deletePenalty(penaltyForm.id)}
+                        className="px-2 py-1.5 rounded-lg bg-rose-500/15 text-rose-400 text-xs">🗑️</button>
+                    )}
+                  </div>
+                </Card>
+              )}
+
+              <div className="grid grid-cols-2 gap-2">
+                {penalties.map((penalty) => (
+                  <Card key={penalty.id} className="!p-3 border-rose-500/10">
+                    <div className="flex flex-col items-center gap-1.5 text-center">
+                      <span className="text-xl">{penalty.emoji}</span>
+                      <p className="text-text-primary text-xs font-medium leading-tight">{penalty.name}</p>
+                      <span className="text-[10px] font-bold text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded-full">−{penalty.points} pts</span>
+                      <div className="flex gap-1 w-full mt-0.5">
+                        <button
+                          onClick={() => openPenaltyPin(penalty)}
+                          className="flex-1 py-1.5 rounded-lg bg-rose-500/15 text-rose-400 text-[10px] font-semibold hover:bg-rose-500/25 transition-colors"
+                        >
+                          Apply
+                        </button>
+                        <button onClick={() => startEditPenalty(penalty)}
+                          className="px-2 py-1.5 rounded-lg bg-surface-2 text-text-muted text-[10px] hover:text-text-secondary">✏️</button>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            </section>
           </div>
         )}
       </div>
@@ -1030,32 +1293,25 @@ function TaskRow({ task, onComplete, onEdit, memberColors, memberEmojis, priorit
               {task.title}
             </p>
           </div>
-          <p className="text-xs text-text-muted mt-0.5">
-            {task.due}
+          <p className="text-xs text-text-muted mt-0.5 truncate">
+            <span className="font-medium text-text-secondary/80">{task.assignee.split(" ")[0]}</span>
+            {" · "}{task.due}
             {task.recurring && ` · 🔄 ${task.recurring}`}
-            {task.completedBy && ` · done by ${task.completedBy}`}
+            {task.completedBy && ` · ✅ ${task.completedBy}`}
           </p>
         </div>
 
-        <div className="flex flex-col shrink-0">
-          <div className="flex items-center justify-center gap-2">
-            {task.points > 0 && (
-              <span className="text-xs font-semibold text-amber-400">+{task.points}pts</span>
-            )}
-            <Avatar
-              name={task.assignee}
-              color={memberColors[task.assignee] ?? "green"}
-              emoji={memberEmojis[task.assignee] || task.assigneeEmoji}
-              size="sm"
-              variant="emoji"
-            />
-          </div>
-          {/* Align assignee label exactly under the points/emoji block */}
-          <div className="flex justify-center mt-0.5">
-            <p className="text-[10px] font-semibold text-text-muted/70 leading-none truncate max-w-[70px] text-center">
-              {task.assignee.split(" ")[0]}
-            </p>
-          </div>
+        <div className="flex flex-col items-center justify-center shrink-0 gap-1">
+          {task.points > 0 && (
+            <span className="text-[10px] font-bold text-amber-400 leading-none">+{task.points}pts</span>
+          )}
+          <Avatar
+            name={task.assignee}
+            color={memberColors[task.assignee] ?? "green"}
+            emoji={memberEmojis[task.assignee] || task.assigneeEmoji}
+            size="sm"
+            variant="emoji"
+          />
         </div>
 
 

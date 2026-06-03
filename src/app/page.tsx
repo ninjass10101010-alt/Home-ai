@@ -24,87 +24,92 @@ const quickPrompts = [
 ];
 
 export default function HomePage() {
-  const familyMembers = db.selectMembersDetailed().map((member: any, idx: number) => {
-    const size = member.avatarSize || "md";
-    return {
-      name: member.name,
-      // Prefer the DB-provided color if present; otherwise fall back to stable ordering.
-      color: member.color || (idx % 4 === 0 ? "green" : idx % 4 === 1 ? "cyan" : idx % 4 === 2 ? "violet" : "amber"),
-      emoji: member.emoji,
-      avatarSize: size,
-    };
-  });
+  const [mounted, setMounted] = useState(false);
+  const [familyMembers, setFamilyMembers] = useState<any[]>([]);
+  const [todayEvents, setTodayEvents] = useState<any[]>([]);
+  const [pendingTasks, setPendingTasks] = useState<any[]>([]);
+  const [homeScheduleItems, setHomeScheduleItems] = useState<any[]>([]);
+  const [timeOfDay, setTimeOfDay] = useState<string>("morning");
+  const [season, setSeason] = useState<{ name: string; emoji: string }>({ name: "Spring", emoji: "🌸" });
+  const [dateInfo, setDateInfo] = useState<{ dayOfWeek: string; dayMonth: string }>({ dayOfWeek: "---", dayMonth: "---" });
+  const [now, setNow] = useState<Date | null>(null);
 
-  const todayEvents = db.selectTodaysEvents();
-  const pendingTasks = db.selectPendingTasks();
-  const scheduleItems = db.selectTodaysSchedules();
-
-  const [homeScheduleItems, setHomeScheduleItems] = useState<any[]>(() => scheduleItems);
+  const { isVisible, widgets } = useHomeLayout();
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    setMounted(true);
+    setNow(new Date());
 
-    // Hydrate from the same storage Calendar uses.
-    // If parsing fails, keep the DB fallback.
+    // Hydrate family members
+    const members = db.selectMembersDetailed().map((member: any, idx: number) => {
+      const size = member.avatarSize || "md";
+      return {
+        name: member.name,
+        color: member.color || (idx % 4 === 0 ? "green" : idx % 4 === 1 ? "cyan" : idx % 4 === 2 ? "violet" : "amber"),
+        emoji: member.emoji,
+        avatarSize: size,
+      };
+    });
+    setFamilyMembers(members);
+
+    // Hydrate events and tasks
+    setTodayEvents(db.selectTodaysEvents());
+    setPendingTasks(db.selectPendingTasks());
+
+    // Hydrate dates and timeOfDay/season
+    const today = new Date();
+    const hour = today.getHours();
+    const tod = hour < 5 ? "night" : hour < 12 ? "morning" : hour < 17 ? "afternoon" : hour < 21 ? "evening" : "night";
+    setTimeOfDay(tod);
+
+    const getSeason = () => {
+      const month = today.getMonth();
+      if (month >= 2 && month <= 4) return { name: "Spring", emoji: "🌸" };
+      if (month >= 5 && month <= 7) return { name: "Summer", emoji: "☀️" };
+      if (month >= 8 && month <= 10) return { name: "Autumn", emoji: "🍂" };
+      return { name: "Winter", emoji: "❄️" };
+    };
+    setSeason(getSeason());
+
+    setDateInfo({
+      dayOfWeek: today.toLocaleDateString("en-US", { weekday: "short" }),
+      dayMonth: today.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+    });
+
+    // Hydrate schedules from local storage or fallback
     const SCHEDULES_STORAGE_KEY = "consuela-schedules";
-
+    let loadedSchedules = db.selectTodaysSchedules();
     try {
       const stored = localStorage.getItem(SCHEDULES_STORAGE_KEY);
-      if (!stored) return;
-
-      const parsed = JSON.parse(stored);
-      if (!Array.isArray(parsed)) return;
-
-      setHomeScheduleItems(
-        parsed.map((s: any) => ({
-          id: s.id,
-          title: s.title,
-          time: s.time,
-          emoji: s.icon,
-          type: s.type,
-          color: s.color || "green",
-          member: s.member,
-          memberColor: s.memberColor,
-          icon: s.icon,
-        }))
-      );
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          loadedSchedules = parsed.map((s: any) => ({
+            id: s.id,
+            title: s.title,
+            time: s.time,
+            emoji: s.icon,
+            type: s.type,
+            color: s.color || "green",
+            member: s.member,
+            memberColor: s.memberColor,
+            icon: s.icon,
+          }));
+        }
+      }
     } catch {
       // ignore
     }
+    setHomeScheduleItems(loadedSchedules);
   }, []);
 
-
-
-
-
-
-  const today = new Date();
-  const hour = today.getHours();
-  const timeOfDay = hour < 5 ? "night" : hour < 12 ? "morning" : hour < 17 ? "afternoon" : hour < 21 ? "evening" : "night";
-
-  const getSeason = () => {
-    const month = new Date().getMonth();
-    if (month >= 2 && month <= 4) return { name: "Spring", emoji: "🌸" };
-    if (month >= 5 && month <= 7) return { name: "Summer", emoji: "☀️" };
-    if (month >= 8 && month <= 10) return { name: "Autumn", emoji: "🍂" };
-    return { name: "Winter", emoji: "❄️" };
-  };
-  const season = getSeason();
-
-  // Date pill
-  const dayOfWeek = today.toLocaleDateString("en-US", { weekday: "short" });
-  const dayMonth = today.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-
-
-
-  // Live clock
-  const [now, setNow] = useState(new Date());
-  const { isVisible, widgets } = useHomeLayout();
   useEffect(() => {
+    if (!mounted) return;
     const timer = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(timer);
-  }, []);
-  const timeStr = now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+  }, [mounted]);
+
+  const timeStr = now ? now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }) : "--:--";
 
   return (
     <PageShell>
@@ -141,8 +146,8 @@ export default function HomePage() {
         {/* Date pill */}
         <div className="flex items-center gap-2 mb-4 animate-in">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full glass-subtle border border-[var(--color-surface-7)]/20">
-            <span className="text-xs text-text-secondary font-medium">{dayOfWeek}</span>
-            <span className="text-xs text-[var(--color-accent-selected)] font-semibold">{dayMonth}</span>
+            <span className="text-xs text-text-secondary font-medium">{dateInfo.dayOfWeek}</span>
+            <span className="text-xs text-[var(--color-accent-selected)] font-semibold">{dateInfo.dayMonth}</span>
             <span className="w-px h-3 bg-[var(--color-surface-7)]/30" />
             <span className="text-xs text-[var(--color-accent-cyan)] font-medium tabular-nums tracking-tight">{timeStr}</span>
           </div>
