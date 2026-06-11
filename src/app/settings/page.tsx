@@ -54,7 +54,7 @@ export default function SettingsPage() {
 
   const { weather, setLocation, setUnit, setTimeOfDay, setSeason, setHolidayOverride } = useWeatherConfig();
   const { widgets, moveUp, moveDown, toggle, getIndex } = useHomeLayout();
-  const [mounted, setMounted] = useState(false);
+  const mountedRef = useRef(false);
 
   // ─── Family Member editing state ────────────────────────────────────────
   const [membersList, setMembersList] = useState<any[]>([]);
@@ -81,7 +81,7 @@ export default function SettingsPage() {
   const [showECEmojiPicker, setShowECEmojiPicker] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
+    mountedRef.current = true;
     // Load family members from localStorage, fallback to DB seed
     const storedMembers = (() => {
       if (typeof window === "undefined") return null;
@@ -233,8 +233,8 @@ export default function SettingsPage() {
 
   // Keep draft in sync with stored location after mount
   useEffect(() => {
-    if (mounted) setLocationDraft(weather.location);
-  }, [mounted, weather.location]);
+    setLocationDraft(weather.location);
+  }, [weather.location]);
 
   const handleLocationSave = () => {
     const trimmed = locationDraft.trim();

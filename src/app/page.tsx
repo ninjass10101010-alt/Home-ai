@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import PageShell from "@/components/ui/PageShell";
 import Avatar from "@/components/ui/Avatar";
 import WeatherWidget from "@/components/ui/WeatherWidget";
@@ -24,7 +24,7 @@ const quickPrompts = [
 ];
 
 export default function HomePage() {
-  const [mounted, setMounted] = useState(false);
+  const mountedRef = useRef(false);
   const [familyMembers, setFamilyMembers] = useState<any[]>([]);
   const [todayEvents, setTodayEvents] = useState<any[]>([]);
   const [pendingTasks, setPendingTasks] = useState<any[]>([]);
@@ -37,7 +37,7 @@ export default function HomePage() {
   const { isVisible, widgets } = useHomeLayout();
 
   useEffect(() => {
-    setMounted(true);
+    mountedRef.current = true;
     setNow(new Date());
 
     // Hydrate family members

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import PageShell from "@/components/ui/PageShell";
 import TopBar from "@/components/ui/TopBar";
 import Card from "@/components/ui/Card";
@@ -82,9 +82,9 @@ function loadFromStorage<T>(key: string, fallback: T): T {
 }
 
 export default function TasksPage() {
-  const [mounted, setMounted] = useState(false);
+  const mountedRef = useRef(false);
   useEffect(() => {
-    setMounted(true);
+    mountedRef.current = true;
   }, []);
 
   const membersData = useMemo(() => db.selectMembers(), []);

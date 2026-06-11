@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import PageShell from "@/components/ui/PageShell";
 import Card from "@/components/ui/Card";
@@ -68,10 +68,10 @@ function cleanPhoneForTel(phone: string): string {
 
 export default function EmergencyPage() {
   const [contacts, setContacts] = useState<EmergencyContact[]>([]);
-  const [mounted, setMounted] = useState(false);
+  const mountedRef = useRef(false);
 
   useEffect(() => {
-    setMounted(true);
+    mountedRef.current = true;
     // Load from localStorage first (persisted by Settings), fallback to DB
     const stored = (() => {
       if (typeof window === "undefined") return null;
