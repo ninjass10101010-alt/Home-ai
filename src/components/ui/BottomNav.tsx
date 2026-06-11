@@ -138,110 +138,117 @@ export default function BottomNav() {
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 flex justify-center pointer-events-none">
       <div
-        className="pointer-events-auto w-full max-w-lg mx-auto"
-        style={{
-          paddingBottom: "env(safe-area-inset-bottom)",
-        }}
+        className="pointer-events-auto w-full max-w-lg mx-auto pb-safe"
+        style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
       >
-        {/* Outer rim glow */}
-        <div
-          className="pointer-events-none absolute inset-0 rounded-full"
-          style={{
-            background:
-              "linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.04) 40%, rgba(255,255,255,0) 60%, rgba(255,255,255,0.06))",
-            maskImage:
-              "linear-gradient(180deg, transparent 0%, black 20%, black 80%, transparent 100%)",
-            WebkitMaskImage:
-              "linear-gradient(180deg, transparent 0%, black 20%, black 80%, transparent 100%)",
-          }}
-        />
-        <div
-          className="mx-4 mb-3 relative flex items-center justify-around rounded-2xl border border-white/[0.08] px-2 py-2 backdrop-blur-2xl"
-          style={{
-            background:
-              "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)",
-            boxShadow:
-              "0 1px 0 0 rgba(255,255,255,0.08) inset, 0 -1px 0 0 rgba(0,0,0,0.4) inset, 0 20px 60px -20px rgba(0,0,0,0.6), 0 8px 24px -8px rgba(0,0,0,0.5)",
-          }}
-        >
-          {navItems.map((item) => {
-            const isActive = pathname === item.href;
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="group relative flex flex-col items-center gap-0.5 flex-1 py-1"
-                aria-label={item.label}
-              >
-                <span className="relative grid place-items-center">
-                  {/* Active rainbow gradient rim (conic) */}
-                  {isActive && (
-                    <>
-                      <span
-                        className="pointer-events-none absolute -inset-[2px] rounded-full"
-                        style={{
-                          background:
-                            "conic-gradient(from 0deg, #ff5fa2, #ff8a5b, #ffd76b, #7df9c8, #5ab6ff, #a07cff, #ff5fa2)",
-                          filter: "blur(0.5px)",
-                        }}
-                      />
-                      <span
-                        className="pointer-events-none absolute inset-0 rounded-full"
-                        style={{
-                          background:
-                            "linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.02))",
-                        }}
-                      />
-                    </>
-                  )}
+        <div className="mx-4 mb-3 relative">
+          {/* Outer rim glow — fades at top/bottom */}
+          <div
+            className="pointer-events-none absolute inset-0 rounded-full"
+            style={{
+              background:
+                "linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0.04) 40%, rgba(255,255,255,0) 60%, rgba(255,255,255,0.06))",
+              maskImage:
+                "linear-gradient(180deg, transparent 0%, black 20%, black 80%, transparent 100%)",
+              WebkitMaskImage:
+                "linear-gradient(180deg, transparent 0%, black 20%, black 80%, transparent 100%)",
+            }}
+          />
 
-                  {/* Frosted inner disc */}
-                  <span
-                    className={`absolute inset-[2px] rounded-full backdrop-blur-xl transition-colors duration-300 ${
-                      isActive ? "" : "bg-white/[0.04]"
-                    }`}
-                    style={
-                      isActive
-                        ? {
-                            background:
-                              "radial-gradient(120% 120% at 30% 20%, rgba(255,255,255,0.18), rgba(255,255,255,0.04) 60%, rgba(255,255,255,0.02))",
-                          }
-                        : undefined
-                    }
-                  />
-
-                  {/* Inner rim line */}
-                  <span
-                    className="pointer-events-none absolute inset-[2px] rounded-full"
-                    style={{
-                      boxShadow: isActive
-                        ? "0 0 0 1px rgba(255,255,255,0.18) inset, 0 0 18px rgba(160,124,255,0.25)"
-                        : "0 0 0 1px rgba(255,255,255,0.10) inset",
-                    }}
-                  />
-
-                  {/* Icon */}
-                  <span
-                    className={`relative z-10 grid place-items-center w-5 h-5 transition-colors duration-300 ${
-                      isActive
-                        ? "text-white drop-shadow-[0_0_6px_rgba(255,255,255,0.6)]"
-                        : "text-white/60 group-hover:text-white"
-                    }`}
-                    style={item.primary ? { width: 24, height: 24 } : {}}
-                  >
-                    {item.icon(isActive)}
-                  </span>
-                </span>
-                <span
-                  className={`text-[10px] font-medium transition-colors duration-200 ${
-                    isActive ? "text-white" : "text-white/50"
-                  }`}
+          {/* Bar background — clear glass with visible rim */}
+          <div
+            className="relative flex items-center justify-around gap-2 rounded-full border border-white/15 px-3 py-3 backdrop-blur-2xl"
+            style={{
+              background:
+                "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)",
+              boxShadow:
+                "0 1px 0 0 rgba(255,255,255,0.08) inset, 0 -1px 0 0 rgba(0,0,0,0.4) inset, 0 20px 60px -20px rgba(0,0,0,0.6), 0 8px 24px -8px rgba(0,0,0,0.5)",
+            }}
+          >
+            {navItems.map((item) => {
+              const isActive = pathname === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  aria-label={item.label}
+                  className="group relative flex flex-col items-center gap-0.5 outline-none"
                 >
-                  {item.label}
-                </span>
-              </Link>
-            );
-          })}
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    className="relative grid h-12 w-12 place-items-center rounded-full outline-none transition-transform duration-300 hover:scale-105"
+                  >
+                    {/* Active rainbow gradient rim (conic) */}
+                    {isActive && (
+                      <>
+                        <span
+                          className="pointer-events-none absolute -inset-[2px] rounded-full"
+                          style={{
+                            background:
+                              "conic-gradient(from 0deg, #ff5fa2, #ff8a5b, #ffd76b, #7df9c8, #5ab6ff, #a07cff, #ff5fa2)",
+                            filter: "blur(0.5px)",
+                          }}
+                        />
+                        <span
+                          className="pointer-events-none absolute inset-0 rounded-full"
+                          style={{
+                            background:
+                              "linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.02))",
+                          }}
+                        />
+                      </>
+                    )}
+
+                    {/* Frosted inner disc */}
+                    <span
+                      className={`absolute inset-[2px] rounded-full backdrop-blur-xl transition-colors duration-300 ${
+                        isActive ? "" : "bg-white/[0.04]"
+                      }`}
+                      style={
+                        isActive
+                          ? {
+                              background:
+                                "radial-gradient(120% 120% at 30% 20%, rgba(255,255,255,0.18), rgba(255,255,255,0.04) 60%, rgba(255,255,255,0.02))",
+                            }
+                          : undefined
+                      }
+                    />
+
+                    {/* Inner rim line */}
+                    <span
+                      className="pointer-events-none absolute inset-[2px] rounded-full"
+                      style={{
+                        boxShadow: isActive
+                          ? "0 0 0 1px rgba(255,255,255,0.18) inset, 0 0 18px rgba(160,124,255,0.25)"
+                          : "0 0 0 1px rgba(255,255,255,0.10) inset",
+                      }}
+                    />
+
+                    {/* Icon */}
+                    <span
+                      className={`relative z-10 grid h-5 w-5 place-items-center transition-colors duration-300 ${
+                        isActive
+                          ? "text-white drop-shadow-[0_0_6px_rgba(255,255,255,0.6)]"
+                          : "text-white/80 group-hover:text-white"
+                      }`}
+                    >
+                      {item.icon(isActive)}
+                    </span>
+                  </button>
+
+                  {/* Label — always visible below */}
+                  <span
+                    className={`text-[10px] font-medium tracking-wide transition-colors duration-200 ${
+                      isActive ? "text-white" : "text-white/50"
+                    }`}
+                  >
+                    {item.label}
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
         </div>
       </div>
       <SyncInit />
