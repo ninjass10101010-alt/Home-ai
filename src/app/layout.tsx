@@ -82,7 +82,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`} suppressHydrationWarning>
         {/* Anti-FOUC script: must run before Next/React hydrates */}
         {/* eslint-disable-next-line @next/next/no-sync-scripts */}
         <script

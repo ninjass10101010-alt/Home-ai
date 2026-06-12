@@ -11,8 +11,8 @@ interface AnimatedEmojiProps {
 }
 
 const sizeMap = {
-  sm: 24,
-  md: 32,
+  sm: 28,
+  md: 36,
   lg: 48,
   xl: 64,
 };
