@@ -16,26 +16,28 @@ export default function ProgressRing({ value, max, label, detail, size = 132, st
   const dashOffset = circumference * (1 - progress);
 
   return (
-    <div className="flex items-center gap-4">
-      <svg width={size} height={size} className="rotate-[-90deg]">
-        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="var(--color-surface-3)" strokeWidth={stroke} />
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke="var(--color-accent-selected)"
-          strokeWidth={stroke}
-          strokeLinecap="round"
-          strokeDasharray={circumference}
-          strokeDashoffset={dashOffset}
-          className="transition-[stroke-dashoffset] duration-300"
-        />
-      </svg>
-      <div>
-        <div className="text-2xl font-bold text-text-primary display-numeral">{Math.round(progress * 100)}%</div>
-        <div className="mt-0.5 text-sm font-semibold text-text-primary">{label}</div>
-        {detail && <div className="mt-0.5 text-xs text-text-muted">{detail}</div>}
+    <div className="flex items-center gap-3">
+      <div className="shrink-0">
+        <svg width={size} height={size} className="rotate-[-90deg]">
+          <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="var(--color-surface-3)" strokeWidth={stroke} />
+          <circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            fill="none"
+            stroke="var(--color-accent-selected)"
+            strokeWidth={stroke}
+            strokeLinecap="round"
+            strokeDasharray={circumference}
+            strokeDashoffset={dashOffset}
+            className="transition-[stroke-dashoffset] duration-300"
+          />
+        </svg>
+      </div>
+      <div className="min-w-0">
+        <div className="text-lg font-bold text-text-primary display-numeral">{Math.round(progress * 100)}%</div>
+        <div className="mt-0.5 text-xs font-semibold text-text-primary truncate">{label}</div>
+        {detail && <div className="mt-0.5 text-[10px] text-text-muted truncate">{detail}</div>}
       </div>
     </div>
   );

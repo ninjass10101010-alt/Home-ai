@@ -5,7 +5,8 @@ import { db } from '@/db';
 
 const AUTH_STORAGE_KEY = 'consuela-auth-user';
 const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;
-const INACTIVITY_CHECK_INTERVAL_MS = 10 * 1000;
+const SESSION_WARN_MS = 30 * 1000;
+const SESSION_TICK_MS = 1 * 1000;
 
 function memberMatchesName(member: any, name: string) {
   const firstName = name.split(" ")[0];
@@ -35,6 +36,9 @@ interface AuthContextValue {
   isParent: boolean;
   login: (memberName: string, pin: string) => { success: boolean; error?: string };
   logout: () => void;
+  sessionRemainingMs: number;
+  sessionWarning: boolean;
+  extendSession: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -49,9 +53,37 @@ export const useAuth = () => {
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [sessionRemainingMs, setSessionRemainingMs] = useState<number>(INACTIVITY_TIMEOUT_MS);
+  const [sessionWarning, setSessionWarning] = useState<boolean>(false);
   const currentUserRef = useRef<AuthUser | null>(null);
   const lastActivityRef = useRef<number>(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const clearTimers = useCallback(() => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  }, []);
+
+  const handleActivity = useCallback(() => {
+    lastActivityRef.current = Date.now();
+    setSessionWarning(false);
+  }, []);
+
+  const logout = useCallback(() => {
+    setCurrentUser(null);
+    currentUserRef.current = null;
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+    setSessionWarning(false);
+    setSessionRemainingMs(INACTIVITY_TIMEOUT_MS);
+  }, []);
+
+  const extendSession = useCallback(() => {
+    lastActivityRef.current = Date.now();
+    setSessionWarning(false);
+    setSessionRemainingMs(INACTIVITY_TIMEOUT_MS);
+  }, []);
 
   // Load persisted session + start inactivity timer on mount
   useEffect(() => {
@@ -82,7 +114,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
 
     const events = ['mousemove', 'keydown', 'touchstart', 'scroll', 'click', 'focus'];
-    const handleActivity = () => { lastActivityRef.current = Date.now(); };
     const handleMembersUpdated = () => {
       const activeUser = currentUserRef.current;
       if (!activeUser) return;
@@ -109,19 +140,26 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     intervalRef.current = setInterval(() => {
       const elapsed = Date.now() - lastActivityRef.current;
-        if (elapsed >= INACTIVITY_TIMEOUT_MS) {
-          setCurrentUser(null);
-          currentUserRef.current = null;
-          localStorage.removeItem(AUTH_STORAGE_KEY);
-        }
-    }, INACTIVITY_CHECK_INTERVAL_MS);
+      const remaining = Math.max(0, INACTIVITY_TIMEOUT_MS - elapsed);
+      setSessionRemainingMs(remaining);
+      if (remaining <= SESSION_WARN_MS) {
+        setSessionWarning(true);
+      }
+      if (elapsed >= INACTIVITY_TIMEOUT_MS) {
+        setCurrentUser(null);
+        currentUserRef.current = null;
+        setSessionRemainingMs(0);
+        setSessionWarning(false);
+        localStorage.removeItem(AUTH_STORAGE_KEY);
+      }
+    }, SESSION_TICK_MS);
 
     return () => {
       events.forEach((event) => window.removeEventListener(event, handleActivity));
       window.removeEventListener("consuela-members-updated", handleMembersUpdated);
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      clearTimers();
     };
-  }, []);
+  }, [handleActivity, clearTimers]);
 
   const login = useCallback((memberName: string, pin: string): { success: boolean; error?: string } => {
     const members = db.selectMembers();
@@ -147,23 +185,30 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setCurrentUser(authUser);
     currentUserRef.current = authUser;
     lastActivityRef.current = Date.now();
+    setSessionRemainingMs(INACTIVITY_TIMEOUT_MS);
+    setSessionWarning(false);
 
     const stored = { ...authUser, emoji: (member.emoji && member.emoji.startsWith('data:')) ? '' : member.emoji };
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(stored));
     return { success: true };
   }, []);
 
-  const logout = useCallback(() => {
-    setCurrentUser(null);
-    currentUserRef.current = null;
-    localStorage.removeItem(AUTH_STORAGE_KEY);
-  }, []);
-
   const isLoggedIn = currentUser !== null;
   const isParent = isLoggedIn && currentUser.role === 'parent';
 
   return (
-    <AuthContext.Provider value={{ currentUser, isLoggedIn, isParent, login, logout }}>
+    <AuthContext.Provider
+      value={{
+        currentUser,
+        isLoggedIn,
+        isParent,
+        login,
+        logout,
+        sessionRemainingMs,
+        sessionWarning,
+        extendSession,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

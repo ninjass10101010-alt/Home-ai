@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/set-state-in-effect, react-hooks/purity */
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import PageShell from "@/components/ui/PageShell";
 import PageHeader from "@/components/patterns/PageHeader";
 import SectionCard from "@/components/patterns/SectionCard";
@@ -22,47 +22,33 @@ import ProgressRing from "@/components/ui/ProgressRing";
 import Avatar from "@/components/ui/Avatar";
 import { db } from "@/db";
 import { useAuth } from "@/hooks/useAuth";
-
-interface Task {
-  id: number;
-  title: string;
-  assignee: string;
-  assigneeEmoji: string;
-  due: string;
-  points: number;
-  recurring: string | null;
-  category: string;
-  completed: boolean;
-  priority: "high" | "medium" | "low";
-  completedBy?: string;
-  universal?: boolean;
-}
-
-interface LeaderboardEntry {
-  name: string;
-  emoji: string;
-  points: number;
-  streak: number;
-  rank: number;
-}
-
-interface Reward {
-  id: number;
-  name: string;
-  emoji: string;
-  cost: number;
-}
-
-interface Penalty {
-  id: number;
-  name: string;
-  emoji: string;
-  points: number;
-}
-
-function todayISO(): string {
-  return new Date().toISOString().split("T")[0];
-}
+import type { Task, LeaderboardEntry, Reward, Penalty, WeekData } from "@/types/tasks";
+import { getLevel, LEVELS, BADGES } from "@/types/tasks";
+import {
+  TASKS_STORAGE_KEY, REWARDS_KEY, PENALTIES_KEY,
+  todayMondayISO, weekKey, todayISO, emptyWeekData,
+  loadWeekData, saveWeekData, addTransaction,
+  calculateRealStreak, regenerateRecurringTasks,
+  getThisWeeksCompletedDates, getThisWeeksCompletedTasks,
+  loadTasks, saveTasks, loadRewards, saveRewards,
+  loadPenalties, savePenalties,
+  getArchivedWeeks, getMemberAllTimePoints, getMemberAllTimeCompletions,
+  getPreviousWeekRanks,
+} from "@/lib/task-utils";
+import Podium from "@/components/leaderboard/Podium";
+import YourCard from "@/components/leaderboard/YourCard";
+import MemberSheet from "@/components/leaderboard/MemberSheet";
+import LeaderboardRow from "@/components/leaderboard/LeaderboardRow";
+import LevelUpModal from "@/components/leaderboard/LevelUpModal";
+import DailyQuestCard from "@/components/leaderboard/DailyQuestCard";
+import StreakSaverBanner from "@/components/leaderboard/StreakSaverBanner";
+import CatchUpNudge from "@/components/leaderboard/CatchUpNudge";
+import TreasurePath from "@/components/leaderboard/TreasurePath";
+import FamilyGoal from "@/components/leaderboard/FamilyGoal";
+import AchievementWall from "@/components/leaderboard/AchievementWall";
+import HallOfFame from "@/components/leaderboard/HallOfFame";
+import TrophyCase from "@/components/leaderboard/TrophyCase";
+import ShareCard from "@/components/leaderboard/ShareCard";
 
 function isoOffset(days: number): string {
   const d = new Date(Date.now() + days * 86400000);
@@ -161,13 +147,6 @@ const initialTasks: Task[] = [
   { id: 11, title: "Grooming appointment", assignee: "Rico", assigneeEmoji: "🐩", due: getISO.tomorrow, points: 0, recurring: "Monthly", category: "Pets", completed: false, priority: "medium" },
 ];
 
-const staticLeaderboard: LeaderboardEntry[] = [
-  { name: "Caspian", emoji: "🧒", points: 145, streak: 5, rank: 1 },
-  { name: "Emily", emoji: "👧", points: 120, streak: 3, rank: 2 },
-  { name: "Rebecca (Mom)", emoji: "👩", points: 95, streak: 7, rank: 3 },
-  { name: "Jeffery (Dad)", emoji: "👨", points: 60, streak: 2, rank: 4 },
-];
-
 const categories = ["Chores", "Errands", "Admin", "Health", "Pets", "School"];
 
 function emptyTask(firstMember?: { name?: string; emoji?: string }): Task {
@@ -198,23 +177,6 @@ function migrateAssigneeNames(tasks: Task[], members: any[]): Task[] {
   });
 }
 
-function migratePointsKeys(points: Record<string, number>, members: any[]): Record<string, number> {
-  const migrated: Record<string, number> = {};
-  for (const [key, value] of Object.entries(points)) {
-    const match = members.find((m: any) =>
-      m.fullName === key || m.name === key || m.fullName.startsWith(key) || key.startsWith(m.name)
-    );
-    const canonicalKey = match ? match.fullName : key;
-    migrated[canonicalKey] = (migrated[canonicalKey] || 0) + value;
-  }
-  return migrated;
-}
-
-const TASKS_STORAGE_KEY = "consuela-tasks";
-const POINTS_STORAGE_KEY = "consuela-points";
-const REWARDS_KEY = "consuela-rewards";
-const PENALTIES_KEY = "consuela-penalties";
-
 function loadFromStorage<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
   try {
@@ -228,6 +190,39 @@ function loadFromStorage<T>(key: string, fallback: T): T {
     }
     return fallback;
   } catch { return fallback; }
+}
+
+function ConfettiBurst({ active }: { active: boolean }) {
+  if (!active) return null;
+  const particles = Array.from({ length: 20 }, (_, i) => ({
+    id: i,
+    left: `${Math.random() * 100}%`,
+    delay: `${Math.random() * 0.5}s`,
+    size: `${6 + Math.random() * 8}px`,
+    color: ["#f59e0b","#ef4444","#22c55e","#3b82f6","#a855f7","#ec4899","#14b8a6"][i % 7],
+    x: `${(Math.random() - 0.5) * 120}px`,
+    y: `${-80 - Math.random() * 80}px`,
+  }));
+  return (
+    <div className="pointer-events-none fixed inset-0 z-[100] overflow-hidden">
+      {particles.map((p) => (
+        <span
+          key={p.id}
+          className="absolute animate-confetti-fall rounded-full"
+          style={{
+            left: p.left,
+            top: "50%",
+            width: p.size,
+            height: p.size,
+            backgroundColor: p.color,
+            animationDelay: p.delay,
+            "--confetti-x": p.x,
+            "--confetti-y": p.y,
+          } as React.CSSProperties}
+        />
+      ))}
+    </div>
+  );
 }
 
 export default function TasksPage() {
@@ -253,32 +248,47 @@ export default function TasksPage() {
     return colors;
   }, [membersData, currentUser]);
 
+  const [weekData, setWeekData] = useState<WeekData>(() => {
+    if (typeof window === "undefined") return emptyWeekData();
+    return loadWeekData();
+  });
+
   const [tasks, setTasks] = useState<Task[]>(() => {
-    const loaded = loadFromStorage(TASKS_STORAGE_KEY, initialTasks);
+    if (typeof window === "undefined") return initialTasks;
+    const loaded = loadTasks();
+    if (loaded.length === 0) return initialTasks;
     try {
       const members = db.selectMembers();
-      return migrateAssigneeNames(loaded, members);
+      return migrateAssigneeNames(migrateDueToISO(loaded), members);
     } catch {
-      return loaded;
+      return migrateDueToISO(loaded);
     }
   });
 
-  const [earnedPoints, setEarnedPoints] = useState<Record<string, number>>(() => {
-    try {
-      const members = db.selectMembers();
-      const raw = loadFromStorage(POINTS_STORAGE_KEY, {});
-      return migratePointsKeys(raw, members);
-    } catch {
-      return loadFromStorage(POINTS_STORAGE_KEY, {});
-    }
-  });
+  useEffect(() => { saveTasks(tasks); }, [tasks]);
+  useEffect(() => { saveWeekData(weekData); }, [weekData]);
 
-  useEffect(() => { localStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify(tasks)); }, [tasks]);
-  useEffect(() => { localStorage.setItem(POINTS_STORAGE_KEY, JSON.stringify(earnedPoints)); }, [earnedPoints]);
+  useEffect(() => {
+    if (!mounted) return;
+    const interval = setInterval(() => {
+      const current = weekKey();
+      if (current !== weekData.weekStart) {
+        saveWeekData({ ...weekData });
+        setWeekData(emptyWeekData());
+        setTasks(prev => {
+          const regenerated = regenerateRecurringTasks(prev);
+          saveTasks(regenerated);
+          return regenerated;
+        });
+      }
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [mounted, weekData]);
 
   const [filterMember, setFilterMember] = useState("All");
   useEffect(() => {
     if (isLoggedIn && filterMember === "All") setFilterMember("My Tasks");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoggedIn]);
 
   const [activeTab, setActiveTab] = useState<"tasks" | "leaderboard">("tasks");
@@ -299,33 +309,52 @@ export default function TasksPage() {
   const [googleSyncing, setGoogleSyncing] = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState<Task[]>([]);
   const [toast, setToast] = useState<string | null>(null);
-  const [rewards, setRewards] = useState<Reward[]>(() => loadFromStorage(REWARDS_KEY, [
+  const [rewards, setRewards] = useState<Reward[]>(() => loadFromStorage(REWARDS_KEY, []).length > 0 ? loadFromStorage(REWARDS_KEY, []) : [
     { id: 1, name: "Movie pick", emoji: "🎬", cost: 50 },
     { id: 2, name: "Skip 1 chore", emoji: "🎟️", cost: 75 },
     { id: 3, name: "Extra screen time", emoji: "📱", cost: 100 },
     { id: 4, name: "Family outing", emoji: "🎡", cost: 200 },
-  ]));
+  ]);
   const [editingRewardId, setEditingRewardId] = useState<number | null>(null);
   const [rewardForm, setRewardForm] = useState<Reward>({ id: 0, name: "", emoji: "🎁", cost: 50 });
   const [addingReward, setAddingReward] = useState(false);
   const [aiRewardSuggesting, setAiRewardSuggesting] = useState(false);
   const [aiRewards, setAiRewards] = useState<Reward[]>([]);
-  const [penalties, setPenalties] = useState<Penalty[]>(() => loadFromStorage(PENALTIES_KEY, [
+  const [penalties, setPenalties] = useState<Penalty[]>(() => loadFromStorage(PENALTIES_KEY, []).length > 0 ? loadFromStorage(PENALTIES_KEY, []) : [
     { id: 1, name: "Missed chore", emoji: "🧹", points: 10 },
     { id: 2, name: "Left mess", emoji: "🗑️", points: 8 },
     { id: 3, name: "Forgot homework", emoji: "📚", points: 15 },
     { id: 4, name: "Late bedtime", emoji: "🌙", points: 5 },
-  ]));
+  ]);
   const [editingPenaltyId, setEditingPenaltyId] = useState<number | null>(null);
   const [penaltyForm, setPenaltyForm] = useState<Penalty>({ id: 0, name: "", emoji: "⚠️", points: 10 });
   const [addingPenalty, setAddingPenalty] = useState(false);
   const [adjustMember, setAdjustMember] = useState<string | null>(null);
+  const [sheetMember, setSheetMember] = useState<string | null>(null);
+  const [levelUpInfo, setLevelUpInfo] = useState<{ name: string; emoji: string; oldLevel: number; newLevel: number } | null>(null);
+  const [shareCard, setShareCard] = useState<{ memberName: string; memberEmoji: string; rank: number; points: number } | null>(null);
+  const prevLevelsRef = useRef<Record<string, number>>({});
   const [adjustAmount, setAdjustAmount] = useState<string>("10");
   const [adjustDir, setAdjustDir] = useState<"+" | "-">("-");
   const [adjustReason, setAdjustReason] = useState("");
   const [adjustPin, setAdjustPin] = useState("");
   const [adjustError, setAdjustError] = useState("");
   const [adjustSuccess, setAdjustSuccess] = useState("");
+  const [confettiActive, setConfettiActive] = useState(false);
+  const [undoTaskId, setUndoTaskId] = useState<number | null>(null);
+  const [undoPin, setUndoPin] = useState("");
+  const [undoError, setUndoError] = useState("");
+  const [parentApprovalReward, setParentApprovalReward] = useState<Reward | null>(null);
+  const [parentApprovalPin, setParentApprovalPin] = useState("");
+  const [parentApprovalError, setParentApprovalError] = useState("");
+
+  useEffect(() => { saveRewards(rewards); }, [rewards]);
+  useEffect(() => { savePenalties(penalties); }, [penalties]);
+
+  const triggerConfetti = useCallback(() => {
+    setConfettiActive(true);
+    setTimeout(() => setConfettiActive(false), 2500);
+  }, []);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -451,7 +480,7 @@ export default function TasksPage() {
           }
         }
         setTasks(existing);
-        showToast(`✅ Synced ${data.events.length} Google tasks`);
+        showToast(`Synced ${data.events.length} Google tasks`);
       } else {
         showToast("No Google tasks found");
       }
@@ -472,13 +501,21 @@ export default function TasksPage() {
 
   const openPinEntry = (taskId: number) => {
     const task = tasks.find((x) => x.id === taskId);
+    if (!task) return;
+    if (task.completed) {
+      setUndoTaskId(taskId);
+      setUndoPin("");
+      setUndoError("");
+      return;
+    }
     setPinTaskId(taskId);
     setPinReward(null);
     setPinPenalty(null);
+    setUndoTaskId(null);
     setPinInput("");
     setPinError("");
     setPinSuccess("");
-    if (task?.universal) {
+    if (task.universal) {
       const defaultSnatcher = membersData.find((m: any) => m.role !== "pet")?.fullName ?? task.assignee;
       setSnatchForMember(defaultSnatcher);
     } else {
@@ -487,6 +524,13 @@ export default function TasksPage() {
   };
 
   const openRewardPin = (reward: Reward, memberName?: string) => {
+    if (reward.cost > 100) {
+      setParentApprovalReward(reward);
+      setParentApprovalPin("");
+      setParentApprovalError("");
+      setRedeemForMember(memberName || (membersData.find((m: any) => m.role !== "pet")?.fullName ?? ""));
+      return;
+    }
     setPinReward(reward);
     setPinTaskId(null);
     setPinPenalty(null);
@@ -495,6 +539,24 @@ export default function TasksPage() {
     setPinSuccess("");
     const defaultMember = memberName || (membersData.find((m: any) => m.role !== "pet")?.fullName ?? "");
     setRedeemForMember(defaultMember);
+  };
+
+  const approveParentReward = () => {
+    if (!parentApprovalReward || !parentApprovalPin) return;
+    const parent = membersData.find((m: any) => m.role === "parent" && db.verifyMemberPin(m.fullName, parentApprovalPin));
+    if (!parent) {
+      setParentApprovalError("Parent PIN required to approve large rewards.");
+      setParentApprovalPin("");
+      setTimeout(() => setParentApprovalError(""), 2500);
+      return;
+    }
+    setPinReward(parentApprovalReward);
+    setParentApprovalReward(null);
+    setParentApprovalPin("");
+    setParentApprovalError("");
+    setPinInput("");
+    setPinError("");
+    setPinSuccess("");
   };
 
   const openPenaltyPin = (penalty: Penalty) => {
@@ -513,6 +575,30 @@ export default function TasksPage() {
     return member ? member.fullName : rawName;
   };
 
+  const submitUndo = () => {
+    if (!undoTaskId || !undoPin) return;
+    const task = tasks.find(t => t.id === undoTaskId);
+    if (!task || !task.completed) return;
+    const memberName = task.completedBy || task.assignee;
+    const verified = db.verifyMemberPin(memberName, undoPin);
+    if (!verified) {
+      setUndoError("Wrong PIN. Try again.");
+      setUndoPin("");
+      setTimeout(() => setUndoError(""), 2000);
+      return;
+    }
+    const normalizedName = normalizeName(memberName);
+    setTasks(prev => prev.map(t => t.id === undoTaskId ? { ...t, completed: false, completedBy: undefined, completedAt: undefined, completedInWeek: undefined } : t));
+    setWeekData(prev => {
+      const current = (prev.points[normalizedName] || 0) - task.points;
+      const updated = { ...prev, points: { ...prev.points, [normalizedName]: Math.max(0, current) } };
+      return addTransaction(updated, "adjust", -task.points, `Undo: ${task.title} (-${task.points}pts)`, normalizedName, task.id);
+    });
+    setUndoTaskId(null);
+    setUndoPin("");
+    showToast(`Undone: ${task.title}`);
+  };
+
   const submitPin = () => {
     if (!pinInput) return;
     if (pinReward) {
@@ -527,12 +613,13 @@ export default function TasksPage() {
       if (verified) {
         const normalizedName = normalizeName((verified as any).name);
         const cost = pinReward.cost;
-        setEarnedPoints(prev => {
-          const current = prev[normalizedName] || 0;
+        setWeekData(prev => {
+          const current = prev.points[normalizedName] || 0;
           if (current < cost) return prev;
-          return { ...prev, [normalizedName]: current - cost };
+          const updated = { ...prev, points: { ...prev.points, [normalizedName]: current - cost } };
+          return addTransaction(updated, "redeem", -cost, `Redeemed: ${pinReward.name} (-${cost}pts)`, normalizedName);
         });
-        setPinSuccess(`🎁 ${normalizedName.split(" ")[0]} redeemed ${pinReward.name}! -${cost}pts`);
+        setPinSuccess(`${pinReward.emoji} ${normalizedName.split(" ")[0]} redeemed ${pinReward.name}! -${cost}pts`);
         setTimeout(() => { setPinReward(null); setPinSuccess(""); }, 1500);
       } else {
         setPinError("Wrong code for selected member. Try again.");
@@ -553,8 +640,12 @@ export default function TasksPage() {
       const verified = db.verifyMemberPin(memberName, pinInput) || membersData.find((m: any) => m.role === "parent" && db.verifyMemberPin(m.fullName, pinInput));
       if (verified) {
         const normalizedName = membersData.find((m: any) => m.fullName === penaltyForMember)?.fullName || penaltyForMember;
-        setEarnedPoints(prev => ({ ...prev, [normalizedName]: Math.max(0, (prev[normalizedName] || 0) - (pinPenalty?.points ?? 0)) }));
-        setPinSuccess(`⚠️ −${pinPenalty?.points}pts from ${normalizedName.split(" ")[0]}`);
+        const penaltyPoints = pinPenalty?.points ?? 0;
+        setWeekData(prev => {
+          const updated = { ...prev, points: { ...prev.points, [normalizedName]: Math.max(0, (prev.points[normalizedName] || 0) - penaltyPoints) } };
+          return addTransaction(updated, "penalty", -penaltyPoints, `Penalty: ${pinPenalty.name} (-${penaltyPoints}pts)`, normalizedName);
+        });
+        setPinSuccess(`-${penaltyPoints}pts from ${normalizedName.split(" ")[0]}`);
         setTimeout(() => { setPinPenalty(null); setPinSuccess(""); }, 1500);
       } else {
         setPinError("Wrong PIN. Try again.");
@@ -566,7 +657,10 @@ export default function TasksPage() {
 
     if (pinTaskId === null) return;
     const task = tasks.find(t => t.id === pinTaskId);
-    if (!task) return;
+    if (!task || task.completed) return;
+    const now = new Date().toISOString();
+    const currentWeek = weekKey();
+
     if (task.universal) {
       const claimant = snatchForMember;
       if (!claimant) {
@@ -579,9 +673,14 @@ export default function TasksPage() {
       if (verified) {
         const normalizedName = normalizeName((verified as any).name);
         const claimantEmoji = (membersData.find((m: any) => m.fullName === normalizedName)?.emoji) || task.assigneeEmoji;
-        setTasks(prev => prev.map(t => t.id === pinTaskId ? { ...t, completed: true, completedBy: normalizedName, assignee: normalizedName, assigneeEmoji: claimantEmoji } : t));
-        setEarnedPoints(prev => ({ ...prev, [normalizedName]: (prev[normalizedName] || 0) + task.points }));
-        setPinSuccess(`✅ +${task.points}pts to ${normalizedName.split(" ")[0]}!`);
+        setTasks(prev => prev.map(t => t.id === pinTaskId ? { ...t, completed: true, completedBy: normalizedName, completedAt: now, completedInWeek: currentWeek, assignee: normalizedName, assigneeEmoji: claimantEmoji } : t));
+        const pointsMsg = task.points > 0 ? `+${task.points}pts` : "";
+        setWeekData(prev => {
+          const updated = { ...prev, points: { ...prev.points, [normalizedName]: (prev.points[normalizedName] || 0) + task.points } };
+          return addTransaction(updated, "earn", task.points, `Completed: ${task.title}${pointsMsg ? ` (${pointsMsg})` : ""}`, normalizedName, task.id);
+        });
+        setPinSuccess(`${normalizedName.split(" ")[0]} completed ${task.title}! ${pointsMsg}`);
+        triggerConfetti();
         setTimeout(() => { setPinTaskId(null); setPinSuccess(""); setSnatchForMember(""); }, 1500);
       } else {
         setPinError("Wrong code for selected member. Try again.");
@@ -594,9 +693,14 @@ export default function TasksPage() {
     const verified = db.verifyMemberPin(task.assignee, pinInput);
     if (verified) {
       const normalizedName = normalizeName((verified as any).name);
-      setTasks(prev => prev.map(t => t.id === pinTaskId ? { ...t, completed: true, completedBy: normalizedName } : t));
-      setEarnedPoints(prev => ({ ...prev, [normalizedName]: (prev[normalizedName] || 0) + task.points }));
-      setPinSuccess(`✅ +${task.points}pts to ${normalizedName.split(" ")[0]}!`);
+      setTasks(prev => prev.map(t => t.id === pinTaskId ? { ...t, completed: true, completedBy: normalizedName, completedAt: now, completedInWeek: currentWeek } : t));
+      const pointsMsg = task.points > 0 ? `+${task.points}pts` : "";
+      setWeekData(prev => {
+        const updated = { ...prev, points: { ...prev.points, [normalizedName]: (prev.points[normalizedName] || 0) + task.points } };
+        return addTransaction(updated, "earn", task.points, `Completed: ${task.title}${pointsMsg ? ` (${pointsMsg})` : ""}`, normalizedName, task.id);
+      });
+      setPinSuccess(`${normalizedName.split(" ")[0]} completed ${task.title}! ${pointsMsg}`);
+      triggerConfetti();
       setTimeout(() => { setPinTaskId(null); setPinSuccess(""); setSnatchForMember(""); }, 1500);
     } else {
       setPinError("Wrong PIN. Try again.");
@@ -688,8 +792,12 @@ export default function TasksPage() {
     }
     const delta = parseInt(adjustAmount) || 0;
     const change = adjustDir === "+" ? delta : -delta;
-    setEarnedPoints(prev => ({ ...prev, [adjustMember]: Math.max(0, (prev[adjustMember] || 0) + change) }));
-    const label = adjustDir === "+" ? `+${delta}` : `−${delta}`;
+    setWeekData(prev => {
+      const updated = { ...prev, points: { ...prev.points, [adjustMember]: Math.max(0, (prev.points[adjustMember] || 0) + change) } };
+      const reason = adjustReason ? ` (${adjustReason})` : "";
+      return addTransaction(updated, "adjust", change, `Manual adjust: ${change > 0 ? "+" : ""}${change}pts${reason}`, adjustMember, undefined, parent.fullName);
+    });
+    const label = adjustDir === "+" ? `+${delta}` : `-${delta}`;
     setAdjustSuccess(`${label} pts applied to ${adjustMember.split(" ")[0]}!`);
     setTimeout(() => { setAdjustMember(null); setAdjustSuccess(""); }, 1500);
   };
@@ -705,26 +813,85 @@ export default function TasksPage() {
 
   const pending = filtered.filter((t) => !t.completed);
   const completed = filtered.filter((t) => t.completed);
-  const completedTotal = tasks.filter((t) => t.completed).length;
+  const thisWeeksCompleted = getThisWeeksCompletedTasks(tasks);
+  const thisWeeksCompletedCount = thisWeeksCompleted.length;
+  const thisWeeksCompletedDates = useMemo(() => getThisWeeksCompletedDates(tasks), [tasks]);
 
   const dynamicLeaderboard: LeaderboardEntry[] = useMemo(() => {
     const entries = membersData
       .filter((m: any) => m.role !== "pet")
-      .map((m: any) => ({
-        name: m.fullName,
-        emoji: m.emoji,
-        points: earnedPoints[m.fullName] || 0,
-        streak: 0,
-        rank: 0,
-      }))
-      .sort((a: any, b: any) => b.points - a.points);
-    if (entries.every((e: any) => e.points === 0)) return staticLeaderboard;
-    return entries.map((e: any, i: number) => ({ ...e, rank: i + 1, streak: Math.floor(e.points / 10) }));
-  }, [earnedPoints, membersData]);
+      .map((m: any) => {
+        const name = m.fullName;
+        const weeklyPoints = weekData.points[name] || 0;
+        const allTimePoints = getMemberAllTimePoints(name, weekData);
+        const allTimeComps = getMemberAllTimeCompletions(name, tasks, weekData);
+        const streak = calculateRealStreak(name, weekData, thisWeeksCompletedDates);
+        const { level, title, emoji, progress } = getLevel(allTimePoints);
+        const earnedBadges = BADGES.filter(b => b.condition(allTimePoints, streak, allTimeComps)).map(b => b.emoji);
+        const currentMonday = weekData.weekStart;
+        const completedInWeek = tasks.filter(
+          t => t.completed && t.completedBy === name && (
+            t.completedInWeek === currentMonday ||
+            (!t.completedInWeek && t.completedAt && t.completedAt >= currentMonday)
+          )
+        ).length;
+        return {
+          name,
+          emoji: m.emoji,
+          color: m.color,
+          points: weeklyPoints,
+          streak,
+          rank: 0,
+          level,
+          levelTitle: title,
+          levelEmoji: emoji,
+          progressToNext: progress,
+          badges: earnedBadges,
+          completedInWeek,
+        };
+      })
+      .sort((a, b) => b.points - a.points);
+
+    return entries.map((e, i) => ({ ...e, rank: i + 1 }));
+  }, [weekData, membersData, thisWeeksCompletedDates, tasks]);
 
   const topScorer = dynamicLeaderboard[0];
   const familyTotal = dynamicLeaderboard.reduce((sum, entry) => sum + entry.points, 0);
   const championShare = familyTotal > 0 ? topScorer.points / familyTotal : 0;
+  const weeklyEarned = Object.values(weekData.points).reduce((a, b) => a + b, 0);
+  const previousRanks = useMemo(() => getPreviousWeekRanks(), [weekData]); // eslint-disable-line react-hooks/exhaustive-deps
+  const sheetEntry = sheetMember ? dynamicLeaderboard.find(e => e.name === sheetMember) : null;
+
+  useEffect(() => {
+    if (!mounted || !isLoggedIn || !currentUser) return;
+    const myEntry = dynamicLeaderboard.find(e => e.name === currentUser.name || e.name.startsWith(currentUser.name));
+    if (!myEntry) return;
+    const prev = prevLevelsRef.current[currentUser.name];
+    if (prev !== undefined && myEntry.level > prev) {
+      setLevelUpInfo({ name: currentUser.name, emoji: myEntry.emoji, oldLevel: prev, newLevel: myEntry.level });
+    }
+    prevLevelsRef.current[currentUser.name] = myEntry.level;
+  }, [dynamicLeaderboard, mounted, isLoggedIn, currentUser]);
+
+  const myPendingQuests = useMemo(() => {
+    if (!isLoggedIn || !currentUser) return [];
+    return tasks
+      .filter(t => !t.completed && (t.assignee === currentUser.name || t.assignee.startsWith(currentUser.name) || t.universal))
+      .sort((a, b) => a.points - b.points)
+      .slice(0, 3);
+  }, [tasks, isLoggedIn, currentUser]);
+
+  const needsStreakSave = useMemo(() => {
+    if (!isLoggedIn || !currentUser) return false;
+    const myEntry = dynamicLeaderboard.find(e => e.name === currentUser.name || e.name.startsWith(currentUser.name));
+    if (!myEntry || myEntry.streak < 2) return false;
+    const today = todayISO();
+    return !tasks.some(t => t.completed && t.completedBy === currentUser.name && t.completedAt && t.completedAt.split("T")[0] === today);
+  }, [dynamicLeaderboard, tasks, isLoggedIn, currentUser]);
+
+  const myEntry = isLoggedIn && currentUser ? dynamicLeaderboard.find(e => e.name === currentUser.name || e.name.startsWith(currentUser.name)) : null;
+  const aheadEntry = myEntry && myEntry.rank > 1 ? dynamicLeaderboard[myEntry.rank - 2] : undefined;
+  const behindEntry = myEntry && myEntry.rank < dynamicLeaderboard.length ? dynamicLeaderboard[myEntry.rank] : undefined;
 
   if (!mounted) {
     return (
@@ -739,6 +906,7 @@ export default function TasksPage() {
 
   return (
     <PageShell>
+      <ConfettiBurst active={confettiActive} />
       <Toast open={Boolean(toast)} tone={toast?.includes("Failed") ? "error" : "success"}>{toast}</Toast>
 
       <PageHeader
@@ -755,8 +923,8 @@ export default function TasksPage() {
       <div className="px-4 space-y-5 pb-8">
         <div className="grid gap-3 sm:grid-cols-3">
           <StatTile label="Pending" value={pending.length} detail="Open tasks" icon="📋" tone="warning" />
-          <StatTile label="Completed" value={completedTotal} detail="Done this week" icon="🎉" tone="success" />
-          <StatTile label="Earned" value={Object.values(earnedPoints).reduce((a, b) => a + b, 0)} detail="Family points" icon="🏆" tone="accent" />
+          <StatTile label="Completed" value={thisWeeksCompletedCount} detail="This week" icon="🎉" tone="success" />
+          <StatTile label="Earned" value={weeklyEarned} detail="This week's points" icon="🏆" tone="accent" />
         </div>
 
         <SegmentedControl
@@ -897,22 +1065,22 @@ export default function TasksPage() {
               )}
             </SectionCard>
 
-            {completedTotal > 0 && (
-              <SectionCard title="Completed" description={`${completedTotal} done tasks`} icon="✅">
+            {thisWeeksCompletedCount > 0 && (
+              <SectionCard title="Completed" description={`${thisWeeksCompletedCount} done this week`} icon="✅">
                 <button type="button" onClick={() => setShowCompleted(!showCompleted)} className="mb-3 flex w-full items-center justify-between text-sm font-semibold text-text-secondary">
                   <span>{showCompleted ? "Hide completed" : "Show completed"}</span>
                   <span>{showCompleted ? "↑" : "↓"}</span>
                 </button>
                 {showCompleted && (
                   <div className="space-y-2">
-                    {completed.map((task) => (
+                    {tasks.filter(t => t.completed).map((task) => (
                       <ListRow
                         key={task.id}
                         title={task.title}
-                        subtitle={`${task.assignee.split(" ")[0]} · ${formatDueLabel(task.due)}`}
+                        subtitle={`${task.assignee.split(" ")[0]} · ${task.completedBy?.split(" ")[0] || task.assignee.split(" ")[0]} · ${task.completedInWeek === weekData.weekStart ? "This week" : "Past"}`}
                         leftRailColor="var(--color-accent-mint)"
                         leading={<Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={task.assigneeEmoji} size="sm" variant="emoji" />}
-                        trailing={<Chip size="sm" tone="success">Done</Chip>}
+                        trailing={<div className="flex items-center gap-1"><Chip size="sm" tone="success">Done</Chip><IconButton size="sm" variant="ghost" aria-label="Undo complete" onClick={() => openPinEntry(task.id)}>↩</IconButton></div>}
                       />
                     ))}
                   </div>
@@ -925,42 +1093,167 @@ export default function TasksPage() {
         {activeTab === "leaderboard" && (
           <>
             <Surface variant="warm" radius="2xl" padding="lg" glow>
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">This week&apos;s champion</p>
-                  <h3 className="mt-1 text-xl font-bold text-text-primary">{topScorer.name.split(" ")[0]}</h3>
-                  <p className="mt-1 text-sm text-text-secondary">{topScorer.points} pts · {topScorer.streak} day streak 🔥</p>
+              <div className="relative overflow-hidden">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">This week&apos;s champion</p>
+                    <button type="button" onClick={() => topScorer && setShareCard({ memberName: topScorer.name, memberEmoji: topScorer.emoji, rank: 1, points: topScorer.points })} className="text-xs text-[var(--color-accent-selected)] hover:underline ml-2">Share</button>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-2xl animate-crown-glow">👑</span>
+                      <h3 className="text-xl font-bold text-text-primary">{topScorer.name.split(" ")[0]}</h3>
+                    </div>
+                    <div className="flex items-center gap-3 mt-1">
+                      <p className="text-sm text-text-secondary">
+                        <span className="font-semibold text-[var(--color-accent-selected)]">{topScorer.points}</span> pts
+                      </p>
+                      {topScorer.streak > 0 && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-400">
+                          🔥 {topScorer.streak}d
+                        </span>
+                      )}
+                      <span className="text-xs text-text-muted">{topScorer.levelEmoji} {topScorer.levelTitle}</span>
+                    </div>
+                  </div>
+                  <div className="relative">
+                    <span className="absolute -inset-1 animate-crown-glow rounded-full bg-amber-400/20 blur-md" />
+                    <Avatar name={topScorer.name} color={memberColors[topScorer.name] || "green"} emoji={topScorer.emoji} size="lg" variant="emoji" glow />
+                  </div>
                 </div>
-                <Avatar name={topScorer.name} color="green" emoji={topScorer.emoji} size="lg" variant="emoji" glow />
-              </div>
-              <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                <ProgressRing value={championShare} max={1} label="Champion share" detail={`${topScorer.name.split(" ")[0]} leads`} />
-                <StatTile label="Rewards" value={rewards.length} detail="Available" icon="🎁" tone="accent" />
-                <StatTile label="Penalties" value={penalties.length} detail="Configured" icon="⚠️" tone="warning" />
+                <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                  <ProgressRing value={championShare} max={1} label="Champion share" detail={`${topScorer.name.split(" ")[0]} leads`} size={96} stroke={8} />
+                  <StatTile label="Rewards" value={rewards.length} detail="Available" icon="🎁" tone="accent" />
+                  <StatTile label="Penalties" value={penalties.length} detail="Configured" icon="⚠️" tone="warning" />
+                </div>
+                {topScorer.badges.length > 0 && (
+                  <div className="mt-3">
+                    <TrophyCase badges={topScorer.badges} />
+                  </div>
+                )}
               </div>
             </Surface>
 
-            <SectionCard title="Leaderboard" description="Family points and streaks" icon="🏆">
-              <div className="space-y-3">
-                {dynamicLeaderboard.map((entry, index) => (
-                  <Surface key={entry.name} variant="glass-subtle" radius="xl" padding="sm">
-                    <div className="flex items-center gap-3">
-                      <div className="grid h-10 w-10 place-items-center rounded-2xl bg-[var(--color-accent-selected)]/15 text-sm font-bold text-[var(--color-accent-selected)]">#{index + 1}</div>
-                      <Avatar name={entry.name} color="green" emoji={entry.emoji} size="sm" variant="emoji" />
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-semibold text-text-primary">{entry.name.split(" ")[0]}</div>
-                        <div className="text-xs text-text-muted">{entry.streak} day streak</div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-sm font-bold text-text-primary display-numeral">{entry.points}</div>
-                        <div className="text-[11px] text-text-muted">pts</div>
-                      </div>
-                      <IconButton size="sm" variant="ghost" aria-label="Adjust points" onClick={() => openAdjust(entry.name)}>⚙️</IconButton>
-                    </div>
-                  </Surface>
+            {isLoggedIn && currentUser && (() => {
+              const myEntry = dynamicLeaderboard.find(e => e.name === currentUser.name || e.name.startsWith(currentUser.name));
+              const myRank = myEntry?.rank ?? 0;
+              const aheadEntry = myRank > 1 ? dynamicLeaderboard[myRank - 2] : undefined;
+              return myEntry ? <YourCard entry={myEntry} aheadEntry={aheadEntry} getMemberColor={(n: string) => memberColors[n] || "green"} /> : null;
+            })()}
+
+            {needsStreakSave && (
+              <StreakSaverBanner
+                streak={myEntry?.streak ?? 0}
+                quickTask={myPendingQuests[0] || null}
+                onGoToTasks={() => setActiveTab("tasks")}
+              />
+            )}
+
+            <CatchUpNudge myEntry={myEntry ?? undefined} aheadEntry={aheadEntry} behindEntry={behindEntry} />
+
+            {myPendingQuests.length > 0 && activeTab === "leaderboard" && (
+              <DailyQuestCard
+                quests={myPendingQuests}
+                onAccept={(quest) => { adoptSuggestion(quest); setAiSuggestions(prev => prev.filter(s => s.title !== quest.title)); }}
+                onGoToTasks={() => setActiveTab("tasks")}
+              />
+            )}
+
+            <SectionCard title="Leaderboard" description="This week's family points &amp; streaks" icon="🏆">
+              <Podium
+                entries={dynamicLeaderboard.slice(0, 3)}
+                previousRanks={previousRanks}
+                isYou={(name: string) => !!(isLoggedIn && currentUser && (name === currentUser.name || name.startsWith(currentUser.name)))}
+                getMemberColor={(name: string) => memberColors[name] || "green"}
+              />
+              <div className="mt-3 space-y-3">
+                {dynamicLeaderboard.slice(3).map((entry, index) => (
+                  <LeaderboardRow
+                    key={entry.name}
+                    entry={entry}
+                    index={index + 3}
+                    previousRank={previousRanks[entry.name]}
+                    isYou={!!(isLoggedIn && currentUser && (entry.name === currentUser.name || entry.name.startsWith(currentUser.name)))}
+                    getMemberColor={(name: string) => memberColors[name] || "green"}
+                    onAdjust={openAdjust}
+                    onOpenSheet={setSheetMember}
+                  />
                 ))}
               </div>
             </SectionCard>
+
+            {sheetEntry && (
+              <MemberSheet
+                open={!!sheetMember}
+                entry={sheetEntry}
+                allTimePoints={getMemberAllTimePoints(sheetEntry.name, weekData)}
+                allTimeComps={getMemberAllTimeCompletions(sheetEntry.name, tasks, weekData)}
+                weeklyPoints={sheetEntry.points}
+                pendingTasks={tasks.filter(t => !t.completed && (t.assignee === sheetEntry.name || t.universal))}
+                affordableRewards={rewards.filter(r => r.cost <= sheetEntry.points)}
+                weekGraph={["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(day => ({
+                  day,
+                  points: weekData.history
+                    .filter(tx => tx.member === sheetEntry.name && tx.type === "earn" && new Date(tx.timestamp).toLocaleDateString("en-US", { weekday: "short" }) === day)
+                    .reduce((sum, tx) => sum + tx.amount, 0),
+                }))}
+                onClose={() => setSheetMember(null)}
+                getMemberColor={(name: string) => memberColors[name] || "green"}
+              />
+            )}
+
+            {isLoggedIn && currentUser && (() => {
+              const myAllTime = getMemberAllTimePoints(currentUser.name, weekData);
+              return (
+                <SectionCard title="Your Journey" description={`${currentUser.emoji} Level progress & badges`}>
+                  <TreasurePath
+                    allTimePoints={myAllTime}
+                    memberEmoji={currentUser.emoji || "🌱"}
+                    memberColor={memberColors[currentUser.name] || "green"}
+                  />
+                  <div className="mt-4">
+                    <AchievementWall
+                      allTimePoints={myAllTime}
+                      streak={dynamicLeaderboard.find(e => e.name === currentUser.name || e.name.startsWith(currentUser.name))?.streak ?? 0}
+                      completions={getMemberAllTimeCompletions(currentUser.name, tasks, weekData)}
+                    />
+                  </div>
+                </SectionCard>
+              );
+            })()}
+
+            <FamilyGoal weekData={weekData} isParent={!!membersData.find((m: any) => m.role === "parent")} />
+
+            <HallOfFame />
+
+            {weekData.history.length > 0 && (
+              <SectionCard title="Recent Activity" description="Latest point transactions" icon="📜">
+                <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                  {weekData.history.slice().reverse().slice(0, 15).map((tx) => (
+                    <div key={tx.id} className="flex items-center gap-2 rounded-xl px-2 py-1 text-xs">
+                      <span className={`shrink-0 text-base ${
+                        tx.type === "earn" ? "" :
+                        tx.type === "redeem" ? "" :
+                        tx.type === "penalty" ? "" :
+                        ""
+                      }`}>
+                        {tx.type === "earn" ? "✅" : tx.type === "redeem" ? "🎁" : tx.type === "penalty" ? "⚠️" : "⚙️"}
+                      </span>
+                      <span className="flex-1 truncate text-text-secondary">
+                        <span className="font-medium text-text-primary">{tx.member.split(" ")[0]}</span>{" "}
+                        {tx.description}
+                      </span>
+                      <span className={`shrink-0 font-semibold ${
+                        tx.amount > 0 ? "text-emerald-400" : "text-rose-400"
+                      }`}>
+                        {tx.amount > 0 ? "+" : ""}{tx.amount}
+                      </span>
+                      <span className="text-text-muted shrink-0">
+                        {new Date(tx.timestamp).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </SectionCard>
+            )}
 
             <SectionCard title="Rewards" description="Spend points on family perks." icon="🎁">
               <div className="flex gap-2">
@@ -990,7 +1283,7 @@ export default function TasksPage() {
                       <span className="text-xl">{reward.emoji}</span>
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-semibold text-text-primary">{reward.name}</div>
-                        <div className="text-xs text-text-muted">{reward.cost} pts</div>
+                        <div className="text-xs text-text-muted">{reward.cost} pts {reward.cost > 100 && <span className="text-amber-400 ml-1">· needs parent</span>}</div>
                       </div>
                       <SoftButton size="sm" variant="secondary" onClick={() => openRewardPin(reward)}>Redeem</SoftButton>
                       <IconButton size="sm" variant="ghost" aria-label="Edit reward" onClick={() => startEditReward(reward)}>✎</IconButton>
@@ -1001,18 +1294,17 @@ export default function TasksPage() {
             </SectionCard>
 
             <SectionCard title="Penalties" description="Point deductions for missed chores." icon="⚠️">
-              <div className="flex gap-2">
+              <div className="flex gap-2 mb-4">
                 <SoftButton variant="secondary" onClick={startAddPenalty} className="flex-1">Add</SoftButton>
-                <SoftButton variant="ghost" onClick={() => {}} className="flex-1">Help</SoftButton>
               </div>
-              <div className="mt-4 space-y-3">
+              <div className="space-y-3">
                 {penalties.map((penalty) => (
                   <Surface key={penalty.id} variant="glass-subtle" radius="xl" padding="sm">
                     <div className="flex items-center gap-3">
                       <span className="text-xl">{penalty.emoji}</span>
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-semibold text-text-primary">{penalty.name}</div>
-                        <div className="text-xs text-text-muted">−{penalty.points} pts</div>
+                        <div className="text-xs text-text-muted">-{penalty.points} pts</div>
                       </div>
                       <IconButton size="sm" variant="ghost" aria-label="Apply penalty" onClick={() => openPenaltyPin(penalty)}>⚠️</IconButton>
                       <IconButton size="sm" variant="ghost" aria-label="Edit penalty" onClick={() => startEditPenalty(penalty)}>✎</IconButton>
@@ -1100,7 +1392,7 @@ export default function TasksPage() {
             pinReward
               ? `Redeem "${pinReward.name}" for ${pinReward.cost}pts`
               : pinPenalty
-              ? `Apply "${pinPenalty.name}" penalty (−${pinPenalty.points}pts)`
+              ? `Apply "${pinPenalty.name}" penalty (-${pinPenalty.points}pts)`
               : `Complete "${tasks.find(t => t.id === pinTaskId)?.title}"`
           }
           footer={
@@ -1152,6 +1444,37 @@ export default function TasksPage() {
         </Modal>
       )}
 
+      {undoTaskId !== null && (
+        <Modal
+          open
+          onClose={() => { setUndoTaskId(null); setUndoPin(""); setUndoError(""); }}
+          title="Undo Completion"
+          description={`Reverse "${tasks.find(t => t.id === undoTaskId)?.title}"`}
+          footer={
+            <>
+              <SoftButton onClick={submitUndo} disabled={undoPin.length < 4} variant="danger" className="flex-1">Undo</SoftButton>
+              <SoftButton variant="secondary" onClick={() => { setUndoTaskId(null); setUndoPin(""); }} className="flex-1">Cancel</SoftButton>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-text-secondary">Enter your PIN to undo this completed task. Points will be deducted.</p>
+            <input
+              type="password"
+              inputMode="numeric"
+              maxLength={4}
+              value={undoPin}
+              onChange={(e) => { setUndoPin(e.target.value.replace(/[^0-9]/g, "")); setUndoError(""); }}
+              onKeyDown={(e) => { if (e.key === "Enter") submitUndo(); }}
+              placeholder="4-digit PIN"
+              autoFocus
+              className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-4 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted"
+            />
+            {undoError && <p className="text-center text-sm text-rose-300">{undoError}</p>}
+          </div>
+        </Modal>
+      )}
+
       {adjustMember && (
         <Modal
           open
@@ -1187,6 +1510,55 @@ export default function TasksPage() {
           </div>
         </Modal>
       )}
+
+      {parentApprovalReward && (
+        <Modal
+          open
+          onClose={() => { setParentApprovalReward(null); setParentApprovalPin(""); }}
+          title="Parent Approval Required"
+          description={`"${parentApprovalReward.name}" costs ${parentApprovalReward.cost}pts — needs a parent PIN to unlock.`}
+          footer={
+            <>
+              <SoftButton onClick={approveParentReward} disabled={!parentApprovalPin} className="flex-1">Approve</SoftButton>
+              <SoftButton variant="secondary" onClick={() => { setParentApprovalReward(null); setParentApprovalPin(""); }} className="flex-1">Cancel</SoftButton>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-text-secondary">Large rewards (&gt;100pts) require a parent to approve. Enter a parent PIN to continue.</p>
+            <input
+              type="password"
+              inputMode="numeric"
+              maxLength={4}
+              value={parentApprovalPin}
+              onChange={(e) => { setParentApprovalPin(e.target.value.replace(/[^0-9]/g, "")); setParentApprovalError(""); }}
+              onKeyDown={(e) => { if (e.key === "Enter") approveParentReward(); }}
+              placeholder="Parent PIN"
+              autoFocus
+              className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-4 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted"
+            />
+            {parentApprovalError && <p className="text-center text-sm text-rose-300">{parentApprovalError}</p>}
+          </div>
+        </Modal>
+      )}
+
+      <LevelUpModal
+        open={!!levelUpInfo}
+        memberName={levelUpInfo?.name ?? ""}
+        memberEmoji={levelUpInfo?.emoji ?? "🌱"}
+        oldLevel={levelUpInfo?.oldLevel ?? 1}
+        newLevel={levelUpInfo?.newLevel ?? 1}
+        onClose={() => setLevelUpInfo(null)}
+      />
+
+      <ShareCard
+        open={!!shareCard}
+        memberName={shareCard?.memberName ?? ""}
+        memberEmoji={shareCard?.memberEmoji ?? "🌱"}
+        rank={shareCard?.rank ?? 1}
+        points={shareCard?.points ?? 0}
+        onClose={() => setShareCard(null)}
+      />
     </PageShell>
   );
 }

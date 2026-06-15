@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 
 interface SwipeableRowProps {
   children: ReactNode;
@@ -11,64 +11,88 @@ interface SwipeableRowProps {
   className?: string;
 }
 
-export default function SwipeableRow({ children, leftAction, rightAction, onSwipeRight, onSwipeLeft, className = "" }: SwipeableRowProps) {
-  const startX = useRef(0);
-  const didFinishSwipe = useRef(false);
-  const [offset, setOffset] = useState(0);
+const THRESHOLD = 48;
+const MAX_OFFSET = 88;
+const SNAP_MS = 180;
 
-  const finishSwipe = (delta: number) => {
-    if (didFinishSwipe.current) return;
-    didFinishSwipe.current = true;
-    const nextOffset = delta > 48 ? 88 : delta < -48 ? -88 : 0;
+export default function SwipeableRow({ children, leftAction, rightAction, onSwipeRight, onSwipeLeft, className = "" }: SwipeableRowProps) {
+  const startXRef = useRef(0);
+  const draggingRef = useRef(false);
+  const velocityRef = useRef(0);
+  const lastXRef = useRef(0);
+  const lastTimeRef = useRef(0);
+  const [offset, setOffset] = useState(0);
+  const [snapping, setSnapping] = useState(false);
+  const [grabbing, setGrabbing] = useState(false);
+
+  const finishSwipe = useCallback((delta: number) => {
+    if (!draggingRef.current) return;
+    draggingRef.current = false;
+    setGrabbing(false);
+    const velocity = velocityRef.current;
+    const fastRight = velocity > 0.4;
+    const fastLeft = velocity < -0.4;
+    let nextOffset: number;
+
+    if (fastRight || delta > THRESHOLD) {
+      nextOffset = MAX_OFFSET;
+    } else if (fastLeft || delta < -THRESHOLD) {
+      nextOffset = -MAX_OFFSET;
+    } else {
+      nextOffset = 0;
+    }
+
+    setSnapping(true);
     setOffset(nextOffset);
+
     if (nextOffset > 0) onSwipeRight?.();
     else if (nextOffset < 0) onSwipeLeft?.();
-  };
 
-  const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    didFinishSwipe.current = false;
-    startX.current = event.clientX;
+    requestAnimationFrame(() => {
+      setTimeout(() => setSnapping(false), SNAP_MS);
+    });
+  }, [onSwipeRight, onSwipeLeft]);
+
+  const handlePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (draggingRef.current) return;
+    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    draggingRef.current = true;
+    setGrabbing(true);
+    startXRef.current = e.clientX;
+    lastXRef.current = e.clientX;
+    lastTimeRef.current = Date.now();
+    velocityRef.current = 0;
+    setSnapping(false);
     setOffset(0);
-  };
+  }, []);
 
-  const onPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    const delta = event.clientX - startX.current;
-    setOffset(Math.max(-88, Math.min(88, delta)));
-  };
+  const handlePointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!draggingRef.current) return;
+    const now = Date.now();
+    const dt = now - lastTimeRef.current;
+    if (dt > 0) {
+      velocityRef.current = (e.clientX - lastXRef.current) / dt;
+    }
+    lastXRef.current = e.clientX;
+    lastTimeRef.current = now;
+    const delta = e.clientX - startXRef.current;
+    setOffset(Math.max(-MAX_OFFSET, Math.min(MAX_OFFSET, delta)));
+  }, []);
 
-  const onTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
-    didFinishSwipe.current = false;
-    startX.current = event.touches[0].clientX;
+  const handlePointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
+    finishSwipe(e.clientX - startXRef.current);
+  }, [finishSwipe]);
+
+  const handlePointerCancel = useCallback(() => {
+    draggingRef.current = false;
+    setGrabbing(false);
+    setSnapping(true);
     setOffset(0);
-  };
-
-  const onTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
-    const delta = event.touches[0].clientX - startX.current;
-    setOffset(Math.max(-88, Math.min(88, delta)));
-  };
-
-  const onTouchEnd = (event: React.TouchEvent<HTMLDivElement>) => {
-    finishSwipe(event.changedTouches[0].clientX - startX.current);
-  };
-
-  const onTouchCancel = () => {
-    didFinishSwipe.current = false;
-    setOffset(0);
-  };
-
-  const onPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
-    finishSwipe(event.clientX - startX.current);
-  };
-
-  const onPointerCancel = () => {
-    didFinishSwipe.current = false;
-    setOffset(0);
-  };
-
-  const onPointerLeave = () => {
-    didFinishSwipe.current = false;
-    setOffset(0);
-  };
+    requestAnimationFrame(() => {
+      setTimeout(() => setSnapping(false), SNAP_MS);
+    });
+  }, []);
 
   return (
     <div className={`relative overflow-hidden rounded-2xl ${className}`} style={{ touchAction: "none" }}>
@@ -80,16 +104,16 @@ export default function SwipeableRow({ children, leftAction, rightAction, onSwip
       </div>
       <div
         className="touch-none"
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerCancel}
-        onPointerLeave={onPointerLeave}
-        onTouchStart={onTouchStart}
-        onTouchMove={onTouchMove}
-        onTouchEnd={onTouchEnd}
-        onTouchCancel={onTouchCancel}
-        style={{ transform: `translateX(${offset}px)`, transition: "transform 180ms cubic-bezier(0.2, 0, 0, 1)", touchAction: "none", cursor: "grab" }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerCancel}
+        style={{
+          transform: `translateX(${offset}px)`,
+          transition: snapping ? `transform ${SNAP_MS}ms cubic-bezier(0.2, 0, 0, 1)` : "none",
+          touchAction: "none",
+          cursor: grabbing ? "grabbing" : "grab",
+        }}
       >
         {children}
       </div>
