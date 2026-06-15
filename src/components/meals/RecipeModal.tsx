@@ -8,22 +8,24 @@ export default function RecipeModal({
   editingMealId,
   saveRecipe,
   setShowRecipeModal,
+  mode = "meal",
 }: any) {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
   const updateIngredient = (idx: number, val: string) => {
-    const ing = [...recipe.ingredients];
+    const ing = [...(recipe.ingredients || [])];
     ing[idx] = val;
     setRecipe((r: any) => ({ ...r, ingredients: ing }));
   };
 
-  const addIngredientRow = () => setRecipe((r: any) => ({ ...r, ingredients: [...r.ingredients, ""] }));
-  const removeIngredientRow = (idx: number) => setRecipe((r: any) => ({ ...r, ingredients: r.ingredients.filter((_: any, i: number) => i !== idx) }));
+  const addIngredientRow = () => setRecipe((r: any) => ({ ...r, ingredients: [...(r.ingredients || []), ""] }));
+  const removeIngredientRow = (idx: number) => setRecipe((r: any) => ({ ...r, ingredients: (r.ingredients || []).filter((_: any, i: number) => i !== idx) }));
 
   const toggleTag = (tag: string) => {
+    const tags = recipe.tags || [];
     setRecipe((r: any) => ({
       ...r,
-      tags: r.tags.includes(tag) ? r.tags.filter((t: string) => t !== tag) : [...r.tags, tag],
+      tags: tags.includes(tag) ? tags.filter((t: string) => t !== tag) : [...tags, tag],
     }));
   };
 
@@ -46,8 +48,16 @@ export default function RecipeModal({
         {/* Header */}
         <div className="px-5 pb-4 flex items-center justify-between border-b border-surface-3">
           <div>
-            <h2 className="text-text-primary font-bold text-lg">{editingMealId !== null ? "✏️ Edit Recipe" : "🍳 Create Recipe"}</h2>
-            <p className="text-text-muted text-xs">{editingMealId !== null ? "Update your recipe" : "Add your own recipe to the meal planner"}</p>
+            <h2 className="text-text-primary font-bold text-lg">
+              {mode === "catalog"
+                ? editingMealId !== null ? "✏️ Edit Recipe" : "📖 New Recipe"
+                : editingMealId !== null ? "✏️ Edit Meal" : "🍳 Create Meal"}
+            </h2>
+            <p className="text-text-muted text-xs">
+              {mode === "catalog"
+                ? editingMealId !== null ? "Update this recipe in your catalog" : "Add a recipe to your catalog for later"
+                : editingMealId !== null ? "Update your meal" : "Plan a meal for the week"}
+            </p>
           </div>
           <button
             onClick={() => setShowRecipeModal(false)}
@@ -81,7 +91,7 @@ export default function RecipeModal({
                       <button
                         key={e}
                         onClick={() => { setRecipe((r: any) => ({ ...r, emoji: e })); setShowEmojiPicker(false); }}
-                        className={`w-8 h-8 rounded-lg text-xl flex items-center justify-center hover:bg-[var(--color-accent-selected)]/20 transition-all hover:scale-110 ${recipe.emoji === e ? "bg-[var(--color-accent-selected)]/20" : ""}`}
+                        className={`w-8 h-8 rounded-lg text-xl flex items-center justify-center hover:bg-[var(--color-accent-selected)]/20 transition-colors ${recipe.emoji === e ? "bg-[var(--color-accent-selected)]/20" : ""}`}
                       >
                         {e}
                       </button>
@@ -91,7 +101,7 @@ export default function RecipeModal({
               )}
             </div>
             <input
-              value={recipe.name}
+              value={recipe.name || ""}
               onChange={e => setRecipe((r: any) => ({ ...r, name: e.target.value }))}
               placeholder="Recipe name..."
               className="flex-1 bg-surface-2 text-text-primary text-base font-semibold rounded-2xl px-4 py-3 outline-none placeholder:text-text-muted border border-surface-3 focus:border-[var(--color-accent-selected)]/50 transition-colors"
@@ -153,7 +163,7 @@ export default function RecipeModal({
             <div>
               <label className="text-text-muted text-xs mb-1.5 block">Day</label>
               <select
-                value={recipe.time}
+                value={recipe.time || "Mon"}
                 onChange={e => setRecipe((r: any) => ({ ...r, time: e.target.value }))}
                 className="w-full bg-surface-2 text-text-primary text-sm rounded-2xl px-3 py-2.5 outline-none border border-surface-3 focus:border-[var(--color-accent-selected)]/50"
               >
@@ -178,7 +188,7 @@ export default function RecipeModal({
             <div>
               <label className="text-text-muted text-xs mb-1.5 block">Prep Time</label>
               <input
-                value={recipe.prepTime}
+                value={recipe.prepTime || ""}
                 onChange={e => setRecipe((r: any) => ({ ...r, prepTime: e.target.value }))}
                 placeholder="e.g. 30 min"
                 className="w-full bg-surface-2 text-text-primary text-sm rounded-2xl px-3 py-2.5 outline-none border border-surface-3 focus:border-[var(--color-accent-selected)]/50 placeholder:text-text-muted"
@@ -188,7 +198,7 @@ export default function RecipeModal({
               <label className="text-text-muted text-xs mb-1.5 block">Servings</label>
               <input
                 type="number"
-                value={recipe.servings}
+                value={recipe.servings || ""}
                 onChange={e => setRecipe((r: any) => ({ ...r, servings: Number(e.target.value) }))}
                 min={1}
                 className="w-full bg-surface-2 text-text-primary text-sm rounded-2xl px-3 py-2.5 outline-none border border-surface-3 focus:border-[var(--color-accent-selected)]/50"
@@ -210,7 +220,7 @@ export default function RecipeModal({
                   <p className="text-[10px] font-medium mb-1" style={{ color: n.color }}>{n.label}</p>
                   <input
                     type="number"
-                    value={(recipe as any)[n.key]}
+                    value={(recipe as any)[n.key] ?? ""}
                     onChange={e => setRecipe((r: any) => ({ ...r, [n.key]: Number(e.target.value) }))}
                     min={0}
                     className="w-full bg-transparent text-text-primary text-sm font-bold text-center outline-none"
@@ -228,7 +238,7 @@ export default function RecipeModal({
               <button onClick={addIngredientRow} className="text-[var(--color-accent-selected)] text-xs hover:text-[var(--color-accent-selected)]">+ Add</button>
             </div>
             <div className="space-y-2">
-              {recipe.ingredients.map((ing: string, idx: number) => (
+              {(recipe.ingredients || []).map((ing: string, idx: number) => (
                 <div key={idx} className="flex items-center gap-2">
                   <span className="text-text-muted text-xs w-5 text-center">{idx + 1}.</span>
                   <input
@@ -237,7 +247,7 @@ export default function RecipeModal({
                     placeholder={`Ingredient ${idx + 1}...`}
                     className="flex-1 bg-surface-2 text-text-primary text-sm rounded-2xl px-3 py-2 outline-none border border-surface-3 focus:border-[var(--color-accent-selected)]/50 placeholder:text-text-muted"
                   />
-                  {recipe.ingredients.length > 1 && (
+                  {(recipe.ingredients || []).length > 1 && (
                     <button onClick={() => removeIngredientRow(idx)} className="p-1.5 text-text-muted hover:text-rose-400 transition-colors">
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4">
                         <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
@@ -258,7 +268,7 @@ export default function RecipeModal({
                   key={tag}
                   onClick={() => toggleTag(tag)}
                   className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all ${
-                    recipe.tags.includes(tag)
+                    (recipe.tags || []).includes(tag)
                       ? "bg-[var(--color-accent-selected)]/20 text-[var(--color-accent-selected)] border border-[var(--color-accent-selected)]/30"
                       : "bg-surface-2 text-text-muted border border-surface-3 hover:text-text-primary"
                   }`}
@@ -286,11 +296,11 @@ export default function RecipeModal({
         <div className="px-5 py-4 border-t border-surface-3" style={{ paddingBottom: "calc(1rem + env(safe-area-inset-bottom))" }}>
           <button
             onClick={saveRecipe}
-            disabled={!recipe.name.trim()}
+            disabled={!recipe.name?.trim()}
             className="w-full py-4 rounded-2xl bg-[var(--color-accent-button)] text-white font-bold text-base hover:bg-[var(--color-accent-button)] disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-[var(--color-accent-selected)]/30 flex items-center justify-center gap-2"
           >
-            <span className="text-xl">{editingMealId !== null ? "💾" : "🍳"}</span>
-            {editingMealId !== null ? "Save Changes" : "Save Recipe"}
+            <span className="text-xl">{mode === "catalog" ? "📖" : editingMealId !== null ? "💾" : "🍳"}</span>
+            {mode === "catalog" ? (editingMealId !== null ? "Save Recipe" : "Add to Catalog") : (editingMealId !== null ? "Save Changes" : "Save to Meal Plan")}
           </button>
         </div>
       </div>

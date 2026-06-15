@@ -66,6 +66,8 @@ export default function MealsTab({
   const { colors, accentRgb } = useAtmosphericTheme();
   const [presetPickerType, setPresetPickerType] = useState<string | null>(null);
   const [mealFilter, setMealFilter] = useState<string | null>(null);
+  const [showRecipeCatalog, setShowRecipeCatalog] = useState(false);
+  const [recipeAddDay, setRecipeAddDay] = useState(activeDay);
 
   // Defer reading db.selectMembersDetailed() until after mount.
   // db/index.ts hydrates membersStore from localStorage at module load, so
@@ -128,6 +130,16 @@ export default function MealsTab({
     return mealTypes.filter(t => t.id === mealFilter);
   }, [mealFilter]);
 
+  const nextEmptySlotType = useMemo(() => {
+    if (!recipes?.length) return null;
+    const occupied = new Set(activeMeals.map((m: Meal) => m.mealType));
+    const order = ["dinner", "lunch", "breakfast", "snack"];
+    for (const id of order) {
+      if (!occupied.has(id)) return mealTypes.find(t => t.id === id) || mealTypes[3];
+    }
+    return mealTypes[3];
+  }, [activeMeals, recipes]);
+
   const ringCircumference = 2 * Math.PI * 42;
   const ringStroke = (pct: number) => `${(pct / 100) * ringCircumference} ${ringCircumference}`;
 
@@ -171,9 +183,92 @@ export default function MealsTab({
         })}
       </div>
 
+      {recipes?.length > 0 && (
+        <div className="glass rounded-2xl p-4 sm:p-5">
+          <div className="flex items-center justify-between mb-3">
+            <button
+              onClick={() => setShowRecipeCatalog(v => !v)}
+              className="flex items-center gap-2 text-text-secondary hover:text-text-primary transition-colors"
+            >
+              <span className="text-lg">{showRecipeCatalog ? "📖" : "📘"}</span>
+              <span className="text-sm font-semibold">Recipe catalog</span>
+              <span className="glass-subtle rounded-full px-2 py-0.5 text-[11px] font-bold text-text-muted">
+                {recipes.length} recipe{recipes.length > 1 ? "s" : ""}
+              </span>
+              <svg
+                className={`h-3.5 w-3.5 transition-transform ${showRecipeCatalog ? "rotate-180" : ""}`}
+                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            {showRecipeCatalog && nextEmptySlotType && (
+              <button
+                onClick={() => setActiveTab("recipes")}
+                className="rounded-full px-3 py-1 text-[11px] font-bold glass-subtle text-text-secondary hover:text-text-primary transition-colors"
+              >
+                Browse all →
+              </button>
+            )}
+          </div>
+
+          {showRecipeCatalog && (
+            <div className="flex gap-3 overflow-x-auto pb-1 -mx-4 px-4 no-scrollbar">
+              {recipes.slice(0, 10).map((recipe: any) => (
+                <div
+                  key={recipe.id}
+                  className="shrink-0 w-[200px] liquid-glass rounded-2xl p-3 flex flex-col gap-2"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-2xl shrink-0">
+                      {recipe.emoji || "📖"}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-bold text-text-primary leading-tight truncate">
+                        {recipe.name}
+                      </p>
+                      <p className="text-[10px] font-semibold text-text-muted mt-0.5">
+                        {recipe.prepTime || "—"}
+                        {recipe.servings ? ` · ${recipe.servings} servings` : ""}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="relative flex-1 group">
+                    <button
+                      onClick={() => {
+                        if (nextEmptySlotType) {
+                          addRecipeToMealSlot(recipe, activeDay, nextEmptySlotType.id);
+                        }
+                      }}
+                      className="w-full cursor-pointer rounded-xl bg-[var(--color-accent-button)] py-2 text-xs font-bold text-white shadow-lg shadow-[var(--color-accent-selected)]/25 hover:opacity-90"
+                    >
+                      ＋ Add to {activeDay} {nextEmptySlotType?.label ?? "dinner"}
+                    </button>
+                    <div className="absolute bottom-full left-0 mb-1 hidden group-hover:grid grid-cols-7 gap-0.5 bg-[var(--color-surface-0)] border border-[var(--color-surface-3)] rounded-2xl shadow-xl p-1 z-50">
+                      {weekDays.map(day => (
+                        <button
+                          key={day}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            addRecipeToMealSlot(recipe, day, nextEmptySlotType?.id ?? "dinner");
+                          }}
+                          className="rounded-lg px-2 py-1 text-[10px] font-medium text-text-secondary hover:bg-[var(--color-accent-selected)]/15 hover:text-[var(--color-accent-selected)] whitespace-nowrap"
+                        >
+                          {day}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
         {/* ── Left Column ────────────────────────────────── */}
-        <div key={activeDay} className="space-y-5 animate-in fade-in duration-300">
+        <div key={activeDay} className="space-y-5">
           {/* ── Weekly Strip ── */}
           <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 no-scrollbar">
             {weekDays.map(day => {
@@ -185,14 +280,14 @@ export default function MealsTab({
                 <button
                   key={day}
                   onClick={() => setActiveDay(day)}
-                  className={`shrink-0 flex flex-col items-center gap-1.5 rounded-2xl px-3 py-3 min-w-[72px] transition-all active:scale-95 ${
+                  className={`shrink-0 flex flex-col items-center gap-1.5 rounded-2xl px-3 py-3 min-w-[72px] transition-colors ${
                     isActive
                       ? "bg-[var(--color-accent-selected)]/15 border border-[var(--color-accent-selected)]/30"
                       : "glass border border-transparent hover:border-[var(--color-surface-4)]"
                   }`}
                 >
                   <span className={`text-xs font-semibold ${isActive ? "text-[var(--color-accent-selected)]" : "text-text-secondary"}`}>{day}</span>
-                  <span className="text-2xl" style={{ animation: isActive ? "float 3s ease-in-out infinite" : "none" }}>
+                  <span className="text-2xl">
                     {dinner?.emoji ?? "➕"}
                   </span>
                   <span className="text-[10px] text-text-muted text-center leading-tight w-full truncate">
@@ -206,7 +301,7 @@ export default function MealsTab({
           {/* ── Empty Day State ── */}
           {activeMeals.length === 0 && (
             <div className="text-center py-8 glass rounded-2xl">
-              <div className="text-4xl mb-3" style={{ animation: "float 4s ease-in-out infinite" }}>🍽️</div>
+              <div className="text-4xl mb-3">🍽️</div>
               <h3 className="text-text-primary font-bold text-base">Start planning {dayFullNames[activeDay] || activeDay}</h3>
               <p className="text-text-muted text-xs font-medium mt-1 max-w-xs mx-auto">
                 Tap any meal slot below to add breakfast, lunch, a snack, or dinner.
@@ -224,7 +319,7 @@ export default function MealsTab({
                 return (
                   <div
                     key={type.id}
-                    className="liquid-glass group rounded-2xl overflow-hidden transition-all duration-200 hover:-translate-y-0.5"
+                    className="liquid-glass group rounded-2xl overflow-hidden"
                     style={{ borderLeft: `4px solid ${slotColorVar(type.id)}` }}
                   >
                     <div className="p-4">
@@ -292,7 +387,7 @@ export default function MealsTab({
                     }`}
                     style={isPickerOpen ? { borderLeftColor: slotColorVar(type.id), borderLeftWidth: "4px" } : undefined}
                   >
-                    <span className={`text-lg transition-all ${isPickerOpen ? "opacity-100 scale-110" : "opacity-50 group-hover:opacity-100 group-hover:scale-110"}`}>
+                    <span className={`text-lg transition-colors ${isPickerOpen ? "opacity-100" : "opacity-50 group-hover:opacity-100"}`}>
                       {type.icon}
                     </span>
                     {isPickerOpen ? `Hide ${type.label} ideas ↑` : `Plan ${type.label}`}
@@ -311,12 +406,11 @@ export default function MealsTab({
                               onClick={() => handlePresetSelect(idea, type.id)}
                               className="flex items-center gap-3 p-3 rounded-2xl glass border border-[var(--color-surface-7)]/20
                                 hover:border-[var(--color-accent-selected)]/30 hover:bg-[var(--color-accent-selected)]/5
-                                transition-all active:scale-95 text-left group"
-                            >
-                              <span
-                                className="text-2xl shrink-0 group-hover:scale-110 transition-transform"
-                                style={{ animation: "float 3s ease-in-out infinite" }}
+                                transition-colors active:opacity-70 text-left group"
                               >
+                                <span
+                                  className="text-2xl shrink-0"
+                                >
                                 {idea.emoji}
                               </span>
                               <div className="min-w-0">
@@ -336,7 +430,7 @@ export default function MealsTab({
                             onClick={() => { openRecipeModal({ mealType: type.id } as Meal); setPresetPickerType(null); }}
                             className="flex items-center justify-center gap-2 p-3 rounded-2xl border-2 border-dashed border-[var(--color-surface-4)]
                               text-text-muted text-xs font-medium hover:border-[var(--color-accent-selected)]/30 hover:text-[var(--color-accent-selected)]
-                              transition-all active:scale-95 col-span-2"
+                              transition-colors active:opacity-70 col-span-2"
                           >
                             ✏️ Enter custom meal…
                           </button>
@@ -360,9 +454,9 @@ export default function MealsTab({
                                 onClick={() => { addRecipeToMealSlot(r, activeDay, type.id); setPresetPickerType(null); }}
                                 className="flex items-start gap-3 p-3 rounded-2xl glass border border-[var(--color-surface-7)]/20
                                   hover:border-[var(--color-accent-selected)]/30 hover:bg-[var(--color-accent-selected)]/5
-                                  transition-all active:scale-95 text-left group"
+                                transition-colors active:opacity-70 text-left group"
                               >
-                                <span className="text-2xl shrink-0" style={{ animation: "float 3s ease-in-out infinite" }}>
+                                <span className="text-2xl shrink-0">
                                   {r.emoji}
                                 </span>
                                 <div className="min-w-0">
@@ -414,7 +508,7 @@ export default function MealsTab({
                 <p className="text-[11px] font-bold uppercase tracking-wider text-text-muted">
                   Tonight&apos;s dinner
                 </p>
-                <span className="text-lg" style={{ animation: "float 6s ease-in-out infinite" }}>
+                <span className="text-lg">
                   {tonightDinner.meal.emoji || "🍽️"}
                 </span>
               </div>
@@ -522,7 +616,7 @@ export default function MealsTab({
           </div>
 
           {/* Smart Tip */}
-          <div className="glass-subtle rounded-2xl p-5" style={{ animation: "float 6s ease-in-out infinite" }}>
+          <div className="glass-subtle rounded-2xl p-5">
             <div className="flex items-start gap-3">
               <div
                 className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-2xl shadow"
@@ -566,7 +660,7 @@ export default function MealsTab({
                 }}
               >
                 <div className="flex flex-col items-center gap-2 text-center">
-                  <span className="text-2xl" style={{ animation: "float 3s ease-in-out infinite" }}>{idea.emoji}</span>
+                  <span className="text-2xl">{idea.emoji}</span>
                   <p className="text-text-primary text-xs font-medium leading-tight">{idea.name}</p>
                   <div className="flex gap-1 flex-wrap justify-center">
                     {idea.tags.map((t: string) => <Badge key={t} variant="gray">{t}</Badge>)}

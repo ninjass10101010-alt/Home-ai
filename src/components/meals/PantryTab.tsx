@@ -1,5 +1,5 @@
 "use client";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import Card from "@/components/ui/Card";
 import { pantryPresets } from "@/data/meals";
@@ -43,8 +43,11 @@ function guessEmoji(name: string): string {
   return "🫙";
 }
 
+const normalizeName = (name: string) => name.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+
 export default function PantryTab({
   pantryItems,
+  groceryItems,
   addPantryItem,
   updatePantryStatus,
   removePantryItem,
@@ -56,7 +59,14 @@ export default function PantryTab({
   const [section, setSection] = useState("all");
   const [activePresetGroup, setActivePresetGroup] = useState(pantryPresets[0]?.group ?? "Baking");
   const [showAllPresets, setShowAllPresets] = useState(false);
+  const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
   const PRESETS_PER_PAGE = 10;
+
+  useEffect(() => {
+    if (pendingDeleteId === null) return;
+    const timer = setTimeout(() => setPendingDeleteId(null), 3000);
+    return () => clearTimeout(timer);
+  }, [pendingDeleteId]);
 
   const handleAdd = (name?: string) => {
     const itemName = (name ?? newPantryItem).trim();
@@ -84,6 +94,10 @@ export default function PantryTab({
 
   const expiring = pantryItems.filter((p: any) => p.status === "low");
 
+  const groceryNotInPantry = useMemo(() => {
+    return (groceryItems || []).filter((g: any) => g.needed && !(groceryItems || []).some((p: any) => normalizeName(p.item || p.name) === normalizeName(g.name)));
+  }, [groceryItems]);
+
   return (
     <div className="space-y-6 pb-6">
       {/* ── Stat Cards ── */}
@@ -95,7 +109,7 @@ export default function PantryTab({
         ].map(stat => (
           <div key={stat.label} className="glass rounded-2xl p-4 sm:p-5 text-center">
             <div className="flex items-center justify-between">
-              <span className="text-2xl" style={{ animation: "float 3s ease-in-out infinite" }}>{stat.emoji}</span>
+              <span className="text-2xl">{stat.emoji}</span>
               <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${stat.bg} ${stat.color}`}>
                 {stat.label === "Stocked" ? "stocked" : stat.label === "Running Low" ? "use soon" : "out"}
               </span>
@@ -121,7 +135,7 @@ export default function PantryTab({
           </div>
           <Link
             href="/chat?q=What+can+I+make+with+my+pantry+items"
-            className="shrink-0 cursor-pointer rounded-2xl bg-[var(--color-accent-selected)] px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-[var(--color-accent-selected)]/25 transition hover:opacity-90 active:scale-95"
+            className="shrink-0 cursor-pointer rounded-2xl bg-[var(--color-accent-selected)] px-4 py-2.5 text-xs font-bold text-white shadow-lg shadow-[var(--color-accent-selected)]/25 transition hover:opacity-90"
           >
             Find recipes →
           </Link>
@@ -156,7 +170,7 @@ export default function PantryTab({
               <button
                 onClick={() => handleAdd()}
                 disabled={!newPantryItem.trim()}
-                className="cursor-pointer rounded-2xl bg-[var(--color-accent-button)] px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-[var(--color-accent-selected)]/25 transition hover:opacity-90 active:scale-95 disabled:opacity-40"
+                className="cursor-pointer rounded-2xl bg-[var(--color-accent-button)] px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-[var(--color-accent-selected)]/25 transition hover:opacity-90 disabled:opacity-40"
               >
                 Add
               </button>
@@ -190,7 +204,7 @@ export default function PantryTab({
                       key={item.name}
                       onClick={() => !alreadyIn && handlePresetTap(item.name)}
                       disabled={alreadyIn}
-                      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium transition-all active:scale-95 ${
+                      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium transition-colors active:opacity-70 ${
                         alreadyIn
                           ? "bg-[var(--color-accent-mint)]/10 border border-[var(--color-accent-mint)]/20 text-[var(--color-accent-mint)] opacity-60 cursor-default"
                           : "glass-subtle border border-[var(--color-surface-7)]/20 text-text-secondary hover:text-text-primary hover:border-[var(--color-accent-selected)]/30 hover:bg-[var(--color-accent-selected)]/5"
@@ -239,21 +253,27 @@ export default function PantryTab({
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {visible.map((p: any) => {
               const f = freshness(p.status);
+              const onGrocery = (groceryItems || []).some((g: any) => normalizeName(g.name) === normalizeName(p.item) && g.needed);
               return (
                 <div
                   key={p.id}
-                  className={`liquid-glass rounded-2xl p-4 transition-transform duration-200 hover:-translate-y-0.5 ${p.status === "out" ? "opacity-55" : ""}`}
+                  className={`liquid-glass rounded-2xl p-4 group ${p.status === "out" ? "opacity-55" : ""}`}
                 >
                   <div className="flex items-center gap-3">
                     <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[var(--color-surface-0)]/50 text-2xl shadow-sm border border-[var(--color-surface-3)]">
                       {guessEmoji(p.item)}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-bold text-text-primary">{p.item}</p>
+                      <p className="text-sm font-bold leading-tight text-text-primary break-words" title={p.item}>{p.item}</p>
                       <p className="flex items-center gap-1.5 text-[11px] font-bold">
                         <span className={`h-1.5 w-1.5 rounded-full ${f.dot}`} />
                         <span className={f.text}>{f.label}</span>
                         <span className="text-text-muted">· {guessCategory(p.item)}</span>
+                        {onGrocery && (
+                          <span className="rounded-full bg-[var(--color-accent-amber)]/10 px-1.5 py-0.5 text-[10px] font-bold text-[var(--color-accent-amber)]">
+                            on grocery
+                          </span>
+                        )}
                       </p>
                     </div>
                   </div>
@@ -264,13 +284,13 @@ export default function PantryTab({
                   </div>
 
                   {/* Status toggles + delete */}
-                  <div className="mt-3 flex items-center justify-between">
+                  <div className="mt-3 flex items-center justify-between group">
                     <div className="flex items-center gap-1">
                       {(["plenty", "low", "out"] as const).map(s => (
                         <button
                           key={s}
                           onClick={() => updatePantryStatus(p.id, s)}
-                          className={`cursor-pointer rounded-lg px-2 py-1 text-[10px] font-bold transition-all active:scale-95 ${
+                          className={`cursor-pointer rounded-lg px-2 py-1 text-[10px] font-bold transition-colors active:opacity-70 ${
                             p.status === s
                               ? s === "plenty" ? "bg-[var(--color-accent-mint)]/20 text-[var(--color-accent-mint)]"
                                 : s === "low" ? "bg-[var(--color-accent-amber)]/20 text-[var(--color-accent-amber)]"
@@ -283,13 +303,26 @@ export default function PantryTab({
                       ))}
                     </div>
                     <button
-                      onClick={() => removePantryItem(p.id)}
-                      className="cursor-pointer rounded-full p-1.5 text-text-muted opacity-0 transition group-hover:opacity-100 hover:bg-[var(--color-accent-rose)]/10 hover:text-[var(--color-accent-rose)]"
-                      title="Remove item"
+                      onClick={() => {
+                        if (pendingDeleteId === p.id) {
+                          setPendingDeleteId(null);
+                          removePantryItem(p.id);
+                        } else {
+                          setPendingDeleteId(p.id);
+                        }
+                      }}
+                      className={`cursor-pointer rounded-full p-1.5 text-text-muted sm:opacity-0 sm:group-hover:opacity-100 hover:bg-[var(--color-accent-rose)]/10 hover:text-[var(--color-accent-rose)] ${
+                        pendingDeleteId === p.id ? "opacity-100 !bg-[var(--color-accent-rose)]/20 !text-[var(--color-accent-rose)] ring-2 ring-[var(--color-accent-rose)]/40" : ""
+                      }`}
+                      title={pendingDeleteId === p.id ? "Tap again to remove" : "Remove item"}
                     >
-                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                      </svg>
+                      {pendingDeleteId === p.id ? (
+                        <span className="text-[10px] font-bold whitespace-nowrap px-1">Remove?</span>
+                      ) : (
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      )}
                     </button>
                   </div>
                 </div>
@@ -319,8 +352,28 @@ export default function PantryTab({
             🔄 {isSyncing ? "Syncing..." : "Sync Low/Out → Grocery"}
           </button>
 
+          <div className="glass rounded-2xl p-5">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-text-muted">Grocery items to restock</h3>
+            {groceryNotInPantry.length > 0 ? (
+              <div className="mt-3 space-y-2">
+                {groceryNotInPantry.slice(0, 5).map((g: any) => (
+                  <button
+                    key={`${g.id}-${g.name}`}
+                    onClick={() => addPantryItem(g.name, "plenty")}
+                    className="w-full flex items-center justify-between rounded-xl bg-[var(--color-surface-2)] px-3 py-2 text-left"
+                  >
+                    <span className="text-sm font-semibold text-text-primary break-words">{g.name}</span>
+                    <span className="text-[var(--color-accent-mint)] text-xs font-bold">Add</span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-3 text-xs font-medium text-text-muted">No needed grocery items are waiting to be added back to pantry.</p>
+            )}
+          </div>
+
           {/* ── Tip / Ask Consuela ── */}
-          <div className="glass-subtle rounded-2xl p-5" style={{ animation: "float 6s ease-in-out infinite" }}>
+          <div className="glass-subtle rounded-2xl p-5">
             <div className="flex items-start gap-3">
               <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-2xl shadow" style={{ backgroundColor: "var(--color-accent-cyan, #22d3ee)20" }}>
                 🧊

@@ -11,12 +11,34 @@ const loadJSON = <T,>(key: string, fallback: T): T => {
   catch { return fallback; }
 };
 
+const normalizeRecipe = (recipe: Partial<Recipe>, fallbackId?: number): Recipe => ({
+  id: fallbackId ?? recipe.id ?? Date.now(),
+  name: recipe.name?.trim() || "Untitled Recipe",
+  emoji: recipe.emoji || "📖",
+  prepTime: recipe.prepTime || "30 min",
+  cookTime: recipe.cookTime,
+  tags: recipe.tags?.filter(Boolean) ?? ["Homemade"],
+  ingredients: (recipe.ingredients ?? []).map(i => i.trim()).filter(Boolean),
+  instructions: recipe.instructions || "",
+  servings: Number(recipe.servings) || 4,
+  calories: Number(recipe.calories) || 0,
+  protein: Number(recipe.protein) || 0,
+  carbs: Number(recipe.carbs) || 0,
+  fat: Number(recipe.fat) || 0,
+  source: recipe.source,
+  createdAt: recipe.createdAt || new Date().toISOString(),
+  favorite: recipe.favorite,
+  difficulty: recipe.difficulty,
+  rating: recipe.rating,
+  image: recipe.image,
+});
+
 export function useRecipes(showToast: (msg: string) => void) {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
 
   useEffect(() => {
-    const saved = loadJSON(RECIPES_KEY, defaultRecipes);
-    setRecipes(saved);
+    const saved = loadJSON<Recipe[]>(RECIPES_KEY, defaultRecipes);
+    setRecipes(saved.map(recipe => normalizeRecipe(recipe, recipe.id)));
   }, []);
 
   useEffect(() => {
@@ -24,13 +46,14 @@ export function useRecipes(showToast: (msg: string) => void) {
   }, [recipes]);
 
   const saveCatalogRecipe = (recipe: Recipe) => {
-    if (!recipe.name.trim()) return;
-    const isExisting = recipes.some(r => r.id === recipe.id);
-    if (isExisting) {
-      setRecipes(prev => prev.map(r => r.id === recipe.id ? { ...recipe } : r));
-      showToast(`✅ "${recipe.name}" updated!`);
+    const cleanRecipe = normalizeRecipe(recipe, recipe.id);
+    if (!cleanRecipe.name.trim()) return;
+    const existing = recipes.find(r => r.id === cleanRecipe.id || r.name.toLowerCase() === cleanRecipe.name.toLowerCase());
+    if (existing) {
+      setRecipes(prev => prev.map(r => r.id === existing.id ? { ...cleanRecipe, id: existing.id } : r));
+      showToast(`✅ "${cleanRecipe.name}" updated!`);
     } else {
-      const newRecipe = { ...recipe, id: Date.now(), createdAt: new Date().toISOString() };
+      const newRecipe = { ...cleanRecipe, id: Date.now(), createdAt: new Date().toISOString() };
       setRecipes(prev => [...prev, newRecipe]);
       showToast(`✅ "${newRecipe.name}" added!`);
     }
@@ -93,23 +116,25 @@ export function useRecipes(showToast: (msg: string) => void) {
 
       if (actions.length > 0 && actions[0].type === "recipe") {
         const a = actions[0];
-        const ingredients = a.detail?.split("·").map((s: string) => s.trim()).filter(Boolean).filter((s: string) => !s.match(/\d+\s*min/i)) || [];
-        const prepMatch = a.detail?.match(/(\d+\s*min)/);
-        const newRecipe: Recipe = {
+        const detailParts = String(a.detail || "")
+          .split("·")
+          .map((s: string) => s.trim())
+          .filter(Boolean);
+        const prepTime = detailParts.find(part => /\d+\s*min/i.test(part)) || "30 min";
+        const ingredients = detailParts.filter(part => !/\d+\s*min/i.test(part));
+        const newRecipe: Recipe = normalizeRecipe({
           id: Date.now(),
           name: a.title || file.name.replace(/\.\w+$/, ""),
           emoji: a.emoji || "📖",
-          prepTime: prepMatch?.[1] || "30 min",
+          prepTime,
           tags: ["Imported"],
           ingredients,
           instructions: text.substring(0, 500),
           servings: 4,
           calories: 500,
-          createdAt: new Date().toISOString(),
           source: file.name,
-        };
-        setRecipes(prev => [...prev, newRecipe]);
-        showToast(`✅ Added "${newRecipe.name}" to recipe catalog`);
+        });
+        saveCatalogRecipe(newRecipe);
       } else {
         showToast("❌ Could not parse recipe. Try again or add manually.");
       }

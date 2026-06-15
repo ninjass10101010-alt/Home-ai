@@ -244,6 +244,7 @@ export const emptyRecipe = {
   name: "",
   emoji: "🍳",
   time: "Mon",
+  mealType: "dinner" as Meal["mealType"],
   prepTime: "",
   servings: 4,
   calories: 0,

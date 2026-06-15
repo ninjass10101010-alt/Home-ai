@@ -4,7 +4,7 @@ import { useState, Suspense } from "react";
 import PageShell from "@/components/ui/PageShell";
 import { useSearchParams } from "next/navigation";
 import { db } from "@/db";
-import { emptyRecipe } from "@/data/meals";
+import { emptyRecipe, groceryCategories } from "@/data/meals";
 import { Meal, Recipe, Tab } from "@/types/meals";
 import { useMeals } from "@/hooks/useMeals";
 import { useGrocery } from "@/hooks/useGrocery";
@@ -41,6 +41,47 @@ function MealHubContent() {
     setTimeout(() => setNotification(null), 3000);
   };
 
+  const normalizeName = (name: string) => name.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+
+  const guessGroceryCategory = (name: string) => {
+    const lower = name.toLowerCase();
+    if (lower.includes('banana') || lower.includes('apple') || lower.includes('spinach') || lower.includes('avocado') || lower.includes('broccoli') || lower.includes('tomato') || lower.includes('lemon') || lower.includes('onion') || lower.includes('garlic') || lower.includes('carrot') || lower.includes('pepper')) return 'produce';
+    if (lower.includes('milk') || lower.includes('egg') || lower.includes('cheese') || lower.includes('yogurt') || lower.includes('butter') || lower.includes('cream')) return 'dairy';
+    if (lower.includes('chicken') || lower.includes('beef') || lower.includes('pork') || lower.includes('salmon') || lower.includes('shrimp') || lower.includes('fish') || lower.includes('bacon')) return 'meat';
+    if (lower.includes('pasta') || lower.includes('rice') || lower.includes('bean') || lower.includes('oil') || lower.includes('sauce') || lower.includes('flour') || lower.includes('sugar') || lower.includes('dough') || lower.includes('salsa')) return 'pantry';
+    if (lower.includes('frozen')) return 'frozen';
+    if (lower.includes('chip') || lower.includes('snack') || lower.includes('cereal')) return 'snacks';
+    if (lower.includes('coffee') || lower.includes('juice') || lower.includes('soda') || lower.includes('water')) return 'beverages';
+    if (lower.includes('soap') || lower.includes('cleaner') || lower.includes('tissue') || lower.includes('detergent')) return 'household';
+    return 'pantry';
+  };
+
+  const normalizeRecipeForCatalog = (recipe: Partial<Recipe>, fallbackId?: number): Recipe => {
+    const tags = recipe.tags?.filter(Boolean) ?? ["Homemade"];
+    const ingredients = (recipe.ingredients ?? []).map(i => i.trim()).filter(Boolean);
+    return {
+      id: fallbackId ?? recipe.id ?? Date.now(),
+      name: (recipe.name || "").trim(),
+      emoji: recipe.emoji || "🍽️",
+      prepTime: recipe.prepTime || "30 min",
+      cookTime: recipe.cookTime,
+      tags,
+      ingredients,
+      instructions: recipe.instructions || "",
+      servings: Number(recipe.servings) || 4,
+      calories: Number(recipe.calories) || 0,
+      protein: Number(recipe.protein) || 0,
+      carbs: Number(recipe.carbs) || 0,
+      fat: Number(recipe.fat) || 0,
+      source: recipe.source,
+      createdAt: recipe.createdAt || new Date().toISOString(),
+      favorite: recipe.favorite,
+      difficulty: recipe.difficulty,
+      rating: recipe.rating,
+      image: recipe.image,
+    };
+  };
+
   const {
     meals, setMeals, activeDay, setActiveDay, activeMeals, deleteMeal,
     aiMealIdeas, aiMealLoading, showAiSuggestions, generateAiMeals
@@ -49,12 +90,13 @@ function MealHubContent() {
   const {
     groceryItems, activeCategory, setActiveCategory, isSyncing, setGroceryItems,
     addGroceryItem, toggleGroceryNeeded, deleteGroceryItem, updateGroceryItem,
-    syncMealToGrocery, syncPantryToGrocery, recentlyBought, clearRecentlyBought
-  } = useGrocery(showToast);
+    syncMealToGrocery, syncPantryToGrocery, recentlyBought, clearRecentlyBought,
+    parseManualGroceryInput, guessCategory: guessGroceryCategoryHook
+  } = useGrocery(showToast, meals);
 
   const {
     pantryItems, addPantryItem, updatePantryStatus, removePantryItem
-  } = usePantry(showToast);
+  } = usePantry(showToast, groceryItems);
 
   const {
     recipes, saveCatalogRecipe, deleteCatalogRecipe, handleFileUpload
@@ -67,7 +109,7 @@ function MealHubContent() {
   const openRecipeModal = (meal?: Partial<Meal>) => {
     if (meal && meal.id) {
       setEditingMealId(meal.id);
-      setRecipe({ ...emptyRecipe, ...meal, protein: meal.protein || 0, carbs: meal.carbs || 0, fat: meal.fat || 0, instructions: meal.instructions || "" } as any);
+      setRecipe({ ...emptyRecipe, ...meal, protein: meal.protein || 0, carbs: meal.carbs || 0, fat: meal.fat || 0, instructions: meal.instructions || "", ingredients: meal.ingredients ?? [""] } as any);
     } else {
       setEditingMealId(null);
       setRecipe({ ...emptyRecipe, time: activeDay, ...(meal || {}) } as any);
@@ -75,7 +117,7 @@ function MealHubContent() {
     setShowRecipeModal(true);
   };
 
-  const saveRecipe = () => {
+  const saveRecipe = async () => {
     if (!recipe.name.trim()) return;
     if (editingMealId !== null) {
       const updated: Meal = {
@@ -83,7 +125,13 @@ function MealHubContent() {
         id: editingMealId,
         name: recipe.name.trim(),
         prepTime: recipe.prepTime || "30 min",
-        ingredients: recipe.ingredients.filter(i => i.trim()),
+        ingredients: (recipe.ingredients ?? []).map(i => i.trim()).filter(Boolean),
+        servings: Number(recipe.servings) || 4,
+        calories: Number(recipe.calories) || 0,
+        protein: Number(recipe.protein) || 0,
+        carbs: Number(recipe.carbs) || 0,
+        fat: Number(recipe.fat) || 0,
+        tags: recipe.tags?.filter(Boolean) ?? [],
       } as Meal;
       setMeals(prev => prev.map(m => m.id === editingMealId ? updated : m));
       if (updated.time !== activeDay) setActiveDay(updated.time);
@@ -93,10 +141,18 @@ function MealHubContent() {
         ...recipe,
         id: Date.now(),
         name: recipe.name.trim(),
+        time: recipe.time || activeDay,
+        mealType: recipe.mealType || "dinner",
         prepTime: recipe.prepTime || "30 min",
-        ingredients: recipe.ingredients.filter(i => i.trim()),
+        ingredients: (recipe.ingredients ?? []).map(i => i.trim()).filter(Boolean),
+        servings: Number(recipe.servings) || 4,
+        calories: Number(recipe.calories) || 0,
+        protein: Number(recipe.protein) || 0,
+        carbs: Number(recipe.carbs) || 0,
+        fat: Number(recipe.fat) || 0,
+        tags: recipe.tags?.filter(Boolean) ?? [],
       } as Meal;
-      db.insertMeal(newMeal);
+      await db.insertMeal(newMeal);
       setMeals(prev => {
         const filtered = prev.filter(
           m => !(m.time === newMeal.time && m.mealType === newMeal.mealType)
@@ -110,6 +166,11 @@ function MealHubContent() {
     setEditingMealId(null);
   };
 
+  const saveCatalogRecipeFromModal = () => {
+    saveCatalogRecipe(normalizeRecipeForCatalog(recipe as unknown as Recipe, editingRecipeId ?? undefined));
+    setShowRecipeEditor(false);
+  };
+
   const [showRecipeEditor, setShowRecipeEditor] = useState(false);
   const [editingRecipeId, setEditingRecipeId] = useState<number | null>(null);
 
@@ -120,41 +181,47 @@ function MealHubContent() {
 
   const startEditRecipe = (r: Recipe) => { setEditingRecipeId(r.id); setRecipe({ ...r } as any); setShowRecipeEditor(true); };
 
-  const addRecipeToPlan = (recipeData: Recipe, day: string) => {
+  const addRecipeToPlan = (recipeData: Recipe, day = activeDay, mealType: Meal["mealType"] = "dinner") => {
     const newMeal: Meal = {
-      id: Date.now(), name: recipeData.name, emoji: recipeData.emoji, time: day, mealType: "dinner",
-      prepTime: recipeData.prepTime, tags: recipeData.tags, ingredients: recipeData.ingredients,
-      servings: recipeData.servings, calories: recipeData.calories, instructions: recipeData.instructions,
+      id: Date.now(), name: recipeData.name, emoji: recipeData.emoji || "🍽️", time: day, mealType,
+      prepTime: recipeData.prepTime || "30 min", tags: recipeData.tags?.filter(Boolean) ?? [], ingredients: (recipeData.ingredients ?? []).map(i => i.trim()).filter(Boolean),
+      servings: Number(recipeData.servings) || 4, calories: Number(recipeData.calories) || 0, protein: Number(recipeData.protein) || 0, carbs: Number(recipeData.carbs) || 0, fat: Number(recipeData.fat) || 0, instructions: recipeData.instructions,
     };
-    setMeals(prev => [...prev, newMeal]);
-    showToast(`✅ Added ${recipeData.name} to ${day}`);
+    setMeals(prev => [...prev.filter(m => !(m.time === day && m.mealType === mealType)), newMeal]);
+    setActiveDay(day);
+    showToast(`✅ Added ${recipeData.name} to ${day} ${mealType}`);
   };
 
   const addRecipeToMealSlot = (recipeData: Recipe, day: string, mealType: Meal["mealType"]) => {
     const newMeal: Meal = {
       id: Date.now(),
       name: recipeData.name,
-      emoji: recipeData.emoji,
+      emoji: recipeData.emoji || "🍽️",
       time: day,
       mealType,
-      prepTime: recipeData.prepTime,
-      tags: recipeData.tags,
-      ingredients: recipeData.ingredients,
-      servings: recipeData.servings,
-      calories: recipeData.calories,
+      prepTime: recipeData.prepTime || "30 min",
+      tags: recipeData.tags?.filter(Boolean) ?? [],
+      ingredients: (recipeData.ingredients ?? []).map(i => i.trim()).filter(Boolean),
+      servings: Number(recipeData.servings) || 4,
+      calories: Number(recipeData.calories) || 0,
+      protein: Number(recipeData.protein) || 0,
+      carbs: Number(recipeData.carbs) || 0,
+      fat: Number(recipeData.fat) || 0,
       instructions: recipeData.instructions,
     };
-    setMeals(prev => [...prev, newMeal]);
+    setMeals(prev => [...prev.filter(m => !(m.time === day && m.mealType === mealType)), newMeal]);
+    setActiveDay(day);
     showToast(`✅ Added ${recipeData.name} to ${day} (${mealType})`);
   };
 
-  const addRecipeToGrocery = (recipeData: Recipe) => {
-    recipeData.ingredients.forEach(ing => {
-      if (ing.trim()) {
-        db.upsertGroceryItem({ name: ing.trim(), category: "pantry", aisle: "1", quantity: "", priority: "medium", needed: true, source: "recipe", autoGenerated: false, userId: "demo" });
-      }
-    });
-    showToast(`🛒 Added ${recipeData.ingredients.length} items to grocery`);
+  const addRecipeToGrocery = async (recipeData: Recipe) => {
+    const ingredients = (recipeData.ingredients ?? []).map(i => i.trim()).filter(Boolean);
+    for (const ing of ingredients) {
+      const category = guessGroceryCategory(ing);
+      const catDef = groceryCategories.find(c => c.id === category);
+      await db.upsertGroceryItem({ name: ing, category, aisle: catDef?.aisles?.[0]?.split('-')[0] || "1", quantity: "", priority: "medium", needed: true, source: "recipe", autoGenerated: false, userId: "demo" });
+    }
+    showToast(`🛒 Added ${ingredients.length} item${ingredients.length === 1 ? "" : "s"} to grocery`);
   };
 
   const neededCount = groceryItems.filter(i => i.needed).length;
@@ -278,12 +345,15 @@ function MealHubContent() {
             updateGroceryItem={updateGroceryItem}
             syncMealToGrocery={syncMealToGrocery}
             syncPantryToGrocery={syncPantryToGrocery}
+            parseManualGroceryInput={parseManualGroceryInput}
+            guessCategory={guessGroceryCategoryHook}
           />
         )}
 
         {activeTab === "pantry" && (
           <PantryTab
             pantryItems={pantryItems}
+            groceryItems={groceryItems}
             addPantryItem={addPantryItem}
             updatePantryStatus={updatePantryStatus}
             removePantryItem={removePantryItem}
@@ -295,6 +365,7 @@ function MealHubContent() {
         {activeTab === "recipes" && (
           <RecipesTab
             recipes={recipes}
+            activeDay={activeDay}
             saveCatalogRecipe={saveCatalogRecipe}
             deleteCatalogRecipe={deleteCatalogRecipe}
             addRecipeToPlan={addRecipeToPlan}
@@ -308,6 +379,7 @@ function MealHubContent() {
 
       {showRecipeModal && (
         <RecipeModal
+          mode="meal"
           recipe={recipe}
           setRecipe={setRecipe}
           editingMealId={editingMealId}
@@ -318,13 +390,11 @@ function MealHubContent() {
 
       {showRecipeEditor && (
         <RecipeModal
+          mode="catalog"
           recipe={recipe}
           setRecipe={setRecipe}
           editingMealId={editingRecipeId}
-          saveRecipe={() => {
-            saveCatalogRecipe(recipe as unknown as Recipe);
-            setShowRecipeEditor(false);
-          }}
+          saveRecipe={saveCatalogRecipeFromModal}
           setShowRecipeModal={setShowRecipeEditor}
         />
       )}

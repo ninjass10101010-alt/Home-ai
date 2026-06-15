@@ -9,6 +9,7 @@ const recipeFilters = ["All", ...RECIPE_TAGS];
 
 export default function RecipesTab({
   recipes,
+  activeDay,
   saveCatalogRecipe,
   deleteCatalogRecipe,
   addRecipeToPlan,
@@ -37,8 +38,8 @@ export default function RecipesTab({
     }
   };
 
-  const addToPlan = (recipe: Recipe, day: string) => {
-    addRecipeToPlan(recipe, day);
+  const addToPlan = (recipe: Recipe) => {
+    addRecipeToPlan(recipe, activeDay);
     setAddedId(recipe.id);
     setTimeout(() => setAddedId(cur => cur === recipe.id ? null : cur), 1500);
   };
@@ -106,7 +107,7 @@ export default function RecipesTab({
           return (
             <article
               key={recipe.id}
-              className="liquid-glass group overflow-hidden rounded-2xl transition-all duration-300 hover:-translate-y-1 hover:shadow-xl"
+              className="liquid-glass group overflow-hidden rounded-2xl"
             >
               {/* Image/emoji header */}
               <div className="relative h-44 overflow-hidden bg-[var(--color-surface-2)] flex items-center justify-center">
@@ -114,10 +115,10 @@ export default function RecipesTab({
                   <img
                     src={recipe.image}
                     alt={recipe.name}
-                    className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                    className="h-full w-full object-cover"
                   />
                 ) : (
-                  <span className="text-7xl" style={{ animation: "float 4s ease-in-out infinite" }}>
+                  <span className="text-7xl">
                     {recipe.emoji || "🍽️"}
                   </span>
                 )}
@@ -125,7 +126,7 @@ export default function RecipesTab({
                 <button
                   onClick={() => toggleFav(recipe.id)}
                   aria-label="favorite"
-                  className={`absolute right-3 top-3 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full backdrop-blur-md transition-all active:scale-90 ${
+                  className={`absolute right-3 top-3 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full backdrop-blur-md transition-colors ${
                     recipe.favorite
                       ? "bg-[var(--color-accent-rose)]/90 text-white shadow-lg"
                       : "bg-[var(--color-surface-0)]/60 text-[var(--color-accent-rose)] hover:bg-[var(--color-surface-0)]/85"
@@ -183,20 +184,20 @@ export default function RecipesTab({
                   {/* Add to Meal Plan — with day dropdown on hover */}
                   <div className="relative group flex-1">
                     <button
-                      onClick={() => addToPlan(recipe, "Mon")}
-                      className={`w-full cursor-pointer rounded-2xl py-2 text-xs font-bold transition-all active:scale-[0.98] ${
+                      onClick={() => addToPlan(recipe)}
+                      className={`w-full cursor-pointer rounded-2xl py-2 text-xs font-bold transition-colors ${
                         isAdded
                           ? "bg-[var(--color-accent-mint)] text-white"
                           : "bg-[var(--color-accent-selected)] text-white shadow-lg shadow-[var(--color-accent-selected)]/25 hover:opacity-90"
                       }`}
                     >
-                      {isAdded ? "✓ Added!" : "＋ Add to Meal Plan"}
+                      {isAdded ? "✓ Added!" : `＋ Add to ${activeDay}`}
                     </button>
                     <div className="absolute bottom-full left-0 mb-1 hidden group-hover:grid grid-cols-4 gap-0.5 bg-[var(--color-surface-0)] border border-[var(--color-surface-3)] rounded-2xl shadow-xl p-1 z-50 min-w-[180px]">
                       {weekDays.map(day => (
                         <button
                           key={day}
-                          onClick={(e) => { e.stopPropagation(); addToPlan(recipe, day); }}
+                          onClick={(e) => { e.stopPropagation(); addToPlan(recipe); }}
                           className="rounded-lg px-2 py-1 text-[10px] font-medium text-text-secondary hover:bg-[var(--color-accent-selected)]/15 hover:text-[var(--color-accent-selected)] whitespace-nowrap cursor-pointer"
                         >
                           {day}
