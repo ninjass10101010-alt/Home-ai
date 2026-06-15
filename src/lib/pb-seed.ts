@@ -93,7 +93,28 @@ export async function seedCollections() {
 
     for (const col of COLLECTIONS) {
       if (existing.includes(col.name)) {
-        created.push(`${col.name} (already exists)`);
+        const live = (await pb.collections.getFullList()).find((c: any) => c.name === col.name);
+        if (!live) {
+          created.push(`${col.name} (already exists)`);
+          continue;
+        }
+        const liveFieldNames = new Set((live.schema || []).map((f: any) => f.name));
+        const missing = col.schema.filter((s: any) => !liveFieldNames.has(s.name));
+        if (missing.length) {
+          const mergedSchema = [
+            ...(live.schema || []),
+            ...missing.map((s: any) => {
+              const base: any = { name: s.name, type: s.type, required: s.required || false };
+              if (s.type === "select" && s.options) base.options = s.options;
+              if (s.type === "json") base.type = "json";
+              return base;
+            }),
+          ];
+          await pb.collections.update(live.id, { schema: mergedSchema });
+          created.push(`${col.name} (patched +${missing.length} fields: ${missing.map((m: any) => m.name).join(", ")})`);
+        } else {
+          created.push(`${col.name} (already exists)`);
+        }
         continue;
       }
       await pb.collections.create({

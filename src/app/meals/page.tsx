@@ -27,7 +27,6 @@ import Modal from "@/components/ui/Modal";
 import Toast from "@/components/ui/Toast";
 import ListRow from "@/components/ui/ListRow";
 import StatTile from "@/components/patterns/StatTile";
-import DayStrip from "@/components/patterns/DayStrip";
 import SectionCard from "@/components/patterns/SectionCard";
 
 function MealHubContent() {
@@ -281,14 +280,6 @@ function MealHubContent() {
               <StatTile label="Tonight" value={activeMeals.length} detail="Selected day" icon="🌙" tone="warning" />
               <StatTile label="Sync" value={isSyncing ? "…" : "Ready"} detail="Pantry + grocery" icon="🔁" tone="success" />
             </div>
-
-            <SectionCard title="Week" description="Tap a day to edit meals." icon="🗓️">
-              <DayStrip
-                value={activeDay}
-                onChange={setActiveDay}
-                days={weekDays}
-              />
-            </SectionCard>
 
             <MealsTab
               meals={meals}

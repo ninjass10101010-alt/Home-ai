@@ -42,7 +42,7 @@ const scheduleData = [
 void (async () => {
   try {
     const [m, e, t, s, ec, ml, p, g] = await Promise.all([
-      pbDb.selectMembers().catch(() => membersFallback),
+      pbDb.selectMembers().catch(() => []),
       pbDb.selectTodaysEvents().catch(() => []),
       pbDb.selectPendingTasks().catch(() => []),
       pbDb.selectTodaysSchedulesRaw().catch(() => []),
@@ -51,7 +51,13 @@ void (async () => {
       pbDb.selectPantry().catch(() => []),
       pbDb.selectGrocery().catch(() => []),
     ]);
-    membersCache = m as any[];
+    const pbMembers = (m as any[]) || [];
+    const pbFirstNames = new Set(pbMembers.map((m: any) => (m.name || "").split(" ")[0].toLowerCase()));
+    const missingFallback = membersFallback.filter((f: any) => {
+      const firstName = f.name.split(" ")[0].toLowerCase();
+      return !pbFirstNames.has(firstName);
+    });
+    membersCache = [...pbMembers, ...missingFallback];
     eventsCache = e as any[];
     tasksCache = t as any[];
     schedulesCache = s as any[];

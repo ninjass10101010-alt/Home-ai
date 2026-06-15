@@ -68,6 +68,9 @@ export default function MealsTab({
   const [mealFilter, setMealFilter] = useState<string | null>(null);
   const [showRecipeCatalog, setShowRecipeCatalog] = useState(false);
   const [recipeAddDay, setRecipeAddDay] = useState(activeDay);
+  const [eatingMembers, setEatingMembers] = useState<string[]>([]);
+  const [showMemberPicker, setShowMemberPicker] = useState(false);
+  const [initializedEaters, setInitializedEaters] = useState(false);
 
   // Defer reading db.selectMembersDetailed() until after mount.
   // db/index.ts hydrates membersStore from localStorage at module load, so
@@ -109,6 +112,13 @@ export default function MealsTab({
     return (db as any).selectMembersDetailed?.()?.filter?.((m: any) => m.role !== "Pet" && m.role !== "pet") ??
       db.selectMembers().slice(0, 6);
   }, [mounted]);
+
+  useEffect(() => {
+    if (mounted && familyMembers.length && !initializedEaters) {
+      setEatingMembers(familyMembers.map((m: any) => m.name));
+      setInitializedEaters(true);
+    }
+  }, [mounted, familyMembers, initializedEaters]);
 
   const tip = useMemo(() => {
     // `Date.now()` is impure and can drift between server and client first
@@ -266,9 +276,9 @@ export default function MealsTab({
         </div>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
         {/* ── Left Column ────────────────────────────────── */}
-        <div key={activeDay} className="space-y-5">
+        <div key={activeDay} className="space-y-5 min-w-0">
           {/* ── Weekly Strip ── */}
           <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 no-scrollbar">
             {weekDays.map(day => {
@@ -500,7 +510,7 @@ export default function MealsTab({
         </div>
 
         {/* ── Right Column: Widgets ────────────────────── */}
-        <div className="space-y-5">
+        <div className="space-y-5 min-w-0">
           {/* ── Tonight's Dinner hero ── */}
           {tonightDinner && (
             <div className="glass rounded-2xl p-5">
@@ -593,26 +603,76 @@ export default function MealsTab({
 
           {/* Who's Eating */}
           <div className="glass rounded-2xl p-5">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-text-muted">
-              Who&apos;s eating tonight
-            </h3>
-            <div className="mt-3 flex items-center gap-2 flex-wrap">
-              {familyMembers.slice(0, 5).map((member: any) => (
-                <div key={member.name} className="flex flex-col items-center gap-1">
-                  <Avatar
-                    name={member.name}
-                    color={member.color || "green"}
-                    emoji={member.emoji}
-                    size="md"
-                    variant="emoji"
-                  />
-                  <span className="text-[11px] font-bold text-text-secondary">{member.name}</span>
-                </div>
-              ))}
-              <button className="ml-1 flex h-12 w-12 cursor-pointer items-center justify-center rounded-full border-2 border-dashed border-[var(--color-surface-4)] text-xl font-bold text-text-muted/70 transition hover:bg-[var(--color-surface-0)]/60 hover:border-[var(--color-accent-selected)]/40">
-                ＋
-              </button>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-text-muted">
+                Who&apos;s eating tonight
+              </h3>
+              <span className="text-[10px] font-semibold text-text-muted">{eatingMembers.length} / {familyMembers.length}</span>
             </div>
+            <div className="mt-3 flex items-center gap-2 flex-wrap">
+              {familyMembers.map((member: any) => {
+                const isEating = eatingMembers.includes(member.name);
+                return (
+                  <button
+                    key={member.name}
+                    type="button"
+                    onClick={() => {
+                      setEatingMembers(prev =>
+                        prev.includes(member.name)
+                          ? prev.filter(n => n !== member.name)
+                          : [...prev, member.name]
+                      );
+                    }}
+                    className={`flex flex-col items-center gap-1 transition-all active:scale-90 ${
+                      isEating ? "opacity-100" : "opacity-35 grayscale"
+                    }`}
+                    aria-label={isEating ? `Remove ${member.name}` : `Add ${member.name}`}
+                    title={isEating ? `Remove ${member.name}` : `Add ${member.name}`}
+                  >
+                    <Avatar
+                      name={member.name}
+                      color={member.color || "green"}
+                      emoji={member.emoji}
+                      size="md"
+                      variant="emoji"
+                    />
+                    <span className="text-[11px] font-bold text-text-secondary">{member.name}</span>
+                  </button>
+                );
+              })}
+              {eatingMembers.length < familyMembers.length && (
+                <button
+                  type="button"
+                  onClick={() => setShowMemberPicker(v => !v)}
+                  className="ml-1 flex h-12 w-12 cursor-pointer items-center justify-center rounded-full border-2 border-dashed border-[var(--color-surface-4)] text-xl font-bold text-text-muted/70 transition hover:bg-[var(--color-surface-0)]/60 hover:border-[var(--color-accent-selected)]/40"
+                  aria-label="Add members"
+                  title="Add members"
+                >
+                  ＋
+                </button>
+              )}
+            </div>
+            {showMemberPicker && (
+              <div className="mt-3 pt-3 border-t border-[var(--color-surface-4)]/60">
+                <p className="text-[10px] font-semibold text-text-muted mb-2">Not eating tonight — tap to add back:</p>
+                <div className="flex gap-2 flex-wrap">
+                  {familyMembers.filter((m: any) => !eatingMembers.includes(m.name)).map((member: any) => (
+                    <button
+                      key={member.name}
+                      type="button"
+                      onClick={() => {
+                        setEatingMembers(prev => [...prev, member.name]);
+                        setShowMemberPicker(false);
+                      }}
+                      className="flex items-center gap-2 rounded-full border border-dashed border-[var(--color-surface-4)] px-3 py-1.5 text-xs font-semibold text-text-muted hover:text-text-primary hover:border-[var(--color-accent-selected)]/40 transition-all active:scale-90"
+                    >
+                      <span>{member.emoji}</span>
+                      <span>＋ {member.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Smart Tip */}

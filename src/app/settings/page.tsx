@@ -25,6 +25,7 @@ import TextField from "@/components/ui/TextField";
 import FormField from "@/components/patterns/FormField";
 import SectionCard from "@/components/patterns/SectionCard";
 import SettingsErrorBoundary from "@/components/ui/SettingsErrorBoundary";
+import GoogleConnectCard from "@/components/settings/GoogleConnectCard";
 import { warmGlassAccentOptions } from "@/lib/design-tokens";
 import { defaultAccentHex, type AccentTarget } from "@/lib/theme-config";
 
@@ -54,7 +55,7 @@ export default function SettingsPage() {
   const [contactModalOpen, setContactModalOpen] = useState(false);
   const [editingMember, setEditingMember] = useState<any | null>(null);
   const [editingContact, setEditingContact] = useState<any | null>(null);
-  const [memberForm, setMemberForm] = useState<any>({ name: "", emoji: "😊", role: "child", pin: "" });
+  const [memberForm, setMemberForm] = useState<any>({ name: "", emoji: "😊", role: "child", pin: "", avatarSize: "md", glow: false, imageUrl: "" });
   const [contactForm, setContactForm] = useState<any>({ name: "", phone: "", email: "", relationship: "parent", isPrimary: false, emoji: "👤" });
   const [mounted, setMounted] = useState(false);
   const [members, setMembers] = useState<any[]>([]);
@@ -147,17 +148,32 @@ export default function SettingsPage() {
 
   const openMemberModal = (member?: any) => {
     setEditingMember(member || null);
-    setMemberForm(member || { name: "", emoji: "😊", role: "child", pin: "" });
+    const currentEmoji = member?.emoji || "😊";
+    const hasCustomImage = currentEmoji.startsWith("data:") || currentEmoji.startsWith("http");
+    setMemberForm(member ? {
+      name: member.name || "",
+      emoji: hasCustomImage ? "😊" : currentEmoji,
+      role: member.role || "child",
+      pin: member.pin || "",
+      avatarSize: member.avatarSize || "md",
+      glow: member.glow || false,
+      imageUrl: hasCustomImage ? currentEmoji : "",
+    } : { name: "", emoji: "😊", role: "child", pin: "", avatarSize: "md", glow: false, imageUrl: "" });
     setMemberModalOpen(true);
   };
 
   const saveMember = () => {
     if (!memberForm.name.trim()) return;
+    const payload = {
+      ...memberForm,
+      name: memberForm.name.trim(),
+      emoji: memberForm.imageUrl?.trim() || memberForm.emoji,
+    };
     if (editingMember) {
-      db.updateMember(editingMember.name, { ...memberForm, name: memberForm.name.trim() });
+      db.updateMember(editingMember.name, payload);
       showToast(`✅ Updated ${memberForm.name.trim()}`);
     } else {
-      db.insertMember({ ...memberForm, name: memberForm.name.trim(), joined: new Date().toLocaleDateString("en-US", { month: "short", year: "numeric" }) });
+      db.insertMember({ ...payload, joined: new Date().toLocaleDateString("en-US", { month: "short", year: "numeric" }) });
       showToast(`✅ Added ${memberForm.name.trim()}`);
     }
     setMembers(db.selectMembersDetailed());
@@ -392,6 +408,14 @@ export default function SettingsPage() {
             </div>
           </SectionCard>
 
+          <SectionCard
+            title="Integrations"
+            description="Connect external accounts to sync calendar events, tasks, and reminders."
+            icon="🔗"
+          >
+            <GoogleConnectCard />
+          </SectionCard>
+
           <SectionCard title="Layout & display" description="Show, hide, and reorder Home widgets." icon="🧩">
             <div className="space-y-3">
               <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.18em] text-text-muted">
@@ -542,6 +566,47 @@ export default function SettingsPage() {
             <FormField label="PIN">
               <input type="password" inputMode="numeric" maxLength={4} value={memberForm.pin} onChange={(e) => setMemberForm((prev: any) => ({ ...prev, pin: e.target.value.replace(/[^0-9]/g, "") }))} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted" placeholder="0000" />
             </FormField>
+            <FormField label="Avatar image">
+              <div className="space-y-2">
+                <input
+                  value={memberForm.imageUrl || ""}
+                  onChange={(e) => setMemberForm((prev: any) => ({ ...prev, imageUrl: e.target.value }))}
+                  className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-xs text-text-primary outline-none font-mono"
+                  placeholder="Paste image URL or data:image/..."
+                />
+                {memberForm.imageUrl && memberForm.imageUrl.startsWith("data:") && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-semibold text-text-muted">Preview:</span>
+                    <Avatar name={memberForm.name || "Preview"} color="green" emoji={memberForm.imageUrl} size="sm" variant="emoji" />
+                  </div>
+                )}
+              </div>
+            </FormField>
+            <div className="flex items-center justify-between">
+              <FormField label="Avatar size">
+                <div className="flex gap-1.5">
+                  {(["xs", "sm", "md", "lg"] as const).map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setMemberForm((prev: any) => ({ ...prev, avatarSize: s }))}
+                      className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-colors ${
+                        memberForm.avatarSize === s
+                          ? "bg-[var(--color-accent-selected)] text-white"
+                          : "glass-subtle text-text-secondary hover:text-text-primary"
+                      }`}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </FormField>
+              <Toggle
+                checked={memberForm.glow}
+                onCheckedChange={(checked) => setMemberForm((prev: any) => ({ ...prev, glow: checked }))}
+                label="Glow"
+              />
+            </div>
           </div>
         </Modal>
 

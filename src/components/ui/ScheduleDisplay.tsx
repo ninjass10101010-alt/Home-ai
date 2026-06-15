@@ -15,6 +15,25 @@ interface ScheduleItem {
   color?: string;
 }
 
+function displayTime12h(timeStr: string): string {
+  if (!timeStr) return "";
+  const ampmMatch = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (ampmMatch) {
+    const h = parseInt(ampmMatch[1], 10);
+    const m = ampmMatch[2];
+    const ampm = ampmMatch[3].toUpperCase();
+    return `${h}:${m} ${ampm}`;
+  }
+  const time24Match = timeStr.match(/^(\d{1,2}):(\d{2})$/);
+  if (time24Match) {
+    const h24 = parseInt(time24Match[1], 10);
+    const ampm = h24 >= 12 ? "PM" : "AM";
+    const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+    return `${h12}:${time24Match[2]} ${ampm}`;
+  }
+  return timeStr;
+}
+
 interface ScheduleDisplayProps {
   schedule: ScheduleItem[];
   title?: string;
@@ -139,7 +158,7 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
                   boxShadow: `0 0 8px rgb(${r},${g},${b})`,
                 }}
               />
-              <span className="text-xs font-mono text-text-secondary w-12 shrink-0 tabular-nums">{item.time}</span>
+              <span className="text-xs font-mono text-text-secondary w-16 shrink-0 tabular-nums">{displayTime12h(item.time)}</span>
               <span className="text-lg shrink-0 drop-shadow-sm">{item.emoji || item.icon || "•"}</span>
 
               <span className="text-sm text-text-primary flex-1 min-w-0">

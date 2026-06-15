@@ -531,7 +531,7 @@ function ChatContent() {
 
       {/* ─── Top bar ─── */}
       <div
-        className="sticky top-0 z-40 mx-4 mt-3 px-4 py-3 glass-strong rounded-3xl flex items-center gap-3"
+        className="sticky top-0 z-40 mx-3 sm:mx-4 mt-3 px-3 sm:px-4 py-3 glass-strong rounded-3xl flex items-center gap-2 sm:gap-3"
         style={{ marginTop: "calc(env(safe-area-inset-top) + 0.5rem)" }}
       >
         <div className="w-9 h-9 rounded-2xl flex items-center justify-center text-lg shrink-0"
@@ -540,17 +540,17 @@ function ChatContent() {
           ✨
         </div>
         <div className="flex-1 min-w-0">
-          <h1 className="text-sm font-semibold text-text-primary">Consuela</h1>
+          <h1 className="text-sm font-semibold text-text-primary truncate">Consuela</h1>
           <div className="flex items-center gap-1.5">
-            <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-            <span className="text-[10px] text-text-secondary">AI Family Assistant</span>
+            <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse shrink-0" />
+            <span className="text-[10px] text-text-secondary truncate">AI Family Assistant</span>
           </div>
         </div>
 
         {isLoggedIn ? (
           <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-2xl glass-subtle text-text-secondary text-xs shrink-0">
             <EmojiSpan emoji={activeSpeaker.emoji} alt={activeSpeaker.name} />
-            <span className="max-w-[48px] truncate">{activeSpeaker.name.split(" ")[0]}</span>
+            <span className="max-w-[64px] truncate">{activeSpeaker.name.split(" ")[0]}</span>
           </div>
         ) : (
           <div className="relative shrink-0">
@@ -559,7 +559,7 @@ function ChatContent() {
               className="flex items-center gap-1.5 px-2.5 py-1 rounded-2xl glass-subtle text-text-secondary hover:text-text-primary transition-colors text-xs"
             >
               <EmojiSpan emoji={activeSpeaker.emoji} alt={activeSpeaker.name} />
-              <span className="max-w-[48px] truncate">{activeSpeaker.name.split(" ")[0]}</span>
+              <span className="max-w-[64px] truncate">{activeSpeaker.name.split(" ")[0]}</span>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3 h-3">
                 <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
@@ -837,10 +837,10 @@ function ChatContent() {
 
       {/* ─── Input area ─── */}
       <div
-        className="sticky bottom-0 px-4 pb-20 pt-2"
+        className="sticky bottom-0 z-50 px-4 pb-20 pt-2"
         style={{
           background: "linear-gradient(to top, var(--color-surface-0) 65%, transparent)",
-          paddingBottom: "calc(env(safe-area-inset-bottom) + 4.5rem)",
+          paddingBottom: "calc(env(safe-area-inset-bottom) + 7rem)",
         }}
       >
         {/* Input bar */}

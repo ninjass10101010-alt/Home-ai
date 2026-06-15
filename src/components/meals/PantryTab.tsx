@@ -1,7 +1,9 @@
 "use client";
 import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
-import Card from "@/components/ui/Card";
+import SectionCard from "@/components/patterns/SectionCard";
+import TextField from "@/components/ui/TextField";
+import SoftButton from "@/components/ui/SoftButton";
 import { pantryPresets } from "@/data/meals";
 import { PantryItem } from "@/types/meals";
 
@@ -60,7 +62,7 @@ export default function PantryTab({
   const [activePresetGroup, setActivePresetGroup] = useState(pantryPresets[0]?.group ?? "Baking");
   const [showAllPresets, setShowAllPresets] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
-  const PRESETS_PER_PAGE = 10;
+  const PRESETS_PER_PAGE = 6;
 
   useEffect(() => {
     if (pendingDeleteId === null) return;
@@ -101,7 +103,7 @@ export default function PantryTab({
   return (
     <div className="space-y-6 pb-6">
       {/* ── Stat Cards ── */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-3 gap-4">
         {[
           { label: "Stocked", count: plenty, emoji: "✅", color: "text-[var(--color-accent-mint)]", bg: "bg-[var(--color-accent-mint)]/10" },
           { label: "Running Low", count: low, emoji: "⚠️", color: "text-[var(--color-accent-amber)]", bg: "bg-[var(--color-accent-amber)]/10" },
@@ -142,61 +144,67 @@ export default function PantryTab({
         </div>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
         {/* ── Left Column ── */}
-        <div className="space-y-5">
+        <div className="space-y-5 min-w-0">
           {/* ── Add Item ── */}
-          <div className="glass rounded-2xl p-4 sm:p-5">
-            <p className="text-text-secondary text-xs font-semibold mb-3 flex items-center gap-1.5">
-              <span>➕</span> Add to Pantry
-            </p>
-            <div className="flex gap-2">
-              <input
-                value={newPantryItem}
-                onChange={e => setNewPantryItem(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && handleAdd()}
-                placeholder="Item name..."
-                className="flex-1 min-w-0 rounded-2xl border border-[var(--color-surface-3)] bg-[var(--color-surface-0)]/50 px-4 py-2.5 text-sm font-semibold text-text-primary placeholder:text-text-muted/50 outline-none transition focus:border-[var(--color-accent-selected)]/50 focus:bg-[var(--color-surface-0)]/80 focus:ring-2 focus:ring-[var(--color-accent-selected)]/20"
-              />
-              <select
-                value={newPantryStatus}
-                onChange={e => setNewPantryStatus(e.target.value as "plenty" | "low" | "out")}
-                className="rounded-xl bg-[var(--color-surface-2)] text-text-secondary text-xs px-3 py-2 outline-none"
-              >
-                <option value="plenty">✅ Plenty</option>
-                <option value="low">⚠️ Low</option>
-                <option value="out">❌ Out</option>
-              </select>
-              <button
-                onClick={() => handleAdd()}
-                disabled={!newPantryItem.trim()}
-                className="cursor-pointer rounded-2xl bg-[var(--color-accent-button)] px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-[var(--color-accent-selected)]/25 transition hover:opacity-90 disabled:opacity-40"
-              >
-                Add
-              </button>
+          <SectionCard title="Add to Pantry" icon="➕" description="Track what you have on hand">
+            <div className="space-y-3">
+              <div className="flex gap-2">
+                <TextField
+                  value={newPantryItem}
+                  onChange={e => setNewPantryItem(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && handleAdd()}
+                  placeholder="Item name..."
+                  className="flex-1 min-w-0"
+                />
+                <select
+                  value={newPantryStatus}
+                  onChange={e => setNewPantryStatus(e.target.value as "plenty" | "low" | "out")}
+                  className="shrink-0 rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-3 py-2.5 text-sm text-text-primary outline-none transition focus:border-[var(--color-accent-selected)]/50"
+                >
+                  <option value="plenty">✅ Plenty</option>
+                  <option value="low">⚠️ Low</option>
+                  <option value="out">❌ Out</option>
+                </select>
+                <SoftButton variant="primary" size="md" onClick={() => handleAdd()} disabled={!newPantryItem.trim()}>
+                  Add
+                </SoftButton>
+              </div>
             </div>
 
             {/* Preset Staples */}
             <div className="mt-4">
-              <p className="text-[11px] font-semibold text-text-muted mb-2 flex items-center gap-1">
-                <span>⚡</span> Pantry Staples
+              <p className="text-xs font-semibold uppercase tracking-wider text-text-secondary mb-2.5 flex items-center gap-1.5">
+                ⚡ Pantry Staples
               </p>
-              <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1 mb-2 no-scrollbar">
-                {pantryPresets.map(g => (
-                  <button
-                    key={g.group}
-                    onClick={() => { setActivePresetGroup(g.group); setShowAllPresets(false); }}
-                    className={`shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold transition-all ${
-                      activePresetGroup === g.group
-                        ? "bg-[var(--color-accent-button)] text-white"
-                        : "bg-[var(--color-surface-3)] text-text-secondary hover:text-text-primary"
-                    }`}
-                  >
-                    {g.emoji} {g.group}
-                  </button>
-                ))}
+              <div className="grid grid-cols-2 gap-2.5 mb-4">
+                {pantryPresets.map(g => {
+                  const isSelected = activePresetGroup === g.group;
+                  return (
+                    <button
+                      key={g.group}
+                      onClick={() => { setActivePresetGroup(g.group); setShowAllPresets(false); }}
+                      className={`group flex items-center gap-2.5 rounded-2xl px-3 py-2.5 text-left transition-all duration-150 active:scale-[0.98] ${
+                        isSelected
+                          ? "bg-[var(--color-accent-button)] text-white shadow-lg shadow-[var(--color-accent-selected)]/25"
+                          : "border border-white/10 bg-[var(--color-surface-0)]/30 text-text-secondary hover:text-text-primary hover:border-[var(--color-accent-selected)]/30"
+                      }`}
+                    >
+                      <span className="text-xl shrink-0" aria-hidden>{g.emoji}</span>
+                      <span className="flex-1 min-w-0 text-sm font-semibold truncate">{g.group}</span>
+                      <span
+                        className={`shrink-0 text-[10px] font-bold rounded-full px-1.5 py-0.5 ${
+                          isSelected ? "bg-white/20 text-white" : "bg-[var(--color-surface-2)] text-text-muted"
+                        }`}
+                      >
+                        {g.items.length}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
-              <div className="flex gap-2 flex-wrap">
+              <div className="grid grid-cols-2 gap-2">
                 {visiblePresets.map((item: { name: string; emoji: string }) => {
                   const alreadyIn = pantryItems.some((p: any) => p.item?.toLowerCase() === item.name.toLowerCase());
                   return (
@@ -204,18 +212,20 @@ export default function PantryTab({
                       key={item.name}
                       onClick={() => !alreadyIn && handlePresetTap(item.name)}
                       disabled={alreadyIn}
-                      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium transition-colors active:opacity-70 ${
+                      className={`group flex items-center gap-2.5 rounded-2xl border border-white/10 px-3 py-2.5 text-left transition-all duration-150 active:scale-[0.98] ${
                         alreadyIn
-                          ? "bg-[var(--color-accent-mint)]/10 border border-[var(--color-accent-mint)]/20 text-[var(--color-accent-mint)] opacity-60 cursor-default"
-                          : "glass-subtle border border-[var(--color-surface-7)]/20 text-text-secondary hover:text-text-primary hover:border-[var(--color-accent-selected)]/30 hover:bg-[var(--color-accent-selected)]/5"
+                          ? "bg-[var(--color-accent-mint)]/10 border-[var(--color-accent-mint)]/20 opacity-60 cursor-default"
+                          : "bg-[var(--color-surface-0)]/30 hover:border-[var(--color-accent-selected)]/40 hover:bg-[var(--color-surface-0)]/50"
                       }`}
                     >
-                      <span>{item.emoji}</span>
-                      <span>{item.name}</span>
+                      <span className="text-lg shrink-0" aria-hidden>{item.emoji}</span>
+                      <span className={`flex-1 min-w-0 text-sm font-medium truncate ${alreadyIn ? "text-[var(--color-accent-mint)]" : "text-text-primary"}`}>
+                        {item.name}
+                      </span>
                       {alreadyIn ? (
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="w-3 h-3 opacity-60"><path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="shrink-0 w-3.5 h-3.5 text-[var(--color-accent-mint)] opacity-60"><path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" /></svg>
                       ) : (
-                        <span className="text-[var(--color-accent-selected)] opacity-70">+</span>
+                        <span className="shrink-0 text-base font-bold text-[var(--color-accent-selected)] opacity-40 group-hover:opacity-100 transition-opacity">+</span>
                       )}
                     </button>
                   );
@@ -230,27 +240,38 @@ export default function PantryTab({
                 </button>
               )}
             </div>
-          </div>
+          </SectionCard>
 
           {/* ── Section Filter ── */}
-          <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 no-scrollbar">
-            {SECTIONS.map(s => (
-              <button
-                key={s.id}
-                onClick={() => setSection(s.id)}
-                className={`shrink-0 cursor-pointer rounded-full px-3.5 py-1.5 text-xs font-bold transition-all ${
-                  section === s.id
-                    ? "bg-[var(--color-accent-selected)] text-white shadow-lg shadow-[var(--color-accent-selected)]/25"
-                    : "glass-subtle text-text-secondary hover:text-text-primary"
-                }`}
-              >
-                {s.emoji} {s.label}
-              </button>
-            ))}
+          <div className="flex gap-3 overflow-x-auto pb-1 -mx-4 px-4 no-scrollbar">
+            {SECTIONS.map(s => {
+              const count = s.id === "all"
+                ? pantryItems.length
+                : pantryItems.filter((p: any) => p.status === s.id).length;
+              const isSelected = section === s.id;
+              return (
+                <button
+                  key={s.id}
+                  onClick={() => setSection(s.id)}
+                  className={`shrink-0 cursor-pointer rounded-full px-4 py-2 text-xs font-bold transition-all flex items-center gap-2 ${
+                    isSelected
+                      ? "bg-[var(--color-accent-selected)] text-white shadow-lg shadow-[var(--color-accent-selected)]/25"
+                      : "glass-subtle text-text-secondary hover:text-text-primary"
+                  }`}
+                >
+                  {s.emoji} {s.label}
+                  {count > 0 && (
+                    <span className="rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-bold">
+                      {count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
 
           {/* ── Pantry Grid ── */}
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             {visible.map((p: any) => {
               const f = freshness(p.status);
               const onGrocery = (groceryItems || []).some((g: any) => normalizeName(g.name) === normalizeName(p.item) && g.needed);
@@ -342,7 +363,7 @@ export default function PantryTab({
         </div>
 
         {/* ── Right Column ── */}
-        <div className="space-y-5 lg:order-2 order-first lg:order-none">
+        <div className="space-y-5 min-w-0 lg:order-2 order-first lg:order-none">
           {/* ── Sync ── */}
           <button
             onClick={syncPantryToGrocery}

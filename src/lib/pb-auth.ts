@@ -1,4 +1,4 @@
-import { getAdminPB } from "./pb";
+import { getAdminPB } from "./pb.ts";
 
 const ADMIN_EMAIL = process.env.PB_ADMIN_EMAIL || "admin@consuela.app";
 const ADMIN_PASS = process.env.PB_ADMIN_PASS || "26649_alan";

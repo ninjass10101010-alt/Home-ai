@@ -49,6 +49,7 @@ import AchievementWall from "@/components/leaderboard/AchievementWall";
 import HallOfFame from "@/components/leaderboard/HallOfFame";
 import TrophyCase from "@/components/leaderboard/TrophyCase";
 import ShareCard from "@/components/leaderboard/ShareCard";
+import RemindersSection from "@/components/tasks/RemindersSection";
 
 function isoOffset(days: number): string {
   const d = new Date(Date.now() + days * 86400000);
@@ -1043,6 +1044,8 @@ export default function TasksPage() {
                 <EmptyState title="No suggestions yet" description="Generate AI ideas or sync Google Tasks to fill this space." icon="🤖" />
               )}
             </SectionCard>
+
+            <RemindersSection />
 
             <SectionCard title="Pending" description={`${pending.length} open tasks`} icon="📋">
               {pending.length === 0 ? (

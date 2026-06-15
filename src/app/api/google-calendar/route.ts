@@ -1,31 +1,66 @@
-import { NextResponse } from "next/server";
-import { readFile } from "fs/promises";
-import { existsSync } from "fs";
-import path from "path";
+import { NextRequest, NextResponse } from "next/server";
+import { isGoogleConnected, GoogleAuthError } from "@/lib/google/oauth-client";
+import { readCachedEvents, syncCalendar } from "@/lib/google/calendar";
+import { ensureGoogleCollections } from "@/lib/google/pb-collections";
+import { getStoredTokens } from "@/lib/google/token-store";
 
-export async function GET(request: Request) {
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+export async function GET(request: NextRequest) {
+  const { searchParams } = new URL(request.url);
+  const sync = searchParams.get("sync");
+
   try {
-    const { searchParams } = new URL(request.url);
-    const type = searchParams.get("type") || "event";
+    await ensureGoogleCollections();
+  } catch (e: any) {
+    return NextResponse.json(
+      { ok: false, events: [], error: "PocketBase not reachable: " + (e?.message || "unknown") },
+      { status: 200 },
+    );
+  }
 
-    const eventsFile = path.join(process.cwd(), "public", "google-events.json");
-    const tasksFile = path.join(process.cwd(), "public", "google-tasks.json");
+  const connected = await isGoogleConnected();
 
-    let events: any[] = [];
+  if (!connected) {
+    return NextResponse.json({
+      ok: true,
+      connected: false,
+      source: "static",
+      events: [],
+    });
+  }
 
-    if (type === "event" && existsSync(eventsFile)) {
-      const data = await readFile(eventsFile, "utf-8");
-      const parsed = JSON.parse(data);
-      events = parsed.filter((e: any) => !type || e.type === type);
+  if (sync === "now") {
+    try {
+      await syncCalendar();
+    } catch (e: any) {
+      if (e instanceof GoogleAuthError) {
+        return NextResponse.json(
+          { ok: false, connected: true, code: e.code, error: e.message, events: [] },
+          { status: e.code === "no_grant" ? 409 : 401 },
+        );
+      }
+      console.error("[google-calendar] sync-now failed:", e?.message);
     }
+  }
 
-    if (type === "task" && existsSync(tasksFile)) {
-      const data = await readFile(tasksFile, "utf-8");
-      events = JSON.parse(data);
-    }
-
-    return NextResponse.json({ events });
-  } catch {
-    return NextResponse.json({ events: [], error: "Failed to read events" });
+  try {
+    const events = await readCachedEvents();
+    const tokens = await getStoredTokens();
+    return NextResponse.json({
+      ok: true,
+      connected: true,
+      source: "google",
+      account_email: tokens?.account_email || null,
+      last_sync_at: tokens?.granted_at || null,
+      events,
+    });
+  } catch (e: any) {
+    console.error("[google-calendar] read failed:", e?.message);
+    return NextResponse.json(
+      { ok: false, connected: true, events: [], error: e?.message },
+      { status: 200 },
+    );
   }
 }

@@ -17,17 +17,55 @@ const MONTHS = [
 
 function parseTimeToMinutes(timeStr: string): number {
   const match = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-  if (!match) return 0;
-  let hours = parseInt(match[1], 10);
-  const minutes = parseInt(match[2], 10);
-  const ampm = match[3].toUpperCase();
-  if (ampm === "PM" && hours !== 12) hours += 12;
-  if (ampm === "AM" && hours === 12) hours = 0;
-  return hours * 60 + minutes;
+  if (match) {
+    let hours = parseInt(match[1], 10);
+    const minutes = parseInt(match[2], 10);
+    const ampm = match[3].toUpperCase();
+    if (ampm === "PM" && hours !== 12) hours += 12;
+    if (ampm === "AM" && hours === 12) hours = 0;
+    return hours * 60 + minutes;
+  }
+  const time24Match = timeStr.match(/^(\d{1,2}):(\d{2})$/);
+  if (time24Match) {
+    const hours = parseInt(time24Match[1], 10);
+    const minutes = parseInt(time24Match[2], 10);
+    return hours * 60 + minutes;
+  }
+  return 0;
+}
+
+function formatTo12Hour(timeStr: string): { hour: string; minute: string; ampm: "AM" | "PM" } {
+  const trimmed = (timeStr || "").trim();
+  const ampmMatch = trimmed.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (ampmMatch) {
+    return {
+      hour: String(parseInt(ampmMatch[1], 10) || 12),
+      minute: ampmMatch[2].padStart(2, "0"),
+      ampm: (ampmMatch[3].toUpperCase() as "AM" | "PM"),
+    };
+  }
+  const time24Match = trimmed.match(/^(\d{1,2}):(\d{2})$/);
+  if (time24Match) {
+    const h24 = parseInt(time24Match[1], 10);
+    const ampm: "AM" | "PM" = h24 >= 12 ? "PM" : "AM";
+    const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+    return {
+      hour: String(h12),
+      minute: time24Match[2].padStart(2, "0"),
+      ampm,
+    };
+  }
+  return { hour: "8", minute: "00", ampm: "AM" };
+}
+
+function build12HourString(hour: string, minute: string, ampm: "AM" | "PM"): string {
+  const h = Math.max(1, Math.min(12, parseInt(hour, 10) || 12));
+  const m = Math.max(0, Math.min(59, parseInt(minute, 10) || 0));
+  return `${h}:${String(m).padStart(2, "0")} ${ampm}`;
 }
 
 interface CalEvent {
-  id: number;
+  id: number | string;
   title: string;
   time: string;
   member: string;
@@ -176,7 +214,7 @@ function subscribeMembersSnapshot(onStoreChange: () => void) {
 const emptySchedule = (): ScheduleItem => ({
   id: Date.now(),
   title: "",
-  time: "08:00",
+  time: "8:00 AM",
   days: "all",
   type: "routine",
   icon: "⏰",
@@ -234,7 +272,7 @@ export default function CalendarPage() {
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
   const [calEvents, setCalEvents] = useState<CalEvent[]>(() => loadFromStorage(EVENTS_STORAGE_KEY, events));
-  const [editingEventId, setEditingEventId] = useState<number | null>(null);
+  const [editingEventId, setEditingEventId] = useState<number | string | null>(null);
   const [eventForm, setEventForm] = useState<CalEvent>({ id: 0, title: "", time: "", member: "All", color: "green", emoji: "📅", day: selectedDay });
   const [isAddingEvent, setIsAddingEvent] = useState(false);
 
@@ -350,6 +388,15 @@ export default function CalendarPage() {
     setEditingEventId(null);
   };
   const startEditEvent = (ev: CalEvent) => {
+    if (ev.member === "Google") {
+      if (ev.id && typeof ev.id === "string" && ev.id.startsWith("g_")) {
+        const googleId = ev.id.split("_")[1];
+        if (googleId) {
+          window.open(`https://calendar.google.com/calendar/event?eid=${googleId}`, "_blank", "noopener,noreferrer");
+        }
+      }
+      return;
+    }
     setEventForm({ ...ev });
     setEditingEventId(ev.id);
     setIsAddingEvent(false);
@@ -364,7 +411,7 @@ export default function CalendarPage() {
     }
     cancelEventEdit();
   };
-  const deleteEvent = (id: number) => {
+  const deleteEvent = (id: number | string) => {
     setCalEvents((prev) => prev.filter((e) => e.id !== id));
     cancelEventEdit();
   };
@@ -397,27 +444,42 @@ export default function CalendarPage() {
   const syncGoogleEvents = async () => {
     setIsSyncing(true);
     try {
-      const res = await fetch("/api/google-calendar?type=event");
+      const res = await fetch("/api/google-calendar?sync=now");
       const data = await res.json();
+      if (!data.connected) {
+        showToast("Connect Google in Settings → Integrations");
+        return;
+      }
       if (data.events?.length) {
         setCalEvents((prev) => {
           const filtered = prev.filter((e: any) => e.member !== "Google");
-          data.events.forEach((ge: any) => {
-            if (!ge.date) return;
-            const dayNum = parseInt(ge.date.split("-")[2], 10);
-            if (Number.isNaN(dayNum)) return;
-            if (!filtered.find((e) => e.title === ge.title && e.day === dayNum)) {
+          const todayYear = today.getFullYear();
+          const todayMonth = today.getMonth();
+          for (const ge of data.events) {
+            const startIso = ge.start_iso || "";
+            if (!startIso) continue;
+            const d = new Date(startIso);
+            if (Number.isNaN(d.getTime())) continue;
+            const evYear = d.getFullYear();
+            const evMonth = d.getMonth();
+            if (evYear !== todayYear || evMonth !== todayMonth) continue;
+            const dayNum = d.getDate();
+            const time = ge.all_day
+              ? "All day"
+              : d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+            const title = ge.summary || "(no title)";
+            if (!filtered.find((e) => e.title === title && e.day === dayNum && e.time === time)) {
               filtered.push({
-                id: Date.now() + Math.random(),
-                title: ge.title,
-                time: ge.time || "12:00 PM",
+                id: `g_${ge.google_id}_${dayNum}_${time}`,
+                title,
+                time,
                 member: "Google",
                 color: "cyan" as const,
                 emoji: "📅",
                 day: dayNum,
               });
             }
-          });
+          }
           return filtered;
         });
         showToast(`\u2705 Synced ${data.events.length} Google events`);
@@ -760,7 +822,57 @@ export default function CalendarPage() {
                     className="calendar-input" autoFocus
                   />
                   <div className="calendar-form-grid">
-                    <input type="text" placeholder="Time (HH:MM)" value={schedForm.time} onChange={(e) => setSchedForm({ ...schedForm, time: e.target.value })} className="calendar-input" />
+                    <div className="calendar-time-picker">
+                      <input
+                        type="number" min={1} max={12} inputMode="numeric"
+                        placeholder="8"
+                        value={(() => { const t = formatTo12Hour(schedForm.time); return t.hour; })()}
+                        onChange={(e) => {
+                          const t = formatTo12Hour(schedForm.time);
+                          const v = e.target.value.replace(/[^0-9]/g, "").slice(0, 2);
+                          setSchedForm({ ...schedForm, time: build12HourString(v || "12", t.minute, t.ampm) });
+                        }}
+                        className="calendar-input calendar-time-hour"
+                        aria-label="Hour"
+                      />
+                      <span className="calendar-time-sep">:</span>
+                      <input
+                        type="number" min={0} max={59} inputMode="numeric"
+                        placeholder="00"
+                        value={(() => { const t = formatTo12Hour(schedForm.time); return t.minute; })()}
+                        onChange={(e) => {
+                          const t = formatTo12Hour(schedForm.time);
+                          const v = e.target.value.replace(/[^0-9]/g, "").slice(0, 2);
+                          setSchedForm({ ...schedForm, time: build12HourString(t.hour, v.padStart(2, "0") || "00", t.ampm) });
+                        }}
+                        className="calendar-input calendar-time-minute"
+                        aria-label="Minute"
+                      />
+                      <div className="calendar-time-ampm">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const t = formatTo12Hour(schedForm.time);
+                            setSchedForm({ ...schedForm, time: build12HourString(t.hour, t.minute, "AM") });
+                          }}
+                          className={`calendar-time-ampm-btn ${(() => { const t = formatTo12Hour(schedForm.time); return t.ampm === "AM"; })() ? "is-active" : ""}`}
+                          aria-label="AM"
+                        >
+                          AM
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const t = formatTo12Hour(schedForm.time);
+                            setSchedForm({ ...schedForm, time: build12HourString(t.hour, t.minute, "PM") });
+                          }}
+                          className={`calendar-time-ampm-btn ${(() => { const t = formatTo12Hour(schedForm.time); return t.ampm === "PM"; })() ? "is-active" : ""}`}
+                          aria-label="PM"
+                        >
+                          PM
+                        </button>
+                      </div>
+                    </div>
                     <input type="text" placeholder="Icon emoji" value={schedForm.icon} onChange={(e) => setSchedForm({ ...schedForm, icon: e.target.value })} className="calendar-input" />
                     <select value={schedForm.days} onChange={(e) => setSchedForm({ ...schedForm, days: e.target.value })} className="calendar-input">
                       {Object.entries(dayLabels).map(([v, l]) => <option key={v} value={v}>{l}</option>)}

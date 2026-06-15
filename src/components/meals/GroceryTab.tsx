@@ -9,7 +9,7 @@ import SectionCard from "@/components/patterns/SectionCard";
 import { groceryCategories, groceryPresets } from "@/data/meals";
 import { GroceryItem } from "@/types/meals";
 
-const PRESETS_PER_PAGE = 12;
+const PRESETS_PER_PAGE = 6;
 
 export default function GroceryTab({
   groceryItems,
@@ -85,8 +85,8 @@ export default function GroceryTab({
 
   return (
     <div className="space-y-5 pb-6">
-      <div className="grid gap-5 xl:grid-cols-[1fr_280px]">
-        <div className="space-y-5">
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_280px]">
+        <div className="space-y-5 min-w-0">
           <SectionCard title="Add Item" icon="➕" description="Quick add items to your list">
             <div className="space-y-3">
               <div className="flex gap-2">
@@ -107,9 +107,9 @@ export default function GroceryTab({
                   onChange={e => setNewGroceryQuantity(e.target.value)}
                   onKeyDown={e => e.key === "Enter" && handleAdd()}
                   placeholder="Qty"
-                  className="w-20"
+                  className="w-20 shrink-0"
                 />
-                <div className="relative flex-1">
+                <div className="relative flex-1 min-w-0">
                   <select
                     value={newGroceryCategory}
                     onChange={e => setNewGroceryCategory(e.target.value)}
@@ -121,7 +121,7 @@ export default function GroceryTab({
                     ))}
                   </select>
                 </div>
-                <div className="relative w-20">
+                <div className="relative w-20 shrink-0">
                   <select
                     value={newGroceryPriority}
                     onChange={e => setNewGroceryPriority(e.target.value as "low" | "medium" | "high")}
@@ -165,73 +165,131 @@ export default function GroceryTab({
             )}
 
             <div className="mt-4 pt-4 border-t border-white/10">
-              <p className="text-xs font-semibold uppercase tracking-wider text-text-secondary mb-2.5">
+              <p className="text-xs font-semibold uppercase tracking-wider text-text-secondary mb-3">
                 ⚡ Quick Add
               </p>
-              <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1 mb-3">
-                {groceryCategories.map(cat => (
-                  <button
-                    key={cat.id}
-                    onClick={() => { setPresetCategory(cat.id); setShowAllPresets(false); }}
-                    className={`shrink-0 rounded-full px-3 py-1.5 text-[11px] font-semibold transition-all duration-150 active:scale-95 ${
-                      presetCategory === cat.id
-                        ? "bg-[var(--color-accent-button)] text-white shadow-lg shadow-[var(--color-accent-selected)]/25"
-                        : "border border-white/10 bg-[var(--color-surface-2)] text-text-secondary hover:text-text-primary hover:border-[var(--color-accent-selected)]/30"
-                    }`}
-                  >
-                    {cat.emoji} {cat.name}
-                  </button>
-                ))}
+
+              <div className="grid grid-cols-2 gap-2.5 mb-4">
+                {groceryCategories.map(cat => {
+                  const presetCount = groceryPresets.filter(p => p.category === cat.id).length;
+                  const isSelected = presetCategory === cat.id;
+                  return (
+                    <button
+                      key={cat.id}
+                      onClick={() => { setPresetCategory(cat.id); setShowAllPresets(false); }}
+                      className={`group flex items-center gap-2.5 rounded-2xl px-3 py-2.5 text-left transition-all duration-150 active:scale-[0.98] ${
+                        isSelected
+                          ? "bg-[var(--color-accent-button)] text-white shadow-lg shadow-[var(--color-accent-selected)]/25"
+                          : "border border-white/10 bg-[var(--color-surface-0)]/30 text-text-secondary hover:text-text-primary hover:border-[var(--color-accent-selected)]/30"
+                      }`}
+                    >
+                      <span className="text-xl shrink-0" aria-hidden>{cat.emoji}</span>
+                      <span className="flex-1 min-w-0 text-sm font-semibold truncate">{cat.name}</span>
+                      {presetCount > 0 && (
+                        <span
+                          className={`shrink-0 text-[10px] font-bold rounded-full px-1.5 py-0.5 ${
+                            isSelected ? "bg-white/20 text-white" : "bg-[var(--color-surface-2)] text-text-muted"
+                          }`}
+                        >
+                          {presetCount}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
-              <div className="flex gap-2 flex-wrap">
-                {visiblePresets.map(preset => (
-                  <Chip
-                    key={preset.name}
-                    tone="neutral"
-                    size="sm"
-                    onClick={() => handlePresetTap(preset)}
-                    className="cursor-pointer hover:border-[var(--color-accent-selected)]/30"
-                  >
-                    {preset.emoji} {preset.name} <span className="text-[var(--color-accent-selected)] opacity-70">+</span>
-                  </Chip>
-                ))}
-              </div>
-              {categoryPresets.length > PRESETS_PER_PAGE && (
-                <button
-                  onClick={() => setShowAllPresets(v => !v)}
-                  className="mt-2 text-[11px] text-[var(--color-accent-selected)] hover:opacity-80 transition-opacity"
-                >
-                  {showAllPresets ? "Show less ↑" : `Show ${categoryPresets.length - PRESETS_PER_PAGE} more ↓`}
-                </button>
+
+              {categoryPresets.length > 0 ? (
+                <>
+                  <div className="grid grid-cols-2 gap-2">
+                    {visiblePresets.map(preset => (
+                      <button
+                        key={preset.name}
+                        onClick={() => handlePresetTap(preset)}
+                        className="group flex items-center gap-2.5 rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/30 px-3 py-2.5 text-left transition-all duration-150 hover:border-[var(--color-accent-selected)]/40 hover:bg-[var(--color-surface-0)]/50 active:scale-[0.98]"
+                      >
+                        <span className="text-lg shrink-0" aria-hidden>{preset.emoji}</span>
+                        <span className="flex-1 min-w-0 text-sm font-medium text-text-primary truncate">{preset.name}</span>
+                        <span className="shrink-0 text-base font-bold text-[var(--color-accent-selected)] opacity-40 group-hover:opacity-100 transition-opacity">+</span>
+                      </button>
+                    ))}
+                  </div>
+                  {categoryPresets.length > PRESETS_PER_PAGE && (
+                    <button
+                      onClick={() => setShowAllPresets(v => !v)}
+                      className="mt-3 text-xs font-semibold text-[var(--color-accent-selected)] hover:opacity-80 transition-opacity"
+                    >
+                      {showAllPresets ? "Show less ↑" : `Show ${categoryPresets.length - PRESETS_PER_PAGE} more ↓`}
+                    </button>
+                  )}
+                </>
+              ) : (
+                <p className="text-sm text-text-muted text-center py-3 rounded-2xl border border-dashed border-white/10">
+                  No quick-add presets for this category yet — use the form above to add items.
+                </p>
               )}
             </div>
           </SectionCard>
 
-          <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 no-scrollbar">
-            <Chip
-              tone={activeCategory === "all" ? "accent" : "neutral"}
-              size="md"
-              selected={activeCategory === "all"}
+          <div className="grid grid-cols-2 gap-2.5">
+            <button
               onClick={() => setActiveCategory("all")}
+              className={`group flex items-center gap-3 rounded-2xl p-3 text-left transition-all duration-150 active:scale-[0.98] ${
+                activeCategory === "all"
+                  ? "border-2 border-[var(--color-accent-selected)]/40 bg-[var(--color-accent-selected)]/15 shadow-[0_0_20px_var(--color-accent-selected)]/10]"
+                  : "border border-white/10 bg-[var(--color-surface-0)]/30 backdrop-blur-xl hover:bg-[var(--color-surface-0)]/50 hover:border-[var(--color-accent-selected)]/20"
+              }`}
             >
-              All
-            </Chip>
+              <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-xl text-base ${
+                activeCategory === "all"
+                  ? "bg-[var(--color-accent-selected)] text-white"
+                  : "bg-[var(--color-surface-2)]"
+              }`}>
+                🛒
+              </span>
+              <span className="flex-1 min-w-0">
+                <span className={`block text-sm font-semibold truncate ${activeCategory === "all" ? "text-text-primary" : "text-text-secondary"}`}>
+                  All
+                </span>
+                {groceryItems.length > 0 && (
+                  <span className="block text-[11px] text-text-muted">
+                    {groceryItems.filter((i: any) => !i.needed).length} of {groceryItems.length} picked up
+                  </span>
+                )}
+              </span>
+            </button>
             {groceryCategories.map(cat => {
               const catItems = groceryItems.filter((i: any) => i.category === cat.id);
               const catPicked = catItems.filter((i: any) => !i.needed).length;
+              const isSelected = activeCategory === cat.id;
               return (
-                <Chip
+                <button
                   key={cat.id}
-                  tone={activeCategory === cat.id ? "accent" : "neutral"}
-                  size="md"
-                  selected={activeCategory === cat.id}
                   onClick={() => setActiveCategory(cat.id)}
+                  className={`group flex items-center gap-3 rounded-2xl p-3 text-left transition-all duration-150 active:scale-[0.98] ${
+                    isSelected
+                      ? "border-2 border-[var(--color-accent-selected)]/40 bg-[var(--color-accent-selected)]/15 shadow-[0_0_20px_var(--color-accent-selected)]/10]"
+                      : "border border-white/10 bg-[var(--color-surface-0)]/30 backdrop-blur-xl hover:bg-[var(--color-surface-0)]/50 hover:border-[var(--color-accent-selected)]/20"
+                  }`}
                 >
-                  {cat.emoji} {cat.name}
-                  {catItems.length > 0 && (
-                    <span className="opacity-60">{catPicked}/{catItems.length}</span>
-                  )}
-                </Chip>
+                  <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-xl text-base ${
+                    isSelected
+                      ? "bg-[var(--color-accent-selected)] text-white"
+                      : "bg-[var(--color-surface-2)]"
+                  }`}>
+                    {cat.emoji}
+                  </span>
+                  <span className="flex-1 min-w-0">
+                    <span className={`block text-sm font-semibold truncate ${isSelected ? "text-text-primary" : "text-text-secondary"}`}>
+                      {cat.name}
+                    </span>
+                    {catItems.length > 0 && (
+                      <span className="block text-[11px] text-text-muted">
+                        {catPicked}/{catItems.length} picked up
+                      </span>
+                    )}
+                  </span>
+                </button>
               );
             })}
           </div>
@@ -262,13 +320,13 @@ export default function GroceryTab({
                               onChange={e => setEditName(e.target.value)}
                               placeholder="Name"
                               onKeyDown={e => e.key === "Enter" && saveEdit(item.id)}
-                              className="flex-1"
+                              className="flex-1 min-w-0"
                             />
                             <TextField
                               value={editQuantity}
                               onChange={e => setEditQuantity(e.target.value)}
                               placeholder="Qty"
-                              className="w-20"
+                              className="w-20 shrink-0"
                             />
                           </div>
                           <TextField
@@ -346,7 +404,7 @@ export default function GroceryTab({
           })}
         </div>
 
-        <div className="space-y-5 xl:order-2 order-first xl:order-none">
+        <div className="space-y-5 min-w-0 xl:order-2 order-first xl:order-none">
           <SectionCard title="Shopping progress" icon="🛒">
             <div className="space-y-4">
               <div className="flex items-end justify-between">
