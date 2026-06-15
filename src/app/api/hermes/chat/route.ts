@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || "";
-const OPENROUTER_MODEL = "openrouter/free";
+const HERMES_API_KEY = process.env.HERMES_API_KEY || "consuela-api-key-2026";
+const HERMES_URL = process.env.HERMES_URL || "http://hermes-agent-2:8642";
+const HERMES_MODEL = "hermes-agent";
 
 const AVAILABLE_ACTIONS = [
   { type: "add_event", desc: "Add a calendar event", data: { title: "string", time: "string", member: "string", emoji: "string", date: "string" } },
@@ -57,12 +58,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Message is required" }, { status: 400 });
     }
 
-    if (!OPENROUTER_API_KEY) {
-      return NextResponse.json({
-        content: "Hey! 👋 I need an API key to work. Let Dad know to set one up in the .env.local file.",
-      });
-    }
-
     const messages = [
       { role: "system", content: SYSTEM_PROMPT },
       ...history.map((m: any) => ({
@@ -73,16 +68,15 @@ export async function POST(request: NextRequest) {
     ];
 
     const response = await fetch(
-      "https://openrouter.ai/api/v1/chat/completions",
+      `${HERMES_URL}/v1/chat/completions`,
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-          "HTTP-Referer": "https://consuela.family",
+          Authorization: `Bearer ${HERMES_API_KEY}`,
         },
         body: JSON.stringify({
-          model: OPENROUTER_MODEL,
+          model: HERMES_MODEL,
           messages,
           temperature: 0.7,
           max_tokens: 1024,
@@ -92,7 +86,7 @@ export async function POST(request: NextRequest) {
 
     if (!response.ok) {
       const errText = await response.text();
-      console.error("OpenRouter error:", response.status, errText);
+      console.error("Hermes error:", response.status, errText);
       return NextResponse.json({
         content: "Hmm, I hit a snag connecting to my brain. Try again in a moment! 🤔",
       });

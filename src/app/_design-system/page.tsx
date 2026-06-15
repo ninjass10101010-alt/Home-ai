@@ -194,7 +194,7 @@ export default function DesignSystemPage() {
             </div>
             <DayStrip
               value="today"
-              onChange={() => {}}
+              onChange={(dayId) => console.log("DayStrip demo:", dayId)}
               days={[
                 { id: "mon", label: "Mon", detail: "12", active: false },
                 { id: "tue", label: "Tue", detail: "13", active: true },

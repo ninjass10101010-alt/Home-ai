@@ -1853,6 +1853,94 @@ body {
 .calendar-routine-toggle:hover { color: var(--color-accent-selected); background: rgba(var(--calendar-accent-rgb, 59,130,246), .12); }
 .calendar-routine-toggle svg { width: .8rem; height: .8rem; }
 
+/* ─── Task / Leaderboard kid-friendly animations ─── */
+@keyframes confetti-fall {
+  0% { opacity: 1; transform: translate(0, 0) rotate(0deg) scale(1); }
+  100% { opacity: 0; transform: translate(var(--confetti-x, 20px), calc(100vh + 40px)) rotate(720deg) scale(0.3); }
+}
+.animate-confetti-fall {
+  animation: confetti-fall 2s cubic-bezier(.25, .46, .45, .94) forwards;
+}
+
+@keyframes crown-glow {
+  0%, 100% { filter: drop-shadow(0 0 6px rgba(251, 191, 36, 0.4)) drop-shadow(0 0 12px rgba(251, 191, 36, 0.2)); }
+  50% { filter: drop-shadow(0 0 12px rgba(251, 191, 36, 0.7)) drop-shadow(0 0 24px rgba(251, 191, 36, 0.4)); }
+}
+.animate-crown-glow {
+  animation: crown-glow 2s ease-in-out infinite;
+}
+
+@keyframes badge-sparkle {
+  0%, 100% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.3); opacity: 1; }
+}
+.animate-badge-sparkle {
+  animation: badge-sparkle 1.5s ease-in-out infinite;
+}
+
+@keyframes rank-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.4); }
+  50% { box-shadow: 0 0 0 6px rgba(251, 191, 36, 0); }
+}
+.animate-rank-pulse {
+  animation: rank-pulse 2s ease-in-out infinite;
+}
+
+@keyframes progress-fill {
+  from { width: 0% !important; }
+}
+.animate-progress-fill {
+  animation: progress-fill 1s ease-out;
+}
+
+@keyframes level-up-pop {
+  0% { transform: scale(0.5); opacity: 0; }
+  50% { transform: scale(1.2); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes podium-shine {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+.podium-shine {
+  animation: podium-shine 3s ease-in-out infinite;
+  background-size: 200% 200%;
+}
+
+@keyframes rank-arrow-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+.animate-rank-arrow-bounce {
+  animation: rank-arrow-bounce 1.5s ease-in-out infinite;
+}
+
+@keyframes widget-row-glow {
+  0%, 100% { box-shadow: 0 0 0 1px var(--row-color, rgba(255,255,255,0.1)), 0 0 12px rgba(255,255,255,0.05); }
+  50% { box-shadow: 0 0 0 1px var(--row-color, rgba(255,255,255,0.1)), 0 0 20px rgba(255,255,255,0.12); }
+}
+.widget-row-glow {
+  animation: widget-row-glow 2.5s ease-in-out infinite;
+}
+
+@keyframes number-roll {
+  0% { transform: translateY(100%); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+.animate-number-roll {
+  animation: number-roll 0.4s ease-out;
+  display: inline-block;
+}
+
+@keyframes session-pill-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.0); }
+  50% { box-shadow: 0 0 0 6px rgba(251, 191, 36, 0.12); }
+}
+.session-pill-warning {
+  animation: session-pill-pulse 1.6s ease-in-out infinite;
+}
+
 /* ─── Reduced motion ─── */
 @media (prefers-reduced-motion: reduce) {
   .calendar-event-card:hover,
@@ -1861,4 +1949,14 @@ body {
   .calendar-routine-card:hover,
   .calendar-day-btn:hover { transform: none !important; }
   .calendar-fade-in-up { animation: none !important; }
+  .animate-confetti-fall { animation: none !important; }
+  .animate-crown-glow { animation: none !important; }
+  .animate-badge-sparkle { animation: none !important; }
+  .animate-rank-pulse { animation: none !important; }
+  .animate-progress-fill { animation: none !important; }
+  .animate-rank-arrow-bounce { animation: none !important; }
+  .widget-row-glow { animation: none !important; }
+  .podium-shine { animation: none !important; }
+  .animate-number-roll { animation: none !important; }
+  .session-pill-warning { animation: none !important; }
 }

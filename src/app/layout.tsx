@@ -1,10 +1,10 @@
 import type { Metadata, Viewport } from "next";
-import Script from "next/script";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { WeatherProvider } from "@/hooks/useWeather";
 import { AtmosphericProvider } from "@/hooks/useAtmosphericTheme";
 import { AuthProvider } from "@/hooks/useAuth";
+import { LayoutProvider } from "@/hooks/useHomeLayout";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -85,9 +85,8 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`} suppressHydrationWarning>
-        <Script
+        <script
           id="theme-init"
-          strategy="beforeInteractive"
           dangerouslySetInnerHTML={{ __html: themeScript }}
         />
 
@@ -95,7 +94,9 @@ export default function RootLayout({
           <ThemeProvider>
             <WeatherProvider>
               <AtmosphericProvider>
-                {children}
+                <LayoutProvider>
+                  {children}
+                </LayoutProvider>
               </AtmosphericProvider>
             </WeatherProvider>
           </ThemeProvider>
