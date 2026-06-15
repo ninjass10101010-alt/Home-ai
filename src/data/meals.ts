@@ -198,6 +198,17 @@ export const mealPresets: { mealType: string; ideas: { name: string; emoji: stri
     ],
   },
   {
+    mealType: "snack",
+    ideas: [
+      { name: "Apple & Peanut Butter", emoji: "🍎", tags: ["Quick", "Healthy"], prepTime: "2 min", ingredients: ["Apple", "Peanut butter"] },
+      { name: "Cheese & Crackers", emoji: "🧀", tags: ["Quick", "Savory"], prepTime: "2 min", ingredients: ["Cheese", "Crackers"] },
+      { name: "Yogurt Parfait", emoji: "🍦", tags: ["Healthy", "Sweet"], prepTime: "5 min", ingredients: ["Greek yogurt", "Granola", "Berries"] },
+      { name: "Trail Mix", emoji: "🥜", tags: ["Quick", "Portable"], prepTime: "1 min", ingredients: ["Nuts", "Dried fruit", "Chocolate chips"] },
+      { name: "Hummus & Veggies", emoji: "🥕", tags: ["Healthy", "Snack"], prepTime: "3 min", ingredients: ["Hummus", "Carrots", "Celery"] },
+      { name: "Banana Smoothie", emoji: "🍌", tags: ["Healthy", "Sweet"], prepTime: "5 min", ingredients: ["Banana", "Milk", "Honey"] },
+    ],
+  },
+  {
     mealType: "dinner",
     ideas: [
       { name: "Pasta Primavera", emoji: "🍝", tags: ["Vegetarian", "Quick"], prepTime: "25 min", ingredients: ["Penne", "Zucchini", "Bell peppers", "Parmesan"] },
@@ -209,6 +220,25 @@ export const mealPresets: { mealType: string; ideas: { name: string; emoji: stri
     ],
   },
 ];
+
+export const slotMeta: Record<string, { color: string; label: string; time: string; icon: string }> = {
+  breakfast: { color: "var(--color-accent-amber, #fbbf24)", label: "Breakfast", time: "7:30 AM", icon: "🌅" },
+  lunch: { color: "var(--color-accent-mint, #34d399)", label: "Lunch", time: "12:30 PM", icon: "☀️" },
+  snack: { color: "var(--color-accent-cyan, #22d3ee)", label: "Snack", time: "3:30 PM", icon: "🥨" },
+  dinner: { color: "var(--color-accent-rose, #f43f5e)", label: "Dinner", time: "6:30 PM", icon: "🌙" },
+};
+
+export const smartTips = [
+  { emoji: "💡", title: "Smart leftover tip", text: "Taco night makes extra filling — plan to reuse it for lunch bowls tomorrow. Zero waste!" },
+  { emoji: "🧊", title: "Already at home", text: "Oats, rice and peanut butter are stocked in your pantry — we left them off the grocery list to save you money." },
+  { emoji: "♻️", title: "Reduce food waste", text: "Check your pantry for expiring items and plan meals around them this week." },
+  { emoji: "🥦", title: "Veggie boost", text: "Add an extra serving of veggies to dinner — it's an easy way to hit your daily nutrition goals." },
+];
+
+export const CALORIE_GOAL = 2000;
+export const PROTEIN_GOAL = 150;
+export const CARBS_GOAL = 300;
+export const FAT_GOAL = 65;
 
 export const emptyRecipe = {
   name: "",

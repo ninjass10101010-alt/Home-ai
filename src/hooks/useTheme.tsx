@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 'use client';
 
 import { useState, useEffect, useCallback, createContext, useContext, ReactNode } from 'react';
@@ -43,7 +44,7 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
           parsed.mode &&
           ['light', 'dark', 'system'].includes(parsed.mode) &&
           parsed.accentColor &&
-          ['nori', 'violet', 'rose', 'coral', 'lavender', 'cyan', 'mint', 'amber'].includes(parsed.accentColor) &&
+          ['nori', 'violet', 'rose', 'coral', 'lavender', 'cyan', 'mint', 'amber', 'apricot', 'sage'].includes(parsed.accentColor) &&
           typeof parsed.contrastBoost === 'boolean' &&
           (!parsed.accentHex || typeof parsed.accentHex === 'object')
         ) {

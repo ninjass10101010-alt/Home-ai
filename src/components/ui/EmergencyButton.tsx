@@ -109,7 +109,7 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
                 {!result.success && (
                   <button
                     onClick={() => setResult(null)}
-                    className="w-full px-3 py-2 rounded-xl bg-rose-500/15 text-rose-400 text-sm font-medium hover:bg-rose-500/25 transition-colors"
+                    className="w-full px-3 py-2 rounded-2xl bg-rose-500/15 text-rose-400 text-sm font-medium hover:bg-rose-500/25 transition-colors"
                   >
                     Try Again
                   </button>
@@ -126,7 +126,7 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
                       key={type.id}
                       onClick={() => handleEmergency(type.id)}
                       disabled={isSending}
-                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-text-primary transition-all hover:bg-white/[0.06]"
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-text-primary transition-all hover:bg-white/[0.06]"
                       style={{ background: `rgba(${accentRgb},0.15)` }}
                     >
                       {isSending && selectedType === type.id ? (
@@ -141,7 +141,7 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
                 <button
                   onClick={() => setShowModal(false)}
                   disabled={isSending}
-                  className="w-full mt-3 px-3 py-2 rounded-xl glass text-text-secondary text-sm disabled:opacity-50"
+                  className="w-full mt-3 px-3 py-2 rounded-2xl glass text-text-secondary text-sm disabled:opacity-50"
                 >
                   Cancel
                 </button>

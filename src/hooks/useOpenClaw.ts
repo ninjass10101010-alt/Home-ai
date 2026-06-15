@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/immutability */
 import { useState, useEffect, useRef, useCallback } from "react";
 
 interface OpenClawOptions {

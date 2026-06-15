@@ -32,6 +32,10 @@ export interface Recipe {
   fat?: number;
   source?: string;
   createdAt: string;
+  favorite?: boolean;
+  difficulty?: "Easy" | "Medium" | "Cozy";
+  rating?: number;
+  image?: string;
 }
 
 export interface PantryItem {

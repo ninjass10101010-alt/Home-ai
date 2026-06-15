@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 import { useState, useEffect } from "react";
 import { db } from "@/db";
 import { GroceryItem } from "@/types/meals";

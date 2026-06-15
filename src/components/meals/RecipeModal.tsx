@@ -51,7 +51,7 @@ export default function RecipeModal({
           </div>
           <button
             onClick={() => setShowRecipeModal(false)}
-            className="w-9 h-9 rounded-xl glass flex items-center justify-center text-text-secondary hover:text-text-primary transition-colors"
+            className="w-9 h-9 rounded-2xl glass flex items-center justify-center text-text-secondary hover:text-text-primary transition-colors"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
               <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
@@ -66,7 +66,7 @@ export default function RecipeModal({
             <div className="relative">
               <button
                 onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                className="w-16 h-16 rounded-2xl bg-surface-2 flex items-center justify-center text-4xl hover:bg-surface-3 transition-colors border-2 border-dashed border-surface-4 hover:border-nori-500/40"
+                className="w-16 h-16 rounded-2xl bg-surface-2 flex items-center justify-center text-4xl hover:bg-surface-3 transition-colors border-2 border-dashed border-surface-4 hover:border-[var(--color-accent-selected)]/40"
               >
                 {recipe.emoji}
               </button>
@@ -81,7 +81,7 @@ export default function RecipeModal({
                       <button
                         key={e}
                         onClick={() => { setRecipe((r: any) => ({ ...r, emoji: e })); setShowEmojiPicker(false); }}
-                        className={`w-8 h-8 rounded-lg text-xl flex items-center justify-center hover:bg-nori-500/20 transition-all hover:scale-110 ${recipe.emoji === e ? "bg-nori-500/20" : ""}`}
+                        className={`w-8 h-8 rounded-lg text-xl flex items-center justify-center hover:bg-[var(--color-accent-selected)]/20 transition-all hover:scale-110 ${recipe.emoji === e ? "bg-[var(--color-accent-selected)]/20" : ""}`}
                       >
                         {e}
                       </button>
@@ -94,8 +94,58 @@ export default function RecipeModal({
               value={recipe.name}
               onChange={e => setRecipe((r: any) => ({ ...r, name: e.target.value }))}
               placeholder="Recipe name..."
-              className="flex-1 bg-surface-2 text-text-primary text-base font-semibold rounded-2xl px-4 py-3 outline-none placeholder:text-text-muted border border-surface-3 focus:border-nori-500/50 transition-colors"
+              className="flex-1 bg-surface-2 text-text-primary text-base font-semibold rounded-2xl px-4 py-3 outline-none placeholder:text-text-muted border border-surface-3 focus:border-[var(--color-accent-selected)]/50 transition-colors"
             />
+          </div>
+
+          {/* Image */}
+          <div>
+            <p className="text-text-secondary text-xs font-semibold mb-2">📸 Photo</p>
+            <div className="flex items-center gap-3">
+              <div
+                className="relative w-20 h-20 rounded-2xl overflow-hidden bg-surface-2 border border-surface-3 flex items-center justify-center shrink-0"
+              >
+                {recipe.image ? (
+                  <>
+                    <img src={recipe.image} alt="" className="w-full h-full object-cover" />
+                    <button
+                      onClick={() => setRecipe((r: any) => ({ ...r, image: "" }))}
+                      className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/50 text-white flex items-center justify-center text-xs"
+                    >
+                      ✕
+                    </button>
+                  </>
+                ) : (
+                  <span className="text-2xl text-text-muted">📷</span>
+                )}
+              </div>
+              <div className="flex flex-col gap-1.5 flex-1">
+                <input
+                  value={recipe.image || ""}
+                  onChange={e => setRecipe((r: any) => ({ ...r, image: e.target.value }))}
+                  placeholder="Paste image URL..."
+                  className="w-full bg-surface-2 text-text-primary text-sm rounded-2xl px-3 py-2 outline-none border border-surface-3 focus:border-[var(--color-accent-selected)]/50 placeholder:text-text-muted"
+                />
+                <label className="cursor-pointer self-start">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-surface-2 text-text-muted text-xs font-medium border border-surface-3 hover:text-text-primary transition-colors">
+                    📁 Upload
+                  </span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={e => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        const reader = new FileReader();
+                        reader.onload = () => setRecipe((r: any) => ({ ...r, image: reader.result as string }));
+                        reader.readAsDataURL(file);
+                      }
+                    }}
+                  />
+                </label>
+              </div>
+            </div>
           </div>
 
           {/* Details Row */}
@@ -105,7 +155,7 @@ export default function RecipeModal({
               <select
                 value={recipe.time}
                 onChange={e => setRecipe((r: any) => ({ ...r, time: e.target.value }))}
-                className="w-full bg-surface-2 text-text-primary text-sm rounded-xl px-3 py-2.5 outline-none border border-surface-3 focus:border-nori-500/50"
+                className="w-full bg-surface-2 text-text-primary text-sm rounded-2xl px-3 py-2.5 outline-none border border-surface-3 focus:border-[var(--color-accent-selected)]/50"
               >
                 {weekDays.map(d => <option key={d} value={d}>{d}</option>)}
               </select>
@@ -115,7 +165,7 @@ export default function RecipeModal({
               <select
                 value={recipe.mealType || "dinner"}
                 onChange={e => setRecipe((r: any) => ({ ...r, mealType: e.target.value }))}
-                className="w-full bg-surface-2 text-text-primary text-sm rounded-xl px-3 py-2.5 outline-none border border-surface-3 focus:border-nori-500/50"
+                className="w-full bg-surface-2 text-text-primary text-sm rounded-2xl px-3 py-2.5 outline-none border border-surface-3 focus:border-[var(--color-accent-selected)]/50"
               >
                 <option value="breakfast">Breakfast</option>
                 <option value="lunch">Lunch</option>
@@ -131,7 +181,7 @@ export default function RecipeModal({
                 value={recipe.prepTime}
                 onChange={e => setRecipe((r: any) => ({ ...r, prepTime: e.target.value }))}
                 placeholder="e.g. 30 min"
-                className="w-full bg-surface-2 text-text-primary text-sm rounded-xl px-3 py-2.5 outline-none border border-surface-3 focus:border-nori-500/50 placeholder:text-text-muted"
+                className="w-full bg-surface-2 text-text-primary text-sm rounded-2xl px-3 py-2.5 outline-none border border-surface-3 focus:border-[var(--color-accent-selected)]/50 placeholder:text-text-muted"
               />
             </div>
             <div>
@@ -141,7 +191,7 @@ export default function RecipeModal({
                 value={recipe.servings}
                 onChange={e => setRecipe((r: any) => ({ ...r, servings: Number(e.target.value) }))}
                 min={1}
-                className="w-full bg-surface-2 text-text-primary text-sm rounded-xl px-3 py-2.5 outline-none border border-surface-3 focus:border-nori-500/50"
+                className="w-full bg-surface-2 text-text-primary text-sm rounded-2xl px-3 py-2.5 outline-none border border-surface-3 focus:border-[var(--color-accent-selected)]/50"
               />
             </div>
           </div>
@@ -156,7 +206,7 @@ export default function RecipeModal({
                 { key: "carbs", label: "Carbs", unit: "g", color: "#3b82f6" },
                 { key: "fat", label: "Fat", unit: "g", color: "#ec4899" },
               ].map(n => (
-                <div key={n.key} className="bg-surface-2 rounded-xl p-2.5 text-center border border-surface-3">
+                <div key={n.key} className="bg-surface-2 rounded-2xl p-2.5 text-center border border-surface-3">
                   <p className="text-[10px] font-medium mb-1" style={{ color: n.color }}>{n.label}</p>
                   <input
                     type="number"
@@ -175,7 +225,7 @@ export default function RecipeModal({
           <div>
             <div className="flex items-center justify-between mb-2">
               <p className="text-text-secondary text-xs font-semibold">🧂 Ingredients</p>
-              <button onClick={addIngredientRow} className="text-nori-400 text-xs hover:text-nori-300">+ Add</button>
+              <button onClick={addIngredientRow} className="text-[var(--color-accent-selected)] text-xs hover:text-[var(--color-accent-selected)]">+ Add</button>
             </div>
             <div className="space-y-2">
               {recipe.ingredients.map((ing: string, idx: number) => (
@@ -185,7 +235,7 @@ export default function RecipeModal({
                     value={ing}
                     onChange={e => updateIngredient(idx, e.target.value)}
                     placeholder={`Ingredient ${idx + 1}...`}
-                    className="flex-1 bg-surface-2 text-text-primary text-sm rounded-xl px-3 py-2 outline-none border border-surface-3 focus:border-nori-500/50 placeholder:text-text-muted"
+                    className="flex-1 bg-surface-2 text-text-primary text-sm rounded-2xl px-3 py-2 outline-none border border-surface-3 focus:border-[var(--color-accent-selected)]/50 placeholder:text-text-muted"
                   />
                   {recipe.ingredients.length > 1 && (
                     <button onClick={() => removeIngredientRow(idx)} className="p-1.5 text-text-muted hover:text-rose-400 transition-colors">
@@ -209,7 +259,7 @@ export default function RecipeModal({
                   onClick={() => toggleTag(tag)}
                   className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all ${
                     recipe.tags.includes(tag)
-                      ? "bg-nori-500/20 text-nori-400 border border-nori-500/30"
+                      ? "bg-[var(--color-accent-selected)]/20 text-[var(--color-accent-selected)] border border-[var(--color-accent-selected)]/30"
                       : "bg-surface-2 text-text-muted border border-surface-3 hover:text-text-primary"
                   }`}
                 >
@@ -227,7 +277,7 @@ export default function RecipeModal({
               onChange={e => setRecipe((r: any) => ({ ...r, instructions: e.target.value }))}
               placeholder="Step-by-step instructions..."
               rows={3}
-              className="w-full bg-surface-2 text-text-primary text-sm rounded-xl px-4 py-3 outline-none border border-surface-3 focus:border-nori-500/50 placeholder:text-text-muted resize-none"
+              className="w-full bg-surface-2 text-text-primary text-sm rounded-2xl px-4 py-3 outline-none border border-surface-3 focus:border-[var(--color-accent-selected)]/50 placeholder:text-text-muted resize-none"
             />
           </div>
         </div>
@@ -237,7 +287,7 @@ export default function RecipeModal({
           <button
             onClick={saveRecipe}
             disabled={!recipe.name.trim()}
-            className="w-full py-4 rounded-2xl bg-nori-500 text-surface-0 font-bold text-base hover:bg-nori-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-nori-500/30 flex items-center justify-center gap-2"
+            className="w-full py-4 rounded-2xl bg-[var(--color-accent-button)] text-white font-bold text-base hover:bg-[var(--color-accent-button)] disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg shadow-[var(--color-accent-selected)]/30 flex items-center justify-center gap-2"
           >
             <span className="text-xl">{editingMealId !== null ? "💾" : "🍳"}</span>
             {editingMealId !== null ? "Save Changes" : "Save Recipe"}

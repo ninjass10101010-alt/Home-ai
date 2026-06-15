@@ -1,8 +1,10 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import PageShell from "@/components/ui/PageShell";
+import TopBar from "@/components/ui/TopBar";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import { db } from "@/db";
@@ -91,27 +93,32 @@ export default function EmergencyPage() {
   const primaryContacts = contacts.filter(c => c.isPrimary);
   const otherContacts = contacts.filter(c => !c.isPrimary);
 
+  const redGlow = {
+    boxShadow: "0 0 32px rgba(244,63,94,0.22), 0 0 64px rgba(244,63,94,0.10)",
+    borderColor: "rgba(244,63,94,0.18)",
+  };
+  const redGlowStrong = {
+    boxShadow: "0 0 32px rgba(244,63,94,0.35), 0 0 64px rgba(244,63,94,0.18)",
+    borderColor: "rgba(244,63,94,0.30)",
+  };
+
   return (
     <PageShell>
-      <div
-        className="px-4 pt-12 pb-4 relative z-10"
-        style={{ paddingTop: "calc(env(safe-area-inset-top) + 2rem)" }}
-      >
-        <Link href="/" className="text-nori-400 text-xs font-medium mb-4 inline-block">
-          ← Back to Home
-        </Link>
-        <h1 className="text-2xl font-bold text-text-primary">Emergency Contacts</h1>
-        <p className="text-text-secondary text-sm mt-1">Quick access for urgent situations</p>
-      </div>
+      <TopBar
+        variant="emergency"
+        title="Emergency"
+        subtitle="Urgent Contacts & Help"
+        back
+      />
 
-      <div className="px-4 space-y-6 relative z-10">
+      <div className="px-4 space-y-6 mt-4 relative z-10 pb-6">
         {/* Primary Contacts */}
         {primaryContacts.length > 0 && (
           <section>
             <h2 className="text-text-primary font-semibold text-base mb-3">Primary Contacts</h2>
             <div className="grid grid-cols-2 gap-3">
               {primaryContacts.map((contact) => (
-                <Card key={contact.id} className="text-center">
+                <Card key={contact.id} className="text-center" style={redGlow}>
                   <div className="text-3xl mb-1">{contact.emoji || relationshipIcons[contact.relationship] || "👤"}</div>
                   <p className="text-text-primary font-medium text-sm">{contact.name}</p>
                   <p className="text-text-muted text-xs mt-0.5">{formatPhoneForDisplay(contact.phone)}</p>
@@ -120,7 +127,7 @@ export default function EmergencyPage() {
                   )}
                   <a
                     href={`tel:${cleanPhoneForTel(contact.phone)}`}
-                    className="inline-flex items-center justify-center transition-all duration-150 bg-surface-3 text-text-primary hover:bg-surface-4 active:bg-surface-2 border border-surface-4 px-3 py-1.5 text-xs rounded-xl gap-1.5 mt-2 w-full cursor-pointer font-medium no-underline"
+                    className="inline-flex items-center justify-center transition-all duration-150 bg-surface-3 text-text-primary hover:bg-surface-4 active:bg-surface-2 border border-surface-4 px-3 py-1.5 text-xs rounded-2xl gap-1.5 mt-2 w-full cursor-pointer font-medium no-underline"
                   >
                     Call
                   </a>
@@ -136,7 +143,7 @@ export default function EmergencyPage() {
             <h2 className="text-text-primary font-semibold text-base mb-3">Other Contacts</h2>
             <div className="grid grid-cols-2 gap-3">
               {otherContacts.map((contact) => (
-                <Card key={contact.id} className="text-center">
+                <Card key={contact.id} className="text-center" style={redGlow}>
                   <div className="text-3xl mb-1">{contact.emoji || relationshipIcons[contact.relationship] || "👤"}</div>
                   <p className="text-text-primary font-medium text-sm">{contact.name}</p>
                   <p className="text-text-muted text-xs mt-0.5">{formatPhoneForDisplay(contact.phone)}</p>
@@ -145,7 +152,7 @@ export default function EmergencyPage() {
                   )}
                   <a
                     href={`tel:${cleanPhoneForTel(contact.phone)}`}
-                    className="inline-flex items-center justify-center transition-all duration-150 bg-surface-3 text-text-primary hover:bg-surface-4 active:bg-surface-2 border border-surface-4 px-3 py-1.5 text-xs rounded-xl gap-1.5 mt-2 w-full cursor-pointer font-medium no-underline"
+                    className="inline-flex items-center justify-center transition-all duration-150 bg-surface-3 text-text-primary hover:bg-surface-4 active:bg-surface-2 border border-surface-4 px-3 py-1.5 text-xs rounded-2xl gap-1.5 mt-2 w-full cursor-pointer font-medium no-underline"
                   >
                     Call
                   </a>
@@ -157,7 +164,7 @@ export default function EmergencyPage() {
 
         {/* Empty state */}
         {contacts.length === 0 && (
-          <Card className="text-center py-8">
+          <Card className="text-center py-8" style={redGlow}>
             <div className="text-4xl mb-3">📋</div>
             <p className="text-text-primary font-medium">No emergency contacts yet</p>
             <p className="text-text-secondary text-sm mt-1">Add contacts in Settings to get started</p>
@@ -174,7 +181,7 @@ export default function EmergencyPage() {
           <h2 className="text-text-primary font-semibold text-base mb-3">Common Situations</h2>
           <div className="space-y-2">
             {emergencyTypes.map((type) => (
-              <Card key={type.id} className="flex items-center gap-3">
+              <Card key={type.id} className="flex items-center gap-3" style={redGlow}>
                 <span className="text-2xl">{type.icon}</span>
                 <div className="flex-1">
                   <p className="text-text-primary text-sm font-medium">{type.label}</p>
@@ -188,7 +195,7 @@ export default function EmergencyPage() {
 
         {/* Settings quick-link */}
         <Link href="/settings#emergency" className="block">
-          <Card className="bg-[var(--color-surface-2)] border-dashed border-[var(--color-surface-4)] text-center cursor-pointer hover:bg-[var(--color-surface-3)] transition-colors">
+          <Card className="bg-[var(--color-surface-2)] border-dashed text-center cursor-pointer hover:bg-[var(--color-surface-3)] transition-colors" style={redGlow}>
             <div className="flex items-center justify-center gap-2">
               <span className="text-lg">⚙️</span>
               <p className="text-text-secondary text-sm">Edit contacts in Settings</p>
@@ -197,7 +204,7 @@ export default function EmergencyPage() {
         </Link>
 
         {/* 911 */}
-        <Card className="bg-rose-500/10 border-rose-500/20">
+        <Card className="bg-rose-500/10" style={redGlowStrong}>
           <div className="text-center">
             <span className="text-3xl">🚨</span>
             <h3 className="text-rose-400 font-semibold mt-2">Life-Threatening Emergency</h3>

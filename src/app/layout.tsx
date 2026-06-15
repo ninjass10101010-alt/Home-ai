@@ -1,8 +1,10 @@
 import type { Metadata, Viewport } from "next";
+import Script from "next/script";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { WeatherProvider } from "@/hooks/useWeather";
 import { AtmosphericProvider } from "@/hooks/useAtmosphericTheme";
+import { AuthProvider } from "@/hooks/useAuth";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -83,22 +85,21 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`} suppressHydrationWarning>
-        {/* Anti-FOUC script: must run before Next/React hydrates */}
-        {/* eslint-disable-next-line @next/next/no-sync-scripts */}
-        <script
+        <Script
+          id="theme-init"
+          strategy="beforeInteractive"
           dangerouslySetInnerHTML={{ __html: themeScript }}
-          // keep it deterministic and as early as possible
-          defer={false}
-          suppressHydrationWarning
         />
 
-        <ThemeProvider>
-          <WeatherProvider>
-            <AtmosphericProvider>
-              {children}
-            </AtmosphericProvider>
-          </WeatherProvider>
-        </ThemeProvider>
+        <AuthProvider>
+          <ThemeProvider>
+            <WeatherProvider>
+              <AtmosphericProvider>
+                {children}
+              </AtmosphericProvider>
+            </WeatherProvider>
+          </ThemeProvider>
+        </AuthProvider>
       </body>
     </html>
   );

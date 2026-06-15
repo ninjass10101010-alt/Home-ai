@@ -1,14 +1,16 @@
+import type { CSSProperties, ReactNode } from "react";
 import BottomNav from "./BottomNav";
 
 interface PageShellProps {
-  children: React.ReactNode;
+  children: ReactNode;
   className?: string;
+  style?: CSSProperties;
 }
 
-export default function PageShell({ children, className = "" }: PageShellProps) {
+export default function PageShell({ children, className = "", style }: PageShellProps) {
   return (
-    <div className="min-h-screen bg-surface-0 max-w-lg mx-auto relative">
-      <main className={`pb-28 ${className}`}>{children}</main>
+    <div className={`min-h-screen bg-[var(--color-canvas)] max-w-lg md:max-w-3xl mx-auto relative overflow-hidden ${className}`} style={style}>
+      <main className="relative z-10 pb-32">{children}</main>
       <BottomNav />
     </div>
   );

@@ -2,39 +2,45 @@
 
 import { useState, Suspense } from "react";
 import PageShell from "@/components/ui/PageShell";
-import TopBar from "@/components/ui/TopBar";
 import { useSearchParams } from "next/navigation";
 import { db } from "@/db";
 import { emptyRecipe } from "@/data/meals";
 import { Meal, Recipe, Tab } from "@/types/meals";
-
-// Hooks
 import { useMeals } from "@/hooks/useMeals";
 import { useGrocery } from "@/hooks/useGrocery";
 import { usePantry } from "@/hooks/usePantry";
 import { useRecipes } from "@/hooks/useRecipes";
-import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
-
-// Components
 import MealsTab from "@/components/meals/MealsTab";
 import GroceryTab from "@/components/meals/GroceryTab";
 import PantryTab from "@/components/meals/PantryTab";
 import RecipesTab from "@/components/meals/RecipesTab";
 import RecipeModal from "@/components/meals/RecipeModal";
+import PageHeader from "@/components/patterns/PageHeader";
+import SegmentedControl from "@/components/ui/SegmentedControl";
+import Surface from "@/components/ui/Surface";
+import SoftButton from "@/components/ui/SoftButton";
+import IconButton from "@/components/ui/IconButton";
+import Chip from "@/components/ui/Chip";
+import EmptyState from "@/components/ui/EmptyState";
+import ErrorState from "@/components/ui/ErrorState";
+import Modal from "@/components/ui/Modal";
+import Toast from "@/components/ui/Toast";
+import ListRow from "@/components/ui/ListRow";
+import StatTile from "@/components/patterns/StatTile";
+import DayStrip from "@/components/patterns/DayStrip";
+import SectionCard from "@/components/patterns/SectionCard";
 
 function MealHubContent() {
   const searchParams = useSearchParams();
   const initialTab = (searchParams.get("tab") as Tab) || "meals";
   const [activeTab, setActiveTab] = useState<Tab>(initialTab);
   const [notification, setNotification] = useState<string | null>(null);
-  const { colors, accentRgb } = useAtmosphericTheme();
 
   const showToast = (msg: string) => {
     setNotification(msg);
     setTimeout(() => setNotification(null), 3000);
   };
 
-  // State Hooks
   const {
     meals, setMeals, activeDay, setActiveDay, activeMeals, deleteMeal,
     aiMealIdeas, aiMealLoading, showAiSuggestions, generateAiMeals
@@ -54,7 +60,6 @@ function MealHubContent() {
     recipes, saveCatalogRecipe, deleteCatalogRecipe, handleFileUpload
   } = useRecipes(showToast);
 
-  // Recipe Creator Modal State
   const [showRecipeModal, setShowRecipeModal] = useState(false);
   const [editingMealId, setEditingMealId] = useState<number | null>(null);
   const [recipe, setRecipe] = useState({ ...emptyRecipe });
@@ -73,7 +78,6 @@ function MealHubContent() {
   const saveRecipe = () => {
     if (!recipe.name.trim()) return;
     if (editingMealId !== null) {
-      // Update existing meal
       const updated: Meal = {
         ...recipe,
         id: editingMealId,
@@ -85,7 +89,6 @@ function MealHubContent() {
       if (updated.time !== activeDay) setActiveDay(updated.time);
       showToast(`✅ "${updated.name}" updated!`);
     } else {
-      // Create new meal
       const newMeal: Meal = {
         ...recipe,
         id: Date.now(),
@@ -95,8 +98,6 @@ function MealHubContent() {
       } as Meal;
       db.insertMeal(newMeal);
       setMeals(prev => {
-        // Replace only the meal slot (same day + same mealType),
-        // instead of removing every meal for that day.
         const filtered = prev.filter(
           m => !(m.time === newMeal.time && m.mealType === newMeal.mealType)
         );
@@ -109,7 +110,6 @@ function MealHubContent() {
     setEditingMealId(null);
   };
 
-  // Recipe Actions from Catalog
   const [showRecipeEditor, setShowRecipeEditor] = useState(false);
   const [editingRecipeId, setEditingRecipeId] = useState<number | null>(null);
 
@@ -158,155 +158,153 @@ function MealHubContent() {
   };
 
   const neededCount = groceryItems.filter(i => i.needed).length;
+  const weekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day, index) => ({
+    id: day,
+    label: day,
+    detail: String(index + 1),
+    active: day === activeDay,
+  }));
+
+  if (activeTab === "meals" && !meals.length) {
+    return (
+      <PageShell>
+        <Toast open={Boolean(notification)} tone="success">{notification}</Toast>
+        <PageHeader title="Meals" subtitle="Family meal planning" action={<IconButton aria-label="Add meal" onClick={() => openRecipeModal()}><span>＋</span></IconButton>} icon="🍽️" />
+        <div className="px-4">
+          <EmptyState title="No meals planned yet" description="Start with a simple breakfast, lunch, snack, or dinner for the week." actionLabel="Add meal" onAction={() => openRecipeModal()} />
+        </div>
+      </PageShell>
+    );
+  }
 
   return (
     <PageShell>
-      {/* Toast */}
-      {notification && (
-        <div
-          className={`fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-2 px-4 py-2.5 rounded-2xl text-sm font-medium shadow-2xl border transition-all animate-[slideDown_0.3s_ease] ${
-            notification.includes("❌")
-              ? "bg-rose-500/20 border-rose-500/30 text-rose-300"
-              : "bg-nori-500/20 border-nori-500/30 text-nori-300"
-          }`}
-          style={{ backdropFilter: "blur(20px)" }}
-        >
-          {notification}
-        </div>
-      )}
+      <Toast open={Boolean(notification)} tone={notification?.includes("❌") ? "error" : "success"}>{notification}</Toast>
 
-      <TopBar
+      <PageHeader
         title="Kitchen"
         subtitle={activeTab === "meals" ? "This week" : activeTab === "grocery" ? `${neededCount} items needed` : activeTab === "pantry" ? `${pantryItems.length} items tracked` : "Recipe Catalog"}
-        right={
+        action={
           activeTab === "meals" ? (
-            <button
-              onClick={generateAiMeals}
-              disabled={aiMealLoading}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-nori-500/15 text-nori-400 text-xs font-medium hover:bg-nori-500/25 transition-colors disabled:opacity-50"
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
-                <path d="M12 2l2 7h7l-5.7 4.1 2.2 6.9L12 16l-5.5 4 2.2-6.9L3 9h7z" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+            <SoftButton size="sm" variant="secondary" onClick={generateAiMeals} disabled={aiMealLoading}>
               {aiMealLoading ? "Thinking..." : "AI Suggest"}
-            </button>
+            </SoftButton>
           ) : null
         }
+        icon="🍽️"
       />
 
-      {/* Tab Bar */}
-      <div className="px-4 mb-4">
-        <div className="flex rounded-2xl bg-surface-2 p-1 gap-1">
-          {([
+      <div className="px-4 space-y-5 pb-8">
+        <SegmentedControl
+          aria-label="Meal hub"
+          value={activeTab}
+          onChange={(value) => setActiveTab(value as Tab)}
+          options={[
             { id: "meals", label: "🍽️ Meals" },
             { id: "grocery", label: "🛒 Grocery" },
             { id: "pantry", label: "🥫 Pantry" },
             { id: "recipes", label: "📖 Recipes" },
-          ] as { id: Tab; label: string }[]).map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex-1 py-2 rounded-xl text-xs font-semibold transition-all duration-200 ${
-                activeTab === tab.id
-                  ? "bg-nori-500 text-surface-0 shadow-lg shadow-nori-500/25"
-                  : "text-text-secondary hover:text-text-primary"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
+          ]}
+        />
+
+        {activeTab === "meals" && (
+          <div className="space-y-5">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <StatTile label="Planned" value={meals.length} detail="This week" icon="📅" tone="accent" />
+              <StatTile label="Tonight" value={activeMeals.length} detail="Selected day" icon="🌙" tone="warning" />
+              <StatTile label="Sync" value={isSyncing ? "…" : "Ready"} detail="Pantry + grocery" icon="🔁" tone="success" />
+            </div>
+
+            <SectionCard title="Week" description="Tap a day to edit meals." icon="🗓️">
+              <DayStrip
+                value={activeDay}
+                onChange={setActiveDay}
+                days={weekDays}
+              />
+            </SectionCard>
+
+            <MealsTab
+              meals={meals}
+              activeDay={activeDay}
+              setActiveDay={setActiveDay}
+              activeMeals={activeMeals}
+              deleteMeal={deleteMeal}
+              openRecipeModal={openRecipeModal}
+              setActiveTab={setActiveTab}
+              handleSyncMealToGrocery={syncMealToGrocery}
+              isSyncing={isSyncing}
+              showAiSuggestions={showAiSuggestions}
+              aiMealIdeas={aiMealIdeas}
+              aiMealLoading={aiMealLoading}
+              recipes={recipes}
+              addRecipeToMealSlot={addRecipeToMealSlot}
+              importRecipeFromUrl={async (url: string, source?: string) => {
+                const label = source ? source : "Web";
+                showToast(`📥 Importing from ${label}: ${url}...`);
+                try {
+                  const res = await fetch("/api/recipes/ingest", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ type: "url", url, sourceLabel: label }),
+                  });
+                  const data = await res.json();
+                  if (!res.ok) {
+                    showToast(`❌ ${data?.error || "Import failed"}`);
+                    return;
+                  }
+                  saveCatalogRecipe(data.recipe);
+                  showToast(`✅ Added "${data?.recipe?.title || "Imported Recipe"}" to recipe catalog`);
+                } catch (e: any) {
+                  showToast(`❌ Import failed: ${e?.message || "Unknown error"}`);
+                }
+              }}
+              handleFileUpload={handleFileUpload}
+            />
+          </div>
+        )}
+
+        {activeTab === "grocery" && (
+          <GroceryTab
+            groceryItems={groceryItems}
+            setGroceryItems={setGroceryItems}
+            activeCategory={activeCategory}
+            setActiveCategory={setActiveCategory}
+            isSyncing={isSyncing}
+            recentlyBought={recentlyBought}
+            clearRecentlyBought={clearRecentlyBought}
+            addGroceryItem={addGroceryItem}
+            toggleGroceryNeeded={toggleGroceryNeeded}
+            deleteGroceryItem={deleteGroceryItem}
+            updateGroceryItem={updateGroceryItem}
+            syncMealToGrocery={syncMealToGrocery}
+            syncPantryToGrocery={syncPantryToGrocery}
+          />
+        )}
+
+        {activeTab === "pantry" && (
+          <PantryTab
+            pantryItems={pantryItems}
+            addPantryItem={addPantryItem}
+            updatePantryStatus={updatePantryStatus}
+            removePantryItem={removePantryItem}
+            syncPantryToGrocery={syncPantryToGrocery}
+            isSyncing={isSyncing}
+          />
+        )}
+
+        {activeTab === "recipes" && (
+          <RecipesTab
+            recipes={recipes}
+            saveCatalogRecipe={saveCatalogRecipe}
+            deleteCatalogRecipe={deleteCatalogRecipe}
+            addRecipeToPlan={addRecipeToPlan}
+            addRecipeToGrocery={addRecipeToGrocery}
+            startAddRecipe={startAddRecipe}
+            startEditRecipe={startEditRecipe}
+            handleFileUpload={handleFileUpload}
+          />
+        )}
       </div>
-
-      {activeTab === "meals" && (
-        <MealsTab
-          meals={meals}
-          activeDay={activeDay}
-          setActiveDay={setActiveDay}
-          activeMeals={activeMeals}
-          deleteMeal={deleteMeal}
-          openRecipeModal={openRecipeModal}
-          setActiveTab={setActiveTab}
-          handleSyncMealToGrocery={syncMealToGrocery}
-          isSyncing={isSyncing}
-          showAiSuggestions={showAiSuggestions}
-          aiMealIdeas={aiMealIdeas}
-          aiMealLoading={aiMealLoading}
-          recipes={recipes}
-          addRecipeToMealSlot={addRecipeToMealSlot}
-          importRecipeFromUrl={async (url: string, source?: string) => {
-            const label = source ? source : "Web";
-            showToast(`📥 Importing from ${label}: ${url}...`);
-            try {
-              const res = await fetch("/api/recipes/ingest", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ type: "url", url, sourceLabel: label }),
-              });
-              const data = await res.json();
-              if (!res.ok) {
-                showToast(`❌ ${data?.error || "Import failed"}`);
-                return;
-              }
-
-              // Add into recipe catalog (consistent across dashboards)
-              // useRecipes hook stores recipes state; we reuse saveCatalogRecipe
-              saveCatalogRecipe(data.recipe);
-              showToast(`✅ Added "${data?.recipe?.title || "Imported Recipe"}" to recipe catalog`);
-            } catch (e: any) {
-              showToast(`❌ Import failed: ${e?.message || "Unknown error"}`);
-            }
-          }}
-          handleFileUpload={handleFileUpload}
-        />
-      )}
-
-
-
-
-
-      {activeTab === "grocery" && (
-        <GroceryTab 
-          groceryItems={groceryItems}
-          setGroceryItems={setGroceryItems}
-          activeCategory={activeCategory}
-          setActiveCategory={setActiveCategory}
-          isSyncing={isSyncing}
-          recentlyBought={recentlyBought}
-          clearRecentlyBought={clearRecentlyBought}
-          addGroceryItem={addGroceryItem}
-          toggleGroceryNeeded={toggleGroceryNeeded}
-          deleteGroceryItem={deleteGroceryItem}
-          updateGroceryItem={updateGroceryItem}
-          syncMealToGrocery={syncMealToGrocery}
-          syncPantryToGrocery={syncPantryToGrocery}
-        />
-      )}
-
-      {activeTab === "pantry" && (
-
-        <PantryTab 
-          pantryItems={pantryItems}
-          addPantryItem={addPantryItem}
-          updatePantryStatus={updatePantryStatus}
-          removePantryItem={removePantryItem}
-          syncPantryToGrocery={syncPantryToGrocery}
-          isSyncing={isSyncing}
-        />
-      )}
-
-      {activeTab === "recipes" && (
-        <RecipesTab 
-          recipes={recipes}
-          saveCatalogRecipe={saveCatalogRecipe}
-          deleteCatalogRecipe={deleteCatalogRecipe}
-          addRecipeToPlan={addRecipeToPlan}
-          addRecipeToGrocery={addRecipeToGrocery}
-          startAddRecipe={startAddRecipe}
-          startEditRecipe={startEditRecipe}
-          handleFileUpload={handleFileUpload}
-        />
-      )}
 
       {showRecipeModal && (
         <RecipeModal
@@ -317,7 +315,7 @@ function MealHubContent() {
           setShowRecipeModal={setShowRecipeModal}
         />
       )}
-      
+
       {showRecipeEditor && (
         <RecipeModal
           recipe={recipe}
@@ -330,33 +328,13 @@ function MealHubContent() {
           setShowRecipeModal={setShowRecipeEditor}
         />
       )}
-
-      <style jsx global>{`
-        @keyframes slideDown {
-          from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
-          to { opacity: 1; transform: translateX(-50%) translateY(0); }
-        }
-        @keyframes bounceIn {
-          0% { transform: scale(0.8); opacity: 0.5; }
-          60% { transform: scale(1.1); }
-          100% { transform: scale(1); opacity: 1; }
-        }
-        @keyframes float {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-4px); }
-        }
-        @keyframes bounce {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-3px); }
-        }
-      `}</style>
     </PageShell>
   );
 }
 
 export default function MealHubPage() {
   return (
-    <Suspense fallback={<div className="flex items-center justify-center min-h-screen"><div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary-500"></div></div>}>
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center"><div className="h-12 w-12 animate-spin rounded-full border-2 border-t-transparent border-[var(--color-accent-selected)]" /></div>}>
       <MealHubContent />
     </Suspense>
   );

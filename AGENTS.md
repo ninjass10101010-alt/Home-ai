@@ -6,12 +6,12 @@
 > **Mandatory:** After any code change that touches UI, navigation, meals, emergency, or integrations, update this file in the same session.
 
 **Current Dashboard Snapshot** (maintain on every relevant change)  
-- **Last Updated:** 2026-05-31 | Avatar system overhaul + theme expansion  
-- **Last major UI refresh:** 2026-05-31 — SigmaImage/SigmaAvatar integration, 8 accent colors, avatar size/glow controls, localStorage persistence for family members  
-- **Active integrations:** Meals ↔ Pantry ↔ Grocery bidirectional sync (`mealSyncService`), Emergency SMS + Email (free Gmail + carrier gateways), AI Chat ("Ask Consuela"), full theme system (3 modes + **8 accent colors** + high-contrast), PocketBase data layer
+- **Last Updated:** 2026-06-14 | Warm Glass v2 design system rollout
+- **Last major UI refresh:** 2026-06-14 — Warm Glass v2 overhaul: new design tokens, glass/neumorphic primitives, shared page patterns, 5-tab bottom navigation + More menu, and redesigned Home / Tasks / Meals / Settings / More surfaces.
+- **Active integrations:** Meals ↔ Pantry ↔ Grocery bidirectional sync (`mealSyncService`), Emergency SMS + Email (free Gmail + carrier gateways), AI Chat ("Ask Consuela"), full theme system (3 modes + **10 accent colors** + high-contrast), PocketBase data layer
 - **IMPORTANT BUILD NOTE:** After every `npm run build`, the CSS chunks can go out of sync (Next.js 16.2.6 bug). If the dashboard loads with broken layout (big icons, wrong nav styles), **restart the container**: `docker restart consuela-dashboard`. This is faster than a rebuild.
 - **IMPORTANT BUILD NOTE:** After every `npm run build`, the CSS chunks can go out of sync (Next.js 16.2.6 Turbopack bug). If the dashboard loads with broken layout (big icons, wrong nav styles), **restart the container**: `docker restart consuela-dashboard`. This is faster than a rebuild.
-- **Navigation model:** Persistent bottom tab bar (8 items) + always-visible floating red Emergency shield button (top-right on Home)
+- **Navigation model:** Persistent bottom tab bar (Home, Ask Consuela, Calendar, Meals, Tasks) + More menu for Grocery, Emergency, Settings, plus always-visible floating red Emergency shield button on Home
 - **Tech surface for ops:** Next.js 16 + React 19 + Tailwind CSS 4, PocketBase backend (`pocketbase` SDK), API routes under `src/app/api/`, custom SVG animations (no framer-motion)
 
 ---
@@ -53,13 +53,127 @@ The dashboard is a mobile-first, glass-morphism, bottom-nav app with a persisten
 Use this exact delta format in the "What's New" area and update 1.5 journeys:
 
 ```markdown
-### UI Change Record — YYYY-MM-DD — <short commit subject>
+### UI Change Record — 2026-06-12 — Liquid Glass cards for Today / Daily Schedule / Tasks
+- Added / Changed: `src/app/page.tsx` (Today + Tasks items), `src/components/ui/ScheduleDisplay.tsx` (Schedule items + empty state)
+- Visual / Motion: New `.liquid-glass` class in `src/app/globals.css`. Each row is now a 3D "bubble": color-tinted linear-gradient frosting (rgba 0.32 → 0.16 across 135°), 20px backdrop blur, 1.25rem squircle radius, bright `inset 0 1px 0` top highlight + soft `inset 0 -1px 0` bottom edge, 0/8/24 drop shadow that deepens to 0/14/32 on hover with a 3px lift. Light-mode variant swaps the inner highlight to a brighter 0.85 white edge and softens the drop shadow. Accent bar shrunk from w-1 to w-0.5 and given an 8px currentColor glow. Member / points pills moved from solid `surface-3` to `glass-subtle`. Reduced-motion disables the lift.
+- Color frosting sources: Today events use the event color (mint/violet/amber/cyan/rose/nori). Tasks use priority (rose > 15pts, amber > 10pts, mint default). Daily Schedule uses the schedule item color.
+- Agent action required: Update this section + Common Journeys + any affected SOP
+- User-facing description (copy-paste ready for responses):
+  > "On the Home screen the Today events, Daily Schedule, and Tasks cards now feel like little 3D bubbles — each row has a frosted glass surface with a light frosting of its existing color, a bright top highlight, and a soft drop shadow that lifts the card off the background. Hover to see them gently rise."
 - Added / Changed: <component or page>
 - Visual / Motion: <describe exactly what user sees, file paths, CSS classes>
 - Agent action required: Update this section + Common Journeys + any affected SOP
 - User-facing description (copy-paste ready for responses):
   > "On the Home screen the chat bubble now gently floats up and down..."
 ```
+
+### UI Change Record — 2026-06-14 — Warm Glass v2 design system rollout
+- Added / Changed: `src/lib/theme-config.ts`, `src/hooks/useTheme.tsx`, `src/lib/design-tokens.ts`, `src/app/globals.css`, `src/components/ui/*`, `src/components/patterns/*`, `src/app/_design-system/page.tsx`, `src/app/page.tsx`, `src/app/tasks/page.tsx`, `src/app/meals/page.tsx`, `src/app/settings/page.tsx`, `src/app/more/page.tsx`, `src/components/ui/BottomNav.tsx`, `docs/DESIGN_SYSTEM.md`
+- Visual / Motion: Warm Glass v2 adds a warm canvas, glass cards, neumorphic raised/pressed/flat surfaces, tactile soft buttons, icon buttons, toggles, segmented controls, chips, list rows, swipe rows, text fields, steppers, empty/error states, progress rings, bottom-sheet modals, skeletons, pull-to-refresh wrappers, and toasts. Shared patterns add page headers, section cards, stat tiles, day strips, form fields, and More menu rows. Motion stays CSS-only via keyframes and Tailwind transitions; reduced-motion remains respected.
+- Color sources: Ten accent colors now include `apricot` and `sage`. Warm Glass surfaces use `--color-canvas`, `--glass-tint-*`, `--border-frost-*`, `--neu-*`, `--warm-shadow-*`, `--warm-elevation-*`, and `--warm-duration-*` variables.
+- Navigation: Bottom nav now uses five primary tabs (Home, Ask Consuela, Calendar, Meals, Tasks) plus a More menu for Grocery, Emergency, and Settings. The Home emergency shield remains fixed at `top-4 right-4`.
+- Agent action required: Update this section + Common Journeys + affected SOPs. For visual QA, open `/_design-system` in development to review primitives and patterns in dark and light themes.
+- User-facing description (copy-paste ready for responses):
+  > "The dashboard now uses a warmer glass-and-neumorphism design system. Cards feel softer and more tactile, controls are easier to tap, the bottom nav is simplified to five primary tabs plus More, and the theme palette now includes apricot and sage accents."
+
+### UI Change Record — 2026-06-14 — Leaderboard champion share ring
+- Added / Changed: `src/app/tasks/page.tsx`
+- Visual / Motion: The “This week’s champion” card now calculates the champion ring from the visible leaderboard points instead of the empty earned-points bucket. It shows the champion’s share of family points, so the default leaderboard no longer displays a misleading 0% ring.
+- Color sources: Uses the existing Warm Glass champion card surface and `--color-accent-selected` ProgressRing stroke.
+- Agent action required: Update this section + Common Journeys if describing the Tasks leaderboard.
+- User-facing description (copy-paste ready for responses):
+  > "The leaderboard champion card now shows Caspian’s share of the family points instead of a 0% ring, so the champion box matches the visible leaderboard."
+
+### UI Change Record — 2026-06-14 — Pending Tasks swipe action fix
+- Added / Changed: `src/components/ui/SwipeableRow.tsx`, `src/app/tasks/page.tsx`
+- Visual / Motion: Pending task rows still use the same Warm Glass swipe affordances, but the swipe primitive now supports both pointer and touch gestures without holding pointer capture. Right swipe opens the PIN completion modal; left swipe opens edit. Tapping a pending row also opens the PIN completion modal as a fallback. Duplicate pointer/touch finish events are ignored so Cancel does not immediately reopen the PIN box.
+- Color sources: Existing pending action colors remain — emerald check on the left and rose X on the right.
+- Agent action required: Update this section + Common Journeys if describing how to complete a pending task.
+- User-facing description (copy-paste ready for responses):
+  > "Pending Tasks can now be completed with the same swipe gesture: drag the row to the right to open the PIN screen, or just tap the row if you prefer a direct completion flow."
+
+- Visual / Motion: Bottom nav now uses a clearer glass treatment with stronger backdrop blur (`24px`), light/dark-specific black tint opacity, brighter white edge borders, and an inset highlight for more depth. Light mode keeps contrast with a dark glass tint while feeling more transparent. The active rainbow rim now uses a real 2px border-gradient instead of a masked radial ring, keeping it aligned to the button edge and reducing jagged/pixelated edges.
+- Agent action required: Update this section + Common Journeys + any affected SOP
+- User-facing description (copy-paste ready for responses):
+  > "The bottom navigation keeps its glass look, but the bar is a little clearer and smoother now. In light mode it uses a subtle dark tint plus blur so it still stands out against white backgrounds, and the active rainbow rim sits right on the button edge without looking pixelated."
+
+### UI Change Record — 2026-06-12 — Settings Accent Studio
+- Added / Changed: `src/app/settings/page.tsx`
+- Visual / Motion: The old Accent Customization color-picker block is now a glass `Accent Studio` panel. Users can tap a target pill (`Selected`, `Glow`, `Button`, `Border`), choose from curated palette chips, or use a custom color picker for the selected target. A small live preview card shows the selected gradient, glow halo, button card, and border treatment. `Sync button + border` and `Reset` actions sit in the panel header for quick recovery.
+- Color sources: Existing 8 accent presets remain (`nori`, `violet`, `rose`, `coral`, `lavender`, `cyan`, `mint`, `amber`). Presets update all four target variables at once: selected hex, glow rgba, button hex, and border rgba.
+- Agent action required: Update this section + Common Journeys + any affected SOP
+- User-facing description (copy-paste ready for responses):
+  > "Settings → Theme & Appearance now has an Accent Studio panel. You can tap a polished palette, then tap Selected, Glow, Button, or Border to fine-tune just that part with a cleaner custom color picker and live preview."
+
+### UI Change Record — 2026-06-12 — Accent Studio layout and readability refresh
+- Added / Changed: `src/app/settings/page.tsx`
+- Visual / Motion: Accent Studio section now has more breathing room throughout. Section padding increased from `p-5` to `p-6 sm:p-8`. Grid gaps increased from `gap-5` to `gap-8`. Color targets: swatches taller (`h-14`), labels bumped to `text-sm font-semibold` (was `text-xs`), descriptions use `text-text-secondary text-xs` instead of `text-text-muted text-[11px]` for better contrast, gap below swatch reduced from `mb-4` to `mb-3`. Section headings use `text-[13px]` with `tracking-[0.15em]` for easier reading. Curated palettes: switched from overlaid gradient cards with "Selected" badge to a cleaner stacked layout — full-width gradient swatch on top with the palette name centered below in `text-sm font-medium`. Custom color picker row uses `p-5` (was `p-4`), larger color swatch (`h-14 w-14`), and `text-sm` for both label and helper text. Live preview: removed the forced `lg:mt-10` offset, increased grid gaps, simplified preview card copy, and bumped all card text to `text-sm`. Header: title bumped to `text-lg font-bold`, action buttons use `text-sm font-medium` with `rounded-xl`.
+- Color sources: Existing `accentOptions` light/dark values.
+- Agent action required: Update this section + Common Journeys + any affected SOP
+- User-facing description (copy-paste ready for responses):
+  > "Accent Studio is a little cleaner now: the color target buttons have larger swatches and clearer text underneath, while the curated palette row keeps big color previews without extra labels."
+
+### UI Change Record — 2026-06-12 — Accent Studio live preview integrated
+- Added / Changed: `src/app/settings/page.tsx`
+- Visual / Motion: The Live Preview pane no longer wraps in its own heavy inner card. Replaced the `rounded-[1.75rem] border bg-surface-2/40` sub-card with a relative column that uses a soft `radial-gradient` of the active accent glow behind it and a thin vertical accent-border divider line on its left (desktop only). Grid columns rebalanced from `1.2fr_0.8fr` to `1.1fr_1fr` with `lg:gap-10`, and the 2x2 target preview grid tightened from `gap-4` to `gap-3`. Mobile / tablet fall back to the same stacked flow but without the inner card. The preview now feels like a continuation of the Accent Studio widget instead of a nested panel.
+- Color sources: Live accent `glow` and `border` values from `useTheme` accentHex.
+- Agent action required: Update this section + Common Journeys + any affected SOP
+- User-facing description (copy-paste ready for responses):
+  > "The Accent Studio live preview no longer looks like a separate widget. The preview pane now flows as part of the studio with a soft accent glow behind it and a thin accent divider separating it from the color controls, so everything feels like one cohesive panel."
+
+### UI Change Record — 2026-06-12 — Settings page wider container
+- Added / Changed: `src/app/settings/page.tsx`
+- Visual / Motion: Settings page `PageShell` now widens to `md:max-w-3xl` (768px) on tablet/desktop, overriding the default mobile `max-w-lg` (512px). This gives the Accent Studio 4-column color targets, 4-column curated palettes, and the controls + live preview 2-column layout enough horizontal room to breathe. Mobile (<768px) keeps the original 512px width so the bottom-nav mobile experience is unchanged. The wider container also makes the season selector, holiday grid, and family/emergency list rows easier to read on larger screens.
+- Color sources: Unchanged — pure layout reflow.
+- Agent action required: Update this section + Common Journeys + any affected SOP
+- User-facing description (copy-paste ready for responses):
+  > "The Settings page now uses a wider container on tablet and desktop, so the Accent Studio color targets, palettes, and live preview all have room to sit side by side without feeling cramped. Mobile is unchanged."
+
+### UI Change Record — 2026-06-12 — Settings Control Deck
+- Added / Changed: `src/app/settings/page.tsx`, `src/app/globals.css`
+- Visual / Motion: The whole Settings page now uses a unified glass control-deck treatment. Each dashboard control area is wrapped in a rounded `settings-control-card` with a consistent icon badge, title, helper copy, live badge, translucent surface, backdrop blur, soft shadow, and subtle accent halo. Inner groups like the display mode radio stack and weather preview use `settings-control-panel` so they feel connected to Accent Studio without losing their own section identity. Section dividers were replaced with spacing so each control card stands on its own.
+- Color frosting sources: Existing theme tokens (`--color-surface-*`, `--color-text-*`, `--color-accent-selected`, `--color-accent-button`) plus light/dark variants in `globals.css`.
+- Agent action required: Update this section + Common Journeys + any affected SOP
+- User-facing description (copy-paste ready for responses):
+  > "Settings now has a cleaner control-deck layout: every dashboard section is its own polished glass card with matching headers, badges, and soft accent glow, so the page feels consistent while still separating Weather, Theme, Family, Emergency, Layout, and Data controls."
+
+### UI Change Record — 2026-06-12 — Accent Studio rollout to primary actions
+- Added / Changed: `src/components/ui/Button.tsx`, `src/app/settings/page.tsx`, `src/app/calendar/page.tsx`, `src/app/tasks/page.tsx`, `src/app/meals/page.tsx`, `src/components/meals/MealsTab.tsx`, `src/components/meals/GroceryTab.tsx`, `src/components/meals/PantryTab.tsx`, `src/components/meals/RecipesTab.tsx`, `src/components/meals/RecipeModal.tsx`
+- Visual / Motion: Primary CTAs now use `--color-accent-button`, while selected tabs, active days, filters, focus rings, and active states use `--color-accent-selected`. The shared `Button` primary variant now reads from `--color-accent-button`, so Settings, Calendar, Tasks, and Meals buttons respond to Accent Studio customizations immediately.
+- Color sources: Custom Accent Studio palette values from `home-ai-theme-config` via `useTheme`.
+- Agent action required: Update this section + Common Journeys + any affected SOP
+- User-facing description (copy-paste ready for responses):
+  > "Accent Studio now drives the main buttons across Settings, Calendar, Tasks, and Meals. Pick your accent in Settings and the primary action buttons use the Button color while active tabs and selected states use the Selected color."
+
+### UI Change Record — 2026-06-12 — BottomNav button halo and rainbow ring
+- Added / Changed: `src/components/ui/BottomNav.tsx`
+- Visual / Motion: The active nav indicator no longer uses the sliding active pill. The active button now has three layers: a soft radial outer halo pushed outside the button, a tight rainbow ring wrapped around the button edge, and the tab-specific glass fill behind the icon.
+- Color sources: Per-tab active color map in `BottomNav.tsx` for the outer halo and button fill; fixed rainbow conic gradient for the ring.
+- Agent action required: Update this section + Common Journeys + any affected SOP
+- User-facing description (copy-paste ready for responses):
+  > "The bottom nav active state is cleaner now: the rainbow glow hugs the active button itself, with a softer halo floating just outside it instead of a sliding pill behind the row."
+
+### UI Change Record — 2026-06-12 — Calendar schedule tab redesigned as Family Routines
+- Added / Changed: `src/app/calendar/page.tsx`, `src/app/globals.css`
+- Visual / Motion: The schedule tab now matches the design project's RoutinesPage layout. Schedule items are grouped by time-of-day categories (Morning, Afternoon, Evening, Night) with gradient icon headers showing the time range. Each item is rendered as a glass `calendar-routine-card` with an icon circle (colored by the item's schedule color), title, time in accent color, type/meal badges, and S M T W T F S day-of-week pills (lit per the item's day scope). Category filter tabs sit above the list and highlight the active filter. The panel title changed from "Daily Schedule" to "Family Routines" and shows total/visible counts. All CRUD functionality preserved (add/edit/delete with form).
+- Color sources: `scheduleColorValues` drive icon circles and active day pills; category icons use hardcoded gradients matching the design project (amber->orange for morning, sky->blue for afternoon, orange->rose for evening, indigo->violet for night).
+- Agent action required: Update this section + Common Journeys + any affected SOP
+- User-facing description (copy-paste ready for responses):
+  > "The Schedule tab is now laid out as Family Routines, grouped by time of day with colorful category headers. Each routine shows its icon in a colored circle, time, type badge, and day-of-week pills so you can see at a glance which days it runs."
+- Added / Changed: `src/app/calendar/page.tsx`, `src/app/globals.css`, `src/components/ui/PageShell.tsx`
+- Visual / Motion: The Calendar page now uses a polished glass-dashboard design system. A `.calendar-page-shell` wrapper with dual soft radial gradients, a glass `.calendar-hero-card` with gradient orb, a `.calendar-member-strip` with animated accent chips, a `.calendar-tabs` segmented control with `is-active` pill, a `.calendar-grid-card` with isometric treatment, `.calendar-panel` glass surfaces for today's events / upcoming / schedule lists. Each event card shows an accent left bar with glow, a time column with dot + divider, and a title row with member badge. All interactive elements respond to the atmospheric theme's `--calendar-accent-rgb` CSS variable for consistent coloring across dark and light modes. `calendar-fade-in-up` animation on events for sequential stagger. `scrollbar-hide` utility for smooth horizontal scroll on member strips and upcoming cards. `PageShell` now accepts an optional `style` prop.
+- Color sources: Inline `--calendar-accent-rgb` from `accentRgb`, CSS custom properties for event/schedule colors (`--event-color`, `--schedule-color`), existing theme tokens for surfaces and text.
+- Agent action required: Update this section + Common Journeys + any affected SOP
+- User-facing description (copy-paste ready for responses):
+  > "The Calendar page feels more polished now with a glass dashboard style: hero card with soft gradient glow, accent-tinted member chips, a clean calendar grid with selected day pop, glass panels for events and schedules, and staggered fade-in animations. Everything uses your chosen accent color so it feels like part of the dashboard."
+
+### UI Change Record — 2026-06-12 — Family avatar settings synced with dashboard avatars
+- Added / Changed: `src/components/ui/Avatar.tsx`, `src/app/settings/page.tsx`, `src/app/page.tsx`, `src/db/index.ts`
+- Visual / Motion: Settings → Family Members now previews and edits avatars through the same `Avatar` component used on the Home family row. The shared size scale is `xs` (28px), `sm` (32px), `md/base` (40px), and `lg` (48px). The glow toggle now applies the same soft color halo to emoji and image avatars. Image data URLs, pasted image URLs, and emoji values all render through the same avatar path on Settings and Home. Home also rehydrates the logged-in user avatar from the latest member data so avatar size and glow reflect after Settings saves, including legacy auth sessions stored with first names.
+- Data sources: Family avatar size and glow are saved to `consuela-members` and merged into the in-memory member store so returning to Home reads the same avatar settings. `consuela-auth-user` is refreshed from the latest member data after family settings change.
+- Agent action required: Update this section + Common Journeys + any affected SOP
+- User-facing description (copy-paste ready for responses):
+  > "Family avatar changes in Settings now match the dashboard: the same avatar sizes, glow behavior, image handling, and animated emoji rendering are used in Settings and on Home."
 
 ### 1.2 Documenting Recent & Future UI Updates
 
@@ -84,7 +198,7 @@ See files:
 ### 1.4 Theme & Accessibility Controls
 
 - Three modes (dark default, light, system) persisted in `localStorage` under `home-ai-theme-config`
-- 8 accent colors (nori, violet, rose, coral, lavender, cyan, mint, amber)
+- 10 accent colors (nori, violet, rose, coral, lavender, cyan, mint, amber, apricot, sage)
 - High-contrast boost toggle
 - All colors via CSS variables (`--color-accent-*`, `--color-surface-*`, etc.)
 - Controlled by `useTheme` hook (`src/hooks/useTheme.tsx`) and inline anti-FOUC script in `layout.tsx`
@@ -94,13 +208,19 @@ Settings page is the single place users change this. Changes are instant across 
 ### 1.5 Common User Journeys (copy-paste ready answers)
 
 **"How do I get to the grocery list?"**  
-Tap the "Grocery" tab in the bottom bar (shopping-cart icon). From Home you can also tap any quick "Grocery list" prompt in the AI chat bubble.
+Tap **More** in the bottom bar, then tap "Grocery" (shopping-cart icon). From Home you can also tap any quick "Grocery list" prompt in the AI chat bubble.
+
+**"Where are Emergency and Settings now?"**  
+Tap **More** in the bottom bar, then choose "Emergency" for quick-reference contacts or "Settings" for theme, family, routines, emergency contacts, layout, and data controls.
 
 **"How do I trigger a real emergency alert?"**  
 On the Home screen, tap the red shield icon in the top-right corner. Choose one of the four serious types. The system will attempt SMS + email to your configured primary contacts.
 
 **"I just added a custom meal — where does it appear?"**  
 It appears immediately in the weekly Meals view on its chosen day. If you tap "Sync with Pantry & Grocery", missing ingredients are added to the Grocery list with the correct aisle and priority.
+
+**"How do I mark a pending task done?"**  
+Open the **Tasks** tab, find the item under **Pending**, then swipe the row right or tap the row. Enter the 4-digit PIN to complete it.
 
 ---
 
@@ -335,6 +455,35 @@ After completing a user request that changes architecture, tech, or goals, updat
 
 ## Change Log (this manual only)
 
+- 2026-06-14 — fix: Leaderboard champion share ring. The “This week’s champion” card now calculates its ProgressRing from the visible leaderboard points, so the default leaderboard shows a meaningful champion share instead of 0%.
+- 2026-06-14 — fix: Pending Tasks PIN modal reopens after Cancel. `SwipeableRow` now deduplicates pointer/touch finish events and resets swipe state on cancel/leave, so Cancel closes the modal without immediately reopening it.
+- 2026-06-14 — fix: Day strip and swipe slide behavior. DayStrip now honors `value`/label matching, scroll snap, and `aria-pressed`; SwipeableRow now handles pointer/touch gestures, up/cancel/leave, and threshold callbacks for reliable slide actions.
+- 2026-06-14 — fix: Tasks leaderboard penalty add/edit flows. Added working Add/Edit modals for rewards and penalties on the Tasks leaderboard, and kept penalty select labels free of raw avatar data URLs.
+- 2026-06-14 — fix: Tasks avatar data URL leakage in filters. Filter chips now use safe emoji fallbacks instead of raw member avatar data URLs.
+- 2026-06-14 — fix: Tasks page avatar data URL leakage. Member select options now display a safe emoji fallback instead of raw `data:image/...` avatar strings.
+- 2026-06-14 — fix: Dark glass review card contrast. Raised the `/_design-system` dark glass sample from near-black to blue-charcoal, forced light text, and verified all review-page glass surfaces are readable.
+- 2026-06-14 — fix: Design-system review route. Added public `/design-system` page plus `src/middleware.ts` rewrite so `/_design-system` works despite Next treating underscore folders as private. Cleaned review-page props, stable TextField IDs, and browser-console errors.
+- 2026-06-14 — feat: Warm Glass v2 design system rollout. Added Warm Glass tokens, primitives, patterns, a dev-only `/_design-system` review page, simplified 5-tab bottom navigation plus More menu, and redesigned Home, Tasks, Meals, Settings, and More. Added `apricot` and `sage` accents. Verified with `npm run typecheck`, `npm run lint` (warnings only), and `npm run build`.
+- 2026-06-13 — fix: Hydration mismatch on the Meals page (the "Who's eating tonight" avatar strip). Root cause: `src/db/index.ts:210-229` hydrates `membersStore` from `localStorage` at module load. On the server, `typeof window === "undefined"` falls back to `membersData` (defaults: 🐱, 🧒, etc.), but on the client it reads localStorage and gets the user's custom avatars (often base64 data URLs like `data:image/webp;base64,UklGR...`). `src/components/meals/MealsTab.tsx:92-95` was calling `db.selectMembersDetailed()` inside a `useMemo(..., [])`, so SSR rendered `🐱` and the client first render rendered the data URL — a React hydration mismatch (`+ data:image/webp...  − 🐱`). Fix: added the established `mounted` pattern (`useState(false)` + `useEffect(() => setMounted(true), [])`) and gated both the `familyMembers` and the `tip` `useMemo`s with it. Until mount, `familyMembers` returns the default emoji list (matches what the server saw) and `tip` returns `smartTips[0]` (deterministic, no `Date.now()`). After mount, both re-pick their real values. Other pages in the app already use this pattern (`tasks/page.tsx:216`, `page.tsx:43`, `chat/page.tsx`, `settings/page.tsx`, etc.) — MealsTab was the only consumer of `db.selectMembersDetailed()` that didn't. Heads up: `tasks/page.tsx:221` and `chat/page.tsx:289` also call `db.selectMembers()` in a `useMemo([], )`, but they are wrapped in an `if (!mounted) return <Loading/>` early return at the top of the component, so the read happens after mount and they are safe.
+- 2026-06-13 — fix: Literal `\u2728` (and three sibling escapes) on the Calendar page. Four spots in `src/app/calendar/page.tsx` had unicode-escape strings written as **direct JSX text children** instead of inside a JavaScript expression, so React rendered the six literal characters `\u2728` instead of the ✨ emoji. JSX text is not interpreted as a JavaScript string — only `{`...`}` template literals (or other JS expressions) decode the escape. Fixed lines 507 (`calendar-member-avatar` 👥 in the "All" chip), 607 (`calendar-panel-icon` 📅 in the panel header), 618 (`calendar-empty-icon` ✨ in the "Nothing scheduled" empty state — the one the user reported), and 698 (the 🗑️ delete button label). All four now use the `{`\uXXXX`}` template-literal pattern that the rest of the file already uses (lines 542, 769-777, 798, 808, 838). No other `\uXXXX` JSX-text leaks exist in the codebase.
+- 2026-06-13 — fix: Liquid Glass 2.2 — matched Consuela card shell. Tuned `.liquid-glass` in `src/app/globals.css` to share the soft glass shell of `.atmospheric-card` (the one used by the "Ask Consuela" card on the Home page), so the Today / Tasks / Daily Schedule rows (and every other `.liquid-glass` instance) feel like part of the same family while keeping their per-row color frost. Added the `0 0 30px rgba(255,255,255,0.03)` soft outer glow that `.atmospheric-card` has. The whisper of top sheen inside the card went from `0.18` → `0.06` in dark mode (matching `.atmospheric-card`) and from `0.45` → `0.10` in light mode — no longer a visible bright line. The `::before` specular layer was reduced to a breath of light at the top (`0.06` dark / `0.12` light) and trimmed from a 3-stop gradient to a 2-stop fade. Light-mode border softened from `0.30` → `0.20`. Hover state matches the new shell: outer glow `0.05`, top sheen `0.10` (dark), no bright white line. Per-row color frosting is unchanged — events still frost mint/violet/amber/cyan/rose/nori, tasks still frost rose/amber/mint, Daily Schedule rows still use their `item.color` — so the color identity of each row is preserved.
+- 2026-06-13 — fix: Liquid Glass 2.1 — minimized white edge. Reduced the visible white frame around `.liquid-glass` cards in `src/app/globals.css` while keeping the glass depth. The 1px border went from `rgba(255,255,255,0.18)` → `0.06` in dark mode and `0.85` → `0.30` in light mode (no longer a hard white outline). The inner top sheen went from `0.55` → `0.18` in dark and `0.95` → `0.45` in light (a soft gradient, not a bright white line). The `::before` specular highlight was dialed back from `0.32` → `0.14` in dark and `0.55` → `0.28` in light. Removed the `inset 0 0 0 1px` inner ring layer entirely (was the source of a faint second white frame on the inside). Hover state matches: border `0.10` (dark), top sheen `0.28` (dark). The glass effect — backdrop blur `26px saturate(1.6)`, drop shadow lift, frosting tint — is unchanged.
+- 2026-06-13 — feat: Liquid Glass 2.0. Strengthened `.liquid-glass` in `src/app/globals.css` so the Today / Tasks / Daily Schedule rows (and the chat quick-actions, recipe cards, pantry items, grocery sections that share the class) actually look like glass. Added a real external drop shadow (`0 8px 24px -8px rgba(0,0,0,0.45) + 0 2px 6px -2px rgba(0,0,0,0.25)`) that lifts the card off the background — the previous version was missing it. Bumped `backdrop-filter` from `blur(20px)` to `blur(26px) saturate(1.6)` so the frost tints read more richly. Added a glossy specular highlight via a `::before` radial gradient (white at 20% 0%, fading to 0 at 60% from the top, `mix-blend-mode: screen` in dark mode). Added a subtle bottom ambient via `::after` so the card reads as a chunk of glass, not a tinted rectangle. Strengthened the inner edge: brighter top inset highlight (0.55 in dark / 0.95 in light), a 1px inner ring (`inset 0 0 0 1px rgba(255,255,255,0.04)`) for the "lip of the glass" feel, and a stronger border. Hover now lifts 4px (was 3px) with a deeper drop shadow and brighter inner highlight. Bumped the color frosting on Today rows, Tasks rows, and Daily Schedule rows from `0.32 → 0.16` to `0.40 → 0.20` so the tint sits on the glass more confidently; bumped the Daily Schedule member pill from `0.45 → 0.25` to `0.55 → 0.30` so the pill reads against the stronger glass behind it. Reduced-motion still disables the lift, and the new pseudo-element layers are pointer-events:none so they never block clicks.
+- 2026-06-12 — feat: Unified Appearance control (Display Mode + Time of Day merged). The standalone "Display Mode" radio list in Settings → Theme and the separate "Time of Day" segmented control in Settings → Weather are gone. Both are replaced by a single 3-option **Appearance** segmented control in the Weather card: `🌅 Auto` (system + auto, follows the real clock), `☀️ Day` (force light + day), `🌙 Night` (force dark + night). `useWeather.tsx` now resolves `timeOfDay === 'auto'` to the real local day/night before publishing the `__consuelaTod` hint, so the weather widget and the theme read the same clock (eliminates the previous drift where the theme fell back to its own seasonal sunrise/sunset table). `setAppearanceMode` writes both `theme.mode` and `weather.timeOfDay` together. Storage keys (`home-ai-theme-config`, `home-ai-weather-config`) are unchanged, so existing user data migrates automatically: `system + auto` → Auto, `light + day` → Day, `dark + night` → Night; any other combo is normalized to Auto on first render.
+- 2026-06-12 — feat: Settings page wider container. `PageShell` in `src/app/settings/page.tsx` now uses `md:max-w-3xl` (768px) on tablet/desktop so the Accent Studio 4-column grids, controls + live preview 2-column layout, season/holiday pickers, and family/emergency rows have room to breathe. Mobile (`<768px`) keeps the original 512px width.
+- 2026-06-12 — feat: Accent Studio live preview integrated. Removed the inner bordered card around the live preview pane in `src/app/settings/page.tsx`. The pane now uses a soft radial accent-glow background and a thin vertical accent divider line, with the grid rebalanced to `1.1fr_1fr` and `lg:gap-10`. The 2x2 target preview grid tightened to `gap-3`. The preview now flows as a continuation of the Accent Studio widget instead of looking like a nested panel.
+- 2026-06-12 — feat: Calendar schedule tab redesigned as Family Routines. Grouped items by time-of-day categories (Morning/Afternoon/Evening/Night) with gradient icon headers. Each item is now a glass routine card with color-driven icon circle, title, time in accent, type/meal badges, and S-M-T-W-T-F-S day pills lit per day scope. Added category filter pills, active counts. All CRUD preserved.
+- 2026-06-12 — feat: Calendar dashboard visual refresh. Refactored `src/app/calendar/page.tsx` with a polished glass-dashboard design system using new CSS classes in `globals.css`. Added `calendar-page-shell` with dual radial gradients, `calendar-hero-card` with gradient orb, `calendar-member-chip` accent pills, `calendar-tabs` segmented control, `calendar-grid-card` with isometric treatment, `calendar-panel` glass surfaces, `calendar-event-card` with accent left bar and time column, `calendar-upcoming-card` horizontal scroll cards, `calendar-fade-in-up` staggered animation, and `scrollbar-hide` utility. Updated `PageShell` to accept an optional `style` prop. All existing functionality preserved (calendar/schedule tabs, event/schedule CRUD, Google sync, member filter).
+
+- 2026-06-12 — feat: BottomNav button halo and rainbow ring. Updated `src/components/ui/BottomNav.tsx` so the active tab no longer uses a sliding pill; the active button now has a tight rainbow edge ring plus a soft radial halo outside the button.
+- 2026-06-12 — fix: PIN login now accepts full names and first names. Updated `src/hooks/useAuth.tsx` and `src/app/page.tsx` member matching so avatar sizing fixes do not break authentication PIN lookup.
+- 2026-06-12 — fix: Legacy auth names now match family members for avatar sizing. Updated `src/hooks/useAuth.tsx` and `src/app/page.tsx` so Home/auth hydration matches first-name and full-name member records before applying avatar size/glow.
+- 2026-06-12 — fix: Family avatar settings now reflect on Home. Updated `src/hooks/useAuth.tsx`, `src/app/page.tsx`, and `src/app/settings/page.tsx` so logged-in Home avatars rehydrate avatar size/glow from the latest member data and auth state refreshes after Settings saves.
+- 2026-06-12 — feat: Family avatar settings synced with dashboard avatars. Updated `src/components/ui/Avatar.tsx`, `src/app/settings/page.tsx`, `src/app/page.tsx`, and `src/db/index.ts` so Settings and Home share avatar size scale, glow behavior, image data URL rendering, and emoji rendering.
+- 2026-06-12 — feat: Accent Studio rollout to primary actions. Updated `src/components/ui/Button.tsx` and primary/active states across Settings, Calendar, Tasks, and Meals so CTAs use `--color-accent-button` while active states use `--color-accent-selected`.
+- 2026-06-12 — feat: Settings Accent Studio. Replaced the Settings accent color-picker block with a glass Accent Studio panel in `src/app/settings/page.tsx`: target pills, curated palette chips, custom color picker, live preview card, sync button + border, and reset action. Existing 8 accent presets still update selected, glow, button, and border variables.
+- 2026-06-12 — feat: Chat screen glass modern redesign. Full visual rewrite of `src/app/chat/page.tsx`. Hero greeting state with 200px cinematic glowing orb + dual dotted-ring animation (20s sweep), 2×2 quick-action chips (Add Event / Plan Meals / Assign Chore / Grocery List) using Icon3D, suggested-prompts grid, floating glass-strong top bar, liquid-glass assistant bubbles with violet/lavender frosting, gradient user bubbles, glass-strong floating input bar with mic + send buttons. New `.chat-hero-orb`, `.chat-hero-ring`, `.chat-hero-enter` CSS in `globals.css`. Uses `--color-accent-violet` as default, theme-aware via CSS variables. Reduced-motion disables all hero animations. Quick tag chips above input. All localStorage + API + voice logic preserved.
+- 2026-06-12 — feat: Liquid Glass cards for Today / Daily Schedule / Tasks. New `.liquid-glass` class in `globals.css` (color-tinted gradient frosting, 20px backdrop blur, squircle radius 1.25rem, bright top inner highlight, soft drop shadow, 3px hover lift). Applied to Today events (`page.tsx`), Daily Schedule items (`ScheduleDisplay.tsx`), and Tasks items (`page.tsx`). Accent bars shrunk to w-0.5 with glow. Light mode gets a brighter inner highlight.
 - 2026-05-30 — feat: Atmospheric Theme Synchronization. Updated ScheduleDisplay, EmergencyButton, CalendarPage, MealsPage, TopBar, and Card to use unified `useAtmosphericTheme` hook with `colors` and `accentRgb` return values. Replaced all hardcoded `nori-500`, `rose-500` with dynamic theme colors. Added `glass` and `isometric-card` classes to surfaces. Added seasonal box-shadow (`0 0 24px ${colors.glow}`) to all interactive elements. Created ui-ux-pro-max skill doc for future reference.
 - 2026-05-26 — feat: Immersive Weather Widget Visuals. Full glassmorphism backgrounds with season-specific SVG backdrops (Spring: cherry blossoms, Summer: palm/heat haze, Autumn: oak/fog, Winter: aurora/icicles) and holiday overlays (Christmas: fairy lights, Halloween: bats, 4th of July: fireworks, Valentine's: hearts, New Year's: gold sparkles). Added Holiday/Event Theme selector in Settings with live preview. Fixed CSS reduce-motion query to include all particle animations.
 - 2026-05-26 — feat: enhance weather widget with summer/winter particle effects. Added summer (heat waves) and winter (ice crystals) particle effects to weather widget. Updated AGENTS.md to document the change.

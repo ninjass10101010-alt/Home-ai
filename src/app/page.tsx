@@ -1,9 +1,11 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
 import Link from "next/link";
-import { useState, useEffect } from "react";
+import dynamic from "next/dynamic";
+import { useState, useEffect, useMemo } from "react";
 import PageShell from "@/components/ui/PageShell";
-import Avatar from "@/components/ui/Avatar";
+import Avatar, { type AvatarSize } from "@/components/ui/Avatar";
 import WeatherWidget from "@/components/ui/WeatherWidget";
 import { Icon3D } from "@/components/3d";
 import EmergencyButton from "@/components/ui/EmergencyButton";
@@ -11,17 +13,43 @@ import ScheduleDisplay from "@/components/ui/ScheduleDisplay";
 import { db } from "@/db";
 import CurrentMealWidget from "@/components/meals/CurrentMealWidget";
 import { AtmosphericProvider } from "@/hooks/useAtmosphericTheme";
+import { FogProvider } from "@/hooks/useFogConfig";
 import AtmosphericBridge from "@/components/ui/AtmosphericBridge";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
 import type { WidgetId } from "@/lib/layout-config";
+import { useAuth, type AuthUser } from "@/hooks/useAuth";
+import PinModal from "@/components/auth/PinModal";
+import Surface from "@/components/ui/Surface";
+import SoftButton from "@/components/ui/SoftButton";
+import IconButton from "@/components/ui/IconButton";
+import Chip from "@/components/ui/Chip";
+import ListRow from "@/components/ui/ListRow";
+import EmptyState from "@/components/ui/EmptyState";
+import ErrorState from "@/components/ui/ErrorState";
+import StatTile from "@/components/patterns/StatTile";
+import DayStrip from "@/components/patterns/DayStrip";
+import SectionCard from "@/components/patterns/SectionCard";
 
+const FogBackground = dynamic(() => import("@/components/ui/FogBackground"), { ssr: false });
 
-const quickPrompts = [
-  "What's for dinner?",
-  "Add event",
-  "Plan this week",
-  "Grocery list",
-];
+const avatarSizes = new Set<AvatarSize>(["xs", "sm", "md", "base", "lg"]);
+
+function normalizeAvatarSize(size?: string) {
+  return avatarSizes.has(size as AvatarSize) ? (size as AvatarSize) : "md";
+}
+
+function memberMatchesName(member: any, name: string) {
+  const firstName = name.split(" ")[0];
+  return (
+    member.name === name ||
+    member.name.startsWith(`${name} `) ||
+    member.name.split(" ")[0] === name ||
+    member.name === firstName ||
+    firstName.startsWith(member.name)
+  );
+}
+
+const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export default function HomePage() {
   const [mounted, setMounted] = useState(false);
@@ -33,58 +61,60 @@ export default function HomePage() {
   const [season, setSeason] = useState<{ name: string; emoji: string }>({ name: "Spring", emoji: "🌸" });
   const [dateInfo, setDateInfo] = useState<{ dayOfWeek: string; dayMonth: string }>({ dayOfWeek: "---", dayMonth: "---" });
   const [now, setNow] = useState<Date | null>(null);
+  const [pinningMember, setPinningMember] = useState<{ name: string; emoji: string; color: string; avatarSize: AvatarSize; glow: boolean } | null>(null);
+  const [homeError, setHomeError] = useState<string | null>(null);
 
+  const { currentUser, isLoggedIn, logout } = useAuth();
   const { isVisible, widgets } = useHomeLayout();
+
+  const dashboardCurrentUser = useMemo<AuthUser | null>(() => {
+    if (!currentUser) return null;
+    const member = db.selectMembersDetailed().find((m: any) => memberMatchesName(m, currentUser.name));
+    if (!member) return currentUser;
+
+    return {
+      ...currentUser,
+      emoji: member.emoji || currentUser.emoji,
+      color: member.color || currentUser.color,
+      avatarSize: normalizeAvatarSize(member.avatarSize),
+      glow: Boolean(member.glow),
+    };
+  }, [currentUser]);
 
   useEffect(() => {
     setMounted(true);
     setNow(new Date());
 
-    // Hydrate family members
-    const members = db.selectMembersDetailed().map((member: any, idx: number) => {
-      const size = member.avatarSize || "md";
-      return {
+    try {
+      const members = db.selectMembersDetailed().map((member: any, idx: number) => ({
         name: member.name,
         color: member.color || (idx % 4 === 0 ? "green" : idx % 4 === 1 ? "cyan" : idx % 4 === 2 ? "violet" : "amber"),
         emoji: member.emoji,
-        avatarSize: size,
-      };
-    });
-    setFamilyMembers(members);
+        avatarSize: normalizeAvatarSize(member.avatarSize),
+        glow: member.glow || false,
+      }));
+      setFamilyMembers(members);
+      setTodayEvents(db.selectTodaysEvents());
+      setPendingTasks(db.selectPendingTasks());
 
-    // Hydrate events and tasks
-    setTodayEvents(db.selectTodaysEvents());
-    setPendingTasks(db.selectPendingTasks());
+      const today = new Date();
+      const hour = today.getHours();
+      const tod = hour < 5 ? "night" : hour < 12 ? "morning" : hour < 17 ? "afternoon" : hour < 21 ? "evening" : "night";
+      setTimeOfDay(tod);
 
-    // Hydrate dates and timeOfDay/season
-    const today = new Date();
-    const hour = today.getHours();
-    const tod = hour < 5 ? "night" : hour < 12 ? "morning" : hour < 17 ? "afternoon" : hour < 21 ? "evening" : "night";
-    setTimeOfDay(tod);
-
-    const getSeason = () => {
       const month = today.getMonth();
-      if (month >= 2 && month <= 4) return { name: "Spring", emoji: "🌸" };
-      if (month >= 5 && month <= 7) return { name: "Summer", emoji: "☀️" };
-      if (month >= 8 && month <= 10) return { name: "Autumn", emoji: "🍂" };
-      return { name: "Winter", emoji: "❄️" };
-    };
-    setSeason(getSeason());
+      const nextSeason = month >= 2 && month <= 4 ? { name: "Spring", emoji: "🌸" } : month >= 5 && month <= 7 ? { name: "Summer", emoji: "☀️" } : month >= 8 && month <= 10 ? { name: "Autumn", emoji: "🍂" } : { name: "Winter", emoji: "❄️" };
+      setSeason(nextSeason);
+      setDateInfo({
+        dayOfWeek: today.toLocaleDateString("en-US", { weekday: "short" }),
+        dayMonth: today.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      });
 
-    setDateInfo({
-      dayOfWeek: today.toLocaleDateString("en-US", { weekday: "short" }),
-      dayMonth: today.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-    });
-
-    // Hydrate schedules from local storage or fallback
-    const SCHEDULES_STORAGE_KEY = "consuela-schedules";
-    let loadedSchedules = db.selectTodaysSchedules();
-    try {
-      const stored = localStorage.getItem(SCHEDULES_STORAGE_KEY);
+      const stored = typeof window !== "undefined" ? localStorage.getItem("consuela-schedules") : null;
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed)) {
-          loadedSchedules = parsed.map((s: any) => ({
+          setHomeScheduleItems(parsed.map((s: any) => ({
             id: s.id,
             title: s.title,
             time: s.time,
@@ -93,14 +123,14 @@ export default function HomePage() {
             color: s.color || "green",
             member: s.member,
             memberColor: s.memberColor,
-            icon: s.icon,
-          }));
+          })));
         }
+      } else {
+        setHomeScheduleItems(db.selectTodaysSchedules());
       }
-    } catch {
-      // ignore
+    } catch (error) {
+      setHomeError("Consuela could not load your family dashboard.");
     }
-    setHomeScheduleItems(loadedSchedules);
   }, []);
 
   useEffect(() => {
@@ -110,322 +140,195 @@ export default function HomePage() {
   }, [mounted]);
 
   const timeStr = now ? now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }) : "--:--";
+  const familyName = isLoggedIn && dashboardCurrentUser ? dashboardCurrentUser.name.split(" ")[0] : "Garcia family";
+
+  const weekDays = useMemo(() => {
+    const today = new Date();
+    return Array.from({ length: 7 }, (_, index) => {
+      const day = new Date(today);
+      day.setDate(today.getDate() + index - today.getDay());
+      const label = weekdayLabels[day.getDay()];
+      const mealsForDay = db.selectMeals().filter((meal: any) => meal.time === label);
+      return {
+        id: label,
+        label,
+        detail: String(day.getDate()),
+        active: index === 0,
+        accent: mealsForDay.length > 0 ? "var(--color-accent-sage)" : undefined,
+      };
+    });
+  }, []);
+
+  if (homeError) {
+    return (
+      <PageShell>
+        <EmergencyButton />
+        <ErrorState title="Dashboard unavailable" description={homeError} retryLabel="Reload" onRetry={() => window.location.reload()} />
+      </PageShell>
+    );
+  }
 
   return (
-    <PageShell>
-      <EmergencyButton />
-      {/* Background Gradient Orbs */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="gradient-orb w-72 h-72 -top-20 -right-20" style={{ background: "radial-gradient(circle, var(--color-accent-lavender), transparent)", animationDelay: "0s" }} />
-        <div className="gradient-orb w-80 h-80 -bottom-20 -left-20" style={{ background: "radial-gradient(circle, var(--color-accent-coral), transparent)", animationDelay: "2s" }} />
-        <div className="gradient-orb w-64 h-64 top-1/2 left-1/4" style={{ background: "radial-gradient(circle, var(--color-accent-mint), transparent)", animationDelay: "4s" }} />
-        <div className="gradient-orb w-48 h-48 bottom-1/4 right-1/4" style={{ background: "radial-gradient(circle, var(--color-accent-amber), transparent)", animationDelay: "6s" }} />
-      </div>
+    <FogProvider>
+      <AtmosphericProvider>
+        <FogBackground />
+        <PageShell style={{ backgroundColor: "transparent" }}>
+          <EmergencyButton />
 
-      {/* Header */}
-      <div
-        className="px-4 pt-12 pb-4 relative z-10"
-        style={{ paddingTop: "calc(env(safe-area-inset-top) + 2rem)" }}
-      >
-        {/* Family row */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-2">
-            {familyMembers.map((m) => (
-              <Avatar
-                key={m.name}
-                name={m.name}
-                color={m.color}
-                emoji={m.emoji}
-                size={m.avatarSize || "md"}
-                variant="emoji"
-              />
-            ))}
-          </div>
-        </div>
-
-        {/* Date pill */}
-        <div className="flex items-center gap-2 mb-4 animate-in">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full glass-subtle border border-[var(--color-surface-7)]/20">
-            <span className="text-xs text-text-secondary font-medium">{dateInfo.dayOfWeek}</span>
-            <span className="text-xs text-[var(--color-accent-selected)] font-semibold">{dateInfo.dayMonth}</span>
-            <span className="w-px h-3 bg-[var(--color-surface-7)]/30" />
-            <span className="text-xs text-[var(--color-accent-cyan)] font-medium tabular-nums tracking-tight">{timeStr}</span>
-          </div>
-        </div>
-
-        {/* Greeting with gradient text */}
-        <div className="mb-4 animate-in animate-in-delay-100">
-          <h1 className="text-2xl font-bold text-text-primary mt-0.5">
-            Good {timeOfDay}, <span className="bg-[linear-gradient(135deg,var(--color-accent-selected),var(--color-accent-cyan))] bg-clip-text text-transparent">Garcia family</span> 👋
-          </h1>
-          <div className="flex items-center gap-1.5 mb-1">
-            <span className="text-xs text-text-muted">{season.emoji} {season.name}</span>
-          </div>
-        </div>
-
-        {/* Quick stat links */}
-        <div className="flex gap-2 flex-wrap mt-3 animate-in animate-in-delay-300">
-          <Link
-            href="/calendar"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl glass-subtle border border-[var(--color-surface-7)]/20 text-text-secondary text-[11px] font-medium shrink-0 transition-all duration-200 cursor-pointer hover:text-text-primary hover:border-[var(--color-accent-selected)]/30 active:scale-95"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3 h-3">
-              <rect x="3" y="4" width="18" height="18" rx="2" />
-              <path d="M16 2v4M8 2v4M3 10h18" strokeLinecap="round" />
-            </svg>
-            <span>3 events</span>
-          </Link>
-          <Link
-            href="/tasks"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl glass-subtle border border-[var(--color-surface-7)]/20 text-text-secondary text-[11px] font-medium shrink-0 transition-all duration-200 cursor-pointer hover:text-text-primary hover:border-[var(--color-accent-selected)]/30 active:scale-95"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3 h-3">
-              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" strokeLinecap="round" />
-              <path d="M9.53 16.15a1.5 1.5 0 0 0 2.11 2.09l3.28-3.28a1.5 1.5 0 0 0 0-2.1l-3.28-3.28a1.5 1.5 0 0 0-2.1 0L7.9 11.17" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            <span>2 tasks</span>
-          </Link>
-          <Link
-            href="/chat?q=taco%20night"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl glass-subtle border border-[var(--color-surface-7)]/20 text-text-secondary text-[11px] font-medium shrink-0 transition-all duration-200 cursor-pointer hover:text-text-primary hover:border-[var(--color-accent-selected)]/30 active:scale-95"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3 h-3">
-              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            <span>Taco night 🌮</span>
-          </Link>
-        </div>
-      </div>
-
-      {/* Weather Widget - always renders first with its special wrapper */}
-      {isVisible("weather") && (
-        <div className="px-4 pb-2 relative z-10">
-          <AtmosphericProvider>
-            <WeatherWidget />
-            <AtmosphericBridge />
-          </AtmosphericProvider>
-        </div>
-      )}
-
-      {/* Divider - only show if weather is visible AND at least one other widget is visible */}
-      {isVisible("weather") && widgets.filter((id) => id !== "weather").some((id) => isVisible(id)) && (
-        <div className="px-4 mb-2 relative z-10">
-          <div className="h-px bg-white/5"></div>
-        </div>
-      )}
-
-      <div className="px-4 space-y-5 relative z-10">
-        {widgets.filter((id) => id !== "weather").map((id) => {
-          if (!isVisible(id)) return null;
-
-          switch (id as WidgetId) {
-            case "aiQuickAsk":
-              return (
-                <AtmosphericProvider key="aiQuickAsk">
-                  <Link href="/chat">
-                  <div className="atmospheric-card rounded-2xl p-4 flex items-center gap-3 cursor-pointer active:scale-[0.98] transition-all">
-                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[var(--color-accent-selected)]/30 to-[var(--color-accent-cyan)]/20 flex items-center justify-center text-2xl shrink-0 floating">
-                      <Icon3D variant="chat" size="md" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-text-primary text-sm font-medium">Ask Consuela anything…</p>
-                      <p className="text-text-secondary/60 text-xs mt-0.5 truncate">
-                        &ldquo;Plan dinner, add an event, or check on the kids…&rdquo;
-                      </p>
-                    </div>
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                      className="w-5 h-5 text-[var(--color-accent-selected)] shrink-0"
-                    >
-                      <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </div>
-                </Link>
-              </AtmosphericProvider>
-              );
-
-            case "quickPrompts":
-              return (
-                <div key="quickPrompts" className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 scroll-smooth-x no-scrollbar">
-                  {quickPrompts.map((p, idx) => (
-                    <Link
-                      key={p}
-                      href={`/chat?q=${encodeURIComponent(p)}`}
-                      style={{ animationDelay: `${0.24 + idx * 0.08}s` }}
-                      className="scroll-snap-child shrink-0 px-3 py-1.5 rounded-full glass text-text-secondary text-xs border border-[var(--color-surface-7)]/20 hover:border-[var(--color-accent-selected)]/40 hover:text-[var(--color-accent-selected)] transition-all duration-200 animate-in"
-                    >
-                      {p}
-                    </Link>
-                  ))}
+          <div className="relative z-10 px-4 pt-10 pb-5">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-3xl">👋</span>
+                  <h1 className="truncate text-3xl font-bold tracking-tight text-text-primary">
+                    Good {timeOfDay}, <span className="text-[var(--color-accent-selected)]">{familyName}</span>
+                  </h1>
                 </div>
-              );
+                <p className="mt-1 text-sm text-text-secondary">{season.emoji} {season.name} · {dateInfo.dayOfWeek}, {dateInfo.dayMonth} · {timeStr}</p>
+              </div>
+              {isLoggedIn && dashboardCurrentUser ? (
+                <button type="button" onDoubleClick={logout} title="Double-tap to log out" className="shrink-0 active:scale-90 transition-transform">
+                  <Avatar name={dashboardCurrentUser.name} color={dashboardCurrentUser.color} emoji={dashboardCurrentUser.emoji} size={normalizeAvatarSize(dashboardCurrentUser.avatarSize)} variant="emoji" glow={dashboardCurrentUser.glow} />
+                </button>
+              ) : (
+                <button type="button" onClick={() => setPinningMember({ name: familyMembers[0]?.name || "Family", emoji: familyMembers[0]?.emoji || "😊", color: familyMembers[0]?.color || "green", avatarSize: normalizeAvatarSize(familyMembers[0]?.avatarSize), glow: familyMembers[0]?.glow || false })} className="shrink-0 active:scale-90 transition-transform">
+                  <Avatar name={familyMembers[0]?.name || "Family"} color={familyMembers[0]?.color || "green"} emoji={familyMembers[0]?.emoji || "😊"} size={normalizeAvatarSize(familyMembers[0]?.avatarSize || "md")} variant="emoji" glow={familyMembers[0]?.glow || false} />
+                </button>
+              )}
+            </div>
 
-            case "todayEvents":
-              return (
-                <section key="todayEvents">
-                  <div className="flex items-center justify-between mb-3">
-                    <h2 className="text-text-primary font-semibold text-base">Today</h2>
-                    <Link href="/calendar" className="text-[var(--color-accent-selected)] text-xs font-medium hover:opacity-80">
-                      {todayEvents.length} events →
-                    </Link>
-                  </div>
-                  <div className="space-y-1.5">
-                    {todayEvents.map((ev, idx) => {
-                      const colorBgMap: Record<string, string> = {
-                        green:  "bg-[var(--color-accent-mint)]/10",
-                        violet: "bg-[var(--color-accent-violet)]/10",
-                        amber:  "bg-[var(--color-accent-amber)]/10",
-                        cyan:   "bg-[var(--color-accent-cyan)]/10",
-                        rose:   "bg-[var(--color-accent-rose)]/10",
-                        blue:   "bg-[var(--color-accent-nori)]/10",
-                      };
-                      const colorBarMap: Record<string, string> = {
-                        green:  "bg-[var(--color-accent-mint)]",
-                        violet: "bg-[var(--color-accent-violet)]",
-                        amber:  "bg-[var(--color-accent-amber)]",
-                        cyan:   "bg-[var(--color-accent-cyan)]",
-                        rose:   "bg-[var(--color-accent-rose)]",
-                        blue:   "bg-[var(--color-accent-nori)]",
-                      };
-                      return (
-                        <div
-                          key={ev.id}
-                          style={{ animationDelay: `${idx * 0.06}s` }}
-                          className={`flex items-center gap-3 px-3 py-2.5 rounded-xl animate-in transition-all duration-200 hover:bg-white/[0.06] ${
-                            colorBgMap[ev.color] ?? "bg-[var(--color-accent-nori)]/10"
-                          }`}
-                        >
-                          {/* Accent bar */}
-                          <div className={`w-1 h-8 rounded-full shrink-0 ${colorBarMap[ev.color] ?? "bg-[var(--color-accent-nori)]"}`} />
-                          {/* Icon */}
-                          <span className="text-lg shrink-0">{ev.icon}</span>
-                          {/* Content */}
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm text-text-primary font-medium truncate">{ev.title}</p>
-                            <p className="text-xs text-text-muted tabular-nums">{ev.time}</p>
-                          </div>
-                          {/* Member badge */}
-                          <span className="text-xs px-2 py-0.5 rounded-full bg-[var(--color-surface-3)] text-text-secondary shrink-0">
-                            {ev.member.split(" ")[0]}
-                          </span>
+            <div className="mt-5 flex gap-2 overflow-x-auto pb-1">
+              {familyMembers.slice(0, 6).map((member) => (
+                <button key={member.name} type="button" onClick={() => setPinningMember({ name: member.name, emoji: member.emoji || "😊", color: member.color || "green", avatarSize: normalizeAvatarSize(member.avatarSize), glow: member.glow || false })} className="active:scale-90 transition-transform">
+                  <Avatar name={member.name} color={member.color} emoji={member.emoji} size={normalizeAvatarSize(member.avatarSize)} variant="emoji" glow={member.glow} />
+                </button>
+              ))}
+              <Chip tone="accent" className="h-12 w-12 !px-0 text-lg">＋</Chip>
+            </div>
+          </div>
+
+          {isVisible("weather") && (
+            <div className="px-4 pb-4 relative z-10">
+              <AtmosphericProvider>
+                <WeatherWidget />
+                <AtmosphericBridge />
+              </AtmosphericProvider>
+            </div>
+          )}
+
+          <div className="px-4 space-y-5 relative z-10">
+            <div className="grid grid-cols-3 gap-2">
+              <StatTile label="Events" value={todayEvents.length} detail="Today" icon="📅" tone={todayEvents.length > 0 ? "warning" : "accent"} />
+              <StatTile label="Tasks" value={pendingTasks.length} detail="Pending" icon="✅" tone={pendingTasks.length > 0 ? "danger" : "success"} />
+              <StatTile label="Week" value="7" detail="Days planned" icon="🍽️" tone="accent" />
+            </div>
+
+            {widgets.filter((id) => id !== "weather").map((id) => {
+              if (!isVisible(id)) return null;
+
+              switch (id as WidgetId) {
+                case "todayEvents":
+                  return (
+                    <SectionCard key="todayEvents" title="Today" description={`${todayEvents.length} events on the family calendar`} icon="📅">
+                      {todayEvents.length === 0 ? (
+                        <EmptyState title="Quiet day" description="No events are scheduled for today." icon="🌿" />
+                      ) : (
+                        <div className="space-y-2">
+                          {todayEvents.map((event) => (
+                            <ListRow
+                              key={event.id}
+                              title={event.title}
+                              subtitle={event.time}
+                              leftRailColor={event.color === "green" ? "var(--color-accent-mint)" : event.color === "violet" ? "var(--color-accent-violet)" : event.color === "amber" ? "var(--color-accent-amber)" : event.color === "cyan" ? "var(--color-accent-cyan)" : event.color === "rose" ? "var(--color-accent-rose)" : event.color === "blue" ? "var(--color-accent-nori)" : "var(--color-accent-nori)"}
+                              leading={<span className="text-xl">{event.icon}</span>}
+                              trailing={<Chip size="sm" tone="accent">{event.member.split(" ")[0]}</Chip>}
+                            />
+                          ))}
                         </div>
-                      );
-                    })}
-                  </div>
-                </section>
-              );
+                      )}
+                    </SectionCard>
+                  );
 
-            case "schedule":
-              return (
-                <ScheduleDisplay
-                  key="schedule"
-                  schedule={homeScheduleItems.map((item) => ({
-                    id: item.id,
-                    title: item.title,
-                    time: item.time,
-                    emoji: item.emoji,
-                    type: item.type as "routine" | "reminder",
-                    color: item.color,
-                    member: item.member,
-                    memberColor: item.memberColor,
-                  }))}
-                  title="Daily Schedule"
-                />
-              );
+                case "schedule":
+                  return <ScheduleDisplay key="schedule" schedule={homeScheduleItems} title="Daily Schedule" />;
 
-            case "currentMeal":
-              return (
-                <AtmosphericProvider key="currentMeal">
-                  <section className="atmospheric-meal-section">
-                    <div className="flex items-center justify-between mb-3">
-                      <h2 className="text-text-primary font-semibold text-base">Current Meal</h2>
-                      <Link href="/meals" className="text-[var(--color-accent-selected)] text-xs font-medium hover:opacity-80">
-                        Plan →
-                      </Link>
-                    </div>
-                    <CurrentMealWidget />
-                  </section>
-                </AtmosphericProvider>
-              );
+                case "currentMeal":
+                  return (
+                    <AtmosphericProvider key="currentMeal">
+                      <CurrentMealWidget />
+                    </AtmosphericProvider>
+                  );
 
-            case "tasks":
-              return (
-                <section key="tasks">
-                  <div className="flex items-center justify-between mb-3">
-                    <h2 className="text-text-primary font-semibold text-base">Tasks</h2>
-                    <Link href="/tasks" className="text-[var(--color-accent-selected)] text-xs font-medium hover:opacity-80">
-                      {pendingTasks.length} pending →
-                    </Link>
-                  </div>
-                  <div className="space-y-1.5">
-                    {pendingTasks.map((task, idx) => {
-                      const pts = task.points;
-                      const isHigh = pts > 15;
-                      const isMed = pts > 10 && !isHigh;
-                      const accentBg = isHigh
-                        ? "bg-[var(--color-accent-rose)]/10"
-                        : isMed
-                        ? "bg-[var(--color-accent-amber)]/10"
-                        : "bg-[var(--color-accent-mint)]/10";
-                      const accentBar = isHigh
-                        ? "bg-[var(--color-accent-rose)]"
-                        : isMed
-                        ? "bg-[var(--color-accent-amber)]"
-                        : "bg-[var(--color-accent-mint)]";
-                      const ptColor = isHigh
-                        ? "text-[var(--color-accent-rose)]"
-                        : "text-[var(--color-accent-amber)]";
-                      return (
-                        <div
-                          key={task.id}
-                          style={{ animationDelay: `${idx * 0.06}s` }}
-                          className={`flex items-center gap-3 px-3 py-2.5 rounded-xl animate-in transition-all duration-200 hover:bg-white/[0.06] ${accentBg}`}
-                        >
-                          {/* Priority bar */}
-                          <div className={`w-1 h-8 rounded-full shrink-0 ${accentBar}`} />
-                          {/* Checkbox */}
-                          <div
-                            className={`w-5 h-5 rounded-full border-2 shrink-0 flex items-center justify-center transition-all ${
-                              task.done
-                                ? "border-[var(--color-accent-selected)] bg-[var(--color-accent-selected)]"
-                                : "border-[var(--color-surface-4)]"
-                            }`}
-                          >
-                            {task.done && (
-                              <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={3} className="w-3 h-3">
-                                <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
-                              </svg>
-                            )}
-                          </div>
-                          {/* Content */}
-                          <div className="flex-1 min-w-0">
-                            <p className={`text-sm truncate ${task.done ? "line-through text-text-muted" : "text-text-primary"}`}>
-                              {task.title}
-                            </p>
-                            <p className="text-xs text-text-muted">
-                              {task.assigned} · {task.due}
-                            </p>
-                          </div>
-                          {/* Points badge */}
-                          <span className={`text-xs font-semibold shrink-0 px-2 py-0.5 rounded-full bg-[var(--color-surface-3)] ${ptColor}`}>
-                            +{pts}pts
-                          </span>
+                case "tasks":
+                  return (
+                    <SectionCard key="tasks" title="Tasks" description={`${pendingTasks.length} pending for the family`} icon="✅">
+                      {pendingTasks.length === 0 ? (
+                        <EmptyState title="All caught up" description="No pending tasks right now." icon="🎉" />
+                      ) : (
+                        <div className="space-y-2">
+                          {pendingTasks.map((task) => (
+                            <ListRow
+                              key={task.id}
+                              title={task.title}
+                              subtitle={`${task.assigned} · ${task.due}`}
+                              leftRailColor={task.points > 15 ? "var(--color-accent-rose)" : task.points > 10 ? "var(--color-accent-amber)" : "var(--color-accent-mint)"}
+                              trailing={<Chip size="sm" tone={task.points > 15 ? "danger" : task.points > 10 ? "warning" : "success"}>+{task.points}pts</Chip>}
+                            />
+                          ))}
                         </div>
-                      );
-                    })}
-                  </div>
-                </section>
-              );
+                      )}
+                    </SectionCard>
+                  );
 
-            default:
-              return null;
-          }
-        })}
+                case "aiQuickAsk":
+                  return (
+                    <Link href="/chat" key="aiQuickAsk">
+                      <Surface variant="warm" radius="2xl" padding="lg" interactive>
+                        <div className="flex items-center gap-4">
+                          <div className="grid h-14 w-14 place-items-center rounded-2xl bg-[var(--color-accent-selected)]/15 text-2xl text-[var(--color-accent-selected)] floating">
+                            <Icon3D variant="chat" size="md" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <h3 className="text-base font-bold text-text-primary">Quick ask</h3>
+                            <p className="mt-0.5 text-sm text-text-secondary">“Add soccer practice for Thursday.”</p>
+                          </div>
+                          <span className="text-[var(--color-accent-selected)]">→</span>
+                        </div>
+                      </Surface>
+                    </Link>
+                  );
 
-      </div>
-    </PageShell>
+                default:
+                  return null;
+              }
+            })}
+
+            <SectionCard title="This Week" description="Meal and family rhythm at a glance" icon="🗓️">
+              <DayStrip value="today" onChange={() => {}} days={weekDays} />
+            </SectionCard>
+
+            <div className="flex gap-2">
+              <Link href="/meals" className="flex-1">
+                <SoftButton variant="secondary" className="w-full">Plan Meals</SoftButton>
+              </Link>
+              <Link href="/tasks" className="flex-1">
+                <SoftButton className="w-full">Open Tasks</SoftButton>
+              </Link>
+              <IconButton variant="accent" aria-label="Add quick note"><span>＋</span></IconButton>
+            </div>
+          </div>
+
+          {pinningMember && (
+            <PinModal
+              memberName={pinningMember.name}
+              memberEmoji={pinningMember.emoji}
+              memberColor={pinningMember.color}
+              onClose={() => setPinningMember(null)}
+              onSuccess={() => setPinningMember(null)}
+            />
+          )}
+        </PageShell>
+      </AtmosphericProvider>
+    </FogProvider>
   );
 }

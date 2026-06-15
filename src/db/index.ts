@@ -215,7 +215,13 @@ const __membersStoreInit = () => {
       const parsed = JSON.parse(d);
       membersStore = parsed.map(function(m: any) {
         const seed = membersData.find(function(s: any) { return s.name === m.name; });
-        return seed ? Object.assign({}, seed, { emoji: m.emoji || seed.emoji, age: parseInt(m.age) || seed.age, pin: m.pin || (seed.pin || "") }) : (seed || membersData[0]);
+        return seed ? Object.assign({}, seed, {
+          emoji: m.emoji || seed.emoji,
+          age: parseInt(m.age) || seed.age,
+          pin: m.pin || (seed.pin || ""),
+          avatarSize: m.avatarSize || "md",
+          glow: Boolean(m.glow),
+        }) : (seed || membersData[0]);
       });
     } catch(e) { membersStore = [...membersData]; }
   } else { membersStore = [...membersData]; }
@@ -258,9 +264,11 @@ export const db = {
   // Members - basic view for dashboard
   selectMembers: () => membersStore.map(m => ({
     id: m.id,
-    name: m.name.split(' ')[0], // Just first name for dashboard
-    color: ["green", "cyan", "violet", "amber", "rose", "blue", "cyan"][m.id - 1] || "green",
-    emoji: m.emoji,
+    name: m.name.split(' ')[0],
+    fullName: m.name,
+    role: m.role,
+    color: ["green", "cyan", "violet", "amber", "rose", "blue", "cyan", "green", "cyan"][m.id - 1] || "green",
+    emoji: m.emoji || "😊",
     skinColor: m.skinColor,
     hairColor: m.hairColor,
     pin: (m as any).pin,
@@ -270,8 +278,8 @@ export const db = {
   selectMembersDetailed: () => membersStore.map(m => ({
     name: m.name,
     role: m.role === 'parent' ? 'Parent' : m.role === 'pet' ? 'Pet' : 'Child',
-    emoji: m.emoji,
-    color: ["green", "cyan", "violet", "amber", "rose", "blue", "cyan"][m.id - 1] || "green",
+    emoji: m.emoji || "😊",
+    color: ["green", "cyan", "violet", "amber", "rose", "blue", "cyan", "green", "cyan"][m.id - 1] || "green",
     age: m.age.toString(),
     joined: m.joined,
     skinColor: m.skinColor,
@@ -287,8 +295,8 @@ export const db = {
     { name: "All", color: "green", emoji: "👨‍👩‍👧‍👦" },
     ...membersStore.map(m => ({
       name: m.name.split(' ')[0], // Just first name
-      color: ["green", "cyan", "violet", "amber", "rose", "blue", "cyan"][m.id - 1] || "green",
-      emoji: m.emoji,
+      color: ["green", "cyan", "violet", "amber", "rose", "blue", "cyan", "green", "cyan"][m.id - 1] || "green",
+      emoji: m.emoji || "😊",
       skinColor: m.skinColor,
       hairColor: m.hairColor,
     }))
@@ -307,7 +315,7 @@ export const db = {
   },
 
   // Update existing member
-  updateMember: (name: string, updates: Partial<typeof membersData[0]>) => {
+  updateMember: (name: string, updates: Partial<typeof membersData[0]> & Record<string, any>) => {
     const index = membersStore.findIndex(m => m.name === name);
     if (index !== -1) {
       membersStore[index] = { ...membersStore[index], ...updates } as any;

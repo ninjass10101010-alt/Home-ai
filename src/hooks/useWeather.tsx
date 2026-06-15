@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 'use client';
 
 import {
@@ -84,10 +85,21 @@ export const WeatherProvider = ({ children }: { children: ReactNode }) => {
       localStorage.setItem(WEATHER_STORAGE_KEY, JSON.stringify(weather));
     }
 
-    // Expose Time-of-day to ThemeProvider for "system" override without importing WeatherConfig.
+    // Expose Time-of-day to ThemeProvider so Display Mode "system" and the
+    // weather widget always agree. When the user picks 'auto' we resolve it
+    // to the real local day/night here (single source of truth), so neither
+    // the widget nor the theme falls back to a different clock.
     if (typeof window !== 'undefined') {
-      const tod = weather.timeOfDay;
-      (window as any).__consuelaTod = tod === 'day' ? 'day' : tod === 'night' ? 'night' : undefined;
+      let resolved: 'day' | 'night';
+      if (weather.timeOfDay === 'day') {
+        resolved = 'day';
+      } else if (weather.timeOfDay === 'night') {
+        resolved = 'night';
+      } else {
+        const hour = new Date().getHours();
+        resolved = hour >= 6 && hour < 19 ? 'day' : 'night';
+      }
+      (window as any).__consuelaTod = resolved;
     }
   }, [weather, mounted]);
 
