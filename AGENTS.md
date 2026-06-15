@@ -6,13 +6,14 @@
 > **Mandatory:** After any code change that touches UI, navigation, meals, emergency, or integrations, update this file in the same session.
 
 **Current Dashboard Snapshot** (maintain on every relevant change)  
-- **Last Updated:** 2026-06-14 | Warm Glass v2 design system rollout
-- **Last major UI refresh:** 2026-06-14 — Warm Glass v2 overhaul: new design tokens, glass/neumorphic primitives, shared page patterns, 5-tab bottom navigation + More menu, and redesigned Home / Tasks / Meals / Settings / More surfaces.
-- **Active integrations:** Meals ↔ Pantry ↔ Grocery bidirectional sync (`mealSyncService`), Emergency SMS + Email (free Gmail + carrier gateways), AI Chat ("Ask Consuela"), full theme system (3 modes + **10 accent colors** + high-contrast), PocketBase data layer
+- **Last Updated:** 2026-06-15 | Home logout + session timer surfaced + spacing rhythm — visible sign-out icon button with confirm modal in Home header, 30-min auto-logout now shows an `mm:ss` idle pill in the header and a "tap to stay" toast in the last 30s, Home card rhythm standardized (stat tiles gap-3, family strip gap-3, section card stack space-y-6, action row gap-3, header pb-6, greeting mt-6)
+- **Last major UI refresh:** 2026-06-15 — Tasks & Leaderboard v2: week-scoped points system with automatic Monday resets, real consecutive-day streak tracking, full transaction history log, undo completion with PIN verification, recurring task auto-regeneration, parental approval gate for large rewards (>100pts), confetti animation on task completion, level-based progression with progress bars, achievement badges, animated champion crown, and Home page task sync from shared localStorage.
+- **Active integrations:** Meals ↔ Pantry ↔ Grocery bidirectional sync (`mealSyncService`), Emergency SMS + Email (free Gmail + carrier gateways), AI Chat ("Ask Consuela"), full theme system (3 modes + **10 accent colors** + high-contrast)
 - **IMPORTANT BUILD NOTE:** After every `npm run build`, the CSS chunks can go out of sync (Next.js 16.2.6 bug). If the dashboard loads with broken layout (big icons, wrong nav styles), **restart the container**: `docker restart consuela-dashboard`. This is faster than a rebuild.
 - **IMPORTANT BUILD NOTE:** After every `npm run build`, the CSS chunks can go out of sync (Next.js 16.2.6 Turbopack bug). If the dashboard loads with broken layout (big icons, wrong nav styles), **restart the container**: `docker restart consuela-dashboard`. This is faster than a rebuild.
 - **Navigation model:** Persistent bottom tab bar (Home, Ask Consuela, Calendar, Meals, Tasks) + More menu for Grocery, Emergency, Settings, plus always-visible floating red Emergency shield button on Home
-- **Tech surface for ops:** Next.js 16 + React 19 + Tailwind CSS 4, PocketBase backend (`pocketbase` SDK), API routes under `src/app/api/`, custom SVG animations (no framer-motion)
+- **Tech surface for ops:** Next.js 16 + React 19 + Tailwind CSS 4, in-memory database (`src/db/index.ts`), API routes under `src/app/api/`, custom SVG animations (no framer-motion)
+- **PocketBase migration:** Planned but not started. See `DESIGN_SPECIFICATION.md` §6 for the full migration plan.
 
 ---
 
@@ -76,6 +77,16 @@ Use this exact delta format in the "What's New" area and update 1.5 journeys:
 - User-facing description (copy-paste ready for responses):
   > "The dashboard now uses a warmer glass-and-neumorphism design system. Cards feel softer and more tactile, controls are easier to tap, the bottom nav is simplified to five primary tabs plus More, and the theme palette now includes apricot and sage accents."
 
+### UI Change Record — 2026-06-15 — Layout & display reorder fixed end-to-end
+- Added / Changed: `src/lib/layout-config.ts`, `src/hooks/useHomeLayout.tsx`, `src/app/settings/page.tsx`, `src/app/page.tsx`
+- Visual / Motion: Settings → Layout & display now reflects the user's saved order. The card is split into a **Visible** group (rendered in user order, count of on-Home widgets shown) and a **Hidden** group (master order, with a thin divider + label). Every visible row carries a ⋮⋮ drag handle that supports native HTML5 drag-and-drop with a ring highlight on the drop target and a 50% opacity on the source row. Hidden rows are dimmed (opacity 0.55) and have their ↑/↓ disabled. The Help modal copy was updated to match the new contract, and the duplicate "Reset layout" button was removed from Data & sync.
+- Persistence: `useHomeLayout` now debounces `saveLayoutConfig` at 250ms and flushes any pending write on `pagehide` so a quick tab close after a reorder does not drop the latest move. The Settings page calls `setSuppressRehydrate(true)` on mount and `false` on unmount, so the focus/visibilitychange rehydrate no longer clobbers in-flight edits on `/settings`. `loadLayoutConfig` now validates stored ids against `ALL_WIDGETS` (unknown ids are dropped) and appends any default ids that are missing — schema changes self-heal for existing users.
+- Weather pinned-to-top bug fixed: `src/app/page.tsx` no longer special-cases the Weather widget outside the `widgets.map(...)` switch. Weather is now a regular switch case that respects the user's chosen position. The page-level `AtmosphericProvider` is the only one in the tree (the previous Weather-scoped provider was removed). `<AtmosphericBridge />` is rendered once, just above the first visible widget, so the bridge still anchors the widget stack regardless of order.
+- Feedback: Every reorder/toggle now shows a toast (`↕️ Moved X up/down`, `↕️ Reordered X`, `✅ Showing X`, `🚫 Hiding X`).
+- Agent action required: Update this section + Common Journeys if describing layout customization.
+- User-facing description (copy-paste ready for responses):
+  > "Settings → Layout & display is now actually a working reorder UI. Widgets are listed in your saved order at the top under **Visible**; hidden widgets fall into a **Hidden** group below. Drag the ⋮⋮ handle onto another row, or use the ↑ and ↓ buttons. The first row appears first on the Home dashboard — even Weather is free to move now, no longer pinned to the top."
+
 ### UI Change Record — 2026-06-14 — Leaderboard champion share ring
 - Added / Changed: `src/app/tasks/page.tsx`
 - Visual / Motion: The “This week’s champion” card now calculates the champion ring from the visible leaderboard points instead of the empty earned-points bucket. It shows the champion’s share of family points, so the default leaderboard no longer displays a misleading 0% ring.
@@ -83,6 +94,49 @@ Use this exact delta format in the "What's New" area and update 1.5 journeys:
 - Agent action required: Update this section + Common Journeys if describing the Tasks leaderboard.
 - User-facing description (copy-paste ready for responses):
   > "The leaderboard champion card now shows Caspian’s share of the family points instead of a 0% ring, so the champion box matches the visible leaderboard."
+
+### UI Change Record — 2026-06-15 — Tasks & Leaderboard v2: week-scoped points, real streaks, kid-friendly redesign
+- Added / Changed: `src/types/tasks.ts` (new), `src/lib/task-utils.ts` (new), `src/app/tasks/page.tsx` (major refactor), `src/app/page.tsx` (Home task sync), `src/app/globals.css` (kid-friendly animations)
+- Visual / Motion: **Leaderboard** now shows a glowing champion crown (👑 with `crown-glow` animation), rank badges (🥇🥈🥉 with `rank-pulse` on #1), real consecutive-day fire streaks (🔥Xd), level progression bars (gradient fill with `progress-fill` animation from current level to next), achievement badge sparkles (`badge-sparkle` animation), and a "Recent Activity" transaction log. **Task completion** triggers a confetti burst of colored particles falling from center screen. **Completed tasks** now show an undo button (↩) that opens a PIN-verified undo modal. **Rewards >100pts** require a parent PIN approval gate first. **Stat tiles** now show accurate "This week" counts instead of all-time totals. **Home page** tasks now sync from the same localStorage source as the Tasks page.
+- Color sources: Amber/gold for champion crown and rank #1, warm emerald for earned points, rose for penalties/deductions, existing accent colors for progress bars, multi-color confetti particles (amber/red/green/blue/purple/pink/teal)
+- Agent action required: Update this section + Common Journeys if describing task completion or leaderboard
+- User-facing description (copy-paste ready for responses):
+  > "The Tasks page now has a whole new leaderboard! Each week starts fresh every Monday, your streak counts real days in a row, and you level up through Rookie → Scout → Champ → Star → Master → Legend. Completing a task fires off a confetti celebration! Big rewards need a parent to approve them first. And if you accidentally mark the wrong task done, you can undo it with your PIN."
+
+- Logic fixes delivered:
+  - **23 issues resolved** across critical, contradictions, missing, and edge-case categories
+  - Week-scoped points with automatic Monday reset + 12-week archive history
+  - Real consecutive-day streak tracking (replaced fake `Math.floor(points / 10)`)
+  - Transaction log records every point event (earn, redeem, penalty, adjust) with timestamp and reason
+  - Recurring tasks auto-regenerate at week start (one-time per week via regeneration tracker)
+  - Completed tasks cannot be re-completed (undo flow instead)
+  - Undo completion with PIN verification reverses points
+  - Parental approval gate for reward redemptions over 100 points
+  - "Done this week" stat now shows actual weekly count (not all-time)
+  - "Earned" stat now shows this week's points (not all-time)
+  - Home page tasks now read from same localStorage as Tasks page (fixed two-source split)
+  - 0-point tasks no longer show confusing "+0pts" message
+  - Manual point adjust reason is now recorded in transaction log
+  - Level-based progression with 6 tiers, progress bars, and achievement badges
+
+### UI Change Record — 2026-06-15 — Home logout button, inactivity countdown, spacing rhythm
+- Added / Changed: `src/hooks/useAuth.tsx`, `src/app/page.tsx`, `src/app/globals.css`
+- Visual / Motion: **Logout is now discoverable.** Home header gets a small `IconButton` (door + arrow glyph, `glass` variant, `sm` size) immediately to the left of the logged-in avatar. Tap → confirm `Modal` ("Sign out of {first name}?") with Cancel + Sign out footer. The previous hidden `onDoubleClick={logout}` gesture is removed; tapping the avatar itself now opens the PIN flow to **switch profile** instead. Guest (not-logged-in) state unchanged. **Inactivity timer is surfaced.** A small `⏳ mm:ss` pill in the Home header shows time remaining until the existing 30-min auto-logout fires; it only renders after 60s of idle so it never distracts active use. When ≤30s remain, the pill flips to amber with the new `.session-pill-warning` keyframe (1.6s amber pulse, `prefers-reduced-motion` safe) and a `Toast` appears at the top: "You'll be signed out in {N}s — tap to stay." Tapping the toast (or any normal activity) calls the new `extendSession()` from `useAuth` and resets the timer to 30:00. **Spacing rhythm standardized.** Header `pt-10 pb-5 → pt-10 pb-6`, greeting → family strip `mt-5 → mt-6`, family member strip `gap-2 → gap-3`, stat-tile row `gap-2 → gap-3`, section card stack `space-y-5 → space-y-6`, bottom action button row `gap-2 → gap-3`.
+- Color sources: pill uses existing `--color-surface-0` glass surface for neutral; warning state uses amber-500/10 with amber-200 text. Toast uses the existing `neutral` tone (surface-0/80, white/10 border). New `.session-pill-warning` keyframe uses amber-500 alpha pulse.
+- Agent action required: Update this section + Common Journeys (added "How do I log out?" and "Why is there a countdown?").
+- User-facing description (copy-paste ready for responses):
+  > "You can now sign out from the Home screen with a single tap — there's a small sign-out icon right next to your avatar that opens a confirm sheet. Consuela also tells you when it's about to sign you out: a small clock in the header counts down, and you'll get a top-of-screen warning 30 seconds before the 30-minute auto-logout fires (just tap it to stay signed in)."
+
+### UI Change Record — 2026-06-15 — Leaderboard world-building + Home widget
+- Added: `src/components/leaderboard/HomeLeaderboardWidget.tsx`, `Podium.tsx`, `YourCard.tsx`, `MemberSheet.tsx`, `LeaderboardRow.tsx`, `RankArrow.tsx`, `LevelUpModal.tsx`, `DailyQuestCard.tsx`, `StreakSaverBanner.tsx`, `CatchUpNudge.tsx`, `TreasurePath.tsx`, `FamilyGoal.tsx`, `AchievementWall.tsx`, `HallOfFame.tsx`, `TrophyCase.tsx`, `ShareCard.tsx`, `hooks/useLeaderboardData.ts`
+- Added: `src/types/tasks.ts` (Task, Transaction, WeekData, LeaderboardEntry, Badge, FamilyGoal, HallOfFameEntry, WeekGraphPoint types + LEVELS const)
+- Added: `src/lib/task-utils.ts` (week management, streaks, transactions, archives, recurring regen, daily quests, streak saver, family goal, hall of fame, week graph helpers)
+- Changed: `src/app/tasks/page.tsx` — full leaderboard refactor with week-scoped points, real streaks, transaction log, undo completion, parental approval gate, confetti animation, member sheet, podium, your card, daily quests, streak saver, catch-up nudge, treasure path, family goal, achievement wall, hall of fame, level-up modal, share card, trophy case
+- Changed: `src/lib/layout-config.ts` — added `"leaderboard"` to WidgetId, ALL_WIDGETS, DEFAULT_LAYOUT at position 3
+- Changed: `src/app/page.tsx` — added leaderboard widget case + localStorage task sync
+- Changed: `src/app/globals.css` — added animations: confetti-fall, crown-glow, badge-sparkle, rank-pulse, progress-fill, level-up-pop, podium-shine, rank-arrow-bounce, widget-row-glow, number-roll + reduced-motion rules
+- Changed: `src/components/patterns/SectionCard.tsx` — added `action` prop
+- Visual / Motion: Home page now shows a compact leaderboard widget (top-3 podium + "You" indicator). Tasks page has full world-building: treasure path, family goal progress, achievement wall with badge grid, hall of fame for past weekly champions, trophy case for champion badges, share card modal, level-up celebration modal (auto-dismiss 4s), daily quest suggestions, streak saver banner, catch-up nudge. All animations respect prefers-reduced-motion.
 
 ### UI Change Record — 2026-06-14 — Pending Tasks swipe action fix
 - Added / Changed: `src/components/ui/SwipeableRow.tsx`, `src/app/tasks/page.tsx`
@@ -188,12 +242,14 @@ As of the latest build, the Home dashboard weather widget features:
 
 ### 1.3 Motion & Animated Elements
 
+- **Planner motion stripped (2026-06-15):** Float, bob, scale (`active:scale-*`), and translate (`hover:-translate-y-*`) animations were removed from the Meals, Grocery, Pantry, and Recipes tabs. These sections are for planning — motion can introduce visual instability during input. Color transitions (`transition-colors`), opacity transitions, focus rings, and progress-bar animations remain for accessibility. The `liquid-glass` CSS hover lift is preserved (it's a class-level treatment, not per-element motion). Home screen, chat, and other surfaces keep their animated elements.
+
 See files:
 - `src/components/3d/Icon3D.tsx` + `index.ts`
 - `src/components/ui/AnimatedEmoji.tsx`
 - `src/app/globals.css` (search for `@keyframes float`, `.floating`, isometric hover)
 
-**Agent rule:** Never describe the old static emoji experience. Always mention the gentle floating / keyframe motion when talking about the Home screen or meal cards.
+**Agent rule:** When describing the Home screen or chat, mention floating / keyframe motion. When describing the Meals, Grocery, Pantry, or Recipes planner tabs, omit motion — describe them as calm, stable input surfaces.
 
 ### 1.4 Theme & Accessibility Controls
 
@@ -221,6 +277,12 @@ It appears immediately in the weekly Meals view on its chosen day. If you tap "S
 
 **"How do I mark a pending task done?"**  
 Open the **Tasks** tab, find the item under **Pending**, then swipe the row right or tap the row. Enter the 4-digit PIN to complete it.
+
+**"How do I log out?"**  
+On the Home screen, tap the small sign-out icon (door + arrow) in the top-right header, just to the left of the avatar. Confirm in the "Sign out of {name}?" modal. You can also tap the gear-icon **Sign out** row on the Settings page.
+
+**"Why is there a countdown next to my avatar?"**  
+For family safety, Consuela signs you out automatically after 30 minutes of no activity. The small `⏳ mm:ss` pill in the Home header shows how much time is left, but only appears once you've been idle for at least a minute (so it doesn't distract active use). In the last 30 seconds, a toast appears at the top of the screen: "You'll be signed out in {N}s — tap to stay." Tap the toast (or just keep using the dashboard) to reset the timer back to 30 minutes.
 
 ---
 
@@ -454,6 +516,11 @@ After completing a user request that changes architecture, tech, or goals, updat
 ---
 
 ## Change Log (this manual only)
+
+- 2026-06-15 — fix: Layout & display reorder broken. Settings → Layout & display now reflects the user's saved order (was iterating the static `ALL_WIDGETS` master list), the ↑/↓ disabled state is computed from the user's position (was using the static index), and hidden widgets have their reorder controls disabled. Added Visible / Hidden grouping, a ⋮⋮ native drag-and-drop handle, toast feedback on every action, debounced (250ms) localStorage persistence with `pagehide` flush, suppressed rehydration while on `/settings`, and `loadLayoutConfig` validation that drops unknown ids and self-heals missing defaults. Weather is no longer pinned to the top of the Home page — it now respects the user's chosen position via a regular switch case. The duplicate "Reset layout" button was removed from Data & sync. `src/lib/layout-config.ts` gained `moveWidgetTo`, `getVisibleWidgets`, `getHiddenWidgets`. `src/hooks/useHomeLayout.tsx` gained `reorder`, `visibleWidgets`, `hiddenWidgets`, `setSuppressRehydrate`. Help modal copy updated to match the new contract.
+- 2026-06-15 — feat: Home logout button + inactivity countdown surfaced + spacing rhythm. Replaced the hidden `onDoubleClick={logout}` avatar gesture with a visible `IconButton` (door + arrow, glass, sm) in the top-right Home header that opens a confirm `Modal` ("Sign out of {name}?"). Tapping the avatar itself now opens the PIN flow to switch profile. `useAuth` now exposes `sessionRemainingMs`, `sessionWarning`, and `extendSession()`; the Home header shows a small `⏳ mm:ss` pill after 60s of idle, amber-pulsing in the last 30s with a tappable "tap to stay" `Toast`. Home spacing standardized: stat-tile row `gap-2→gap-3`, family strip `gap-2→gap-3`, section card stack `space-y-5→space-y-6`, action row `gap-2→gap-3`, header `pb-5→pb-6`, greeting `mt-5→mt-6`. New `.session-pill-warning` keyframe in `globals.css` (reduced-motion safe). No new dependencies.
+- 2026-06-15 — feat: Tasks & Leaderboard v2. Major refactor delivering week-scoped points, real consecutive-day streak tracking, transaction history log, undo completion with PIN, recurring task auto-regeneration at week start, parental approval gate for large rewards (>100pts), confetti completion animation, level-based progression with progress bars, achievement badges, animated champion crown, and Home page task sync. New files: `src/types/tasks.ts`, `src/lib/task-utils.ts`. Updated: `src/app/tasks/page.tsx`, `src/app/page.tsx`, `src/app/globals.css`. Fixed 23 logic issues (critical, contradictions, missing, edge cases).
+- 2026-06-15 — fix: Meal/recipe/grocery/pantry reliability + planner motion removal. `RecipeModal` now targets either meal or catalog via `mode` prop (was always saving as meal, corrupting meal state when editing catalog recipes). Recipes added from the modal go to the catalog only — assign to a slot later from Meals or Recipes tab. `MealsTab` gets a collapsed `RecipeCatalogStrip` above the day strip so users can browse the catalog while planning, with "Add to {activeDay} as {next empty slot}" one-tap insertion. `usePantry` now writes to the real DB (adds `db.deletePantryItem` to `src/db/index.ts` + `src/db/pb-db.ts`), merges DB + localStorage on load, and accepts `groceryItems` to power a "Grocery items waiting to be restocked" panel with one-tap "Add to pantry". Pantry delete is two-tap with a 3s confirmation window (no modal). `useGrocery` accepts `plannedMeals` from `useMeals` so `mealSyncService.syncMealPlanToGrocery` reflects what the user actually planned (was reading stale `db.selectMeals()`), and sync quantities now include units (`"1 cup"`, `"1 lb"`, etc.). Manual grocery add supports qty/notes inputs, "✨ Auto category" option, and friendly duplicate handling ("already on your list" toast + keep existing row). `useRecipes` normalizes tags/ingredients on save and dedupes by id then name. `GroceryTab`, `PantryTab`, `RecipesTab`, and `MealsTab` had all float/bob/scale/translate animations removed (color transitions, focus rings, and progress bars remain). `src/services/types.ts` `Meal` interface updated with `mealType`, `protein`, `carbs`, `fat`, `instructions`. `emptyRecipe` in `src/data/meals.ts` now includes `mealType`.
 
 - 2026-06-14 — fix: Leaderboard champion share ring. The “This week’s champion” card now calculates its ProgressRing from the visible leaderboard points, so the default leaderboard shows a meaningful champion share instead of 0%.
 - 2026-06-14 — fix: Pending Tasks PIN modal reopens after Cancel. `SwipeableRow` now deduplicates pointer/touch finish events and resets swipe state on cancel/leave, so Cancel closes the modal without immediately reopening it.

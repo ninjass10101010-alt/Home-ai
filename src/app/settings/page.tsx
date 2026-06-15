@@ -1,10 +1,11 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useTheme } from "@/hooks/useTheme";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
 import { useAuth } from "@/hooks/useAuth";
-import { ALL_WIDGETS, type WidgetId } from "@/lib/layout-config";
+import { type WidgetId } from "@/lib/layout-config";
 import { db } from "@/db";
 import PageShell from "@/components/ui/PageShell";
 import PageHeader from "@/components/patterns/PageHeader";
@@ -44,7 +45,7 @@ function hexToRgb(hex: string) {
 
 export default function SettingsPage() {
   const { theme, setMode, setAccentColor, setContrastBoost, setAccentHex } = useTheme();
-  const { widgets, toggle, moveUp, moveDown } = useHomeLayout();
+  const { widgets, visibleWidgets, hiddenWidgets, toggle, moveUp, moveDown, reorder, setSuppressRehydrate } = useHomeLayout();
   const { currentUser, isLoggedIn, logout } = useAuth();
   const [toast, setToast] = useState<string | null>(null);
   const [accentTarget, setAccentTarget] = useState<AccentTarget>("selected");
@@ -55,16 +56,85 @@ export default function SettingsPage() {
   const [editingContact, setEditingContact] = useState<any | null>(null);
   const [memberForm, setMemberForm] = useState<any>({ name: "", emoji: "😊", role: "child", pin: "" });
   const [contactForm, setContactForm] = useState<any>({ name: "", phone: "", email: "", relationship: "parent", isPrimary: false, emoji: "👤" });
+  const [mounted, setMounted] = useState(false);
+  const [members, setMembers] = useState<any[]>([]);
+  const [contacts, setContacts] = useState<any[]>([]);
+  const [draggingId, setDraggingId] = useState<WidgetId | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<WidgetId | null>(null);
 
-  const members = useMemo(() => db.selectMembersDetailed(), []);
-  const contacts = useMemo(() => db.selectEmergencyContacts(), []);
-  const profileMember = currentUser
+  useEffect(() => {
+    setMounted(true);
+    setMembers(db.selectMembersDetailed());
+    setContacts(db.selectEmergencyContacts());
+    setSuppressRehydrate(true);
+    return () => setSuppressRehydrate(false);
+  }, [setSuppressRehydrate]);
+
+  const profileMember = mounted && currentUser
     ? members.find((m: any) => m.name === currentUser.name || m.fullName === currentUser.name) || members[0]
     : members[0];
 
   const showToast = (message: string) => {
     setToast(message);
     setTimeout(() => setToast(null), 3000);
+  };
+
+  const widgetLabel = (id: WidgetId) =>
+    visibleWidgets.find((w) => w.id === id)?.label ||
+    hiddenWidgets.find((w) => w.id === id)?.label ||
+    id;
+
+  const handleMoveUp = (id: WidgetId) => {
+    moveUp(id);
+    showToast(`↕️ Moved ${widgetLabel(id)} up`);
+  };
+
+  const handleMoveDown = (id: WidgetId) => {
+    moveDown(id);
+    showToast(`↕️ Moved ${widgetLabel(id)} down`);
+  };
+
+  const handleReorder = (id: WidgetId, targetIndex: number) => {
+    reorder(id, targetIndex);
+    showToast(`↕️ Reordered ${widgetLabel(id)}`);
+  };
+
+  const handleToggle = (id: WidgetId, nextVisible: boolean) => {
+    toggle(id);
+    showToast(nextVisible ? `✅ Showing ${widgetLabel(id)}` : `🚫 Hiding ${widgetLabel(id)}`);
+  };
+
+  const handleDragStart = (id: WidgetId) => (event: React.DragEvent) => {
+    setDraggingId(id);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", id);
+  };
+
+  const handleDragOver = (id: WidgetId) => (event: React.DragEvent) => {
+    if (!draggingId || draggingId === id) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDropTargetId(id);
+  };
+
+  const handleDragLeave = (id: WidgetId) => () => {
+    if (dropTargetId === id) setDropTargetId(null);
+  };
+
+  const handleDrop = (targetId: WidgetId) => (event: React.DragEvent) => {
+    event.preventDefault();
+    const sourceId = (event.dataTransfer.getData("text/plain") || draggingId) as WidgetId | null;
+    setDraggingId(null);
+    setDropTargetId(null);
+    if (!sourceId || sourceId === targetId) return;
+    const targetIndex = visibleWidgets.findIndex((w) => w.id === targetId);
+    if (targetIndex === -1) return;
+    handleReorder(sourceId, targetIndex);
+  };
+
+  const handleDragEnd = () => {
+    setDraggingId(null);
+    setDropTargetId(null);
   };
 
   const setTargetColor = (target: AccentTarget, value: string) => {
@@ -90,12 +160,14 @@ export default function SettingsPage() {
       db.insertMember({ ...memberForm, name: memberForm.name.trim(), joined: new Date().toLocaleDateString("en-US", { month: "short", year: "numeric" }) });
       showToast(`✅ Added ${memberForm.name.trim()}`);
     }
+    setMembers(db.selectMembersDetailed());
     setMemberModalOpen(false);
   };
 
   const deleteMember = (member: any) => {
     db.deleteMember(member.name);
     showToast(`🗑️ Removed ${member.name}`);
+    setMembers(db.selectMembersDetailed());
   };
 
   const openContactModal = (contact?: any) => {
@@ -113,18 +185,46 @@ export default function SettingsPage() {
       db.insertEmergencyContact({ ...contactForm, name: contactForm.name.trim(), phone: contactForm.phone.trim(), email: contactForm.email.trim() });
       showToast(`✅ Added ${contactForm.name.trim()}`);
     }
+    setContacts(db.selectEmergencyContacts());
     setContactModalOpen(false);
   };
 
   const deleteContact = (contact: any) => {
     db.deleteEmergencyContact(contact.id);
     showToast(`🗑️ Removed ${contact.name}`);
+    setContacts(db.selectEmergencyContacts());
   };
 
   const resetLayout = () => {
     localStorage.removeItem("consuela-home-layout");
     window.location.reload();
   };
+
+  const inviteMember = async () => {
+    const shareData = { title: "Consuela — AI Family Organizer", text: "Join our family on Consuela! Manage calendars, meals, chores, and more.", url: window.location.origin };
+    if (navigator.share) {
+      try { await navigator.share(shareData); } catch { /* user cancelled */ }
+    } else {
+      try {
+        await navigator.clipboard.writeText(shareData.url);
+        showToast("📋 Link copied to clipboard");
+      } catch {
+        showToast("📋 Share link: " + shareData.url);
+      }
+    }
+  };
+
+  const testEmergencyAlert = async () => {
+    try {
+      const res = await fetch("/api/emergency", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "General", timestamp: new Date().toISOString() }) });
+      const data = await res.json();
+      showToast(data.success ? "✅ Test alert sent" : "❌ Alert failed — check emergency contacts");
+    } catch {
+      showToast("❌ Could not send test alert");
+    }
+  };
+
+  const [helpModalOpen, setHelpModalOpen] = useState(false);
 
   const exportData = () => {
     const data = {
@@ -263,7 +363,7 @@ export default function SettingsPage() {
             </div>
             <div className="mt-4 flex gap-2">
               <SoftButton onClick={() => openMemberModal()} className="flex-1">Add member</SoftButton>
-              <SoftButton variant="secondary" onClick={() => {}} className="flex-1">Invite</SoftButton>
+              <SoftButton variant="secondary" onClick={inviteMember} className="flex-1">Invite</SoftButton>
             </div>
           </SectionCard>
 
@@ -288,49 +388,123 @@ export default function SettingsPage() {
             </div>
             <div className="mt-4 flex gap-2">
               <SoftButton onClick={() => openContactModal()} className="flex-1">Add contact</SoftButton>
-              <SoftButton variant="secondary" onClick={() => {}} className="flex-1">Test</SoftButton>
+              <SoftButton variant="secondary" onClick={testEmergencyAlert} className="flex-1">Test</SoftButton>
             </div>
           </SectionCard>
 
           <SectionCard title="Layout & display" description="Show, hide, and reorder Home widgets." icon="🧩">
             <div className="space-y-3">
-              {ALL_WIDGETS.map((widget, index) => (
-                <ListRow
-                  key={widget.id}
-                  title={widget.label}
-                  subtitle={widget.description}
-                  leftRailColor="var(--color-accent-sage)"
-                  leading={<span className="text-xl">{widget.emoji}</span>}
-                  trailing={
-                    <div className="flex items-center gap-1">
-                      <Toggle checked={widgets.includes(widget.id)} onCheckedChange={() => toggle(widget.id)} />
-                      <IconButton size="sm" variant="ghost" aria-label="Move up" disabled={index === 0} onClick={() => moveUp(widget.id)}>↑</IconButton>
-                      <IconButton size="sm" variant="ghost" aria-label="Move down" disabled={index === ALL_WIDGETS.length - 1} onClick={() => moveDown(widget.id)}>↓</IconButton>
-                    </div>
-                  }
+              <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.18em] text-text-muted">
+                <span>Visible</span>
+                <span>{visibleWidgets.length} on Home</span>
+              </div>
+              {visibleWidgets.length === 0 && (
+                <EmptyState
+                  title="No visible widgets"
+                  description="Turn on a widget from the Hidden group below to start building your Home."
+                  icon="🧩"
                 />
-              ))}
+              )}
+              <div className="space-y-3">
+                {visibleWidgets.map((widget, index) => {
+                  const isDropTarget = dropTargetId === widget.id && draggingId !== widget.id;
+                  return (
+                    <div
+                      key={widget.id}
+                      draggable
+                      onDragStart={handleDragStart(widget.id)}
+                      onDragOver={handleDragOver(widget.id)}
+                      onDragLeave={handleDragLeave(widget.id)}
+                      onDrop={handleDrop(widget.id)}
+                      onDragEnd={handleDragEnd}
+                      className={`rounded-2xl transition ${isDropTarget ? "ring-2 ring-[var(--color-accent-selected)] ring-offset-2 ring-offset-[var(--color-canvas)]" : ""} ${draggingId === widget.id ? "opacity-50" : ""}`}
+                    >
+                      <ListRow
+                        title={widget.label}
+                        subtitle={widget.description}
+                        leftRailColor="var(--color-accent-sage)"
+                        leading={
+                          <span
+                            className="grid h-9 w-6 cursor-grab place-items-center text-text-muted active:cursor-grabbing"
+                            aria-hidden="true"
+                            title="Drag to reorder"
+                          >
+                            ⋮⋮
+                          </span>
+                        }
+                        trailing={
+                          <div className="flex items-center gap-1">
+                            <Toggle
+                              checked
+                              onCheckedChange={(checked) => {
+                                if (!checked) handleToggle(widget.id, false);
+                              }}
+                              aria-label={`Hide ${widget.label}`}
+                            />
+                            <IconButton size="sm" variant="ghost" aria-label={`Move ${widget.label} up`} disabled={index === 0} onClick={() => handleMoveUp(widget.id)}>↑</IconButton>
+                            <IconButton size="sm" variant="ghost" aria-label={`Move ${widget.label} down`} disabled={index === visibleWidgets.length - 1} onClick={() => handleMoveDown(widget.id)}>↓</IconButton>
+                          </div>
+                        }
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+
+              {hiddenWidgets.length > 0 && (
+                <>
+                  <div className="mt-6 flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-text-muted">
+                    <span className="h-px flex-1 bg-white/10" />
+                    <span>Hidden · {hiddenWidgets.length}</span>
+                    <span className="h-px flex-1 bg-white/10" />
+                  </div>
+                  <div className="space-y-3">
+                    {hiddenWidgets.map((widget) => (
+                      <ListRow
+                        key={widget.id}
+                        title={widget.label}
+                        subtitle={widget.description}
+                        leftRailColor="var(--color-accent-sage)"
+                        className="opacity-55"
+                        leading={<span className="grid h-9 w-6 place-items-center text-text-muted" aria-hidden="true">⋮⋮</span>}
+                        trailing={
+                          <div className="flex items-center gap-1">
+                            <Toggle
+                              checked={false}
+                              onCheckedChange={(checked) => {
+                                if (checked) handleToggle(widget.id, true);
+                              }}
+                              aria-label={`Show ${widget.label}`}
+                            />
+                            <IconButton size="sm" variant="ghost" aria-label={`Reorder ${widget.label}`} disabled aria-disabled>
+                              ↑
+                            </IconButton>
+                            <IconButton size="sm" variant="ghost" aria-label={`Reorder ${widget.label}`} disabled aria-disabled>
+                              ↓
+                            </IconButton>
+                          </div>
+                        }
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
             <div className="mt-4 flex gap-2">
               <SoftButton variant="secondary" onClick={resetLayout} className="flex-1">Reset layout</SoftButton>
-              <SoftButton variant="ghost" onClick={() => {}} className="flex-1">Help</SoftButton>
+              <SoftButton variant="ghost" onClick={() => setHelpModalOpen(true)} className="flex-1">Help</SoftButton>
             </div>
           </SectionCard>
 
           <SectionCard title="Data & sync" description="Export or reset local settings." icon="📦">
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-3 sm:grid-cols-1">
               <Surface variant="glass-subtle" radius="xl" padding="sm">
                 <div className="text-sm font-bold text-text-primary">Local settings</div>
-                <p className="mt-1 text-xs text-text-secondary">Export your family members, emergency contacts, and home layout.</p>
-              </Surface>
-              <Surface variant="glass-subtle" radius="xl" padding="sm">
-                <div className="text-sm font-bold text-text-primary">Reset</div>
-                <p className="mt-1 text-xs text-text-secondary">Clear local layout settings and reload the page.</p>
+                <p className="mt-1 text-xs text-text-secondary">Export your family members, emergency contacts, and home layout as a single JSON file. Reset is in the Layout section above.</p>
               </Surface>
             </div>
             <div className="mt-4 flex gap-2">
               <SoftButton onClick={exportData} className="flex-1">Export JSON</SoftButton>
-              <SoftButton variant="danger" onClick={resetLayout} className="flex-1">Reset layout</SoftButton>
             </div>
           </SectionCard>
         </div>
@@ -403,6 +577,14 @@ export default function SettingsPage() {
               </select>
             </FormField>
             <Toggle checked={contactForm.isPrimary} onCheckedChange={(checked) => setContactForm((prev: any) => ({ ...prev, isPrimary: checked }))} label="Primary contact" />
+          </div>
+        </Modal>
+
+        <Modal open={helpModalOpen} onClose={() => setHelpModalOpen(false)} title="Layout & display help" description="Control which widgets appear on your Home dashboard." footer={<SoftButton variant="secondary" onClick={() => setHelpModalOpen(false)} className="flex-1">Got it</SoftButton>}>
+          <div className="space-y-4 text-sm text-text-secondary">
+            <p><strong className="text-text-primary">Show / Hide</strong> — Toggle each widget on or off. Hidden widgets move to the <em>Hidden</em> group at the bottom of this list and stop appearing on the Home dashboard.</p>
+            <p><strong className="text-text-primary">Reorder</strong> — Drag the ⋮⋮ handle onto another visible row, or use the ↑ and ↓ buttons. The first row appears first on the Home dashboard.</p>
+            <p><strong className="text-text-primary">Reset layout</strong> — Restores all widgets to their default order and visibility.</p>
           </div>
         </Modal>
       </SettingsErrorBoundary>

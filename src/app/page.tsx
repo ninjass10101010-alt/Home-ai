@@ -2,6 +2,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { useState, useEffect, useMemo } from "react";
 import PageShell from "@/components/ui/PageShell";
@@ -26,9 +27,12 @@ import Chip from "@/components/ui/Chip";
 import ListRow from "@/components/ui/ListRow";
 import EmptyState from "@/components/ui/EmptyState";
 import ErrorState from "@/components/ui/ErrorState";
+import Modal from "@/components/ui/Modal";
+import Toast from "@/components/ui/Toast";
 import StatTile from "@/components/patterns/StatTile";
 import DayStrip from "@/components/patterns/DayStrip";
 import SectionCard from "@/components/patterns/SectionCard";
+import HomeLeaderboardWidget from "@/components/leaderboard/HomeLeaderboardWidget";
 
 const FogBackground = dynamic(() => import("@/components/ui/FogBackground"), { ssr: false });
 
@@ -63,9 +67,16 @@ export default function HomePage() {
   const [now, setNow] = useState<Date | null>(null);
   const [pinningMember, setPinningMember] = useState<{ name: string; emoji: string; color: string; avatarSize: AvatarSize; glow: boolean } | null>(null);
   const [homeError, setHomeError] = useState<string | null>(null);
+  const [confirmingLogout, setConfirmingLogout] = useState(false);
 
-  const { currentUser, isLoggedIn, logout } = useAuth();
-  const { isVisible, widgets } = useHomeLayout();
+  const router = useRouter();
+  const { currentUser, isLoggedIn, logout, sessionRemainingMs, sessionWarning, extendSession } = useAuth();
+  const { widgets } = useHomeLayout();
+
+  const sessionSecondsRemaining = Math.ceil(sessionRemainingMs / 1000);
+  const showSessionPill = isLoggedIn && sessionRemainingMs < 30 * 60 * 1000 - 60 * 1000;
+  const sessionPillMM = String(Math.floor(sessionSecondsRemaining / 60)).padStart(2, "0");
+  const sessionPillSS = String(sessionSecondsRemaining % 60).padStart(2, "0");
 
   const dashboardCurrentUser = useMemo<AuthUser | null>(() => {
     if (!currentUser) return null;
@@ -95,7 +106,21 @@ export default function HomePage() {
       }));
       setFamilyMembers(members);
       setTodayEvents(db.selectTodaysEvents());
-      setPendingTasks(db.selectPendingTasks());
+      const storedTasks = typeof window !== "undefined" ? localStorage.getItem("consuela-tasks") : null;
+      if (storedTasks) {
+        try {
+          const parsed = JSON.parse(storedTasks);
+          const pending = Array.isArray(parsed) ? parsed.filter((t: any) => !t.completed).slice(0, 3).map((t: any) => ({
+            id: t.id, title: t.title, assigned: t.assignee, due: t.due,
+            points: t.points, priority: t.priority, category: t.category,
+          })) : [];
+          setPendingTasks(pending);
+        } catch {
+          setPendingTasks(db.selectPendingTasks());
+        }
+      } else {
+        setPendingTasks(db.selectPendingTasks());
+      }
 
       const today = new Date();
       const hour = today.getHours();
@@ -175,7 +200,7 @@ export default function HomePage() {
         <PageShell style={{ backgroundColor: "transparent" }}>
           <EmergencyButton />
 
-          <div className="relative z-10 px-4 pt-10 pb-5">
+          <div className="relative z-10 px-4 pt-10 pb-6">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
@@ -187,9 +212,35 @@ export default function HomePage() {
                 <p className="mt-1 text-sm text-text-secondary">{season.emoji} {season.name} · {dateInfo.dayOfWeek}, {dateInfo.dayMonth} · {timeStr}</p>
               </div>
               {isLoggedIn && dashboardCurrentUser ? (
-                <button type="button" onDoubleClick={logout} title="Double-tap to log out" className="shrink-0 active:scale-90 transition-transform">
-                  <Avatar name={dashboardCurrentUser.name} color={dashboardCurrentUser.color} emoji={dashboardCurrentUser.emoji} size={normalizeAvatarSize(dashboardCurrentUser.avatarSize)} variant="emoji" glow={dashboardCurrentUser.glow} />
-                </button>
+                <div className="flex shrink-0 items-center gap-2">
+                  {showSessionPill && (
+                    <span
+                      className={`rounded-full border border-white/10 bg-[var(--color-surface-0)]/35 px-2.5 py-1 text-[10px] font-semibold tabular-nums text-text-secondary backdrop-blur-xl ${
+                        sessionWarning ? "session-pill-warning border-amber-300/30 bg-amber-500/10 text-amber-200" : ""
+                      }`}
+                      aria-label={`Auto sign-out in ${sessionPillMM}:${sessionPillSS}`}
+                      title="Time until auto sign-out"
+                    >
+                      ⏳ {sessionPillMM}:{sessionPillSS}
+                    </span>
+                  )}
+                  <IconButton
+                    aria-label="Sign out"
+                    title="Sign out"
+                    onClick={() => setConfirmingLogout(true)}
+                    size="sm"
+                    variant="glass"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                      <polyline points="16 17 21 12 16 7" />
+                      <line x1="21" y1="12" x2="9" y2="12" />
+                    </svg>
+                  </IconButton>
+                  <button type="button" onClick={() => setPinningMember({ name: dashboardCurrentUser.name, emoji: dashboardCurrentUser.emoji || "😊", color: dashboardCurrentUser.color || "green", avatarSize: normalizeAvatarSize(dashboardCurrentUser.avatarSize), glow: dashboardCurrentUser.glow || false })} className="active:scale-90 transition-transform" aria-label="Switch profile">
+                    <Avatar name={dashboardCurrentUser.name} color={dashboardCurrentUser.color} emoji={dashboardCurrentUser.emoji} size={normalizeAvatarSize(dashboardCurrentUser.avatarSize)} variant="emoji" glow={dashboardCurrentUser.glow} />
+                  </button>
+                </div>
               ) : (
                 <button type="button" onClick={() => setPinningMember({ name: familyMembers[0]?.name || "Family", emoji: familyMembers[0]?.emoji || "😊", color: familyMembers[0]?.color || "green", avatarSize: normalizeAvatarSize(familyMembers[0]?.avatarSize), glow: familyMembers[0]?.glow || false })} className="shrink-0 active:scale-90 transition-transform">
                   <Avatar name={familyMembers[0]?.name || "Family"} color={familyMembers[0]?.color || "green"} emoji={familyMembers[0]?.emoji || "😊"} size={normalizeAvatarSize(familyMembers[0]?.avatarSize || "md")} variant="emoji" glow={familyMembers[0]?.glow || false} />
@@ -197,7 +248,7 @@ export default function HomePage() {
               )}
             </div>
 
-            <div className="mt-5 flex gap-2 overflow-x-auto pb-1">
+            <div className="mt-6 flex gap-3 overflow-x-auto pb-1">
               {familyMembers.slice(0, 6).map((member) => (
                 <button key={member.name} type="button" onClick={() => setPinningMember({ name: member.name, emoji: member.emoji || "😊", color: member.color || "green", avatarSize: normalizeAvatarSize(member.avatarSize), glow: member.glow || false })} className="active:scale-90 transition-transform">
                   <Avatar name={member.name} color={member.color} emoji={member.emoji} size={normalizeAvatarSize(member.avatarSize)} variant="emoji" glow={member.glow} />
@@ -207,26 +258,27 @@ export default function HomePage() {
             </div>
           </div>
 
-          {isVisible("weather") && (
-            <div className="px-4 pb-4 relative z-10">
-              <AtmosphericProvider>
-                <WeatherWidget />
-                <AtmosphericBridge />
-              </AtmosphericProvider>
-            </div>
-          )}
-
-          <div className="px-4 space-y-5 relative z-10">
-            <div className="grid grid-cols-3 gap-2">
+          <div className="px-4 space-y-6 relative z-10">
+            <div className="grid grid-cols-3 gap-3">
               <StatTile label="Events" value={todayEvents.length} detail="Today" icon="📅" tone={todayEvents.length > 0 ? "warning" : "accent"} />
               <StatTile label="Tasks" value={pendingTasks.length} detail="Pending" icon="✅" tone={pendingTasks.length > 0 ? "danger" : "success"} />
               <StatTile label="Week" value="7" detail="Days planned" icon="🍽️" tone="accent" />
             </div>
 
-            {widgets.filter((id) => id !== "weather").map((id) => {
-              if (!isVisible(id)) return null;
+            {widgets.length > 0 && <AtmosphericBridge />}
 
+            {widgets.map((id) => {
               switch (id as WidgetId) {
+                case "weather":
+                  return (
+                    <div key="weather" className="relative z-10">
+                      <WeatherWidget />
+                    </div>
+                  );
+
+                case "leaderboard":
+                  return <HomeLeaderboardWidget key="leaderboard" />;
+
                 case "todayEvents":
                   return (
                     <SectionCard key="todayEvents" title="Today" description={`${todayEvents.length} events on the family calendar`} icon="📅">
@@ -304,10 +356,10 @@ export default function HomePage() {
             })}
 
             <SectionCard title="This Week" description="Meal and family rhythm at a glance" icon="🗓️">
-              <DayStrip value="today" onChange={() => {}} days={weekDays} />
+              <DayStrip value="today" onChange={(dayId) => router.push(`/meals?day=${dayId}`)} days={weekDays} />
             </SectionCard>
 
-            <div className="flex gap-2">
+            <div className="flex gap-3">
               <Link href="/meals" className="flex-1">
                 <SoftButton variant="secondary" className="w-full">Plan Meals</SoftButton>
               </Link>
@@ -327,6 +379,61 @@ export default function HomePage() {
               onSuccess={() => setPinningMember(null)}
             />
           )}
+
+          {isLoggedIn && (
+            <Modal
+              open={confirmingLogout}
+              onClose={() => setConfirmingLogout(false)}
+              title={`Sign out of ${dashboardCurrentUser?.name.split(" ")[0] || "your account"}?`}
+              description="You can sign back in any time by tapping your avatar."
+              footer={
+                <>
+                  <SoftButton variant="secondary" className="flex-1" onClick={() => setConfirmingLogout(false)}>
+                    Cancel
+                  </SoftButton>
+                  <SoftButton
+                    className="flex-1"
+                    onClick={() => {
+                      setConfirmingLogout(false);
+                      logout();
+                    }}
+                  >
+                    Sign out
+                  </SoftButton>
+                </>
+              }
+            >
+              {dashboardCurrentUser && (
+                <div className="flex items-center gap-3">
+                  <Avatar
+                    name={dashboardCurrentUser.name}
+                    color={dashboardCurrentUser.color}
+                    emoji={dashboardCurrentUser.emoji}
+                    size="md"
+                    variant="emoji"
+                    glow={dashboardCurrentUser.glow}
+                  />
+                  <span className="text-sm text-text-secondary">
+                    Signed in as <span className="font-semibold text-text-primary">{dashboardCurrentUser.name}</span>
+                  </span>
+                </div>
+              )}
+            </Modal>
+          )}
+
+          <Toast
+            open={isLoggedIn && sessionWarning}
+            tone="neutral"
+          >
+            <button
+              type="button"
+              onClick={extendSession}
+              className="flex w-full items-center justify-center gap-2 text-left"
+              aria-label="Stay signed in"
+            >
+              <span>You’ll be signed out in {sessionSecondsRemaining}s — tap to stay</span>
+            </button>
+          </Toast>
         </PageShell>
       </AtmosphericProvider>
     </FogProvider>
