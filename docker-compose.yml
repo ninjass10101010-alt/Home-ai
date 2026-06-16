@@ -1,27 +1,33 @@
-version: '3.8'
 services:
+  pocketbase:
+    image: ghcr.io/muchobien/pocketbase:latest
+    ports:
+      - "8090:8090"
+    container_name: pocketbase
+    restart: unless-stopped
+    volumes:
+      - pocketbase_data:/pb_data
+    networks:
+      - consuela-net
+
   home-dashboard:
     build: .
-    container_name: home-dashboard
+    container_name: consuela-dashboard
     restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
       - NODE_ENV=production
+      - POCKETBASE_URL=http://pocketbase:8090
     networks:
+      - consuela-net
       - media-stack_default
 
-  pocketbase:
-    image: pocketbase/pocketbase:latest
-    container_name: consuela-pocketbase
-    restart: unless-stopped
-    ports:
-      - "8090:8090"
-    volumes:
-      - ./pb_data:/pb_data
-    networks:
-      - media-stack_default
+volumes:
+  pocketbase_data:
 
 networks:
+  consuela-net:
+    driver: bridge
   media-stack_default:
     external: true
