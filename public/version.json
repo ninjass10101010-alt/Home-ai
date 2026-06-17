@@ -1,1 +1,6 @@
-{"hash":"094efcf6c44c75f19feb2d63b6526fd56fbed031","short":"094efcf","message":"chore(updates): add prebuild hook + sync version.json","date":"2026-06-16 21:45:00 -0400","author":"GarciaFam"}
+{
+  "hash": "6d707213b75b59b1d7f27d347c58fdc4e3d2c9d9",
+  "message": "fix: revert deploy.sh to single-repo pull — QNAP clones Home-ai directly",
+  "date": "2026-06-17 09:11:00 -0400",
+  "author": "GarciaFam"
+}
