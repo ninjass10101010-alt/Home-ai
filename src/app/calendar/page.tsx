@@ -862,32 +862,36 @@ export default function CalendarPage() {
                     className="calendar-input" autoFocus
                   />
                   <div className="calendar-form-grid">
-                    <div className="calendar-time-picker">
-                      <input
-                        type="number" min={1} max={12} inputMode="numeric"
-                        placeholder="8"
-                        value={(() => { const t = formatTo12Hour(schedForm.time); return t.hour; })()}
-                        onChange={(e) => {
-                          const t = formatTo12Hour(schedForm.time);
-                          const v = e.target.value.replace(/[^0-9]/g, "").slice(0, 2);
-                          setSchedForm({ ...schedForm, time: build12HourString(v || "12", t.minute, t.ampm) });
-                        }}
-                        className="calendar-input calendar-time-hour"
-                        aria-label="Hour"
-                      />
-                      <span className="calendar-time-sep">:</span>
-                      <input
-                        type="number" min={0} max={59} inputMode="numeric"
-                        placeholder="00"
-                        value={(() => { const t = formatTo12Hour(schedForm.time); return t.minute; })()}
-                        onChange={(e) => {
-                          const t = formatTo12Hour(schedForm.time);
-                          const v = e.target.value.replace(/[^0-9]/g, "").slice(0, 2);
-                          setSchedForm({ ...schedForm, time: build12HourString(t.hour, v.padStart(2, "0") || "00", t.ampm) });
-                        }}
-                        className="calendar-input calendar-time-minute"
-                        aria-label="Minute"
-                      />
+                     <div className="calendar-time-picker">
+                       <input
+                         type="text" inputMode="numeric"
+                         placeholder="8"
+                         value={(() => { const t = formatTo12Hour(schedForm.time); return t.hour; })()}
+                         onFocus={(e) => e.target.select()}
+                         onBlur={(e) => {
+                           const t = formatTo12Hour(schedForm.time);
+                           let v = e.target.value.replace(/[^0-9]/g, "").slice(0, 2);
+                           if (!v) v = t.hour;
+                           setSchedForm({ ...schedForm, time: build12HourString(v, t.minute, t.ampm) });
+                         }}
+                         className="calendar-input calendar-time-hour"
+                         aria-label="Hour"
+                       />
+                       <span className="calendar-time-sep">:</span>
+                       <input
+                         type="text" inputMode="numeric"
+                         placeholder="00"
+                         value={(() => { const t = formatTo12Hour(schedForm.time); return t.minute; })()}
+                         onFocus={(e) => e.target.select()}
+                         onBlur={(e) => {
+                           const t = formatTo12Hour(schedForm.time);
+                           let v = e.target.value.replace(/[^0-9]/g, "").slice(0, 2);
+                           if (!v) v = t.minute;
+                           setSchedForm({ ...schedForm, time: build12HourString(t.hour, v.padStart(2, "0"), t.ampm) });
+                         }}
+                         className="calendar-input calendar-time-minute"
+                         aria-label="Minute"
+                       />
                       <div className="calendar-time-ampm">
                         <button
                           type="button"

@@ -1205,6 +1205,9 @@ export default function TasksPage() {
                 previousRanks={previousRanks}
                 isYou={(name: string) => !!(isLoggedIn && currentUser && (name === currentUser.name || name.startsWith(currentUser.name)))}
                 getMemberColor={(name: string) => memberColors[name] || "green"}
+                onOpenSheet={setSheetMember}
+                onAdjust={openAdjust}
+                isAdmin={isLoggedIn && currentUser?.role === "parent"}
               />
               <div className="mt-3 space-y-3">
                 {dynamicLeaderboard.slice(3).map((entry, index) => (
