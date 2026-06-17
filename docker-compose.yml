@@ -12,7 +12,7 @@ services:
 
   home-dashboard:
     build:
-      context: .
+      context: ./Home-ai
       args:
         - NEXT_PUBLIC_PB_URL=http://pocketbase:8090
     container_name: consuela-dashboard
@@ -21,7 +21,7 @@ services:
       - "3000:3000"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - .:/app-source
+      - ./Home-ai:/app-source
     environment:
       - NODE_ENV=production
       - NEXT_PUBLIC_PB_URL=http://pocketbase:8090
