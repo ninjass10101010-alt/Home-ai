@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "prebuild": "node scripts/write-version.mjs || true",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",

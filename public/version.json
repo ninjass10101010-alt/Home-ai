@@ -1,7 +1,7 @@
 {
-  "hash": "403d6a10a81a3491042f55385ff9809a26c24b29",
-  "short": "403d6a1",
-  "message": "feat(updates): one-click version check + deploy script",
-  "date": "2026-06-16 21:44:04 -0400",
+  "hash": "85445befc89a1f58eee32dca8a7b3529ae576618",
+  "short": "85445be",
+  "message": "chore: sync version.json to current commit",
+  "date": "2026-06-16 21:44:31 -0400",
   "author": "GarciaFam"
 }
