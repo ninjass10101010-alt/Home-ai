@@ -10,6 +10,7 @@ const COLLECTIONS = [
       { name: "role", type: "text" },
       { name: "avatarSize", type: "text" },
       { name: "glow", type: "bool" },
+      { name: "pin", type: "text" },
       { name: "phone", type: "text" },
       { name: "email", type: "text" },
     ],

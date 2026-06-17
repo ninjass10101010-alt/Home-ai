@@ -517,31 +517,6 @@ function ChatContent() {
               ? m.content.replace(/\n\n✅[\s\S]*$/, "").trim()
               : m.content,
           })),
-          context: (() => {
-            const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-            const events = db.selectTodaysEvents();
-            const schedules = db.selectTodaysSchedules();
-            const tasks = db.selectPendingTasks();
-            const meals = db.selectMeals();
-            const members = db.selectMembers();
-
-            let ctx = `Current date: ${today}. Current speaker: ${activeSpeaker.name}. Family: ${memberOptions.map(m => `${m.name} (${m.emoji?.startsWith('data:') ? '🖼️' : m.emoji})`).join(", ")}.`;
-
-            if (events.length > 0) {
-              ctx += ` Today's events: ${events.map((e: any) => `${e.title} at ${e.time} (${e.member})`).join("; ")}.`;
-            }
-            if (schedules.length > 0) {
-              ctx += ` Today's schedule: ${schedules.slice(0, 8).map((s: any) => `${s.time} ${s.title}`).join("; ")}.`;
-            }
-            if (tasks.length > 0) {
-              ctx += ` Pending tasks: ${tasks.map((t: any) => `${t.title} (${t.assigned}, ${t.points}pts)`).join("; ")}.`;
-            }
-            if (meals.length > 0) {
-              const weekMeals = meals.filter((m: any) => m.time).map((m: any) => `${m.time}: ${m.name}`).join(", ");
-              if (weekMeals) ctx += ` This week's meals: ${weekMeals}.`;
-            }
-            return ctx;
-          })(),
         }),
       });
       const aiResponse = await res.json();

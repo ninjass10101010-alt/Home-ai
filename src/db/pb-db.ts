@@ -155,6 +155,36 @@ export const db = {
       });
   },
 
+  async insertEvent(event: any): Promise<any> {
+    return safeCreate("events", event);
+  },
+  async updateEvent(id: number | string, updates: any): Promise<any> {
+    return safeUpdate("events", String(id), updates);
+  },
+  async deleteEvent(id: number | string): Promise<boolean> {
+    return safeDelete("events", String(id));
+  },
+
+  async insertSchedule(schedule: any): Promise<any> {
+    return safeCreate("schedules", schedule);
+  },
+  async updateSchedule(id: number | string, updates: any): Promise<any> {
+    return safeUpdate("schedules", String(id), updates);
+  },
+  async deleteSchedule(id: number | string): Promise<boolean> {
+    return safeDelete("schedules", String(id));
+  },
+
+  async insertTask(task: any): Promise<any> {
+    return safeCreate("tasks", task);
+  },
+  async updateTask(id: number | string, updates: any): Promise<any> {
+    return safeUpdate("tasks", String(id), updates);
+  },
+  async deleteTask(id: number | string): Promise<boolean> {
+    return safeDelete("tasks", String(id));
+  },
+
   async selectPendingTasks() {
     const records = await safeList<any>("tasks", tasksFallback);
     const members = await this.selectMembers();

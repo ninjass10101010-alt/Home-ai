@@ -460,30 +460,20 @@ export default function TasksPage() {
   const syncGoogleTasks = async () => {
     setGoogleSyncing(true);
     try {
-      const res = await fetch("/api/google-calendar?type=task");
+      const res = await fetch("/api/google/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resource: "all" }),
+      });
       const data = await res.json();
-      if (data.events?.length) {
-        const existing = [...tasks];
-        for (const ge of data.events) {
-          if (!existing.find(t => t.title === ge.title)) {
-            existing.push({
-              id: uid(),
-              title: ge.title,
-              assignee: "All",
-              assigneeEmoji: "👨‍👩‍👧‍👧",
-              due: getISO.today,
-              points: 5,
-              recurring: null,
-              category: "Google Tasks",
-              completed: false,
-              priority: "medium",
-            });
-          }
-        }
-        setTasks(existing);
-        showToast(`Synced ${data.events.length} Google tasks`);
+      if (data.tasks?.skipped) {
+        showToast("Google Tasks scope not granted — see Settings → Integrations");
+      } else if (data.tasks?.tasks != null) {
+        showToast(`Synced ${data.tasks.tasks} Google tasks`);
+      } else if (!data.ok) {
+        showToast("Google not connected — check Settings → Integrations");
       } else {
-        showToast("No Google tasks found");
+        showToast("No Google tasks to sync");
       }
     } catch {
       showToast("Failed to sync Google tasks");

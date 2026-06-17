@@ -76,7 +76,8 @@
     "emoji": "🐶",
     "color": "amber",
     "age": "3",
-    "joined": "Feb 2024"
+    "joined": "Feb 2024",
+    "pin": "0000"
   },
   {
     "id": "9",
@@ -85,6 +86,7 @@
     "emoji": "🐩",
     "color": "cyan",
     "age": "5",
-    "joined": "Feb 2024"
+    "joined": "Feb 2024",
+    "pin": "0000"
   }
 ]

@@ -11,14 +11,28 @@ services:
       - consuela-net
 
   home-dashboard:
-    build: .
+    build:
+      context: .
+      args:
+        - NEXT_PUBLIC_PB_URL=http://pocketbase:8090
     container_name: consuela-dashboard
     restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
       - NODE_ENV=production
-      - POCKETBASE_URL=http://pocketbase:8090
+      - NEXT_PUBLIC_PB_URL=http://pocketbase:8090
+      - PB_ADMIN_EMAIL=${PB_ADMIN_EMAIL:-admin@consuela.app}
+      - PB_ADMIN_PASS=${PB_ADMIN_PASS:-changeme}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_OAUTH_SCOPES=${GOOGLE_OAUTH_SCOPES:-openid email https://www.googleapis.com/auth/calendar}
+      - CONSUELA_ENCRYPTION_KEY=${CONSUELA_ENCRYPTION_KEY}
+      - GOOGLE_POLL_INTERVAL_MS=300000
+      - HERMES_API_URL=http://192.168.0.28:9119
+      - HERMES_API_KEY=consuela-api-key-2026
+      - OPENROUTER_API_KEY=
+      - TELEGRAM_BOT_TOKEN=
     networks:
       - consuela-net
       - media-stack_default

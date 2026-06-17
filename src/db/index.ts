@@ -1,4 +1,5 @@
 import { db as pbDb } from "./pb-db";
+import { defaultMeals, mealIdeas, initialGroceryItems } from "../data/meals";
 
 const memberColor = (i: number) =>
   ["green", "cyan", "violet", "amber", "rose", "blue", "cyan", "green", "cyan"][i % 9] || "green";
@@ -53,6 +54,15 @@ void (async () => {
     ]);
     const pbMembers = (m as any[]) || [];
     const pbFirstNames = new Set(pbMembers.map((m: any) => (m.name || "").split(" ")[0].toLowerCase()));
+    for (const pbm of pbMembers) {
+      if (!pbm.pin) {
+        const first = (pbm.name || "").split(" ")[0].toLowerCase();
+        const fallback = membersFallback.find(
+          (f: any) => f.name.split(" ")[0].toLowerCase() === first,
+        );
+        if (fallback) pbm.pin = fallback.pin;
+      }
+    }
     const missingFallback = membersFallback.filter((f: any) => {
       const firstName = f.name.split(" ")[0].toLowerCase();
       return !pbFirstNames.has(firstName);
@@ -146,7 +156,51 @@ export const db = {
     return [];
   },
 
+  insertEvent: async (event: any) => {
+    const result = await pbDb.insertEvent(event);
+    if (result) eventsCache.push(result);
+    return result;
+  },
+  updateEvent: async (id: number | string, updates: any) => {
+    const result = await pbDb.updateEvent(id, updates);
+    if (result) {
+      const idx = eventsCache.findIndex((e: any) => e.id == id);
+      if (idx !== -1) eventsCache[idx] = result;
+    }
+    return result;
+  },
+  deleteEvent: async (id: number | string) => {
+    const result = await pbDb.deleteEvent(id);
+    if (result) {
+      const idx = eventsCache.findIndex((e: any) => e.id == id);
+      if (idx !== -1) eventsCache.splice(idx, 1);
+    }
+    return result;
+  },
+
   selectPendingTasks: () => tasksCache,
+
+  insertTask: async (task: any) => {
+    const result = await pbDb.insertTask(task);
+    if (result) tasksCache.push(result);
+    return result;
+  },
+  updateTask: async (id: number | string, updates: any) => {
+    const result = await pbDb.updateTask(id, updates);
+    if (result) {
+      const idx = tasksCache.findIndex((t: any) => t.id == id);
+      if (idx !== -1) tasksCache[idx] = result;
+    }
+    return result;
+  },
+  deleteTask: async (id: number | string) => {
+    const result = await pbDb.deleteTask(id);
+    if (result) {
+      const idx = tasksCache.findIndex((t: any) => t.id == id);
+      if (idx !== -1) tasksCache.splice(idx, 1);
+    }
+    return result;
+  },
 
   selectTodaysSchedulesRaw: () => {
     if (schedulesCache.length > 0) return schedulesCache;
@@ -168,6 +222,28 @@ export const db = {
         hour: 'numeric', minute: '2-digit', hour12: true,
       }),
     }));
+  },
+
+  insertSchedule: async (schedule: any) => {
+    const result = await pbDb.insertSchedule(schedule);
+    if (result) schedulesCache.push(result);
+    return result;
+  },
+  updateSchedule: async (id: number | string, updates: any) => {
+    const result = await pbDb.updateSchedule(id, updates);
+    if (result) {
+      const idx = schedulesCache.findIndex((s: any) => s.id == id);
+      if (idx !== -1) schedulesCache[idx] = result;
+    }
+    return result;
+  },
+  deleteSchedule: async (id: number | string) => {
+    const result = await pbDb.deleteSchedule(id);
+    if (result) {
+      const idx = schedulesCache.findIndex((s: any) => s.id == id);
+      if (idx !== -1) schedulesCache.splice(idx, 1);
+    }
+    return result;
   },
 
   selectEmergencyContacts: () => emergencyCache,
@@ -196,14 +272,35 @@ export const db = {
     return result;
   },
 
-  selectMeals: () => mealsCache,
+  selectMeals: () => {
+    if (mealsCache.length > 0) return mealsCache;
+    return defaultMeals;
+  },
+  selectMealIdeas: () => mealIdeas,
   insertMeal: async (meal: any) => {
     const result = await pbDb.insertMeal(meal);
     if (result) mealsCache.push(result);
     return result;
   },
 
-  selectPantry: () => pantryCache,
+  selectPantry: () => {
+    if (pantryCache.length > 0) return pantryCache;
+    return [
+      { id: 101, name: "Olive oil", status: "plenty" },
+      { id: 102, name: "Rice", status: "plenty" },
+      { id: 103, name: "Pasta", status: "low" },
+      { id: 104, name: "Canned tomatoes", status: "plenty" },
+      { id: 105, name: "Chicken broth", status: "plenty" },
+      { id: 106, name: "Flour", status: "plenty" },
+      { id: 107, name: "Sugar", status: "plenty" },
+      { id: 108, name: "Salt", status: "plenty" },
+      { id: 109, name: "Black pepper", status: "low" },
+    ];
+  },
+  selectGrocery: () => {
+    if (groceryCache.length > 0) return groceryCache;
+    return initialGroceryItems;
+  },
   upsertPantryItem: async (item: any) => {
     const result = await pbDb.upsertPantryItem(item);
     if (result) {
@@ -223,7 +320,6 @@ export const db = {
     return result;
   },
 
-  selectGrocery: () => groceryCache,
   upsertGroceryItem: async (item: any) => {
     const result = await pbDb.upsertGroceryItem(item);
     if (result) {

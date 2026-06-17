@@ -5,6 +5,7 @@ import { WeatherProvider } from "@/hooks/useWeather";
 import { AtmosphericProvider } from "@/hooks/useAtmosphericTheme";
 import { AuthProvider } from "@/hooks/useAuth";
 import { LayoutProvider } from "@/hooks/useHomeLayout";
+import { FogProvider } from "@/hooks/useFogConfig";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -94,9 +95,11 @@ export default function RootLayout({
           <ThemeProvider>
             <WeatherProvider>
               <AtmosphericProvider>
-                <LayoutProvider>
-                  {children}
-                </LayoutProvider>
+                <FogProvider>
+                  <LayoutProvider>
+                    {children}
+                  </LayoutProvider>
+                </FogProvider>
               </AtmosphericProvider>
             </WeatherProvider>
           </ThemeProvider>

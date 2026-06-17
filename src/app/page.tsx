@@ -14,7 +14,6 @@ import ScheduleDisplay from "@/components/ui/ScheduleDisplay";
 import { db } from "@/db";
 import CurrentMealWidget from "@/components/meals/CurrentMealWidget";
 import { AtmosphericProvider } from "@/hooks/useAtmosphericTheme";
-import { FogProvider } from "@/hooks/useFogConfig";
 import AtmosphericBridge from "@/components/ui/AtmosphericBridge";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
 import type { WidgetId } from "@/lib/layout-config";
@@ -194,7 +193,6 @@ export default function HomePage() {
   }
 
   return (
-    <FogProvider>
       <AtmosphericProvider>
         <FogBackground />
         <PageShell style={{ backgroundColor: "transparent" }}>
@@ -444,6 +442,5 @@ export default function HomePage() {
           </Toast>
         </PageShell>
       </AtmosphericProvider>
-    </FogProvider>
   );
 }

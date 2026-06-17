@@ -405,14 +405,33 @@ export default function CalendarPage() {
   const saveEvent = () => {
     if (!eventForm.title.trim()) return;
     if (isAddingEvent) {
-      setCalEvents((prev) => [...prev, { ...eventForm, id: Date.now() }]);
+      const newEvent = { ...eventForm, id: Date.now() };
+      setCalEvents((prev) => [...prev, newEvent]);
+      db.insertEvent({
+        title: newEvent.title,
+        date: `${year}-${String(month + 1).padStart(2, "0")}-${String(newEvent.day).padStart(2, "0")}`,
+        time: newEvent.time,
+        icon: newEvent.emoji,
+        color: newEvent.color,
+        member: newEvent.member,
+      }).catch(() => {});
     } else {
       setCalEvents((prev) => prev.map((e) => e.id === editingEventId ? { ...eventForm } : e));
+      if (typeof editingEventId === "number") {
+        db.updateEvent(editingEventId, {
+          title: eventForm.title,
+          time: eventForm.time,
+          icon: eventForm.emoji,
+          color: eventForm.color,
+          member: eventForm.member,
+        }).catch(() => {});
+      }
     }
     cancelEventEdit();
   };
   const deleteEvent = (id: number | string) => {
     setCalEvents((prev) => prev.filter((e) => e.id !== id));
+    db.deleteEvent(id).catch(() => {});
     cancelEventEdit();
   };
 
@@ -430,14 +449,35 @@ export default function CalendarPage() {
   const saveSched = () => {
     if (!schedForm.title.trim()) return;
     if (isAddingSched) {
-      setSchedules((prev) => [...prev, { ...schedForm, id: Date.now() }]);
+      const newSched = { ...schedForm, id: Date.now() };
+      setSchedules((prev) => [...prev, newSched]);
+      db.insertSchedule({
+        title: newSched.title,
+        time: newSched.time,
+        icon: newSched.icon,
+        type: newSched.type,
+        color: newSched.color,
+        days: newSched.days,
+        member: (newSched as any).member || "",
+      }).catch(() => {});
     } else {
       setSchedules((prev) => prev.map((s) => s.id === editingSchedId ? { ...schedForm } : s));
+      if (editingSchedId) {
+        db.updateSchedule(editingSchedId, {
+          title: schedForm.title,
+          time: schedForm.time,
+          icon: schedForm.icon,
+          type: schedForm.type,
+          color: schedForm.color,
+          days: schedForm.days,
+        }).catch(() => {});
+      }
     }
     cancelSchedEdit();
   };
   const deleteSched = (id: number) => {
     setSchedules((prev) => prev.filter((s) => s.id !== id));
+    db.deleteSchedule(id).catch(() => {});
     cancelSchedEdit();
   };
 
