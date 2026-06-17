@@ -1,7 +1,1 @@
-{
-  "hash": "85445befc89a1f58eee32dca8a7b3529ae576618",
-  "short": "85445be",
-  "message": "chore: sync version.json to current commit",
-  "date": "2026-06-16 21:44:31 -0400",
-  "author": "GarciaFam"
-}
+{"hash":"094efcf6c44c75f19feb2d63b6526fd56fbed031","short":"094efcf","message":"chore(updates): add prebuild hook + sync version.json","date":"2026-06-16 21:45:00 -0400","author":"GarciaFam"}

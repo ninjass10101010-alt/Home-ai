@@ -48,6 +48,9 @@ function hexToRgb(hex: string) {
 function VersionCard() {
   const [data, setData] = useState<any>(null);
   const [checking, setChecking] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const [updateLogs, setUpdateLogs] = useState<any[]>([]);
+  const [updateDone, setUpdateDone] = useState(false);
 
   useEffect(() => {
     fetch("/api/admin/version")
@@ -65,6 +68,26 @@ function VersionCard() {
       setData({ ok: false });
     }
     setChecking(false);
+  };
+
+  const updateNow = async () => {
+    setUpdating(true);
+    setUpdateLogs([]);
+    setUpdateDone(false);
+    try {
+      const r = await fetch("/api/admin/update", { method: "POST" });
+      const result = await r.json();
+      setUpdateLogs(result.logs || []);
+      if (result.ok) {
+        setUpdateDone(true);
+        setTimeout(() => {
+          window.location.reload();
+        }, 8000);
+      }
+    } catch (e: any) {
+      setUpdateLogs([{ step: "error", status: "error", detail: e.message, timestamp: new Date().toISOString() }]);
+    }
+    setUpdating(false);
   };
 
   if (!data) {
@@ -147,6 +170,43 @@ function VersionCard() {
           </SoftButton>
         )}
       </div>
+
+      {data.update_available && (
+        <SoftButton
+          onClick={updateNow}
+          loading={updating}
+          variant="success"
+          className="w-full"
+        >
+          {updateDone ? "Done — reloading..." : "Update now (self-update)"}
+        </SoftButton>
+      )}
+
+      {updateLogs.length > 0 && (
+        <div className="rounded-xl border border-white/10 bg-[var(--color-surface-2)]/60 p-3">
+          <p className="mb-2 text-[11px] font-semibold text-text-muted">Update progress:</p>
+          <div className="space-y-1">
+            {updateLogs.map((log: any, i: number) => (
+              <div
+                key={i}
+                className={`flex items-start gap-2 text-[11px] ${
+                  log.status === "error" ? "text-rose-300" : log.status === "ok" ? "text-emerald-300" : "text-text-muted"
+                }`}
+              >
+                <span className="shrink-0">
+                  {log.status === "ok" ? "✓" : log.status === "error" ? "✗" : "○"}
+                </span>
+                <span>{log.detail}</span>
+              </div>
+            ))}
+          </div>
+          {updateDone && (
+            <p className="mt-2 text-[11px] font-semibold text-emerald-300">
+              ✅ Update complete — page will reload in a few seconds...
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

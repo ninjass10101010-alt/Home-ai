@@ -153,6 +153,17 @@ const COLLECTIONS: ColSpec[] = [
       "CREATE UNIQUE INDEX idx_consuela_google_api_usage_date ON consuela_google_api_usage (date)",
     ],
   },
+  {
+    name: "consuela_data_snapshots",
+    fields: [
+      { name: "key", type: "text", required: true },
+      { name: "data", type: "json" },
+      { name: "updated_at", type: "date" },
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_consuela_data_snapshots_key ON consuela_data_snapshots (key)",
+    ],
+  },
 ];
 
 export async function ensureGoogleCollections(): Promise<string[]> {

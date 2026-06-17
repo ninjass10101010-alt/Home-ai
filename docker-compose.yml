@@ -19,6 +19,9 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/app-source
     environment:
       - NODE_ENV=production
       - NEXT_PUBLIC_PB_URL=http://pocketbase:8090

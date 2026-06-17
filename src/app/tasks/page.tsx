@@ -352,6 +352,55 @@ export default function TasksPage() {
   useEffect(() => { saveRewards(rewards); }, [rewards]);
   useEffect(() => { savePenalties(penalties); }, [penalties]);
 
+  // Persist tasks + week data to PocketBase in the background (survives container restarts)
+  const syncPendingRef = useRef(false);
+  useEffect(() => {
+    if (!mounted) return;
+    if (syncPendingRef.current) return;
+    syncPendingRef.current = true;
+    const t = setTimeout(() => {
+      fetch("/api/tasks/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tasks, weekData }),
+      }).catch(() => {});
+      syncPendingRef.current = false;
+    }, 2000);
+    return () => { clearTimeout(t); syncPendingRef.current = false; };
+  }, [tasks, weekData, mounted]);
+
+  // Restore tasks state from PocketBase snapshot on mount (bridges container restarts)
+  const restoreAttempted = useRef(false);
+  useEffect(() => {
+    if (!mounted || restoreAttempted.current) return;
+    restoreAttempted.current = true;
+    fetch("/api/tasks/sync")
+      .then((r) => r.json())
+      .then((data) => {
+        if (!data?.snapshot) return;
+        const snap = data.snapshot;
+        if (snap.rewards?.length) setRewards((prev: any) => snap.rewards.length > prev.length ? snap.rewards : prev);
+        if (snap.penalties?.length) setPenalties((prev: any) => snap.penalties.length > prev.length ? snap.penalties : prev);
+        if (snap.weekData?.weekStart) {
+          const localWk = loadWeekData();
+          if (localWk.weekStart !== snap.weekData.weekStart) {
+            setWeekData((prev: any) => ({ ...prev, ...snap.weekData }));
+          }
+        }
+        if (snap.tasks?.length) {
+          setTasks((prev: any) => {
+            const restored = snap.tasks.map((t: any) => ({
+              ...t, id: Date.now() + Math.random(),
+              assignee: t.assigned || t.assignee || "All", assigneeEmoji: "👤",
+              completed: t.completed || false, completedBy: null, completedInWeek: null,
+            }));
+            return [...prev, ...restored.filter((t: any) => !prev.find((p: any) => p.title === t.title))];
+          });
+        }
+      })
+      .catch(() => {});
+  }, [mounted]);
+
   const triggerConfetti = useCallback(() => {
     setConfettiActive(true);
     setTimeout(() => setConfettiActive(false), 2500);
