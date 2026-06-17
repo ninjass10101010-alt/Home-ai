@@ -1,7 +1,7 @@
 {
-  "hash": "adfd71566b083cc3cb5ac4c1abe44ceebdbf95f0",
-  "short": "adfd715",
-  "message": "docs: add .env.docker template for container deployment",
-  "date": "2026-06-16 20:47:41 -0400",
+  "hash": "403d6a10a81a3491042f55385ff9809a26c24b29",
+  "short": "403d6a1",
+  "message": "feat(updates): one-click version check + deploy script",
+  "date": "2026-06-16 21:44:04 -0400",
   "author": "GarciaFam"
 }
