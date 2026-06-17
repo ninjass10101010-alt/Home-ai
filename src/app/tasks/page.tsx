@@ -1220,6 +1220,7 @@ export default function TasksPage() {
                     getMemberColor={(name: string) => memberColors[name] || "green"}
                     onAdjust={openAdjust}
                     onOpenSheet={setSheetMember}
+                    isAdmin={isLoggedIn && currentUser?.role === "parent"}
                   />
                 ))}
               </div>

@@ -13,6 +13,7 @@ interface LeaderboardRowProps {
   getMemberColor: (name: string) => string;
   onAdjust: (name: string) => void;
   onOpenSheet: (name: string) => void;
+  isAdmin: boolean;
 }
 
 export default function LeaderboardRow({
@@ -23,6 +24,7 @@ export default function LeaderboardRow({
   getMemberColor,
   onAdjust,
   onOpenSheet,
+  isAdmin,
 }: LeaderboardRowProps) {
   const color = getMemberColor(entry.name);
 
@@ -98,9 +100,11 @@ export default function LeaderboardRow({
           <div className="text-sm font-bold text-text-primary display-numeral">{entry.points}</div>
           <div className="text-[11px] text-text-muted">pts</div>
         </div>
-        <IconButton size="sm" variant="ghost" aria-label="Adjust points" onClick={(e: React.MouseEvent) => { e.stopPropagation(); onAdjust(entry.name); }}>
-          ⚙️
-        </IconButton>
+        {isAdmin && (
+          <IconButton size="sm" variant="ghost" aria-label="Adjust points" onClick={(e: React.MouseEvent) => { e.stopPropagation(); onAdjust(entry.name); }}>
+            ⚙️
+          </IconButton>
+        )}
       </div>
     </Surface>
   );

@@ -71,6 +71,7 @@ export default function Surface({
   as: Component = "div",
   role,
   "aria-label": ariaLabel,
+  ...rest
 }: SurfaceProps) {
   const combinedStyle: CSSProperties = {
     ...style,
@@ -85,6 +86,7 @@ export default function Surface({
         interactive ? "cursor-pointer hover:scale-[1.015] active:scale-[0.99]" : ""
       } ${className}`}
       style={combinedStyle}
+      {...rest}
     >
       {children}
     </Component>
