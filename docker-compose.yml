@@ -8,7 +8,7 @@ services:
     volumes:
       - pocketbase_data:/pb_data
     networks:
-      - consuela-net
+      - dashboard-net
 
   home-dashboard:
     build:
@@ -32,19 +32,17 @@ services:
       - GOOGLE_OAUTH_SCOPES=${GOOGLE_OAUTH_SCOPES:-openid email https://www.googleapis.com/auth/calendar}
       - CONSUELA_ENCRYPTION_KEY=${CONSUELA_ENCRYPTION_KEY}
       - GOOGLE_POLL_INTERVAL_MS=300000
-      - HERMES_API_URL=http://192.168.0.28:9119
+      - HERMES_API_URL=http://hermes-agent-2:8642
       - HERMES_API_KEY=consuela-api-key-2026
       - OPENROUTER_API_KEY=
       - TELEGRAM_BOT_TOKEN=
     networks:
-      - consuela-net
-      - media-stack_default
+      - dashboard-net
 
 volumes:
   pocketbase_data:
 
 networks:
-  consuela-net:
-    driver: bridge
-  media-stack_default:
+  dashboard-net:
+    name: familydashboard_consuela-net
     external: true
