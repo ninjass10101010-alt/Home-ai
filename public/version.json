@@ -1,6 +1,7 @@
 {
-  "hash": "6d707213b75b59b1d7f27d347c58fdc4e3d2c9d9",
-  "message": "fix: revert deploy.sh to single-repo pull — QNAP clones Home-ai directly",
-  "date": "2026-06-17 09:11:00 -0400",
+  "hash": "782e73637cc125a830f5836aa4de2e4077de22bc",
+  "short": "782e736",
+  "message": "fix: write-version.mjs uses ESM imports (was require in .mjs — caused build failure)",
+  "date": "2026-06-17 15:51:09 -0400",
   "author": "GarciaFam"
 }

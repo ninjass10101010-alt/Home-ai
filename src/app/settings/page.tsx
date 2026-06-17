@@ -107,7 +107,7 @@ function VersionCard() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-semibold text-text-primary">
-            {built.short !== "unknown"
+            {built.short && built.short !== "unknown"
               ? `Consuela Dashboard ${built.short}`
               : "Development build"}
           </p>
