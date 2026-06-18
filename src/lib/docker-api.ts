@@ -55,7 +55,7 @@ export interface ContainerInfo {
 }
 
 export async function listContainers(...names: string[]): Promise<ContainerInfo[]> {
-  const filter = JSON.stringify({ name });
+  const filter = JSON.stringify({ name: names });
   const containers = await dockerRequest<DockerContainer[]>(
     "GET",
     `/containers/json?all=true&filters=${encodeURIComponent(filter)}`,
