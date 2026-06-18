@@ -621,6 +621,76 @@ One-sentence goal from the human user's perspective.
 
 ---
 
+## 5. Consuela Admin Capabilities (Self-Management)
+
+Consuela has 5 admin-level tools available through the Ask Consuela chat interface. These tools let her manage the dashboard itself — check for updates, deploy new code, restart containers, and verify database health.
+
+### 5.1 Available Admin Tools
+
+| Tool | Description | Use Case | Safety |
+|------|-------------|----------|--------|
+| `check_for_update` | Checks GitHub for newer commits on `warm-glass-v2` | "Is there a dashboard update available?" | Read-only. Calls `/api/admin/version` internally. |
+| `trigger_update` | Pulls latest code + rebuilds Docker container | "Update the dashboard to the latest version" | **Destructive** — restarts the dashboard (brief downtime). Consuela will confirm with the user before running. |
+| `get_container_status` | Lists Docker containers and their health | "Is PocketBase running?" / "Check dashboard health" | Read-only. Calls `/api/admin/containers`. |
+| `restart_container` | Restarts a Docker container by name | "Restart PocketBase, it's not responding" | **Restart** — brief downtime for that service. Only allowed: consuela-dashboard, pocketbase, hermes-agent-2. |
+| `check_pocketbase` | Verifies PocketBase is healthy | "Check if the database is up" | Read-only. Pings PB health endpoint. |
+
+### 5.2 Architecture
+
+The admin tools work via internal HTTP calls from the tool handler (runs inside the Next.js process) to the dashboard's own API routes:
+
+```
+User → Ask Consuela → POST /api/hermes/chat
+  → Consuela (Hermes agent) decides tool_call
+  → Tool handler runs inside Next.js
+    → Internal fetch to /api/admin/version, /api/admin/update, /api/admin/containers, /api/admin/restart
+  → Results formatted → Sent back to Hermes for natural response
+  → User sees natural-language answer
+```
+
+**New API routes:**
+- `src/app/api/admin/containers/route.ts` — GET: lists three key containers (dashboard, PB, Hermes) with state, status, ports, image
+- `src/app/api/admin/restart/route.ts` — POST: restarts a named container from an allow-list
+
+**Env vars needed:**
+- `NEXT_PUBLIC_APP_URL=http://localhost:3000` — internal self-referencing URL for tool handler fetches
+
+### 5.3 What Consuela CAN Do
+
+- ✅ Answer questions about today's events, tasks, meals, grocery, pantry, weather, family members
+- ✅ Add tasks and grocery items
+- ✅ Check for dashboard updates and report version info
+- ✅ Trigger dashboard rebuild after user confirmation
+- ✅ Check container health (dashboard, PocketBase, Hermes)
+- ✅ Restart unhealthy containers
+- ✅ Verify PocketBase database connectivity
+- ✅ Explain what she can and can't do when asked
+
+### 5.4 What Consuela CANNOT Do
+
+- ❌ Modify events, meals, recipes, or schedule items (read-only for most data)
+- ❌ Delete tasks or grocery items (can only add)
+- ❌ Reset the leaderboard or modify points directly
+- ❌ Edit the physical environment (temperature, locks, lights)
+- ❌ Access external APIs beyond Google Calendar (no Spoonacular, no real weather API)
+- ❌ Send emergency alerts (human must press the shield button)
+- ❌ Access the Docker host or other containers outside the allowed three
+- ❌ Run arbitrary commands or shell access
+- ❌ Modify her own system prompt or tools
+
+### 5.5 Common Q&A
+
+**"Consuela, can you update the dashboard?"**  
+"I can check if an update is available and install it. Want me to check first?"
+
+**"Consuela, PocketBase is acting up"**  
+"Let me check PocketBase's health and the container status. I'll let you know what I find."
+
+**"Consuela, what tools do you have?"**  
+Full explanation of all 19 tools available (14 daily-life + 5 admin). Read-only, no shell access.
+
+---
+
 ## Appendices & Quick References
 
 ### Core Operational Docs (read these when the summary here is not enough)
@@ -717,3 +787,9 @@ After completing a user request that changes architecture, tech, or goals, updat
 **End of Agent Operational Manual**
 
 Remember: This file + the 2–3 linked deep docs it points to are sufficient for you to give perfect, up-to-date, safe instructions to any user of the Consuela dashboard. When in doubt, re-read this file first.
+
+### Change Log (continued)
+
+- 2026-06-17 — fix(ui): Schedule time picker hour resetting to 12. `src/app/calendar/page.tsx` — switched from controlled `value` + `onFocus/onBlur` to `defaultValue` + `key` (re-mounts on edit switch) + `type="number"` with proper mobile keyboard. Empty value falls back to current time from state instead of "12". Also removed `onBlur` clamping logic (caused the "resets to 12" bug). TS / lint clean.
+- 2026-06-17 — feat(infra): Hermes admin tools for dashboard self-management. Added 5 new tools to `src/lib/hermes-tools.ts`: `check_for_update`, `trigger_update`, `get_container_status`, `restart_container`, `check_pocketbase`. Each tool calls the corresponding `/api/admin/*` endpoint via internal HTTP (using `NEXT_PUBLIC_APP_URL`). Created `src/app/api/admin/containers/route.ts` (GET — lists Docker containers consuela-dashboard, pocketbase, hermes-agent-2) and `src/app/api/admin/restart/route.ts` (POST — restarts a named container from an allow-list). Updated `src/app/api/hermes/chat/route.ts` system prompts to inform Consuela of her new admin tools and the confirmation-before-action rule. Added `NEXT_PUBLIC_APP_URL` to `.env.docker` and `docker-compose.yml`. AGENTS.md §5 added with full admin capabilities documentation (what Consuela can/can't do). TS / lint clean.
+

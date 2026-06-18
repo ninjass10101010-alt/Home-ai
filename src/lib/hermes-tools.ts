@@ -373,6 +373,147 @@ const TOOLS: Tool[] = [
       });
     },
   },
+  {
+    definition: {
+      name: "check_for_update",
+      description: "Check if a new version of the Consuela Dashboard is available on GitHub. Returns the current version, latest remote version, and whether an update is available.",
+      parameters: { type: "object", properties: {} },
+    },
+    handler: async () => {
+      try {
+        const base = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+        const res = await fetch(`${base}/api/admin/version`, { signal: AbortSignal.timeout(10000) });
+        if (!res.ok) return summarize({ error: `Version check returned ${res.status}` });
+        const data = await res.json();
+        return summarize({
+          current_version: data.built_at?.short || "unknown",
+          current_message: data.built_at?.message || "",
+          latest_remote: data.latest_remote?.short || null,
+          latest_message: data.latest_remote?.message || null,
+          update_available: data.update_available || false,
+          commits_behind: data.commits_behind || 0,
+          repo: data.repo,
+          branch: data.branch,
+        });
+      } catch (e: any) {
+        return summarize({ error: `Could not check for updates: ${e?.message}` });
+      }
+    },
+  },
+  {
+    definition: {
+      name: "trigger_update",
+      description: "Pull the latest code from GitHub and rebuild the Consuela Dashboard container. This will restart the dashboard — users will see a brief downtime. Use check_for_update first to confirm an update is available before calling this.",
+      parameters: { type: "object", properties: {} },
+    },
+    handler: async () => {
+      try {
+        const base = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+        const res = await fetch(`${base}/api/admin/update`, {
+          method: "POST",
+          signal: AbortSignal.timeout(300000),
+        });
+        const data = await res.json();
+        if (!res.ok) return summarize({ error: data.error || "Update failed", logs: data.logs || [] });
+        return summarize({
+          success: true,
+          message: data.message || "Dashboard updated successfully",
+          logs: (data.logs || []).map((l: any) => `${l.step}: ${l.status} — ${l.detail}`),
+        });
+      } catch (e: any) {
+        return summarize({ error: `Update trigger failed: ${e?.message}` });
+      }
+    },
+  },
+  {
+    definition: {
+      name: "get_container_status",
+      description: "Get the status of Docker containers (consuela-dashboard, pocketbase, hermes-agent-2). Returns name, state, status, image, and ports for each.",
+      parameters: { type: "object", properties: {} },
+    },
+    handler: async () => {
+      try {
+        const base = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+        const res = await fetch(`${base}/api/admin/containers`, { signal: AbortSignal.timeout(10000) });
+        if (!res.ok) return summarize({ error: `Container check returned ${res.status}` });
+        const data = await res.json();
+        return summarize({
+          containers: data.containers || [],
+          note: "Use restart_container to restart any of these containers if they are unhealthy.",
+        });
+      } catch (e: any) {
+        return summarize({ error: `Could not get container status: ${e?.message}` });
+      }
+    },
+  },
+  {
+    definition: {
+      name: "restart_container",
+      description: "Restart a Docker container. Allowed containers: consuela-dashboard, pocketbase, hermes-agent-2. Use get_container_status first to check which containers need restarting.",
+      parameters: {
+        type: "object",
+        properties: {
+          container: {
+            type: "string",
+            description: "Container name to restart (consuela-dashboard, pocketbase, or hermes-agent-2)",
+          },
+        },
+        required: ["container"],
+      },
+    },
+    handler: async (args) => {
+      const name = String(args.container || "").trim();
+      const allowed = ["consuela-dashboard", "pocketbase", "hermes-agent-2"];
+      if (!allowed.includes(name)) {
+        return summarize({
+          error: `"${name}" is not allowed. Allowed: ${allowed.join(", ")}`,
+        });
+      }
+      try {
+        const base = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+        const res = await fetch(`${base}/api/admin/restart`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ container: name }),
+          signal: AbortSignal.timeout(35000),
+        });
+        const data = await res.json();
+        if (!res.ok) return summarize({ error: data.error || "Restart failed" });
+        return summarize({ success: true, message: data.message });
+      } catch (e: any) {
+        return summarize({ error: `Restart failed: ${e?.message}` });
+      }
+    },
+  },
+  {
+    definition: {
+      name: "check_pocketbase",
+      description: "Check if PocketBase is running and healthy. Returns the PocketBase version, admin URL, and connectivity status. Use this when troubleshooting database issues.",
+      parameters: { type: "object", properties: {} },
+    },
+    handler: async () => {
+      try {
+        const pbUrl = process.env.NEXT_PUBLIC_PB_URL || "http://pocketbase:8090";
+        const res = await fetch(`${pbUrl}/api/health`, { signal: AbortSignal.timeout(5000) });
+        if (!res.ok) return summarize({ error: `PocketBase returned ${res.status}`, url: pbUrl });
+        const data = await res.json();
+        return summarize({
+          status: "healthy",
+          version: data.version || "unknown",
+          url: pbUrl,
+          admin_panel: `${pbUrl}/_/`,
+          note: "PocketBase is the database backend for the dashboard. It stores calendar events, grocery items, pantry inventory, and task transactions. The admin panel at the URL above lets you inspect and edit data directly.",
+        });
+      } catch (e: any) {
+        return summarize({
+          status: "unreachable",
+          error: e?.message,
+          url: process.env.NEXT_PUBLIC_PB_URL || "http://pocketbase:8090",
+          note: "If PocketBase is down, the dashboard will use in-memory fallback data. Try restart_container with container=pocketbase.",
+        });
+      }
+    },
+  },
 ];
 
 export function getAllTools(): Tool[] {
