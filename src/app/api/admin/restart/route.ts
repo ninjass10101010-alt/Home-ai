@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { execSync } from "child_process";
+import { restartContainer } from "@/lib/docker-api";
 
 export const dynamic = "force-dynamic";
 
-const ALLOWED_CONTAINERS = ["consuela-dashboard", "pocketbase", "hermes-agent-2"];
+const ALLOWED = ["consuela-dashboard", "pocketbase", "hermes-agent-2"];
 
 export async function POST(request: NextRequest) {
   let body: { container?: string };
@@ -17,15 +17,15 @@ export async function POST(request: NextRequest) {
   if (!name) {
     return NextResponse.json({ ok: false, error: "container name required" }, { status: 400 });
   }
-  if (!ALLOWED_CONTAINERS.includes(name)) {
+  if (!ALLOWED.includes(name)) {
     return NextResponse.json(
-      { ok: false, error: `Container "${name}" not in allowed list: ${ALLOWED_CONTAINERS.join(", ")}` },
+      { ok: false, error: `Container "${name}" not in allowed list: ${ALLOWED.join(", ")}` },
       { status: 403 },
     );
   }
 
   try {
-    await execSync(`docker restart ${name}`, { encoding: "utf8", timeout: 30000 });
+    await restartContainer(name);
     return NextResponse.json({
       ok: true,
       message: `Container "${name}" restarted successfully`,

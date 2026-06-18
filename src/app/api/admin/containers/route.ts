@@ -1,31 +1,15 @@
 import { NextResponse } from "next/server";
-import { execSync } from "child_process";
+import { listContainers } from "@/lib/docker-api";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const result = execSync(
-      `docker ps --format json --filter "name=consuela-dashboard" --filter "name=pocketbase" --filter "name=hermes-agent-2"`,
-      { encoding: "utf8", timeout: 15000, shell: "/bin/sh" },
+    const containers = await listContainers(
+      "consuela-dashboard",
+      "pocketbase",
+      "hermes-agent-2",
     );
-    const lines = result.trim().split("\n").filter(Boolean);
-    const containers = lines.map((line) => {
-      try {
-        const c = JSON.parse(line);
-        return {
-          name: c.Names,
-          image: c.Image,
-          status: c.Status,
-          state: c.State,
-          ports: c.Ports,
-          created: c.CreatedAt,
-        };
-      } catch {
-        return null;
-      }
-    }).filter(Boolean);
-
     return NextResponse.json({ ok: true, containers });
   } catch (e: any) {
     return NextResponse.json(
