@@ -63,10 +63,27 @@ export function useGrocery(showToast: (msg: string) => void, plannedMeals: Meal[
   };
 
   useEffect(() => {
-    const grocery = db.selectGrocery();
-    const defaultGrocery = grocery.length ? grocery.map(mapDbToGrocery) : initialGroceryItems;
-    const savedGrocery = loadJSON<GroceryItem[]>(GROCERY_KEY, defaultGrocery);
-    setGroceryItems(savedGrocery);
+    const local = loadJSON<GroceryItem[]>(GROCERY_KEY, []);
+    const pbData = db.selectGrocery().map(mapDbToGrocery);
+    if (pbData.length > 0) {
+      const localByName = new Map(local.map(i => [normalizeName(i.name), i]));
+      const merged: GroceryItem[] = [];
+      const seen = new Set<string>();
+      for (const item of pbData) {
+        merged.push(item);
+        seen.add(normalizeName(item.name));
+      }
+      for (const item of local) {
+        const key = normalizeName(item.name);
+        if (!seen.has(key)) {
+          merged.push(item);
+          seen.add(key);
+        }
+      }
+      setGroceryItems(merged);
+    } else {
+      setGroceryItems(local.length > 0 ? local : initialGroceryItems);
+    }
     const savedRecent = loadJSON<{ name: string; emoji: string; category: string }[]>(RECENTLY_BOUGHT_KEY, []);
     setRecentlyBought(savedRecent);
   // eslint-disable-next-line react-hooks/exhaustive-deps

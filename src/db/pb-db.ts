@@ -253,6 +253,14 @@ export const db = {
     return safeCreate("meal_plan_entries", meal);
   },
 
+  async updateMeal(id: string, updates: any): Promise<any> {
+    return safeUpdate("meal_plan_entries", id, updates);
+  },
+
+  async deleteMeal(id: string): Promise<boolean> {
+    return safeDelete("meal_plan_entries", id);
+  },
+
   async selectPantry(userId = "demo"): Promise<any[]> {
     return safeList<any>("pantry_items", pantryFallback);
   },
@@ -287,6 +295,133 @@ export const db = {
 
   async deleteGroceryItem(id: number | string): Promise<boolean> {
     return safeDelete("grocery_list_items", String(id));
+  },
+
+  // === Schedules (full list) ===
+  async selectSchedules(): Promise<any[]> {
+    return safeList<any>("schedules", schedulesFallback);
+  },
+
+  // === Auth Sessions ===
+  async createAuthSession(data: any): Promise<any> {
+    return safeCreate("auth_sessions", data);
+  },
+  async findAuthSession(token: string): Promise<any | null> {
+    const records = await safeList<any>("auth_sessions", []);
+    return records.find((r: any) => r.token === token) || null;
+  },
+  async deleteAuthSession(token: string): Promise<boolean> {
+    const records = await safeList<any>("auth_sessions", []);
+    const session = records.find((r: any) => r.token === token);
+    if (!session) return false;
+    return safeDelete("auth_sessions", session.id);
+  },
+  async deleteExpiredAuthSessions(maxAgeDays = 30): Promise<void> {
+    const records = await safeList<any>("auth_sessions", []);
+    const cutoff = Date.now() - maxAgeDays * 86400000;
+    for (const r of records) {
+      const lastActive = new Date(r.lastActiveAt || r.createdAt).getTime();
+      if (lastActive < cutoff) await safeDelete("auth_sessions", r.id).catch(() => {});
+    }
+  },
+
+  // === Tasks (structured) ===
+  async selectAllTasks(): Promise<any[]> {
+    return safeList<any>("tasks", []);
+  },
+  async upsertTask(task: any): Promise<any | null> {
+    const records = await safeList<any>("tasks", []);
+    const existing = records.find((r: any) => r.taskId === task.taskId);
+    if (existing) return safeUpdate("tasks", existing.id, task);
+    return safeCreate("tasks", task);
+  },
+  async deleteTaskByTaskId(taskId: number): Promise<boolean> {
+    const records = await safeList<any>("tasks", []);
+    const task = records.find((r: any) => r.taskId === taskId);
+    if (!task) return false;
+    return safeDelete("tasks", task.id);
+  },
+
+  // === Week Data ===
+  async getWeekData(weekStart: string): Promise<any | null> {
+    const records = await safeList<any>("week_data", []);
+    return records.find((r: any) => r.weekStart === weekStart) || null;
+  },
+  async upsertWeekData(data: any): Promise<any | null> {
+    const records = await safeList<any>("week_data", []);
+    const existing = records.find((r: any) => r.weekStart === data.weekStart);
+    if (existing) return safeUpdate("week_data", existing.id, data);
+    return safeCreate("week_data", data);
+  },
+
+  // === Week Archive ===
+  async archiveWeek(data: any): Promise<any | null> {
+    return safeCreate("week_archive", data);
+  },
+  async listArchivedWeeks(): Promise<any[]> {
+    return safeList<any>("week_archive", []);
+  },
+
+  // === Rewards ===
+  async selectRewards(): Promise<any[]> {
+    return safeList<any>("rewards", []);
+  },
+  async upsertReward(data: any): Promise<any | null> {
+    const records = await safeList<any>("rewards", []);
+    const existing = records.find((r: any) => r.name === data.name);
+    if (existing) return safeUpdate("rewards", existing.id, data);
+    return safeCreate("rewards", data);
+  },
+  async deleteReward(id: string): Promise<boolean> {
+    return safeDelete("rewards", id);
+  },
+
+  // === Penalties ===
+  async selectPenalties(): Promise<any[]> {
+    return safeList<any>("penalties", []);
+  },
+  async upsertPenalty(data: any): Promise<any | null> {
+    const records = await safeList<any>("penalties", []);
+    const existing = records.find((r: any) => r.name === data.name);
+    if (existing) return safeUpdate("penalties", existing.id, data);
+    return safeCreate("penalties", data);
+  },
+  async deletePenalty(id: string): Promise<boolean> {
+    return safeDelete("penalties", id);
+  },
+
+  // === Family Goals ===
+  async getActiveFamilyGoal(): Promise<any | null> {
+    const records = await safeList<any>("family_goals", []);
+    return records.find((r: any) => r.active !== false) || null;
+  },
+  async upsertFamilyGoal(data: any): Promise<any | null> {
+    const records = await safeList<any>("family_goals", []);
+    const existing = records.find((r: any) => r.active !== false || r.weekStart === data.weekStart);
+    if (existing) return safeUpdate("family_goals", existing.id, data);
+    return safeCreate("family_goals", data);
+  },
+
+  // === Hall of Fame ===
+  async insertHallOfFameEntry(data: any): Promise<any | null> {
+    return safeCreate("hall_of_fame", data);
+  },
+  async selectHallOfFame(): Promise<any[]> {
+    return safeList<any>("hall_of_fame", []);
+  },
+
+  // === Recipes ===
+  async selectRecipes(): Promise<any[]> {
+    return safeList<any>("recipes", []);
+  },
+  async upsertRecipe(recipe: any): Promise<any | null> {
+    const records = await safeList<any>("recipes", []);
+    const existing = records.find((r: any) => r.name?.toLowerCase() === recipe.name?.toLowerCase());
+    if (existing) return safeUpdate("recipes", existing.id, recipe);
+    return safeCreate("recipes", recipe);
+  },
+  async deleteRecipe(id: string): Promise<boolean> {
+    return safeDelete("recipes", id);
   },
 };
 

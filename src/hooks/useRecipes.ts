@@ -1,5 +1,6 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useState, useEffect } from "react";
+import { db } from "@/db";
 import { Recipe } from "@/types/meals";
 import { defaultRecipes } from "@/data/meals";
 
@@ -37,17 +38,29 @@ export function useRecipes(showToast: (msg: string) => void) {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
 
   useEffect(() => {
-    const saved = loadJSON<Recipe[]>(RECIPES_KEY, defaultRecipes);
-    setRecipes(saved.map(recipe => normalizeRecipe(recipe, recipe.id)));
+    const local = loadJSON<Recipe[]>(RECIPES_KEY, []);
+    db.selectRecipes().then((pbData: any) => {
+      if (pbData && pbData.length > 0) {
+        const normalized = pbData.map((r: any) => normalizeRecipe(r, r.id));
+        const pbNames = new Set(normalized.map((r: any) => r.name.toLowerCase()));
+        const localExtra = local.filter(r => !pbNames.has(r.name.toLowerCase()));
+        setRecipes([...normalized, ...localExtra]);
+      } else {
+        setRecipes(local.length > 0 ? local : defaultRecipes);
+      }
+    }).catch(() => {
+      setRecipes(local.length > 0 ? local : defaultRecipes);
+    });
   }, []);
 
   useEffect(() => {
     if (recipes.length) localStorage.setItem(RECIPES_KEY, JSON.stringify(recipes));
   }, [recipes]);
 
-  const saveCatalogRecipe = (recipe: Recipe) => {
+  const saveCatalogRecipe = async (recipe: Recipe) => {
     const cleanRecipe = normalizeRecipe(recipe, recipe.id);
     if (!cleanRecipe.name.trim()) return;
+    await db.upsertRecipe(cleanRecipe);
     const existing = recipes.find(r => r.id === cleanRecipe.id || r.name.toLowerCase() === cleanRecipe.name.toLowerCase());
     if (existing) {
       setRecipes(prev => prev.map(r => r.id === existing.id ? { ...cleanRecipe, id: existing.id } : r));
@@ -59,7 +72,8 @@ export function useRecipes(showToast: (msg: string) => void) {
     }
   };
 
-  const deleteCatalogRecipe = (id: number) => {
+  const deleteCatalogRecipe = async (id: number) => {
+    await db.deleteRecipe(String(id));
     setRecipes(prev => prev.filter(r => r.id !== id));
     showToast(`🗑️ Recipe deleted.`);
   };

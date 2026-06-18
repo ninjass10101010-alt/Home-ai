@@ -14,6 +14,58 @@ let mealsCache: any[] = [];
 let pantryCache: any[] = [];
 let groceryCache: any[] = [];
 
+let lastRefreshed: Record<string, number> = {};
+const REFRESH_INTERVAL = 30_000;
+
+function needsRefresh(name: string): boolean {
+  const last = lastRefreshed[name];
+  return !last || Date.now() - last > REFRESH_INTERVAL;
+}
+
+function markRefreshed(name: string) {
+  lastRefreshed[name] = Date.now();
+}
+
+async function refreshMembersCache() {
+  try {
+    const fresh = await pbDb.selectMembers();
+    const pbMembers = fresh || [];
+    const pbFirstNames = new Set(pbMembers.map((m: any) => (m.name || "").split(" ")[0].toLowerCase()));
+    for (const pbm of pbMembers) {
+      if (!pbm.pin) {
+        const first = (pbm.name || "").split(" ")[0].toLowerCase();
+        const fallback = membersFallback.find(
+          (f: any) => f.name.split(" ")[0].toLowerCase() === first,
+        );
+        if (fallback) pbm.pin = fallback.pin;
+      }
+    }
+    const missingFallback = membersFallback.filter((f: any) => {
+      const firstName = f.name.split(" ")[0].toLowerCase();
+      return !pbFirstNames.has(firstName);
+    });
+    membersCache = [...pbMembers, ...missingFallback];
+    markRefreshed("members");
+    window.dispatchEvent(new CustomEvent("consuela-members-updated"));
+  } catch {}
+}
+
+async function refreshCache(name: string, fetcher: () => Promise<any[]>, cache: any[], fallback?: any[]) {
+  try {
+    const fresh = await fetcher();
+    if (fresh && fresh.length > 0) {
+      cache.length = 0;
+      cache.push(...fresh);
+    }
+    markRefreshed(name);
+  } catch {
+    if (cache.length === 0 && fallback) {
+      cache.length = 0;
+      cache.push(...fallback);
+    }
+  }
+}
+
 const membersFallback = [
   { id: 1, name: "Rebecca (Mom)", role: "parent", emoji: "🐱", fullName: "Rebecca Garcia", age: 38, joined: "Feb 2024", skinColor: "#fdbcb4", hairColor: "#b45309", pin: "0202" },
   { id: 2, name: "Jeffery (Dad)", role: "parent", emoji: "👨", fullName: "Jeffery Garcia", age: 40, joined: "Feb 2024", skinColor: "#fdbcb4", hairColor: "#1e40af", pin: "0828" },
@@ -120,15 +172,16 @@ export const db = {
 
   insertMember: async (data: any) => {
     const result = await pbDb.insertMember(data);
-    if (result) membersCache.push(result);
+    if (result) {
+      await refreshMembersCache();
+    }
     return result;
   },
 
   updateMember: async (name: string, updates: any) => {
     const result = await pbDb.updateMember(name, updates);
     if (result) {
-      const idx = membersCache.findIndex((m: any) => m.name === name);
-      if (idx !== -1) membersCache[idx] = { ...membersCache[idx], ...updates };
+      await refreshMembersCache();
     }
     return result;
   },
@@ -144,8 +197,7 @@ export const db = {
   deleteMember: async (name: string) => {
     const result = await pbDb.deleteMember(name);
     if (result) {
-      const idx = membersCache.findIndex((m: any) => m.name === name);
-      if (idx !== -1) membersCache.splice(idx, 1);
+      await refreshMembersCache();
     }
     return result;
   },
@@ -282,6 +334,22 @@ export const db = {
     if (result) mealsCache.push(result);
     return result;
   },
+  updateMeal: async (id: string, updates: any) => {
+    const result = await pbDb.updateMeal(id, updates);
+    if (result) {
+      const idx = mealsCache.findIndex((m: any) => m.id == id);
+      if (idx !== -1) mealsCache[idx] = result;
+    }
+    return result;
+  },
+  deleteMeal: async (id: string) => {
+    const result = await pbDb.deleteMeal(id);
+    if (result) {
+      const idx = mealsCache.findIndex((m: any) => m.id == id);
+      if (idx !== -1) mealsCache.splice(idx, 1);
+    }
+    return result;
+  },
 
   selectPantry: () => {
     if (pantryCache.length > 0) return pantryCache;
@@ -346,6 +414,50 @@ export const db = {
       if (idx !== -1) groceryCache.splice(idx, 1);
     }
     return result;
+  },
+
+    // === PB pass-through methods for collections without local cache ===
+
+  selectSchedules: async () => pbDb.selectSchedules(),
+
+  upsertTask: async (task: any) => pbDb.upsertTask(task),
+  selectAllTasks: async () => pbDb.selectAllTasks(),
+  deleteTaskByTaskId: async (taskId: number) => pbDb.deleteTaskByTaskId(taskId),
+
+  getWeekData: async (weekStart: string) => pbDb.getWeekData(weekStart),
+  upsertWeekData: async (data: any) => pbDb.upsertWeekData(data),
+  archiveWeek: async (data: any) => pbDb.archiveWeek(data),
+  listArchivedWeeks: async () => pbDb.listArchivedWeeks(),
+
+  selectRewards: async () => pbDb.selectRewards(),
+  upsertReward: async (data: any) => pbDb.upsertReward(data),
+  deleteReward: async (id: string) => pbDb.deleteReward(id),
+
+  selectPenalties: async () => pbDb.selectPenalties(),
+  upsertPenalty: async (data: any) => pbDb.upsertPenalty(data),
+  deletePenalty: async (id: string) => pbDb.deletePenalty(id),
+
+  getActiveFamilyGoal: async () => pbDb.getActiveFamilyGoal(),
+  upsertFamilyGoal: async (data: any) => pbDb.upsertFamilyGoal(data),
+
+  insertHallOfFameEntry: async (data: any) => pbDb.insertHallOfFameEntry(data),
+  selectHallOfFame: async () => pbDb.selectHallOfFame(),
+
+  selectRecipes: async () => pbDb.selectRecipes(),
+  upsertRecipe: async (recipe: any) => pbDb.upsertRecipe(recipe),
+  deleteRecipe: async (id: string) => pbDb.deleteRecipe(id),
+
+  // Refresh all caches from PB (for cross-device sync)
+  refreshCaches: async () => {
+    await Promise.allSettled([
+      refreshMembersCache(),
+      refreshCache("events", () => pbDb.selectTodaysEvents(), eventsCache),
+      refreshCache("schedules", () => pbDb.selectTodaysSchedulesRaw(), schedulesCache),
+      refreshCache("emergency", () => pbDb.selectEmergencyContacts(), emergencyCache),
+      refreshCache("meals", () => pbDb.selectMeals(), mealsCache),
+      refreshCache("pantry", () => pbDb.selectPantry(), pantryCache),
+      refreshCache("grocery", () => pbDb.selectGrocery(), groceryCache),
+    ]);
   },
 
   // Expose cache for direct access

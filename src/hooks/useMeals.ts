@@ -22,15 +22,30 @@ export function useMeals() {
   const [showAiSuggestions, setShowAiSuggestions] = useState(false);
 
   useEffect(() => {
-    const loaded = db.selectMeals();
-    const mealDefaults = loaded.length ? loaded : defaultMeals;
-    const saved = loadJSON(MEALS_KEY, mealDefaults);
-    setMeals(saved);
+    const pbData = db.selectMeals() as any[];
+    const local = loadJSON<any[]>(MEALS_KEY, []);
+    if (pbData.length > 0) {
+      const merged = [...pbData];
+      const pbNames = new Set(pbData.map((m: any) => m.name?.toLowerCase()));
+      for (const item of local) {
+        if (!pbNames.has(item.name?.toLowerCase())) {
+          merged.push({ ...item, id: item.id || merged.length + 1 });
+        }
+      }
+      setMeals(merged);
+    } else {
+      setMeals(local.length > 0 ? local : defaultMeals);
+    }
   }, []);
 
   useEffect(() => {
     if (meals.length) localStorage.setItem(MEALS_KEY, JSON.stringify(meals));
   }, [meals]);
+
+  const saveMeal = async (meal: Meal) => {
+    const result = await db.insertMeal(meal);
+    return result;
+  };
 
   const generateAiMeals = async () => {
     setAiMealLoading(true);
@@ -60,9 +75,9 @@ export function useMeals() {
     setAiMealLoading(false);
   };
 
-  const deleteMeal = (id: number) => {
+  const deleteMeal = async (id: number) => {
+    await db.deleteMeal(String(id));
     setMeals(prev => prev.filter(m => m.id !== id));
-    // Optionally delete from db if needed
   };
 
   const activeMeals = meals.filter(m => m.time === activeDay);

@@ -6,6 +6,7 @@ import { AtmosphericProvider } from "@/hooks/useAtmosphericTheme";
 import { AuthProvider } from "@/hooks/useAuth";
 import { LayoutProvider } from "@/hooks/useHomeLayout";
 import { FogProvider } from "@/hooks/useFogConfig";
+import { CacheRefresher } from "@/components/ui/CacheRefresher";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -97,7 +98,9 @@ export default function RootLayout({
               <AtmosphericProvider>
                 <FogProvider>
                   <LayoutProvider>
-                    {children}
+                    <CacheRefresher>
+                      {children}
+                    </CacheRefresher>
                   </LayoutProvider>
                 </FogProvider>
               </AtmosphericProvider>

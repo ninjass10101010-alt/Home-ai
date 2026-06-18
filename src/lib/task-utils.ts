@@ -1,4 +1,5 @@
-import type { Task, WeekData, Transaction, WeekArchive, FamilyGoal, HallOfFameEntry } from "@/types/tasks";
+import { db } from "@/db";
+import type { Task, WeekData, Transaction, WeekArchive, FamilyGoal, HallOfFameEntry, Reward, Penalty } from "@/types/tasks";
 
 export const TASKS_STORAGE_KEY = "consuela-tasks";
 export const WEEK_DATA_KEY = "consuela-week-data";
@@ -356,6 +357,103 @@ export function archiveWeekWinner(entries: { name: string; emoji: string; points
   });
   const trimmed = hall.slice(-12);
   saveHallOfFame(trimmed);
+}
+
+// === PocketBase sync helpers ===
+
+export async function syncTasksToPB(tasks: Task[]): Promise<void> {
+  for (const task of tasks) {
+    await db.upsertTask({
+      taskId: task.id,
+      title: task.title,
+      assignee: task.assignee,
+      assigneeEmoji: task.assigneeEmoji,
+      due: task.due,
+      points: task.points,
+      recurring: task.recurring,
+      category: task.category,
+      priority: task.priority,
+      universal: task.universal || false,
+      createdAt: new Date().toISOString(),
+    }).catch(() => {});
+  }
+}
+
+export async function syncWeekDataToPB(data: WeekData): Promise<void> {
+  await db.upsertWeekData(data).catch(() => {});
+}
+
+export async function syncArchiveToPB(archive: WeekArchive): Promise<void> {
+  for (const [weekStart, weekData] of Object.entries(archive)) {
+    await db.upsertWeekData({
+      ...weekData,
+      weekStart,
+      archivedAt: new Date().toISOString(),
+    }).catch(() => {});
+  }
+}
+
+export async function syncRewardsToPB(rewards: Reward[]): Promise<void> {
+  for (const r of rewards) {
+    await db.upsertReward({
+      name: r.name,
+      emoji: r.emoji,
+      cost: r.cost,
+    }).catch(() => {});
+  }
+}
+
+export async function syncPenaltiesToPB(penalties: Penalty[]): Promise<void> {
+  for (const p of penalties) {
+    await db.upsertPenalty({
+      name: p.name,
+      emoji: p.emoji,
+      points: p.points,
+    }).catch(() => {});
+  }
+}
+
+export async function syncFamilyGoalToPB(goal: FamilyGoal | null): Promise<void> {
+  if (goal) {
+    await db.upsertFamilyGoal({
+      title: goal.title,
+      emoji: goal.emoji,
+      targetPoints: goal.targetPoints,
+      reward: goal.reward,
+      weekStart: goal.weekStart,
+      active: true,
+    }).catch(() => {});
+  }
+}
+
+export async function syncHallOfFameToPB(entries: HallOfFameEntry[]): Promise<void> {
+  for (const e of entries) {
+    await db.insertHallOfFameEntry({
+      member: e.member,
+      emoji: e.emoji,
+      weekStart: e.weekStart,
+      points: e.points,
+      rank: e.rank,
+    }).catch(() => {});
+  }
+}
+
+export async function syncAllTasksToPB(
+  tasks: Task[],
+  weekData: WeekData,
+  archive: WeekArchive,
+  rewards: Reward[],
+  penalties: Penalty[],
+  hallOfFame: HallOfFameEntry[]
+): Promise<void> {
+  await Promise.allSettled([
+    syncTasksToPB(tasks),
+    syncWeekDataToPB(weekData),
+    syncArchiveToPB(archive),
+    syncRewardsToPB(rewards),
+    syncPenaltiesToPB(penalties),
+    syncHallOfFameToPB(hallOfFame),
+  ]);
 }
 
 export function getWeekGraph(memberName: string, weekData: WeekData): { day: string; points: number }[] {

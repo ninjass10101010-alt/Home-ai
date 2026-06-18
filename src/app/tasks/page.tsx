@@ -33,7 +33,8 @@ import {
   loadTasks, saveTasks, loadRewards, saveRewards,
   loadPenalties, savePenalties,
   getArchivedWeeks, getMemberAllTimePoints, getMemberAllTimeCompletions,
-  getPreviousWeekRanks,
+  getPreviousWeekRanks, loadHallOfFame,
+  syncAllTasksToPB,
 } from "@/lib/task-utils";
 import Podium from "@/components/leaderboard/Podium";
 import YourCard from "@/components/leaderboard/YourCard";
@@ -352,8 +353,9 @@ export default function TasksPage() {
   useEffect(() => { saveRewards(rewards); }, [rewards]);
   useEffect(() => { savePenalties(penalties); }, [penalties]);
 
-  // Persist tasks + week data to PocketBase in the background (survives container restarts)
+  // Persist tasks + week data to PocketBase in the background (snapshot + structured)
   const syncPendingRef = useRef(false);
+  const pbSyncPendingRef = useRef(false);
   useEffect(() => {
     if (!mounted) return;
     if (syncPendingRef.current) return;
@@ -368,6 +370,18 @@ export default function TasksPage() {
     }, 2000);
     return () => { clearTimeout(t); syncPendingRef.current = false; };
   }, [tasks, weekData, mounted]);
+
+  // Structured PB sync (individual collections)
+  useEffect(() => {
+    if (!mounted) return;
+    if (pbSyncPendingRef.current) return;
+    pbSyncPendingRef.current = true;
+    const t = setTimeout(() => {
+      syncAllTasksToPB(tasks, weekData, getArchivedWeeks(), rewards, penalties, loadHallOfFame());
+      pbSyncPendingRef.current = false;
+    }, 5000);
+    return () => { clearTimeout(t); pbSyncPendingRef.current = false; };
+  }, [tasks, weekData, rewards, penalties, mounted]);
 
   // Restore tasks state from PocketBase snapshot on mount (bridges container restarts)
   const restoreAttempted = useRef(false);
