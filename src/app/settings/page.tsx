@@ -768,15 +768,38 @@ export default function SettingsPage() {
             </div>
           </SectionCard>
 
-          <SectionCard title="Data & sync" description="Export or reset local settings." icon="📦">
+          <SectionCard title="Data & sync" description="Export settings or push local data to cloud." icon="📦">
             <div className="grid gap-3 sm:grid-cols-1">
               <Surface variant="glass-subtle" radius="xl" padding="sm">
                 <div className="text-sm font-bold text-text-primary">Local settings</div>
                 <p className="mt-1 text-xs text-text-secondary">Export your family members, emergency contacts, and home layout as a single JSON file. Reset is in the Layout section above.</p>
               </Surface>
+              <Surface variant="glass-subtle" radius="xl" padding="sm">
+                <div className="text-sm font-bold text-text-primary">Cloud sync</div>
+                <p className="mt-1 text-xs text-text-secondary">Push your existing local data (grocery, pantry, meals, recipes, events, schedules) to PocketBase so it syncs across devices.</p>
+              </Surface>
             </div>
-            <div className="mt-4 flex gap-2">
-              <SoftButton onClick={exportData} className="flex-1">Export JSON</SoftButton>
+            <div className="mt-4 flex flex-col gap-2">
+              <SoftButton onClick={exportData} className="w-full">Export JSON</SoftButton>
+              <SoftButton
+                onClick={async () => {
+                  const { pushLocalToPB } = await import("@/lib/push-local-to-pb");
+                  showToast("⏳ Pushing local data to cloud...");
+                  try {
+                    const results = await pushLocalToPB();
+                    const total = results.reduce((s, r) => s + r.pushed, 0);
+                    const errors = results.reduce((s, r) => s + r.errors, 0);
+                    const detail = results.filter(r => r.pushed > 0).map(r => `${r.collection}: ${r.pushed}`).join(", ");
+                    showToast(`☁️ Pushed ${total} items to PB${errors ? ` (${errors} errors)` : ""} — ${detail}`);
+                  } catch {
+                    showToast("❌ Push failed — check console for details");
+                  }
+                }}
+                variant="secondary"
+                className="w-full"
+              >
+                ☁️ Push local data to cloud
+              </SoftButton>
             </div>
           </SectionCard>
 
