@@ -1,7 +1,7 @@
 import { request } from "node:http";
 
 const DOCKER_SOCKET = "/var/run/docker.sock";
-const API_VERSION = "v1.47";
+const API_VERSION = "v1.46";
 
 interface DockerContainer {
   Id: string;
