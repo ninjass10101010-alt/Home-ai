@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import PageShell from "@/components/ui/PageShell";
 import TopBar from "@/components/ui/TopBar";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import Avatar from "@/components/ui/Avatar";
 import AnimatedEmoji from "@/components/ui/AnimatedEmoji";
-import { db } from "@/db";
+// @/db removed — members loaded via API, PIN verified locally
 
 interface Task {
   id: number;
@@ -73,35 +73,169 @@ function emptyTask(firstMember?: { name?: string; emoji?: string }): Task {
   };
 }
 
-const TASKS_STORAGE_KEY = "consuela-tasks";
-const POINTS_STORAGE_KEY = "consuela-points";
-
-function loadFromStorage<T>(key: string, fallback: T): T {
-  if (typeof window === "undefined") return fallback;
-  try { const stored = localStorage.getItem(key); return stored ? JSON.parse(stored) : fallback; } catch { return fallback; }
-}
+// localStorage infrastructure removed — data managed via API routes
 
 export default function TasksPage() {
-  const mountedRef = useRef(false);
+  const [mounted, setMounted] = useState(false);
   useEffect(() => {
-    mountedRef.current = true;
+    setMounted(true);
   }, []);
 
-  const membersData = useMemo(() => db.selectMembers(), []);
+  // ─── Members (loaded from API) ───────────────────────────
+  const [membersData, setMembersData] = useState<any[]>([]);
+  const [dataLoading, setDataLoading] = useState(true);
+
   const allMembers = useMemo(() => ["All", ...membersData.map((m: any) => m.name)], [membersData]);
   const memberEmojis: Record<string, string> = useMemo(() => ({
     All: "👨‍👩‍👧‍👦",
     ...Object.fromEntries(membersData.map((m: any) => [m.name, m.emoji]))
   }), [membersData]);
-  const memberColors: Record<string, string> = useMemo(() => 
+  const memberColors: Record<string, string> = useMemo(() =>
     Object.fromEntries(membersData.map((m: any) => [m.name, m.color]))
   , [membersData]);
 
-  const [tasks, setTasks] = useState<Task[]>(() => loadFromStorage(TASKS_STORAGE_KEY, initialTasks));
-  const [earnedPoints, setEarnedPoints] = useState<Record<string, number>>(() => loadFromStorage(POINTS_STORAGE_KEY, {}));
+  // ─── Local PIN verification (replaces verifyMemberPin) ──
+  const verifyMemberPin = useCallback((memberName: string, pin: string) => {
+    const member = membersData.find((m: any) => m.name === memberName || m.name.startsWith(memberName));
+    if (!member) return null;
+    if (member.pin && member.pin === pin) return member;
+    // Allow any parent to verify
+    const parent = membersData.find((m: any) => m.role === "parent" && m.pin === pin);
+    return parent || null;
+  }, [membersData]);
 
-  useEffect(() => { localStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify(tasks)); }, [tasks]);
-  useEffect(() => { localStorage.setItem(POINTS_STORAGE_KEY, JSON.stringify(earnedPoints)); }, [earnedPoints]);
+  // ─── State (loaded from API) ──────────────────────────────
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [earnedPoints, setEarnedPoints] = useState<Record<string, number>>({});
+
+  // Rewards state (declare before useEffect that references defaults)
+  interface Reward {
+    id: number;
+    name: string;
+    emoji: string;
+    cost: number;
+  }
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- defaults referenced in data-loading effect
+  const defaultRewards: Reward[] = [
+    { id: 1, name: "Movie pick", emoji: "🎬", cost: 50 },
+    { id: 2, name: "Skip 1 chore", emoji: "🎟️", cost: 75 },
+    { id: 3, name: "Extra screen time", emoji: "📱", cost: 100 },
+    { id: 4, name: "Family outing", emoji: "🎡", cost: 200 },
+  ];
+  const [rewards, setRewards] = useState<Reward[]>(defaultRewards);
+
+
+  // ─── Penalties (point deductions) ───────────────────────
+  interface Penalty {
+    id: number;
+    name: string;
+    emoji: string;
+    points: number; // positive number = how many pts to deduct
+  }
+  const defaultPenalties: Penalty[] = [
+    { id: 1, name: "Missed chore", emoji: "🧹", points: 10 },
+    { id: 2, name: "Left mess", emoji: "🗑️", points: 8 },
+    { id: 3, name: "Forgot homework", emoji: "📚", points: 15 },
+    { id: 4, name: "Late bedtime", emoji: "🌙", points: 5 },
+    { id: 5, name: "Rude behavior", emoji: "😤", points: 20 },
+  ];
+  const [penalties, setPenalties] = useState<Penalty[]>(defaultPenalties);
+
+  // ─── Fetch all data on mount ──────────────────────────────
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const [membersRes, tasksRes, leaderboardRes, rewardsRes, penaltiesRes] = await Promise.all([
+          fetch("/api/members"),
+          fetch("/api/tasks"),
+          fetch("/api/leaderboard"),
+          fetch("/api/rewards"),
+          fetch("/api/penalties"),
+        ]);
+
+        // Members
+        if (membersRes.ok) {
+          const mData = await membersRes.json();
+          setMembersData(mData.members || mData.items || []);
+        }
+
+        // Tasks
+        if (tasksRes.ok) {
+          const tData = await tasksRes.json();
+          const rawTasks = tData.tasks || tData.items || tData.data || [];
+          if (rawTasks.length > 0) {
+            setTasks(rawTasks.map((t: any) => ({
+              id: t.id,
+              title: t.title,
+              assignee: t.assignee || t.assignedTo || "",
+              assigneeEmoji: t.assigneeEmoji || "🧒",
+              due: t.due || "Today",
+              points: t.points || 0,
+              recurring: t.recurring || null,
+              category: t.category || "Chores",
+              completed: t.completed || false,
+              priority: t.priority || "medium",
+              completedBy: t.completedBy,
+              universal: t.universal || false,
+            })));
+          } else {
+            setTasks(initialTasks);
+          }
+        } else {
+          setTasks(initialTasks);
+        }
+
+        // Leaderboard → earnedPoints map
+        if (leaderboardRes.ok) {
+          const lbData = await leaderboardRes.json();
+          const entries = lbData.leaderboard || lbData.items || [];
+          const pointsMap: Record<string, number> = {};
+          for (const e of entries) {
+            const name = e.memberName || e.name || "";
+            if (name) pointsMap[name] = e.points || 0;
+          }
+          setEarnedPoints(pointsMap);
+        }
+
+        // Rewards
+        if (rewardsRes.ok) {
+          const rData = await rewardsRes.json();
+          const rawRewards = rData.rewards || rData.items || rData.data || [];
+          if (rawRewards.length > 0) {
+            setRewards(rawRewards.map((r: any) => ({
+              id: r.id,
+              name: r.name,
+              emoji: r.emoji || "🎁",
+              cost: r.cost || 50,
+            })));
+          } else {
+            setRewards(defaultRewards);
+          }
+        }
+
+        // Penalties
+        if (penaltiesRes.ok) {
+          const pData = await penaltiesRes.json();
+          const rawPenalties = pData.penalties || pData.items || pData.data || [];
+          if (rawPenalties.length > 0) {
+            setPenalties(rawPenalties.map((p: any) => ({
+              id: p.id,
+              name: p.name,
+              emoji: p.emoji || "⚠️",
+              points: p.points || 10,
+            })));
+          } else {
+            setPenalties(defaultPenalties);
+          }
+        }
+      } catch {
+        // Fallback to defaults on network error
+        setTasks(initialTasks);
+      }
+      setDataLoading(false);
+    };
+    loadData();
+  }, []);
 
   const [filterMember, setFilterMember] = useState("All");
   const [activeTab, setActiveTab] = useState<"tasks" | "leaderboard">("tasks");
@@ -126,23 +260,6 @@ export default function TasksPage() {
   const [toast, setToast] = useState<string | null>(null);
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
-  // Rewards state
-  interface Reward {
-    id: number;
-    name: string;
-    emoji: string;
-    cost: number;
-  }
-  const REWARDS_KEY = "consuela-rewards";
-  const defaultRewards: Reward[] = [
-    { id: 1, name: "Movie pick", emoji: "🎬", cost: 50 },
-    { id: 2, name: "Skip 1 chore", emoji: "🎟️", cost: 75 },
-    { id: 3, name: "Extra screen time", emoji: "📱", cost: 100 },
-    { id: 4, name: "Family outing", emoji: "🎡", cost: 200 },
-  ];
-  const [rewards, setRewards] = useState<Reward[]>(() => loadFromStorage(REWARDS_KEY, defaultRewards));
-  useEffect(() => { localStorage.setItem(REWARDS_KEY, JSON.stringify(rewards)); }, [rewards]);
-
   // Reward editing
   const [editingRewardId, setEditingRewardId] = useState<number | null>(null);
   const [rewardForm, setRewardForm] = useState<Reward>({ id: 0, name: "", emoji: "🎁", cost: 50 });
@@ -150,23 +267,6 @@ export default function TasksPage() {
   const [aiRewardSuggesting, setAiRewardSuggesting] = useState(false);
   const [aiRewards, setAiRewards] = useState<Reward[]>([]);
 
-  // ─── Penalties (point deductions) ───────────────────────
-  interface Penalty {
-    id: number;
-    name: string;
-    emoji: string;
-    points: number; // positive number = how many pts to deduct
-  }
-  const PENALTIES_KEY = "consuela-penalties";
-  const defaultPenalties: Penalty[] = [
-    { id: 1, name: "Missed chore", emoji: "🧹", points: 10 },
-    { id: 2, name: "Left mess", emoji: "🗑️", points: 8 },
-    { id: 3, name: "Forgot homework", emoji: "📚", points: 15 },
-    { id: 4, name: "Late bedtime", emoji: "🌙", points: 5 },
-    { id: 5, name: "Rude behavior", emoji: "😤", points: 20 },
-  ];
-  const [penalties, setPenalties] = useState<Penalty[]>(() => loadFromStorage(PENALTIES_KEY, defaultPenalties));
-  useEffect(() => { localStorage.setItem(PENALTIES_KEY, JSON.stringify(penalties)); }, [penalties]);
 
   const [editingPenaltyId, setEditingPenaltyId] = useState<number | null>(null);
   const [penaltyForm, setPenaltyForm] = useState<Penalty>({ id: 0, name: "", emoji: "⚠️", points: 10 });
@@ -176,11 +276,20 @@ export default function TasksPage() {
   const startAddPenalty = () => { setEditingPenaltyId(null); setAddingPenalty(true); setPenaltyForm({ id: Date.now(), name: "", emoji: "⚠️", points: 10 }); };
   const savePenalty = () => {
     if (!penaltyForm.name.trim()) return;
-    if (addingPenalty) setPenalties(prev => [...prev, { ...penaltyForm, id: Date.now() }]);
-    else setPenalties(prev => prev.map(p => p.id === editingPenaltyId ? { ...penaltyForm } : p));
+    if (addingPenalty) {
+      const newPenalty = { ...penaltyForm, id: Date.now() };
+      setPenalties(prev => [...prev, newPenalty]);
+      // Persist to API
+      fetch("/api/penalties", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(newPenalty) });
+    } else {
+      setPenalties(prev => prev.map(p => p.id === editingPenaltyId ? { ...penaltyForm } : p));
+    }
     setEditingPenaltyId(null); setAddingPenalty(false);
   };
-  const deletePenalty = (id: number) => { setPenalties(prev => prev.filter(p => p.id !== id)); setEditingPenaltyId(null); };
+  const deletePenalty = (id: number) => { setPenalties(prev => prev.filter(p => p.id !== id)); setEditingPenaltyId(null);
+    // Persist to API
+    fetch(`/api/penalties?id=${id}`, { method: "DELETE" });
+  };
 
   // PIN state for applying a penalty
   const [pinPenalty, setPinPenalty] = useState<Penalty | null>(null);
@@ -211,7 +320,7 @@ export default function TasksPage() {
   const submitAdjust = () => {
     if (!adjustMember || !adjustPin) return;
     // Any parent can authorize manual adjustments
-    const parent = membersData.find((m: any) => m.role === "parent" && db.verifyMemberPin(m.name, adjustPin));
+    const parent = membersData.find((m: any) => m.role === "parent" && verifyMemberPin(m.name, adjustPin));
     if (!parent) {
       setAdjustError("Parent PIN required. Try again.");
       setAdjustPin("");
@@ -221,6 +330,10 @@ export default function TasksPage() {
     const delta = parseInt(adjustAmount) || 0;
     const change = adjustDir === "+" ? delta : -delta;
     setEarnedPoints(prev => ({ ...prev, [adjustMember]: Math.max(0, (prev[adjustMember] || 0) + change) }));
+
+    // Persist to API
+    fetch("/api/leaderboard", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ memberName: adjustMember, points: change }) });
+
     const label = adjustDir === "+" ? `+${delta}` : `-${delta}`;
     setAdjustSuccess(`${label} pts applied to ${adjustMember.split(" ")[0]}!`);
     setTimeout(() => { setAdjustMember(null); setAdjustSuccess(""); }, 1500);
@@ -237,7 +350,10 @@ export default function TasksPage() {
   const saveReward = () => {
     if (!rewardForm.name.trim()) return;
     if (addingReward) {
-      setRewards(prev => [...prev, { ...rewardForm, id: Date.now() }]);
+      const newReward = { ...rewardForm, id: Date.now() };
+      setRewards(prev => [...prev, newReward]);
+      // Persist to API
+      fetch("/api/rewards", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(newReward) });
     } else {
       setRewards(prev => prev.map(r => r.id === editingRewardId ? { ...rewardForm } : r));
     }
@@ -246,6 +362,8 @@ export default function TasksPage() {
   const deleteReward = (id: number) => {
     setRewards(prev => prev.filter(r => r.id !== id));
     setEditingRewardId(null);
+    // Persist to API
+    fetch(`/api/rewards?id=${id}`, { method: "DELETE" });
   };
 
   // AI Reward Suggestions
@@ -344,7 +462,7 @@ export default function TasksPage() {
       }
 
       // Verify PIN for the selected member
-      const verified = db.verifyMemberPin(memberName, pinInput);
+      const verified = verifyMemberPin(memberName, pinInput);
       if (verified) {
         const cost = pinReward.cost;
         setEarnedPoints(prev => {
@@ -352,444 +470,17 @@ export default function TasksPage() {
           if (current < cost) return prev;
           return { ...prev, [memberName]: current - cost };
         });
-        setPinSuccess(`🎁 ${memberName.split(" ")[0]} redeemed ${pinReward.name}! -${cost}pts`);
-        setTimeout(() => { setPinReward(null); setPinSuccess(""); }, 1500);
-      } else {
-        setPinError("Wrong code for selected member. Try again.");
-        setPinInput("");
-        setTimeout(() => setPinError(""), 2000);
-      }
-      return;
-    }
 
-    // Task completion mode
-    if (pinTaskId === null) return;
-    const task = tasks.find(t => t.id === pinTaskId);
-    if (!task) return;
+        // Persist to API
+        fetch("/api/leaderboard", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ memberName, points: -cost }) });
 
-    // Universal task: claim for selected member; points go to that claimant
-    if (task.universal) {
-      const claimant = snatchForMember;
-      if (!claimant) {
-        setPinError("Select who is claiming this task.");
-        setPinInput("");
-        setTimeout(() => setPinError(""), 2000);
-        return;
-      }
+        setPinSu
 
-      const verified = db.verifyMemberPin(claimant, pinInput);
-      if (verified) {
-        const claimantName = (verified as any).name;
-        const claimantEmoji = (membersData.find((m: any) => m.name === claimantName)?.emoji) || task.assigneeEmoji;
+... [OUTPUT TRUNCATED - 22459 chars omitted out of 72459 total] ...
 
-        setTasks(prev =>
-          prev.map(t =>
-            t.id === pinTaskId
-              ? {
-                  ...t,
-                  completed: true,
-                  completedBy: claimantName,
-                  assignee: claimantName,
-                  assigneeEmoji: claimantEmoji,
-                }
-              : t
-          )
-        );
+sist to API
+                  fetch("/api/leaderboard", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ memberName: penaltyForMember, points: -(pinPenalty?.points ?? 0) }) });
 
-        setEarnedPoints(prev => {
-          return { ...prev, [claimantName]: (prev[claimantName] || 0) + task.points };
-        });
-
-        setPinSuccess(`✅ +${task.points}pts to ${claimantName.split(" ")[0]}!`);
-        setTimeout(() => { setPinTaskId(null); setPinSuccess(""); setSnatchForMember(""); }, 1500);
-      } else {
-        setPinError("Wrong code for selected member. Try again.");
-        setPinInput("");
-        setTimeout(() => setPinError(""), 2000);
-      }
-      return;
-    }
-
-    // Non-universal task: verify against fixed assignee
-    const verified = db.verifyMemberPin(task.assignee, pinInput);
-    if (verified) {
-      setTasks(prev => prev.map(t => t.id === pinTaskId ? { ...t, completed: true, completedBy: (verified as any).name } : t));
-      setEarnedPoints(prev => {
-        const name = (verified as any).name;
-        return { ...prev, [name]: (prev[name] || 0) + task.points };
-      });
-      setPinSuccess(`✅ +${task.points}pts to ${(verified as any).name}!`);
-      setTimeout(() => { setPinTaskId(null); setPinSuccess(""); setSnatchForMember(""); }, 1500);
-    } else {
-      setPinError("Wrong PIN. Try again.");
-      setPinInput("");
-      setTimeout(() => setPinError(""), 2000);
-    }
-  };
-
-  // ─── Task CRUD ──────────────────────────────────────────
-  const startEdit = (task: Task) => {
-    setEditingId(task.id);
-    setEditForm({ ...task });
-    setIsAdding(false);
-  };
-
-  const startAdd = () => {
-    setEditingId(null);
-    setEditForm(emptyTask(membersData[0]));
-    setIsAdding(true);
-  };
-
-  const cancelEdit = () => { setEditingId(null); setIsAdding(false); };
-
-  const saveTask = () => {
-    if (!editForm.title.trim()) return;
-    if (isAdding) {
-      setTasks(prev => [...prev, { ...editForm, id: Date.now() }]);
-    } else {
-      setTasks(prev => prev.map(t => t.id === editingId ? { ...editForm } : t));
-    }
-    setEditingId(null); setIsAdding(false);
-  };
-
-  const deleteTask = (id: number) => {
-    setTasks(prev => prev.filter(t => t.id !== id));
-    setEditingId(null); setIsAdding(false);
-  };
-
-  const updateForm = (field: keyof Task, value: any) => {
-    setEditForm(prev => {
-      const updated: Task = { ...prev, [field]: value };
-
-      if (field === "assignee") {
-        const member = membersData.find(m => m.name === value);
-        if (member) updated.assigneeEmoji = member.emoji;
-      }
-
-      return updated;
-    });
-  };
-
-  // ─── AI Task Suggestions ─────────────────────────────────
-  const generateAiTasks = async () => {
-    setAiSuggesting(true);
-    // Build dynamic family member list with ages
-    const familyList = membersData
-      .filter((m: any) => m.role !== "pet")
-      .map((m: any) => `${m.name} (${(m as any).age || "?"}yo)`)
-      .join(", ");
-    const adults = membersData.filter((m: any) => m.role === "parent").map((m: any) => m.name).join(", ");
-    const kids = membersData.filter((m: any) => m.role === "child").map((m: any) => m.name).join(", ");
-    try {
-      const res = await fetch('/api/hermes/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: `Suggest 4 age-appropriate chores for the Garcia family: ${familyList}. Adults (${adults}) can handle harder tasks (15-25pts). Kids (${kids}) get easier tasks based on their age (5-15pts). Return as JSON: {"actions":[{"type":"task","title":"...","detail":"AssigneeName · Xpts","emoji":"..."}]}. Make them varied (chores, pets, school, helping, errands).`
-        }),
-      });
-      const data = await res.json();
-      const actions = data.actions || [];
-      const suggestions: Task[] = actions
-        .filter((a: any) => a.type === "task")
-        .map((a: any) => {
-          const assignee = a.detail?.split("·")?.[0]?.trim() || "Caspian";
-          const points = parseInt(a.detail?.match(/(\d+)\s*pts?/)?.[1] || "8");
-          const member = membersData.find((m: any) => m.name.startsWith(assignee) || m.name === assignee);
-          return {
-            id: Date.now() + Math.random(),
-            title: a.title,
-            assignee: member?.name || assignee,
-            assigneeEmoji: member?.emoji || "🧒",
-            due: "Today",
-            points,
-            recurring: null,
-            category: "AI Suggested",
-            completed: false,
-            priority: points >= 15 ? "high" : points >= 10 ? "medium" : "low",
-          } as Task;
-        });
-      setAiSuggestions(suggestions.length > 0 ? suggestions : [
-        { id: Date.now()+1, title: "Make your bed", assignee: "Caspian", assigneeEmoji: "🧒", due: "Today", points: 5, recurring: "Daily", category: "AI Suggested", completed: false, priority: "low" },
-        { id: Date.now()+2, title: "Help set the table", assignee: "Aurora", assigneeEmoji: "👧", due: "Today", points: 8, recurring: "Daily", category: "AI Suggested", completed: false, priority: "medium" },
-        { id: Date.now()+3, title: "Sweep the kitchen", assignee: "Jasmine", assigneeEmoji: "👧", due: "Today", points: 12, recurring: null, category: "AI Suggested", completed: false, priority: "medium" },
-        { id: Date.now()+4, title: "Organize the pantry", assignee: "Bailey", assigneeEmoji: "👧", due: "Today", points: 15, recurring: "Weekly", category: "AI Suggested", completed: false, priority: "high" },
-      ]);
-    } catch {
-      // Fallback suggestions
-      setAiSuggestions([
-        { id: Date.now()+1, title: "Make your bed", assignee: "Caspian", assigneeEmoji: "🧒", due: "Today", points: 5, recurring: "Daily", category: "AI Suggested", completed: false, priority: "low" },
-        { id: Date.now()+2, title: "Help set the table", assignee: "Aurora", assigneeEmoji: "👧", due: "Today", points: 8, recurring: "Daily", category: "AI Suggested", completed: false, priority: "medium" },
-        { id: Date.now()+3, title: "Sweep the kitchen", assignee: "Jasmine", assigneeEmoji: "👧", due: "Today", points: 12, recurring: null, category: "AI Suggested", completed: false, priority: "medium" },
-        { id: Date.now()+4, title: "Organize the pantry", assignee: "Bailey", assigneeEmoji: "👧", due: "Today", points: 15, recurring: "Weekly", category: "AI Suggested", completed: false, priority: "high" },
-      ]);
-    }
-    setAiSuggesting(false);
-  };
-
-  // Google Tasks sync
-  const syncGoogleTasks = async () => {
-    setGoogleSyncing(true);
-    try {
-      const res = await fetch("/api/google-calendar?type=task");
-      const data = await res.json();
-      if (data.events?.length) {
-        const existing = [...tasks];
-        for (const ge of data.events) {
-          if (!existing.find(t => t.title === ge.title)) {
-            existing.push({
-              id: Date.now() + Math.random(),
-              title: ge.title,
-              assignee: "All",
-              assigneeEmoji: "👨‍👩‍👧‍👧",
-              due: "Today",
-              points: 5,
-              recurring: null,
-              category: "Google Tasks",
-              completed: false,
-              priority: "medium" as const,
-            });
-          }
-        }
-        setTasks(existing);
-        showToast(`✅ Synced ${data.events.length} Google tasks`);
-      } else {
-        showToast("No Google tasks found");
-      }
-    } catch {
-      showToast("Failed to sync Google tasks");
-    }
-    setGoogleSyncing(false);
-  };
-
-  const adoptSuggestion = (suggestion: Task) => {
-    setTasks(prev => [...prev, { ...suggestion, id: Date.now() }]);
-    setAiSuggestions(prev => prev.filter(s => s.title !== suggestion.title));
-  };
-
-  const dismissSuggestion = (title: string) => {
-    setAiSuggestions(prev => prev.filter(s => s.title !== title));
-  };
-
-  // ─── Computed ────────────────────────────────────────────
-  const filtered = tasks.filter((t) => {
-    const memberMatch = filterMember === "All" || t.assignee === filterMember;
-    const completedMatch = showCompleted ? true : !t.completed;
-    return memberMatch && completedMatch;
-  });
-
-  const pending = filtered.filter((t) => !t.completed);
-  const completed = filtered.filter((t) => t.completed);
-  const completedTotal = tasks.filter((t) => t.completed).length;
-
-  // Dynamic leaderboard from earned points
-  const dynamicLeaderboard: LeaderboardEntry[] = useMemo(() => {
-    const entries = membersData
-      .filter((m: any) => m.role !== "pet")
-      .map((m: any) => ({
-        name: m.name,
-        emoji: m.emoji,
-        points: earnedPoints[m.name] || 0,
-        streak: 0,
-        rank: 0,
-      }))
-      .sort((a: any, b: any) => b.points - a.points);
-    // Fall back to static if no points earned yet
-    if (entries.every((e: any) => e.points === 0)) return staticLeaderboard;
-    return entries.map((e: any, i: number) => ({ ...e, rank: i + 1, streak: Math.floor(e.points / 10) }));
-  }, [earnedPoints, membersData]);
-
-  const topScorer = dynamicLeaderboard[0];
-
-  if (!mounted) {
-    return (
-      <PageShell>
-        <TopBar title="Tasks & Chores" subtitle="Loading..." />
-        <div className="flex items-center justify-center min-h-[50vh]">
-          <div className="animate-spin rounded-full h-8 w-8 border-2 border-t-transparent border-[var(--color-accent-selected)]"></div>
-        </div>
-      </PageShell>
-    );
-  }
-
-  return (
-    <PageShell>
-      <TopBar
-        title="Tasks & Chores"
-        subtitle={`${pending.length} pending`}
-        right={
-          <button
-            onClick={() => activeTab === "tasks" ? startAdd() : startAddReward()}
-            className="w-9 h-9 flex items-center justify-center rounded-xl bg-nori-500/15 text-nori-400 hover:bg-nori-500/25 transition-colors"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="w-5 h-5">
-              <path d="M12 5v14M5 12h14" strokeLinecap="round" />
-            </svg>
-          </button>
-        }
-      />
-
-      {/* Toast */}
-      {toast && (
-        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-xl text-sm font-medium bg-nori-500/20 border border-nori-500/30 text-nori-300 shadow-lg backdrop-blur-sm animate-in fade-in slide-in-from-top-2">
-          {toast}
-        </div>
-      )}
-
-      {/* Manual Adjust Modal */}
-      {adjustMember && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setAdjustMember(null)}>
-          <div className="bg-surface-0 rounded-2xl p-6 mx-4 w-full max-w-sm border border-surface-3 shadow-2xl" onClick={e => e.stopPropagation()}>
-            <div className="text-center mb-4">
-              <span className="text-4xl">⚙️</span>
-              <h3 className="text-text-primary font-semibold mt-2">Manual Point Adjust</h3>
-              <p className="text-text-secondary text-sm mt-1">Adjust points for <span className="font-semibold text-text-primary">{adjustMember.split(" ")[0]}</span></p>
-              <p className="text-text-muted text-xs mt-0.5">Current: <span className="text-nori-400 font-bold">{earnedPoints[adjustMember] || 0} pts</span></p>
-            </div>
-            {/* Member selector */}
-            <div className="mb-3">
-              <p className="text-text-muted text-xs font-semibold mb-1">Member</p>
-              <select value={adjustMember} onChange={e => setAdjustMember(e.target.value)}
-                className="w-full bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3">
-                {membersData.filter((m: any) => m.role !== "pet").map((m: any) => (
-                  <option key={m.name} value={m.name}>{m.emoji} {m.name}</option>
-                ))}
-              </select>
-            </div>
-            {/* +/- toggle + amount */}
-            <div className="flex gap-2 mb-3">
-              <div className="flex rounded-lg overflow-hidden border border-surface-3">
-                <button onClick={() => setAdjustDir("+")}
-                  className={`px-4 py-2 text-sm font-bold transition-colors ${adjustDir === "+" ? "bg-nori-500 text-white" : "bg-surface-2 text-text-muted"}`}>+</button>
-                <button onClick={() => setAdjustDir("-")}
-                  className={`px-4 py-2 text-sm font-bold transition-colors ${adjustDir === "-" ? "bg-rose-500 text-white" : "bg-surface-2 text-text-muted"}`}>−</button>
-              </div>
-              <input type="number" min="1" max="999" value={adjustAmount}
-                onChange={e => setAdjustAmount(e.target.value)}
-                className="flex-1 bg-surface-2 text-text-primary text-center text-lg font-bold rounded-lg px-3 py-2 outline-none border border-surface-3 focus:border-nori-500/50" />
-              <span className="flex items-center text-text-muted text-sm font-medium">pts</span>
-            </div>
-            {/* Reason */}
-            <input type="text" placeholder="Reason (optional)" value={adjustReason}
-              onChange={e => setAdjustReason(e.target.value)}
-              className="w-full mb-3 bg-surface-2 text-text-primary text-sm rounded-lg px-3 py-2 outline-none border border-surface-3 focus:border-nori-500/50 placeholder:text-text-muted" />
-            {/* Parent PIN */}
-            <input type="password" inputMode="numeric" maxLength={4} value={adjustPin}
-              onChange={e => { setAdjustPin(e.target.value.replace(/[^0-9]/g, "")); setAdjustError(""); }}
-              onKeyDown={e => { if (e.key === "Enter") submitAdjust(); }}
-              placeholder="Parent PIN" autoFocus
-              className="w-full bg-surface-2 text-text-primary text-center text-2xl tracking-[0.5em] rounded-xl px-4 py-3 outline-none border-2 border-surface-3 focus:border-nori-500/50 placeholder:text-text-muted placeholder:text-sm placeholder:tracking-normal" />
-            {adjustError && <p className="text-rose-400 text-xs text-center mt-2">{adjustError}</p>}
-            {adjustSuccess && <p className="text-nori-400 text-xs text-center mt-2 font-semibold">{adjustSuccess}</p>}
-            <div className="flex gap-2 mt-4">
-              <button onClick={submitAdjust} disabled={adjustPin.length < 4 || !adjustAmount}
-                className={`flex-1 py-2.5 rounded-xl font-semibold text-sm disabled:opacity-40 transition-colors text-white ${
-                  adjustDir === "+" ? "bg-nori-500 hover:bg-nori-400" : "bg-rose-500 hover:bg-rose-400"
-                }`}>
-                {adjustDir === "+" ? `+${adjustAmount} pts` : `−${adjustAmount} pts`}
-              </button>
-              <button onClick={() => setAdjustMember(null)}
-                className="flex-1 py-2.5 rounded-xl bg-surface-2 text-text-secondary text-sm font-medium hover:text-text-primary transition-colors">
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* PIN Entry Modal */}
-      {(pinTaskId !== null || pinReward !== null || pinPenalty !== null) && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => { setPinTaskId(null); setPinReward(null); setPinPenalty(null); }}>
-          <div className="bg-surface-0 rounded-2xl p-6 mx-4 w-full max-w-sm border border-surface-3 shadow-2xl" onClick={e => e.stopPropagation()}>
-            <div className="text-center mb-4">
-              <span className="text-4xl">{pinReward ? pinReward.emoji : pinPenalty ? pinPenalty.emoji : "🔐"}</span>
-              <h3 className="text-text-primary font-semibold mt-2">Enter Your PIN</h3>
-              <p className="text-text-secondary text-sm mt-1">
-                {pinReward
-                  ? `Redeem "${pinReward.name}" for ${pinReward.cost}pts`
-                  : pinPenalty
-                  ? `Apply "${pinPenalty.name}" penalty (−${pinPenalty.points}pts)`
-                  : `Complete "${tasks.find(t => t.id === pinTaskId)?.title}"`
-                }
-              </p>
-
-              {!pinReward && tasks.find((t) => t.id === pinTaskId)?.universal && (
-                <div className="mt-3">
-                  <p className="text-text-muted text-xs font-semibold mb-1">Snatch for</p>
-                  <select
-                    value={snatchForMember}
-                    onChange={(e) => setSnatchForMember(e.target.value)}
-                    className="w-full bg-surface-2 text-text-primary text-xs rounded-lg px-3 py-2 outline-none border border-surface-3"
-                  >
-                    {membersData
-                      .filter((m: any) => m.role !== "pet")
-                      .map((m: any) => (
-                        <option key={m.name} value={m.name}>
-                          {m.emoji} {m.name}
-                        </option>
-                      ))}
-                  </select>
-                </div>
-              )}
-
-              {pinReward && (
-                <div className="mt-3">
-                  <p className="text-text-muted text-xs font-semibold mb-1">Redeem for</p>
-                  <select
-                    value={redeemForMember}
-                    onChange={(e) => setRedeemForMember(e.target.value)}
-                    className="w-full bg-surface-2 text-text-primary text-xs rounded-lg px-3 py-2 outline-none border border-surface-3"
-                  >
-                    {membersData
-                      .filter((m: any) => m.role !== "pet")
-                      .map((m: any) => (
-                        <option key={m.name} value={m.name}>
-                          {m.emoji} {m.name}
-                        </option>
-                      ))}
-                  </select>
-                </div>
-              )}
-
-              {pinPenalty && (
-                <div className="mt-3">
-                  <p className="text-text-muted text-xs font-semibold mb-1">Apply penalty to</p>
-                  <select
-                    value={penaltyForMember}
-                    onChange={(e) => setPenaltyForMember(e.target.value)}
-                    className="w-full bg-surface-2 text-text-primary text-xs rounded-lg px-3 py-2 outline-none border border-surface-3"
-                  >
-                    {membersData
-                      .filter((m: any) => m.role !== "pet")
-                      .map((m: any) => (
-                        <option key={m.name} value={m.name}>
-                          {m.emoji} {m.name}
-                        </option>
-                      ))}
-                  </select>
-                </div>
-              )}
-            </div>
-            <input
-              type="password"
-              inputMode="numeric"
-              maxLength={4}
-              value={pinInput}
-              onChange={e => { setPinInput(e.target.value.replace(/[^0-9]/g, "")); setPinError(""); }}
-              onKeyDown={e => { if (e.key === "Enter") submitPin(); }}
-              placeholder="4-digit PIN"
-              className="w-full bg-surface-2 text-text-primary text-center text-2xl tracking-[0.5em] rounded-xl px-4 py-3 outline-none border-2 border-surface-3 focus:border-nori-500/50 placeholder:text-text-muted"
-              autoFocus
-            />
-            {pinError && <p className="text-rose-400 text-xs text-center mt-2">{pinError}</p>}
-            {pinSuccess && <p className="text-nori-400 text-xs text-center mt-2">{pinSuccess}</p>}
-            <div className="flex gap-2 mt-4">
-              <button onClick={pinPenalty ? () => {
-                if (!penaltyForMember) { setPinError("Select a member."); return; }
-                const verified = db.verifyMemberPin(penaltyForMember, pinInput) ||
-                  membersData.find((m: any) => m.role === "parent" && db.verifyMemberPin(m.name, pinInput));
-                if (verified) {
-                  setEarnedPoints(prev => ({ ...prev, [penaltyForMember]: Math.max(0, (prev[penaltyForMember] || 0) - (pinPenalty?.points ?? 0)) }));
                   setPinSuccess(`⚠️ −${pinPenalty?.points}pts from ${penaltyForMember.split(" ")[0]}`);
                   setTimeout(() => { setPinPenalty(null); setPinSuccess(""); }, 1500);
                 } else {
@@ -1043,7 +734,7 @@ export default function TasksPage() {
                 <button
                   onClick={() => {
                     if (typeof window === "undefined") return;
-                    localStorage.removeItem(POINTS_STORAGE_KEY);
+                    localStorage.removeItem("consuela-points");
                     setEarnedPoints({});
                     showToast("Leaderboard reset ✅");
                   }}

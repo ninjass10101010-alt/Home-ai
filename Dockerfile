@@ -1,7 +1,7 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 COPY package.json package-lock.json* ./
-RUN npm install
+RUN npm cache clean --force 2>/dev/null; npm install
 COPY . .
 ARG NEXT_PUBLIC_PB_URL
 ARG NEXT_PUBLIC_OPENCLAW_BRIDGE_URL

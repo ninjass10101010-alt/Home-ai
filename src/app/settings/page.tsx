@@ -12,7 +12,6 @@ import Button from "@/components/ui/Button";
 import AnimatedEmoji from "@/components/ui/AnimatedEmoji";
 import SigmaImage from "@/components/ui/SigmaImage";
 import SigmaAvatar from "@/components/ui/SigmaAvatar";
-import { db } from "@/db";
 
 const emojiOptions = ["👨","👩","👧","🧒","👶","👴","👵","🐶","🐱","🐩","🐕","🐈","🐠","🐹","🐰","🦊","🐻","🐼","🐨","🐯","🦁","🐮","🐷","🐸","🐵"];
 
@@ -54,7 +53,7 @@ export default function SettingsPage() {
 
   const { weather, setLocation, setUnit, setTimeOfDay, setSeason, setHolidayOverride } = useWeatherConfig();
   const { widgets, moveUp, moveDown, toggle, getIndex } = useHomeLayout();
-  const mountedRef = useRef(false);
+  const [mounted, setMounted] = useState(false);
 
   // ─── Family Member editing state ────────────────────────────────────────
   const [membersList, setMembersList] = useState<any[]>([]);
@@ -80,51 +79,48 @@ export default function SettingsPage() {
   const [editECEmoji, setEditECEmoji] = useState("👤");
   const [showECEmojiPicker, setShowECEmojiPicker] = useState(false);
 
+  const [loading, setLoading] = useState(true);
+
   useEffect(() => {
-    mountedRef.current = true;
-    // Load family members from localStorage, fallback to DB seed
-    const storedMembers = (() => {
-      if (typeof window === "undefined") return null;
-      try { const d = localStorage.getItem("consuela-members"); return d ? JSON.parse(d) : null; } catch { return null; }
-    })();
-    if (storedMembers && storedMembers.length > 0) {
-      storedMembers.forEach((m: any) => {
-        const exists = db.selectMembersDetailed().find((em: any) => em.name === m.name);
-        if (exists) db.updateMember(m.name, { emoji: m.emoji, name: m.name, age: parseInt(m.age) || 0, pin: m.pin || "" });
-      });
-      setMembersList(storedMembers);
-    } else {
-      setMembersList(db.selectMembersDetailed());
-    }
-    // Load emergency contacts from localStorage, fallback to DB seed
-    const stored = (() => {
-      if (typeof window === "undefined") return null;
-      try { const d = localStorage.getItem("consuela-emergency"); return d ? JSON.parse(d) : null; } catch { return null; }
-    })();
-    if (stored && stored.length > 0) {
-      // Seed DB from localStorage
-      stored.forEach((c: any) => {
-        const exists = db.selectEmergencyContacts().find((ec: any) => ec.id === c.id);
-        if (!exists) db.insertEmergencyContact(c);
-        else db.updateEmergencyContact(c.id, c);
-      });
-      setEmergencyList(stored);
-    } else {
-      setEmergencyList(db.selectEmergencyContacts());
-    }
+    setMounted(true);
+    // Fetch family members from API
+    Promise.all([
+      fetch('/api/members').then(r => r.json()).catch(() => ({})),
+      fetch('/api/emergency-contacts').then(r => r.json()).catch(() => ({})),
+    ]).then(([membersData, contactsData]) => {
+      if (membersData.members) {
+        setMembersList(membersData.members);
+      }
+      if (contactsData.contacts) {
+        setEmergencyList(contactsData.contacts);
+      }
+    }).finally(() => setLoading(false));
   }, []);
 
-  // Persist family members to localStorage on every change
+  // Persist family members via API on every change
   useEffect(() => {
     if (mounted && membersList.length > 0) {
-      localStorage.setItem("consuela-members", JSON.stringify(membersList));
+      // Batch update all members via API
+      membersList.forEach((member: any) => {
+        fetch('/api/members', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(member),
+        }).catch(() => {});
+      });
     }
   }, [membersList, mounted]);
 
-  // Persist emergency contacts to localStorage on every change
+  // Persist emergency contacts via API on every change
   useEffect(() => {
     if (mounted && emergencyList.length > 0) {
-      localStorage.setItem("consuela-emergency", JSON.stringify(emergencyList));
+      emergencyList.forEach((contact: any) => {
+        fetch('/api/emergency-contacts', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(contact),
+        }).catch(() => {});
+      });
     }
   }, [emergencyList, mounted]);
 
@@ -141,7 +137,12 @@ export default function SettingsPage() {
   const saveMember = (idx: number) => {
     const member = membersList[idx];
     if (!member || !editName.trim()) return;
-    db.updateMember(member.name, { name: editName.trim(), emoji: editEmoji, age: parseInt(editAge) || 0, pin: editPin });
+    // Persist to API
+    fetch('/api/members', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: member.id, name: editName.trim(), emoji: editEmoji, age: parseInt(editAge) || 0, pin: editPin, avatarSize: editAvatarSize, glow: editGlow }),
+    }).catch(() => {});
     setMembersList(prev => prev.map((m, i) => i === idx ? { ...m, name: editName.trim(), emoji: editEmoji, age: editAge, pin: editPin, avatarSize: editAvatarSize, glow: editGlow } : m));
     setEditingMemberIdx(null);
   };
@@ -174,48 +175,47 @@ export default function SettingsPage() {
 
   const saveEmergency = (idx: number | null) => {
     if (!editECName.trim() || !editECPhone.trim()) return;
+    const contactData = {
+      name: editECName.trim(),
+      phone: editECPhone.trim(),
+      email: editECEmail.trim(),
+      carrier: editECCarrier,
+      relationship: editECRelationship as any,
+      isPrimary: editECIsPrimary,
+      emoji: editECEmoji,
+    };
     if (idx !== null) {
       // Update existing
       const contact = emergencyList[idx];
-      db.updateEmergencyContact(contact.id, {
-        name: editECName.trim(),
-        phone: editECPhone.trim(),
-        email: editECEmail.trim(),
-        carrier: editECCarrier,
-        relationship: editECRelationship as any,
-        isPrimary: editECIsPrimary,
-        emoji: editECEmoji,
-      });
-      setEmergencyList(prev => prev.map((c, i) => i === idx ? {
-        ...c,
-        name: editECName.trim(),
-        phone: editECPhone.trim(),
-        email: editECEmail.trim(),
-        carrier: editECCarrier,
-        relationship: editECRelationship,
-        isPrimary: editECIsPrimary,
-        emoji: editECEmoji,
-      } : c));
+      fetch('/api/emergency-contacts', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: contact.id, ...contactData }),
+      }).catch(() => {});
+      setEmergencyList(prev => prev.map((c, i) => i === idx ? { ...c, ...contactData } : c));
       setEditingEmergencyIdx(null);
     } else {
-      // Add new
-      const newContact = db.insertEmergencyContact({
-        name: editECName.trim(),
-        phone: editECPhone.trim(),
-        email: editECEmail.trim(),
-        carrier: editECCarrier,
-        relationship: editECRelationship as any,
-        isPrimary: editECIsPrimary,
-        emoji: editECEmoji,
+      // Add new via API
+      fetch('/api/emergency-contacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(contactData),
+      }).then(r => r.json()).then(data => {
+        if (data.contact) setEmergencyList(prev => [...prev, data.contact]);
+      }).catch(() => {
+        // Fallback: add locally with temp ID
+        setEmergencyList(prev => [...prev, { id: Date.now(), ...contactData }]);
       });
-      setEmergencyList(prev => [...prev, newContact]);
       setAddingEmergency(false);
     }
   };
 
   const deleteEmergency = (idx: number) => {
     const contact = emergencyList[idx];
-    db.deleteEmergencyContact(contact.id);
+    // Delete via API
+    fetch(`/api/emergency-contacts?id=${contact.id}`, {
+      method: 'DELETE',
+    }).catch(() => {});
     setEmergencyList(prev => prev.filter((_, i) => i !== idx));
     if (editingEmergencyIdx === idx) {
       setEditingEmergencyIdx(null);
@@ -1271,11 +1271,11 @@ export default function SettingsPage() {
           {/* Auto-sync status */}
           <div className="p-4 rounded-xl border border-[var(--color-surface-3)] bg-[var(--color-surface-1)]">
             <div className="flex items-center gap-3">
-              <div className="w-3 h-3 rounded-full bg-[var(--color-accent-mint)] animate-pulse" />
+              <div className="w-3 h-3 rounded-full bg-[var(--color-accent-mint)]" />
               <div>
-                <p className="text-text-primary text-sm font-medium">Auto-Sync Active</p>
+                <p className="text-text-primary text-sm font-medium">PocketBase Connected</p>
                 <p className="text-text-muted text-xs">
-                  Data is synced on app load via <code className="text-[var(--color-accent-cyan)]">SyncInit</code>.
+                  All data is stored in PocketBase and loaded on app start.
                   Use the buttons above for manual backup or full push.
                 </p>
               </div>

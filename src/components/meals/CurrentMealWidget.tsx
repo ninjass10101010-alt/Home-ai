@@ -3,9 +3,6 @@
 import { useState, useEffect } from "react";
 import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
 
-const SCHEDULES_STORAGE_KEY = "consuela-schedules";
-const MEALS_KEY = "consuela-meals";
-
 function parseTimeToMinutes(timeStr: string): number {
   if (!timeStr) return 0;
   const raw = timeStr.match(/^(\d{1,2}):(\d{2})$/);
@@ -45,62 +42,71 @@ export default function CurrentMealWidget() {
   const [currentTimeStr, setCurrentTimeStr] = useState("");
   const [scheduledTime, setScheduledTime] = useState<string>("");
   const [activeMealData, setActiveMealData] = useState<any>(null);
+  const [schedules, setSchedules] = useState<any[]>([]);
+  const [meals, setMeals] = useState<any[]>([]);
 
+  // Fetch schedules and meals from API on mount and every 60s
   useEffect(() => {
-    const update = () => {
-      const now = new Date();
-      setCurrentTimeStr(now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }));
-      const nowMinutes = now.getHours() * 60 + now.getMinutes();
-
-      let schedules: any[] = [];
+    const fetchData = async () => {
       try {
-        const raw = localStorage.getItem(SCHEDULES_STORAGE_KEY);
-        schedules = raw ? JSON.parse(raw) : [];
-      } catch { schedules = []; }
-
-      const mealSchedules = schedules
-        .filter((s: any) => s.mealType && s.mealType !== "none")
-        .map((s: any) => ({ ...s, minutes: parseTimeToMinutes(s.time) }))
-        .sort((a: any, b: any) => a.minutes - b.minutes);
-
-      const activeMealSchedules = mealSchedules.length > 0 ? mealSchedules : schedules
-        .map((s: any) => {
-          const t = s.title?.toLowerCase() ?? "";
-          let mealType = null;
-          if (t.includes("breakfast")) mealType = "breakfast";
-          else if (t.includes("lunch")) mealType = "lunch";
-          else if (t.includes("dinner")) mealType = "dinner";
-          else if (t.includes("snack")) mealType = "snack";
-          return mealType ? { ...s, mealType, minutes: parseTimeToMinutes(s.time) } : null;
-        })
-        .filter(Boolean)
-        .sort((a: any, b: any) => a.minutes - b.minutes);
-
-      let current = activeMealSchedules[0];
-      for (const meal of activeMealSchedules) {
-        if (meal.minutes <= nowMinutes) current = meal;
+        const [schedulesRes, mealsRes] = await Promise.all([
+          fetch("/api/schedules"),
+          fetch("/api/meals"),
+        ]);
+        const schedulesJson = await schedulesRes.json();
+        const mealsJson = await mealsRes.json();
+        setSchedules(schedulesJson.schedules || []);
+        setMeals(mealsJson.meals || []);
+      } catch {
+        // On error, keep existing state (empty arrays on first load)
       }
-
-      if (current) {
-        setCurrentMealType(current.mealType);
-        setScheduledTime(formatTime(current.time));
-      }
-
-      const todayShort = now.toLocaleDateString("en-US", { weekday: "short" });
-      try {
-        const mealsRaw = localStorage.getItem(MEALS_KEY);
-        const meals: any[] = mealsRaw ? JSON.parse(mealsRaw) : [];
-        const meal = meals.find(
-          (m: any) => m.time === todayShort && m.mealType === (current?.mealType || "dinner")
-        ) || meals.find((m: any) => m.time === todayShort);
-        setActiveMealData(meal || null);
-      } catch { setActiveMealData(null); }
     };
 
-    update();
-    const interval = setInterval(update, 60000);
+    fetchData();
+    const interval = setInterval(fetchData, 60000);
     return () => clearInterval(interval);
   }, []);
+
+  // Derive current meal info from fetched data
+  useEffect(() => {
+    const now = new Date();
+    setCurrentTimeStr(now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }));
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+
+    const mealSchedules = schedules
+      .filter((s: any) => s.mealType && s.mealType !== "none")
+      .map((s: any) => ({ ...s, minutes: parseTimeToMinutes(s.time) }))
+      .sort((a: any, b: any) => a.minutes - b.minutes);
+
+    const activeMealSchedules = mealSchedules.length > 0 ? mealSchedules : schedules
+      .map((s: any) => {
+        const t = s.title?.toLowerCase() ?? "";
+        let mealType = null;
+        if (t.includes("breakfast")) mealType = "breakfast";
+        else if (t.includes("lunch")) mealType = "lunch";
+        else if (t.includes("dinner")) mealType = "dinner";
+        else if (t.includes("snack")) mealType = "snack";
+        return mealType ? { ...s, mealType, minutes: parseTimeToMinutes(s.time) } : null;
+      })
+      .filter(Boolean)
+      .sort((a: any, b: any) => a.minutes - b.minutes);
+
+    let current = activeMealSchedules[0];
+    for (const meal of activeMealSchedules) {
+      if (meal.minutes <= nowMinutes) current = meal;
+    }
+
+    if (current) {
+      setCurrentMealType(current.mealType);
+      setScheduledTime(formatTime(current.time));
+    }
+
+    const todayShort = now.toLocaleDateString("en-US", { weekday: "short" });
+    const meal = meals.find(
+      (m: any) => m.time === todayShort && m.mealType === (current?.mealType || "dinner")
+    ) || meals.find((m: any) => m.time === todayShort);
+    setActiveMealData(meal || null);
+  }, [schedules, meals]);
 
   const mealInfo = MEAL_THEMES[currentMealType] ?? MEAL_THEMES.dinner;
 

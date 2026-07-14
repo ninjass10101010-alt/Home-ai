@@ -5,8 +5,6 @@ import Link from "next/link";
 import PageShell from "@/components/ui/PageShell";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
-import { db } from "@/db";
-
 interface EmergencyContact {
   id: number;
   name: string;
@@ -68,20 +66,18 @@ function cleanPhoneForTel(phone: string): string {
 
 export default function EmergencyPage() {
   const [contacts, setContacts] = useState<EmergencyContact[]>([]);
-  const mountedRef = useRef(false);
+  const [mounted, setMounted] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    mountedRef.current = true;
-    // Load from localStorage first (persisted by Settings), fallback to DB
-    const stored = (() => {
-      if (typeof window === "undefined") return null;
-      try { const d = localStorage.getItem("consuela-emergency"); return d ? JSON.parse(d) : null; } catch { return null; }
-    })();
-    if (stored && stored.length > 0) {
-      setContacts(stored);
-    } else {
-      setContacts(db.selectEmergencyContacts());
-    }
+    setMounted(true);
+    fetch('/api/emergency-contacts')
+      .then(r => r.json())
+      .then(data => {
+        if (data.contacts) setContacts(data.contacts);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, []);
 
   if (!mounted) {

@@ -8,7 +8,7 @@ import WeatherWidget from "@/components/ui/WeatherWidget";
 import { Icon3D } from "@/components/3d";
 import EmergencyButton from "@/components/ui/EmergencyButton";
 import ScheduleDisplay from "@/components/ui/ScheduleDisplay";
-import { db } from "@/db";
+
 import CurrentMealWidget from "@/components/meals/CurrentMealWidget";
 import { AtmosphericProvider } from "@/hooks/useAtmosphericTheme";
 import AtmosphericBridge from "@/components/ui/AtmosphericBridge";
@@ -24,7 +24,7 @@ const quickPrompts = [
 ];
 
 export default function HomePage() {
-  const mountedRef = useRef(false);
+  const [mounted, setMounted] = useState(false);
   const [familyMembers, setFamilyMembers] = useState<any[]>([]);
   const [todayEvents, setTodayEvents] = useState<any[]>([]);
   const [pendingTasks, setPendingTasks] = useState<any[]>([]);
@@ -37,24 +37,8 @@ export default function HomePage() {
   const { isVisible, widgets } = useHomeLayout();
 
   useEffect(() => {
-    mountedRef.current = true;
+    setMounted(true);
     setNow(new Date());
-
-    // Hydrate family members
-    const members = db.selectMembersDetailed().map((member: any, idx: number) => {
-      const size = member.avatarSize || "md";
-      return {
-        name: member.name,
-        color: member.color || (idx % 4 === 0 ? "green" : idx % 4 === 1 ? "cyan" : idx % 4 === 2 ? "violet" : "amber"),
-        emoji: member.emoji,
-        avatarSize: size,
-      };
-    });
-    setFamilyMembers(members);
-
-    // Hydrate events and tasks
-    setTodayEvents(db.selectTodaysEvents());
-    setPendingTasks(db.selectPendingTasks());
 
     // Hydrate dates and timeOfDay/season
     const today = new Date();
@@ -76,31 +60,27 @@ export default function HomePage() {
       dayMonth: today.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
     });
 
-    // Hydrate schedules from local storage or fallback
-    const SCHEDULES_STORAGE_KEY = "consuela-schedules";
-    let loadedSchedules = db.selectTodaysSchedules();
-    try {
-      const stored = localStorage.getItem(SCHEDULES_STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed)) {
-          loadedSchedules = parsed.map((s: any) => ({
-            id: s.id,
-            title: s.title,
-            time: s.time,
-            emoji: s.icon,
-            type: s.type,
-            color: s.color || "green",
-            member: s.member,
-            memberColor: s.memberColor,
-            icon: s.icon,
-          }));
-        }
-      }
-    } catch {
-      // ignore
-    }
-    setHomeScheduleItems(loadedSchedules);
+    // Hydrate data from APIs
+    Promise.all([
+      fetch('/api/members').then(r => r.json()).catch(() => ({})),
+      fetch('/api/calendar').then(r => r.json()).catch(() => ({})),
+      fetch('/api/tasks').then(r => r.json()).catch(() => ({})),
+      fetch('/api/schedules').then(r => r.json()).catch(() => ({})),
+    ]).then(([membersRes, calendarRes, tasksRes, schedulesRes]) => {
+      const members = (membersRes.members || []).map((member: any, idx: number) => {
+        const size = member.avatarSize || "md";
+        return {
+          name: member.name,
+          color: member.color || (idx % 4 === 0 ? "green" : idx % 4 === 1 ? "cyan" : idx % 4 === 2 ? "violet" : "amber"),
+          emoji: member.emoji,
+          avatarSize: size,
+        };
+      });
+      setFamilyMembers(members);
+      setTodayEvents(calendarRes.items || calendarRes.events || []);
+      setPendingTasks(tasksRes.items || tasksRes.tasks || []);
+      setHomeScheduleItems(schedulesRes.items || schedulesRes.schedules || []);
+    });
   }, []);
 
   useEffect(() => {

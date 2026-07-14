@@ -1,34 +1,31 @@
-const WebSocket = require('ws');
-const http = require('http');
-const crypto = require('crypto');
+const http = require("http");
 
-// Target the socat proxy on port 18800 instead of 18789
-const GATEWAY_URL = process.env.OPENCLAW_WS_URL || 'ws://openclaw:18800';
-const TOKEN = process.env.OPENCLAW_TOKEN || 'openclaw-key-998877';
+const HERMES_API_URL = process.env.HERMES_API_URL || "http://hermes-agent-2:8642/v1";
+const HERMES_API_KEY = process.env.HERMES_API_KEY || "consuela-api-key-2026";
 const PORT = 3005;
 
 const server = http.createServer((req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-  if (req.method === 'OPTIONS') {
+  if (req.method === "OPTIONS") {
     res.writeHead(204);
     res.end();
     return;
   }
 
-  if (req.method === 'POST' && req.url === '/api/chat') {
-    let body = '';
-    req.on('data', chunk => body += chunk);
-    req.on('end', async () => {
+  if (req.method === "POST" && req.url === "/api/chat") {
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", async () => {
       try {
         const { message } = JSON.parse(body);
         const reply = await talkToConsuela(message);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ reply }));
       } catch (err) {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: err.message }));
       }
     });
@@ -38,102 +35,36 @@ const server = http.createServer((req, res) => {
   }
 });
 
-function talkToConsuela(message) {
-  return new Promise((resolve, reject) => {
-    const ws = new WebSocket(GATEWAY_URL);
-    let fullReply = '';
-    let settled = false;
-
-    const timer = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        ws.close();
-        reject(new Error('Gateway timeout'));
-      }
-    }, 120000); // extended to 2 minutes
-
-    ws.on('open', () => {
-      // Send connect request immediately (gateway may still issue a challenge which we handle below)
-      ws.send(JSON.stringify({
-        type: 'req', id: 'auth', method: 'connect',
-        params: {
-          minProtocol: 3, maxProtocol: 3,
-          client: { id: 'gateway-client', version: '1.0.0', platform: 'linux', mode: 'backend' },
-          auth: { token: TOKEN },
-          scopes: ['operator.admin', 'operator.write', 'operator.agent']
-        }
-      }));
-    });
-
-    ws.on('message', (data) => {
-      try {
-        const msg = JSON.parse(data.toString());
-
-        // Handle optional challenge (some gateways still emit it)
-        if (msg.event === 'connect.challenge') {
-          ws.send(JSON.stringify({
-            type: 'req', id: 'auth', method: 'connect',
-            params: {
-              minProtocol: 3, maxProtocol: 3,
-              client: { id: 'gateway-client', version: '1.0.0', platform: 'linux', mode: 'backend' },
-              auth: { token: TOKEN },
-              scopes: ['operator.admin', 'operator.write', 'operator.agent']
-            }
-          }));
-        }
-
-        // Once authorized, trigger the agent run
-        if (msg.id === 'auth' && msg.ok) {
-          ws.send(JSON.stringify({
-            type: 'req', id: 'run', method: 'agent',
-            params: { agentId: 'consuela', message, sessionId: 'bridge-' + Date.now(), idempotencyKey: crypto.randomUUID() }
-          }));
-        }
-
-        // Accumulate streaming text from the agent (OpenClaw uses 'assistant' stream type)
-        if (msg.type === 'event' && msg.event === 'agent' && 
-            (msg.payload?.stream === 'assistant' || msg.payload?.stream === 'text')) {
-          if (msg.payload.data?.delta) fullReply += msg.payload.data.delta;
-          else if (msg.payload.data?.text) fullReply = msg.payload.data.text;
-        }
-
-        // When the chat turn finishes, resolve with the collected reply
-        if (msg.type === 'event' && msg.event === 'chat' && msg.payload?.state === 'turn:complete') {
-          if (!settled) {
-            settled = true;
-            clearTimeout(timer);
-            ws.close();
-            resolve(fullReply || 'No response');
-          }
-        }
-
-        // Propagate any gateway error back to the caller
-        if (msg.error && !settled) {
-          settled = true;
-          clearTimeout(timer);
-          ws.close();
-          reject(new Error(msg.error.message));
-        }
-      } catch (e) {}
-    });
-
-    // Fallback: if the socket closes before a turn:complete event, resolve with whatever we have
-    ws.on('close', () => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timer);
-        resolve(fullReply || 'No response');
-      }
-    });
-
-    ws.on('error', (e) => {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timer);
-        reject(e);
-      }
-    });
+async function talkToConsuela(message) {
+  const response = await fetch(`${HERMES_API_URL}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${HERMES_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "hermes-agent",
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are Consuela, the Garcia family AI assistant. You help with family organization, meal planning, scheduling, tasks, grocery lists, and reminders. Be warm, friendly, and efficient. Keep responses concise.",
+        },
+        { role: "user", content: message },
+      ],
+      temperature: 0.7,
+      max_tokens: 1024,
+    }),
   });
+
+  if (!response.ok) {
+    throw new Error(`Hermes API error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content || "No response";
 }
 
-server.listen(PORT, '0.0.0.0', () => console.log('Bridge listening on port ' + PORT));
+server.listen(PORT, "0.0.0.0", () =>
+  console.log("Bridge listening on port " + PORT)
+);

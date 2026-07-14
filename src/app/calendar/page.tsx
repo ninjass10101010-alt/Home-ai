@@ -9,7 +9,7 @@ import Avatar from "@/components/ui/Avatar";
 import AnimatedEmoji from "@/components/ui/AnimatedEmoji";
 import Link from "next/link";
 import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
-import { db } from "@/db";
+
 
 const DAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 const MONTHS = [
@@ -30,7 +30,7 @@ function parseTimeToMinutes(timeStr: string): number {
 }
 
 interface CalEvent {
-  id: number;
+  id: string;
   title: string;
   time: string;
   member: string;
@@ -50,18 +50,37 @@ type ScheduleColor =
   | "pink"
   | "teal";
 
-const events: CalEvent[] = [
-  { id: 1, title: "Soccer Practice", time: "4:00 PM", member: "Caspian", color: "violet", emoji: "⚽", day: 18 },
-  { id: 2, title: "Piano Lesson", time: "3:00 PM", member: "Emily", color: "amber", emoji: "🎹", day: 19 },
-  { id: 3, title: "Team Dinner", time: "7:00 PM", member: "Jeffery (Dad)", color: "cyan", emoji: "🍽️", day: 19 },
-  { id: 4, title: "Dentist — Emily", time: "2:00 PM", member: "Emily", color: "amber", emoji: "🦷", day: 21 },
-  { id: 5, title: "Car Service", time: "10:00 AM", member: "Jeffery (Dad)", color: "cyan", emoji: "🚗", day: 21 },
-  { id: 6, title: "Movie Night", time: "8:00 PM", member: "All", color: "green", emoji: "🎬", day: 22 },
-  { id: 7, title: "Park Picnic", time: "11:00 AM", member: "All", color: "green", emoji: "🌳", day: 23 },
-  { id: 8, title: "Grocery Run", time: "10:00 AM", member: "Rebecca (Mom)", color: "green", emoji: "🛒", day: 20 },
-  { id: 9, title: "Swim Class", time: "9:00 AM", member: "Caspian", color: "violet", emoji: "🏊", day: 25 },
-  { id: 10, title: "Book Club", time: "6:30 PM", member: "Rebecca (Mom)", color: "green", emoji: "📚", day: 26 },
-];
+/** Convert 24h time string like "16:00" to 12h format like "4:00 PM". */
+function to12h(time24: string | null | undefined): string {
+  if (!time24 || typeof time24 !== "string" || !time24.includes(":")) return time24 ?? "";
+  const match12h = time24.match(/^\d{1,2}:\d{2}\s*(AM|PM)$/i);
+  if (match12h) return time24; // already 12h
+  const [hStr, rest] = time24.split(":");
+  let h = parseInt(hStr, 10);
+  const mins = rest.slice(0, 2);
+  const ampm = h >= 12 ? "PM" : "AM";
+  if (h === 0) h = 12;
+  else if (h > 12) h -= 12;
+  return `${h}:${mins} ${ampm}`;
+}
+
+/** Map a raw PB/API record to the CalEvent interface. */
+function mapPBToCalEvent(raw: any): CalEvent {
+  const day = typeof raw.day === "number"
+    ? raw.day
+    : typeof raw.date === "string"
+      ? parseInt(raw.date.split("-")[2], 10) || 1
+      : 1;
+  return {
+    id: String(raw.id ?? ""),
+    title: String(raw.title ?? ""),
+    time: to12h(raw.time),
+    member: String(raw.member ?? "All"),
+    color: (["green", "violet", "amber", "cyan", "rose"].includes(raw.color) ? raw.color : "green") as CalEvent["color"],
+    emoji: String(raw.emoji ?? raw.icon ?? "📅"),
+    day,
+  };
+}
 
 const dotColors: Record<string, string> = {
   green: "bg-[var(--color-accent-selected)]/400",
@@ -76,7 +95,7 @@ const badgeVariants: Record<string, "green" | "violet" | "amber" | "cyan" | "ros
 };
 
 interface ScheduleItem {
-  id: number;
+  id: string;
   title: string;
   time: string;
   days: string;
@@ -85,13 +104,6 @@ interface ScheduleItem {
   color: ScheduleColor;
   mealType?: "breakfast" | "lunch" | "dinner" | "snack" | "none";
 }
-
-const getInitialSchedules = (): ScheduleItem[] => db.selectTodaysSchedulesRaw().map((s: any) => ({
-  ...s,
-  days: "all" as string,
-  icon: s.emoji || s.icon || "⏰",
-  color: (s.color as ScheduleColor) || "green",
-}));
 
 const dayLabels: Record<string, string> = {
   all: "Every day", weekdays: "Weekdays", weekends: "Weekends", friday: "Fridays",
@@ -123,7 +135,7 @@ function getColorBG(accentRgb: string): Record<ScheduleColor, string> {
 }
 
 const emptySchedule = (): ScheduleItem => ({
-  id: Date.now(),
+  id: "",
   title: "",
   time: "08:00",
   days: "all",
@@ -133,24 +145,11 @@ const emptySchedule = (): ScheduleItem => ({
   mealType: "none",
 });
 
-const EVENTS_STORAGE_KEY = "consuela-events";
-const SCHEDULES_STORAGE_KEY = "consuela-schedules";
-const SCHEDULES_VERSION_KEY = "consuela-schedules-v";
-const SCHEDULES_VERSION = 3; // bump to clear stale localStorage
-
-function loadFromStorage<T>(key: string, fallback: T): T {
-  if (typeof window === "undefined") return fallback;
-  try {
-    const stored = localStorage.getItem(key);
-    return stored ? JSON.parse(stored) : fallback;
-  } catch {
-    return fallback;
-  }
-}
+const API_USER_ID = "demo";
 
 export default function CalendarPage() {
   const today = new Date();
-  const members = useMemo(() => db.selectMembersForCalendar(), []);
+  const [members, setMembers] = useState<any[]>([]);
   const { colors, accentRgb } = useAtmosphericTheme();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
@@ -158,38 +157,67 @@ export default function CalendarPage() {
   const [filterMember, setFilterMember] = useState("All");
   const [activeTab, setActiveTab] = useState<"calendar" | "schedule">("calendar");
   const [toast, setToast] = useState<string | null>(null);
+
+  // Fetch members from PB
+  useEffect(() => {
+    fetch("/api/members").then(r => r.json()).then(d => {
+      setMembers(d.members || d.items || []);
+    }).catch(() => {});
+  }, []);
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
 
   // Calendar events state
-  const [calEvents, setCalEvents] = useState<CalEvent[]>(() => loadFromStorage(EVENTS_STORAGE_KEY, events));
-  const [editingEventId, setEditingEventId] = useState<number | null>(null);
-  const [eventForm, setEventForm] = useState<CalEvent>({ id: 0, title: "", time: "", member: "All", color: "green", emoji: "📅", day: selectedDay });
+  const [calEvents, setCalEvents] = useState<CalEvent[]>([]);
+  const [loadingEvents, setLoadingEvents] = useState(true);
+  const [editingEventId, setEditingEventId] = useState<string | null>(null);
+  const [eventForm, setEventForm] = useState<CalEvent>({ id: "", title: "", time: "", member: "All", color: "green", emoji: "📅", day: selectedDay });
   const [isAddingEvent, setIsAddingEvent] = useState(false);
 
   // Schedule state
-  const [schedules, setSchedules] = useState<ScheduleItem[]>(() => {
-    if (typeof window !== "undefined") {
-      const storedVersion = localStorage.getItem(SCHEDULES_VERSION_KEY);
-      if (storedVersion === String(SCHEDULES_VERSION)) {
-        return loadFromStorage(SCHEDULES_STORAGE_KEY, getInitialSchedules());
-      }
-      // Version mismatch — clear stale data
-      localStorage.removeItem(SCHEDULES_STORAGE_KEY);
-      localStorage.setItem(SCHEDULES_VERSION_KEY, String(SCHEDULES_VERSION));
-    }
-    return getInitialSchedules();
-  });
-  const [editingSchedId, setEditingSchedId] = useState<number | null>(null);
+  const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
+  const [loadingSchedules, setLoadingSchedules] = useState(true);
+  const [editingSchedId, setEditingSchedId] = useState<string | null>(null);
   const [schedForm, setSchedForm] = useState<ScheduleItem>(emptySchedule());
   const [isAddingSched, setIsAddingSched] = useState(false);
 
+  // Fetch events from API on mount
   useEffect(() => {
-    localStorage.setItem(EVENTS_STORAGE_KEY, JSON.stringify(calEvents));
-  }, [calEvents]);
+    (async () => {
+      try {
+        const res = await fetch(`/api/calendar?userId=${API_USER_ID}`);
+        const data = await res.json();
+        if (data.events?.length) {
+          setCalEvents(data.events.map(mapPBToCalEvent));
+        }
+      } catch {
+        showToast("⚠️ Could not load events");
+      } finally {
+        setLoadingEvents(false);
+      }
+    })();
+  }, []);
 
+  // Fetch schedules from API on mount
   useEffect(() => {
-    localStorage.setItem(SCHEDULES_STORAGE_KEY, JSON.stringify(schedules));
-  }, [schedules]);
+    (async () => {
+      try {
+        const res = await fetch(`/api/schedules?userId=${API_USER_ID}`);
+        const data = await res.json();
+        if (data.schedules?.length) {
+          setSchedules(data.schedules.map((s: any) => ({
+            ...s,
+            days: s.days || "all",
+            icon: s.emoji || s.icon || "⏰",
+            color: (s.color as ScheduleColor) || "green",
+          })));
+        }
+      } catch {
+        showToast("⚠️ Could not load schedules");
+      } finally {
+        setLoadingSchedules(false);
+      }
+    })();
+  }, []);
 
   // Pre-sort schedules for display (handles both raw 24h and formatted AM/PM)
   const sortedSchedules = useMemo(() => {
@@ -227,7 +255,7 @@ export default function CalendarPage() {
 
   // Event CRUD
   const startAddEvent = () => {
-    setEventForm({ id: 0, title: "", time: "12:00 PM", member: "All", color: "green", emoji: "📅", day: selectedDay });
+    setEventForm({ id: "", title: "", time: "12:00 PM", member: "All", color: "green", emoji: "📅", day: selectedDay });
     setIsAddingEvent(true);
     setEditingEventId(null);
   };
@@ -237,18 +265,39 @@ export default function CalendarPage() {
     setIsAddingEvent(false);
   };
   const cancelEventEdit = () => { setEditingEventId(null); setIsAddingEvent(false); };
-  const saveEvent = () => {
+  const saveEvent = async () => {
     if (!eventForm.title.trim()) return;
-    if (isAddingEvent) {
-      setCalEvents(prev => [...prev, { ...eventForm, id: Date.now() }]);
-    } else {
-      setCalEvents(prev => prev.map(e => e.id === editingEventId ? { ...eventForm } : e));
+    try {
+      if (isAddingEvent) {
+        const { id, ...data } = eventForm;
+        const res = await fetch("/api/calendar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...data, userId: API_USER_ID }),
+        });
+        const { event: record } = await res.json();
+        setCalEvents(prev => [...prev, { ...eventForm, id: record.id }]);
+      } else {
+        const res = await fetch("/api/calendar", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(eventForm),
+        });
+        setCalEvents(prev => prev.map(e => e.id === editingEventId ? { ...eventForm } : e));
+      }
+      cancelEventEdit();
+    } catch {
+      showToast("❌ Failed to save event");
     }
-    cancelEventEdit();
   };
-  const deleteEvent = (id: number) => {
-    setCalEvents(prev => prev.filter(e => e.id !== id));
-    cancelEventEdit();
+  const deleteEvent = async (id: string) => {
+    try {
+      await fetch(`/api/calendar?id=${id}`, { method: "DELETE" });
+      setCalEvents(prev => prev.filter(e => e.id !== id));
+      cancelEventEdit();
+    } catch {
+      showToast("❌ Failed to delete event");
+    }
   };
 
   // Schedule CRUD
@@ -263,18 +312,39 @@ export default function CalendarPage() {
     setIsAddingSched(false);
   };
   const cancelSchedEdit = () => { setEditingSchedId(null); setIsAddingSched(false); };
-  const saveSched = () => {
+  const saveSched = async () => {
     if (!schedForm.title.trim()) return;
-    if (isAddingSched) {
-      setSchedules(prev => [...prev, { ...schedForm, id: Date.now() }]);
-    } else {
-      setSchedules(prev => prev.map(s => s.id === editingSchedId ? { ...schedForm } : s));
+    try {
+      if (isAddingSched) {
+        const { id, ...data } = schedForm;
+        const res = await fetch("/api/schedules", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...data, userId: API_USER_ID }),
+        });
+        const { schedule: record } = await res.json();
+        setSchedules(prev => [...prev, { ...schedForm, id: record.id }]);
+      } else {
+        await fetch("/api/schedules", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(schedForm),
+        });
+        setSchedules(prev => prev.map(s => s.id === editingSchedId ? { ...schedForm } : s));
+      }
+      cancelSchedEdit();
+    } catch {
+      showToast("❌ Failed to save schedule");
     }
-    cancelSchedEdit();
   };
-  const deleteSched = (id: number) => {
-    setSchedules(prev => prev.filter(s => s.id !== id));
-    cancelSchedEdit();
+  const deleteSched = async (id: string) => {
+    try {
+      await fetch(`/api/schedules?id=${id}`, { method: "DELETE" });
+      setSchedules(prev => prev.filter(s => s.id !== id));
+      cancelSchedEdit();
+    } catch {
+      showToast("❌ Failed to delete schedule");
+    }
   };
 
   return (
@@ -328,36 +398,43 @@ export default function CalendarPage() {
             {/* Google Calendar sync button */}
             <div className="flex items-center justify-end mb-1">
               <button
-                onClick={async () => {
-                  try {
-                    const res = await fetch("/api/google-calendar?type=event");
-                    const data = await res.json();
-                    if (data.events?.length) {
-                      // Remove old Google-synced events, then re-add from current data
-                      const filtered = calEvents.filter((e: any) => e.member !== "Google");
-                      for (const ge of data.events) {
-                        const dayNum = parseInt(ge.date.split('-')[2], 10);
-                        if (!filtered.find(e => e.title === ge.title && e.day === dayNum)) {
-                          filtered.push({
-                            id: Date.now() + Math.random(),
-                            title: ge.title,
-                            time: ge.time || "12:00 PM",
-                            member: "Google",
-                            color: "cyan" as const,
-                            emoji: "📅",
-                            day: dayNum,
-                          });
-                        }
-                      }
-                      setCalEvents(filtered);
-                      showToast(`✅ Synced ${data.events.length} Google events`);
-                    } else {
-                      showToast("No Google Calendar events found");
-                    }
-                  } catch {
-                    showToast("❌ Sync failed");
-                  }
-                }}
+                 onClick={async () => {
+                   try {
+                     const res = await fetch("/api/google-calendar?type=event");
+                     const data = await res.json();
+                     if (data.events?.length) {
+                       // Remove old Google-synced events, then re-add from current data
+                       const filtered = calEvents.filter((e: any) => e.member !== "Google");
+                       for (const ge of data.events) {
+                         const dayNum = parseInt(ge.date.split('-')[2], 10);
+                         if (!filtered.find(e => e.title === ge.title && e.day === dayNum)) {
+                            const mapped = mapPBToCalEvent({
+                              id: crypto.randomUUID(),
+                              title: ge.title,
+                              time: ge.time || "12:00 PM",
+                              member: "Google",
+                              color: "cyan",
+                              emoji: "📅",
+                              day: dayNum,
+                            });
+                            const syncRes = await fetch("/api/calendar", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ ...mapped, userId: API_USER_ID }),
+                            });
+                            const { event: record } = await syncRes.json();
+                            filtered.push({ ...mapped, id: record.id });
+                         }
+                       }
+                       setCalEvents(filtered);
+                       showToast(`✅ Synced ${data.events.length} Google events`);
+                     } else {
+                       showToast("No Google Calendar events found");
+                     }
+                   } catch {
+                     showToast("❌ Sync failed");
+                   }
+                 }}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-500/10 text-cyan-400 text-xs font-medium border border-cyan-500/20 hover:bg-cyan-500/20 transition-colors"
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
@@ -475,7 +552,12 @@ export default function CalendarPage() {
                 </h3>
                 <button onClick={startAddEvent} className="text-nori-400 text-xs hover:text-nori-300">+ Add</button>
               </div>
-              {selectedEvents.length === 0 ? (
+              {loadingEvents ? (
+                <Card className="!p-6 flex flex-col items-center gap-2">
+                  <div className="w-5 h-5 border-2 border-nori-400/30 border-t-nori-400 rounded-full animate-spin" />
+                  <p className="text-text-secondary text-sm">Loading events…</p>
+                </Card>
+              ) : selectedEvents.length === 0 ? (
                 <Card className="!p-6 flex flex-col items-center gap-2">
                   <span className="text-3xl">📅</span>
                   <p className="text-text-secondary text-sm text-center">No events this day</p>
@@ -605,7 +687,12 @@ export default function CalendarPage() {
                 <h3 className="text-text-primary font-semibold text-sm">Daily Schedule</h3>
                 <button onClick={startAddSched} className="text-nori-400 text-xs hover:text-nori-300">+ Add</button>
               </div>
-              {schedules.length === 0 ? (
+              {loadingSchedules ? (
+                <Card className="!p-6 flex flex-col items-center gap-2">
+                  <div className="w-5 h-5 border-2 border-nori-400/30 border-t-nori-400 rounded-full animate-spin" />
+                  <p className="text-text-secondary text-sm">Loading schedules…</p>
+                </Card>
+              ) : schedules.length === 0 ? (
                 <Card className="!p-6 flex flex-col items-center gap-2">
                   <span className="text-3xl">⏰</span>
                   <p className="text-text-secondary text-sm">No schedule items</p>

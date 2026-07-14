@@ -32,6 +32,8 @@ export default function GroceryTab({
   const [editNotes, setEditNotes] = useState("");
   const [presetCategory, setPresetCategory] = useState<string>("produce");
   const [showAllPresets, setShowAllPresets] = useState(false);
+  const [instacartLoading, setInstacartLoading] = useState(false);
+  const [instacartCopied, setInstacartCopied] = useState(false);
 
   const handleAdd = () => {
     if (!newGroceryItem.trim()) return;
@@ -57,6 +59,42 @@ export default function GroceryTab({
   const saveEdit = (id: number) => {
     updateGroceryItem(id, { name: editName, quantity: editQuantity, notes: editNotes });
     setEditingGroceryId(null);
+  };
+
+  const handleOrderInstacart = async () => {
+    const neededItems = groceryItems.filter((i: any) => i.needed);
+    if (neededItems.length === 0) return;
+
+    setInstacartLoading(true);
+    try {
+      const res = await fetch("/api/instacart", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          items: neededItems.map((i: any) => ({
+            name: i.name,
+            quantity: i.quantity,
+            category: i.category,
+          })),
+        }),
+      });
+      const data = await res.json();
+      if (data.combinedUrl) {
+        window.open(data.combinedUrl, "_blank", "noopener,noreferrer");
+      }
+      // Also copy the list to clipboard
+      if (data.copyList) {
+        try {
+          await navigator.clipboard.writeText(data.copyList);
+          setInstacartCopied(true);
+          setTimeout(() => setInstacartCopied(false), 2000);
+        } catch {}
+      }
+    } catch (err) {
+      console.error("Instacart link error:", err);
+    } finally {
+      setInstacartLoading(false);
+    }
   };
 
   const filteredGrocery = activeCategory === "all" ? groceryItems : groceryItems.filter((i: any) => i.category === activeCategory);
@@ -305,6 +343,29 @@ export default function GroceryTab({
         );
       })}
 
+      {/* ── Order on Instacart ──────────────────────── */}
+      {groceryItems.some((i: any) => i.needed) && (
+        <button
+          onClick={handleOrderInstacart}
+          disabled={instacartLoading}
+          className="w-full py-3 rounded-xl bg-gradient-to-r from-[#43b02a] to-[#389323] text-white text-sm font-bold 
+            hover:from-[#3a9c24] hover:to-[#2f8020] active:scale-[0.98] transition-all
+            flex items-center justify-center gap-2 disabled:opacity-60 shadow-lg shadow-[#43b02a]/20"
+        >
+          {instacartLoading ? (
+            <span className="animate-pulse">🔗 Opening Instacart...</span>
+          ) : instacartCopied ? (
+            <span>✅ List copied! Opening Instacart...</span>
+          ) : (
+            <>
+              <span className="text-lg">🛒</span>
+              <span>Order {groceryItems.filter((i: any) => i.needed).length} items on Instacart</span>
+              <span className="text-lg">→</span>
+            </>
+          )}
+        </button>
+      )}
+
       {/* ── Bulk Actions ─────────────────────────────── */}
       <div className="flex gap-2 pb-4">
         <button
@@ -314,8 +375,6 @@ export default function GroceryTab({
         </button>
         <button
           onClick={() => {
-            // Clear all grocery items that are not needed (completed)
-            // Assumes `needed === false` means completed.
             groceryItems
               .filter((i: any) => !i.needed)
               .forEach((i: any) => deleteGroceryItem(i.id));
