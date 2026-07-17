@@ -6,11 +6,254 @@
 - Local:         http://localhost:3000
 - Network:       http://192.168.0.12:3000
 - Environments: .env.local
-✓ Ready in 534ms
+✓ Ready in 508ms
 ⚠ Warning: Next.js inferred your workspace root, but it may not be correct.
  We detected multiple lockfiles and selected the directory of /Users/garciafam/package-lock.json as the root directory.
  To silence this warning, set `turbopack.root` in your Next.js config, or consider removing one of the lockfiles if it's not needed.
    See https://nextjs.org/docs/app/api-reference/config/next-config-js/turbopack#root-directory for more information.
  Detected additional lockfiles: 
-   * /Users/garciafam/Library/CloudStorage/GoogleDrive-ninjass10101010@gmail.com/My Drive/Google AI Studio/Home-ai/package-lock.json
+   * /Users/garciafam/Documents/Dashboard/Home-ai/package-lock.json
 
+⚠ The "middleware" file convention is deprecated. Please use "proxy" instead. Learn more: https://nextjs.org/docs/messages/middleware-to-proxy
+
+ GET /settings 200 in 670ms (next.js: 276ms, application-code: 394ms)
+[google/state] ClientResponseError 400: Failed to authenticate.
+    at async ensureAuth (src/lib/pb-auth.ts:13:16)
+    at async withAdmin (src/lib/pb-auth.ts:21:21)
+    at async getPublicState (src/lib/google/token-store.ts:152:18)
+    at async GET (src/app/api/google/state/route.ts:9:19)
+  11 |
+  12 |   const pb = getAdminPB();
+> 13 |   const auth = await pb.collection("_superusers").authWithPassword(ADMIN_EMAIL, ADMIN_PASS);
+     |                ^
+  14 |   adminToken = auth.token;
+  15 |   tokenExpiry = Date.now() + 3600_000;
+  16 |   return adminToken; {
+  url: 'http://192.168.0.28:8090/api/collections/_superusers/auth-with-password',
+  status: 400,
+  response: { data: {}, message: 'Failed to authenticate.', status: 400 },
+  isAbort: false,
+  originalError: {
+    url: 'http://192.168.0.28:8090/api/collections/_superusers/auth-with-password',
+    status: 400,
+    data: { data: {}, message: 'Failed to authenticate.', status: 400 }
+  },
+  [cause]: {
+    url: 'http://192.168.0.28:8090/api/collections/_superusers/auth-with-password',
+    status: 400,
+    data: { data: {}, message: 'Failed to authenticate.', status: 400 }
+  }
+}
+ GET /api/google/state 500 in 431ms (next.js: 32ms, application-code: 398ms)
+ GET /api/admin/version 200 in 793ms (next.js: 117ms, application-code: 676ms)
+ GET /meals 200 in 84ms (next.js: 17ms, application-code: 67ms)
+✓ Compiled in 2s
+⚠ Fast Refresh had to perform a full reload when ./Documents/Dashboard/Home-ai/src/hooks/useAuth.tsx changed. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+ GET /settings 200 in 359ms (next.js: 73ms, application-code: 286ms)
+[google/state] ClientResponseError 400: Failed to authenticate.
+    at async ensureAuth (src/lib/pb-auth.ts:13:16)
+    at async withAdmin (src/lib/pb-auth.ts:21:21)
+    at async getPublicState (src/lib/google/token-store.ts:152:18)
+    at async GET (src/app/api/google/state/route.ts:9:19)
+  11 |
+  12 |   const pb = getAdminPB();
+> 13 |   const auth = await pb.collection("_superusers").authWithPassword(ADMIN_EMAIL, ADMIN_PASS);
+     |                ^
+  14 |   adminToken = auth.token;
+  15 |   tokenExpiry = Date.now() + 3600_000;
+  16 |   return adminToken; {
+  url: 'http://192.168.0.28:8090/api/collections/_superusers/auth-with-password',
+  status: 400,
+  response: { data: {}, message: 'Failed to authenticate.', status: 400 },
+  isAbort: false,
+  originalError: {
+    url: 'http://192.168.0.28:8090/api/collections/_superusers/auth-with-password',
+    status: 400,
+    data: { data: {}, message: 'Failed to authenticate.', status: 400 }
+  },
+  [cause]: {
+    url: 'http://192.168.0.28:8090/api/collections/_superusers/auth-with-password',
+    status: 400,
+    data: { data: {}, message: 'Failed to authenticate.', status: 400 }
+  }
+}
+ GET /api/google/state 500 in 672ms (next.js: 73ms, application-code: 598ms)
+ GET /api/admin/version 200 in 1233ms (next.js: 29ms, application-code: 1204ms)
+⚠ Fast Refresh had to perform a full reload when ./Documents/Dashboard/Home-ai/src/db/pb-db.ts changed. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+✓ Compiled in 358ms
+ GET /settings 200 in 164ms (next.js: 11ms, application-code: 153ms)
+ GET /api/admin/version 200 in 119ms (next.js: 10ms, application-code: 109ms)
+[google/state] ClientResponseError 400: Failed to authenticate.
+    at async ensureAuth (src/lib/pb-auth.ts:13:16)
+    at async withAdmin (src/lib/pb-auth.ts:21:21)
+    at async getPublicState (src/lib/google/token-store.ts:152:18)
+    at async GET (src/app/api/google/state/route.ts:9:19)
+  11 |
+  12 |   const pb = getAdminPB();
+> 13 |   const auth = await pb.collection("_superusers").authWithPassword(ADMIN_EMAIL, ADMIN_PASS);
+     |                ^
+  14 |   adminToken = auth.token;
+  15 |   tokenExpiry = Date.now() + 3600_000;
+  16 |   return adminToken; {
+  url: 'http://192.168.0.28:8090/api/collections/_superusers/auth-with-password',
+  status: 400,
+  response: { data: {}, message: 'Failed to authenticate.', status: 400 },
+  isAbort: false,
+  originalError: {
+    url: 'http://192.168.0.28:8090/api/collections/_superusers/auth-with-password',
+    status: 400,
+    data: { data: {}, message: 'Failed to authenticate.', status: 400 }
+  },
+  [cause]: {
+    url: 'http://192.168.0.28:8090/api/collections/_superusers/auth-with-password',
+    status: 400,
+    data: { data: {}, message: 'Failed to authenticate.', status: 400 }
+  }
+}
+ GET /api/google/state 500 in 265ms (next.js: 3ms, application-code: 262ms)
+⚠ Fast Refresh had to perform a full reload when ./Documents/Dashboard/Home-ai/src/db/pb-db.ts changed. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+✓ Compiled in 76ms
+ GET /settings 200 in 92ms (next.js: 6ms, application-code: 86ms)
+[google/state] ClientResponseError 400: Failed to authenticate.
+    at async ensureAuth (src/lib/pb-auth.ts:13:16)
+    at async withAdmin (src/lib/pb-auth.ts:21:21)
+    at async getPublicState (src/lib/google/token-store.ts:152:18)
+    at async GET (src/app/api/google/state/route.ts:9:19)
+  11 |
+  12 |   const pb = getAdminPB();
+> 13 |   const auth = await pb.collection("_superusers").authWithPassword(ADMIN_EMAIL, ADMIN_PASS);
+     |                ^
+  14 |   adminToken = auth.token;
+  15 |   tokenExpiry = Date.now() + 3600_000;
+  16 |   return adminToken; {
+  url: 'http://192.168.0.28:8090/api/collections/_superusers/auth-with-password',
+  status: 400,
+  response: { data: {}, message: 'Failed to authenticate.', status: 400 },
+  isAbort: false,
+  originalError: {
+    url: 'http://192.168.0.28:8090/api/collections/_superusers/auth-with-password',
+    status: 400,
+    data: { data: {}, message: 'Failed to authenticate.', status: 400 }
+  },
+  [cause]: {
+    url: 'http://192.168.0.28:8090/api/collections/_superusers/auth-with-password',
+    status: 400,
+    data: { data: {}, message: 'Failed to authenticate.', status: 400 }
+  }
+}
+ GET /api/google/state 500 in 207ms (next.js: 10ms, application-code: 197ms)
+ GET /api/admin/version 200 in 273ms (next.js: 6ms, application-code: 266ms)
+⚠ Fast Refresh had to perform a full reload when ./Documents/Dashboard/Home-ai/src/db/pb-db.ts changed. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+✓ Compiled in 75ms
+ GET /settings 200 in 136ms (next.js: 4ms, application-code: 132ms)
+[google/state] ClientResponseError 400: Failed to authenticate.
+    at async ensureAuth (src/lib/pb-auth.ts:13:16)
+    at async withAdmin (src/lib/pb-auth.ts:21:21)
+    at async getPublicState (src/lib/google/token-store.ts:152:18)
+    at async GET (src/app/api/google/state/route.ts:9:19)
+  11 |
+  12 |   const pb = getAdminPB();
+> 13 |   const auth = await pb.collection("_superusers").authWithPassword(ADMIN_EMAIL, ADMIN_PASS);
+     |                ^
+  14 |   adminToken = auth.token;
+  15 |   tokenExpiry = Date.now() + 3600_000;
+  16 |   return adminToken; {
+  url: 'http://192.168.0.28:8090/api/collections/_superusers/auth-with-password',
+  status: 400,
+  response: { data: {}, message: 'Failed to authenticate.', status: 400 },
+  isAbort: false,
+  originalError: {
+    url: 'http://192.168.0.28:8090/api/collections/_superusers/auth-with-password',
+    status: 400,
+    data: { data: {}, message: 'Failed to authenticate.', status: 400 }
+  },
+  [cause]: {
+    url: 'http://192.168.0.28:8090/api/collections/_superusers/auth-with-password',
+    status: 400,
+    data: { data: {}, message: 'Failed to authenticate.', status: 400 }
+  }
+}
+ GET /api/google/state 500 in 291ms (next.js: 5ms, application-code: 286ms)
+ GET /api/admin/version 200 in 348ms (next.js: 2ms, application-code: 346ms)
+⚠ Fast Refresh had to perform a full reload when ./Documents/Dashboard/Home-ai/src/db/pb-db.ts changed. Read more: https://nextjs.org/docs/messages/fast-refresh-reload
+✓ Compiled in 75ms
+ GET /settings 200 in 182ms (next.js: 4ms, application-code: 178ms)
+[google/state] ClientResponseError 400: Failed to authenticate.
+    at async ensureAuth (src/lib/pb-auth.ts:13:16)
+    at async withAdmin (src/lib/pb-auth.ts:21:21)
+    at async getPublicState (src/lib/google/token-store.ts:152:18)
+    at async GET (src/app/api/google/state/route.ts:9:19)
+  11 |
+  12 |   const pb = getAdminPB();
+> 13 |   const auth = await pb.collection("_superusers").authWithPassword(ADMIN_EMAIL, ADMIN_PASS);
+     |                ^
+  14 |   adminToken = auth.token;
+  15 |   tokenExpiry = Date.now() + 3600_000;
+  16 |   return adminToken; {
+  url: 'http://192.168.0.28:8090/api/collections/_superusers/auth-with-password',
+  status: 400,
+  response: { data: {}, message: 'Failed to authenticate.', status: 400 },
+  isAbort: false,
+  originalError: {
+    url: 'http://192.168.0.28:8090/api/collections/_superusers/auth-with-password',
+    status: 400,
+    data: { data: {}, message: 'Failed to authenticate.', status: 400 }
+  },
+  [cause]: {
+    url: 'http://192.168.0.28:8090/api/collections/_superusers/auth-with-password',
+    status: 400,
+    data: { data: {}, message: 'Failed to authenticate.', status: 400 }
+  }
+}
+ GET /api/google/state 500 in 161ms (next.js: 6ms, application-code: 154ms)
+ GET /api/admin/version 200 in 272ms (next.js: 3ms, application-code: 269ms)
+Error: Cannot apply unknown utility class `material-regular`
+    [2m[at onInvalidCandidate (/Users/garciafam/Documents/Dashboard/Home-ai/node_modules/tailwindcss/dist/lib.js:21:1511)][0m
+    [2m[at Ne (/Users/garciafam/Documents/Dashboard/Home-ai/node_modules/tailwindcss/dist/lib.js:16:38457)][0m
+    [2m[at /Users/garciafam/Documents/Dashboard/Home-ai/node_modules/tailwindcss/dist/lib.js:21:355][0m
+    [2m[at zr (/Users/garciafam/Documents/Dashboard/Home-ai/node_modules/tailwindcss/dist/lib.js:3:1733)][0m
+    [2m[at I (/Users/garciafam/Documents/Dashboard/Home-ai/node_modules/tailwindcss/dist/lib.js:3:1377)][0m
+    [2m[at Ee (/Users/garciafam/Documents/Dashboard/Home-ai/node_modules/tailwindcss/dist/lib.js:21:172)][0m
+    [2m[at vn (/Users/garciafam/Documents/Dashboard/Home-ai/node_modules/tailwindcss/dist/lib.js:38:294)][0m
+    [2m[at async kn (/Users/garciafam/Documents/Dashboard/Home-ai/node_modules/tailwindcss/dist/lib.js:38:631)][0m
+    [2m[at async Xr (/Users/garciafam/Documents/Dashboard/Home-ai/node_modules/@tailwindcss/node/dist/index.js:10:3415)][0m
+    [2m[at async E (/Users/garciafam/Documents/Dashboard/Home-ai/node_modules/@tailwindcss/postcss/dist/index.js:10:3983)][0m
+✓ Compiled in 1444ms
+✓ Compiled in 283ms
+✓ Compiled in 30ms
+✓ Compiled in 29ms
+✓ Compiled in 59ms
+✓ Compiled in 54ms
+✓ Compiled in 40ms
+✓ Compiled in 39ms
+✓ Compiled in 218ms
+✓ Compiled in 40ms
+✓ Compiled in 27ms
+✓ Compiled in 993ms
+ GET /settings 200 in 219ms (next.js: 48ms, application-code: 171ms)
+ GET /settings 200 in 49ms (next.js: 3ms, application-code: 45ms)
+ GET /settings 200 in 702ms (next.js: 384ms, application-code: 318ms)
+ GET /settings 200 in 40ms (next.js: 3ms, application-code: 36ms)
+✓ Compiled in 153ms
+ GET /settings 200 in 408ms (next.js: 143ms, application-code: 265ms)
+ GET /settings 200 in 161ms (next.js: 3ms, application-code: 158ms)
+ GET /settings 200 in 139ms (next.js: 3ms, application-code: 137ms)
+ GET /settings 200 in 73ms (next.js: 5ms, application-code: 68ms)
+ GET /settings 200 in 45ms (next.js: 1861µs, application-code: 43ms)
+✓ Compiled in 396ms
+✓ Compiled in 234ms
+✓ Compiled in 223ms
+ GET /settings 200 in 186ms (next.js: 72ms, application-code: 114ms)
+✓ Compiled in 477ms
+✓ Compiled in 75ms
+ GET /settings 200 in 137ms (next.js: 53ms, application-code: 84ms)
+✓ Compiled in 299ms
+✓ Compiled in 440ms
+✓ Compiled in 273ms
+✓ Compiled in 573ms
+✓ Compiled in 98ms
+✓ Compiled in 118ms
+✓ Compiled in 155ms
+✓ Compiled in 112ms
+✓ Compiled in 93ms
+✓ Compiled in 257ms

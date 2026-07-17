@@ -32,7 +32,7 @@ export default function Toast({ open, children, tone = "neutral" }: ToastProps) 
     <div
       role="status"
       aria-live="polite"
-      className={`fixed left-1/2 top-4 z-[90] max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-2xl border px-4 py-3 text-sm font-semibold shadow-2xl backdrop-blur-xl ${toneMap[tone]}`}
+      className={`fixed left-1/2 top-4 z-[90] max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-2xl border px-4 py-3 text-sm font-semibold shadow-2xl backdrop-blur-xl animate-[toastSlide_0.4s_cubic-bezier(0.34,1.56,0.64,1)] ${toneMap[tone]}`}
     >
       {children}
     </div>

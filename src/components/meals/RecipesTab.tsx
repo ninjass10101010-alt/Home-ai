@@ -17,6 +17,7 @@ export default function RecipesTab({
   startAddRecipe,
   startEditRecipe,
   handleFileUpload,
+  importRecipeFromUrl,
 }: any) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("All");
@@ -50,17 +51,27 @@ export default function RecipesTab({
       <div className="flex gap-2">
         <button
           onClick={startAddRecipe}
-          className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-2xl bg-[var(--color-accent-selected)]/15 text-[var(--color-accent-selected)] text-sm font-medium hover:bg-[var(--color-accent-selected)]/25 transition-colors cursor-pointer"
+          className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-2xl bg-[var(--color-accent-selected)]/15 text-[var(--color-accent-selected)] text-sm font-medium hover:bg-[var(--color-accent-selected)]/25 tap-sm cursor-pointer"
         >
           + New Recipe
         </button>
         <button
+          onClick={() => {
+            const url = prompt("Enter recipe URL (Pinterest/TikTok/etc):");
+            if (url && importRecipeFromUrl) importRecipeFromUrl(url, "Web");
+          }}
+          className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-2xl glass text-text-secondary text-sm font-medium border border-[var(--color-surface-3)] hover:text-text-primary tap-sm cursor-pointer"
+        >
+          🌐 Web Import
+        </button>
+        <button
           onClick={() => document.getElementById("recipe-pdf-upload-recipes")?.click()}
-          className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-2xl glass text-text-secondary text-sm font-medium border border-[var(--color-surface-3)] hover:text-text-primary transition-colors cursor-pointer"
+          className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-2xl glass text-text-secondary text-sm font-medium border border-[var(--color-surface-3)] hover:text-text-primary tap-sm cursor-pointer"
         >
           📄 Import
         </button>
       </div>
+      <input type="file" id="recipe-file-upload-recipes" accept=".txt,.json,.csv" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handleFileUpload(e.target.files[0]); }} />
 
       {/* ── Search + Filters ── */}
       <div className="glass rounded-2xl p-4 sm:p-5">
@@ -88,7 +99,7 @@ export default function RecipesTab({
             <button
               key={f}
               onClick={() => setFilter(f)}
-              className={`shrink-0 cursor-pointer rounded-full px-4 py-1.5 text-xs font-bold transition-all ${
+              className={`shrink-0 cursor-pointer rounded-full px-4 py-1.5 text-xs font-bold tap-sm ${
                 filter === f
                   ? "bg-[var(--color-accent-selected)] text-white shadow-lg shadow-[var(--color-accent-selected)]/25"
                   : "glass-subtle text-text-secondary hover:text-text-primary"
@@ -126,7 +137,7 @@ export default function RecipesTab({
                 <button
                   onClick={() => toggleFav(recipe.id)}
                   aria-label="favorite"
-                  className={`absolute right-3 top-3 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full backdrop-blur-md transition-colors ${
+                  className={`absolute right-3 top-3 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full backdrop-blur-md tap-sm ${
                     recipe.favorite
                       ? "bg-[var(--color-accent-rose)]/90 text-white shadow-lg"
                       : "bg-[var(--color-surface-0)]/60 text-[var(--color-accent-rose)] hover:bg-[var(--color-surface-0)]/85"
@@ -185,7 +196,7 @@ export default function RecipesTab({
                   <div className="relative group flex-1">
                     <button
                       onClick={() => addToPlan(recipe)}
-                      className={`w-full cursor-pointer rounded-2xl py-2 text-xs font-bold transition-colors ${
+                      className={`w-full cursor-pointer rounded-2xl py-2 text-xs font-bold tap-sm ${
                         isAdded
                           ? "bg-[var(--color-accent-mint)] text-white"
                           : "bg-[var(--color-accent-selected)] text-white shadow-lg shadow-[var(--color-accent-selected)]/25 hover:opacity-90"
@@ -198,7 +209,7 @@ export default function RecipesTab({
                         <button
                           key={day}
                           onClick={(e) => { e.stopPropagation(); addToPlan(recipe); }}
-                          className="rounded-lg px-2 py-1 text-[10px] font-medium text-text-secondary hover:bg-[var(--color-accent-selected)]/15 hover:text-[var(--color-accent-selected)] whitespace-nowrap cursor-pointer"
+                           className="rounded-lg px-2 py-1 text-[10px] font-medium text-text-secondary hover:bg-[var(--color-accent-selected)]/15 hover:text-[var(--color-accent-selected)] whitespace-nowrap cursor-pointer tap-sm"
                         >
                           {day}
                         </button>
@@ -207,13 +218,13 @@ export default function RecipesTab({
                   </div>
                   <button
                     onClick={() => addRecipeToGrocery(recipe)}
-                    className="cursor-pointer rounded-2xl bg-[var(--color-accent-amber)]/15 px-3 py-2 text-xs font-bold text-[var(--color-accent-amber)] hover:bg-[var(--color-accent-amber)]/25 transition-colors"
+                    className="cursor-pointer rounded-2xl bg-[var(--color-accent-amber)]/15 px-3 py-2 text-xs font-bold text-[var(--color-accent-amber)] hover:bg-[var(--color-accent-amber)]/25 tap-sm"
                   >
                     🛒
                   </button>
                   <button
                     onClick={() => startEditRecipe(recipe)}
-                    className="cursor-pointer rounded-2xl px-2.5 py-2 text-xs font-medium text-text-muted hover:text-text-primary transition-colors"
+                    className="cursor-pointer rounded-2xl px-2.5 py-2 text-xs font-medium text-text-muted hover:text-text-primary tap-sm"
                   >
                     ✏️
                   </button>

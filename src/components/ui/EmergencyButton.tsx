@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
+import { useAuth } from "@/hooks/useAuth";
 
 interface EmergencyButtonProps {
   className?: string;
@@ -21,6 +22,7 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
   const [isSending, setIsSending] = useState(false);
   const [result, setResult] = useState<{success: boolean, message: string, details?: any} | null>(null);
   const router = useRouter();
+  const { currentUser } = useAuth();
 
   const { colors, accentRgb } = useAtmosphericTheme();
 
@@ -32,8 +34,11 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
     try {
       const response = await fetch("/api/emergency", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type, timestamp: new Date().toISOString() }),
+        headers: {
+          "Content-Type": "application/json",
+          "x-emergency-pin": currentUser?.pin || "",
+        },
+        body: JSON.stringify({ type, timestamp: new Date().toISOString(), pin: currentUser?.pin }),
       });
 
       const data = await response.json();
@@ -63,7 +68,7 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
     <>
       <button
         onClick={() => setShowModal(true)}
-        className={`fixed top-4 right-4 z-50 w-10 h-10 rounded-full text-white shadow-lg hover:opacity-90 active:scale-95 transition-all ${className}`}
+        className={`fixed top-4 right-4 z-50 w-10 h-10 rounded-full text-white shadow-lg hover:opacity-90 tap ${className}`}
         style={{
           background: colors.accentColor,
           boxShadow: `0 0 24px ${colors.glow}`,

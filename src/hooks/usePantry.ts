@@ -33,9 +33,10 @@ export function usePantry(showToast: (msg: string) => void, groceryItems: Grocer
     const pbData = db.selectPantry().map((p: any) => ({ id: p.id, item: p.name || p.item, status: p.status }));
     if (pbData.length > 0) {
       const merged = [...pbData];
+      const pbIds = new Set(pbData.map(p => p.id));
       const pbNames = new Set(pbData.map(p => normalizeName(p.item)));
       for (const item of local) {
-        if (!pbNames.has(normalizeName(item.item))) {
+        if (!pbIds.has(item.id) && !pbNames.has(normalizeName(item.item))) {
           merged.push(item);
         }
       }

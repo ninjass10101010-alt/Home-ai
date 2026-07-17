@@ -30,7 +30,7 @@ export default function Chip({ children, tone = "neutral", size = "md", selected
   return (
     <button
       type="button"
-      className={`inline-flex items-center justify-center gap-1.5 border bg-[var(--color-surface-0)]/20 backdrop-blur-xl transition-all duration-150 active:scale-95 disabled:pointer-events-none disabled:opacity-50 ${toneMap[tone]} ${sizeMap[size]} ${
+      className={`inline-flex items-center justify-center gap-1.5 border bg-[var(--color-surface-0)]/20 backdrop-blur-xl tap-sm disabled:pointer-events-none disabled:opacity-50 ${toneMap[tone]} ${sizeMap[size]} ${
         selected ? "bg-[var(--color-accent-selected)] text-white border-transparent" : ""
       } ${className}`}
       {...props}

@@ -160,8 +160,8 @@ export default function DesignSystemPage() {
               <div className="grid gap-3">
                 <Surface variant="glass" className="backdrop-blur-2xl" style={darkModeStyles}>Dark glass — visible</Surface>
                 <Surface variant="glass" style={lightModeStyles}>Light glass</Surface>
-                <Surface variant="neu">Neumorphic raised</Surface>
-                <Surface variant="neu-pressed">Neumorphic pressed</Surface>
+                <Surface variant="material-regular" style={darkModeStyles}>Material regular</Surface>
+                <Surface variant="material-thick" style={lightModeStyles}>Material thick</Surface>
               </div>
             </SectionCard>
 

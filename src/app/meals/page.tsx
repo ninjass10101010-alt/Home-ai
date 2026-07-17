@@ -223,6 +223,53 @@ function MealHubContent() {
     showToast(`🛒 Added ${ingredients.length} item${ingredients.length === 1 ? "" : "s"} to grocery`);
   };
 
+  const importRecipeFromUrl = async (url: string, source?: string) => {
+    const label = source || "Web";
+    showToast(`📥 Importing from ${label}: ${url}...`);
+    try {
+      const res = await fetch("/api/recipes/ingest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "url", url, sourceLabel: label }),
+      });
+      const data = await res.json();
+      if (!res.ok) { showToast(`❌ ${data?.error || "Import failed"}`); return; }
+      saveCatalogRecipe(data.recipe);
+      showToast(`✅ Added "${data?.recipe?.title || "Imported Recipe"}" to recipe catalog`);
+    } catch (e: any) {
+      showToast(`❌ Import failed: ${e?.message || "Unknown error"}`);
+    }
+  };
+
+  const copyDayMeals = (fromDay: string, toDay: string) => {
+    if (fromDay === toDay) return;
+    const sourceMeals = meals.filter(m => m.time === fromDay);
+    if (!sourceMeals.length) { showToast(`No meals planned for ${fromDay}`); return; }
+    const occupiedTypes = new Set(meals.filter(m => m.time === toDay).map(m => m.mealType));
+    let copied = 0;
+    for (const meal of sourceMeals) {
+      if (!occupiedTypes.has(meal.mealType)) {
+        const newMeal: Meal = { ...meal, id: Date.now() + copied, time: toDay };
+        db.insertMeal(newMeal);
+        setMeals(prev => [...prev, newMeal]);
+        copied++;
+      }
+    }
+    showToast(`📋 Copied ${copied} meal${copied === 1 ? "" : "s"} to ${toDay}${sourceMeals.length > copied ? ` (${sourceMeals.length - copied} slots occupied, skipped)` : ""}`);
+    setActiveDay(toDay);
+  };
+
+  const duplicateMeal = (meal: Meal, targetDay: string) => {
+    if (meal.time === targetDay) return;
+    const existing = meals.find(m => m.time === targetDay && m.mealType === meal.mealType);
+    if (existing) { showToast(`⏭ Already have a ${meal.mealType} planned for ${targetDay}`); return; }
+    const newMeal: Meal = { ...meal, id: Date.now(), time: targetDay };
+    db.insertMeal(newMeal);
+    setMeals(prev => [...prev, newMeal]);
+    showToast(`↗️ ${meal.name} copied to ${targetDay} (${meal.mealType})`);
+    setActiveDay(targetDay);
+  };
+
   const neededCount = groceryItems.filter(i => i.needed).length;
   const weekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day, index) => ({
     id: day,
@@ -231,30 +278,32 @@ function MealHubContent() {
     active: day === activeDay,
   }));
 
-  if (activeTab === "meals" && !meals.length) {
-    return (
-      <PageShell>
-        <Toast open={Boolean(notification)} tone="success">{notification}</Toast>
-        <PageHeader title="Meals" subtitle="Family meal planning" action={<IconButton aria-label="Add meal" onClick={() => openRecipeModal()}><span>＋</span></IconButton>} icon="🍽️" />
-        <div className="px-4">
-          <EmptyState title="No meals planned yet" description="Start with a simple breakfast, lunch, snack, or dinner for the week." actionLabel="Add meal" onAction={() => openRecipeModal()} />
-        </div>
-      </PageShell>
-    );
-  }
-
   return (
     <PageShell>
       <Toast open={Boolean(notification)} tone={notification?.includes("❌") ? "error" : "success"}>{notification}</Toast>
 
       <PageHeader
-        title="Kitchen"
-        subtitle={activeTab === "meals" ? "This week" : activeTab === "grocery" ? `${neededCount} items needed` : activeTab === "pantry" ? `${pantryItems.length} items tracked` : "Recipe Catalog"}
+        title={activeTab === "meals" && !meals.length ? "Meals" : "Kitchen"}
+        subtitle={
+          activeTab === "meals" && !meals.length
+            ? "Family meal planning"
+            : activeTab === "meals"
+              ? "This week"
+              : activeTab === "grocery"
+                ? `${neededCount} items needed`
+                : activeTab === "pantry"
+                  ? `${pantryItems.length} items tracked`
+                  : "Recipe Catalog"
+        }
         action={
           activeTab === "meals" ? (
-            <SoftButton size="sm" variant="secondary" onClick={generateAiMeals} disabled={aiMealLoading}>
-              {aiMealLoading ? "Thinking..." : "AI Suggest"}
-            </SoftButton>
+            activeTab === "meals" && !meals.length ? (
+              <IconButton aria-label="Add meal" onClick={() => openRecipeModal()}><span>＋</span></IconButton>
+            ) : (
+              <SoftButton size="sm" variant="secondary" onClick={generateAiMeals} disabled={aiMealLoading}>
+                {aiMealLoading ? "Thinking..." : "AI Suggest"}
+              </SoftButton>
+            )
           ) : null
         }
         icon="🍽️"
@@ -274,6 +323,9 @@ function MealHubContent() {
         />
 
         {activeTab === "meals" && (
+          meals.length === 0 ? (
+            <EmptyState title="No meals planned yet" description="Start with a simple breakfast, lunch, snack, or dinner for the week." actionLabel="Add meal" onAction={() => openRecipeModal()} />
+          ) : (
           <div className="space-y-5">
             <div className="grid gap-3 sm:grid-cols-3">
               <StatTile label="Planned" value={meals.length} detail="This week" icon="📅" tone="accent" />
@@ -296,30 +348,11 @@ function MealHubContent() {
               aiMealLoading={aiMealLoading}
               recipes={recipes}
               addRecipeToMealSlot={addRecipeToMealSlot}
-              importRecipeFromUrl={async (url: string, source?: string) => {
-                const label = source ? source : "Web";
-                showToast(`📥 Importing from ${label}: ${url}...`);
-                try {
-                  const res = await fetch("/api/recipes/ingest", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ type: "url", url, sourceLabel: label }),
-                  });
-                  const data = await res.json();
-                  if (!res.ok) {
-                    showToast(`❌ ${data?.error || "Import failed"}`);
-                    return;
-                  }
-                  saveCatalogRecipe(data.recipe);
-                  showToast(`✅ Added "${data?.recipe?.title || "Imported Recipe"}" to recipe catalog`);
-                } catch (e: any) {
-                  showToast(`❌ Import failed: ${e?.message || "Unknown error"}`);
-                }
-              }}
-              handleFileUpload={handleFileUpload}
+              copyDayMeals={copyDayMeals}
+              duplicateMeal={duplicateMeal}
             />
           </div>
-        )}
+        ))}
 
         {activeTab === "grocery" && (
           <GroceryTab
@@ -364,6 +397,7 @@ function MealHubContent() {
             startAddRecipe={startAddRecipe}
             startEditRecipe={startEditRecipe}
             handleFileUpload={handleFileUpload}
+            importRecipeFromUrl={importRecipeFromUrl}
           />
         )}
       </div>

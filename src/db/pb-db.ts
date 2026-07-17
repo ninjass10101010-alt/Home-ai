@@ -246,15 +246,26 @@ export const db = {
   },
 
   async selectMeals(userId = "demo") {
-    return safeList<any>("meal_plan_entries", []);
+    const meals = await safeList<any>("meal_plan_entries", []);
+    return meals.map((meal: any) => ({
+      ...meal,
+      ingredients: typeof meal.ingredients === 'string' ? JSON.parse(meal.ingredients) : meal.ingredients ?? [],
+      tags: typeof meal.tags === 'string' ? JSON.parse(meal.tags) : meal.tags ?? [],
+    }));
   },
 
   async insertMeal(meal: any): Promise<any> {
-    return safeCreate("meal_plan_entries", meal);
+    const data = { ...meal };
+    if (Array.isArray(data.ingredients)) data.ingredients = JSON.stringify(data.ingredients);
+    if (Array.isArray(data.tags)) data.tags = JSON.stringify(data.tags);
+    return safeCreate("meal_plan_entries", data);
   },
 
   async updateMeal(id: string, updates: any): Promise<any> {
-    return safeUpdate("meal_plan_entries", id, updates);
+    const data = { ...updates };
+    if (Array.isArray(data.ingredients)) data.ingredients = JSON.stringify(data.ingredients);
+    if (Array.isArray(data.tags)) data.tags = JSON.stringify(data.tags);
+    return safeUpdate("meal_plan_entries", id, data);
   },
 
   async deleteMeal(id: string): Promise<boolean> {
@@ -317,11 +328,19 @@ export const db = {
     return safeDelete("auth_sessions", session.id);
   },
   async deleteExpiredAuthSessions(maxAgeDays = 30): Promise<void> {
-    const records = await safeList<any>("auth_sessions", []);
-    const cutoff = Date.now() - maxAgeDays * 86400000;
-    for (const r of records) {
-      const lastActive = new Date(r.lastActiveAt || r.createdAt).getTime();
-      if (lastActive < cutoff) await safeDelete("auth_sessions", r.id).catch(() => {});
+    try {
+      const client = pb();
+      if (!client) return;
+      const cutoff = new Date(Date.now() - maxAgeDays * 86400000).toISOString();
+      const records = await client.collection("auth_sessions").getFullList({
+        filter: `lastActiveAt < "${cutoff}"`,
+        requestKey: null,
+      });
+      for (const r of records) {
+        await safeDelete("auth_sessions", r.id).catch(() => {});
+      }
+    } catch {
+      // fallback: no-op if PB unavailable
     }
   },
 
@@ -417,8 +436,11 @@ export const db = {
   async upsertRecipe(recipe: any): Promise<any | null> {
     const records = await safeList<any>("recipes", []);
     const existing = records.find((r: any) => r.name?.toLowerCase() === recipe.name?.toLowerCase());
-    if (existing) return safeUpdate("recipes", existing.id, recipe);
-    return safeCreate("recipes", recipe);
+    const data = { ...recipe };
+    if (Array.isArray(data.ingredients)) data.ingredients = JSON.stringify(data.ingredients);
+    if (Array.isArray(data.tags)) data.tags = JSON.stringify(data.tags);
+    if (existing) return safeUpdate("recipes", existing.id, data);
+    return safeCreate("recipes", data);
   },
   async deleteRecipe(id: string): Promise<boolean> {
     return safeDelete("recipes", id);
@@ -463,8 +485,8 @@ const schedulesFallback = [
 ];
 
 const emergencyFallback = [
-  { id: 1, name: "Rebecca", phone: "+16163448104", email: "Ninjass10101010@gmail.com", carrier: "verizon", relationship: "parent", isPrimary: true, emoji: "👩" },
-  { id: 2, name: "Test Contact", phone: "+16167452736", email: "Ninjass10101010@gmail.com", carrier: "verizon", relationship: "parent", isPrimary: true, emoji: "👨" },
+  { id: 1, name: "Parent 1", phone: "+15551234567", email: "parent1@example.com", carrier: "verizon", relationship: "parent", isPrimary: true, emoji: "👩" },
+  { id: 2, name: "Parent 2", phone: "+15559876543", email: "parent2@example.com", carrier: "verizon", relationship: "parent", isPrimary: false, emoji: "👨" },
 ];
 
 const pantryFallback = [

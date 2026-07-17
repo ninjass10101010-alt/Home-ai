@@ -1,7 +1,7 @@
 {
-  "hash": "782e73637cc125a830f5836aa4de2e4077de22bc",
-  "short": "782e736",
-  "message": "fix: write-version.mjs uses ESM imports (was require in .mjs — caused build failure)",
-  "date": "2026-06-17 15:51:09 -0400",
+  "hash": "9614c5be1fed199c31a8d9d9c35870f0c507acd7",
+  "short": "9614c5b",
+  "message": "docs: update AGENTS.md with push-to-PB utility",
+  "date": "2026-06-19 06:31:18 -0400",
   "author": "GarciaFam"
 }

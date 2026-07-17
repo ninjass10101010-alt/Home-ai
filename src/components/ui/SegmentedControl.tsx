@@ -36,7 +36,7 @@ export default function SegmentedControl({ options, value, onChange, className =
           role="radio"
           aria-checked={option.id === value}
           onClick={() => onChange(option.id)}
-          className={`relative z-10 flex flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition-colors ${
+          className={`relative z-10 flex flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold tap-sm ${
             option.id === value ? "text-text-primary" : "text-text-muted hover:text-text-secondary"
           }`}
         >

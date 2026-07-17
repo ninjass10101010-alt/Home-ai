@@ -712,6 +712,7 @@ export default function TasksPage() {
     if (pinTaskId === null) return;
     const task = tasks.find(t => t.id === pinTaskId);
     if (!task || task.completed) return;
+    if (task.completedInWeek === weekKey()) return;
     const now = new Date().toISOString();
     const currentWeek = weekKey();
 

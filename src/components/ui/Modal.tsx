@@ -26,7 +26,7 @@ export default function Modal({ open, onClose, title, description, children, foo
   return (
     <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/50 p-4 backdrop-blur-sm sm:items-center" onClick={onClose}>
       <div
-        className="w-full max-w-lg rounded-[2rem] border border-white/10 bg-[var(--color-surface-0)] p-5 shadow-2xl backdrop-blur-2xl animate-[fadeInUp_0.3s_ease-out] sm:pb-safe"
+        className="material-thick w-full max-w-lg rounded-[2rem] border border-white/12 bg-[var(--color-surface-0)]/80 p-5 shadow-2xl backdrop-blur-2xl animate-[modalEnter_0.35s_cubic-bezier(0.34,1.56,0.64,1)] sm:pb-safe"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="mb-4">

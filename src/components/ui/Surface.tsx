@@ -6,10 +6,9 @@ export type SurfaceVariant =
   | "glass"
   | "glass-strong"
   | "glass-subtle"
+  | "material-regular"
+  | "material-thick"
   | "warm"
-  | "warm-strong"
-  | "neu"
-  | "neu-pressed"
   | "flat";
 
 export type SurfacePadding = "none" | "sm" | "md" | "lg" | "xl";
@@ -52,11 +51,10 @@ const variantMap: Record<SurfaceVariant, string> = {
   glass: "glass",
   "glass-strong": "glass-strong",
   "glass-subtle": "glass-subtle",
+  "material-regular": "material-regular",
+  "material-thick": "material-thick",
   warm: "warm-glass-card",
-  "warm-strong": "warm-glass-card bg-[var(--color-surface-0)]/75",
-  neu: "neu-raised",
-  "neu-pressed": "neu-pressed",
-  flat: "neu-flat",
+  flat: "material-regular bg-[var(--color-surface-2)] border border-white/8",
 };
 
 export default function Surface({
@@ -83,7 +81,7 @@ export default function Surface({
       role={role}
       aria-label={ariaLabel}
       className={`overflow-hidden ${paddingMap[padding]} ${radiusMap[radius]} ${variantMap[variant]} ${
-        interactive ? "cursor-pointer hover:scale-[1.015] active:scale-[0.99]" : ""
+        interactive ? "cursor-pointer tap" : ""
       } ${className}`}
       style={combinedStyle}
       {...rest}

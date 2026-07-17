@@ -60,14 +60,15 @@ export default function MealsTab({
   meals, activeDay, setActiveDay, activeMeals, deleteMeal,
   openRecipeModal, setActiveTab, handleSyncMealToGrocery, isSyncing,
   showAiSuggestions, aiMealIdeas, aiMealLoading, recipes,
-  addRecipeToMealSlot, importRecipeFromUrl, handleFileUpload,
+  addRecipeToMealSlot, copyDayMeals, duplicateMeal,
 }: any) {
 
   const { colors, accentRgb } = useAtmosphericTheme();
   const [presetPickerType, setPresetPickerType] = useState<string | null>(null);
   const [mealFilter, setMealFilter] = useState<string | null>(null);
-  const [showRecipeCatalog, setShowRecipeCatalog] = useState(false);
   const [recipeAddDay, setRecipeAddDay] = useState(activeDay);
+  const [copyTarget, setCopyTarget] = useState<string | null>(null);
+  const [duplicateTarget, setDuplicateTarget] = useState<{ meal: Meal; open: boolean } | null>(null);
   const [eatingMembers, setEatingMembers] = useState<string[]>([]);
   const [showMemberPicker, setShowMemberPicker] = useState(false);
   const [initializedEaters, setInitializedEaters] = useState(false);
@@ -159,7 +160,7 @@ export default function MealsTab({
       <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
         <button
           onClick={() => setMealFilter(null)}
-          className={`shrink-0 cursor-pointer rounded-full px-3.5 py-1.5 text-xs font-bold transition-all ${
+          className={`shrink-0 cursor-pointer rounded-full px-3.5 py-1.5 text-xs font-bold tap-sm ${
             !mealFilter
               ? "bg-[var(--color-accent-selected)] text-white shadow-lg shadow-[var(--color-accent-selected)]/25"
               : "glass-subtle text-text-secondary hover:text-text-primary"
@@ -173,7 +174,7 @@ export default function MealsTab({
             <button
               key={type.id}
               onClick={() => setMealFilter(mealFilter === type.id ? null : type.id)}
-              className={`shrink-0 cursor-pointer rounded-full px-3.5 py-1.5 text-xs font-bold transition-all flex items-center gap-1.5 ${
+              className={`shrink-0 cursor-pointer rounded-full px-3.5 py-1.5 text-xs font-bold tap-sm flex items-center gap-1.5 ${
                 mealFilter === type.id
                   ? "text-white shadow-lg"
                   : "glass-subtle text-text-secondary hover:text-text-primary"
@@ -193,89 +194,6 @@ export default function MealsTab({
         })}
       </div>
 
-      {recipes?.length > 0 && (
-        <div className="glass rounded-2xl p-4 sm:p-5">
-          <div className="flex items-center justify-between mb-3">
-            <button
-              onClick={() => setShowRecipeCatalog(v => !v)}
-              className="flex items-center gap-2 text-text-secondary hover:text-text-primary transition-colors"
-            >
-              <span className="text-lg">{showRecipeCatalog ? "📖" : "📘"}</span>
-              <span className="text-sm font-semibold">Recipe catalog</span>
-              <span className="glass-subtle rounded-full px-2 py-0.5 text-[11px] font-bold text-text-muted">
-                {recipes.length} recipe{recipes.length > 1 ? "s" : ""}
-              </span>
-              <svg
-                className={`h-3.5 w-3.5 transition-transform ${showRecipeCatalog ? "rotate-180" : ""}`}
-                fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-            {showRecipeCatalog && nextEmptySlotType && (
-              <button
-                onClick={() => setActiveTab("recipes")}
-                className="rounded-full px-3 py-1 text-[11px] font-bold glass-subtle text-text-secondary hover:text-text-primary transition-colors"
-              >
-                Browse all →
-              </button>
-            )}
-          </div>
-
-          {showRecipeCatalog && (
-            <div className="flex gap-3 overflow-x-auto pb-1 -mx-4 px-4 no-scrollbar">
-              {recipes.slice(0, 10).map((recipe: any) => (
-                <div
-                  key={recipe.id}
-                  className="shrink-0 w-[200px] liquid-glass rounded-2xl p-3 flex flex-col gap-2"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <span className="text-2xl shrink-0">
-                      {recipe.emoji || "📖"}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-bold text-text-primary leading-tight truncate">
-                        {recipe.name}
-                      </p>
-                      <p className="text-[10px] font-semibold text-text-muted mt-0.5">
-                        {recipe.prepTime || "—"}
-                        {recipe.servings ? ` · ${recipe.servings} servings` : ""}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="relative flex-1 group">
-                    <button
-                      onClick={() => {
-                        if (nextEmptySlotType) {
-                          addRecipeToMealSlot(recipe, activeDay, nextEmptySlotType.id);
-                        }
-                      }}
-                      className="w-full cursor-pointer rounded-xl bg-[var(--color-accent-button)] py-2 text-xs font-bold text-white shadow-lg shadow-[var(--color-accent-selected)]/25 hover:opacity-90"
-                    >
-                      ＋ Add to {activeDay} {nextEmptySlotType?.label ?? "dinner"}
-                    </button>
-                    <div className="absolute bottom-full left-0 mb-1 hidden group-hover:grid grid-cols-7 gap-0.5 bg-[var(--color-surface-0)] border border-[var(--color-surface-3)] rounded-2xl shadow-xl p-1 z-50">
-                      {weekDays.map(day => (
-                        <button
-                          key={day}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            addRecipeToMealSlot(recipe, day, nextEmptySlotType?.id ?? "dinner");
-                          }}
-                          className="rounded-lg px-2 py-1 text-[10px] font-medium text-text-secondary hover:bg-[var(--color-accent-selected)]/15 hover:text-[var(--color-accent-selected)] whitespace-nowrap"
-                        >
-                          {day}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
         {/* ── Left Column ────────────────────────────────── */}
         <div key={activeDay} className="space-y-5 min-w-0">
@@ -286,20 +204,57 @@ export default function MealsTab({
               const dinner = dayMeals.find((m: Meal) => m.mealType === "dinner") || dayMeals[0];
               const isActive = day === activeDay;
               const mealCount = dayMeals.length;
+              const targetPickerOpen = copyTarget === day;
+              const targetDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].filter(d => d !== day);
+              if (isActive) {
+                return (
+                  <div key={day} className="relative shrink-0 min-w-[72px]">
+                    <button
+                      onClick={() => setActiveDay(day)}
+                      className="w-full flex flex-col items-center gap-1.5 rounded-2xl px-3 py-3 bg-[var(--color-accent-selected)]/15 border border-[var(--color-accent-selected)]/30 tap-sm"
+                    >
+                      <span className="text-xs font-semibold text-[var(--color-accent-selected)]">{day}</span>
+                      <span className="text-2xl">{dinner?.emoji ?? "➕"}</span>
+                      <span className="text-[10px] text-text-muted text-center leading-tight w-full truncate">
+                        {mealCount > 0 ? `${mealCount} meal${mealCount > 1 ? "s" : ""}` : "Empty"}
+                      </span>
+                    </button>
+                    {mealCount > 0 && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setCopyTarget(targetPickerOpen ? null : day); }}
+                        aria-label="Copy day meals"
+                        className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-[var(--color-surface-0)]/80 border border-[var(--color-surface-4)] text-[10px] flex items-center justify-center shadow tap-sm"
+                      >
+                        📋
+                      </button>
+                    )}
+                    {targetPickerOpen && (
+                      <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 z-20 p-2 rounded-xl bg-[var(--color-surface-0)]/95 border border-[var(--color-surface-4)] shadow-xl backdrop-blur-xl w-[152px]">
+                        <div className="text-[10px] font-semibold text-text-muted mb-1.5 text-center">Copy {day} to</div>
+                        <div className="grid grid-cols-3 gap-1.5">
+                          {targetDays.map(target => (
+                            <button
+                              key={target}
+                              onClick={() => { copyDayMeals(day, target); setCopyTarget(null); }}
+                              className="rounded-lg px-1 py-1.5 text-[10px] font-semibold bg-[var(--color-surface-2)] hover:bg-[var(--color-accent-selected)] hover:text-white tap-sm"
+                            >
+                              {target}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              }
               return (
                 <button
                   key={day}
                   onClick={() => setActiveDay(day)}
-                  className={`shrink-0 flex flex-col items-center gap-1.5 rounded-2xl px-3 py-3 min-w-[72px] transition-colors ${
-                    isActive
-                      ? "bg-[var(--color-accent-selected)]/15 border border-[var(--color-accent-selected)]/30"
-                      : "glass border border-transparent hover:border-[var(--color-surface-4)]"
-                  }`}
+                  className="shrink-0 flex flex-col items-center gap-1.5 rounded-2xl px-3 py-3 min-w-[72px] glass border border-transparent hover:border-[var(--color-surface-4)] transition-colors"
                 >
-                  <span className={`text-xs font-semibold ${isActive ? "text-[var(--color-accent-selected)]" : "text-text-secondary"}`}>{day}</span>
-                  <span className="text-2xl">
-                    {dinner?.emoji ?? "➕"}
-                  </span>
+                  <span className="text-xs font-semibold text-text-secondary">{day}</span>
+                  <span className="text-2xl">{dinner?.emoji ?? "➕"}</span>
                   <span className="text-[10px] text-text-muted text-center leading-tight w-full truncate">
                     {mealCount > 0 ? `${mealCount} meal${mealCount > 1 ? "s" : ""}` : "Empty"}
                   </span>
@@ -347,13 +302,38 @@ export default function MealsTab({
                               {meta?.label || type.label} · {meta?.time || ""}
                             </span>
                             <div className="ml-auto flex gap-1.5">
-                              <button onClick={() => openRecipeModal(mealForType)} className="p-1.5 text-text-muted hover:text-text-primary rounded-lg hover:bg-[var(--color-surface-2)] transition-colors">✏️</button>
-                              <button onClick={() => deleteMeal(mealForType.id)} className="p-1.5 text-text-muted hover:text-[var(--color-accent-rose)] rounded-lg hover:bg-[var(--color-accent-rose)]/10 transition-colors">🗑️</button>
+                              <button onClick={() => setDuplicateTarget({ meal: mealForType, open: true })} className="p-1.5 text-text-muted hover:text-[var(--color-accent-selected)] rounded-lg hover:bg-[var(--color-accent-selected)]/10 tap-sm" aria-label="Duplicate meal">↗️</button>
+                              <button onClick={() => openRecipeModal(mealForType)} className="p-1.5 text-text-muted hover:text-text-primary rounded-lg hover:bg-[var(--color-surface-2)] tap-sm">✏️</button>
+                              <button onClick={() => deleteMeal(mealForType.id)} className="p-1.5 text-text-muted hover:text-[var(--color-accent-rose)] rounded-lg hover:bg-[var(--color-accent-rose)]/10 tap-sm">🗑️</button>
                             </div>
                           </div>
                           <h3 className="truncate text-base font-bold text-text-primary leading-tight mt-0.5">
                             {mealForType.name}
                           </h3>
+                          {duplicateTarget?.meal.id === mealForType.id && (
+                            <div className="mt-2 p-2 rounded-xl bg-[var(--color-surface-0)]/70 border border-[var(--color-surface-4)] backdrop-blur-xl">
+                              <div className="flex items-center justify-between mb-1.5">
+                                <span className="text-[10px] font-semibold text-text-muted">Copy to day</span>
+                                <button onClick={() => setDuplicateTarget(null)} className="text-[10px] text-text-muted hover:text-text-primary px-1.5 py-0.5 rounded hover:bg-[var(--color-surface-2)] tap-sm">Close</button>
+                              </div>
+                              <div className="grid grid-cols-3 gap-1.5">
+                                {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(d => (
+                                  <button
+                                    key={d}
+                                    disabled={d === mealForType.time}
+                                    onClick={() => { duplicateMeal(mealForType, d); setDuplicateTarget(null); }}
+                                    className={`rounded-lg px-1 py-1.5 text-[10px] font-semibold transition ${
+                                      d === mealForType.time
+                                        ? "opacity-40 cursor-not-allowed bg-[var(--color-surface-2)]"
+                                        : "bg-[var(--color-surface-2)] hover:bg-[var(--color-accent-selected)] hover:text-white"
+                                    }`}
+                                  >
+                                    {d}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                           <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs font-semibold text-text-muted">
                             {mealForType.calories > 0 && (
                               <span className="glass-subtle rounded-full px-2 py-0.5">🔥 {mealForType.calories} kcal</span>
@@ -490,7 +470,16 @@ export default function MealsTab({
             })}
 
             {/* Add meal button */}
-            <button className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl border-2 border-dashed border-[var(--color-surface-4)] text-sm font-bold text-text-muted/70 transition hover:bg-[var(--color-accent-selected)]/5 hover:border-[var(--color-accent-selected)]/40 hover:text-[var(--color-accent-selected)]">
+            <button
+              onClick={() => {
+                if (nextEmptySlotType) {
+                  setPresetPickerType(nextEmptySlotType.id);
+                } else {
+                  openRecipeModal();
+                }
+              }}
+              className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl border-2 border-dashed border-[var(--color-surface-4)] text-sm font-bold text-text-muted/70 transition hover:bg-[var(--color-accent-selected)]/5 hover:border-[var(--color-accent-selected)]/40 hover:text-[var(--color-accent-selected)] cursor-pointer active:scale-[0.97]"
+            >
               <span className="text-lg leading-none">＋</span> Add a meal to {dayFullNames[activeDay] || activeDay}
             </button>
           </div>
@@ -501,7 +490,7 @@ export default function MealsTab({
               <button
                 onClick={handleSyncMealToGrocery}
                 disabled={isSyncing}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-2xl glass text-text-secondary text-sm font-medium hover:text-text-primary transition-colors disabled:opacity-60"
+                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-2xl glass text-text-secondary text-sm font-medium hover:text-text-primary tap-sm disabled:opacity-60"
               >
                 🔄 {isSyncing ? "Syncing..." : "Sync to Grocery"}
               </button>
@@ -735,40 +724,6 @@ export default function MealsTab({
         </section>
       )}
 
-      {/* ── Import Recipes ── */}
-      <section className="pb-2 pt-2">
-        <h3 className="text-text-primary font-semibold text-sm mb-3">📥 Import Recipes</h3>
-        <div className="grid grid-cols-2 gap-2">
-          {[
-            { label: "🌐 Web Import", source: "Web" },
-          ].map(s => (
-            <button
-              key={s.source}
-              onClick={() => {
-                const url = prompt(`Enter recipe URL (Pinterest/TikTok/etc):`);
-                if (url) importRecipeFromUrl(url, s.source);
-              }}
-              className="flex items-center justify-center gap-2 px-3 py-3 rounded-2xl text-xs font-medium bg-[var(--color-accent-selected)]/10 text-[var(--color-accent-selected)] border border-[var(--color-accent-selected)]/20 hover:bg-[var(--color-accent-selected)]/20 transition-all"
-            >
-              {s.label}
-            </button>
-          ))}
-          <button
-            onClick={() => document.getElementById("recipe-file-upload")?.click()}
-            className="flex items-center justify-center gap-2 px-3 py-3 rounded-2xl text-xs font-medium glass text-text-secondary border border-[var(--color-surface-3)] hover:text-text-primary transition-all"
-          >
-            📄 Upload File
-          </button>
-          <button
-            onClick={() => document.getElementById("recipe-pdf-upload")?.click()}
-            className="flex items-center justify-center gap-2 px-3 py-3 rounded-2xl text-xs font-medium glass text-text-secondary border border-[var(--color-surface-3)] hover:text-text-primary transition-all"
-          >
-            🗒️ Upload PDF
-          </button>
-        </div>
-        <input type="file" id="recipe-file-upload" accept=".txt,.json,.csv" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handleFileUpload(e.target.files[0]); }} />
-        <input type="file" id="recipe-pdf-upload" accept=".pdf" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handleFileUpload(e.target.files[0]); }} />
-      </section>
     </div>
   );
 }

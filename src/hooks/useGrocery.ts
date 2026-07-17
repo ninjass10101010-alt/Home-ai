@@ -157,8 +157,15 @@ export function useGrocery(showToast: (msg: string) => void, plannedMeals: Meal[
   const toggleGroceryNeeded = async (id: number) => {
     const item = groceryItems.find(i => i.id === id);
     if (!item) return;
-    await db.upsertGroceryItem({ ...item, needed: !item.needed, id: item.id });
+    const wasNeeded = item.needed;
+    await db.upsertGroceryItem({ ...item, needed: !wasNeeded, id: item.id });
     setGroceryItems(prev => prev.map(i => i.id === id ? { ...i, needed: !i.needed } : i));
+    if (wasNeeded) {
+      setRecentlyBought(prev => {
+        const filtered = prev.filter(r => normalizeName(r.name) !== normalizeName(item.name));
+        return [{ name: item.name, emoji: item.emoji || "📦", category: item.category }, ...filtered].slice(0, 8);
+      });
+    }
   };
 
   const deleteGroceryItem = async (id: number) => {

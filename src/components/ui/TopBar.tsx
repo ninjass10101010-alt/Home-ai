@@ -49,7 +49,7 @@ export default function TopBar({ title, subtitle, right, back, variant = "defaul
         {back && (
           <Link
             href="/"
-            className="flex items-center justify-center w-9 h-9 rounded-2xl text-text-secondary hover:text-text-primary transition-colors"
+            className="flex items-center justify-center w-9 h-9 rounded-2xl text-text-secondary hover:text-text-primary tap-sm"
             style={getAccentColorStyle()}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">

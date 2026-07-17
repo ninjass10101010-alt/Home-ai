@@ -36,7 +36,7 @@ export default function IconButton({
   return (
     <button
       type={type}
-      className={`grid place-items-center rounded-full transition-all duration-150 active:scale-90 hover:scale-105 disabled:pointer-events-none disabled:opacity-50 ${sizeMap[size]} ${variantMap[variant]} ${className}`}
+      className={`grid place-items-center rounded-full tap disabled:pointer-events-none disabled:opacity-50 ${sizeMap[size]} ${variantMap[variant]} ${className}`}
       {...props}
     >
       {children}

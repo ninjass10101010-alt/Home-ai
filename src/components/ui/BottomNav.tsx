@@ -149,7 +149,7 @@ export default function BottomNav() {
                   <button
                     type="button"
                     tabIndex={-1}
-                    className="relative z-10 grid h-14 w-14 place-items-center rounded-full outline-none transition-transform duration-200 hover:scale-105 active:scale-95"
+                    className="relative z-10 grid h-14 w-14 place-items-center rounded-full outline-none tap"
                   >
                     {!isActive && (
                       <span

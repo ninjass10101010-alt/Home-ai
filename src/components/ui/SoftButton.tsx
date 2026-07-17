@@ -41,7 +41,7 @@ export default function SoftButton({
     <button
       type={type}
       disabled={disabled ?? loading}
-      className={`inline-flex items-center justify-center gap-2 font-medium transition-all duration-150 active:scale-[0.96] disabled:pointer-events-none disabled:opacity-50 ${variantMap[variant]} ${sizeMap[size]} ${className}`}
+      className={`inline-flex items-center justify-center gap-2 font-medium tap disabled:pointer-events-none disabled:opacity-50 ${variantMap[variant]} ${sizeMap[size]} ${className}`}
       {...props}
     >
       {loading && (

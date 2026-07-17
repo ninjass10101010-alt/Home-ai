@@ -27,7 +27,7 @@ export default function ListRow({ leading, title, subtitle, trailing, leftRailCo
           onClick();
         }
       }}
-      className={`group relative flex items-center gap-3 rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/30 p-3 backdrop-blur-xl transition-all duration-200 hover:bg-[var(--color-surface-0)]/45 active:scale-[0.99] ${onClick ? "cursor-pointer" : ""} ${className}`}
+        className={`group relative flex items-center gap-3 rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/30 p-3 backdrop-blur-xl tap hover:bg-[var(--color-surface-0)]/45 ${onClick ? "cursor-pointer" : ""} ${className}`}
     >
       {leftRailColor && <span className="absolute left-0 top-3 bottom-3 w-1 rounded-full" style={{ backgroundColor: leftRailColor }} />}
       {leading && <div className="shrink-0">{leading}</div>}

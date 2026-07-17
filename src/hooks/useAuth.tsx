@@ -169,10 +169,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       };
       setCurrentUser(updatedUser);
       currentUserRef.current = updatedUser;
-      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({
-        ...updatedUser,
-        emoji: updatedUser.emoji.startsWith('data:') ? '' : updatedUser.emoji,
-      }));
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({
+      id: updatedUser.id,
+      name: updatedUser.name,
+      role: updatedUser.role,
+      emoji: updatedUser.emoji.startsWith('data:') ? '' : updatedUser.emoji,
+      color: updatedUser.color,
+      avatarSize: updatedUser.avatarSize,
+      glow: updatedUser.glow,
+    }));
     };
     events.forEach((event) => window.addEventListener(event, handleActivity));
     window.addEventListener("consuela-members-updated", handleMembersUpdated);
@@ -228,7 +233,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setSessionRemainingMs(INACTIVITY_TIMEOUT_MS);
     setSessionWarning(false);
 
-    const stored = { ...authUser, emoji: (member.emoji && member.emoji.startsWith('data:')) ? '' : member.emoji };
+    const stored = {
+      id: authUser.id,
+      name: authUser.name,
+      role: authUser.role,
+      emoji: (member.emoji && member.emoji.startsWith('data:')) ? '' : member.emoji,
+      color: authUser.color,
+      avatarSize: authUser.avatarSize,
+      glow: authUser.glow,
+    };
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(stored));
 
     // Persist session to PB for cross-device awareness

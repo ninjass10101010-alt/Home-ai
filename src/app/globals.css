@@ -249,14 +249,22 @@
   }
 }
 
-/* Ensure all borders increase to 2px in high contrast mode */
+/* High contrast mode: thicken borders and brighten text instead of dimming */
 [data-contrast="boost"] * {
   border-width: 2px !important;
 }
 
-/* Ensure no opacity below 70% in high contrast mode */
 [data-contrast="boost"] * {
-  opacity: 0.7 !important;
+  opacity: 1 !important;
+}
+
+[data-contrast="boost"] .material-thin,
+[data-contrast="boost"] .material-regular,
+[data-contrast="boost"] .material-thick,
+[data-contrast="boost"] .glass,
+[data-contrast="boost"] .glass-subtle,
+[data-contrast="boost"] .glass-strong {
+  border-color: rgba(255, 255, 255, 0.3) !important;
 }
 
 /* Smooth scrolling */
@@ -321,25 +329,6 @@ body {
   box-shadow: var(--elev-3), inset 0 1px 0 rgba(255,255,255,0.12);
 }
 
-.neu-raised {
-  background: var(--color-surface-2);
-  border: var(--border-frost-1);
-  box-shadow: var(--neu-raised), inset 0 1px 0 rgba(255,255,255,0.10);
-  transition: transform var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast) var(--ease-standard);
-}
-
-.neu-raised:active,
-.neu-pressed {
-  box-shadow: var(--neu-pressed), inset 0 1px 0 rgba(255,255,255,0.06);
-  transform: scale(0.985);
-}
-
-.neu-flat {
-  background: var(--color-surface-1);
-  border: var(--border-frost-1);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
-}
-
 .display-numeral {
   font-feature-settings: "tnum";
   font-variant-numeric: tabular-nums;
@@ -347,8 +336,26 @@ body {
 }
 
 .soft-press {
-  transform: scale(0.985);
-  box-shadow: var(--neu-pressed);
+  transform: scale(0.97);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+}
+
+/* ─── Tap language (Stream C) ───
+   One coherent press/hover/focus contract for every tappable surface.
+   Use `.tap` for normal controls, `.tap-sm` for small controls
+   (steppers, icon buttons, chips). */
+.tap {
+  @apply transition-all duration-150;
+  @apply active:scale-[0.97] hover:scale-[1.02];
+  @apply focus-visible:outline-none focus-visible:ring-2;
+  @apply focus-visible:ring-[var(--color-accent-selected)] focus-visible:ring-offset-2;
+}
+
+.tap-sm {
+  @apply transition-all duration-150;
+  @apply active:scale-[0.97] hover:scale-[1.01];
+  @apply focus-visible:outline-none focus-visible:ring-2;
+  @apply focus-visible:ring-[var(--color-accent-selected)] focus-visible:ring-offset-2;
 }
 
 .swipe-action {
@@ -387,47 +394,112 @@ body {
 }
 
 /* ─── Glass variants ─── */
-.glass {
-  background: rgba(30, 35, 48, 0.5);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+/* Consolidated Apple-style materials — 3 levels mapped to depth:
+   .material-thin    → subtle overlays (12px blur, low saturation)
+   .material-regular → standard cards (20px blur, saturated)
+   .material-thick   → elevated sheets (26px blur, vibrant)
+   Each carries a specular top-light (::before) — the Apple "liquid glass" signature. */
+
+.material-thin,
+.glass-subtle {
+  background: rgba(30, 35, 48, 0.35);
+  backdrop-filter: blur(12px) saturate(1.2);
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
   transition: background 0.15s ease, border 0.15s ease, box-shadow 0.15s ease;
 }
 
-/* Light mode overrides for glass */
-:root[data-theme="light"] .glass {
+.material-thin::before,
+.glass-subtle::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(120% 60% at 20% 0%, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0) 40%);
+  mix-blend-mode: screen;
+}
+
+.material-regular,
+.glass {
+  background: rgba(30, 35, 48, 0.45);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition: background 0.15s ease, border 0.15s ease, box-shadow 0.15s ease;
+}
+
+.material-regular::before,
+.glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(120% 60% at 20% 0%, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0) 40%);
+  mix-blend-mode: screen;
+}
+
+.material-thick,
+.glass-strong {
+  background: rgba(30, 35, 48, 0.55);
+  backdrop-filter: blur(26px) saturate(1.6);
+  -webkit-backdrop-filter: blur(26px) saturate(1.6);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition: background 0.15s ease, border 0.15s ease, box-shadow 0.15s ease;
+}
+
+.material-thick::before,
+.glass-strong::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(120% 60% at 20% 0%, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0) 40%);
+  mix-blend-mode: screen;
+}
+
+/* Keep actual content above the highlight layers */
+.material-thin > *,
+.material-regular > *,
+.material-thick > *,
+.glass-subtle > *,
+.glass > *,
+.glass-strong > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Light mode overrides */
+:root[data-theme="light"] .material-thin {
+  background: rgba(255, 255, 255, 0.4);
+  border: 1px solid rgba(0, 0, 0, 0.03);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+:root[data-theme="light"] .material-regular {
   background: rgba(255, 255, 255, 0.6);
   border: 1px solid rgba(0, 0, 0, 0.06);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
 }
-
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) .glass {
-    background: rgba(255, 255, 255, 0.6);
-    border: 1px solid rgba(0, 0, 0, 0.06);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
-  }
-}
-
-.glass-strong {
-  background: rgba(255, 255, 255, 0.75);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
-  transition: background 0.15s ease, border 0.15s ease, box-shadow 0.15s ease;
-}
-
-:root[data-theme="light"] .glass-strong {
+:root[data-theme="light"] .material-thick {
   background: rgba(255, 255, 255, 0.8);
   border: 1px solid rgba(0, 0, 0, 0.08);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
 }
 
 @media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) .glass-strong {
+  :root:not([data-theme="dark"]) .material-thin {
+    background: rgba(255, 255, 255, 0.4);
+    border: 1px solid rgba(0, 0, 0, 0.03);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  }
+  :root:not([data-theme="dark"]) .material-regular {
+    background: rgba(255, 255, 255, 0.6);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+  }
+  :root:not([data-theme="dark"]) .material-thick {
     background: rgba(255, 255, 255, 0.8);
     border: 1px solid rgba(0, 0, 0, 0.08);
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
@@ -753,7 +825,13 @@ body {
   .warm-glass-drift,
   .warm-glass-pulse,
   .floating,
-  .gradient-orb {
+  .gradient-orb,
+  .tap,
+  .tap:hover,
+  .tap:active,
+  .tap-sm,
+  .tap-sm:hover,
+  .tap-sm:active {
     transform: none !important;
     animation-duration: 0s !important;
     transition: none !important;
@@ -782,6 +860,28 @@ body {
 
 .warm-glass-enter {
   animation: warm-glass-enter 320ms var(--ease-decel) both;
+}
+
+@keyframes modalEnter {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes toastSlide {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -100%);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
 }
 
 .warm-glass-pulse {

@@ -38,6 +38,7 @@ export default function GroceryTab({
   const [editNotes, setEditNotes] = useState("");
   const [presetCategory, setPresetCategory] = useState<string>("produce");
   const [showAllPresets, setShowAllPresets] = useState(false);
+  const [groceryMode, setGroceryMode] = useState<"plan" | "shop">("plan");
 
   const handleAdd = async () => {
     if (!newGroceryItem.trim()) return;
@@ -85,6 +86,31 @@ export default function GroceryTab({
 
   return (
     <div className="space-y-5 pb-6">
+      {/* ── Mode Toggle ── */}
+      <div className="flex gap-2 rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/30 p-1 backdrop-blur-xl">
+        <button
+          onClick={() => setGroceryMode("plan")}
+          className={`flex-1 rounded-xl py-2 text-sm font-semibold tap-sm ${
+            groceryMode === "plan"
+              ? "bg-[var(--color-accent-selected)] text-white shadow-lg shadow-[var(--color-accent-selected)]/25"
+              : "text-text-secondary hover:text-text-primary"
+          }`}
+        >
+          📝 Plan
+        </button>
+        <button
+          onClick={() => setGroceryMode("shop")}
+          className={`flex-1 rounded-xl py-2 text-sm font-semibold tap-sm ${
+            groceryMode === "shop"
+              ? "bg-[var(--color-accent-selected)] text-white shadow-lg shadow-[var(--color-accent-selected)]/25"
+              : "text-text-secondary hover:text-text-primary"
+          }`}
+        >
+          🛒 Shop
+        </button>
+      </div>
+
+      {groceryMode === "plan" ? (
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_280px]">
         <div className="space-y-5 min-w-0">
           <SectionCard title="Add Item" icon="➕" description="Quick add items to your list">
@@ -177,7 +203,7 @@ export default function GroceryTab({
                     <button
                       key={cat.id}
                       onClick={() => { setPresetCategory(cat.id); setShowAllPresets(false); }}
-                      className={`group flex items-center gap-2.5 rounded-2xl px-3 py-2.5 text-left transition-all duration-150 active:scale-[0.98] ${
+                      className={`group flex items-center gap-2.5 rounded-2xl px-3 py-2.5 text-left transition-all duration-150 active:scale-[0.97] ${
                         isSelected
                           ? "bg-[var(--color-accent-button)] text-white shadow-lg shadow-[var(--color-accent-selected)]/25"
                           : "border border-white/10 bg-[var(--color-surface-0)]/30 text-text-secondary hover:text-text-primary hover:border-[var(--color-accent-selected)]/30"
@@ -206,7 +232,7 @@ export default function GroceryTab({
                       <button
                         key={preset.name}
                         onClick={() => handlePresetTap(preset)}
-                        className="group flex items-center gap-2.5 rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/30 px-3 py-2.5 text-left transition-all duration-150 hover:border-[var(--color-accent-selected)]/40 hover:bg-[var(--color-surface-0)]/50 active:scale-[0.98]"
+                        className="group flex items-center gap-2.5 rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/30 px-3 py-2.5 text-left transition-all duration-150 hover:border-[var(--color-accent-selected)]/40 hover:bg-[var(--color-surface-0)]/50 active:scale-[0.97]"
                       >
                         <span className="text-lg shrink-0" aria-hidden>{preset.emoji}</span>
                         <span className="flex-1 min-w-0 text-sm font-medium text-text-primary truncate">{preset.name}</span>
@@ -234,7 +260,7 @@ export default function GroceryTab({
           <div className="grid grid-cols-2 gap-2.5">
             <button
               onClick={() => setActiveCategory("all")}
-              className={`group flex items-center gap-3 rounded-2xl p-3 text-left transition-all duration-150 active:scale-[0.98] ${
+              className={`group flex items-center gap-3 rounded-2xl p-3 text-left tap-sm ${
                 activeCategory === "all"
                   ? "border-2 border-[var(--color-accent-selected)]/40 bg-[var(--color-accent-selected)]/15 shadow-[0_0_20px_var(--color-accent-selected)]/10]"
                   : "border border-white/10 bg-[var(--color-surface-0)]/30 backdrop-blur-xl hover:bg-[var(--color-surface-0)]/50 hover:border-[var(--color-accent-selected)]/20"
@@ -266,7 +292,7 @@ export default function GroceryTab({
                 <button
                   key={cat.id}
                   onClick={() => setActiveCategory(cat.id)}
-                  className={`group flex items-center gap-3 rounded-2xl p-3 text-left transition-all duration-150 active:scale-[0.98] ${
+                  className={`group flex items-center gap-3 rounded-2xl p-3 text-left tap-sm ${
                     isSelected
                       ? "border-2 border-[var(--color-accent-selected)]/40 bg-[var(--color-accent-selected)]/15 shadow-[0_0_20px_var(--color-accent-selected)]/10]"
                       : "border border-white/10 bg-[var(--color-surface-0)]/30 backdrop-blur-xl hover:bg-[var(--color-surface-0)]/50 hover:border-[var(--color-accent-selected)]/20"
@@ -346,7 +372,7 @@ export default function GroceryTab({
                         leading={
                           <button
                             onClick={() => toggleGroceryNeeded(item.id)}
-                            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-xl border-2 transition-all duration-150 active:scale-90 ${
+                            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-xl border-2 tap-sm ${
                               !item.needed
                                 ? "border-[var(--color-accent-mint)] bg-[var(--color-accent-mint)] text-white"
                                 : "border-[var(--color-surface-4)] bg-[var(--color-surface-0)]/50 hover:border-[var(--color-accent-mint)]/50"
@@ -376,7 +402,7 @@ export default function GroceryTab({
                             <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                               <button
                                 onClick={() => startEditing(item)}
-                                className="rounded-xl p-1.5 text-text-muted transition-colors hover:bg-[var(--color-surface-2)] hover:text-text-primary"
+                                className="rounded-xl p-1.5 text-text-muted hover:bg-[var(--color-surface-2)] hover:text-text-primary tap-sm"
                               >
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-3.5 w-3.5">
                                   <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" strokeLinecap="round" strokeLinejoin="round" />
@@ -385,7 +411,7 @@ export default function GroceryTab({
                               </button>
                               <button
                                 onClick={() => deleteGroceryItem(item.id)}
-                                className="rounded-xl p-1.5 text-text-muted transition-colors hover:bg-[var(--color-accent-rose)]/10 hover:text-[var(--color-accent-rose)]"
+                                className="rounded-xl p-1.5 text-text-muted hover:bg-[var(--color-accent-rose)]/10 hover:text-[var(--color-accent-rose)] tap-sm"
                               >
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-3.5 w-3.5">
                                   <path d="M3 6h18M19 6l-1 14H6L5 6M8 6V4h8v2" strokeLinecap="round" strokeLinejoin="round" />
@@ -461,6 +487,158 @@ export default function GroceryTab({
           </SoftButton>
         </div>
       </div>
+    ) : (
+
+      <div className="space-y-5">
+        <SectionCard title="Shopping progress" icon="🛒">
+          <div className="space-y-4">
+            <div className="flex items-end justify-between">
+              <span className="text-3xl font-black text-text-primary display-numeral">{pct}%</span>
+              <span className="text-xs font-bold text-text-muted">
+                {pickedUp} of {totalItems} picked up
+              </span>
+            </div>
+            <div className="h-3 overflow-hidden rounded-full bg-[var(--color-surface-2)]">
+              <div
+                className="h-full rounded-full transition-all duration-500"
+                style={{
+                  width: `${pct}%`,
+                  background: `linear-gradient(90deg, var(--color-accent-mint, #34d399), var(--color-accent-amber, #fbbf24))`,
+                }}
+              />
+            </div>
+            {pickedUp > 0 && (
+              <SoftButton variant="ghost" size="md" onClick={clearCompleted} className="w-full text-emerald-400">
+                ✨ Clear {pickedUp} checked item{pickedUp > 1 ? "s" : ""}
+              </SoftButton>
+            )}
+          </div>
+        </SectionCard>
+
+        <div className="grid grid-cols-2 gap-2.5">
+          <button
+            onClick={() => setActiveCategory("all")}
+            className={`group flex items-center gap-3 rounded-2xl p-3 text-left transition-all duration-150 active:scale-[0.97] ${
+              activeCategory === "all"
+                ? "border-2 border-[var(--color-accent-selected)]/40 bg-[var(--color-accent-selected)]/15 shadow-[0_0_20px_var(--color-accent-selected)]/10]"
+                : "border border-white/10 bg-[var(--color-surface-0)]/30 backdrop-blur-xl hover:bg-[var(--color-surface-0)]/50 hover:border-[var(--color-accent-selected)]/20"
+            }`}
+          >
+            <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-xl text-base ${
+              activeCategory === "all"
+                ? "bg-[var(--color-accent-selected)] text-white"
+                : "bg-[var(--color-surface-2)]"
+            }`}>
+              🛒
+            </span>
+            <span className="flex-1 min-w-0">
+              <span className={`block text-sm font-semibold truncate ${activeCategory === "all" ? "text-text-primary" : "text-text-secondary"}`}>All</span>
+              {groceryItems.length > 0 && (
+                <span className="block text-[11px] text-text-muted">
+                  {groceryItems.filter((i: any) => !i.needed).length} of {groceryItems.length} picked up
+                </span>
+              )}
+            </span>
+          </button>
+          {groceryCategories.map(cat => {
+            const catItems = groceryItems.filter((i: any) => i.category === cat.id);
+            const catPicked = catItems.filter((i: any) => !i.needed).length;
+            const isSelected = activeCategory === cat.id;
+            return (
+              <button
+                key={cat.id}
+                onClick={() => setActiveCategory(cat.id)}
+                className={`group flex items-center gap-3 rounded-2xl p-3 text-left transition-all duration-150 active:scale-[0.97] ${
+                  isSelected
+                    ? "border-2 border-[var(--color-accent-selected)]/40 bg-[var(--color-accent-selected)]/15 shadow-[0_0_20px_var(--color-accent-selected)]/10]"
+                    : "border border-white/10 bg-[var(--color-surface-0)]/30 backdrop-blur-xl hover:bg-[var(--color-surface-0)]/50 hover:border-[var(--color-accent-selected)]/20"
+                }`}
+              >
+                <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-xl text-base ${
+                  isSelected
+                    ? "bg-[var(--color-accent-selected)] text-white"
+                    : "bg-[var(--color-surface-2)]"
+                }`}>
+                  {cat.emoji}
+                </span>
+                <span className="flex-1 min-w-0">
+                  <span className={`block text-sm font-semibold truncate ${isSelected ? "text-text-primary" : "text-text-secondary"}`}>{cat.name}</span>
+                  {catItems.length > 0 && (
+                    <span className="block text-[11px] text-text-muted">
+                      {catPicked}/{catItems.length} picked up
+                    </span>
+                  )}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="space-y-5 min-w-0">
+          {groceryCategories.map(cat => {
+            const catItems = filteredGrocery.filter((i: any) => i.category === cat.id);
+            if (catItems.length === 0) return null;
+            const catPicked = catItems.filter((i: any) => !i.needed).length;
+            const sortedItems = [...catItems].sort((a, b) => {
+              if (a.needed && !b.needed) return 1;
+              if (!a.needed && b.needed) return -1;
+              return 0;
+            });
+            return (
+              <SectionCard
+                key={cat.id}
+                title={cat.name}
+                icon={cat.emoji}
+                action={
+                  <span className="text-xs font-semibold text-text-muted">
+                    {catPicked}/{catItems.length}
+                  </span>
+                }
+              >
+                <div className="space-y-2">
+                  {sortedItems.map((item: any, idx: number) => (
+                    <ListRow
+                      key={`${cat.id}-${item.id}-${idx}`}
+                      leading={
+                        <button
+                          onClick={() => toggleGroceryNeeded(item.id)}
+                          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border-2 transition-all duration-150 active:scale-[0.97] ${
+                            !item.needed
+                              ? "border-[var(--color-accent-mint)] bg-[var(--color-accent-mint)] text-white"
+                              : "border-[var(--color-surface-4)] bg-[var(--color-surface-0)]/50 hover:border-[var(--color-accent-mint)]/50"
+                          }`}
+                        >
+                          {!item.needed && (
+                            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </button>
+                      }
+                      title={
+                        <span className={`text-base ${!item.needed ? "line-through text-text-muted" : ""}`}>
+                          {item.emoji} {item.name}
+                        </span>
+                      }
+                      subtitle={item.quantity || undefined}
+                      trailing={
+                        <Chip
+                          tone={item.priority === "high" ? "danger" : item.priority === "medium" ? "warning" : "success"}
+                          size="sm"
+                        >
+                          {item.priority}
+                        </Chip>
+                      }
+                      onClick={() => toggleGroceryNeeded(item.id)}
+                    />
+                  ))}
+                </div>
+              </SectionCard>
+            );
+          })}
+        </div>
+      </div>
+    )}
     </div>
   );
 }
