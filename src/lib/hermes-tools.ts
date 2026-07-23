@@ -514,6 +514,126 @@ const TOOLS: Tool[] = [
       }
     },
   },
+  {
+    definition: {
+      name: "check_conflicts",
+      description: "Check if creating an event would cause scheduling conflicts. Use this BEFORE creating any event to detect overlaps, travel time issues, or double-bookings.",
+      parameters: {
+        type: "object",
+        properties: {
+          summary: { type: "string", description: "Event title/summary" },
+          start: { type: "string", description: "Event start time (ISO 8601 format)" },
+          end: { type: "string", description: "Event end time (ISO 8601 format)" },
+          location: { type: "string", description: "Event location (optional)" },
+          attendees: { type: "array", description: "List of attendee emails (optional)" },
+        },
+        required: ["summary", "start", "end"],
+      },
+    },
+    handler: async (args: any) => {
+      try {
+        const { wouldConflict } = await import("./conflict-detection");
+        const result = await wouldConflict({
+          newEvent: {
+            summary: args.summary,
+            start: args.start,
+            end: args.end,
+            location: args.location,
+            attendees: args.attendees,
+          },
+          travelTimeMinutes: 15,
+        });
+        return JSON.stringify({
+          hasConflict: result.hasConflict,
+          conflictCount: result.conflicts.length,
+          summary: result.summary,
+          conflicts: result.conflicts.map(c => ({
+            type: c.type,
+            severity: c.severity,
+            message: c.message,
+            suggestion: c.suggestion,
+          })),
+        });
+      } catch (error: any) {
+        return JSON.stringify({ error: error.message });
+      }
+    },
+  },
+  {
+    definition: {
+      name: "suggest_buffers",
+      description: "Suggest buffer times and travel time for an event. Use this after checking for conflicts to add preparation and travel time.",
+      parameters: {
+        type: "object",
+        properties: {
+          start: { type: "string", description: "Event start time (ISO 8601 format)" },
+          end: { type: "string", description: "Event end time (ISO 8601 format)" },
+          location: { type: "string", description: "Event location (optional)" },
+        },
+        required: ["start", "end"],
+      },
+    },
+    handler: async (args: any) => {
+      try {
+        const { suggestBuffers } = await import("./auto-buffer-scheduling");
+        const { buffers, totalBufferTime } = await suggestBuffers({
+          start: args.start,
+          end: args.end,
+          location: args.location,
+        });
+        return JSON.stringify({
+          bufferCount: buffers.length,
+          totalBufferTime,
+          buffers: buffers.map(b => ({
+            type: b.type,
+            start: b.start,
+            end: b.end,
+            duration: b.duration,
+            description: b.description,
+          })),
+          message: buffers.length > 0
+            ? `I found ${buffers.length} buffer${buffers.length > 1 ? 's' : ''} (${totalBufferTime} min total) to add travel and preparation time.`
+            : 'No additional buffers needed - your schedule looks clear!',
+        });
+      } catch (error: any) {
+        return JSON.stringify({ error: error.message });
+      }
+    },
+  },
+  {
+    definition: {
+      name: "create_buffers",
+      description: "Create buffer events (travel time, preparation time) in Google Calendar. Use this after suggesting buffers and getting user approval.",
+      parameters: {
+        type: "object",
+        properties: {
+          buffers: { type: "array", description: "Array of buffer objects with start, end, description" },
+          mainEventSummary: { type: "string", description: "Summary of the main event these buffers are for" },
+        },
+        required: ["buffers", "mainEventSummary"],
+      },
+    },
+    handler: async (args: any) => {
+      try {
+        const { createBufferEvents } = await import("./auto-buffer-scheduling");
+        const { created, errors } = await createBufferEvents(
+          args.buffers,
+          args.mainEventSummary
+        );
+        return JSON.stringify({
+          created,
+          errors,
+          message: created > 0
+            ? `✅ Created ${created} buffer event${created > 1 ? 's' : ''} in your calendar!`
+            : errors > 0
+              ? `⚠️ Failed to create some buffers (${errors} error${errors > 1 ? 's' : ''})`
+              : 'No buffers to create',
+        });
+      } catch (error: any) {
+        return JSON.stringify({ error: error.message });
+      }
+    },
+  },
 ];
 
 export function getAllTools(): Tool[] {

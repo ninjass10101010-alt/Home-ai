@@ -1,8 +1,22 @@
 import PocketBase from "pocketbase";
 
-const PB_URL = process.env.NEXT_PUBLIC_PB_URL || "http://192.168.0.28:8090";
-const ADMIN_EMAIL = process.env.PB_ADMIN_EMAIL || "admin@consuela.app";
-const ADMIN_PASS = process.env.PB_ADMIN_PASS || "26649_alan";
+const PB_URL = process.env.NEXT_PUBLIC_PB_URL;
+const ADMIN_EMAIL = process.env.PB_ADMIN_EMAIL;
+const ADMIN_PASS = process.env.PB_ADMIN_PASS;
+
+// Validate required environment variables
+const missing = [];
+if (!PB_URL) missing.push('NEXT_PUBLIC_PB_URL');
+if (!ADMIN_EMAIL) missing.push('PB_ADMIN_EMAIL');
+if (!ADMIN_PASS) missing.push('PB_ADMIN_PASS');
+
+if (missing.length > 0) {
+  console.error('❌ Missing required environment variables:');
+  missing.forEach(v => console.error(`   - ${v}`));
+  console.error('\n📋 Copy .env.example to .env.local and fill in your values:');
+  console.error('   cp .env.example .env.local');
+  process.exit(1);
+}
 
 const COLLECTIONS = [
   {

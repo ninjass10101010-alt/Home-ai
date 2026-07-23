@@ -3,6 +3,7 @@ import {
   buildToolsForOpenAI,
   getTool,
 } from "@/lib/hermes-tools";
+import { buildMemoryContext } from "@/lib/family-memory";
 
 export const dynamic = "force-dynamic";
 
@@ -130,6 +131,11 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    // Build memory context from family memory bank
+    const userId = 'demo-user';
+    const familyId = 'demo-family';
+    const memoryContext = await buildMemoryContext(userId, familyId, message);
+
     let recentHistory = [...(history || [])].slice(-6);
     const historyBlock = recentHistory.length > 0
       ? `\n\nRecent conversation:\n${recentHistory.map((h: any) => `${h.role}: ${h.content}`).join("\n")}`
@@ -138,7 +144,7 @@ export async function POST(request: NextRequest) {
     const round1Messages = [
       {
         role: "system",
-        content: FIRST_ROUND_PROMPT.replace(/\{toolList\}/, toolListForPrompt()),
+        content: FIRST_ROUND_PROMPT.replace(/\{toolList\}/, toolListForPrompt()) + memoryContext,
       },
       {
         role: "user",

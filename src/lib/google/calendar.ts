@@ -184,6 +184,7 @@ export interface CalendarEventInput {
   end: { dateTime?: string; date?: string; timeZone?: string };
   reminders?: { useDefault?: boolean; overrides?: { method: string; minutes: number }[] };
   attendees?: { email: string }[];
+  extendedProperties?: { private?: Record<string, string>; shared?: Record<string, string> };
 }
 
 export async function createCalendarEvent(input: CalendarEventInput): Promise<GoogleCalendarEvent> {

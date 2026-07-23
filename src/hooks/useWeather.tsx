@@ -130,3 +130,63 @@ export const WeatherProvider = ({ children }: { children: ReactNode }) => {
     </WeatherContext.Provider>
   );
 };
+
+// ─── Weather Data Fetching ───────────────────────────────────────────────────
+
+export interface WeatherData {
+  current: {
+    temp_f: number;
+    condition: {
+      text: string;
+    };
+  };
+  forecast: {
+    forecastday: Array<{
+      day: {
+        maxtemp_f: number;
+        mintemp_f: number;
+      };
+    }>;
+  };
+}
+
+/**
+ * Get weather data for the current location
+ * Currently returns mock data. Integrate with WeatherAPI.com or OpenWeatherMap
+ * when deploying to production.
+ */
+export async function getWeatherData(): Promise<WeatherData | null> {
+  // Mock weather data for development
+  const now = new Date();
+  const hour = now.getHours();
+  
+  // Simulate different weather based on time of day for variety
+  const conditions = [
+    { temp: 72, condition: 'Partly cloudy', high: 75, low: 65 },
+    { temp: 68, condition: 'Sunny', high: 72, low: 62 },
+    { temp: 65, condition: 'Overcast', high: 68, low: 60 },
+    { temp: 70, condition: 'Clear', high: 73, low: 64 },
+  ];
+  
+  const index = Math.floor(hour / 6) % conditions.length;
+  const weather = conditions[index];
+  
+  return {
+    current: {
+      temp_f: weather.temp,
+      condition: {
+        text: weather.condition,
+      },
+    },
+    forecast: {
+      forecastday: [
+        {
+          day: {
+            maxtemp_f: weather.high,
+            mintemp_f: weather.low,
+          },
+        },
+      ],
+    },
+  };
+}

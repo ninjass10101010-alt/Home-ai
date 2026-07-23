@@ -1,0 +1,1277 @@
+/* ═══ ANIMATIONS — All @keyframes and animation utility classes ═══ */
+
+        rgba(255, 255, 255, 0) 40%
+      );
+    mix-blend-mode: normal;
+  }
+}
+
+/* Reduce motion: no lift or transform changes */
+@media (prefers-reduced-motion: reduce) {
+  .liquid-glass,
+  .liquid-glass:hover,
+  .liquid-glass:active,
+  .warm-glass-drift,
+  .warm-glass-pulse,
+  .floating,
+  .gradient-orb,
+  .tap,
+  .tap:hover,
+  .tap:active,
+  .tap-sm,
+  .tap-sm:hover,
+  .tap-sm:active {
+    transform: none !important;
+    animation-duration: 0s !important;
+    transition: none !important;
+  }
+}
+
+@keyframes warm-glass-drift {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(2%, -3%, 0) scale(1.04); }
+}
+
+@keyframes warm-glass-enter {
+  from { opacity: 0; transform: translateY(16px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes warm-glass-pulse {
+  0%, 100% { opacity: 0.16; transform: scale(1); }
+  50% { opacity: 0.28; transform: scale(1.05); }
+}
+
+.warm-glass-drift {
+  animation: warm-glass-drift 18s ease-in-out infinite;
+  /* will-change removed: permanent animation doesn't benefit from compositor hint */
+}
+
+.warm-glass-enter {
+  animation: warm-glass-enter 320ms var(--ease-decel) both;
+}
+
+@keyframes modalEnter {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes toastSlide {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -100%);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.warm-glass-pulse {
+  animation: warm-glass-pulse 4s ease-in-out infinite;
+}
+
+/* ─── 3D floating animation ─── */
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+.floating {
+  animation: float 6s ease-in-out infinite;
+  /* will-change removed: permanent animation doesn't benefit from compositor hint */
+}
+
+/* ─── Gradient orbs ─── */
+@keyframes melt {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+.gradient-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(48px);
+  opacity: 0.12;
+  animation: pulse 8s ease-in-out infinite, melt 14s linear infinite;
+  background-size: 200% 200%;
+  /* will-change removed: permanent animation doesn't benefit from compositor hint */
+}
+
+/* ─── Consuela glow ring ─── */
+.consuela-glow {
+  box-shadow: 0 0 24px rgba(59, 130, 246, 0.2), 0 0 48px rgba(59, 130, 246, 0.08);
+}
+
+/* ─── Fade-in / slide-up entrance animations ─── */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-in {
+  animation: fadeInUp 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.animate-in-delay-100 { animation-delay: 0.08s; }
+.animate-in-delay-200 { animation-delay: 0.16s; }
+.animate-in-delay-300 { animation-delay: 0.24s; }
+.animate-in-delay-400 { animation-delay: 0.32s; }
+.animate-in-delay-500 { animation-delay: 0.4s; }
+
+/* ─── Section divider ─── */
+.section-divider {
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.06) 30%,
+    rgba(255, 255, 255, 0.08) 50%,
+    rgba(255, 255, 255, 0.06) 70%,
+    transparent 100%
+  );
+}
+
+/* ─── Accent glow on active day ─── */
+.accent-glow {
+  box-shadow: 0 0 12px rgba(59, 130, 246, 0.25), inset 0 0 12px rgba(59, 130, 246, 0.08);
+}
+
+/* ─── Tap highlight removal for mobile ─── */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ─── Reduced motion support ─── */
+@media (prefers-reduced-motion: reduce) {
+  .animate-in,
+  .isometric-card,
+  .floating,
+  .gradient-orb,
+  .liquid-glass {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .isometric-card {
+    transform: none;
+  }
+
+  .liquid-glass:hover,
+  .liquid-glass:active {
+    transform: none !important;
+  }
+}
+
+/* ─── Smooth scrolling for horizontal lists ─── */
+.scroll-smooth-x {
+  scroll-behavior: smooth;
+  scroll-snap-type: x mandatory;
+}
+
+.scroll-snap-child {
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+}
+
+/* ─── Scrollable container safe padding ─── */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* ─── Weather Widget Animations ─── */
+
+/* Sun: outer ring spin */
+@keyframes weatherSpin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* Sun rays: breathe in/out */
+@keyframes weatherRayPulse {
+  0%, 100% { opacity: 0.45; transform: scaleY(1); }
+  50%       { opacity: 1;    transform: scaleY(1.35); }
+}
+
+/* Cloud: gentle vertical bob */
+@keyframes weatherCloudBob {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-5px); }
+}
+
+/* Rain drops: fall and fade */
+@keyframes weatherRainDrop {
+  0%   { transform: translateY(-6px);  opacity: 0; }
+  15%  { opacity: 1; }
+  85%  { opacity: 1; }
+  100% { transform: translateY(16px); opacity: 0; }
+}
+
+/* Snow flakes: drift and sway */
+@keyframes weatherSnowDrift {
+  0%   { transform: translateY(-4px) translateX(0px);  opacity: 0; }
+  20%  { opacity: 1; }
+  50%  { transform: translateY(10px) translateX(4px); }
+  80%  { opacity: 1; }
+  100% { transform: translateY(20px) translateX(-3px); opacity: 0; }
+}
+
+/* Glow orb: pulse in place */
+@keyframes weatherGlowPulse {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50%       { opacity: 0.9; transform: scale(1.12); }
+}
+
+/* Card entrance */
+@keyframes weatherCardEnter {
+  from { opacity: 0; transform: translateY(14px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0)   scale(1); }
+}
+
+/* Forecast rows slide in */
+@keyframes weatherForecastIn {
+  from { opacity: 0; transform: translateX(-6px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* Temp number pop on unit switch */
+@keyframes weatherTempPop {
+  0%   { transform: scale(1); }
+  35%  { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+
+/* Background particles – rain */
+@keyframes weatherParticleRain {
+  0%   { transform: translateY(-5%) rotate(-12deg); opacity: 0; }
+  8%   { opacity: 0.75; }
+  92%  { opacity: 0.75; }
+  100% { transform: translateY(130%) rotate(-12deg); opacity: 0; }
+}
+
+/* Background particles – snow */
+@keyframes weatherParticleSnow {
+  0%   { transform: translateY(-5%) translateX(0);   opacity: 0; }
+  10%  { opacity: 0.85; }
+  50%  { transform: translateY(55%) translateX(7px); }
+  90%  { opacity: 0.85; }
+  100% { transform: translateY(115%) translateX(-4px); opacity: 0; }
+}
+
+/* Background particles – sun sparkles */
+@keyframes weatherParticleSun {
+  0%   { transform: translateY(0)    scale(0); opacity: 0; }
+  25%  { transform: translateY(-18px) scale(1); opacity: 0.75; }
+  100% { transform: translateY(-52px) scale(0.2); opacity: 0; }
+}
+
+/* Background particles – heat */
+@keyframes weatherParticleHeat {
+  0%   { transform: translateY(0) scale(0.5) rotate(0deg); opacity: 0; }
+  15%  { opacity: 0.6; }
+  30%  { transform: translateY(-8px) scale(0.7) rotate(15deg); opacity: 0.8; }
+  50%  { transform: translateY(-12px) scale(0.9) rotate(0deg); opacity: 0.7; }
+  70%  { transform: translateY(-8px) scale(0.8) rotate(-15deg); opacity: 0.6; }
+  85%  { opacity: 0.4; }
+  100% { transform: translateY(-20px) scale(0.3) rotate(0deg); opacity: 0; }
+}
+
+/* Background particles – ice */
+@keyframes weatherParticleIce {
+  0%   { transform: translateY(0) scale(0) rotate(0deg); opacity: 0; }
+  10%  { opacity: 0.5; }
+  40%  { transform: translateY(0) scale(1) rotate(0deg); opacity: 0.85; }
+  100% { transform: translateY(-8px) scale(0.3) rotate(0deg); opacity: 0; }
+}
+
+/* Blossom / petal fall with gentle sway */
+@keyframes weatherBlossomFall {
+  0%   { transform: translateY(-10px) translateX(0px) rotate(0deg);   opacity: 0; }
+  8%   { opacity: 0.85; }
+  25%  { transform: translateY(25%) translateX(8px) rotate(45deg); }
+  50%  { transform: translateY(55%) translateX(-6px) rotate(120deg); }
+  75%  { transform: translateY(80%) translateX(10px) rotate(220deg); }
+  92%  { opacity: 0.75; }
+  100% { transform: translateY(110%) translateX(-4px) rotate(360deg); opacity: 0; }
+}
+
+/* Leaf tumbling fall */
+@keyframes weatherLeafFall {
+  0%   { transform: translateY(-5px) translateX(0px) rotate(0deg) scale(1);    opacity: 0; }
+  10%  { opacity: 0.9; }
+  30%  { transform: translateY(28%) translateX(14px) rotate(90deg) scale(0.9); }
+  55%  { transform: translateY(56%) translateX(-10px) rotate(200deg) scale(1); }
+  80%  { transform: translateY(82%) translateX(8px) rotate(310deg) scale(0.95); }
+  92%  { opacity: 0.8; }
+  100% { transform: translateY(112%) translateX(0px) rotate(400deg) scale(0.85); opacity: 0; }
+}
+
+/* Firefly bob and glow */
+@keyframes weatherFirefly {
+  0%   { transform: translateY(0px) translateX(0px); opacity: 0;   }
+  15%  { opacity: 0.9; }
+  30%  { transform: translateY(-12px) translateX(8px); }
+  50%  { transform: translateY(-8px) translateX(-5px); opacity: 0.7; }
+  70%  { transform: translateY(-18px) translateX(12px); }
+  85%  { opacity: 0.4; }
+  100% { transform: translateY(-6px) translateX(-8px); opacity: 0; }
+}
+
+/* Sparkle pop */
+@keyframes weatherSparkle {
+  0%   { transform: scale(0) rotate(0deg);   opacity: 0; }
+  20%  { transform: scale(1.5) rotate(45deg); opacity: 1; }
+  50%  { transform: scale(1) rotate(90deg);  opacity: 0.8; }
+  80%  { transform: scale(0.5) rotate(180deg); opacity: 0.4; }
+  100% { transform: scale(0) rotate(360deg); opacity: 0; }
+}
+
+/* Reduce-motion: disable all weather animations */
+@media (prefers-reduced-motion: reduce) {
+  [class*="weather"],
+  [style*="weatherSpin"],
+  [style*="weatherRayPulse"],
+  [style*="weatherCloudBob"],
+  [style*="weatherRainDrop"],
+  [style*="weatherSnowDrift"],
+  [style*="weatherGlowPulse"],
+  [style*="weatherCardEnter"],
+  [style*="weatherForecastIn"],
+  [style*="weatherTempPop"],
+  [style*="weatherParticle"],
+  [style*="weatherBlossom"],
+  [style*="weatherLeaf"],
+  [style*="weatherFirefly"],
+  [style*="weatherSparkle"],
+  [style*="weatherParticleSun"],
+  [style*="weatherParticleHeat"],
+  [style*="weatherParticleIce"] {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ATMOSPHERIC CONTINUITY SYSTEM
+   Connects Weather → Consuela → Meal widgets with flowing visuals
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Atmospheric card wrapper */
+.atmospheric-card {
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow:
+    0 0 30px rgba(255, 255, 255, 0.03),
+    0 8px 24px rgba(0, 0, 0, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition: box-shadow 0.4s ease, border-color 0.4s ease, background 0.4s ease;
+}
+
+/* Atmospheric bridge connector */
+.atmospheric-bridge {
+  overflow: hidden;
+}
+
+/* Particles drifting down through the bridge */
+@keyframes driftDownParticle {
+  0% {
+    transform: translateY(-8px) translateX(0px) scale(0.6);
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.7;
+    transform: translateY(0px) translateX(2px) scale(1);
+  }
+  80% {
+    opacity: 0.5;
+    transform: translateY(12px) translateX(-3px) scale(0.9);
+  }
+  100% {
+    transform: translateY(18px) translateX(1px) scale(0.5);
+    opacity: 0;
+  }
+}
+
+.drift-down-particle {
+  animation: driftDownParticle 3.5s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+/* Meal widget gentle float for seasonal emoji */
+@keyframes mealFloatGentle {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+    opacity: 0.15;
+  }
+  33% {
+    transform: translateY(-6px) rotate(3deg);
+    opacity: 0.25;
+  }
+  66% {
+    transform: translateY(-3px) rotate(-2deg);
+    opacity: 0.18;
+  }
+}
+
+.meal-float-gentle {
+  animation: mealFloatGentle 6s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+/* Meal icon subtle pulse */
+@keyframes mealIconPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+
+.meal-icon-pulse {
+  display: inline-block;
+  animation: mealIconPulse 3s ease-in-out infinite;
+  will-change: transform;
+}
+
+/* Meal emoji bob */
+@keyframes mealEmojiBob {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  25% { transform: translateY(-3px) rotate(2deg); }
+  75% { transform: translateY(-1px) rotate(-1deg); }
+}
+
+.meal-emoji-bob {
+  animation: mealEmojiBob 4s ease-in-out infinite;
+  will-change: transform;
+}
+
+/* Atmospheric section wrapper */
+.atmospheric-meal-section {
+  position: relative;
+}
+
+/* Reduce-motion: disable atmospheric animations */
+@media (prefers-reduced-motion: reduce) {
+  .drift-down-particle,
+  .meal-float-gentle,
+  .meal-icon-pulse,
+  .meal-emoji-bob,
+  .atmospheric-bridge {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* ─── Enhanced Seasonal & Holiday Animations ─── */
+
+/* Embers float upward (Autumn night) */
+@keyframes weatherEmberFloat {
+  0%   { transform: translateY(0px) translateX(0px) scale(1) rotate(0deg); opacity: 0; }
+  10%  { opacity: 0.9; }
+  30%  { transform: translateY(-20px) translateX(6px) scale(0.9) rotate(15deg); }
+  55%  { transform: translateY(-45px) translateX(-4px) scale(0.8) rotate(-10deg); opacity: 0.7; }
+  80%  { transform: translateY(-70px) translateX(8px) scale(0.5) rotate(20deg); opacity: 0.3; }
+  100% { transform: translateY(-95px) translateX(-2px) scale(0.1) rotate(45deg); opacity: 0; }
+}
+
+/* Aurora borealis pulse */
+@keyframes weatherAuroraPulse {
+  0%   { opacity: 0.08; transform: scaleX(1) translateY(0px); }
+  33%  { opacity: 0.22; transform: scaleX(1.04) translateY(-6px); }
+  66%  { opacity: 0.12; transform: scaleX(0.98) translateY(4px); }
+  100% { opacity: 0.08; transform: scaleX(1) translateY(0px); }
+}
+
+/* Sun halo breathe */
+@keyframes weatherSunHalo {
+  0%, 100% { opacity: 0.06; transform: scale(1); }
+  50%       { opacity: 0.18; transform: scale(1.10); }
+}
+
+/* Firefly wander: figure-8 style drift */
+@keyframes weatherFireflyWander {
+  0%   { transform: translate(0px, 0px); opacity: 0; }
+  12%  { opacity: 0.95; }
+  25%  { transform: translate(14px, -10px); }
+  50%  { transform: translate(-8px, -20px); opacity: 0.7; }
+  75%  { transform: translate(10px, -32px); }
+  88%  { opacity: 0.3; }
+  100% { transform: translate(-4px, -45px); opacity: 0; }
+}
+
+/* Leaf swirl (stronger tumble) */
+@keyframes weatherLeafSwirl {
+  0%   { transform: translateY(-10px) translateX(0px) rotate(0deg) scale(1); opacity: 0; }
+  8%   { opacity: 1; }
+  20%  { transform: translateY(20%) translateX(20px) rotate(120deg) scale(0.9); }
+  40%  { transform: translateY(42%) translateX(-15px) rotate(260deg) scale(1.05); }
+  60%  { transform: translateY(63%) translateX(22px) rotate(380deg) scale(0.85); }
+  80%  { transform: translateY(85%) translateX(-8px) rotate(500deg) scale(0.9); opacity: 0.7; }
+  100% { transform: translateY(115%) translateX(5px) rotate(620deg) scale(0.6); opacity: 0; }
+}
+
+/* Snow crystal fall */
+@keyframes weatherSnowAccumulate {
+  0%   { transform: translateY(-5px) translateX(0) rotate(0deg); opacity: 0; }
+  10%  { opacity: 0.9; }
+  40%  { transform: translateY(40%) translateX(8px) rotate(45deg); }
+  70%  { transform: translateY(75%) translateX(-5px) rotate(90deg); opacity: 0.7; }
+  100% { transform: translateY(112%) translateX(3px) rotate(135deg); opacity: 0; }
+}
+
+/* Confetti burst + drift (Cinco de Mayo / party) */
+@keyframes weatherConfettiFall {
+  0%   { transform: translateY(-5%) rotate(0deg) scaleX(1); opacity: 0; }
+  8%   { opacity: 1; }
+  25%  { transform: translateY(22%) rotate(90deg) scaleX(-1); }
+  50%  { transform: translateY(52%) rotate(200deg) scaleX(1); }
+  75%  { transform: translateY(78%) rotate(310deg) scaleX(-1); opacity: 0.7; }
+  100% { transform: translateY(112%) rotate(430deg) scaleX(1); opacity: 0; }
+}
+
+/* Shamrock float */
+@keyframes weatherShamrockFloat {
+  0%   { transform: translateY(0px) rotate(0deg) scale(0.8); opacity: 0; }
+  12%  { opacity: 0.9; }
+  33%  { transform: translateY(-18px) rotate(45deg) scale(1); }
+  66%  { transform: translateY(-40px) rotate(-20deg) scale(0.9); opacity: 0.6; }
+  100% { transform: translateY(-65px) rotate(60deg) scale(0.5); opacity: 0; }
+}
+
+/* Harvest float (Thanksgiving) */
+@keyframes weatherHarvestFloat {
+  0%, 100% { transform: translateY(0px) rotate(-5deg) scale(1); opacity: 0.7; }
+  50%       { transform: translateY(-10px) rotate(5deg) scale(1.05); opacity: 1; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CHAT HERO — polished cinematic greeting state
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Hero orb: gentle breathing */
+@keyframes chatOrbBreathe {
+  0%, 100% { transform: scale(1); opacity: 0.92; }
+  50%      { transform: scale(1.04); opacity: 1; }
+}
+
+.chat-hero-orb {
+  animation: chatOrbBreathe 6s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+/* Dotted ring: continuous sweep rotation */
+@keyframes chatRingSweep {
+  from { stroke-dashoffset: 0; }
+  to   { stroke-dashoffset: -100; }
+}
+
+.chat-hero-ring {
+  animation: chatRingSweep 20s linear infinite;
+  will-change: stroke-dashoffset;
+}
+
+/* Hero orb fade-in on mount */
+@keyframes chatHeroEnter {
+  from { opacity: 0; transform: translateY(24px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.chat-hero-enter {
+  animation: chatHeroEnter 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.chat-hero-enter-delay-100 { animation-delay: 0.1s; }
+.chat-hero-enter-delay-200 { animation-delay: 0.2s; }
+.chat-hero-enter-delay-300 { animation-delay: 0.3s; }
+.chat-hero-enter-delay-400 { animation-delay: 0.4s; }
+
+/* ─── Siri-style thinking animation ─── */
+
+/* Large ambient glow behind the orb — soft pulsing halo */
+@keyframes chatAmbientGlow {
+  0%, 100% { opacity: 0.06; transform: scale(1); }
+  50%      { opacity: 0.14; transform: scale(1.15); }
+}
+
+.chat-ambient-glow {
+  animation: chatAmbientGlow 2s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+/* Orb elastic morph — subtle scale + gradient shift for fluid feel */
+@keyframes chatOrbThink {
+  0%   { transform: scale(0.96); opacity: 0.88; }
+  20%  { transform: scale(1.04); opacity: 1; }
+  40%  { transform: scale(0.98); opacity: 0.94; }
+  60%  { transform: scale(1.02); opacity: 1; }
+  80%  { transform: scale(0.97); opacity: 0.93; }
+  100% { transform: scale(0.96); opacity: 0.88; }
+}
+
+.chat-orb-think {
+  animation: chatOrbThink 1.8s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+/* Expanding ripple rings — 5 concentric rings staggered evenly,
+   each expands outward and fades (physics: ease-out = fast start, slow end) */
+@keyframes chatRipple {
+  0%   { transform: scale(0.5); opacity: 0.65; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
+
+.chat-ripple {
+  animation: chatRipple 1.8s ease-out infinite;
+  will-change: transform, opacity;
+}
+
+/* Faster dotted ring sweep while thinking */
+@keyframes chatRingSweepFast {
+  from { stroke-dashoffset: 0; }
+  to   { stroke-dashoffset: -100; }
+}
+
+.chat-hero-ring-fast {
+  animation: chatRingSweepFast 6s linear infinite;
+  will-change: stroke-dashoffset;
+}
+
+/* Reduced motion: disable hero + siri animations */
+@media (prefers-reduced-motion: reduce) {
+  .chat-hero-orb,
+  .chat-hero-ring,
+  .chat-hero-enter,
+  .chat-ambient-glow,
+  .chat-orb-think,
+  .chat-ripple,
+  .chat-hero-ring-fast {
+    animation: none !important;
+  }
+}
+
+/* ─── Calendar dashboard design system ─── */
+
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+.calendar-page-shell { position: relative; overflow: hidden; }
+.calendar-page-shell::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 12% 6%, rgba(var(--calendar-accent-rgb, 59,130,246), .22), transparent 36%),
+    radial-gradient(circle at 88% 74%, rgba(var(--calendar-accent-rgb, 59,130,246), .10), transparent 40%);
+  opacity: .55;
+  z-index: 0;
+}
+.calendar-page-shell > main { position: relative; z-index: 1; }
+
+:root[data-theme="light"] .calendar-page-shell::before { opacity: .72; }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .calendar-page-shell::before { opacity: .72; }
+}
+
+@keyframes calendarFadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes calendarSlideDown {
+  from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* ─── Hero ─── */
+.calendar-hero-card {
+  position: relative; overflow: hidden; border-radius: 2rem; padding: 1.25rem;
+  background: linear-gradient(135deg, var(--calendar-accent-soft, rgba(59,130,246,.22)), rgba(255,255,255,.04)), rgba(30,35,48,.5);
+  backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255,255,255,.12);
+  box-shadow: 0 24px 70px rgba(0,0,0,.14), inset 0 1px 0 rgba(255,255,255,.08);
+  transition: border-color .3s ease, box-shadow .3s ease;
+}
+:root[data-theme="light"] .calendar-hero-card {
+  background: linear-gradient(135deg, var(--calendar-accent-soft, rgba(59,130,246,.18)), rgba(255,255,255,.08)), rgba(255,255,255,.55);
+  border-color: rgba(0,0,0,.08);
+  box-shadow: 0 16px 60px rgba(0,0,0,.08), inset 0 1px 0 rgba(255,255,255,.85);
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .calendar-hero-card {
+    background: linear-gradient(135deg, var(--calendar-accent-soft, rgba(59,130,246,.18)), rgba(255,255,255,.08)), rgba(255,255,255,.55);
+    border-color: rgba(0,0,0,.08);
+    box-shadow: 0 16px 60px rgba(0,0,0,.08), inset 0 1px 0 rgba(255,255,255,.85);
+  }
+}
+.calendar-hero-card::after {
+  content: ""; position: absolute; right: -3rem; top: -3rem; width: 9rem; height: 9rem;
+  border-radius: 999px; background: radial-gradient(circle, rgba(var(--calendar-accent-rgb, 59,130,246), .32), transparent 70%);
+  filter: blur(10px);
+}
+.calendar-hero-card > * { position: relative; }
+.calendar-hero-content { display: flex; align-items: flex-start; justify-content: space-between; gap: .8rem; }
+.calendar-hero-kicker { font-size: .68rem; font-weight: 600; color: var(--color-text-secondary); letter-spacing: .04em; text-transform: uppercase; }
+.calendar-hero-title { font-size: 1.45rem; font-weight: 800; color: var(--color-text-primary); margin-top: .25rem; letter-spacing: -.02em; }
+.calendar-hero-copy { font-size: .78rem; color: var(--color-text-secondary); margin-top: .25rem; }
+
+/* ─── Member filter chips ─── */
+.calendar-member-strip { display: flex; gap: .45rem; overflow-x: auto; padding-bottom: .25rem; }
+.calendar-member-chip {
+  display: inline-flex; align-items: center; gap: .4rem; white-space: nowrap;
+  padding: .42rem .72rem; border-radius: 999px;
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.08);
+  color: var(--color-text-secondary); font-size: .7rem; font-weight: 600;
+  transition: all .25s ease; cursor: pointer;
+}
+.calendar-member-chip:hover { color: var(--color-text-primary); background: rgba(255,255,255,.1); }
+.calendar-member-chip.is-active {
+  color: var(--chip-color, var(--color-accent-selected));
+  background: linear-gradient(135deg, rgba(var(--calendar-accent-rgb, 59,130,246), .22), rgba(255,255,255,.06));
+  border-color: rgba(var(--calendar-accent-rgb, 59,130,246), .32);
+  box-shadow: 0 0 24px rgba(var(--calendar-accent-rgb, 59,130,246), .10);
+}
+.calendar-member-avatar {
+  width: 1.35rem; height: 1.35rem; border-radius: 999px;
+  display: grid; place-items: center;
+  background: color-mix(in srgb, var(--chip-color, var(--color-accent-selected)) 18%, transparent);
+}
+
+/* ─── Tabs ─── */
+.calendar-tabs {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: .35rem; padding: .35rem;
+  border-radius: 1.25rem;
+  background: rgba(30,35,48,.42); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255,255,255,.08);
+}
+:root[data-theme="light"] .calendar-tabs {
+  background: rgba(255,255,255,.48); border-color: rgba(0,0,0,.06);
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .calendar-tabs {
+    background: rgba(255,255,255,.48); border-color: rgba(0,0,0,.06);
+  }
+}
+.calendar-tab {
+  flex: 1; padding: .55rem 0; border-radius: .9rem;
+  font-size: .78rem; font-weight: 600; color: var(--color-text-muted);
+  transition: all .2s ease; cursor: pointer; border: none; text-align: center;
+}
+.calendar-tab:hover { color: var(--color-text-secondary); }
+.calendar-tab.is-active {
+  color: var(--color-text-primary);
+  background: linear-gradient(135deg, rgba(var(--calendar-accent-rgb, 59,130,246), .24), rgba(255,255,255,.08));
+  box-shadow: 0 4px 16px rgba(0,0,0,.12), inset 0 1px 0 rgba(255,255,255,.1);
+}
+
+/* ─── Panels ─── */
+.calendar-panel {
+  border-radius: 1.75rem; padding: 1rem;
+  background: rgba(30,35,48,.44); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,.08);
+  box-shadow: 0 12px 40px rgba(0,0,0,.10), inset 0 1px 0 rgba(255,255,255,.04);
+}
+:root[data-theme="light"] .calendar-panel {
+  background: rgba(255,255,255,.52); border-color: rgba(0,0,0,.06);
+  box-shadow: 0 10px 32px rgba(0,0,0,.05), inset 0 1px 0 rgba(255,255,255,.8);
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .calendar-panel {
+    background: rgba(255,255,255,.52); border-color: rgba(0,0,0,.06);
+    box-shadow: 0 10px 32px rgba(0,0,0,.05), inset 0 1px 0 rgba(255,255,255,.8);
+  }
+}
+.calendar-panel-header { display: flex; align-items: flex-start; justify-content: space-between; gap: .6rem; }
+.calendar-panel-heading { display: flex; align-items: center; gap: .7rem; }
+.calendar-panel-icon {
+  width: 2.2rem; height: 2.2rem; border-radius: .8rem; display: grid; place-items: center; flex-shrink: 0;
+  background: linear-gradient(135deg, rgba(var(--calendar-accent-rgb, 59,130,246), .8), rgba(99,102,241,.8));
+  box-shadow: 0 8px 24px rgba(var(--calendar-accent-rgb, 59,130,246), .28);
+  color: #fff; font-size: 1rem;
+}
+.calendar-panel-kicker { font-size: .6rem; font-weight: 600; color: var(--color-text-muted); letter-spacing: .06em; text-transform: uppercase; }
+.calendar-panel-title { font-size: .82rem; font-weight: 700; color: var(--color-text-primary); }
+.calendar-panel-subtitle { font-size: .64rem; color: var(--color-text-muted); }
+.calendar-add-link { font-size: .72rem; font-weight: 600; color: var(--color-accent-selected); background: none; border: none; cursor: pointer; transition: opacity .2s; }
+.calendar-add-link:hover { opacity: .75; }
+
+/* ─── Empty state ─── */
+.calendar-empty {
+  border: 1px dashed rgba(255,255,255,.08); border-radius: 1.25rem; padding: 1.5rem;
+  text-align: center; background: rgba(255,255,255,.03);
+}
+.calendar-empty-icon { font-size: 2.25rem; margin-bottom: .5rem; }
+.calendar-empty-title { font-size: .8rem; font-weight: 600; color: var(--color-text-secondary); }
+.calendar-empty-subtitle { font-size: .7rem; color: var(--color-text-muted); margin-top: .15rem; }
+
+/* ─── Event list ─── */
+.calendar-event-list { display: flex; flex-direction: column; gap: .55rem; }
+
+.calendar-event-card {
+  position: relative; display: flex; gap: .7rem; padding: .8rem .85rem; border-radius: 1.15rem;
+  background: linear-gradient(135deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+  border: 1px solid rgba(255,255,255,.08);
+  overflow: hidden; isolation: isolate;
+  transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease;
+}
+.calendar-event-card::before {
+  content: ""; position: absolute; left: 0; top: .7rem; bottom: .7rem; width: 3px; border-radius: 999px;
+  background: var(--event-color, var(--color-accent-selected));
+  box-shadow: 0 0 18px var(--event-color, var(--color-accent-selected));
+}
+.calendar-event-card:hover { transform: translateY(-2px); border-color: rgba(255,255,255,.16); box-shadow: 0 12px 36px rgba(0,0,0,.12); }
+:root[data-theme="light"] .calendar-event-card {
+  background: linear-gradient(135deg, rgba(0,0,0,.03), rgba(0,0,0,.01));
+  border-color: rgba(0,0,0,.06);
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .calendar-event-card {
+    background: linear-gradient(135deg, rgba(0,0,0,.03), rgba(0,0,0,.01));
+    border-color: rgba(0,0,0,.06);
+  }
+}
+
+.calendar-event-time-col {
+  display: flex; flex-direction: column; align-items: center; width: 3.2rem; flex-shrink: 0; gap: .15rem;
+}
+.calendar-event-dot {
+  width: .45rem; height: .45rem; border-radius: 999px; border: 2px solid rgba(255,255,255,.5);
+  background: var(--event-color, var(--color-accent-selected));
+}
+.calendar-event-time { font-size: .68rem; font-weight: 700; color: var(--color-text-secondary); }
+.calendar-event-divider {
+  width: 2px; flex: 1; border-radius: 999px; background: color-mix(in srgb, var(--event-color, var(--color-accent-selected)) 18%, transparent);
+}
+.calendar-event-content { flex: 1; min-width: 0; }
+.calendar-event-title { font-size: .82rem; font-weight: 600; color: var(--color-text-primary); transition: color .2s; line-height: 1.3; }
+.calendar-event-card:hover .calendar-event-title { color: var(--color-accent-selected); }
+.calendar-event-meta { display: flex; align-items: center; gap: .45rem; margin-top: .35rem; }
+
+.calendar-edit-btn {
+  width: 1.8rem; height: 1.8rem; border-radius: .55rem; display: grid; place-items: center;
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.06);
+  color: var(--color-text-muted); cursor: pointer; transition: all .2s; flex-shrink: 0;
+}
+.calendar-edit-btn:hover { color: var(--color-accent-selected); background: rgba(var(--calendar-accent-rgb, 59,130,246), .12); }
+.calendar-edit-btn svg { width: .8rem; height: .8rem; }
+
+/* ─── Upcoming ─── */
+.calendar-upcoming-header { display: flex; align-items: center; gap: .5rem; margin-bottom: .6rem; }
+.calendar-upcoming-icon {
+  width: 1.9rem; height: 1.9rem; border-radius: .7rem; display: grid; place-items: center;
+  background: linear-gradient(135deg, rgba(var(--calendar-accent-rgb, 59,130,246), .85), rgba(99,102,241,.85));
+  box-shadow: 0 6px 20px rgba(var(--calendar-accent-rgb, 59,130,246), .25);
+}
+.calendar-upcoming-scroll { display: flex; gap: .55rem; overflow-x: auto; padding-bottom: .35rem; }
+
+.calendar-upcoming-card {
+  width: 9.5rem; flex-shrink: 0; padding: .85rem; border-radius: 1.25rem;
+  background: rgba(30,35,48,.4); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(255,255,255,.08);
+  box-shadow: 0 8px 28px rgba(0,0,0,.08);
+  transition: all .3s ease; cursor: pointer; text-align: left;
+}
+.calendar-upcoming-card:hover { transform: translateY(-3px); border-color: rgba(255,255,255,.16); box-shadow: 0 16px 40px rgba(0,0,0,.14); }
+:root[data-theme="light"] .calendar-upcoming-card {
+  background: rgba(255,255,255,.5); border-color: rgba(0,0,0,.06);
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .calendar-upcoming-card {
+    background: rgba(255,255,255,.5); border-color: rgba(0,0,0,.06);
+  }
+}
+.calendar-upcoming-day-label { font-size: .55rem; font-weight: 600; color: var(--color-text-muted); letter-spacing: .05em; text-transform: uppercase; }
+.calendar-upcoming-day-num { font-size: 1.55rem; font-weight: 800; color: var(--color-text-primary); margin-top: .1rem; }
+.calendar-upcoming-events { margin-top: .65rem; display: flex; flex-direction: column; gap: .35rem; }
+.calendar-upcoming-event { display: flex; align-items: center; gap: .35rem; }
+.calendar-upcoming-dot { width: .3rem; height: .3rem; border-radius: 999px; flex-shrink: 0; }
+.calendar-upcoming-event-title { font-size: .6rem; font-weight: 500; color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color .2s; }
+.calendar-upcoming-card:hover .calendar-upcoming-event-title { color: var(--color-text-primary); }
+.calendar-upcoming-empty { font-size: .6rem; color: var(--color-text-muted); font-weight: 500; margin-top: .5rem; }
+.calendar-upcoming-more { font-size: .55rem; color: var(--color-accent-selected); font-weight: 600; margin-top: .2rem; }
+
+/* ─── Schedule list ─── */
+.calendar-schedule-list { display: flex; flex-direction: column; gap: .45rem; }
+
+.calendar-schedule-row {
+  position: relative; display: flex; align-items: center; gap: .65rem;
+  padding: .7rem .8rem; border-radius: 1.1rem;
+  border: 1px solid rgba(255,255,255,.08);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
+  overflow: hidden; isolation: isolate; transition: transform .2s ease;
+}
+.calendar-schedule-row::before {
+  content: ""; position: absolute; left: 0; top: .5rem; bottom: .5rem; width: 3px; border-radius: 999px;
+  background: var(--schedule-color, var(--color-accent-selected));
+  box-shadow: 0 0 14px var(--schedule-color, var(--color-accent-selected));
+}
+.calendar-schedule-row:hover { transform: translateX(2px); }
+.calendar-schedule-time { font-size: .65rem; font-family: var(--font-mono); color: var(--color-text-muted); width: 2.8rem; flex-shrink: 0; text-align: right; tabular-nums: true; }
+.calendar-schedule-icon { font-size: 1rem; flex-shrink: 0; }
+.calendar-schedule-title { font-size: .78rem; font-weight: 500; color: var(--color-text-primary); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.calendar-schedule-meta { display: flex; align-items: center; gap: .3rem; flex-shrink: 0; }
+.calendar-schedule-day { font-size: .58rem; color: var(--color-text-muted); padding: .15rem .4rem; border-radius: 999px; background: rgba(255,255,255,.05); font-weight: 500; }
+
+/* ─── Icons ─── */
+.calendar-icon-btn {
+  width: 2.15rem; height: 2.15rem; border-radius: .85rem; display: grid; place-items: center;
+  background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.08);
+  color: var(--color-text-secondary); cursor: pointer; transition: all .2s;
+}
+.calendar-icon-btn:hover { color: var(--color-text-primary); background: rgba(255,255,255,.12); }
+.calendar-icon-btn:active { transform: scale(.95); }
+.calendar-icon-btn svg { width: 1rem; height: 1rem; }
+.calendar-sync-btn {
+  display: inline-flex; align-items: center; gap: .4rem;
+  padding: .4rem .8rem; border-radius: 999px;
+  background: rgba(6,182,212,.12); border: 1px solid rgba(6,182,212,.18);
+  color: var(--color-accent-cyan); font-size: .65rem; font-weight: 600;
+  cursor: pointer; transition: all .2s;
+}
+.calendar-sync-btn:hover { background: rgba(6,182,212,.2); }
+.calendar-sync-btn:disabled { opacity: .5; cursor: not-allowed; }
+.calendar-sync-btn svg { width: .8rem; height: .8rem; }
+.calendar-today-btn {
+  padding: .3rem .7rem; border-radius: .55rem;
+  font-size: .62rem; font-weight: 700; color: var(--color-accent-selected);
+  background: rgba(var(--calendar-accent-rgb, 59,130,246), .12);
+  border: 1px solid rgba(var(--calendar-accent-rgb, 59,130,246), .18);
+  cursor: pointer; transition: all .2s;
+}
+.calendar-today-btn:hover { background: rgba(var(--calendar-accent-rgb, 59,130,246), .22); }
+
+/* ─── Calendar grid card ─── */
+.calendar-grid-card { overflow: hidden; }
+.calendar-grid-header { padding: .85rem 1rem .6rem; }
+.calendar-month-title { font-size: 1.05rem; font-weight: 800; color: var(--color-text-primary); letter-spacing: -.01em; }
+.calendar-month-year { font-size: .85rem; color: var(--color-accent-selected); font-weight: 500; }
+.calendar-weekday-row { display: grid; grid-template-columns: repeat(7, 1fr); gap: .15rem; padding: .35rem .85rem; border-bottom: 1px solid rgba(255,255,255,.04); margin-bottom: .3rem; }
+.calendar-weekday { text-align: center; font-size: .58rem; font-weight: 600; color: var(--color-text-muted); letter-spacing: .05em; text-transform: uppercase; padding: .3rem 0; }
+.calendar-day-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: .2rem; padding: 0 .75rem .85rem; }
+
+.calendar-day-btn {
+  aspect-ratio: 1 / 1; border-radius: .85rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .2rem;
+  border: none; background: rgba(255,255,255,.03); color: var(--color-text-secondary);
+  transition: all .25s cubic-bezier(.34,1.56,.64,1); cursor: pointer; font-size: .72rem; font-weight: 600;
+}
+.calendar-day-btn:hover { background: rgba(255,255,255,.1); color: var(--color-text-primary); }
+.calendar-day-btn.is-empty { visibility: hidden; pointer-events: none; }
+.calendar-day-btn.is-today { color: var(--color-accent-selected); background: rgba(var(--calendar-accent-rgb, 59,130,246), .12); }
+.calendar-day-btn.is-selected {
+  color: #fff; background: linear-gradient(135deg, rgba(var(--calendar-accent-rgb, 59,130,246), .9), rgba(99,102,241,.9));
+  transform: scale(1.06); box-shadow: 0 12px 32px rgba(var(--calendar-accent-rgb, 59,130,246), .32);
+  z-index: 1;
+}
+.calendar-day-btn.is-selected:hover { transform: scale(1.06); }
+.calendar-day-number { font-size: .72rem; font-weight: 700; line-height: 1; }
+.calendar-day-dots { display: flex; gap: .13rem; }
+.calendar-day-dot { width: .2rem; height: .2rem; border-radius: 999px; }
+.calendar-day-btn.is-selected .calendar-day-dot { background: rgba(255,255,255,.8) !important; }
+
+/* ─── Form ─── */
+.calendar-form-card { padding: 1rem; }
+.calendar-form-heading { font-size: .82rem; font-weight: 700; color: var(--color-text-primary); margin-bottom: .65rem; }
+.calendar-form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: .5rem; }
+.calendar-form-grid .col-span-2 { grid-column: span 2; }
+.calendar-input {
+  width: 100%; border-radius: .75rem; padding: .65rem .75rem;
+  background: rgba(30,35,48,.45); border: 1px solid rgba(255,255,255,.08);
+  color: var(--color-text-primary); font-size: .75rem; outline: none;
+  transition: border-color .2s, box-shadow .2s;
+}
+.calendar-input:focus {
+  border-color: rgba(var(--calendar-accent-rgb, 59,130,246), .5);
+  box-shadow: 0 0 0 3px rgba(var(--calendar-accent-rgb, 59,130,246), .1);
+}
+.calendar-input::placeholder { color: var(--color-text-dim); }
+:root[data-theme="light"] .calendar-input { background: rgba(255,255,255,.6); border-color: rgba(0,0,0,.08); }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .calendar-input { background: rgba(255,255,255,.6); border-color: rgba(0,0,0,.08); }
+}
+
+.calendar-time-picker { display: flex; align-items: stretch; gap: .3rem; }
+.calendar-time-hour,
+.calendar-time-minute { padding: .65rem .4rem; text-align: center; -moz-appearance: textfield; }
+.calendar-time-hour::-webkit-outer-spin-button,
+.calendar-time-hour::-webkit-inner-spin-button,
+.calendar-time-minute::-webkit-outer-spin-button,
+.calendar-time-minute::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.calendar-time-hour { width: 3.25rem; }
+.calendar-time-minute { width: 3.25rem; }
+.calendar-time-sep { display: flex; align-items: center; color: var(--color-text-muted); font-weight: 600; font-size: .85rem; }
+.calendar-time-ampm { display: flex; flex-direction: column; gap: .25rem; margin-left: .15rem; }
+.calendar-time-ampm-btn {
+  flex: 1; min-width: 2.25rem; padding: .25rem .5rem; border-radius: .55rem;
+  background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.06);
+  color: var(--color-text-muted); font-size: .65rem; font-weight: 600;
+  cursor: pointer; transition: all .15s; letter-spacing: .04em;
+}
+.calendar-time-ampm-btn:hover { color: var(--color-text-primary); background: rgba(255,255,255,.08); }
+.calendar-time-ampm-btn.is-active {
+  background: var(--color-accent-button);
+  color: #fff;
+  border-color: transparent;
+  box-shadow: 0 0 10px rgba(var(--calendar-accent-rgb, 59,130,246), .35);
+}
+:root[data-theme="light"] .calendar-time-ampm-btn { background: rgba(0,0,0,.04); border-color: rgba(0,0,0,.06); }
+
+.calendar-color-swatches { display: flex; gap: .35rem; flex-wrap: wrap; }
+.calendar-color-swatch {
+  width: 1.75rem; height: 1.75rem; border-radius: 999px; border: 2px solid transparent;
+  background: var(--swatch-color); cursor: pointer; transition: all .2s;
+}
+.calendar-color-swatch.is-selected { border-color: #fff; transform: scale(1.15); box-shadow: 0 0 14px var(--swatch-color); }
+
+.calendar-form-actions { display: flex; gap: .45rem; padding-top: .25rem; }
+.calendar-primary-btn {
+  flex: 1; padding: .6rem 0; border-radius: .75rem; border: none;
+  background: var(--color-accent-button); color: #fff; font-size: .78rem; font-weight: 600;
+  cursor: pointer; transition: opacity .2s;
+}
+.calendar-primary-btn:disabled { opacity: .4; cursor: not-allowed; }
+.calendar-primary-btn:hover:not(:disabled) { opacity: .85; }
+.calendar-secondary-btn {
+  flex: 1; padding: .6rem 0; border-radius: .75rem; border: none;
+  background: rgba(255,255,255,.08); color: var(--color-text-secondary); font-size: .78rem; font-weight: 600;
+  cursor: pointer; transition: background .2s;
+}
+.calendar-secondary-btn:hover { background: rgba(255,255,255,.14); color: var(--color-text-primary); }
+.calendar-delete-btn {
+  padding: .6rem .85rem; border-radius: .75rem; border: none;
+  background: rgba(244,63,94,.12); color: var(--color-accent-rose); font-size: .78rem; font-weight: 600;
+  cursor: pointer; transition: background .2s;
+}
+.calendar-delete-btn:hover { background: rgba(244,63,94,.22); }
+
+/* ─── Toast ─── */
+.calendar-toast {
+  position: fixed; top: calc(env(safe-area-inset-top, 0px) + .8rem); left: 50%;
+  transform: translateX(-50%); z-index: 100;
+  display: flex; align-items: center; gap: .5rem;
+  padding: .55rem 1rem; border-radius: 2rem;
+  font-size: .75rem; font-weight: 600;
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  animation: calendarSlideDown .3s ease;
+}
+
+/* ─── Fade-in animation utility ─── */
+.calendar-fade-in-up {
+  animation: calendarFadeInUp .4s ease-out both;
+}
+
+/* ─── Schedule redesign (Routines-style) ─── */
+
+.calendar-filter-tabs {
+  display: flex; gap: .4rem; overflow-x: auto; padding-bottom: .15rem;
+}
+.calendar-filter-pill {
+  display: inline-flex; align-items: center; gap: .35rem;
+  padding: .4rem .85rem; border-radius: .75rem;
+  font-size: .68rem; font-weight: 600; white-space: nowrap;
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.08);
+  color: var(--color-text-secondary); cursor: pointer; transition: all .2s;
+}
+.calendar-filter-pill:hover { background: rgba(255,255,255,.1); color: var(--color-text-primary); }
+.calendar-filter-pill.is-active {
+  background: linear-gradient(135deg, rgba(var(--calendar-accent-rgb, 59,130,246), .24), rgba(255,255,255,.08));
+  border-color: rgba(var(--calendar-accent-rgb, 59,130,246), .3);
+  color: var(--color-text-primary);
+  box-shadow: 0 4px 14px rgba(var(--calendar-accent-rgb, 59,130,246), .10);
+}
+
+.calendar-category-group { margin-bottom: 1.25rem; }
+.calendar-category-group:last-child { margin-bottom: 0; }
+
+.calendar-category-header {
+  display: flex; align-items: center; gap: .6rem; margin-bottom: .55rem;
+}
+.calendar-category-icon {
+  width: 2rem; height: 2rem; border-radius: .65rem; display: grid; place-items: center;
+  box-shadow: 0 6px 18px rgba(0,0,0,.2);
+}
+.calendar-category-icon svg { width: .95rem; height: .95rem; }
+.calendar-category-title { font-size: .78rem; font-weight: 700; color: var(--color-text-primary); }
+.calendar-category-count { font-size: .62rem; color: var(--color-text-muted); font-weight: 500; }
+
+/* ─── Routine-style schedule card ─── */
+.calendar-routine-card {
+  display: flex; align-items: stretch; gap: .65rem;
+  padding: .8rem; border-radius: 1.1rem;
+  background: rgba(30,35,48,.38); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255,255,255,.08);
+  box-shadow: 0 6px 22px rgba(0,0,0,.08);
+  transition: all .25s ease; cursor: default;
+}
+.calendar-routine-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255,255,255,.14);
+  box-shadow: 0 10px 30px rgba(0,0,0,.14);
+}
+:root[data-theme="light"] .calendar-routine-card {
+  background: rgba(255,255,255,.48); border-color: rgba(0,0,0,.06);
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .calendar-routine-card {
+    background: rgba(255,255,255,.48); border-color: rgba(0,0,0,.06);
+  }
+}
+.calendar-routine-icon-circle {
+  width: 2.35rem; height: 2.35rem; border-radius: .7rem; display: grid; place-items: center;
+  flex-shrink: 0; font-size: 1.05rem;
+}
+.calendar-routine-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .35rem; }
+.calendar-routine-title { font-size: .82rem; font-weight: 600; color: var(--color-text-primary); }
+.calendar-routine-meta { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
+.calendar-routine-time { font-size: .68rem; color: var(--color-text-secondary); font-weight: 500; }
+.calendar-routine-days { display: flex; gap: .18rem; margin-top: .1rem; }
+.calendar-routine-day-pill {
+  width: 1.2rem; height: 1.2rem; border-radius: .28rem;
+  display: grid; place-items: center;
+  font-size: .55rem; font-weight: 700;
+  background: rgba(255,255,255,.08); color: var(--color-text-dim);
+  transition: all .2s;
+}
+.calendar-routine-day-pill.is-active {
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(0,0,0,.25);
+}
+.calendar-routine-day-pill.is-active:hover { opacity: .9; }
+.calendar-routine-actions {
+  display: flex; flex-direction: column; justify-content: center; gap: .35rem; flex-shrink: 0;
+}
+.calendar-routine-toggle {
+  width: 1.9rem; height: 1.9rem; border-radius: .55rem; display: grid; place-items: center;
+  background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.06);
+  color: var(--color-text-muted); cursor: pointer; transition: all .2s;
+}
+.calendar-routine-toggle:hover { color: var(--color-accent-selected); background: rgba(var(--calendar-accent-rgb, 59,130,246), .12); }
+.calendar-routine-toggle svg { width: .8rem; height: .8rem; }
+
+/* ─── Task / Leaderboard kid-friendly animations ─── */
+@keyframes confetti-fall {
+  0% { opacity: 1; transform: translate(0, 0) rotate(0deg) scale(1); }
+  100% { opacity: 0; transform: translate(var(--confetti-x, 20px), calc(100vh + 40px)) rotate(720deg) scale(0.3); }
+}
+.animate-confetti-fall {
+  animation: confetti-fall 2s cubic-bezier(.25, .46, .45, .94) forwards;
+}
+
+@keyframes crown-glow {
+  0%, 100% { filter: drop-shadow(0 0 6px rgba(251, 191, 36, 0.4)) drop-shadow(0 0 12px rgba(251, 191, 36, 0.2)); }
+  50% { filter: drop-shadow(0 0 12px rgba(251, 191, 36, 0.7)) drop-shadow(0 0 24px rgba(251, 191, 36, 0.4)); }
+}
+.animate-crown-glow {
+  animation: crown-glow 2s ease-in-out infinite;
+}
+
+@keyframes badge-sparkle {
+  0%, 100% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.3); opacity: 1; }
+}
+.animate-badge-sparkle {
+  animation: badge-sparkle 1.5s ease-in-out infinite;
+}
+
+@keyframes rank-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.4); }
+  50% { box-shadow: 0 0 0 6px rgba(251, 191, 36, 0); }
+}
+.animate-rank-pulse {
+  animation: rank-pulse 2s ease-in-out infinite;
+}
+
+@keyframes progress-fill {
+  from { width: 0% !important; }
+}
+.animate-progress-fill {
+  animation: progress-fill 1s ease-out;
+}
+
+@keyframes level-up-pop {
+  0% { transform: scale(0.5); opacity: 0; }
+  50% { transform: scale(1.2); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes podium-shine {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+.podium-shine {
+  animation: podium-shine 3s ease-in-out infinite;
+  background-size: 200% 200%;
+}
+
+@keyframes rank-arrow-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+.animate-rank-arrow-bounce {
+  animation: rank-arrow-bounce 1.5s ease-in-out infinite;
+}
+
+@keyframes widget-row-glow {
+  0%, 100% { box-shadow: 0 0 0 1px var(--row-color, rgba(255,255,255,0.1)), 0 0 12px rgba(255,255,255,0.05); }
+  50% { box-shadow: 0 0 0 1px var(--row-color, rgba(255,255,255,0.1)), 0 0 20px rgba(255,255,255,0.12); }
+}
+.widget-row-glow {
+  animation: widget-row-glow 2.5s ease-in-out infinite;
+}
+
+@keyframes number-roll {
+  0% { transform: translateY(100%); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+.animate-number-roll {
+  animation: number-roll 0.4s ease-out;
+  display: inline-block;
+}
+
+@keyframes session-pill-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.0); }
+  50% { box-shadow: 0 0 0 6px rgba(251, 191, 36, 0.12); }
+}
+.session-pill-warning {
+  animation: session-pill-pulse 1.6s ease-in-out infinite;
+}
+
+/* ─── Reduced motion ─── */
+@media (prefers-reduced-motion: reduce) {
+  .calendar-event-card:hover,
+  .calendar-upcoming-card:hover,
+  .calendar-schedule-row:hover,
+  .calendar-routine-card:hover,
+  .calendar-day-btn:hover { transform: none !important; }
+  .calendar-fade-in-up { animation: none !important; }
+  .animate-confetti-fall { animation: none !important; }
+  .animate-crown-glow { animation: none !important; }
+  .animate-badge-sparkle { animation: none !important; }
+  .animate-rank-pulse { animation: none !important; }
+  .animate-progress-fill { animation: none !important; }
+  .animate-rank-arrow-bounce { animation: none !important; }
+  .widget-row-glow { animation: none !important; }
+  .podium-shine { animation: none !important; }
+  .animate-number-roll { animation: none !important; }
+  .session-pill-warning { animation: none !important; }
+}

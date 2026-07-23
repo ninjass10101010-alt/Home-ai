@@ -17,6 +17,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ error: 'Invalid sync direction' }, { status: 400 });
   } catch (error) {
+    console.error('[sync] API error:', error);
     return NextResponse.json({ error: 'Sync failed' }, { status: 500 });
   }
 }

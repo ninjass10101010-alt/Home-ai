@@ -1,0 +1,204 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   DASHBOARD MODE SYSTEM
+   Three modes: family | adult | kid
+   Two modifiers: bedtime | weekend
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ─── Mode Transition Animation ─── */
+
+.mode-transition-root {
+  transition: opacity 0.3s ease, filter 0.3s ease, transform 0.3s ease;
+  will-change: opacity, filter, transform;
+}
+
+.mode-transition-root.mode-exit {
+  opacity: 0;
+  filter: blur(8px);
+  transform: scale(0.97);
+  transition-duration: 0.2s;
+}
+
+.mode-transition-root.mode-enter {
+  opacity: 0;
+  filter: blur(4px);
+  transform: scale(1.01);
+}
+
+/* The enter state transitions TO idle via the CSS transition on the root */
+.mode-transition-root:not(.mode-exit):not(.mode-enter) {
+  opacity: 1;
+  filter: blur(0);
+  transform: scale(1);
+  transition-duration: 0.3s;
+}
+
+/* ─── SHARED MODE TOKENS ─── */
+
+/* Base: all modes share these, then override below */
+[data-mode] {
+  transition: background-color 0.4s ease, color 0.3s ease;
+}
+
+/* ═══ FAMILY MODE ═══
+   Warm, balanced, inviting. The "living room TV." */
+
+[data-mode="family"] {
+  --mode-gap: 1.5rem;
+  --mode-padding: 1rem;
+  --mode-radius: 1.5rem;
+  --mode-card-opacity: 0.6;
+  --mode-greeting-size: 1.75rem;
+  --mode-animation-scale: 1;       /* full animations */
+  --mode-touch-target: 44px;
+}
+
+/* ═══ ADULT MODE ═══
+   Clean, dense, efficient. The "command center." */
+
+[data-mode="adult"] {
+  --mode-gap: 0.75rem;
+  --mode-padding: 0.75rem;
+  --mode-radius: 1rem;
+  --mode-card-opacity: 0.45;
+  --mode-greeting-size: 0;         /* no greeting in adult mode */
+  --mode-animation-scale: 0;       /* kill decorative animations */
+  --mode-touch-target: 44px;
+
+  /* Denser, more professional background */
+  --color-canvas: var(--color-surface-0);
+}
+
+/* Adult mode: shift content right on desktop to make room for sidebar */
+@media (min-width: 768px) {
+  [data-mode="adult"] .max-w-lg,
+  [data-mode="adult"] .md\\:max-w-3xl {
+    margin-left: 0;
+    margin-right: 0;
+    padding-left: 260px; /* 240px sidebar + 20px gap */
+  }
+}
+
+/* Kill all decorative animations in adult mode */
+[data-mode="adult"] .floating,
+[data-mode="adult"] .gradient-orb,
+[data-mode="adult"] .warm-glass-drift,
+[data-mode="adult"] .warm-glass-pulse,
+[data-mode="adult"] .meal-float-gentle,
+[data-mode="adult"] .meal-icon-pulse,
+[data-mode="adult"] .meal-emoji-bob,
+[data-mode="adult"] .drift-down-particle {
+  animation: none !important;
+}
+
+/* Hide seasonal backdrop art in adult mode — too decorative */
+[data-mode="adult"] .weather-backdrop-art {
+  display: none !important;
+}
+
+/* Adult mode: tabular nums everywhere for data alignment */
+[data-mode="adult"] .text-sm,
+[data-mode="adult"] .text-xs {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ═══ KID MODE ═══
+   Vibrant, bouncy, gamified. The "personal adventure." */
+
+[data-mode="kid"] {
+  --mode-gap: 1.25rem;
+  --mode-padding: 1rem;
+  --mode-radius: 1.5rem;
+  --mode-card-opacity: 0.65;
+  --mode-greeting-size: 1.5rem;
+  --mode-animation-scale: 1.2;     /* bigger, bouncier animations */
+  --mode-touch-target: 52px;       /* bigger touch targets for small fingers */
+
+  /* Spring easing for kid-mode interactions */
+  --ease-standard: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Kid mode: quest cards are tappable and bouncy */
+[data-mode="kid"] .quest-card {
+  min-height: 72px;
+  border-radius: 1.25rem;
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1),
+              box-shadow 0.25s ease;
+  cursor: pointer;
+}
+
+[data-mode="kid"] .quest-card:active {
+  transform: scale(0.95);
+}
+
+/* Kid mode: larger avatar in hero position */
+[data-mode="kid"] .avatar-hero {
+  width: 100px;
+  height: 100px;
+  animation: avatar-breathe 3s ease-in-out infinite;
+}
+
+@keyframes avatar-breathe {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.04); }
+}
+
+/* ═══ BEDTIME MODE (cross-cutting) ═══
+   Applies on top of any mode when 8pm–6am. */
+
+[data-bedtime="true"] {
+  /* Deepen the canvas */
+  --color-canvas: #070a14;
+  --color-surface-0: #0a0e1a;
+  --color-surface-1: #0f1420;
+
+  /* Slow all animations to 50% speed */
+  --mode-animation-scale: 0.5;
+}
+
+/* Bedtime: halve animation durations across the board */
+[data-bedtime="true"] .floating      { animation-duration: 12s !important; }
+[data-bedtime="true"] .gradient-orb  { animation-duration: 40s !important; }
+[data-bedtime="true"] .warm-glass-drift { animation-duration: 36s !important; }
+
+/* Bedtime: dim particles in weather widget */
+[data-bedtime="true"] .weather-particle-container {
+  opacity: 0.3 !important;
+}
+
+/* Bedtime: specific overrides per mode */
+[data-mode="kid"][data-bedtime="true"] .quest-card {
+  /* Can't complete quests at bedtime — visual cue */
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* ═══ WEEKEND MODE (cross-cutting) ═══
+   Applies on top of any mode on Sat/Sun. */
+
+[data-weekend="true"] .weekend-badge {
+  display: inline-flex;
+  animation: badge-sparkle 2s ease-in-out infinite;
+}
+
+@keyframes badge-sparkle {
+  0%, 100% { transform: scale(1); opacity: 0.8; }
+  50%      { transform: scale(1.15); opacity: 1; }
+}
+
+/* Weekend: warm golden tint on the canvas */
+[data-weekend="true"] {
+  --weekend-glow: rgba(251, 191, 36, 0.04);
+}
+
+/* ═══ REDUCED MOTION ═══ */
+
+@media (prefers-reduced-motion: reduce) {
+  .mode-transition-root {
+    transition: none !important;
+  }
+  .mode-transition-root.mode-exit,
+  .mode-transition-root.mode-enter {
+    filter: none !important;
+    transform: none !important;
+  }
+}

@@ -1,0 +1,105 @@
+/* ═══ COMPONENT UTILITIES — Base styles, tap, scroll, focus ═══ */
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-surface-4);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+body {
+  background-color: var(--color-canvas);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent-selected);
+  outline-offset: 3px;
+}
+
+/* Gradient text variants */
+
+/* ─── Gradient text variants ─── */
+.gradient-text {
+  background: linear-gradient(135deg, #60a5fa 0%, #06b6d4 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gradient-text-warm {
+  background: linear-gradient(135deg, var(--color-accent-coral) 0%, var(--color-accent-amber) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gradient-text-cool {
+  background: linear-gradient(135deg, var(--color-accent-lavender) 0%, var(--color-accent-cyan) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ─── Glass variants ─── */
+/* Consolidated Apple-style materials — 3 levels mapped to depth:
+   .surface-subtle / .material-thin / .glass-subtle
+     → subtle overlays (12px blur, low saturation)
+
+/* Utility classes */
+.display-numeral {
+  font-feature-settings: "tnum";
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.04em;
+}
+
+.soft-press {
+  transform: scale(0.97);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+}
+
+/* ─── Tap language (Stream C) ───
+   One coherent press/hover/focus contract for every tappable surface.
+   Use `.tap` for normal controls, `.tap-sm` for small controls
+   (steppers, icon buttons, chips). */
+.tap {
+  @apply transition-all duration-150;
+  @apply active:scale-[0.97] hover:scale-[1.02];
+  @apply focus-visible:outline-none focus-visible:ring-2;
+  @apply focus-visible:ring-[var(--color-accent-selected)] focus-visible:ring-offset-2;
+}
+
+.tap-sm {
+  @apply transition-all duration-150;
+  @apply active:scale-[0.97] hover:scale-[1.01];
+  @apply focus-visible:outline-none focus-visible:ring-2;
+  @apply focus-visible:ring-[var(--color-accent-selected)] focus-visible:ring-offset-2;
+}
+
+.swipe-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 80px;
+  height: 100%;
+  border-radius: 0 1.25rem 1.25rem 0;
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);

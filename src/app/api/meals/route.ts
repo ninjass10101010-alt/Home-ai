@@ -5,6 +5,7 @@ export async function GET() {
     const allMeals: Array<Record<string, unknown>> = [];
     return NextResponse.json(allMeals);
   } catch (error) {
+    console.error('[meals] API error:', error);
     return NextResponse.json({ error: 'Failed to fetch meals' }, { status: 500 });
   }
 }
@@ -14,6 +15,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     return NextResponse.json({ id: Date.now(), ...body }, { status: 201 });
   } catch (error) {
+    console.error('[meals] API error:', error);
     return NextResponse.json({ error: 'Failed to create meal' }, { status: 500 });
   }
 }

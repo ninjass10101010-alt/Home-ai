@@ -1,0 +1,177 @@
+/* ═══ COLOR TOKENS — Light/Dark/Contrast Mode Overrides ═══ */
+
+:root[data-theme="light"] {
+  /* LIGHT MODE PALETTE */
+  --color-surface-0: #ffffff;   /* Main background */
+  --color-surface-1: #f8f9fb;
+  --color-surface-2: #f0f2f7;
+  --color-surface-3: #e7ebf3;
+  --color-surface-4: #dde3ed;
+  --color-surface-5: #d3dae7;
+  --color-surface-6: #c9d1e0;
+  --color-surface-7: #bfc6d8;   /* Darkest for depth */
+
+  --color-canvas: #f5f6fa;
+
+  --color-text-primary: #1a1a1a;   /* Main body text */
+  --color-text-secondary: #5a5a5a;   /* Hints, secondary text */
+  --color-text-muted: #8a8a8a;   /* Disabled text */
+  --color-text-dim: #ababab;   /* Placeholders */
+
+  /* ACCENT COLORS (Light mode variants - darker for better contrast) */
+  --color-accent-nori: #2563eb;   /* Darker shade */
+  --color-accent-violet: #7c3aed;
+  --color-accent-rose: #e11d48;
+  --color-accent-cyan: #0891b2;
+  --color-accent-mint: #059669;
+  --color-accent-amber: #d97706;
+  --color-accent-coral: #e11d48;
+  --color-accent-lavender: #6d28d9;
+  --color-accent-apricot: #ea580c;
+  --color-accent-sage: #65a30d;
+
+  --glass-tint-strong: rgba(255,255,255,0.62);
+  --glass-tint-soft: rgba(255,255,255,0.32);
+  --border-frost-1: 1px solid rgba(0,0,0,0.06);
+  --border-frost-2: 1px solid rgba(0,0,0,0.10);
+  --border-frost-3: 1px solid rgba(0,0,0,0.16);
+
+  --neu-light: rgba(255,255,255,0.95);
+  --neu-dark: rgba(163,177,198,0.55);
+  --neu-raised: 6px 6px 12px var(--neu-dark), -6px -6px 12px var(--neu-light);
+  --neu-pressed: inset 3px 3px 6px var(--neu-dark), inset -3px -3px 6px var(--neu-light);
+
+  --gradient-canvas-dawn: linear-gradient(160deg, rgba(251,207,232,0.72), rgba(254,215,170,0.52), rgba(254,243,199,0.38));
+  --gradient-canvas-day: linear-gradient(160deg, rgba(219,234,254,0.70), rgba(224,242,254,0.50), rgba(240,253,244,0.42));
+  --gradient-canvas-dusk: linear-gradient(160deg, rgba(253,230,138,0.60), rgba(253,164,175,0.48), rgba(196,181,253,0.50));
+  --gradient-canvas-night: linear-gradient(160deg, rgba(30,27,75,0.72), rgba(49,46,129,0.62), rgba(15,23,42,0.72));
+
+  /* Gradient palette */
+  --color-gradient-start: #7c3aed;
+  --color-gradient-end: #e11d48;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    /* LIGHT MODE PALETTE */
+    --color-surface-0: #ffffff;
+    --color-surface-1: #f8f9fb;
+    --color-surface-2: #f0f2f7;
+    --color-surface-3: #e7ebf3;
+    --color-surface-4: #dde3ed;
+    --color-surface-5: #d3dae7;
+    --color-surface-6: #c9d1e0;
+    --color-surface-7: #bfc6d8;
+
+    --color-canvas: #f5f6fa;
+
+    --color-text-primary: #1a1a1a;
+    --color-text-secondary: #5a5a5a;
+    --color-text-muted: #8a8a8a;
+    --color-text-dim: #ababab;
+
+    /* ACCENT COLORS */
+    --color-accent-nori: #2563eb;
+    --color-accent-violet: #7c3aed;
+    --color-accent-rose: #e11d48;
+    --color-accent-cyan: #0891b2;
+    --color-accent-mint: #059669;
+    --color-accent-amber: #d97706;
+    --color-accent-coral: #e11d48;
+    --color-accent-lavender: #6d28d9;
+    --color-accent-apricot: #ea580c;
+    --color-accent-sage: #65a30d;
+
+    --glass-tint-strong: rgba(255,255,255,0.62);
+    --glass-tint-soft: rgba(255,255,255,0.32);
+    --border-frost-1: 1px solid rgba(0,0,0,0.06);
+    --border-frost-2: 1px solid rgba(0,0,0,0.10);
+    --border-frost-3: 1px solid rgba(0,0,0,0.16);
+
+    --neu-light: rgba(255,255,255,0.95);
+    --neu-dark: rgba(163,177,198,0.55);
+    --neu-raised: 6px 6px 12px var(--neu-dark), -6px -6px 12px var(--neu-light);
+    --neu-pressed: inset 3px 3px 6px var(--neu-dark), inset -3px -3px 6px var(--neu-light);
+
+    --gradient-canvas-dawn: linear-gradient(160deg, rgba(251,207,232,0.72), rgba(254,215,170,0.52), rgba(254,243,199,0.38));
+    --gradient-canvas-day: linear-gradient(160deg, rgba(219,234,254,0.70), rgba(224,242,254,0.50), rgba(240,253,244,0.42));
+    --gradient-canvas-dusk: linear-gradient(160deg, rgba(253,230,138,0.60), rgba(253,164,175,0.48), rgba(196,181,253,0.50));
+    --gradient-canvas-night: linear-gradient(160deg, rgba(30,27,75,0.72), rgba(49,46,129,0.62), rgba(15,23,42,0.72));
+
+    /* Gradient palette */
+    --color-gradient-start: #7c3aed;
+    --color-gradient-end: #e11d48;
+  }
+}
+
+/* ─── Dark Mode Explicit Override Color Tokens ─── */
+:root[data-theme="dark"] {
+  /* DARK MODE PALETTE */
+  --color-surface-0: #0f1117;   /* Main background */
+  --color-surface-1: #181c24;
+  --color-surface-2: #1e2330;
+  --color-surface-3: #252c3a;
+  --color-surface-4: #2d3548;
+  --color-surface-5: #323b4d;
+  --color-surface-6: #3a4456;
+  --color-surface-7: #434e60;   /* Darkest for depth */
+
+  --color-text-primary: #f0f4ff;   /* Main body text */
+  --color-text-secondary: #8892aa;   /* Hints, secondary text */
+  --color-text-muted: #4e5a72;   /* Disabled text */
+  --color-text-dim: #363e50;   /* Placeholders */
+
+  /* ACCENT COLORS (Dark mode variants) */
+  --color-accent-nori: #3b82f6;   /* Selected by default */
+  --color-accent-violet: #7c6ff7;
+  --color-accent-rose: #f43f5e;
+  --color-accent-cyan: #06b6d4;
+  --color-accent-mint: #4ade80;
+  --color-accent-amber: #f59e0b;
+  --color-accent-apricot: #fb923c;
+  --color-accent-sage: #84cc16;
+
+  /* Gradient palette */
+  --color-gradient-start: #b583ff;
+  --color-gradient-end: #ff6b8a;
+}
+
+/* ─── High Contrast Mode ─── */
+/* Activates when [data-contrast="boost"] is present on html element */
+[data-contrast="boost"] {
+  --color-text-primary: #ffffff;  /* Pure white in dark mode */
+  --color-text-secondary: #e2e8f0; /* Very bright secondary text */
+}
+
+/* High contrast mode overrides for Light Mode */
+:root[data-theme="light"][data-contrast="boost"] {
+  --color-text-primary: #000000;  /* Pure black in light mode */
+  --color-text-secondary: #1a1a1a; /* Very dark secondary text */
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"])[data-contrast="boost"] {
+    --color-text-primary: #000000;  /* Pure black in light mode */
+    --color-text-secondary: #1a1a1a; /* Very dark secondary text */
+  }
+}
+
+/* High contrast mode: thicken borders and brighten text instead of dimming */
+[data-contrast="boost"] * {
+  border-width: 2px !important;
+}
+
+[data-contrast="boost"] * {
+  opacity: 1 !important;
+}
+
+[data-contrast="boost"] .material-thin,
+[data-contrast="boost"] .material-regular,
+[data-contrast="boost"] .material-thick,
+[data-contrast="boost"] .glass,
+[data-contrast="boost"] .glass-subtle,
+[data-contrast="boost"] .glass-strong {
+  border-color: rgba(255, 255, 255, 0.3) !important;
+}
+
+/* Smooth scrolling */

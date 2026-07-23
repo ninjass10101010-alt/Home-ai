@@ -6,6 +6,7 @@ import BottomNav from "@/components/ui/BottomNav";
 import Avatar from "@/components/ui/Avatar";
 import SigmaImage from "@/components/ui/SigmaImage";
 import { Icon3D } from "@/components/3d";
+import { UnifiedInput } from "@/components/chat/UnifiedInput";
 
 import { db } from "@/db";
 import { useSearchParams } from "next/navigation";
@@ -893,66 +894,12 @@ function ChatContent() {
 
       {/* ─── Input area ─── */}
       <div
-        className="sticky bottom-0 z-50 px-4 pb-20 pt-2"
+        className="sticky bottom-0 z-50"
         style={{
-          background: "linear-gradient(to top, var(--color-surface-0) 65%, transparent)",
-          paddingBottom: "calc(env(safe-area-inset-bottom) + 7rem)",
+          paddingBottom: "calc(env(safe-area-inset-bottom) + 5rem)",
         }}
       >
-        {/* Input bar */}
-        <div className="flex items-end gap-2 rounded-3xl px-3 py-2"
-          style={{
-            background: "linear-gradient(135deg, rgba(124,111,247,0.22) 0%, rgba(124,111,247,0.10) 100%)",
-            backdropFilter: "blur(20px)",
-            WebkitBackdropFilter: "blur(20px)",
-            border: "1px solid rgba(167,139,250,0.20)",
-            boxShadow: "0 8px 32px rgba(124,111,247,0.12), inset 0 1px 0 rgba(255,255,255,0.12)",
-          }}
-        >
-          {/* Mic button */}
-          <button onClick={toggleListening}
-            className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors shrink-0 mb-0.5 ${
-              isListening ? "text-rose-400 bg-rose-500/15" : "text-text-secondary hover:text-[var(--color-accent-violet)]"
-            }`}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
-              <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" strokeLinecap="round" />
-              <path d="M19 10v2a7 7 0 01-14 0v-2" strokeLinecap="round" />
-              <line x1="12" y1="19" x2="12" y2="23" strokeLinecap="round" />
-              <line x1="8" y1="23" x2="16" y2="23" strokeLinecap="round" />
-            </svg>
-          </button>
-
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={`Message Consuela as ${activeSpeaker.name.split(" ")[0]}…`}
-            rows={1}
-            suppressHydrationWarning
-            className="flex-1 bg-transparent text-text-primary text-sm placeholder:text-text-muted resize-none outline-none leading-relaxed py-1.5 max-h-28"
-            style={{ minHeight: "36px" }}
-          />
-
-          {/* Send button */}
-          <button onClick={() => sendMessage(input)} disabled={!input.trim()}
-            className={`w-9 h-9 flex items-center justify-center rounded-full shrink-0 mb-0.5 transition-all ${
-              input.trim()
-                ? "text-white active:scale-95"
-                : "text-text-muted cursor-not-allowed"
-            }`}
-            style={input.trim()
-              ? { background: "linear-gradient(135deg, var(--color-accent-violet), var(--color-accent-lavender))", boxShadow: "0 4px 12px rgba(124,111,247,0.35)" }
-              : { background: "rgba(255,255,255,0.04)" }
-            }
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="w-4 h-4">
-              <path d="M22 2L11 13" strokeLinecap="round" strokeLinejoin="round" />
-              <path d="M22 2L15 22l-4-9-9-4 20-7z" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-        </div>
+        <UnifiedInput onSendMessage={sendMessage} />
       </div>
 
       <BottomNav />

@@ -26,7 +26,8 @@ export async function GET() {
     let builtAt: VersionInfo | null = null;
     try {
       builtAt = JSON.parse(await readFile(versionPath, "utf-8"));
-    } catch {
+    } catch (e: any) {
+    console.error("[admin/version]", e);
       builtAt = {
         hash: "unknown",
         short: "unknown",
@@ -75,7 +76,8 @@ export async function GET() {
           }
         }
       }
-    } catch {
+    } catch (e: any) {
+    console.error("[admin/version]", e);
       // GitHub unreachable — just show local version
     }
 
@@ -89,6 +91,7 @@ export async function GET() {
       branch: GITHUB_BRANCH,
     });
   } catch (e: any) {
+    console.error("[admin/version]", e);
     return NextResponse.json(
       { ok: false, error: e?.message || "Version check failed" },
       { status: 500 },
