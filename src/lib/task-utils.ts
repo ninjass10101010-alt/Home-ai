@@ -168,6 +168,9 @@ export function regenerateRecurringTasks(tasks: Task[]): Task[] {
       completedBy: undefined,
       completedAt: undefined,
       completedInWeek: undefined,
+      // Universal recurring tasks come back unclaimed — no ghost assignee from last week
+      assignee: t.universal ? "All" : t.assignee,
+      assigneeEmoji: t.universal ? "🤝" : t.assigneeEmoji,
       due,
     };
   });

@@ -32,6 +32,7 @@ import StatTile from "@/components/patterns/StatTile";
 import DayStrip from "@/components/patterns/DayStrip";
 import SectionCard from "@/components/patterns/SectionCard";
 import HomeLeaderboardWidget from "@/components/leaderboard/HomeLeaderboardWidget";
+import ProfileSheet from "@/components/profile/ProfileSheet";
 
 const FogBackground = dynamic(() => import("@/components/ui/FogBackground"), { ssr: false });
 
@@ -67,6 +68,7 @@ export default function HomePage() {
   const [pinningMember, setPinningMember] = useState<{ name: string; emoji: string; color: string; avatarSize: AvatarSize; glow: boolean } | null>(null);
   const [homeError, setHomeError] = useState<string | null>(null);
   const [confirmingLogout, setConfirmingLogout] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
 
   const router = useRouter();
   const { currentUser, isLoggedIn, logout, sessionRemainingMs, sessionWarning, extendSession } = useAuth();
@@ -233,7 +235,7 @@ export default function HomePage() {
                     </svg>
                     <span>Sign out</span>
                   </button>
-                  <button type="button" onClick={() => setPinningMember({ name: dashboardCurrentUser.name, emoji: dashboardCurrentUser.emoji || "😊", color: dashboardCurrentUser.color || "green", avatarSize: normalizeAvatarSize(dashboardCurrentUser.avatarSize), glow: dashboardCurrentUser.glow || false })} className="active:scale-90 transition-transform" aria-label="Switch profile">
+                  <button type="button" onClick={() => setProfileOpen(true)} className="active:scale-90 transition-transform" aria-label="Open your profile">
                     <Avatar name={dashboardCurrentUser.name} color={dashboardCurrentUser.color} emoji={dashboardCurrentUser.emoji} size={normalizeAvatarSize(dashboardCurrentUser.avatarSize)} variant="emoji" glow={dashboardCurrentUser.glow} />
                   </button>
                 </div>
@@ -257,7 +259,18 @@ export default function HomePage() {
 
             <div className="mt-6 flex gap-3 overflow-x-auto pb-1">
               {familyMembers.map((member) => (
-                <button key={member.name} type="button" onClick={() => setPinningMember({ name: member.name, emoji: member.emoji || "😊", color: member.color || "green", avatarSize: normalizeAvatarSize(member.avatarSize), glow: member.glow || false })} className="active:scale-90 transition-transform">
+                <button
+                  key={member.name}
+                  type="button"
+                  onClick={() => {
+                    if (isLoggedIn && dashboardCurrentUser && memberMatchesName(member, dashboardCurrentUser.name)) {
+                      setProfileOpen(true);
+                    } else {
+                      setPinningMember({ name: member.name, emoji: member.emoji || "😊", color: member.color || "green", avatarSize: normalizeAvatarSize(member.avatarSize), glow: member.glow || false });
+                    }
+                  }}
+                  className="active:scale-90 transition-transform"
+                >
                   <Avatar name={member.name} color={member.color} emoji={member.emoji} size={normalizeAvatarSize(member.avatarSize)} variant="emoji" glow={member.glow} />
                 </button>
               ))}
@@ -383,6 +396,14 @@ export default function HomePage() {
               memberColor={pinningMember.color}
               onClose={() => setPinningMember(null)}
               onSuccess={() => setPinningMember(null)}
+            />
+          )}
+
+          {isLoggedIn && dashboardCurrentUser && (
+            <ProfileSheet
+              open={profileOpen}
+              onClose={() => setProfileOpen(false)}
+              member={dashboardCurrentUser}
             />
           )}
 

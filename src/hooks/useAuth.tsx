@@ -48,6 +48,7 @@ interface AuthContextValue {
   isParent: boolean;
   login: (memberName: string, pin: string) => { success: boolean; error?: string };
   logout: () => void;
+  changePin: (newPin: string) => Promise<boolean>;
   sessionRemainingMs: number;
   sessionWarning: boolean;
   extendSession: () => void;
@@ -158,7 +159,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (!activeUser) return;
 
       const member = db.selectMembersDetailed().find((m: any) => memberMatchesName(m, activeUser.name));
-      if (!member) return;
+      if (!member) {
+        // The signed-in member was deleted from Settings — sign out gracefully.
+        logout();
+        return;
+      }
 
       const updatedUser: AuthUser = {
         ...activeUser,
@@ -204,7 +209,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       window.removeEventListener("consuela-members-updated", handleMembersUpdated);
       clearTimers();
     };
-  }, [handleActivity, clearTimers]);
+  }, [handleActivity, clearTimers, logout]);
 
   const login = useCallback((memberName: string, pin: string): { success: boolean; error?: string } => {
     const members = db.selectMembers();
@@ -259,6 +264,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const isLoggedIn = currentUser !== null;
   const isParent = isLoggedIn && currentUser.role === 'parent';
 
+  const changePin = useCallback(async (newPin: string): Promise<boolean> => {
+    const activeUser = currentUserRef.current;
+    if (!activeUser) return false;
+    const updated = { ...activeUser, pin: newPin };
+    currentUserRef.current = updated;
+    setCurrentUser(updated);
+    return true;
+  }, []);
+
   return (
     <AuthContext.Provider
       value={{
@@ -267,6 +281,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         isParent,
         login,
         logout,
+        changePin,
         sessionRemainingMs,
         sessionWarning,
         extendSession,

@@ -26,11 +26,10 @@ import FormField from "@/components/patterns/FormField";
 import SectionCard from "@/components/patterns/SectionCard";
 import SettingsErrorBoundary from "@/components/ui/SettingsErrorBoundary";
 import GoogleConnectCard from "@/components/settings/GoogleConnectCard";
+import AvatarPicker from "@/components/profile/AvatarPicker";
 import { warmGlassAccentOptions } from "@/lib/design-tokens";
 import { defaultAccentHex, type AccentTarget } from "@/lib/theme-config";
 import { useFogConfig } from "@/hooks/useFogConfig";
-
-const emojiOptions = ["👨","👩","👧","🧒","👶","👴","👵","🐶","🐱","🐩","🐕","🐈","🐠","🐹","🐰","🦊","🐻","🐼","🐨","🐯","🦁","🐮","🐷","🐸","🐵"];
 
 function normalizeHex(hex: string) {
   const clean = hex.trim().replace("#", "");
@@ -824,12 +823,16 @@ export default function SettingsPage() {
             <FormField label="Name">
               <input value={memberForm.name} onChange={(e) => setMemberForm((prev: any) => ({ ...prev, name: e.target.value }))} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none" placeholder="Member name" />
             </FormField>
-            <FormField label="Emoji">
-              <div className="flex flex-wrap gap-2">
-                {emojiOptions.map((emoji) => (
-                  <button key={emoji} type="button" onClick={() => setMemberForm((prev: any) => ({ ...prev, emoji }))} className={`grid h-10 w-10 place-items-center rounded-2xl text-lg ${memberForm.emoji === emoji ? "bg-[var(--color-accent-selected)] text-white" : "bg-[var(--color-surface-2)] text-text-primary"}`}>{emoji}</button>
-                ))}
-              </div>
+            <FormField label="Avatar">
+              <AvatarPicker
+                value={memberForm.imageUrl?.startsWith("data:") || memberForm.imageUrl?.startsWith("http") ? memberForm.imageUrl : memberForm.emoji || "😊"}
+                onChange={(next) =>
+                  setMemberForm((prev: any) => {
+                    const isImage = next.startsWith("data:") || next.startsWith("http");
+                    return { ...prev, imageUrl: isImage ? next : "", emoji: isImage ? prev.emoji || "😊" : next };
+                  })
+                }
+              />
             </FormField>
             <FormField label="Role">
               <select value={memberForm.role} onChange={(e) => setMemberForm((prev: any) => ({ ...prev, role: e.target.value }))} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none">
@@ -840,22 +843,6 @@ export default function SettingsPage() {
             </FormField>
             <FormField label="PIN">
               <input type="password" inputMode="numeric" maxLength={4} value={memberForm.pin} onChange={(e) => setMemberForm((prev: any) => ({ ...prev, pin: e.target.value.replace(/[^0-9]/g, "") }))} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted" placeholder="0000" />
-            </FormField>
-            <FormField label="Avatar image">
-              <div className="space-y-2">
-                <input
-                  value={memberForm.imageUrl || ""}
-                  onChange={(e) => setMemberForm((prev: any) => ({ ...prev, imageUrl: e.target.value }))}
-                  className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-xs text-text-primary outline-none font-mono"
-                  placeholder="Paste image URL or data:image/..."
-                />
-                {memberForm.imageUrl && memberForm.imageUrl.startsWith("data:") && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-semibold text-text-muted">Preview:</span>
-                    <Avatar name={memberForm.name || "Preview"} color="green" emoji={memberForm.imageUrl} size="sm" variant="emoji" />
-                  </div>
-                )}
-              </div>
             </FormField>
             <div className="flex items-center justify-between">
               <FormField label="Avatar size">

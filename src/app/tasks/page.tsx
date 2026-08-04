@@ -235,12 +235,13 @@ export default function TasksPage() {
   const { currentUser, isLoggedIn } = useAuth();
   const allMembers = useMemo(() => {
     const names = membersData.map((m: any) => m.fullName);
-    return isLoggedIn ? ["My Tasks", ...names] : ["All", ...names];
+    return isLoggedIn ? ["My Tasks", ...names, "Up for grabs"] : ["All", ...names, "Up for grabs"];
   }, [membersData, isLoggedIn]);
 
   const memberEmojis: Record<string, string> = useMemo(() => ({
     All: "👨‍👩‍👧‍👦",
     "My Tasks": currentUser?.emoji || "👤",
+    "Up for grabs": "🤝",
     ...Object.fromEntries(membersData.map((m: any) => [m.fullName, safeDisplayEmoji(m.emoji)]))
   }), [membersData, currentUser]);
 
@@ -356,6 +357,7 @@ export default function TasksPage() {
   // Persist tasks + week data to PocketBase in the background (snapshot + structured)
   const syncPendingRef = useRef(false);
   const pbSyncPendingRef = useRef(false);
+  const claimSnapshotRef = useRef<{ tasks: Task[]; weekData: WeekData } | null>(null);
   useEffect(() => {
     if (!mounted) return;
     if (syncPendingRef.current) return;
@@ -728,6 +730,7 @@ export default function TasksPage() {
       if (verified) {
         const normalizedName = normalizeName((verified as any).name);
         const claimantEmoji = (membersData.find((m: any) => m.fullName === normalizedName)?.emoji) || task.assigneeEmoji;
+        claimSnapshotRef.current = { tasks, weekData };
         setTasks(prev => prev.map(t => t.id === pinTaskId ? { ...t, completed: true, completedBy: normalizedName, completedAt: now, completedInWeek: currentWeek, assignee: normalizedName, assigneeEmoji: claimantEmoji } : t));
         const pointsMsg = task.points > 0 ? `+${task.points}pts` : "";
         setWeekData(prev => {
@@ -737,6 +740,35 @@ export default function TasksPage() {
         setPinSuccess(`${normalizedName.split(" ")[0]} completed ${task.title}! ${pointsMsg}`);
         triggerConfetti();
         setTimeout(() => { setPinTaskId(null); setPinSuccess(""); setSnatchForMember(""); }, 1500);
+
+        // Server-authoritative claim: exactly one family member wins the race
+        fetch("/api/tasks/claim", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            taskId: task.id,
+            claimantName: normalizedName,
+            claimantPin: pinInput,
+            completedAt: now,
+            title: task.title,
+            points: task.points,
+            assigneeEmoji: claimantEmoji,
+          }),
+        }).then(async (res) => {
+          const data = await res.json().catch(() => null);
+          if (!res.ok || !data?.success) {
+            const snap = claimSnapshotRef.current;
+            if (snap) {
+              setTasks(snap.tasks);
+              setWeekData(snap.weekData);
+              claimSnapshotRef.current = null;
+            }
+            const grabbedBy = data?.claimedBy ? ` ${data.claimedBy.split(" ")[0]}` : "";
+            showToast(`🤝 ${grabbedBy ? `${grabbedBy} ` : "Someone"}already grabbed that one!`);
+          }
+        }).catch(() => {
+          // Offline: keep the optimistic claim (local sync will reconcile)
+        });
       } else {
         setPinError("Wrong code for selected member. Try again.");
         setPinInput("");
@@ -858,8 +890,13 @@ export default function TasksPage() {
   };
 
   const filtered = tasks.filter((t) => {
+    if (filterMember === "Up for grabs") {
+      return t.universal && (showCompleted ? true : !t.completed);
+    }
     if (filterMember === "My Tasks" && currentUser) {
-      return t.assignee === currentUser.name && (showCompleted ? true : !t.completed);
+      const mine = t.assignee === currentUser.name;
+      const claimable = t.universal && !t.completed;
+      return (mine || claimable) && (showCompleted ? true : !t.completed);
     }
     const memberMatch = filterMember === "All" || t.assignee === filterMember;
     const completedMatch = showCompleted ? true : !t.completed;
