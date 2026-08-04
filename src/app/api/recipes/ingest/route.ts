@@ -1,8 +1,89 @@
 import { NextResponse } from "next/server";
+import { Readability } from "@mozilla/readability";
+import { parseHTML } from "linkedom";
 
-// Playwright is expected to be installed in this project.
-// If it isn’t yet, you’ll need: npm i -D playwright && npx playwright install
-import { chromium } from "playwright";
+function isPrivateIP(hostname: string): boolean {
+  if (!hostname) return true;
+  if (/localhost|127\.\d+\.\d+\.\d+|::1|0\.0\.0\.0/.test(hostname)) return true;
+  const ipMatch = hostname.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (!ipMatch) return false;
+  const [, a, b] = ipMatch.map(Number);
+  if (a === 10) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  return false;
+}
+
+function cleanExtractedText(s: string) {
+  return s.replace(/\s+/g, " ").trim();
+}
+
+async function fetchAndExtract(url: string): Promise<string> {
+  const parsed = new URL(url);
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error("Only HTTP and HTTPS URLs are allowed");
+  }
+  if (isPrivateIP(parsed.hostname)) {
+    throw new Error("Private network URLs are not allowed");
+  }
+
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent": "Consuela-Dashboard/1.0 RecipeImporter",
+      Accept: "text/html,application/xhtml+xml,*/*",
+    },
+    signal: AbortSignal.timeout(15000),
+  });
+
+  const html = await res.text();
+
+  const ldJson = html.match(/<script\s+[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/i);
+  if (ldJson) {
+    try {
+      const json = JSON.parse(ldJson[1]);
+      if (Array.isArray(json)) {
+        const recipe = json.find((item: any) => item["@type"] === "Recipe");
+        if (recipe) return formatSchemaRecipeToText(recipe);
+      }
+      if (json["@type"] === "Recipe") {
+        return formatSchemaRecipeToText(json);
+      }
+    } catch {
+      // keep going with Readability
+    }
+  }
+
+  const { document } = parseHTML(html);
+  const reader = new Readability(document.cloneNode(true) as any);
+  const article = reader.parse();
+  return cleanExtractedText(article?.textContent || document.body?.textContent || "");
+}
+
+function formatSchemaRecipeToText(recipe: any): string {
+  const parts: string[] = [];
+  parts.push(`Title: ${recipe.name || recipe.headline || "Untitled"}`);
+  if (recipe.description) parts.push(`Description: ${recipe.description}`);
+  if (recipe.recipeIngredient?.length) {
+    parts.push("Ingredients:");
+    parts.push(...recipe.recipeIngredient.map((i: string) => `- ${i}`));
+  }
+  if (recipe.recipeInstructions?.length) {
+    parts.push("Instructions:");
+    const instructions = Array.isArray(recipe.recipeInstructions)
+      ? recipe.recipeInstructions
+          .map((i: any) => i.text || i.description || i.name || "")
+          .filter(Boolean)
+          .join("\n")
+      : typeof recipe.recipeInstructions === "string"
+        ? recipe.recipeInstructions
+        : "";
+    parts.push(instructions);
+  }
+  if (recipe.nutrition?.calories) parts.push(`Calories: ${recipe.nutrition.calories}`);
+  if (recipe.prepTime) parts.push(`Prep Time: ${recipe.prepTime}`);
+  if (recipe.cookTime) parts.push(`Cook Time: ${recipe.cookTime}`);
+  return parts.join("\n");
+}
 
 async function callConsuelaParseRecipe({
   sourceLabel,
@@ -16,7 +97,6 @@ async function callConsuelaParseRecipe({
   const res = await fetch(process.env.HERMES_CHAT_URL || "http://localhost:3000/api/hermes/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    // Using a local route keeps consistent behavior with existing code.
     body: JSON.stringify({
       message: [
         "You are Consuela, an expert recipe parser.",
@@ -37,15 +117,10 @@ async function callConsuelaParseRecipe({
   });
 
   const data = await res.json();
-  // Existing hermes/chat format in repo:
-  // { actions: [{ type: "meal" | "recipe" | ... , title, detail, emoji }, ...] }
   const actions = data?.actions || [];
   const first = actions.find((a: any) => a.type === "recipe") || actions[0];
   if (!first) throw new Error("Consuela did not return a recipe action");
 
-  // If detail contains the JSON, try to parse.
-  // Otherwise, fallback to simple mapping from title/emoji/detail.
-  // This makes it resilient to minor response format variations.
   const detail = first.detail;
   let parsed: any = null;
 
@@ -57,9 +132,8 @@ async function callConsuelaParseRecipe({
     }
   }
 
-  // If parsed exists and contains shape, use it.
   if (parsed && typeof parsed === "object") {
-    const normalized = {
+    return {
       title: parsed.title || first.title,
       emoji: parsed.emoji || first.emoji || "📖",
       prepTime: parsed.prepTime || parsed.prep_time || "30 min",
@@ -72,20 +146,12 @@ async function callConsuelaParseRecipe({
       carbs: parsed.carbs ?? null,
       fat: parsed.fat ?? null,
     };
-
-    return normalized;
   }
 
-  // Fallback: interpret detail as "Prep time · ing1 · ing2".
   const detailLines = typeof detail === "string" ? detail : "";
-  const parts = detailLines
-    .split("·")
-    .map((s: string) => s.trim())
-    .filter(Boolean);
-
+  const parts = detailLines.split("·").map((s: string) => s.trim()).filter(Boolean);
   const prepMatch = detailLines.match(/(\d+\s*min)/i);
   const prepTime = prepMatch ? prepMatch[1] : "30 min";
-
   const ingredients = parts.filter((p: string) => !/(min)/i.test(p)).slice(0, 30);
 
   return {
@@ -103,33 +169,6 @@ async function callConsuelaParseRecipe({
   };
 }
 
-function cleanExtractedText(s: string) {
-  // Remove excessive whitespace.
-  return s.replace(/\s+/g, " ").trim();
-}
-
-async function scrapeUrlText(url: string) {
-  const browser = await chromium.launch({ headless: true });
-  try {
-    const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
-
-    // Give some time for dynamic content.
-    await page.waitForTimeout(2000);
-
-    // Extract visible text.
-    const text = await page.evaluate(() => {
-      const body = document.body;
-      if (!body) return "";
-      return body.innerText || body.textContent || "";
-    });
-
-    return cleanExtractedText(text || "");
-  } finally {
-    await browser.close();
-  }
-}
-
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -140,7 +179,7 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Missing url" }, { status: 400 });
       }
 
-      const scrapedText = await scrapeUrlText(url);
+      const scrapedText = await fetchAndExtract(url);
       if (!scrapedText || scrapedText.length < 80) {
         return NextResponse.json({ error: "Could not extract useful text from URL" }, { status: 422 });
       }
@@ -155,8 +194,6 @@ export async function POST(req: Request) {
     }
 
     if (type === "pdf") {
-      // Optional for now; your current PDF import already works client-side.
-      // Return a clear message instead of failing.
       return NextResponse.json({ error: "PDF ingestion via this endpoint not implemented yet" }, { status: 501 });
     }
 
@@ -179,4 +216,3 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: e?.message || "Ingestion failed" }, { status: 500 });
   }
 }
-

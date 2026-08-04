@@ -75,9 +75,11 @@ async function fileToDataUrl(file: File): Promise<string> {
 interface AvatarPickerProps {
   value: string;
   onChange: (next: string) => void;
+  fallbackEmoji?: string;
 }
 
-export default function AvatarPicker({ value, onChange }: AvatarPickerProps) {
+export default function AvatarPicker({ value, onChange, fallbackEmoji }: AvatarPickerProps) {
+  const defaultEmoji = fallbackEmoji || "😊";
   const [activeCategory, setActiveCategory] = useState<string>("faces");
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -169,7 +171,7 @@ export default function AvatarPicker({ value, onChange }: AvatarPickerProps) {
         {isPhoto && (
           <button
             type="button"
-            onClick={() => onChange("😊")}
+            onClick={() => onChange(defaultEmoji)}
             className="tap-sm flex-1 rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-3 py-2.5 text-sm font-semibold text-text-primary transition hover:bg-[var(--color-surface-1)]"
           >
             🙂 Use emoji

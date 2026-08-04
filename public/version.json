@@ -1,7 +1,7 @@
 {
-  "hash": "9614c5be1fed199c31a8d9d9c35870f0c507acd7",
-  "short": "9614c5b",
-  "message": "docs: update AGENTS.md with push-to-PB utility",
-  "date": "2026-06-19 06:31:18 -0400",
+  "hash": "ee8a973e69e4e47489a27bc670adfa29bc4da77a",
+  "short": "ee8a973",
+  "message": "feat(user): profile sheet + PIN-verified member APIs + race-proof universal task claiming",
+  "date": "2026-08-04 13:05:11 -0400",
   "author": "GarciaFam"
 }

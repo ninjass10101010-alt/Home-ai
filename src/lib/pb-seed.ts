@@ -28,6 +28,13 @@ const COLLECTIONS = [
       { name: "ingredients", type: "json" },
       { name: "servings", type: "number" },
       { name: "calories", type: "number" },
+      { name: "protein", type: "number" },
+      { name: "carbs", type: "number" },
+      { name: "fat", type: "number" },
+      { name: "recipeId", type: "text" },
+      { name: "recipeSnapshotAt", type: "text" },
+      { name: "weekOf", type: "text" },
+      { name: "date", type: "text" },
       { name: "instructions", type: "text" },
       { name: "image", type: "text" },
     ],
@@ -38,6 +45,8 @@ const COLLECTIONS = [
       { name: "item", type: "text", required: true },
       { name: "status", type: "select", options: { values: ["plenty", "low", "out"] } },
       { name: "category", type: "text" },
+      { name: "quantity", type: "number" },
+      { name: "unit", type: "text" },
     ],
   },
   {
@@ -52,6 +61,9 @@ const COLLECTIONS = [
       { name: "needed", type: "bool" },
       { name: "manualOverride", type: "bool" },
       { name: "source", type: "text" },
+      { name: "quantityValue", type: "number" },
+      { name: "unit", type: "text" },
+      { name: "pinned", type: "bool" },
     ],
   },
   {
@@ -143,6 +155,14 @@ const COLLECTIONS = [
       { name: "points", type: "json" },
       { name: "streak", type: "json" },
       { name: "history", type: "json" },
+    ],
+  },
+  {
+    name: "meal_week_archive",
+    schema: [
+      { name: "weekStart", type: "text", required: true },
+      { name: "archivedAt", type: "text" },
+      { name: "data", type: "json" },
     ],
   },
   {

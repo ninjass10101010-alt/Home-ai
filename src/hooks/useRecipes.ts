@@ -61,6 +61,23 @@ export function useRecipes(showToast: (msg: string) => void) {
     const cleanRecipe = normalizeRecipe(recipe, recipe.id);
     if (!cleanRecipe.name.trim()) return;
     await db.upsertRecipe(cleanRecipe);
+
+    const recipeId = String(cleanRecipe.id);
+    const linkedMeals = (db.mealsStore || []).filter((m: any) => m.recipeId === recipeId);
+    const now = new Date().toISOString();
+    for (const meal of linkedMeals) {
+      await db.updateMeal(String(meal.id), {
+        ingredients: cleanRecipe.ingredients ?? meal.ingredients,
+        instructions: cleanRecipe.instructions ?? meal.instructions,
+        servings: cleanRecipe.servings ?? meal.servings,
+        calories: cleanRecipe.calories ?? meal.calories,
+        protein: cleanRecipe.protein ?? meal.protein,
+        carbs: cleanRecipe.carbs ?? meal.carbs,
+        fat: cleanRecipe.fat ?? meal.fat,
+        recipeSnapshotAt: now,
+      });
+    }
+
     const existing = recipes.find(r => r.id === cleanRecipe.id || r.name.toLowerCase() === cleanRecipe.name.toLowerCase());
     if (existing) {
       setRecipes(prev => prev.map(r => r.id === existing.id ? { ...cleanRecipe, id: existing.id } : r));

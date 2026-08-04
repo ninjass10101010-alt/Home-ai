@@ -39,8 +39,8 @@ export default function RecipesTab({
     }
   };
 
-  const addToPlan = (recipe: Recipe) => {
-    addRecipeToPlan(recipe, activeDay);
+  const addToPlan = (recipe: Recipe, day?: string) => {
+    addRecipeToPlan(recipe, day || activeDay);
     setAddedId(recipe.id);
     setTimeout(() => setAddedId(cur => cur === recipe.id ? null : cur), 1500);
   };
@@ -65,13 +65,13 @@ export default function RecipesTab({
           🌐 Web Import
         </button>
         <button
-          onClick={() => document.getElementById("recipe-pdf-upload-recipes")?.click()}
+          onClick={() => document.getElementById("recipe-file-upload-recipes")?.click()}
           className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-2xl glass text-text-secondary text-sm font-medium border border-[var(--color-surface-3)] hover:text-text-primary tap-sm cursor-pointer"
         >
           📄 Import
         </button>
       </div>
-      <input type="file" id="recipe-file-upload-recipes" accept=".txt,.json,.csv" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handleFileUpload(e.target.files[0]); }} />
+      <input type="file" id="recipe-file-upload-recipes" accept=".txt,.json,.csv,.pdf" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handleFileUpload(e.target.files[0]); }} />
 
       {/* ── Search + Filters ── */}
       <div className="glass rounded-2xl p-4 sm:p-5">
@@ -208,7 +208,7 @@ export default function RecipesTab({
                       {weekDays.map(day => (
                         <button
                           key={day}
-                          onClick={(e) => { e.stopPropagation(); addToPlan(recipe); }}
+                          onClick={(e) => { e.stopPropagation(); addToPlan(recipe, day); }}
                            className="rounded-lg px-2 py-1 text-[10px] font-medium text-text-secondary hover:bg-[var(--color-accent-selected)]/15 hover:text-[var(--color-accent-selected)] whitespace-nowrap cursor-pointer tap-sm"
                         >
                           {day}
@@ -243,7 +243,6 @@ export default function RecipesTab({
         </div>
       )}
 
-      <input type="file" id="recipe-pdf-upload-recipes" accept=".pdf" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handleFileUpload(e.target.files[0]); }} />
     </div>
   );
 }

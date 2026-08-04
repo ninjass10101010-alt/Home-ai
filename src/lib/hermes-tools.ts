@@ -183,7 +183,7 @@ const TOOLS: Tool[] = [
       parameters: { type: "object", properties: {} },
     },
     handler: async () => {
-      const meals = db.selectMeals();
+      const meals = await db.selectMeals();
       let data = meals.length > 0 ? meals : defaultMeals;
       const byDay: Record<string, any[]> = {};
       for (const m of data) {
@@ -214,7 +214,7 @@ const TOOLS: Tool[] = [
       },
     },
     handler: async (args) => {
-      const meals = db.selectMeals();
+      const meals = await db.selectMeals();
       let recipes = meals.length > 0 ? meals.filter((m: any) => m.name && m.ingredients) : defaultMeals.filter((m: any) => m.name && m.ingredients);
       if (args.tag) {
         const tag = String(args.tag).toLowerCase();
@@ -247,7 +247,7 @@ const TOOLS: Tool[] = [
       },
     },
     handler: async (args) => {
-      let items = db.selectGrocery();
+      let items = await db.selectGrocery();
       if (items.length === 0) items = initialGroceryItems;
       if (args.needed_only) items = items.filter((i: any) => i.needed !== false);
       const byCategory: Record<string, any[]> = {};
@@ -273,7 +273,7 @@ const TOOLS: Tool[] = [
       parameters: { type: "object", properties: {} },
     },
     handler: async () => {
-      let items = db.selectPantry();
+      let items = await db.selectPantry();
       if (items.length === 0) {
         items = [
           { id: 101, name: "Olive oil", status: "plenty" },
@@ -348,7 +348,7 @@ const TOOLS: Tool[] = [
     handler: async () => {
       const events = db.selectTodaysEvents();
       const tasks = db.selectPendingTasks();
-      const meals = db.selectMeals();
+      const meals = await db.selectMeals();
       const today = todayISO();
       const todayMeals = meals.filter((m: any) => {
         const day = m.time || m.day || "";

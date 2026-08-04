@@ -22,6 +22,7 @@ export default function ProfileSheet({ open, onClose, member }: ProfileSheetProp
   const { logout, changePin } = useAuth();
 
   const [avatarValue, setAvatarValue] = useState<string>(member.emoji || "😊");
+  const [avatarPin, setAvatarPin] = useState("");
   const [savingAvatar, setSavingAvatar] = useState(false);
   const [avatarSaved, setAvatarSaved] = useState(false);
   const [avatarError, setAvatarError] = useState<string | null>(null);
@@ -36,6 +37,10 @@ export default function ProfileSheet({ open, onClose, member }: ProfileSheetProp
 
   const saveAvatar = async () => {
     if (!avatarValue || avatarValue === member.emoji) return;
+    if (!avatarPin || !/^\d{4}$/.test(avatarPin)) {
+      setAvatarError("Enter your 4-digit PIN to save.");
+      return;
+    }
     setSavingAvatar(true);
     setAvatarError(null);
     setAvatarSaved(false);
@@ -43,7 +48,7 @@ export default function ProfileSheet({ open, onClose, member }: ProfileSheetProp
       const res = await fetch("/api/members/profile", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ actorName: member.name, actorPin: member.pin, patch: { emoji: avatarValue } }),
+        body: JSON.stringify({ actorName: member.name, actorPin: avatarPin, patch: { emoji: avatarValue } }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -127,12 +132,13 @@ export default function ProfileSheet({ open, onClose, member }: ProfileSheetProp
 
         <div className="rounded-3xl border border-white/10 bg-[var(--color-surface-0)]/50 p-4">
           <h5 className="mb-3 text-sm font-bold text-text-primary">Change your avatar</h5>
-          <AvatarPicker value={avatarValue} onChange={setAvatarValue} />
-          <div className="mt-3 flex gap-2">
+          <AvatarPicker value={avatarValue} onChange={setAvatarValue} fallbackEmoji={member.emoji || "😊"} />
+          <div className="mt-3 space-y-2.5">
+            <input type="password" inputMode="numeric" maxLength={4} value={avatarPin} onChange={(e) => setAvatarPin(e.target.value.replace(/[^0-9]/g, ""))} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-2.5 text-center text-lg tracking-[0.4em] text-text-primary outline-none placeholder:text-text-muted" placeholder="Enter PIN to confirm" />
             <SoftButton
               onClick={saveAvatar}
-              disabled={savingAvatar || !avatarValue || avatarValue === member.emoji}
-              className="flex-1"
+              disabled={savingAvatar || !avatarValue || avatarValue === member.emoji || avatarPin.length < 4}
+              className="w-full"
             >
               {savingAvatar ? "Saving…" : avatarSaved ? "Saved ✓" : "Save avatar"}
             </SoftButton>

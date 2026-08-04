@@ -826,6 +826,7 @@ export default function SettingsPage() {
             <FormField label="Avatar">
               <AvatarPicker
                 value={memberForm.imageUrl?.startsWith("data:") || memberForm.imageUrl?.startsWith("http") ? memberForm.imageUrl : memberForm.emoji || "😊"}
+                fallbackEmoji={memberForm.emoji || "😊"}
                 onChange={(next) =>
                   setMemberForm((prev: any) => {
                     const isImage = next.startsWith("data:") || next.startsWith("http");

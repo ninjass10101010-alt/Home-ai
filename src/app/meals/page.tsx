@@ -83,7 +83,8 @@ function MealHubContent() {
 
   const {
     meals, setMeals, activeDay, setActiveDay, activeMeals, deleteMeal,
-    aiMealIdeas, aiMealLoading, showAiSuggestions, generateAiMeals
+    aiMealIdeas, aiMealLoading, showAiSuggestions, generateAiMeals,
+    activeWeek, goToWeek, archiveCurrentWeek, isCurrentWeek,
   } = useMeals();
 
   const {
@@ -142,6 +143,7 @@ function MealHubContent() {
         name: recipe.name.trim(),
         time: recipe.time || activeDay,
         mealType: recipe.mealType || "dinner",
+        weekOf: activeWeek,
         prepTime: recipe.prepTime || "30 min",
         ingredients: (recipe.ingredients ?? []).map(i => i.trim()).filter(Boolean),
         servings: Number(recipe.servings) || 4,
@@ -185,6 +187,7 @@ function MealHubContent() {
       id: Date.now(), name: recipeData.name, emoji: recipeData.emoji || "🍽️", time: day, mealType,
       prepTime: recipeData.prepTime || "30 min", tags: recipeData.tags?.filter(Boolean) ?? [], ingredients: (recipeData.ingredients ?? []).map(i => i.trim()).filter(Boolean),
       servings: Number(recipeData.servings) || 4, calories: Number(recipeData.calories) || 0, protein: Number(recipeData.protein) || 0, carbs: Number(recipeData.carbs) || 0, fat: Number(recipeData.fat) || 0, instructions: recipeData.instructions,
+      weekOf: activeWeek, recipeId: String(recipeData.id), recipeSnapshotAt: new Date().toISOString(),
     };
     setMeals(prev => [...prev.filter(m => !(m.time === day && m.mealType === mealType)), newMeal]);
     setActiveDay(day);
@@ -207,6 +210,7 @@ function MealHubContent() {
       carbs: Number(recipeData.carbs) || 0,
       fat: Number(recipeData.fat) || 0,
       instructions: recipeData.instructions,
+      weekOf: activeWeek, recipeId: String(recipeData.id), recipeSnapshotAt: new Date().toISOString(),
     };
     setMeals(prev => [...prev.filter(m => !(m.time === day && m.mealType === mealType)), newMeal]);
     setActiveDay(day);
@@ -243,13 +247,13 @@ function MealHubContent() {
 
   const copyDayMeals = (fromDay: string, toDay: string) => {
     if (fromDay === toDay) return;
-    const sourceMeals = meals.filter(m => m.time === fromDay);
+    const sourceMeals = meals.filter(m => m.time === fromDay && (m.weekOf || activeWeek) === activeWeek);
     if (!sourceMeals.length) { showToast(`No meals planned for ${fromDay}`); return; }
-    const occupiedTypes = new Set(meals.filter(m => m.time === toDay).map(m => m.mealType));
+    const occupiedTypes = new Set(meals.filter(m => m.time === toDay && (m.weekOf || activeWeek) === activeWeek).map(m => m.mealType));
     let copied = 0;
     for (const meal of sourceMeals) {
       if (!occupiedTypes.has(meal.mealType)) {
-        const newMeal: Meal = { ...meal, id: Date.now() + copied, time: toDay };
+        const newMeal: Meal = { ...meal, id: Date.now() + copied, time: toDay, weekOf: activeWeek };
         db.insertMeal(newMeal);
         setMeals(prev => [...prev, newMeal]);
         copied++;
@@ -261,9 +265,9 @@ function MealHubContent() {
 
   const duplicateMeal = (meal: Meal, targetDay: string) => {
     if (meal.time === targetDay) return;
-    const existing = meals.find(m => m.time === targetDay && m.mealType === meal.mealType);
+    const existing = meals.find(m => m.time === targetDay && m.mealType === meal.mealType && (m.weekOf || activeWeek) === activeWeek);
     if (existing) { showToast(`⏭ Already have a ${meal.mealType} planned for ${targetDay}`); return; }
-    const newMeal: Meal = { ...meal, id: Date.now(), time: targetDay };
+    const newMeal: Meal = { ...meal, id: Date.now(), time: targetDay, weekOf: activeWeek };
     db.insertMeal(newMeal);
     setMeals(prev => [...prev, newMeal]);
     showToast(`↗️ ${meal.name} copied to ${targetDay} (${meal.mealType})`);
@@ -350,6 +354,10 @@ function MealHubContent() {
               addRecipeToMealSlot={addRecipeToMealSlot}
               copyDayMeals={copyDayMeals}
               duplicateMeal={duplicateMeal}
+              activeWeek={activeWeek}
+              goToWeek={goToWeek}
+              archiveCurrentWeek={archiveCurrentWeek}
+              isCurrentWeek={isCurrentWeek}
             />
           </div>
         ))}

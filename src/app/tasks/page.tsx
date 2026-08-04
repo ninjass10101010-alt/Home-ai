@@ -739,7 +739,7 @@ export default function TasksPage() {
         });
         setPinSuccess(`${normalizedName.split(" ")[0]} completed ${task.title}! ${pointsMsg}`);
         triggerConfetti();
-        setTimeout(() => { setPinTaskId(null); setPinSuccess(""); setSnatchForMember(""); }, 1500);
+        setTimeout(() => { setPinTaskId(null); setPinSuccess(""); setSnatchForMember(""); setPinInput(""); }, 1500);
 
         // Server-authoritative claim: exactly one family member wins the race
         fetch("/api/tasks/claim", {
@@ -788,7 +788,7 @@ export default function TasksPage() {
       });
       setPinSuccess(`${normalizedName.split(" ")[0]} completed ${task.title}! ${pointsMsg}`);
       triggerConfetti();
-      setTimeout(() => { setPinTaskId(null); setPinSuccess(""); setSnatchForMember(""); }, 1500);
+      setTimeout(() => { setPinTaskId(null); setPinSuccess(""); setSnatchForMember(""); setPinInput(""); }, 1500);
     } else {
       setPinError("Wrong PIN. Try again.");
       setPinInput("");

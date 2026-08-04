@@ -324,10 +324,7 @@ export const db = {
     return result;
   },
 
-  selectMeals: () => {
-    if (mealsCache.length > 0) return mealsCache;
-    return defaultMeals;
-  },
+  selectMeals: async () => pbDb.selectMeals(),
   selectMealIdeas: () => mealIdeas,
   insertMeal: async (meal: any) => {
     const result = await pbDb.insertMeal(meal);
@@ -351,24 +348,8 @@ export const db = {
     return result;
   },
 
-  selectPantry: () => {
-    if (pantryCache.length > 0) return pantryCache;
-    return [
-      { id: 101, name: "Olive oil", status: "plenty" },
-      { id: 102, name: "Rice", status: "plenty" },
-      { id: 103, name: "Pasta", status: "low" },
-      { id: 104, name: "Canned tomatoes", status: "plenty" },
-      { id: 105, name: "Chicken broth", status: "plenty" },
-      { id: 106, name: "Flour", status: "plenty" },
-      { id: 107, name: "Sugar", status: "plenty" },
-      { id: 108, name: "Salt", status: "plenty" },
-      { id: 109, name: "Black pepper", status: "low" },
-    ];
-  },
-  selectGrocery: () => {
-    if (groceryCache.length > 0) return groceryCache;
-    return initialGroceryItems;
-  },
+  selectPantry: async () => pbDb.selectPantry(),
+  selectGrocery: async () => pbDb.selectGrocery(),
   upsertPantryItem: async (item: any) => {
     const result = await pbDb.upsertPantryItem(item);
     if (result) {
@@ -464,4 +445,8 @@ export const db = {
   mealsStore: mealsCache,
   pantryStore: pantryCache,
   groceryStore: groceryCache,
+
+  selectMealWeekArchives: async () => pbDb.selectMealWeekArchives(),
+  upsertMealWeekArchive: async (entry: any) => pbDb.upsertMealWeekArchive(entry),
+  deleteMealWeekArchive: async (weekStart: string) => pbDb.deleteMealWeekArchive(weekStart),
 };

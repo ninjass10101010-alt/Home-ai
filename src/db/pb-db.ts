@@ -445,6 +445,24 @@ export const db = {
   async deleteRecipe(id: string): Promise<boolean> {
     return safeDelete("recipes", id);
   },
+
+  async selectMealWeekArchives(): Promise<any[]> {
+    return safeList<any>("meal_week_archive", []);
+  },
+  async upsertMealWeekArchive(entry: any): Promise<any> {
+    const records = await safeList<any>("meal_week_archive", []);
+    const existing = records.find((r: any) => r.weekStart === entry.weekStart);
+    if (existing) {
+      return safeUpdate<any>("meal_week_archive", existing.id, entry);
+    }
+    return safeCreate<any>("meal_week_archive", entry);
+  },
+  async deleteMealWeekArchive(weekStart: string): Promise<boolean> {
+    const records = await safeList<any>("meal_week_archive", []);
+    const entry = records.find((r: any) => r.weekStart === weekStart);
+    if (!entry) return false;
+    return safeDelete("meal_week_archive", entry.id);
+  },
 };
 
 const membersFallback = [

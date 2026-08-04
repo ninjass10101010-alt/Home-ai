@@ -8,6 +8,7 @@ import Badge from "@/components/ui/Badge";
 import { weekDays, mealIdeas, mealPresets, slotMeta, smartTips, CALORIE_GOAL, PROTEIN_GOAL, CARBS_GOAL, FAT_GOAL } from "@/data/meals";
 import { Meal } from "@/types/meals";
 import { db } from "@/db";
+import { weekLabel } from "@/lib/meals-week-utils";
 
 const mealTypes = [
   { id: "breakfast", label: "Breakfast", icon: "🌅" },
@@ -40,9 +41,31 @@ function timeOfDayMeal(meals: Meal[]): Meal | undefined {
   return meals.find(m => m.mealType === "dinner") || meals[0];
 }
 
+function resolveMealEntry(meal: Meal, recipeCatalog: any[]): Meal {
+  if (!meal.recipeId) return meal;
+  const recipe = recipeCatalog.find((r: any) => String(r.id) === meal.recipeId);
+  if (!recipe) return meal;
+  const snapshotAt = meal.recipeSnapshotAt ? new Date(meal.recipeSnapshotAt).getTime() : 0;
+  const recipeUpdated = recipe.updatedAt ? new Date(recipe.updatedAt).getTime() : 0;
+  if (recipeUpdated <= snapshotAt) return meal;
+  return {
+    ...meal,
+    name: recipe.name || meal.name,
+    emoji: recipe.emoji || meal.emoji,
+    ingredients: recipe.ingredients ?? meal.ingredients,
+    instructions: recipe.instructions ?? meal.instructions,
+    servings: recipe.servings ?? meal.servings,
+    calories: recipe.calories ?? meal.calories,
+    protein: recipe.protein ?? meal.protein,
+    carbs: recipe.carbs ?? meal.carbs,
+    fat: recipe.fat ?? meal.fat,
+    recipeSnapshotAt: recipe.updatedAt || new Date().toISOString(),
+  };
+}
+
 function ingredientReadiness(meal: Meal): { ready: number; total: number } {
   if (!meal.ingredients?.length) return { ready: 0, total: 0 };
-  const pantryItems = db.selectPantry();
+  const pantryItems = db.pantryStore;
   const total = meal.ingredients.filter(i => i.trim()).length;
   let ready = 0;
   meal.ingredients.forEach(ing => {
@@ -61,6 +84,7 @@ export default function MealsTab({
   openRecipeModal, setActiveTab, handleSyncMealToGrocery, isSyncing,
   showAiSuggestions, aiMealIdeas, aiMealLoading, recipes,
   addRecipeToMealSlot, copyDayMeals, duplicateMeal,
+  activeWeek, goToWeek, archiveCurrentWeek, isCurrentWeek,
 }: any) {
 
   const { colors, accentRgb } = useAtmosphericTheme();
@@ -197,6 +221,36 @@ export default function MealsTab({
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
         {/* ── Left Column ────────────────────────────────── */}
         <div key={activeDay} className="space-y-5 min-w-0">
+          {/* ── Week Nav ── */}
+          {activeWeek && (
+            <div className="flex items-center justify-between mb-1">
+              <button
+                onClick={() => goToWeek?.(-1)}
+                className="w-8 h-8 rounded-lg glass flex items-center justify-center text-text-secondary hover:text-text-primary tap-sm text-sm"
+              >
+                ‹
+              </button>
+              <span className="text-sm font-semibold text-text-primary">
+                {weekLabel(activeWeek)}
+              </span>
+              <div className="flex items-center gap-1">
+                {!isCurrentWeek && (
+                  <button
+                    onClick={() => archiveCurrentWeek?.()}
+                    className="text-[10px] px-2 py-1 rounded-lg bg-[var(--color-surface-2)] text-text-muted hover:text-text-primary tap-sm"
+                  >
+                    Archive
+                  </button>
+                )}
+                <button
+                  onClick={() => goToWeek?.(1)}
+                  className="w-8 h-8 rounded-lg glass flex items-center justify-center text-text-secondary hover:text-text-primary tap-sm text-sm"
+                >
+                  ›
+                </button>
+              </div>
+            </div>
+          )}
           {/* ── Weekly Strip ── */}
           <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 no-scrollbar">
             {weekDays.map(day => {
@@ -279,8 +333,10 @@ export default function MealsTab({
             {visibleMealTypes.map(type => {
               const meta = slotMeta[type.id];
               const mealForType = activeMeals.find((m: Meal) => m.mealType === type.id);
+              const resolvedMeal = mealForType ? resolveMealEntry(mealForType, recipes) : null;
 
               if (mealForType) {
+                const display = resolvedMeal || mealForType;
                 return (
                   <div
                     key={type.id}
@@ -290,7 +346,7 @@ export default function MealsTab({
                     <div className="p-4">
                       <div className="flex items-center gap-4">
                         <div className="w-14 h-14 shrink-0 rounded-2xl bg-[var(--color-surface-0)]/50 flex items-center justify-center text-3xl shadow-sm border border-[var(--color-surface-3)]">
-                          {mealForType.emoji || "🍽️"}
+                          {display.emoji || "🍽️"}
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
@@ -308,7 +364,7 @@ export default function MealsTab({
                             </div>
                           </div>
                           <h3 className="truncate text-base font-bold text-text-primary leading-tight mt-0.5">
-                            {mealForType.name}
+                            {display.name}
                           </h3>
                           {duplicateTarget?.meal.id === mealForType.id && (
                             <div className="mt-2 p-2 rounded-xl bg-[var(--color-surface-0)]/70 border border-[var(--color-surface-4)] backdrop-blur-xl">
@@ -335,16 +391,16 @@ export default function MealsTab({
                             </div>
                           )}
                           <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs font-semibold text-text-muted">
-                            {mealForType.calories > 0 && (
-                              <span className="glass-subtle rounded-full px-2 py-0.5">🔥 {mealForType.calories} kcal</span>
+                            {display.calories > 0 && (
+                              <span className="glass-subtle rounded-full px-2 py-0.5">🔥 {display.calories} kcal</span>
                             )}
-                            {mealForType.prepTime && (
-                              <span className="glass-subtle rounded-full px-2 py-0.5">⏱ {mealForType.prepTime}</span>
+                            {display.prepTime && (
+                              <span className="glass-subtle rounded-full px-2 py-0.5">⏱ {display.prepTime}</span>
                             )}
-                            {mealForType.servings > 0 && (
-                              <span className="glass-subtle rounded-full px-2 py-0.5">👨‍👩‍👧‍👦 {mealForType.servings}</span>
+                            {display.servings > 0 && (
+                              <span className="glass-subtle rounded-full px-2 py-0.5">👨‍👩‍👧‍👦 {display.servings}</span>
                             )}
-                            {mealForType.tags?.map((t: string) => (
+                            {display.tags?.map((t: string) => (
                               <span key={t} className="hidden sm:inline rounded-full bg-[var(--color-surface-2)] px-2 py-0.5 text-text-secondary text-[10px] font-medium border border-[var(--color-surface-3)]">
                                 {t}
                               </span>

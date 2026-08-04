@@ -174,7 +174,7 @@ export default function HomePage() {
       const day = new Date(today);
       day.setDate(today.getDate() + index - today.getDay());
       const label = weekdayLabels[day.getDay()];
-      const mealsForDay = db.selectMeals().filter((meal: any) => meal.time === label);
+      const mealsForDay = (db.mealsStore || []).filter((meal: any) => meal.time === label);
       return {
         id: label,
         label,
