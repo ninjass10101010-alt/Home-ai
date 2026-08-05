@@ -33,6 +33,7 @@ import DayStrip from "@/components/patterns/DayStrip";
 import SectionCard from "@/components/patterns/SectionCard";
 import HomeLeaderboardWidget from "@/components/leaderboard/HomeLeaderboardWidget";
 import HomeSuggestionsWidget from "@/components/suggestions/HomeSuggestionsWidget";
+import MorningBriefingWidget from "@/components/briefing/MorningBriefingWidget";
 import ProfileSheet from "@/components/profile/ProfileSheet";
 
 const FogBackground = dynamic(() => import("@/components/ui/FogBackground"), { ssr: false });
@@ -288,6 +289,9 @@ export default function HomePage() {
 
             {widgets.map((id) => {
               switch (id as WidgetId) {
+                case "morningBriefing":
+                  return <div key="morningBriefing" className="mt-3"><MorningBriefingWidget /></div>;
+
                 case "weather":
                   return (
                     <div key="weather" className="relative z-10">
