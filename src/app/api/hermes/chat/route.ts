@@ -1,7 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildToolsForOpenAI, getTool } from "@/lib/hermes-tools";
+import { db } from "@/db";
 
 export const dynamic = "force-dynamic";
+
+function todayISO(): string {
+  return new Date().toISOString().split("T")[0];
+}
+
+async function persistChatPair(request: NextRequest, userMessage: string, assistantReply: string) {
+  try {
+    const userId = request.cookies.get("x-consuela-user")?.value || "guest";
+    const threadId = todayISO();
+    await db.insertChatMessage({ userId, role: "user", content: userMessage, source: "dashboard", threadId });
+    await db.insertChatMessage({ userId: "consuela", role: "assistant", content: assistantReply, source: "dashboard", threadId });
+  } catch (e: any) {
+    console.error("Failed to persist chat messages:", e?.message || e);
+  }
+}
 
 const HERMES_API_KEY = process.env.HERMES_API_KEY || "consuela-api-key-2026";
 const HERMES_URL =
@@ -113,6 +129,7 @@ export async function POST(request: NextRequest) {
       const { content, tool_calls } = await callHermes(messages, { tools, toolChoice: "auto" });
 
       if (!tool_calls || tool_calls.length === 0) {
+        await persistChatPair(request, message, content);
         return NextResponse.json({ content });
       }
 
