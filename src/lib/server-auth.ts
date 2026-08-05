@@ -1,4 +1,5 @@
 import { withAdmin } from "./pb-auth";
+import { memberPinMatches } from "./member-pins";
 
 export interface ServerMember {
   id: string;
@@ -34,22 +35,21 @@ export async function findMemberByName(name: string): Promise<any | null> {
 export async function verifyPinFromPB(name: string, pin: string): Promise<any | null> {
   if (!name || !pin) return null;
   const member = await findMemberByName(name);
-  if (!member || !member.pin) return null;
-  if (String(member.pin) !== String(pin)) return null;
+  if (!member) return null;
+  if (!memberPinMatches(member, pin)) return null;
   return member;
 }
 
 // Verify a PIN against ANY family member's stored PIN (PB is the source of
 // truth). Used by routes that only carry a pin (e.g. x-consuela-pin header) —
 // mirrors the /api/emergency "verify against any member" convention, but with
-// the live PB members instead of the in-memory fallback.
+// the live PB members instead of the in-memory fallback. Pin-less PB records
+// resolve through the shared fallback so client and server agree.
 export async function verifyPinAgainstAnyMember(pin: string): Promise<any | null> {
   if (!pin) return null;
   return withAdmin(async (pb) => {
     const records = await pb.collection("members").getFullList({ requestKey: null });
-    const member = records.find(
-      (r: any) => r.pin !== undefined && r.pin !== null && String(r.pin) === String(pin)
-    );
+    const member = records.find((r: any) => memberPinMatches(r, pin));
     return member || null;
   });
 }

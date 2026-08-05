@@ -1,5 +1,6 @@
 import { db as pbDb } from "./pb-db";
 import { defaultMeals, mealIdeas, initialGroceryItems } from "../data/meals";
+import { resolveMemberPin, memberPinMatches } from "@/lib/member-pins";
 
 const memberColor = (i: number) =>
   ["green", "cyan", "violet", "amber", "rose", "blue", "cyan", "green", "cyan"][i % 9] || "green";
@@ -32,13 +33,7 @@ async function refreshMembersCache() {
     const pbMembers = fresh || [];
     const pbFirstNames = new Set(pbMembers.map((m: any) => (m.name || "").split(" ")[0].toLowerCase()));
     for (const pbm of pbMembers) {
-      if (!pbm.pin) {
-        const first = (pbm.name || "").split(" ")[0].toLowerCase();
-        const fallback = membersFallback.find(
-          (f: any) => f.name.split(" ")[0].toLowerCase() === first,
-        );
-        if (fallback) pbm.pin = fallback.pin;
-      }
+      pbm.pin = resolveMemberPin(pbm);
     }
     const missingFallback = membersFallback.filter((f: any) => {
       const firstName = f.name.split(" ")[0].toLowerCase();
@@ -107,13 +102,7 @@ void (async () => {
     const pbMembers = (m as any[]) || [];
     const pbFirstNames = new Set(pbMembers.map((m: any) => (m.name || "").split(" ")[0].toLowerCase()));
     for (const pbm of pbMembers) {
-      if (!pbm.pin) {
-        const first = (pbm.name || "").split(" ")[0].toLowerCase();
-        const fallback = membersFallback.find(
-          (f: any) => f.name.split(" ")[0].toLowerCase() === first,
-        );
-        if (fallback) pbm.pin = fallback.pin;
-      }
+      pbm.pin = resolveMemberPin(pbm);
     }
     const missingFallback = membersFallback.filter((f: any) => {
       const firstName = f.name.split(" ")[0].toLowerCase();
@@ -190,8 +179,8 @@ export const db = {
     const list = membersCache.length > 0 ? membersCache : membersFallback;
     const member = list.find((m: any) => m.name === memberName || m.name?.startsWith(memberName));
     if (!member) return null;
-    if (member.pin && member.pin === pin) return member;
-    return null;
+    if (!memberPinMatches(member, pin)) return null;
+    return member;
   },
 
   deleteMember: async (name: string) => {
