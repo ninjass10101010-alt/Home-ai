@@ -55,6 +55,15 @@ export default function GoogleConnectCard() {
   const [copied, setCopied] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
+  const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (status !== "connected") return;
+    fetch("/api/google/sync-state")
+      .then((r) => r.json())
+      .then((d) => setLastSyncAt(d.calendar_last_sync_at || d.tasks_last_sync_at))
+      .catch(() => {});
+  }, [status]);
 
   if (!mounted) {
     return (
@@ -124,6 +133,11 @@ export default function GoogleConnectCard() {
                 Access token expires in {state.minutes_until_expiry} min · Last granted {formatRelativeTime(state.granted_at)}
               </p>
             )}
+            {lastSyncAt && (
+              <p className="mt-1 text-[11px] text-text-muted">
+                Last auto-sync: {formatRelativeTime(lastSyncAt)}
+              </p>
+            )}
           </div>
         </div>
         {syncResult && (
@@ -133,7 +147,7 @@ export default function GoogleConnectCard() {
         )}
         <div className="flex gap-2">
           <SoftButton onClick={handleSyncNow} loading={syncing} className="flex-1">
-            Sync now
+            Sync now (every 5 min)
           </SoftButton>
           <SoftButton variant="secondary" onClick={() => disconnect()} className="flex-1">
             Disconnect
