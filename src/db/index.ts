@@ -454,4 +454,8 @@ export const db = {
   selectPendingSuggestions: async (opts?: { scopeDate?: string; limit?: number }) => pbDb.selectPendingSuggestions(opts),
   updateSuggestion: async (id: string, patch: { status?: any; snoozedUntil?: string }) => pbDb.updateSuggestion(id, patch),
   deleteStaleSuggestions: async (beforeISO: string) => pbDb.deleteStaleSuggestions(beforeISO),
+
+  upsertMorningBriefing: async (scopeDate: string, summary: any) => pbDb.upsertMorningBriefing(scopeDate, summary),
+  selectMorningBriefing: async (scopeDate?: string) => pbDb.selectMorningBriefing(scopeDate),
+  ackMorningBriefing: async (id: string) => pbDb.ackMorningBriefing(id),
 };

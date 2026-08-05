@@ -547,6 +547,42 @@ export const db = {
       return count;
     });
   },
+
+  // === Morning Briefing ===
+  async upsertMorningBriefing(scopeDate: string, summary: unknown): Promise<any> {
+    return withAdmin(async (pb) => {
+      const existing = await pb.collection("morning_briefing").getFullList({
+        filter: `scopeDate="${scopeDate}"`,
+        requestKey: null,
+      });
+      const body = {
+        scopeDate,
+        summary,
+        generatedAt: new Date().toISOString(),
+      };
+      if (existing.length > 0) {
+        return pb.collection("morning_briefing").update(existing[0].id, body);
+      }
+      return pb.collection("morning_briefing").create({ ...body, acknowledged: false });
+    });
+  },
+
+  async selectMorningBriefing(scopeDate?: string): Promise<any | null> {
+    return withAdmin(async (pb) => {
+      const records = await pb.collection("morning_briefing").getFullList({
+        filter: scopeDate ? `scopeDate="${scopeDate}"` : "",
+        sort: "-scopeDate",
+        requestKey: null,
+      });
+      return records.length > 0 ? records[0] : null;
+    });
+  },
+
+  async ackMorningBriefing(id: string): Promise<any> {
+    return withAdmin(async (pb) => {
+      return pb.collection("morning_briefing").update(id, { acknowledged: true });
+    });
+  },
 };
 
 const membersFallback = [

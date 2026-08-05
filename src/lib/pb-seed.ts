@@ -188,6 +188,18 @@ const COLLECTIONS = [
     ],
   },
   {
+    name: "morning_briefing",
+    schema: [
+      { name: "scopeDate", type: "text", required: true },
+      { name: "summary", type: "json" },
+      { name: "generatedAt", type: "date" },
+      { name: "acknowledged", type: "bool" },
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_scope_unique ON morning_briefing (scopeDate)",
+    ],
+  },
+  {
     name: "rewards",
     schema: [
       { name: "name", type: "text", required: true },
