@@ -16,7 +16,6 @@ const normalizeName = (name: string) => name.toLowerCase().replace(/[^\w\s]/g, '
 
 export default function GroceryTab({
   groceryItems,
-  setGroceryItems,
   activeCategory,
   setActiveCategory,
   isSyncing,
@@ -45,12 +44,14 @@ export default function GroceryTab({
   const [editNotes, setEditNotes] = useState("");
   const [presetCategory, setPresetCategory] = useState<string>("produce");
   const [showAllPresets, setShowAllPresets] = useState(false);
-  const [undo, setUndo] = useState<{ pantryIds: number[]; items: GroceryItem[] } | null>(null);
+  const [undo, setUndo] = useState<{ pantryIds: number[]; items: GroceryItem[]; added: number } | null>(null);
+  const [sending, setSending] = useState(false);
+  const [undoing, setUndoing] = useState(false);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => () => { if (undoTimer.current) clearTimeout(undoTimer.current); }, []);
 
-  const pushUndo = (snapshot: { pantryIds: number[]; items: GroceryItem[] }) => {
+  const pushUndo = (snapshot: { pantryIds: number[]; items: GroceryItem[]; added: number }) => {
     setUndo(snapshot);
     if (undoTimer.current) clearTimeout(undoTimer.current);
     undoTimer.current = setTimeout(() => setUndo(null), UNDO_MS);
@@ -86,43 +87,73 @@ export default function GroceryTab({
   };
 
   const sendSingleToPantry = async (item: GroceryItem) => {
+    if (sending) return;
     const inPantry = (pantryItems || []).some((p: any) => normalizeName(p.item || p.name) === normalizeName(item.name));
     if (inPantry) { showToast(`🥫 ${item.name} is already in your pantry`); return; }
-    const saved: any = await addPantryItem(item.name, "plenty");
-    if (saved && typeof saved === "object") {
-      await deleteGroceryItem(item.id);
-      pushUndo({ pantryIds: [saved.id], items: [item] });
-      showToast(`🥫 Sent ${item.name} to pantry`);
+    setSending(true);
+    try {
+      const saved: any = await addPantryItem(item.name, "plenty");
+      if (saved && typeof saved === "object") {
+        await deleteGroceryItem(item.id);
+        pushUndo({ pantryIds: [saved.id], items: [item], added: 1 });
+        showToast(`🥫 Sent ${item.name} to pantry`);
+      }
+    } finally {
+      setSending(false);
     }
   };
 
   const sendCheckedToPantry = async () => {
+    if (sending) return;
     const checked = groceryItems.filter((i: any) => !i.needed);
     if (!checked.length) return;
-    const pantryIds: number[] = [];
-    let added = 0;
-    for (const item of checked) {
-      const inPantry = (pantryItems || []).some((p: any) => normalizeName(p.item || p.name) === normalizeName(item.name));
-      if (inPantry) continue;
-      const saved: any = await addPantryItem(item.name, "plenty");
-      if (saved && typeof saved === "object") { added++; pantryIds.push(saved.id); }
+    setSending(true);
+    try {
+      const pantryIds: number[] = [];
+      const sentItems: GroceryItem[] = [];
+      let added = 0;
+      let already = 0;
+      let failed = 0;
+      for (const item of checked) {
+        const inPantry = (pantryItems || []).some((p: any) => normalizeName(p.item || p.name) === normalizeName(item.name));
+        if (inPantry) { already++; continue; }
+        const saved: any = await addPantryItem(item.name, "plenty");
+        if (saved && typeof saved === "object") {
+          added++;
+          pantryIds.push(saved.id);
+          sentItems.push(item);
+        } else {
+          failed++;
+        }
+      }
+      for (const item of sentItems) await deleteGroceryItem(item.id);
+      if (added > 0) pushUndo({ pantryIds, items: sentItems, added });
+      if (added > 0 && already === 0 && failed === 0) {
+        showToast(`🥫 Sent ${added} item${added === 1 ? "" : "s"} to pantry`);
+      } else if (failed === 0) {
+        showToast(`🥫 Sent ${added} of ${added + already} to pantry (${already} already there)`);
+      } else {
+        showToast(`🥫 Sent ${added} to pantry (${already} already there, ${failed} failed)`);
+      }
+    } finally {
+      setSending(false);
     }
-    for (const item of checked) await deleteGroceryItem(item.id);
-    pushUndo({ pantryIds, items: checked });
-    showToast(added === checked.length
-      ? `🥫 Sent ${added} item${added === 1 ? "" : "s"} to pantry`
-      : `🥫 Sent ${added} of ${checked.length} to pantry (${checked.length - added} already there)`);
   };
 
   const handleUndo = async () => {
-    if (!undo) return;
-    if (undoTimer.current) clearTimeout(undoTimer.current);
-    for (const id of undo.pantryIds) await removePantryItem(id);
-    for (const item of undo.items) {
-      await addGroceryItem(item.name, item.category, item.priority, item.emoji, item.quantity || "", "", true);
+    if (!undo || undoing) return;
+    setUndoing(true);
+    try {
+      if (undoTimer.current) clearTimeout(undoTimer.current);
+      for (const id of undo.pantryIds) await removePantryItem(id);
+      for (const item of undo.items) {
+        await addGroceryItem(item.name, item.category, item.priority, item.emoji, item.quantity || "", item.notes || "", true);
+      }
+      setUndo(null);
+      showToast(`↩️ Restored ${undo.items.length} item${undo.items.length === 1 ? "" : "s"} to grocery`);
+    } finally {
+      setUndoing(false);
     }
-    setUndo(null);
-    showToast(`↩️ Restored ${undo.items.length} item${undo.items.length === 1 ? "" : "s"} to grocery`);
   };
 
   const clearCompleted = () => {
@@ -150,7 +181,7 @@ export default function GroceryTab({
 
   const bulkActions = (
     <div className="flex gap-2">
-      <SoftButton variant="primary" size="sm" onClick={sendCheckedToPantry} className="flex-1 whitespace-nowrap">
+      <SoftButton variant="primary" size="sm" onClick={sendCheckedToPantry} disabled={sending} className="flex-1 whitespace-nowrap">
         🥫 Send {checkedCount} to pantry
       </SoftButton>
       <SoftButton variant="ghost" size="sm" onClick={clearCompleted}>Clear</SoftButton>
@@ -290,7 +321,7 @@ export default function GroceryTab({
                           key={preset.name}
                           onClick={() => !alreadyIn && handlePresetTap(preset)}
                           disabled={alreadyIn}
-                          className={`group flex items-center gap-2.5 rounded-2xl border border-white/10 px-3 py-2.5 text-left transition-all duration-150 active:scale-[0.97] ${
+                          className={`group flex items-center gap-2.5 rounded-2xl border border-white/10 px-3 py-2.5 text-left transition-all duration-150 tap-sm ${
                             alreadyIn
                               ? "bg-[var(--color-accent-mint)]/10 border-[var(--color-accent-mint)]/20 opacity-60 cursor-default"
                               : "bg-[var(--color-surface-0)]/30 hover:border-[var(--color-accent-selected)]/40 hover:bg-[var(--color-surface-0)]/50"
@@ -330,11 +361,12 @@ export default function GroceryTab({
           {undo && (
             <div className="flex items-center gap-3 rounded-2xl border border-[var(--color-accent-mint)]/25 bg-[var(--color-accent-mint)]/10 px-4 py-3">
               <span className="flex-1 text-sm font-semibold text-text-primary">
-                🥫 Sent {undo.items.length} item{undo.items.length === 1 ? "" : "s"} to pantry
+                🥫 Sent {undo.added} item{undo.added === 1 ? "" : "s"} to pantry
               </span>
               <button
                 onClick={handleUndo}
-                className="rounded-xl bg-[var(--color-accent-mint)] px-3 py-1.5 text-xs font-bold text-white tap-sm"
+                disabled={undoing}
+                className="rounded-xl bg-[var(--color-accent-mint)] px-3 py-1.5 text-xs font-bold text-white tap-sm disabled:opacity-50"
               >
                 Undo
               </button>
@@ -490,7 +522,8 @@ export default function GroceryTab({
                             {!item.needed && (
                               <button
                                 onClick={(e) => { e.stopPropagation(); sendSingleToPantry(item); }}
-                                className="flex items-center gap-1 rounded-xl bg-[var(--color-accent-mint)]/15 px-2 py-1.5 text-[11px] font-bold text-[var(--color-accent-mint)] hover:bg-[var(--color-accent-mint)]/25 tap-sm"
+                                disabled={sending}
+                                className="flex items-center gap-1 rounded-xl bg-[var(--color-accent-mint)]/15 px-2 py-1.5 text-[11px] font-bold text-[var(--color-accent-mint)] hover:bg-[var(--color-accent-mint)]/25 tap-sm disabled:opacity-50"
                               >
                                 🥫 <span className="hidden sm:inline">Pantry</span>
                               </button>
