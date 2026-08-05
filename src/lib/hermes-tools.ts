@@ -1,5 +1,8 @@
 import { db } from "@/db";
-import { defaultMeals, mealIdeas, initialGroceryItems } from "@/data/meals";
+import { defaultMeals, mealIdeas, initialGroceryItems, groceryCategories } from "@/data/meals";
+import { withAdmin } from "@/lib/pb-auth";
+import { weekKey } from "@/lib/task-utils";
+import type { Transaction, WeekData } from "@/types/tasks";
 
 export interface ToolDefinition {
   name: string;
@@ -31,6 +34,99 @@ function formatTime(iso?: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return String(iso);
   return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+}
+
+// === Admin-backed persistence helpers ===
+// The dev/prod PocketBase restricts collections to superusers (PB v0.39+ rejects
+// unauthenticated writes), so every write goes through withAdmin.
+
+function parseJSON<T>(value: unknown, fallback: T): T {
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value) as T;
+    } catch {
+      return fallback;
+    }
+  }
+  return (value as T) ?? fallback;
+}
+
+function normalizeGroceryName(name: string): string {
+  return name.toLowerCase().replace(/[^\w\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+async function adminUpsertTask(task: Record<string, unknown>): Promise<any | null> {
+  try {
+    return await withAdmin(async (pb) => {
+      const records = await pb.collection("tasks").getFullList({ requestKey: null });
+      const existing = records.find((r: any) => r.taskId === task.taskId);
+      return existing ? pb.collection("tasks").update(existing.id, task) : pb.collection("tasks").create(task);
+    });
+  } catch (e: any) {
+    console.error("[hermes-tools] upsertTask failed:", e?.message);
+    return null;
+  }
+}
+
+async function adminInsertEvent(event: Record<string, unknown>): Promise<any | null> {
+  try {
+    return await withAdmin(async (pb) => pb.collection("events").create(event));
+  } catch (e: any) {
+    console.error("[hermes-tools] insertEvent failed:", e?.message);
+    return null;
+  }
+}
+
+async function adminUpsertGroceryItem(input: {
+  name: string;
+  category?: string;
+  source?: string;
+  needed?: boolean;
+}): Promise<any | null> {
+  try {
+    return await withAdmin(async (pb) => {
+      const trimmed = input.name.trim();
+      const category = input.category || "pantry";
+      const catDef = groceryCategories.find((c) => c.id === category);
+      const emoji = catDef?.emoji || "📦";
+      const aisle = catDef?.aisles?.[0]?.split("-")[0] || "1";
+      const records = await pb.collection("grocery_list_items").getFullList({ requestKey: null });
+      const existing = records.find((g: any) => g.name && normalizeGroceryName(g.name) === normalizeGroceryName(trimmed));
+      if (existing) {
+        const patch: Record<string, unknown> = { needed: input.needed ?? true };
+        if (input.needed === undefined) patch.source = input.source || existing.source || "chat";
+        return pb.collection("grocery_list_items").update(existing.id, patch);
+      }
+      return pb.collection("grocery_list_items").create({
+        name: trimmed,
+        emoji,
+        category,
+        aisle,
+        quantity: "",
+        priority: "medium",
+        needed: true,
+        source: input.source || "chat",
+      });
+    });
+  } catch (e: any) {
+    console.error("[hermes-tools] upsertGroceryItem failed:", e?.message);
+    return null;
+  }
+}
+
+async function adminUpsertWeekData(data: WeekData): Promise<any | null> {
+  try {
+    return await withAdmin(async (pb) => {
+      const records = await pb.collection("week_data").getFullList({ requestKey: null });
+      const existing = records.find((r: any) => r.weekStart === data.weekStart);
+      return existing
+        ? pb.collection("week_data").update(existing.id, data as any)
+        : pb.collection("week_data").create(data as any);
+    });
+  } catch (e: any) {
+    console.error("[hermes-tools] upsertWeekData failed:", e?.message);
+    return null;
+  }
 }
 
 const TOOLS: Tool[] = [
@@ -89,6 +185,81 @@ const TOOLS: Tool[] = [
         emoji: e.emoji,
         color: e.color,
       })));
+    },
+  },
+  {
+    definition: {
+      name: "add_event",
+      description: "Add a new event to the family calendar. Use this when the user asks to create or schedule an event.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Event title (e.g. 'Soccer practice', 'Dentist appointment')" },
+          date: { type: "string", description: "Date in YYYY-MM-DD format. Defaults to today." },
+          time: { type: "string", description: "Time in HH:MM 24-hour format. Defaults to 09:00." },
+          icon: { type: "string", description: "Emoji icon for the event (default 📅)" },
+          color: { type: "string", description: "Accent color (default mint)" },
+          member: { type: "string", description: "Family member the event is for" },
+        },
+        required: ["title"],
+      },
+    },
+    handler: async (args) => {
+      const event: Record<string, unknown> = {
+        title: String(args.title).trim(),
+        date: args.date || todayISO(),
+        time: args.time || "09:00",
+        icon: args.icon || "📅",
+        color: args.color || "mint",
+        member: args.member,
+      };
+      const row = await adminInsertEvent(event);
+      if (!row) return summarize({ ok: false, error: "Could not create event" });
+      return summarize({
+        ok: true,
+        event: {
+          id: row.id,
+          title: row.title,
+          date: row.date,
+          time: row.time,
+          icon: row.icon,
+          color: row.color,
+          member: row.member,
+        },
+      });
+    },
+  },
+  {
+    definition: {
+      name: "remove_event",
+      description: "Remove an event from the family calendar by title. Optionally narrow by date.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Event title to remove (e.g. 'Soccer practice')" },
+          date: { type: "string", description: "Optional: date in YYYY-MM-DD format to disambiguate" },
+        },
+        required: ["title"],
+      },
+    },
+    handler: async (args) => {
+      const title = String(args.title).trim().toLowerCase();
+      const date = args.date ? String(args.date) : undefined;
+      let result: { removed: boolean; title?: any; reason?: string };
+      try {
+        result = await withAdmin(async (pb) => {
+          const records = await pb.collection("events").getFullList({ requestKey: null });
+          const match = records.find(
+            (e: any) => String(e.title).trim().toLowerCase() === title && (!date || e.date === date)
+          );
+          if (!match) return { removed: false, reason: "not found" };
+          await pb.collection("events").delete(match.id);
+          return { removed: true, title: match.title };
+        });
+      } catch (e: any) {
+        result = { removed: false, reason: `error: ${e?.message}` };
+      }
+      return summarize(result);
     },
   },
   {
@@ -164,16 +335,131 @@ const TOOLS: Tool[] = [
         const search = String(args.assigned_to).toLowerCase();
         return name.includes(search) || name.startsWith(search);
       });
+      const task: Record<string, unknown> = {
+        taskId: Date.now(),
+        title: String(args.title).trim(),
+        assignee: match ? (match.fullName || match.name) : String(args.assigned_to).trim(),
+        assigneeEmoji: match?.emoji || "✅",
+        due,
+        points,
+        priority,
+        recurring: "none",
+        category: "chore",
+        universal: false,
+        createdAt: new Date().toISOString(),
+      };
+      const row = await adminUpsertTask(task);
+      if (!row) return summarize({ ok: false, error: "Could not persist task to the dashboard" });
       return summarize({
-        added: {
-          title: args.title,
-          assigned_to: match ? (match.fullName || match.name) : args.assigned_to,
-          points,
-          due,
-          priority,
-        },
-        note: "Task added to the dashboard (stored locally — will sync to Google Tasks when that integration is enabled).",
+        ok: true,
+        taskId: row.taskId ?? task.taskId,
+        id: row.id,
+        title: row.title,
+        assignee: row.assignee,
+        assigneeEmoji: row.assigneeEmoji,
+        points: row.points,
+        due: row.due,
+        priority: row.priority,
       });
+    },
+  },
+  {
+    definition: {
+      name: "complete_task",
+      description: "Mark a pending chore as completed for the week. The task's points are awarded to its assigned family member. Find the task by title or taskId.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Task title to complete (e.g. 'Walk Rocco')" },
+          taskId: { type: "number", description: "Optional: numeric task id to complete" },
+          assignee: { type: "string", description: "Optional: family member name to disambiguate (e.g. 'Emily')" },
+        },
+      },
+    },
+    handler: async (args) => {
+      const taskId = args.taskId !== undefined ? Number(args.taskId) : undefined;
+      const title = args.title ? String(args.title).trim() : undefined;
+      const assignee = args.assignee ? String(args.assignee).trim().toLowerCase() : undefined;
+      let result: Record<string, any>;
+      if (!taskId && !title) {
+        return summarize({ ok: false, error: "Provide a title or taskId of the task to complete" });
+      }
+      try {
+        result = await withAdmin(async (pb) => {
+          const records = await pb.collection("tasks").getFullList({ requestKey: null });
+          let task: any = taskId !== undefined ? records.find((r: any) => r.taskId === taskId) : undefined;
+          if (!task && title) {
+            task = records.find((r: any) => String(r.title).trim().toLowerCase() === title.toLowerCase());
+            if (!task) task = records.find((r: any) => String(r.title).trim().toLowerCase().includes(title.toLowerCase()));
+            if (task && assignee) {
+              const t = String(task.assignee || "").toLowerCase();
+              if (!t.includes(assignee) && !t.startsWith(assignee)) {
+                const alt = records.find(
+                  (r: any) => String(r.title).trim().toLowerCase() === title.toLowerCase() &&
+                    String(r.assignee || "").toLowerCase().includes(assignee)
+                );
+                if (alt) task = alt;
+              }
+            }
+          }
+          if (!task) {
+            return {
+              ok: false,
+              error: `No pending task found${title ? ` matching "${title}"` : ""}${taskId !== undefined ? ` (taskId ${taskId})` : ""}`,
+            };
+          }
+
+          const currentWeek = weekKey();
+          const weekRecords = await pb.collection("week_data").getFullList({ requestKey: null });
+          const week = weekRecords.find((r: any) => r.weekStart === currentWeek) || null;
+          const points = parseJSON<Record<string, number>>(week?.points, {});
+          const history = parseJSON<Transaction[]>(week?.history, []);
+          const existingTx = history.find((tx: any) => tx.taskId === Number(task.taskId) && tx.type === "earn");
+          if (existingTx) {
+            return {
+              ok: false,
+              error: `Task "${task.title}" was already completed this week by ${existingTx.member}`,
+              completedBy: existingTx.member,
+            };
+          }
+
+          const memberName = task.assignee || "Unknown";
+          const amount = Number(task.points) || 0;
+          const tx: Transaction = {
+            id: Date.now() + Math.floor(Math.random() * 1000),
+            timestamp: new Date().toISOString(),
+            member: memberName,
+            type: "earn",
+            amount,
+            description: `Completed: ${task.title}${amount > 0 ? ` (+${amount}pts)` : ""}`,
+            taskId: Number(task.taskId),
+          };
+          const updatedWeek: WeekData = {
+            weekStart: currentWeek,
+            points: { ...points, [memberName]: (points[memberName] || 0) + amount },
+            streak: parseJSON<Record<string, number>>(week?.streak, {}),
+            lastActive: parseJSON<Record<string, string>>(week?.lastActive, {}),
+            history: [...history, tx],
+          };
+          if (week) {
+            await pb.collection("week_data").update(week.id, updatedWeek as any);
+          } else {
+            await pb.collection("week_data").create(updatedWeek as any);
+          }
+
+          return {
+            ok: true,
+            taskId: Number(task.taskId),
+            title: task.title,
+            assignee: memberName,
+            pointsEarned: amount,
+            completedInWeek: currentWeek,
+          };
+        });
+      } catch (e: any) {
+        result = { ok: false, error: `complete_task failed: ${e?.message}` };
+      }
+      return summarize(result);
     },
   },
   {
@@ -330,13 +616,59 @@ const TOOLS: Tool[] = [
       },
     },
     handler: async (args) => {
-      const names = String(args.items).split(",").map((s: string) => s.trim()).filter(Boolean);
-      const cat = args.category || "pantry";
+      const names = String(args.items ?? "").split(",").map((s: string) => s.trim()).filter(Boolean);
+      if (names.length === 0) return summarize({ inserted: 0, items: [], error: "No item names provided" });
+      const category = args.category || "pantry";
+      const inserted: Array<{ name: string; emoji: string; category: string }> = [];
+      for (const name of names) {
+        const row = await adminUpsertGroceryItem({ name, category, source: "chat" });
+        if (row) {
+          inserted.push({
+            name: row.name || name,
+            emoji: row.emoji || "🛒",
+            category: row.category || category,
+          });
+        }
+      }
       return summarize({
-        added: names.map((n: string) => ({ name: n, category: cat, emoji: "🛒", priority: "medium", needed: true })),
-        total: names.length,
-        note: `${names.length} item(s) added to the grocery list. Check the Grocery tab in the dashboard.`,
+        inserted: inserted.length,
+        items: inserted,
+        note: `${inserted.length} item(s) added to the grocery list. Check the Grocery tab in the dashboard.`,
       });
+    },
+  },
+  {
+    definition: {
+      name: "complete_grocery_item",
+      description: "Mark a grocery item as picked up / no longer needed on the shopping list.",
+      parameters: {
+        type: "object",
+        properties: {
+          item: { type: "string", description: "Item name to mark as picked up (e.g. 'milk')" },
+        },
+        required: ["item"],
+      },
+    },
+    handler: async (args) => {
+      const name = String(args.item || "").trim();
+      let result: { ok: boolean; reason?: string; item?: any; needed?: boolean };
+      if (!name) {
+        return summarize({ ok: false, error: "Item name required" });
+      }
+      try {
+        result = await withAdmin(async (pb) => {
+          const records = await pb.collection("grocery_list_items").getFullList({ requestKey: null });
+          const found = records.find(
+            (g: any) => g.name && normalizeGroceryName(g.name) === normalizeGroceryName(name)
+          );
+          if (!found) return { ok: false, reason: "not found", item: name };
+          await pb.collection("grocery_list_items").update(found.id, { needed: false });
+          return { ok: true, item: found.name, needed: false };
+        });
+      } catch (e: any) {
+        result = { ok: false, reason: `error: ${e?.message}` };
+      }
+      return summarize(result);
     },
   },
   {
@@ -402,7 +734,8 @@ const TOOLS: Tool[] = [
       parameters: { type: "object", properties: { id: { type: "string", description: "Suggestion id" } }, required: ["id"] },
     },
     handler: async (args) => {
-      const items = await db.selectPendingSuggestions({ limit: 50 });
+      const today = new Date().toISOString().split("T")[0];
+      const items = await db.selectPendingSuggestions({ limit: 50, scopeDate: today });
       const suggestion = items.find((s: any) => s.id === args.id);
       if (!suggestion) {
         return JSON.stringify({ ok: false, error: `Suggestion "${args.id}" not found` });
@@ -411,7 +744,19 @@ const TOOLS: Tool[] = [
       if (!payload?.tool) {
         return JSON.stringify({ ok: false, error: "This suggestion has no attached action" });
       }
-      return JSON.stringify({ ok: true, actionedLater: true, tool: payload.tool, args: payload.args || {} });
+      const tool = getTool(payload.tool);
+      if (!tool) {
+        return JSON.stringify({ ok: false, error: `Unknown tool: ${payload.tool}` });
+      }
+      const result = await tool.handler((payload.args as Record<string, any>) || {});
+      await db.updateSuggestion(args.id, { status: "actioned" });
+      let parsed: any = result;
+      try {
+        parsed = JSON.parse(result);
+      } catch {
+        // keep raw string result
+      }
+      return JSON.stringify({ ok: true, tool: payload.tool, args: payload.args || {}, result: parsed });
     },
   },
   {
