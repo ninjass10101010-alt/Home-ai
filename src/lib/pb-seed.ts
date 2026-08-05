@@ -166,6 +166,28 @@ const COLLECTIONS = [
     ],
   },
   {
+    name: "proactive_suggestions",
+    schema: [
+      { name: "idempotencyHash", type: "text", required: true },
+      { name: "kind", type: "select", options: { values: ["pantry_low","task_penalty_streak","calendar_conflict","stale_data","custom"] } },
+      { name: "severity", type: "select", options: { values: ["info","warn","alert"] } },
+      { name: "title", type: "text", required: true },
+      { name: "body", type: "text" },
+      { name: "emoji", type: "text" },
+      { name: "actionLabel", type: "text" },
+      { name: "actionPayload", type: "json" },
+      { name: "status", type: "select", options: { values: ["pending","dismissed","actioned","snoozed"] } },
+      { name: "snoozedUntil", type: "date" },
+      { name: "scopeDate", type: "text", required: true },
+      { name: "createdAt", type: "date" },
+      { name: "expiresAt", type: "date" },
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_hash_unique ON proactive_suggestions (idempotencyHash)",
+      "CREATE INDEX idx_status_scope ON proactive_suggestions (status, scopeDate)",
+    ],
+  },
+  {
     name: "rewards",
     schema: [
       { name: "name", type: "text", required: true },
@@ -238,20 +260,48 @@ export async function seedCollections() {
           created.push(`${col.name} (already exists)`);
           continue;
         }
-        const liveFieldNames = new Set((live.schema || []).map((f: any) => f.name));
-        const missing = col.schema.filter((s: any) => !liveFieldNames.has(s.name));
-        if (missing.length) {
-          const mergedSchema = [
-            ...(live.schema || []),
-            ...missing.map((s: any) => {
-              const base: any = { name: s.name, type: s.type, required: s.required || false };
-              if (s.type === "select" && s.options) base.options = s.options;
-              if (s.type === "json") base.type = "json";
-              return base;
-            }),
-          ];
-          await pb.collections.update(live.id, { schema: mergedSchema });
-          created.push(`${col.name} (patched +${missing.length} fields: ${missing.map((m: any) => m.name).join(", ")})`);
+        const liveFieldNames = new Set((live.fields || []).map((f: any) => f.name));
+        const missingFields = col.schema.filter((s: any) => !liveFieldNames.has(s.name));
+
+        const liveIndexNames = new Set(
+          (live.indexes || []).map((i: any) => {
+            if (typeof i === "string") {
+              const match = i.match(/INDEX\s+(\S+)\s+ON/i);
+              return match ? match[1] : i;
+            }
+            return i.name;
+          })
+        );
+        const missingIndexes = (col.indexes || []).filter((i: any) => {
+          const name = typeof i === "string"
+            ? ((i.match(/INDEX\s+(\S+)\s+ON/i) || [])[1] || i)
+            : i.name;
+          return !liveIndexNames.has(name);
+        });
+
+        if (missingFields.length || missingIndexes.length) {
+          const parts: string[] = [];
+          if (missingFields.length) {
+            const mergedFields = [
+              ...(live.fields || []),
+              ...missingFields.map((s: any) => {
+                const base: any = { name: s.name, type: s.type, required: s.required || false };
+                if (s.type === "select" && s.options) {
+                  base.values = s.options.values;
+                  if (s.options.maxSelect) base.maxSelect = s.options.maxSelect;
+                }
+                if (s.type === "json") base.type = "json";
+                return base;
+              }),
+            ];
+            await pb.collections.update(live.id, { fields: mergedFields });
+            parts.push(`+${missingFields.length} fields: ${missingFields.map((m: any) => m.name).join(", ")}`);
+          }
+          if (missingIndexes.length) {
+            await pb.collections.update(live.id, { indexes: [...(live.indexes || []), ...missingIndexes] });
+            parts.push(`+${missingIndexes.length} indexes: ${missingIndexes.map((i: any) => typeof i === "string" ? ((i.match(/INDEX\s+(\S+)\s+ON/i) || [])[1] || i) : i.name).join(", ")}`);
+          }
+          created.push(`${col.name} (patched ${parts.join(", ")})`);
         } else {
           created.push(`${col.name} (already exists)`);
         }
@@ -260,13 +310,16 @@ export async function seedCollections() {
       await pb.collections.create({
         name: col.name,
         type: "base",
-        schema: col.schema.map((s: any) => {
+        fields: col.schema.map((s: any) => {
           const base: any = {
             name: s.name,
             type: s.type,
             required: s.required || false,
           };
-          if (s.type === "select" && s.options) base.options = s.options;
+          if (s.type === "select" && s.options) {
+            base.values = s.options.values;
+            if (s.options.maxSelect) base.maxSelect = s.options.maxSelect;
+          }
           if (s.type === "json") base.type = "json";
           return base;
         }),
