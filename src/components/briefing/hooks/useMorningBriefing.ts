@@ -1,7 +1,8 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { localTodayISO } from "@/lib/local-date";
 
 const REFRESH_INTERVAL_MS = 60_000;
 
@@ -24,31 +25,47 @@ export interface MorningBriefing {
 export function useMorningBriefing() {
   const [briefing, setBriefing] = useState<MorningBriefing | null>(null);
   const [loading, setLoading] = useState(true);
+  const [ackError, setAckError] = useState(false);
+  const scopeDateRef = useRef(localTodayISO());
 
+  // I7 — re-anchor on the local calendar date: recompute at every refresh tick
+  // (and on tab visibility change) so the polling switches to the new day's
+  // briefing at local midnight, not UTC midnight.
   const refresh = useCallback(async () => {
+    const scopeDate = localTodayISO();
+    const reanchored = scopeDate !== scopeDateRef.current;
+    scopeDateRef.current = scopeDate;
     try {
-      const res = await fetch("/api/consuela/briefing", { cache: "no-store" });
+      const res = await fetch(`/api/consuela/briefing?scopeDate=${scopeDate}`, { cache: "no-store" });
       const json = await res.json();
       setBriefing(json?.briefing ?? null);
     } catch {
       // keep last-known briefing so the card doesn't flicker when PB blips
     } finally {
       setLoading(false);
+      if (reanchored) setAckError(false);
     }
   }, []);
 
   const ack = useCallback(
-    async (id: string) => {
+    async (id: string): Promise<boolean> => {
+      // L4 — optimistic ack: collapse immediately; roll back if PATCH fails.
+      setBriefing((prev) => (prev ? { ...prev, acknowledged: true } : prev));
       try {
-        await fetch("/api/consuela/briefing", {
+        const res = await fetch("/api/consuela/briefing", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ id }),
         });
+        if (!res.ok) throw new Error(`PATCH failed: ${res.status}`);
       } catch {
-        // fall through to refresh; PATCH failure surfaces on the next poll
+        setBriefing((prev) => (prev ? { ...prev, acknowledged: false } : prev));
+        setAckError(true);
+        setTimeout(() => setAckError(false), 4000);
+        return false;
       }
       await refresh();
+      return true;
     },
     [refresh],
   );
@@ -56,8 +73,15 @@ export function useMorningBriefing() {
   useEffect(() => {
     refresh();
     const t = setInterval(refresh, REFRESH_INTERVAL_MS);
-    return () => clearInterval(t);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [refresh]);
 
-  return { briefing, loading, ack };
+  return { briefing, loading, ack, ackError };
 }

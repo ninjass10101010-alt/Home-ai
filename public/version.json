@@ -1,7 +1,7 @@
 {
-  "hash": "eb4ae85b566b21891a788e74170262e8a09bcbba",
-  "short": "eb4ae85",
-  "message": "fix(consuela): final review — snooze, conflict parser, complete_task, act buttons, minor sweep",
-  "date": "2026-08-05 00:37:04 -0400",
+  "hash": "d55f092e91b5cb14867a0b6966e793d62ac9c91b",
+  "short": "d55f092",
+  "message": "fix(consuela): act route tool allowlist + robust success check",
+  "date": "2026-08-05 00:46:45 -0400",
   "author": "GarciaFam"
 }

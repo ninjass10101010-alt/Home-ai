@@ -11,6 +11,7 @@ import EmptyState from "@/components/ui/EmptyState";
 import Toast from "@/components/ui/Toast";
 import { useSuggestions, actSuggestion } from "./hooks/useSuggestions";
 import type { ProactiveSuggestion } from "@/lib/consuela/types";
+import { useAuth } from "@/hooks/useAuth";
 
 const TOOL_ROUTES: Record<string, string> = {
   get_pending_tasks: "/tasks",
@@ -77,6 +78,7 @@ function SuggestionRow({
 export default function HomeSuggestionsWidget() {
   const [mounted, setMounted] = useState(false);
   const [toast, setToast] = useState<{ msg: string; tone: "success" | "error" } | null>(null);
+  const { currentUser } = useAuth();
   const { items, loading, refresh, dismiss } = useSuggestions(20);
 
   useEffect(() => {
@@ -89,7 +91,7 @@ export default function HomeSuggestionsWidget() {
   };
 
   const handleAct = async (suggestion: ProactiveSuggestion) => {
-    const res = await actSuggestion(suggestion.id);
+    const res = await actSuggestion(suggestion.id, currentUser?.pin);
     if (res.ok) showToast(`✅ ${res.message}`, "success");
     else showToast(`⚠️ ${res.message}`, "error");
     refresh();

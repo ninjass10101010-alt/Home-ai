@@ -39,6 +39,21 @@ export async function verifyPinFromPB(name: string, pin: string): Promise<any | 
   return member;
 }
 
+// Verify a PIN against ANY family member's stored PIN (PB is the source of
+// truth). Used by routes that only carry a pin (e.g. x-consuela-pin header) —
+// mirrors the /api/emergency "verify against any member" convention, but with
+// the live PB members instead of the in-memory fallback.
+export async function verifyPinAgainstAnyMember(pin: string): Promise<any | null> {
+  if (!pin) return null;
+  return withAdmin(async (pb) => {
+    const records = await pb.collection("members").getFullList({ requestKey: null });
+    const member = records.find(
+      (r: any) => r.pin !== undefined && r.pin !== null && String(r.pin) === String(pin)
+    );
+    return member || null;
+  });
+}
+
 export function sanitizeMember(member: any): ServerMember {
   const { pin, ...rest } = member;
   return rest as ServerMember;

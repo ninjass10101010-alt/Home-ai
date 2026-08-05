@@ -19,6 +19,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { NextRequest } from "next/server";
 import { db } from "../../src/db/index.ts";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -268,6 +269,48 @@ async function main() {
   await step("selectChatMessages with a different threadId returns empty", async () => {
     const other = await db.selectChatMessages(`${TEST_THREAD_ID}-other`);
     assert.equal(other.length, 0, `expected 0 rows for other thread, got ${other.length}`);
+  });
+
+  // --- 6. I3: explicit createdAt honored; L10: route rejects malformed threadId ---
+  await step("insertChatMessage honors an explicit createdAt (I3)", async () => {
+    const backdated = await db.insertChatMessage({
+      userId: "consuela",
+      role: "assistant",
+      content: "test-chat-msg-0 (backdated)",
+      source: "api",
+      threadId: TEST_THREAD_ID,
+      createdAt: "2020-01-01T00:00:00.000Z",
+    });
+    assert.ok(backdated?.id, `expected row, got ${JSON.stringify(backdated).slice(0, 200)}`);
+    assert.equal(
+      new Date(backdated.createdAt).toISOString(),
+      "2020-01-01T00:00:00.000Z",
+      `explicit createdAt must be preserved, got ${backdated.createdAt}`
+    );
+    const all = await db.selectChatMessages(TEST_THREAD_ID);
+    assert.equal(all.length, 4, `expected 4 rows, got ${all.length}`);
+    assert.equal(all[0].content, "test-chat-msg-0 (backdated)", "backdated row must sort first");
+  });
+
+  await step("GET /api/chat/messages rejects malformed threadId (L10)", async () => {
+    const { GET: chatMessagesGET } = await import("../../src/app/api/chat/messages/route.ts");
+    for (const bad of ['abc"def', 'abc\\def']) {
+      const res = await chatMessagesGET(
+        new NextRequest(`http://localhost/api/chat/messages?threadId=${encodeURIComponent(bad)}`)
+      );
+      assert.equal(res.status, 400, `threadId ${bad}: expected 400, got ${res.status}`);
+      const body = await res.json();
+      assert.equal(body.error, "invalid threadId");
+    }
+    const res = await chatMessagesGET(
+      new NextRequest(`http://localhost/api/chat/messages?threadId=${encodeURIComponent(TEST_THREAD_ID)}`)
+    );
+    assert.equal(res.status, 200, `valid threadId: expected 200, got ${res.status}`);
+    const body = await res.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.threadId, TEST_THREAD_ID);
+    assert.ok(Array.isArray(body.messages) && body.messages.length === 4, "all 4 rows served");
+    assert.equal(body.messages[0].content, "test-chat-msg-0 (backdated)");
   });
 
   // --- Cleanup ---

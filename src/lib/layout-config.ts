@@ -55,7 +55,24 @@ export function loadLayoutConfig(): HomeLayoutConfig {
       const sanitized = parsed.widgets.filter((id: unknown): id is WidgetId => typeof id === "string" && VALID_IDS.has(id as WidgetId));
       const present = new Set(sanitized);
       const missing = DEFAULT_LAYOUT.widgets.filter((id) => !present.has(id));
-      return { widgets: [...sanitized, ...missing] };
+      if (missing.length === 0) return { widgets: [...sanitized] };
+      const widgets = [...sanitized];
+      // L6 — self-heal heuristic: the consuela widgets (morningBriefing at the
+      // very top of Home, consuelaSuggestions right below it) are "new" defaults
+      // for legacy saved layouts. Appending them at the end would bury the
+      // briefing card at the bottom of Home, defeating its top-of-Home purpose,
+      // so insert them at their default positions instead. Everything else that
+      // is missing keeps the old append-at-end behaviour.
+      for (const id of DEFAULT_LAYOUT.widgets) {
+        if (!missing.includes(id)) continue;
+        if (id === "morningBriefing" || id === "consuelaSuggestions") {
+          const idx = id === "morningBriefing" ? 0 : 1;
+          widgets.splice(Math.min(idx, widgets.length), 0, id);
+        } else {
+          widgets.push(id);
+        }
+      }
+      return { widgets };
     }
     return { ...DEFAULT_LAYOUT, widgets: [...DEFAULT_LAYOUT.widgets] };
   } catch {

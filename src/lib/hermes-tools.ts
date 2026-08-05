@@ -387,14 +387,18 @@ const TOOLS: Tool[] = [
       try {
         result = await withAdmin(async (pb) => {
           const records = await pb.collection("tasks").getFullList({ requestKey: null });
-          let task: any = taskId !== undefined ? records.find((r: any) => r.taskId === taskId) : undefined;
+          // I4 — only pending rows can be completed. A `done` row (completed in
+          // a previous week) must not silently re-earn points.
+          const pending = records.filter((r: any) => r.status !== "done");
+          const done = records.filter((r: any) => r.status === "done");
+          let task: any = taskId !== undefined ? pending.find((r: any) => r.taskId === taskId) : undefined;
           if (!task && title) {
-            task = records.find((r: any) => String(r.title).trim().toLowerCase() === title.toLowerCase());
-            if (!task) task = records.find((r: any) => String(r.title).trim().toLowerCase().includes(title.toLowerCase()));
+            task = pending.find((r: any) => String(r.title).trim().toLowerCase() === title.toLowerCase());
+            if (!task) task = pending.find((r: any) => String(r.title).trim().toLowerCase().includes(title.toLowerCase()));
             if (task && assignee) {
               const t = String(task.assignee || "").toLowerCase();
               if (!t.includes(assignee) && !t.startsWith(assignee)) {
-                const alt = records.find(
+                const alt = pending.find(
                   (r: any) => String(r.title).trim().toLowerCase() === title.toLowerCase() &&
                     String(r.assignee || "").toLowerCase().includes(assignee)
                 );
@@ -403,6 +407,18 @@ const TOOLS: Tool[] = [
             }
           }
           if (!task) {
+            // I4 — distinguish "already completed (previous week)" from "not found".
+            const completedMatch = taskId !== undefined
+              ? done.find((r: any) => r.taskId === taskId)
+              : title
+                ? done.find((r: any) => String(r.title).trim().toLowerCase() === title.toLowerCase())
+                : undefined;
+            if (completedMatch) {
+              return {
+                ok: false,
+                error: "Task was already completed (last week). Mark it as pending first if you want to recomplete.",
+              };
+            }
             return {
               ok: false,
               error: `No pending task found${title ? ` matching "${title}"` : ""}${taskId !== undefined ? ` (taskId ${taskId})` : ""}`,
@@ -740,8 +756,9 @@ const TOOLS: Tool[] = [
       parameters: { type: "object", properties: { id: { type: "string", description: "Suggestion id" } }, required: ["id"] },
     },
     handler: async (args) => {
-      const today = new Date().toISOString().split("T")[0];
-      const items = await db.selectPendingSuggestions({ limit: 50, scopeDate: today });
+      // C2 — no scopeDate filter: past-day suggestions must still be findable
+      // by id (snoozed/older rows live on after midnight).
+      const items = await db.selectPendingSuggestions({ limit: 50 });
       const suggestion = items.find((s: any) => s.id === args.id);
       if (!suggestion) {
         return JSON.stringify({ ok: false, error: `Suggestion "${args.id}" not found` });
@@ -766,8 +783,16 @@ const TOOLS: Tool[] = [
       } catch {
         // keep raw string result
       }
-      if (parsed && typeof parsed === "object" && parsed.error) {
-        return JSON.stringify({ ok: false, error: parsed.error, tool: payload.tool, result: parsed });
+      // I5 — mirror /act/route.ts R3: success is only !parsed.error &&
+      // parsed.ok !== false. Handlers report failure via `error` OR `ok:false`
+      // (no error key); on failure DO NOT mark the suggestion actioned.
+      if (parsed && typeof parsed === "object" && (parsed.error || parsed.ok === false)) {
+        return JSON.stringify({
+          ok: false,
+          error: parsed.error || parsed.reason || "Action failed",
+          tool: payload.tool,
+          result: parsed,
+        });
       }
       await db.updateSuggestion(args.id, { status: "actioned" });
       return JSON.stringify({ ok: true, tool: payload.tool, args: payload.args || {}, result: parsed });

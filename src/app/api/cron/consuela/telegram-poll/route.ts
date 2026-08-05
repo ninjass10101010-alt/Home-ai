@@ -10,7 +10,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { pollTelegramUpdates, type TgUpdate } from "@/lib/telegram/get-updates";
+import { pollTelegramUpdates, sanitizeTelegramError, type TgUpdate } from "@/lib/telegram/get-updates";
 
 export const dynamic = "force-dynamic";
 
@@ -34,10 +34,17 @@ export async function POST(request: NextRequest) {
   try {
     updates = await pollTelegramUpdates(lastUpdateId ?? undefined);
   } catch (err: any) {
+    const message = sanitizeTelegramError(String(err?.message || err));
+    // I2 — 429/5xx: back off, do NOT advance lastUpdateId, so the next cron
+    // tick retries the same window.
+    if (message.includes("429")) {
+      console.log("[telegram-poll] rate-limited, backing off until next cron tick");
+      return NextResponse.json({ ok: false, reason: "rate_limited" });
+    }
     return NextResponse.json({
       ok: false,
       reason: "telegram_error",
-      error: String(err?.message || err),
+      error: message,
     });
   }
 
@@ -54,12 +61,20 @@ export async function POST(request: NextRequest) {
       content: msg.text,
       source: "telegram",
       threadId: dateISO(msg.date),
+      // I3 — use the Telegram send time, not the poll time.
+      createdAt: new Date(msg.date * 1000).toISOString(),
     });
     processed++;
   }
 
   if (maxId !== (lastUpdateId ?? 0)) {
-    await db.setState(STATE_KEY, maxId);
+    // I6 — compare-and-set: only advance if no concurrent poll already moved
+    // the offset further. A lost update here is expected under concurrency and
+    // is retried on the next cron tick.
+    const advanced = await db.setState(STATE_KEY, maxId, lastUpdateId ?? null);
+    if (!advanced) {
+      return NextResponse.json({ ok: false, reason: "state_conflict" });
+    }
   }
 
   return NextResponse.json({ ok: true, processed, lastUpdateId: maxId });

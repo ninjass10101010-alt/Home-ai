@@ -30,7 +30,11 @@ export async function POST(req: NextRequest) {
 
     if (resource === "calendar" || resource === "all") {
       const c = await syncCalendar();
-      result.calendar = { events: c.events, deleted: c.deleted };
+      if (c && "skipped" in c) {
+        result.calendar = { skipped: true, reason: c.reason };
+      } else {
+        result.calendar = { events: c.events, deleted: c.deleted };
+      }
     }
 
     if (resource === "tasks" || resource === "all") {

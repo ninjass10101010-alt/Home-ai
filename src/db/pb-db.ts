@@ -472,7 +472,7 @@ export const db = {
     let rejected = 0;
     await withAdmin(async (pb) => {
       for (const item of items) {
-        const hash = idempotencyHashOf(item.kind, item.title, item.scopeDate);
+        const hash = idempotencyHashOf(item.kind, item.title, item.scopeDate, item.severity, item.actionPayload?.args);
         const body: Record<string, unknown> = {
           idempotencyHash: hash,
           kind: item.kind,
@@ -504,14 +504,20 @@ export const db = {
   },
 
   async selectPendingSuggestions(opts?: { scopeDate?: string; limit?: number }): Promise<ProactiveSuggestion[]> {
-    const today = opts?.scopeDate || new Date().toISOString().split("T")[0];
     const now = new Date().toISOString();
     const limit = opts?.limit ?? 20;
+    // C1: no `scopeDate>="today"` clause — after midnight a snoozed row's
+    // scopeDate is yesterday, so a lower-bound filter would permanently hide it.
+    // The `status="pending"` + `(snoozedUntil=null || snoozedUntil<now)` clauses
+    // already gate visibility correctly. scopeDate is kept only as an OPTIONAL
+    // exact-match parameter for callers that want "what's relevant today"
+    // (briefing/scanner); the widget/act path passes nothing and sees all
+    // pending rows regardless of age.
     const filterParts = [
       'status="pending"',
-      `scopeDate>="${today}"`,
       `(snoozedUntil=null || snoozedUntil<"${now}")`,
     ];
+    if (opts?.scopeDate) filterParts.push(`scopeDate="${opts.scopeDate}"`);
     const filter = filterParts.join(" && ");
     return withAdmin(async (pb) => {
       const records = await pb.collection("proactive_suggestions").getFullList({
@@ -595,25 +601,35 @@ export const db = {
     });
   },
 
-  async setState(key: string, value: unknown): Promise<any> {
+  async setState(key: string, value: unknown, expectedPrev?: unknown): Promise<boolean> {
     return withAdmin(async (pb) => {
       const records = await pb.collection("consuela_state").getFullList({
         filter: `key="${key}"`,
         requestKey: null,
       });
       if (records.length > 0) {
-        return pb.collection("consuela_state").update(records[0].id, { value });
+        // I6 — compare-and-set: if the caller knows the previous value and it
+        // doesn't match the fresh read, someone else advanced it first. Refuse
+        // the write (lost update under concurrency is expected and retried).
+        if (expectedPrev !== undefined && records[0].value !== expectedPrev) {
+          return false;
+        }
+        await pb.collection("consuela_state").update(records[0].id, { value });
+        return true;
       }
-      return pb.collection("consuela_state").create({ key, value });
+      await pb.collection("consuela_state").create({ key, value });
+      return true;
     });
   },
 
   // === Chat Messages ===
-  async insertChatMessage(msg: { userId: string; role: string; content: string; source: string; threadId: string }): Promise<any> {
+  async insertChatMessage(msg: { userId: string; role: string; content: string; source: string; threadId: string; createdAt?: string }): Promise<any> {
     return withAdmin(async (pb) => {
       return pb.collection("chat_messages").create({
         ...msg,
-        createdAt: new Date().toISOString(),
+        // I3 — optional caller-provided createdAt (e.g. Telegram send time);
+        // otherwise fall back to the insert time.
+        createdAt: msg.createdAt || new Date().toISOString(),
       });
     });
   },

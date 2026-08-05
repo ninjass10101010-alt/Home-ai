@@ -1,8 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { getTool } from "@/lib/hermes-tools";
+import { verifyPinAgainstAnyMember } from "@/lib/server-auth";
 
 export const dynamic = "force-dynamic";
+
+const PIN_HEADER = "x-consuela-pin";
+
+// C3 — this route performs write actions, so it requires a family-member PIN
+// verified server-side against PocketBase (mirrors /api/tasks/claim +
+// /api/emergency). The client forwards the active session PIN from useAuth.
+async function isAuthorized(request: NextRequest): Promise<boolean> {
+  const pin =
+    request.headers.get(PIN_HEADER) || request.cookies.get(PIN_HEADER)?.value || "";
+  if (!pin) return false;
+  const member = await verifyPinAgainstAnyMember(pin);
+  return member !== null;
+}
 
 // R2 — allowlist of tools the act route may dispatch. Only safe, non-admin,
 // write-capable tools; admin tools (trigger_update, restart_container, ...) and
@@ -18,6 +32,9 @@ const ALLOWED_TOOLS = new Set([
 ]);
 
 export async function POST(request: NextRequest) {
+  if (!(await isAuthorized(request))) {
+    return NextResponse.json({ error: "pin required" }, { status: 401 });
+  }
   const { id } = await request.json().catch(() => ({}));
   if (!id) return NextResponse.json({ ok: false, error: "id required" }, { status: 400 });
   try {

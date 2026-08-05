@@ -390,6 +390,91 @@ async function main() {
     assert.equal(count, 2, `expected still 2 rows, got ${count}`);
   });
 
+  // --- 5. I2: 429/5xx backoff (offset untouched) ---
+  await step("429 response -> ok:false reason:rate_limited, offset untouched (I2)", async () => {
+    // I6 — CAS: pass the actual current value as expectedPrev, otherwise the
+    // row holding EXPECTED_LAST_ID refuses the "reset to 100".
+    const currentOffset = await db.getState(STATE_KEY);
+    assert.equal(currentOffset, EXPECTED_LAST_ID, "precondition: offset is at the expected last id");
+    const reset = await db.setState(STATE_KEY, 100, currentOffset);
+    assert.equal(reset, true, "reset to 100 must succeed");
+    tgResponder = () =>
+      Promise.resolve({ ok: false, status: 429, json: async () => ({ ok: false }) });
+    try {
+      const res = await post();
+      assert.equal(res.status, 200);
+      const json = await res.json();
+      assert.equal(json.ok, false);
+      assert.equal(json.reason, "rate_limited", "429 must map to rate_limited");
+      assert.equal(json.lastUpdateId, undefined, "no offset advance in the response");
+    } finally {
+      tgResponder = null;
+    }
+    const value = await db.getState(STATE_KEY);
+    assert.equal(value, 100, "offset must NOT advance on 429");
+    await fetch(`${PB_URL}/api/collections/consuela_state/records?filter=${encodeURIComponent(`key="${STATE_KEY}"`)}&perPage=10`, {
+      headers: { authorization: adminToken },
+    }).then(async (r) => {
+      const data = await r.json();
+      for (const row of data.items || []) {
+        await fetch(`${PB_URL}/api/collections/consuela_state/records/${row.id}`, {
+          method: "DELETE",
+          headers: { authorization: adminToken },
+        });
+      }
+    });
+  });
+
+  // --- 6. I6: setState compare-and-set ---
+  await step("setState CAS refuses stale expectedPrev (I6)", async () => {
+    // Pre-clean any leftover row from an interrupted earlier run so the
+    // "initial write" CAS (expectedPrev=null, no row) starts fresh.
+    const leftovers = await pbJson(
+      `/api/collections/consuela_state/records?filter=${encodeURIComponent(`key="${TEST_STATE_KEY}"`)}&perPage=10`,
+      adminToken
+    );
+    for (const row of leftovers.items || []) {
+      await fetch(`${PB_URL}/api/collections/consuela_state/records/${row.id}`, {
+        method: "DELETE",
+        headers: { authorization: adminToken },
+      });
+    }
+    assert.equal(await db.setState(TEST_STATE_KEY, 50, null), true, "initial write");
+    assert.equal(await db.setState(TEST_STATE_KEY, 100, 50), true, "advance with correct prev");
+    assert.equal(await db.setState(TEST_STATE_KEY, 200, 50), false, "stale expectedPrev must be refused");
+    assert.equal(await db.getState(TEST_STATE_KEY), 100, "row keeps the first write");
+    assert.equal(await db.setState(TEST_STATE_KEY, 200, 100), true, "advance with the real prev");
+    const data = await pbJson(
+      `/api/collections/consuela_state/records?filter=${encodeURIComponent(`key="${TEST_STATE_KEY}"`)}&perPage=10`,
+      adminToken
+    );
+    for (const row of data.items || []) {
+      await fetch(`${PB_URL}/api/collections/consuela_state/records/${row.id}`, {
+        method: "DELETE",
+        headers: { authorization: adminToken },
+      });
+    }
+    assert.equal(await db.getState(TEST_STATE_KEY), null, "test state row cleaned up");
+  });
+
+  // --- 7. L10: bot token redaction in error responses ---
+  await step("telegram_error response redacts the bot token (L10)", async () => {
+    tgResponder = async () => {
+      throw new Error(`fetch failed: https://api.telegram.org/bot${MOCK_TOKEN}/getUpdates?offset=1&timeout=10`);
+    };
+    try {
+      const res = await post();
+      assert.equal(res.status, 200);
+      const json = await res.json();
+      assert.equal(json.ok, false);
+      assert.equal(json.reason, "telegram_error");
+      assert.ok(!String(json.error || "").includes(MOCK_TOKEN), `token leaked: ${json.error}`);
+      assert.ok(String(json.error || "").includes("<redacted telegram url>"), "placeholder missing");
+    } finally {
+      tgResponder = null;
+    }
+  });
+
   // --- 5. Cleanup ---
   await step("cleanup: delete test chat rows + state row", async () => {
     await cleanupTestData(adminToken);

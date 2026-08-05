@@ -2,6 +2,7 @@ import { runEngine } from "./engine";
 import { withAdmin } from "@/lib/pb-auth";
 import { db } from "@/db";
 import { weekStartForDate } from "@/lib/meals-week-utils";
+import { localTodayISO } from "@/lib/local-date";
 import type { ProactiveSuggestion } from "./types";
 
 type BriefingRow = Record<string, unknown>;
@@ -14,7 +15,7 @@ export interface BriefingSummary {
   generatedAt: string;
 }
 
-function todayISO(): string { return new Date().toISOString().split("T")[0]; }
+function todayISO(): string { return localTodayISO(); }
 
 export async function generateBriefing({ scopeDate }: { scopeDate: string }): Promise<BriefingSummary> {
   await runEngine({ scopeDate });

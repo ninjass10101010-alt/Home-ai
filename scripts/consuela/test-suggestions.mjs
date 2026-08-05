@@ -143,10 +143,35 @@ async function deleteSuggestion(token, id) {
   });
 }
 
-async function actOnSuggestion(serverPort, id) {
+// C3 — the PATCH + /act routes now require a family-member PIN; members are user
+// data (not seeded), so if the dev PB has no member with a PIN, create a
+// dedicated test member and return its pin + id for cleanup.
+async function resolveTestMemberPin(token) {
+  const data = await pbJson("/api/collections/members/records?perPage=100", token);
+  const member = (data.items || []).find(
+    (m) => m.pin !== undefined && m.pin !== null && String(m.pin).trim().length > 0
+  );
+  if (member) return { pin: String(member.pin), id: null };
+  const created = await pbJson("/api/collections/members/records", token, {
+    method: "POST",
+    body: JSON.stringify({
+      name: `test-c3-member-${Date.now()}`,
+      pin: "4242",
+      role: "kid",
+      emoji: "🧪",
+      color: "violet",
+    }),
+  });
+  return { pin: "4242", id: created.id };
+}
+
+async function actOnSuggestion(serverPort, id, pin) {
   const res = await fetch(`http://127.0.0.1:${serverPort}/api/consuela/suggestions/act`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      ...(pin ? { "x-consuela-pin": pin } : {}),
+    },
     body: JSON.stringify({ id }),
     signal: AbortSignal.timeout(60_000),
   });
@@ -209,6 +234,15 @@ async function main() {
   let adminToken;
   await step("setup: PB admin auth works (dev PB reachable)", async () => {
     adminToken = await pbAdminToken();
+  });
+
+  let validPin = "";
+  let testMemberId = null;
+  await step("setup: resolve a family member PIN from PB (C3 authorized path)", async () => {
+    const resolved = await resolveTestMemberPin(adminToken);
+    validPin = resolved.pin;
+    testMemberId = resolved.id;
+    console.log(`  (using pin ${validPin} for member auth in subsequent steps)`);
   });
 
   let booted = null;
@@ -308,7 +342,7 @@ async function main() {
 
     const patch = await fetch(`http://127.0.0.1:${serverPort}/api/consuela/suggestions`, {
       method: "PATCH",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "x-consuela-pin": validPin },
       body: JSON.stringify({ id: targetId, status: "dismissed" }),
       signal: AbortSignal.timeout(60_000),
     });
@@ -331,14 +365,59 @@ async function main() {
     if (!serverPort) throw new Error("no server to test (previous step failed)");
     const res = await fetch(`http://127.0.0.1:${serverPort}/api/consuela/suggestions`, {
       method: "PATCH",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "x-consuela-pin": validPin },
       body: JSON.stringify({ status: "dismissed" }),
       signal: AbortSignal.timeout(60_000),
     });
     assert.equal(res.status, 400, `expected 400, got ${res.status}`);
   });
 
+  // ---- C3: PIN required on write routes ----
   const actRows = [];
+  let pinTargetId = null;
+  await step("PATCH without pin returns 401 { error: pin required } (C3)", async () => {
+    if (!serverPort) throw new Error("no server to test (previous step failed)");
+    pinTargetId = await createPendingSuggestion(adminToken);
+    const res = await fetch(`http://127.0.0.1:${serverPort}/api/consuela/suggestions`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: pinTargetId, status: "dismissed" }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    assert.equal(res.status, 401, `expected 401, got ${res.status}`);
+    const body = await res.json().catch(() => ({}));
+    assert.equal(body.error, "pin required");
+    const after = await fetchSuggestion(adminToken, pinTargetId);
+    assert.equal(after.status, "pending", "row must stay pending without a pin");
+    await deleteSuggestion(adminToken, pinTargetId);
+  });
+
+  await step("PATCH with wrong pin returns 401 (C3)", async () => {
+    if (!serverPort) throw new Error("no server to test (previous step failed)");
+    const res = await fetch(`http://127.0.0.1:${serverPort}/api/consuela/suggestions`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", "x-consuela-pin": "9999" },
+      body: JSON.stringify({ id: pinTargetId || "does-not-matter", status: "dismissed" }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    assert.equal(res.status, 401, `expected 401, got ${res.status}`);
+  });
+
+  await step("act without pin returns 401 (C3)", async () => {
+    if (!serverPort) throw new Error("no server to test (previous step failed)");
+    const rec = await createSuggestionWithPayload(adminToken, {
+      tool: "add_grocery_item",
+      args: { items: "should-never-be-inserted" },
+      title: "hardening-test-suggestion-nopin",
+    });
+    actRows.push(rec.id);
+    const { status, body } = await actOnSuggestion(serverPort, rec.id);
+    assert.equal(status, 401, `expected 401, got ${status} (${JSON.stringify(body).slice(0, 200)})`);
+    assert.equal(body.error, "pin required");
+    const after = await fetchSuggestion(adminToken, rec.id);
+    assert.equal(after.status, "pending", "row must stay pending without a pin");
+  });
+
   const actGroceryName = `hardening-act ${Date.now()}`;
 
   await step("act route: admin tool is rejected by the allowlist (R2), row stays pending", async () => {
@@ -349,7 +428,7 @@ async function main() {
       title: "hardening-test-suggestion-admin",
     });
     actRows.push(rec.id);
-    const { status, body } = await actOnSuggestion(serverPort, rec.id);
+    const { status, body } = await actOnSuggestion(serverPort, rec.id, validPin);
     assert.equal(status, 400, `expected 400, got ${status} (${JSON.stringify(body).slice(0, 200)})`);
     assert.equal(body.ok, false, `expected ok:false, got ${JSON.stringify(body).slice(0, 200)}`);
     assert.equal(body.error, "tool not allowed", `expected "tool not allowed", got ${body.error}`);
@@ -365,7 +444,7 @@ async function main() {
       title: "hardening-test-suggestion-toolerror",
     });
     actRows.push(rec.id);
-    const { status, body } = await actOnSuggestion(serverPort, rec.id);
+    const { status, body } = await actOnSuggestion(serverPort, rec.id, validPin);
     assert.equal(status, 400, `expected 400, got ${status} (${JSON.stringify(body).slice(0, 200)})`);
     assert.equal(body.ok, false, `expected ok:false, got ${JSON.stringify(body).slice(0, 200)}`);
     const after = await fetchSuggestion(adminToken, rec.id);
@@ -380,7 +459,7 @@ async function main() {
       title: "hardening-test-suggestion-ok",
     });
     actRows.push(rec.id);
-    const { status, body } = await actOnSuggestion(serverPort, rec.id);
+    const { status, body } = await actOnSuggestion(serverPort, rec.id, validPin);
     assert.equal(status, 200, `expected 200, got ${status} (${JSON.stringify(body).slice(0, 200)})`);
     assert.equal(body.ok, true, `expected ok:true, got ${JSON.stringify(body).slice(0, 200)}`);
     assert.equal(body.tool, "add_grocery_item");
@@ -397,6 +476,34 @@ async function main() {
     );
   });
 
+  await step("act route still finds past-day suggestions (C2): scopeDate=yesterday is actionable", async () => {
+    if (!serverPort) throw new Error("no server to test (previous step failed)");
+    const yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
+    const pastName = `hardening-act past-day ${Date.now()}`;
+    const rec = await createSuggestionWithPayload(adminToken, {
+      tool: "add_grocery_item",
+      args: { items: pastName },
+      title: "hardening-test-suggestion-pastday",
+    });
+    actRows.push(rec.id);
+    await pbJson(`/api/collections/proactive_suggestions/records/${rec.id}`, adminToken, {
+      method: "PATCH",
+      body: JSON.stringify({ scopeDate: yesterday }),
+    });
+    const { status, body } = await actOnSuggestion(serverPort, rec.id, validPin);
+    assert.equal(status, 200, `expected 200, got ${status} (${JSON.stringify(body).slice(0, 200)})`);
+    const after = await fetchSuggestion(adminToken, rec.id);
+    assert.equal(after.status, "actioned", "past-day suggestion should be actionable");
+    const grocery = await pbJson(
+      `/api/collections/grocery_list_items/records?filter=${encodeURIComponent(`(name~"hardening-act")`)}`,
+      adminToken,
+    );
+    assert.ok(
+      (grocery.items || []).some((g) => g.name === pastName),
+      "grocery row from the past-day acted suggestion should exist",
+    );
+  });
+
   for (const id of actRows) {
     await deleteSuggestion(adminToken, id).catch(() => {});
   }
@@ -406,6 +513,12 @@ async function main() {
   );
   for (const g of actGrocery.items || []) {
     await fetch(`${PB_URL}/api/collections/grocery_list_items/records/${g.id}`, {
+      method: "DELETE",
+      headers: { authorization: adminToken },
+    }).catch(() => {});
+  }
+  if (testMemberId) {
+    await fetch(`${PB_URL}/api/collections/members/records/${testMemberId}`, {
       method: "DELETE",
       headers: { authorization: adminToken },
     }).catch(() => {});

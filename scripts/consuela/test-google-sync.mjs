@@ -11,6 +11,10 @@
 //   2. POST /api/cron/consuela/google-sync returns 401 with a wrong secret.
 //   3. The same route returns 409 { code: "no_grant" } with the right secret when
 //      Google is not connected (expected locally - no Google grant on this Mac).
+//   4. L7: 10 concurrent recordApiCall() calls serialize (unique increments,
+//      final PB count = start + 10 — no lost updates).
+//   5. L8: two concurrent syncCalendar() calls — exactly one wins, the loser
+//      resolves { skipped:true, reason:"already_in_progress" }.
 //
 // Manual curl equivalent (if you prefer not to boot a dev server):
 //   curl -s -X POST -H "Authorization: Bearer wrong-secret" \
@@ -132,6 +136,46 @@ function runEnsureCollections() {
   });
 }
 
+function runConcurrentApiCalls(n) {
+  const code = [
+    `import { recordApiCall } from "./src/lib/google/api-quota.ts";`,
+    `const calls = Array.from({ length: ${n} }, () => recordApiCall("test-l7"));`,
+    `Promise.all(calls)`,
+    `  .then(rs => process.stdout.write(JSON.stringify(rs.map(r => r.count))))`,
+    `  .catch(e => { console.error(e); process.exit(1); });`,
+  ].join("");
+  const out = execFileSync(TSCLI, ["-e", code], {
+    cwd: REPO_ROOT,
+    env: { ...process.env, NEXT_PUBLIC_PB_URL: PB_URL, PB_ADMIN_EMAIL: ADMIN_EMAIL, PB_ADMIN_PASS: ADMIN_PASS },
+    encoding: "utf8",
+    timeout: 120_000,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  return JSON.parse(out.trim());
+}
+
+function runConcurrentSync() {
+  const code = [
+    `import { syncCalendar } from "./src/lib/google/calendar.ts";`,
+    `const r1 = syncCalendar();`,
+    `const r2 = syncCalendar();`,
+    `Promise.allSettled([r1, r2]).then(rs =>`,
+    `  process.stdout.write(JSON.stringify(rs.map(r => r.status === "fulfilled" ? r.value : { rejected: true })))`,
+    `).catch(e => { console.error(e); process.exit(1); });`,
+  ].join("");
+  const out = execFileSync(TSCLI, ["-e", code], {
+    cwd: REPO_ROOT,
+    env: { ...process.env, NEXT_PUBLIC_PB_URL: PB_URL, PB_ADMIN_EMAIL: ADMIN_EMAIL, PB_ADMIN_PASS: ADMIN_PASS },
+    encoding: "utf8",
+    timeout: 120_000,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  // calendar.ts logs "[google-sync] sync already in progress, skipping" to
+  // stdout when the loser loses the lock; the JSON is written last, so take
+  // the final line.
+  return JSON.parse(out.trim().split("\n").pop());
+}
+
 async function probeWrongSecret(port, deadlineMs) {
   const deadline = Date.now() + deadlineMs;
   let lastErr = null;
@@ -205,6 +249,32 @@ async function main() {
     const q = runCheckQuota();
     assert.deepEqual(q, { ok: false, used: 49000, cap: 48000 });
     await upsertUsageRow(adminToken, 10);
+  });
+
+  await step("L7: 10 concurrent recordApiCall calls serialize (no lost updates)", async () => {
+    await upsertUsageRow(adminToken, 10);
+    const counts = runConcurrentApiCalls(10);
+    assert.equal(counts.length, 10, `expected 10 results, got ${JSON.stringify(counts)}`);
+    assert.equal(
+      new Set(counts).size,
+      10,
+      `counts must be unique (serialized increments), got ${counts.join(",")}`
+    );
+    assert.equal(Math.max(...counts), 20, `max count should be 20, got ${Math.max(...counts)}`);
+    const filter = encodeURIComponent(`date="${today()}"`);
+    const row = await pbJson(`/api/collections/consuela_google_api_usage/records?perPage=1&filter=${filter}`, adminToken);
+    assert.equal(row.items[0].count, 20, `PB row should end at 20, got ${row.items[0].count}`);
+    await upsertUsageRow(adminToken, 10);
+  });
+
+  await step("L8: concurrent syncCalendar calls — exactly one wins, loser gets skipped:true", async () => {
+    const settled = runConcurrentSync();
+    const skipped = settled.filter(
+      (r) => r && r.skipped === true && r.reason === "already_in_progress"
+    ).length;
+    assert.equal(skipped, 1, `expected exactly 1 skipped outcome, got ${JSON.stringify(settled)}`);
+    const nonSkipped = settled.filter((r) => !r || r.skipped !== true).length;
+    assert.equal(nonSkipped, 1, "exactly one non-skipped outcome (may reject without a grant)");
   });
 
   let booted = null;

@@ -1,14 +1,22 @@
 import { withAdmin } from "../pb-auth.ts";
 
-const DATE = new Date().toISOString().slice(0, 10);
+// L7 — the quota day must be computed per call (UTC — Google's quota day is
+// UTC), not cached at module load: a long-lived process would otherwise keep
+// counting against yesterday's row after midnight.
 const SOFT_LIMIT = 50_000;
 const HARD_LIMIT = 100_000;
 
-export async function recordApiCall(endpoint: string): Promise<{
+// L7 — serialize read-modify-write: concurrent recordApiCall calls would
+// otherwise read the same `count` and both write count+1 (lost update). Chaining
+// every call onto the previous one makes the increment sequential.
+let queue: Promise<unknown> = Promise.resolve();
+
+async function recordApiCallNow(endpoint: string): Promise<{
   count: number;
   tripped: boolean;
   blocked: boolean;
 }> {
+  const DATE = new Date().toISOString().slice(0, 10);
   return withAdmin(async (pb) => {
     const rows = await pb
       .collection("consuela_google_api_usage")
@@ -50,4 +58,14 @@ export async function recordApiCall(endpoint: string): Promise<{
       blocked: next > HARD_LIMIT,
     };
   });
+}
+
+export async function recordApiCall(endpoint: string): Promise<{
+  count: number;
+  tripped: boolean;
+  blocked: boolean;
+}> {
+  const run = queue.then(() => recordApiCallNow(endpoint));
+  queue = run.catch(() => undefined);
+  return run;
 }

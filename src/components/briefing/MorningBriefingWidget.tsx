@@ -5,6 +5,7 @@ import SectionCard from "@/components/patterns/SectionCard";
 import Surface from "@/components/ui/Surface";
 import Chip from "@/components/ui/Chip";
 import SoftButton from "@/components/ui/SoftButton";
+import Toast from "@/components/ui/Toast";
 import { useMorningBriefing } from "./hooks/useMorningBriefing";
 import type { MorningBriefing } from "./hooks/useMorningBriefing";
 
@@ -62,7 +63,7 @@ function Row({ icon, title, meta }: { icon: string; title: string; meta?: string
 }
 
 export default function MorningBriefingWidget() {
-  const { briefing, loading, ack } = useMorningBriefing();
+  const { briefing, loading, ack, ackError } = useMorningBriefing();
   const [expanded, setExpanded] = useState(false);
   const [acknowledging, setAcknowledging] = useState(false);
 
@@ -74,8 +75,10 @@ export default function MorningBriefingWidget() {
   const handleGotIt = async () => {
     setAcknowledging(true);
     try {
-      await ack(briefing.id);
-      setExpanded(false);
+      // L4 — only collapse on a confirmed ack; a failed PATCH keeps the card
+      // expanded so the rollback + error toast stay visible.
+      const ok = await ack(briefing.id);
+      if (ok) setExpanded(false);
     } finally {
       setAcknowledging(false);
     }
@@ -117,56 +120,69 @@ export default function MorningBriefingWidget() {
     >
       {expanded ? (
         <div className="space-y-4">
-          <div className="space-y-2">
-            <SectionLabel emoji="📅" label="Today's events" count={summary.events.length} />
-            {summary.events.slice(0, 5).map((event, i) => (
-              <Row key={str(event.id, `event-${i}`)} icon={str(event.icon, "📅")} title={str(event.title, "Untitled event")} meta={str(event.time)} />
-            ))}
-          </div>
+          {summary.events.length > 0 && (
+            <div className="space-y-2">
+              <SectionLabel emoji="📅" label="Today's events" count={summary.events.length} />
+              {summary.events.slice(0, 5).map((event, i) => (
+                <Row key={str(event.id, `event-${i}`)} icon={str(event.icon, "📅")} title={str(event.title, "Untitled event")} meta={str(event.time)} />
+              ))}
+            </div>
+          )}
 
-          <div className="space-y-2">
-            <SectionLabel emoji="✅" label="Priority tasks" count={summary.tasks.length} />
-            {summary.tasks
-              .slice()
-              .sort((a, b) => (Number(b.points) || 0) - (Number(a.points) || 0))
-              .slice(0, 6)
-              .map((task, i) => (
+          {summary.tasks.length > 0 && (
+            <div className="space-y-2">
+              <SectionLabel emoji="✅" label="Priority tasks" count={summary.tasks.length} />
+              {summary.tasks
+                .slice()
+                .sort((a, b) => (Number(b.points) || 0) - (Number(a.points) || 0))
+                .slice(0, 6)
+                .map((task, i) => (
+                  <Row
+                    key={str(task.id, `task-${i}`)}
+                    icon="✅"
+                    title={str(task.title, "Untitled task")}
+                    meta={`${str(task.assigned, str(task.assignee, "Anyone"))} · ${Number(task.points) || 0} pts`}
+                  />
+                ))}
+            </div>
+          )}
+
+          {summary.meals.length > 0 && (
+            <div className="space-y-2">
+              <SectionLabel emoji="🍽️" label="Meals" count={summary.meals.length} />
+              {summary.meals.map((meal, i) => (
                 <Row
-                  key={str(task.id, `task-${i}`)}
-                  icon="✅"
-                  title={str(task.title, "Untitled task")}
-                  meta={`${str(task.assigned, str(task.assignee, "Anyone"))} · ${Number(task.points) || 0} pts`}
+                  key={str(meal.id, `meal-${i}`)}
+                  icon={str(meal.emoji, "🍽️")}
+                  title={str(meal.name, "Untitled meal")}
+                  meta={[str(meal.mealType), str(meal.time)].filter(Boolean).join(" · ")}
                 />
               ))}
-          </div>
+            </div>
+          )}
 
-          <div className="space-y-2">
-            <SectionLabel emoji="🍽️" label="Meals" count={summary.meals.length} />
-            {summary.meals.map((meal, i) => (
-              <Row
-                key={str(meal.id, `meal-${i}`)}
-                icon={str(meal.emoji, "🍽️")}
-                title={str(meal.name, "Untitled meal")}
-                meta={[str(meal.mealType), str(meal.time)].filter(Boolean).join(" · ")}
-              />
-            ))}
-          </div>
-
-          <div className="space-y-2">
-            <SectionLabel emoji="✨" label="Consuela's noticed" count={summary.suggestions.length} />
-            {summary.suggestions.slice(0, 5).map((s, i) => (
-              <Row
-                key={str(s.id, `suggestion-${i}`)}
-                icon={str(s.emoji, "✨")}
-                title={str(s.title, "Suggestion")}
-                meta={str(s.body)}
-              />
-            ))}
-          </div>
+          {summary.suggestions.length > 0 && (
+            <div className="space-y-2">
+              <SectionLabel emoji="✨" label="Consuela's noticed" count={summary.suggestions.length} />
+              {summary.suggestions.slice(0, 5).map((s, i) => (
+                <Row
+                  key={str(s.id, `suggestion-${i}`)}
+                  icon={str(s.emoji, "✨")}
+                  title={str(s.title, "Suggestion")}
+                  meta={str(s.body)}
+                />
+              ))}
+            </div>
+          )}
 
           <SoftButton size="md" variant="primary" className="w-full" loading={acknowledging} onClick={handleGotIt}>
             Got it ✓
           </SoftButton>
+          {ackError && (
+            <Toast open tone="error">
+              Couldn&apos;t save — try again
+            </Toast>
+          )}
         </div>
       ) : (
         <p className="text-xs text-text-muted">Tap the badge above to see today’s plan.</p>

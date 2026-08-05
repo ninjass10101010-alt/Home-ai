@@ -28,6 +28,11 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await syncCalendar();
+    // L8 — a concurrent sync (cron double-fire or manual "Sync now") holds the
+    // in-process lock; report the skip instead of running in parallel.
+    if (result && "skipped" in result) {
+      return NextResponse.json({ ok: false, reason: "already_in_progress" });
+    }
     return NextResponse.json({ ok: true, result, quota });
   } catch (e: any) {
     console.error("[cron/google-sync]", e);

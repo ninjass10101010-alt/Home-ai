@@ -13,6 +13,18 @@ export interface SyncResult {
   deleted: number;
 }
 
+export interface SyncSkipped {
+  skipped: true;
+  reason: string;
+}
+
+export type SyncOutcome = SyncResult | SyncSkipped;
+
+// L8 — in-process lock: two concurrent cron fires (or a manual "Sync now" on
+// top of the cron) must not run listAllEvents + the upsert loop at the same
+// time. The loser gets { skipped: true } and the route reports it.
+let syncInFlight: Promise<SyncOutcome> | null = null;
+
 interface EventsListResponse {
   items?: GoogleCalendarEvent[];
   nextSyncToken?: string;
@@ -128,43 +140,55 @@ function eventToRow(event: GoogleCalendarEvent) {
   };
 }
 
-export async function syncCalendar(): Promise<SyncResult> {
-  const existingToken = await getSyncToken();
-  const { events, nextSyncToken } = await listAllEvents(
-    existingToken ? { syncToken: existingToken } : {},
-  );
+export async function syncCalendar(): Promise<SyncOutcome> {
+  if (syncInFlight) {
+    console.log("[google-sync] sync already in progress, skipping");
+    return { skipped: true, reason: "already_in_progress" };
+  }
+  const run = (async () => {
+    try {
+      const existingToken = await getSyncToken();
+      const { events, nextSyncToken } = await listAllEvents(
+        existingToken ? { syncToken: existingToken } : {},
+      );
 
-  let upserted = 0;
-  let deleted = 0;
+      let upserted = 0;
+      let deleted = 0;
 
-  await withAdmin(async (pb) => {
-    for (const ev of events) {
-      if ((ev as any).status === "cancelled") {
-        const existing = await pb
-          .collection(EVENTS_COLLECTION)
-          .getFullList({ requestKey: null, filter: `google_id = "${ev.id.replace(/"/g, '\\"')}"` });
-        for (const row of existing) {
-          await pb.collection(EVENTS_COLLECTION).delete(row.id, { requestKey: null });
-          deleted++;
+      await withAdmin(async (pb) => {
+        for (const ev of events) {
+          if ((ev as any).status === "cancelled") {
+            const existing = await pb
+              .collection(EVENTS_COLLECTION)
+              .getFullList({ requestKey: null, filter: `google_id = "${ev.id.replace(/"/g, '\\"')}"` });
+            for (const row of existing) {
+              await pb.collection(EVENTS_COLLECTION).delete(row.id, { requestKey: null });
+              deleted++;
+            }
+            continue;
+          }
+          const row = eventToRow(ev);
+          const existing = await pb
+            .collection(EVENTS_COLLECTION)
+            .getFullList({ requestKey: null, filter: `google_id = "${ev.id.replace(/"/g, '\\"')}"` });
+          if (existing.length > 0) {
+            await pb.collection(EVENTS_COLLECTION).update(existing[0].id, row, { requestKey: null });
+          } else {
+            await pb.collection(EVENTS_COLLECTION).create(row, { requestKey: null });
+          }
+          upserted++;
         }
-        continue;
-      }
-      const row = eventToRow(ev);
-      const existing = await pb
-        .collection(EVENTS_COLLECTION)
-        .getFullList({ requestKey: null, filter: `google_id = "${ev.id.replace(/"/g, '\\"')}"` });
-      if (existing.length > 0) {
-        await pb.collection(EVENTS_COLLECTION).update(existing[0].id, row, { requestKey: null });
-      } else {
-        await pb.collection(EVENTS_COLLECTION).create(row, { requestKey: null });
-      }
-      upserted++;
+      });
+
+      await saveSyncToken(nextSyncToken);
+
+      return { events: upserted, nextSyncToken, deleted };
+    } finally {
+      syncInFlight = null;
     }
-  });
-
-  await saveSyncToken(nextSyncToken);
-
-  return { events: upserted, nextSyncToken, deleted };
+  })();
+  syncInFlight = run;
+  return run;
 }
 
 export async function readCachedEvents(): Promise<any[]> {

@@ -13,6 +13,8 @@
 //   3. A morning_briefing row for today exists in PB after the cron run.
 //   4. GET /api/consuela/briefing returns { ok:true, briefing } (latest, and via ?scopeDate=).
 //   5. PATCH /api/consuela/briefing { id } acks the briefing (acknowledged=true).
+//   6. A second cron POST is idempotent: { ok:true, skipped:true, briefing } (L3), no
+//      duplicate row, ack state preserved.
 //
 // Manual curl equivalents:
 //   curl -s -X POST -H "Authorization: Bearer wrong-secret" \
@@ -224,9 +226,17 @@ async function main() {
     assert.ok(seedOutput.includes("morning_briefing"), `seed output missing morning_briefing`);
   });
 
+  await step("setup: remove any existing briefing for today (deterministic L3 test)", async () => {
+    const filter = encodeURIComponent(`scopeDate="${today()}"`);
+    const data = await pbJson(`/api/collections/morning_briefing/records?filter=${filter}&perPage=100`, adminToken);
+    for (const r of data.items || []) {
+      await deleteRow("morning_briefing", r.id, adminToken);
+    }
+  });
+
   const preExistingBriefing = await findBriefingByScopeDate(today(), adminToken);
   if (preExistingBriefing) {
-    console.log(`  note: a briefing for ${today()} already existed (id ${preExistingBriefing.id}); will leave it`);
+    throw new Error("briefing for today still exists after setup delete; cannot run deterministic L3 test");
   }
 
   const seeded = { event: null, task: null, meal: null, pantry: null };
@@ -296,6 +306,14 @@ async function main() {
     }
 
     try {
+      // The reuse probe above already POSTed the cron route, which (L3) may have
+      // created today's briefing; delete it so the in-test POST regenerates fresh.
+      const probeFilter = encodeURIComponent(`scopeDate="${today()}"`);
+      const probeRows = await pbJson(`/api/collections/morning_briefing/records?filter=${probeFilter}&perPage=100`, adminToken);
+      for (const r of probeRows.items || []) {
+        await deleteRow("morning_briefing", r.id, adminToken);
+      }
+
       const wrong = await probeWrongSecret(serverPort, 300_000);
       assert.equal(wrong.status, 401, `wrong secret: expected 401, got ${wrong.status}`);
       assert.equal(wrong.body.error, "unauthorized");
@@ -342,6 +360,24 @@ async function main() {
     assert.ok(rec.summary && Array.isArray(rec.summary.events), "row summary should have an events array");
     assert.ok(rec.summary.events.some((e) => e.title === TEST_EVENT_TITLE), "row summary should include the seeded event");
     console.log(`  briefing row: ${rec.id}`);
+  });
+
+  await step("second cron POST is idempotent: skipped:true + row untouched (L3)", async () => {
+    if (!serverPort) throw new Error("no server to test (previous step failed)");
+    const res = await fetch(`http://127.0.0.1:${serverPort}/api/cron/consuela/briefing`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${CRON_SECRET}` },
+      signal: AbortSignal.timeout(120_000),
+    });
+    const body = await res.json().catch(() => ({}));
+    assert.equal(res.status, 200, `expected 200, got ${res.status}`);
+    assert.equal(body.ok, true, `expected ok:true, got ${JSON.stringify(body).slice(0, 200)}`);
+    assert.equal(body.skipped, true, `expected skipped:true, got ${JSON.stringify(body).slice(0, 200)}`);
+    assert.equal(body.briefing?.id, briefingId, "skipped response should carry the existing row");
+    const rec = await findBriefingByScopeDate(today(), adminToken);
+    assert.equal(rec.id, briefingId, "no second row may be created");
+    assert.equal(rec.acknowledged, false, "ack state must not be clobbered by the re-run (L3)");
+    assert.ok(rec.summary.events.some((e) => e.title === TEST_EVENT_TITLE), "existing summary intact");
   });
 
   await step("GET /api/consuela/briefing returns latest briefing", async () => {

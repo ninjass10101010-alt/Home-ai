@@ -10,10 +10,14 @@ function todayISO(): string {
 
 async function persistChatPair(request: NextRequest, userMessage: string, assistantReply: string) {
   try {
+    // I1 — don't persist empty/fallback replies: they're thread spam and give
+    // the daily thread nothing useful for later rounds.
+    const reply = String(assistantReply || "").trim();
+    if (!reply || reply === "I processed that.") return;
     const userId = request.cookies.get("x-consuela-user")?.value || "guest";
     const threadId = todayISO();
     await db.insertChatMessage({ userId, role: "user", content: userMessage, source: "dashboard", threadId });
-    await db.insertChatMessage({ userId: "consuela", role: "assistant", content: assistantReply, source: "dashboard", threadId });
+    await db.insertChatMessage({ userId: "consuela", role: "assistant", content: reply, source: "dashboard", threadId });
   } catch (e: any) {
     console.error("Failed to persist chat messages:", e?.message || e);
   }
@@ -52,7 +56,8 @@ Rules:
 1. When asking about events, tasks, meals, recipes, grocery, or pantry — ALWAYS call a tool first.
 2. Never make up data. If you need to know something about the dashboard, use a tool.
 3. Use the user's message to determine which tool to call and what arguments to pass.
-4. For admin actions, confirm with the user before triggering updates or restarts. Use check_for_update or get_container_status first.`;
+4. For admin actions, confirm with the user before triggering updates or restarts. Use check_for_update or get_container_status first.
+5. If the user references a previous action (e.g. 'did you add milk?'), use a read tool to check current state rather than assuming.`;
 
 function parseToolArgs(raw: string | undefined): Record<string, any> {
   if (!raw) return {};

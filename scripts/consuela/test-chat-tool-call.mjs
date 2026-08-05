@@ -211,6 +211,39 @@ async function main() {
     assert.equal(earnTxs.length, 1, "double-complete must not add a second earn tx");
   });
 
+  await step("complete_task refuses a done row from a previous week (I4)", async () => {
+    const tool = getTool("complete_task");
+    const prevWeek = new Date(Date.parse(`${weekStart}T00:00:00Z`) - 7 * 86400000)
+      .toISOString()
+      .split("T")[0];
+    const lastWeekId = Math.floor(Date.now() / 1000) + 7;
+    await pbJson(`/api/collections/tasks/records`, token, {
+      method: "POST",
+      body: JSON.stringify({
+        taskId: lastWeekId,
+        title: "Hermes test task (last week)",
+        status: "done",
+        completedInWeek: prevWeek,
+        completedAt: new Date(Date.now() - 7 * 86400000).toISOString(),
+        assignee: "Caspian",
+        points: 5,
+      }),
+    });
+    const res = parseResult(await tool.handler({ taskId: lastWeekId }));
+    assert.equal(res.ok, false, `cross-week complete must fail, got ${JSON.stringify(res)}`);
+    assert.equal(
+      String(res.error),
+      "Task was already completed (last week). Mark it as pending first if you want to recomplete.",
+      `exact I4 error string expected, got: ${res.error}`
+    );
+    const weekRows = await listAll(token, "week_data", `weekStart="${weekStart}"`);
+    const history = jsonValue(weekRows[0]?.history ?? [], []);
+    assert.ok(
+      !history.some((h) => h.taskId === lastWeekId),
+      "no earn tx may be added for the last-week task"
+    );
+  });
+
   // ---- 4. add_event ----
   let createdEventId = null;
   await step("add_event persists a row to events", async () => {
@@ -320,7 +353,7 @@ async function main() {
     assert.equal(sug.status, "pending", "suggestion should stay pending");
   });
 
-  await step("action_suggestion does NOT mark actioned when the tool errors (M6)", async () => {
+  await step("action_suggestion does NOT mark actioned when the tool returns ok:false (I5)", async () => {
     const tool = getTool("action_suggestion");
     const created = await pbJson(
       `/api/collections/proactive_suggestions/records`,

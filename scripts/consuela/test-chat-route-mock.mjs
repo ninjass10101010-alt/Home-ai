@@ -136,6 +136,40 @@ await step("no-tool path: tools sent, content returned directly", async () => {
   assert.equal(sent.messages[1].content, "hello");
 });
 
+await step("I1: empty / fallback replies are not persisted (no PB fetches)", async () => {
+  const cases = [
+    ["", 0],
+    ["I processed that.", 0],
+    ["A real reply.", ">0"],
+  ];
+  for (const [content, expectedPbFetches] of cases) {
+    let pbFetchCount = 0;
+    fetchCalls = [];
+    mockFetch((i, url) => {
+      if (!String(url).includes("/v1/chat/completions")) pbFetchCount++;
+      return cannedCompletion(completion({ content }));
+    });
+
+    const res = await post("hello");
+    const json = await res.json();
+
+    assert.equal(json.content, content);
+    assert.equal(fetchCalls.length, 1, "exactly one Hermes call");
+    if (expectedPbFetches === ">0") {
+      assert.ok(
+        pbFetchCount > 0,
+        `content="${content}": expected persist fetches, got ${pbFetchCount}`
+      );
+    } else {
+      assert.equal(
+        pbFetchCount,
+        expectedPbFetches,
+        `content="${content}": expected ${expectedPbFetches} persist fetches, got ${pbFetchCount}`
+      );
+    }
+  }
+});
+
 await step("tool-call loop: handler result fed back as tool message, then final reply", async () => {
   fetchCalls = [];
   const canned = [

@@ -3,8 +3,14 @@
 
 import { useEffect, useState } from "react";
 import type { ProactiveSuggestion, SuggestionStatus } from "@/lib/consuela/types";
+import { useAuth } from "@/hooks/useAuth";
 
 const REFRESH_INTERVAL_MS = 60_000;
+
+// C3 — the suggestions write routes (PATCH + POST /act) require the session
+// PIN. The PIN is forwarded from the useAuth context (in-memory only, never
+// persisted to localStorage).
+export const PIN_HEADER = "x-consuela-pin";
 
 export const VIEW_TOOLS = ["get_pending_tasks", "get_weekly_meals", "open_calendar"];
 
@@ -21,11 +27,11 @@ function actionMessage(result: unknown): string {
   return "Done";
 }
 
-export async function actSuggestion(id: string): Promise<{ ok: boolean; message: string; result?: unknown }> {
+export async function actSuggestion(id: string, pin?: string): Promise<{ ok: boolean; message: string; result?: unknown }> {
   try {
     const r = await fetch("/api/consuela/suggestions/act", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(pin ? { [PIN_HEADER]: pin } : {}) },
       body: JSON.stringify({ id }),
     });
     const data = await r.json().catch(() => ({}));
@@ -39,6 +45,8 @@ export async function actSuggestion(id: string): Promise<{ ok: boolean; message:
 export function useSuggestions(limit = 20) {
   const [items, setItems] = useState<ProactiveSuggestion[]>([]);
   const [loading, setLoading] = useState(true);
+  const { currentUser } = useAuth();
+  const pin = currentUser?.pin;
 
   const refresh = async () => {
     try {
@@ -54,7 +62,7 @@ export function useSuggestions(limit = 20) {
   const patch = async (id: string, body: Record<string, unknown>) => {
     await fetch("/api/consuela/suggestions", {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(pin ? { [PIN_HEADER]: pin } : {}) },
       body: JSON.stringify({ id, ...body }),
     });
     await refresh();

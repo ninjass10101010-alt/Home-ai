@@ -12,6 +12,8 @@
 //   4. selectMorningBriefing(scopeDate) returns the row
 //   5. ackMorningBriefing flips acknowledged
 //   6. selectMorningBriefing() (no arg) returns the most recent row
+//   7. I7: localTodayISO anchors to the local calendar day (TZ=America/Los_Angeles
+//      test where UTC has already rolled to the next date)
 //
 // Uses a far-future scopeDate (2099-12-31) so the test never collides with real
 // briefing data, and cleans up its rows via the admin REST API at the end.
@@ -264,6 +266,33 @@ async function main() {
     assert.equal(rec.id, firstId, "still the same row");
     assert.equal(rec.acknowledged, true, "ack state should survive a same-day re-upsert");
     assert.deepEqual(rec.summary, SUMMARY_V1);
+  });
+
+  // --- I7: localTodayISO anchors to the local calendar day ---
+  await step("localTodayISO follows the local day, not UTC (I7)", async () => {
+    const prevTZ = process.env.TZ;
+    process.env.TZ = "America/Los_Angeles";
+    try {
+      const { localTodayISO, localPreviousDayISO } = await import("../../src/lib/local-date.ts");
+      // 2026-08-06 06:30Z == 2026-08-05 23:30 PT (PDT, UTC-7): UTC already rolled
+      // to Aug 6 while the family's local day is still Aug 5.
+      assert.equal(
+        localTodayISO(new Date("2026-08-06T06:30:00Z")),
+        "2026-08-05",
+        "LA local day must win over the UTC date"
+      );
+      assert.equal(
+        localTodayISO(new Date("2026-08-06T18:00:00Z")),
+        "2026-08-06",
+        "midday local is the same day"
+      );
+      process.env.TZ = "UTC";
+      assert.equal(localTodayISO(new Date("2026-08-06T06:30:00Z")), "2026-08-06", "UTC env sees the UTC date");
+      assert.equal(localPreviousDayISO("2026-08-05"), "2026-08-04");
+    } finally {
+      if (prevTZ === undefined) delete process.env.TZ;
+      else process.env.TZ = prevTZ;
+    }
   });
 
   // --- Cleanup ---

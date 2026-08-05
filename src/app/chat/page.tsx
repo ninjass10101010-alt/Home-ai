@@ -10,14 +10,12 @@ import { Icon3D } from "@/components/3d";
 import { db } from "@/db";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
-import { runAction, ActionCard } from "@/lib/action-runner";
 
 interface Message {
   id: number;
   role: "user" | "assistant";
   content: string;
   timestamp: string;
-  actions?: ActionCard[];
   speaker?: string;
   speakerEmoji?: string;
 }
@@ -97,24 +95,6 @@ const quickActions = [
   { icon: "tasks" as const, label: "Assign Chore", prompt: "Assign trash duty to Caspian every Thursday with 10 points" },
   { icon: "grocery" as const, label: "Grocery List", prompt: "Generate grocery list for this week's meals" },
 ];
-
-const actionAccentBg: Record<string, string> = {
-  event: "linear-gradient(135deg, rgba(124,111,247,0.18) 0%, rgba(124,111,247,0.06) 100%)",
-  meal: "linear-gradient(135deg, rgba(245,158,11,0.18) 0%, rgba(245,158,11,0.06) 100%)",
-  task: "linear-gradient(135deg, rgba(6,182,212,0.18) 0%, rgba(6,182,212,0.06) 100%)",
-  grocery: "linear-gradient(135deg, rgba(59,130,246,0.18) 0%, rgba(59,130,246,0.06) 100%)",
-  recipe: "linear-gradient(135deg, rgba(244,63,94,0.18) 0%, rgba(244,63,94,0.06) 100%)",
-  reward: "linear-gradient(135deg, rgba(234,179,8,0.18) 0%, rgba(234,179,8,0.06) 100%)",
-};
-
-const actionAccentBorder: Record<string, string> = {
-  event: "rgba(124,111,247,0.30)",
-  meal: "rgba(245,158,11,0.30)",
-  task: "rgba(6,182,212,0.30)",
-  grocery: "rgba(59,130,246,0.30)",
-  recipe: "rgba(244,63,94,0.30)",
-  reward: "rgba(234,179,8,0.30)",
-};
 
 function renderContent(text: string) {
   return text.split("\n").map((line, i) => {
@@ -308,25 +288,14 @@ function ChatContent() {
 
       setIsTyping(false);
 
-      const actions = aiResponse.actions || [];
-      const executedActions = await Promise.all(actions.map(async (action: ActionCard) => {
-        const result = await runAction(action);
-        return { ...action, confirmed: result.success };
-      }));
-
-      const resultMsgs = executedActions
-        .filter((a: ActionCard) => a.confirmed)
-        .map((a: ActionCard) => `✅ ${a.title}`);
       const content = aiResponse.content || aiResponse.reply || "I processed that.";
-      const fullContent = resultMsgs.length > 0 ? content + "\n\n" + resultMsgs.join("\n") : content;
 
       msgCounter.current += 1;
       const response: Message = {
         id: msgCounter.current,
         role: "assistant",
-        content: fullContent,
+        content,
         timestamp: "Just now",
-        actions: executedActions,
       };
       setMessages(prev => [...prev, response]);
 
@@ -605,34 +574,6 @@ function ChatContent() {
               >
                 {renderContent(msg.content)}
               </div>
-
-              {msg.actions?.map((action, i) => (
-                <div key={i}
-                  className="rounded-2xl px-3 py-2.5 flex items-center gap-2.5 w-full max-w-xs"
-                  style={{
-                    background: actionAccentBg[action.type] || actionAccentBg.event,
-                    border: `1px solid ${actionAccentBorder[action.type] || actionAccentBorder.event}`,
-                    backdropFilter: "blur(12px)",
-                    WebkitBackdropFilter: "blur(12px)",
-                    boxShadow: "0 4px 12px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.08)",
-                  }}
-                >
-                  <span className="text-lg shrink-0">{action.emoji}</span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold text-text-primary truncate">{action.title}</p>
-                    <p className="text-[10px] text-text-secondary truncate">{action.detail}</p>
-                  </div>
-                  {action.confirmed && (
-                    <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0"
-                      style={{ background: "var(--color-accent-violet)" }}
-                    >
-                      <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={3} className="w-3 h-3">
-                        <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    </div>
-                  )}
-                </div>
-              ))}
 
               <span className="text-[10px] text-text-muted px-1">{msg.timestamp}</span>
             </div>

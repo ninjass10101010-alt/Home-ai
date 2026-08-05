@@ -2,6 +2,7 @@ import { db } from "@/db";
 import { withAdmin } from "@/lib/pb-auth";
 import { weekStartForDate } from "@/lib/meals-week-utils";
 import { weekKey } from "@/lib/task-utils";
+import { localPreviousDayISO } from "@/lib/local-date";
 import type { NewSuggestion } from "./types";
 
 function todayISO(): string { return new Date().toISOString().split("T")[0]; }
@@ -90,7 +91,9 @@ export async function scanCalendarConflicts(scopeDate: string): Promise<NewSugge
   const suggestions: NewSuggestion[] = [];
   for (let i = 0; i < parsed.length; i++) {
     for (let j = i + 1; j < parsed.length; j++) {
-      if (parsed[j].mins - parsed[i].mins <= 30) {
+      // L2 (boundary) — events starting exactly 30 min apart are back-to-back,
+      // not a conflict: use `< 30`, not `<= 30`.
+      if (parsed[j].mins - parsed[i].mins < 30) {
         suggestions.push({
           kind: "calendar_conflict",
           severity: "warn" as const,
@@ -104,6 +107,40 @@ export async function scanCalendarConflicts(scopeDate: string): Promise<NewSugge
       }
     }
   }
+
+  // L2 (overnight) — a late-night event (>= 23:00) on the previous day spills
+  // into the early hours; catch overlaps against today's pre-01:30 events.
+  const previousDay = localPreviousDayISO(scopeDate);
+  const lateEvents = await withAdmin(async (pb) =>
+    pb.collection("events").getFullList({
+      filter: `date="${previousDay}"`,
+      requestKey: null,
+    }) as unknown as Array<{ id: string; title: string; date: string; time: string; icon?: string; color?: string; member?: string }>
+  );
+  const earlyEvents = parsed.filter(e => e.mins < 90); // before 01:30
+  if (lateEvents.length > 0 && earlyEvents.length > 0) {
+    for (const late of lateEvents) {
+      const lateMins = parseMinutes(late.time);
+      if (isNaN(lateMins) || lateMins < 23 * 60) continue; // only >= 23:00
+      for (const early of earlyEvents) {
+        // 23:50 + 30min = 00:20 next day (1440+20); overlaps 00:10 (1450 > 1450? no).
+        // Overlap iff lateEnd (in next-day minutes) > early start (next-day minutes).
+        if (lateMins + 30 > 24 * 60 + early.mins) {
+          suggestions.push({
+            kind: "calendar_conflict",
+            severity: "warn" as const,
+            title: `${late.title} and ${early.title} overlap`,
+            body: `"${late.title}" (${late.time} on ${previousDay}) runs into "${early.title}" (${early.time} on ${scopeDate}).`,
+            emoji: "📅",
+            actionLabel: "View calendar",
+            actionPayload: { tool: "open_calendar", args: { date: scopeDate } },
+            scopeDate,
+          });
+        }
+      }
+    }
+  }
+
   return suggestions;
 }
 

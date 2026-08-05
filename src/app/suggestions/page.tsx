@@ -13,6 +13,7 @@ import EmptyState from "@/components/ui/EmptyState";
 import { useSuggestions, actSuggestion } from "@/components/suggestions/hooks/useSuggestions";
 import { suggestionActionRoute } from "@/components/suggestions/HomeSuggestionsWidget";
 import Toast from "@/components/ui/Toast";
+import { useAuth } from "@/hooks/useAuth";
 import type { ProactiveSuggestion, SuggestionKind } from "@/lib/consuela/types";
 
 type FilterKind = "all" | SuggestionKind;
@@ -96,6 +97,7 @@ export default function SuggestionsPage() {
   const [mounted, setMounted] = useState(false);
   const [filter, setFilter] = useState<FilterKind>("all");
   const [toast, setToast] = useState<{ msg: string; tone: "success" | "error" } | null>(null);
+  const { currentUser } = useAuth();
   const { items, loading, refresh, dismiss, snooze } = useSuggestions(100);
 
   useEffect(() => {
@@ -108,7 +110,7 @@ export default function SuggestionsPage() {
   };
 
   const handleAct = async (suggestion: ProactiveSuggestion) => {
-    const res = await actSuggestion(suggestion.id);
+    const res = await actSuggestion(suggestion.id, currentUser?.pin);
     if (res.ok) showToast(`✅ ${res.message}`, "success");
     else showToast(`⚠️ ${res.message}`, "error");
     refresh();

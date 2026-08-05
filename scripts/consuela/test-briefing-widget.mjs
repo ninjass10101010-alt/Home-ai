@@ -14,6 +14,10 @@
 //      - tapping the badge expands the card and shows all four sections with the
 //        seeded rows (events / priority tasks / meals / Consuela's noticed),
 //      - "Got it ✓" collapses the card, shows "Acknowledged ✓", and fades it,
+//      - L4: a failed PATCH (500, route-intercepted) rolls the ack back, keeps the
+//        card expanded, and shows the "Couldn't save — try again" toast,
+//      - L5: a briefing whose summary.events is empty renders NO "Today's events"
+//        section (empty sections produce no blank gaps),
 //      - Settings -> Layout & display lists "Morning Briefing"; hiding it removes
 //        the card from Home.
 //   3. Cleans up all seeded rows (event/task/meal/pantry + suggestions + briefing
@@ -278,7 +282,16 @@ async function main() {
       let right = null;
       const deadline = Date.now() + 300_000;
       while (Date.now() < deadline) {
-        try {
+    // L3 — the cron route is now idempotent: the reuse probe above already
+    // POSTed it, which may have created (or skipped on) today's briefing. Delete
+    // any existing briefing for today so the POST below regenerates it fresh.
+    const staleFilter = encodeURIComponent(`scopeDate="${today()}"`);
+    const staleRows = await pbJson(`/api/collections/morning_briefing/records?filter=${staleFilter}&perPage=100`, adminToken);
+    for (const r of staleRows.items || []) {
+      await deleteRow("morning_briefing", r.id, adminToken);
+    }
+
+    try {
           const candidate = await fetch(`http://127.0.0.1:${serverPort}/api/cron/consuela/briefing`, {
             method: "POST",
             headers: { authorization: `Bearer ${CRON_SECRET}` },
@@ -346,6 +359,40 @@ async function main() {
       await page.getByText(TEST_TASK_TITLE, { exact: true }).waitFor({ state: "visible", timeout: 10_000 });
       await page.getByText(TEST_MEAL_NAME, { exact: true }).waitFor({ state: "visible", timeout: 10_000 });
       await page.getByText(TEST_PANTRY_ITEM, { exact: false }).first().waitFor({ state: "visible", timeout: 10_000 });
+    });
+
+    await step("L4: failed PATCH rolls the ack back + shows 'Couldn't save' toast", async () => {
+      await page.route("**/api/consuela/briefing*", (route) => {
+        if (route.request().method() === "PATCH") {
+          return route.fulfill({ status: 500, contentType: "application/json", body: "{}" });
+        }
+        return route.continue();
+      });
+      await page.getByRole("button", { name: /Got it/ }).click();
+      await page.getByText("Couldn't save — try again", { exact: true }).waitFor({ state: "visible", timeout: 15_000 });
+      await page.unroute("**/api/consuela/briefing*");
+      const tasksLabel = page.getByText("Priority tasks", { exact: true }).first();
+      assert.ok(await tasksLabel.isVisible(), "card must stay expanded after rollback (L4)");
+      const pendingBriefing = await findBriefingByScopeDate(today(), adminToken);
+      assert.equal(pendingBriefing?.acknowledged, false, "briefing row must stay unacknowledged after rollback");
+    });
+
+    await step("L5: empty sections render nothing (no blank gaps)", async () => {
+      const rec = await findBriefingByScopeDate(today(), adminToken);
+      const summary = rec.summary || {};
+      await pbJson(`/api/collections/morning_briefing/records/${rec.id}`, adminToken, {
+        method: "PATCH",
+        body: JSON.stringify({ summary: { ...summary, events: [] } }),
+      });
+      await page.goto(`${base}/`, { waitUntil: "domcontentloaded" });
+      await page.getByRole("heading", { name: "Morning Briefing" }).waitFor({ state: "visible", timeout: 90_000 });
+      await page.getByRole("button", { name: "Expand morning briefing" }).click();
+      const eventsLabels = await page.getByText("Today's events", { exact: true }).count();
+      assert.equal(eventsLabels, 0, "empty events section must not render (L5)");
+      await page.getByText("Priority tasks", { exact: true }).first().waitFor({ state: "visible", timeout: 10_000 });
+      await page.getByText("Meals", { exact: true }).first().waitFor({ state: "visible", timeout: 10_000 });
+      await page.getByText("Consuela's noticed", { exact: true }).first().waitFor({ state: "visible", timeout: 10_000 });
+      assert.ok(await page.getByText(TEST_TASK_TITLE, { exact: true }).first().isVisible(), "non-empty sections keep their rows");
     });
 
     await step('"Got it ✓" collapses the card, shows Acknowledged ✓, and fades it', async () => {
