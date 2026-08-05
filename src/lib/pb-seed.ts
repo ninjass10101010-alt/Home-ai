@@ -214,6 +214,16 @@ const COLLECTIONS = [
     ],
   },
   {
+    name: "consuela_state",
+    schema: [
+      { name: "key", type: "text", required: true },
+      { name: "value", type: "json" },
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_key_unique ON consuela_state (key)",
+    ],
+  },
+  {
     name: "rewards",
     schema: [
       { name: "name", type: "text", required: true },

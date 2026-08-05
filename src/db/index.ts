@@ -461,4 +461,7 @@ export const db = {
 
   insertChatMessage: async (msg: any) => pbDb.insertChatMessage(msg),
   selectChatMessages: async (threadId: string, sinceISO?: string) => pbDb.selectChatMessages(threadId, sinceISO),
+
+  getState: async (key: string) => pbDb.getState(key),
+  setState: async (key: string, value: any) => pbDb.setState(key, value),
 };

@@ -584,6 +584,30 @@ export const db = {
     });
   },
 
+  // === Consuela State (key/value, e.g. last_telegram_update_id) ===
+  async getState(key: string): Promise<unknown> {
+    return withAdmin(async (pb) => {
+      const records = await pb.collection("consuela_state").getFullList({
+        filter: `key="${key}"`,
+        requestKey: null,
+      });
+      return records.length > 0 ? records[0].value : null;
+    });
+  },
+
+  async setState(key: string, value: unknown): Promise<any> {
+    return withAdmin(async (pb) => {
+      const records = await pb.collection("consuela_state").getFullList({
+        filter: `key="${key}"`,
+        requestKey: null,
+      });
+      if (records.length > 0) {
+        return pb.collection("consuela_state").update(records[0].id, { value });
+      }
+      return pb.collection("consuela_state").create({ key, value });
+    });
+  },
+
   // === Chat Messages ===
   async insertChatMessage(msg: { userId: string; role: string; content: string; source: string; threadId: string }): Promise<any> {
     return withAdmin(async (pb) => {
