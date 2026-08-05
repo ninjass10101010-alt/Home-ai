@@ -12,6 +12,11 @@
 //   3. GET /api/consuela/suggestions returns { items: [...] } (pending list, limit 20).
 //   4. PATCH /api/consuela/suggestions flips a row to "dismissed" and GET no longer
 //      returns that row.
+//   5. POST /api/consuela/suggestions/act (hardening R2 + R3): an admin tool
+//      (trigger_update) is rejected with 400 "tool not allowed" and the row stays
+//      pending; a valid tool that fails (complete_grocery_item, unknown item) returns
+//      400 and the row stays pending; a success (add_grocery_item) flips the row to
+//      "actioned" and persists the write.
 //
 // Manual curl equivalents:
 //   curl -s -X POST -H "Authorization: Bearer wrong-secret" \
@@ -105,6 +110,48 @@ async function createPendingSuggestion(token) {
     body: JSON.stringify(body),
   });
   return rec.id;
+}
+
+async function createSuggestionWithPayload(token, { tool, args, title }) {
+  const rec = await pbJson("/api/collections/proactive_suggestions/records", token, {
+    method: "POST",
+    body: JSON.stringify({
+      idempotencyHash: `test-act-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      kind: "custom",
+      severity: "info",
+      title,
+      body: "Created by test-suggestions.mjs (act route hardening).",
+      emoji: "🧪",
+      actionLabel: "Act",
+      actionPayload: { tool, args },
+      status: "pending",
+      scopeDate: today(),
+      createdAt: new Date().toISOString(),
+    }),
+  });
+  return rec;
+}
+
+async function fetchSuggestion(token, id) {
+  return pbJson(`/api/collections/proactive_suggestions/records/${id}`, token);
+}
+
+async function deleteSuggestion(token, id) {
+  await fetch(`${PB_URL}/api/collections/proactive_suggestions/records/${id}`, {
+    method: "DELETE",
+    headers: { authorization: token },
+  });
+}
+
+async function actOnSuggestion(serverPort, id) {
+  const res = await fetch(`http://127.0.0.1:${serverPort}/api/consuela/suggestions/act`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id }),
+    signal: AbortSignal.timeout(60_000),
+  });
+  const body = await res.json().catch(() => ({}));
+  return { status: res.status, body };
 }
 
 async function probeWrongSecret(port, deadlineMs) {
@@ -290,6 +337,79 @@ async function main() {
     });
     assert.equal(res.status, 400, `expected 400, got ${res.status}`);
   });
+
+  const actRows = [];
+  const actGroceryName = `hardening-act ${Date.now()}`;
+
+  await step("act route: admin tool is rejected by the allowlist (R2), row stays pending", async () => {
+    if (!serverPort) throw new Error("no server to test (previous step failed)");
+    const rec = await createSuggestionWithPayload(adminToken, {
+      tool: "trigger_update",
+      args: {},
+      title: "hardening-test-suggestion-admin",
+    });
+    actRows.push(rec.id);
+    const { status, body } = await actOnSuggestion(serverPort, rec.id);
+    assert.equal(status, 400, `expected 400, got ${status} (${JSON.stringify(body).slice(0, 200)})`);
+    assert.equal(body.ok, false, `expected ok:false, got ${JSON.stringify(body).slice(0, 200)}`);
+    assert.equal(body.error, "tool not allowed", `expected "tool not allowed", got ${body.error}`);
+    const after = await fetchSuggestion(adminToken, rec.id);
+    assert.equal(after.status, "pending", `row should stay pending, got ${after.status}`);
+  });
+
+  await step("act route: valid tool that errors (ok:false) returns 400, row stays pending (R3)", async () => {
+    if (!serverPort) throw new Error("no server to test (previous step failed)");
+    const rec = await createSuggestionWithPayload(adminToken, {
+      tool: "complete_grocery_item",
+      args: { item: `no-such-item-${Date.now()}` },
+      title: "hardening-test-suggestion-toolerror",
+    });
+    actRows.push(rec.id);
+    const { status, body } = await actOnSuggestion(serverPort, rec.id);
+    assert.equal(status, 400, `expected 400, got ${status} (${JSON.stringify(body).slice(0, 200)})`);
+    assert.equal(body.ok, false, `expected ok:false, got ${JSON.stringify(body).slice(0, 200)}`);
+    const after = await fetchSuggestion(adminToken, rec.id);
+    assert.equal(after.status, "pending", `row should stay pending on tool error, got ${after.status}`);
+  });
+
+  await step("act route: success flips the row to actioned (R3)", async () => {
+    if (!serverPort) throw new Error("no server to test (previous step failed)");
+    const rec = await createSuggestionWithPayload(adminToken, {
+      tool: "add_grocery_item",
+      args: { items: actGroceryName },
+      title: "hardening-test-suggestion-ok",
+    });
+    actRows.push(rec.id);
+    const { status, body } = await actOnSuggestion(serverPort, rec.id);
+    assert.equal(status, 200, `expected 200, got ${status} (${JSON.stringify(body).slice(0, 200)})`);
+    assert.equal(body.ok, true, `expected ok:true, got ${JSON.stringify(body).slice(0, 200)}`);
+    assert.equal(body.tool, "add_grocery_item");
+    assert.equal(body.result?.inserted, 1, `expected 1 inserted, got ${JSON.stringify(body.result)}`);
+    const after = await fetchSuggestion(adminToken, rec.id);
+    assert.equal(after.status, "actioned", `row should be actioned, got ${after.status}`);
+    const grocery = await pbJson(
+      `/api/collections/grocery_list_items/records?filter=${encodeURIComponent(`(name~"hardening-act")`)}`,
+      adminToken,
+    );
+    assert.ok(
+      (grocery.items || []).some((g) => g.name === actGroceryName),
+      "grocery row from the acted suggestion should exist",
+    );
+  });
+
+  for (const id of actRows) {
+    await deleteSuggestion(adminToken, id).catch(() => {});
+  }
+  const actGrocery = await pbJson(
+    `/api/collections/grocery_list_items/records?filter=${encodeURIComponent(`(name~"hardening-act")`)}`,
+    adminToken,
+  );
+  for (const g of actGrocery.items || []) {
+    await fetch(`${PB_URL}/api/collections/grocery_list_items/records/${g.id}`, {
+      method: "DELETE",
+      headers: { authorization: adminToken },
+    }).catch(() => {});
+  }
 
   if (booted) {
     booted.child.kill("SIGTERM");
