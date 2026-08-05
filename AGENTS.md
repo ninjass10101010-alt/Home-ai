@@ -579,6 +579,9 @@ Before you send any reply about the dashboard, mentally tick:
 - Never give production deployment advice without the Gmail limits + security warnings.
 - Never claim data is persisted when it is still in-memory only.
 
+### 3.5 Consuela Chat Data Conventions
+- **Chat thread id = `YYYY-MM-DD` (daily thread).** Every message stored in the `chat_messages` PB collection belongs to the day it was sent: `threadId` is always the local date in `YYYY-MM-DD` form (use the same `new Date().toISOString().split("T")[0]` helper used across the codebase). Telegram messages, dashboard messages, and API messages all land in the same daily thread so the Ask Consuela page can show one unified conversation per day. `selectChatMessages(threadId, sinceISO?)` is the only way to read them; ordering is `createdAt` ascending.
+
 ---
 
 ## 4. Standard Operating Procedures (SOPs)

@@ -583,6 +583,29 @@ export const db = {
       return pb.collection("morning_briefing").update(id, { acknowledged: true });
     });
   },
+
+  // === Chat Messages ===
+  async insertChatMessage(msg: { userId: string; role: string; content: string; source: string; threadId: string }): Promise<any> {
+    return withAdmin(async (pb) => {
+      return pb.collection("chat_messages").create({
+        ...msg,
+        createdAt: new Date().toISOString(),
+      });
+    });
+  },
+
+  async selectChatMessages(threadId: string, sinceISO?: string): Promise<any[]> {
+    return withAdmin(async (pb) => {
+      const filter = sinceISO
+        ? `threadId="${threadId}" && createdAt>"${sinceISO}"`
+        : `threadId="${threadId}"`;
+      return pb.collection("chat_messages").getFullList({
+        filter,
+        sort: "createdAt",
+        requestKey: null,
+      });
+    });
+  },
 };
 
 const membersFallback = [

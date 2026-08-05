@@ -458,4 +458,7 @@ export const db = {
   upsertMorningBriefing: async (scopeDate: string, summary: any) => pbDb.upsertMorningBriefing(scopeDate, summary),
   selectMorningBriefing: async (scopeDate?: string) => pbDb.selectMorningBriefing(scopeDate),
   ackMorningBriefing: async (id: string) => pbDb.ackMorningBriefing(id),
+
+  insertChatMessage: async (msg: any) => pbDb.insertChatMessage(msg),
+  selectChatMessages: async (threadId: string, sinceISO?: string) => pbDb.selectChatMessages(threadId, sinceISO),
 };

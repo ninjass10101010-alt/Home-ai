@@ -200,6 +200,20 @@ const COLLECTIONS = [
     ],
   },
   {
+    name: "chat_messages",
+    schema: [
+      { name: "userId", type: "text", required: true },
+      { name: "role", type: "select", options: { values: ["user", "assistant", "system"] } },
+      { name: "content", type: "text", required: true },
+      { name: "source", type: "select", options: { values: ["telegram", "dashboard", "api"] } },
+      { name: "threadId", type: "text", required: true },
+      { name: "createdAt", type: "date" },
+    ],
+    indexes: [
+      "CREATE INDEX idx_thread_created ON chat_messages (threadId, createdAt)",
+    ],
+  },
+  {
     name: "rewards",
     schema: [
       { name: "name", type: "text", required: true },
