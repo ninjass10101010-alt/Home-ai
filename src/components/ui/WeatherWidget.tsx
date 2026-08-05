@@ -494,6 +494,49 @@ function SpringBackdrop({ tod }: { tod: TimeOfDayFlag }) {
   );
 }
 
+function PalmSilhouette({
+  x, y, scale, opacity, sunlit, shadow,
+}: {
+  x: number; y: number; scale: number; opacity: number; sunlit: string; shadow: string;
+}) {
+  return (
+    <g opacity={opacity} transform={`translate(${x} ${y}) scale(${scale})`}>
+      {/* Tapered trunk, sunlit crown → shadow base */}
+      <path d="M-6 0 C-6 -50 -4 -100 0 -126 L 8 -124 C4 -100 6 -50 6 0 Z"
+        fill="url(#summerPalmTrunk)" stroke="#2d1810" strokeWidth="0.75" strokeOpacity="0.35" />
+      {/* Segmented trunk ring texture */}
+      {[-30, -55, -80, -105].map((ry) => (
+        <path key={ry} d={`M-5.5 ${ry} Q0 ${ry - 2} 5.5 ${ry + 1}`} fill="none"
+          stroke="#2d1810" strokeWidth="1" opacity="0.3" />
+      ))}
+      {/* Crown shadow mass */}
+      <path d="M-28 -126 Q-24 -158 0 -162 Q24 -158 28 -126 Q12 -114 -12 -114 Q-24 -116 -28 -126 Z"
+        fill={shadow} opacity="0.55" />
+      {/* Sunlit fronds (up-left, up, up-right, right) */}
+      <path d="M-1 -125 Q-17 -141 -25 -153 Q-13 -147 1 -125 Z" fill={sunlit} />
+      <path d="M0 -127 Q-1 -153 0 -167 Q5 -153 4 -127 Z" fill={sunlit} />
+      <path d="M1 -127 Q15 -155 25 -163 Q13 -147 3 -127 Z" fill={sunlit} />
+      <path d="M3 -126 Q21 -135 33 -131 Q19 -123 5 -124 Z" fill={sunlit} />
+      {/* Shadow fronds (down-right, left, down-left) */}
+      <path d="M3 -125 Q19 -111 27 -99 Q15 -109 5 -123 Z" fill={shadow} />
+      <path d="M-1 -125 Q-17 -131 -25 -125 Q-15 -119 1 -123 Z" fill={shadow} />
+      <path d="M-1 -124 Q-11 -107 -17 -97 Q-7 -107 -1 -122 Z" fill={shadow} />
+      {/* Midrib veining */}
+      <path d="M0 -126 Q-15 -144 -23 -152" fill="none" stroke={shadow} strokeWidth="0.8" opacity="0.5" />
+      <path d="M0 -127 Q0 -154 0 -165" fill="none" stroke={shadow} strokeWidth="0.8" opacity="0.5" />
+      <path d="M1 -126 Q14 -152 23 -161" fill="none" stroke={shadow} strokeWidth="0.8" opacity="0.5" />
+      <path d="M3 -125 Q20 -134 31 -130" fill="none" stroke={shadow} strokeWidth="0.8" opacity="0.5" />
+      <path d="M3 -125 Q17 -112 25 -101" fill="none" stroke={shadow} strokeWidth="0.8" opacity="0.5" />
+      <path d="M0 -125 Q-16 -130 -24 -125" fill="none" stroke={shadow} strokeWidth="0.8" opacity="0.5" />
+      <path d="M0 -124 Q-9 -109 -15 -99" fill="none" stroke={shadow} strokeWidth="0.8" opacity="0.5" />
+      {/* Coconuts */}
+      <circle cx="-2" cy="-125" r="2.2" fill="#3f2412" />
+      <circle cx="3" cy="-124" r="2.2" fill="#3f2412" />
+      <circle cx="0.5" cy="-121.5" r="2" fill="#3f2412" />
+    </g>
+  );
+}
+
 function SummerBackdrop({ tod }: { tod: TimeOfDayFlag }) {
   return (
     <svg className="absolute inset-0 w-full h-full" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
@@ -506,6 +549,10 @@ function SummerBackdrop({ tod }: { tod: TimeOfDayFlag }) {
           <stop offset="0%" stopColor="rgba(167,139,250,0.12)" />
           <stop offset="100%" stopColor="transparent" />
         </radialGradient>
+        <linearGradient id="summerPalmTrunk" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#7c4a1e" />
+          <stop offset="100%" stopColor="#2d1810" />
+        </linearGradient>
       </defs>
 
       {tod === "night" ? (
@@ -553,23 +600,9 @@ function SummerBackdrop({ tod }: { tod: TimeOfDayFlag }) {
           <circle cx="285" cy="28" r="18" fill="rgba(251,191,36,0.9)"/>
           <circle cx="285" cy="28" r="14" fill="#f59e0b"/>
           {/* Tall palm tree — left side */}
-          <g opacity="0.22">
-            <path d="M55 200 Q52 160 50 120 Q48 90 58 70" stroke="#15803d" strokeWidth="6" fill="none" strokeLinecap="round"/>
-            <path d="M58 70 Q30 48 10 62" stroke="#15803d" strokeWidth="4" fill="none" strokeLinecap="round"/>
-            <path d="M58 70 Q85 42 105 55" stroke="#15803d" strokeWidth="4" fill="none" strokeLinecap="round"/>
-            <path d="M58 70 Q40 50 35 30" stroke="#15803d" strokeWidth="3" fill="none" strokeLinecap="round"/>
-            <path d="M58 70 Q80 52 88 35" stroke="#15803d" strokeWidth="3" fill="none" strokeLinecap="round"/>
-            <path d="M58 70 Q60 48 55 25" stroke="#15803d" strokeWidth="2.5" fill="none" strokeLinecap="round"/>
-            <circle cx="40" cy="65" r="5" fill="#78350f" opacity="0.6"/>
-            <circle cx="74" cy="60" r="4" fill="#78350f" opacity="0.6"/>
-          </g>
+          <PalmSilhouette x={55} y={200} scale={1} opacity={0.28} sunlit="#16a34a" shadow="#15803d" />
           {/* Distant palm — right */}
-          <g opacity="0.14">
-            <path d="M290 200 Q288 170 287 145 Q286 125 292 110" stroke="#166534" strokeWidth="4" fill="none" strokeLinecap="round"/>
-            <path d="M292 112 Q272 95 258 104" stroke="#166534" strokeWidth="3" fill="none" strokeLinecap="round"/>
-            <path d="M292 112 Q312 92 320 102" stroke="#166534" strokeWidth="3" fill="none" strokeLinecap="round"/>
-            <path d="M292 112 Q280 96 277 82" stroke="#166534" strokeWidth="2.5" fill="none" strokeLinecap="round"/>
-          </g>
+          <PalmSilhouette x={292} y={196} scale={0.6} opacity={0.18} sunlit="#166534" shadow="#14532d" />
           {/* Ocean horizon glow */}
           <ellipse cx="160" cy="200" rx="220" ry="28" fill="rgba(56,189,248,0.18)" />
           {/* Heat shimmer waves */}
