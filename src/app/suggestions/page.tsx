@@ -10,10 +10,10 @@ import SoftButton from "@/components/ui/SoftButton";
 import IconButton from "@/components/ui/IconButton";
 import Chip from "@/components/ui/Chip";
 import EmptyState from "@/components/ui/EmptyState";
-import { useSuggestions, actSuggestion } from "@/components/suggestions/hooks/useSuggestions";
+import { useSuggestions } from "@/components/suggestions/hooks/useSuggestions";
+import SuggestionPinModal from "@/components/suggestions/SuggestionPinModal";
 import { suggestionActionRoute } from "@/components/suggestions/HomeSuggestionsWidget";
 import Toast from "@/components/ui/Toast";
-import { useAuth } from "@/hooks/useAuth";
 import type { ProactiveSuggestion, SuggestionKind } from "@/lib/consuela/types";
 
 type FilterKind = "all" | SuggestionKind;
@@ -97,8 +97,8 @@ export default function SuggestionsPage() {
   const [mounted, setMounted] = useState(false);
   const [filter, setFilter] = useState<FilterKind>("all");
   const [toast, setToast] = useState<{ msg: string; tone: "success" | "error" } | null>(null);
-  const { currentUser } = useAuth();
-  const { items, loading, refresh, dismiss, snooze } = useSuggestions(100);
+  const { items, loading, refresh, dismiss, snooze, act, needsPin, pinError, submitPin, cancelPin } =
+    useSuggestions(100);
 
   useEffect(() => {
     setMounted(true);
@@ -110,10 +110,21 @@ export default function SuggestionsPage() {
   };
 
   const handleAct = async (suggestion: ProactiveSuggestion) => {
-    const res = await actSuggestion(suggestion.id, currentUser?.pin);
+    const res = await act(suggestion);
+    if (res.prompted) return; // queued for the PIN modal — no error toast
     if (res.ok) showToast(`✅ ${res.message}`, "success");
     else showToast(`⚠️ ${res.message}`, "error");
-    refresh();
+  };
+
+  const handleDismiss = async (id: string) => {
+    const res = await dismiss(id);
+    if (res && !res.ok && !res.prompted) showToast(`⚠️ ${res.message}`, "error");
+  };
+
+  const handleSnooze = async (id: string) => {
+    const res = await snooze(id);
+    if (res && !res.ok && !res.prompted) showToast(`⚠️ ${res.message}`, "error");
+    else if (res && res.ok) showToast("😴 Snoozed until tomorrow", "success");
   };
 
   const counts = useMemo(() => {
@@ -185,8 +196,8 @@ export default function SuggestionsPage() {
               <SuggestionCard
                 key={suggestion.id}
                 suggestion={suggestion}
-                onSnooze={snooze}
-                onDismiss={dismiss}
+                onSnooze={handleSnooze}
+                onDismiss={handleDismiss}
                 onAct={handleAct}
               />
             ))}
@@ -194,6 +205,7 @@ export default function SuggestionsPage() {
         )}
         {toast && <Toast open tone={toast.tone}>{toast.msg}</Toast>}
       </div>
+      <SuggestionPinModal open={needsPin} error={pinError} onClose={cancelPin} onSubmit={submitPin} />
     </PageShell>
   );
 }

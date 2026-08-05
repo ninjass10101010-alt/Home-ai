@@ -2,10 +2,8 @@ import { db } from "@/db";
 import { withAdmin } from "@/lib/pb-auth";
 import { weekStartForDate } from "@/lib/meals-week-utils";
 import { weekKey } from "@/lib/task-utils";
-import { localPreviousDayISO } from "@/lib/local-date";
+import { localTodayISO, localPreviousDayISO } from "@/lib/local-date";
 import type { NewSuggestion } from "./types";
-
-function todayISO(): string { return new Date().toISOString().split("T")[0]; }
 
 export async function scanPantryLow(scopeDate: string): Promise<NewSuggestion[]> {
   const pantry = await withAdmin(async (pb) =>
@@ -148,7 +146,7 @@ export async function scanStaleData(scopeDate: string): Promise<NewSuggestion[]>
   const meals = await withAdmin(async (pb) =>
     pb.collection("meal_plan_entries").getFullList({ requestKey: null }) as unknown as Array<{ weekOf?: string }>
   );
-  const currentWeek = weekStartForDate(todayISO());
+  const currentWeek = weekStartForDate(localTodayISO());
   if (meals.filter(m => m.weekOf === currentWeek).length === 0) {
     return [{
       kind: "stale_data",
@@ -164,6 +162,25 @@ export async function scanStaleData(scopeDate: string): Promise<NewSuggestion[]>
   return [];
 }
 
+// C1 — engine-level condition dedup: keep exactly ONE pending row per
+// condition (kind + normalized title), regardless of scopeDate or snooze
+// state. Without this, a persistent condition (pantry low, no-meals-this-week,
+// streak >= 3, nightly conflict) accumulates one visible row per day because
+// the idempotency hash includes scopeDate. Snoozing hides the single row;
+// acting/dismissing frees the condition for re-creation on the next scan.
+// This also gracefully absorbs the L1 hash-format migration: old-format
+// pending rows (different hash, same condition) block new inserts until acted
+// on — intended.
+async function fetchExistingConditionKeys(): Promise<Set<string>> {
+  return withAdmin(async (pb) => {
+    const rows = await pb.collection("proactive_suggestions").getFullList({
+      filter: 'status="pending"',
+      requestKey: null,
+    }) as unknown as Array<{ kind?: string; title?: string }>;
+    return new Set(rows.map((r) => `${r.kind ?? ""}|${(r.title ?? "").trim().toLowerCase()}`));
+  });
+}
+
 export async function runEngine({ scopeDate }: { scopeDate: string }): Promise<{ scanned: number; inserted: number; rejected: number }> {
   const scanners = [scanPantryLow, scanTaskPenaltyStreak, scanCalendarConflicts, scanStaleData];
   let all: NewSuggestion[] = [];
@@ -176,6 +193,15 @@ export async function runEngine({ scopeDate }: { scopeDate: string }): Promise<{
     }
   }
   if (all.length === 0) return { scanned: 0, inserted: 0, rejected: 0 };
-  const result = await db.insertProactiveSuggestions(all);
+  const existingKeys = await fetchExistingConditionKeys();
+  const seen = new Set<string>();
+  const fresh = all.filter((s) => {
+    const key = `${s.kind}|${s.title.trim().toLowerCase()}`;
+    if (existingKeys.has(key) || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (fresh.length === 0) return { scanned: all.length, inserted: 0, rejected: 0 };
+  const result = await db.insertProactiveSuggestions(fresh);
   return { scanned: all.length, inserted: result.inserted, rejected: result.rejected };
 }

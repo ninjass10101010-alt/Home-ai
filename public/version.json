@@ -1,7 +1,7 @@
 {
-  "hash": "d55f092e91b5cb14867a0b6966e793d62ac9c91b",
-  "short": "d55f092",
-  "message": "fix(consuela): act route tool allowlist + robust success check",
-  "date": "2026-08-05 00:46:45 -0400",
+  "hash": "f38ba3745c3212ad2ee9e58c291de588e57943bc",
+  "short": "f38ba37",
+  "message": "fix(consuela): post-scan bug sweep — auth, snooze/scope-date, chat history, telegram, complete_task, UTC drift, quota lock",
+  "date": "2026-08-05 07:49:41 -0400",
   "author": "GarciaFam"
 }

@@ -414,9 +414,12 @@ const TOOLS: Tool[] = [
                 ? done.find((r: any) => String(r.title).trim().toLowerCase() === title.toLowerCase())
                 : undefined;
             if (completedMatch) {
+              // M-A — a `done` row may have been completed this week OR in a
+              // previous week (F3 flips status to "done" on completion), so
+              // "(last week)" was wrong for same-week repeats. Generic copy.
               return {
                 ok: false,
-                error: "Task was already completed (last week). Mark it as pending first if you want to recomplete.",
+                error: "Task was already completed (earlier this week or previously). Mark it as pending first if you want to recomplete.",
               };
             }
             return {

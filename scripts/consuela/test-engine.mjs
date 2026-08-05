@@ -429,6 +429,79 @@ async function main() {
   });
 
   // ================================================================
+  // 7. C1 cross-day dedup — exactly one pending row per condition
+  // ================================================================
+  console.log("\n--- C1 condition dedup (cross-day) ---");
+
+  const dedupStamp = Date.now();
+  const dedupItemName = `test-engine-dedup-${dedupStamp}`;
+  const dedupCleanup = { pantry: [], suggestions: [] };
+  const day1 = new Date().toISOString().split("T")[0];
+  const day2 = new Date(Date.now() + 86400000).toISOString().split("T")[0];
+  const dedupTitle = `${dedupItemName} is running low`;
+
+  await step("seed pantry item for dedup (status=low)", async () => {
+    const row = await pbCreate("pantry_items", {
+      name: dedupItemName,
+      item: dedupItemName,
+      status: "low",
+      quantity: 1,
+      unit: "gallon",
+      category: "dairy",
+    }, adminToken);
+    if (row?.id) dedupCleanup.pantry.push(row.id);
+  });
+
+  const fetchDedupRows = async () => {
+    const data = await pbGet(
+      `/api/collections/proactive_suggestions/records?filter=${encodeURIComponent(`(title="${dedupTitle}" && status="pending")`)}`,
+      adminToken
+    );
+    return data?.items || [];
+  };
+
+  await step("runEngine(day1) inserts one pending row", async () => {
+    const { runEngine } = await import("../../src/lib/consuela/engine.ts");
+    const result = await runEngine({ scopeDate: day1 });
+    assert.ok(result.scanned >= 1, `scanned ${result.scanned}`);
+    const rows = await fetchDedupRows();
+    assert.equal(rows.length, 1, `expected 1 pending row, got ${rows.length}`);
+    assert.equal(rows[0].scopeDate, day1);
+    dedupCleanup.suggestions.push(rows[0].id);
+  });
+
+  await step("runEngine(day2) SKIPS re-insert — still exactly 1 pending row (C1)", async () => {
+    const { runEngine } = await import("../../src/lib/consuela/engine.ts");
+    const result = await runEngine({ scopeDate: day2 });
+    assert.equal(result.inserted, 0, `day2 must insert nothing for the same condition, got ${JSON.stringify(result)}`);
+    const rows = await fetchDedupRows();
+    assert.equal(rows.length, 1, `expected still 1 pending row, got ${rows.length}`);
+    assert.equal(rows[0].scopeDate, day1, "original row must survive; no today-row may appear");
+  });
+
+  await step("dismissing frees the condition; next scan re-creates exactly one row (C1)", async () => {
+    const { db } = await import("../../src/db/index.ts");
+    const { runEngine } = await import("../../src/lib/consuela/engine.ts");
+    const rows = await fetchDedupRows();
+    assert.equal(rows.length, 1, "precondition: exactly 1 pending row");
+    await db.updateSuggestion(rows[0].id, { status: "dismissed" });
+    dedupCleanup.suggestions.push(rows[0].id); // dismissed row (scopeDate=day1)
+    await runEngine({ scopeDate: day2 });
+    const after = await fetchDedupRows();
+    assert.equal(after.length, 1, `expected exactly 1 re-created pending row, got ${after.length}`);
+    assert.equal(after[0].status, "pending");
+    assert.equal(after[0].scopeDate, day2, "re-created row lands on the new scopeDate");
+    for (const r of after) dedupCleanup.suggestions.push(r.id);
+  });
+
+  for (const id of dedupCleanup.suggestions) {
+    await pbDelete("proactive_suggestions", id, adminToken).catch(() => {});
+  }
+  for (const id of dedupCleanup.pantry) {
+    await pbDelete("pantry_items", id, adminToken).catch(() => {});
+  }
+
+  // ================================================================
   // Cleanup
   // ================================================================
   console.log("\n--- cleanup ---");

@@ -9,9 +9,9 @@ import SoftButton from "@/components/ui/SoftButton";
 import IconButton from "@/components/ui/IconButton";
 import EmptyState from "@/components/ui/EmptyState";
 import Toast from "@/components/ui/Toast";
-import { useSuggestions, actSuggestion } from "./hooks/useSuggestions";
+import { useSuggestions } from "./hooks/useSuggestions";
+import SuggestionPinModal from "./SuggestionPinModal";
 import type { ProactiveSuggestion } from "@/lib/consuela/types";
-import { useAuth } from "@/hooks/useAuth";
 
 const TOOL_ROUTES: Record<string, string> = {
   get_pending_tasks: "/tasks",
@@ -78,8 +78,7 @@ function SuggestionRow({
 export default function HomeSuggestionsWidget() {
   const [mounted, setMounted] = useState(false);
   const [toast, setToast] = useState<{ msg: string; tone: "success" | "error" } | null>(null);
-  const { currentUser } = useAuth();
-  const { items, loading, refresh, dismiss } = useSuggestions(20);
+  const { items, loading, dismiss, act, needsPin, pinError, submitPin, cancelPin } = useSuggestions(20);
 
   useEffect(() => {
     setMounted(true);
@@ -91,10 +90,15 @@ export default function HomeSuggestionsWidget() {
   };
 
   const handleAct = async (suggestion: ProactiveSuggestion) => {
-    const res = await actSuggestion(suggestion.id, currentUser?.pin);
+    const res = await act(suggestion);
+    if (res.prompted) return; // queued for the PIN modal — no error toast
     if (res.ok) showToast(`✅ ${res.message}`, "success");
     else showToast(`⚠️ ${res.message}`, "error");
-    refresh();
+  };
+
+  const handleDismiss = async (id: string) => {
+    const res = await dismiss(id);
+    if (res && !res.ok && !res.prompted) showToast(`⚠️ ${res.message}`, "error");
   };
 
   if (!mounted) {
@@ -109,6 +113,10 @@ export default function HomeSuggestionsWidget() {
     );
   }
 
+  const pinModal = (
+    <SuggestionPinModal open={needsPin} error={pinError} onClose={cancelPin} onSubmit={submitPin} />
+  );
+
   if (items.length === 0 && !loading) {
     return (
       <SectionCard
@@ -122,6 +130,7 @@ export default function HomeSuggestionsWidget() {
           icon="🧘"
         />
         {toast && <Toast open tone={toast.tone}>{toast.msg}</Toast>}
+        {pinModal}
       </SectionCard>
     );
   }
@@ -142,11 +151,12 @@ export default function HomeSuggestionsWidget() {
       ) : (
         <div className="space-y-2">
           {items.slice(0, 5).map((suggestion) => (
-            <SuggestionRow key={suggestion.id} suggestion={suggestion} onDismiss={dismiss} onAct={handleAct} />
+            <SuggestionRow key={suggestion.id} suggestion={suggestion} onDismiss={handleDismiss} onAct={handleAct} />
           ))}
         </div>
       )}
       {toast && <Toast open tone={toast.tone}>{toast.msg}</Toast>}
+      {pinModal}
     </SectionCard>
   );
 }

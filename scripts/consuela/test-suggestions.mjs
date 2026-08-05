@@ -418,6 +418,76 @@ async function main() {
     assert.equal(after.status, "pending", "row must stay pending without a pin");
   });
 
+  // C3 regression (fix wave 2) — simulates the hook's client flow on ONE row:
+  // no pin -> 401 (hook queues + prompts), wrong pin -> 401 (hook re-prompts,
+  // does not drop the action), valid pin -> 200 (queued action completes).
+  await step("C3 client flow: no pin -> 401, wrong pin -> 401, valid pin -> 200 (retry completes)", async () => {
+    if (!serverPort) throw new Error("no server to test (previous step failed)");
+    const id = await createPendingSuggestion(adminToken);
+    try {
+      const noPin = await fetch(`http://127.0.0.1:${serverPort}/api/consuela/suggestions`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id, status: "dismissed" }),
+        signal: AbortSignal.timeout(60_000),
+      });
+      assert.equal(noPin.status, 401, `no pin: expected 401, got ${noPin.status}`);
+      const noPinBody = await noPin.json().catch(() => ({}));
+      assert.equal(noPinBody.error, "pin required");
+      assert.equal(
+        (await fetchSuggestion(adminToken, id)).status,
+        "pending",
+        "row must stay pending while the client queues for the PIN prompt",
+      );
+
+      const wrongPin = await fetch(`http://127.0.0.1:${serverPort}/api/consuela/suggestions`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", "x-consuela-pin": "9999" },
+        body: JSON.stringify({ id, status: "dismissed" }),
+        signal: AbortSignal.timeout(60_000),
+      });
+      assert.equal(wrongPin.status, 401, `wrong pin: expected 401, got ${wrongPin.status}`);
+      assert.equal(
+        (await fetchSuggestion(adminToken, id)).status,
+        "pending",
+        "row must stay pending after a wrong pin (hook re-prompts)",
+      );
+
+      const goodPin = await fetch(`http://127.0.0.1:${serverPort}/api/consuela/suggestions`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", "x-consuela-pin": validPin },
+        body: JSON.stringify({ id, status: "dismissed" }),
+        signal: AbortSignal.timeout(60_000),
+      });
+      const goodBody = await goodPin.json().catch(() => ({}));
+      assert.equal(goodPin.status, 200, `valid pin: expected 200, got ${goodPin.status} (${JSON.stringify(goodBody).slice(0, 200)})`);
+      assert.equal(goodBody.ok, true, `expected ok:true, got ${JSON.stringify(goodBody).slice(0, 200)}`);
+      assert.equal(
+        (await fetchSuggestion(adminToken, id)).status,
+        "dismissed",
+        "queued action must complete once a valid pin is supplied",
+      );
+    } finally {
+      await deleteSuggestion(adminToken, id).catch(() => {});
+    }
+  });
+
+  await step("briefing GET rejects malformed scopeDate with 400 (M-C)", async () => {
+    if (!serverPort) throw new Error("no server to test (previous step failed)");
+    const res = await fetch(
+      `http://127.0.0.1:${serverPort}/api/consuela/briefing?scopeDate=${encodeURIComponent("2026-8-5")}`,
+      { signal: AbortSignal.timeout(60_000) },
+    );
+    assert.equal(res.status, 400, `expected 400, got ${res.status}`);
+    const body = await res.json().catch(() => ({}));
+    assert.equal(body.error, "invalid scopeDate");
+    const okRes = await fetch(
+      `http://127.0.0.1:${serverPort}/api/consuela/briefing?scopeDate=2026-08-05`,
+      { signal: AbortSignal.timeout(60_000) },
+    );
+    assert.equal(okRes.status, 200, `valid scopeDate: expected 200, got ${okRes.status}`);
+  });
+
   const actGroceryName = `hardening-act ${Date.now()}`;
 
   await step("act route: admin tool is rejected by the allowlist (R2), row stays pending", async () => {

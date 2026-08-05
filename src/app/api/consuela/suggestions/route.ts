@@ -30,6 +30,12 @@ export async function PATCH(request: NextRequest) {
   }
   const { id, status, snoozedUntil } = await request.json();
   if (!id || (!status && !snoozedUntil)) return NextResponse.json({ error: "id + status or snoozedUntil required" }, { status: 400 });
-  await db.updateSuggestion(id, { status, snoozedUntil });
+  // M-D — a PB failure must not surface as a 500; report ok:false instead
+  // (the act route already try/catches the same way).
+  try {
+    await db.updateSuggestion(id, { status, snoozedUntil });
+  } catch (e: any) {
+    return NextResponse.json({ ok: false, error: e?.message || "update failed" }, { status: 400 });
+  }
   return NextResponse.json({ ok: true });
 }

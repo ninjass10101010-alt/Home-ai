@@ -233,8 +233,8 @@ async function main() {
     assert.equal(res.ok, false, `cross-week complete must fail, got ${JSON.stringify(res)}`);
     assert.equal(
       String(res.error),
-      "Task was already completed (last week). Mark it as pending first if you want to recomplete.",
-      `exact I4 error string expected, got: ${res.error}`
+      "Task was already completed (earlier this week or previously). Mark it as pending first if you want to recomplete.",
+      `exact I4/M-A error string expected, got: ${res.error}`
     );
     const weekRows = await listAll(token, "week_data", `weekStart="${weekStart}"`);
     const history = jsonValue(weekRows[0]?.history ?? [], []);
