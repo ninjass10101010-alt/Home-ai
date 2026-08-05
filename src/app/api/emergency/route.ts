@@ -4,10 +4,13 @@ import { sendSMSViaEmail, sendEmailAlert } from "@/lib/free-communication";
 
 export const dynamic = "force-dynamic";
 
+const EMERGENCY_PIN_HEADER = "x-emergency-pin";
+const EMERGENCY_PIN_BYPASS = process.env.EMERGENCY_PIN_BYPASS || "";
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { type, timestamp } = body;
+    const { type, timestamp, pin } = body;
 
     if (!type) {
       return NextResponse.json({ error: "Emergency type is required" }, { status: 400 });
@@ -17,6 +20,23 @@ export async function POST(request: NextRequest) {
     const validTypes = ["fire", "water", "injury", "general"];
     if (!validTypes.includes(type)) {
       return NextResponse.json({ error: "Invalid emergency type" }, { status: 400 });
+    }
+
+    // Require PIN verification for emergency alerts
+    const providedPin = pin || request.headers.get(EMERGENCY_PIN_HEADER);
+    if (!providedPin) {
+      return NextResponse.json({ error: "PIN required to trigger emergency alert" }, { status: 401 });
+    }
+
+    // Verify PIN against any family member
+    const members = db.selectMembers();
+    const verifiedMember = members.find((m: any) => {
+      const memberPin = (m as any).pin;
+      return memberPin && memberPin === providedPin;
+    });
+
+    if (!verifiedMember && providedPin !== EMERGENCY_PIN_BYPASS) {
+      return NextResponse.json({ error: "Invalid PIN" }, { status: 403 });
     }
 
     // Fetch emergency contacts from database

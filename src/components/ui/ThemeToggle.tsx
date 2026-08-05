@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 'use client';
 
 import { useTheme } from '@/hooks/useTheme';
@@ -28,11 +29,8 @@ export const ThemeToggle = () => {
         flex items-center justify-center w-10 h-10
         bg-[var(--color-surface-2)] 
         rounded-full
-        transition-all duration-200
         hover:bg-[var(--color-surface-3)]
-        focus-visible:outline-none
-        focus-visible:ring-2 focus-visible:ring-[var(--color-accent-nori)] focus-visible:ring-offset-2
-        data-[state=active]:scale-[0.95]
+        tap-sm
       "
     >
       {isDark ? '☀️' : '🌙'}

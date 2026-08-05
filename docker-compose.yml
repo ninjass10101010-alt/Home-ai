@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 version: 3.8
 services:
   consuela-dashboard:
@@ -25,4 +26,55 @@ networks:
     name: familydashboard_consuela-net
     external: true
   media-stack_default:
+=======
+services:
+  pocketbase:
+    image: ghcr.io/muchobien/pocketbase:latest
+    ports:
+      - "8090:8090"
+    container_name: pocketbase
+    restart: unless-stopped
+    volumes:
+      - pocketbase_data:/pb_data
+    networks:
+      - dashboard-net
+
+  home-dashboard:
+    build:
+      context: .
+      args:
+        - NEXT_PUBLIC_PB_URL=http://pocketbase:8090
+    container_name: consuela-dashboard
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/app-source
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_PB_URL=http://pocketbase:8090
+      - PB_ADMIN_EMAIL=${PB_ADMIN_EMAIL:-admin@consuela.app}
+      - PB_ADMIN_PASS=${PB_ADMIN_PASS:-changeme}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_OAUTH_SCOPES=${GOOGLE_OAUTH_SCOPES:-openid email https://www.googleapis.com/auth/calendar}
+      - CONSUELA_ENCRYPTION_KEY=${CONSUELA_ENCRYPTION_KEY}
+      - CRON_SECRET=${CRON_SECRET:-changeme-please-set-me}
+      - GOOGLE_POLL_INTERVAL_MS=300000
+      - HERMES_API_URL=http://hermes-agent-2:8642
+      - HERMES_API_KEY=consuela-api-key-2026
+      - OPENROUTER_API_KEY=
+      - TELEGRAM_BOT_TOKEN=
+      - TELEGRAM_MIRROR_BOT_TOKEN=${TELEGRAM_MIRROR_BOT_TOKEN}
+    networks:
+      - dashboard-net
+
+volumes:
+  pocketbase_data:
+
+networks:
+  dashboard-net:
+    name: familydashboard_consuela-net
+>>>>>>> kitchen-ui
     external: true

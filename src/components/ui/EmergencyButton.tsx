@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
+import { useAuth } from "@/hooks/useAuth";
 
 interface EmergencyButtonProps {
   className?: string;
@@ -21,6 +22,7 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
   const [isSending, setIsSending] = useState(false);
   const [result, setResult] = useState<{success: boolean, message: string, details?: any} | null>(null);
   const router = useRouter();
+  const { currentUser } = useAuth();
 
   const { colors, accentRgb } = useAtmosphericTheme();
 
@@ -32,8 +34,11 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
     try {
       const response = await fetch("/api/emergency", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type, timestamp: new Date().toISOString() }),
+        headers: {
+          "Content-Type": "application/json",
+          "x-emergency-pin": currentUser?.pin || "",
+        },
+        body: JSON.stringify({ type, timestamp: new Date().toISOString(), pin: currentUser?.pin }),
       });
 
       const data = await response.json();
@@ -63,7 +68,7 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
     <>
       <button
         onClick={() => setShowModal(true)}
-        className={`fixed top-4 right-4 z-50 w-10 h-10 rounded-full text-white shadow-lg hover:opacity-90 active:scale-95 transition-all ${className}`}
+        className={`fixed top-4 right-4 z-50 w-10 h-10 rounded-full text-white shadow-lg hover:opacity-90 tap ${className}`}
         style={{
           background: colors.accentColor,
           boxShadow: `0 0 24px ${colors.glow}`,
@@ -109,7 +114,7 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
                 {!result.success && (
                   <button
                     onClick={() => setResult(null)}
-                    className="w-full px-3 py-2 rounded-xl bg-rose-500/15 text-rose-400 text-sm font-medium hover:bg-rose-500/25 transition-colors"
+                    className="w-full px-3 py-2 rounded-2xl bg-rose-500/15 text-rose-400 text-sm font-medium hover:bg-rose-500/25 transition-colors"
                   >
                     Try Again
                   </button>
@@ -126,7 +131,7 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
                       key={type.id}
                       onClick={() => handleEmergency(type.id)}
                       disabled={isSending}
-                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-text-primary transition-all hover:bg-white/[0.06]"
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-text-primary transition-all hover:bg-white/[0.06]"
                       style={{ background: `rgba(${accentRgb},0.15)` }}
                     >
                       {isSending && selectedType === type.id ? (
@@ -141,7 +146,7 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
                 <button
                   onClick={() => setShowModal(false)}
                   disabled={isSending}
-                  className="w-full mt-3 px-3 py-2 rounded-xl glass text-text-secondary text-sm disabled:opacity-50"
+                  className="w-full mt-3 px-3 py-2 rounded-2xl glass text-text-secondary text-sm disabled:opacity-50"
                 >
                   Cancel
                 </button>

@@ -1,58 +1,38 @@
+/* eslint-disable react-hooks/set-state-in-effect, react-hooks/purity */
 "use client";
 
 import { useState, useRef, useEffect, useMemo, Suspense } from "react";
 import BottomNav from "@/components/ui/BottomNav";
 import Avatar from "@/components/ui/Avatar";
-import Badge from "@/components/ui/Badge";
+import SigmaImage from "@/components/ui/SigmaImage";
+import { Icon3D } from "@/components/3d";
 
+import { db } from "@/db";
 import { useSearchParams } from "next/navigation";
+import { useAuth } from "@/hooks/useAuth";
 
 interface Message {
   id: number;
   role: "user" | "assistant";
   content: string;
   timestamp: string;
-  actions?: ActionCard[];
   speaker?: string;
   speakerEmoji?: string;
 }
 
-type LocalActionType =
-  | "event"
-  | "meal"
-  | "task"
-  | "grocery"
-  | "recipe"
-  | "reward"
-  | "clear"
-  | "schedule";
-
-type HermesActionType =
-  | LocalActionType
-  | "add_event"
-  | "remove_event"
-  | "add_task"
-  | "complete_task"
-  | "clear_leaderboard"
-  | "add_meal"
-  | "remove_meal"
-  | "update_grocery"
-  | "update_pantry"
-  | "send_message";
-
-interface ActionCard {
-  // Client supports both the legacy local types and the OpenRouter action types
-  type: HermesActionType;
-  title: string;
-  detail?: string;
-  emoji?: string;
-  // OpenRouter uses `data` (per system prompt)
-  data?: any;
-  confirmed?: boolean;
-}
-
 const CHAT_STORAGE_KEY = "consuela-chat-messages";
 const SPEAKER_STORAGE_KEY = "consuela-chat-speaker";
+
+function EmojiSpan({ emoji, alt = "" }: { emoji: string; alt?: string }) {
+  if (emoji && (emoji.startsWith("data:") || emoji.startsWith("http"))) {
+    return (
+      <span className="inline-block w-4 h-4 rounded-full overflow-hidden shrink-0">
+        <SigmaImage src={emoji} alt={alt} shape="circle" />
+      </span>
+    );
+  }
+  return <span>{emoji}</span>;
+}
 
 function loadChatHistory(): Message[] {
   if (typeof window === "undefined") return [];
@@ -67,6 +47,41 @@ function saveChatHistory(msgs: Message[]) {
   try { localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(msgs)); } catch {}
 }
 
+function todayISO(): string {
+  return new Date().toISOString().split("T")[0];
+}
+
+// Read the daily PB thread (union of dashboard + telegram messages).
+// Returns [] on any failure so callers keep their localStorage state.
+async function fetchPBThread(): Promise<Message[]> {
+  try {
+    const res = await fetch(`/api/chat/messages?threadId=${todayISO()}`, { cache: "no-store" });
+    if (!res.ok) return [];
+    const json = await res.json();
+    if (!json.ok || !Array.isArray(json.messages)) return [];
+    return json.messages.map((m: any, i: number) => ({
+      id: 1000000 + i,
+      role: m.role === "user" ? ("user" as const) : ("assistant" as const),
+      content: m.content || "",
+      timestamp: new Date(m.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
+      ...(m.role === "user" && m.userId ? { speaker: m.userId } : {}),
+    }));
+  } catch { return []; }
+}
+
+// Merge PB rows into the local list without duplicating rows already shown.
+// Keeps local rows (which may carry action cards) and appends anything new.
+function mergePBThread(prev: Message[], pbMsgs: Message[]): Message[] {
+  const keyOf = (m: Message) => `${m.role}:${m.speaker ?? ""}:${m.content}`;
+  const countIn = (arr: Message[], k: string) => arr.reduce((n, m) => n + (keyOf(m) === k ? 1 : 0), 0);
+  const merged = [...prev];
+  for (const pm of pbMsgs) {
+    const k = keyOf(pm);
+    if (countIn(merged, k) < countIn(pbMsgs, k)) merged.push(pm);
+  }
+  return merged;
+}
+
 const initialGreeting: Message = {
   id: 1,
   role: "assistant",
@@ -74,23 +89,12 @@ const initialGreeting: Message = {
   timestamp: "Now",
 };
 
-const suggestedPrompts = [
-  { label: "📅 Add event", prompt: "Add soccer practice tomorrow at 4pm for Caspian" },
-  { label: "🍽️ Plan meals", prompt: "Plan dinners for this week" },
-  { label: "✅ Assign chore", prompt: "Assign trash duty to Caspian every Thursday with 10 points" },
-  { label: "🛒 Grocery list", prompt: "Generate grocery list for this week's meals" },
-  { label: "📊 Family update", prompt: "What does the family have going on this week?" },
-  { label: "🔔 Reminder", prompt: "Remind Dad about car service on Friday at 10am" },
+const quickActions = [
+  { icon: "calendar" as const, label: "Add Event", prompt: "Add soccer practice tomorrow at 4pm for Caspian" },
+  { icon: "meals" as const, label: "Plan Meals", prompt: "Plan dinners for this week" },
+  { icon: "tasks" as const, label: "Assign Chore", prompt: "Assign trash duty to Caspian every Thursday with 10 points" },
+  { icon: "grocery" as const, label: "Grocery List", prompt: "Generate grocery list for this week's meals" },
 ];
-
-const actionColors: Record<string, string> = {
-  event: "border-violet-500/25 bg-violet-500/8",
-  meal: "border-amber-500/25 bg-amber-500/8",
-  task: "border-cyan-500/25 bg-cyan-500/8",
-  grocery: "border-nori-500/25 bg-nori-500/8",
-  recipe: "border-rose-500/25 bg-rose-500/8",
-  reward: "border-yellow-500/25 bg-yellow-500/8",
-};
 
 function renderContent(text: string) {
   return text.split("\n").map((line, i) => {
@@ -104,174 +108,8 @@ function renderContent(text: string) {
   });
 }
 
-async function executeAction(action: ActionCard): Promise<{ success: boolean; message: string }> {
-  try {
-    // Normalize OpenRouter payload shape.
-    const payload = (action as any).data;
-    const detailFromAction = action.detail;
-
-    const getEmoji = () => action.emoji || payload?.emoji || "✨";
-    const getTitle = () => action.title || payload?.title || action.detail || "";
-
-    const getDetailString = () => {
-      if (typeof detailFromAction === "string") return detailFromAction;
-      if (typeof payload === "string") return payload;
-      if (payload && typeof payload === "object") {
-        // Preserve existing parsing behavior as much as possible.
-        // For task/event actions, client often expects `detail` to contain free-form text like "Emily 10pts".
-        // We'll synthesize a minimal detail string when possible.
-        if (payload?.assignedTo && payload?.points) {
-          return `${payload.assignedTo} ${payload.points}pts`;
-        }
-        if (payload?.member && payload?.time) {
-          return `${payload.member} · ${payload.time}`;
-        }
-        if (payload?.items && Array.isArray(payload.items)) {
-          return payload.items.join("· ");
-        }
-      }
-      return "";
-    };
-
-    const normalizedAction: ActionCard = {
-      ...action,
-      title: getTitle(),
-      emoji: getEmoji(),
-      detail: getDetailString(),
-    };
-
-    switch (normalizedAction.type) {
-      case "meal": {
-        const dayMatch = normalizedAction.detail?.match(/\b(Mon|Tue|Wed|Thu|Fri|Sat|Sun|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b/i);
-        const dayMap: Record<string, string> = {
-          monday: "Mon", tuesday: "Tue", wednesday: "Wed", thursday: "Thu",
-          friday: "Fri", saturday: "Sat", sunday: "Sun",
-        };
-        let day = "Mon";
-        if (dayMatch) {
-          const raw = dayMatch[1].toLowerCase();
-          day = dayMap[raw] || raw.charAt(0).toUpperCase() + raw.slice(1, 3);
-        }
-        const typeMatch = normalizedAction.detail?.match(/\b(breakfast|lunch|dinner|snack)\b/i);
-        const mealType = typeMatch ? typeMatch[1].toLowerCase() as any : "dinner";
-        const newMeal = {
-          id: Date.now(),
-          name: action.title,
-          emoji: action.emoji || "🍽️",
-          time: day,
-          mealType,
-          prepTime: "30 min",
-          tags: ["AI Suggested"],
-          ingredients: [] as string[],
-          servings: 4,
-          calories: 500,
-          userId: "demo",
-        };
-        // Persist to API
-        fetch('/api/meals', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newMeal),
-        }).catch(() => {});
-        return { success: true, message: `Added "${action.title}" to ${day}` };
-      }
-      case "task": {
-        // Fetch members from API for assignee resolution
-        let members: any[] = [];
-        try {
-          const mRes = await fetch('/api/members');
-          const mData = await mRes.json();
-          members = mData.members || [];
-        } catch {}
-        const assignee = action.detail?.match(/^(\w+)/)?.[1] || members[0]?.name || "Caspian";
-        const member = members.find((m: any) => m.name === assignee || m.name.startsWith(assignee));
-        const points = parseInt(action.detail?.match(/(\d+)\s*pts?/)?.[1] || "10");
-        const newTask = {
-          id: Date.now(), title: action.title, assignee: member?.name || assignee,
-          assigneeEmoji: member?.emoji || "🧒", due: "Today", points,
-          recurring: null, category: "AI Suggested", completed: false, priority: "medium" as const,
-        };
-        // Persist to API
-        fetch('/api/tasks', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newTask),
-        }).catch(() => {});
-        return { success: true, message: `Created task "${action.title}" for ${member?.name || assignee} (${points}pts)` };
-      }
-      case "grocery": {
-        fetch('/api/grocery', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            name: action.title, category: "pantry", aisle: "1", quantity: "1",
-            priority: "medium", needed: true, source: "ai", autoGenerated: false, userId: "demo",
-          }),
-        }).catch(() => {});
-        return { success: true, message: `Added "${action.title}" to grocery list` };
-      }
-      case "event": {
-        const newEvent = {
-          id: Date.now(), title: action.title, time: "4:00 PM",
-          member: action.detail?.split("·")?.[0]?.trim() || "All",
-          color: "green" as const, emoji: action.emoji || "📅", day: new Date().getDate(),
-        };
-        fetch('/api/calendar', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newEvent),
-        }).catch(() => {});
-        return { success: true, message: `Added event "${action.title}"` };
-      }
-      case "recipe": {
-        const newRecipe = {
-          id: Date.now(),
-          name: action.title,
-          emoji: action.emoji || "📖",
-          prepTime: action.detail?.match(/(\d+\s*min)/)?.[1] || "30 min",
-          tags: ["AI Created"],
-          ingredients: action.detail?.split("·").map((s: string) => s.trim()).filter(Boolean) || [],
-          instructions: action.detail || "",
-          servings: 4,
-          calories: 500,
-          createdAt: new Date().toISOString(),
-        };
-        fetch('/api/meals', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newRecipe),
-        }).catch(() => {});
-        return { success: true, message: `Created recipe "${action.title}"` };
-      }
-      case "reward": {
-        const points = parseInt(action.detail?.match(/(\d+)/)?.[1] || "50");
-        const newReward = { id: Date.now(), name: action.title, emoji: action.emoji || "🎁", cost: points };
-        fetch('/api/rewards', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newReward),
-        }).catch(() => {});
-        return { success: true, message: `Added reward "${action.title}" (${points}pts)` };
-      }
-      case "clear": {
-        // Leaderboard is managed server-side via /api/leaderboard
-        return { success: true, message: "Cleared leaderboard" };
-      }
-      default:
-        return { success: false, message: `Unknown action type` };
-    }
-  } catch (err) {
-    return { success: false, message: err instanceof Error ? err.message : "Failed" };
-  }
-}
-
 function ChatContent() {
-  const [membersData, setMembersData] = useState<any[]>([]);
-  useEffect(() => {
-    fetch('/api/members').then(r => r.json()).then(d => {
-      if (d.members) setMembersData(d.members);
-    }).catch(() => {});
-  }, []);
+  const membersData = useMemo(() => db.selectMembers(), []);
   const memberOptions = useMemo(() =>
     membersData.filter((m: any) => m.role !== "pet").map((m: any) => ({
       name: m.name,
@@ -279,47 +117,97 @@ function ChatContent() {
       color: m.color,
     })), [membersData]);
 
-  // Load saved speaker or default to first member
-  const [currentSpeaker, setCurrentSpeaker] = useState<{ name: string; emoji: string; color: string }>(() => {
-    if (typeof window === "undefined") return memberOptions[0] || { name: "Mom", emoji: "👩", color: "green" };
+  // Hardcoded default — same on server & client, avoids hydration mismatch
+  // when member emojis differ between SSR (seed text) and client (data: URLs from localStorage).
+  const [currentSpeaker, setCurrentSpeaker] = useState<{ name: string; emoji: string; color: string }>({
+    name: "Family", emoji: "👨‍👩‍👧‍👦", color: "violet",
+  });
+
+  // Hydrate speaker from localStorage + member data after mount (client only)
+  useEffect(() => {
     try {
       const saved = localStorage.getItem(SPEAKER_STORAGE_KEY);
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        const member = memberOptions.find((m: any) => m.name === parsed.name);
+        if (member) {
+          // Always use the live member emoji (never a stale data: URL)
+          return setCurrentSpeaker({ ...parsed, emoji: member.emoji });
+        }
+      }
     } catch {}
-    return memberOptions[0] || { name: "Mom", emoji: "👩", color: "green" };
-  });
+    // Fallback to first member if no saved speaker
+    if (memberOptions.length > 0) {
+      setCurrentSpeaker(memberOptions[0]);
+    }
+  }, [memberOptions]);
 
   const saveSpeaker = (speaker: typeof currentSpeaker) => {
     setCurrentSpeaker(speaker);
     if (typeof window !== "undefined") {
-      localStorage.setItem(SPEAKER_STORAGE_KEY, JSON.stringify(speaker));
+      const member = memberOptions.find((m: any) => m.name === speaker.name);
+      const storeEmoji = (member?.emoji && member.emoji.startsWith('data:')) ? '' : member?.emoji || speaker.emoji;
+      localStorage.setItem(SPEAKER_STORAGE_KEY, JSON.stringify({ ...speaker, emoji: storeEmoji }));
     }
   };
 
-  // Load persisted messages
-  const [messages, setMessages] = useState<Message[]>(() => {
-    const saved = loadChatHistory();
-    return saved.length > 0 ? saved : [initialGreeting];
-  });
+  const { currentUser, isLoggedIn } = useAuth();
+  const activeSpeaker = isLoggedIn && currentUser
+    ? { name: currentUser.name, emoji: currentUser.emoji, color: currentUser.color }
+    : currentSpeaker;
 
-  // Defer query-param send until after `sendMessage` is declared.
+  const [messages, setMessages] = useState<Message[]>([initialGreeting]);
+
+  // Hydrate saved messages after mount (client only, avoids SSR mismatch)
+  useEffect(() => {
+    const saved = loadChatHistory();
+    if (saved.length > 0) {
+      setMessages(saved);
+    }
+  }, []);
+
+  const hydratedRef = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      // PB is the union of dashboard + telegram — it wins over the localStorage
+      // seed when it has anything; otherwise keep the local history as-is.
+      const pbMsgs = await fetchPBThread();
+      if (cancelled) return;
+      if (pbMsgs.length > 0) {
+        setMessages(pbMsgs);
+      } else {
+        const saved = loadChatHistory();
+        if (saved.length > 0) setMessages(saved);
+      }
+      hydratedRef.current = true;
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   const queryParamRef = useRef<string | null>(null);
 
-  // Save messages on every change
   useEffect(() => {
-    if (messages.length > 0) saveChatHistory(messages);
+    if (hydratedRef.current && messages.length > 0) saveChatHistory(messages);
   }, [messages]);
 
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
-  const [showSuggestions, setShowSuggestions] = useState(true);
-  const [isListening, setIsListening] = useState(false);
   const [showSpeakerPicker, setShowSpeakerPicker] = useState(false);
+  const [isListening, setIsListening] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<any>(null);
   const searchParams = useSearchParams();
   const queryParam = searchParams.get("q");
+
+  // Hero state: visible when fresh (no user messages yet) OR first reply is pending (orb animation plays while thinking)
+  const userMessageCount = messages.filter(m => m.role === "user").length;
+  const showHero = userMessageCount === 0 || (userMessageCount === 1 && isTyping);
+
+  // Hide quick actions while Consuela is thinking — don't let them tap again
+  const showQuickActions = userMessageCount === 0 && !isTyping;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -328,7 +216,6 @@ function ChatContent() {
   useEffect(() => {
     if (queryParam) {
       queryParamRef.current = queryParam;
-
       if (typeof window !== "undefined") {
         const url = new URL(window.location.href);
         url.searchParams.delete("q");
@@ -365,82 +252,56 @@ function ChatContent() {
       role: "user",
       content: text.trim(),
       timestamp: "Just now",
-      speaker: currentSpeaker.name,
-      speakerEmoji: currentSpeaker.emoji,
+      speaker: activeSpeaker.name,
+      speakerEmoji: activeSpeaker.emoji,
     };
 
     const updated = [...messages, userMsg];
     setMessages(updated);
     setInput("");
     setIsTyping(true);
-    setShowSuggestions(false);
 
     try {
-      // Pre-fetch context data from API routes
-      const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-      let events: any[] = [], schedules: any[] = [], tasks: any[] = [], meals: any[] = [];
-      try {
-        const [evRes, schRes, taskRes, mealRes] = await Promise.all([
-          fetch('/api/calendar').then(r => r.json()).catch(() => ({ events: [] })),
-          fetch('/api/schedules').then(r => r.json()).catch(() => ({ schedules: [] })),
-          fetch('/api/tasks').then(r => r.json()).catch(() => ({ tasks: [] })),
-          fetch('/api/meals').then(r => r.json()).catch(() => ({ meals: [] })),
-        ]);
-        events = evRes.events || [];
-        schedules = schRes.schedules || [];
-        tasks = taskRes.tasks || [];
-        meals = mealRes.meals || [];
-      } catch {}
-
+      const t0 = Date.now();
       const res = await fetch('/api/hermes/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: text,
-          context: (() => {
-            let ctx = `Current date: ${today}. Current speaker: ${currentSpeaker.name}. Family: ${memberOptions.map(m => `${m.name} (${m.emoji})`).join(", ")}.`;
-
-            if (events.length > 0) {
-              ctx += ` Today's events: ${events.map((e: any) => `${e.title} at ${e.time} (${e.member})`).join("; ")}.`;
-            }
-            if (schedules.length > 0) {
-              ctx += ` Today's schedule: ${schedules.slice(0, 8).map((s: any) => `${s.time} ${s.title}`).join("; ")}.`;
-            }
-            if (tasks.length > 0) {
-              ctx += ` Pending tasks: ${tasks.map((t: any) => `${t.title} (${t.assigned || t.assignee}, ${t.points || 0}pts)`).join("; ")}.`;
-            }
-            if (meals.length > 0) {
-              const weekMeals = meals.filter((m: any) => m.time).map((m: any) => `${m.time}: ${m.name}`).join(", ");
-              if (weekMeals) ctx += ` This week's meals: ${weekMeals}.`;
-            }
-            return ctx;
-          })(),
+          history: messages.slice(-12).map(m => ({
+            role: m.role,
+            content: m.role === "assistant"
+              ? m.content.replace(/\n\n✅[\s\S]*$/, "").trim()
+              : m.content,
+          })),
         }),
       });
       const aiResponse = await res.json();
+
+      // Minimum 2s delay so the hero orb animation plays fully —
+      // also creates a buffer that absorbs connectivity jitter gracefully.
+      const MIN_THINKING_DELAY = 2000;
+      const elapsed = Date.now() - t0;
+      if (elapsed < MIN_THINKING_DELAY) {
+        await new Promise(r => setTimeout(r, MIN_THINKING_DELAY - elapsed));
+      }
+
       setIsTyping(false);
 
-      const actions = aiResponse.actions || [];
-      const executedActions = await Promise.all(actions.map(async (action: ActionCard) => {
-        const result = await executeAction(action);
-        return { ...action, confirmed: result.success };
-      }));
-
-      const resultMsgs = executedActions
-        .filter((a: ActionCard) => a.confirmed)
-        .map((a: ActionCard) => `✅ ${a.title}`);
       const content = aiResponse.content || aiResponse.reply || "I processed that.";
-      const fullContent = resultMsgs.length > 0 ? content + "\n\n" + resultMsgs.join("\n") : content;
 
       msgCounter.current += 1;
       const response: Message = {
         id: msgCounter.current,
         role: "assistant",
-        content: fullContent,
+        content,
         timestamp: "Just now",
-        actions: executedActions,
       };
       setMessages(prev => [...prev, response]);
+
+      // Reconcile against PB (picks up anything that arrived on other devices).
+      const pbMsgs = await fetchPBThread();
+      if (pbMsgs.length > 0) setMessages(prev => mergePBThread(prev, pbMsgs));
     } catch (error) {
       setIsTyping(false);
       msgCounter.current += 1;
@@ -472,108 +333,247 @@ function ChatContent() {
   };
 
   return (
-    <div className="min-h-screen bg-surface-0 max-w-lg mx-auto flex flex-col">
-      {/* Top bar */}
+    <div className="min-h-screen max-w-lg mx-auto flex flex-col relative bg-surface-0">
+
+      {/* ─── Top bar ─── */}
       <div
-        className="sticky top-0 z-40 px-4 py-3 flex items-center gap-3 bg-surface-0/90 backdrop-blur-md border-b border-surface-3/20"
-        style={{ paddingTop: "calc(env(safe-area-inset-top) + 0.75rem)" }}
+        className="sticky top-0 z-40 mx-3 sm:mx-4 mt-3 px-3 sm:px-4 py-3 glass-strong rounded-3xl flex items-center gap-2 sm:gap-3"
+        style={{ marginTop: "calc(env(safe-area-inset-top) + 0.5rem)" }}
       >
-        <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl shrink-0 bg-nori-500/15 consuela-glow">
+        <div className="w-9 h-9 rounded-2xl flex items-center justify-center text-lg shrink-0"
+          style={{ background: "linear-gradient(135deg, var(--color-accent-violet), var(--color-accent-lavender))", boxShadow: "0 0 16px rgba(124,111,247,0.3)" }}
+        >
           ✨
         </div>
         <div className="flex-1 min-w-0">
-          <h1 className="text-base font-semibold text-text-primary">Consuela</h1>
+          <h1 className="text-sm font-semibold text-text-primary truncate">Consuela</h1>
           <div className="flex items-center gap-1.5">
-            <div className="w-1.5 h-1.5 rounded-full bg-nori-400 animate-pulse" />
-            <span className="text-xs text-text-secondary">AI Family Assistant</span>
+            <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse shrink-0" />
+            <span className="text-[10px] text-text-secondary truncate">AI Family Assistant</span>
           </div>
         </div>
 
-        {/* Speaker selector */}
-        <div className="relative">
-          <button
-            onClick={() => setShowSpeakerPicker(!showSpeakerPicker)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-surface-2 text-text-secondary hover:text-text-primary transition-colors text-xs"
-          >
-            <span>{currentSpeaker.emoji}</span>
-            <span className="max-w-[60px] truncate">{currentSpeaker.name.split(" ")[0]}</span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3 h-3">
-              <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-          {showSpeakerPicker && (
-            <div className="absolute right-0 top-full mt-1 bg-surface-0 border border-surface-3 rounded-xl shadow-xl z-50 py-1 min-w-[160px]"
-              onClick={() => setShowSpeakerPicker(false)}>
-              {memberOptions.map(m => (
-                <button
-                  key={m.name}
-                  onClick={() => saveSpeaker(m)}
-                  className={`w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-surface-2 transition-colors ${
-                    currentSpeaker.name === m.name ? "text-nori-400 bg-nori-500/10" : "text-text-primary"
-                  }`}
-                >
-                  <span>{m.emoji}</span>
-                  <span>{m.name}</span>
-                  {currentSpeaker.name === m.name && <span className="ml-auto text-nori-400">✓</span>}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        {isLoggedIn ? (
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-2xl glass-subtle text-text-secondary text-xs shrink-0">
+            <EmojiSpan emoji={activeSpeaker.emoji} alt={activeSpeaker.name} />
+            <span className="max-w-[64px] truncate">{activeSpeaker.name.split(" ")[0]}</span>
+          </div>
+        ) : (
+          <div className="relative shrink-0">
+            <button
+              onClick={() => setShowSpeakerPicker(!showSpeakerPicker)}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-2xl glass-subtle text-text-secondary hover:text-text-primary transition-colors text-xs"
+            >
+              <EmojiSpan emoji={activeSpeaker.emoji} alt={activeSpeaker.name} />
+              <span className="max-w-[64px] truncate">{activeSpeaker.name.split(" ")[0]}</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3 h-3">
+                <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            {showSpeakerPicker && (
+              <div
+                className="absolute right-0 top-full mt-1 glass-strong rounded-2xl shadow-xl z-50 py-1 min-w-[160px]"
+                onClick={() => setShowSpeakerPicker(false)}
+              >
+                {memberOptions.map(m => (
+                  <button
+                    key={m.name}
+                    onClick={() => saveSpeaker(m)}
+                    className={`w-full flex items-center gap-2 px-3 py-2 text-xs transition-colors ${
+                      currentSpeaker.name === m.name ? "text-[var(--color-accent-violet)] bg-[var(--color-accent-violet)]/10" : "text-text-primary"
+                    }`}
+                    onMouseEnter={(e) => { if (currentSpeaker.name !== m.name) e.currentTarget.style.background = "rgba(255,255,255,0.05)"; }}
+                    onMouseLeave={(e) => { if (currentSpeaker.name !== m.name) e.currentTarget.style.background = ""; }}
+                  >
+                    <EmojiSpan emoji={m.emoji} alt={m.name} />
+                    <span>{m.name}</span>
+                    {currentSpeaker.name === m.name && <span className="ml-auto text-[var(--color-accent-violet)]">✓</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
-        <button onClick={clearChat} className="w-9 h-9 flex items-center justify-center rounded-xl bg-surface-2 text-text-secondary hover:text-text-primary transition-colors text-xs" title="Clear chat">
-          🗑️
+        <button
+          onClick={clearChat}
+          className="w-8 h-8 flex items-center justify-center rounded-2xl glass-subtle text-text-secondary hover:text-text-primary transition-colors shrink-0"
+          title="Clear chat"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" className="w-4 h-4">
+            <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6M5 6l1 14a2 2 0 002 2h8a2 2 0 002-2l1-14" />
+          </svg>
         </button>
       </div>
 
-      {/* Messages */}
+      {/* ─── Messages area ─── */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-        {messages.map((msg) => (
+        {/* Hero greeting state */}
+        {showHero && (
+          <div className="flex flex-col items-center pt-10 pb-6">
+            {/* Orb + ring container */}
+            <div className="relative w-[200px] h-[200px] flex items-center justify-center chat-hero-enter">
+              {/* Ambient glow — large soft halo behind the orb, visible only while thinking */}
+              {isTyping && (
+                <div
+                  className="chat-ambient-glow absolute inset-0 rounded-full"
+                  style={{
+                    background: "radial-gradient(circle, rgba(167,139,250,0.5) 0%, rgba(124,111,247,0.2) 40%, transparent 70%)",
+                    filter: "blur(24px)",
+                  }}
+                />
+              )}
+
+              {/* Glowing orb — elastic morph when thinking */}
+              <div
+                className={`w-[140px] h-[140px] rounded-full ${isTyping ? "chat-orb-think" : "chat-hero-orb"}`}
+                style={{
+                  background: "radial-gradient(circle at 40% 35%, rgba(167,139,250,0.9) 0%, rgba(124,111,247,0.6) 35%, rgba(99,102,241,0.2) 70%, transparent 100%)",
+                  boxShadow: `0 0 80px rgba(124,111,247,${isTyping ? "0.40" : "0.25"}), 0 0 160px rgba(167,139,250,0.12), inset 0 2px 0 rgba(255,255,255,0.2)`,
+                }}
+              />
+
+              {/* Siri-style concentric ripple rings — 5 rings staggered evenly across 1.8s */}
+              {isTyping && (
+                <svg className="absolute inset-0 w-full h-full" viewBox="0 0 200 200">
+                  {[0, 1, 2, 3, 4].map((i) => {
+                    const phase = i / 5;
+                    const strokeAlpha = 0.55 - phase * 0.4;
+                    const strokeWidth = 2.0 - phase * 0.35;
+                    return (
+                      <circle
+                        key={i}
+                        cx="100" cy="100" r="78"
+                        fill="none"
+                        stroke={`rgba(192,132,252,${strokeAlpha.toFixed(2)})`}
+                        strokeWidth={strokeWidth}
+                        className="chat-ripple"
+                        style={{
+                          animationDelay: `${(phase * 1.8).toFixed(2)}s`,
+                          transformOrigin: "100px 100px",
+                        }}
+                      />
+                    );
+                  })}
+                </svg>
+              )}
+
+              {/* Dotted ring — spins faster while thinking */}
+              <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 200 200">
+                <circle
+                  cx="100" cy="100" r="88"
+                  fill="none"
+                  stroke="rgba(192,132,252,0.40)"
+                  strokeWidth="1.0"
+                  strokeDasharray="6 14"
+                  strokeLinecap="round"
+                  className={isTyping ? "chat-hero-ring-fast" : "chat-hero-ring"}
+                />
+                <circle
+                  cx="100" cy="100" r="88"
+                  fill="none"
+                  stroke="rgba(147,51,234,0.25)"
+                  strokeWidth="0.6"
+                  strokeDasharray="3 17"
+                  strokeLinecap="round"
+                  style={{ animation: `chatRingSweep${isTyping ? "Fast" : ""} 25s linear infinite reverse` }}
+                />
+              </svg>
+            </div>
+
+            {/* Greeting / thinking text */}
+            {isTyping ? (
+              <p className="text-sm text-text-secondary mt-3 chat-hero-enter chat-hero-enter-delay-100">
+                Listening…
+              </p>
+            ) : (
+              <>
+                <h1 className="text-2xl font-bold mt-2 chat-hero-enter chat-hero-enter-delay-100"
+                  style={{
+                    background: "linear-gradient(135deg, var(--color-accent-violet), var(--color-accent-lavender))",
+                    WebkitBackgroundClip: "text",
+                    WebkitTextFillColor: "transparent",
+                    backgroundClip: "text",
+                  }}
+                >
+                  Hi, I&apos;m Consuela
+                </h1>
+                <p className="text-sm text-text-secondary mt-1 chat-hero-enter chat-hero-enter-delay-200">
+                  What can I help you with today?
+                </p>
+              </>
+            )}
+
+            {/* Quick action chips — hidden while thinking */}
+            {showQuickActions && (
+            <div className="grid grid-cols-2 gap-3 w-full mt-6 chat-hero-enter chat-hero-enter-delay-300">
+              {quickActions.map((a) => (
+                <button
+                  key={a.label}
+                  onClick={() => sendMessage(a.prompt)}
+                  className="liquid-glass flex items-center gap-4 px-5 py-4 text-left group"
+                  style={{ background: "linear-gradient(135deg, rgba(124,111,247,0.24) 0%, rgba(124,111,247,0.10) 100%)" }}
+                >
+                  <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0"
+                    style={{ background: "linear-gradient(135deg, rgba(124,111,247,0.4), rgba(167,139,250,0.2))" }}
+                  >
+                    <Icon3D variant={a.icon} size="md" animated={false} className="w-6 h-6" />
+                  </div>
+                  <span className="text-sm font-medium text-text-primary">{a.label}</span>
+                </button>
+              ))}
+            </div>
+            )}
+
+          </div>
+        )}
+
+        {/* Conversation messages */}
+        {!showHero && messages.map((msg) => (
           <div
             key={msg.id}
             className={`flex gap-2.5 ${msg.role === "user" ? "flex-row-reverse" : "flex-row"}`}
           >
             {msg.role === "assistant" && (
-              <div className="w-8 h-8 rounded-xl bg-nori-500/15 flex items-center justify-center text-sm shrink-0 mt-0.5">✨</div>
+              <div className="w-8 h-8 rounded-2xl flex items-center justify-center text-sm shrink-0 mt-0.5"
+                style={{
+                  background: "linear-gradient(135deg, rgba(124,111,247,0.3), rgba(167,139,250,0.15))",
+                  boxShadow: "0 0 12px rgba(124,111,247,0.15)",
+                }}
+              >
+                ✨
+              </div>
             )}
             {msg.role === "user" && (
-              <Avatar name={msg.speaker || currentSpeaker.name}
-                color={currentSpeaker.color || "green"}
-                emoji={msg.speakerEmoji || currentSpeaker.emoji}
+              <Avatar name={msg.speaker || activeSpeaker.name}
+                color={activeSpeaker.color || "green"}
+                emoji={msg.speakerEmoji || activeSpeaker.emoji}
                 size="sm" variant="emoji" />
             )}
             <div className={`max-w-[82%] space-y-2 ${msg.role === "user" ? "items-end" : "items-start"} flex flex-col`}>
-              {/* Speaker label */}
               {msg.role === "user" && msg.speaker && (
                 <span className="text-[10px] text-text-muted px-1">{msg.speaker.split(" ")[0]}</span>
               )}
               <div
                 className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                   msg.role === "user"
-                    ? "bg-nori-600 text-white rounded-tr-sm"
-                    : "glass text-text-primary rounded-tl-sm"
+                    ? "text-white rounded-tr-md"
+                    : "rounded-tl-md text-text-primary"
                 }`}
+                style={
+                  msg.role === "user"
+                    ? { background: "linear-gradient(135deg, var(--color-accent-violet), var(--color-accent-lavender))" }
+                    : {
+                        background: "linear-gradient(135deg, rgba(124,111,247,0.18) 0%, rgba(124,111,247,0.08) 100%)",
+                        backdropFilter: "blur(16px)",
+                        WebkitBackdropFilter: "blur(16px)",
+                        border: "1px solid rgba(255,255,255,0.10)",
+                        boxShadow: "0 4px 16px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.12)",
+                      }
+                }
               >
                 {renderContent(msg.content)}
               </div>
-
-              {msg.actions?.map((action, i) => (
-                <div key={i}
-                  className={`rounded-xl px-3 py-2.5 flex items-center gap-2.5 border w-full max-w-xs ${actionColors[action.type]}`}>
-                  <span className="text-xl shrink-0">{action.emoji}</span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold text-text-primary truncate">{action.title}</p>
-                    <p className="text-[11px] text-text-secondary truncate">{action.detail}</p>
-                  </div>
-                  {action.confirmed && (
-                    <div className="w-5 h-5 rounded-full bg-nori-500 flex items-center justify-center shrink-0">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={3} className="w-3 h-3">
-                        <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    </div>
-                  )}
-                </div>
-              ))}
 
               <span className="text-[10px] text-text-muted px-1">{msg.timestamp}</span>
             </div>
@@ -582,25 +582,29 @@ function ChatContent() {
 
         {isTyping && (
           <div className="flex gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-nori-500/15 flex items-center justify-center text-sm shrink-0">✨</div>
-            <div className="glass rounded-2xl rounded-tl-sm px-4 py-3 flex items-center gap-1">
-              {[0, 1, 2].map((i) => (
-                <div key={i} className="w-2 h-2 rounded-full bg-nori-400"
-                  style={{ animation: `bounce 1s ease-in-out ${i * 0.15}s infinite` }} />
-              ))}
+            <div className="w-8 h-8 rounded-2xl flex items-center justify-center text-sm shrink-0"
+              style={{
+                background: "linear-gradient(135deg, rgba(124,111,247,0.3), rgba(167,139,250,0.15))",
+                boxShadow: "0 0 12px rgba(124,111,247,0.15)",
+              }}
+            >
+              ✨
             </div>
-          </div>
-        )}
-
-        {showSuggestions && messages.length <= 1 && (
-          <div className="pt-2">
-            <p className="text-text-muted text-xs mb-3 text-center">Try asking…</p>
-            <div className="grid grid-cols-2 gap-2">
-              {suggestedPrompts.map((s) => (
-                <button key={s.label} onClick={() => sendMessage(s.prompt)}
-                  className="glass rounded-xl px-3 py-2.5 text-left text-xs text-text-secondary hover:text-text-primary hover:border-nori-500/30 transition-all active:scale-95">
-                  {s.label}
-                </button>
+            <div
+              className="rounded-2xl rounded-tl-md px-4 py-3 flex items-center gap-1"
+              style={{
+                background: "linear-gradient(135deg, rgba(124,111,247,0.12) 0%, rgba(124,111,247,0.06) 100%)",
+                backdropFilter: "blur(12px)",
+                border: "1px solid rgba(255,255,255,0.08)",
+              }}
+            >
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="w-2 h-2 rounded-full"
+                  style={{
+                    background: "var(--color-accent-violet)",
+                    animation: `bounce 1s ease-in-out ${i * 0.15}s infinite`,
+                  }}
+                />
               ))}
             </div>
           </div>
@@ -609,18 +613,30 @@ function ChatContent() {
         <div ref={bottomRef} />
       </div>
 
-      {/* Input area */}
+      {/* ─── Input area ─── */}
       <div
-        className="sticky bottom-0 px-4 pb-24 pt-3"
+        className="sticky bottom-0 z-50 px-4 pb-20 pt-2"
         style={{
-          background: "linear-gradient(to top, var(--color-surface-0) 70%, transparent)",
-          paddingBottom: "calc(env(safe-area-inset-bottom) + 5.5rem)",
+          background: "linear-gradient(to top, var(--color-surface-0) 65%, transparent)",
+          paddingBottom: "calc(env(safe-area-inset-bottom) + 7rem)",
         }}
       >
-        <div className="flex items-end gap-2 rounded-2xl glass px-3 py-2 border border-accent-selected/15">
+        {/* Input bar */}
+        <div className="flex items-end gap-2 rounded-3xl px-3 py-2"
+          style={{
+            background: "linear-gradient(135deg, rgba(124,111,247,0.22) 0%, rgba(124,111,247,0.10) 100%)",
+            backdropFilter: "blur(20px)",
+            WebkitBackdropFilter: "blur(20px)",
+            border: "1px solid rgba(167,139,250,0.20)",
+            boxShadow: "0 8px 32px rgba(124,111,247,0.12), inset 0 1px 0 rgba(255,255,255,0.12)",
+          }}
+        >
+          {/* Mic button */}
           <button onClick={toggleListening}
-            className={`w-9 h-9 flex items-center justify-center rounded-xl transition-colors shrink-0 mb-0.5 ${
-              isListening ? "text-red-400 bg-red-500/10" : "text-text-secondary hover:text-nori-400"}`}>
+            className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors shrink-0 mb-0.5 ${
+              isListening ? "text-rose-400 bg-rose-500/15" : "text-text-secondary hover:text-[var(--color-accent-violet)]"
+            }`}
+          >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-5 h-5">
               <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" strokeLinecap="round" />
               <path d="M19 10v2a7 7 0 01-14 0v-2" strokeLinecap="round" />
@@ -634,27 +650,30 @@ function ChatContent() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={`Message Consuela as ${currentSpeaker.name.split(" ")[0]}…`}
+            placeholder={`Message Consuela as ${activeSpeaker.name.split(" ")[0]}…`}
             rows={1}
+            suppressHydrationWarning
             className="flex-1 bg-transparent text-text-primary text-sm placeholder:text-text-muted resize-none outline-none leading-relaxed py-1.5 max-h-28"
             style={{ minHeight: "36px" }}
           />
 
+          {/* Send button */}
           <button onClick={() => sendMessage(input)} disabled={!input.trim()}
-            className={`w-9 h-9 flex items-center justify-center rounded-xl shrink-0 mb-0.5 transition-all ${
-              input.trim() ? "bg-nori-500 text-white hover:bg-nori-400 active:scale-95" : "bg-surface-3 text-text-muted cursor-not-allowed"}`}>
+            className={`w-9 h-9 flex items-center justify-center rounded-full shrink-0 mb-0.5 transition-all ${
+              input.trim()
+                ? "text-white active:scale-95"
+                : "text-text-muted cursor-not-allowed"
+            }`}
+            style={input.trim()
+              ? { background: "linear-gradient(135deg, var(--color-accent-violet), var(--color-accent-lavender))", boxShadow: "0 4px 12px rgba(124,111,247,0.35)" }
+              : { background: "rgba(255,255,255,0.04)" }
+            }
+          >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} className="w-4 h-4">
               <path d="M22 2L11 13" strokeLinecap="round" strokeLinejoin="round" />
               <path d="M22 2L15 22l-4-9-9-4 20-7z" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </button>
-        </div>
-
-        <div className="flex gap-2 mt-2.5 overflow-x-auto pb-0.5">
-          <Badge variant="gray">📅 Calendar</Badge>
-          <Badge variant="gray">🍽️ Meals</Badge>
-          <Badge variant="gray">✅ Tasks</Badge>
-          <Badge variant="gray">🛒 Grocery</Badge>
         </div>
       </div>
 
@@ -672,7 +691,7 @@ function ChatContent() {
 
 export default function ChatPage() {
   return (
-    <Suspense fallback={<div className="flex items-center justify-center min-h-screen"><div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary-500"></div></div>}>
+    <Suspense fallback={<div className="flex items-center justify-center min-h-screen"><div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary-500" /></div>}>
       <ChatContent />
     </Suspense>
   );

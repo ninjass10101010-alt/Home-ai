@@ -1,105 +1,176 @@
 import { NextRequest, NextResponse } from "next/server";
+import { buildToolsForOpenAI, getTool } from "@/lib/hermes-tools";
+import { db } from "@/db";
 
 export const dynamic = "force-dynamic";
 
-const HERMES_API_URL = process.env.HERMES_API_URL || "http://hermes-agent-2:8642/v1";
-const HERMES_API_KEY = process.env.HERMES_API_KEY || "consuela-api-key-2026";
-
-const AVAILABLE_ACTIONS = [
-  { type: "add_event", desc: "Add a calendar event", data: { title: "string", time: "string", member: "string", emoji: "string", date: "string" } },
-  { type: "remove_event", desc: "Remove a calendar event", data: { title: "string" } },
-  { type: "add_task", desc: "Add a chore/task", data: { title: "string", assignedTo: "string", points: "number", emoji: "string" } },
-  { type: "complete_task", desc: "Mark a task done", data: { title: "string" } },
-  { type: "clear_leaderboard", desc: "Reset ALL task points to zero for everyone", data: {} },
-  { type: "add_meal", desc: "Add a meal to the plan", data: { time: "string", name: "string", emoji: "string", day: "string" } },
-  { type: "remove_meal", desc: "Remove a meal", data: { name: "string" } },
-  { type: "update_grocery", desc: "Add items to the grocery list", data: { items: ["item1", "item2"] } },
-  { type: "update_pantry", desc: "Add items to the pantry", data: { items: ["item1", "item2"] } },
-  { type: "send_message", desc: "Notify a family member", data: { to: "string", message: "string" } },
-];
-
-const SYSTEM_PROMPT = `You are Consuela, the Garcia family AI assistant in their family dashboard.
-
-IMPORTANT — You MUST return a JSON response with this EXACT format:
-{
-  "content": "your friendly reply here",
-  "actions": []
+function todayISO(): string {
+  return new Date().toISOString().split("T")[0];
 }
 
-When the user asks you to DO something (add, remove, clear, update, complete), you MUST include the matching action object in the "actions" array with the correct "type" and "data" fields.
+async function persistChatPair(request: NextRequest, userMessage: string, assistantReply: string) {
+  try {
+    // I1 — don't persist empty/fallback replies: they're thread spam and give
+    // the daily thread nothing useful for later rounds.
+    const reply = String(assistantReply || "").trim();
+    if (!reply || reply === "I processed that.") return;
+    const userId = request.cookies.get("x-consuela-user")?.value || "guest";
+    const threadId = todayISO();
+    await db.insertChatMessage({ userId, role: "user", content: userMessage, source: "dashboard", threadId });
+    await db.insertChatMessage({ userId: "consuela", role: "assistant", content: reply, source: "dashboard", threadId });
+  } catch (e: any) {
+    console.error("Failed to persist chat messages:", e?.message || e);
+  }
+}
 
-Available actions:
-${AVAILABLE_ACTIONS.map(a => `- "${a.type}": ${a.desc}`).join("\n")}
+const HERMES_API_KEY = process.env.HERMES_API_KEY || "consuela-api-key-2026";
+const HERMES_URL =
+  process.env.HERMES_URL || process.env.HERMES_API_URL || "http://hermes-agent-2:8642";
+const HERMES_MODEL = "consuela";
+const MAX_ROUNDS = 4;
 
-CRITICAL: If the user asks to make a change, you MUST include the action. Never just say you did something — actually do it by including the action.
-Always return valid JSON only. No markdown wrapping, no extra text. JSON only.
+interface ToolCall {
+  id?: string;
+  function?: { name?: string; arguments?: string };
+}
 
-Family members: Jeff (Dad), Rebecca (Mom), Emily (14), Bailey (12), Jasmine (10), Aurora (7), Caspian (5), Rocco (dog Frenchie), Rico (dog Poodle).`;
+interface ChatMessage {
+  role: string;
+  content: string;
+  tool_call_id?: string;
+  tool_calls?: ToolCall[];
+}
+
+const SYSTEM_PROMPT = `You are Consuela, the Garcia family's AI assistant. You have access to the family dashboard through tools.
+
+Family members: Rebecca (Mom 🐱), Jeffery (Dad 👨), Emily (👧14), Bailey (👧12), Jasmine (👧10), Aurora (👧7), Caspian (🧒5), Rocco (🐶), Rico (🐩).
+
+Admin capabilities — you can also manage the dashboard itself:
+- check_for_update: Check if new code is available on GitHub
+- trigger_update: Pull latest code and rebuild the dashboard container
+- get_container_status: Check if Docker containers (dashboard, PocketBase, Hermes) are running
+- restart_container: Restart a container if unhealthy
+- check_pocketbase: Verify the database is healthy and connected
+
+Rules:
+1. When asking about events, tasks, meals, recipes, grocery, or pantry — ALWAYS call a tool first.
+2. Never make up data. If you need to know something about the dashboard, use a tool.
+3. Use the user's message to determine which tool to call and what arguments to pass.
+4. For admin actions, confirm with the user before triggering updates or restarts. Use check_for_update or get_container_status first.
+5. If the user references a previous action (e.g. 'did you add milk?'), use a read tool to check current state rather than assuming.`;
+
+function parseToolArgs(raw: string | undefined): Record<string, any> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+async function callHermes(
+  messages: ChatMessage[],
+  opts: { maxTokens?: number; tools?: ReturnType<typeof buildToolsForOpenAI>; toolChoice?: "auto" | "none" } = {},
+): Promise<{ content: string; tool_calls?: ToolCall[] }> {
+  const res = await fetch(`${HERMES_URL}/v1/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${HERMES_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: HERMES_MODEL,
+      messages,
+      temperature: 0.7,
+      max_tokens: opts.maxTokens ?? 1024,
+      tools: opts.tools,
+      tool_choice: opts.toolChoice ?? "auto",
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text().catch(() => "");
+    throw new Error(`Hermes ${res.status}: ${err || res.statusText}`);
+  }
+
+  const data = await res.json();
+  return {
+    content: data.choices?.[0]?.message?.content || "",
+    tool_calls: data.choices?.[0]?.message?.tool_calls,
+  };
+}
 
 export async function POST(request: NextRequest) {
+  let body: { message?: string; history?: any[] };
   try {
-    const body = await request.json();
-    const { message, history = [], context } = body;
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
 
-    if (!message) {
-      return NextResponse.json({ error: "Message is required" }, { status: 400 });
-    }
+  const { message, history = [] } = body;
+  if (!message || !message.trim()) {
+    return NextResponse.json({ error: "Message is required" }, { status: 400 });
+  }
 
-    const messages = [
+  try {
+    const tools = buildToolsForOpenAI();
+    const recentHistory = (history || [])
+      .slice(-6)
+      .filter((h: any) => h && typeof h.content === "string" && h.content.trim())
+      .map((h: any) => ({
+        role: h.role === "assistant" ? "assistant" : "user",
+        content: h.content,
+      }));
+
+    const messages: ChatMessage[] = [
       { role: "system", content: SYSTEM_PROMPT },
-      ...history.map((m: any) => ({
-        role: m.role === "assistant" ? "assistant" : "user",
-        content: m.content,
-      })),
-      { role: "user", content: context ? `${message}\n\nContext: ${context}` : message },
+      ...recentHistory,
+      { role: "user", content: message },
     ];
 
-    // Route through Hermes API server (OpenAI-compatible)
-    const response = await fetch(`${HERMES_API_URL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${HERMES_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: "hermes-agent",
-        messages,
-        temperature: 0.7,
-        max_tokens: 1024,
-      }),
-    });
+    for (let round = 0; round < MAX_ROUNDS; round++) {
+      const { content, tool_calls } = await callHermes(messages, { tools, toolChoice: "auto" });
 
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error("Hermes API error:", response.status, errText);
-      return NextResponse.json({
-        content: "Hmm, I hit a snag connecting to my brain. Try again in a moment!",
-      });
+      if (!tool_calls || tool_calls.length === 0) {
+        await persistChatPair(request, message, content);
+        return NextResponse.json({ content });
+      }
+
+      messages.push({ role: "assistant", content, tool_calls });
+
+      for (const tc of tool_calls) {
+        const name = tc.function?.name;
+        const tool = name ? getTool(name) : undefined;
+
+        let result: string;
+        if (!name || !tool) {
+          const available = tools.map((t) => t.function.name).join(", ");
+          result = JSON.stringify({
+            error: `Unknown tool: ${name ?? "<missing name>"}. Available: ${available}`,
+          });
+        } else {
+          try {
+            result = await tool.handler(parseToolArgs(tc.function?.arguments));
+          } catch (e: any) {
+            result = JSON.stringify({ error: e?.message || "Tool failed" });
+          }
+        }
+
+        messages.push({ role: "tool", tool_call_id: tc.id || "", content: result });
+      }
     }
 
-    const data = await response.json();
-    const rawContent = data.choices?.[0]?.message?.content || "";
-
-    let parsed: any = null;
-    const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      try {
-        parsed = JSON.parse(jsonMatch[0]);
-      } catch {}
-    }
-
-    if (parsed && parsed.content) {
-      return NextResponse.json({
-        content: parsed.content,
-        actions: parsed.actions || [],
-      });
-    }
-
-    return NextResponse.json({ content: rawContent, actions: [] });
-  } catch (error) {
-    console.error("Consuela API error:", error);
     return NextResponse.json({
-      content: "Sorry, I am having trouble connecting. Try again in a moment!",
+      content:
+        "I kept needing to look things up and ran out of steps — give me a moment and try again! 🔧",
+    });
+  } catch (error: any) {
+    console.error("Consuela agent error:", error?.message || error);
+    return NextResponse.json({
+      content:
+        "Hey, I hit a snag connecting to my brain right now. Give me a moment and try again! 🔧",
     });
   }
 }

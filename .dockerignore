@@ -1,4 +1,5 @@
 node_modules
 .next
 .git
-pb_data
+*.md
+.cache

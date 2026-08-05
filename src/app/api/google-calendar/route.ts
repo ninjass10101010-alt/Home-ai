@@ -1,82 +1,66 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { isGoogleConnected, GoogleAuthError } from "@/lib/google/oauth-client";
+import { readCachedEvents, syncCalendar } from "@/lib/google/calendar";
+import { ensureGoogleCollections } from "@/lib/google/pb-collections";
+import { getStoredTokens } from "@/lib/google/token-store";
 
-/**
- * Google Calendar API route — reads events from PocketBase `events` collection.
- * 
- * Flow: Hermes sync script pulls from Google Calendar via Composio
- *       → writes to PB `events` collection  
- *       → this route reads PB and returns them to the dashboard.
- * 
- * GET /api/google-calendar?type=event|task
- */
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
-const PB_URL = process.env.PB_URL || process.env.POCKETBASE_URL || "http://pocketbase:8090";
+export async function GET(request: NextRequest) {
+  const { searchParams } = new URL(request.url);
+  const sync = searchParams.get("sync");
 
-async function pbAuth(): Promise<string> {
-  const res = await fetch(PB_URL + "/api/collections/_superusers/auth-with-password", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      identity: process.env.PB_ADMIN_EMAIL || "admin@family.local",
-      password: process.env.PB_ADMIN_PASSWORD || "",
-    }),
-  });
-  if (!res.ok) throw new Error("PB auth failed: " + res.status);
-  const data = await res.json();
-  return data.token;
-}
-
-async function pbQuery(collection: string, token: string, filter?: string) {
-  const params = new URLSearchParams({ perPage: "200", sort: "-date" });
-  if (filter) params.set("filter", filter);
-  
-  const res = await fetch(PB_URL + "/api/collections/" + collection + "/records?" + params.toString(), {
-    headers: { "Authorization": "Bearer " + token },
-  });
-  if (!res.ok) throw new Error("PB query failed: " + res.status);
-  return res.json();
-}
-
-export async function GET(request: Request) {
   try {
-    const { searchParams } = new URL(request.url);
-    const type = searchParams.get("type") || "event";
+    await ensureGoogleCollections();
+  } catch (e: any) {
+    return NextResponse.json(
+      { ok: false, events: [], error: "PocketBase not reachable: " + (e?.message || "unknown") },
+      { status: 200 },
+    );
+  }
 
-    const token = await pbAuth();
-    const filter = type === "task" ? 'type="task"' : 'type!="task"';
-    const data = await pbQuery("events", token, filter);
-    const items = data.items || [];
+  const connected = await isGoogleConnected();
 
-    const events = items.map((item: any) => ({
-      id: item.id,
-      title: item.title,
-      date: item.date,
-      time: item.time || "All day",
-      description: item.notes || "",
-      type: item.type || "event",
-      member: item.member || "Google",
-    }));
+  if (!connected) {
+    return NextResponse.json({
+      ok: true,
+      connected: false,
+      source: "static",
+      events: [],
+    });
+  }
 
-    return NextResponse.json({ events });
-  } catch (error: any) {
-    console.error("[Google Calendar API]", error.message);
-    
-    // Fallback: read from static JSON if PB unreachable
+  if (sync === "now") {
     try {
-      const fs = await import("fs/promises");
-      const pathMod = await import("path");
-      const { existsSync } = await import("fs");
-      
-      const type = new URL(request.url).searchParams.get("type") || "event";
-      const fileName = type === "task" ? "google-tasks.json" : "google-events.json";
-      const filePath = pathMod.join(process.cwd(), "public", fileName);
-      
-      if (existsSync(filePath)) {
-        const raw = await fs.readFile(filePath, "utf-8");
-        return NextResponse.json({ events: JSON.parse(raw), source: "fallback" });
+      await syncCalendar();
+    } catch (e: any) {
+      if (e instanceof GoogleAuthError) {
+        return NextResponse.json(
+          { ok: false, connected: true, code: e.code, error: e.message, events: [] },
+          { status: e.code === "no_grant" ? 409 : 401 },
+        );
       }
-    } catch {}
-    
-    return NextResponse.json({ events: [], error: "Failed to fetch events" });
+      console.error("[google-calendar] sync-now failed:", e?.message);
+    }
+  }
+
+  try {
+    const events = await readCachedEvents();
+    const tokens = await getStoredTokens();
+    return NextResponse.json({
+      ok: true,
+      connected: true,
+      source: "google",
+      account_email: tokens?.account_email || null,
+      last_sync_at: tokens?.granted_at || null,
+      events,
+    });
+  } catch (e: any) {
+    console.error("[google-calendar] read failed:", e?.message);
+    return NextResponse.json(
+      { ok: false, connected: true, events: [], error: e?.message },
+      { status: 200 },
+    );
   }
 }

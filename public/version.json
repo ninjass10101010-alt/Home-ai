@@ -1,0 +1,7 @@
+{
+  "hash": "fc9cb6c0aac96a08ee7bc8a8f8f638ab49a6b48c",
+  "short": "fc9cb6c",
+  "message": "fix(ui): undo no longer wipes a newer send snapshot (identity-checked clear)",
+  "date": "2026-08-05 14:23:54 -0400",
+  "author": "GarciaFam"
+}

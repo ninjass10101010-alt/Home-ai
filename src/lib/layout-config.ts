@@ -3,9 +3,11 @@
 // Persisted to localStorage.
 
 export type WidgetId =
+  | "morningBriefing"
   | "weather"
   | "aiQuickAsk"
-  | "quickPrompts"
+  | "consuelaSuggestions"
+  | "leaderboard"
   | "todayEvents"
   | "schedule"
   | "currentMeal"
@@ -19,9 +21,11 @@ export interface WidgetDef {
 }
 
 export const ALL_WIDGETS: WidgetDef[] = [
+  { id: "morningBriefing", label: "Morning Briefing", emoji: "🌅", description: "Today's events, tasks, meals, and what Consuela noticed" },
   { id: "weather",     label: "Weather",       emoji: "⛅", description: "Current weather & atmospheric conditions" },
   { id: "aiQuickAsk",  label: "AI Quick Ask",  emoji: "💬", description: "Quick chat prompt to ask Consuela anything" },
-  { id: "quickPrompts",label: "Quick Prompts",  emoji: "⚡", description: "One-tap shortcuts to common actions" },
+  { id: "consuelaSuggestions", label: "Consuela's Suggestions", emoji: "✨", description: "Proactive alerts Consuela noticed for you" },
+  { id: "leaderboard", label: "Leaderboard",    emoji: "🏆", description: "This week's family points race" },
   { id: "todayEvents", label: "Today's Events", emoji: "📅", description: "Upcoming events for the day" },
   { id: "schedule",    label: "Daily Schedule", emoji: "🕐", description: "Routines and reminders" },
   { id: "currentMeal", label: "Current Meal",  emoji: "🍽️", description: "Today's meal plan" },
@@ -34,10 +38,12 @@ export interface HomeLayoutConfig {
 }
 
 export const DEFAULT_LAYOUT: HomeLayoutConfig = {
-  widgets: ["weather", "aiQuickAsk", "quickPrompts", "todayEvents", "schedule", "currentMeal", "tasks"],
+  widgets: ["morningBriefing", "weather", "aiQuickAsk", "consuelaSuggestions", "leaderboard", "todayEvents", "schedule", "currentMeal", "tasks"],
 };
 
 export const LAYOUT_STORAGE_KEY = "consuela-home-layout";
+
+const VALID_IDS = new Set<WidgetId>(ALL_WIDGETS.map((w) => w.id));
 
 export function loadLayoutConfig(): HomeLayoutConfig {
   if (typeof window === "undefined") return { ...DEFAULT_LAYOUT, widgets: [...DEFAULT_LAYOUT.widgets] };
@@ -46,7 +52,27 @@ export function loadLayoutConfig(): HomeLayoutConfig {
     if (!raw) return { ...DEFAULT_LAYOUT, widgets: [...DEFAULT_LAYOUT.widgets] };
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed.widgets) && parsed.widgets.length > 0) {
-      return { widgets: parsed.widgets };
+      const sanitized = parsed.widgets.filter((id: unknown): id is WidgetId => typeof id === "string" && VALID_IDS.has(id as WidgetId));
+      const present = new Set(sanitized);
+      const missing = DEFAULT_LAYOUT.widgets.filter((id) => !present.has(id));
+      if (missing.length === 0) return { widgets: [...sanitized] };
+      const widgets = [...sanitized];
+      // L6 — self-heal heuristic: the consuela widgets (morningBriefing at the
+      // very top of Home, consuelaSuggestions right below it) are "new" defaults
+      // for legacy saved layouts. Appending them at the end would bury the
+      // briefing card at the bottom of Home, defeating its top-of-Home purpose,
+      // so insert them at their default positions instead. Everything else that
+      // is missing keeps the old append-at-end behaviour.
+      for (const id of DEFAULT_LAYOUT.widgets) {
+        if (!missing.includes(id)) continue;
+        if (id === "morningBriefing" || id === "consuelaSuggestions") {
+          const idx = id === "morningBriefing" ? 0 : 1;
+          widgets.splice(Math.min(idx, widgets.length), 0, id);
+        } else {
+          widgets.push(id);
+        }
+      }
+      return { widgets };
     }
     return { ...DEFAULT_LAYOUT, widgets: [...DEFAULT_LAYOUT.widgets] };
   } catch {
@@ -81,10 +107,39 @@ export function moveWidgetDown(widgets: WidgetId[], id: WidgetId): WidgetId[] {
   return next;
 }
 
+/**
+ * Move a widget to a specific index. Used by drag-and-drop.
+ * If the widget is not currently visible it is appended at the end of the
+ * visible group first, then moved to the target index. If `targetIndex` is
+ * out of range it is clamped.
+ */
+export function moveWidgetTo(widgets: WidgetId[], id: WidgetId, targetIndex: number): WidgetId[] {
+  const list = widgets.includes(id) ? [...widgets] : [...widgets, id];
+  const fromIndex = list.indexOf(id);
+  if (fromIndex === -1) return list;
+  const clamped = Math.max(0, Math.min(targetIndex, list.length - 1));
+  if (fromIndex === clamped) return list;
+  const [moved] = list.splice(fromIndex, 1);
+  list.splice(clamped, 0, moved);
+  return list;
+}
+
 /** Toggle a widget on/off. If turning on, appends to end. */
 export function toggleWidget(widgets: WidgetId[], id: WidgetId): WidgetId[] {
   if (widgets.includes(id)) {
     return widgets.filter((w) => w !== id);
   }
   return [...widgets, id];
+}
+
+/** Return visible widgets as WidgetDef[] in the user's saved order. */
+export function getVisibleWidgets(widgets: WidgetId[]): WidgetDef[] {
+  const map = new Map(ALL_WIDGETS.map((w) => [w.id, w]));
+  return widgets.map((id) => map.get(id)).filter((w): w is WidgetDef => Boolean(w));
+}
+
+/** Return hidden widgets as WidgetDef[] in master order. */
+export function getHiddenWidgets(widgets: WidgetId[]): WidgetDef[] {
+  const present = new Set(widgets);
+  return ALL_WIDGETS.filter((w) => !present.has(w.id));
 }

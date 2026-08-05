@@ -2,59 +2,106 @@
 
 import { useState, Suspense } from "react";
 import PageShell from "@/components/ui/PageShell";
-import TopBar from "@/components/ui/TopBar";
 import { useSearchParams } from "next/navigation";
-
-import { emptyRecipe } from "@/data/meals";
+import { db } from "@/db";
+import { emptyRecipe, groceryCategories } from "@/data/meals";
 import { Meal, Recipe, Tab } from "@/types/meals";
-
-// Hooks
 import { useMeals } from "@/hooks/useMeals";
 import { useGrocery } from "@/hooks/useGrocery";
 import { usePantry } from "@/hooks/usePantry";
 import { useRecipes } from "@/hooks/useRecipes";
-import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
-
-// Components
 import MealsTab from "@/components/meals/MealsTab";
 import GroceryTab from "@/components/meals/GroceryTab";
 import PantryTab from "@/components/meals/PantryTab";
 import RecipesTab from "@/components/meals/RecipesTab";
 import RecipeModal from "@/components/meals/RecipeModal";
+import PageHeader from "@/components/patterns/PageHeader";
+import SegmentedControl from "@/components/ui/SegmentedControl";
+import Surface from "@/components/ui/Surface";
+import SoftButton from "@/components/ui/SoftButton";
+import IconButton from "@/components/ui/IconButton";
+import Chip from "@/components/ui/Chip";
+import EmptyState from "@/components/ui/EmptyState";
+import ErrorState from "@/components/ui/ErrorState";
+import Modal from "@/components/ui/Modal";
+import Toast from "@/components/ui/Toast";
+import ListRow from "@/components/ui/ListRow";
+import StatTile from "@/components/patterns/StatTile";
+import SectionCard from "@/components/patterns/SectionCard";
 
 function MealHubContent() {
   const searchParams = useSearchParams();
   const initialTab = (searchParams.get("tab") as Tab) || "meals";
   const [activeTab, setActiveTab] = useState<Tab>(initialTab);
   const [notification, setNotification] = useState<string | null>(null);
-  const { colors, accentRgb } = useAtmosphericTheme();
 
   const showToast = (msg: string) => {
     setNotification(msg);
     setTimeout(() => setNotification(null), 3000);
   };
 
-  // State Hooks
+  const normalizeName = (name: string) => name.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+
+  const guessGroceryCategory = (name: string) => {
+    const lower = name.toLowerCase();
+    if (lower.includes('banana') || lower.includes('apple') || lower.includes('spinach') || lower.includes('avocado') || lower.includes('broccoli') || lower.includes('tomato') || lower.includes('lemon') || lower.includes('onion') || lower.includes('garlic') || lower.includes('carrot') || lower.includes('pepper')) return 'produce';
+    if (lower.includes('milk') || lower.includes('egg') || lower.includes('cheese') || lower.includes('yogurt') || lower.includes('butter') || lower.includes('cream')) return 'dairy';
+    if (lower.includes('chicken') || lower.includes('beef') || lower.includes('pork') || lower.includes('salmon') || lower.includes('shrimp') || lower.includes('fish') || lower.includes('bacon')) return 'meat';
+    if (lower.includes('pasta') || lower.includes('rice') || lower.includes('bean') || lower.includes('oil') || lower.includes('sauce') || lower.includes('flour') || lower.includes('sugar') || lower.includes('dough') || lower.includes('salsa')) return 'pantry';
+    if (lower.includes('frozen')) return 'frozen';
+    if (lower.includes('chip') || lower.includes('snack') || lower.includes('cereal')) return 'snacks';
+    if (lower.includes('coffee') || lower.includes('juice') || lower.includes('soda') || lower.includes('water')) return 'beverages';
+    if (lower.includes('soap') || lower.includes('cleaner') || lower.includes('tissue') || lower.includes('detergent')) return 'household';
+    return 'pantry';
+  };
+
+  const normalizeRecipeForCatalog = (recipe: Partial<Recipe>, fallbackId?: number): Recipe => {
+    const tags = recipe.tags?.filter(Boolean) ?? ["Homemade"];
+    const ingredients = (recipe.ingredients ?? []).map(i => i.trim()).filter(Boolean);
+    return {
+      id: fallbackId ?? recipe.id ?? Date.now(),
+      name: (recipe.name || "").trim(),
+      emoji: recipe.emoji || "🍽️",
+      prepTime: recipe.prepTime || "30 min",
+      cookTime: recipe.cookTime,
+      tags,
+      ingredients,
+      instructions: recipe.instructions || "",
+      servings: Number(recipe.servings) || 4,
+      calories: Number(recipe.calories) || 0,
+      protein: Number(recipe.protein) || 0,
+      carbs: Number(recipe.carbs) || 0,
+      fat: Number(recipe.fat) || 0,
+      source: recipe.source,
+      createdAt: recipe.createdAt || new Date().toISOString(),
+      favorite: recipe.favorite,
+      difficulty: recipe.difficulty,
+      rating: recipe.rating,
+      image: recipe.image,
+    };
+  };
+
   const {
     meals, setMeals, activeDay, setActiveDay, activeMeals, deleteMeal,
-    aiMealIdeas, aiMealLoading, showAiSuggestions, generateAiMeals
+    aiMealIdeas, aiMealLoading, showAiSuggestions, generateAiMeals,
+    activeWeek, goToWeek, archiveCurrentWeek, isCurrentWeek,
   } = useMeals();
 
   const {
     groceryItems, activeCategory, setActiveCategory, isSyncing, setGroceryItems,
     addGroceryItem, toggleGroceryNeeded, deleteGroceryItem, updateGroceryItem,
-    syncMealToGrocery, syncPantryToGrocery, recentlyBought, clearRecentlyBought
-  } = useGrocery(showToast);
+    syncMealToGrocery, syncPantryToGrocery, recentlyBought, clearRecentlyBought,
+    parseManualGroceryInput, guessCategory: guessGroceryCategoryHook
+  } = useGrocery(showToast, meals);
 
   const {
     pantryItems, addPantryItem, updatePantryStatus, removePantryItem
-  } = usePantry(showToast);
+  } = usePantry(showToast, groceryItems);
 
   const {
     recipes, saveCatalogRecipe, deleteCatalogRecipe, handleFileUpload
   } = useRecipes(showToast);
 
-  // Recipe Creator Modal State
   const [showRecipeModal, setShowRecipeModal] = useState(false);
   const [editingMealId, setEditingMealId] = useState<number | null>(null);
   const [recipe, setRecipe] = useState({ ...emptyRecipe });
@@ -62,7 +109,7 @@ function MealHubContent() {
   const openRecipeModal = (meal?: Partial<Meal>) => {
     if (meal && meal.id) {
       setEditingMealId(meal.id);
-      setRecipe({ ...emptyRecipe, ...meal, protein: meal.protein || 0, carbs: meal.carbs || 0, fat: meal.fat || 0, instructions: meal.instructions || "" } as any);
+      setRecipe({ ...emptyRecipe, ...meal, protein: meal.protein || 0, carbs: meal.carbs || 0, fat: meal.fat || 0, instructions: meal.instructions || "", ingredients: meal.ingredients ?? [""] } as any);
     } else {
       setEditingMealId(null);
       setRecipe({ ...emptyRecipe, time: activeDay, ...(meal || {}) } as any);
@@ -70,37 +117,44 @@ function MealHubContent() {
     setShowRecipeModal(true);
   };
 
-  const saveRecipe = () => {
+  const saveRecipe = async () => {
     if (!recipe.name.trim()) return;
     if (editingMealId !== null) {
-      // Update existing meal
       const updated: Meal = {
         ...recipe,
         id: editingMealId,
         name: recipe.name.trim(),
         prepTime: recipe.prepTime || "30 min",
-        ingredients: recipe.ingredients.filter(i => i.trim()),
+        ingredients: (recipe.ingredients ?? []).map(i => i.trim()).filter(Boolean),
+        servings: Number(recipe.servings) || 4,
+        calories: Number(recipe.calories) || 0,
+        protein: Number(recipe.protein) || 0,
+        carbs: Number(recipe.carbs) || 0,
+        fat: Number(recipe.fat) || 0,
+        tags: recipe.tags?.filter(Boolean) ?? [],
       } as Meal;
       setMeals(prev => prev.map(m => m.id === editingMealId ? updated : m));
       if (updated.time !== activeDay) setActiveDay(updated.time);
       showToast(`✅ "${updated.name}" updated!`);
     } else {
-      // Create new meal
       const newMeal: Meal = {
         ...recipe,
         id: Date.now(),
         name: recipe.name.trim(),
+        time: recipe.time || activeDay,
+        mealType: recipe.mealType || "dinner",
+        weekOf: activeWeek,
         prepTime: recipe.prepTime || "30 min",
-        ingredients: recipe.ingredients.filter(i => i.trim()),
+        ingredients: (recipe.ingredients ?? []).map(i => i.trim()).filter(Boolean),
+        servings: Number(recipe.servings) || 4,
+        calories: Number(recipe.calories) || 0,
+        protein: Number(recipe.protein) || 0,
+        carbs: Number(recipe.carbs) || 0,
+        fat: Number(recipe.fat) || 0,
+        tags: recipe.tags?.filter(Boolean) ?? [],
       } as Meal;
-      fetch('/api/meals', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newMeal),
-      }).catch(() => {});
+      await db.insertMeal(newMeal);
       setMeals(prev => {
-        // Replace only the meal slot (same day + same mealType),
-        // instead of removing every meal for that day.
         const filtered = prev.filter(
           m => !(m.time === newMeal.time && m.mealType === newMeal.mealType)
         );
@@ -113,7 +167,11 @@ function MealHubContent() {
     setEditingMealId(null);
   };
 
-  // Recipe Actions from Catalog
+  const saveCatalogRecipeFromModal = () => {
+    saveCatalogRecipe(normalizeRecipeForCatalog(recipe as unknown as Recipe, editingRecipeId ?? undefined));
+    setShowRecipeEditor(false);
+  };
+
   const [showRecipeEditor, setShowRecipeEditor] = useState(false);
   const [editingRecipeId, setEditingRecipeId] = useState<number | null>(null);
 
@@ -124,200 +182,241 @@ function MealHubContent() {
 
   const startEditRecipe = (r: Recipe) => { setEditingRecipeId(r.id); setRecipe({ ...r } as any); setShowRecipeEditor(true); };
 
-  const addRecipeToPlan = (recipeData: Recipe, day: string) => {
+  const addRecipeToPlan = (recipeData: Recipe, day = activeDay, mealType: Meal["mealType"] = "dinner") => {
     const newMeal: Meal = {
-      id: Date.now(), name: recipeData.name, emoji: recipeData.emoji, time: day, mealType: "dinner",
-      prepTime: recipeData.prepTime, tags: recipeData.tags, ingredients: recipeData.ingredients,
-      servings: recipeData.servings, calories: recipeData.calories, instructions: recipeData.instructions,
+      id: Date.now(), name: recipeData.name, emoji: recipeData.emoji || "🍽️", time: day, mealType,
+      prepTime: recipeData.prepTime || "30 min", tags: recipeData.tags?.filter(Boolean) ?? [], ingredients: (recipeData.ingredients ?? []).map(i => i.trim()).filter(Boolean),
+      servings: Number(recipeData.servings) || 4, calories: Number(recipeData.calories) || 0, protein: Number(recipeData.protein) || 0, carbs: Number(recipeData.carbs) || 0, fat: Number(recipeData.fat) || 0, instructions: recipeData.instructions,
+      weekOf: activeWeek, recipeId: String(recipeData.id), recipeSnapshotAt: new Date().toISOString(),
     };
-    setMeals(prev => [...prev, newMeal]);
-    showToast(`✅ Added ${recipeData.name} to ${day}`);
+    setMeals(prev => [...prev.filter(m => !(m.time === day && m.mealType === mealType)), newMeal]);
+    setActiveDay(day);
+    showToast(`✅ Added ${recipeData.name} to ${day} ${mealType}`);
   };
 
   const addRecipeToMealSlot = (recipeData: Recipe, day: string, mealType: Meal["mealType"]) => {
     const newMeal: Meal = {
       id: Date.now(),
       name: recipeData.name,
-      emoji: recipeData.emoji,
+      emoji: recipeData.emoji || "🍽️",
       time: day,
       mealType,
-      prepTime: recipeData.prepTime,
-      tags: recipeData.tags,
-      ingredients: recipeData.ingredients,
-      servings: recipeData.servings,
-      calories: recipeData.calories,
+      prepTime: recipeData.prepTime || "30 min",
+      tags: recipeData.tags?.filter(Boolean) ?? [],
+      ingredients: (recipeData.ingredients ?? []).map(i => i.trim()).filter(Boolean),
+      servings: Number(recipeData.servings) || 4,
+      calories: Number(recipeData.calories) || 0,
+      protein: Number(recipeData.protein) || 0,
+      carbs: Number(recipeData.carbs) || 0,
+      fat: Number(recipeData.fat) || 0,
       instructions: recipeData.instructions,
+      weekOf: activeWeek, recipeId: String(recipeData.id), recipeSnapshotAt: new Date().toISOString(),
     };
-    setMeals(prev => [...prev, newMeal]);
+    setMeals(prev => [...prev.filter(m => !(m.time === day && m.mealType === mealType)), newMeal]);
+    setActiveDay(day);
     showToast(`✅ Added ${recipeData.name} to ${day} (${mealType})`);
   };
 
-  const addRecipeToGrocery = (recipeData: Recipe) => {
-    recipeData.ingredients.forEach(ing => {
-      if (ing.trim()) {
-        fetch('/api/grocery', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: ing.trim(), category: "pantry", aisle: "1", quantity: "", priority: "medium", needed: true, source: "recipe", autoGenerated: false, userId: "demo" }),
-        }).catch(() => {});
+  const addRecipeToGrocery = async (recipeData: Recipe) => {
+    const ingredients = (recipeData.ingredients ?? []).map(i => i.trim()).filter(Boolean);
+    for (const ing of ingredients) {
+      const category = guessGroceryCategory(ing);
+      const catDef = groceryCategories.find(c => c.id === category);
+      await db.upsertGroceryItem({ name: ing, category, aisle: catDef?.aisles?.[0]?.split('-')[0] || "1", quantity: "", priority: "medium", needed: true, source: "recipe", autoGenerated: false, userId: "demo" });
+    }
+    showToast(`🛒 Added ${ingredients.length} item${ingredients.length === 1 ? "" : "s"} to grocery`);
+  };
+
+  const importRecipeFromUrl = async (url: string, source?: string) => {
+    const label = source || "Web";
+    showToast(`📥 Importing from ${label}: ${url}...`);
+    try {
+      const res = await fetch("/api/recipes/ingest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "url", url, sourceLabel: label }),
+      });
+      const data = await res.json();
+      if (!res.ok) { showToast(`❌ ${data?.error || "Import failed"}`); return; }
+      saveCatalogRecipe(data.recipe);
+      showToast(`✅ Added "${data?.recipe?.title || "Imported Recipe"}" to recipe catalog`);
+    } catch (e: any) {
+      showToast(`❌ Import failed: ${e?.message || "Unknown error"}`);
+    }
+  };
+
+  const copyDayMeals = (fromDay: string, toDay: string) => {
+    if (fromDay === toDay) return;
+    const sourceMeals = meals.filter(m => m.time === fromDay && (m.weekOf || activeWeek) === activeWeek);
+    if (!sourceMeals.length) { showToast(`No meals planned for ${fromDay}`); return; }
+    const occupiedTypes = new Set(meals.filter(m => m.time === toDay && (m.weekOf || activeWeek) === activeWeek).map(m => m.mealType));
+    let copied = 0;
+    for (const meal of sourceMeals) {
+      if (!occupiedTypes.has(meal.mealType)) {
+        const newMeal: Meal = { ...meal, id: Date.now() + copied, time: toDay, weekOf: activeWeek };
+        db.insertMeal(newMeal);
+        setMeals(prev => [...prev, newMeal]);
+        copied++;
       }
-    });
-    showToast(`🛒 Added ${recipeData.ingredients.length} items to grocery`);
+    }
+    showToast(`📋 Copied ${copied} meal${copied === 1 ? "" : "s"} to ${toDay}${sourceMeals.length > copied ? ` (${sourceMeals.length - copied} slots occupied, skipped)` : ""}`);
+    setActiveDay(toDay);
+  };
+
+  const duplicateMeal = (meal: Meal, targetDay: string) => {
+    if (meal.time === targetDay) return;
+    const existing = meals.find(m => m.time === targetDay && m.mealType === meal.mealType && (m.weekOf || activeWeek) === activeWeek);
+    if (existing) { showToast(`⏭ Already have a ${meal.mealType} planned for ${targetDay}`); return; }
+    const newMeal: Meal = { ...meal, id: Date.now(), time: targetDay, weekOf: activeWeek };
+    db.insertMeal(newMeal);
+    setMeals(prev => [...prev, newMeal]);
+    showToast(`↗️ ${meal.name} copied to ${targetDay} (${meal.mealType})`);
+    setActiveDay(targetDay);
   };
 
   const neededCount = groceryItems.filter(i => i.needed).length;
+  const weekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day, index) => ({
+    id: day,
+    label: day,
+    detail: String(index + 1),
+    active: day === activeDay,
+  }));
 
   return (
     <PageShell>
-      {/* Toast */}
-      {notification && (
-        <div
-          className={`fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-2 px-4 py-2.5 rounded-2xl text-sm font-medium shadow-2xl border transition-all animate-[slideDown_0.3s_ease] ${
-            notification.includes("❌")
-              ? "bg-rose-500/20 border-rose-500/30 text-rose-300"
-              : "bg-nori-500/20 border-nori-500/30 text-nori-300"
-          }`}
-          style={{ backdropFilter: "blur(20px)" }}
-        >
-          {notification}
-        </div>
-      )}
+      <Toast open={Boolean(notification)} tone={notification?.includes("❌") ? "error" : "success"}>{notification}</Toast>
 
-      <TopBar
-        title="Kitchen"
-        subtitle={activeTab === "meals" ? "This week" : activeTab === "grocery" ? `${neededCount} items needed` : activeTab === "pantry" ? `${pantryItems.length} items tracked` : "Recipe Catalog"}
-        right={
+      <PageHeader
+        title={activeTab === "meals" && !meals.length ? "Meals" : "Kitchen"}
+        subtitle={
+          activeTab === "meals" && !meals.length
+            ? "Family meal planning"
+            : activeTab === "meals"
+              ? "This week"
+              : activeTab === "grocery"
+                ? `${neededCount} items needed`
+                : activeTab === "pantry"
+                  ? `${pantryItems.length} items tracked`
+                  : "Recipe Catalog"
+        }
+        action={
           activeTab === "meals" ? (
-            <button
-              onClick={generateAiMeals}
-              disabled={aiMealLoading}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-nori-500/15 text-nori-400 text-xs font-medium hover:bg-nori-500/25 transition-colors disabled:opacity-50"
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
-                <path d="M12 2l2 7h7l-5.7 4.1 2.2 6.9L12 16l-5.5 4 2.2-6.9L3 9h7z" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              {aiMealLoading ? "Thinking..." : "AI Suggest"}
-            </button>
+            activeTab === "meals" && !meals.length ? (
+              <IconButton aria-label="Add meal" onClick={() => openRecipeModal()}><span>＋</span></IconButton>
+            ) : (
+              <SoftButton size="sm" variant="secondary" onClick={generateAiMeals} disabled={aiMealLoading}>
+                {aiMealLoading ? "Thinking..." : "AI Suggest"}
+              </SoftButton>
+            )
           ) : null
         }
+        icon="🍽️"
       />
 
-      {/* Tab Bar */}
-      <div className="px-4 mb-4">
-        <div className="flex rounded-2xl bg-surface-2 p-1 gap-1">
-          {([
+      <div className="px-4 space-y-5 pb-8">
+        <SegmentedControl
+          aria-label="Meal hub"
+          value={activeTab}
+          onChange={(value) => setActiveTab(value as Tab)}
+          options={[
             { id: "meals", label: "🍽️ Meals" },
             { id: "grocery", label: "🛒 Grocery" },
             { id: "pantry", label: "🥫 Pantry" },
             { id: "recipes", label: "📖 Recipes" },
-          ] as { id: Tab; label: string }[]).map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex-1 py-2 rounded-xl text-xs font-semibold transition-all duration-200 ${
-                activeTab === tab.id
-                  ? "bg-nori-500 text-surface-0 shadow-lg shadow-nori-500/25"
-                  : "text-text-secondary hover:text-text-primary"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
+          ]}
+        />
+
+        {activeTab === "meals" && (
+          meals.length === 0 ? (
+            <EmptyState title="No meals planned yet" description="Start with a simple breakfast, lunch, snack, or dinner for the week." actionLabel="Add meal" onAction={() => openRecipeModal()} />
+          ) : (
+          <div className="space-y-5">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <StatTile label="Planned" value={meals.length} detail="This week" icon="📅" tone="accent" />
+              <StatTile label="Tonight" value={activeMeals.length} detail="Selected day" icon="🌙" tone="warning" />
+              <StatTile label="Sync" value={isSyncing ? "…" : "Ready"} detail="Pantry + grocery" icon="🔁" tone="success" />
+            </div>
+
+            <MealsTab
+              meals={meals}
+              activeDay={activeDay}
+              setActiveDay={setActiveDay}
+              activeMeals={activeMeals}
+              deleteMeal={deleteMeal}
+              openRecipeModal={openRecipeModal}
+              setActiveTab={setActiveTab}
+              handleSyncMealToGrocery={syncMealToGrocery}
+              isSyncing={isSyncing}
+              showAiSuggestions={showAiSuggestions}
+              aiMealIdeas={aiMealIdeas}
+              aiMealLoading={aiMealLoading}
+              recipes={recipes}
+              addRecipeToMealSlot={addRecipeToMealSlot}
+              copyDayMeals={copyDayMeals}
+              duplicateMeal={duplicateMeal}
+              activeWeek={activeWeek}
+              goToWeek={goToWeek}
+              archiveCurrentWeek={archiveCurrentWeek}
+              isCurrentWeek={isCurrentWeek}
+            />
+          </div>
+        ))}
+
+        {activeTab === "grocery" && (
+          <GroceryTab
+            groceryItems={groceryItems}
+            setGroceryItems={setGroceryItems}
+            activeCategory={activeCategory}
+            setActiveCategory={setActiveCategory}
+            isSyncing={isSyncing}
+            recentlyBought={recentlyBought}
+            clearRecentlyBought={clearRecentlyBought}
+            addGroceryItem={addGroceryItem}
+            toggleGroceryNeeded={toggleGroceryNeeded}
+            deleteGroceryItem={deleteGroceryItem}
+            updateGroceryItem={updateGroceryItem}
+            syncMealToGrocery={syncMealToGrocery}
+            syncPantryToGrocery={syncPantryToGrocery}
+            parseManualGroceryInput={parseManualGroceryInput}
+            guessCategory={guessGroceryCategoryHook}
+            showToast={showToast}
+            pantryItems={pantryItems}
+            addPantryItem={addPantryItem}
+            removePantryItem={removePantryItem}
+          />
+        )}
+
+        {activeTab === "pantry" && (
+          <PantryTab
+            pantryItems={pantryItems}
+            groceryItems={groceryItems}
+            addPantryItem={addPantryItem}
+            updatePantryStatus={updatePantryStatus}
+            removePantryItem={removePantryItem}
+            syncPantryToGrocery={syncPantryToGrocery}
+            isSyncing={isSyncing}
+          />
+        )}
+
+        {activeTab === "recipes" && (
+          <RecipesTab
+            recipes={recipes}
+            activeDay={activeDay}
+            saveCatalogRecipe={saveCatalogRecipe}
+            deleteCatalogRecipe={deleteCatalogRecipe}
+            addRecipeToPlan={addRecipeToPlan}
+            addRecipeToGrocery={addRecipeToGrocery}
+            startAddRecipe={startAddRecipe}
+            startEditRecipe={startEditRecipe}
+            handleFileUpload={handleFileUpload}
+            importRecipeFromUrl={importRecipeFromUrl}
+          />
+        )}
       </div>
-
-      {activeTab === "meals" && (
-        <MealsTab
-          meals={meals}
-          activeDay={activeDay}
-          setActiveDay={setActiveDay}
-          activeMeals={activeMeals}
-          deleteMeal={deleteMeal}
-          openRecipeModal={openRecipeModal}
-          setActiveTab={setActiveTab}
-          handleSyncMealToGrocery={syncMealToGrocery}
-          isSyncing={isSyncing}
-          showAiSuggestions={showAiSuggestions}
-          aiMealIdeas={aiMealIdeas}
-          aiMealLoading={aiMealLoading}
-          recipes={recipes}
-          addRecipeToMealSlot={addRecipeToMealSlot}
-          importRecipeFromUrl={async (url: string, source?: string) => {
-            const label = source ? source : "Web";
-            showToast(`📥 Importing from ${label}: ${url}...`);
-            try {
-              const res = await fetch("/api/recipes/ingest", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ type: "url", url, sourceLabel: label }),
-              });
-              const data = await res.json();
-              if (!res.ok) {
-                showToast(`❌ ${data?.error || "Import failed"}`);
-                return;
-              }
-
-              // Add into recipe catalog (consistent across dashboards)
-              // useRecipes hook stores recipes state; we reuse saveCatalogRecipe
-              saveCatalogRecipe(data.recipe);
-              showToast(`✅ Added "${data?.recipe?.title || "Imported Recipe"}" to recipe catalog`);
-            } catch (e: any) {
-              showToast(`❌ Import failed: ${e?.message || "Unknown error"}`);
-            }
-          }}
-          handleFileUpload={handleFileUpload}
-        />
-      )}
-
-
-
-
-
-      {activeTab === "grocery" && (
-        <GroceryTab 
-          groceryItems={groceryItems}
-          setGroceryItems={setGroceryItems}
-          activeCategory={activeCategory}
-          setActiveCategory={setActiveCategory}
-          isSyncing={isSyncing}
-          recentlyBought={recentlyBought}
-          clearRecentlyBought={clearRecentlyBought}
-          addGroceryItem={addGroceryItem}
-          toggleGroceryNeeded={toggleGroceryNeeded}
-          deleteGroceryItem={deleteGroceryItem}
-          updateGroceryItem={updateGroceryItem}
-          syncMealToGrocery={syncMealToGrocery}
-          syncPantryToGrocery={syncPantryToGrocery}
-        />
-      )}
-
-      {activeTab === "pantry" && (
-
-        <PantryTab 
-          pantryItems={pantryItems}
-          addPantryItem={addPantryItem}
-          updatePantryStatus={updatePantryStatus}
-          removePantryItem={removePantryItem}
-          syncPantryToGrocery={syncPantryToGrocery}
-          isSyncing={isSyncing}
-        />
-      )}
-
-      {activeTab === "recipes" && (
-        <RecipesTab 
-          recipes={recipes}
-          saveCatalogRecipe={saveCatalogRecipe}
-          deleteCatalogRecipe={deleteCatalogRecipe}
-          addRecipeToPlan={addRecipeToPlan}
-          addRecipeToGrocery={addRecipeToGrocery}
-          startAddRecipe={startAddRecipe}
-          startEditRecipe={startEditRecipe}
-          handleFileUpload={handleFileUpload}
-        />
-      )}
 
       {showRecipeModal && (
         <RecipeModal
+          mode="meal"
           recipe={recipe}
           setRecipe={setRecipe}
           editingMealId={editingMealId}
@@ -325,46 +424,24 @@ function MealHubContent() {
           setShowRecipeModal={setShowRecipeModal}
         />
       )}
-      
+
       {showRecipeEditor && (
         <RecipeModal
+          mode="catalog"
           recipe={recipe}
           setRecipe={setRecipe}
           editingMealId={editingRecipeId}
-          saveRecipe={() => {
-            saveCatalogRecipe(recipe as unknown as Recipe);
-            setShowRecipeEditor(false);
-          }}
+          saveRecipe={saveCatalogRecipeFromModal}
           setShowRecipeModal={setShowRecipeEditor}
         />
       )}
-
-      <style jsx global>{`
-        @keyframes slideDown {
-          from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
-          to { opacity: 1; transform: translateX(-50%) translateY(0); }
-        }
-        @keyframes bounceIn {
-          0% { transform: scale(0.8); opacity: 0.5; }
-          60% { transform: scale(1.1); }
-          100% { transform: scale(1); opacity: 1; }
-        }
-        @keyframes float {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-4px); }
-        }
-        @keyframes bounce {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-3px); }
-        }
-      `}</style>
     </PageShell>
   );
 }
 
 export default function MealHubPage() {
   return (
-    <Suspense fallback={<div className="flex items-center justify-center min-h-screen"><div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary-500"></div></div>}>
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center"><div className="h-12 w-12 animate-spin rounded-full border-2 border-t-transparent border-[var(--color-accent-selected)]" /></div>}>
       <MealHubContent />
     </Suspense>
   );

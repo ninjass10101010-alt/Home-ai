@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
 import { useState, useEffect, useRef } from "react";
@@ -1597,7 +1598,7 @@ function WeatherParticles({ type, tod }: { type: ParticleKind; tod: TimeOfDayFla
 
 function StatPill({ icon, label, value, delay, accentColor }: { icon: string; label: string; value: string; delay: string; accentColor: string }) {
   return (
-    <div className="flex flex-col items-center gap-1 py-2.5 px-1 rounded-xl"
+    <div className="flex flex-col items-center gap-1 py-2.5 px-1 rounded-2xl"
       style={{ background: "rgba(255,255,255,0.06)", backdropFilter: "blur(8px)", animation: `weatherForecastIn 0.35s ease-out ${delay} both` }}>
       <span className="text-lg leading-none">{icon}</span>
       <span className="text-xs font-bold" style={{ color: accentColor }}>{value}</span>
@@ -1847,7 +1848,7 @@ export default function WeatherWidget() {
                 <p className="text-white/40 text-[10px] font-semibold uppercase tracking-widest mb-2">5-Day Forecast</p>
                 <div className="flex justify-between gap-1.5">
                   {(weatherData?.forecast ?? []).map((day, i) => (
-                    <div key={day.day} className="flex-1 flex flex-col items-center gap-1 py-2.5 rounded-xl cursor-default"
+                    <div key={day.day} className="flex-1 flex flex-col items-center gap-1 py-2.5 rounded-2xl cursor-default"
                       style={{
                         background: "rgba(255,255,255,0.07)",
                         backdropFilter: "blur(6px)",

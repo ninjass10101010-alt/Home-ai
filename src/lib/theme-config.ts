@@ -1,6 +1,6 @@
 // Type definitions for the theme system
 export type ThemeMode = 'light' | 'dark' | 'system';
-export type AccentColor = 'nori' | 'violet' | 'rose' | 'coral' | 'lavender' | 'cyan' | 'mint' | 'amber';
+export type AccentColor = 'nori' | 'violet' | 'rose' | 'coral' | 'lavender' | 'cyan' | 'mint' | 'amber' | 'apricot' | 'sage';
 
 export type AccentTarget = 'selected' | 'glow' | 'button' | 'border';
 
@@ -34,7 +34,6 @@ export const defaultThemeConfig: ThemeConfig = {
   accentHex: defaultAccentHex,
   contrastBoost: false,
 };
-
 
 // Storage key for theme configuration
 export const THEME_STORAGE_KEY = 'home-ai-theme-config';

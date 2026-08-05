@@ -22,12 +22,15 @@ export default function AnimatedEmoji({ emoji, name, size = "md", className = ""
   const cx = s / 2;
   const cy = s / 2;
 
-  // Render GIFs and image URLs as <img>
-  const isImageUrl = /^(https?:)?\/\/|\.(gif|png|jpg|jpeg|webp)(\?|$)/i.test(emoji);
+  // Render GIFs, image URLs, and data URIs as <img>
+  const isImageUrl = /^(https?:)?\/\/|^data:image\/|\.(gif|png|jpg|jpeg|webp)(\?|$)/i.test(emoji);
   if (isImageUrl) {
-    const url = emoji.startsWith("http") ? emoji : `https://${emoji}`;
+    const url = emoji.startsWith("http") || emoji.startsWith("data:") ? emoji : `https://${emoji}`;
     return (
-      <div style={{ width: s, height: s }} className="overflow-hidden rounded-full">
+      <div
+        style={{ width: `${s}px`, height: `${s}px` }}
+        className={`overflow-hidden rounded-full ${className}`}
+      >
         <SigmaImage src={url} alt={name || "avatar"} shape="circle" />
       </div>
     );

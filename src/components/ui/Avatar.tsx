@@ -1,15 +1,19 @@
 "use client";
 
 import AnimatedEmoji from "./AnimatedEmoji";
+import SigmaImage from "./SigmaImage";
+
+export type AvatarSize = "xs" | "sm" | "md" | "base" | "lg";
 
 interface AvatarProps {
   name: string;
   color?: string;
-  size?: "sm" | "md" | "lg";
+  size?: AvatarSize;
   emoji?: string;
   variant?: "emoji" | "illustrated";
   skinColor?: string;
   hairColor?: string;
+  glow?: boolean;
 }
 
 const colorMap: Record<string, string> = {
@@ -31,18 +35,57 @@ const ringMap: Record<string, string> = {
   blue: "ring-[var(--color-accent-nori)]/30",
 };
 
-// Avatar sizing map - typed as Record<string, string> to allow indexing
-const sizeMap: Record<string, string> = {
-  sm: "w-7 h-7 text-xs",
-  md: "w-9 h-9 text-sm",
-  lg: "w-12 h-12 text-base",
+const glowMap: Record<string, string> = {
+  green: "0 0 0 3px rgba(74, 222, 128, 0.12), 0 0 18px rgba(74, 222, 128, 0.28)",
+  violet: "0 0 0 3px rgba(124, 111, 247, 0.12), 0 0 18px rgba(124, 111, 247, 0.28)",
+  amber: "0 0 0 3px rgba(245, 158, 11, 0.12), 0 0 18px rgba(245, 158, 11, 0.28)",
+  cyan: "0 0 0 3px rgba(6, 182, 212, 0.12), 0 0 18px rgba(6, 182, 212, 0.28)",
+  rose: "0 0 0 3px rgba(244, 63, 94, 0.12), 0 0 18px rgba(244, 63, 94, 0.28)",
+  blue: "0 0 0 3px rgba(59, 130, 246, 0.12), 0 0 18px rgba(59, 130, 246, 0.28)",
 };
+
+// Avatar sizing map - shared by settings and dashboard avatars.
+const sizeMap: Record<AvatarSize, string> = {
+  xs: "w-7 h-7",
+  sm: "w-8 h-8",
+  md: "w-10 h-10",
+  base: "w-10 h-10",
+  lg: "w-12 h-12",
+};
+
+const animatedSizeMap: Record<AvatarSize, "sm" | "md" | "lg"> = {
+  xs: "sm",
+  sm: "sm",
+  md: "md",
+  base: "md",
+  lg: "lg",
+};
+
+const textMap: Record<AvatarSize, string> = {
+  xs: "text-xs",
+  sm: "text-sm",
+  md: "text-lg",
+  base: "text-lg",
+  lg: "text-xl",
+};
+
+const avatarSizePx: Record<AvatarSize, number> = {
+  xs: 28,
+  sm: 32,
+  md: 40,
+  base: 40,
+  lg: 48,
+};
+
+function getGlowStyle(color: string, glow: boolean) {
+  return glow ? { boxShadow: glowMap[color] ?? glowMap.green } : undefined;
+}
 
 // Premium illustrated SVG family member icons
 function FamilyIllustration({ 
   name, colorName, size, skinColor, hairColor 
 }: { 
-  name: string; colorName: string; size: string; skinColor?: string; hairColor?: string; 
+  name: string; colorName: string; size: AvatarSize; skinColor?: string; hairColor?: string; 
 }) {
   const colors: Record<string, { bg: string; skin: string; hair: string; accent: string }> = {
     green: { bg: "#22c55e", skin: "#fdbcb4", hair: "#166534", accent: "#bbf7d0" },
@@ -56,10 +99,10 @@ function FamilyIllustration({
   const c = colors[colorName] ?? colors.blue;
   const actualSkin = skinColor || c.skin;
   const actualHair = hairColor || c.hair;
-  const isSmall = size === "sm";
-  const isLarge = size === "lg";
-  const w = isLarge ? 48 : isSmall ? 28 : 36;
-  const h = isLarge ? 48 : isSmall ? 28 : 36;
+  const w = avatarSizePx[size] ?? 40;
+  const h = w;
+  const isSmall = w <= 32;
+  const isLarge = w >= 48;
 
   const renderAvatar = () => {
     const baseProps = { width: w, height: h, viewBox: `0 0 ${w} ${h}` };
@@ -235,10 +278,10 @@ function FamilyIllustration({
         );
       case "Rocco":
       case "Rocco (Frenchie)":
-        return <AnimatedEmoji emoji="🐶" name="Rocco" size={size as any} />;
+        return <AnimatedEmoji emoji="🐶" name="Rocco" size={animatedSizeMap[size]} />;
       case "Rico":
       case "Rico (Poodle)":
-        return <AnimatedEmoji emoji="🐩" name="Rico" size={size as any} />;
+        return <AnimatedEmoji emoji="🐩" name="Rico" size={animatedSizeMap[size]} />;
       default:
         return (
           <svg {...baseProps} xmlns="http://www.w3.org/2000/svg">
@@ -270,22 +313,31 @@ function FamilyIllustration({
 }
 
 export default function Avatar({ 
-  name, color = "green", size = "md", emoji, variant = "illustrated", skinColor, hairColor 
+  name, color = "green", size = "md", emoji, variant = "illustrated", skinColor, hairColor, glow = false
 }: AvatarProps) {
-  const initials = name
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .toUpperCase()
-    .slice(0, 2);
+  const avatarSize = sizeMap[size] ?? sizeMap.md;
+  const avatarTextSize = textMap[size] ?? textMap.md;
+  const avatarGlow = getGlowStyle(color, glow);
 
   if (variant === "emoji" && emoji) {
+    const isDataUrl = emoji.startsWith("data:");
     const ringClass = ringMap[color] ?? ringMap.green;
+    if (isDataUrl) {
+      return (
+        <div
+          className={`${avatarSize} rounded-full flex items-center justify-center shrink-0 overflow-hidden ring-2 ${ringClass}`}
+          style={avatarGlow}
+        >
+          <SigmaImage src={emoji} alt={name} shape="circle" glow={glow} />
+        </div>
+      );
+    }
     return (
       <div
-        className={`${colorMap[color] ?? colorMap.green} ${sizeMap[size]} rounded-full flex items-center justify-center shrink-0 transition-transform duration-200 hover:scale-110 active:scale-90 ring-2 ${ringClass}`}
+        className={`${colorMap[color] ?? colorMap.green} ${avatarSize} ${avatarTextSize} rounded-full flex items-center justify-center shrink-0 transition-transform duration-200 hover:scale-110 active:scale-90 ring-2 ${ringClass}`}
+        style={avatarGlow}
       >
-        <AnimatedEmoji emoji={emoji} size={size as any} />
+        <AnimatedEmoji emoji={emoji} size={animatedSizeMap[size] ?? "md"} />
       </div>
     );
   }
