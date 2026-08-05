@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  buildToolsForOpenAI,
-  getTool,
-} from "@/lib/hermes-tools";
+import { buildToolsForOpenAI, getTool } from "@/lib/hermes-tools";
 
 export const dynamic = "force-dynamic";
 
@@ -10,38 +7,21 @@ const HERMES_API_KEY = process.env.HERMES_API_KEY || "consuela-api-key-2026";
 const HERMES_URL =
   process.env.HERMES_URL || process.env.HERMES_API_URL || "http://hermes-agent-2:8642";
 const HERMES_MODEL = "consuela";
-const MAX_ROUNDS = 2;
+const MAX_ROUNDS = 4;
 
-function toolListForPrompt(): string {
-  return buildToolsForOpenAI()
-    .map((t) => {
-      const props = t.function.parameters.properties || {};
-      const argStr = Object.entries(props)
-        .map(([k, v]) => `"${k}" (${(v as any).type}, ${(v as any).description})`)
-        .join(", ");
-      const required = t.function.parameters.required || [];
-      return `- ${t.function.name}: ${t.function.description}${argStr ? `\n  Args: ${argStr}` : ""}${required.length ? `\n  Required: ${required.join(", ")}` : ""}`;
-    })
-    .join("\n");
+interface ToolCall {
+  id?: string;
+  function?: { name?: string; arguments?: string };
 }
 
-const FIRST_ROUND_PROMPT = `You are Consuela, the Garcia family's AI assistant. You have access to the family dashboard through tools.
-
-IMPORTANT — For this message, you MUST decide whether you need to call a tool. If you do, respond with ONLY a JSON object in this format:
-
-{
-  "tool_call": "name_of_tool",
-  "tool_args": { "arg_name": "value" }
+interface ChatMessage {
+  role: string;
+  content: string;
+  tool_call_id?: string;
+  tool_calls?: ToolCall[];
 }
 
-Available tools:
-${toolListForPrompt()}
-
-If NO tool is needed (greetings, general chat, etc.), respond with:
-{
-  "tool_call": null,
-  "content": "your friendly reply"
-}
+const SYSTEM_PROMPT = `You are Consuela, the Garcia family's AI assistant. You have access to the family dashboard through tools.
 
 Family members: Rebecca (Mom 🐱), Jeffery (Dad 👨), Emily (👧14), Bailey (👧12), Jasmine (👧10), Aurora (👧7), Caspian (🧒5), Rocco (🐶), Rico (🐩).
 
@@ -53,34 +33,25 @@ Admin capabilities — you can also manage the dashboard itself:
 - check_pocketbase: Verify the database is healthy and connected
 
 Rules:
-1. When asking about events, tasks, meals, recipes, grocery, or pantry — ALWAYS call the tool first.
+1. When asking about events, tasks, meals, recipes, grocery, or pantry — ALWAYS call a tool first.
 2. Never make up data. If you need to know something about the dashboard, use a tool.
 3. Use the user's message to determine which tool to call and what arguments to pass.
-4. Return ONLY JSON. No markdown wrapping, no explanations outside the JSON.
-5. For admin actions, confirm with the user before triggering updates or restarts. Use check_for_update or get_container_status first.`;
+4. For admin actions, confirm with the user before triggering updates or restarts. Use check_for_update or get_container_status first.`;
 
-const FINAL_ROUND_PROMPT = `You are Consuela, the Garcia family's AI assistant. You just received tool results from the dashboard. Use these results to answer the user's question naturally.
-
-The user's original message was: "{originalMessage}"
-
-Tool called: {toolName}
-Tool results:
-{toolResults}
-
-Respond with ONLY a natural, friendly message. Be specific — mention actual names, times, and details from the results. Use emojis naturally. Keep it warm and family-appropriate.
-
-Family: Rebecca (Mom 🐱), Jeff (Dad 👨), Emily (👧14), Bailey (👧12), Jasmine (👧10), Aurora (👧7), Caspian (🧒5), Rocco (🐶), Rico (🐩).`;
-
-const CASUAL_PROMPT = `You are Consuela, the Garcia family's AI assistant. Respond to the user's message naturally. Be warm, friendly, and family-appropriate. Use emojis sparingly. Keep responses concise.
-
-Family: Rebecca (Mom 🐱), Jeff (Dad 👨), Emily (👧14), Bailey (👧12), Jasmine (👧10), Aurora (👧7), Caspian (🧒5), Rocco (🐶 Frenchie), Rico (🐩 Poodle).
-
-You also have admin tools: check_for_update checks GitHub for new code, trigger_update pulls and rebuilds the dashboard, get_container_status shows container health, restart_container restarts a container, and check_pocketbase verifies the database. Always ask before triggering updates or restarts.`;
+function parseToolArgs(raw: string | undefined): Record<string, any> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
 
 async function callHermes(
-  messages: Array<{ role: string; content: string }>,
-  maxTokens = 1024,
-): Promise<string> {
+  messages: ChatMessage[],
+  opts: { maxTokens?: number; tools?: ReturnType<typeof buildToolsForOpenAI>; toolChoice?: "auto" | "none" } = {},
+): Promise<{ content: string; tool_calls?: ToolCall[] }> {
   const res = await fetch(`${HERMES_URL}/v1/chat/completions`, {
     method: "POST",
     headers: {
@@ -91,7 +62,9 @@ async function callHermes(
       model: HERMES_MODEL,
       messages,
       temperature: 0.7,
-      max_tokens: maxTokens,
+      max_tokens: opts.maxTokens ?? 1024,
+      tools: opts.tools,
+      tool_choice: opts.toolChoice ?? "auto",
     }),
   });
 
@@ -101,19 +74,10 @@ async function callHermes(
   }
 
   const data = await res.json();
-  return data.choices?.[0]?.message?.content || "";
-}
-
-function extractJSON(raw: string): any | null {
-  const trimmed = raw.trim();
-  if (trimmed.startsWith("{")) {
-    try { return JSON.parse(trimmed); } catch { /* fall through */ }
-  }
-  const match = trimmed.match(/\{[\s\S]*\}/);
-  if (match) {
-    try { return JSON.parse(match[0]); } catch { /* fall through */ }
-  }
-  return null;
+  return {
+    content: data.choices?.[0]?.message?.content || "",
+    tool_calls: data.choices?.[0]?.message?.tool_calls,
+  };
 }
 
 export async function POST(request: NextRequest) {
@@ -130,64 +94,56 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    let recentHistory = [...(history || [])].slice(-6);
-    const historyBlock = recentHistory.length > 0
-      ? `\n\nRecent conversation:\n${recentHistory.map((h: any) => `${h.role}: ${h.content}`).join("\n")}`
-      : "";
+    const tools = buildToolsForOpenAI();
+    const recentHistory = (history || [])
+      .slice(-6)
+      .filter((h: any) => h && typeof h.content === "string" && h.content.trim())
+      .map((h: any) => ({
+        role: h.role === "assistant" ? "assistant" : "user",
+        content: h.content,
+      }));
 
-    const round1Messages = [
-      {
-        role: "system",
-        content: FIRST_ROUND_PROMPT.replace(/\{toolList\}/, toolListForPrompt()),
-      },
-      {
-        role: "user",
-        content: `User message: "${message}"${historyBlock}\n\nBased on this message, do you need to call a tool? Respond with JSON only.`,
-      },
-    ];
-
-    const round1Response = await callHermes(round1Messages, 300);
-    const parsed = extractJSON(round1Response);
-
-    if (!parsed || (!parsed.tool_call && !parsed.content)) {
-      const fallback = await callHermes([
-        { role: "system", content: CASUAL_PROMPT },
-        { role: "user", content: message },
-      ], 500);
-      return NextResponse.json({ content: fallback });
-    }
-
-    if (!parsed.tool_call) {
-      return NextResponse.json({ content: parsed.content || round1Response });
-    }
-
-    const tool = getTool(parsed.tool_call);
-    let toolResult: string;
-    if (tool) {
-      try {
-        toolResult = await tool.handler(parsed.tool_args || {});
-      } catch (e: any) {
-        toolResult = JSON.stringify({ error: e?.message || "Tool failed" });
-      }
-    } else {
-      toolResult = JSON.stringify({
-        error: `Unknown tool: ${parsed.tool_call}. Available: ${buildToolsForOpenAI().map((t) => t.function.name).join(", ")}`,
-      });
-    }
-
-    const finalPrompt = FINAL_ROUND_PROMPT
-      .replace("{originalMessage}", message)
-      .replace("{toolName}", parsed.tool_call)
-      .replace("{toolResults}", toolResult);
-
-    const round2Messages = [
-      { role: "system", content: finalPrompt },
+    const messages: ChatMessage[] = [
+      { role: "system", content: SYSTEM_PROMPT },
+      ...recentHistory,
       { role: "user", content: message },
     ];
 
-    const finalResponse = await callHermes(round2Messages, 800);
+    for (let round = 0; round < MAX_ROUNDS; round++) {
+      const { content, tool_calls } = await callHermes(messages, { tools, toolChoice: "auto" });
 
-    return NextResponse.json({ content: finalResponse });
+      if (!tool_calls || tool_calls.length === 0) {
+        return NextResponse.json({ content });
+      }
+
+      messages.push({ role: "assistant", content, tool_calls });
+
+      for (const tc of tool_calls) {
+        const name = tc.function?.name;
+        const tool = name ? getTool(name) : undefined;
+
+        let result: string;
+        if (!name || !tool) {
+          const available = tools.map((t) => t.function.name).join(", ");
+          result = JSON.stringify({
+            error: `Unknown tool: ${name ?? "<missing name>"}. Available: ${available}`,
+          });
+        } else {
+          try {
+            result = await tool.handler(parseToolArgs(tc.function?.arguments));
+          } catch (e: any) {
+            result = JSON.stringify({ error: e?.message || "Tool failed" });
+          }
+        }
+
+        messages.push({ role: "tool", tool_call_id: tc.id || "", content: result });
+      }
+    }
+
+    return NextResponse.json({
+      content:
+        "I kept needing to look things up and ran out of steps — give me a moment and try again! 🔧",
+    });
   } catch (error: any) {
     console.error("Consuela agent error:", error?.message || error);
     return NextResponse.json({
