@@ -56,6 +56,7 @@ export default function ProfileSheet({ open, onClose, member }: ProfileSheetProp
         return;
       }
       await db.refreshCaches();
+      db.patchMemberLocal(member.name, { emoji: data.member?.emoji || avatarValue });
       setAvatarSaved(true);
       setTimeout(() => setAvatarSaved(false), 2000);
     } catch {

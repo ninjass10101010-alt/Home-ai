@@ -19,6 +19,7 @@ import { useHomeLayout } from "@/hooks/useHomeLayout";
 import type { WidgetId } from "@/lib/layout-config";
 import { useAuth, type AuthUser } from "@/hooks/useAuth";
 import PinModal from "@/components/auth/PinModal";
+import MemberPickerModal from "@/components/auth/MemberPickerModal";
 import Surface from "@/components/ui/Surface";
 import SoftButton from "@/components/ui/SoftButton";
 import IconButton from "@/components/ui/IconButton";
@@ -71,6 +72,7 @@ export default function HomePage() {
   const [homeError, setHomeError] = useState<string | null>(null);
   const [confirmingLogout, setConfirmingLogout] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const router = useRouter();
   const { currentUser, isLoggedIn, logout, sessionRemainingMs, sessionWarning, extendSession } = useAuth();
@@ -244,7 +246,7 @@ export default function HomePage() {
               ) : (
                 <button
                   type="button"
-                  onClick={() => setPinningMember({ name: familyMembers[0]?.name || "Family", emoji: familyMembers[0]?.emoji || "😊", color: familyMembers[0]?.color || "green", avatarSize: normalizeAvatarSize(familyMembers[0]?.avatarSize), glow: familyMembers[0]?.glow || false })}
+                  onClick={() => setPickerOpen(true)}
                   className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-[var(--color-surface-0)]/35 px-3 py-1.5 text-xs font-semibold text-text-secondary backdrop-blur-xl transition hover:bg-[var(--color-surface-0)]/55 hover:text-text-primary active:scale-95"
                   aria-label="Sign in"
                   title="Sign in"
@@ -396,6 +398,18 @@ export default function HomePage() {
               <IconButton variant="accent" aria-label="Add quick note"><span>＋</span></IconButton>
             </div>
           </div>
+
+          {pickerOpen && (
+            <MemberPickerModal
+              open={pickerOpen}
+              members={familyMembers}
+              onClose={() => setPickerOpen(false)}
+              onSelect={(member) => {
+                setPickerOpen(false);
+                setPinningMember({ name: member.name, emoji: member.emoji || "😊", color: member.color || "green", avatarSize: normalizeAvatarSize(member.avatarSize), glow: member.glow || false });
+              }}
+            />
+          )}
 
           {pinningMember && (
             <PinModal

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withAdmin } from "@/lib/pb-auth";
-import { verifyPinFromPB, sanitizeMember } from "@/lib/server-auth";
+import { verifyPinFromPB, sanitizeMember, findOrCreateMemberRecord } from "@/lib/server-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
     }
 
     const updated = await withAdmin(async (pb) => {
-      return pb.collection("members").update(actor.id, clean);
+      return findOrCreateMemberRecord(pb, actor, clean);
     });
 
     return NextResponse.json({ success: true, member: sanitizeMember(updated) });

@@ -2,6 +2,7 @@ import { getPB } from "@/lib/pb";
 import { withAdmin } from "@/lib/pb-auth";
 import { idempotencyHashOf } from "@/lib/consuela/hash";
 import type { NewSuggestion, ProactiveSuggestion, SuggestionStatus } from "@/lib/consuela/types";
+import { memberFallbacks as membersFallback } from "@/lib/member-fallback";
 
 let localFallback = false;
 
@@ -116,7 +117,7 @@ export const db = {
 
   async updateMember(name: string, updates: any): Promise<any> {
     const records = await safeList<any>("members", []);
-    const member = records.find((r: any) => r.name === name);
+    const member = records.find((r: any) => r.name === name || r.name?.startsWith(name) || name.startsWith(r.name || ""));
     if (!member) return null;
     return safeUpdate("members", member.id, updates);
   },
@@ -131,7 +132,7 @@ export const db = {
 
   async deleteMember(name: string): Promise<any> {
     const records = await safeList<any>("members", []);
-    const member = records.find((r: any) => r.name === name);
+    const member = records.find((r: any) => r.name === name || r.name?.startsWith(name) || name.startsWith(r.name || ""));
     if (!member) return false;
     return safeDelete("members", member.id);
   },
@@ -648,17 +649,6 @@ export const db = {
   },
 };
 
-const membersFallback = [
-  { id: 1, name: "Rebecca (Mom)", role: "parent", emoji: "🐱", age: 38, joined: "Feb 2024", skinColor: "#fdbcb4", hairColor: "#b45309", pin: "0202" },
-  { id: 2, name: "Jeffery (Dad)", role: "parent", emoji: "👨", age: 40, joined: "Feb 2024", skinColor: "#fdbcb4", hairColor: "#1e40af", pin: "0828" },
-  { id: 3, name: "Emily", role: "child", emoji: "👧", age: 14, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#5b21b6", pin: "1024" },
-  { id: 4, name: "Bailey", role: "child", emoji: "👧", age: 12, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#166534", pin: "1005" },
-  { id: 5, name: "Jasmine", role: "child", emoji: "👧", age: 10, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#b45309", pin: "0402" },
-  { id: 6, name: "Aurora", role: "child", emoji: "👧", age: 7, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#5b21b6", pin: "1025" },
-  { id: 7, name: "Caspian", role: "child", emoji: "🧒", age: 5, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#166534", pin: "1010" },
-  { id: 8, name: "Rocco", role: "pet", emoji: "🐶", age: 3, joined: "Feb 2024", pin: "0000" },
-  { id: 9, name: "Rico", role: "pet", emoji: "🐩", age: 5, joined: "Feb 2024", pin: "0000" },
-];
 
 const eventsFallback = [
   { id: 1, title: "Soccer Practice", date: new Date().toISOString().split('T')[0], time: "16:00", member: "Emily", icon: "⚽", color: "violet" },

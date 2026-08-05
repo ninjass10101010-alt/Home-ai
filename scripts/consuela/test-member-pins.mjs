@@ -20,6 +20,9 @@ import assert from "node:assert/strict";
 const { resolveMemberPin, memberPinMatches } = await import(
   "../../src/lib/member-pins.ts"
 );
+const { mergeMemberFallbacks, memberFallbacks } = await import(
+  "../../src/lib/member-fallback.ts"
+);
 
 let failures = 0;
 async function step(name, fn) {
@@ -70,6 +73,33 @@ await step("memberPinMatches rejects unknown members", () => {
 
 await step("memberPinMatches rejects non-digit stray pins", () => {
   assert.equal(memberPinMatches({ name: "Rebecca (Mom)", pin: "" }, " 0202"), false);
+});
+
+await step("fallback list contains all 9 known members", () => {
+  assert.equal(memberFallbacks.length, 9);
+  assert.ok(memberFallbacks.some((m) => m.name === "Rebecca (Mom)" && m.pin === "0202"));
+});
+
+await step("mergeMemberFallbacks keeps live pins when PB covers everyone", () => {
+  const pbMembers = memberFallbacks.map((m) => ({ ...m, pin: "1111" }));
+  const merged = mergeMemberFallbacks(pbMembers);
+  assert.equal(merged.length, 9);
+  assert.ok(merged.every((m) => m.pin === "1111"));
+});
+
+await step("mergeMemberFallbacks appends fallbacks missing from PB", () => {
+  const pbMembers = [{ name: "Rebecca (Mom)", pin: "1111" }];
+  const merged = mergeMemberFallbacks(pbMembers);
+  assert.ok(merged.some((m) => m.name === "Rebecca (Mom)" && m.pin === "1111"));
+  assert.ok(merged.some((m) => m.name === "Aurora" && m.pin === "1025"));
+  assert.ok(merged.some((m) => m.name === "Caspian" && m.pin === "1010"));
+});
+
+await step("mergeMemberFallbacks returns all fallbacks for an empty PB (dev env regression)", () => {
+  const merged = mergeMemberFallbacks([]);
+  assert.equal(merged.length, 9);
+  assert.equal(resolveMemberPin(merged.find((m) => m.name === "Rebecca (Mom)")), "0202");
+  assert.ok(memberPinMatches(merged.find((m) => m.name === "Rebecca (Mom)"), "0202"));
 });
 
 if (failures > 0) {
