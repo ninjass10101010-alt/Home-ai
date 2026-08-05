@@ -1,6 +1,7 @@
 import { db as pbDb } from "./pb-db";
 import { defaultMeals, mealIdeas, initialGroceryItems } from "../data/meals";
 import { resolveMemberPin, memberPinMatches } from "@/lib/member-pins";
+import { memberFallbacks, mergeMemberFallbacks } from "@/lib/member-fallback";
 
 const memberColor = (i: number) =>
   ["green", "cyan", "violet", "amber", "rose", "blue", "cyan", "green", "cyan"][i % 9] || "green";
@@ -31,15 +32,10 @@ async function refreshMembersCache() {
   try {
     const fresh = await pbDb.selectMembers();
     const pbMembers = fresh || [];
-    const pbFirstNames = new Set(pbMembers.map((m: any) => (m.name || "").split(" ")[0].toLowerCase()));
     for (const pbm of pbMembers) {
       pbm.pin = resolveMemberPin(pbm);
     }
-    const missingFallback = membersFallback.filter((f: any) => {
-      const firstName = f.name.split(" ")[0].toLowerCase();
-      return !pbFirstNames.has(firstName);
-    });
-    membersCache = [...pbMembers, ...missingFallback];
+    membersCache = mergeMemberFallbacks(pbMembers);
     markRefreshed("members");
     window.dispatchEvent(new CustomEvent("consuela-members-updated"));
   } catch {}
@@ -61,17 +57,7 @@ async function refreshCache(name: string, fetcher: () => Promise<any[]>, cache: 
   }
 }
 
-const membersFallback = [
-  { id: 1, name: "Rebecca (Mom)", role: "parent", emoji: "🐱", fullName: "Rebecca Garcia", age: 38, joined: "Feb 2024", skinColor: "#fdbcb4", hairColor: "#b45309", pin: "0202" },
-  { id: 2, name: "Jeffery (Dad)", role: "parent", emoji: "👨", fullName: "Jeffery Garcia", age: 40, joined: "Feb 2024", skinColor: "#fdbcb4", hairColor: "#1e40af", pin: "0828" },
-  { id: 3, name: "Emily", role: "child", emoji: "👧", fullName: "Emily Garcia", age: 14, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#5b21b6", pin: "1024" },
-  { id: 4, name: "Bailey", role: "child", emoji: "👧", fullName: "Bailey Garcia", age: 12, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#166534", pin: "1005" },
-  { id: 5, name: "Jasmine", role: "child", emoji: "👧", fullName: "Jasmine Garcia", age: 10, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#b45309", pin: "0402" },
-  { id: 6, name: "Aurora", role: "child", emoji: "👧", fullName: "Aurora Garcia", age: 7, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#5b21b6", pin: "1025" },
-  { id: 7, name: "Caspian", role: "child", emoji: "🧒", fullName: "Caspian Garcia", age: 5, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#166534", pin: "1010" },
-  { id: 8, name: "Rocco", role: "pet", emoji: "🐶", fullName: "Rocco (Frenchie)", age: 3, joined: "Feb 2024", pin: "0000" },
-  { id: 9, name: "Rico", role: "pet", emoji: "🐩", fullName: "Rico (Poodle)", age: 5, joined: "Feb 2024", pin: "0000" },
-];
+const membersFallback = memberFallbacks;
 
 const scheduleData = [
   { id: 1, title: "Wake up / Morning routine", time: "07:00", days: "weekdays", type: "routine", icon: "⏰", color: "amber" },
@@ -100,15 +86,10 @@ void (async () => {
       pbDb.selectGrocery().catch(() => []),
     ]);
     const pbMembers = (m as any[]) || [];
-    const pbFirstNames = new Set(pbMembers.map((m: any) => (m.name || "").split(" ")[0].toLowerCase()));
     for (const pbm of pbMembers) {
       pbm.pin = resolveMemberPin(pbm);
     }
-    const missingFallback = membersFallback.filter((f: any) => {
-      const firstName = f.name.split(" ")[0].toLowerCase();
-      return !pbFirstNames.has(firstName);
-    });
-    membersCache = [...pbMembers, ...missingFallback];
+    membersCache = mergeMemberFallbacks(pbMembers);
     eventsCache = e as any[];
     tasksCache = t as any[];
     schedulesCache = s as any[];
@@ -173,6 +154,19 @@ export const db = {
       await refreshMembersCache();
     }
     return result;
+  },
+
+  // Optimistically patch a member in the local cache and notify subscribers
+  // (e.g. right after a server-side profile save, so the UI reflects the new
+  // avatar even when PB member reads are unavailable/restricted).
+  patchMemberLocal: (name: string, patch: any) => {
+    const list = membersCache.length > 0 ? membersCache : membersFallback;
+    const idx = list.findIndex((m: any) => m.name === name || m.name?.startsWith(name));
+    if (idx === -1) return;
+    list[idx] = { ...list[idx], ...patch };
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("consuela-members-updated"));
+    }
   },
 
   verifyMemberPin: (memberName: string, pin: string) => {

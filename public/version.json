@@ -1,7 +1,7 @@
 {
-  "hash": "f38ba3745c3212ad2ee9e58c291de588e57943bc",
-  "short": "f38ba37",
-  "message": "fix(consuela): post-scan bug sweep — auth, snooze/scope-date, chat history, telegram, complete_task, UTC drift, quota lock",
-  "date": "2026-08-05 07:49:41 -0400",
+  "hash": "fc9cb6c0aac96a08ee7bc8a8f8f638ab49a6b48c",
+  "short": "fc9cb6c",
+  "message": "fix(ui): undo no longer wipes a newer send snapshot (identity-checked clear)",
+  "date": "2026-08-05 14:23:54 -0400",
   "author": "GarciaFam"
 }
