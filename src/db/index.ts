@@ -449,4 +449,9 @@ export const db = {
   selectMealWeekArchives: async () => pbDb.selectMealWeekArchives(),
   upsertMealWeekArchive: async (entry: any) => pbDb.upsertMealWeekArchive(entry),
   deleteMealWeekArchive: async (weekStart: string) => pbDb.deleteMealWeekArchive(weekStart),
+
+  insertProactiveSuggestions: async (items: any[]) => pbDb.insertProactiveSuggestions(items),
+  selectPendingSuggestions: async (opts?: { scopeDate?: string; limit?: number }) => pbDb.selectPendingSuggestions(opts),
+  updateSuggestion: async (id: string, patch: { status?: any; snoozedUntil?: string }) => pbDb.updateSuggestion(id, patch),
+  deleteStaleSuggestions: async (beforeISO: string) => pbDb.deleteStaleSuggestions(beforeISO),
 };

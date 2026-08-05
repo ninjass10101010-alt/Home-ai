@@ -1,4 +1,7 @@
 import { getPB } from "@/lib/pb";
+import { withAdmin } from "@/lib/pb-auth";
+import { idempotencyHashOf } from "@/lib/consuela/hash";
+import type { NewSuggestion, ProactiveSuggestion, SuggestionStatus } from "@/lib/consuela/types";
 
 let localFallback = false;
 
@@ -462,6 +465,87 @@ export const db = {
     const entry = records.find((r: any) => r.weekStart === weekStart);
     if (!entry) return false;
     return safeDelete("meal_week_archive", entry.id);
+  },
+
+  async insertProactiveSuggestions(items: NewSuggestion[]): Promise<{ inserted: number; rejected: number }> {
+    let inserted = 0;
+    let rejected = 0;
+    await withAdmin(async (pb) => {
+      for (const item of items) {
+        const hash = idempotencyHashOf(item.kind, item.title, item.scopeDate);
+        const body: Record<string, unknown> = {
+          idempotencyHash: hash,
+          kind: item.kind,
+          severity: item.severity,
+          title: item.title,
+          scopeDate: item.scopeDate,
+          status: "pending",
+          createdAt: new Date().toISOString(),
+        };
+        if (item.body !== undefined) body.body = item.body;
+        if (item.emoji !== undefined) body.emoji = item.emoji;
+        if (item.actionLabel !== undefined) body.actionLabel = item.actionLabel;
+        if (item.actionPayload !== undefined) body.actionPayload = item.actionPayload;
+        if (item.expiresAt !== undefined) body.expiresAt = item.expiresAt;
+
+        try {
+          await pb.collection("proactive_suggestions").create(body);
+          inserted++;
+        } catch (err: any) {
+          if (err.status === 400 && JSON.stringify(err.response).toLowerCase().includes("unique")) {
+            rejected++;
+          } else {
+            throw err;
+          }
+        }
+      }
+    });
+    return { inserted, rejected };
+  },
+
+  async selectPendingSuggestions(opts?: { scopeDate?: string; limit?: number }): Promise<ProactiveSuggestion[]> {
+    const today = opts?.scopeDate || new Date().toISOString().split("T")[0];
+    const now = new Date().toISOString();
+    const limit = opts?.limit ?? 20;
+    const filterParts = [
+      'status="pending"',
+      `scopeDate>="${today}"`,
+      `(snoozedUntil=null || snoozedUntil<"${now}")`,
+    ];
+    const filter = filterParts.join(" && ");
+    return withAdmin(async (pb) => {
+      const records = await pb.collection("proactive_suggestions").getFullList({
+        filter,
+        sort: "-createdAt",
+        requestKey: null,
+      });
+      return records.slice(0, limit) as unknown as ProactiveSuggestion[];
+    });
+  },
+
+  async updateSuggestion(id: string, patch: { status?: SuggestionStatus; snoozedUntil?: string }): Promise<void> {
+    await withAdmin(async (pb) => {
+      await pb.collection("proactive_suggestions").update(id, patch);
+    });
+  },
+
+  async deleteStaleSuggestions(beforeISO: string): Promise<number> {
+    return withAdmin(async (pb) => {
+      const records = await pb.collection("proactive_suggestions").getFullList({
+        filter: `createdAt<"${beforeISO}"`,
+        requestKey: null,
+      });
+      let count = 0;
+      for (const r of records) {
+        try {
+          await pb.collection("proactive_suggestions").delete(r.id);
+          count++;
+        } catch {
+          // ignore individual delete failures
+        }
+      }
+      return count;
+    });
   },
 };
 
