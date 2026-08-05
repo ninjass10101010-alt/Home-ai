@@ -62,9 +62,10 @@ export function usePantry(showToast: (msg: string) => void, groceryItems: Grocer
     const alreadyOnGrocery = groceryItems.some(g => normalizeName(g.name) === normalizeName(trimmed) && g.needed);
     const saved = await db.upsertPantryItem({ userId: "demo", name: trimmed, status });
     if (!saved) { showToast("❌ Failed to save item to pantry"); return false; }
-    setPantryItems(prev => [...prev, { id: saved.id ?? Date.now(), item: saved.name || saved.item, status: saved.status }]);
+    const newItem = { id: saved.id ?? Date.now(), item: saved.name || saved.item, status: saved.status };
+    setPantryItems(prev => [...prev, newItem]);
     showToast(alreadyOnGrocery ? `🥫 Added ${trimmed} to pantry and grocery` : `🥫 Added ${trimmed} to pantry`);
-    return true;
+    return newItem;
   };
 
   const updatePantryStatus = async (id: number, status: "plenty" | "low" | "out") => {

@@ -113,7 +113,8 @@ export function useGrocery(showToast: (msg: string) => void, plannedMeals: Meal[
     priority: "low" | "medium" | "high",
     emojiOverride?: string,
     quantity = "",
-    notes = ""
+    notes = "",
+    silent = false
   ) => {
     const trimmed = name.trim();
     if (!trimmed) return false;
@@ -135,7 +136,7 @@ export function useGrocery(showToast: (msg: string) => void, plannedMeals: Meal[
       const filtered = prev.filter(r => normalizeName(r.name) !== normalizeName(trimmed));
       return [{ name: trimmed, emoji: item.emoji || "📦", category: item.category }, ...filtered].slice(0, 8);
     });
-    showToast(existing ? `🛒 ${trimmed} is already on your list` : `🛒 Added ${trimmed}`);
+    if (!silent) showToast(existing ? `🛒 ${trimmed} is already on your list` : `🛒 Added ${trimmed}`);
     return true;
   };
 
