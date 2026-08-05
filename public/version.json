@@ -1,7 +1,7 @@
 {
-  "hash": "ee8a973e69e4e47489a27bc670adfa29bc4da77a",
-  "short": "ee8a973",
-  "message": "feat(user): profile sheet + PIN-verified member APIs + race-proof universal task claiming",
-  "date": "2026-08-04 13:05:11 -0400",
+  "hash": "0f5bb1eae2fb7192afc549fcfcd13b14d36a0fbc",
+  "short": "0f5bb1e",
+  "message": "feat(kitchen): full kitchen overhaul — weekOf meal planning, recipe-as-reference, pantry-aware suggestions, PB seed hardening",
+  "date": "2026-08-04 13:57:23 -0400",
   "author": "GarciaFam"
 }

@@ -246,6 +246,7 @@ export class MealSyncService {
       lastSyncedAt: data.lastSyncedAt,
     };
     const saved = await db.upsertGroceryItem(toUpsert);
+    if (!saved) throw new Error(`Failed to create grocery item: ${toUpsert.name}`);
     return {
       id: saved.id,
       userId: saved.userId,

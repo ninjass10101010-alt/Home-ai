@@ -5,7 +5,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { db } from "@/db";
-import { weekLabel } from "@/lib/meals-week-utils";
+import { weekLabel, isoDateForWeekday } from "@/lib/meals-week-utils";
 
 export default function MealsArchivePage() {
   const router = useRouter();
@@ -15,7 +15,7 @@ export default function MealsArchivePage() {
 
   async function loadArchives() {
     try {
-      const raw = await (db as any).selectMealWeekArchives?.() || [];
+      const raw = await db.selectMealWeekArchives() || [];
       setArchives(
         raw
           .map((a: any) => ({
@@ -38,19 +38,19 @@ export default function MealsArchivePage() {
   async function restoreWeek(weekStart: string) {
     setRestoring(weekStart);
     try {
-      const raw = await (db as any).selectMealWeekArchives?.() || [];
+      const raw = await db.selectMealWeekArchives() || [];
       const entry = raw.find((a: any) => a.weekStart === weekStart);
       if (!entry?.data) throw new Error("No data found");
       const meals = Array.isArray(entry.data) ? entry.data : [];
       for (const meal of meals) {
         const { id, ...rest } = meal;
-        await db.insertMeal({
-          ...rest,
-          weekOf: meal.weekOf || weekStart,
-          date: meal.date || meal.time,
-        });
+      await db.insertMeal({
+        ...rest,
+        weekOf: meal.weekOf || weekStart,
+        date: meal.date || isoDateForWeekday(weekStart, meal.time || "Mon"),
+      });
       }
-      await (db as any).deleteMealWeekArchive?.(weekStart);
+      await db.deleteMealWeekArchive(weekStart);
       setArchives(prev => prev.filter(a => a.weekStart !== weekStart));
     } catch (e: any) {
       console.error("Restore failed:", e);

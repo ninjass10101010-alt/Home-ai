@@ -254,7 +254,7 @@ export default function MealsTab({
           {/* ── Weekly Strip ── */}
           <div className="flex gap-2 overflow-x-auto pb-1 -mx-4 px-4 no-scrollbar">
             {weekDays.map(day => {
-              const dayMeals = meals.filter((m: Meal) => m.time === day);
+              const dayMeals = meals.filter((m: Meal) => m.time === day && (m.weekOf || activeWeek) === activeWeek);
               const dinner = dayMeals.find((m: Meal) => m.mealType === "dinner") || dayMeals[0];
               const isActive = day === activeDay;
               const mealCount = dayMeals.length;

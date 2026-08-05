@@ -30,7 +30,7 @@ export function isoDateForWeekday(weekOf: string, weekdayShort: string): string 
   };
   const weekdayNum = weekdayMap[weekdayShort] ?? 1;
   const d = new Date(weekOf + "T00:00:00");
-  d.setDate(d.getDate() + weekdayNum - 1);
+  d.setDate(d.getDate() + (weekdayNum === 0 ? 6 : weekdayNum - 1));
   return d.toISOString().split("T")[0];
 }
 
