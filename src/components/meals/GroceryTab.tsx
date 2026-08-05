@@ -142,14 +142,15 @@ export default function GroceryTab({
 
   const handleUndo = async () => {
     if (!undo || undoing) return;
+    const snap = undo;
     setUndoing(true);
     try {
       if (undoTimer.current) clearTimeout(undoTimer.current);
-      for (const id of undo.pantryIds) await removePantryItem(id);
-      for (const item of undo.items) {
+      for (const id of snap.pantryIds) await removePantryItem(id);
+      for (const item of snap.items) {
         await addGroceryItem(item.name, item.category, item.priority, item.emoji, item.quantity || "", item.notes || "", true);
       }
-      setUndo(null);
+      setUndo(prev => prev === snap ? null : prev);
       showToast(`↩️ Restored ${undo.items.length} item${undo.items.length === 1 ? "" : "s"} to grocery`);
     } finally {
       setUndoing(false);
