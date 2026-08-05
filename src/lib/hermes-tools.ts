@@ -375,6 +375,47 @@ const TOOLS: Tool[] = [
   },
   {
     definition: {
+      name: "get_proactive_suggestions",
+      description: "Get Consuela's pending proactive alerts that need the family's attention. Returns pantry lows, task penalty streaks, calendar conflicts, etc.",
+      parameters: { type: "object", properties: { limit: { type: "number", description: "Max to return (default 10)" } } },
+    },
+    handler: async (args) => {
+      const items = await db.selectPendingSuggestions({ limit: args.limit ?? 10 });
+      return summarize(items);
+    },
+  },
+  {
+    definition: {
+      name: "dismiss_suggestion",
+      description: "Mark a proactive suggestion as dismissed. Use when the user wants to dismiss an alert.",
+      parameters: { type: "object", properties: { id: { type: "string", description: "Suggestion id" } }, required: ["id"] },
+    },
+    handler: async (args) => {
+      await db.updateSuggestion(args.id, { status: "dismissed" });
+      return JSON.stringify({ ok: true, dismissed: args.id });
+    },
+  },
+  {
+    definition: {
+      name: "action_suggestion",
+      description: "Run the suggested action attached to a proactive suggestion. e.g. add a pantry item to the grocery list.",
+      parameters: { type: "object", properties: { id: { type: "string", description: "Suggestion id" } }, required: ["id"] },
+    },
+    handler: async (args) => {
+      const items = await db.selectPendingSuggestions({ limit: 50 });
+      const suggestion = items.find((s: any) => s.id === args.id);
+      if (!suggestion) {
+        return JSON.stringify({ ok: false, error: `Suggestion "${args.id}" not found` });
+      }
+      const payload = suggestion.actionPayload;
+      if (!payload?.tool) {
+        return JSON.stringify({ ok: false, error: "This suggestion has no attached action" });
+      }
+      return JSON.stringify({ ok: true, actionedLater: true, tool: payload.tool, args: payload.args || {} });
+    },
+  },
+  {
+    definition: {
       name: "check_for_update",
       description: "Check if a new version of the Consuela Dashboard is available on GitHub. Returns the current version, latest remote version, and whether an update is available.",
       parameters: { type: "object", properties: {} },
