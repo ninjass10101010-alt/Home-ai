@@ -1802,7 +1802,15 @@ export default function WeatherWidget() {
         {mounted && <WeatherParticles type={particleType} tod={tod} />}
 
         {/* ── Glassmorphism content overlay ── */}
-        <div className="relative z-20 p-4" style={{ backdropFilter: "blur(0px)" }}>
+        <div
+          className="relative z-20 p-4"
+          style={{
+            backdropFilter: "blur(14px) saturate(1.3)",
+            background: "linear-gradient(180deg, rgba(15,23,42,0.28), rgba(15,23,42,0.18))",
+            border: "1px solid rgba(255,255,255,0.08)",
+            borderRadius: "1rem",
+          }}
+        >
 
           {/* Header: location + season badge */}
           <div className="flex items-center justify-between mb-3">
@@ -1844,13 +1852,13 @@ export default function WeatherWidget() {
               <div key={tempKey} className="flex items-start leading-none mb-1"
                 style={{ animation: tempKey > 0 ? "weatherTempPop 0.45s cubic-bezier(0.34,1.56,0.64,1)" : undefined }}>
                 <span className="text-[52px] font-black tabular-nums leading-none tracking-tight"
-                  style={{ color: "white", textShadow: `0 0 30px ${accentHex.selected}88, 0 2px 8px rgba(0,0,0,0.3)` }}>
+                  style={{ color: accentHex.selected, textShadow: "0 0 30px rgba(0,0,0,0.45), 0 2px 8px rgba(0,0,0,0.35)" }}>
                   {displayTemp}
                 </span>
                 <span className="text-2xl font-light mt-2 ml-1 text-white/50">°</span>
               </div>
               <p className="text-white text-sm font-semibold mb-0.5 drop-shadow">{weatherData?.currentCondition ?? "Partly Cloudy"}</p>
-              <p className="text-white/55 text-[11px]">Feels like {displayFeels}°{weather.unit} · {season} · {tod}</p>
+              <p className="text-white/70 text-[11px]">Feels like {displayFeels}°{weather.unit} · {season} · {tod}</p>
             </div>
           </div>
 
@@ -1889,10 +1897,10 @@ export default function WeatherWidget() {
                         animation: expanded ? `weatherForecastIn 0.38s ease-out ${0.18 + i * 0.06}s both` : undefined,
                       }}
                       title={`${day.condition} · High ${weather.unit === "C" ? toC(day.high) : day.high}° / Low ${weather.unit === "C" ? toC(day.low) : day.low}°`}>
-                      <span className="text-white/50 text-[10px] font-semibold">{day.day}</span>
+                      <span className="text-white/65 text-[10px] font-semibold">{day.day}</span>
                       <span className="text-xl leading-none">{day.emoji}</span>
-                      <span className="text-white text-[11px] font-bold">{weather.unit === "C" ? toC(day.high) : day.high}°</span>
-                      <span className="text-white/40 text-[10px]">{weather.unit === "C" ? toC(day.low) : day.low}°</span>
+                      <span className="text-[11px] font-bold" style={{ color: accentHex.selected, textShadow: "0 1px 3px rgba(0,0,0,0.4)" }}>{weather.unit === "C" ? toC(day.high) : day.high}°</span>
+                      <span className="text-white/55 text-[10px]">{weather.unit === "C" ? toC(day.low) : day.low}°</span>
                     </div>
                   ))}
                 </div>
