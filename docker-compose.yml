@@ -31,6 +31,7 @@ services:
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
       - GOOGLE_OAUTH_SCOPES=${GOOGLE_OAUTH_SCOPES:-openid email https://www.googleapis.com/auth/calendar}
       - CONSUELA_ENCRYPTION_KEY=${CONSUELA_ENCRYPTION_KEY}
+      - CRON_SECRET=${CRON_SECRET:-changeme-please-set-me}
       - GOOGLE_POLL_INTERVAL_MS=300000
       - HERMES_API_URL=http://hermes-agent-2:8642
       - HERMES_API_KEY=consuela-api-key-2026
