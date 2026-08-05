@@ -447,6 +447,12 @@ const TOOLS: Tool[] = [
             await pb.collection("week_data").create(updatedWeek as any);
           }
 
+          await pb.collection("tasks").update(task.id, {
+            status: "done",
+            completedInWeek: currentWeek,
+            completedAt: new Date().toISOString(),
+          });
+
           return {
             ok: true,
             taskId: Number(task.taskId),
@@ -748,14 +754,22 @@ const TOOLS: Tool[] = [
       if (!tool) {
         return JSON.stringify({ ok: false, error: `Unknown tool: ${payload.tool}` });
       }
-      const result = await tool.handler((payload.args as Record<string, any>) || {});
-      await db.updateSuggestion(args.id, { status: "actioned" });
+      let result: string;
+      try {
+        result = await tool.handler((payload.args as Record<string, any>) || {});
+      } catch (e: any) {
+        return JSON.stringify({ ok: false, error: `Action failed: ${e?.message}`, tool: payload.tool });
+      }
       let parsed: any = result;
       try {
         parsed = JSON.parse(result);
       } catch {
         // keep raw string result
       }
+      if (parsed && typeof parsed === "object" && parsed.error) {
+        return JSON.stringify({ ok: false, error: parsed.error, tool: payload.tool, result: parsed });
+      }
+      await db.updateSuggestion(args.id, { status: "actioned" });
       return JSON.stringify({ ok: true, tool: payload.tool, args: payload.args || {}, result: parsed });
     },
   },

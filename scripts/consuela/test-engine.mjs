@@ -250,15 +250,40 @@ async function main() {
       member: "family",
     }, adminToken);
     if (e3?.id) cleanup.events.push(e3.id);
+
+    // 12-hour AM/PM regression: 12:45 PM and 1:15 PM are a real 30-min window
+    const e4 = await pbCreate("events", {
+      title: "test-engine-event-noon-a",
+      date: scopeDate,
+      time: "12:45 PM",
+      icon: "⏰",
+      color: "mint",
+      member: "kid",
+    }, adminToken);
+    if (e4?.id) cleanup.events.push(e4.id);
+
+    const e5 = await pbCreate("events", {
+      title: "test-engine-event-noon-b",
+      date: scopeDate,
+      time: "1:15 PM",
+      icon: "⏰",
+      color: "violet",
+      member: "kid",
+    }, adminToken);
+    if (e5?.id) cleanup.events.push(e5.id);
   });
 
-  await step("scanCalendarConflicts detects 1 overlap", async () => {
+  await step("scanCalendarConflicts detects 2 overlaps (incl. 12:45 PM vs 1:15 PM)", async () => {
     const { scanCalendarConflicts } = await import("../../src/lib/consuela/engine.ts");
     const results = await scanCalendarConflicts(scopeDate);
-    assert.equal(results.length, 1, `expected 1 conflict, got ${results.length}`);
-    assert.ok(results[0].title.includes("soccer"));
-    assert.ok(results[0].title.includes("piano"));
-    console.log(`  ${results[0].title}`);
+    assert.equal(results.length, 2, `expected 2 conflicts, got ${results.length}`);
+    assert.ok(results.some((r) => r.title.includes("soccer")));
+    assert.ok(results.some((r) => r.title.includes("piano")));
+    assert.ok(
+      results.some((r) => r.title.includes("noon-a") && r.title.includes("noon-b")),
+      `12-hour boundary overlap missing from: ${results.map((r) => r.title).join(" | ")}`
+    );
+    console.log(`  ${results.map((r) => r.title).join("\n  ")}`);
   });
 
   // ================================================================

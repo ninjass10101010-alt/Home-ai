@@ -37,6 +37,7 @@ services:
       - HERMES_API_KEY=consuela-api-key-2026
       - OPENROUTER_API_KEY=
       - TELEGRAM_BOT_TOKEN=
+      - TELEGRAM_MIRROR_BOT_TOKEN=${TELEGRAM_MIRROR_BOT_TOKEN}
     networks:
       - dashboard-net
 

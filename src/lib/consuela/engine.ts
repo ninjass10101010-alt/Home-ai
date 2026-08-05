@@ -58,8 +58,17 @@ export async function scanTaskPenaltyStreak(scopeDate: string): Promise<NewSugge
 }
 
 function parseMinutes(time: string): number {
-  const match = time.match(/^(\d{1,2}):(\d{2})/);
-  if (match) return parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
+  const match = time.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (match) {
+    let hours = parseInt(match[1], 10);
+    const minutes = parseInt(match[2], 10);
+    const ampm = match[3].toUpperCase();
+    if (ampm === "PM" && hours !== 12) hours += 12;
+    if (ampm === "AM" && hours === 12) hours = 0;
+    return hours * 60 + minutes;
+  }
+  const time24Match = time.match(/^(\d{1,2}):(\d{2})$/);
+  if (time24Match) return parseInt(time24Match[1], 10) * 60 + parseInt(time24Match[2], 10);
   const d = new Date(time);
   if (!isNaN(d.getTime())) return d.getHours() * 60 + d.getMinutes();
   return NaN;

@@ -85,6 +85,12 @@ let fetchCalls = [];
 
 function mockFetch(handler) {
   global.fetch = async (url, init) => {
+    // Only Hermes chat-completion calls are under test; the route also persists
+    // each chat pair to PocketBase (chat_messages) via internal fetches, which
+    // would skew the call counts.
+    if (!String(url).includes("/v1/chat/completions")) {
+      return handler(fetchCalls.length, url, init);
+    }
     fetchCalls.push({ url: String(url), init });
     return handler(fetchCalls.length, url, init);
   };

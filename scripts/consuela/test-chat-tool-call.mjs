@@ -191,11 +191,24 @@ async function main() {
     assert.equal(points[memberKey], expectedPoints, "points should grow by 5");
   });
 
+  await step("complete_task marks the tasks row done + completedInWeek (F3)", async () => {
+    assert.ok(createdTaskId, "need taskId from add_task step");
+    const rows = await listAll(token, "tasks", `taskId=${createdTaskId}`);
+    assert.equal(rows.length, 1, `expected 1 task row, got ${rows.length}`);
+    assert.equal(rows[0].status, "done", `task status should be "done", got ${rows[0].status}`);
+    assert.equal(rows[0].completedInWeek, weekStart, "completedInWeek should equal the current week");
+    assert.ok(rows[0].completedAt, "completedAt should be set");
+  });
+
   await step("complete_task rejects double-completion", async () => {
     const tool = getTool("complete_task");
     const res = parseResult(await tool.handler({ taskId: createdTaskId }));
     assert.equal(res.ok, false, "second completion should fail");
     assert.match(String(res.error), /already completed/i);
+    const weekRows = await listAll(token, "week_data", `weekStart="${weekStart}"`);
+    const history = jsonValue(weekRows[0].history, []);
+    const earnTxs = history.filter((h) => h.taskId === createdTaskId && h.type === "earn");
+    assert.equal(earnTxs.length, 1, "double-complete must not add a second earn tx");
   });
 
   // ---- 4. add_event ----
@@ -305,6 +318,32 @@ async function main() {
     assert.match(String(res.error), /unknown/i);
     const sug = await pbJson(`/api/collections/proactive_suggestions/records/${created.id}`, token);
     assert.equal(sug.status, "pending", "suggestion should stay pending");
+  });
+
+  await step("action_suggestion does NOT mark actioned when the tool errors (M6)", async () => {
+    const tool = getTool("action_suggestion");
+    const created = await pbJson(
+      `/api/collections/proactive_suggestions/records`,
+      token,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          idempotencyHash: `hermes-test-${STAMP}-toolerror`,
+          kind: "custom",
+          severity: "info",
+          title: "hermes-test-suggestion-toolerror",
+          body: "test",
+          actionPayload: { tool: "add_grocery_item", args: { items: "   " } },
+          status: "pending",
+          scopeDate: todayISO(),
+        }),
+      }
+    );
+    const res = parseResult(await tool.handler({ id: created.id }));
+    assert.equal(res.ok, false, "empty-item add should return ok:false");
+    assert.ok(res.error, "error message should be present");
+    const sug = await pbJson(`/api/collections/proactive_suggestions/records/${created.id}`, token);
+    assert.equal(sug.status, "pending", "suggestion must stay pending on tool error");
   });
 
   // ---- summary ----

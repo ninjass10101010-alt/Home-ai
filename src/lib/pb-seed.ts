@@ -134,6 +134,9 @@ const COLLECTIONS = [
       { name: "priority", type: "text" },
       { name: "universal", type: "bool" },
       { name: "createdAt", type: "text" },
+      { name: "status", type: "select", options: { values: ["pending", "done"] } },
+      { name: "completedInWeek", type: "text" },
+      { name: "completedAt", type: "text" },
     ],
   },
   {

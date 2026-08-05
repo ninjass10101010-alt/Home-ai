@@ -4,7 +4,7 @@ import { db } from "@/db";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-  const scopeDate = request.nextUrl.searchParams.get("scopeDate") || undefined;
+  const scopeDate = request.nextUrl.searchParams.get("scopeDate") || new Date().toISOString().split("T")[0];
   const briefing = await db.selectMorningBriefing(scopeDate);
   return NextResponse.json({ ok: true, briefing });
 }

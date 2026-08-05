@@ -10,8 +10,9 @@ import SoftButton from "@/components/ui/SoftButton";
 import IconButton from "@/components/ui/IconButton";
 import Chip from "@/components/ui/Chip";
 import EmptyState from "@/components/ui/EmptyState";
-import { useSuggestions } from "@/components/suggestions/hooks/useSuggestions";
+import { useSuggestions, actSuggestion } from "@/components/suggestions/hooks/useSuggestions";
 import { suggestionActionRoute } from "@/components/suggestions/HomeSuggestionsWidget";
+import Toast from "@/components/ui/Toast";
 import type { ProactiveSuggestion, SuggestionKind } from "@/lib/consuela/types";
 
 type FilterKind = "all" | SuggestionKind;
@@ -36,12 +37,24 @@ function SuggestionCard({
   suggestion,
   onSnooze,
   onDismiss,
+  onAct,
 }: {
   suggestion: ProactiveSuggestion;
   onSnooze: (id: string) => void;
   onDismiss: (id: string) => void;
+  onAct: (suggestion: ProactiveSuggestion) => Promise<void>;
 }) {
   const route = suggestionActionRoute(suggestion);
+  const [acting, setActing] = useState(false);
+
+  const handleAct = async () => {
+    setActing(true);
+    try {
+      await onAct(suggestion);
+    } finally {
+      setActing(false);
+    }
+  };
 
   return (
     <Surface variant="glass-subtle" radius="xl" padding="sm">
@@ -62,7 +75,9 @@ function SuggestionCard({
                   <SoftButton size="sm" variant="secondary">{suggestion.actionLabel}</SoftButton>
                 </Link>
               ) : (
-                <SoftButton size="sm" variant="secondary">{suggestion.actionLabel}</SoftButton>
+                <SoftButton size="sm" variant="secondary" loading={acting} onClick={handleAct}>
+                  {suggestion.actionLabel}
+                </SoftButton>
               ))}
             <SoftButton size="sm" variant="ghost" onClick={() => onSnooze(suggestion.id)} title="Snooze until tomorrow">
               Snooze
@@ -80,11 +95,24 @@ function SuggestionCard({
 export default function SuggestionsPage() {
   const [mounted, setMounted] = useState(false);
   const [filter, setFilter] = useState<FilterKind>("all");
+  const [toast, setToast] = useState<{ msg: string; tone: "success" | "error" } | null>(null);
   const { items, loading, refresh, dismiss, snooze } = useSuggestions(100);
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  const showToast = (msg: string, tone: "success" | "error") => {
+    setToast({ msg, tone });
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  const handleAct = async (suggestion: ProactiveSuggestion) => {
+    const res = await actSuggestion(suggestion.id);
+    if (res.ok) showToast(`✅ ${res.message}`, "success");
+    else showToast(`⚠️ ${res.message}`, "error");
+    refresh();
+  };
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: items.length };
@@ -157,10 +185,12 @@ export default function SuggestionsPage() {
                 suggestion={suggestion}
                 onSnooze={snooze}
                 onDismiss={dismiss}
+                onAct={handleAct}
               />
             ))}
           </div>
         )}
+        {toast && <Toast open tone={toast.tone}>{toast.msg}</Toast>}
       </div>
     </PageShell>
   );

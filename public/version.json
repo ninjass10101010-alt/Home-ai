@@ -1,7 +1,7 @@
 {
-  "hash": "0f5bb1eae2fb7192afc549fcfcd13b14d36a0fbc",
-  "short": "0f5bb1e",
-  "message": "feat(kitchen): full kitchen overhaul — weekOf meal planning, recipe-as-reference, pantry-aware suggestions, PB seed hardening",
-  "date": "2026-08-04 13:57:23 -0400",
+  "hash": "90208c2ac6da4bd7ae04c45a18789f7f3737375e",
+  "short": "90208c2",
+  "message": "fix(consuela): final review — snooze, conflict parser, complete_task, act buttons, minor sweep",
+  "date": "2026-08-05 00:36:45 -0400",
   "author": "GarciaFam"
 }

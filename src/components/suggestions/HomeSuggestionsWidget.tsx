@@ -8,11 +8,11 @@ import Surface from "@/components/ui/Surface";
 import SoftButton from "@/components/ui/SoftButton";
 import IconButton from "@/components/ui/IconButton";
 import EmptyState from "@/components/ui/EmptyState";
-import { useSuggestions } from "./hooks/useSuggestions";
+import Toast from "@/components/ui/Toast";
+import { useSuggestions, actSuggestion } from "./hooks/useSuggestions";
 import type { ProactiveSuggestion } from "@/lib/consuela/types";
 
 const TOOL_ROUTES: Record<string, string> = {
-  add_grocery_item: "/grocery",
   get_pending_tasks: "/tasks",
   get_weekly_meals: "/meals",
   open_calendar: "/calendar",
@@ -26,11 +26,23 @@ export function suggestionActionRoute(suggestion: ProactiveSuggestion): string |
 function SuggestionRow({
   suggestion,
   onDismiss,
+  onAct,
 }: {
   suggestion: ProactiveSuggestion;
   onDismiss: (id: string) => void;
+  onAct: (suggestion: ProactiveSuggestion) => Promise<void>;
 }) {
   const route = suggestionActionRoute(suggestion);
+  const [acting, setActing] = useState(false);
+
+  const handleAct = async () => {
+    setActing(true);
+    try {
+      await onAct(suggestion);
+    } finally {
+      setActing(false);
+    }
+  };
 
   return (
     <Surface variant="glass-subtle" radius="xl" padding="sm">
@@ -49,7 +61,9 @@ function SuggestionRow({
                 <SoftButton size="sm" variant="secondary">{suggestion.actionLabel}</SoftButton>
               </Link>
             ) : (
-              <SoftButton size="sm" variant="secondary">{suggestion.actionLabel}</SoftButton>
+              <SoftButton size="sm" variant="secondary" loading={acting} onClick={handleAct}>
+                {suggestion.actionLabel}
+              </SoftButton>
             ))}
           <IconButton size="sm" variant="ghost" aria-label="Dismiss suggestion" onClick={() => onDismiss(suggestion.id)}>
             <span>×</span>
@@ -62,11 +76,24 @@ function SuggestionRow({
 
 export default function HomeSuggestionsWidget() {
   const [mounted, setMounted] = useState(false);
-  const { items, loading, dismiss } = useSuggestions(20);
+  const [toast, setToast] = useState<{ msg: string; tone: "success" | "error" } | null>(null);
+  const { items, loading, refresh, dismiss } = useSuggestions(20);
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  const showToast = (msg: string, tone: "success" | "error") => {
+    setToast({ msg, tone });
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  const handleAct = async (suggestion: ProactiveSuggestion) => {
+    const res = await actSuggestion(suggestion.id);
+    if (res.ok) showToast(`✅ ${res.message}`, "success");
+    else showToast(`⚠️ ${res.message}`, "error");
+    refresh();
+  };
 
   if (!mounted) {
     return (
@@ -92,6 +119,7 @@ export default function HomeSuggestionsWidget() {
           description="Consuela is watching the pantry, tasks, and calendar — she'll surface something here when it needs attention."
           icon="🧘"
         />
+        {toast && <Toast open tone={toast.tone}>{toast.msg}</Toast>}
       </SectionCard>
     );
   }
@@ -112,10 +140,11 @@ export default function HomeSuggestionsWidget() {
       ) : (
         <div className="space-y-2">
           {items.slice(0, 5).map((suggestion) => (
-            <SuggestionRow key={suggestion.id} suggestion={suggestion} onDismiss={dismiss} />
+            <SuggestionRow key={suggestion.id} suggestion={suggestion} onDismiss={dismiss} onAct={handleAct} />
           ))}
         </div>
       )}
+      {toast && <Toast open tone={toast.tone}>{toast.msg}</Toast>}
     </SectionCard>
   );
 }
