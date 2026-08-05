@@ -379,6 +379,10 @@ function MealHubContent() {
             syncPantryToGrocery={syncPantryToGrocery}
             parseManualGroceryInput={parseManualGroceryInput}
             guessCategory={guessGroceryCategoryHook}
+            showToast={showToast}
+            pantryItems={pantryItems}
+            addPantryItem={addPantryItem}
+            removePantryItem={removePantryItem}
           />
         )}
 
