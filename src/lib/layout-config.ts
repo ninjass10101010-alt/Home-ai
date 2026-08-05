@@ -5,6 +5,7 @@
 export type WidgetId =
   | "weather"
   | "aiQuickAsk"
+  | "consuelaSuggestions"
   | "leaderboard"
   | "todayEvents"
   | "schedule"
@@ -21,6 +22,7 @@ export interface WidgetDef {
 export const ALL_WIDGETS: WidgetDef[] = [
   { id: "weather",     label: "Weather",       emoji: "⛅", description: "Current weather & atmospheric conditions" },
   { id: "aiQuickAsk",  label: "AI Quick Ask",  emoji: "💬", description: "Quick chat prompt to ask Consuela anything" },
+  { id: "consuelaSuggestions", label: "Consuela's Suggestions", emoji: "✨", description: "Proactive alerts Consuela noticed for you" },
   { id: "leaderboard", label: "Leaderboard",    emoji: "🏆", description: "This week's family points race" },
   { id: "todayEvents", label: "Today's Events", emoji: "📅", description: "Upcoming events for the day" },
   { id: "schedule",    label: "Daily Schedule", emoji: "🕐", description: "Routines and reminders" },
@@ -34,7 +36,7 @@ export interface HomeLayoutConfig {
 }
 
 export const DEFAULT_LAYOUT: HomeLayoutConfig = {
-  widgets: ["weather", "aiQuickAsk", "leaderboard", "todayEvents", "schedule", "currentMeal", "tasks"],
+  widgets: ["weather", "aiQuickAsk", "consuelaSuggestions", "leaderboard", "todayEvents", "schedule", "currentMeal", "tasks"],
 };
 
 export const LAYOUT_STORAGE_KEY = "consuela-home-layout";

@@ -32,6 +32,7 @@ import StatTile from "@/components/patterns/StatTile";
 import DayStrip from "@/components/patterns/DayStrip";
 import SectionCard from "@/components/patterns/SectionCard";
 import HomeLeaderboardWidget from "@/components/leaderboard/HomeLeaderboardWidget";
+import HomeSuggestionsWidget from "@/components/suggestions/HomeSuggestionsWidget";
 import ProfileSheet from "@/components/profile/ProfileSheet";
 
 const FogBackground = dynamic(() => import("@/components/ui/FogBackground"), { ssr: false });
@@ -297,6 +298,9 @@ export default function HomePage() {
 
                 case "leaderboard":
                   return <div key="leaderboard" className="mt-3"><HomeLeaderboardWidget /></div>;
+
+                case "consuelaSuggestions":
+                  return <div key="consuelaSuggestions" className="mt-3"><HomeSuggestionsWidget /></div>;
 
                 case "todayEvents":
                   return (
