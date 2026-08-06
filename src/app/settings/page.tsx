@@ -5,7 +5,7 @@ import { useState, useEffect } from "react";
 import { useTheme } from "@/hooks/useTheme";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
 import { useAuth } from "@/hooks/useAuth";
-import { type WidgetId } from "@/lib/layout-config";
+import { type WidgetId, type Orientation, ALL_WIDGETS } from "@/lib/layout-config";
 import { db } from "@/db";
 import PageShell from "@/components/ui/PageShell";
 import PageHeader from "@/components/patterns/PageHeader";
@@ -212,7 +212,7 @@ function VersionCard() {
 
 export default function SettingsPage() {
   const { theme, setMode, setAccentColor, setContrastBoost, setAccentHex } = useTheme();
-  const { widgets, visibleWidgets, hiddenWidgets, toggle, moveUp, moveDown, reorder, setSuppressRehydrate } = useHomeLayout();
+  const { orientation, widgetsFor, visibleWidgetsFor, hiddenWidgetsFor, moveUpFor, moveDownFor, reorderFor, toggleFor, resetLayout, setSuppressRehydrate } = useHomeLayout();
   const fog = useFogConfig();
   const { currentUser, isLoggedIn, logout } = useAuth();
   const [toast, setToast] = useState<string | null>(null);
@@ -229,6 +229,7 @@ export default function SettingsPage() {
   const [contacts, setContacts] = useState<any[]>([]);
   const [draggingId, setDraggingId] = useState<WidgetId | null>(null);
   const [dropTargetId, setDropTargetId] = useState<WidgetId | null>(null);
+  const [editingOrientation, setEditingOrientation] = useState<Orientation>(orientation);
 
   useEffect(() => {
     setMounted(true);
@@ -247,29 +248,29 @@ export default function SettingsPage() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  const widgetLabel = (id: WidgetId) =>
-    visibleWidgets.find((w) => w.id === id)?.label ||
-    hiddenWidgets.find((w) => w.id === id)?.label ||
-    id;
+  const widgetLabel = (id: WidgetId) => ALL_WIDGETS.find((w) => w.id === id)?.label ?? id;
+
+  const editingVisible = visibleWidgetsFor(editingOrientation);
+  const editingHidden = hiddenWidgetsFor(editingOrientation);
 
   const handleMoveUp = (id: WidgetId) => {
-    moveUp(id);
-    showToast(`↕️ Moved ${widgetLabel(id)} up`);
+    moveUpFor(editingOrientation, id);
+    showToast(`↕️ Moved ${widgetLabel(id)} up (${editingOrientation})`);
   };
 
   const handleMoveDown = (id: WidgetId) => {
-    moveDown(id);
-    showToast(`↕️ Moved ${widgetLabel(id)} down`);
+    moveDownFor(editingOrientation, id);
+    showToast(`↕️ Moved ${widgetLabel(id)} down (${editingOrientation})`);
   };
 
   const handleReorder = (id: WidgetId, targetIndex: number) => {
-    reorder(id, targetIndex);
-    showToast(`↕️ Reordered ${widgetLabel(id)}`);
+    reorderFor(editingOrientation, id, targetIndex);
+    showToast(`↕️ Reordered ${widgetLabel(id)} (${editingOrientation})`);
   };
 
   const handleToggle = (id: WidgetId, nextVisible: boolean) => {
-    toggle(id);
-    showToast(nextVisible ? `✅ Showing ${widgetLabel(id)}` : `🚫 Hiding ${widgetLabel(id)}`);
+    toggleFor(editingOrientation, id);
+    showToast(nextVisible ? `✅ Showing ${widgetLabel(id)} (${editingOrientation})` : `🚫 Hiding ${widgetLabel(id)} (${editingOrientation})`);
   };
 
   const handleDragStart = (id: WidgetId) => (event: React.DragEvent) => {
@@ -295,7 +296,7 @@ export default function SettingsPage() {
     setDraggingId(null);
     setDropTargetId(null);
     if (!sourceId || sourceId === targetId) return;
-    const targetIndex = visibleWidgets.findIndex((w) => w.id === targetId);
+    const targetIndex = visibleWidgetsFor(editingOrientation).findIndex((w) => w.id === targetId);
     if (targetIndex === -1) return;
     handleReorder(sourceId, targetIndex);
   };
@@ -378,9 +379,9 @@ export default function SettingsPage() {
     setContacts(db.selectEmergencyContacts());
   };
 
-  const resetLayout = () => {
-    localStorage.removeItem("consuela-home-layout");
-    window.location.reload();
+  const handleResetLayout = () => {
+    resetLayout();
+    showToast("🔄 Layout reset for portrait and landscape");
   };
 
   const inviteMember = async () => {
@@ -413,7 +414,10 @@ export default function SettingsPage() {
     const data = {
       members,
       contacts,
-      widgets,
+      layout: {
+        portrait: widgetsFor("portrait"),
+        landscape: widgetsFor("landscape"),
+      },
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -665,11 +669,25 @@ export default function SettingsPage() {
 
           <SectionCard title="Layout & display" description="Show, hide, and reorder Home widgets." icon="🧩">
             <div className="space-y-3">
+              <SegmentedControl
+                options={[
+                  { id: "portrait", label: "📱 Portrait" },
+                  { id: "landscape", label: "🖥️ Landscape" },
+                ]}
+                value={editingOrientation}
+                onChange={(value) => setEditingOrientation(value as Orientation)}
+                aria-label="Layout orientation"
+              />
+              <p className="text-[11px] text-text-muted">
+                Each orientation keeps its own order. {editingOrientation === orientation
+                  ? "You're editing the layout your device is using right now."
+                  : `Your device is in ${orientation} — the ${orientation} layout applies automatically.`}
+              </p>
               <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.18em] text-text-muted">
                 <span>Visible</span>
-                <span>{visibleWidgets.length} on Home</span>
+                <span>{editingVisible.length} on Home</span>
               </div>
-              {visibleWidgets.length === 0 && (
+              {editingVisible.length === 0 && (
                 <EmptyState
                   title="No visible widgets"
                   description="Turn on a widget from the Hidden group below to start building your Home."
@@ -677,7 +695,7 @@ export default function SettingsPage() {
                 />
               )}
               <div className="space-y-3">
-                {visibleWidgets.map((widget, index) => {
+                {editingVisible.map((widget, index) => {
                   const isDropTarget = dropTargetId === widget.id && draggingId !== widget.id;
                   return (
                     <div
@@ -713,7 +731,7 @@ export default function SettingsPage() {
                               aria-label={`Hide ${widget.label}`}
                             />
                             <IconButton size="sm" variant="ghost" aria-label={`Move ${widget.label} up`} disabled={index === 0} onClick={() => handleMoveUp(widget.id)}>↑</IconButton>
-                            <IconButton size="sm" variant="ghost" aria-label={`Move ${widget.label} down`} disabled={index === visibleWidgets.length - 1} onClick={() => handleMoveDown(widget.id)}>↓</IconButton>
+                            <IconButton size="sm" variant="ghost" aria-label={`Move ${widget.label} down`} disabled={index === editingVisible.length - 1} onClick={() => handleMoveDown(widget.id)}>↓</IconButton>
                           </div>
                         }
                       />
@@ -722,15 +740,15 @@ export default function SettingsPage() {
                 })}
               </div>
 
-              {hiddenWidgets.length > 0 && (
+              {editingHidden.length > 0 && (
                 <>
                   <div className="mt-6 flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-text-muted">
                     <span className="h-px flex-1 bg-white/10" />
-                    <span>Hidden · {hiddenWidgets.length}</span>
+                    <span>Hidden · {editingHidden.length}</span>
                     <span className="h-px flex-1 bg-white/10" />
                   </div>
                   <div className="space-y-3">
-                    {hiddenWidgets.map((widget) => (
+                    {editingHidden.map((widget) => (
                       <ListRow
                         key={widget.id}
                         title={widget.label}
@@ -762,7 +780,7 @@ export default function SettingsPage() {
               )}
             </div>
             <div className="mt-4 flex gap-2">
-              <SoftButton variant="secondary" onClick={resetLayout} className="flex-1">Reset layout</SoftButton>
+              <SoftButton variant="secondary" onClick={handleResetLayout} className="flex-1">Reset layout</SoftButton>
               <SoftButton variant="ghost" onClick={() => setHelpModalOpen(true)} className="flex-1">Help</SoftButton>
             </div>
           </SectionCard>
@@ -912,7 +930,8 @@ export default function SettingsPage() {
           <div className="space-y-4 text-sm text-text-secondary">
             <p><strong className="text-text-primary">Show / Hide</strong> — Toggle each widget on or off. Hidden widgets move to the <em>Hidden</em> group at the bottom of this list and stop appearing on the Home dashboard.</p>
             <p><strong className="text-text-primary">Reorder</strong> — Drag the ⋮⋮ handle onto another visible row, or use the ↑ and ↓ buttons. The first row appears first on the Home dashboard.</p>
-            <p><strong className="text-text-primary">Reset layout</strong> — Restores all widgets to their default order and visibility.</p>
+            <p><strong className="text-text-primary">Portrait vs Landscape</strong> — Each orientation keeps its own widget order and visibility. Switch the toggle at the top of this card to edit the other one; Consuela applies the right layout automatically when your device rotates or resizes.</p>
+            <p><strong className="text-text-primary">Reset layout</strong> — Restores both orientations to their default order and visibility.</p>
           </div>
         </Modal>
       </SettingsErrorBoundary>

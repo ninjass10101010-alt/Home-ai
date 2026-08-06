@@ -16,11 +16,10 @@ import CurrentMealWidget from "@/components/meals/CurrentMealWidget";
 import { AtmosphericProvider } from "@/hooks/useAtmosphericTheme";
 import AtmosphericBridge from "@/components/ui/AtmosphericBridge";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
-import type { WidgetId } from "@/lib/layout-config";
+import { WIDGET_SPANS, type WidgetId } from "@/lib/layout-config";
 import { useAuth, type AuthUser } from "@/hooks/useAuth";
 import PinModal from "@/components/auth/PinModal";
 import MemberPickerModal from "@/components/auth/MemberPickerModal";
-import Surface from "@/components/ui/Surface";
 import SoftButton from "@/components/ui/SoftButton";
 import IconButton from "@/components/ui/IconButton";
 import Chip from "@/components/ui/Chip";
@@ -32,9 +31,11 @@ import Toast from "@/components/ui/Toast";
 import StatTile from "@/components/patterns/StatTile";
 import DayStrip from "@/components/patterns/DayStrip";
 import SectionCard from "@/components/patterns/SectionCard";
+import WidgetCard from "@/components/patterns/WidgetCard";
 import HomeLeaderboardWidget from "@/components/leaderboard/HomeLeaderboardWidget";
 import HomeSuggestionsWidget from "@/components/suggestions/HomeSuggestionsWidget";
 import MorningBriefingWidget from "@/components/briefing/MorningBriefingWidget";
+import { useMorningBriefing, briefingSectionsEmpty } from "@/components/briefing/hooks/useMorningBriefing";
 import ProfileSheet from "@/components/profile/ProfileSheet";
 
 const FogBackground = dynamic(() => import("@/components/ui/FogBackground"), { ssr: false });
@@ -57,6 +58,22 @@ function memberMatchesName(member: any, name: string) {
 }
 
 const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/**
+ * Morning briefing grid slot. Owns the briefing hook so the widget and the
+ * empty-cell decision share one fetch; when there is nothing to show for the
+ * day the slot returns null so the bento grid doesn't keep a hollow
+ * `lg:col-span-1` cell that pushes every row down.
+ */
+function MorningBriefingSlot({ span }: { span: string }) {
+  const { briefing, loading, ack, ackError } = useMorningBriefing();
+  if (loading || !briefing || briefingSectionsEmpty(briefing)) return null;
+  return (
+    <div className={`mt-3 lg:mt-0 ${span}`}>
+      <MorningBriefingWidget briefing={briefing} loading={loading} ack={ack} ackError={ackError} />
+    </div>
+  );
+}
 
 export default function HomePage() {
   const [mounted, setMounted] = useState(false);
@@ -289,94 +306,109 @@ export default function HomePage() {
               <StatTile label="Week" value="7" detail="Days planned" icon="🍽️" tone="accent" />
             </div>
 
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 auto-rows-min">
+
             {widgets.map((id) => {
+              const span = WIDGET_SPANS[id as WidgetId] ?? "lg:col-span-1";
               switch (id as WidgetId) {
                 case "morningBriefing":
-                  return <div key="morningBriefing" className="mt-3"><MorningBriefingWidget /></div>;
+                  return <MorningBriefingSlot key="morningBriefing" span={span} />;
 
                 case "weather":
                   return (
-                    <div key="weather" className="relative z-10">
+                    <div key="weather" className={`relative z-10 ${span}`}>
                       <WeatherWidget />
                       <AtmosphericBridge />
                     </div>
                   );
 
                 case "leaderboard":
-                  return <div key="leaderboard" className="mt-3"><HomeLeaderboardWidget /></div>;
+                  return <div key="leaderboard" className={`mt-3 lg:mt-0 ${span}`}><HomeLeaderboardWidget /></div>;
 
                 case "consuelaSuggestions":
-                  return <div key="consuelaSuggestions" className="mt-3"><HomeSuggestionsWidget /></div>;
+                  return <div key="consuelaSuggestions" className={`mt-3 lg:mt-0 ${span}`}><HomeSuggestionsWidget /></div>;
 
                 case "todayEvents":
                   return (
-                    <SectionCard key="todayEvents" title="Today" description={`${todayEvents.length} events on the family calendar`} icon="📅" className="mt-4">
-                      {todayEvents.length === 0 ? (
-                        <EmptyState title="Quiet day" description="No events are scheduled for today." icon="🌿" />
-                      ) : (
-                        <div className="space-y-2">
-                          {todayEvents.map((event) => (
-                            <ListRow
-                              key={event.id}
-                              title={event.title}
-                              subtitle={event.time}
-                              leftRailColor={event.color === "green" ? "var(--color-accent-mint)" : event.color === "violet" ? "var(--color-accent-violet)" : event.color === "amber" ? "var(--color-accent-amber)" : event.color === "cyan" ? "var(--color-accent-cyan)" : event.color === "rose" ? "var(--color-accent-rose)" : event.color === "blue" ? "var(--color-accent-nori)" : "var(--color-accent-nori)"}
-                              leading={<span className="text-xl">{event.icon}</span>}
-                              trailing={<Chip size="sm" tone="accent">{event.member.split(" ")[0]}</Chip>}
-                            />
-                          ))}
-                        </div>
-                      )}
-                    </SectionCard>
+                    <div key="todayEvents" className={span}>
+                      <SectionCard title="Today" description={`${todayEvents.length} events on the family calendar`} icon="📅" tone="#3b82f6" className="mt-4 lg:mt-0">
+                        {todayEvents.length === 0 ? (
+                          <EmptyState title="Quiet day" description="No events are scheduled for today." icon="🌿" />
+                        ) : (
+                          <div className="space-y-2">
+                            {todayEvents.map((event) => (
+                              <ListRow
+                                key={event.id}
+                                title={event.title}
+                                subtitle={event.time}
+                                leftRailColor={event.color === "green" ? "var(--color-accent-mint)" : event.color === "violet" ? "var(--color-accent-violet)" : event.color === "amber" ? "var(--color-accent-amber)" : event.color === "cyan" ? "var(--color-accent-cyan)" : event.color === "rose" ? "var(--color-accent-rose)" : event.color === "blue" ? "var(--color-accent-nori)" : "var(--color-accent-nori)"}
+                                leading={<span className="text-xl">{event.icon}</span>}
+                                trailing={<Chip size="sm" tone="accent">{event.member.split(" ")[0]}</Chip>}
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </SectionCard>
+                    </div>
                   );
 
                 case "schedule":
-                  return <ScheduleDisplay key="schedule" schedule={homeScheduleItems} title="Daily Schedule" />;
+                  return (
+                    <div key="schedule" className={span}>
+                      <ScheduleDisplay schedule={homeScheduleItems} title="Daily Schedule" />
+                    </div>
+                  );
 
                 case "currentMeal":
                   return (
-                    <AtmosphericProvider key="currentMeal">
-                      <CurrentMealWidget />
-                    </AtmosphericProvider>
+                    <div key="currentMeal" className={span}>
+                      <AtmosphericProvider>
+                        <CurrentMealWidget />
+                      </AtmosphericProvider>
+                    </div>
                   );
 
                 case "tasks":
                   return (
-                    <SectionCard key="tasks" title="Tasks" description={`${pendingTasks.length} pending for the family`} icon="✅">
-                      {pendingTasks.length === 0 ? (
-                        <EmptyState title="All caught up" description="No pending tasks right now." icon="🎉" />
-                      ) : (
-                        <div className="space-y-2">
-                          {pendingTasks.map((task) => (
-                            <ListRow
-                              key={task.id}
-                              title={task.title}
-                              subtitle={`${task.assigned} · ${task.due}`}
-                              leftRailColor={task.points > 15 ? "var(--color-accent-rose)" : task.points > 10 ? "var(--color-accent-amber)" : "var(--color-accent-mint)"}
-                              trailing={<Chip size="sm" tone={task.points > 15 ? "danger" : task.points > 10 ? "warning" : "success"}>+{task.points}pts</Chip>}
-                            />
-                          ))}
-                        </div>
-                      )}
-                    </SectionCard>
+                    <div key="tasks" className={span}>
+                      <SectionCard title="Tasks" description={`${pendingTasks.length} pending for the family`} icon="✅" tone="#f43f5e">
+                        {pendingTasks.length === 0 ? (
+                          <EmptyState title="All caught up" description="No pending tasks right now." icon="🎉" />
+                        ) : (
+                          <div className="space-y-2">
+                            {pendingTasks.map((task) => (
+                              <ListRow
+                                key={task.id}
+                                title={task.title}
+                                subtitle={`${task.assigned} · ${task.due}`}
+                                leftRailColor={task.points > 15 ? "var(--color-accent-rose)" : task.points > 10 ? "var(--color-accent-amber)" : "var(--color-accent-mint)"}
+                                trailing={<Chip size="sm" tone={task.points > 15 ? "danger" : task.points > 10 ? "warning" : "success"}>+{task.points}pts</Chip>}
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </SectionCard>
+                    </div>
                   );
 
                 case "aiQuickAsk":
                   return (
-                    <Link href="/chat" key="aiQuickAsk">
-                      <Surface variant="warm" radius="2xl" padding="lg" interactive>
-                        <div className="flex items-center gap-4">
-                          <div className="grid h-14 w-14 place-items-center rounded-2xl bg-[var(--color-accent-selected)]/15 text-2xl text-[var(--color-accent-selected)] floating">
-                            <Icon3D variant="chat" size="md" />
+                    <div key="aiQuickAsk" className={span}>
+                      <Link href="/chat">
+                        <WidgetCard
+                          tone="#8b5cf6"
+                          icon={<span className="grid h-14 w-14 place-items-center"><Icon3D variant="chat" size="md" /></span>}
+                        >
+                          <div className="flex items-center gap-4 p-5 pl-14">
+                            <div className="min-w-0 flex-1">
+                              <h3 className="text-base font-bold text-text-primary">Quick ask</h3>
+                              <p className="mt-0.5 text-sm text-text-secondary">“Add soccer practice for Thursday.”</p>
+                            </div>
+                            <span className="widget-accent-text">→</span>
                           </div>
-                          <div className="min-w-0 flex-1">
-                            <h3 className="text-base font-bold text-text-primary">Quick ask</h3>
-                            <p className="mt-0.5 text-sm text-text-secondary">“Add soccer practice for Thursday.”</p>
-                          </div>
-                          <span className="text-[var(--color-accent-selected)]">→</span>
-                        </div>
-                      </Surface>
-                    </Link>
+                        </WidgetCard>
+                      </Link>
+                    </div>
                   );
 
                 default:
@@ -384,9 +416,12 @@ export default function HomePage() {
               }
             })}
 
-            <SectionCard title="This Week" description="Meal and family rhythm at a glance" icon="🗓️">
-              <DayStrip value="today" onChange={(dayId) => router.push(`/meals?day=${dayId}`)} days={weekDays} />
-            </SectionCard>
+            <div className="lg:col-span-3">
+              <SectionCard title="This Week" description="Meal and family rhythm at a glance" icon="🗓️" tone="#10b981">
+                <DayStrip value="today" onChange={(dayId) => router.push(`/meals?day=${dayId}`)} days={weekDays} />
+              </SectionCard>
+            </div>
+          </div>
 
             <div className="flex gap-3">
               <Link href="/meals" className="flex-1">

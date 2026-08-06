@@ -1,6 +1,8 @@
 // ─── Home Page Layout Config ──────────────────────────────────────────────
 // Allows users to show/hide and reorder widgets on the home page.
-// Persisted to localStorage.
+// Persisted to localStorage. Layouts are configured per device orientation:
+// "portrait" (single-column stack, any <1024px portrait viewport) and
+// "landscape" (3-column bento, 1024px+ or portrait-width landscape views).
 
 export type WidgetId =
   | "morningBriefing"
@@ -12,6 +14,9 @@ export type WidgetId =
   | "schedule"
   | "currentMeal"
   | "tasks";
+
+/** Device orientation bucket. "portrait" = portrait aspect AND narrow (<1024px). */
+export type Orientation = "portrait" | "landscape";
 
 export interface WidgetDef {
   id: WidgetId;
@@ -32,51 +37,109 @@ export const ALL_WIDGETS: WidgetDef[] = [
   { id: "tasks",       label: "Tasks",          emoji: "✅", description: "Pending chores and to-dos" },
 ];
 
-export interface HomeLayoutConfig {
-  /** Ordered list of visible widget ids. Only ids in this array are shown. */
+export interface OrientationLayout {
+  /** Ordered list of visible widget ids for one orientation. */
   widgets: WidgetId[];
 }
 
+export interface HomeLayoutConfig {
+  portrait: OrientationLayout;
+  landscape: OrientationLayout;
+}
+
+/**
+ * Smart default bento (landscape). The order is chosen so CSS-grid sparse
+ * auto-flow tiles every row with no holes while keeping similar cards
+ * together: row 1 = briefing + quick ask + leaderboard, row 2 = weather
+ * (3-col hero), row 3 = suggestions (2-col) + current meal, row 4 = the
+ * three list cards — Daily Schedule + Tasks + Today's Events — side by side.
+ * Weather sits after two 1-col widgets so that when the briefing collapses
+ * (no content for the day) the only unavoidable empty cell lands at the very
+ * top row instead of splitting the pairings below.
+ * Portrait keeps the familiar single-column mobile stack.
+ */
 export const DEFAULT_LAYOUT: HomeLayoutConfig = {
-  widgets: ["morningBriefing", "weather", "aiQuickAsk", "consuelaSuggestions", "leaderboard", "todayEvents", "schedule", "currentMeal", "tasks"],
+  landscape: {
+    widgets: ["morningBriefing", "aiQuickAsk", "leaderboard", "weather", "consuelaSuggestions", "currentMeal", "schedule", "tasks", "todayEvents"],
+  },
+  portrait: {
+    widgets: ["morningBriefing", "weather", "aiQuickAsk", "consuelaSuggestions", "leaderboard", "todayEvents", "schedule", "currentMeal", "tasks"],
+  },
+};
+
+/** Desktop (lg) bento column spans for each widget. Portrait uses 1 col (grid-cols-1). */
+export const WIDGET_SPANS: Record<WidgetId, string> = {
+  morningBriefing: "lg:col-span-1",
+  weather: "lg:col-span-3",
+  aiQuickAsk: "lg:col-span-1",
+  consuelaSuggestions: "lg:col-span-2",
+  leaderboard: "lg:col-span-1",
+  todayEvents: "lg:col-span-1",
+  schedule: "lg:col-span-1",
+  currentMeal: "lg:col-span-1",
+  tasks: "lg:col-span-1",
 };
 
 export const LAYOUT_STORAGE_KEY = "consuela-home-layout";
 
 const VALID_IDS = new Set<WidgetId>(ALL_WIDGETS.map((w) => w.id));
 
+export function cloneDefaultLayout(): HomeLayoutConfig {
+  return {
+    portrait: { widgets: [...DEFAULT_LAYOUT.portrait.widgets] },
+    landscape: { widgets: [...DEFAULT_LAYOUT.landscape.widgets] },
+  };
+}
+
+/**
+ * Validate + self-heal a single orientation's widget list: drop unknown ids
+ * and append missing defaults (L6 — the consuela widgets are inserted at
+ * their default positions so they don't get buried at the bottom of Home).
+ */
+function sanitizeLayout(list: unknown): OrientationLayout {
+  if (!Array.isArray(list) || list.length === 0) {
+    return { widgets: [...DEFAULT_LAYOUT.landscape.widgets] };
+  }
+  const sanitized = list.filter((id): id is WidgetId => typeof id === "string" && VALID_IDS.has(id as WidgetId));
+  const present = new Set(sanitized);
+  const missing = ALL_WIDGETS.map((w) => w.id).filter((id) => !present.has(id));
+  const widgets = [...sanitized];
+  for (const id of DEFAULT_LAYOUT.landscape.widgets) {
+    if (!missing.includes(id)) continue;
+    if (id === "morningBriefing" || id === "consuelaSuggestions") {
+      const idx = id === "morningBriefing" ? 0 : 1;
+      widgets.splice(Math.min(idx, widgets.length), 0, id);
+    } else {
+      widgets.push(id);
+    }
+  }
+  return { widgets };
+}
+
 export function loadLayoutConfig(): HomeLayoutConfig {
-  if (typeof window === "undefined") return { ...DEFAULT_LAYOUT, widgets: [...DEFAULT_LAYOUT.widgets] };
+  if (typeof window === "undefined") return cloneDefaultLayout();
   try {
     const raw = localStorage.getItem(LAYOUT_STORAGE_KEY);
-    if (!raw) return { ...DEFAULT_LAYOUT, widgets: [...DEFAULT_LAYOUT.widgets] };
+    if (!raw) return cloneDefaultLayout();
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed.widgets) && parsed.widgets.length > 0) {
-      const sanitized = parsed.widgets.filter((id: unknown): id is WidgetId => typeof id === "string" && VALID_IDS.has(id as WidgetId));
-      const present = new Set(sanitized);
-      const missing = DEFAULT_LAYOUT.widgets.filter((id) => !present.has(id));
-      if (missing.length === 0) return { widgets: [...sanitized] };
-      const widgets = [...sanitized];
-      // L6 — self-heal heuristic: the consuela widgets (morningBriefing at the
-      // very top of Home, consuelaSuggestions right below it) are "new" defaults
-      // for legacy saved layouts. Appending them at the end would bury the
-      // briefing card at the bottom of Home, defeating its top-of-Home purpose,
-      // so insert them at their default positions instead. Everything else that
-      // is missing keeps the old append-at-end behaviour.
-      for (const id of DEFAULT_LAYOUT.widgets) {
-        if (!missing.includes(id)) continue;
-        if (id === "morningBriefing" || id === "consuelaSuggestions") {
-          const idx = id === "morningBriefing" ? 0 : 1;
-          widgets.splice(Math.min(idx, widgets.length), 0, id);
-        } else {
-          widgets.push(id);
-        }
-      }
-      return { widgets };
+
+    // Legacy shape: { widgets: WidgetId[] } — one layout for everything.
+    // Migrate it into both orientations so existing users keep their order.
+    if (Array.isArray(parsed?.widgets) && parsed.widgets.length > 0) {
+      const migrated = sanitizeLayout(parsed.widgets);
+      return { portrait: migrated, landscape: { widgets: [...migrated.widgets] } };
     }
-    return { ...DEFAULT_LAYOUT, widgets: [...DEFAULT_LAYOUT.widgets] };
+
+    // Current shape: { portrait: { widgets }, landscape: { widgets } }
+    if (parsed && typeof parsed === "object") {
+      return {
+        portrait: sanitizeLayout(parsed.portrait?.widgets),
+        landscape: sanitizeLayout(parsed.landscape?.widgets),
+      };
+    }
+    return cloneDefaultLayout();
   } catch {
-    return { ...DEFAULT_LAYOUT, widgets: [...DEFAULT_LAYOUT.widgets] };
+    return cloneDefaultLayout();
   }
 }
 

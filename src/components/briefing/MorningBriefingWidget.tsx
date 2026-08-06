@@ -2,28 +2,19 @@
 
 import { useState } from "react";
 import SectionCard from "@/components/patterns/SectionCard";
-import Surface from "@/components/ui/Surface";
+import WidgetCard from "@/components/patterns/WidgetCard";
 import Chip from "@/components/ui/Chip";
 import SoftButton from "@/components/ui/SoftButton";
 import Toast from "@/components/ui/Toast";
-import { useMorningBriefing } from "./hooks/useMorningBriefing";
+import { briefingSectionsEmpty } from "./hooks/useMorningBriefing";
 import type { MorningBriefing } from "./hooks/useMorningBriefing";
+
+const BRIEFING_TONE = "#f97316";
 
 function str(value: unknown, fallback = ""): string {
   if (typeof value === "string" && value) return value;
   if (typeof value === "number") return String(value);
   return fallback;
-}
-
-function allSectionsEmpty(briefing: MorningBriefing): boolean {
-  const s = briefing.summary;
-  if (!s) return true;
-  return (
-    (!Array.isArray(s.events) || s.events.length === 0) &&
-    (!Array.isArray(s.tasks) || s.tasks.length === 0) &&
-    (!Array.isArray(s.meals) || s.meals.length === 0) &&
-    (!Array.isArray(s.suggestions) || s.suggestions.length === 0)
-  );
 }
 
 function totalCount(briefing: MorningBriefing): number {
@@ -62,12 +53,18 @@ function Row({ icon, title, meta }: { icon: string; title: string; meta?: string
   );
 }
 
-export default function MorningBriefingWidget() {
-  const { briefing, loading, ack, ackError } = useMorningBriefing();
+export interface MorningBriefingWidgetProps {
+  briefing: MorningBriefing | null;
+  loading: boolean;
+  ack: (id: string) => Promise<boolean>;
+  ackError: boolean;
+}
+
+export default function MorningBriefingWidget({ briefing, loading, ack, ackError }: MorningBriefingWidgetProps) {
   const [expanded, setExpanded] = useState(false);
   const [acknowledging, setAcknowledging] = useState(false);
 
-  if (loading || !briefing || allSectionsEmpty(briefing)) return null;
+  if (loading || !briefing || briefingSectionsEmpty(briefing)) return null;
 
   const summary = briefing.summary!;
   const count = totalCount(briefing);
@@ -87,16 +84,15 @@ export default function MorningBriefingWidget() {
   if (briefing.acknowledged) {
     return (
       <div className="opacity-60 transition-opacity duration-700">
-        <Surface variant="warm" radius="2xl" padding="none">
-          <div className="flex items-center gap-3 p-5">
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-[var(--color-accent-selected)]/15 text-xl">🌅</span>
+        <WidgetCard tone={BRIEFING_TONE} icon="🌅">
+          <div className="flex items-center gap-3 p-5 pl-14">
             <div className="min-w-0 flex-1">
               <h3 className="text-base font-bold text-text-primary">Morning Briefing</h3>
               <p className="mt-0.5 text-xs text-text-secondary">Seen for today — Consuela will refresh it tomorrow</p>
             </div>
             <Chip size="sm" tone="success">Acknowledged ✓</Chip>
           </div>
-        </Surface>
+        </WidgetCard>
       </div>
     );
   }
@@ -106,13 +102,14 @@ export default function MorningBriefingWidget() {
       title="Morning Briefing"
       description="What Consuela lined up for today"
       icon="🌅"
+      tone={BRIEFING_TONE}
       action={
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
           aria-expanded={expanded}
           aria-label={expanded ? "Collapse morning briefing" : "Expand morning briefing"}
-          className="tap-sm inline-flex items-center gap-1.5 rounded-full border border-[var(--color-accent-selected)]/25 bg-[var(--color-surface-0)]/20 px-3 py-1 text-xs font-semibold text-[var(--color-accent-selected)]"
+          className="tap-sm inline-flex items-center gap-1.5 rounded-full border border-[var(--color-accent-selected)]/25 bg-[var(--color-surface-0)]/20 px-3 py-1 text-xs font-semibold widget-accent-text"
         >
           {count} item{count !== 1 ? "s" : ""} <span className="text-[10px]">{expanded ? "▲" : "▼"}</span>
         </button>

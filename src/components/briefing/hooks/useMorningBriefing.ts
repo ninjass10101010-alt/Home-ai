@@ -22,6 +22,18 @@ export interface MorningBriefing {
   createdAt?: string;
 }
 
+/** True when the briefing has no content at all (no events/tasks/meals/suggestions). */
+export function briefingSectionsEmpty(briefing: MorningBriefing): boolean {
+  const s = briefing.summary;
+  if (!s) return true;
+  return (
+    (!Array.isArray(s.events) || s.events.length === 0) &&
+    (!Array.isArray(s.tasks) || s.tasks.length === 0) &&
+    (!Array.isArray(s.meals) || s.meals.length === 0) &&
+    (!Array.isArray(s.suggestions) || s.suggestions.length === 0)
+  );
+}
+
 export function useMorningBriefing() {
   const [briefing, setBriefing] = useState<MorningBriefing | null>(null);
   const [loading, setLoading] = useState(true);
