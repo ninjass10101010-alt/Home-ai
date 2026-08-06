@@ -112,7 +112,7 @@ export default function HomeLeaderboardWidget() {
 
   if (!mounted) {
     return (
-      <SectionCard title="This Week's Leaderboard" icon="🏆">
+      <SectionCard title="This Week's Leaderboard" icon="🏆" tone="#f59e0b">
         <div className="space-y-2">
           {[1, 2, 3].map((i) => (
             <div key={i} className="h-12 rounded-2xl bg-white/5 animate-pulse" />
@@ -127,7 +127,7 @@ export default function HomeLeaderboardWidget() {
   if (entries.length === 0 || entries.every(e => e.points === 0)) {
     return (
       <Link href="/tasks" className="block active:scale-[0.99] transition-transform">
-        <SectionCard title="This Week's Leaderboard" icon="🏆">
+        <SectionCard title="This Week's Leaderboard" icon="🏆" tone="#f59e0b">
           <EmptyState
             title="Be the first!"
             description="Complete a task to start the race this week."
@@ -150,7 +150,8 @@ export default function HomeLeaderboardWidget() {
         title="This Week's Leaderboard"
         description={`Resets in ${daysUntilReset} day${daysUntilReset !== 1 ? "s" : ""}`}
         icon="🏆"
-        action={<span className="text-sm font-medium text-[var(--color-accent-selected)]">See all →</span>}
+        tone="#f59e0b"
+        action={<span className="text-sm font-medium widget-accent-text">See all →</span>}
       >
         {isLoggedIn && myEntry && (
           <div

@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import Surface from "@/components/ui/Surface";
+import WidgetCard from "@/components/patterns/WidgetCard";
 
 interface StatTileProps {
   label: string;
@@ -11,20 +11,22 @@ interface StatTileProps {
   tone?: "accent" | "success" | "warning" | "danger";
 }
 
-const toneMap = {
-  accent: "bg-[var(--color-accent-selected)]/15 text-[var(--color-accent-selected)]",
-  success: "bg-emerald-400/15 text-emerald-300",
-  warning: "bg-amber-400/15 text-amber-300",
-  danger: "bg-rose-400/15 text-rose-300",
+const toneHex = {
+  accent: "var(--color-accent-selected)",
+  success: "#10b981",
+  warning: "#f59e0b",
+  danger: "#f43f5e",
 };
 
 export default function StatTile({ label, value, detail, icon, tone = "accent" }: StatTileProps) {
   return (
-    <Surface variant="glass-subtle" radius="xl" padding="sm" className="min-w-0 flex-1">
-      <div className={`mb-3 grid h-9 w-9 place-items-center rounded-2xl ${toneMap[tone]}`}>{icon}</div>
+    <WidgetCard tone={toneHex[tone]} className="min-w-0 flex-1 p-4 lg:aspect-square lg:flex lg:flex-col lg:items-center lg:justify-center">
+      <div className="mb-3 grid h-9 w-9 place-items-center rounded-2xl bg-white/10 text-lg" style={{ color: `color-mix(in srgb, var(--widget-tone) 85%, white)` }}>
+        {icon}
+      </div>
       <div className="text-2xl font-bold tracking-tight text-text-primary display-numeral">{value}</div>
       <div className="mt-1 text-xs font-medium text-text-secondary">{label}</div>
       {detail && <div className="mt-1 text-[11px] text-text-muted">{detail}</div>}
-    </Surface>
+    </WidgetCard>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import WidgetCard from "@/components/patterns/WidgetCard";
 import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
 
 const SCHEDULES_STORAGE_KEY = "consuela-schedules";
@@ -105,24 +106,7 @@ export default function CurrentMealWidget() {
   const mealInfo = MEAL_THEMES[currentMealType] ?? MEAL_THEMES.dinner;
 
   return (
-    <div
-      className="relative overflow-hidden rounded-2xl"
-      style={{
-        background: atm.bgGradient,
-        border: `1px solid ${atm.glowColor}`,
-        boxShadow: `0 0 40px ${atm.glowColor}, 0 8px 32px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.06)`,
-        transition: "box-shadow 0.6s ease, border-color 0.6s ease, background 0.6s ease",
-      }}
-    >
-      {/* Seasonal backdrop art trickling in */}
-      <div
-        className="absolute inset-0 pointer-events-none"
-        style={{
-          background: `radial-gradient(ellipse at 80% 120%, ${atm.glowColor} 0%, transparent 60%)`,
-          opacity: atm.atmosphereOpacity,
-        }}
-      />
-
+    <WidgetCard tone="#10b981" icon="🍽️">
       {/* Floating seasonal emoji in corner */}
       <div
         className="absolute top-2 right-2 text-4xl pointer-events-none select-none meal-float-gentle"
@@ -134,7 +118,7 @@ export default function CurrentMealWidget() {
         {atm.particleEmoji}
       </div>
 
-      <div className="relative z-10 p-4">
+      <div className="relative z-10 p-5 pl-14">
         {/* Header row */}
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-text-primary font-bold text-base flex items-center gap-2">
@@ -144,7 +128,7 @@ export default function CurrentMealWidget() {
           <span
             className="text-xs font-bold px-2.5 py-1 rounded-lg meal-time-badge"
             style={{
-              color: atm.accentColor,
+              color: `var(--widget-accent-strong, ${atm.accentColor})`,
               background: `${atm.accentColor}18`,
               border: `1px solid ${atm.accentColor}30`,
               transition: "color 0.4s ease, background 0.4s ease",
@@ -190,7 +174,7 @@ export default function CurrentMealWidget() {
                     key={t}
                     className="px-2 py-0.5 rounded-md text-[10px] font-medium"
                     style={{
-                      color: atm.accentColor,
+                      color: `var(--widget-accent-strong, ${atm.accentColor})`,
                       background: `${atm.accentColor}15`,
                       transition: "color 0.4s ease, background 0.4s ease",
                     }}
@@ -207,6 +191,6 @@ export default function CurrentMealWidget() {
           </div>
         </div>
       </div>
-    </div>
+    </WidgetCard>
   );
 }

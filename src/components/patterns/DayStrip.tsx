@@ -20,7 +20,7 @@ export default function DayStrip({ days, onChange, value, className = "" }: DayS
             onClick={() => onChange(day.id)}
             className={`snap-start min-w-16 rounded-2xl border p-3 text-center transition-all active:scale-95 ${
               isActive
-                ? "border-[var(--color-accent-selected)] bg-[var(--color-accent-selected)] text-white shadow-lg shadow-[var(--color-accent-selected)]/20"
+                ? "border-[var(--color-accent-button)] bg-[var(--color-accent-button)] text-white shadow-lg shadow-[var(--color-accent-button)]/20"
                 : "border-white/10 bg-[var(--color-surface-0)]/30 text-text-primary hover:bg-[var(--color-surface-0)]/45"
             }`}
           >

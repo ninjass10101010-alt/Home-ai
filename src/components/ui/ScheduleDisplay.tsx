@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import WidgetCard from "@/components/patterns/WidgetCard";
 import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
 
 interface ScheduleItem {
@@ -79,15 +80,14 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
 
   if (schedule.length === 0) {
     return (
-        <section className={className}>
-        <h2 className="text-text-primary font-semibold text-base mb-3">{title}</h2>
-        <div className="liquid-glass flex flex-col items-center gap-2 py-6 text-text-muted">
+      <WidgetCard tone="#22d3ee" icon="🕐" className={className}>
+        <div className="flex flex-col items-center gap-2 py-6 text-text-muted">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-8 h-8 text-text-muted">
             <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48 2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48 2.83-2.83" strokeLinecap="round" />
           </svg>
           <p className="text-xs">No items scheduled</p>
         </div>
-      </section>
+      </WidgetCard>
     );
   }
 
@@ -126,61 +126,62 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
   };
 
   return (
-    <section className={className}>
-      <div className="flex items-center justify-between mb-3">
+    <WidgetCard tone="#22d3ee" icon="🕐" className={className}>
+      <div className="flex items-center justify-between gap-3 p-5 pl-14 border-b border-white/10">
         <h2 className="text-text-primary font-semibold text-base">{title}</h2>
-        <span className="text-text-muted text-[10px] font-medium">
+        <span className="text-text-muted text-[10px] font-medium shrink-0">
           {upcomingCount} upcoming
         </span>
       </div>
-      {sortedSchedule.length === 0 ? (
-        <div className="flex flex-col items-center gap-2 py-4 text-text-muted">
-          <p className="text-xs">All done for today 🎉</p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {sortedSchedule.map((item, idx) => {
-            const [r, g, b] = getAccentRgb(item.color || "green");
-            return (
-            <div
-              key={item.id}
-              style={{
-                animationDelay: `${idx * 0.05}s`,
-                background: getLiquidGlassBg(item.color || "green"),
-              }}
-              className="liquid-glass flex items-center gap-3 px-3 py-2.5 animate-in"
-            >
-              {/* Glowing accent bar */}
+      <div className="p-5">
+        {sortedSchedule.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 py-4 text-text-muted">
+            <p className="text-xs">All done for today 🎉</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {sortedSchedule.map((item, idx) => {
+              const [r, g, b] = getAccentRgb(item.color || "green");
+              return (
               <div
-                className="w-0.5 h-8 rounded-full shrink-0"
+                key={item.id}
                 style={{
-                  backgroundColor: `rgb(${r},${g},${b})`,
-                  boxShadow: `0 0 8px rgb(${r},${g},${b})`,
+                  animationDelay: `${idx * 0.05}s`,
+                  backgroundImage: getLiquidGlassBg(item.color || "green"),
                 }}
-              />
-              <span className="text-xs font-mono text-text-secondary w-16 shrink-0 tabular-nums">{displayTime12h(item.time)}</span>
-              <span className="text-lg shrink-0 drop-shadow-sm">{item.emoji || item.icon || "•"}</span>
-
-              <span className="text-sm text-text-primary flex-1 min-w-0">
-                {item.title}
-              </span>
-
-              {item.member && (
-                <span
-                  className="text-xs px-2 py-0.5 rounded-full text-text-primary shrink-0 glass-subtle"
+                className="schedule-row liquid-glass flex items-center gap-3 px-3 py-2.5 animate-in"
+              >
+                {/* Glowing accent bar */}
+                <div
+                  className="w-0.5 h-8 rounded-full shrink-0"
                   style={{
-                    background: getMemberPillBg(item.color || "green"),
+                    backgroundColor: `rgb(${r},${g},${b})`,
+                    boxShadow: `0 0 8px rgb(${r},${g},${b})`,
                   }}
-                >
-                  {item.member.split(" ")[0]}
-                </span>
-              )}
-            </div>
-            );
-          })}
-        </div>
-      )}
+                />
+                <span className="text-xs font-mono text-text-primary w-16 shrink-0 tabular-nums">{displayTime12h(item.time)}</span>
+                <span className="text-lg shrink-0 drop-shadow-sm">{item.emoji || item.icon || "•"}</span>
 
-    </section>
+                <span className="text-sm text-text-primary flex-1 min-w-0">
+                  {item.title}
+                </span>
+
+                {item.member && (
+                  <span
+                    className="text-xs px-2 py-0.5 rounded-full text-text-primary shrink-0 glass-subtle"
+                    style={{
+                      background: getMemberPillBg(item.color || "green"),
+                    }}
+                  >
+                    {item.member.split(" ")[0]}
+                  </span>
+                )}
+              </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </WidgetCard>
   );
 }

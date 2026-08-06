@@ -103,7 +103,7 @@ export default function HomeSuggestionsWidget() {
 
   if (!mounted) {
     return (
-      <SectionCard title="Consuela suggests" icon="✨">
+      <SectionCard title="Consuela suggests" icon="✨" tone="#8b5cf6">
         <div className="space-y-2">
           {[1, 2].map((i) => (
             <div key={i} className="h-14 rounded-2xl bg-white/5 animate-pulse" />
@@ -122,7 +122,8 @@ export default function HomeSuggestionsWidget() {
       <SectionCard
         title="Consuela suggests"
         icon="✨"
-        action={<Link href="/suggestions" className="text-sm text-[var(--color-accent-selected)]">See all →</Link>}
+        tone="#8b5cf6"
+        action={<Link href="/suggestions" className="text-sm widget-accent-text">See all →</Link>}
       >
         <EmptyState
           title="All clear"
@@ -140,7 +141,8 @@ export default function HomeSuggestionsWidget() {
       title="Consuela suggests"
       description="Proactive alerts for the family"
       icon="✨"
-      action={<Link href="/suggestions" className="text-sm text-[var(--color-accent-selected)]">See all →</Link>}
+      tone="#8b5cf6"
+      action={<Link href="/suggestions" className="text-sm widget-accent-text">See all →</Link>}
     >
       {items.length === 0 && loading ? (
         <div className="space-y-2">

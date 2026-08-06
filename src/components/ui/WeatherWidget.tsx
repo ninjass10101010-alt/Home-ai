@@ -265,13 +265,13 @@ function AnimatedSunIcon({ tod }: { tod: TimeOfDayFlag }) {
   if (tod === "night") {
     return (
       <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} fill="none" aria-hidden="true">
-        <circle cx={CX} cy={CY} r="32" fill="rgba(167,139,250,0.07)" style={{ animation: "weatherGlowPulse 4s ease-in-out infinite" }} />
+        <circle cx={CX} cy={CY} r="32" fill="rgba(167,139,250,0.07)" style={{ animation: "weatherGlowPulse 8s ease-in-out infinite" }} />
         <path d="M40 20 A14 14 0 1 0 52 32 A18 18 0 0 1 40 20 Z" fill="#c4b5fd" />
         <path d="M38 22 A12 12 0 1 0 48 32 A16 16 0 0 1 38 22 Z" fill="#8b5cf6" />
-        <g style={{ animation: "weatherSpin 20s linear infinite", transformOrigin: `${CX}px ${CY}px` }}>
-          <circle cx={CX - 20} cy={CY - 15} r="1.5" fill="#fde047" style={{ animation: "weatherGlowPulse 2s ease-in-out infinite" }} />
-          <circle cx={CX + 15} cy={CY + 20} r="2" fill="#fde047" style={{ animation: "weatherGlowPulse 3s ease-in-out infinite" }} />
-          <circle cx={CX - 10} cy={CY + 25} r="1" fill="#fde047" style={{ animation: "weatherGlowPulse 2.5s ease-in-out infinite" }} />
+        <g style={{ animation: "weatherSpin 32s linear infinite", transformOrigin: `${CX}px ${CY}px` }}>
+          <circle cx={CX - 20} cy={CY - 15} r="1.5" fill="#fde047" style={{ animation: "weatherGlowPulse 4s ease-in-out infinite" }} />
+          <circle cx={CX + 15} cy={CY + 20} r="2" fill="#fde047" style={{ animation: "weatherGlowPulse 6s ease-in-out infinite" }} />
+          <circle cx={CX - 10} cy={CY + 25} r="1" fill="#fde047" style={{ animation: "weatherGlowPulse 5s ease-in-out infinite" }} />
         </g>
       </svg>
     );
@@ -279,8 +279,8 @@ function AnimatedSunIcon({ tod }: { tod: TimeOfDayFlag }) {
 
   return (
     <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} fill="none" aria-hidden="true">
-      <circle cx={CX} cy={CY} r="32" fill="rgba(251,191,36,0.07)" style={{ animation: "weatherGlowPulse 3.5s ease-in-out infinite" }} />
-      <g style={{ animation: "weatherSpin 14s linear infinite", transformOrigin: `${CX}px ${CY}px` }}>
+      <circle cx={CX} cy={CY} r="32" fill="rgba(251,191,36,0.07)" style={{ animation: "weatherGlowPulse 7s ease-in-out infinite" }} />
+      <g style={{ animation: "weatherSpin 28s linear infinite", transformOrigin: `${CX}px ${CY}px` }}>
         {Array.from({ length: 8 }, (_, i) => {
           const a = (i / 8) * Math.PI * 2;
           return (<circle key={i} cx={CX + Math.cos(a) * 30} cy={CY + Math.sin(a) * 30} r="2.5" fill="rgba(251,191,36,0.5)" />);
@@ -291,10 +291,10 @@ function AnimatedSunIcon({ tod }: { tod: TimeOfDayFlag }) {
         return (
           <line key={i} x1={CX + Math.cos(a) * 15} y1={CY + Math.sin(a) * 15} x2={CX + Math.cos(a) * 23} y2={CY + Math.sin(a) * 23}
             stroke="#fbbf24" strokeWidth="3" strokeLinecap="round"
-            style={{ animation: `weatherRayPulse 2.2s ease-in-out ${i * 0.28}s infinite`, transformOrigin: `${CX}px ${CY}px` }} />
+            style={{ animation: `weatherRayPulse 4.4s ease-in-out ${i * 0.45}s infinite`, transformOrigin: `${CX}px ${CY}px` }} />
         );
       })}
-      <circle cx={CX} cy={CY} r="14" fill="rgba(251,191,36,0.18)" style={{ animation: "weatherGlowPulse 2.2s ease-in-out 0.6s infinite" }} />
+      <circle cx={CX} cy={CY} r="14" fill="rgba(251,191,36,0.18)" style={{ animation: "weatherGlowPulse 4.4s ease-in-out 1.2s infinite" }} />
       <circle cx={CX} cy={CY} r="12" fill="#fbbf24" />
       <circle cx={CX} cy={CY} r="10" fill="#f59e0b" />
       <circle cx={CX - 3.5} cy={CY - 3.5} r="3.5" fill="rgba(254,243,199,0.45)" />
@@ -306,11 +306,11 @@ function AnimatedPartlyCloudyIcon({ tod }: { tod: TimeOfDayFlag }) {
   return (
     <svg width="72" height="72" viewBox="0 0 72 72" fill="none" aria-hidden="true">
       {tod === "night" ? (
-        <g style={{ animation: "weatherGlowPulse 5s ease-in-out infinite" }}>
+        <g style={{ animation: "weatherGlowPulse 10s ease-in-out infinite" }}>
           <path d="M35 15 A10 10 0 1 0 45 25 A12 12 0 0 1 35 15 Z" fill="#a78bfa" />
         </g>
       ) : (
-        <g style={{ animation: "weatherGlowPulse 4s ease-in-out infinite" }}>
+        <g style={{ animation: "weatherGlowPulse 8s ease-in-out infinite" }}>
           {Array.from({ length: 6 }, (_, i) => {
             const a = (i / 6) * Math.PI * 2;
             return (
@@ -323,7 +323,7 @@ function AnimatedPartlyCloudyIcon({ tod }: { tod: TimeOfDayFlag }) {
           <circle cx="21" cy="21" r="2.5" fill="rgba(254,243,199,0.4)" />
         </g>
       )}
-      <g style={{ animation: "weatherCloudBob 5s ease-in-out infinite" }}>
+      <g style={{ animation: "weatherCloudBob 10s ease-in-out infinite" }}>
         <path d="M12 54 Q11 44 21 44 Q23 37 33 39 Q41 36 43 42 Q51 42 51 51 Q51 56 46 56 L18 56 Q12 56 12 54 Z"
           fill="rgba(203,213,225,0.9)" stroke="rgba(255,255,255,0.4)" strokeWidth="1" />
         <path d="M19 48 Q27 44 35 46" stroke="rgba(255,255,255,0.6)" strokeWidth="2" strokeLinecap="round" fill="none" />
@@ -335,10 +335,10 @@ function AnimatedPartlyCloudyIcon({ tod }: { tod: TimeOfDayFlag }) {
 function AnimatedCloudyIcon() {
   return (
     <svg width="72" height="72" viewBox="0 0 72 72" fill="none" aria-hidden="true">
-      <g style={{ animation: "weatherCloudBob 7s ease-in-out 1.8s infinite" }}>
+      <g style={{ animation: "weatherCloudBob 12s ease-in-out 3.6s infinite" }}>
         <path d="M28 46 Q27 38 36 38 Q38 31 47 33 Q54 31 56 37 Q63 37 63 45 Q63 49 58 49 L34 49 Q28 49 28 46 Z" fill="rgba(148,163,184,0.7)" />
       </g>
-      <g style={{ animation: "weatherCloudBob 5.5s ease-in-out infinite" }}>
+      <g style={{ animation: "weatherCloudBob 11s ease-in-out infinite" }}>
         <path d="M6 52 Q5 42 15 42 Q17 35 27 37 Q35 34 38 40 Q46 40 46 49 Q46 54 41 54 L12 54 Q6 54 6 52 Z"
           fill="rgba(203,213,225,0.9)" stroke="rgba(255,255,255,0.3)" strokeWidth="0.5" />
         <path d="M13 46 Q21 42 29 44" stroke="rgba(255,255,255,0.5)" strokeWidth="2" strokeLinecap="round" fill="none" />
@@ -348,31 +348,31 @@ function AnimatedCloudyIcon() {
 }
 
 function AnimatedRainyIcon() {
-  const drops = [{ x: 11, delay: "0s" }, { x: 21, delay: "0.32s" }, { x: 31, delay: "0.64s" }, { x: 41, delay: "0.16s" }, { x: 16, delay: "0.80s" }, { x: 26, delay: "0.48s" }, { x: 36, delay: "0.96s" }];
+  const drops = [{ x: 11, delay: "0s" }, { x: 21, delay: "0.5s" }, { x: 31, delay: "1s" }, { x: 41, delay: "0.25s" }, { x: 16, delay: "1.25s" }, { x: 26, delay: "0.75s" }, { x: 36, delay: "1.5s" }];
   return (
     <svg width="72" height="72" viewBox="0 0 72 72" fill="none" aria-hidden="true">
-      <g style={{ animation: "weatherCloudBob 4.5s ease-in-out infinite" }}>
+      <g style={{ animation: "weatherCloudBob 9s ease-in-out infinite" }}>
         <path d="M8 38 Q7 28 17 28 Q19 21 29 23 Q37 20 40 26 Q48 26 48 35 Q48 40 42 40 L14 40 Q8 40 8 38 Z" fill="rgba(100,116,139,0.88)" />
         <path d="M15 32 Q24 28 32 30" stroke="rgba(255,255,255,0.35)" strokeWidth="2" strokeLinecap="round" fill="none" />
       </g>
       {drops.map((d, i) => (
         <line key={i} x1={d.x + 2} y1="44" x2={d.x} y2="58" stroke="rgba(96,165,250,0.8)" strokeWidth="2.5" strokeLinecap="round"
-          style={{ animation: `weatherRainDrop 1.35s linear ${d.delay} infinite` }} />
+          style={{ animation: `weatherRainDrop 2.2s linear ${d.delay} infinite` }} />
       ))}
     </svg>
   );
 }
 
 function AnimatedSnowyIcon() {
-  const flakes = [{ x: 13, delay: "0s" }, { x: 23, delay: "0.55s" }, { x: 33, delay: "0.28s" }, { x: 43, delay: "0.80s" }, { x: 18, delay: "1.05s" }, { x: 38, delay: "0.12s" }];
+  const flakes = [{ x: 13, delay: "0s" }, { x: 23, delay: "1.1s" }, { x: 33, delay: "0.55s" }, { x: 43, delay: "1.6s" }, { x: 18, delay: "2.1s" }, { x: 38, delay: "0.25s" }];
   return (
     <svg width="72" height="72" viewBox="0 0 72 72" fill="none" aria-hidden="true">
-      <g style={{ animation: "weatherCloudBob 5s ease-in-out infinite" }}>
+      <g style={{ animation: "weatherCloudBob 9s ease-in-out infinite" }}>
         <path d="M8 35 Q7 25 17 25 Q19 18 29 20 Q37 17 40 23 Q48 23 48 32 Q48 37 42 37 L14 37 Q8 37 8 35 Z" fill="rgba(186,230,253,0.88)" />
         <path d="M15 29 Q24 25 32 27" stroke="rgba(255,255,255,0.55)" strokeWidth="2" strokeLinecap="round" fill="none" />
       </g>
       {flakes.map((f, i) => (
-        <g key={i} style={{ animation: `weatherSnowDrift 2.4s ease-in-out ${f.delay} infinite` }}>
+        <g key={i} style={{ animation: `weatherSnowDrift 4.5s ease-in-out ${f.delay} infinite` }}>
           <circle cx={f.x} cy="52" r="3" fill="rgba(224,242,254,0.95)" />
           <line x1={f.x - 4} y1="52" x2={f.x + 4} y2="52" stroke="rgba(186,230,253,0.8)" strokeWidth="1.5" strokeLinecap="round" />
           <line x1={f.x} y1="48" x2={f.x} y2="56" stroke="rgba(186,230,253,0.8)" strokeWidth="1.5" strokeLinecap="round" />
@@ -1759,7 +1759,34 @@ export default function WeatherWidget() {
   };
 
   return (
-    <div style={{ animation: mounted ? "weatherCardEnter 0.65s cubic-bezier(0.34,1.56,0.64,1) both" : undefined }}>
+    <div
+      className="relative"
+      style={{ animation: mounted ? "weatherCardEnter 1s cubic-bezier(0.34,1.56,0.64,1) both" : undefined }}
+    >
+      {/* ── Protruding weather icon (top-left overhang) ── */}
+      <div className="absolute z-30 pointer-events-none" style={{ top: -24, left: -24 }}>
+        <div className="relative w-[96px] h-[96px]">
+          <div
+            aria-hidden="true"
+            style={{
+              position: "absolute",
+              inset: 0,
+              background: `radial-gradient(circle, ${accentHex.selected}66 0%, ${accentHex.selected}00 70%)`,
+              filter: "blur(10px)",
+              animation: mounted ? "weatherGlowPulse 7s ease-in-out infinite" : undefined,
+            }}
+          />
+          <div style={{ filter: "drop-shadow(0 10px 18px rgba(0,0,0,0.35))" }}>
+            {mounted ? (
+              <div style={{ transform: "scale(1.3333)", transformOrigin: "top left" }}>
+                <Icon tod={tod} />
+              </div>
+            ) : (
+              <div className="w-[96px] h-[96px] flex items-center justify-center text-7xl leading-none">⛅</div>
+            )}
+          </div>
+        </div>
+      </div>
       <div
         className="rounded-2xl overflow-hidden relative"
         style={{
@@ -1767,7 +1794,7 @@ export default function WeatherWidget() {
           border: `1px solid ${atm.glowColor}`,
           boxShadow: `0 0 60px ${theme.glowColor}, 0 16px 48px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.08)`,
           transition: "box-shadow 0.6s ease, background 0.6s ease, border-color 0.6s ease",
-          minHeight: "180px",
+          minHeight: "220px",
         }}
       >
         {/* ── Season/Holiday Backdrop Art ── */}
@@ -1803,7 +1830,7 @@ export default function WeatherWidget() {
 
         {/* ── Glassmorphism content overlay ── */}
         <div
-          className="relative z-20 p-4"
+          className="relative z-20 p-5 pl-[80px]"
           style={{
             backdropFilter: "blur(14px) saturate(1.3)",
             background: "linear-gradient(180deg, rgba(15,23,42,0.28), rgba(15,23,42,0.18))",
@@ -1814,7 +1841,7 @@ export default function WeatherWidget() {
 
           {/* Header: location + season badge */}
           <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-1.5 text-xs font-medium min-w-0">
+            <div className="flex items-center gap-1.5 text-sm font-medium min-w-0">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
                 className="w-3.5 h-3.5 shrink-0" style={{ color: accentHex.selected }}>
                 <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
@@ -1829,7 +1856,7 @@ export default function WeatherWidget() {
               )}
             </div>
             <span
-              className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full shrink-0 ml-2"
+              className="text-xs font-semibold px-3 py-1 rounded-full shrink-0 ml-2"
               style={{
                 background: `${accentHex.selected}25`,
                 color: accentHex.selected,
@@ -1843,22 +1870,17 @@ export default function WeatherWidget() {
 
           {/* Main display row */}
           <div className="flex items-center gap-3 mb-4">
-            <div className="shrink-0 -ml-1 drop-shadow-lg">
-              {mounted ? <Icon tod={tod} /> : (
-                <div className="w-[72px] h-[72px] flex items-center justify-center text-5xl leading-none">⛅</div>
-              )}
-            </div>
             <div className="flex-1 min-w-0">
               <div key={tempKey} className="flex items-start leading-none mb-1"
-                style={{ animation: tempKey > 0 ? "weatherTempPop 0.45s cubic-bezier(0.34,1.56,0.64,1)" : undefined }}>
-                <span className="text-[52px] font-black tabular-nums leading-none tracking-tight"
+                style={{ animation: tempKey > 0 ? "weatherTempPop 0.7s cubic-bezier(0.34,1.56,0.64,1)" : undefined }}>
+                <span className="text-[60px] font-black tabular-nums leading-none tracking-tight"
                   style={{ color: accentHex.selected, textShadow: "0 0 30px rgba(0,0,0,0.45), 0 2px 8px rgba(0,0,0,0.35)" }}>
                   {displayTemp}
                 </span>
-                <span className="text-2xl font-light mt-2 ml-1 text-white/50">°</span>
+                <span className="text-3xl font-light mt-3 ml-1 text-white/50">°</span>
               </div>
-              <p className="text-white text-sm font-semibold mb-0.5 drop-shadow">{weatherData?.currentCondition ?? "Partly Cloudy"}</p>
-              <p className="text-white/70 text-[11px]">Feels like {displayFeels}°{weather.unit} · {season} · {tod}</p>
+              <p className="text-white text-base font-semibold mb-0.5 drop-shadow">{weatherData?.currentCondition ?? "Partly Cloudy"}</p>
+              <p className="text-white/70 text-xs">Feels like {displayFeels}°{weather.unit} · {season} · {tod}</p>
             </div>
           </div>
 
@@ -1877,7 +1899,7 @@ export default function WeatherWidget() {
           </button>
 
           {/* Expandable panel */}
-          <div className="overflow-hidden transition-all duration-500"
+          <div className="overflow-hidden transition-all duration-700"
             style={{ maxHeight: expanded ? "440px" : "0px", opacity: expanded ? 1 : 0 }}>
             <div className="pt-3 space-y-3 mt-2" style={{ borderTop: `1px solid ${theme.accentColor}30` }}>
               <div className="grid grid-cols-3 gap-2">
@@ -1894,7 +1916,7 @@ export default function WeatherWidget() {
                         background: "rgba(255,255,255,0.07)",
                         backdropFilter: "blur(6px)",
                         border: "1px solid rgba(255,255,255,0.08)",
-                        animation: expanded ? `weatherForecastIn 0.38s ease-out ${0.18 + i * 0.06}s both` : undefined,
+                        animation: expanded ? `weatherForecastIn 0.55s ease-out ${0.25 + i * 0.08}s both` : undefined,
                       }}
                       title={`${day.condition} · High ${weather.unit === "C" ? toC(day.high) : day.high}° / Low ${weather.unit === "C" ? toC(day.low) : day.low}°`}>
                       <span className="text-white/65 text-[10px] font-semibold">{day.day}</span>

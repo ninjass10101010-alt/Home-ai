@@ -14,7 +14,7 @@ interface ChipProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const toneMap: Record<ChipTone, string> = {
   neutral: "text-text-secondary border-white/10",
-  accent: "text-[var(--color-accent-selected)] border-[var(--color-accent-selected)]/25",
+  accent: "widget-accent-text border-[var(--color-accent-selected)]/25",
   success: "text-emerald-400 border-emerald-300/25",
   danger: "text-rose-400 border-rose-300/25",
   warning: "text-amber-300 border-amber-300/25",
@@ -31,7 +31,7 @@ export default function Chip({ children, tone = "neutral", size = "md", selected
     <button
       type="button"
       className={`inline-flex items-center justify-center gap-1.5 border bg-[var(--color-surface-0)]/20 backdrop-blur-xl tap-sm disabled:pointer-events-none disabled:opacity-50 ${toneMap[tone]} ${sizeMap[size]} ${
-        selected ? "bg-[var(--color-accent-selected)] text-white border-transparent" : ""
+        selected ? "bg-[var(--color-accent-button)] text-white border-transparent" : ""
       } ${className}`}
       {...props}
     >

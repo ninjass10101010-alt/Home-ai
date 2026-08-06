@@ -329,6 +329,87 @@ body {
   box-shadow: var(--elev-3), inset 0 1px 0 rgba(255,255,255,0.12);
 }
 
+/* ─── Widget card (pastel bento family) ───
+   Shared shell for Home widget cards: soft identity-color gradient wash
+   over the warm glass base, tone-tinted glow border, soft outer glow.
+   Tone is injected as --widget-tone (hex or CSS var) via inline style.
+
+   WCAG contrast (4.5:1): card-scoped text tokens are brightened/darkened
+   so muted/secondary text stays legible on the pastel washes, and
+   --widget-accent is the accessible variant of the app accent for
+   accent-colored text inside cards (lightened in dark mode, darkened in
+   light mode). */
+.widget-card {
+  --widget-tone: var(--color-accent-selected);
+  --widget-accent: color-mix(in srgb, var(--color-accent-selected) 45%, white);
+  --widget-accent-strong: color-mix(in srgb, var(--widget-tone) 65%, white);
+  --color-text-secondary: #a5afc7;
+  --color-text-muted: #8b99b5;
+  position: relative;
+  overflow: visible;
+  border-radius: 1.5rem;
+  background:
+    linear-gradient(160deg,
+      color-mix(in srgb, var(--widget-tone) 16%, transparent) 0%,
+      color-mix(in srgb, var(--widget-tone) 5%, transparent) 100%),
+    linear-gradient(180deg, var(--glass-tint-strong), var(--glass-tint-soft));
+  backdrop-filter: blur(24px) saturate(1.35);
+  -webkit-backdrop-filter: blur(24px) saturate(1.35);
+  border: 1px solid color-mix(in srgb, var(--widget-tone) 35%, transparent);
+  box-shadow:
+    0 0 40px color-mix(in srgb, var(--widget-tone) 22%, transparent),
+    0 16px 48px rgba(0, 0, 0, 0.20),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition: box-shadow var(--motion-base) var(--ease-standard), border-color var(--motion-base) var(--ease-standard);
+}
+
+.widget-card:hover {
+  box-shadow:
+    0 0 48px color-mix(in srgb, var(--widget-tone) 28%, transparent),
+    0 20px 56px rgba(0, 0, 0, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+:root[data-theme="light"] .widget-card,
+:root:not([data-theme="dark"]) .widget-card {
+  --widget-accent: color-mix(in srgb, var(--color-accent-selected) 72%, black);
+  --widget-accent-strong: color-mix(in srgb, var(--widget-tone) 60%, black);
+  --color-text-secondary: #57637a;
+  --color-text-muted: #4e596b;
+  background:
+    linear-gradient(160deg,
+      color-mix(in srgb, var(--widget-tone) 10%, transparent) 0%,
+      color-mix(in srgb, var(--widget-tone) 4%, transparent) 100%),
+    linear-gradient(180deg, var(--glass-tint-strong), var(--glass-tint-soft));
+  border: 1px solid color-mix(in srgb, var(--widget-tone) 30%, transparent);
+  box-shadow:
+    0 0 32px color-mix(in srgb, var(--widget-tone) 16%, transparent),
+    0 8px 24px rgba(0, 0, 0, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+[data-contrast="boost"] .widget-card {
+  border-width: 1.5px;
+}
+
+/* Accent-colored text that meets 4.5:1 inside widget cards (falls back to the
+   raw app accent outside cards, e.g. on the calendar page). */
+.widget-accent-text {
+  color: var(--widget-accent, var(--color-accent-selected));
+}
+
+/* Schedule rows: solid scrim under the per-color tint so the animated page
+   fog can't wash the tint to a mid-tone and break text contrast. The tint
+   gradient itself is applied inline as background-image. */
+.schedule-row {
+  background-color: rgba(13, 17, 25, 0.72);
+}
+
+:root[data-theme="light"] .schedule-row,
+:root:not([data-theme="dark"]) .schedule-row {
+  background-color: rgba(255, 255, 255, 0.75);
+}
+
 .display-numeral {
   font-feature-settings: "tnum";
   font-variant-numeric: tabular-nums;
