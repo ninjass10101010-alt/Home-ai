@@ -8,13 +8,14 @@ import { updateMemory, deleteMemory, incrementMemoryUsage } from '@/lib/family-m
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const body = await request.json();
     const { content, tags, confidence } = body;
 
-    const memory = await updateMemory(params.id, {
+    const memory = await updateMemory(id, {
       content,
       tags,
       confidence,
@@ -47,10 +48,11 @@ export async function PATCH(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const success = await deleteMemory(params.id);
+    const { id } = await params;
+    const success = await deleteMemory(id);
 
     if (!success) {
       return NextResponse.json(
@@ -79,10 +81,11 @@ export async function DELETE(
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await incrementMemoryUsage(params.id);
+    const { id } = await params;
+    await incrementMemoryUsage(id);
 
     return NextResponse.json({
       success: true,

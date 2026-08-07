@@ -14,9 +14,10 @@ import type { TransactionType, TransactionSource } from '@/db/features/money-mou
  */
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const userId = getUserId(request);
     
     if (!userId) {
@@ -26,7 +27,7 @@ export async function GET(
       );
     }
     
-    const result = await getMountain(params.id);
+    const result = await getMountain(id);
     
     if (!result) {
       return NextResponse.json(
@@ -59,9 +60,10 @@ export async function GET(
  */
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const userId = getUserId(request);
     
     if (!userId) {
@@ -72,7 +74,7 @@ export async function PATCH(
     }
     
     // Check ownership
-    const existing = await getMountain(params.id);
+    const existing = await getMountain(id);
     if (!existing || existing.mountain.userId !== userId) {
       return NextResponse.json(
         { error: 'Access denied' },
@@ -81,7 +83,7 @@ export async function PATCH(
     }
     
     const data = await request.json();
-    const mountain = await updateMountain(params.id, data);
+    const mountain = await updateMountain(id, data);
     
     if (!mountain) {
       return NextResponse.json(
@@ -106,9 +108,10 @@ export async function PATCH(
  */
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const userId = getUserId(request);
     
     if (!userId) {
@@ -119,7 +122,7 @@ export async function DELETE(
     }
     
     // Check ownership
-    const existing = await getMountain(params.id);
+    const existing = await getMountain(id);
     if (!existing || existing.mountain.userId !== userId) {
       return NextResponse.json(
         { error: 'Access denied' },
@@ -127,7 +130,7 @@ export async function DELETE(
       );
     }
     
-    const success = await deleteMountain(params.id);
+    const success = await deleteMountain(id);
     
     if (!success) {
       return NextResponse.json(
@@ -152,9 +155,10 @@ export async function DELETE(
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const userId = getUserId(request);
     
     if (!userId) {
@@ -165,7 +169,7 @@ export async function POST(
     }
     
     // Check ownership
-    const existing = await getMountain(params.id);
+    const existing = await getMountain(id);
     if (!existing || existing.mountain.userId !== userId) {
       return NextResponse.json(
         { error: 'Access denied' },
@@ -190,7 +194,7 @@ export async function POST(
       );
     }
     
-    const result = await addTransaction(params.id, userId, {
+    const result = await addTransaction(id, userId, {
       type: data.type as TransactionType,
       amount: data.amount,
       description: data.description,

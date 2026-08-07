@@ -8,11 +8,11 @@ import { markCapsuleViewed } from '@/lib/time-capsule';
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id: capsuleId } = await params;
     const userId = getUserId(request);
-    const capsuleId = params.id;
     
     if (!userId) {
       return NextResponse.json(

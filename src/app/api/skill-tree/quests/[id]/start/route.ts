@@ -8,9 +8,10 @@ import { startQuest } from '@/lib/skill-tree';
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id: questId } = await params;
     const userId = getUserId(request);
     
     if (!userId) {
@@ -20,7 +21,7 @@ export async function POST(
       );
     }
     
-    const success = await startQuest(params.id, userId);
+    const success = await startQuest(questId, userId);
     
     if (!success) {
       return NextResponse.json(

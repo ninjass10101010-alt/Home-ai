@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Clock } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { getDaysUntilUnlock } from '@/db/features/time-capsule';
 
 interface CountdownTimerProps {

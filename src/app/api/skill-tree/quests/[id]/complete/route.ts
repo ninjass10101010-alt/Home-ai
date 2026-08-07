@@ -8,18 +8,19 @@ import { completeQuest } from '@/lib/skill-tree';
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id: questId } = await params;
     const userId = getUserId(request);
-    
+
     if (!userId) {
       return NextResponse.json(
         { error: 'User ID is required' },
         { status: 401 }
       );
     }
-    
+
     // Get proof from request body (optional)
     let proof = '';
     try {
@@ -28,8 +29,8 @@ export async function POST(
     } catch {
       // No body provided, that's OK
     }
-    
-    const result = await completeQuest(params.id, userId, proof);
+
+    const result = await completeQuest(questId, userId, proof);
     
     if (!result.success) {
       return NextResponse.json(

@@ -318,7 +318,7 @@ describe('Skill Tree API Routes', () => {
       const request = new NextRequest('http://localhost:3000/api/skill-tree/quests/quest-1/start', {
         method: 'POST',
       });
-      const response = await POST(request, { params: { id: 'quest-1' } });
+      const response = await POST(request, { params: Promise.resolve({ id: 'quest-1' }) });
       
       expect(response.status).toBe(401);
     });
@@ -330,7 +330,7 @@ describe('Skill Tree API Routes', () => {
       const request = new NextRequest('http://localhost:3000/api/skill-tree/quests/quest-1/start', {
         method: 'POST',
       });
-      const response = await POST(request, { params: { id: 'quest-1' } });
+      const response = await POST(request, { params: Promise.resolve({ id: 'quest-1' }) });
       
       expect(response.status).toBe(200);
     });
@@ -345,7 +345,7 @@ describe('Skill Tree API Routes', () => {
         method: 'POST',
         body: JSON.stringify({ proof: 'Completed the quest' }),
       });
-      const response = await POST(request, { params: { id: 'quest-1' } });
+      const response = await POST(request, { params: Promise.resolve({ id: 'quest-1' }) });
       
       expect(response.status).toBe(401);
     });
@@ -358,7 +358,7 @@ describe('Skill Tree API Routes', () => {
         method: 'POST',
         body: JSON.stringify({ proof: 'Completed the quest' }),
       });
-      const response = await POST(request, { params: { id: 'quest-1' } });
+      const response = await POST(request, { params: Promise.resolve({ id: 'quest-1' }) });
       
       expect(response.status).toBe(200);
       const body = await response.json();
@@ -375,7 +375,7 @@ describe('Skill Tree API Routes', () => {
       const request = new NextRequest('http://localhost:3000/api/skill-tree/branches/branch-1/unlock', {
         method: 'POST',
       });
-      const response = await POST(request, { params: { id: 'branch-1' } });
+      const response = await POST(request, { params: Promise.resolve({ id: 'branch-1' }) });
       
       expect(response.status).toBe(401);
     });
@@ -387,7 +387,7 @@ describe('Skill Tree API Routes', () => {
       const request = new NextRequest('http://localhost:3000/api/skill-tree/branches/branch-1/unlock', {
         method: 'POST',
       });
-      const response = await POST(request, { params: { id: 'branch-1' } });
+      const response = await POST(request, { params: Promise.resolve({ id: 'branch-1' }) });
       
       expect(response.status).toBe(200);
     });
