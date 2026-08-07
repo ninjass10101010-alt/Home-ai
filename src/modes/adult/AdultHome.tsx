@@ -285,13 +285,14 @@ export default function AdultHome() {
   const router = useRouter();
 
   useEffect(() => {
+    (async () => {
     setMounted(true);
     try {
       setTodayEvents(db.selectTodaysEvents());
       const allTasks = db.selectPendingTasks();
       setPendingTasks(allTasks.filter((t: any) => !t.completed));
       setCompletedTasks(allTasks.filter((t: any) => t.completed));
-      setMeals(db.selectMeals());
+      setMeals(await db.selectMeals());
 
       const stored = typeof window !== "undefined" ? localStorage.getItem("consuela-schedules") : null;
       if (stored) {
@@ -312,6 +313,7 @@ export default function AdultHome() {
       const note = typeof window !== "undefined" ? localStorage.getItem("consuela-adult-note") : null;
       if (note) setQuickNote(note);
     } catch {}
+    })();
   }, []);
 
   useEffect(() => {

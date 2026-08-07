@@ -29,14 +29,21 @@ vi.mock('@/lib/pb', () => ({
     })),
   })),
   getAdminPB: vi.fn(() => ({
+    authStore: { save: vi.fn(), clear: vi.fn(), token: '' },
     collection: vi.fn(() => ({
       getFullList: vi.fn(() => Promise.resolve([])),
       getOne: vi.fn(() => Promise.resolve(null)),
       create: vi.fn(() => Promise.resolve({ id: 'test-id' })),
       update: vi.fn(() => Promise.resolve({ id: 'test-id' })),
       delete: vi.fn(() => Promise.resolve(true)),
+      authWithPassword: vi.fn(() => Promise.resolve({ token: 'test-token' })),
     })),
   })),
+}));
+
+// Mock server-side PIN verification so PATCH routes can pass auth gate in tests
+vi.mock('@/lib/server-auth', () => ({
+  verifyPinAgainstAnyMember: vi.fn(() => Promise.resolve({ id: 'member-1', name: 'Test Member' })),
 }));
 
 // Mock skill tree lib functions
@@ -432,40 +439,46 @@ describe('Consuela Chat API Routes', () => {
     });
   });
 
-  describe('POST /api/consuela/suggestions', () => {
-    it('returns 400 when required fields are missing', async () => {
-      vi.mocked(auth.getUserId).mockReturnValue('user-1');
-      
-      const { POST } = await import('@/app/api/consuela/suggestions/route');
-      const request = new NextRequest('http://localhost:3000/api/consuela/suggestions', {
-        method: 'POST',
-        body: JSON.stringify({}),
-      });
-      const response = await POST(request);
-      
-      expect(response.status).toBe(400);
-      const body = await response.json();
-      expect(body.error).toBe('Title, message, and triggerType are required');
-    });
+  describe('GET /api/consuela/suggestions', () => {
+    it('returns pending suggestions list', async () => {
+      const { GET } = await import('@/app/api/consuela/suggestions/route');
+      const request = new NextRequest('http://localhost:3000/api/consuela/suggestions');
+      const response = await GET(request);
 
-    it('returns 200 when suggestion is created successfully', async () => {
-      vi.mocked(auth.getUserId).mockReturnValue('user-1');
-      
-      const { POST } = await import('@/app/api/consuela/suggestions/route');
-      const request = new NextRequest('http://localhost:3000/api/consuela/suggestions', {
-        method: 'POST',
-        body: JSON.stringify({
-          title: 'Test Suggestion',
-          message: 'This is a test suggestion',
-          triggerType: 'time_based',
-        }),
-      });
-      const response = await POST(request);
-      
       expect(response.status).toBe(200);
       const body = await response.json();
-      expect(body).toHaveProperty('suggestion');
-      expect(body.suggestion).toHaveProperty('status', 'pending');
+      expect(body).toHaveProperty('items');
+      expect(Array.isArray(body.items)).toBe(true);
+    });
+  });
+
+  describe('PATCH /api/consuela/suggestions', () => {
+    it('returns 401 when no PIN provided', async () => {
+      const { PATCH } = await import('@/app/api/consuela/suggestions/route');
+      const request = new NextRequest('http://localhost:3000/api/consuela/suggestions', {
+        method: 'PATCH',
+        body: JSON.stringify({ id: 'test-id', status: 'done' }),
+      });
+      const response = await PATCH(request);
+
+      expect(response.status).toBe(401);
+      const body = await response.json();
+      expect(body.error).toBe('pin required');
+    });
+
+    it('returns 400 when id or status missing', async () => {
+      vi.mocked(auth.getUserId).mockReturnValue('user-1');
+      const { PATCH } = await import('@/app/api/consuela/suggestions/route');
+      const request = new NextRequest('http://localhost:3000/api/consuela/suggestions', {
+        method: 'PATCH',
+        headers: { 'x-consuela-pin': '1234' },
+        body: JSON.stringify({}),
+      });
+      const response = await PATCH(request);
+
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.error).toBe('id + status or snoozedUntil required');
     });
   });
 });

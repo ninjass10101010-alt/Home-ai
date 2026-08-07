@@ -216,6 +216,7 @@ export default function KidHome() {
   const POINTS_PER_LEVEL = 50;
 
   useEffect(() => {
+    (async () => {
     setMounted(true);
     try {
       const allTasks = db.selectPendingTasks();
@@ -224,7 +225,7 @@ export default function KidHome() {
       setTodayEvents(db.selectTodaysEvents());
 
       // Load tonight's dinner for the fun widget
-      const allMeals = db.selectMeals();
+      const allMeals = await db.selectMeals();
       const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
       const todayName = dayNames[new Date().getDay()];
       const dinner = allMeals.find((m: any) => m.time === todayName && m.mealType === "dinner") || allMeals.find((m: any) => m.mealType === "dinner");
@@ -251,6 +252,7 @@ export default function KidHome() {
         setPoints(myPoints);
       }
     } catch {}
+    })();
   }, [currentUser]);
 
   const user = currentUser;
