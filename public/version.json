@@ -1,7 +1,7 @@
 {
-  "hash": "584738b16f1b10308886876e622e613b02467848",
-  "short": "584738b",
-  "message": "feat(ui): Home bento grid alignment + portrait/landscape widget layouts",
-  "date": "2026-08-06 13:40:47 -0400",
-  "author": "GarciaFam"
+  "hash": "0319d9019f9716aabf3ced2ebe2d3206e1af4800",
+  "short": "0319d90",
+  "message": "fix: merge fixes — async selectMeals in mode homes, suggestions GET+PATCH tests, auth mocks",
+  "date": "2026-08-07 01:57:03 +0000",
+  "author": "Consuela Agent"
 }

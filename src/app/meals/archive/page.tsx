@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 /* eslint-disable react-hooks/set-state-in-effect */
 
 import { useState, useEffect } from "react";
