@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useMemo, Suspense } from "react";
-import BottomNav from "@/components/ui/BottomNav";
+import CapsuleNav from "@/components/ui/CapsuleNav";
 import Avatar from "@/components/ui/Avatar";
 import SigmaImage from "@/components/ui/SigmaImage";
 import { Icon3D } from "@/components/3d";
@@ -677,7 +677,7 @@ function ChatContent() {
         </div>
       </div>
 
-      <BottomNav />
+      <CapsuleNav />
 
       <style>{`
         @keyframes bounce {

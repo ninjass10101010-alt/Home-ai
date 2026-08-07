@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
-import BottomNav from "./BottomNav";
+import CapsuleNav from "./CapsuleNav";
 
 interface PageShellProps {
   children: ReactNode;
@@ -11,7 +11,7 @@ export default function PageShell({ children, className = "", style }: PageShell
   return (
     <div className={`min-h-screen bg-[var(--color-canvas)] max-w-lg md:max-w-3xl mx-auto relative overflow-hidden ${className}`} style={style}>
       <main className="relative z-10 pb-32">{children}</main>
-      <BottomNav />
+      <CapsuleNav />
     </div>
   );
 }

@@ -439,6 +439,27 @@ body {
   @apply focus-visible:ring-[var(--color-accent-selected)] focus-visible:ring-offset-2;
 }
 
+/* ─── CapsuleNav (expanding pill bottom nav) ───
+   The active item expands into a neon-lime pill; inactive items stay
+   compact dark circles. Width expansion is driven by a 0fr -> 1fr
+   grid-column transition on each item (CSS-only, no JS measurement).
+   `--capsule-scale` keeps the full 6-item dock inside narrow viewports. */
+.capsule-nav {
+  --capsule-accent: #78f05a;
+  --capsule-scale: min(1, calc((100vw - 1.5rem) / 500px));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .capsule-item,
+  .capsule-item .capsule-label-text {
+    transition: none !important;
+  }
+  .capsule-item .capsule-label-text {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
 .swipe-action {
   display: inline-flex;
   align-items: center;
