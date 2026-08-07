@@ -27,6 +27,7 @@ async function runCmd(cmd: string, cwd?: string): Promise<string> {
       });
       resolve(result.trim());
     } catch (e: any) {
+    console.error("[admin/update]", e);
       reject(new Error(e.stderr || e.message || "Command failed"));
     }
   });
@@ -45,7 +46,8 @@ export async function POST() {
     try {
       await runCmd("test -d /app-source/.git && echo exists");
       add("check-source", "ok", "Source directory found with git");
-    } catch {
+    } catch (e: any) {
+    console.error("[admin/update]", e);
       add("check-source", "error", "No .git found in /app-source. Mount the project directory at /app-source.");
       return NextResponse.json({ ok: false, logs, error: "Source directory not mounted" }, { status: 500 });
     }
@@ -55,6 +57,7 @@ export async function POST() {
       const result = await runCmd("git fetch origin warm-glass-v2 2>/dev/null; git checkout warm-glass-v2 2>/dev/null; git pull origin warm-glass-v2 2>&1");
       add("git-pull", "ok", result || "Already up to date");
     } catch (e: any) {
+    console.error("[admin/update]", e);
       add("git-pull", "error", e.message);
       return NextResponse.json({ ok: false, logs, error: "Git pull failed" }, { status: 500 });
     }
@@ -63,12 +66,14 @@ export async function POST() {
     try {
       await runCmd("test -f /app-source/.env && echo exists");
       add("env-check", "ok", ".env file found");
-    } catch {
+    } catch (e: any) {
+    console.error("[admin/update]", e);
       try {
         await runCmd("test -f /app-source/.env.docker && echo exists");
         await runCmd("cp /app-source/.env.docker /app-source/.env");
         add("env-check", "ok", "Created .env from .env.docker template (fill in secrets)");
-      } catch {
+      } catch (e: any) {
+    console.error("[admin/update]", e);
         add("env-check", "ok", "No .env or .env.docker — container env vars will be used");
       }
     }
@@ -77,7 +82,8 @@ export async function POST() {
     try {
       await runCmd(`docker stop ${CONTAINER_NAME} 2>/dev/null; docker rm ${CONTAINER_NAME} 2>/dev/null; echo "stopped"`);
       add("stop", "ok", "Container stopped");
-    } catch {
+    } catch (e: any) {
+    console.error("[admin/update]", e);
       add("stop", "ok", "Container not running (already stopped)");
     }
 
@@ -89,6 +95,7 @@ export async function POST() {
       );
       add("build-deploy", "ok", result || "Container started");
     } catch (e: any) {
+    console.error("[admin/update]", e);
       add("build-deploy", "error", e.message);
       return NextResponse.json({ ok: false, logs, error: "Docker build failed" }, { status: 500 });
     }
@@ -98,7 +105,8 @@ export async function POST() {
       const version = await readFile(path.join(process.cwd(), "public", "version.json"), "utf-8");
       const v = JSON.parse(version);
       add("new-version", "ok", `Updated to ${v.short || "unknown"} — ${v.message || ""}`);
-    } catch {
+    } catch (e: any) {
+    console.error("[admin/update]", e);
       add("new-version", "ok", "Version info not available yet (will update after rebuild)");
     }
 
@@ -108,6 +116,7 @@ export async function POST() {
       message: "Dashboard updated successfully. Reloading in 5 seconds...",
     });
   } catch (e: any) {
+    console.error("[admin/update]", e);
     add("fatal", "error", e.message);
     return NextResponse.json({ ok: false, logs, error: e.message }, { status: 500 });
   }

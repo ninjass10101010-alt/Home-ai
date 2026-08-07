@@ -24,6 +24,7 @@ export async function GET() {
     const raw = fs.readFileSync(FAMILY_PATH, "utf-8");
     return NextResponse.json(JSON.parse(raw));
   } catch (err) {
+    console.error("[family]", err);
     return NextResponse.json({ error: "Failed to read family data" }, { status: 500 });
   }
 }
@@ -34,6 +35,7 @@ export async function POST(req: NextRequest) {
     fs.writeFileSync(FAMILY_PATH, JSON.stringify(data, null, 2));
     return NextResponse.json({ success: true });
   } catch (err) {
+    console.error("[family]", err);
     return NextResponse.json({ error: "Failed to write family data" }, { status: 500 });
   }
 }

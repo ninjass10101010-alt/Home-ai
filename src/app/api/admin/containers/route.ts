@@ -12,6 +12,7 @@ export async function GET() {
     );
     return NextResponse.json({ ok: true, containers });
   } catch (e: any) {
+    console.error("[admin/containers]", e);
     return NextResponse.json(
       { ok: false, error: e?.message || "Failed to list containers" },
       { status: 500 },

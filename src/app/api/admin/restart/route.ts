@@ -9,7 +9,8 @@ export async function POST(request: NextRequest) {
   let body: { container?: string };
   try {
     body = await request.json();
-  } catch {
+  } catch (e: any) {
+    console.error("[admin/restart]", e);
     return NextResponse.json({ ok: false, error: "Invalid JSON body" }, { status: 400 });
   }
 
@@ -31,6 +32,7 @@ export async function POST(request: NextRequest) {
       message: `Container "${name}" restarted successfully`,
     });
   } catch (e: any) {
+    console.error("[admin/restart]", e);
     return NextResponse.json(
       { ok: false, error: e?.message || `Failed to restart ${name}` },
       { status: 500 },

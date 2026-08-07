@@ -56,6 +56,7 @@ export interface GoogleCalendarEvent {
   etag?: string;
   updated?: string;
   htmlLink?: string;
+  attendees?: { email: string; displayName?: string; responseStatus?: string }[];
 }
 
 export interface GoogleTaskList {

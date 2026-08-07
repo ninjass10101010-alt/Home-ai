@@ -127,7 +127,8 @@ async function callConsuelaParseRecipe({
   if (typeof detail === "string") {
     try {
       parsed = JSON.parse(detail);
-    } catch {
+    } catch (e: any) {
+    console.error("[recipes/ingest]", e);
       // Not JSON — ignore.
     }
   }
@@ -213,6 +214,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ error: "Unknown type" }, { status: 400 });
   } catch (e: any) {
+    console.error("[recipes/ingest]", e);
     return NextResponse.json({ error: e?.message || "Ingestion failed" }, { status: 500 });
   }
 }

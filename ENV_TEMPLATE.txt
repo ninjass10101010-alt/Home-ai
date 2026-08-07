@@ -1,0 +1,29 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Consuela Dashboard — Environment Variables
+# Copy this file to .env.local and fill in your values
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ─── AI Backend ───────────────────────────────────────────────────────────────
+GOOGLE_AI_API_KEY=your_google_gemini_api_key
+OPENCLAW_WS_URL=ws://localhost:8080
+
+# ─── PocketBase ───────────────────────────────────────────────────────────────
+NEXT_PUBLIC_PB_URL=http://localhost:8090
+PB_ADMIN_EMAIL=admin@consuela.local
+PB_ADMIN_PASSWORD=your_secure_password
+
+# ─── Instacart Integration ────────────────────────────────────────────────────
+# Get an API key: https://docs.instacart.com/developer_platform_api/guide/get_api_key
+INSTACART_API_KEY=
+NEXT_PUBLIC_INSTACART_ENABLED=false
+
+# ─── Composio (Spotify, Maps, Amazon, etc.) ───────────────────────────────────
+# Get an API key: https://dashboard.composio.dev
+COMPOSIO_API_KEY=
+
+# ─── Email / Emergency Alerts ─────────────────────────────────────────────────
+GMAIL_USER=your_email@gmail.com
+GMAIL_APP_PASSWORD=your_app_specific_password
+
+# ─── Docker / Deployment ─────────────────────────────────────────────────────
+NEXT_PUBLIC_URL=http://localhost:3000
