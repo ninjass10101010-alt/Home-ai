@@ -1,7 +1,7 @@
 {
-  "hash": "0319d9019f9716aabf3ced2ebe2d3206e1af4800",
-  "short": "0319d90",
-  "message": "fix: merge fixes — async selectMeals in mode homes, suggestions GET+PATCH tests, auth mocks",
-  "date": "2026-08-07 01:57:03 +0000",
+  "hash": "13f8faa0a82b5129350cf6e236c5a84decd28e3e",
+  "short": "13f8faa",
+  "message": "fix: mark /meals/archive force-dynamic — skip prerender (Next 16.2.6 segments bug)",
+  "date": "2026-08-07 01:59:26 +0000",
   "author": "Consuela Agent"
 }
