@@ -67,18 +67,51 @@ export const DEFAULT_LAYOUT: HomeLayoutConfig = {
   },
 };
 
-/** Desktop (lg) bento column spans for each widget. Portrait uses 1 col (grid-cols-1). */
+/** Desktop bento column spans for each widget. Portrait uses 1 col (grid-cols-1). */
 export const WIDGET_SPANS: Record<WidgetId, string> = {
-  morningBriefing: "lg:col-span-1",
-  weather: "lg:col-span-3",
-  aiQuickAsk: "lg:col-span-1",
-  consuelaSuggestions: "lg:col-span-2",
-  leaderboard: "lg:col-span-1",
-  todayEvents: "lg:col-span-1",
-  schedule: "lg:col-span-1",
-  currentMeal: "lg:col-span-1",
-  tasks: "lg:col-span-1",
+  morningBriefing: "col-span-1",
+  weather: "col-span-3",
+  aiQuickAsk: "col-span-1",
+  consuelaSuggestions: "col-span-2",
+  leaderboard: "col-span-1",
+  todayEvents: "col-span-1",
+  schedule: "col-span-1",
+  currentMeal: "col-span-1",
+  tasks: "col-span-1",
 };
+
+/**
+ * Grid classes for the Home bento. The bento must follow the live
+ * `orientation` value, NOT the CSS `lg:` breakpoint: on a narrow landscape
+ * viewport (<1024px wide, e.g. a phone held sideways) the breakpoint never
+ * matches, so only the orientation hook can flip the visuals.
+ */
+export function homeGridClass(orientation: Orientation): string {
+  return orientation === "landscape"
+    ? "grid grid-cols-3 gap-6 auto-rows-min"
+    : "grid grid-cols-1 gap-6 auto-rows-min";
+}
+
+/**
+ * Fallback grid classes used before the orientation hook has mounted
+ * (SSR + first client frame) — keeps today's breakpoint-driven rendering
+ * so there is no layout flash while orientation resolves.
+ */
+export const HOME_GRID_FALLBACK = "grid grid-cols-1 lg:grid-cols-3 gap-6 auto-rows-min";
+
+/**
+ * Column span for one widget in the live orientation. Spans only exist in
+ * landscape; portrait is a single-column stack and must not span.
+ */
+export function widgetSpanClass(id: WidgetId, orientation: Orientation): string {
+  if (orientation !== "landscape") return "";
+  return WIDGET_SPANS[id] ?? "col-span-1";
+}
+
+/** Full-width (3-col) footer row for the bento; hidden in portrait. */
+export function homeFooterSpanClass(orientation: Orientation): string {
+  return orientation === "landscape" ? "col-span-3" : "";
+}
 
 export const LAYOUT_STORAGE_KEY = "consuela-home-layout";
 

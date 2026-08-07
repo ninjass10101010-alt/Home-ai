@@ -16,7 +16,7 @@ import CurrentMealWidget from "@/components/meals/CurrentMealWidget";
 import { AtmosphericProvider } from "@/hooks/useAtmosphericTheme";
 import AtmosphericBridge from "@/components/ui/AtmosphericBridge";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
-import { WIDGET_SPANS, type WidgetId } from "@/lib/layout-config";
+import { WIDGET_SPANS, homeGridClass, homeFooterSpanClass, widgetSpanClass, HOME_GRID_FALLBACK, type WidgetId } from "@/lib/layout-config";
 import { useAuth, type AuthUser } from "@/hooks/useAuth";
 import PinModal from "@/components/auth/PinModal";
 import MemberPickerModal from "@/components/auth/MemberPickerModal";
@@ -93,7 +93,8 @@ export default function HomePage() {
 
   const router = useRouter();
   const { currentUser, isLoggedIn, logout, sessionRemainingMs, sessionWarning, extendSession } = useAuth();
-  const { widgets } = useHomeLayout();
+  const { widgets, orientation, mounted: layoutMounted } = useHomeLayout();
+  const gridClass = layoutMounted ? homeGridClass(orientation) : HOME_GRID_FALLBACK;
 
   const sessionSecondsRemaining = Math.ceil(sessionRemainingMs / 1000);
   const showSessionPill = isLoggedIn && sessionRemainingMs < 30 * 60 * 1000 - 60 * 1000;
@@ -306,10 +307,10 @@ export default function HomePage() {
               <StatTile label="Week" value="7" detail="Days planned" icon="🍽️" tone="accent" />
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 auto-rows-min">
+            <div className={gridClass}>
 
             {widgets.map((id) => {
-              const span = WIDGET_SPANS[id as WidgetId] ?? "lg:col-span-1";
+              const span = layoutMounted ? widgetSpanClass(id as WidgetId, orientation) : (WIDGET_SPANS[id as WidgetId] ?? "lg:col-span-1");
               switch (id as WidgetId) {
                 case "morningBriefing":
                   return <MorningBriefingSlot key="morningBriefing" span={span} />;
@@ -416,7 +417,7 @@ export default function HomePage() {
               }
             })}
 
-            <div className="lg:col-span-3">
+            <div className={layoutMounted ? homeFooterSpanClass(orientation) : "lg:col-span-3"}>
               <SectionCard title="This Week" description="Meal and family rhythm at a glance" icon="🗓️" tone="#10b981">
                 <DayStrip value="today" onChange={(dayId) => router.push(`/meals?day=${dayId}`)} days={weekDays} />
               </SectionCard>
