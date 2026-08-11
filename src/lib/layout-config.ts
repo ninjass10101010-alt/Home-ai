@@ -263,19 +263,41 @@ export function loadLayoutConfig(): HomeLayoutConfig {
     if (!raw) return cloneDefaultLayout();
     const parsed = JSON.parse(raw);
 
-    // Legacy shape: { widgets: WidgetId[] } — one layout for everything.
-    // Migrate it into both orientations so existing users keep their order.
+    // v1: { widgets: WidgetId[] } — one layout for everything. Migrate it
+    // into all three modes so existing users keep their order.
     if (Array.isArray(parsed?.widgets) && parsed.widgets.length > 0) {
       const migrated = sanitizeLayout(parsed.widgets);
-      return { portrait: migrated, landscape: { widgets: [...migrated.widgets] } };
+      return {
+        phone: migrated,
+        tablet: { widgets: toTabletOrder(migrated.widgets) },
+        desktop: { widgets: [...migrated.widgets] },
+      };
     }
 
-    // Current shape: { portrait: { widgets }, landscape: { widgets } }
-    if (parsed && typeof parsed === "object") {
+    // v2: { portrait: { widgets }, landscape: { widgets } } — tablet starts
+    // from the user's portrait order, partitioned hole-free for 2 columns.
+    if (parsed && typeof parsed === "object" && parsed.portrait && parsed.landscape) {
+      const phone = sanitizeLayout(parsed.portrait?.widgets);
+      const desktop = sanitizeLayout(parsed.landscape?.widgets);
       return {
-        portrait: sanitizeLayout(parsed.portrait?.widgets),
-        landscape: sanitizeLayout(parsed.landscape?.widgets),
+        phone,
+        tablet: { widgets: toTabletOrder(phone.widgets) },
+        desktop,
       };
+    }
+
+    // v3: { phone: { widgets }, tablet: { widgets }, desktop: { widgets } }.
+    // Written by this app, so round-trip exactly (no self-heal reorder — that
+    // is reserved for legacy v1/v2 migration). Missing/empty buckets fall
+    // back to the sanitized defaults.
+    if (parsed && typeof parsed === "object") {
+      const exact = (key: string): OrientationLayout => {
+        const list = parsed?.[key]?.widgets;
+        return Array.isArray(list) && list.length > 0
+          ? { widgets: [...list] }
+          : sanitizeLayout(list);
+      };
+      return { phone: exact("phone"), tablet: exact("tablet"), desktop: exact("desktop") };
     }
     return cloneDefaultLayout();
   } catch {
