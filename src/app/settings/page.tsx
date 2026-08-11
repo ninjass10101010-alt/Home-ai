@@ -5,7 +5,7 @@ import { useState, useEffect } from "react";
 import { useTheme } from "@/hooks/useTheme";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
 import { useAuth } from "@/hooks/useAuth";
-import { type WidgetId, type Orientation, ALL_WIDGETS } from "@/lib/layout-config";
+import { type WidgetId, type LayoutMode, ALL_WIDGETS } from "@/lib/layout-config";
 import { db } from "@/db";
 import PageShell from "@/components/ui/PageShell";
 import PageHeader from "@/components/patterns/PageHeader";
@@ -229,7 +229,7 @@ export default function SettingsPage() {
   const [contacts, setContacts] = useState<any[]>([]);
   const [draggingId, setDraggingId] = useState<WidgetId | null>(null);
   const [dropTargetId, setDropTargetId] = useState<WidgetId | null>(null);
-  const [editingOrientation, setEditingOrientation] = useState<Orientation>(orientation);
+  const [editingOrientation, setEditingOrientation] = useState<LayoutMode>(orientation);
 
   useEffect(() => {
     setMounted(true);
@@ -381,7 +381,7 @@ export default function SettingsPage() {
 
   const handleResetLayout = () => {
     resetLayout();
-    showToast("🔄 Layout reset for portrait and landscape");
+    showToast("🔄 Layout reset for phone, tablet, and desktop");
   };
 
   const inviteMember = async () => {
@@ -415,8 +415,9 @@ export default function SettingsPage() {
       members,
       contacts,
       layout: {
-        portrait: widgetsFor("portrait"),
-        landscape: widgetsFor("landscape"),
+        phone: widgetsFor("phone"),
+        tablet: widgetsFor("tablet"),
+        desktop: widgetsFor("desktop"),
       },
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -671,12 +672,13 @@ export default function SettingsPage() {
             <div className="space-y-3">
               <SegmentedControl
                 options={[
-                  { id: "portrait", label: "📱 Portrait" },
-                  { id: "landscape", label: "🖥️ Landscape" },
+                  { id: "phone", label: "📱 Phone" },
+                  { id: "tablet", label: "📱 Tablet" },
+                  { id: "desktop", label: "🖥️ Desktop" },
                 ]}
                 value={editingOrientation}
-                onChange={(value) => setEditingOrientation(value as Orientation)}
-                aria-label="Layout orientation"
+                onChange={(value) => setEditingOrientation(value as LayoutMode)}
+                aria-label="Layout mode"
               />
               <p className="text-[11px] text-text-muted">
                 Each orientation keeps its own order. {editingOrientation === orientation
