@@ -9,6 +9,7 @@ interface StatTileProps {
   detail?: ReactNode;
   icon?: ReactNode;
   tone?: "accent" | "success" | "warning" | "danger";
+  compact?: boolean;
 }
 
 const toneHex = {
@@ -18,15 +19,18 @@ const toneHex = {
   danger: "#f43f5e",
 };
 
-export default function StatTile({ label, value, detail, icon, tone = "accent" }: StatTileProps) {
+export default function StatTile({ label, value, detail, icon, tone = "accent", compact = false }: StatTileProps) {
   return (
-    <WidgetCard tone={toneHex[tone]} className="min-w-0 flex-1 p-4 lg:aspect-square lg:flex lg:flex-col lg:items-center lg:justify-center">
-      <div className="mb-3 grid h-9 w-9 place-items-center rounded-2xl bg-white/10 text-lg" style={{ color: `color-mix(in srgb, var(--widget-tone) 85%, white)` }}>
+    <WidgetCard
+      tone={toneHex[tone]}
+      className={`min-w-0 flex-1 lg:flex lg:flex-col lg:items-center ${compact ? "p-3 lg:justify-center" : "p-4 lg:aspect-square lg:justify-center"}`}
+    >
+      <div className={`grid place-items-center rounded-2xl bg-white/10 ${compact ? "mb-2 h-8 w-8 text-base" : "mb-3 h-9 w-9 text-lg"}`} style={{ color: `color-mix(in srgb, var(--widget-tone) 85%, white)` }}>
         {icon}
       </div>
-      <div className="text-2xl font-bold tracking-tight text-text-primary display-numeral">{value}</div>
-      <div className="mt-1 text-xs font-medium text-text-secondary">{label}</div>
-      {detail && <div className="mt-1 text-[11px] text-text-muted">{detail}</div>}
+      <div className={`font-bold tracking-tight text-text-primary display-numeral ${compact ? "text-xl" : "text-2xl"}`}>{value}</div>
+      <div className={`mt-1 font-medium text-text-secondary ${compact ? "text-[11px]" : "text-xs"}`}>{label}</div>
+      {detail && <div className={`mt-1 text-text-muted ${compact ? "text-[10px]" : "text-[11px]"}`}>{detail}</div>}
     </WidgetCard>
   );
 }

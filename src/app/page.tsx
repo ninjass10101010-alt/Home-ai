@@ -69,7 +69,7 @@ function MorningBriefingSlot({ span }: { span: string }) {
   const { briefing, loading, ack, ackError } = useMorningBriefing();
   if (loading || !briefing || briefingSectionsEmpty(briefing)) return null;
   return (
-    <div className={`mt-3 lg:mt-0 ${span}`}>
+    <div className={span}>
       <MorningBriefingWidget briefing={briefing} loading={loading} ack={ack} ackError={ackError} />
     </div>
   );
@@ -302,9 +302,9 @@ export default function HomePage() {
 
           <div className="px-4 space-y-6 relative z-10">
             <div className="grid grid-cols-3 gap-3">
-              <StatTile label="Events" value={todayEvents.length} detail="Today" icon="📅" tone={todayEvents.length > 0 ? "warning" : "accent"} />
-              <StatTile label="Tasks" value={pendingTasks.length} detail="Pending" icon="✅" tone={pendingTasks.length > 0 ? "danger" : "success"} />
-              <StatTile label="Week" value="7" detail="Days planned" icon="🍽️" tone="accent" />
+              <StatTile label="Events" value={todayEvents.length} detail="Today" icon="📅" tone={todayEvents.length > 0 ? "warning" : "accent"} compact />
+              <StatTile label="Tasks" value={pendingTasks.length} detail="Pending" icon="✅" tone={pendingTasks.length > 0 ? "danger" : "success"} compact />
+              <StatTile label="Week" value="7" detail="Days planned" icon="🍽️" tone="accent" compact />
             </div>
 
             <div className={gridClass}>
@@ -324,20 +324,27 @@ export default function HomePage() {
                   );
 
                 case "leaderboard":
-                  return <div key="leaderboard" className={`mt-3 lg:mt-0 ${span}`}><HomeLeaderboardWidget /></div>;
+                  return <div key="leaderboard" className={span}><HomeLeaderboardWidget /></div>;
 
                 case "consuelaSuggestions":
-                  return <div key="consuelaSuggestions" className={`mt-3 lg:mt-0 ${span}`}><HomeSuggestionsWidget /></div>;
+                  return <div key="consuelaSuggestions" className={span}><HomeSuggestionsWidget /></div>;
 
-                case "todayEvents":
+                case "todayEvents": {
+                  const visibleEvents = todayEvents.slice(0, 3);
+                  const hiddenEvents = todayEvents.length - visibleEvents.length;
                   return (
                     <div key="todayEvents" className={span}>
-                      <SectionCard title="Today" description={`${todayEvents.length} events on the family calendar`} icon="📅" tone="#3b82f6" className="mt-4 lg:mt-0">
-                        {todayEvents.length === 0 ? (
+                      <SectionCard title="Today" description={`${todayEvents.length} events on the family calendar`} icon="📅" tone="#3b82f6" compact
+                        footer={
+                          hiddenEvents > 0 ? (
+                            <Link href="/calendar" className="tap-sm text-xs font-semibold widget-accent-text">+{hiddenEvents} more · See all →</Link>
+                          ) : undefined
+                        }>
+                        {visibleEvents.length === 0 ? (
                           <EmptyState title="Quiet day" description="No events are scheduled for today." icon="🌿" />
                         ) : (
                           <div className="space-y-2">
-                            {todayEvents.map((event) => (
+                            {visibleEvents.map((event) => (
                               <ListRow
                                 key={event.id}
                                 title={event.title}
@@ -352,6 +359,7 @@ export default function HomePage() {
                       </SectionCard>
                     </div>
                   );
+                }
 
                 case "schedule":
                   return (
@@ -369,15 +377,22 @@ export default function HomePage() {
                     </div>
                   );
 
-                case "tasks":
+                case "tasks": {
+                  const visibleTasks = pendingTasks.slice(0, 3);
+                  const hiddenTasks = pendingTasks.length - visibleTasks.length;
                   return (
                     <div key="tasks" className={span}>
-                      <SectionCard title="Tasks" description={`${pendingTasks.length} pending for the family`} icon="✅" tone="#f43f5e">
-                        {pendingTasks.length === 0 ? (
+                      <SectionCard title="Tasks" description={`${pendingTasks.length} pending for the family`} icon="✅" tone="#f43f5e" compact
+                        footer={
+                          hiddenTasks > 0 ? (
+                            <Link href="/tasks" className="tap-sm text-xs font-semibold widget-accent-text">+{hiddenTasks} more · See all →</Link>
+                          ) : undefined
+                        }>
+                        {visibleTasks.length === 0 ? (
                           <EmptyState title="All caught up" description="No pending tasks right now." icon="🎉" />
                         ) : (
                           <div className="space-y-2">
-                            {pendingTasks.map((task) => (
+                            {visibleTasks.map((task) => (
                               <ListRow
                                 key={task.id}
                                 title={task.title}
@@ -391,6 +406,7 @@ export default function HomePage() {
                       </SectionCard>
                     </div>
                   );
+                }
 
                 case "aiQuickAsk":
                   return (
@@ -418,8 +434,8 @@ export default function HomePage() {
             })}
 
             <div className={layoutMounted ? homeFooterSpanClass(orientation) : "lg:col-span-3"}>
-              <SectionCard title="This Week" description="Meal and family rhythm at a glance" icon="🗓️" tone="#10b981">
-                <DayStrip value="today" onChange={(dayId) => router.push(`/meals?day=${dayId}`)} days={weekDays} />
+              <SectionCard title="This Week" description="Meal and family rhythm at a glance" icon="🗓️" tone="#10b981" compact>
+                <DayStrip value="today" onChange={(dayId) => router.push(`/meals?day=${dayId}`)} days={weekDays} compact />
               </SectionCard>
             </div>
           </div>

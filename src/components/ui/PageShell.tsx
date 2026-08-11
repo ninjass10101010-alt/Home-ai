@@ -9,7 +9,7 @@ interface PageShellProps {
 
 export default function PageShell({ children, className = "", style }: PageShellProps) {
   return (
-    <div className={`min-h-screen bg-[var(--color-canvas)] max-w-lg md:max-w-3xl mx-auto relative overflow-hidden ${className}`} style={style}>
+    <div className={`min-h-screen bg-[var(--color-canvas)] max-w-lg md:max-w-3xl lg:max-w-none mx-auto relative overflow-hidden ${className}`} style={style}>
       <main className="relative z-10 pb-32">{children}</main>
       <CapsuleNav />
     </div>

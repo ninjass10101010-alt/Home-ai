@@ -1,8 +1,9 @@
 // ─── Home Page Layout Config ──────────────────────────────────────────────
 // Allows users to show/hide and reorder widgets on the home page.
 // Persisted to localStorage. Layouts are configured per device orientation:
-// "portrait" (single-column stack, any <1024px portrait viewport) and
-// "landscape" (3-column bento, 1024px+ or portrait-width landscape views).
+// "portrait" (single-column vertical stack, any <1024px portrait viewport) and
+// "landscape" (horizontal filmstrip: widgets are shrink-0 columns wider than
+// the viewport, so the dashboard scrolls left↔right instead of vertically).
 
 export type WidgetId =
   | "morningBriefing"
@@ -67,7 +68,7 @@ export const DEFAULT_LAYOUT: HomeLayoutConfig = {
   },
 };
 
-/** Desktop bento column spans for each widget. Portrait uses 1 col (grid-cols-1). */
+/** Desktop column spans (fallback / non-filmstrip grids). Portrait uses 1 col (grid-cols-1). */
 export const WIDGET_SPANS: Record<WidgetId, string> = {
   morningBriefing: "col-span-1",
   weather: "col-span-3",
@@ -81,14 +82,34 @@ export const WIDGET_SPANS: Record<WidgetId, string> = {
 };
 
 /**
- * Grid classes for the Home bento. The bento must follow the live
- * `orientation` value, NOT the CSS `lg:` breakpoint: on a narrow landscape
- * viewport (<1024px wide, e.g. a phone held sideways) the breakpoint never
- * matches, so only the orientation hook can flip the visuals.
+ * Fixed column widths for the landscape filmstrip. Each widget becomes a
+ * horizontal flex item wider than the viewport can show at once, so the
+ * landscape layout scrolls left↔right (swipe/sideways) instead of
+ * vertically. Hero widgets (weather, this-week) get a 2× width; suggestions
+ * gets 1.3×; the rest are 1× (~360px) — comfortable for a protruding-icon
+ * pastel card on a wide screen.
+ */
+export const WIDGET_WIDTHS: Record<WidgetId, string> = {
+  morningBriefing: "w-[360px]",
+  weather: "w-[720px]",
+  aiQuickAsk: "w-[360px]",
+  consuelaSuggestions: "w-[480px]",
+  leaderboard: "w-[360px]",
+  todayEvents: "w-[360px]",
+  schedule: "w-[360px]",
+  currentMeal: "w-[420px]",
+  tasks: "w-[360px]",
+};
+
+/**
+ * Grid classes for the Home layout. Landscape is a horizontal filmstrip
+ * (flex + overflow-x-auto + gentle proximity snap): every widget is a
+ * shrink-0 column wider than the viewport, so the dashboard scrolls
+ * left↔right. Portrait keeps the single-column vertical stack.
  */
 export function homeGridClass(orientation: Orientation): string {
   return orientation === "landscape"
-    ? "grid grid-cols-3 gap-6 auto-rows-min"
+    ? "flex gap-6 overflow-x-auto pb-4 pt-6 items-start snap-x snap-proximity"
     : "grid grid-cols-1 gap-6 auto-rows-min";
 }
 
@@ -100,17 +121,18 @@ export function homeGridClass(orientation: Orientation): string {
 export const HOME_GRID_FALLBACK = "grid grid-cols-1 lg:grid-cols-3 gap-6 auto-rows-min";
 
 /**
- * Column span for one widget in the live orientation. Spans only exist in
- * landscape; portrait is a single-column stack and must not span.
+ * Class for one widget in the live orientation. Landscape (filmstrip) returns
+ * a shrink-0 snap-start column width; portrait is a single-column stack and
+ * returns "" (no span).
  */
 export function widgetSpanClass(id: WidgetId, orientation: Orientation): string {
   if (orientation !== "landscape") return "";
-  return WIDGET_SPANS[id] ?? "col-span-1";
+  return `shrink-0 snap-start ${WIDGET_WIDTHS[id] ?? "w-[360px]"}`;
 }
 
-/** Full-width (3-col) footer row for the bento; hidden in portrait. */
+/** Filmstrip item width for the bento footer (This Week); "" in portrait. */
 export function homeFooterSpanClass(orientation: Orientation): string {
-  return orientation === "landscape" ? "col-span-3" : "";
+  return orientation === "landscape" ? "shrink-0 snap-start w-[720px]" : "";
 }
 
 export const LAYOUT_STORAGE_KEY = "consuela-home-layout";
