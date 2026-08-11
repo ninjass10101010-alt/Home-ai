@@ -2,26 +2,23 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { Orientation } from "@/lib/layout-config";
+import { computeLayoutMode, type LayoutMode } from "@/lib/layout-config";
 
 const PORTRAIT_MQL = "(orientation: portrait)";
 
 /**
- * Resolve the current orientation bucket. A viewport counts as "portrait"
- * only when BOTH the media query says portrait AND the width is < 1024px —
- * a wide portrait monitor or a landscape tablet keeps the landscape bento.
- * Mirrors the `lg:` breakpoint used by the Home grid (Tailwind lg = 1024px).
+ * Resolve the current layout-mode bucket (SSR-safe): landscape always counts
+ * as "desktop"; portrait splits by width — <700px phone, 700–1279px tablet,
+ * >=1280px desktop (a wide portrait monitor keeps the desktop filmstrip).
  */
-function computeOrientation(): Orientation {
-  if (typeof window === "undefined") return "landscape";
-  const isPortraitMedia = window.matchMedia(PORTRAIT_MQL).matches;
-  const isNarrow = window.innerWidth < 1024;
-  return isPortraitMedia && isNarrow ? "portrait" : "landscape";
+function computeOrientation(): LayoutMode {
+  if (typeof window === "undefined") return "desktop";
+  return computeLayoutMode(window.matchMedia(PORTRAIT_MQL).matches, window.innerWidth);
 }
 
-export function useOrientation(): { orientation: Orientation; mounted: boolean } {
+export function useOrientation(): { orientation: LayoutMode; mounted: boolean } {
   const [mounted, setMounted] = useState(false);
-  const [orientation, setOrientation] = useState<Orientation>("landscape");
+  const [orientation, setOrientation] = useState<LayoutMode>("desktop");
 
   useEffect(() => {
     setMounted(true);
