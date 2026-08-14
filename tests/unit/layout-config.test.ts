@@ -10,12 +10,14 @@ import {
   homeGridClass,
   widgetSpanClass,
   homeFooterSpanClass,
+  tabletSpan,
   WIDGET_SPANS,
   computeLayoutMode,
   cloneDefaultLayout,
   loadLayoutConfig,
   saveLayoutConfig,
   DEFAULT_LAYOUT,
+  HOME_GRID_FALLBACK,
   LAYOUT_STORAGE_KEY,
   type WidgetId,
 } from '@/lib/layout-config';
@@ -62,11 +64,20 @@ describe('homeGridClass', () => {
     expect(cls).not.toContain('grid-cols-3');
   });
 
-  it('renders the horizontal filmstrip for desktop', () => {
+  it('renders the auto-fit tiling grid for desktop', () => {
     const cls = homeGridClass('desktop');
-    expect(cls).toContain('flex');
-    expect(cls).toContain('overflow-x-auto');
-    expect(cls).toContain('snap-x');
+    expect(cls).toContain('grid');
+    expect(cls).toContain('auto-rows-min');
+    expect(cls).toContain('gap-6');
+    expect(cls).toContain('grid-cols-[repeat(auto-fit,minmax(360px,1fr))]');
+    expect(cls).not.toContain('flex');
+    expect(cls).not.toContain('overflow-x-auto');
+    expect(cls).not.toContain('snap-x');
+  });
+
+  it('falls back to a responsive grid with the auto-fit lg tier', () => {
+    expect(HOME_GRID_FALLBACK).toContain('lg:grid-cols-[repeat(auto-fit,minmax(360px,1fr))]');
+    expect(HOME_GRID_FALLBACK).toContain('md:grid-cols-2');
   });
 });
 
@@ -84,15 +95,15 @@ describe('widgetSpanClass', () => {
     expect(widgetSpanClass('tasks', 'tablet')).toBe('col-span-1');
   });
 
-  it('applies the uniform filmstrip width in desktop', () => {
-    expect(widgetSpanClass('weather', 'desktop')).toBe('shrink-0 snap-start w-[360px]');
-    expect(widgetSpanClass('leaderboard', 'desktop')).toBe('shrink-0 snap-start w-[360px]');
-    expect(widgetSpanClass('currentMeal', 'desktop')).toBe('shrink-0 snap-start w-[360px]');
+  it('applies no spans in desktop (auto-fit grid sizes the columns)', () => {
+    expect(widgetSpanClass('weather', 'desktop')).toBe('');
+    expect(widgetSpanClass('leaderboard', 'desktop')).toBe('');
+    expect(widgetSpanClass('currentMeal', 'desktop')).toBe('');
   });
 
   it('falls back safely for unknown ids', () => {
     expect(widgetSpanClass('bogus' as never, 'tablet')).toBe('col-span-1');
-    expect(widgetSpanClass('bogus' as never, 'desktop')).toBe('shrink-0 snap-start w-[360px]');
+    expect(widgetSpanClass('bogus' as never, 'desktop')).toBe('');
   });
 });
 
@@ -105,8 +116,26 @@ describe('homeFooterSpanClass', () => {
     expect(homeFooterSpanClass('tablet')).toBe('col-span-2');
   });
 
-  it('is a filmstrip item in desktop', () => {
-    expect(homeFooterSpanClass('desktop')).toBe('shrink-0 snap-start w-[360px]');
+  it('spans the full row in desktop', () => {
+    expect(homeFooterSpanClass('desktop')).toBe('col-span-full');
+  });
+});
+
+describe('tabletSpan', () => {
+  it('keeps every widget col-span-1 when the visible count is even', () => {
+    expect(tabletSpan(0, 8)).toBe('col-span-1');
+    expect(tabletSpan(3, 8)).toBe('col-span-1');
+    expect(tabletSpan(7, 8)).toBe('col-span-1');
+  });
+
+  it('stretches the last widget to the full row when the count is odd', () => {
+    expect(tabletSpan(0, 9)).toBe('col-span-1');
+    expect(tabletSpan(5, 9)).toBe('col-span-1');
+    expect(tabletSpan(8, 9)).toBe('col-span-2');
+  });
+
+  it('stretches a single widget to the full row', () => {
+    expect(tabletSpan(0, 1)).toBe('col-span-2');
   });
 });
 

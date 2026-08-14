@@ -2,9 +2,9 @@
 // Allows users to show/hide and reorder widgets on the home page.
 // Persisted to localStorage. Layouts are configured per layout mode:
 // "phone" (single-column vertical stack, portrait <700px), "tablet"
-// (uniform 2-column pairing grid, portrait 700–1279px) and "desktop" (horizontal filmstrip:
-// widgets are shrink-0 columns wider than the viewport, so the dashboard
-// scrolls left↔right instead of vertically).
+// (uniform 2-column pairing grid, portrait 700–1279px) and "desktop"
+// (auto-fit tiling grid: repeat(auto-fit, minmax(360px, 1fr)) columns fill
+// the viewport width with uniform cards; scrolls vertically).
 
 export type WidgetId =
   | "morningBriefing"
@@ -116,34 +116,16 @@ export const WIDGET_SPANS: Record<WidgetId, string> = {
 };
 
 /**
- * Fixed column widths for the landscape filmstrip. Each widget becomes a
- * horizontal flex item wider than the viewport can show at once, so the
- * landscape layout scrolls left↔right (swipe/sideways) instead of
- * vertically. Every widget gets the same 360px width — a comfortable
- * column for a protruding-icon pastel card on a wide screen.
- */
-export const WIDGET_WIDTHS: Record<WidgetId, string> = {
-  morningBriefing: "w-[360px]",
-  weather: "w-[360px]",
-  aiQuickAsk: "w-[360px]",
-  consuelaSuggestions: "w-[360px]",
-  leaderboard: "w-[360px]",
-  todayEvents: "w-[360px]",
-  schedule: "w-[360px]",
-  currentMeal: "w-[360px]",
-  tasks: "w-[360px]",
-};
-
-/**
- * Grid classes for the Home layout. Landscape is a horizontal filmstrip
- * (flex + overflow-x-auto + gentle proximity snap): every widget is a
- * shrink-0 column wider than the viewport, so the dashboard scrolls
- * left↔right. Portrait keeps the single-column vertical stack.
+ * Grid classes for the Home layout. Desktop is an auto-fit tiling grid:
+ * `repeat(auto-fit, minmax(360px, 1fr))` fits as many uniform 360px-plus
+ * columns as the viewport holds (3 at 1440px, 5–6 at 2560px, 2 at 1024px
+ * landscape) so every widget is visible at once and the page scrolls
+ * vertically. Portrait keeps the single-column / 2-column stacks.
  */
 export function homeGridClass(mode: LayoutMode): string {
   switch (mode) {
     case "desktop":
-      return "flex gap-6 overflow-x-auto pb-4 pt-6 items-start snap-x snap-proximity";
+      return "grid gap-6 auto-rows-min grid-cols-[repeat(auto-fit,minmax(360px,1fr))]";
     case "tablet":
       return "grid grid-cols-2 gap-6 auto-rows-min";
     case "phone":
@@ -156,17 +138,18 @@ export function homeGridClass(mode: LayoutMode): string {
  * (SSR + first client frame) — keeps today's breakpoint-driven rendering
  * so there is no layout flash while orientation resolves.
  */
-export const HOME_GRID_FALLBACK = "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 auto-rows-min";
+export const HOME_GRID_FALLBACK = "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(360px,1fr))] gap-6 auto-rows-min";
 
 /**
- * Class for one widget in the live orientation. Landscape (filmstrip) returns
- * a shrink-0 snap-start column width; portrait is a single-column stack and
- * returns "" (no span).
+ * Class for one widget in the live orientation. Desktop returns "" (the
+ * auto-fit grid sizes the columns); tablet pairs every widget up as
+ * col-span-1 except a lone last widget of an odd count, which stretches to
+ * the full row; phone is a single-column stack and returns "".
  */
 export function widgetSpanClass(id: WidgetId, mode: LayoutMode): string {
   switch (mode) {
     case "desktop":
-      return `shrink-0 snap-start ${WIDGET_WIDTHS[id] ?? "w-[360px]"}`;
+      return "";
     case "tablet":
       return "col-span-1";
     case "phone":
@@ -174,10 +157,19 @@ export function widgetSpanClass(id: WidgetId, mode: LayoutMode): string {
   }
 }
 
+/**
+ * Tablet span for the widget at `index` of `count` visible widgets:
+ * the last widget of an odd count stretches to fill the row, so an odd
+ * number of uniform 1×1 widgets never leaves an empty half-row.
+ */
+export function tabletSpan(index: number, count: number): string {
+  return index === count - 1 && count % 2 === 1 ? "col-span-2" : "col-span-1";
+}
+
 export function homeFooterSpanClass(mode: LayoutMode): string {
   switch (mode) {
     case "desktop":
-      return "shrink-0 snap-start w-[360px]";
+      return "col-span-full";
     case "tablet":
       return "col-span-2";
     case "phone":
