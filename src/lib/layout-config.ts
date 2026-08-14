@@ -2,7 +2,7 @@
 // Allows users to show/hide and reorder widgets on the home page.
 // Persisted to localStorage. Layouts are configured per layout mode:
 // "phone" (single-column vertical stack, portrait <700px), "tablet"
-// (2-column bento, portrait 700–1279px) and "desktop" (horizontal filmstrip:
+// (uniform 2-column pairing grid, portrait 700–1279px) and "desktop" (horizontal filmstrip:
 // widgets are shrink-0 columns wider than the viewport, so the dashboard
 // scrolls left↔right instead of vertically).
 
@@ -80,22 +80,6 @@ export interface HomeLayoutConfig {
  * top row instead of splitting the pairings below.
  * Portrait keeps the familiar single-column mobile stack.
  */
-/** Widgets that span the full tablet row. */
-const TABLET_FULL_WIDTH: readonly WidgetId[] = ["morningBriefing", "weather", "consuelaSuggestions"];
-
-/**
- * Reorder a single-column order into a hole-free 2-column tablet order:
- * full-width widgets first (in relative order), then the 1-col widgets,
- * which pair up evenly below. CSS-grid sparse auto-flow leaves a hole when a
- * col-span-2 card follows a col-span-1 card, so the full-width group must
- * lead. Preserves the user's relative order within each group.
- */
-export function toTabletOrder(order: WidgetId[]): WidgetId[] {
-  const heroes = order.filter((id) => TABLET_FULL_WIDTH.includes(id));
-  const rest = order.filter((id) => !TABLET_FULL_WIDTH.includes(id));
-  return [...heroes, ...rest];
-}
-
 /** Phone (single-column) default order — the source order tablet derives from. */
 const PHONE_DEFAULT_WIDGETS: WidgetId[] = [
   "morningBriefing", "weather", "aiQuickAsk", "consuelaSuggestions", "leaderboard", "todayEvents", "schedule", "currentMeal", "tasks",
@@ -106,7 +90,7 @@ export const DEFAULT_LAYOUT: HomeLayoutConfig = {
     widgets: [...PHONE_DEFAULT_WIDGETS],
   },
   tablet: {
-    widgets: toTabletOrder([...PHONE_DEFAULT_WIDGETS]),
+    widgets: [...PHONE_DEFAULT_WIDGETS],
   },
   desktop: {
     widgets: ["morningBriefing", "aiQuickAsk", "leaderboard", "weather", "consuelaSuggestions", "currentMeal", "schedule", "tasks", "todayEvents"],
@@ -116,31 +100,14 @@ export const DEFAULT_LAYOUT: HomeLayoutConfig = {
 /**
  * PRE-MOUNT fallback column spans, applied together with HOME_GRID_FALLBACK
  * for the SSR + first-client-frame render (before the layout hook resolves).
- * Responsive so every width band matches its eventual live grid:
- * <md = 1-col phone stack, md = 2-col tablet, lg = 3-col desktop bento.
+ * Every widget is a uniform col-span-1.
  * The live render uses widgetSpanClass() — this map is NOT used post-mount.
  */
 export const WIDGET_SPANS: Record<WidgetId, string> = {
   morningBriefing: "col-span-1",
-  weather: "md:col-span-2 lg:col-span-3",
+  weather: "col-span-1",
   aiQuickAsk: "col-span-1",
-  consuelaSuggestions: "md:col-span-2 lg:col-span-2",
-  leaderboard: "col-span-1",
-  todayEvents: "col-span-1",
-  schedule: "col-span-1",
-  currentMeal: "col-span-1",
-  tasks: "col-span-1",
-};
-
-/**
- * Tablet (2-col grid) column spans. Separate from WIDGET_SPANS: the desktop
- * 3-col spans would overflow a 2-col grid.
- */
-export const TABLET_COL_SPANS: Record<WidgetId, string> = {
-  morningBriefing: "col-span-2",
-  weather: "col-span-2",
-  aiQuickAsk: "col-span-1",
-  consuelaSuggestions: "col-span-2",
+  consuelaSuggestions: "col-span-1",
   leaderboard: "col-span-1",
   todayEvents: "col-span-1",
   schedule: "col-span-1",
@@ -152,19 +119,18 @@ export const TABLET_COL_SPANS: Record<WidgetId, string> = {
  * Fixed column widths for the landscape filmstrip. Each widget becomes a
  * horizontal flex item wider than the viewport can show at once, so the
  * landscape layout scrolls left↔right (swipe/sideways) instead of
- * vertically. Hero widgets (weather, this-week) get a 2× width; suggestions
- * gets 1.3×; the rest are 1× (~360px) — comfortable for a protruding-icon
- * pastel card on a wide screen.
+ * vertically. Every widget gets the same 360px width — a comfortable
+ * column for a protruding-icon pastel card on a wide screen.
  */
 export const WIDGET_WIDTHS: Record<WidgetId, string> = {
   morningBriefing: "w-[360px]",
-  weather: "w-[720px]",
+  weather: "w-[360px]",
   aiQuickAsk: "w-[360px]",
-  consuelaSuggestions: "w-[480px]",
+  consuelaSuggestions: "w-[360px]",
   leaderboard: "w-[360px]",
   todayEvents: "w-[360px]",
   schedule: "w-[360px]",
-  currentMeal: "w-[420px]",
+  currentMeal: "w-[360px]",
   tasks: "w-[360px]",
 };
 
@@ -202,7 +168,7 @@ export function widgetSpanClass(id: WidgetId, mode: LayoutMode): string {
     case "desktop":
       return `shrink-0 snap-start ${WIDGET_WIDTHS[id] ?? "w-[360px]"}`;
     case "tablet":
-      return TABLET_COL_SPANS[id] ?? "col-span-1";
+      return "col-span-1";
     case "phone":
       return "";
   }
@@ -211,7 +177,7 @@ export function widgetSpanClass(id: WidgetId, mode: LayoutMode): string {
 export function homeFooterSpanClass(mode: LayoutMode): string {
   switch (mode) {
     case "desktop":
-      return "shrink-0 snap-start w-[720px]";
+      return "shrink-0 snap-start w-[360px]";
     case "tablet":
       return "col-span-2";
     case "phone":
@@ -269,19 +235,19 @@ export function loadLayoutConfig(): HomeLayoutConfig {
       const migrated = sanitizeLayout(parsed.widgets);
       return {
         phone: migrated,
-        tablet: { widgets: toTabletOrder(migrated.widgets) },
+        tablet: { widgets: [...migrated.widgets] },
         desktop: { widgets: [...migrated.widgets] },
       };
     }
 
     // v2: { portrait: { widgets }, landscape: { widgets } } — tablet starts
-    // from the user's portrait order, partitioned hole-free for 2 columns.
+    // from the user's portrait order (tablet mirrors the phone order).
     if (parsed && typeof parsed === "object" && parsed.portrait && parsed.landscape) {
       const phone = sanitizeLayout(parsed.portrait?.widgets);
       const desktop = sanitizeLayout(parsed.landscape?.widgets);
       return {
         phone,
-        tablet: { widgets: toTabletOrder(phone.widgets) },
+        tablet: { widgets: [...phone.widgets] },
         desktop,
       };
     }

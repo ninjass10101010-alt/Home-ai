@@ -11,9 +11,7 @@ import {
   widgetSpanClass,
   homeFooterSpanClass,
   WIDGET_SPANS,
-  TABLET_COL_SPANS,
   computeLayoutMode,
-  toTabletOrder,
   cloneDefaultLayout,
   loadLayoutConfig,
   saveLayoutConfig,
@@ -78,16 +76,18 @@ describe('widgetSpanClass', () => {
     expect(widgetSpanClass('leaderboard', 'phone')).toBe('');
   });
 
-  it('applies 2-col spans in tablet so the bento tiles hole-free', () => {
-    expect(widgetSpanClass('morningBriefing', 'tablet')).toBe('col-span-2');
-    expect(widgetSpanClass('weather', 'tablet')).toBe('col-span-2');
-    expect(widgetSpanClass('consuelaSuggestions', 'tablet')).toBe('col-span-2');
+  it('applies 1-col spans in tablet so every widget pairs up evenly', () => {
+    expect(widgetSpanClass('morningBriefing', 'tablet')).toBe('col-span-1');
+    expect(widgetSpanClass('weather', 'tablet')).toBe('col-span-1');
+    expect(widgetSpanClass('consuelaSuggestions', 'tablet')).toBe('col-span-1');
     expect(widgetSpanClass('leaderboard', 'tablet')).toBe('col-span-1');
+    expect(widgetSpanClass('tasks', 'tablet')).toBe('col-span-1');
   });
 
-  it('applies filmstrip widths in desktop', () => {
-    expect(widgetSpanClass('weather', 'desktop')).toBe('shrink-0 snap-start w-[720px]');
+  it('applies the uniform filmstrip width in desktop', () => {
+    expect(widgetSpanClass('weather', 'desktop')).toBe('shrink-0 snap-start w-[360px]');
     expect(widgetSpanClass('leaderboard', 'desktop')).toBe('shrink-0 snap-start w-[360px]');
+    expect(widgetSpanClass('currentMeal', 'desktop')).toBe('shrink-0 snap-start w-[360px]');
   });
 
   it('falls back safely for unknown ids', () => {
@@ -106,35 +106,15 @@ describe('homeFooterSpanClass', () => {
   });
 
   it('is a filmstrip item in desktop', () => {
-    expect(homeFooterSpanClass('desktop')).toBe('shrink-0 snap-start w-[720px]');
+    expect(homeFooterSpanClass('desktop')).toBe('shrink-0 snap-start w-[360px]');
   });
 });
 
 describe('pre-mount fallback (WIDGET_SPANS)', () => {
-  it('weather and suggestions use responsive prefixes matching the fallback grid', () => {
-    expect(WIDGET_SPANS.weather).toBe('md:col-span-2 lg:col-span-3');
-    expect(WIDGET_SPANS.consuelaSuggestions).toBe('md:col-span-2 lg:col-span-2');
-    expect(WIDGET_SPANS.leaderboard).toBe('col-span-1');
-  });
-});
-
-describe('TABLET_COL_SPANS', () => {
-  it('contains a col-span-1/2 entry for every widget id', () => {
-    for (const id of Object.keys(TABLET_COL_SPANS)) {
-      expect(TABLET_COL_SPANS[id as WidgetId]).toMatch(/^col-span-[12]$/);
+  it('every widget falls back to a uniform col-span-1', () => {
+    for (const id of Object.keys(WIDGET_SPANS)) {
+      expect(WIDGET_SPANS[id as WidgetId]).toBe('col-span-1');
     }
-  });
-});
-
-describe('toTabletOrder', () => {
-  it('moves full-width widgets first, preserving relative order within each group', () => {
-    const input = ['aiQuickAsk', 'weather', 'leaderboard', 'morningBriefing', 'tasks'] as WidgetId[];
-    expect(toTabletOrder(input)).toEqual(['weather', 'morningBriefing', 'aiQuickAsk', 'leaderboard', 'tasks']);
-  });
-
-  it('keeps an order with no full-width widgets unchanged', () => {
-    const input = ['leaderboard', 'schedule', 'tasks'] as WidgetId[];
-    expect(toTabletOrder(input)).toEqual(input);
   });
 });
 
@@ -145,7 +125,7 @@ describe('cloneDefaultLayout', () => {
     a.phone.widgets.push('morningBriefing');
     expect(a.phone.widgets).toHaveLength(10);
     expect(b.phone.widgets).toHaveLength(9);
-    expect(a.tablet.widgets).toEqual(toTabletOrder(a.phone.widgets.slice(0, 9)));
+    expect(a.tablet.widgets).toEqual(DEFAULT_LAYOUT.phone.widgets);
     expect(a.desktop.widgets).toEqual(DEFAULT_LAYOUT.desktop.widgets);
   });
 });
@@ -166,7 +146,7 @@ describe('layout migration', () => {
     expect(new Set(cfg.desktop.widgets).size).toBe(9);
   });
 
-  it('migrates v2 { portrait, landscape }: phone=portrait, desktop=landscape, tablet=partitioned portrait', () => {
+  it('migrates v2 { portrait, landscape }: phone=portrait, desktop=landscape, tablet=portrait order', () => {
     localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify({
       portrait: { widgets: ['weather', 'aiQuickAsk', 'leaderboard'] },
       landscape: { widgets: ['schedule', 'tasks'] },
@@ -179,6 +159,7 @@ describe('layout migration', () => {
     expect(cfg.tablet.widgets[0]).toBe('morningBriefing');
     expect(cfg.tablet.widgets.slice(1, 3)).toEqual(['consuelaSuggestions', 'weather']);
     expect(cfg.tablet.widgets).toContain('aiQuickAsk');
+    expect(cfg.tablet.widgets).toEqual(cfg.phone.widgets);
   });
 
   it('round-trips a v3 { phone, tablet, desktop } config', () => {
