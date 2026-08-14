@@ -104,6 +104,7 @@ export default function MorningBriefingWidget({ briefing, loading, ack, ackError
       description="What Consuela lined up for today"
       icon="🌅"
       tone={BRIEFING_TONE}
+      className={className}
       action={
         <button
           type="button"
