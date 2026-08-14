@@ -121,7 +121,6 @@ export default function HomeSuggestionsWidget({ className = "" }: { className?: 
     return (
       <SectionCard
         title="Consuela suggests"
-        description="Proactive alerts for the family"
         icon="✨"
         tone="#8b5cf6"
         className={className}
