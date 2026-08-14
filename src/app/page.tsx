@@ -16,7 +16,7 @@ import CurrentMealWidget from "@/components/meals/CurrentMealWidget";
 import { AtmosphericProvider } from "@/hooks/useAtmosphericTheme";
 import AtmosphericBridge from "@/components/ui/AtmosphericBridge";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
-import { WIDGET_SPANS, homeGridClass, homeFooterSpanClass, widgetSpanClass, HOME_GRID_FALLBACK, type WidgetId } from "@/lib/layout-config";
+import { WIDGET_SPANS, homeGridClass, homeFooterSpanClass, widgetSpanClass, tabletSpan, HOME_GRID_FALLBACK, type WidgetId } from "@/lib/layout-config";
 import { useAuth, type AuthUser } from "@/hooks/useAuth";
 import PinModal from "@/components/auth/PinModal";
 import MemberPickerModal from "@/components/auth/MemberPickerModal";
@@ -309,8 +309,12 @@ export default function HomePage() {
 
             <div className={gridClass}>
 
-            {widgets.map((id) => {
-              const span = layoutMounted ? widgetSpanClass(id as WidgetId, orientation) : (WIDGET_SPANS[id as WidgetId] ?? "lg:col-span-1");
+            {widgets.map((id, index) => {
+              const span = layoutMounted
+                ? orientation === "tablet"
+                  ? tabletSpan(index, widgets.length)
+                  : widgetSpanClass(id as WidgetId, orientation)
+                : (WIDGET_SPANS[id as WidgetId] ?? "lg:col-span-1");
               switch (id as WidgetId) {
                 case "morningBriefing":
                   return <MorningBriefingSlot key="morningBriefing" span={span} />;
@@ -334,7 +338,7 @@ export default function HomePage() {
                   const hiddenEvents = todayEvents.length - visibleEvents.length;
                   return (
                     <div key="todayEvents" className={span}>
-                      <SectionCard title="Today" description={`${todayEvents.length} events on the family calendar`} icon="📅" tone="#3b82f6" compact
+                      <SectionCard title="Today" description={`${todayEvents.length} events on the family calendar`} icon="📅" tone="#3b82f6" compact className="h-full"
                         footer={
                           hiddenEvents > 0 ? (
                             <Link href="/calendar" className="tap-sm text-xs font-semibold widget-accent-text">+{hiddenEvents} more · See all →</Link>
@@ -364,7 +368,7 @@ export default function HomePage() {
                 case "schedule":
                   return (
                     <div key="schedule" className={span}>
-                      <ScheduleDisplay schedule={homeScheduleItems} title="Daily Schedule" />
+                      <ScheduleDisplay schedule={homeScheduleItems} title="Daily Schedule" className="h-full" />
                     </div>
                   );
 
@@ -382,7 +386,7 @@ export default function HomePage() {
                   const hiddenTasks = pendingTasks.length - visibleTasks.length;
                   return (
                     <div key="tasks" className={span}>
-                      <SectionCard title="Tasks" description={`${pendingTasks.length} pending for the family`} icon="✅" tone="#f43f5e" compact
+                      <SectionCard title="Tasks" description={`${pendingTasks.length} pending for the family`} icon="✅" tone="#f43f5e" compact className="h-full"
                         footer={
                           hiddenTasks > 0 ? (
                             <Link href="/tasks" className="tap-sm text-xs font-semibold widget-accent-text">+{hiddenTasks} more · See all →</Link>
@@ -411,9 +415,10 @@ export default function HomePage() {
                 case "aiQuickAsk":
                   return (
                     <div key="aiQuickAsk" className={span}>
-                      <Link href="/chat">
+                      <Link href="/chat" className="block h-full">
                         <WidgetCard
                           tone="#8b5cf6"
+                          className="h-full"
                           icon={<span className="grid h-14 w-14 place-items-center"><Icon3D variant="chat" size="md" /></span>}
                         >
                           <div className="flex items-center gap-4 p-5 pl-14">
@@ -434,7 +439,7 @@ export default function HomePage() {
             })}
 
             <div className={layoutMounted ? homeFooterSpanClass(orientation) : "lg:col-span-3"}>
-              <SectionCard title="This Week" description="Meal and family rhythm at a glance" icon="🗓️" tone="#10b981" compact>
+              <SectionCard title="This Week" description="Meal and family rhythm at a glance" icon="🗓️" tone="#10b981" compact className="h-full">
                 <DayStrip value="today" onChange={(dayId) => router.push(`/meals?day=${dayId}`)} days={weekDays} compact />
               </SectionCard>
             </div>
