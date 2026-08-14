@@ -70,7 +70,7 @@ function MorningBriefingSlot({ span }: { span: string }) {
   if (loading || !briefing || briefingSectionsEmpty(briefing)) return null;
   return (
     <div className={span}>
-      <MorningBriefingWidget briefing={briefing} loading={loading} ack={ack} ackError={ackError} />
+      <MorningBriefingWidget briefing={briefing} loading={loading} ack={ack} ackError={ackError} className="h-full" />
     </div>
   );
 }
@@ -322,16 +322,16 @@ export default function HomePage() {
                 case "weather":
                   return (
                     <div key="weather" className={`relative z-10 ${span}`}>
-                      <WeatherWidget />
+                      <WeatherWidget className="h-full" />
                       <AtmosphericBridge />
                     </div>
                   );
 
                 case "leaderboard":
-                  return <div key="leaderboard" className={span}><HomeLeaderboardWidget /></div>;
+                  return <div key="leaderboard" className={span}><HomeLeaderboardWidget className="h-full" /></div>;
 
                 case "consuelaSuggestions":
-                  return <div key="consuelaSuggestions" className={span}><HomeSuggestionsWidget /></div>;
+                  return <div key="consuelaSuggestions" className={span}><HomeSuggestionsWidget className="h-full" /></div>;
 
                 case "todayEvents": {
                   const visibleEvents = todayEvents.slice(0, 3);
@@ -376,7 +376,7 @@ export default function HomePage() {
                   return (
                     <div key="currentMeal" className={span}>
                       <AtmosphericProvider>
-                        <CurrentMealWidget />
+                        <CurrentMealWidget className="h-full" />
                       </AtmosphericProvider>
                     </div>
                   );

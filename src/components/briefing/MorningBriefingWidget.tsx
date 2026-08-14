@@ -58,9 +58,10 @@ export interface MorningBriefingWidgetProps {
   loading: boolean;
   ack: (id: string) => Promise<boolean>;
   ackError: boolean;
+  className?: string;
 }
 
-export default function MorningBriefingWidget({ briefing, loading, ack, ackError }: MorningBriefingWidgetProps) {
+export default function MorningBriefingWidget({ briefing, loading, ack, ackError, className = "" }: MorningBriefingWidgetProps) {
   const [expanded, setExpanded] = useState(false);
   const [acknowledging, setAcknowledging] = useState(false);
 
@@ -84,7 +85,7 @@ export default function MorningBriefingWidget({ briefing, loading, ack, ackError
   if (briefing.acknowledged) {
     return (
       <div className="opacity-60 transition-opacity duration-700">
-        <WidgetCard tone={BRIEFING_TONE} icon="🌅">
+        <WidgetCard tone={BRIEFING_TONE} icon="🌅" className={className}>
           <div className="flex items-center gap-3 p-5 pl-14">
             <div className="min-w-0 flex-1">
               <h3 className="text-base font-bold text-text-primary">Morning Briefing</h3>

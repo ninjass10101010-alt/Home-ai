@@ -75,7 +75,7 @@ function SuggestionRow({
   );
 }
 
-export default function HomeSuggestionsWidget() {
+export default function HomeSuggestionsWidget({ className = "" }: { className?: string }) {
   const [mounted, setMounted] = useState(false);
   const [toast, setToast] = useState<{ msg: string; tone: "success" | "error" } | null>(null);
   const { items, loading, dismiss, act, needsPin, pinError, submitPin, cancelPin } = useSuggestions(20);
@@ -121,8 +121,10 @@ export default function HomeSuggestionsWidget() {
     return (
       <SectionCard
         title="Consuela suggests"
+        description="Proactive alerts for the family"
         icon="✨"
         tone="#8b5cf6"
+        className={className}
         action={<Link href="/suggestions" className="text-sm widget-accent-text">See all →</Link>}
       >
         <EmptyState
@@ -142,6 +144,7 @@ export default function HomeSuggestionsWidget() {
       description="Proactive alerts for the family"
       icon="✨"
       tone="#8b5cf6"
+      className={className}
       action={<Link href="/suggestions" className="text-sm widget-accent-text">See all →</Link>}
     >
       {items.length === 0 && loading ? (

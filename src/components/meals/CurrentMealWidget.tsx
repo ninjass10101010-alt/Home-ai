@@ -40,7 +40,7 @@ const MEAL_THEMES: Record<string, { icon: string; label: string }> = {
   snack:     { icon: "🍎", label: "Snack" },
 };
 
-export default function CurrentMealWidget() {
+export default function CurrentMealWidget({ className = "" }: { className?: string }) {
   const atm = useAtmosphericTheme();
   const [currentMealType, setCurrentMealType] = useState<string>("dinner");
   const [currentTimeStr, setCurrentTimeStr] = useState("");
@@ -106,7 +106,7 @@ export default function CurrentMealWidget() {
   const mealInfo = MEAL_THEMES[currentMealType] ?? MEAL_THEMES.dinner;
 
   return (
-    <WidgetCard tone="#10b981" icon="🍽️">
+    <WidgetCard tone="#10b981" icon="🍽️" className={className}>
       {/* Floating seasonal emoji in corner */}
       <div
         className="absolute top-2 right-2 text-4xl pointer-events-none select-none meal-float-gentle"

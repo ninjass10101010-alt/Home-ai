@@ -1642,7 +1642,7 @@ function StatPill({ icon, label, value, delay, accentColor }: { icon: string; la
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function WeatherWidget() {
+export default function WeatherWidget({ className = "" }: { className?: string }) {
   const { weather } = useWeatherConfig();
   const atm = useAtmosphericTheme();
   const [expanded, setExpanded] = useState(false);
@@ -1760,7 +1760,7 @@ export default function WeatherWidget() {
 
   return (
     <div
-      className="relative"
+      className={`relative ${className}`}
       style={{ animation: mounted ? "weatherCardEnter 1s cubic-bezier(0.34,1.56,0.64,1) both" : undefined }}
     >
       {/* ── Protruding weather icon (top-left overhang) ── */}
@@ -1788,7 +1788,7 @@ export default function WeatherWidget() {
         </div>
       </div>
       <div
-        className="rounded-2xl overflow-hidden relative"
+        className="rounded-2xl overflow-hidden relative h-full"
         style={{
           background: theme.bgGradient,
           border: `1px solid ${atm.glowColor}`,
