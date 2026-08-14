@@ -932,7 +932,7 @@ export default function SettingsPage() {
           <div className="space-y-4 text-sm text-text-secondary">
             <p><strong className="text-text-primary">Show / Hide</strong> — Toggle each widget on or off. Hidden widgets move to the <em>Hidden</em> group at the bottom of this list and stop appearing on the Home dashboard.</p>
             <p><strong className="text-text-primary">Reorder</strong> — Drag the ⋮⋮ handle onto another visible row, or use the ↑ and ↓ buttons. The first row appears first on the Home dashboard.</p>
-            <p><strong className="text-text-primary">Phone / Tablet / Desktop</strong> — Each layout mode keeps its own widget order and visibility. Switch the tabs at the top of this card to edit a different mode; Consuela applies the right layout automatically when your device rotates or resizes.</p>
+            <p><strong className="text-text-primary">Phone / Tablet / Desktop</strong> — Each layout mode keeps its own widget order and visibility. Switch the tabs at the top of this card to edit a different mode; Consuela applies the right layout automatically when your device rotates or resizes. On tablet every widget is the same size and pairs up two per row; on desktop the widgets are uniform-width cards in a sideways filmstrip.</p>
             <p><strong className="text-text-primary">Reset layout</strong> — Restores all three layout modes (phone, tablet, desktop) to their default order and visibility.</p>
           </div>
         </Modal>
