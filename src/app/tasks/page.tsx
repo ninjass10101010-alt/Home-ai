@@ -1014,9 +1014,9 @@ export default function TasksPage() {
 
       <div className="px-4 space-y-5 pb-8">
         <div className="grid gap-3 sm:grid-cols-3">
-          <StatTile label="Pending" value={pending.length} detail="Open tasks" icon="📋" tone="warning" />
-          <StatTile label="Completed" value={thisWeeksCompletedCount} detail="This week" icon="🎉" tone="success" />
-          <StatTile label="Earned" value={weeklyEarned} detail="This week's points" icon="🏆" tone="accent" />
+          <StatTile label="Pending" value={pending.length} detail="Open tasks" icon="📋" tone="warning" compact />
+          <StatTile label="Completed" value={thisWeeksCompletedCount} detail="This week" icon="🎉" tone="success" compact />
+          <StatTile label="Earned" value={weeklyEarned} detail="This week's points" icon="🏆" tone="accent" compact />
         </div>
 
         <SegmentedControl

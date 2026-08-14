@@ -332,9 +332,9 @@ function MealHubContent() {
           ) : (
           <div className="space-y-5">
             <div className="grid gap-3 sm:grid-cols-3">
-              <StatTile label="Planned" value={meals.length} detail="This week" icon="📅" tone="accent" />
-              <StatTile label="Tonight" value={activeMeals.length} detail="Selected day" icon="🌙" tone="warning" />
-              <StatTile label="Sync" value={isSyncing ? "…" : "Ready"} detail="Pantry + grocery" icon="🔁" tone="success" />
+              <StatTile label="Planned" value={meals.length} detail="This week" icon="📅" tone="accent" compact />
+              <StatTile label="Tonight" value={activeMeals.length} detail="Selected day" icon="🌙" tone="warning" compact />
+              <StatTile label="Sync" value={isSyncing ? "…" : "Ready"} detail="Pantry + grocery" icon="🔁" tone="success" compact />
             </div>
 
             <MealsTab
