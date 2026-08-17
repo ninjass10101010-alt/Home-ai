@@ -101,7 +101,7 @@ export default function RecipesTab({
               onClick={() => setFilter(f)}
               className={`shrink-0 cursor-pointer rounded-full px-4 py-1.5 text-xs font-bold tap-sm ${
                 filter === f
-                  ? "bg-[var(--color-accent-selected)] text-white shadow-lg shadow-[var(--color-accent-selected)]/25"
+                  ? "bg-[var(--color-accent-selected)] text-white"
                   : "glass-subtle text-text-secondary hover:text-text-primary"
               }`}
             >
@@ -139,7 +139,7 @@ export default function RecipesTab({
                   aria-label="favorite"
                   className={`absolute right-3 top-3 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full backdrop-blur-md tap-sm ${
                     recipe.favorite
-                      ? "bg-[var(--color-accent-rose)]/90 text-white shadow-lg"
+                      ? "bg-[var(--color-accent-rose)]/90 text-white"
                       : "bg-[var(--color-surface-0)]/60 text-[var(--color-accent-rose)] hover:bg-[var(--color-surface-0)]/85"
                   }`}
                 >
@@ -199,7 +199,7 @@ export default function RecipesTab({
                       className={`w-full cursor-pointer rounded-2xl py-2 text-xs font-bold tap-sm ${
                         isAdded
                           ? "bg-[var(--color-accent-mint)] text-white"
-                          : "bg-[var(--color-accent-selected)] text-white shadow-lg shadow-[var(--color-accent-selected)]/25 hover:opacity-90"
+                          : "bg-[var(--color-accent-selected)] text-white hover:opacity-90"
                       }`}
                     >
                       {isAdded ? "✓ Added!" : `＋ Add to ${activeDay}`}

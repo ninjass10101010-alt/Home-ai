@@ -186,7 +186,7 @@ export default function MealsTab({
           onClick={() => setMealFilter(null)}
           className={`shrink-0 cursor-pointer rounded-full px-3.5 py-1.5 text-xs font-bold tap-sm ${
             !mealFilter
-              ? "bg-[var(--color-accent-selected)] text-white shadow-lg shadow-[var(--color-accent-selected)]/25"
+              ? "bg-[var(--color-accent-selected)] text-white"
               : "glass-subtle text-text-secondary hover:text-text-primary"
           }`}
         >
@@ -200,12 +200,11 @@ export default function MealsTab({
               onClick={() => setMealFilter(mealFilter === type.id ? null : type.id)}
               className={`shrink-0 cursor-pointer rounded-full px-3.5 py-1.5 text-xs font-bold tap-sm flex items-center gap-1.5 ${
                 mealFilter === type.id
-                  ? "text-white shadow-lg"
+                  ? "text-white"
                   : "glass-subtle text-text-secondary hover:text-text-primary"
               }`}
               style={mealFilter === type.id ? {
                 backgroundColor: slotColorVar(type.id),
-                boxShadow: `0 8px 24px ${slotColorVar(type.id)}40`,
               } : undefined}
             >
               <span className="text-sm">{type.icon}</span>

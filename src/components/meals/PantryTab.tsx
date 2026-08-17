@@ -272,7 +272,7 @@ export default function PantryTab({
                   onClick={() => setSection(s.id)}
                   className={`group flex items-center gap-3 rounded-2xl border p-3.5 text-left transition-all duration-150 active:scale-[0.97] ${
                     isSelected
-                      ? "border-2 border-[var(--color-accent-selected)]/40 bg-[var(--color-accent-selected)]/15 shadow-[0_0_20px_var(--color-accent-selected)]/10"
+                      ? "border-2 border-[var(--color-accent-selected)]/40 bg-[var(--color-accent-selected)]/15"
                       : "glass border border-white/10 hover:border-[var(--color-accent-selected)]/30 hover:bg-[var(--color-surface-0)]/40"
                   }`}
                 >
