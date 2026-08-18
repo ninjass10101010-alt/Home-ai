@@ -30,7 +30,7 @@
 - Consumes: nothing new (existing `ListRowProps` unchanged).
 - Produces: ListRow root class no longer contains `tap`; interactive rows (with `onClick`) gain a `focus-visible` accent ring. All ListRow consumers across the app (Settings lists, grocery, pantry, tasks, family members, emergency contacts) inherit the change — no per-consumer edits needed.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/unit/list-row.test.tsx` (`@testing-library/react` is NOT installed — use `react-dom/client` + `act`):
 
@@ -68,12 +68,12 @@ describe("ListRow motion", () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run tests/unit/list-row.test.tsx -v`
 Expected: FAIL — `expect(row.className).not.toContain("tap")` finds `tap` in the class list (current line 30 has `tap`).
 
-- [ ] **Step 3: Remove the tap class from ListRow**
+- [x] **Step 3: Remove the tap class from ListRow**
 
 `src/components/ui/ListRow.tsx:30` — replace:
 
@@ -87,17 +87,17 @@ with:
         className={`group relative flex items-center gap-3 rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/30 p-3 backdrop-blur-xl transition-colors hover:bg-[var(--color-surface-0)]/45 ${onClick ? "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-selected)] focus-visible:ring-offset-2" : ""} ${className}`}
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run tests/unit/list-row.test.tsx -v`
 Expected: PASS (3/3).
 
-- [ ] **Step 5: Typecheck + lint + full test suite**
+- [x] **Step 5: Typecheck + lint + full test suite**
 
 Run: `npm run typecheck && npm run lint && npx vitest run`
 Expected: typecheck clean; lint reports only the pre-existing 73 problems (52 errors / 21 warnings — run `git stash` comparison if unsure); all unit tests pass (112+3).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/components/ui/ListRow.tsx tests/unit/list-row.test.tsx
@@ -125,7 +125,7 @@ git commit -m "feat(ui): remove hover/press scale from ListRow app-wide (tap cla
   - `loadLayoutConfig(): HomeLayoutConfig` — v1/v2/v3 migrate; v4 round-trips exactly
   - Removed: `toggleWidget(list, id)`, `getHiddenWidgets(list)` (replaced by the above)
 
-- [ ] **Step 1: Write the failing tests for the new contract**
+- [x] **Step 1: Write the failing tests for the new contract**
 
 Replace the visibility-related describes in `tests/unit/layout-config.test.ts`. Keep the grid/span/tablet/fallback/clone describes untouched. Add:
 
@@ -279,12 +279,12 @@ Also update the existing `cloneDefaultLayout` describe — it must assert `hidde
 
 Note: the existing test file imports `moveWidgetUp` / `moveWidgetDown` — verify those imports exist in the new test file's import block (they were previously imported transitively; add them explicitly).
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `npx vitest run tests/unit/layout-config.test.ts`
 Expected: FAIL — `OrientationLayout` has no `hidden`; `toggleWidgetVisibility` / `getOrderedWidgetDefs` / `getHiddenWidgetDefs` undefined; migration assertions fail.
 
-- [ ] **Step 3: Implement the v4 storage layer**
+- [x] **Step 3: Implement the v4 storage layer**
 
 `src/lib/layout-config.ts` — make these changes:
 
@@ -440,17 +440,17 @@ export function getHiddenWidgetDefs(layout: OrientationLayout): WidgetDef[] {
 
 Delete `toggleWidget` and `getHiddenWidgets` (they take lists; replaced above).
 
-- [ ] **Step 4: Run the layout tests**
+- [x] **Step 4: Run the layout tests**
 
 Run: `npx vitest run tests/unit/layout-config.test.ts`
 Expected: PASS. If the old `migrates v2` test's exact assertions differ from the new append behavior, adjust the test expectations to match the L6 insertion rule (morningBriefing→0, consuelaSuggestions→1) — but do NOT weaken the hidden/order assertions.
 
-- [ ] **Step 5: Typecheck + full suite**
+- [x] **Step 5: Typecheck + full suite**
 
 Run: `npm run typecheck && npx vitest run`
 Expected: typecheck may fail on `useHomeLayout.tsx` / `page.tsx` / `settings/page.tsx` — those still call `toggleWidget(list, ...)` / `getVisibleWidgets(list)` / `getHiddenWidgets(list)`. That's expected (Task 3 fixes the hook, Task 4 fixes the pages). If ONLY those files fail, proceed.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/lib/layout-config.ts tests/unit/layout-config.test.ts
@@ -476,7 +476,7 @@ git commit -m "feat(ui): v4 home-layout storage — full order + hidden set with
   - `widgetsFor(o)` — full `config[o].widgets` (still the Home render list = visible ids via `getVisibleWidgets` at the page level; Home renders `getVisibleWidgets(config[o]).map(id => id)` — check page.tsx consumers in Task 4)
   - Context value drops `hiddenWidgetsFor` / `hiddenWidgets`, adds `orderedWidgetsFor`.
 
-- [ ] **Step 1: Update imports and toggleFor/visibleWidgetsFor**
+- [x] **Step 1: Update imports and toggleFor/visibleWidgetsFor**
 
 `src/hooks/useHomeLayout.tsx` — change the import from `@/lib/layout-config` to include `toggleWidgetVisibility`, `getVisibleWidgets`, `getOrderedWidgetDefs`, `getHiddenWidgetDefs` (remove `toggleWidget`, `getHiddenWidgets` if imported):
 
@@ -514,21 +514,21 @@ Update the live memos (keep `widgets` as the full order — Home filters at rend
 
 Delete `const hiddenWidgets = useMemo(...)`.
 
-- [ ] **Step 2: Update the context value**
+- [x] **Step 2: Update the context value**
 
 Remove `hiddenWidgets` and `hiddenWidgetsFor` from the provider `value`, add `orderedWidgetsFor`.
 
-- [ ] **Step 3: Typecheck**
+- [x] **Step 3: Typecheck**
 
 Run: `npm run typecheck`
 Expected: FAIL only in `src/app/settings/page.tsx` and `src/app/page.tsx` (they consume `hiddenWidgetsFor` / `hiddenWidgets` / old signatures). Task 4 fixes those. If other files fail, fix them.
 
-- [ ] **Step 4: Run unit tests**
+- [x] **Step 4: Run unit tests**
 
 Run: `npx vitest run`
 Expected: all pass except any page-level test that used `hiddenWidgets` (none exist — layout-config tests were updated in Task 2). 112+ tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/hooks/useHomeLayout.tsx
@@ -547,7 +547,7 @@ git commit -m "feat(ui): hook updates for v4 layout — orderedWidgetsFor, toggl
 - Consumes: `orderedWidgetsFor(o)`, `toggleFor(o, id)`, `moveUpFor/moveDownFor/reorderFor(o, id, idx)` from the hook; `getVisibleWidgets` count via `visibleWidgetsFor(o).length`.
 - Produces: one `space-y-3` list of ALL widgets in full order; hidden rows `opacity-55 transition-opacity duration-300`; ↑/↓ enabled on every row (disabled at full-order ends); drag from ⋮⋮ handle; FLIP animation on reorder; help modal copy update.
 
-- [ ] **Step 1: Replace the two-group render with a single list**
+- [x] **Step 1: Replace the two-group render with a single list**
 
 In `src/app/settings/page.tsx`:
 - Line 215 destructure: remove `hiddenWidgetsFor`, add `orderedWidgetsFor` (and `config`).
@@ -611,7 +611,7 @@ In `src/app/settings/page.tsx`:
               )}
 ```
 
-- [ ] **Step 2: Update state + derived values**
+- [x] **Step 2: Update state + derived values**
 
 Replace the current derived lists (line ~253-254: `editingVisible` / `editingHidden`):
 
@@ -624,7 +624,7 @@ Replace the current derived lists (line ~253-254: `editingVisible` / `editingHid
 
 (`config` is exposed by the hook context — add it to the destructure on line 215.)
 
-- [ ] **Step 3: Update handleToggle + handleDrop**
+- [x] **Step 3: Update handleToggle + handleDrop**
 
 `handleToggle` currently calls `toggleFor` + toast — keep, but the `nextVisible` param now drives the toast directly (no direction guard):
 
@@ -652,7 +652,7 @@ Replace the current derived lists (line ~253-254: `editingVisible` / `editingHid
 
 `handleMoveUp` / `handleMoveDown` stay as-is (they call `moveUpFor`/`moveDownFor` which now operate on the full order via Task 2).
 
-- [ ] **Step 4: Add the FLIP reorder animation**
+- [x] **Step 4: Add the FLIP reorder animation**
 
 Add `useRef` to the react import (line 4 currently imports `useState, useEffect` only). Add state + refs near the top of the Layout section:
 
@@ -710,7 +710,7 @@ The effect depends on `editingOrdered` (a new array identity after every reorder
 
 Note: `el.animate` requires the element to be in the DOM — after React commits the new list, the refs point to the new rows. The old positions were recorded pre-mutation. FLIP works: oldTop = recorded, newTop = post-commit.
 
-- [ ] **Step 5: Update the "N on Home" header + help modal copy**
+- [x] **Step 5: Update the "N on Home" header + help modal copy**
 
 Find the header line rendering the visible count (search for "on Home" / `editingVisible.length`) and make sure it uses `visibleCount`. Update the Help modal copy (find the modal content, likely near the bottom):
 
@@ -720,12 +720,12 @@ Replace copy about Visible/Hidden groups with:
 Widgets are listed in the order they appear on Home. Toggle a widget off and its row stays in place, dimmed — hidden widgets don't appear on the Home dashboard. Use ↑/↓ or drag the ⋮⋮ handle to reorder any row, hidden or visible. Each device type (Phone / Tablet / Desktop) keeps its own order and visibility.
 ```
 
-- [ ] **Step 6: Typecheck + lint + tests**
+- [x] **Step 6: Typecheck + lint + tests**
 
 Run: `npm run typecheck && npm run lint && npx vitest run`
 Expected: typecheck clean (page.tsx was fixed in this task; if `src/app/page.tsx` still fails on `hiddenWidgetsFor` usage, fix it here too — see Task 5 note: the Home page consumes `widgetsFor`/`visibleWidgetsFor` which now return the same shape, so likely no change needed; check for `hiddenWidgets` usage in page.tsx and remove if present).
 
-- [ ] **Step 7: Playwright verification**
+- [x] **Step 7: Playwright verification**
 
 Write `/tmp/verify-calm-motion.py` (pattern from the existing repro scripts — plain `page.goto` + fixed waits, `domcontentloaded`, no networkidle):
 
@@ -739,7 +739,7 @@ Write `/tmp/verify-calm-motion.py` (pattern from the existing repro scripts — 
 
 Keep the script in /tmp (not committed).
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/app/settings/page.tsx
@@ -759,7 +759,7 @@ git commit -m "feat(ui): layout editor single list — in-place toggles, dimmed 
 - Consumes: `useHomeLayout` context (updated shape), `Toggle` props.
 - Produces: final state — Home renders visible widgets only; toggle knob slides; docs current.
 
-- [ ] **Step 1: Check/fix Home page consumers**
+- [x] **Step 1: Check/fix Home page consumers**
 
 `src/app/page.tsx:96` destructures `const { widgets, orientation, mounted: layoutMounted } = useHomeLayout();` and line 312 maps `widgets`. After Task 3, `widgets` is the FULL order (hidden included) — **Home must render only visible widgets**, otherwise hidden widgets appear on Home. Fix — line 96:
 
@@ -782,7 +782,7 @@ and replace the map at line 312 (`visibleWidgets` is `WidgetDef[]`, so the callb
 
 The `tabletSpan(index, visibleWidgets.length)` count change matters: `widgets.length` would always be 9 (full order), which breaks the odd-count logic when a widget is hidden.
 
-- [ ] **Step 2: Toggle knob slide**
+- [x] **Step 2: Toggle knob slide**
 
 `src/components/ui/Toggle.tsx:34-38` — replace:
 
@@ -806,12 +806,12 @@ with:
 
 (`transition-transform` → `transition-all` so the `left-1`↔`left-6` position change animates.)
 
-- [ ] **Step 3: Typecheck + lint + full tests**
+- [x] **Step 3: Typecheck + lint + full tests**
 
 Run: `npm run typecheck && npm run lint && npx vitest run && npm run build`
 Expected: typecheck clean, lint 0 new (73 pre-existing baseline), all unit tests pass, build clean.
 
-- [ ] **Step 4: AGENTS.md updates (mandatory same-session)**
+- [x] **Step 4: AGENTS.md updates (mandatory same-session)**
 
 Update:
 1. **"Current Dashboard Snapshot"** — rewrite the Layout & display portion: single unified list, in-place toggles, hidden rows dimmed in place, v4 storage `{ widgets, hidden }`, reorder glide animation, ListRow motion removal.
@@ -824,11 +824,11 @@ Update:
 3. **Change Log** — append the 2026-08-18 entries (Task 1–5, matching the commits).
 4. **Stream C note** — in the `.tap` exclusion list (where Avatar/Badge/Toggle/Toast/TextField are listed), add ListRow.
 
-- [ ] **Step 5: Final browser smoke**
+- [x] **Step 5: Final browser smoke**
 
 Open http://localhost:3000 in the browser (user side): Home shows only visible widgets; Settings → Layout & display single list; toggles dim in place; arrows glide; drag reorders; Toggle knob slides. Verify light + dark theme.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/app/page.tsx src/components/ui/Toggle.tsx AGENTS.md
