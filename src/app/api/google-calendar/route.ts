@@ -23,12 +23,27 @@ export async function GET(request: NextRequest) {
   const connected = await isGoogleConnected();
 
   if (!connected) {
-    return NextResponse.json({
-      ok: true,
-      connected: false,
-      source: "static",
-      events: [],
-    });
+    // Composio-backed sync: no direct OAuth grant, but the Drogon/Consuela
+    // cron job populates consuela_google_calendar_events via Composio MCP.
+    // Serve those cached events so the calendar page still shows real data.
+    try {
+      const cached = await readCachedEvents();
+      return NextResponse.json({
+        ok: true,
+        connected: true,
+        source: "composio",
+        account_email: null,
+        last_sync_at: null,
+        events: cached,
+      });
+    } catch (e: any) {
+      return NextResponse.json({
+        ok: true,
+        connected: false,
+        source: "static",
+        events: [],
+      });
+    }
   }
 
   if (sync === "now") {
