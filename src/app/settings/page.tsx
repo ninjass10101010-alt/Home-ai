@@ -702,8 +702,6 @@ export default function SettingsPage() {
                   return (
                     <div
                       key={widget.id}
-                      draggable
-                      onDragStart={handleDragStart(widget.id)}
                       onDragOver={handleDragOver(widget.id)}
                       onDragLeave={handleDragLeave(widget.id)}
                       onDrop={handleDrop(widget.id)}
@@ -716,6 +714,8 @@ export default function SettingsPage() {
                         leftRailColor="var(--color-accent-sage)"
                         leading={
                           <span
+                            draggable
+                            onDragStart={handleDragStart(widget.id)}
                             className="grid h-9 w-6 cursor-grab place-items-center text-text-muted active:cursor-grabbing"
                             aria-hidden="true"
                             title="Drag to reorder"
