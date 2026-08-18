@@ -59,7 +59,7 @@ export const WeatherProvider = ({ children }: { children: ReactNode }) => {
         const parsed: Partial<WeatherConfig> = JSON.parse(stored);
         setWeather({
           location:
-            typeof parsed.location === 'string' && parsed.location.trim()
+            typeof parsed.location === 'string' && parsed.location.trim() && parsed.location.trim() !== 'New York, NY'
               ? parsed.location.trim()
               : defaultWeatherConfig.location,
           unit: parsed.unit === 'C' ? 'C' : 'F',

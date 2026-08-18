@@ -481,13 +481,13 @@ export default function CalendarPage() {
     cancelSchedEdit();
   };
 
-  const syncGoogleEvents = async () => {
+  const syncGoogleEvents = async (silent = false) => {
     setIsSyncing(true);
     try {
       const res = await fetch("/api/google-calendar?sync=now");
       const data = await res.json();
       if (!data.connected) {
-        showToast("Connect Google in Settings → Integrations");
+        if (!silent) showToast("Connect Google in Settings → Integrations");
         return;
       }
       if (data.events?.length) {
@@ -522,16 +522,23 @@ export default function CalendarPage() {
           }
           return filtered;
         });
-        showToast(`\u2705 Synced ${data.events.length} Google events`);
+        if (!silent) showToast(`\u2705 Synced ${data.events.length} Google events`);
       } else {
-        showToast("No Google Calendar events found");
+        if (!silent) showToast("No Google Calendar events found");
       }
     } catch {
-      showToast("\u274C Sync failed");
+      if (!silent) showToast("\u274C Sync failed");
     } finally {
       setIsSyncing(false);
     }
   };
+
+  // Auto-load Google Calendar events on mount so the calendar shows real
+  // school/holiday events without requiring a manual Sync tap.
+  useEffect(() => {
+    syncGoogleEvents(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const isSelectedToday = selectedDay === today.getDate() && month === today.getMonth() && year === today.getFullYear();
   const selectedDateLabel = isSelectedToday ? "Today" : `${MONTHS[month].slice(0, 3)} ${selectedDay}`;
@@ -580,7 +587,7 @@ export default function CalendarPage() {
               </p>
             </div>
             <button
-              onClick={syncGoogleEvents}
+              onClick={() => syncGoogleEvents(false)}
               disabled={isSyncing}
               className="calendar-sync-btn"
             >

@@ -15,7 +15,7 @@ export interface WeatherConfig {
 
 // Default weather configuration
 export const defaultWeatherConfig: WeatherConfig = {
-  location: 'New York, NY',
+  location: 'Holland, MI',
   unit: 'F',
   timeOfDay: 'auto',
   season: 'auto',
