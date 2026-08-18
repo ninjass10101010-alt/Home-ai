@@ -32,7 +32,7 @@ export default function Toggle({ checked, onCheckedChange, label, description, d
         } ${disabled ? "opacity-50" : ""}`}
       >
         <span
-          className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-transform duration-200 ${
+          className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all duration-200 ${
             checked ? "left-6" : "left-1"
           }`}
         />

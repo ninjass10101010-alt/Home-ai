@@ -93,7 +93,7 @@ export default function HomePage() {
 
   const router = useRouter();
   const { currentUser, isLoggedIn, logout, sessionRemainingMs, sessionWarning, extendSession } = useAuth();
-  const { widgets, orientation, mounted: layoutMounted } = useHomeLayout();
+  const { visibleWidgets, orientation, mounted: layoutMounted } = useHomeLayout();
   const gridClass = layoutMounted ? homeGridClass(orientation) : HOME_GRID_FALLBACK;
 
   const sessionSecondsRemaining = Math.ceil(sessionRemainingMs / 1000);
@@ -309,13 +309,14 @@ export default function HomePage() {
 
             <div className={gridClass}>
 
-            {widgets.map((id, index) => {
+            {visibleWidgets.map((w, index) => {
+              const id = w.id;
               const span = layoutMounted
                 ? orientation === "tablet"
-                  ? tabletSpan(index, widgets.length)
-                  : widgetSpanClass(id as WidgetId, orientation)
-                : (WIDGET_SPANS[id as WidgetId] ?? "lg:col-span-1");
-              switch (id as WidgetId) {
+                  ? tabletSpan(index, visibleWidgets.length)
+                  : widgetSpanClass(id, orientation)
+                : (WIDGET_SPANS[id] ?? "lg:col-span-1");
+              switch (id) {
                 case "morningBriefing":
                   return <MorningBriefingSlot key="morningBriefing" span={span} />;
 
