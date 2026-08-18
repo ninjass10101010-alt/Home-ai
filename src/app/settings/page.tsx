@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTheme } from "@/hooks/useTheme";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
 import { useAuth } from "@/hooks/useAuth";
@@ -212,7 +212,7 @@ function VersionCard() {
 
 export default function SettingsPage() {
   const { theme, setMode, setAccentColor, setContrastBoost, setAccentHex } = useTheme();
-  const { orientation, widgetsFor, visibleWidgetsFor, hiddenWidgetsFor, moveUpFor, moveDownFor, reorderFor, toggleFor, resetLayout, setSuppressRehydrate } = useHomeLayout();
+  const { config, orientation, widgetsFor, visibleWidgetsFor, orderedWidgetsFor, moveUpFor, moveDownFor, reorderFor, toggleFor, resetLayout, setSuppressRehydrate } = useHomeLayout();
   const fog = useFogConfig();
   const { currentUser, isLoggedIn, logout } = useAuth();
   const [toast, setToast] = useState<string | null>(null);
@@ -230,6 +230,10 @@ export default function SettingsPage() {
   const [draggingId, setDraggingId] = useState<WidgetId | null>(null);
   const [dropTargetId, setDropTargetId] = useState<WidgetId | null>(null);
   const [editingOrientation, setEditingOrientation] = useState<LayoutMode>(orientation);
+
+  const rowRefs = useRef(new Map<WidgetId, HTMLDivElement | null>());
+  const prevPositions = useRef<Map<WidgetId, number> | null>(null);
+  const reorderPending = useRef(false);
 
   useEffect(() => {
     setMounted(true);
@@ -250,20 +254,34 @@ export default function SettingsPage() {
 
   const widgetLabel = (id: WidgetId) => ALL_WIDGETS.find((w) => w.id === id)?.label ?? id;
 
+  const editingOrdered = orderedWidgetsFor(editingOrientation);
   const editingVisible = visibleWidgetsFor(editingOrientation);
-  const editingHidden = hiddenWidgetsFor(editingOrientation);
+  const hiddenIds = new Set(config[editingOrientation].hidden);
+  const visibleCount = editingVisible.length;
+
+  const recordPositions = () => {
+    const map = new Map<WidgetId, number>();
+    for (const [id, el] of rowRefs.current) {
+      if (el) map.set(id, el.getBoundingClientRect().top);
+    }
+    prevPositions.current = map;
+    reorderPending.current = true;
+  };
 
   const handleMoveUp = (id: WidgetId) => {
+    recordPositions();
     moveUpFor(editingOrientation, id);
     showToast(`↕️ Moved ${widgetLabel(id)} up (${editingOrientation})`);
   };
 
   const handleMoveDown = (id: WidgetId) => {
+    recordPositions();
     moveDownFor(editingOrientation, id);
     showToast(`↕️ Moved ${widgetLabel(id)} down (${editingOrientation})`);
   };
 
   const handleReorder = (id: WidgetId, targetIndex: number) => {
+    recordPositions();
     reorderFor(editingOrientation, id, targetIndex);
     showToast(`↕️ Reordered ${widgetLabel(id)} (${editingOrientation})`);
   };
@@ -296,7 +314,7 @@ export default function SettingsPage() {
     setDraggingId(null);
     setDropTargetId(null);
     if (!sourceId || sourceId === targetId) return;
-    const targetIndex = visibleWidgetsFor(editingOrientation).findIndex((w) => w.id === targetId);
+    const targetIndex = editingOrdered.findIndex((w) => w.id === targetId);
     if (targetIndex === -1) return;
     handleReorder(sourceId, targetIndex);
   };
@@ -305,6 +323,27 @@ export default function SettingsPage() {
     setDraggingId(null);
     setDropTargetId(null);
   };
+
+  useEffect(() => {
+    if (!reorderPending.current || !prevPositions.current) return;
+    reorderPending.current = false;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduced) return;
+    const prev = prevPositions.current;
+    prevPositions.current = null;
+    for (const [id, el] of rowRefs.current) {
+      if (!el) continue;
+      const oldTop = prev.get(id);
+      if (oldTop === undefined) continue;
+      const newTop = el.getBoundingClientRect().top;
+      const delta = oldTop - newTop;
+      if (Math.abs(delta) < 1) continue;
+      el.animate(
+        [{ transform: `translateY(${delta}px)` }, { transform: "translateY(0)" }],
+        { duration: 260, easing: "cubic-bezier(0.22, 1, 0.36, 1)" }
+      );
+    }
+  }, [editingOrdered]);
 
   const setTargetColor = (target: AccentTarget, value: string) => {
     const hex = normalizeHex(value);
@@ -686,22 +725,18 @@ export default function SettingsPage() {
                   : `Your device is in ${orientation} — the ${orientation} layout applies automatically.`}
               </p>
               <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.18em] text-text-muted">
-                <span>Visible</span>
-                <span>{editingVisible.length} on Home</span>
+                <span>All widgets</span>
+                <span>{visibleCount} on Home</span>
               </div>
-              {editingVisible.length === 0 && (
-                <EmptyState
-                  title="No visible widgets"
-                  description="Turn on a widget from the Hidden group below to start building your Home."
-                  icon="🧩"
-                />
-              )}
               <div className="space-y-3">
-                {editingVisible.map((widget, index) => {
+                {editingOrdered.map((widget, index) => {
                   const isDropTarget = dropTargetId === widget.id && draggingId !== widget.id;
+                  const isHidden = hiddenIds.has(widget.id);
                   return (
                     <div
                       key={widget.id}
+                      ref={(el) => { rowRefs.current.set(widget.id, el); }}
+                      data-widget-id={widget.id}
                       onDragOver={handleDragOver(widget.id)}
                       onDragLeave={handleDragLeave(widget.id)}
                       onDrop={handleDrop(widget.id)}
@@ -712,6 +747,7 @@ export default function SettingsPage() {
                         title={widget.label}
                         subtitle={widget.description}
                         leftRailColor="var(--color-accent-sage)"
+                        className={isHidden ? "opacity-55 transition-opacity duration-300" : "transition-opacity duration-300"}
                         leading={
                           <span
                             draggable
@@ -726,14 +762,12 @@ export default function SettingsPage() {
                         trailing={
                           <div className="flex items-center gap-1">
                             <Toggle
-                              checked
-                              onCheckedChange={(checked) => {
-                                if (!checked) handleToggle(widget.id, false);
-                              }}
-                              aria-label={`Hide ${widget.label}`}
+                              checked={!isHidden}
+                              onCheckedChange={(checked) => handleToggle(widget.id, checked)}
+                              aria-label={`${isHidden ? "Show" : "Hide"} ${widget.label}`}
                             />
                             <IconButton size="sm" variant="ghost" aria-label={`Move ${widget.label} up`} disabled={index === 0} onClick={() => handleMoveUp(widget.id)}>↑</IconButton>
-                            <IconButton size="sm" variant="ghost" aria-label={`Move ${widget.label} down`} disabled={index === editingVisible.length - 1} onClick={() => handleMoveDown(widget.id)}>↓</IconButton>
+                            <IconButton size="sm" variant="ghost" aria-label={`Move ${widget.label} down`} disabled={index === editingOrdered.length - 1} onClick={() => handleMoveDown(widget.id)}>↓</IconButton>
                           </div>
                         }
                       />
@@ -741,44 +775,8 @@ export default function SettingsPage() {
                   );
                 })}
               </div>
-
-              {editingHidden.length > 0 && (
-                <>
-                  <div className="mt-6 flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-text-muted">
-                    <span className="h-px flex-1 bg-white/10" />
-                    <span>Hidden · {editingHidden.length}</span>
-                    <span className="h-px flex-1 bg-white/10" />
-                  </div>
-                  <div className="space-y-3">
-                    {editingHidden.map((widget) => (
-                      <ListRow
-                        key={widget.id}
-                        title={widget.label}
-                        subtitle={widget.description}
-                        leftRailColor="var(--color-accent-sage)"
-                        className="opacity-55"
-                        leading={<span className="grid h-9 w-6 place-items-center text-text-muted" aria-hidden="true">⋮⋮</span>}
-                        trailing={
-                          <div className="flex items-center gap-1">
-                            <Toggle
-                              checked={false}
-                              onCheckedChange={(checked) => {
-                                if (checked) handleToggle(widget.id, true);
-                              }}
-                              aria-label={`Show ${widget.label}`}
-                            />
-                            <IconButton size="sm" variant="ghost" aria-label={`Reorder ${widget.label}`} disabled aria-disabled>
-                              ↑
-                            </IconButton>
-                            <IconButton size="sm" variant="ghost" aria-label={`Reorder ${widget.label}`} disabled aria-disabled>
-                              ↓
-                            </IconButton>
-                          </div>
-                        }
-                      />
-                    ))}
-                  </div>
-                </>
+              {visibleCount === 0 && (
+                <p className="text-xs text-text-muted">All widgets are hidden — turn one on to fill the Home dashboard.</p>
               )}
             </div>
             <div className="mt-4 flex gap-2">
@@ -930,8 +928,7 @@ export default function SettingsPage() {
 
         <Modal open={helpModalOpen} onClose={() => setHelpModalOpen(false)} title="Layout & display help" description="Control which widgets appear on your Home dashboard." footer={<SoftButton variant="secondary" onClick={() => setHelpModalOpen(false)} className="flex-1">Got it</SoftButton>}>
           <div className="space-y-4 text-sm text-text-secondary">
-            <p><strong className="text-text-primary">Show / Hide</strong> — Toggle each widget on or off. Hidden widgets move to the <em>Hidden</em> group at the bottom of this list and stop appearing on the Home dashboard.</p>
-            <p><strong className="text-text-primary">Reorder</strong> — Drag the ⋮⋮ handle onto another visible row, or use the ↑ and ↓ buttons. The first row appears first on the Home dashboard.</p>
+            <p>Widgets are listed in the order they appear on Home. Toggle a widget off and its row stays in place, dimmed — hidden widgets don&apos;t appear on the Home dashboard. Use ↑/↓ or drag the ⋮⋮ handle to reorder any row, hidden or visible. Each device type (Phone / Tablet / Desktop) keeps its own order and visibility.</p>
             <p><strong className="text-text-primary">Phone / Tablet / Desktop</strong> — Each layout mode keeps its own widget order and visibility. Switch the tabs at the top of this card to edit a different mode; Consuela applies the right layout automatically when your device rotates or resizes. On tablet every widget is the same size and pairs up two per row (the last card stretches across the row if the count is odd); on desktop the widgets tile into a grid that fills the screen, with every card the same width.</p>
             <p><strong className="text-text-primary">Reset layout</strong> — Restores all three layout modes (phone, tablet, desktop) to their default order and visibility.</p>
           </div>
