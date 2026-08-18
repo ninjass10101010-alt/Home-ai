@@ -16,7 +16,7 @@ import CurrentMealWidget from "@/components/meals/CurrentMealWidget";
 import { AtmosphericProvider } from "@/hooks/useAtmosphericTheme";
 import AtmosphericBridge from "@/components/ui/AtmosphericBridge";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
-import { WIDGET_SPANS, homeGridClass, homeFooterSpanClass, widgetSpanClass, tabletSpan, HOME_GRID_FALLBACK, type WidgetId } from "@/lib/layout-config";
+import { WIDGET_SPANS, homeGridClass, homeFooterSpanClass, widgetSpanClass, tabletSpan, HOME_GRID_FALLBACK } from "@/lib/layout-config";
 import { useAuth, type AuthUser } from "@/hooks/useAuth";
 import PinModal from "@/components/auth/PinModal";
 import MemberPickerModal from "@/components/auth/MemberPickerModal";
