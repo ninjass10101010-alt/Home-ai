@@ -59,8 +59,10 @@ export const ALL_WIDGETS: WidgetDef[] = [
 ];
 
 export interface OrientationLayout {
-  /** Ordered list of visible widget ids for one orientation. */
+  /** Full ordered list of ALL widget ids — stable positions, hidden included. */
   widgets: WidgetId[];
+  /** Subset of widgets currently hidden (not rendered on Home). */
+  hidden: WidgetId[];
 }
 
 export interface HomeLayoutConfig {
@@ -86,15 +88,9 @@ const PHONE_DEFAULT_WIDGETS: WidgetId[] = [
 ];
 
 export const DEFAULT_LAYOUT: HomeLayoutConfig = {
-  phone: {
-    widgets: [...PHONE_DEFAULT_WIDGETS],
-  },
-  tablet: {
-    widgets: [...PHONE_DEFAULT_WIDGETS],
-  },
-  desktop: {
-    widgets: ["morningBriefing", "aiQuickAsk", "leaderboard", "weather", "consuelaSuggestions", "currentMeal", "schedule", "tasks", "todayEvents"],
-  },
+  phone: { widgets: [...PHONE_DEFAULT_WIDGETS], hidden: [] },
+  tablet: { widgets: [...PHONE_DEFAULT_WIDGETS], hidden: [] },
+  desktop: { widgets: ["morningBriefing", "aiQuickAsk", "leaderboard", "weather", "consuelaSuggestions", "currentMeal", "schedule", "tasks", "todayEvents"], hidden: [] },
 };
 
 /**
@@ -183,21 +179,27 @@ const VALID_IDS = new Set<WidgetId>(ALL_WIDGETS.map((w) => w.id));
 
 export function cloneDefaultLayout(): HomeLayoutConfig {
   return {
-    phone: { widgets: [...DEFAULT_LAYOUT.phone.widgets] },
-    tablet: { widgets: [...DEFAULT_LAYOUT.tablet.widgets] },
-    desktop: { widgets: [...DEFAULT_LAYOUT.desktop.widgets] },
+    phone: { widgets: [...DEFAULT_LAYOUT.phone.widgets], hidden: [] },
+    tablet: { widgets: [...DEFAULT_LAYOUT.tablet.widgets], hidden: [] },
+    desktop: { widgets: [...DEFAULT_LAYOUT.desktop.widgets], hidden: [] },
   };
 }
 
 /**
- * Validate + self-heal a single orientation's widget list: drop unknown ids
- * and append missing defaults (L6 — the consuela widgets are inserted at
- * their default positions so they don't get buried at the bottom of Home).
+ * Validate + self-heal one orientation's layout. Accepts a v4 object
+ * `{ widgets, hidden }` or a legacy visible-only list. Unknown ids are
+ * dropped; missing widget ids are appended in the mode's default order
+ * (L6: morningBriefing → index 0, consuelaSuggestions → index 1);
+ * `hidden` keeps only valid known ids.
  */
-function sanitizeLayout(list: unknown): OrientationLayout {
-  if (!Array.isArray(list) || list.length === 0) {
-    return { widgets: [...DEFAULT_LAYOUT.desktop.widgets] };
-  }
+function sanitizeLayout(input: unknown): OrientationLayout {
+  const isObject = input !== null && typeof input === "object";
+  const list = isObject && Array.isArray((input as { widgets?: unknown }).widgets)
+    ? (input as { widgets: unknown[] }).widgets
+    : Array.isArray(input) ? input : [];
+  const hasHidden = isObject && Array.isArray((input as { hidden?: unknown }).hidden);
+  const hiddenList = hasHidden ? (input as { hidden: unknown[] }).hidden : [];
+
   const sanitized = list.filter((id): id is WidgetId => typeof id === "string" && VALID_IDS.has(id as WidgetId));
   const present = new Set(sanitized);
   const missing = ALL_WIDGETS.map((w) => w.id).filter((id) => !present.has(id));
@@ -211,7 +213,12 @@ function sanitizeLayout(list: unknown): OrientationLayout {
       widgets.push(id);
     }
   }
-  return { widgets };
+  // Explicit hidden list (v4) is validated as-is; legacy visible-only lists
+  // (v1/v2/v3) imply the missing ids ARE the hidden ones.
+  const hidden = hasHidden
+    ? hiddenList.filter((id): id is WidgetId => typeof id === "string" && VALID_IDS.has(id as WidgetId))
+    : missing;
+  return { widgets, hidden };
 }
 
 export function loadLayoutConfig(): HomeLayoutConfig {
@@ -221,40 +228,33 @@ export function loadLayoutConfig(): HomeLayoutConfig {
     if (!raw) return cloneDefaultLayout();
     const parsed = JSON.parse(raw);
 
-    // v1: { widgets: WidgetId[] } — one layout for everything. Migrate it
-    // into all three modes so existing users keep their order.
+    // v1: { widgets: WidgetId[] } — one layout for everything.
     if (Array.isArray(parsed?.widgets) && parsed.widgets.length > 0) {
       const migrated = sanitizeLayout(parsed.widgets);
       return {
-        phone: migrated,
-        tablet: { widgets: [...migrated.widgets] },
-        desktop: { widgets: [...migrated.widgets] },
+        phone: { widgets: [...migrated.widgets], hidden: [...migrated.hidden] },
+        tablet: { widgets: [...migrated.widgets], hidden: [...migrated.hidden] },
+        desktop: { widgets: [...migrated.widgets], hidden: [...migrated.hidden] },
       };
     }
 
-    // v2: { portrait: { widgets }, landscape: { widgets } } — tablet starts
-    // from the user's portrait order (tablet mirrors the phone order).
+    // v2: { portrait: { widgets }, landscape: { widgets } }.
     if (parsed && typeof parsed === "object" && parsed.portrait && parsed.landscape) {
       const phone = sanitizeLayout(parsed.portrait?.widgets);
       const desktop = sanitizeLayout(parsed.landscape?.widgets);
       return {
-        phone,
-        tablet: { widgets: [...phone.widgets] },
-        desktop,
+        phone: { widgets: [...phone.widgets], hidden: [...phone.hidden] },
+        tablet: { widgets: [...phone.widgets], hidden: [...phone.hidden] },
+        desktop: { widgets: [...desktop.widgets], hidden: [...desktop.hidden] },
       };
     }
 
-    // v3: { phone: { widgets }, tablet: { widgets }, desktop: { widgets } }.
-    // Written by this app, so round-trip exactly (no self-heal reorder — that
-    // is reserved for legacy v1/v2 migration). Missing/empty buckets fall
-    // back to the sanitized defaults.
+    // v3 (visible-only lists, no hidden key) or v4 ({ widgets, hidden }):
+    // per-mode buckets. sanitizeLayout preserves the given list order and
+    // appends missing ids; v3 buckets gain hidden = missing ids; v4 hidden
+    // round-trips exactly (unknown ids dropped).
     if (parsed && typeof parsed === "object") {
-      const exact = (key: string): OrientationLayout => {
-        const list = parsed?.[key]?.widgets;
-        return Array.isArray(list) && list.length > 0
-          ? { widgets: [...list] }
-          : sanitizeLayout(list);
-      };
+      const exact = (key: string): OrientationLayout => sanitizeLayout(parsed?.[key]);
       return { phone: exact("phone"), tablet: exact("tablet"), desktop: exact("desktop") };
     }
     return cloneDefaultLayout();
@@ -307,22 +307,29 @@ export function moveWidgetTo(widgets: WidgetId[], id: WidgetId, targetIndex: num
   return list;
 }
 
-/** Toggle a widget on/off. If turning on, appends to end. */
-export function toggleWidget(widgets: WidgetId[], id: WidgetId): WidgetId[] {
-  if (widgets.includes(id)) {
-    return widgets.filter((w) => w !== id);
-  }
-  return [...widgets, id];
+/** Toggle a widget on/off without touching the order. */
+export function toggleWidgetVisibility(layout: OrientationLayout, id: WidgetId): OrientationLayout {
+  const hidden = layout.hidden.includes(id)
+    ? layout.hidden.filter((w) => w !== id)
+    : [...layout.hidden, id];
+  return { widgets: layout.widgets, hidden };
 }
 
 /** Return visible widgets as WidgetDef[] in the user's saved order. */
-export function getVisibleWidgets(widgets: WidgetId[]): WidgetDef[] {
+export function getVisibleWidgets(layout: OrientationLayout): WidgetDef[] {
+  const hidden = new Set(layout.hidden);
   const map = new Map(ALL_WIDGETS.map((w) => [w.id, w]));
-  return widgets.map((id) => map.get(id)).filter((w): w is WidgetDef => Boolean(w));
+  return layout.widgets.filter((id) => !hidden.has(id)).map((id) => map.get(id)).filter((w): w is WidgetDef => Boolean(w));
 }
 
-/** Return hidden widgets as WidgetDef[] in master order. */
-export function getHiddenWidgets(widgets: WidgetId[]): WidgetDef[] {
-  const present = new Set(widgets);
-  return ALL_WIDGETS.filter((w) => !present.has(w.id));
+/** Return ALL widgets as WidgetDef[] in the user's saved order (hidden included). */
+export function getOrderedWidgetDefs(layout: OrientationLayout): WidgetDef[] {
+  const map = new Map(ALL_WIDGETS.map((w) => [w.id, w]));
+  return layout.widgets.map((id) => map.get(id)).filter((w): w is WidgetDef => Boolean(w));
+}
+
+/** Return hidden widgets as WidgetDef[] in the saved order. */
+export function getHiddenWidgetDefs(layout: OrientationLayout): WidgetDef[] {
+  const map = new Map(ALL_WIDGETS.map((w) => [w.id, w]));
+  return layout.hidden.map((id) => map.get(id)).filter((w): w is WidgetDef => Boolean(w));
 }

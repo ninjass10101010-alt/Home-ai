@@ -19,7 +19,14 @@ import {
   DEFAULT_LAYOUT,
   HOME_GRID_FALLBACK,
   LAYOUT_STORAGE_KEY,
+  moveWidgetUp,
+  moveWidgetDown,
+  toggleWidgetVisibility,
+  getVisibleWidgets,
+  getOrderedWidgetDefs,
+  getHiddenWidgetDefs,
   type WidgetId,
+  type OrientationLayout,
 } from '@/lib/layout-config';
 
 describe('computeLayoutMode', () => {
@@ -148,56 +155,126 @@ describe('pre-mount fallback (WIDGET_SPANS)', () => {
 });
 
 describe('cloneDefaultLayout', () => {
-  it('returns all three modes with independent arrays', () => {
+  it('returns all three modes with independent arrays and empty hidden', () => {
     const a = cloneDefaultLayout();
     const b = cloneDefaultLayout();
     a.phone.widgets.push('morningBriefing');
+    a.phone.hidden.push('tasks');
     expect(a.phone.widgets).toHaveLength(10);
-    expect(b.phone.widgets).toHaveLength(9);
+    expect(a.phone.hidden).toEqual(['tasks']);
+    expect(b.phone.hidden).toEqual([]);
     expect(a.tablet.widgets).toEqual(DEFAULT_LAYOUT.phone.widgets);
     expect(a.desktop.widgets).toEqual(DEFAULT_LAYOUT.desktop.widgets);
   });
 });
 
-describe('layout migration', () => {
+describe('v4 storage (full order + hidden)', () => {
+  const base: OrientationLayout = {
+    widgets: ['morningBriefing', 'weather', 'aiQuickAsk', 'consuelaSuggestions', 'leaderboard', 'todayEvents', 'schedule', 'currentMeal', 'tasks'],
+    hidden: [],
+  };
+
+  it('toggleWidgetVisibility adds to hidden without touching order', () => {
+    const next = toggleWidgetVisibility(base, 'weather');
+    expect(next.widgets).toEqual(base.widgets);
+    expect(next.hidden).toEqual(['weather']);
+  });
+
+  it('toggleWidgetVisibility removes from hidden on the second toggle', () => {
+    const next = toggleWidgetVisibility(toggleWidgetVisibility(base, 'weather'), 'weather');
+    expect(next.hidden).toEqual([]);
+    expect(next.widgets).toEqual(base.widgets);
+  });
+
+  it('getVisibleWidgets filters hidden and preserves order', () => {
+    const next = toggleWidgetVisibility(base, 'weather');
+    const visible = getVisibleWidgets(next);
+    expect(visible.map((w) => w.id)).toEqual(['morningBriefing', 'aiQuickAsk', 'consuelaSuggestions', 'leaderboard', 'todayEvents', 'schedule', 'currentMeal', 'tasks']);
+  });
+
+  it('getOrderedWidgetDefs returns all 9 in order including hidden', () => {
+    const next = toggleWidgetVisibility(base, 'tasks');
+    expect(getOrderedWidgetDefs(next).map((w) => w.id)).toEqual(base.widgets);
+  });
+
+  it('getHiddenWidgetDefs returns hidden defs in master order', () => {
+    const next = toggleWidgetVisibility(base, 'tasks');
+    expect(getHiddenWidgetDefs(next).map((w) => w.id)).toEqual(['tasks']);
+  });
+
+  it('moveWidgetUp/Down operate on the full order (hidden rows reorder too)', () => {
+    const withHidden = { ...base, hidden: ['tasks'] };
+    const up = moveWidgetUp(withHidden.widgets, 'tasks');
+    expect(up.indexOf('tasks')).toBe(base.widgets.indexOf('tasks') - 1);
+    const down = moveWidgetDown(withHidden.widgets, 'weather');
+    expect(down.indexOf('weather')).toBe(base.widgets.indexOf('weather') + 1);
+  });
+});
+
+describe('v4 layout migration', () => {
   beforeEach(() => {
     localStorage.clear();
   });
 
-  it('migrates v1 { widgets } into all three modes', () => {
+  it('migrates v1 { widgets } into all three modes with hidden = missing', () => {
     localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify({ widgets: ['tasks', 'weather'] }));
     const cfg = loadLayoutConfig();
     expect(cfg.phone.widgets[0]).toBe('morningBriefing');
     expect(cfg.phone.widgets).toContain('tasks');
     expect(cfg.phone.widgets).toContain('weather');
     expect(new Set(cfg.phone.widgets).size).toBe(9);
-    expect(new Set(cfg.tablet.widgets).size).toBe(9);
-    expect(new Set(cfg.desktop.widgets).size).toBe(9);
+    expect(cfg.phone.hidden).toEqual(expect.arrayContaining(['morningBriefing', 'aiQuickAsk', 'consuelaSuggestions', 'leaderboard', 'todayEvents', 'schedule', 'currentMeal']));
+    expect(cfg.tablet.widgets).toEqual(cfg.phone.widgets);
+    expect(cfg.tablet.hidden).toEqual(cfg.phone.hidden);
   });
 
-  it('migrates v2 { portrait, landscape }: phone=portrait, desktop=landscape, tablet=portrait order', () => {
+  it('migrates v2 { portrait, landscape } preserving order and hidden', () => {
     localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify({
       portrait: { widgets: ['weather', 'aiQuickAsk', 'leaderboard'] },
       landscape: { widgets: ['schedule', 'tasks'] },
     }));
     const cfg = loadLayoutConfig();
-    expect(cfg.phone.widgets.slice(0, 3)).toEqual(['morningBriefing', 'consuelaSuggestions', 'weather']);
-    expect(cfg.phone.widgets).toContain('aiQuickAsk');
-    expect(cfg.desktop.widgets[0]).toBe('morningBriefing');
+    expect(cfg.phone.widgets.slice(0, 2)).toEqual(['morningBriefing', 'consuelaSuggestions']);
+    expect(cfg.phone.widgets.indexOf('weather')).toBeLessThan(cfg.phone.widgets.indexOf('aiQuickAsk'));
+    expect(cfg.phone.widgets.indexOf('aiQuickAsk')).toBeLessThan(cfg.phone.widgets.indexOf('leaderboard'));
+    expect(cfg.phone.hidden).toHaveLength(6);
     expect(cfg.desktop.widgets.indexOf('schedule')).toBeLessThan(cfg.desktop.widgets.indexOf('tasks'));
-    expect(cfg.tablet.widgets[0]).toBe('morningBriefing');
-    expect(cfg.tablet.widgets.slice(1, 3)).toEqual(['consuelaSuggestions', 'weather']);
-    expect(cfg.tablet.widgets).toContain('aiQuickAsk');
-    expect(cfg.tablet.widgets).toEqual(cfg.phone.widgets);
+    expect(cfg.desktop.hidden).toHaveLength(7);
   });
 
-  it('round-trips a v3 { phone, tablet, desktop } config', () => {
+  it('migrates v3 { phone, tablet, desktop } visible-only lists', () => {
+    localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify({
+      phone: { widgets: ['weather', 'tasks'] },
+      tablet: { widgets: ['tasks', 'weather'] },
+      desktop: { widgets: ['weather'] },
+    }));
+    const cfg = loadLayoutConfig();
+    expect(cfg.phone.widgets).toEqual(['morningBriefing', 'consuelaSuggestions', 'weather', 'tasks', 'aiQuickAsk', 'leaderboard', 'currentMeal', 'schedule', 'todayEvents']);
+    expect(cfg.phone.hidden).toHaveLength(7);
+    expect(cfg.tablet.widgets).toEqual(['morningBriefing', 'consuelaSuggestions', 'tasks', 'weather', 'aiQuickAsk', 'leaderboard', 'currentMeal', 'schedule', 'todayEvents']);
+    expect(cfg.tablet.hidden).toHaveLength(7);
+    expect(cfg.desktop.widgets).toEqual(['morningBriefing', 'consuelaSuggestions', 'weather', 'aiQuickAsk', 'leaderboard', 'currentMeal', 'schedule', 'tasks', 'todayEvents']);
+    expect(cfg.desktop.hidden).toHaveLength(8);
+  });
+
+  it('self-heals a partial v4 config (hidden preserved, missing widgets appended)', () => {
     const cfg = cloneDefaultLayout();
-    cfg.tablet.widgets = ['weather', 'tasks'];
+    cfg.tablet.widgets = ['tasks', 'weather', 'morningBriefing'];
+    cfg.tablet.hidden = ['aiQuickAsk', 'leaderboard'];
     saveLayoutConfig(cfg);
     const loaded = loadLayoutConfig();
-    expect(loaded.tablet.widgets).toEqual(['weather', 'tasks']);
-    expect(loaded.phone.widgets).toEqual(cloneDefaultLayout().phone.widgets);
+    expect(loaded.tablet.widgets).toEqual(['tasks', 'consuelaSuggestions', 'weather', 'morningBriefing', 'aiQuickAsk', 'leaderboard', 'currentMeal', 'schedule', 'todayEvents']);
+    expect(loaded.tablet.hidden).toEqual(['aiQuickAsk', 'leaderboard']);
+  });
+
+  it('drops unknown hidden ids and appends missing widget ids', () => {
+    localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify({
+      phone: { widgets: ['weather'], hidden: ['bogus', 'tasks'] },
+    }));
+    const cfg = loadLayoutConfig();
+    expect(cfg.phone.hidden).toEqual(['tasks']);
+    expect(cfg.phone.widgets).toHaveLength(9);
+    expect(cfg.phone.widgets).toContain('morningBriefing');
   });
 
   it('falls back to defaults on corrupt JSON', () => {
