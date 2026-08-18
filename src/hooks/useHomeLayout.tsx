@@ -13,9 +13,9 @@ import {
   moveWidgetUp,
   moveWidgetDown,
   moveWidgetTo,
-  toggleWidget,
+  toggleWidgetVisibility,
   getVisibleWidgets,
-  getHiddenWidgets,
+  getOrderedWidgetDefs,
 } from "@/lib/layout-config";
 import { useOrientation } from "@/hooks/useOrientation";
 
@@ -27,7 +27,6 @@ interface LayoutContextValue {
   /** Ordered visible widget ids for the LIVE orientation (what Home renders). */
   widgets: WidgetId[];
   visibleWidgets: WidgetDef[];
-  hiddenWidgets: WidgetDef[];
   mounted: boolean;
   /** Mutators for the LIVE orientation. */
   moveUp: (id: WidgetId) => void;
@@ -39,7 +38,7 @@ interface LayoutContextValue {
   /** Read/mutate a SPECIFIC orientation (used by the Settings editor). */
   widgetsFor: (o: LayoutMode) => WidgetId[];
   visibleWidgetsFor: (o: LayoutMode) => WidgetDef[];
-  hiddenWidgetsFor: (o: LayoutMode) => WidgetDef[];
+  orderedWidgetsFor: (o: LayoutMode) => WidgetDef[];
   moveUpFor: (o: LayoutMode, id: WidgetId) => void;
   moveDownFor: (o: LayoutMode, id: WidgetId) => void;
   reorderFor: (o: LayoutMode, id: WidgetId, targetIndex: number) => void;
@@ -125,46 +124,46 @@ export function LayoutProvider({ children }: { children: ReactNode }) {
 
   const moveUp = useCallback(
     (id: WidgetId) => {
-      setConfig((prev) => ({ ...prev, [orientation]: { widgets: moveWidgetUp(prev[orientation].widgets, id) } }));
+      setConfig((prev) => ({ ...prev, [orientation]: { ...prev[orientation], widgets: moveWidgetUp(prev[orientation].widgets, id) } }));
     },
     [orientation]
   );
 
   const moveDown = useCallback(
     (id: WidgetId) => {
-      setConfig((prev) => ({ ...prev, [orientation]: { widgets: moveWidgetDown(prev[orientation].widgets, id) } }));
+      setConfig((prev) => ({ ...prev, [orientation]: { ...prev[orientation], widgets: moveWidgetDown(prev[orientation].widgets, id) } }));
     },
     [orientation]
   );
 
   const reorder = useCallback(
     (id: WidgetId, targetIndex: number) => {
-      setConfig((prev) => ({ ...prev, [orientation]: { widgets: moveWidgetTo(prev[orientation].widgets, id, targetIndex) } }));
+      setConfig((prev) => ({ ...prev, [orientation]: { ...prev[orientation], widgets: moveWidgetTo(prev[orientation].widgets, id, targetIndex) } }));
     },
     [orientation]
   );
 
   const toggle = useCallback(
     (id: WidgetId) => {
-      setConfig((prev) => ({ ...prev, [orientation]: { widgets: toggleWidget(prev[orientation].widgets, id) } }));
+      setConfig((prev) => ({ ...prev, [orientation]: toggleWidgetVisibility(prev[orientation], id) }));
     },
     [orientation]
   );
 
   const moveUpFor = useCallback((o: LayoutMode, id: WidgetId) => {
-    setConfig((prev) => ({ ...prev, [o]: { widgets: moveWidgetUp(prev[o].widgets, id) } }));
+    setConfig((prev) => ({ ...prev, [o]: { ...prev[o], widgets: moveWidgetUp(prev[o].widgets, id) } }));
   }, []);
 
   const moveDownFor = useCallback((o: LayoutMode, id: WidgetId) => {
-    setConfig((prev) => ({ ...prev, [o]: { widgets: moveWidgetDown(prev[o].widgets, id) } }));
+    setConfig((prev) => ({ ...prev, [o]: { ...prev[o], widgets: moveWidgetDown(prev[o].widgets, id) } }));
   }, []);
 
   const reorderFor = useCallback((o: LayoutMode, id: WidgetId, targetIndex: number) => {
-    setConfig((prev) => ({ ...prev, [o]: { widgets: moveWidgetTo(prev[o].widgets, id, targetIndex) } }));
+    setConfig((prev) => ({ ...prev, [o]: { ...prev[o], widgets: moveWidgetTo(prev[o].widgets, id, targetIndex) } }));
   }, []);
 
   const toggleFor = useCallback((o: LayoutMode, id: WidgetId) => {
-    setConfig((prev) => ({ ...prev, [o]: { widgets: toggleWidget(prev[o].widgets, id) } }));
+    setConfig((prev) => ({ ...prev, [o]: toggleWidgetVisibility(prev[o], id) }));
   }, []);
 
   const resetLayout = useCallback(() => {
@@ -174,7 +173,7 @@ export function LayoutProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const isVisible = useCallback(
-    (id: WidgetId) => config[orientation].widgets.includes(id),
+    (id: WidgetId) => !config[orientation].hidden.includes(id),
     [config, orientation]
   );
 
@@ -189,18 +188,17 @@ export function LayoutProvider({ children }: { children: ReactNode }) {
   );
 
   const visibleWidgetsFor = useCallback(
-    (o: LayoutMode) => getVisibleWidgets(config[o].widgets),
+    (o: LayoutMode) => getVisibleWidgets(config[o]),
     [config]
   );
 
-  const hiddenWidgetsFor = useCallback(
-    (o: LayoutMode) => getHiddenWidgets(config[o].widgets),
+  const orderedWidgetsFor = useCallback(
+    (o: LayoutMode) => getOrderedWidgetDefs(config[o]),
     [config]
   );
 
   const widgets = config[orientation].widgets;
-  const visibleWidgets = useMemo(() => getVisibleWidgets(widgets), [widgets]);
-  const hiddenWidgets = useMemo(() => getHiddenWidgets(widgets), [widgets]);
+  const visibleWidgets = useMemo(() => getVisibleWidgets(config[orientation]), [config, orientation]);
 
   return (
     <LayoutContext.Provider
@@ -209,7 +207,6 @@ export function LayoutProvider({ children }: { children: ReactNode }) {
         orientation,
         widgets,
         visibleWidgets,
-        hiddenWidgets,
         mounted,
         moveUp,
         moveDown,
@@ -219,7 +216,7 @@ export function LayoutProvider({ children }: { children: ReactNode }) {
         getIndex,
         widgetsFor,
         visibleWidgetsFor,
-        hiddenWidgetsFor,
+        orderedWidgetsFor,
         moveUpFor,
         moveDownFor,
         reorderFor,
