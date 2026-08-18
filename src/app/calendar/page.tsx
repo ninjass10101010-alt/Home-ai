@@ -498,7 +498,16 @@ export default function CalendarPage() {
           for (const ge of data.events) {
             const startIso = ge.start_iso || "";
             if (!startIso) continue;
-            const d = new Date(startIso);
+            // All-day events carry a date-only "YYYY-MM-DD" string; `new Date()`
+            // parses that as UTC midnight and shifts the day back one in US
+            // timezones. Parse it as a local calendar date instead.
+            let d: Date;
+            if (ge.all_day && /^\d{4}-\d{2}-\d{2}$/.test(startIso)) {
+              const [y, m, dd] = startIso.split("-").map(Number);
+              d = new Date(y, m - 1, dd);
+            } else {
+              d = new Date(startIso);
+            }
             if (Number.isNaN(d.getTime())) continue;
             const evYear = d.getFullYear();
             const evMonth = d.getMonth();
