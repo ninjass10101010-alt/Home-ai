@@ -24,8 +24,9 @@ interface LayoutContextValue {
   config: HomeLayoutConfig;
   /** Live layout-mode bucket (phone/tablet/desktop). */
   orientation: LayoutMode;
-  /** Ordered visible widget ids for the LIVE orientation (what Home renders). */
+  /** Full widget order for the LIVE orientation (hidden included); Home renders `visibleWidgets`. */
   widgets: WidgetId[];
+  /** Visible (non-hidden) widget defs for the LIVE orientation — what Home renders. */
   visibleWidgets: WidgetDef[];
   mounted: boolean;
   /** Mutators for the LIVE orientation. */

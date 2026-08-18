@@ -212,7 +212,7 @@ function VersionCard() {
 
 export default function SettingsPage() {
   const { theme, setMode, setAccentColor, setContrastBoost, setAccentHex } = useTheme();
-  const { config, orientation, widgetsFor, visibleWidgetsFor, orderedWidgetsFor, moveUpFor, moveDownFor, reorderFor, toggleFor, resetLayout, setSuppressRehydrate } = useHomeLayout();
+  const { config, orientation, visibleWidgetsFor, orderedWidgetsFor, moveUpFor, moveDownFor, reorderFor, toggleFor, resetLayout, setSuppressRehydrate } = useHomeLayout();
   const fog = useFogConfig();
   const { currentUser, isLoggedIn, logout } = useAuth();
   const [toast, setToast] = useState<string | null>(null);
@@ -454,9 +454,9 @@ export default function SettingsPage() {
       members,
       contacts,
       layout: {
-        phone: widgetsFor("phone"),
-        tablet: widgetsFor("tablet"),
-        desktop: widgetsFor("desktop"),
+        phone: config.phone,
+        tablet: config.tablet,
+        desktop: config.desktop,
       },
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });

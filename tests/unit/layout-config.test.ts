@@ -267,6 +267,17 @@ describe('v4 layout migration', () => {
     expect(loaded.tablet.hidden).toEqual(['aiQuickAsk', 'leaderboard']);
   });
 
+  it('round-trips a full v4 config exactly (the shape the app writes)', () => {
+    const cfg = cloneDefaultLayout();
+    cfg.phone.widgets = ['leaderboard', 'tasks', 'morningBriefing', 'todayEvents', 'schedule', 'aiQuickAsk', 'weather', 'consuelaSuggestions', 'currentMeal'];
+    cfg.phone.hidden = ['schedule', 'currentMeal'];
+    saveLayoutConfig(cfg);
+    const loaded = loadLayoutConfig();
+    expect(loaded.phone).toEqual(cfg.phone);
+    expect(loaded.tablet).toEqual(cfg.tablet);
+    expect(loaded.desktop).toEqual(cfg.desktop);
+  });
+
   it('drops unknown hidden ids and appends missing widget ids', () => {
     localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify({
       phone: { widgets: ['weather'], hidden: ['bogus', 'tasks'] },
