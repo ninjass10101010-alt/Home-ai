@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import Link from "next/link";
 import WidgetCard from "@/components/patterns/WidgetCard";
 import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
 
@@ -80,12 +81,22 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
 
   if (schedule.length === 0) {
     return (
-      <WidgetCard tone="#22d3ee" icon="🕐" className={className}>
-        <div className="flex flex-col items-center gap-2 py-6 text-text-muted">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-8 h-8 text-text-muted">
-            <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48 2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48 2.83-2.83" strokeLinecap="round" />
-          </svg>
-          <p className="text-xs">No items scheduled</p>
+      <WidgetCard tone="#22d3ee" className={className}>
+        <div className="relative shrink-0 border-b border-white/10 p-4 pb-3 text-center">
+          <div className="relative mx-auto h-9 w-9">
+            <div aria-hidden="true" className="absolute inset-0" style={{ background: "radial-gradient(circle, rgba(34,211,238,0.4) 0%, transparent 70%)", filter: "blur(8px)", animation: "weatherGlowPulse 7s ease-in-out infinite" }} />
+            <div className="relative grid h-9 w-9 place-items-center text-xl leading-none" style={{ filter: "drop-shadow(0 6px 10px rgba(0,0,0,0.35))" }}>🕐</div>
+          </div>
+          <h3 className="mt-1.5 text-sm font-bold text-text-primary">{title}</h3>
+          <span className="mt-0.5 text-[10px] font-medium text-text-muted">0 upcoming</span>
+        </div>
+        <div className="flex min-h-0 flex-1 flex-col p-4">
+          <div className="flex flex-col items-center gap-2 py-6 text-text-muted">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-8 h-8 text-text-muted">
+              <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48 2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48 2.83-2.83" strokeLinecap="round" />
+            </svg>
+            <p className="text-xs">No items scheduled</p>
+          </div>
         </div>
       </WidgetCard>
     );
@@ -126,21 +137,23 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
   };
 
   return (
-    <WidgetCard tone="#22d3ee" icon="🕐" className={className}>
-      <div className="flex items-center justify-between gap-3 p-5 pl-14 border-b border-white/10">
-        <h2 className="text-text-primary font-semibold text-base">{title}</h2>
-        <span className="text-text-muted text-[10px] font-medium shrink-0">
-          {upcomingCount} upcoming
-        </span>
+    <WidgetCard tone="#22d3ee" className={className}>
+      <div className="flex flex-col items-center border-b border-white/10 p-4 text-center">
+        <div className="relative h-9 w-9">
+          <div aria-hidden="true" className="absolute inset-0" style={{ background: "radial-gradient(circle, rgba(34,211,238,0.4) 0%, transparent 70%)", filter: "blur(8px)", animation: "weatherGlowPulse 7s ease-in-out infinite" }} />
+          <div className="relative grid h-9 w-9 place-items-center text-xl leading-none" style={{ filter: "drop-shadow(0 6px 10px rgba(0,0,0,0.35))" }}>🕐</div>
+        </div>
+        <h2 className="mt-1.5 text-sm font-bold text-text-primary">{title}</h2>
+        <span className="mt-0.5 text-[10px] font-medium text-text-muted">{upcomingCount} upcoming</span>
       </div>
-      <div className="p-5">
+      <div className="flex min-h-0 flex-1 flex-col p-5">
         {sortedSchedule.length === 0 ? (
-          <div className="flex flex-col items-center gap-2 py-4 text-text-muted">
+          <div className="flex flex-1 flex-col items-center justify-center gap-2 py-4 text-text-muted">
             <p className="text-xs">All done for today 🎉</p>
           </div>
         ) : (
-          <div className="space-y-2">
-            {sortedSchedule.map((item, idx) => {
+          <div className="space-y-2 flex-1">
+            {sortedSchedule.slice(0, 3).map((item, idx) => {
               const [r, g, b] = getAccentRgb(item.color || "green");
               return (
               <div
@@ -179,6 +192,13 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
               </div>
               );
             })}
+          </div>
+        )}
+        {sortedSchedule.length > 3 && (
+          <div className="mt-3 border-t border-white/10 pt-3">
+            <Link href="/calendar" className="tap-sm text-xs font-semibold widget-accent-text">
+              +{sortedSchedule.length - 3} more · See all →
+            </Link>
           </div>
         )}
       </div>
