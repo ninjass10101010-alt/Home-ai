@@ -1763,8 +1763,8 @@ export default function WeatherWidget({ className = "" }: { className?: string }
       className={`relative ${className}`}
       style={{ animation: mounted ? "weatherCardEnter 1s cubic-bezier(0.34,1.56,0.64,1) both" : undefined }}
     >
-      {/* ── Protruding weather icon (top-left overhang) ── */}
-      <div className="absolute z-30 pointer-events-none" style={{ top: -24, left: -24 }}>
+      {/* ── Weather icon (centered top strip) ── */}
+      <div className="relative z-30 pointer-events-none flex justify-center pt-5">
         <div className="relative w-[96px] h-[96px]">
           <div
             aria-hidden="true"
@@ -1788,7 +1788,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
         </div>
       </div>
       <div
-        className="rounded-2xl overflow-hidden relative h-full"
+        className="rounded-2xl overflow-hidden relative h-full flex flex-col"
         style={{
           background: theme.bgGradient,
           border: `1px solid ${atm.glowColor}`,
@@ -1830,7 +1830,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
 
         {/* ── Glassmorphism content overlay ── */}
         <div
-          className="relative z-20 p-5 pl-[80px]"
+          className="relative z-20 flex flex-1 min-h-0 flex-col p-5"
           style={{
             backdropFilter: "blur(14px) saturate(1.3)",
             background: "linear-gradient(180deg, rgba(15,23,42,0.28), rgba(15,23,42,0.18))",
@@ -1869,7 +1869,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
           </div>
 
           {/* Main display row */}
-          <div className="flex items-center gap-3 mb-4">
+          <div className="flex flex-1 items-center gap-3 mb-4">
             <div className="flex-1 min-w-0">
               <div key={tempKey} className="flex items-start leading-none mb-1"
                 style={{ animation: tempKey > 0 ? "weatherTempPop 0.7s cubic-bezier(0.34,1.56,0.64,1)" : undefined }}>
