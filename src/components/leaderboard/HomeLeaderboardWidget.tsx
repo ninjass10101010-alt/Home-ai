@@ -112,7 +112,7 @@ export default function HomeLeaderboardWidget({ className = "" }: { className?: 
 
   if (!mounted) {
     return (
-      <SectionCard title="This Week's Leaderboard" icon="🏆" tone="#f59e0b" className={className}>
+      <SectionCard title="This Week's Leaderboard" icon="🏆" tone="#f59e0b" centeredHeader className={className}>
         <div className="space-y-2">
           {[1, 2, 3].map((i) => (
             <div key={i} className="h-12 rounded-2xl bg-white/5 animate-pulse" />
@@ -127,7 +127,7 @@ export default function HomeLeaderboardWidget({ className = "" }: { className?: 
   if (entries.length === 0 || entries.every(e => e.points === 0)) {
     return (
       <Link href="/tasks" className="block h-full active:scale-[0.99] transition-transform">
-        <SectionCard title="This Week's Leaderboard" icon="🏆" tone="#f59e0b" className={className}>
+        <SectionCard title="This Week's Leaderboard" icon="🏆" tone="#f59e0b" centeredHeader className={className}>
           <EmptyState
             title="Be the first!"
             description="Complete a task to start the race this week."
@@ -151,6 +151,7 @@ export default function HomeLeaderboardWidget({ className = "" }: { className?: 
         description={`Resets in ${daysUntilReset} day${daysUntilReset !== 1 ? "s" : ""}`}
         icon="🏆"
         tone="#f59e0b"
+        centeredHeader
         className={className}
         action={<span className="text-sm font-medium widget-accent-text">See all →</span>}
       >
