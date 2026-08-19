@@ -11,6 +11,7 @@ import {
   widgetSpanClass,
   homeFooterSpanClass,
   tabletSpan,
+  tabletSpanFor,
   WIDGET_SPANS,
   computeLayoutMode,
   cloneDefaultLayout,
@@ -26,6 +27,7 @@ import {
   getOrderedWidgetDefs,
   getHiddenWidgetDefs,
   type WidgetId,
+  type WidgetDef,
   type OrientationLayout,
 } from '@/lib/layout-config';
 
@@ -66,25 +68,30 @@ describe('homeGridClass', () => {
   it('renders the 2-column bento for tablet', () => {
     const cls = homeGridClass('tablet');
     expect(cls).toContain('grid-cols-2');
-    expect(cls).toContain('auto-rows-min');
-    expect(cls).not.toContain('flex');
-    expect(cls).not.toContain('grid-cols-3');
+    expect(cls).toContain('auto-rows-[350px]');
+    expect(cls).toContain('grid-flow-dense');
+    expect(cls).not.toContain('auto-rows-min');
   });
 
   it('renders the auto-fit tiling grid for desktop', () => {
     const cls = homeGridClass('desktop');
     expect(cls).toContain('grid');
-    expect(cls).toContain('auto-rows-min');
+    expect(cls).toContain('auto-rows-[350px]');
+    expect(cls).toContain('grid-flow-dense');
     expect(cls).toContain('gap-6');
     expect(cls).toContain('grid-cols-[repeat(auto-fit,minmax(360px,1fr))]');
+    expect(cls).not.toContain('auto-rows-min');
     expect(cls).not.toContain('flex');
     expect(cls).not.toContain('overflow-x-auto');
-    expect(cls).not.toContain('snap-x');
   });
 
-  it('falls back to a responsive grid with the auto-fit lg tier', () => {
+  it('falls back to a responsive grid with tier-aware rows', () => {
     expect(HOME_GRID_FALLBACK).toContain('lg:grid-cols-[repeat(auto-fit,minmax(360px,1fr))]');
     expect(HOME_GRID_FALLBACK).toContain('md:grid-cols-2');
+    expect(HOME_GRID_FALLBACK).toContain('md:auto-rows-[350px]');
+    expect(HOME_GRID_FALLBACK).toContain('md:grid-flow-dense');
+    expect(HOME_GRID_FALLBACK).toContain('lg:auto-rows-[350px]');
+    expect(HOME_GRID_FALLBACK).toContain('lg:grid-flow-dense');
   });
 });
 
@@ -94,22 +101,23 @@ describe('widgetSpanClass', () => {
     expect(widgetSpanClass('leaderboard', 'phone')).toBe('');
   });
 
-  it('applies 1-col spans in tablet so every widget pairs up evenly', () => {
+  it('makes weather the 2×2 hero on tablet and desktop', () => {
+    expect(widgetSpanClass('weather', 'tablet')).toBe('col-span-2 row-span-2');
+    expect(widgetSpanClass('weather', 'desktop')).toBe('col-span-2 row-span-2 max-[743px]:col-span-1 max-[743px]:row-span-1');
+  });
+
+  it('keeps every other widget a uniform 1×1', () => {
     expect(widgetSpanClass('morningBriefing', 'tablet')).toBe('col-span-1');
-    expect(widgetSpanClass('weather', 'tablet')).toBe('col-span-1');
     expect(widgetSpanClass('consuelaSuggestions', 'tablet')).toBe('col-span-1');
     expect(widgetSpanClass('leaderboard', 'tablet')).toBe('col-span-1');
     expect(widgetSpanClass('tasks', 'tablet')).toBe('col-span-1');
-  });
-
-  it('applies no spans in desktop (auto-fit grid sizes the columns)', () => {
-    expect(widgetSpanClass('weather', 'desktop')).toBe('');
+    expect(widgetSpanClass('morningBriefing', 'desktop')).toBe('');
     expect(widgetSpanClass('leaderboard', 'desktop')).toBe('');
     expect(widgetSpanClass('currentMeal', 'desktop')).toBe('');
   });
 
   it('falls back safely for unknown ids', () => {
-    expect(widgetSpanClass('bogus' as never, 'tablet')).toBe('col-span-1');
+    expect(widgetSpanClass('bogus' as never, 'tablet')).toBe('');
     expect(widgetSpanClass('bogus' as never, 'desktop')).toBe('');
   });
 });
@@ -143,6 +151,37 @@ describe('tabletSpan', () => {
 
   it('stretches a single widget to the full row', () => {
     expect(tabletSpan(0, 1)).toBe('col-span-2');
+  });
+});
+
+describe('tabletSpanFor (tier-aware, hole-free with the weather hero)', () => {
+  const defs = (ids: WidgetId[]): WidgetDef[] => ids.map((id) => ({ id, label: id, emoji: 'x', description: '' }));
+  const defaultNine = defs(['morningBriefing', 'weather', 'aiQuickAsk', 'consuelaSuggestions', 'leaderboard', 'todayEvents', 'schedule', 'currentMeal', 'tasks']);
+  const eightNoWeather = defs(['morningBriefing', 'aiQuickAsk', 'consuelaSuggestions', 'leaderboard', 'todayEvents', 'schedule', 'currentMeal', 'tasks']);
+  const eightWithWeather = defs(['morningBriefing', 'weather', 'aiQuickAsk', 'consuelaSuggestions', 'leaderboard', 'schedule', 'currentMeal', 'tasks']); // todayEvents hidden → 7 one-by-ones
+
+  it('keeps the weather hero untouched wherever it sits', () => {
+    expect(tabletSpanFor('weather', 1, defaultNine)).toBe('col-span-2 row-span-2');
+    expect(tabletSpanFor('weather', 0, defs(['weather']))).toBe('col-span-2 row-span-2');
+    expect(tabletSpanFor('weather', 2, defs(['tasks', 'morningBriefing', 'weather']))).toBe('col-span-2 row-span-2');
+  });
+
+  it('does NOT stretch the last widget of the default 9 (weather makes 8 one-by-ones — even)', () => {
+    // Regression: stretching here would leave a hole at r6c2 with dense flow.
+    expect(tabletSpanFor('tasks', 8, defaultNine)).toBe('col-span-1');
+  });
+
+  it('does not stretch when all 8 visible are one-by-ones (even)', () => {
+    expect(tabletSpanFor('tasks', 7, eightNoWeather)).toBe('col-span-1');
+  });
+
+  it('stretches the last one-by-one when their count is odd (weather visible)', () => {
+    expect(tabletSpanFor('tasks', 7, eightWithWeather)).toBe('col-span-2');
+    expect(tabletSpanFor('currentMeal', 6, eightWithWeather)).toBe('col-span-1');
+  });
+
+  it('stretches a lone one-by-one widget to the full row', () => {
+    expect(tabletSpanFor('tasks', 0, defs(['tasks']))).toBe('col-span-2');
   });
 });
 
