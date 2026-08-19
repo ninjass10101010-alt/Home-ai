@@ -58,6 +58,27 @@ export const ALL_WIDGETS: WidgetDef[] = [
   { id: "tasks",       label: "Tasks",          emoji: "✅", description: "Pending chores and to-dos" },
 ];
 
+/**
+ * Per-widget tier spans per layout mode. Weather is the only enlarged
+ * widget (2×2 hero on tablet + desktop); everything else is 1×1.
+ * Phone always returns "" (single-column stack).
+ */
+export const WIDGET_TIERS: Record<WidgetId, { phone: string; tablet: string; desktop: string }> = {
+  morningBriefing: { phone: "", tablet: "col-span-1", desktop: "" },
+  weather: {
+    phone: "",
+    tablet: "col-span-2 row-span-2",
+    desktop: "col-span-2 row-span-2 max-[743px]:col-span-1 max-[743px]:row-span-1",
+  },
+  aiQuickAsk: { phone: "", tablet: "col-span-1", desktop: "" },
+  consuelaSuggestions: { phone: "", tablet: "col-span-1", desktop: "" },
+  leaderboard: { phone: "", tablet: "col-span-1", desktop: "" },
+  todayEvents: { phone: "", tablet: "col-span-1", desktop: "" },
+  schedule: { phone: "", tablet: "col-span-1", desktop: "" },
+  currentMeal: { phone: "", tablet: "col-span-1", desktop: "" },
+  tasks: { phone: "", tablet: "col-span-1", desktop: "" },
+};
+
 export interface OrientationLayout {
   /** Full ordered list of ALL widget ids — stable positions, hidden included. */
   widgets: WidgetId[];
@@ -121,9 +142,9 @@ export const WIDGET_SPANS: Record<WidgetId, string> = {
 export function homeGridClass(mode: LayoutMode): string {
   switch (mode) {
     case "desktop":
-      return "grid gap-6 auto-rows-min grid-cols-[repeat(auto-fit,minmax(360px,1fr))]";
+      return "grid gap-6 grid-flow-dense auto-rows-[350px] grid-cols-[repeat(auto-fit,minmax(360px,1fr))]";
     case "tablet":
-      return "grid grid-cols-2 gap-6 auto-rows-min";
+      return "grid grid-cols-2 gap-6 grid-flow-dense auto-rows-[350px]";
     case "phone":
       return "grid grid-cols-1 gap-6 auto-rows-min";
   }
@@ -134,23 +155,10 @@ export function homeGridClass(mode: LayoutMode): string {
  * (SSR + first client frame) — keeps today's breakpoint-driven rendering
  * so there is no layout flash while orientation resolves.
  */
-export const HOME_GRID_FALLBACK = "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(360px,1fr))] gap-6 auto-rows-min";
+export const HOME_GRID_FALLBACK = "grid grid-cols-1 md:grid-cols-2 md:auto-rows-[350px] md:grid-flow-dense lg:grid-cols-[repeat(auto-fit,minmax(360px,1fr))] lg:auto-rows-[350px] lg:grid-flow-dense gap-6 auto-rows-min";
 
-/**
- * Class for one widget in the live orientation. Desktop returns "" (the
- * auto-fit grid sizes the columns); tablet pairs every widget up as
- * col-span-1 except a lone last widget of an odd count, which stretches to
- * the full row; phone is a single-column stack and returns "".
- */
 export function widgetSpanClass(id: WidgetId, mode: LayoutMode): string {
-  switch (mode) {
-    case "desktop":
-      return "";
-    case "tablet":
-      return "col-span-1";
-    case "phone":
-      return "";
-  }
+  return WIDGET_TIERS[id]?.[mode] ?? "";
 }
 
 /**
@@ -160,6 +168,21 @@ export function widgetSpanClass(id: WidgetId, mode: LayoutMode): string {
  */
 export function tabletSpan(index: number, count: number): string {
   return index === count - 1 && count % 2 === 1 ? "col-span-2" : "col-span-1";
+}
+
+/**
+ * Tablet span for the widget at `index` of the visible `widgets` list,
+ * honoring widget tiers: the weather hero never stretches (it already
+ * spans the full row). The last one-by-one widget stretches to fill the
+ * row ONLY when the count of one-by-one widgets is odd — counting raw
+ * widgets would be wrong while weather is visible (its 2×2 = 4 even cells
+ * flip the parity and the stretch would create a hole).
+ */
+export function tabletSpanFor(id: WidgetId, index: number, widgets: WidgetDef[]): string {
+  const tier = WIDGET_TIERS[id]?.tablet ?? "col-span-1";
+  if (tier !== "col-span-1") return tier;
+  const oneByOneCount = widgets.filter((w) => (WIDGET_TIERS[w.id]?.tablet ?? "col-span-1") === "col-span-1").length;
+  return index === widgets.length - 1 && oneByOneCount % 2 === 1 ? "col-span-2" : "col-span-1";
 }
 
 export function homeFooterSpanClass(mode: LayoutMode): string {
