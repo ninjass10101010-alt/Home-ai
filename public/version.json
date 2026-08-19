@@ -1,7 +1,7 @@
 {
-  "hash": "6b1f22342036f6eda6ecc7684ba6fe6010a68587",
-  "short": "6b1f223",
-  "message": "feat(ui): compact stat tiles on Meals and Tasks pages",
-  "date": "2026-08-14 09:52:09 -0400",
+  "hash": "89436e68eebfa56522907a76f78d10b14cf864bb",
+  "short": "89436e6",
+  "message": "feat(ui): layout editor single list — in-place toggles, dimmed hidden rows, FLIP reorder glide",
+  "date": "2026-08-18 09:59:53 -0400",
   "author": "GarciaFam"
 }

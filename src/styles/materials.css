@@ -147,7 +147,7 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: radial-gradient(120% 60% at 20% 0%, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0) 40%);
+  background: radial-gradient(120% 60% at 20% 0%, rgba(255, 255, 255, 0.02) 0%, rgba(255, 255, 255, 0) 40%);
   mix-blend-mode: screen;
 }
 
@@ -446,7 +446,7 @@
   background:
     radial-gradient(
       120% 60% at 20% 0%,
-      rgba(255, 255, 255, 0.06) 0%,
+      rgba(255, 255, 255, 0.02) 0%,
       rgba(255, 255, 255, 0) 40%
     );
   mix-blend-mode: screen;

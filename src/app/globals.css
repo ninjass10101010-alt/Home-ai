@@ -357,7 +357,7 @@ body {
   -webkit-backdrop-filter: blur(24px) saturate(1.35);
   border: 1px solid color-mix(in srgb, var(--widget-tone) 35%, transparent);
   box-shadow:
-    0 0 40px color-mix(in srgb, var(--widget-tone) 22%, transparent),
+    0 0 20px color-mix(in srgb, var(--widget-tone) 12%, transparent),
     0 16px 48px rgba(0, 0, 0, 0.20),
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
   transition: box-shadow var(--motion-base) var(--ease-standard), border-color var(--motion-base) var(--ease-standard);
@@ -365,7 +365,7 @@ body {
 
 .widget-card:hover {
   box-shadow:
-    0 0 48px color-mix(in srgb, var(--widget-tone) 28%, transparent),
+    0 0 24px color-mix(in srgb, var(--widget-tone) 14%, transparent),
     0 20px 56px rgba(0, 0, 0, 0.24),
     inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
@@ -383,7 +383,7 @@ body {
     linear-gradient(180deg, var(--glass-tint-strong), var(--glass-tint-soft));
   border: 1px solid color-mix(in srgb, var(--widget-tone) 30%, transparent);
   box-shadow:
-    0 0 32px color-mix(in srgb, var(--widget-tone) 16%, transparent),
+    0 0 16px color-mix(in srgb, var(--widget-tone) 8%, transparent),
     0 8px 24px rgba(0, 0, 0, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.6);
 }
@@ -504,6 +504,7 @@ body {
 
 .material-thin,
 .glass-subtle {
+  position: relative;
   background: rgba(30, 35, 48, 0.35);
   backdrop-filter: blur(12px) saturate(1.2);
   -webkit-backdrop-filter: blur(12px) saturate(1.2);
@@ -524,6 +525,7 @@ body {
 
 .material-regular,
 .glass {
+  position: relative;
   background: rgba(30, 35, 48, 0.45);
   backdrop-filter: blur(20px) saturate(1.4);
   -webkit-backdrop-filter: blur(20px) saturate(1.4);
@@ -538,12 +540,13 @@ body {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: radial-gradient(120% 60% at 20% 0%, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0) 40%);
+  background: radial-gradient(120% 60% at 20% 0%, rgba(255, 255, 255, 0.02) 0%, rgba(255, 255, 255, 0) 40%);
   mix-blend-mode: screen;
 }
 
 .material-thick,
 .glass-strong {
+  position: relative;
   background: rgba(30, 35, 48, 0.55);
   backdrop-filter: blur(26px) saturate(1.6);
   -webkit-backdrop-filter: blur(26px) saturate(1.6);
@@ -832,7 +835,7 @@ body {
   background:
     radial-gradient(
       120% 60% at 20% 0%,
-      rgba(255, 255, 255, 0.06) 0%,
+      rgba(255, 255, 255, 0.02) 0%,
       rgba(255, 255, 255, 0) 40%
     );
   mix-blend-mode: screen;
