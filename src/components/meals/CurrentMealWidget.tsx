@@ -106,7 +106,14 @@ export default function CurrentMealWidget({ className = "" }: { className?: stri
   const mealInfo = MEAL_THEMES[currentMealType] ?? MEAL_THEMES.dinner;
 
   return (
-    <WidgetCard tone="#10b981" icon="🍽️" className={className}>
+    <WidgetCard tone="#10b981" className={className}>
+      {/* ── Centered 🍽️ icon ── */}
+      <div className="relative z-30 pointer-events-none flex justify-center pt-5">
+        <div className="relative h-9 w-9">
+          <div aria-hidden="true" className="absolute inset-0" style={{ background: "radial-gradient(circle, rgba(16,185,129,0.4) 0%, transparent 70%)", filter: "blur(8px)", animation: "weatherGlowPulse 7s ease-in-out infinite" }} />
+          <div className="relative grid h-9 w-9 place-items-center text-xl leading-none" style={{ filter: "drop-shadow(0 6px 10px rgba(0,0,0,0.35))" }}>🍽️</div>
+        </div>
+      </div>
       {/* Floating seasonal emoji in corner */}
       <div
         className="absolute top-2 right-2 text-4xl pointer-events-none select-none meal-float-gentle"
@@ -118,9 +125,9 @@ export default function CurrentMealWidget({ className = "" }: { className?: stri
         {atm.particleEmoji}
       </div>
 
-      <div className="relative z-10 p-5 pl-14">
+      <div className="relative z-10 flex min-h-0 flex-1 flex-col justify-center p-5">
         {/* Header row */}
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-center gap-2">
           <h2 className="text-text-primary font-bold text-base flex items-center gap-2">
             <span className="meal-icon-pulse">{mealInfo.icon}</span>
             {mealInfo.label} Time
@@ -138,7 +145,7 @@ export default function CurrentMealWidget({ className = "" }: { className?: stri
           </span>
         </div>
 
-        <p className="text-text-secondary text-xs mb-4">
+        <p className="text-text-secondary text-xs mb-4 text-center">
           {scheduledTime ? `Scheduled at ${scheduledTime}` : "Set a meal schedule to see times"}
         </p>
 
