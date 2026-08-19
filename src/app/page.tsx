@@ -16,7 +16,7 @@ import CurrentMealWidget from "@/components/meals/CurrentMealWidget";
 import { AtmosphericProvider } from "@/hooks/useAtmosphericTheme";
 import AtmosphericBridge from "@/components/ui/AtmosphericBridge";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
-import { WIDGET_SPANS, homeGridClass, homeFooterSpanClass, widgetSpanClass, tabletSpan, HOME_GRID_FALLBACK } from "@/lib/layout-config";
+import { WIDGET_SPANS, homeGridClass, homeFooterSpanClass, widgetSpanClass, tabletSpan, tabletSpanFor, HOME_GRID_FALLBACK } from "@/lib/layout-config";
 import { useAuth, type AuthUser } from "@/hooks/useAuth";
 import PinModal from "@/components/auth/PinModal";
 import MemberPickerModal from "@/components/auth/MemberPickerModal";
@@ -313,7 +313,7 @@ export default function HomePage() {
               const id = w.id;
               const span = layoutMounted
                 ? orientation === "tablet"
-                  ? tabletSpan(index, visibleWidgets.length)
+                  ? tabletSpanFor(id, index, visibleWidgets)
                   : widgetSpanClass(id, orientation)
                 : (WIDGET_SPANS[id] ?? "lg:col-span-1");
               switch (id) {
@@ -339,7 +339,7 @@ export default function HomePage() {
                   const hiddenEvents = todayEvents.length - visibleEvents.length;
                   return (
                     <div key="todayEvents" className={span}>
-                      <SectionCard title="Today" description={`${todayEvents.length} events on the family calendar`} icon="📅" tone="#3b82f6" compact className="h-full"
+                      <SectionCard title="Today" description={`${todayEvents.length} events on the family calendar`} icon="📅" tone="#3b82f6" compact centeredHeader className="h-full"
                         footer={
                           hiddenEvents > 0 ? (
                             <Link href="/calendar" className="tap-sm text-xs font-semibold widget-accent-text">+{hiddenEvents} more · See all →</Link>
@@ -387,7 +387,7 @@ export default function HomePage() {
                   const hiddenTasks = pendingTasks.length - visibleTasks.length;
                   return (
                     <div key="tasks" className={span}>
-                      <SectionCard title="Tasks" description={`${pendingTasks.length} pending for the family`} icon="✅" tone="#f43f5e" compact className="h-full"
+                      <SectionCard title="Tasks" description={`${pendingTasks.length} pending for the family`} icon="✅" tone="#f43f5e" compact centeredHeader className="h-full"
                         footer={
                           hiddenTasks > 0 ? (
                             <Link href="/tasks" className="tap-sm text-xs font-semibold widget-accent-text">+{hiddenTasks} more · See all →</Link>
@@ -417,17 +417,29 @@ export default function HomePage() {
                   return (
                     <div key="aiQuickAsk" className={span}>
                       <Link href="/chat" className="block h-full">
-                        <WidgetCard
-                          tone="#8b5cf6"
-                          className="h-full"
-                          icon={<span className="grid h-14 w-14 place-items-center"><Icon3D variant="chat" size="md" /></span>}
-                        >
-                          <div className="flex items-center gap-4 p-5 pl-14">
-                            <div className="min-w-0 flex-1">
-                              <h3 className="text-base font-bold text-text-primary">Quick ask</h3>
-                              <p className="mt-0.5 text-sm text-text-secondary">“Add soccer practice for Thursday.”</p>
+                        <WidgetCard tone="#8b5cf6" className="h-full">
+                          <div className="relative z-30 pointer-events-none flex justify-center pt-5">
+                            <div className="relative h-14 w-14">
+                              <div
+                                aria-hidden="true"
+                                className="absolute inset-0"
+                                style={{
+                                  background: "radial-gradient(circle, rgba(139,92,246,0.4) 0%, transparent 70%)",
+                                  filter: "blur(8px)",
+                                  animation: "weatherGlowPulse 7s ease-in-out infinite",
+                                }}
+                              />
+                              <div className="relative" style={{ filter: "drop-shadow(0 6px 10px rgba(0,0,0,0.35))" }}>
+                                <span className="grid h-14 w-14 place-items-center"><Icon3D variant="chat" size="md" /></span>
+                              </div>
                             </div>
-                            <span className="widget-accent-text">→</span>
+                          </div>
+                          <div className="flex flex-1 flex-col items-center justify-center gap-1 p-5 text-center">
+                            <div className="flex items-center gap-2">
+                              <h3 className="text-base font-bold text-text-primary">Quick ask</h3>
+                              <span className="widget-accent-text">→</span>
+                            </div>
+                            <p className="text-sm text-text-secondary">"Add soccer practice for Thursday."</p>
                           </div>
                         </WidgetCard>
                       </Link>
@@ -440,8 +452,10 @@ export default function HomePage() {
             })}
 
             <div className={layoutMounted ? homeFooterSpanClass(orientation) : "lg:col-span-3"}>
-              <SectionCard title="This Week" description="Meal and family rhythm at a glance" icon="🗓️" tone="#10b981" compact className="h-full">
-                <DayStrip value="today" onChange={(dayId) => router.push(`/meals?day=${dayId}`)} days={weekDays} compact />
+              <SectionCard title="This Week" description="Meal and family rhythm at a glance" icon="🗓️" tone="#10b981" compact centeredHeader className="h-full">
+                <div className="flex flex-1 items-center">
+                  <DayStrip value="today" onChange={(dayId) => router.push(`/meals?day=${dayId}`)} days={weekDays} compact />
+                </div>
               </SectionCard>
             </div>
           </div>
