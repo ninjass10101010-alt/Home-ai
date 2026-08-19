@@ -103,7 +103,7 @@ export default function HomeSuggestionsWidget({ className = "" }: { className?: 
 
   if (!mounted) {
     return (
-      <SectionCard title="Consuela suggests" icon="✨" tone="#8b5cf6">
+      <SectionCard title="Consuela suggests" icon="✨" tone="#8b5cf6" centeredHeader className={className}>
         <div className="space-y-2">
           {[1, 2].map((i) => (
             <div key={i} className="h-14 rounded-2xl bg-white/5 animate-pulse" />
@@ -123,6 +123,7 @@ export default function HomeSuggestionsWidget({ className = "" }: { className?: 
         title="Consuela suggests"
         icon="✨"
         tone="#8b5cf6"
+        centeredHeader
         className={className}
         action={<Link href="/suggestions" className="text-sm widget-accent-text">See all →</Link>}
       >
@@ -143,6 +144,7 @@ export default function HomeSuggestionsWidget({ className = "" }: { className?: 
       description="Proactive alerts for the family"
       icon="✨"
       tone="#8b5cf6"
+      centeredHeader
       className={className}
       action={<Link href="/suggestions" className="text-sm widget-accent-text">See all →</Link>}
     >
@@ -154,7 +156,7 @@ export default function HomeSuggestionsWidget({ className = "" }: { className?: 
         </div>
       ) : (
         <div className="space-y-2">
-          {items.slice(0, 5).map((suggestion) => (
+          {items.slice(0, 3).map((suggestion) => (
             <SuggestionRow key={suggestion.id} suggestion={suggestion} onDismiss={handleDismiss} onAct={handleAct} />
           ))}
         </div>
