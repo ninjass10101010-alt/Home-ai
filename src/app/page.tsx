@@ -452,10 +452,8 @@ export default function HomePage() {
             })}
 
             <div className={layoutMounted ? homeFooterSpanClass(orientation) : "lg:col-span-3"}>
-              <SectionCard title="This Week" description="Meal and family rhythm at a glance" icon="🗓️" tone="#10b981" compact centeredHeader className="h-full">
-                <div className="flex flex-1 items-center">
-                  <DayStrip value="today" onChange={(dayId) => router.push(`/meals?day=${dayId}`)} days={weekDays} compact />
-                </div>
+              <SectionCard title="This Week" description="Meal and family rhythm at a glance" icon="🗓️" tone="#10b981" compact className="h-full">
+                <DayStrip value="today" onChange={(dayId) => router.push(`/meals?day=${dayId}`)} days={weekDays} compact />
               </SectionCard>
             </div>
           </div>

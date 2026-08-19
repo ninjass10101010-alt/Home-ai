@@ -67,8 +67,8 @@ export const WIDGET_TIERS: Record<WidgetId, { phone: string; tablet: string; des
   morningBriefing: { phone: "", tablet: "col-span-1", desktop: "" },
   weather: {
     phone: "",
-    tablet: "col-span-2 row-span-2",
-    desktop: "col-span-2 row-span-2 max-[743px]:col-span-1 max-[743px]:row-span-1",
+    tablet: "col-span-1",
+    desktop: "col-span-1 max-[743px]:col-span-1",
   },
   aiQuickAsk: { phone: "", tablet: "col-span-1", desktop: "" },
   consuelaSuggestions: { phone: "", tablet: "col-span-1", desktop: "" },

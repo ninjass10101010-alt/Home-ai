@@ -101,9 +101,9 @@ describe('widgetSpanClass', () => {
     expect(widgetSpanClass('leaderboard', 'phone')).toBe('');
   });
 
-  it('makes weather the 2×2 hero on tablet and desktop', () => {
-    expect(widgetSpanClass('weather', 'tablet')).toBe('col-span-2 row-span-2');
-    expect(widgetSpanClass('weather', 'desktop')).toBe('col-span-2 row-span-2 max-[743px]:col-span-1 max-[743px]:row-span-1');
+  it('makes weather a uniform 1×1 widget on tablet and desktop', () => {
+    expect(widgetSpanClass('weather', 'tablet')).toBe('col-span-1');
+    expect(widgetSpanClass('weather', 'desktop')).toBe('col-span-1 max-[743px]:col-span-1');
   });
 
   it('keeps every other widget a uniform 1×1', () => {
@@ -160,23 +160,28 @@ describe('tabletSpanFor (tier-aware, hole-free with the weather hero)', () => {
   const eightNoWeather = defs(['morningBriefing', 'aiQuickAsk', 'consuelaSuggestions', 'leaderboard', 'todayEvents', 'schedule', 'currentMeal', 'tasks']);
   const eightWithWeather = defs(['morningBriefing', 'weather', 'aiQuickAsk', 'consuelaSuggestions', 'leaderboard', 'schedule', 'currentMeal', 'tasks']); // todayEvents hidden → 7 one-by-ones
 
-  it('keeps the weather hero untouched wherever it sits', () => {
-    expect(tabletSpanFor('weather', 1, defaultNine)).toBe('col-span-2 row-span-2');
-    expect(tabletSpanFor('weather', 0, defs(['weather']))).toBe('col-span-2 row-span-2');
-    expect(tabletSpanFor('weather', 2, defs(['tasks', 'morningBriefing', 'weather']))).toBe('col-span-2 row-span-2');
+  it('weather is a uniform 1×1 widget at any position', () => {
+    // With weather now 1×1 uniform, it behaves like any other widget.
+    // Count of 1×1 widgets in defaultNine = 9 (odd), so the last widget stretches.
+    expect(tabletSpanFor('weather', 1, defaultNine)).toBe('col-span-1'); // not last
+    expect(tabletSpanFor('weather', 0, defs(['weather']))).toBe('col-span-2'); // only widget, count=1 odd, last → stretch
+    expect(tabletSpanFor('weather', 2, defs(['tasks', 'morningBriefing', 'weather']))).toBe('col-span-2'); // 3 widgets, count=3 odd, last at index 2 → stretch
   });
 
-  it('does NOT stretch the last widget of the default 9 (weather makes 8 one-by-ones — even)', () => {
-    // Regression: stretching here would leave a hole at r6c2 with dense flow.
-    expect(tabletSpanFor('tasks', 8, defaultNine)).toBe('col-span-1');
+  it('stretches the last widget of the default 9 when the 1×1 count is odd', () => {
+    // With weather now 1×1 uniform, defaultNine has 9 one-by-ones (odd count),
+    // so the last widget (tasks at index 8) stretches to fill the row.
+    expect(tabletSpanFor('tasks', 8, defaultNine)).toBe('col-span-2');
   });
 
   it('does not stretch when all 8 visible are one-by-ones (even)', () => {
     expect(tabletSpanFor('tasks', 7, eightNoWeather)).toBe('col-span-1');
   });
 
-  it('stretches the last one-by-one when their count is odd (weather visible)', () => {
-    expect(tabletSpanFor('tasks', 7, eightWithWeather)).toBe('col-span-2');
+  it('does not stretch when all visible are one-by-ones (even count)', () => {
+    // With weather now 1×1 uniform, eightWithWeather = 8 one-by-ones (even count),
+    // so no widget stretches.
+    expect(tabletSpanFor('tasks', 7, eightWithWeather)).toBe('col-span-1');
     expect(tabletSpanFor('currentMeal', 6, eightWithWeather)).toBe('col-span-1');
   });
 
