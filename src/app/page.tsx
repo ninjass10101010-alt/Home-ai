@@ -422,23 +422,7 @@ export default function HomePage() {
                 case "aiQuickAsk":
                   return (
                     <div key="aiQuickAsk" className={span}>
-                      <WidgetCard tone="#8b5cf6" className="h-full">
-                        <div className="relative z-30 pointer-events-none flex justify-center pt-5">
-                          <div className="relative h-14 w-14">
-                            <div
-                              aria-hidden="true"
-                              className="absolute inset-0"
-                              style={{
-                                background: "radial-gradient(circle, rgba(139,92,246,0.4) 0%, transparent 70%)",
-                                filter: "blur(8px)",
-                                animation: "weatherGlowPulse 7s ease-in-out infinite",
-                              }}
-                            />
-                            <div className="relative" style={{ filter: "drop-shadow(0 6px 10px rgba(0,0,0,0.35))" }}>
-                              <span className="grid h-14 w-14 place-items-center"><Icon3D variant="chat" size="md" /></span>
-                            </div>
-                          </div>
-                        </div>
+                      <WidgetCard tone="#8b5cf6" icon={<Icon3D variant="chat" size="lg" />} className="h-full">
                         <div className="flex flex-1 flex-col items-center justify-center gap-1 p-5 text-center">
                           <Link href="/chat" className="flex items-center gap-2 tap-sm">
                             <h3 className="text-base font-bold text-text-primary">Quick ask</h3>

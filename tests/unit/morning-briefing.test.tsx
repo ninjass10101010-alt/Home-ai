@@ -17,7 +17,7 @@ function render(ui: ReactElement): HTMLElement {
 const ack = async () => true;
 
 describe("MorningBriefingWidget acknowledged state", () => {
-  it("renders the acknowledged state centered with a large sunrise icon", () => {
+  it("renders the acknowledged state centered with a protruding sunrise icon", () => {
     const briefing = {
       id: "b1",
       scopeDate: "2026-08-20",
@@ -33,15 +33,13 @@ describe("MorningBriefingWidget acknowledged state", () => {
     const el = render(<MorningBriefingWidget briefing={briefing} loading={false} ack={ack} ackError={false} />);
     expect(el.textContent).toContain("Acknowledged ✓");
 
-    // Icon is the prominent large size (h-12 w-12) with a warm halo.
+    // Icon rides the shared WidgetCard protruding top-left slot (88px box)
+    // with the warm briefing tone injected as --widget-tone.
     const iconBox = Array.from(el.querySelectorAll("div")).find(
-      (d) => d.className.includes("h-12") && d.className.includes("w-12")
+      (d) => d.className.includes("absolute") && d.className.includes("z-30") && d.className.includes("pointer-events-none")
     );
     expect(iconBox).toBeTruthy();
-
-    const halo = Array.from(el.querySelectorAll("div")).find(
-      (d) => d.className.includes("absolute") && d.className.includes("inset-0") && d.getAttribute("style")?.includes("249, 115, 22, 0.5")
-    );
-    expect(halo).toBeTruthy();
+    expect(iconBox?.textContent).toContain("🌅");
+    expect((el.querySelector(".widget-card") as HTMLElement | null)?.style.getPropertyValue("--widget-tone")).toContain("#f97316");
   });
 });

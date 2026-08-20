@@ -89,17 +89,9 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
       if (tod === 'day') isDark = false;
       else if (tod === 'night') isDark = true;
       else {
-        // fallback to actual daylight
-        const now = new Date();
-        const hour = now.getHours();
-        const month = now.getMonth();
-        let sunsetHour = 19;
-        let sunriseHour = 7;
-        if (month >= 4 && month <= 7) { sunsetHour = 21; sunriseHour = 6; }
-        else if (month >= 2 && month <= 3) { sunsetHour = 19; sunriseHour = 7; }
-        else if (month >= 8 && month <= 9) { sunsetHour = 19; sunriseHour = 7; }
-        else { sunsetHour = 17; sunriseHour = 7; }
-        isDark = hour >= sunsetHour || hour < sunriseHour;
+        // fallback — same clock as WeatherProvider/Atmosphere (6am-7pm day).
+        const hour = new Date().getHours();
+        isDark = hour < 6 || hour >= 19;
       }
     }
 
@@ -137,16 +129,18 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
     const handleChange = () => updateHtmlAttributes();
     mediaQuery.addEventListener('change', handleChange);
 
-    // Keep a global hint for Time-of-day override when display mode is "system".
-    // This avoids importing WeatherConfig into ThemeProvider.
-    if (typeof window !== 'undefined') {
-      const todOverride = (window as any).__consuelaTod;
-      void todOverride;
-    }
+    // Re-run immediately when WeatherProvider flips __consuelaTod (e.g. user
+    // changes Time-of-day or the 6am/7pm boundary is crossed while the page
+    // is open). Without this, ThemeProvider would stay stale for up to 15m.
+    const handleTodChange = () => updateHtmlAttributes();
+    window.addEventListener('consuela-tod-change', handleTodChange as EventListener);
+    window.addEventListener('storage', handleTodChange);
 
     return () => {
       clearInterval(interval);
       mediaQuery.removeEventListener('change', handleChange);
+      window.removeEventListener('consuela-tod-change', handleTodChange as EventListener);
+      window.removeEventListener('storage', handleTodChange);
     }
   }, [
     theme.mode,

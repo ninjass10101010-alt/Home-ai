@@ -5,8 +5,7 @@ import { useState, useEffect, useRef } from "react";
 import { useWeatherConfig } from "@/hooks/useWeather";
 import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
 import { HolidayOverride } from "@/lib/weather-config";
-import Modal from "./Modal";
-import SoftButton from "./SoftButton";
+
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -1719,6 +1718,13 @@ export default function WeatherWidget({ className = "" }: { className?: string }
     }
   }, [weather.unit]);
 
+  useEffect(() => {
+    if (!detailsOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setDetailsOpen(false); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [detailsOpen]);
+
   const condition = detectCondition(weatherData?.currentCondition ?? "Partly Cloudy");
   const tod = weather.timeOfDay === "auto" ? getRealTimeOfDay() : weather.timeOfDay as TimeOfDayFlag;
   const season = (weather.season === "auto" ? getRealSeason() : weather.season) as SeasonKey;
@@ -1765,30 +1771,31 @@ export default function WeatherWidget({ className = "" }: { className?: string }
       className={`relative ${className}`}
       style={{ animation: mounted ? "weatherCardEnter 1s cubic-bezier(0.34,1.56,0.64,1) both" : undefined }}
     >
-      {/* ── Weather icon (centered top strip) ── */}
-      <div className="relative z-30 pointer-events-none flex justify-center pt-5">
-        <div className="relative w-[96px] h-[96px]">
-          <div
-            aria-hidden="true"
-            style={{
-              position: "absolute",
-              inset: 0,
-              background: `radial-gradient(circle, ${accentHex.selected}66 0%, ${accentHex.selected}00 70%)`,
-              filter: "blur(10px)",
-              animation: mounted ? "weatherGlowPulse 7s ease-in-out infinite" : undefined,
-            }}
-          />
-          <div style={{ filter: "drop-shadow(0 10px 18px rgba(0,0,0,0.35))" }}>
-            {mounted ? (
-              <div style={{ transform: "scale(1.3333)", transformOrigin: "top left" }}>
-                <Icon tod={tod} />
-              </div>
-            ) : (
-              <div className="w-[96px] h-[96px] flex items-center justify-center text-7xl leading-none">⛅</div>
-            )}
-          </div>
+      {/* ── Protruding weather icon — overhangs the card's top-left corner ── */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute z-30 top-[-12px] left-[-12px] xl:top-[-24px] xl:left-[-24px] w-[88px] h-[88px]"
+      >
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            background: `radial-gradient(circle, ${accentHex.selected}66 0%, ${accentHex.selected}00 70%)`,
+            filter: "blur(10px)",
+            animation: mounted ? "weatherGlowPulse 7s ease-in-out infinite" : undefined,
+          }}
+        />
+        <div style={{ filter: "drop-shadow(0 10px 18px rgba(0,0,0,0.35))" }}>
+          {mounted ? (
+            <div style={{ transform: "scale(1.2222)", transformOrigin: "top left" }}>
+              <Icon tod={tod} />
+            </div>
+          ) : (
+            <div className="w-[88px] h-[88px] flex items-center justify-center text-7xl leading-none">⛅</div>
+          )}
         </div>
       </div>
+
       <div
         className="rounded-2xl overflow-hidden relative h-full flex flex-col"
         style={{
@@ -1832,17 +1839,19 @@ export default function WeatherWidget({ className = "" }: { className?: string }
 
         {/* ── Glassmorphism content overlay ── */}
         <div
-          className="relative z-20 flex flex-1 min-h-0 flex-col p-5"
+          className="relative z-20 flex flex-1 min-h-0 flex-col px-5 pb-5 pt-3"
           style={{
-            backdropFilter: "blur(14px) saturate(1.3)",
-            background: "linear-gradient(180deg, rgba(15,23,42,0.28), rgba(15,23,42,0.18))",
-            border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: "1rem",
+            backdropFilter: "blur(8px) saturate(1.15)",
+            background:
+              tod === "night"
+                ? "rgba(15,23,42,0.16)"
+                : "rgba(60,30,10,0.07)",
+            border: "none",
+            borderRadius: 0,
           }}
         >
-
-          {/* Header: location + season badge */}
-          <div className="flex items-center justify-between mb-3">
+          {/* Header: location + season badge (left padding clears the protruding icon) */}
+          <div className="flex items-center justify-between mb-3 pl-[72px]">
             <div className="flex items-center gap-1.5 text-sm font-medium min-w-0">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
                 className="w-3.5 h-3.5 shrink-0" style={{ color: accentHex.selected }}>
@@ -1911,44 +1920,156 @@ export default function WeatherWidget({ className = "" }: { className?: string }
         />
       </div>
 
-      {/* ── Weather details modal ── */}
-      <Modal
-        open={detailsOpen}
-        onClose={() => setDetailsOpen(false)}
-        title="Weather details"
-        description={`${weather.location} · ${weatherData?.currentCondition ?? "Partly Cloudy"}`}
-        footer={
-          <SoftButton variant="primary" onClick={() => setDetailsOpen(false)}>Close</SoftButton>
-        }
-      >
-        <div className="space-y-3">
-          <div className="grid grid-cols-3 gap-2">
-            <StatPill icon="💧" label="Rain" value={`${weatherData?.forecast?.[0]?.precipitation ?? 10}%`} delay="0s" accentColor={theme.accentColor} />
-            <StatPill icon="🌫️" label="Humidity" value={`${weatherData?.humidity ?? 55}%`} delay="0.07s" accentColor={theme.accentColor} />
-            <StatPill icon="💨" label="Wind" value={`${weatherData?.wind ?? 8} mph`} delay="0.14s" accentColor={theme.accentColor} />
-          </div>
-          <div>
-            <p className="text-white/40 text-[10px] font-semibold uppercase tracking-widest mb-2">5-Day Forecast</p>
-            <div className="flex justify-between gap-1.5">
-              {(weatherData?.forecast ?? []).map((day, i) => (
-                <div key={day.day} className="flex-1 flex flex-col items-center gap-1 py-2.5 rounded-2xl cursor-default"
-                  style={{
-                    background: "rgba(255,255,255,0.07)",
-                    backdropFilter: "blur(6px)",
-                    border: "1px solid rgba(255,255,255,0.08)",
-                    animation: `weatherForecastIn 0.55s ease-out ${0.25 + i * 0.08}s both`,
-                  }}
-                  title={`${day.condition} · High ${weather.unit === "C" ? toC(day.high) : day.high}° / Low ${weather.unit === "C" ? toC(day.low) : day.low}°`}>
-                  <span className="text-white/65 text-[10px] font-semibold">{day.day}</span>
-                  <span className="text-xl leading-none">{day.emoji}</span>
-                  <span className="text-[11px] font-bold" style={{ color: accentHex.selected, textShadow: "0 1px 3px rgba(0,0,0,0.4)" }}>{weather.unit === "C" ? toC(day.high) : day.high}°</span>
-                  <span className="text-white/55 text-[10px]">{weather.unit === "C" ? toC(day.low) : day.low}°</span>
+      {/* ── Weather details — immersive sheet ── */}
+      {detailsOpen && (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-[#0a0f1c]/55 p-3 backdrop-blur-[2px] sm:p-4"
+          onClick={() => setDetailsOpen(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Weather details"
+        >
+          <div
+            className="relative flex w-full max-w-[440px] max-h-[88vh] flex-col overflow-hidden rounded-[2rem] sm:max-h-[82vh]"
+            style={{
+              background: theme.bgGradient,
+              border: `1px solid ${atm.glowColor}`,
+              boxShadow: `0 0 80px ${theme.glowColor}, 0 24px 64px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.09)`,
+              animation: "modalEnter 0.38s cubic-bezier(0.34,1.56,0.64,1) both",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Backdrop art — faint, behind frost */}
+            {mounted && (
+              <div className="pointer-events-none absolute inset-0 opacity-[0.18]" aria-hidden="true">
+                {activeHoliday === "none" || activeHoliday === "auto" ? (
+                  <>
+                    {season === "spring" && <SpringBackdrop tod={tod} />}
+                    {season === "summer" && <SummerBackdrop tod={tod} />}
+                    {season === "autumn" && <AutumnBackdrop tod={tod} />}
+                    {season === "winter" && <WinterBackdrop tod={tod} />}
+                  </>
+                ) : (
+                  <>
+                    {activeHoliday === "christmas" && <><WinterBackdrop tod={tod} /><ChristmasOverlay /></>}
+                    {activeHoliday === "halloween" && <HalloweenOverlay />}
+                    {activeHoliday === "july4th" && <FireworksOverlay />}
+                    {activeHoliday === "valentines" && <ValentinesOverlay />}
+                    {activeHoliday === "newyears" && <NewYearsOverlay />}
+                  </>
+                )}
+              </div>
+            )}
+            {mounted && <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[2rem] opacity-40"><WeatherParticles type={particleType} tod={tod} /></div>}
+
+            {/* Scrollable frosted content */}
+            <div
+              className="relative flex-1 overflow-y-auto"
+              style={{
+                backdropFilter: "blur(10px) saturate(1.15)",
+                background: tod === "night" ? "rgba(10,16,32,0.52)" : "rgba(40,20,10,0.22)",
+              }}
+            >
+              {/* Handle + close */}
+              <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-white/10 bg-[rgba(8,12,24,0.28)] px-5 py-3 backdrop-blur-md">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-white/70" style={{ textShadow: "0 1px 6px rgba(0,0,0,0.6)" }}>Weather</p>
+                  <p className="truncate text-sm font-semibold text-white" style={{ textShadow: "0 1px 8px rgba(0,0,0,0.65), 0 0 1px rgba(0,0,0,0.9)" }}>{weather.location} · {weatherData?.currentCondition ?? "Partly Cloudy"}</p>
                 </div>
-              ))}
+                <button
+                  type="button"
+                  onClick={() => setDetailsOpen(false)}
+                  aria-label="Close weather details"
+                  className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-white/12 bg-white/10 text-white/80 backdrop-blur transition hover:bg-white/16 hover:text-white active:scale-95"
+                >
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M1 1L13 13M13 1L1 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
+                </button>
+              </div>
+
+              <div className="space-y-5 p-5">
+                {/* Hero — icon + temp + condition */}
+                <div className="flex items-center gap-4">
+                  <div className="relative grid h-[88px] w-[88px] shrink-0 place-items-center">
+                    <div aria-hidden="true" className="absolute inset-0 rounded-full" style={{ background: `radial-gradient(circle, ${accentHex.selected}28 0%, transparent 72%)`, filter: "blur(12px)" }} />
+                    <div style={{ filter: "drop-shadow(0 10px 18px rgba(0,0,0,0.35))" }}>
+                      <div style={{ transform: "scale(1.22)", transformOrigin: "center" }}><Icon tod={tod} /></div>
+                    </div>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-[52px] font-black leading-none tracking-tight" style={{ color: accentHex.selected, textShadow: "0 1px 18px rgba(0,0,0,0.45), 0 0 1px rgba(0,0,0,0.7)" }}>{displayTemp}</span>
+                      <span className="text-2xl font-light text-white" style={{ textShadow: "0 1px 6px rgba(0,0,0,0.6)" }}>°{weather.unit}</span>
+                    </div>
+                    <p className="text-[15px] font-semibold leading-none text-white mt-1" style={{ textShadow: "0 1px 8px rgba(0,0,0,0.65), 0 0 1px rgba(0,0,0,0.85)" }}>{weatherData?.currentCondition ?? "Partly Cloudy"}</p>
+                    <p className="mt-1 text-xs font-medium text-white/85" style={{ textShadow: "0 1px 6px rgba(0,0,0,0.65)" }}>Feels like {displayFeels}° · {season} · {tod} · Humidity {weatherData?.humidity ?? 55}%</p>
+                  </div>
+                </div>
+
+                {/* Bento stats — 2×2 */}
+                <div className="grid grid-cols-2 gap-3">
+                    {[
+                    { k: "Hum", label: "Humidity", value: `${weatherData?.humidity ?? 55}%`, sub: "Dew point comfortable", icon: "🌫️" },
+                    { k: "Wind", label: "Wind", value: `${weatherData?.wind ?? 8} mph`, sub: "Light breeze", icon: "💨" },
+                    { k: "Rain", label: "Rain chance", value: `${weatherData?.forecast?.[0]?.precipitation ?? 10}%`, sub: "Today", icon: "💧" },
+                    { k: "Feel", label: "Feels like", value: `${displayFeels}°`, sub: weatherData?.currentCondition ?? "Partly Cloudy", icon: "🌡️" },
+                  ].map((s) => (
+                    <div key={s.k} className="rounded-2xl border border-white/12 bg-[rgba(8,12,24,0.22)] px-4 py-4 backdrop-blur-md">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-white/70" style={{ textTransform: "uppercase", textShadow: "0 1px 5px rgba(0,0,0,0.6)" }}>{s.label}</span>
+                        <span className="text-base leading-none drop-shadow-[0_1px_4px_rgba(0,0,0,0.5)]">{s.icon}</span>
+                      </div>
+                      <p className="mt-2 text-[22px] font-black leading-none tracking-tight text-white" style={{ textShadow: "0 1px 10px rgba(0,0,0,0.7), 0 0 1px rgba(0,0,0,0.9)" }}>{s.value}</p>
+                      <p className="mt-1 truncate text-xs font-medium text-white/75" style={{ textShadow: "0 1px 6px rgba(0,0,0,0.65)" }}>{s.sub}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* 5-day — refined list, not tiny pills */}
+                <div>
+                  <div className="mb-2.5 flex items-baseline justify-between">
+                    <h4 className="text-[11px] font-bold uppercase tracking-[0.14em] text-white/75" style={{ textShadow: "0 1px 6px rgba(0,0,0,0.65)" }}>5-Day Forecast</h4>
+                    <span className="text-[11px] font-medium text-white/60" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.6)" }}>High · Low</span>
+                  </div>
+                  <div className="overflow-hidden rounded-2xl border border-white/12 bg-[rgba(8,12,24,0.20)] backdrop-blur-md">
+                    {(weatherData?.forecast ?? []).map((day, i) => (
+                      <div
+                        key={day.day}
+                        className="flex items-center justify-between gap-3 px-4 py-3.5"
+                        style={{
+                          borderTop: i === 0 ? "none" : "1px solid rgba(255,255,255,0.06)",
+                          background: i % 2 === 1 ? "rgba(255,255,255,0.02)" : "transparent",
+                        }}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span className="w-9 shrink-0 text-xs font-bold tracking-wide text-white" style={{ textShadow: "0 1px 6px rgba(0,0,0,0.6)" }}>{day.day}</span>
+                          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-white/10 text-[15px] leading-none ring-1 ring-white/10">{day.emoji}</span>
+                          <span className="hidden truncate text-xs font-medium text-white/75 sm:block" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.6)" }}>{day.condition}</span>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          <span className="rounded-full px-2 py-1 text-xs font-bold leading-none text-white" style={{ background: `${accentHex.selected}22`, border: `1px solid ${accentHex.selected}30`, textShadow: "0 1px 4px rgba(0,0,0,0.6)" }}>{day.precipitation}%</span>
+                          <span className="w-10 text-right text-sm font-black" style={{ color: accentHex.selected, textShadow: "0 1px 8px rgba(0,0,0,0.5)" }}>{weather.unit === "C" ? toC(day.high) : day.high}°</span>
+                          <span className="w-8 text-right text-sm font-semibold text-white/70" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.6)" }}>{weather.unit === "C" ? toC(day.low) : day.low}°</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-center text-[11px] leading-relaxed text-white/65" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.6)" }}>Tip: tap “°F” on the widget to switch to Celsius — the sheet follows.</p>
+                </div>
+              </div>
+
+              <div className="sticky bottom-0 border-t border-white/06 bg-[rgba(0,0,0,0.10)] p-4 backdrop-blur-md">
+                <button
+                  type="button"
+                  onClick={() => setDetailsOpen(false)}
+                  className="w-full rounded-full border border-white/12 bg-white/12 py-3 text-sm font-bold text-white backdrop-blur transition hover:bg-white/16 active:scale-[0.99]"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         </div>
-      </Modal>
+      )}
     </div>
   );
 }

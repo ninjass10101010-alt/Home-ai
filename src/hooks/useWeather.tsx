@@ -99,9 +99,31 @@ export const WeatherProvider = ({ children }: { children: ReactNode }) => {
         const hour = new Date().getHours();
         resolved = hour >= 6 && hour < 19 ? 'day' : 'night';
       }
+      const prev = (window as any).__consuelaTod;
       (window as any).__consuelaTod = resolved;
+      if (prev !== resolved) {
+        window.dispatchEvent(new CustomEvent('consuela-tod-change', { detail: resolved }));
+      }
     }
   }, [weather, mounted]);
+
+  // Keep __consuelaTod fresh when timeOfDay is 'auto' — re-evaluate every
+  // minute so a page left open across the 6am/7pm boundary flips without
+  // needing a reload or a weather config change.
+  useEffect(() => {
+    if (weather.timeOfDay !== 'auto') return;
+    const tick = () => {
+      const hour = new Date().getHours();
+      const resolved: 'day' | 'night' = hour >= 6 && hour < 19 ? 'day' : 'night';
+      const prev = (window as any).__consuelaTod;
+      if (prev !== resolved) {
+        (window as any).__consuelaTod = resolved;
+        window.dispatchEvent(new CustomEvent('consuela-tod-change', { detail: resolved }));
+      }
+    };
+    const id = window.setInterval(tick, 60 * 1000);
+    return () => window.clearInterval(id);
+  }, [weather.timeOfDay]);
 
 
   const setLocation = useCallback((location: string) => {

@@ -19,23 +19,24 @@ export default function WidgetCard({ tone, icon, children, className = "", style
       style={{ ...(tone ? ({ "--widget-tone": tone } as CSSProperties) : null), ...style }}
     >
       {icon && (
-        <div className="absolute z-30 pointer-events-none" style={{ top: -14, left: -14 }}>
-          <div className="relative h-14 w-14">
-            <div
-              aria-hidden="true"
-              className="absolute inset-0"
-              style={{
-                background: `radial-gradient(circle, color-mix(in srgb, var(--widget-tone) 40%, transparent) 0%, color-mix(in srgb, var(--widget-tone) 0%, transparent) 70%)`,
-                filter: "blur(8px)",
-                animation: "weatherGlowPulse 7s ease-in-out infinite",
-              }}
-            />
-            <div
-              className="grid h-14 w-14 place-items-center text-3xl leading-none"
-              style={{ filter: "drop-shadow(0 8px 14px rgba(0,0,0,0.35))" }}
-            >
-              {icon}
-            </div>
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute z-30 top-[-12px] left-[-12px] xl:top-[-24px] xl:left-[-24px] w-[88px] h-[88px]"
+        >
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              background: `radial-gradient(circle, color-mix(in srgb, var(--widget-tone) 40%, transparent) 0%, color-mix(in srgb, var(--widget-tone) 0%, transparent) 70%)`,
+              filter: "blur(10px)",
+              animation: "weatherGlowPulse 7s ease-in-out infinite",
+            }}
+          />
+          <div
+            className="relative grid h-full w-full place-items-center text-6xl leading-none"
+            style={{ filter: "drop-shadow(0 10px 18px rgba(0,0,0,0.35))" }}
+          >
+            {icon}
           </div>
         </div>
       )}

@@ -72,13 +72,7 @@ export default function MorningBriefingWidget({ briefing, loading, ack, ackError
   if (briefing.acknowledged) {
     return (
       <div className="opacity-60 transition-opacity duration-700">
-        <WidgetCard tone={BRIEFING_TONE} className={className}>
-          <div className="relative z-30 pointer-events-none flex justify-center pt-5">
-            <div className="relative h-12 w-12">
-              <div aria-hidden="true" className="absolute inset-0" style={{ background: "radial-gradient(circle, rgba(249,115,22,0.5) 0%, transparent 70%)", filter: "blur(10px)", animation: "weatherGlowPulse 7s ease-in-out infinite" }} />
-              <div className="relative grid h-12 w-12 place-items-center text-2xl leading-none" style={{ filter: "drop-shadow(0 8px 14px rgba(0,0,0,0.35))" }}>🌅</div>
-            </div>
-          </div>
+        <WidgetCard tone={BRIEFING_TONE} icon="🌅" className={className}>
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 p-5 text-center">
             <h3 className="text-base font-bold text-text-primary">Morning Briefing</h3>
             <p className="mt-0.5 text-xs text-text-secondary">Seen for today — Consuela will refresh it tomorrow</p>
