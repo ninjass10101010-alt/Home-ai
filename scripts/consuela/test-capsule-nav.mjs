@@ -120,6 +120,18 @@ async function main() {
     assert.equal(await page.locator('.capsule-nav button[aria-label="Home"]').getAttribute("aria-current"), "page", "Enter activates the focused nav item");
     console.log("5. keyboard focus + Enter activation work");
 
+    await page.locator('.capsule-nav button[aria-label="Calendar"]').click();
+    await page.waitForURL("**/calendar", { timeout: 30_000 });
+    await page.waitForTimeout(500);
+    assert.equal(await page.locator('.capsule-nav button[aria-label="Calendar"]').getAttribute("aria-current"), "page", "Calendar should be current on /calendar");
+    console.log("6. Calendar tab navigates to /calendar and becomes active");
+
+    const resp = await page.request.get(BASE + "/more", { maxRedirects: 0 });
+    assert.ok(resp.status() === 307 || resp.status() === 308 || resp.status() === 301, `expected redirect status, got ${resp.status()}`);
+    const loc = resp.headers()["location"];
+    assert.match(loc, /\/calendar$/, `redirect location should be /calendar, got ${loc}`);
+    console.log("7. /more redirects to /calendar");
+
     for (const width of [375, 390]) {
       await page.setViewportSize({ width, height: 844 });
       await page.waitForTimeout(400);
@@ -135,7 +147,7 @@ async function main() {
       });
       assert.ok(scale < 1 && scale > 0.5, `capsule should scale down at ${width}px (got ${scale})`);
     }
-    console.log("6. no horizontal overflow + capsule auto-scales at 375px and 390px");
+    console.log("8. no horizontal overflow + capsule auto-scales at 375px and 390px");
 
     console.log("\nALL CAPSULE NAV CHECKS PASSED");
   } catch (err) {

@@ -153,7 +153,7 @@ function CompactWeather() {
             <p className="text-xs text-text-secondary">{condition}</p>
           </div>
         </div>
-        <Link href="/more" className="text-[10px] font-semibold text-[var(--color-accent-selected)]">Details →</Link>
+        <Link href="/calendar" className="text-[10px] font-semibold text-[var(--color-accent-selected)]">Details →</Link>
       </div>
       {forecast.length > 0 && (
         <div className="flex gap-1 pt-2 border-t border-white/[0.06]">
