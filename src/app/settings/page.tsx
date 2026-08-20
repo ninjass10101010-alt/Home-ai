@@ -23,6 +23,7 @@ import ErrorState from "@/components/ui/ErrorState";
 import Avatar from "@/components/ui/Avatar";
 import TextField from "@/components/ui/TextField";
 import FormField from "@/components/patterns/FormField";
+import MoreMenuItem from "@/components/patterns/MoreMenuItem";
 import SectionCard from "@/components/patterns/SectionCard";
 import SettingsErrorBoundary from "@/components/ui/SettingsErrorBoundary";
 import GoogleConnectCard from "@/components/settings/GoogleConnectCard";
@@ -697,6 +698,10 @@ export default function SettingsPage() {
               <SoftButton onClick={() => openContactModal()} className="flex-1">Add contact</SoftButton>
               <SoftButton variant="secondary" onClick={testEmergencyAlert} className="flex-1">Test</SoftButton>
             </div>
+          </SectionCard>
+
+          <SectionCard title="Emergency" description="Call cards, common situations, and 911 reference." icon="🛡️" tone="#f43f5e">
+            <MoreMenuItem icon="🛡️" title="Open emergency reference" description="Contacts, common situations, and 911" href="/emergency" />
           </SectionCard>
 
           <SectionCard
