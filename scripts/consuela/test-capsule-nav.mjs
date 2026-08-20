@@ -6,7 +6,7 @@
 //
 // What it verifies:
 //   1. The floating glass capsule renders with all 6 items
-//      (Home, Ask, Meals, Tasks, Settings, More) as real <button>s.
+//      (Home, Ask, Meals, Tasks, Settings, Calendar) as real <button>s.
 //   2. On "/" the Home item is expanded (grid-template-columns "56px 1fr"),
 //      carries aria-current="page", and shows its label; the other items
 //      are collapsed ("56px 0fr") with no visible label.
@@ -68,7 +68,7 @@ const serverLogTail = (logPath) => {
   }
 };
 
-const LABELS = ["Home", "Ask", "Meals", "Tasks", "Settings", "More"];
+const LABELS = ["Home", "Ask", "Meals", "Tasks", "Settings", "Calendar"];
 
 async function main() {
   const { child, logPath } = await bootDevServer(PORT);

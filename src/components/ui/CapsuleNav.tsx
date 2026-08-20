@@ -60,13 +60,20 @@ const navItems = [
     ),
   },
   {
-    href: "/more",
-    label: "More",
+    href: "/calendar",
+    label: "Calendar",
     icon: (active: boolean) => (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 2.5 : 2} strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="6" cy="12" r="1.5" fill="currentColor" />
-        <circle cx="12" cy="12" r="1.5" fill="currentColor" />
-        <circle cx="18" cy="12" r="1.5" fill="currentColor" />
+        <rect x="3.5" y="4.5" width="17" height="16" rx="3" />
+        <path d="M3.5 9.5h17" />
+        <path d="M8 2.5v4" />
+        <path d="M16 2.5v4" />
+        <path d="M8.5 13.5h.01" />
+        <path d="M12 13.5h.01" />
+        <path d="M15.5 13.5h.01" />
+        <path d="M8.5 17h.01" />
+        <path d="M12 17h.01" />
+        <path d="M15.5 17h.01" />
       </svg>
     ),
   },
