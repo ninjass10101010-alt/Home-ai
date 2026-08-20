@@ -32,7 +32,7 @@ Restructure primary navigation so the bottom capsule nav's **More** tab becomes 
 
 - New `SectionCard` **"Emergency"** (icon 🛡️, tone `#f43f5e`) placed directly below the existing "Emergency contacts" card:
   - Description: "Call cards, common situations, and 911 reference".
-  - A `MoreMenuItem`-style row (or `Link` + `SoftButton`) linking to `/emergency`.
+  - A `MoreMenuItem` row (icon 🛡️, title "Emergency", description "Call cards, common situations, and 911 reference", href `/emergency`) — reuses the existing pattern so it stays used after the More page is deleted.
 - The `/emergency` page is unchanged (it already has its own "Edit contacts in Settings" quick-link back to the Settings `#emergency` anchor).
 
 ### 4. Docs & tests
