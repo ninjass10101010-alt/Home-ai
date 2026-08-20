@@ -16,7 +16,7 @@ import CurrentMealWidget from "@/components/meals/CurrentMealWidget";
 import { AtmosphericProvider } from "@/hooks/useAtmosphericTheme";
 import AtmosphericBridge from "@/components/ui/AtmosphericBridge";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
-import { WIDGET_SPANS, homeGridClass, homeFooterSpanClass, widgetSpanClass, tabletSpan, tabletSpanFor, HOME_GRID_FALLBACK } from "@/lib/layout-config";
+import { WIDGET_SPANS, homeGridClass, widgetSpanClass, tabletSpan, tabletSpanFor, HOME_GRID_FALLBACK } from "@/lib/layout-config";
 import { useAuth, type AuthUser } from "@/hooks/useAuth";
 import PinModal from "@/components/auth/PinModal";
 import MemberPickerModal from "@/components/auth/MemberPickerModal";
@@ -58,6 +58,12 @@ function memberMatchesName(member: any, name: string) {
 }
 
 const weekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+const QUICK_PROMPTS = [
+  "What's running low?",
+  "Any calendar conflicts?",
+  "What chores are pending?",
+];
 
 /**
  * Morning briefing grid slot. Owns the briefing hook so the widget and the
@@ -346,7 +352,7 @@ export default function HomePage() {
                           ) : undefined
                         }>
                         {visibleEvents.length === 0 ? (
-                          <EmptyState title="Quiet day" description="No events are scheduled for today." icon="🌿" />
+                          <EmptyState title="Quiet day" description="No events are scheduled for today." icon="🌿" flat />
                         ) : (
                           <div className="space-y-2">
                             {visibleEvents.map((event) => (
@@ -394,7 +400,7 @@ export default function HomePage() {
                           ) : undefined
                         }>
                         {visibleTasks.length === 0 ? (
-                          <EmptyState title="All caught up" description="No pending tasks right now." icon="🎉" />
+                          <EmptyState title="All caught up" description="No pending tasks right now." icon="🎉" flat />
                         ) : (
                           <div className="space-y-2">
                             {visibleTasks.map((task) => (
@@ -416,33 +422,42 @@ export default function HomePage() {
                 case "aiQuickAsk":
                   return (
                     <div key="aiQuickAsk" className={span}>
-                      <Link href="/chat" className="block h-full">
-                        <WidgetCard tone="#8b5cf6" className="h-full">
-                          <div className="relative z-30 pointer-events-none flex justify-center pt-5">
-                            <div className="relative h-14 w-14">
-                              <div
-                                aria-hidden="true"
-                                className="absolute inset-0"
-                                style={{
-                                  background: "radial-gradient(circle, rgba(139,92,246,0.4) 0%, transparent 70%)",
-                                  filter: "blur(8px)",
-                                  animation: "weatherGlowPulse 7s ease-in-out infinite",
-                                }}
-                              />
-                              <div className="relative" style={{ filter: "drop-shadow(0 6px 10px rgba(0,0,0,0.35))" }}>
-                                <span className="grid h-14 w-14 place-items-center"><Icon3D variant="chat" size="md" /></span>
-                              </div>
+                      <WidgetCard tone="#8b5cf6" className="h-full">
+                        <div className="relative z-30 pointer-events-none flex justify-center pt-5">
+                          <div className="relative h-14 w-14">
+                            <div
+                              aria-hidden="true"
+                              className="absolute inset-0"
+                              style={{
+                                background: "radial-gradient(circle, rgba(139,92,246,0.4) 0%, transparent 70%)",
+                                filter: "blur(8px)",
+                                animation: "weatherGlowPulse 7s ease-in-out infinite",
+                              }}
+                            />
+                            <div className="relative" style={{ filter: "drop-shadow(0 6px 10px rgba(0,0,0,0.35))" }}>
+                              <span className="grid h-14 w-14 place-items-center"><Icon3D variant="chat" size="md" /></span>
                             </div>
                           </div>
-                          <div className="flex flex-1 flex-col items-center justify-center gap-1 p-5 text-center">
-                            <div className="flex items-center gap-2">
-                              <h3 className="text-base font-bold text-text-primary">Quick ask</h3>
-                              <span className="widget-accent-text">→</span>
-                            </div>
-                            <p className="text-sm text-text-secondary">"Add soccer practice for Thursday."</p>
+                        </div>
+                        <div className="flex flex-1 flex-col items-center justify-center gap-1 p-5 text-center">
+                          <Link href="/chat" className="flex items-center gap-2 tap-sm">
+                            <h3 className="text-base font-bold text-text-primary">Quick ask</h3>
+                            <span className="widget-accent-text">→</span>
+                          </Link>
+                          <p className="text-sm text-text-secondary">&ldquo;Add soccer practice for Thursday.&rdquo;</p>
+                          <div className="mt-2 flex flex-wrap items-center justify-center gap-1.5">
+                            {QUICK_PROMPTS.map((prompt) => (
+                              <Link
+                                key={prompt}
+                                href={`/chat?q=${encodeURIComponent(prompt)}`}
+                                className="tap-sm rounded-full border border-[var(--color-accent-violet)]/25 bg-[var(--color-accent-violet)]/10 px-2.5 py-1 text-[11px] font-semibold text-[var(--color-accent-violet)] transition-colors hover:bg-[var(--color-accent-violet)]/20"
+                              >
+                                {prompt}
+                              </Link>
+                            ))}
                           </div>
-                        </WidgetCard>
-                      </Link>
+                        </div>
+                      </WidgetCard>
                     </div>
                   );
 
@@ -450,13 +465,13 @@ export default function HomePage() {
                   return null;
               }
             })}
+            </div>
 
-            <div className={layoutMounted ? homeFooterSpanClass(orientation) : "lg:col-span-3"}>
-              <SectionCard title="This Week" description="Meal and family rhythm at a glance" icon="🗓️" tone="#10b981" compact className="h-full">
+            <div className="mt-6">
+              <SectionCard title="This Week" description="Meal and family rhythm at a glance" icon="🗓️" tone="#10b981" compact>
                 <DayStrip value="today" onChange={(dayId) => router.push(`/meals?day=${dayId}`)} days={weekDays} compact />
               </SectionCard>
             </div>
-          </div>
 
             <div className="flex gap-3">
               <Link href="/meals" className="flex-1">

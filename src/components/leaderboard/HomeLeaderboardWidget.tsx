@@ -132,6 +132,7 @@ export default function HomeLeaderboardWidget({ className = "" }: { className?: 
             title="Be the first!"
             description="Complete a task to start the race this week."
             icon="👑"
+            flat
           />
         </SectionCard>
       </Link>

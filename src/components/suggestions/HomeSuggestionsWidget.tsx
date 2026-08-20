@@ -131,6 +131,7 @@ export default function HomeSuggestionsWidget({ className = "" }: { className?: 
           title="All clear"
           description="Consuela is watching the pantry, tasks, and calendar — she'll surface something here when it needs attention."
           icon="🧘"
+          flat
         />
         {toast && <Toast open tone={toast.tone}>{toast.msg}</Toast>}
         {pinModal}

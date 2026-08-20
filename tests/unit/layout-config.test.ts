@@ -9,7 +9,6 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   homeGridClass,
   widgetSpanClass,
-  homeFooterSpanClass,
   tabletSpan,
   tabletSpanFor,
   WIDGET_SPANS,
@@ -119,20 +118,6 @@ describe('widgetSpanClass', () => {
   it('falls back safely for unknown ids', () => {
     expect(widgetSpanClass('bogus' as never, 'tablet')).toBe('');
     expect(widgetSpanClass('bogus' as never, 'desktop')).toBe('');
-  });
-});
-
-describe('homeFooterSpanClass', () => {
-  it('spans nothing in phone', () => {
-    expect(homeFooterSpanClass('phone')).toBe('');
-  });
-
-  it('spans the full 2-col row in tablet', () => {
-    expect(homeFooterSpanClass('tablet')).toBe('col-span-2');
-  });
-
-  it('spans the full row in desktop', () => {
-    expect(homeFooterSpanClass('desktop')).toBe('col-span-full');
   });
 });
 

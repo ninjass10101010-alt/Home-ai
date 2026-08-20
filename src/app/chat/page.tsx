@@ -11,6 +11,7 @@ import { UnifiedInput } from "@/components/chat/UnifiedInput";
 import { db } from "@/db";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
+import { usePendingChatQuery } from "@/hooks/usePendingChatQuery";
 
 interface Message {
   id: number;
@@ -168,6 +169,7 @@ function ChatContent() {
   }, []);
 
   const hydratedRef = useRef(false);
+  const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -183,15 +185,14 @@ function ChatContent() {
         if (saved.length > 0) setMessages(saved);
       }
       hydratedRef.current = true;
+      setHydrated(true);
     })();
     return () => { cancelled = true; };
   }, []);
 
-  const queryParamRef = useRef<string | null>(null);
-
   useEffect(() => {
-    if (hydratedRef.current && messages.length > 0) saveChatHistory(messages);
-  }, [messages]);
+    if (hydrated && messages.length > 0) saveChatHistory(messages);
+  }, [messages, hydrated]);
 
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
@@ -213,17 +214,6 @@ function ChatContent() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isTyping]);
-
-  useEffect(() => {
-    if (queryParam) {
-      queryParamRef.current = queryParam;
-      if (typeof window !== "undefined") {
-        const url = new URL(window.location.href);
-        url.searchParams.delete("q");
-        window.history.replaceState({}, "", url.toString());
-      }
-    }
-  }, [queryParam]);
 
   useEffect(() => {
     if (typeof window !== "undefined" && ("webkitSpeechRecognition" in window || "SpeechRecognition" in window)) {
@@ -319,6 +309,10 @@ function ChatContent() {
     setMessages([initialGreeting]);
     saveChatHistory([initialGreeting]);
   };
+
+  // Deep-link query: /chat?q=... fires the query exactly once, after the
+  // thread has hydrated, and strips the param from the URL immediately.
+  usePendingChatQuery(queryParam, hydrated, sendMessage);
 
   const toggleListening = () => {
     if (!recognitionRef.current) return;

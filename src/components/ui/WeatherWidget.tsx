@@ -5,6 +5,8 @@ import { useState, useEffect, useRef } from "react";
 import { useWeatherConfig } from "@/hooks/useWeather";
 import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
 import { HolidayOverride } from "@/lib/weather-config";
+import Modal from "./Modal";
+import SoftButton from "./SoftButton";
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -1645,7 +1647,7 @@ function StatPill({ icon, label, value, delay, accentColor }: { icon: string; la
 export default function WeatherWidget({ className = "" }: { className?: string }) {
   const { weather } = useWeatherConfig();
   const atm = useAtmosphericTheme();
-  const [expanded, setExpanded] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [tempKey, setTempKey] = useState(0);
   const prevUnitRef = useRef(weather.unit);
@@ -1884,51 +1886,18 @@ export default function WeatherWidget({ className = "" }: { className?: string }
             </div>
           </div>
 
-          {/* Expand toggle */}
+          {/* Expand toggle → opens details modal */}
           <button
-            onClick={() => setExpanded((e) => !e)}
+            onClick={() => setDetailsOpen(true)}
             className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold py-1.5 rounded-lg transition-all duration-200 active:scale-95"
             style={{ color: theme.accentColor, background: `${theme.accentColor}15`, border: `1px solid ${theme.accentColor}25` }}
           >
-            {expanded ? "Hide details" : "More details"}
+            More details
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}
-              className="w-3.5 h-3.5 transition-transform duration-300"
-              style={{ transform: expanded ? "rotate(180deg)" : "rotate(0deg)" }}>
+              className="w-3.5 h-3.5 transition-transform duration-300">
               <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </button>
-
-          {/* Expandable panel */}
-          <div className="overflow-hidden transition-all duration-700"
-            style={{ maxHeight: expanded ? "440px" : "0px", opacity: expanded ? 1 : 0 }}>
-            <div className="pt-3 space-y-3 mt-2" style={{ borderTop: `1px solid ${theme.accentColor}30` }}>
-              <div className="grid grid-cols-3 gap-2">
-                <StatPill icon="💧" label="Rain" value={`${weatherData?.forecast?.[0]?.precipitation ?? 10}%`} delay="0s" accentColor={theme.accentColor} />
-                <StatPill icon="🌫️" label="Humidity" value={`${weatherData?.humidity ?? 55}%`} delay="0.07s" accentColor={theme.accentColor} />
-                <StatPill icon="💨" label="Wind" value={`${weatherData?.wind ?? 8} mph`} delay="0.14s" accentColor={theme.accentColor} />
-              </div>
-              <div>
-                <p className="text-white/40 text-[10px] font-semibold uppercase tracking-widest mb-2">5-Day Forecast</p>
-                <div className="flex justify-between gap-1.5">
-                  {(weatherData?.forecast ?? []).map((day, i) => (
-                    <div key={day.day} className="flex-1 flex flex-col items-center gap-1 py-2.5 rounded-2xl cursor-default"
-                      style={{
-                        background: "rgba(255,255,255,0.07)",
-                        backdropFilter: "blur(6px)",
-                        border: "1px solid rgba(255,255,255,0.08)",
-                        animation: expanded ? `weatherForecastIn 0.55s ease-out ${0.25 + i * 0.08}s both` : undefined,
-                      }}
-                      title={`${day.condition} · High ${weather.unit === "C" ? toC(day.high) : day.high}° / Low ${weather.unit === "C" ? toC(day.low) : day.low}°`}>
-                      <span className="text-white/65 text-[10px] font-semibold">{day.day}</span>
-                      <span className="text-xl leading-none">{day.emoji}</span>
-                      <span className="text-[11px] font-bold" style={{ color: accentHex.selected, textShadow: "0 1px 3px rgba(0,0,0,0.4)" }}>{weather.unit === "C" ? toC(day.high) : day.high}°</span>
-                      <span className="text-white/55 text-[10px]">{weather.unit === "C" ? toC(day.low) : day.low}°</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
 
         </div>
 
@@ -1941,6 +1910,45 @@ export default function WeatherWidget({ className = "" }: { className?: string }
           }}
         />
       </div>
+
+      {/* ── Weather details modal ── */}
+      <Modal
+        open={detailsOpen}
+        onClose={() => setDetailsOpen(false)}
+        title="Weather details"
+        description={`${weather.location} · ${weatherData?.currentCondition ?? "Partly Cloudy"}`}
+        footer={
+          <SoftButton variant="primary" onClick={() => setDetailsOpen(false)}>Close</SoftButton>
+        }
+      >
+        <div className="space-y-3">
+          <div className="grid grid-cols-3 gap-2">
+            <StatPill icon="💧" label="Rain" value={`${weatherData?.forecast?.[0]?.precipitation ?? 10}%`} delay="0s" accentColor={theme.accentColor} />
+            <StatPill icon="🌫️" label="Humidity" value={`${weatherData?.humidity ?? 55}%`} delay="0.07s" accentColor={theme.accentColor} />
+            <StatPill icon="💨" label="Wind" value={`${weatherData?.wind ?? 8} mph`} delay="0.14s" accentColor={theme.accentColor} />
+          </div>
+          <div>
+            <p className="text-white/40 text-[10px] font-semibold uppercase tracking-widest mb-2">5-Day Forecast</p>
+            <div className="flex justify-between gap-1.5">
+              {(weatherData?.forecast ?? []).map((day, i) => (
+                <div key={day.day} className="flex-1 flex flex-col items-center gap-1 py-2.5 rounded-2xl cursor-default"
+                  style={{
+                    background: "rgba(255,255,255,0.07)",
+                    backdropFilter: "blur(6px)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    animation: `weatherForecastIn 0.55s ease-out ${0.25 + i * 0.08}s both`,
+                  }}
+                  title={`${day.condition} · High ${weather.unit === "C" ? toC(day.high) : day.high}° / Low ${weather.unit === "C" ? toC(day.low) : day.low}°`}>
+                  <span className="text-white/65 text-[10px] font-semibold">{day.day}</span>
+                  <span className="text-xl leading-none">{day.emoji}</span>
+                  <span className="text-[11px] font-bold" style={{ color: accentHex.selected, textShadow: "0 1px 3px rgba(0,0,0,0.4)" }}>{weather.unit === "C" ? toC(day.high) : day.high}°</span>
+                  <span className="text-white/55 text-[10px]">{weather.unit === "C" ? toC(day.low) : day.low}°</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

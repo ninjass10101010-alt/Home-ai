@@ -185,17 +185,6 @@ export function tabletSpanFor(id: WidgetId, index: number, widgets: WidgetDef[])
   return index === widgets.length - 1 && oneByOneCount % 2 === 1 ? "col-span-2" : "col-span-1";
 }
 
-export function homeFooterSpanClass(mode: LayoutMode): string {
-  switch (mode) {
-    case "desktop":
-      return "col-span-full";
-    case "tablet":
-      return "col-span-2";
-    case "phone":
-      return "";
-  }
-}
-
 export const LAYOUT_STORAGE_KEY = "consuela-home-layout";
 
 const VALID_IDS = new Set<WidgetId>(ALL_WIDGETS.map((w) => w.id));

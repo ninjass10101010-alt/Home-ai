@@ -362,12 +362,25 @@ body {
     0 0 20px color-mix(in srgb, var(--widget-tone) 12%, transparent),
     0 16px 48px rgba(0, 0, 0, 0.20),
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  transition: box-shadow var(--motion-base) var(--ease-standard), border-color var(--motion-base) var(--ease-standard);
+  transition:
+    box-shadow 600ms var(--ease-standard),
+    border-color 600ms var(--ease-standard),
+    background 600ms var(--ease-standard);
 }
 
-.widget-card:hover {
+/* Resonant atmosphere: hovering (or keyboard-focusing into) a widget makes its
+   tone "resonate" — the pastel wash deepens and the glow swells — over a slow,
+   calm 600ms fade. Reduced-motion neutralizes the fade (see below). */
+.widget-card:hover,
+.widget-card:focus-within {
+  background:
+    linear-gradient(160deg,
+      color-mix(in srgb, var(--widget-tone) 24%, transparent) 0%,
+      color-mix(in srgb, var(--widget-tone) 8%, transparent) 100%),
+    linear-gradient(180deg, var(--glass-tint-strong), var(--glass-tint-soft));
+  border-color: color-mix(in srgb, var(--widget-tone) 48%, transparent);
   box-shadow:
-    0 0 24px color-mix(in srgb, var(--widget-tone) 14%, transparent),
+    0 0 32px color-mix(in srgb, var(--widget-tone) 20%, transparent),
     0 20px 56px rgba(0, 0, 0, 0.24),
     inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
@@ -388,6 +401,22 @@ body {
     0 0 16px color-mix(in srgb, var(--widget-tone) 8%, transparent),
     0 8px 24px rgba(0, 0, 0, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+:root[data-theme="light"] .widget-card:hover,
+:root[data-theme="light"] .widget-card:focus-within,
+:root:not([data-theme="dark"]) .widget-card:hover,
+:root:not([data-theme="dark"]) .widget-card:focus-within {
+  background:
+    linear-gradient(160deg,
+      color-mix(in srgb, var(--widget-tone) 16%, transparent) 0%,
+      color-mix(in srgb, var(--widget-tone) 6%, transparent) 100%),
+    linear-gradient(180deg, var(--glass-tint-strong), var(--glass-tint-soft));
+  border-color: color-mix(in srgb, var(--widget-tone) 44%, transparent);
+  box-shadow:
+    0 0 24px color-mix(in srgb, var(--widget-tone) 14%, transparent),
+    0 12px 32px rgba(0, 0, 0, 0.10),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
 [data-contrast="boost"] .widget-card {
@@ -934,6 +963,7 @@ body {
   .floating,
   .gradient-orb,
   .toggle-knob,
+  .widget-card,
   .tap,
   .tap:hover,
   .tap:active,
