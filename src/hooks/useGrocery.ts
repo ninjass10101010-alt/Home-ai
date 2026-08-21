@@ -123,8 +123,36 @@ export function useGrocery(showToast: (msg: string) => void, plannedMeals: Meal[
     const trimmed = name.trim();
     if (!trimmed) return false;
 
+    const catDef = groceryCategories.find(c => c.id === category);
+    const categoryEmoji = catDef?.emoji || "📦";
+    const categoryAisle = catDef?.aisles?.[0]?.split('-')[0] || "1";
+
     const existing = groceryItems.find(i => normalizeName(i.name) === normalizeName(trimmed));
-    const item = await db.upsertGroceryItem({ name: trimmed, category, priority, emoji: emojiOverride, quantity, notes });
+    const saved: any = await db.upsertGroceryItem({ name: trimmed, category, priority, emoji: emojiOverride, quantity, notes });
+
+    let item: any;
+    if (!saved) {
+      item = {
+        id: Date.now(),
+        name: trimmed,
+        emoji: emojiOverride || categoryEmoji,
+        category,
+        aisle: categoryAisle,
+        quantity,
+        notes,
+        priority,
+        needed: true,
+      };
+    } else {
+      item = {
+        ...saved,
+        emoji: saved.emoji || emojiOverride || categoryEmoji,
+        category: saved.category || category,
+        aisle: saved.aisle || categoryAisle,
+        priority: saved.priority || priority,
+        needed: saved.needed !== false,
+      };
+    }
 
     setGroceryItems(prev => {
       const idx = prev.findIndex(i => normalizeName(i.name) === normalizeName(trimmed));
