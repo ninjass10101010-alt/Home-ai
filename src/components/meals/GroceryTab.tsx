@@ -8,6 +8,7 @@ import ListRow from "@/components/ui/ListRow";
 import SectionCard from "@/components/patterns/SectionCard";
 import { groceryCategories, groceryPresets } from "@/data/meals";
 import { GroceryItem } from "@/types/meals";
+import { parseQuantityString } from "@/lib/grocery-service";
 
 const PRESETS_PER_PAGE = 6;
 const UNDO_MS = 8000;
@@ -51,7 +52,7 @@ export default function GroceryTab({
 
   useEffect(() => () => { if (undoTimer.current) clearTimeout(undoTimer.current); }, []);
 
-  const pushUndo = (snapshot: { pantryIds: number[]; items: GroceryItem[]; added: number }) => {
+  const pushUndo = (snapshot: { pantryIds: (number | string)[]; items: GroceryItem[]; added: number }) => {
     setUndo(snapshot);
     if (undoTimer.current) clearTimeout(undoTimer.current);
     undoTimer.current = setTimeout(() => setUndo(null), UNDO_MS);
@@ -88,16 +89,20 @@ export default function GroceryTab({
 
   const sendSingleToPantry = async (item: GroceryItem) => {
     if (sending) return;
-    const inPantry = (pantryItems || []).some((p: any) => normalizeName(p.item || p.name) === normalizeName(item.name));
-    if (inPantry) { showToast(`🥫 ${item.name} is already in your pantry`); return; }
     setSending(true);
     try {
-      const saved: any = await addPantryItem(item.name, "plenty");
-      if (saved && typeof saved === "object") {
-        await deleteGroceryItem(item.id);
+      const inPantry = (pantryItems || []).some((p: any) => normalizeName(p.item || p.name) === normalizeName(item.name));
+      const { quantityValue, unit } = parseQuantityString(item.quantity || "");
+      if (!inPantry) {
+        const saved: any = await addPantryItem(item.name, "plenty", { quantity: quantityValue, unit, silent: true });
+        if (!saved) {
+          showToast(`❌ Couldn't add ${item.name} to pantry — it stays on your list`);
+          return;
+        }
         pushUndo({ pantryIds: [saved.id], items: [item], added: 1 });
-        showToast(`🥫 Sent ${item.name} to pantry`);
       }
+      await deleteGroceryItem(item.id);
+      showToast(inPantry ? `🥫 ${item.name} was already stocked — removed from your list` : `🥫 Sent ${item.name} to pantry`);
     } finally {
       setSending(false);
     }
@@ -109,7 +114,7 @@ export default function GroceryTab({
     if (!checked.length) return;
     setSending(true);
     try {
-      const pantryIds: number[] = [];
+      const pantryIds: (number | string)[] = [];
       const sentItems: GroceryItem[] = [];
       let added = 0;
       let already = 0;
@@ -117,7 +122,8 @@ export default function GroceryTab({
       for (const item of checked) {
         const inPantry = (pantryItems || []).some((p: any) => normalizeName(p.item || p.name) === normalizeName(item.name));
         if (inPantry) { already++; continue; }
-        const saved: any = await addPantryItem(item.name, "plenty");
+        const { quantityValue, unit } = parseQuantityString(item.quantity || "");
+        const saved: any = await addPantryItem(item.name, "plenty", { quantity: quantityValue, unit, silent: true });
         if (saved && typeof saved === "object") {
           added++;
           pantryIds.push(saved.id);
@@ -126,14 +132,17 @@ export default function GroceryTab({
           failed++;
         }
       }
-      for (const item of sentItems) await deleteGroceryItem(item.id);
+      const removable = checked.filter((i: any) =>
+        failed === 0 || (pantryItems || []).some((p: any) => normalizeName(p.item || p.name) === normalizeName(i.name)) || sentItems.some(s => s.id === i.id)
+      );
+      for (const item of removable) await deleteGroceryItem(item.id);
       if (added > 0) pushUndo({ pantryIds, items: sentItems, added });
-      if (added > 0 && already === 0 && failed === 0) {
-        showToast(`🥫 Sent ${added} item${added === 1 ? "" : "s"} to pantry`);
-      } else if (failed === 0) {
-        showToast(`🥫 Sent ${added} of ${added + already} to pantry (${already} already there)`);
+      if (failed === 0) {
+        showToast(already === 0
+          ? `🥫 Sent ${added} item${added === 1 ? "" : "s"} to pantry`
+          : `🥫 Sent ${added} of ${added + already} to pantry (${already} already stocked)`);
       } else {
-        showToast(`🥫 Sent ${added} to pantry (${already} already there, ${failed} failed)`);
+        showToast(`🥫 Sent ${added} to pantry (${already} already stocked, ${failed} failed — kept on list)`);
       }
     } finally {
       setSending(false);
@@ -148,7 +157,7 @@ export default function GroceryTab({
       if (undoTimer.current) clearTimeout(undoTimer.current);
       for (const id of snap.pantryIds) await removePantryItem(id);
       for (const item of snap.items) {
-        await addGroceryItem(item.name, item.category, item.priority, item.emoji, item.quantity || "", item.notes || "", true);
+        await addGroceryItem(item.name, item.category, item.priority, item.emoji, item.quantity || "", item.notes || "", true, true);
       }
       setUndo(prev => prev === snap ? null : prev);
       showToast(`↩️ Restored ${undo.items.length} item${undo.items.length === 1 ? "" : "s"} to grocery`);
