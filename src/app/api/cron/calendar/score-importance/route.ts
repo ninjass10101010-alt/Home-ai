@@ -72,7 +72,7 @@ async function handle(request: NextRequest) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const end = new Date(today);
-  end.setDate(today.getDate() + 7);
+  end.setDate(today.getDate() + 8);
 
   const todayStr = formatLocalDate(today);
   const endStr = formatLocalDate(end);
