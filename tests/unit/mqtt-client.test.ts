@@ -176,6 +176,30 @@ describe("HAMQTTClient", () => {
     expect(received).toHaveLength(0);
   });
 
+  it("ignores /set and /get command sub-topics", () => {
+    const { client, fakes } = makeHarness({
+      mqttBroker: "mqtt://zigbee.local:1883",
+    });
+    client.start();
+    connect(fakes[0]);
+
+    const received: DeviceMessage[] = [];
+    client.onDeviceMessage((msg) => received.push(msg));
+
+    fakes[0].emit(
+      "message",
+      "zigbee2mqtt/kitchen/set",
+      Buffer.from(JSON.stringify({ state: "on" }))
+    );
+    fakes[0].emit(
+      "message",
+      "zigbee2mqtt/kitchen/get",
+      Buffer.from(JSON.stringify({ state: "" }))
+    );
+
+    expect(received).toHaveLength(0);
+  });
+
   it("ignores messages on /availability topics", () => {
     const { client, fakes } = makeHarness({
       mqttBroker: "mqtt://zigbee.local:1883",

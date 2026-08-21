@@ -6,6 +6,7 @@ import type { ReactElement } from "react";
 import HomeSecurityWidget from "@/components/ha/HomeSecurityWidget";
 import HomeClimateWidget from "@/components/ha/HomeClimateWidget";
 import HomeLightsWidget from "@/components/ha/HomeLightsWidget";
+import { _resetHAStateForTests } from "@/hooks/useHAState";
 
 const mockCurrentUser = vi.hoisted(() => ({ role: "parent" as string }));
 
@@ -78,6 +79,7 @@ function findRow(root: HTMLElement, text: string): HTMLElement {
 
 describe("Home widgets (Home Assistant)", () => {
   beforeEach(() => {
+    _resetHAStateForTests();
     mockCurrentUser.role = "parent";
     vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("no network"))));
   });

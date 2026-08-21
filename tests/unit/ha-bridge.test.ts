@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => {
       return () => {};
     }),
     upsertHAEntity: vi.fn(),
+    deleteHAEntity: vi.fn(),
     getCapturedHandler: () => capturedHandler,
     getCapturedMqttHandler: () => capturedMqttHandler,
   };
@@ -39,6 +40,7 @@ vi.mock("../../src/lib/mqtt/client", () => ({
 vi.mock("../../src/lib/ha/persist", () => ({
   upsertHAEntity: mocks.upsertHAEntity,
   upsertHAEntities: vi.fn(),
+  deleteHAEntity: mocks.deleteHAEntity,
 }));
 
 type BridgeModule = typeof import("../../src/lib/ha/bridge");
@@ -79,6 +81,8 @@ describe("startHABridge", () => {
     mocks.mqttStart.mockReset();
     mocks.upsertHAEntity.mockReset();
     mocks.upsertHAEntity.mockResolvedValue(undefined);
+    mocks.deleteHAEntity.mockReset();
+    mocks.deleteHAEntity.mockResolvedValue(undefined);
     process.env.HA_HOST = "http://ha.local:8123";
     process.env.HA_TOKEN = "test-token";
     process.env.MQTT_BROKER = "mqtt://broker:1883";
@@ -156,6 +160,23 @@ describe("startHABridge", () => {
 
     expect(mocks.connect).toHaveBeenCalledTimes(1);
     expect(mocks.mqttStart).toHaveBeenCalledTimes(1);
+  });
+
+  it("deletes the cached row when HA reports a removed entity (new_state null)", async () => {
+    const { startHABridge } = await loadBridge();
+    startHABridge();
+
+    const handler = mocks.getCapturedHandler();
+    expect(handler).toBeTruthy();
+    handler!({
+      entity_id: "light.retired",
+      old_state: { state: "on" },
+      new_state: null,
+    });
+
+    expect(mocks.upsertHAEntity).not.toHaveBeenCalled();
+    expect(mocks.deleteHAEntity).toHaveBeenCalledTimes(1);
+    expect(mocks.deleteHAEntity).toHaveBeenCalledWith("light.retired");
   });
 
   it("reports bridge status before and after start", async () => {

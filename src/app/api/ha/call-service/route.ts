@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { getHAWebSocketClient } from "@/lib/ha/websocket-client";
 
+// NOTE (accepted risk): this route is intentionally UNAUTHENTICATED. The
+// dashboard is LAN-only and the product decision is that HA controls are not
+// PIN-gated for family convenience. Do not expose this app to the internet.
+// If remote access is ever added, add a bearer/PIN gate here first.
+
 const NAME_PATTERN = /^[a-z0-9_]+$/;
 const MAX_NAME_LENGTH = 64;
 

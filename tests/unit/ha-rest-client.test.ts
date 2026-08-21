@@ -10,6 +10,7 @@ describe("fetchHADeviceStates", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it("sends Bearer token and returns only watched domains", async () => {
@@ -40,10 +41,9 @@ describe("fetchHADeviceStates", () => {
 
     const result = await fetchHADeviceStates();
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "http://homeassistant:8123/api/states",
-      { headers: { Authorization: "Bearer test-token" } }
-    );
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("http://homeassistant:8123/api/states");
+    expect((init as RequestInit).headers).toEqual({ Authorization: "Bearer test-token" });
     expect(result.map((e) => e.entity_id)).toEqual([
       "light.kitchen",
       "person.jeffery",
@@ -96,8 +96,30 @@ describe("fetchHADeviceStates", () => {
 
     await fetchHADeviceStates({ haHost: "http://ha2:8123", haToken: "tok2" });
 
-    expect(fetchMock).toHaveBeenCalledWith("http://ha2:8123/api/states", {
-      headers: { Authorization: "Bearer tok2" },
-    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("http://ha2:8123/api/states");
+    expect((init as RequestInit).headers).toEqual({ Authorization: "Bearer tok2" });
+    expect((init as RequestInit).signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("throws a friendly timeout error when HA never responds", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockImplementation(
+      (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            const err = new Error("The operation was aborted");
+            err.name = "AbortError";
+            reject(err);
+          });
+        })
+    );
+
+    const pending = fetchHADeviceStates();
+    const expectation = expect(pending).rejects.toThrow("timed out");
+    await vi.advanceTimersByTimeAsync(15_000);
+    await expectation;
   });
 });

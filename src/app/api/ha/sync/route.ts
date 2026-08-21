@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { fetchHADeviceStates } from "@/lib/ha/rest-client";
 
+// NOTE (accepted risk): unauthenticated by design — LAN-only app, HA state is
+// non-sensitive within the home. See call-service/route.ts for the fuller note.
+
 export async function POST() {
   try {
     const states = await fetchHADeviceStates();

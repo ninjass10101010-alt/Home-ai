@@ -4,6 +4,7 @@ const fakeColl = vi.hoisted(() => ({
   getFirstListItem: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
+  delete: vi.fn(),
 }));
 
 const fakePb = vi.hoisted(() => ({
@@ -14,7 +15,7 @@ vi.mock("../../src/lib/pb-auth", () => ({
   withAdmin: (fn: (pb: unknown) => Promise<unknown>) => fn(fakePb),
 }));
 
-import { upsertHAEntity, upsertHAEntities, HAEntityRecord } from "../../src/lib/ha/persist";
+import { upsertHAEntity, upsertHAEntities, deleteHAEntity, HAEntityRecord } from "../../src/lib/ha/persist";
 
 const record: HAEntityRecord = {
   entity_id: "light.kitchen",
@@ -28,14 +29,19 @@ const record: HAEntityRecord = {
   source: "ha",
 };
 
+// Spy ONCE at module scope; re-spying per test would stack mocks and leak
+// call history across tests.
+vi.spyOn(console, "log").mockImplementation(() => {});
+vi.spyOn(console, "warn").mockImplementation(() => {});
+
 describe("upsertHAEntity", () => {
   beforeEach(() => {
     fakeColl.getFirstListItem.mockReset();
     fakeColl.create.mockReset();
     fakeColl.update.mockReset();
     fakePb.collection.mockClear();
-    vi.spyOn(console, "log").mockImplementation(() => {});
-    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.mocked(console.log).mockClear();
+    vi.mocked(console.warn).mockClear();
   });
 
   it("creates when the entity does not exist (404)", async () => {
@@ -66,6 +72,49 @@ describe("upsertHAEntity", () => {
     expect(fakeColl.create).not.toHaveBeenCalled();
     expect(fakeColl.update).not.toHaveBeenCalled();
     expect(console.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("recovers by updating the winner when a concurrent create loses the unique race", async () => {
+    // First lookup: entity not found → create path
+    fakeColl.getFirstListItem.mockRejectedValueOnce({ status: 404 });
+    // Concurrent writer won: our create hits the unique index (PB returns 400)
+    fakeColl.create.mockRejectedValueOnce({ status: 400, response: { code: "unique_index" } });
+    // Recovery lookup finds the winner's row
+    fakeColl.getFirstListItem.mockResolvedValueOnce({ id: "winner" });
+    fakeColl.update.mockResolvedValue(undefined);
+
+    await upsertHAEntity(record);
+
+    expect(fakeColl.create).toHaveBeenCalledTimes(1);
+    expect(fakeColl.update).toHaveBeenCalledWith("winner", record);
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+});
+
+describe("deleteHAEntity", () => {
+  beforeEach(() => {
+    fakeColl.getFirstListItem.mockReset();
+    fakeColl.delete.mockReset();
+    vi.mocked(console.warn).mockClear();
+  });
+
+  it("deletes the cached row for a removed entity", async () => {
+    fakeColl.getFirstListItem.mockResolvedValue({ id: "gone" });
+    fakeColl.delete.mockResolvedValue(undefined);
+
+    await deleteHAEntity("light.old");
+
+    expect(fakeColl.getFirstListItem).toHaveBeenCalledWith('entity_id="light.old"');
+    expect(fakeColl.delete).toHaveBeenCalledWith("gone");
+  });
+
+  it("ignores 404 when the row is already gone", async () => {
+    fakeColl.getFirstListItem.mockRejectedValue({ status: 404 });
+
+    await deleteHAEntity("light.never_existed");
+
+    expect(fakeColl.delete).not.toHaveBeenCalled();
+    expect(console.warn).not.toHaveBeenCalled();
   });
 });
 

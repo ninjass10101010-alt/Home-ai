@@ -73,7 +73,7 @@ export default function RoomSheet({ room, states, onClose, onRefresh }: RoomShee
                 key={entity.entity_id}
                 title={entityFriendlyName(entity)}
                 onClick={readOnly ? undefined : () => toggle(entity.entity_id)}
-                aria-label={`Toggle ${entityFriendlyName(entity)}`}
+                aria-label={readOnly ? undefined : `Toggle ${entityFriendlyName(entity)}`}
                 trailing={
                   <Chip size="sm" tone={entity.state === "on" ? "success" : "neutral"}>
                     {entity.state === "on" ? "On" : "Off"}

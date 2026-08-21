@@ -1,6 +1,6 @@
 import { getHAWebSocketClient, HAStateChange } from "./websocket-client";
 import { getHAMQTTClient } from "../mqtt/client";
-import { upsertHAEntity, HAEntityRecord } from "./persist";
+import { deleteHAEntity, upsertHAEntity, HAEntityRecord } from "./persist";
 
 export interface HABridgeStatus {
   started: boolean;
@@ -90,6 +90,14 @@ export function startHABridge(): void {
   const ws = getHAWebSocketClient();
   ws.onStateChange((change) => {
     lastEventAt = new Date().toISOString();
+    // HA sends new_state: null when an entity is removed — delete the cached
+    // row instead of skipping, otherwise removed devices linger as ghosts.
+    if (change.new_state === null || change.new_state === undefined) {
+      if (typeof change.entity_id === "string" && change.entity_id.length > 0) {
+        deleteHAEntity(change.entity_id).catch(() => {});
+      }
+      return;
+    }
     const record = mapWSChange(change);
     if (!record) return;
     upsertHAEntity(record).catch(() => {});

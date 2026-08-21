@@ -88,6 +88,9 @@ export class HAMQTTClient {
     if (!topic.startsWith("zigbee2mqtt/")) return;
     if (topic === BRIDGE_STATE_TOPIC) return;
     if (topic.endsWith("/availability")) return;
+    // Command/echo sub-topics are not device state — publishing them would
+    // create synthetic noise entities like sensor.z2m_kitchen_set.
+    if (topic.endsWith("/set") || topic.endsWith("/get")) return;
 
     const raw = payload.toString("utf8");
     let parsed: unknown;

@@ -22,9 +22,14 @@ const TABS = [
   { id: "automation", label: "Automation" },
 ];
 
+// Domains that are not physical room contents — they'd otherwise pile into a
+// meaningless "Other" card (people, scenes, whole-house automations).
+const NON_ROOM_DOMAINS = new Set(["person", "scene", "automation"]);
+
 export function roomsFor(states: HAState[]): { room: string; states: HAState[] }[] {
   const byRoom = new Map<string, HAState[]>();
   for (const s of states) {
+    if (NON_ROOM_DOMAINS.has(s.entity_id.split(".")[0])) continue;
     const area = typeof s.attributes?.area_id === "string" && s.attributes.area_id.length > 0 ? s.attributes.area_id : "Other";
     const list = byRoom.get(area) ?? [];
     list.push(s);

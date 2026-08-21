@@ -5,6 +5,8 @@ import {
   WebSocketLike,
 } from "../../src/lib/ha/websocket-client";
 
+const HANDSHAKE_TIMEOUT_MS = 15_000;
+
 class FakeSocket implements WebSocketLike {
   onopen: (() => void) | null = null;
   onclose: (() => void) | null = null;
@@ -230,6 +232,59 @@ describe("HAWebSocketClient", () => {
     client.close();
     await vi.advanceTimersByTimeAsync(40_000);
     expect(sockets).toHaveLength(1);
+  });
+
+  it("handshake timeout rejects, then retries with backoff", async () => {
+    vi.useFakeTimers();
+    const { sockets, factory } = makeFactory();
+    const client = makeClient(factory);
+
+    const connecting = client.connect();
+    const socket = sockets[0];
+    socket.onopen?.();
+    socket.emit({ type: "auth_required", ha_version: "2026.1" });
+    // Server never answers — no auth_ok.
+
+    const expectation = expect(connecting).rejects.toThrow("handshake timed out");
+    await vi.advanceTimersByTimeAsync(HANDSHAKE_TIMEOUT_MS + 100);
+    await expectation;
+
+    // Backoff starts at 1s ±20% jitter → second attempt well within 3s.
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(sockets).toHaveLength(2);
+  });
+
+  it("auth_invalid does not schedule any reconnect", async () => {
+    vi.useFakeTimers();
+    const { sockets, factory } = makeFactory();
+    const client = makeClient(factory, "bad-token");
+
+    const connecting = client.connect();
+    const socket = sockets[0];
+    socket.onopen?.();
+    socket.emit({ type: "auth_required", ha_version: "2026.1" });
+    socket.emit({ type: "auth_invalid", message: "nope" });
+
+    await expect(connecting).rejects.toThrow("nope");
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(sockets).toHaveLength(1);
+    expect(factory).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries when the very first handshake fails (HA down at startup)", async () => {
+    vi.useFakeTimers();
+    const { sockets, factory } = makeFactory();
+    const client = makeClient(factory);
+
+    const connecting = client.connect();
+    const socket = sockets[0];
+    // Close before the handshake completes — HA unreachable.
+    if (socket.onclose) socket.onclose();
+
+    await expect(connecting).rejects.toThrow("closed during handshake");
+
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(sockets).toHaveLength(2);
   });
 
   it("a pending reconnect timer is cancelled by an explicit close()", async () => {

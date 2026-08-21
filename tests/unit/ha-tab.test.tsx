@@ -5,6 +5,7 @@ import { act } from "react";
 import type { ReactElement } from "react";
 import HomeControlsPage from "@/app/ha/page";
 import SecurityPanel from "@/components/ha/SecurityPanel";
+import { _resetHAStateForTests } from "@/hooks/useHAState";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -84,6 +85,7 @@ function findRadio(root: HTMLElement, text: RegExp): HTMLButtonElement {
 
 describe("HA tab (/ha) HomeControlsPage", () => {
   beforeEach(() => {
+    _resetHAStateForTests();
     mockCurrentUser.role = "parent";
     vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("no network"))));
   });

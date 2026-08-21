@@ -5,6 +5,9 @@ const ADMIN_PASS = process.env.PB_ADMIN_PASS;
 
 let adminToken: string | null = null;
 let tokenExpiry = 0;
+// Reuse one authenticated client instead of constructing a fresh PocketBase
+// instance (new HTTP agent, new auth store) on every withAdmin call.
+let cachedAdminPB: ReturnType<typeof getAdminPB> | null = null;
 
 export async function ensureAuth(): Promise<string> {
   if (!ADMIN_EMAIL || !ADMIN_PASS) {
@@ -20,7 +23,10 @@ export async function ensureAuth(): Promise<string> {
 }
 
 export async function withAdmin<T>(fn: (pb: ReturnType<typeof getAdminPB>) => Promise<T>): Promise<T> {
-  const pb = getAdminPB();
-  pb.authStore.save(await ensureAuth(), null);
-  return fn(pb);
+  if (!cachedAdminPB) {
+    cachedAdminPB = getAdminPB();
+    cachedAdminPB.autoCancellation(false);
+  }
+  cachedAdminPB.authStore.save(await ensureAuth(), null);
+  return fn(cachedAdminPB);
 }

@@ -31,6 +31,7 @@ interface PendingCall {
 const SUBSCRIBE_EVENTS = "subscribe_events";
 const MAX_BACKOFF_MS = 30_000;
 const CALL_TIMEOUT_MS = 10_000;
+const HANDSHAKE_TIMEOUT_MS = 15_000;
 
 export class HAWebSocketClient {
   private readonly config: HAConfig;
@@ -45,7 +46,7 @@ export class HAWebSocketClient {
   private connectPromise: Promise<void> | null = null;
   private backoffMs = 1_000;
   private closedExplicitly = false;
-  private connectedOnce = false;
+  private authFailed = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
@@ -63,6 +64,7 @@ export class HAWebSocketClient {
 
   private wsUrl(): string {
     const ws = this.config.haHost
+      .replace(/\/+$/, "")
       .replace(/^http:\/\//i, "ws://")
       .replace(/^https:\/\//i, "wss://");
     return `${ws}/api/websocket`;
@@ -79,29 +81,48 @@ export class HAWebSocketClient {
       let opened = false;
       let settled = false;
 
-      const fail = (err: Error) => {
+      const fail = (err: Error, opts?: { retryable?: boolean }) => {
         if (settled) return;
         settled = true;
         this.connectPromise = null;
         if (this.socket === socket) this.socket = null;
         this._status = "disconnected";
         reject(err);
+        // Transient handshake failures (server down, timeout, dropped socket)
+        // should keep trying with backoff — HA may simply boot after us. A
+        // rejected token must NOT loop; auth_invalid sets authFailed first.
+        if (opts?.retryable !== false && !this.closedExplicitly && !this.authFailed) {
+          this.scheduleReconnect();
+        }
       };
 
       const done = () => {
         if (settled) return;
         settled = true;
+        clearTimeout(handshakeTimer);
         this.connectPromise = null;
-        this.connectedOnce = true;
         this.backoffMs = 1_000;
         this._status = "connected";
         resolve();
       };
 
+      // Guard against a lost subscription result leaving connect() pending forever.
+      // Fail BEFORE closing so onclose sees a nulled socket and doesn't
+      // schedule a second (duplicate) reconnect.
+      const handshakeTimer = setTimeout(() => {
+        fail(new Error("HA WebSocket handshake timed out"));
+        try {
+          socket?.close();
+        } catch {
+          /* ignore */
+        }
+      }, HANDSHAKE_TIMEOUT_MS);
+
       let socket: WebSocketLike;
       try {
         socket = this.socketFactory(this.wsUrl());
       } catch (err) {
+        clearTimeout(handshakeTimer);
         fail(err instanceof Error ? err : new Error(String(err)));
         return;
       }
@@ -116,6 +137,7 @@ export class HAWebSocketClient {
       socket.onerror = () => {
         if (this.socket !== socket) return;
         if (!opened) {
+          clearTimeout(handshakeTimer);
           fail(new Error("WebSocket error during handshake"));
           return;
         }
@@ -125,6 +147,7 @@ export class HAWebSocketClient {
       socket.onclose = () => {
         if (this.socket !== socket) return;
         if (!opened) {
+          clearTimeout(handshakeTimer);
           fail(new Error("WebSocket closed during handshake"));
           return;
         }
@@ -169,12 +192,17 @@ export class HAWebSocketClient {
             }
             return;
           case "auth_invalid":
+            // Latch BEFORE closing so the onclose handler can't schedule a
+            // retry for a token that will never succeed.
+            this.authFailed = true;
             try {
               socket.close();
             } catch {
               /* ignore */
             }
-            fail(new Error(`HA auth invalid: ${msg.message ?? "unknown"}`));
+            fail(new Error(`HA auth invalid: ${msg.message ?? "unknown"}`), {
+              retryable: false,
+            });
             return;
           case "ping":
             try {
@@ -239,6 +267,17 @@ export class HAWebSocketClient {
     }
   }
 
+  private scheduleReconnect(): void {
+    if (this.closedExplicitly || this.authFailed) return;
+    const jitter = this.backoffMs * 0.2 * (Math.random() * 2 - 1);
+    const delay = Math.max(0, Math.round(this.backoffMs + jitter));
+    this.backoffMs = Math.min(this.backoffMs * 2, MAX_BACKOFF_MS);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect().catch(() => {});
+    }, delay);
+  }
+
   private handleUnexpectedClose(socket: WebSocketLike): void {
     if (this.closedExplicitly) return;
     if (this.socket !== socket) return;
@@ -251,15 +290,9 @@ export class HAWebSocketClient {
     this._status = "disconnected";
     this.connectPromise = null;
 
-    if (!this.connectedOnce) return;
-
-    const jitter = this.backoffMs * 0.2 * (Math.random() * 2 - 1);
-    const delay = Math.max(0, Math.round(this.backoffMs + jitter));
-    this.backoffMs = Math.min(this.backoffMs * 2, MAX_BACKOFF_MS);
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
-      this.connect().catch(() => {});
-    }, delay);
+    // Retry regardless of whether a previous handshake fully succeeded —
+    // HA may simply not be up yet. auth_invalid latches via authFailed.
+    this.scheduleReconnect();
   }
 
   close(): void {
