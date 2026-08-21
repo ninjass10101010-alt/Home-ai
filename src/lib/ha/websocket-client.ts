@@ -46,6 +46,7 @@ export class HAWebSocketClient {
   private backoffMs = 1_000;
   private closedExplicitly = false;
   private connectedOnce = false;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     config?: HAConfig,
@@ -255,14 +256,17 @@ export class HAWebSocketClient {
     const jitter = this.backoffMs * 0.2 * (Math.random() * 2 - 1);
     const delay = Math.max(0, Math.round(this.backoffMs + jitter));
     this.backoffMs = Math.min(this.backoffMs * 2, MAX_BACKOFF_MS);
-    setTimeout(() => {
-      this.connect().catch(() => {
-        /* reconnect retries continue on next unexpected close */
-      });
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect().catch(() => {});
     }, delay);
   }
 
   close(): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.closedExplicitly = true;
     if (this.socket) {
       const socket = this.socket;

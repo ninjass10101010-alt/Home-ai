@@ -232,6 +232,22 @@ describe("HAWebSocketClient", () => {
     expect(sockets).toHaveLength(1);
   });
 
+  it("a pending reconnect timer is cancelled by an explicit close()", async () => {
+    vi.useFakeTimers();
+    const { sockets, factory } = makeFactory();
+    const client = makeClient(factory);
+    const connecting = client.connect();
+    await driveHandshake(sockets[0]);
+    await connecting;
+
+    sockets[0].close(); // unexpected close schedules a reconnect
+    client.close(); // explicit close should cancel it
+
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(sockets).toHaveLength(1);
+    expect(factory).toHaveBeenCalledTimes(1);
+  });
+
   it("replies pong to server pings", async () => {
     const { sockets, factory } = makeFactory();
     const client = makeClient(factory);
