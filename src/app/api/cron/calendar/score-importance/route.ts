@@ -43,6 +43,13 @@ function getMembers(event: any): string[] {
   return [];
 }
 
+function formatLocalDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 function getEventDateStr(event: any): string | null {
   if (typeof event.date === "string" && /^\d{4}-\d{2}-\d{2}/.test(event.date)) {
     return event.date.slice(0, 10);
@@ -52,7 +59,7 @@ function getEventDateStr(event: any): string | null {
     // Handles both YYYY-MM-DD and ISO datetime
     if (/^\d{4}-\d{2}-\d{2}/.test(iso)) return iso.slice(0, 10);
     const d = new Date(iso);
-    if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+    if (!Number.isNaN(d.getTime())) return formatLocalDate(d);
   }
   return null;
 }
@@ -67,13 +74,14 @@ async function handle(request: NextRequest) {
   const end = new Date(today);
   end.setDate(today.getDate() + 7);
 
-  const todayStr = today.toISOString().slice(0, 10);
-  const endStr = end.toISOString().slice(0, 10);
+  const todayStr = formatLocalDate(today);
+  const endStr = formatLocalDate(end);
 
   try {
     // Fetch events. Try server-side date filter first (lexicographic YYYY-MM-DD);
     // fallback to full list + JS filter for robustness and for `start` ISO shapes.
     let events: any[] = [];
+    let usedFallback = false;
     try {
       events = await withAdmin(async (pb) => {
         return pb.collection("events").getFullList({
@@ -81,12 +89,8 @@ async function handle(request: NextRequest) {
           requestKey: null,
         });
       });
-      // If collection contains legacy `start` ISO events without `date`, supplement
-      // by checking the full list only when filtered result seems to miss them.
-      // To keep PB call count predictable for tests, we lazily handle that via
-      // the JS-filter fallback check below only if PB filter threw — the common
-      // `events` collection path already has `date`, so no extra fetch is needed.
     } catch {
+      usedFallback = true;
       const all = await withAdmin(async (pb) =>
         pb.collection("events").getFullList({ requestKey: null }),
       );
@@ -96,28 +100,24 @@ async function handle(request: NextRequest) {
         return d >= todayStr && d < endStr;
       });
     }
-    // Handle legacy `start` ISO shape in-memory when PB date filter succeeded but
-    // missed start-based rows (those rows have no `date`). We do this without an
-    // extra PB call by noting that events with `date` are already scored; start-based
-    // rows would have been absent — to cover them we re-filter the already-fetched
-    // `events`? No, need full list. Instead, if any start-based events exist, the PB
-    // filter path would have missed them, so we fetch once more only in that edge
-    // case. In practice `events` seeded data uses `date`, so this extra fetch is rare
-    // and only triggers when filtered count is 0 and full list has start-based in-window.
-    if (events.length === 0) {
-      // Double-check for start-based events only when date-filter returned empty
+    if (!usedFallback) {
+      // PB date filter succeeded but missed start-based rows (no `date` field).
+      // Merge in-window start-based events so mixed collections are fully scored.
       try {
         const all = await withAdmin(async (pb) =>
           pb.collection("events").getFullList({ requestKey: null }),
         );
-        const startBased = all.filter((e: any) => {
-          if (e.date) return false;
+        const seen = new Set(events.map((e: any) => e.id));
+        for (const e of all) {
+          if (e.date) continue;
+          if (seen.has(e.id)) continue;
           const d = getEventDateStr(e);
-          return d !== null && d >= todayStr && d < endStr;
-        });
-        if (startBased.length) events = startBased;
+          if (d !== null && d >= todayStr && d < endStr) {
+            events.push(e);
+          }
+        }
       } catch {
-        // ignore
+        // ignore supplement failures — primary date-filtered events still scored
       }
     }
 
