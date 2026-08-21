@@ -5,14 +5,15 @@
 //   node scripts/consuela/test-capsule-nav.mjs
 //
 // What it verifies:
-//   1. The floating glass capsule renders with all 6 items
-//      (Home, Ask, Meals, Tasks, Calendar, Settings) as real <button>s.
+//   1. The floating glass capsule renders with all 7 items
+//      (Home, Ask, Meals, Tasks, Calendar, House, Settings) as real <button>s.
 //   2. On "/" the Home item is expanded (grid-template-columns "56px 1fr"),
 //      carries aria-current="page", and shows its label; the other items
 //      are collapsed ("56px 0fr") with no visible label.
 //   3. Clicking Meals navigates to /meals and moves the expansion + aria-current.
 //   4. Keyboard: pressing Tab focuses a nav button (not tabIndex=-1).
-//   5. At 390px and 375px viewports there is no horizontal page overflow and
+//   5. Clicking House navigates to /ha and becomes the active item.
+//   6. At 390px and 375px viewports there is no horizontal page overflow and
 //      the capsule scales down (--capsule-scale < 1).
 //
 // Boots its own `npm run dev -p <free port>`; no PocketBase or cron needed
@@ -68,7 +69,7 @@ const serverLogTail = (logPath) => {
   }
 };
 
-const LABELS = ["Home", "Ask", "Meals", "Tasks", "Calendar", "Settings"];
+const LABELS = ["Home", "Ask", "Meals", "Tasks", "Calendar", "House", "Settings"];
 
 async function main() {
   const { child, logPath } = await bootDevServer(PORT);
@@ -87,11 +88,11 @@ async function main() {
     console.log("1. capsule renders");
 
     const buttons = page.locator('.capsule-nav button[aria-label]');
-    assert.equal(await buttons.count(), 6, "expected 6 nav buttons");
+    assert.equal(await buttons.count(), 7, "expected 7 nav buttons");
     for (const label of LABELS) {
       assert.equal(await page.locator(`.capsule-nav button[aria-label="${label}"]`).count(), 1, `missing item ${label}`);
     }
-    console.log("2. six items present");
+    console.log("2. seven items present");
 
     const homeBtn = page.locator('.capsule-nav button[aria-label="Home"]');
     assert.equal(await homeBtn.getAttribute("aria-current"), "page", "Home should be current on /");
@@ -126,11 +127,17 @@ async function main() {
     assert.equal(await page.locator('.capsule-nav button[aria-label="Calendar"]').getAttribute("aria-current"), "page", "Calendar should be current on /calendar");
     console.log("6. Calendar tab navigates to /calendar and becomes active");
 
+    await page.locator('.capsule-nav button[aria-label="House"]').click();
+    await page.waitForURL("**/ha", { timeout: 30_000 });
+    await page.waitForTimeout(500);
+    assert.equal(await page.locator('.capsule-nav button[aria-label="House"]').getAttribute("aria-current"), "page", "House should be current on /ha");
+    console.log("7. House tab navigates to /ha and becomes active");
+
     const resp = await page.request.get(BASE + "/more", { maxRedirects: 0 });
     assert.ok(resp.status() === 307 || resp.status() === 308 || resp.status() === 301, `expected redirect status, got ${resp.status()}`);
     const loc = resp.headers()["location"];
     assert.match(loc, /\/calendar$/, `redirect location should be /calendar, got ${loc}`);
-    console.log("7. /more redirects to /calendar");
+    console.log("8. /more redirects to /calendar");
 
     for (const width of [375, 390]) {
       await page.setViewportSize({ width, height: 844 });
@@ -147,7 +154,7 @@ async function main() {
       });
       assert.ok(scale < 1 && scale > 0.5, `capsule should scale down at ${width}px (got ${scale})`);
     }
-    console.log("8. no horizontal overflow + capsule auto-scales at 375px and 390px");
+    console.log("9. no horizontal overflow + capsule auto-scales at 375px and 390px");
 
     console.log("\nALL CAPSULE NAV CHECKS PASSED");
   } catch (err) {
