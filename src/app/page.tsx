@@ -37,6 +37,7 @@ import HomeSuggestionsWidget from "@/components/suggestions/HomeSuggestionsWidge
 import MorningBriefingWidget from "@/components/briefing/MorningBriefingWidget";
 import { useMorningBriefing, briefingSectionsEmpty } from "@/components/briefing/hooks/useMorningBriefing";
 import ProfileSheet from "@/components/profile/ProfileSheet";
+import { useHomeEvents } from "@/hooks/useHomeEvents";
 
 const FogBackground = dynamic(() => import("@/components/ui/FogBackground"), { ssr: false });
 
@@ -100,6 +101,7 @@ export default function HomePage() {
   const router = useRouter();
   const { currentUser, isLoggedIn, logout, sessionRemainingMs, sessionWarning, extendSession } = useAuth();
   const { visibleWidgets, orientation, mounted: layoutMounted } = useHomeLayout();
+  const { upcomingImportant } = useHomeEvents();
   const gridClass = layoutMounted ? homeGridClass(orientation) : HOME_GRID_FALLBACK;
 
   const sessionSecondsRemaining = Math.ceil(sessionRemainingMs / 1000);
@@ -343,6 +345,7 @@ export default function HomePage() {
                 case "todayEvents": {
                   const visibleEvents = todayEvents.slice(0, 3);
                   const hiddenEvents = todayEvents.length - visibleEvents.length;
+                  const upcoming = Array.isArray(upcomingImportant) ? upcomingImportant.slice(0, 3) : [];
                   return (
                     <div key="todayEvents" className={span}>
                       <SectionCard title="Today" description={`${todayEvents.length} events on the family calendar`} icon="📅" tone="#3b82f6" compact centeredHeader className="h-full"
@@ -365,6 +368,38 @@ export default function HomePage() {
                                 trailing={<Chip size="sm" tone="accent">{event.member.split(" ")[0]}</Chip>}
                               />
                             ))}
+                          </div>
+                        )}
+                        {upcoming.length > 0 && (
+                          <div className="pt-3 border-t border-white/10">
+                            <div className="text-[11px] uppercase tracking-wide text-text-muted mb-2">Upcoming important</div>
+                            <div className="space-y-2">
+                              {upcoming.map((event: any) => {
+                                const timeStr = event.time
+                                  ? (() => {
+                                      try {
+                                        if (typeof event.time === "string" && event.time.includes("M")) return event.time;
+                                        return new Date(`2000-01-01T${event.time}`).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+                                      } catch {
+                                        return String(event.time);
+                                      }
+                                    })()
+                                  : "";
+                                const dateLabel = event.date ? String(event.date).slice(0, 10) : (event.start ? String(event.start).slice(0, 10) : "");
+                                const subtitle = [dateLabel, timeStr].filter(Boolean).join(" · ");
+                                const memberLabel = event.member ? String(event.member).split(" ")[0] : null;
+                                return (
+                                  <ListRow
+                                    key={event.id}
+                                    title={event.title}
+                                    subtitle={subtitle || undefined}
+                                    leftRailColor={event.color === "green" ? "var(--color-accent-mint)" : event.color === "violet" ? "var(--color-accent-violet)" : event.color === "amber" ? "var(--color-accent-amber)" : event.color === "cyan" ? "var(--color-accent-cyan)" : event.color === "rose" ? "var(--color-accent-rose)" : event.color === "blue" ? "var(--color-accent-nori)" : "var(--color-accent-nori)"}
+                                    leading={<span className="text-xl">{event.icon || "📅"}</span>}
+                                    trailing={memberLabel ? <Chip size="sm" tone="accent">{memberLabel}</Chip> : undefined}
+                                  />
+                                );
+                              })}
+                            </div>
                           </div>
                         )}
                       </SectionCard>
