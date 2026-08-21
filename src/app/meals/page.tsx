@@ -14,6 +14,7 @@ import MealsTab from "@/components/meals/MealsTab";
 import GroceryTab from "@/components/meals/GroceryTab";
 import PantryTab from "@/components/meals/PantryTab";
 import RecipesTab from "@/components/meals/RecipesTab";
+import CookWithWhatYouHave from "@/components/meals/CookWithWhatYouHave";
 import RecipeModal from "@/components/meals/RecipeModal";
 import PageHeader from "@/components/patterns/PageHeader";
 import SegmentedControl from "@/components/ui/SegmentedControl";
@@ -227,6 +228,14 @@ function MealHubContent() {
     showToast(`🛒 Added ${ingredients.length} item${ingredients.length === 1 ? "" : "s"} to grocery`);
   };
 
+  const addMissingToGrocery = async (ingredients: string[]) => {
+    for (const ing of ingredients) {
+      const category = guessGroceryCategory(ing);
+      await addGroceryItem(ing, category, "medium", undefined, "", "", true);
+    }
+    showToast(`🛒 Added ${ingredients.length} missing item${ingredients.length === 1 ? "" : "s"} to grocery`);
+  };
+
   const importRecipeFromUrl = async (url: string, source?: string) => {
     const label = source || "Web";
     showToast(`📥 Importing from ${label}: ${url}...`);
@@ -388,15 +397,20 @@ function MealHubContent() {
         )}
 
         {activeTab === "pantry" && (
-          <PantryTab
-            pantryItems={pantryItems}
-            groceryItems={groceryItems}
-            addPantryItem={addPantryItem}
-            updatePantryStatus={updatePantryStatus}
-            removePantryItem={removePantryItem}
-            syncPantryToGrocery={syncPantryToGrocery}
-            isSyncing={isSyncing}
-          />
+          <>
+            <PantryTab
+              pantryItems={pantryItems}
+              groceryItems={groceryItems}
+              addPantryItem={addPantryItem}
+              updatePantryStatus={updatePantryStatus}
+              removePantryItem={removePantryItem}
+              syncPantryToGrocery={syncPantryToGrocery}
+              isSyncing={isSyncing}
+            />
+            <div className="mt-6">
+              <CookWithWhatYouHave recipes={recipes} pantryItems={pantryItems} onAddMissing={addMissingToGrocery} />
+            </div>
+          </>
         )}
 
         {activeTab === "recipes" && (
