@@ -288,7 +288,78 @@ export const COLLECTIONS = [
       { name: "image", type: "text" },
     ],
   },
+  {
+    name: "ha_entities",
+    schema: [
+      { name: "entity_id", type: "text", required: true },
+      { name: "domain", type: "text", required: true },
+      { name: "object_id", type: "text", required: true },
+      { name: "friendly_name", type: "text" },
+      { name: "area_id", type: "text" },
+      { name: "state", type: "text" },
+      { name: "attributes", type: "json" },
+      { name: "last_updated", type: "text" },
+      { name: "source", type: "select", options: { values: ["ha", "mqtt"] } },
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_ha_entities_entity ON ha_entities (entity_id)",
+    ],
+  },
+  {
+    name: "ha_areas",
+    schema: [
+      { name: "area_id", type: "text", required: true },
+      { name: "name", type: "text" },
+      { name: "icon", type: "text" },
+    ],
+    indexes: [],
+  },
+  {
+    name: "ha_devices",
+    schema: [
+      { name: "device_id", type: "text", required: true },
+      { name: "name", type: "text" },
+      { name: "manufacturer", type: "text" },
+      { name: "area_id", type: "text" },
+    ],
+    indexes: [],
+  },
+  {
+    name: "ha_automations",
+    schema: [
+      { name: "automation_id", type: "text", required: true },
+      { name: "name", type: "text" },
+      { name: "state", type: "text" },
+      { name: "last_triggered", type: "text" },
+    ],
+    indexes: [],
+  },
 ];
+
+// The dashboard client reads/writes PocketBase WITHOUT an auth token
+// (writes by chat tools/crons go through server-side withAdmin, but the
+// everyday UI — events, tasks, grocery, pantry, schedules, members — calls
+// the PB SDK directly from the browser). Collections must therefore be
+// publicly accessible or every client call 403s and the UI silently falls
+// back to demo data. All app collections use open rules; system/auth
+// collections are excluded.
+const PUBLIC_RULES = {
+  listRule: "",
+  viewRule: "",
+  createRule: "",
+  updateRule: "",
+  deleteRule: "",
+};
+
+function rulesMatch(live: any): boolean {
+  return (
+    live.listRule === "" &&
+    live.viewRule === "" &&
+    live.createRule === "" &&
+    live.updateRule === "" &&
+    live.deleteRule === ""
+  );
+}
 
 export async function seedCollections() {
   const result = await withAdmin(async (pb) => {
@@ -353,11 +424,16 @@ export async function seedCollections() {
         } else {
           created.push(`${col.name} (already exists)`);
         }
+        if (!rulesMatch(live)) {
+          await pb.collections.update(live.id, { ...PUBLIC_RULES });
+          created[created.length - 1] += " (rules opened)";
+        }
         continue;
       }
       await pb.collections.create({
         name: col.name,
         type: "base",
+        ...PUBLIC_RULES,
         fields: col.schema.map((s: any) => {
           const base: any = {
             name: s.name,

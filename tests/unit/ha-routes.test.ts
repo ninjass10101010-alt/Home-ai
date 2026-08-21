@@ -4,10 +4,15 @@ const mocks = vi.hoisted(() => ({
   callService: vi.fn(),
   getHAWebSocketClient: vi.fn(),
   fetchHADeviceStates: vi.fn(),
+  getHABridgeStatus: vi.fn(),
 }));
 
 vi.mock("../../src/lib/ha/websocket-client", () => ({
   getHAWebSocketClient: mocks.getHAWebSocketClient,
+}));
+
+vi.mock("../../src/lib/ha/bridge", () => ({
+  getHABridgeStatus: mocks.getHABridgeStatus,
 }));
 
 vi.mock("../../src/lib/ha/rest-client", () => ({
@@ -98,9 +103,16 @@ describe("POST /api/ha/call-service", () => {
 describe("GET /api/ha/health", () => {
   beforeEach(() => {
     mocks.getHAWebSocketClient.mockReset();
+    mocks.getHABridgeStatus.mockReset();
+    mocks.getHABridgeStatus.mockReturnValue({
+      started: true,
+      wsConnected: true,
+      mqttStatus: "connected",
+      lastEventAt: null,
+    });
   });
 
-  it("reports wsStatus and wsConnected true when the client is connected", async () => {
+  it("reports wsStatus, wsConnected and bridge status when the client is connected", async () => {
     mocks.getHAWebSocketClient.mockReturnValue({
       status: "connected",
       connect: vi.fn(),
@@ -114,6 +126,12 @@ describe("GET /api/ha/health", () => {
       ok: true,
       wsStatus: "connected",
       wsConnected: true,
+      bridge: {
+        started: true,
+        wsConnected: true,
+        mqttStatus: "connected",
+        lastEventAt: null,
+      },
     });
   });
 
@@ -131,6 +149,12 @@ describe("GET /api/ha/health", () => {
       ok: true,
       wsStatus: "disconnected",
       wsConnected: false,
+      bridge: {
+        started: true,
+        wsConnected: true,
+        mqttStatus: "connected",
+        lastEventAt: null,
+      },
     });
   });
 });
