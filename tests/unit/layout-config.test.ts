@@ -189,7 +189,7 @@ describe('cloneDefaultLayout', () => {
     const b = cloneDefaultLayout();
     a.phone.widgets.push('morningBriefing');
     a.phone.hidden.push('tasks');
-    expect(a.phone.widgets).toHaveLength(10);
+    expect(a.phone.widgets).toHaveLength(13);
     expect(a.phone.hidden).toEqual(['tasks']);
     expect(b.phone.hidden).toEqual([]);
     expect(a.tablet.widgets).toEqual(DEFAULT_LAYOUT.phone.widgets);
@@ -251,8 +251,8 @@ describe('v4 layout migration', () => {
     expect(cfg.phone.widgets[0]).toBe('morningBriefing');
     expect(cfg.phone.widgets).toContain('tasks');
     expect(cfg.phone.widgets).toContain('weather');
-    expect(new Set(cfg.phone.widgets).size).toBe(9);
-    expect(cfg.phone.hidden).toEqual(expect.arrayContaining(['morningBriefing', 'aiQuickAsk', 'consuelaSuggestions', 'leaderboard', 'todayEvents', 'schedule', 'currentMeal']));
+    expect(new Set(cfg.phone.widgets).size).toBe(12);
+    expect(cfg.phone.hidden).toEqual(expect.arrayContaining(['morningBriefing', 'aiQuickAsk', 'consuelaSuggestions', 'leaderboard', 'todayEvents', 'schedule', 'currentMeal', 'homeSecurity', 'homeClimate', 'homeLights']));
     expect(cfg.tablet.widgets).toEqual(cfg.phone.widgets);
     expect(cfg.tablet.hidden).toEqual(cfg.phone.hidden);
   });
@@ -266,9 +266,9 @@ describe('v4 layout migration', () => {
     expect(cfg.phone.widgets.slice(0, 2)).toEqual(['morningBriefing', 'consuelaSuggestions']);
     expect(cfg.phone.widgets.indexOf('weather')).toBeLessThan(cfg.phone.widgets.indexOf('aiQuickAsk'));
     expect(cfg.phone.widgets.indexOf('aiQuickAsk')).toBeLessThan(cfg.phone.widgets.indexOf('leaderboard'));
-    expect(cfg.phone.hidden).toHaveLength(6);
+    expect(cfg.phone.hidden).toHaveLength(9);
     expect(cfg.desktop.widgets.indexOf('schedule')).toBeLessThan(cfg.desktop.widgets.indexOf('tasks'));
-    expect(cfg.desktop.hidden).toHaveLength(7);
+    expect(cfg.desktop.hidden).toHaveLength(10);
   });
 
   it('migrates v3 { phone, tablet, desktop } visible-only lists', () => {
@@ -278,12 +278,12 @@ describe('v4 layout migration', () => {
       desktop: { widgets: ['weather'] },
     }));
     const cfg = loadLayoutConfig();
-    expect(cfg.phone.widgets).toEqual(['morningBriefing', 'consuelaSuggestions', 'weather', 'tasks', 'aiQuickAsk', 'leaderboard', 'currentMeal', 'schedule', 'todayEvents']);
-    expect(cfg.phone.hidden).toHaveLength(7);
-    expect(cfg.tablet.widgets).toEqual(['morningBriefing', 'consuelaSuggestions', 'tasks', 'weather', 'aiQuickAsk', 'leaderboard', 'currentMeal', 'schedule', 'todayEvents']);
-    expect(cfg.tablet.hidden).toHaveLength(7);
-    expect(cfg.desktop.widgets).toEqual(['morningBriefing', 'consuelaSuggestions', 'weather', 'aiQuickAsk', 'leaderboard', 'currentMeal', 'schedule', 'tasks', 'todayEvents']);
-    expect(cfg.desktop.hidden).toHaveLength(8);
+    expect(cfg.phone.widgets).toEqual(['morningBriefing', 'consuelaSuggestions', 'weather', 'tasks', 'aiQuickAsk', 'leaderboard', 'currentMeal', 'schedule', 'todayEvents', 'homeSecurity', 'homeClimate', 'homeLights']);
+    expect(cfg.phone.hidden).toHaveLength(10);
+    expect(cfg.tablet.widgets).toEqual(['morningBriefing', 'consuelaSuggestions', 'tasks', 'weather', 'aiQuickAsk', 'leaderboard', 'currentMeal', 'schedule', 'todayEvents', 'homeSecurity', 'homeClimate', 'homeLights']);
+    expect(cfg.tablet.hidden).toHaveLength(10);
+    expect(cfg.desktop.widgets).toEqual(['morningBriefing', 'consuelaSuggestions', 'weather', 'aiQuickAsk', 'leaderboard', 'currentMeal', 'schedule', 'tasks', 'todayEvents', 'homeSecurity', 'homeClimate', 'homeLights']);
+    expect(cfg.desktop.hidden).toHaveLength(11);
   });
 
   it('self-heals a partial v4 config (hidden preserved, missing widgets appended)', () => {
@@ -292,13 +292,13 @@ describe('v4 layout migration', () => {
     cfg.tablet.hidden = ['aiQuickAsk', 'leaderboard'];
     saveLayoutConfig(cfg);
     const loaded = loadLayoutConfig();
-    expect(loaded.tablet.widgets).toEqual(['tasks', 'consuelaSuggestions', 'weather', 'morningBriefing', 'aiQuickAsk', 'leaderboard', 'currentMeal', 'schedule', 'todayEvents']);
+    expect(loaded.tablet.widgets).toEqual(['tasks', 'consuelaSuggestions', 'weather', 'morningBriefing', 'aiQuickAsk', 'leaderboard', 'currentMeal', 'schedule', 'todayEvents', 'homeSecurity', 'homeClimate', 'homeLights']);
     expect(loaded.tablet.hidden).toEqual(['aiQuickAsk', 'leaderboard']);
   });
 
   it('round-trips a full v4 config exactly (the shape the app writes)', () => {
     const cfg = cloneDefaultLayout();
-    cfg.phone.widgets = ['leaderboard', 'tasks', 'morningBriefing', 'todayEvents', 'schedule', 'aiQuickAsk', 'weather', 'consuelaSuggestions', 'currentMeal'];
+    cfg.phone.widgets = ['leaderboard', 'tasks', 'morningBriefing', 'todayEvents', 'schedule', 'aiQuickAsk', 'weather', 'consuelaSuggestions', 'currentMeal', 'homeSecurity', 'homeClimate', 'homeLights'];
     cfg.phone.hidden = ['schedule', 'currentMeal'];
     saveLayoutConfig(cfg);
     const loaded = loadLayoutConfig();
@@ -313,7 +313,7 @@ describe('v4 layout migration', () => {
     }));
     const cfg = loadLayoutConfig();
     expect(cfg.phone.hidden).toEqual(['tasks']);
-    expect(cfg.phone.widgets).toHaveLength(9);
+    expect(cfg.phone.widgets).toHaveLength(12);
     expect(cfg.phone.widgets).toContain('morningBriefing');
   });
 

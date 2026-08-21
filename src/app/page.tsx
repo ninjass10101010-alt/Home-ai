@@ -35,6 +35,9 @@ import WidgetCard from "@/components/patterns/WidgetCard";
 import HomeLeaderboardWidget from "@/components/leaderboard/HomeLeaderboardWidget";
 import HomeSuggestionsWidget from "@/components/suggestions/HomeSuggestionsWidget";
 import MorningBriefingWidget from "@/components/briefing/MorningBriefingWidget";
+import HomeSecurityWidget from "@/components/ha/HomeSecurityWidget";
+import HomeClimateWidget from "@/components/ha/HomeClimateWidget";
+import HomeLightsWidget from "@/components/ha/HomeLightsWidget";
 import { useMorningBriefing, briefingSectionsEmpty } from "@/components/briefing/hooks/useMorningBriefing";
 import ProfileSheet from "@/components/profile/ProfileSheet";
 import { useHomeEvents } from "@/hooks/useHomeEvents";
@@ -453,6 +456,15 @@ export default function HomePage() {
                     </div>
                   );
                 }
+
+                case "homeSecurity":
+                  return <div key="homeSecurity" className={span}><HomeSecurityWidget className="h-full" /></div>;
+
+                case "homeClimate":
+                  return <div key="homeClimate" className={span}><HomeClimateWidget className="h-full" /></div>;
+
+                case "homeLights":
+                  return <div key="homeLights" className={span}><HomeLightsWidget className="h-full" /></div>;
 
                 case "aiQuickAsk":
                   return (
