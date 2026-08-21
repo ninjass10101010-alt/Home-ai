@@ -34,6 +34,7 @@ export default function GroceryTab({
   pantryItems,
   addPantryItem,
   removePantryItem,
+  toggleManualOverride,
 }: any) {
   const [newGroceryItem, setNewGroceryItem] = useState("");
   const [newGroceryQuantity, setNewGroceryQuantity] = useState("");
@@ -544,6 +545,21 @@ export default function GroceryTab({
                             >
                               {item.priority}
                             </Chip>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); toggleManualOverride?.(item.id); }}
+                              aria-label={item.manualOverride ? `unlock ${item.name} for auto-sync` : `lock ${item.name} from auto-sync`}
+                              title={item.manualOverride ? "Locked from auto-sync — tap to unlock" : "Lock from auto-sync"}
+                              className={`rounded-xl p-1.5 tap-sm ${
+                                item.manualOverride
+                                  ? "opacity-100 text-[var(--color-accent-amber)] bg-[var(--color-accent-amber)]/10"
+                                  : "text-text-muted hover:bg-[var(--color-surface-2)] hover:text-text-primary opacity-0 group-hover:opacity-100"
+                              }`}
+                            >
+                              <svg viewBox="0 0 24 24" fill={item.manualOverride ? "currentColor" : "none"} stroke="currentColor" strokeWidth={2} className="h-3.5 w-3.5">
+                                <path d="M12 17v5" strokeLinecap="round" strokeLinejoin="round" />
+                                <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                            </button>
                             <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                               <button
                                 onClick={(e) => { e.stopPropagation(); startEditing(item); }}
