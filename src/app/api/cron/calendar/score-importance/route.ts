@@ -56,8 +56,8 @@ function getEventDateStr(event: any): string | null {
   }
   const iso = event.start || event.start_iso || event.startIso;
   if (typeof iso === "string" && iso.length >= 10) {
-    // Handles both YYYY-MM-DD and ISO datetime
-    if (/^\d{4}-\d{2}-\d{2}/.test(iso)) return iso.slice(0, 10);
+    // Date-only YYYY-MM-DD -> return as-is; ISO datetime -> local date via Date
+    if (/^\d{4}-\d{2}-\d{2}$/.test(iso.trim())) return iso.trim().slice(0, 10);
     const d = new Date(iso);
     if (!Number.isNaN(d.getTime())) return formatLocalDate(d);
   }
