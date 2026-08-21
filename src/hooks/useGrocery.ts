@@ -4,7 +4,6 @@ import { db } from "@/db";
 import { GroceryItem, Meal } from "@/types/meals";
 import { initialGroceryItems, groceryCategories } from "@/data/meals";
 import { mealSyncService } from "@/services/mealSync";
-import { upsertGroceryItem } from "@/lib/grocery-service";
 
 const GROCERY_KEY = "consuela-grocery";
 const RECENTLY_BOUGHT_KEY = "consuela-recently-bought";
@@ -42,6 +41,7 @@ export function useGrocery(showToast: (msg: string) => void, plannedMeals: Meal[
   const [activeCategory, setActiveCategory] = useState("all");
   const [isSyncing, setIsSyncing] = useState(false);
   const [recentlyBought, setRecentlyBought] = useState<{ name: string; emoji: string; category: string }[]>([]);
+  const [loaded, setLoaded] = useState(false);
 
   const mapDbToGrocery = (g: any): GroceryItem => {
     const cat = g.category || "pantry";
@@ -91,8 +91,10 @@ export function useGrocery(showToast: (msg: string) => void, plannedMeals: Meal[
       } else {
         setGroceryItems(local.length > 0 ? local : initialGroceryItems);
       }
+      setLoaded(true);
     }).catch(() => {
       setGroceryItems(local.length > 0 ? local : initialGroceryItems);
+      setLoaded(true);
     });
     const savedRecent = loadJSON<{ name: string; emoji: string; category: string }[]>(RECENTLY_BOUGHT_KEY, []);
     setRecentlyBought(savedRecent);
@@ -100,8 +102,9 @@ export function useGrocery(showToast: (msg: string) => void, plannedMeals: Meal[
   }, []);
 
   useEffect(() => {
-    if (groceryItems.length) localStorage.setItem(GROCERY_KEY, JSON.stringify(groceryItems));
-  }, [groceryItems]);
+    if (!loaded) return;
+    localStorage.setItem(GROCERY_KEY, JSON.stringify(groceryItems));
+  }, [groceryItems, loaded]);
 
   useEffect(() => {
     localStorage.setItem(RECENTLY_BOUGHT_KEY, JSON.stringify(recentlyBought));
@@ -114,28 +117,29 @@ export function useGrocery(showToast: (msg: string) => void, plannedMeals: Meal[
     emojiOverride?: string,
     quantity = "",
     notes = "",
-    silent = false
+    silent = false,
+    skipRecent = false
   ) => {
     const trimmed = name.trim();
     if (!trimmed) return false;
 
     const existing = groceryItems.find(i => normalizeName(i.name) === normalizeName(trimmed));
-    const item = await upsertGroceryItem({ name: trimmed, category, priority, emoji: emojiOverride, quantity, notes });
+    const item = await db.upsertGroceryItem({ name: trimmed, category, priority, emoji: emojiOverride, quantity, notes });
 
-    if (existing) {
-      setGroceryItems(prev => prev.map(i =>
-        normalizeName(i.name) === normalizeName(trimmed)
-          ? { ...item, id: i.id, quantity: quantity || i.quantity, notes: notes || i.notes }
-          : i
-      ));
-    } else {
-      setGroceryItems(prev => [...prev, item]);
-    }
-
-    setRecentlyBought(prev => {
-      const filtered = prev.filter(r => normalizeName(r.name) !== normalizeName(trimmed));
-      return [{ name: trimmed, emoji: item.emoji || "📦", category: item.category }, ...filtered].slice(0, 8);
+    setGroceryItems(prev => {
+      const idx = prev.findIndex(i => normalizeName(i.name) === normalizeName(trimmed));
+      if (idx === -1) return [...prev, item];
+      const next = [...prev];
+      next[idx] = { ...next[idx], ...item, quantity: quantity || next[idx].quantity, notes: notes || next[idx].notes };
+      return next;
     });
+
+    if (!skipRecent) {
+      setRecentlyBought(prev => {
+        const filtered = prev.filter(r => normalizeName(r.name) !== normalizeName(trimmed));
+        return [{ name: trimmed, emoji: item.emoji || "📦", category: item.category }, ...filtered].slice(0, 8);
+      });
+    }
     if (!silent) showToast(existing ? `🛒 ${trimmed} is already on your list` : `🛒 Added ${trimmed}`);
     return true;
   };
@@ -170,6 +174,15 @@ export function useGrocery(showToast: (msg: string) => void, plannedMeals: Meal[
     if (!item || !trimmedName) return;
     await db.upsertGroceryItem({ ...item, id, name: trimmedName, quantity: updates.quantity.trim(), notes: updates.notes.trim() });
     setGroceryItems(prev => prev.map(i => i.id === id ? { ...i, name: trimmedName, quantity: updates.quantity.trim(), notes: updates.notes.trim() } : i));
+  };
+
+  const toggleManualOverride = async (id: number | string) => {
+    const item = groceryItems.find(i => i.id === id);
+    if (!item) return;
+    const next = !item.manualOverride;
+    await db.toggleGroceryOverride(id, next);
+    setGroceryItems(prev => prev.map(i => i.id === id ? { ...i, manualOverride: next } : i));
+    showToast(next ? `📌 ${item.name} locked from auto-sync` : `🔓 ${item.name} unlocked for auto-sync`);
   };
 
   const mergeFreshIntoState = (fresh: GroceryItem[]) => {
@@ -223,6 +236,7 @@ export function useGrocery(showToast: (msg: string) => void, plannedMeals: Meal[
     toggleGroceryNeeded,
     deleteGroceryItem,
     updateGroceryItem,
+    toggleManualOverride,
     syncMealToGrocery,
     syncPantryToGrocery,
     parseManualGroceryInput,
