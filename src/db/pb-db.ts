@@ -296,11 +296,15 @@ export const db = {
 
   async upsertGroceryItem(item: any): Promise<any> {
     const items = await safeList<any>("grocery_list_items", []);
-    const existing = items.find((g: any) =>
+    const byId = item.id != null
+      ? items.find((g: any) => String(g.id) === String(item.id))
+      : undefined;
+    const existing = byId || items.find((g: any) =>
       g.name?.toLowerCase() === item.name?.toLowerCase() && !g.manualOverride
     );
-    if (existing) return safeUpdate("grocery_list_items", existing.id, item);
-    return safeCreate("grocery_list_items", item);
+    const { id: _omitId, ...data } = item;
+    if (existing) return safeUpdate("grocery_list_items", existing.id, data);
+    return safeCreate("grocery_list_items", data);
   },
 
   async toggleGroceryOverride(id: number | string, override: boolean): Promise<any> {

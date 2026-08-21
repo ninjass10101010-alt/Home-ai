@@ -154,7 +154,7 @@ export class MealSyncService {
     }
   }
 
-  async toggleManualOverride(groceryId: number, override: boolean): Promise<void> {
+  async toggleManualOverride(groceryId: number | string, override: boolean): Promise<void> {
     try {
       await db.toggleGroceryOverride(groceryId, override);
     } catch (e) {
@@ -265,7 +265,7 @@ export class MealSyncService {
     } as GroceryListItem;
   }
 
-  private async updateGroceryItem(id: number, updates: Partial<GroceryListItem>): Promise<void> {
+  private async updateGroceryItem(id: number | string, updates: Partial<GroceryListItem>): Promise<void> {
     try {
       const merged = { id, ...updates, userId: 'demo' };
       await db.upsertGroceryItem(merged);

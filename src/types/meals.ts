@@ -43,7 +43,7 @@ export interface Recipe {
 }
 
 export interface PantryItem {
-  id: number;
+  id: number | string;
   item: string;
   name?: string;
   status: "plenty" | "low" | "out";
@@ -52,7 +52,7 @@ export interface PantryItem {
 }
 
 export interface GroceryItem {
-  id: number;
+  id: number | string;
   userId?: string;
   name: string;
   emoji: string;

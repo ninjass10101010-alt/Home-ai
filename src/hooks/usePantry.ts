@@ -68,14 +68,14 @@ export function usePantry(showToast: (msg: string) => void, groceryItems: Grocer
     return newItem;
   };
 
-  const updatePantryStatus = async (id: number, status: "plenty" | "low" | "out") => {
+  const updatePantryStatus = async (id: number | string, status: "plenty" | "low" | "out") => {
     const item = pantryItems.find(p => p.id === id);
     if (!item) return;
     await db.upsertPantryItem({ userId: "demo", name: item.item, status });
     setPantryItems(prev => prev.map(p => p.id === id ? { ...p, status } : p));
   };
 
-  const removePantryItem = async (id: number) => {
+  const removePantryItem = async (id: number | string) => {
     await db.deletePantryItem(id);
     setPantryItems(prev => prev.filter(p => p.id !== id));
   };

@@ -145,7 +145,7 @@ export function useGrocery(showToast: (msg: string) => void, plannedMeals: Meal[
     localStorage.removeItem(RECENTLY_BOUGHT_KEY);
   };
 
-  const toggleGroceryNeeded = async (id: number) => {
+  const toggleGroceryNeeded = async (id: number | string) => {
     const item = groceryItems.find(i => i.id === id);
     if (!item) return;
     const wasNeeded = item.needed;
@@ -159,12 +159,12 @@ export function useGrocery(showToast: (msg: string) => void, plannedMeals: Meal[
     }
   };
 
-  const deleteGroceryItem = async (id: number) => {
+  const deleteGroceryItem = async (id: number | string) => {
     await db.deleteGroceryItem(id);
     setGroceryItems(prev => prev.filter(i => i.id !== id));
   };
 
-  const updateGroceryItem = async (id: number, updates: { name: string; quantity: string; notes: string }) => {
+  const updateGroceryItem = async (id: number | string, updates: { name: string; quantity: string; notes: string }) => {
     const item = groceryItems.find(i => i.id === id);
     const trimmedName = updates.name.trim();
     if (!item || !trimmedName) return;

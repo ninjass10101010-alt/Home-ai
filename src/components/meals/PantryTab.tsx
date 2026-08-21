@@ -62,7 +62,7 @@ export default function PantryTab({
   const [activePresetGroup, setActivePresetGroup] = useState(pantryPresets[0]?.group ?? "Baking");
   const [showAllPresets, setShowAllPresets] = useState(false);
   const [showStaples, setShowStaples] = useState(false);
-  const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
+  const [pendingDeleteId, setPendingDeleteId] = useState<number | string | null>(null);
   const PRESETS_PER_PAGE = 6;
 
   useEffect(() => {

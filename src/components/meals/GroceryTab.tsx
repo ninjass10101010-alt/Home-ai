@@ -38,13 +38,13 @@ export default function GroceryTab({
   const [newGroceryQuantity, setNewGroceryQuantity] = useState("");
   const [newGroceryCategory, setNewGroceryCategory] = useState("auto");
   const [newGroceryPriority, setNewGroceryPriority] = useState<"low" | "medium" | "high">("medium");
-  const [editingGroceryId, setEditingGroceryId] = useState<number | null>(null);
+  const [editingGroceryId, setEditingGroceryId] = useState<number | string | null>(null);
   const [editName, setEditName] = useState("");
   const [editQuantity, setEditQuantity] = useState("");
   const [editNotes, setEditNotes] = useState("");
   const [presetCategory, setPresetCategory] = useState<string>("produce");
   const [showAllPresets, setShowAllPresets] = useState(false);
-  const [undo, setUndo] = useState<{ pantryIds: number[]; items: GroceryItem[]; added: number } | null>(null);
+  const [undo, setUndo] = useState<{ pantryIds: (number | string)[]; items: GroceryItem[]; added: number } | null>(null);
   const [sending, setSending] = useState(false);
   const [undoing, setUndoing] = useState(false);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -81,7 +81,7 @@ export default function GroceryTab({
     setEditNotes(item.notes || "");
   };
 
-  const saveEdit = (id: number) => {
+  const saveEdit = (id: number | string) => {
     updateGroceryItem(id, { name: editName.trim(), quantity: editQuantity.trim(), notes: editNotes.trim() });
     setEditingGroceryId(null);
   };
