@@ -7,6 +7,12 @@ import HomeSecurityWidget from "@/components/ha/HomeSecurityWidget";
 import HomeClimateWidget from "@/components/ha/HomeClimateWidget";
 import HomeLightsWidget from "@/components/ha/HomeLightsWidget";
 
+const mockCurrentUser = vi.hoisted(() => ({ role: "parent" as string }));
+
+vi.mock("@/hooks/useAuth", () => ({
+  useAuth: () => ({ currentUser: mockCurrentUser }),
+}));
+
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
 const SYNC_STATES = [
@@ -72,6 +78,7 @@ function findRow(root: HTMLElement, text: string): HTMLElement {
 
 describe("Home widgets (Home Assistant)", () => {
   beforeEach(() => {
+    mockCurrentUser.role = "parent";
     vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("no network"))));
   });
 
@@ -148,5 +155,49 @@ describe("Home widgets (Home Assistant)", () => {
       service: "turn_off",
       serviceData: { entity_id: ["light.kitchen", "light.hall"] },
     });
+  });
+
+  it("HomeSecurityWidget hides the Arm home/Disarm button for a child user", async () => {
+    mockCurrentUser.role = "child";
+    const { calls } = stubFetch();
+    const el = render(<HomeSecurityWidget />);
+    await settle();
+
+    expect(el.textContent).toContain("disarmed");
+    const controls = Array.from(el.querySelectorAll("button")).filter((b) => /Arm home|Disarm/.test(b.textContent || ""));
+    expect(controls).toHaveLength(0);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("HomeClimateWidget hides the setpoint stepper for a child user", async () => {
+    mockCurrentUser.role = "child";
+    const { calls } = stubFetch();
+    const el = render(<HomeClimateWidget />);
+    await settle();
+
+    expect(el.textContent).toContain("22°");
+    expect(el.querySelector('button[aria-label="Increase target temperature"]')).toBeNull();
+    expect(el.querySelector('button[aria-label="Decrease target temperature"]')).toBeNull();
+    expect(calls).toHaveLength(0);
+  });
+
+  it("HomeLightsWidget rows are non-interactive and Turn all off is hidden for a child user", async () => {
+    mockCurrentUser.role = "child";
+    const { calls } = stubFetch();
+    const el = render(<HomeLightsWidget />);
+    await settle();
+
+    expect(el.textContent).toContain("Kitchen");
+    expect(el.textContent).toContain("Hall");
+    expect(el.textContent).not.toContain("Turn all off");
+
+    const kitchenRow = Array.from(el.querySelectorAll("div")).find(
+      (d) => d.className.includes("rounded-2xl") && (d.textContent || "").includes("Kitchen")
+    );
+    expect(kitchenRow).toBeTruthy();
+    expect(kitchenRow!.getAttribute("role")).toBeNull();
+    act(() => kitchenRow!.click());
+    await settle();
+    expect(calls.some((c) => c.body.service === "toggle")).toBe(false);
   });
 });

@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { act } from "react";
 import type { ReactElement } from "react";
 import HomeControlsPage from "@/app/ha/page";
+import SecurityPanel from "@/components/ha/SecurityPanel";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -12,10 +13,10 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), prefetch: vi.fn() }),
 }));
 
+const mockCurrentUser = vi.hoisted(() => ({ role: "parent" as string }));
+
 vi.mock("@/hooks/useAuth", () => ({
-  useAuth: () => ({
-    currentUser: { id: 1, name: "Jeffery", role: "parent", emoji: "👨", color: "#fff", pin: "1234", avatarSize: "md", glow: false },
-  }),
+  useAuth: () => ({ currentUser: mockCurrentUser }),
 }));
 
 vi.mock("@/components/ui/SyncInit", () => ({ default: () => null }));
@@ -83,6 +84,7 @@ function findRadio(root: HTMLElement, text: RegExp): HTMLButtonElement {
 
 describe("HA tab (/ha) HomeControlsPage", () => {
   beforeEach(() => {
+    mockCurrentUser.role = "parent";
     vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("no network"))));
   });
 
@@ -101,6 +103,7 @@ describe("HA tab (/ha) HomeControlsPage", () => {
     expect(el.textContent).toContain("· home");
     expect(el.textContent).toContain("Living Room");
     expect(el.textContent).toContain("Other");
+    expect(el.textContent).not.toContain("Read-only for kids");
   });
 
   it("Security tab shows Arm home and posts alarm_arm_home", async () => {
@@ -156,5 +159,25 @@ describe("HA tab (/ha) HomeControlsPage", () => {
 
     expect(el.textContent).toContain("Vacation mode");
     expect(el.textContent).toContain("off");
+  });
+
+  it("SecurityPanel shows no Arm home button for a child user", async () => {
+    mockCurrentUser.role = "child";
+    stubFetch();
+    const el = render(<SecurityPanel states={SYNC_STATES} />);
+    await settle();
+
+    expect(el.textContent).toContain("Disarmed");
+    const controls = Array.from(el.querySelectorAll("button")).filter((b) => /Arm home|Disarm/.test(b.textContent || ""));
+    expect(controls).toHaveLength(0);
+  });
+
+  it("shows the Read-only for kids chip for a child user", async () => {
+    mockCurrentUser.role = "child";
+    stubFetch();
+    const el = render(<HomeControlsPage />);
+    await settle();
+
+    expect(el.textContent).toContain("Read-only for kids");
   });
 });

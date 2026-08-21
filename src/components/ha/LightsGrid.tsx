@@ -3,6 +3,7 @@
 import EmptyState from "@/components/ui/EmptyState";
 import SoftButton from "@/components/ui/SoftButton";
 import { entitiesByDomain, entityFriendlyName, useHACall, type HAState } from "@/hooks/useHAState";
+import { useAuth } from "@/hooks/useAuth";
 import { formatRoomName } from "./RoomCard";
 
 interface LightsGridProps {
@@ -11,6 +12,8 @@ interface LightsGridProps {
 }
 
 export default function LightsGrid({ states, onRefresh }: LightsGridProps) {
+  const { currentUser } = useAuth();
+  const readOnly = currentUser?.role === "child";
   const { calling, callService } = useHACall();
 
   const lightEntities = entitiesByDomain(states, "light");
@@ -32,7 +35,7 @@ export default function LightsGrid({ states, onRefresh }: LightsGridProps) {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <p className="text-xs text-text-secondary">{lights.length} light{lights.length === 1 ? "" : "s"}</p>
-        {anyOn && (
+        {!readOnly && anyOn && (
           <SoftButton size="sm" variant="secondary" disabled={calling} onClick={turnAllOff}>
             Turn all off
           </SoftButton>
@@ -55,9 +58,13 @@ export default function LightsGrid({ states, onRefresh }: LightsGridProps) {
                 key={light.entity_id}
                 type="button"
                 aria-label={`Toggle ${name}`}
-                disabled={calling}
-                onClick={() => toggle(light.entity_id)}
-                className="tap flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/30 p-4 text-left backdrop-blur-xl transition-colors hover:bg-[var(--color-surface-0)]/45 disabled:pointer-events-none disabled:opacity-50"
+                disabled={!readOnly && calling}
+                onClick={readOnly ? undefined : () => toggle(light.entity_id)}
+                className={`flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/30 p-4 text-left backdrop-blur-xl transition-colors ${
+                  readOnly
+                    ? "cursor-default"
+                    : "tap hover:bg-[var(--color-surface-0)]/45 disabled:pointer-events-none disabled:opacity-50"
+                }`}
               >
                 <span className="min-w-0">
                   <span className="block truncate text-sm font-semibold text-text-primary">{name}</span>

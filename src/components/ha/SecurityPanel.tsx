@@ -3,6 +3,7 @@
 import Chip from "@/components/ui/Chip";
 import SoftButton from "@/components/ui/SoftButton";
 import { entitiesByDomain, entityFriendlyName, useHACall, type HAState } from "@/hooks/useHAState";
+import { useAuth } from "@/hooks/useAuth";
 
 const OPEN_SENSOR_CLASSES = new Set(["door", "window", "motion"]);
 
@@ -19,6 +20,8 @@ function alarmLabel(state: string): string {
 }
 
 export default function SecurityPanel({ states, onRefresh }: SecurityPanelProps) {
+  const { currentUser } = useAuth();
+  const readOnly = currentUser?.role === "child";
   const { calling, callService } = useHACall();
 
   const alarm = states.find((s) => s.entity_id.startsWith("alarm_control_panel."));
@@ -54,15 +57,16 @@ export default function SecurityPanel({ states, onRefresh }: SecurityPanelProps)
           <p className="text-[11px] uppercase tracking-wide text-text-muted">Alarm system</p>
           <p className={`mt-1 text-3xl font-bold ${armed ? "text-rose-400" : "text-emerald-400"}`}>{alarmLabel(alarm.state)}</p>
           <p className="mt-1 text-xs text-text-secondary">{entityFriendlyName(alarm)}</p>
-          {armed ? (
-            <SoftButton size="lg" variant="danger" loading={calling} onClick={disarm} className="mt-4 w-full sm:w-auto">
-              Disarm
-            </SoftButton>
-          ) : (
-            <SoftButton size="lg" loading={calling} onClick={armHome} className="mt-4 w-full sm:w-auto">
-              Arm home
-            </SoftButton>
-          )}
+          {!readOnly &&
+            (armed ? (
+              <SoftButton size="lg" variant="danger" loading={calling} onClick={disarm} className="mt-4 w-full sm:w-auto">
+                Disarm
+              </SoftButton>
+            ) : (
+              <SoftButton size="lg" loading={calling} onClick={armHome} className="mt-4 w-full sm:w-auto">
+                Arm home
+              </SoftButton>
+            ))}
         </div>
       )}
 

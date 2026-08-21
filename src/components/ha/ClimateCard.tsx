@@ -3,6 +3,7 @@
 import EmptyState from "@/components/ui/EmptyState";
 import SoftButton from "@/components/ui/SoftButton";
 import { entitiesByDomain, entityFriendlyName, useHACall, type HAState } from "@/hooks/useHAState";
+import { useAuth } from "@/hooks/useAuth";
 
 interface ClimateCardProps {
   states: HAState[];
@@ -12,6 +13,8 @@ interface ClimateCardProps {
 const HVAC_MODES = ["heat", "cool", "off"] as const;
 
 export default function ClimateCard({ states, onRefresh }: ClimateCardProps) {
+  const { currentUser } = useAuth();
+  const readOnly = currentUser?.role === "child";
   const { calling, callService } = useHACall();
 
   const climate = entitiesByDomain(states, "climate")[0];
@@ -53,30 +56,38 @@ export default function ClimateCard({ states, onRefresh }: ClimateCardProps) {
           {humidity !== null && <p className="mt-0.5 text-xs text-text-muted">Humidity {Math.round(humidity)}%</p>}
         </div>
         <div className="flex items-center gap-2 pb-1">
-          <SoftButton size="sm" variant="secondary" disabled={calling} onClick={() => setTarget(target - 1)} aria-label="Decrease target temperature">
-            −
-          </SoftButton>
-          <span className="text-sm font-semibold tabular-nums text-text-secondary">{Math.round(target)}°</span>
-          <SoftButton size="sm" variant="secondary" disabled={calling} onClick={() => setTarget(target + 1)} aria-label="Increase target temperature">
-            +
-          </SoftButton>
+          {readOnly ? (
+            <span className="text-sm font-semibold tabular-nums text-text-secondary">Target {Math.round(target)}°</span>
+          ) : (
+            <>
+              <SoftButton size="sm" variant="secondary" disabled={calling} onClick={() => setTarget(target - 1)} aria-label="Decrease target temperature">
+                −
+              </SoftButton>
+              <span className="text-sm font-semibold tabular-nums text-text-secondary">{Math.round(target)}°</span>
+              <SoftButton size="sm" variant="secondary" disabled={calling} onClick={() => setTarget(target + 1)} aria-label="Increase target temperature">
+                +
+              </SoftButton>
+            </>
+          )}
         </div>
       </div>
-      <div className="mt-4 flex gap-2">
-        {HVAC_MODES.map((hvacMode) => (
-          <SoftButton
-            key={hvacMode}
-            size="sm"
-            variant={mode === hvacMode ? "primary" : "secondary"}
-            disabled={calling}
-            onClick={() => setMode(hvacMode)}
-            aria-label={`Set mode ${hvacMode}`}
-            className="flex-1"
-          >
-            {hvacMode.charAt(0).toUpperCase() + hvacMode.slice(1)}
-          </SoftButton>
-        ))}
-      </div>
+      {!readOnly && (
+        <div className="mt-4 flex gap-2">
+          {HVAC_MODES.map((hvacMode) => (
+            <SoftButton
+              key={hvacMode}
+              size="sm"
+              variant={mode === hvacMode ? "primary" : "secondary"}
+              disabled={calling}
+              onClick={() => setMode(hvacMode)}
+              aria-label={`Set mode ${hvacMode}`}
+              className="flex-1"
+            >
+              {hvacMode.charAt(0).toUpperCase() + hvacMode.slice(1)}
+            </SoftButton>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

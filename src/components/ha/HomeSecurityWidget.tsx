@@ -5,10 +5,13 @@ import SectionCard from "@/components/patterns/SectionCard";
 import Chip from "@/components/ui/Chip";
 import SoftButton from "@/components/ui/SoftButton";
 import { entitiesByDomain, entityFriendlyName, useHACall, useHAState } from "@/hooks/useHAState";
+import { useAuth } from "@/hooks/useAuth";
 
 const OPEN_SENSOR_CLASSES = new Set(["door", "window", "motion", "smoke", "gas", "moisture"]);
 
 export default function HomeSecurityWidget({ className }: { className?: string }) {
+  const { currentUser } = useAuth();
+  const readOnly = currentUser?.role === "child";
   const { states } = useHAState();
   const { calling, callService } = useHACall();
 
@@ -89,15 +92,16 @@ export default function HomeSecurityWidget({ className }: { className?: string }
         {alarm && (
           <div className="flex items-center justify-between gap-2">
             <Chip size="sm" tone={alarm.state === "disarmed" ? "success" : "danger"}>{alarm.state}</Chip>
-            {alarm.state === "disarmed" ? (
-              <SoftButton size="sm" variant="secondary" loading={calling} onClick={armHome}>
-                Arm home
-              </SoftButton>
-            ) : alarm.state === "armed_home" || alarm.state === "armed_away" ? (
-              <SoftButton size="sm" variant="secondary" loading={calling} onClick={disarm}>
-                Disarm
-              </SoftButton>
-            ) : null}
+            {!readOnly &&
+              (alarm.state === "disarmed" ? (
+                <SoftButton size="sm" variant="secondary" loading={calling} onClick={armHome}>
+                  Arm home
+                </SoftButton>
+              ) : alarm.state === "armed_home" || alarm.state === "armed_away" ? (
+                <SoftButton size="sm" variant="secondary" loading={calling} onClick={disarm}>
+                  Disarm
+                </SoftButton>
+              ) : null)}
           </div>
         )}
       </div>

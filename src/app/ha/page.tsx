@@ -12,6 +12,7 @@ import SecurityPanel from "@/components/ha/SecurityPanel";
 import ClimateCard from "@/components/ha/ClimateCard";
 import LightsGrid from "@/components/ha/LightsGrid";
 import { entitiesByDomain, entityFriendlyName, useHAState, type HAState } from "@/hooks/useHAState";
+import { useAuth } from "@/hooks/useAuth";
 
 const TABS = [
   { id: "overview", label: "Overview" },
@@ -35,6 +36,8 @@ export function roomsFor(states: HAState[]): { room: string; states: HAState[] }
 }
 
 export default function HomeControlsPage() {
+  const { currentUser } = useAuth();
+  const readOnly = currentUser?.role === "child";
   const { states, loading, error, refresh } = useHAState();
   const [tab, setTab] = useState("overview");
   const [selectedRoom, setSelectedRoom] = useState<string | null>(null);
@@ -56,7 +59,14 @@ export default function HomeControlsPage() {
       </div>
 
       <div className="mt-4 space-y-4 px-4">
-        <SegmentedControl options={TABS} value={tab} onChange={setTab} aria-label="Home Assistant tabs" />
+        <div className="flex flex-wrap items-center gap-2">
+          <SegmentedControl options={TABS} value={tab} onChange={setTab} aria-label="Home Assistant tabs" className="flex-1" />
+          {readOnly && (
+            <Chip size="sm" tone="warning">
+              Read-only for kids
+            </Chip>
+          )}
+        </div>
 
         {loading && states.length === 0 ? (
           <p className="py-12 text-center text-sm text-text-secondary">Connecting to Home Assistant…</p>

@@ -4,8 +4,11 @@ import SectionCard from "@/components/patterns/SectionCard";
 import SoftButton from "@/components/ui/SoftButton";
 import EmptyState from "@/components/ui/EmptyState";
 import { entitiesByDomain, useHACall, useHAState } from "@/hooks/useHAState";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function HomeClimateWidget({ className }: { className?: string }) {
+  const { currentUser } = useAuth();
+  const readOnly = currentUser?.role === "child";
   const { states, refresh } = useHAState();
   const { calling, callService } = useHACall();
 
@@ -37,13 +40,19 @@ export default function HomeClimateWidget({ className }: { className?: string })
         <p className="text-xs text-text-secondary">{hvacMode}</p>
         {humidity !== null && <p className="text-[11px] text-text-muted">Humidity {Math.round(humidity)}%</p>}
         <div className="mt-2 flex items-center gap-2">
-          <SoftButton size="sm" variant="secondary" disabled={calling} onClick={() => setTarget(target - 1)} aria-label="Decrease target temperature">
-            −
-          </SoftButton>
-          <span className="text-xs font-semibold tabular-nums text-text-secondary">{Math.round(target)}°</span>
-          <SoftButton size="sm" variant="secondary" disabled={calling} onClick={() => setTarget(target + 1)} aria-label="Increase target temperature">
-            +
-          </SoftButton>
+          {readOnly ? (
+            <span className="text-xs font-semibold tabular-nums text-text-secondary">Target {Math.round(target)}°</span>
+          ) : (
+            <>
+              <SoftButton size="sm" variant="secondary" disabled={calling} onClick={() => setTarget(target - 1)} aria-label="Decrease target temperature">
+                −
+              </SoftButton>
+              <span className="text-xs font-semibold tabular-nums text-text-secondary">{Math.round(target)}°</span>
+              <SoftButton size="sm" variant="secondary" disabled={calling} onClick={() => setTarget(target + 1)} aria-label="Increase target temperature">
+                +
+              </SoftButton>
+            </>
+          )}
         </div>
       </div>
     </SectionCard>

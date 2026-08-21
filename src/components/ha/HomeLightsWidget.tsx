@@ -5,8 +5,11 @@ import Chip from "@/components/ui/Chip";
 import EmptyState from "@/components/ui/EmptyState";
 import ListRow from "@/components/ui/ListRow";
 import { entitiesByDomain, entityFriendlyName, useHACall, useHAState } from "@/hooks/useHAState";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function HomeLightsWidget({ className }: { className?: string }) {
+  const { currentUser } = useAuth();
+  const readOnly = currentUser?.role === "child";
   const { states, refresh } = useHAState();
   const { calling, callService } = useHACall();
 
@@ -35,7 +38,7 @@ export default function HomeLightsWidget({ className }: { className?: string }) 
       centeredHeader
       className={className}
       footer={
-        anyOn ? (
+        !readOnly && anyOn ? (
           <Chip size="sm" tone="warning" onClick={turnAllOff} disabled={calling}>
             Turn all off
           </Chip>
@@ -50,8 +53,7 @@ export default function HomeLightsWidget({ className }: { className?: string }) 
             <ListRow
               key={light.entity_id}
               title={entityFriendlyName(light)}
-              onClick={() => toggle(light.entity_id)}
-              className="tap"
+              onClick={readOnly ? undefined : () => toggle(light.entity_id)}
               trailing={
                 <Chip size="sm" tone={light.state === "on" ? "success" : "neutral"}>
                   {light.state === "on" ? "On" : "Off"}

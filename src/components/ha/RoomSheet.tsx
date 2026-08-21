@@ -5,6 +5,7 @@ import Chip from "@/components/ui/Chip";
 import ListRow from "@/components/ui/ListRow";
 import SoftButton from "@/components/ui/SoftButton";
 import { entitiesByDomain, entityFriendlyName, useHACall, type HAState } from "@/hooks/useHAState";
+import { useAuth } from "@/hooks/useAuth";
 import { formatRoomName } from "./RoomCard";
 
 const OPEN_SENSOR_CLASSES = new Set(["door", "window", "motion"]);
@@ -17,6 +18,8 @@ interface RoomSheetProps {
 }
 
 export default function RoomSheet({ room, states, onClose, onRefresh }: RoomSheetProps) {
+  const { currentUser } = useAuth();
+  const readOnly = currentUser?.role === "child";
   const { calling, callService } = useHACall();
 
   if (!room) return null;
@@ -69,7 +72,7 @@ export default function RoomSheet({ room, states, onClose, onRefresh }: RoomShee
               <ListRow
                 key={entity.entity_id}
                 title={entityFriendlyName(entity)}
-                onClick={() => toggle(entity.entity_id)}
+                onClick={readOnly ? undefined : () => toggle(entity.entity_id)}
                 aria-label={`Toggle ${entityFriendlyName(entity)}`}
                 trailing={
                   <Chip size="sm" tone={entity.state === "on" ? "success" : "neutral"}>
@@ -90,13 +93,19 @@ export default function RoomSheet({ room, states, onClose, onRefresh }: RoomShee
                 <span className="ml-2 text-xs font-medium text-text-secondary">{String(attrs.hvac_mode ?? climate.state)}</span>
               </span>
               <span className="flex items-center gap-2">
-                <SoftButton size="sm" variant="secondary" disabled={calling} onClick={() => setTarget(target - 1)} aria-label="Decrease target temperature">
-                  −
-                </SoftButton>
-                <span className="text-xs font-semibold tabular-nums text-text-secondary">{Math.round(target)}°</span>
-                <SoftButton size="sm" variant="secondary" disabled={calling} onClick={() => setTarget(target + 1)} aria-label="Increase target temperature">
-                  +
-                </SoftButton>
+                {readOnly ? (
+                  <span className="text-xs font-semibold tabular-nums text-text-secondary">Target {Math.round(target)}°</span>
+                ) : (
+                  <>
+                    <SoftButton size="sm" variant="secondary" disabled={calling} onClick={() => setTarget(target - 1)} aria-label="Decrease target temperature">
+                      −
+                    </SoftButton>
+                    <span className="text-xs font-semibold tabular-nums text-text-secondary">{Math.round(target)}°</span>
+                    <SoftButton size="sm" variant="secondary" disabled={calling} onClick={() => setTarget(target + 1)} aria-label="Increase target temperature">
+                      +
+                    </SoftButton>
+                  </>
+                )}
               </span>
             </div>
           </div>
