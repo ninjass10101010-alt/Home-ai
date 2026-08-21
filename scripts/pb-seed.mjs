@@ -101,6 +101,9 @@ const COLLECTIONS = [
       { name: "icon", type: "text" },
       { name: "color", type: "text" },
       { name: "member", type: "text" },
+      { name: "importanceScore", type: "number", required: false, options: { min: 0, max: 100 } },
+      { name: "importanceReason", type: "text", required: false },
+      { name: "importanceUpdatedAt", type: "date", required: false },
     ],
   },
   {
@@ -146,10 +149,57 @@ async function main() {
   console.log("Authenticated as superuser.");
 
   const existing = (await pb.collections.getFullList()).map((c) => c.name);
+  const allCollections = await pb.collections.getFullList();
 
   for (const col of COLLECTIONS) {
     if (existing.includes(col.name)) {
-      console.log(`  ✓ ${col.name} (exists)`);
+      // Idempotent patch: add missing fields/indexes without data loss
+      try {
+        const live = allCollections.find((c) => c.name === col.name);
+        const liveFieldNames = new Set((live?.fields || live?.schema || []).map((f) => f.name));
+        const missingFields = col.schema.filter((s) => !liveFieldNames.has(s.name));
+        const liveIndexes = live?.indexes || [];
+        const liveIndexNames = new Set(
+          liveIndexes.map((i) => {
+            if (typeof i === "string") {
+              const m = i.match(/INDEX\s+(\S+)\s+ON/i);
+              return m ? m[1] : i;
+            }
+            return i.name;
+          })
+        );
+        const missingIndexes = (col.indexes || []).filter((i) => {
+          const name = typeof i === "string" ? ((i.match(/INDEX\s+(\S+)\s+ON/i) || [])[1] || i) : i.name;
+          return !liveIndexNames.has(name);
+        });
+        if (missingFields.length || missingIndexes.length) {
+          const parts = [];
+          if (missingFields.length) {
+            const mergedFields = [
+              ...(live?.fields || live?.schema || []),
+              ...missingFields.map((s) => {
+                const base = { name: s.name, type: s.type, required: s.required ?? false };
+                if (s.type === "select" && s.options) base.options = s.options;
+                if (s.type === "json") base.type = "json";
+                if (s.options) base.options = s.options;
+                return base;
+              }),
+            ];
+            await pb.collections.update(live.id, { fields: mergedFields });
+            parts.push(`+${missingFields.length} fields: ${missingFields.map((m) => m.name).join(", ")}`);
+          }
+          if (missingIndexes.length) {
+            await pb.collections.update(live.id, { indexes: [...liveIndexes, ...missingIndexes] });
+            parts.push(`+${missingIndexes.length} indexes`);
+          }
+          console.log(`  ✓ ${col.name} (patched ${parts.join(", ")})`);
+        } else {
+          console.log(`  ✓ ${col.name} (exists)`);
+        }
+      } catch (e) {
+        console.error(`  ✗ ${col.name} patch:`, e.message);
+        if (e.response?.data) console.error("    ", JSON.stringify(e.response.data));
+      }
       continue;
     }
     try {
@@ -160,6 +210,7 @@ async function main() {
           const base = { name: s.name, type: s.type, required: s.required ?? false };
           if (s.type === "select" && s.options) base.options = s.options;
           if (s.type === "json") base.type = "json";
+          if (s.options) base.options = s.options;
           return base;
         }),
         indexes: col.indexes || [],

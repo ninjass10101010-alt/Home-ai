@@ -1,6 +1,6 @@
 import { withAdmin } from "./pb-auth";
 
-const COLLECTIONS = [
+export const COLLECTIONS = [
   {
     name: "members",
     schema: [
@@ -75,6 +75,9 @@ const COLLECTIONS = [
       { name: "icon", type: "text" },
       { name: "color", type: "text" },
       { name: "member", type: "text" },
+      { name: "importanceScore", type: "number", required: false, options: { min: 0, max: 100 } },
+      { name: "importanceReason", type: "text", required: false },
+      { name: "importanceUpdatedAt", type: "date", required: false },
     ],
   },
   {
@@ -327,9 +330,15 @@ export async function seedCollections() {
                 const base: any = { name: s.name, type: s.type, required: s.required || false };
                 if (s.type === "select" && s.options) {
                   base.values = s.options.values;
+                  base.options = s.options;
                   if (s.options.maxSelect) base.maxSelect = s.options.maxSelect;
                 }
                 if (s.type === "json") base.type = "json";
+                if (s.type === "number" && s.options) base.options = s.options;
+                if (s.type === "date" && s.options) base.options = s.options;
+                if (s.type === "text" && s.options) base.options = s.options;
+                // generic fallback: preserve any options
+                if (s.options && !base.options) base.options = s.options;
                 return base;
               }),
             ];
@@ -357,9 +366,11 @@ export async function seedCollections() {
           };
           if (s.type === "select" && s.options) {
             base.values = s.options.values;
+            base.options = s.options;
             if (s.options.maxSelect) base.maxSelect = s.options.maxSelect;
           }
           if (s.type === "json") base.type = "json";
+          if (s.options) base.options = s.options;
           return base;
         }),
         indexes: col.indexes || [],
