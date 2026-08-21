@@ -5,16 +5,19 @@ const mockGetList = vi.fn();
 const mockGetFullList = vi.fn();
 const mockSelectTodaysEvents = vi.fn();
 
-vi.mock("@/lib/pb-auth", () => ({
-  withAdmin: vi.fn(async (fn: any) => {
-    const pb: any = {
-      collection: vi.fn(() => ({
-        getList: mockGetList,
-        getFullList: mockGetFullList,
-      })),
-    };
-    return fn(pb);
-  }),
+vi.mock("@/lib/pb", () => ({
+  getPB: vi.fn(() => ({
+    collection: vi.fn(() => ({
+      getList: mockGetList,
+      getFullList: mockGetFullList,
+    })),
+  })),
+  getAdminPB: vi.fn(() => ({
+    collection: vi.fn(() => ({
+      getList: mockGetList,
+      getFullList: mockGetFullList,
+    })),
+  })),
 }));
 
 vi.mock("@/db", () => ({
@@ -41,7 +44,7 @@ function endStr(): string {
   const t = new Date();
   t.setHours(0, 0, 0, 0);
   const e = new Date(t);
-  e.setDate(t.getDate() + 7);
+  e.setDate(t.getDate() + 8);
   return formatLocalDate(e);
 }
 function todayStr(): string {
@@ -168,7 +171,7 @@ describe("getHomeEvents", () => {
     const today = todayStr();
     const tom = tomorrowStr();
     const end = endStr();
-    const afterEnd = dateOffset(8);
+    const afterEnd = dateOffset(9);
 
     // Force JS path to verify window logic
     mockGetList.mockRejectedValueOnce(new Error("filter error"));
@@ -263,7 +266,7 @@ describe("getHomeEvents", () => {
     mockGetList.mockRejectedValueOnce(new Error("fallback"));
     const many = Array.from({ length: 10 }, (_, i) => ({
       id: `e${i}`,
-      date: dateOffset(1 + (i % 6)), // days 1..6 rotating, all in window
+      date: dateOffset(1 + (i % 7)), // days 1..7 rotating, all in 7-day window
       importanceScore: 50 + (i % 5) * 10, // 50..90
     }));
     // Make one score below threshold to ensure filtering

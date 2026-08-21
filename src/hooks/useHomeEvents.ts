@@ -2,17 +2,22 @@
 
 import { useEffect, useState } from "react";
 import { db } from "@/db";
-import { withAdmin } from "@/lib/pb-auth";
+import { getPB } from "@/lib/pb";
 
 /**
  * Home data hook for upcoming important events.
  *
  * Returns { todayEvents, upcomingImportant } where
  * upcomingImportant = PB query events where
- *   date >= tomorrow (local) && date < today+7d (local, exclusive)
+ *   date >= tomorrow (local) && date < today+8d (local, exclusive)
  *   && importanceScore >= 50
  * ordered by -importanceScore, date asc and limited to 3.
+ * Window is 7 full days after today: tomorrow..today+7 inclusive
+ * (end = today+8 exclusive) per global constraint.
  *
+ * Uses public PocketBase client (getPB) — no admin auth — so the hook
+ * is safe to run in a "use client" component. The `events` collection
+ * has public listRule (null) and is readable without PB_ADMIN env.
  * Uses local date strings (YYYY-MM-DD) to match the cron scorer's
  * local-midnight windowing. Falls back to JS filtering for `start`
  * shaped rows and for PB filter failures.
@@ -70,33 +75,33 @@ export async function getHomeEvents(): Promise<HomeEventsResult> {
   const tomorrow = new Date(today);
   tomorrow.setDate(today.getDate() + 1);
   const end = new Date(today);
-  end.setDate(today.getDate() + 7);
+  end.setDate(today.getDate() + 8);
 
   const tomorrowStr = formatLocalDate(tomorrow);
   const endStr = formatLocalDate(end);
 
   let upcomingImportant: any[] = [];
 
-  // Primary: server-filtered getList (limit 3, sorted)
+  // Primary: server-filtered getList (limit 3, sorted) via public PB client
   try {
-    const items: any[] = await withAdmin(async (pb) => {
-      const col: any = pb.collection("events");
-      // Prefer getList with server filter + sort + limit (PB paging)
-      if (typeof col.getList === "function") {
-        const page = await col.getList(1, 3, {
-          filter: `date >= "${tomorrowStr}" && date < "${endStr}" && importanceScore >= 50`,
-          sort: "-importanceScore,date",
-          requestKey: null,
-        });
-        // getList returns { items, ... } or array in some mocks
-        if (Array.isArray(page)) return page;
-        if (page && Array.isArray(page.items)) return page.items;
-        return [];
-      }
+    const pb = getPB();
+    const col: any = pb.collection("events");
+    let items: any[] = [];
+    if (typeof col.getList === "function") {
+      const page = await col.getList(1, 3, {
+        filter: `date >= "${tomorrowStr}" && date < "${endStr}" && importanceScore >= 50`,
+        sort: "-importanceScore,date",
+        requestKey: null,
+      });
+      // getList returns { items, ... } or array in some mocks
+      if (Array.isArray(page)) items = page;
+      else if (page && Array.isArray(page.items)) items = page.items;
+      else items = [];
+    } else {
       // Fallback if getList unavailable: fetch all and filter in JS
       const all = await col.getFullList({ requestKey: null });
-      return all as any[];
-    });
+      items = all as any[];
+    }
 
     // If primary used getList, items are already filtered/sorted/limited.
     // If it used getFullList fallback shape, we still need JS filter/sort/limit.
@@ -135,6 +140,8 @@ export async function getHomeEvents(): Promise<HomeEventsResult> {
         .slice(0, 3);
     } else {
       // Primary path: ensure JS sort for deterministic tie-break, then limit 3
+      // Tie-break is time/start after date to keep ordering deterministic when
+      // scores and dates collide (consistent with fallback path).
       upcomingImportant = [...items]
         .sort((a: any, b: any) => {
           const sa = getImportanceScore(a);
@@ -143,16 +150,16 @@ export async function getHomeEvents(): Promise<HomeEventsResult> {
           const da = getEventDateStr(a) || "";
           const db2 = getEventDateStr(b) || "";
           if (da !== db2) return da.localeCompare(db2);
-          return 0;
+          const ta = a.time || a.start || "";
+          const tb = b.time || b.start || "";
+          return String(ta).localeCompare(String(tb));
         })
         .slice(0, 3);
     }
   } catch {
-    // Secondary fallback: fetch all and filter in JS
+    // Secondary fallback: fetch all and filter in JS via public PB client
     try {
-      const all: any[] = await withAdmin(async (pb) => {
-        return pb.collection("events").getFullList({ requestKey: null });
-      });
+      const all: any[] = await getPB().collection("events").getFullList({ requestKey: null } as any);
       upcomingImportant = (all as any[])
         .filter((e: any) => {
           const d = getEventDateStr(e);
