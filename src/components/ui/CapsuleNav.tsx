@@ -2,6 +2,7 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useAuth } from "@/hooks/useAuth";
 import SyncInit from "./SyncInit";
 
 const navItems = [
@@ -68,6 +69,18 @@ const navItems = [
     ),
   },
   {
+    href: "/ha",
+    label: "House",
+    icon: (active: boolean) => (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 2.5 : 2} strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3.5 10.5 12 3.5l8.5 7" />
+        <path d="M6 9.5V18a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V9.5" />
+        <path d="M9.5 20v-5h5v5" />
+        <circle cx="17.5" cy="6" r="1.6" fill="currentColor" stroke="none" />
+      </svg>
+    ),
+  },
+  {
     href: "/settings",
     label: "Settings",
     icon: (active: boolean) => (
@@ -82,9 +95,18 @@ const navItems = [
 const EXPAND_EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
 const LABEL_EASE = "cubic-bezier(0.34, 1.56, 0.64, 1)";
 
+/** Kid mode hides the House (Home Assistant) tab. */
+function visibleNavItems(currentUser: { role?: string } | null) {
+  if (currentUser?.role === "child") {
+    return navItems.filter((item) => item.href !== "/ha");
+  }
+  return navItems;
+}
+
 export default function CapsuleNav() {
   const pathname = usePathname();
   const router = useRouter();
+  const { currentUser } = useAuth();
   const [isLight, setIsLight] = useState(false);
 
   useEffect(() => {
@@ -117,7 +139,7 @@ export default function CapsuleNav() {
           }}
         >
           <div className="flex items-center gap-2.5 px-3 py-2">
-            {navItems.map((item) => {
+            {visibleNavItems(currentUser).map((item) => {
               const isActive = pathname === item.href;
 
               return (
