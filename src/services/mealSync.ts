@@ -54,13 +54,13 @@ export class MealSyncService {
           );
 
           if (existing) {
-            await this.updateGroceryItem(existing.id, {
+            const ok = await this.updateGroceryItem(existing.id, {
               quantity: this.formatQuantity(ingredient.quantity, ingredient.unit),
               priority: this.getPriorityForDeficit(ingredient.quantity),
               needed: true,
               lastSyncedAt: new Date().toISOString(),
             });
-            updated++;
+            if (ok) updated++;
           } else {
             await this.createGroceryItem({
               userId,
@@ -80,11 +80,11 @@ export class MealSyncService {
       for (const grocery of existingGrocery) {
         if (grocery.manualOverride || this.isManualSource(grocery.source)) continue;
         if (this.shouldKeepMealPlanGrocery(grocery, requiredNames)) continue;
-        await this.updateGroceryItem(grocery.id, {
+        const ok = await this.updateGroceryItem(grocery.id, {
           needed: false,
           lastSyncedAt: new Date().toISOString(),
         });
-        removed++;
+        if (ok) removed++;
       }
 
       return { added, updated, removed };
@@ -111,13 +111,13 @@ export class MealSyncService {
         const priority = pantry.status === 'out' ? 'high' : 'medium';
 
         if (existing) {
-          await this.updateGroceryItem(existing.id, {
+          const ok = await this.updateGroceryItem(existing.id, {
             needed: true,
             priority,
             lastSyncedAt: new Date().toISOString(),
             source: 'pantry-check',
           });
-          updated++;
+          if (ok) updated++;
         } else {
           await this.createGroceryItem({
             userId,
@@ -139,11 +139,11 @@ export class MealSyncService {
         if (grocery.manualOverride || this.isManualSource(grocery.source) || !grocery.needed) continue;
         const pantryStock = this.findPantryStock(pantryItems, grocery.name);
         if (pantryStock && pantryStock.status === 'plenty') {
-          await this.updateGroceryItem(grocery.id, {
+          const ok = await this.updateGroceryItem(grocery.id, {
             needed: false,
             lastSyncedAt: new Date().toISOString(),
           });
-          updated++;
+          if (ok) updated++;
         }
       }
 
@@ -265,12 +265,16 @@ export class MealSyncService {
     } as GroceryListItem;
   }
 
-  private async updateGroceryItem(id: number | string, updates: Partial<GroceryListItem>): Promise<void> {
+  private async updateGroceryItem(id: number | string, updates: Partial<GroceryListItem>): Promise<boolean> {
     try {
-      const merged = { id, ...updates, userId: 'demo' };
-      await db.upsertGroceryItem(merged);
+      const all = await db.selectGrocery();
+      const record = all.find((g: any) => String(g.id) === String(id));
+      if (!record) return false;
+      const saved = await db.upsertGroceryItem({ ...record, ...updates, id: record.id, userId: 'demo' });
+      return !!saved;
     } catch (e) {
       console.warn('[MealSync] update failed for id', id, e);
+      return false;
     }
   }
 
