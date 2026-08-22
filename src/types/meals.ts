@@ -35,6 +35,7 @@ export interface Recipe {
   carbs?: number;
   fat?: number;
   source?: string;
+  sourceUrl?: string;
   createdAt: string;
   favorite?: boolean;
   difficulty?: "Easy" | "Medium" | "Cozy";

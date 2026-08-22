@@ -16,6 +16,7 @@ import PantryTab from "@/components/meals/PantryTab";
 import RecipesTab from "@/components/meals/RecipesTab";
 import CookWithWhatYouHave from "@/components/meals/CookWithWhatYouHave";
 import RecipeModal from "@/components/meals/RecipeModal";
+import RecipeImportModal from "@/components/meals/RecipeImportModal";
 import PageHeader from "@/components/patterns/PageHeader";
 import SegmentedControl from "@/components/ui/SegmentedControl";
 import Surface from "@/components/ui/Surface";
@@ -74,6 +75,7 @@ function MealHubContent() {
       carbs: Number(recipe.carbs) || 0,
       fat: Number(recipe.fat) || 0,
       source: recipe.source,
+      sourceUrl: recipe.sourceUrl,
       createdAt: recipe.createdAt || new Date().toISOString(),
       favorite: recipe.favorite,
       difficulty: recipe.difficulty,
@@ -175,6 +177,8 @@ function MealHubContent() {
 
   const [showRecipeEditor, setShowRecipeEditor] = useState(false);
   const [editingRecipeId, setEditingRecipeId] = useState<number | null>(null);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importModalKey, setImportModalKey] = useState(0);
 
   const startAddRecipe = () => {
     setEditingRecipeId(null); setShowRecipeEditor(true);
@@ -236,22 +240,9 @@ function MealHubContent() {
     showToast(`🛒 Added ${ingredients.length} missing item${ingredients.length === 1 ? "" : "s"} to grocery`);
   };
 
-  const importRecipeFromUrl = async (url: string, source?: string) => {
-    const label = source || "Web";
-    showToast(`📥 Importing from ${label}: ${url}...`);
-    try {
-      const res = await fetch("/api/recipes/ingest", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "url", url, sourceLabel: label }),
-      });
-      const data = await res.json();
-      if (!res.ok) { showToast(`❌ ${data?.error || "Import failed"}`); return; }
-      saveCatalogRecipe(data.recipe);
-      showToast(`✅ Added "${data?.recipe?.title || "Imported Recipe"}" to recipe catalog`);
-    } catch (e: any) {
-      showToast(`❌ Import failed: ${e?.message || "Unknown error"}`);
-    }
+  const openImportModal = () => {
+    setImportModalKey((k) => k + 1);
+    setShowImportModal(true);
   };
 
   const copyDayMeals = (fromDay: string, toDay: string) => {
@@ -424,7 +415,7 @@ function MealHubContent() {
             startAddRecipe={startAddRecipe}
             startEditRecipe={startEditRecipe}
             handleFileUpload={handleFileUpload}
-            importRecipeFromUrl={importRecipeFromUrl}
+            openImportModal={openImportModal}
           />
         )}
       </div>
@@ -450,6 +441,15 @@ function MealHubContent() {
           setShowRecipeModal={setShowRecipeEditor}
         />
       )}
+
+      <RecipeImportModal
+        key={importModalKey}
+        open={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        recipes={recipes}
+        onSave={saveCatalogRecipe}
+        showToast={showToast}
+      />
     </PageShell>
   );
 }

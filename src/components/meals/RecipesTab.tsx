@@ -17,7 +17,7 @@ export default function RecipesTab({
   startAddRecipe,
   startEditRecipe,
   handleFileUpload,
-  importRecipeFromUrl,
+  openImportModal,
 }: any) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("All");
@@ -56,10 +56,7 @@ export default function RecipesTab({
           + New Recipe
         </button>
         <button
-          onClick={() => {
-            const url = prompt("Enter recipe URL (Pinterest/TikTok/etc):");
-            if (url && importRecipeFromUrl) importRecipeFromUrl(url, "Web");
-          }}
+          onClick={() => openImportModal?.()}
           className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-2xl glass text-text-secondary text-sm font-medium border border-[var(--color-surface-3)] hover:text-text-primary tap-sm cursor-pointer"
         >
           🌐 Web Import

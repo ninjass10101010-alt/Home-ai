@@ -67,6 +67,7 @@ const COLLECTIONS = [
       { name: "calories", type: "number" },
       { name: "image", type: "text" },
       { name: "source", type: "text" },
+      { name: "sourceUrl", type: "text" },
       { name: "favorite", type: "bool" },
     ],
   },

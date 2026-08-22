@@ -27,6 +27,7 @@ const normalizeRecipe = (recipe: Partial<Recipe>, fallbackId?: number): Recipe =
   carbs: Number(recipe.carbs) || 0,
   fat: Number(recipe.fat) || 0,
   source: recipe.source,
+  sourceUrl: recipe.sourceUrl,
   createdAt: recipe.createdAt || new Date().toISOString(),
   favorite: recipe.favorite,
   difficulty: recipe.difficulty,
