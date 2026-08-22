@@ -360,6 +360,16 @@ export const COLLECTIONS = [
       "CREATE UNIQUE INDEX idx_ha_notify_prefs_key ON ha_notify_prefs (key)",
     ],
   },
+  {
+    name: "ha_mirror_state",
+    schema: [
+      { name: "key", type: "text", required: true },
+      { name: "names", type: "json" },
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_ha_mirror_state_key ON ha_mirror_state (key)",
+    ],
+  },
   // Skill tree (src/lib/skill-tree.ts). The lib identifies users/branches/
   // quests by plain string ids (e.g. "demo-user"), so id fields are text —
   // NOT relations — and array fields are json.
