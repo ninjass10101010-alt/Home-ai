@@ -18,6 +18,7 @@ export default function RecipesTab({
   startEditRecipe,
   handleFileUpload,
   openImportModal,
+  openSearchModal,
 }: any) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("All");
@@ -48,22 +49,28 @@ export default function RecipesTab({
   return (
     <div className="space-y-6 pb-6">
       {/* ── Actions bar ── */}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <button
           onClick={startAddRecipe}
-          className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-2xl bg-[var(--color-accent-selected)]/15 text-[var(--color-accent-selected)] text-sm font-medium hover:bg-[var(--color-accent-selected)]/25 tap-sm cursor-pointer"
+          className="flex-1 min-w-[calc(50%-0.25rem)] sm:min-w-0 flex items-center justify-center gap-1.5 py-2.5 rounded-2xl bg-[var(--color-accent-selected)]/15 text-[var(--color-accent-selected)] text-sm font-medium hover:bg-[var(--color-accent-selected)]/25 tap-sm cursor-pointer"
         >
           + New Recipe
         </button>
         <button
+          onClick={() => openSearchModal?.()}
+          className="flex-1 min-w-[calc(50%-0.25rem)] sm:min-w-0 flex items-center justify-center gap-1.5 py-2.5 rounded-2xl glass text-text-secondary text-sm font-medium border border-[var(--color-surface-3)] hover:text-text-primary tap-sm cursor-pointer"
+        >
+          🔎 Search
+        </button>
+        <button
           onClick={() => openImportModal?.()}
-          className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-2xl glass text-text-secondary text-sm font-medium border border-[var(--color-surface-3)] hover:text-text-primary tap-sm cursor-pointer"
+          className="flex-1 min-w-[calc(50%-0.25rem)] sm:min-w-0 flex items-center justify-center gap-1.5 py-2.5 rounded-2xl glass text-text-secondary text-sm font-medium border border-[var(--color-surface-3)] hover:text-text-primary tap-sm cursor-pointer"
         >
           🌐 Web Import
         </button>
         <button
           onClick={() => document.getElementById("recipe-file-upload-recipes")?.click()}
-          className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-2xl glass text-text-secondary text-sm font-medium border border-[var(--color-surface-3)] hover:text-text-primary tap-sm cursor-pointer"
+          className="flex-1 min-w-[calc(50%-0.25rem)] sm:min-w-0 flex items-center justify-center gap-1.5 py-2.5 rounded-2xl glass text-text-secondary text-sm font-medium border border-[var(--color-surface-3)] hover:text-text-primary tap-sm cursor-pointer"
         >
           📄 Import
         </button>

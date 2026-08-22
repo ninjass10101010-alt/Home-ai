@@ -17,6 +17,7 @@ import RecipesTab from "@/components/meals/RecipesTab";
 import CookWithWhatYouHave from "@/components/meals/CookWithWhatYouHave";
 import RecipeModal from "@/components/meals/RecipeModal";
 import RecipeImportModal from "@/components/meals/RecipeImportModal";
+import RecipeSearchModal from "@/components/meals/RecipeSearchModal";
 import PageHeader from "@/components/patterns/PageHeader";
 import SegmentedControl from "@/components/ui/SegmentedControl";
 import Surface from "@/components/ui/Surface";
@@ -179,6 +180,8 @@ function MealHubContent() {
   const [editingRecipeId, setEditingRecipeId] = useState<number | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importModalKey, setImportModalKey] = useState(0);
+  const [showSearchModal, setShowSearchModal] = useState(false);
+  const [searchModalKey, setSearchModalKey] = useState(0);
 
   const startAddRecipe = () => {
     setEditingRecipeId(null); setShowRecipeEditor(true);
@@ -243,6 +246,11 @@ function MealHubContent() {
   const openImportModal = () => {
     setImportModalKey((k) => k + 1);
     setShowImportModal(true);
+  };
+
+  const openSearchModal = () => {
+    setSearchModalKey((k) => k + 1);
+    setShowSearchModal(true);
   };
 
   const copyDayMeals = (fromDay: string, toDay: string) => {
@@ -416,6 +424,7 @@ function MealHubContent() {
             startEditRecipe={startEditRecipe}
             handleFileUpload={handleFileUpload}
             openImportModal={openImportModal}
+            openSearchModal={openSearchModal}
           />
         )}
       </div>
@@ -446,6 +455,16 @@ function MealHubContent() {
         key={importModalKey}
         open={showImportModal}
         onClose={() => setShowImportModal(false)}
+        recipes={recipes}
+        onSave={saveCatalogRecipe}
+        onOpenExisting={startEditRecipe}
+        showToast={showToast}
+      />
+
+      <RecipeSearchModal
+        key={searchModalKey}
+        open={showSearchModal}
+        onClose={() => setShowSearchModal(false)}
         recipes={recipes}
         onSave={saveCatalogRecipe}
         onOpenExisting={startEditRecipe}
