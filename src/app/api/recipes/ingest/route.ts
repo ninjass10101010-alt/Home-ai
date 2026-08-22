@@ -1,6 +1,14 @@
 import { NextResponse } from "next/server";
 import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
+import {
+  extractAllLdJson,
+  findRecipeNode,
+  schemaRecipeToRecipe,
+  type ExtractedRecipe,
+} from "@/lib/recipe-extract";
+
+const MAX_BODY_BYTES = 5 * 1024 * 1024;
 
 function isPrivateIP(hostname: string): boolean {
   if (!hostname) return true;
@@ -18,71 +26,129 @@ function cleanExtractedText(s: string) {
   return s.replace(/\s+/g, " ").trim();
 }
 
-async function fetchAndExtract(url: string): Promise<string> {
-  const parsed = new URL(url);
-  if (!["http:", "https:"].includes(parsed.protocol)) {
-    throw new Error("Only HTTP and HTTPS URLs are allowed");
+class FetchError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
   }
-  if (isPrivateIP(parsed.hostname)) {
-    throw new Error("Private network URLs are not allowed");
+}
+
+async function readBodyCapped(res: Response): Promise<string> {
+  const lengthHeader = Number(res.headers.get("content-length"));
+  if (Number.isFinite(lengthHeader) && lengthHeader > MAX_BODY_BYTES) {
+    throw new FetchError(413, "Page is too large to import");
   }
-
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent": "Consuela-Dashboard/1.0 RecipeImporter",
-      Accept: "text/html,application/xhtml+xml,*/*",
-    },
-    signal: AbortSignal.timeout(15000),
-  });
-
-  const html = await res.text();
-
-  const ldJson = html.match(/<script\s+[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/i);
-  if (ldJson) {
-    try {
-      const json = JSON.parse(ldJson[1]);
-      if (Array.isArray(json)) {
-        const recipe = json.find((item: any) => item["@type"] === "Recipe");
-        if (recipe) return formatSchemaRecipeToText(recipe);
+  if (!res.body) return res.text();
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      received += value.byteLength;
+      if (received > MAX_BODY_BYTES) {
+        reader.cancel().catch(() => {});
+        throw new FetchError(413, "Page is too large to import");
       }
-      if (json["@type"] === "Recipe") {
-        return formatSchemaRecipeToText(json);
-      }
-    } catch {
-      // keep going with Readability
+      chunks.push(value);
     }
   }
+  return new TextDecoder("utf-8").decode(chunks.length === 1 ? chunks[0] : Buffer.concat(chunks));
+}
 
+async function fetchHtml(url: string): Promise<string> {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new FetchError(400, "That doesn't look like a valid link. It should start with http:// or https://");
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new FetchError(400, "Only HTTP and HTTPS URLs are allowed");
+  }
+  if (isPrivateIP(parsed.hostname)) {
+    throw new FetchError(400, "Private network URLs are not allowed");
+  }
+
+  const doFetch = (userAgent: string) =>
+    fetch(url, {
+      headers: {
+        "User-Agent": userAgent,
+        Accept: "text/html,application/xhtml+xml,*/*",
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+
+  let res = await doFetch("Consuela-Dashboard/1.0 RecipeImporter");
+  if (res.status === 403) {
+    // Many CDNs block non-browser UAs outright — retry once with a common one.
+    res = await doFetch(
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    );
+  }
+
+  if (!res.ok) {
+    if (res.status === 403 || res.status === 401) {
+      throw new FetchError(
+        403,
+        "This site blocks automatic import. Try copying the recipe text and using the Paste text tab instead.",
+      );
+    }
+    if (res.status === 429) {
+      throw new FetchError(
+        429,
+        "This site is rate-limiting imports right now. Wait a minute and try again, or paste the recipe text instead.",
+      );
+    }
+    if (res.status === 404) {
+      throw new FetchError(404, "That page could not be found (404). Check the link and try again.");
+    }
+    throw new FetchError(502, `The site responded with an error (${res.status}). Try again in a moment.`);
+  }
+
+  return readBodyCapped(res);
+}
+
+function extractStructuredRecipe(html: string, url: string): ExtractedRecipe | null {
+  const blocks = extractAllLdJson(html);
+  for (const block of blocks) {
+    const node = findRecipeNode(block);
+    if (node) {
+      const recipe = schemaRecipeToRecipe(node, url);
+      if (recipe.name && (recipe.ingredients.length || recipe.instructions)) return recipe;
+    }
+  }
+  return null;
+}
+
+function extractReadableText(html: string): string {
   const { document } = parseHTML(html);
   const reader = new Readability(document.cloneNode(true) as any);
   const article = reader.parse();
   return cleanExtractedText(article?.textContent || document.body?.textContent || "");
 }
 
-function formatSchemaRecipeToText(recipe: any): string {
-  const parts: string[] = [];
-  parts.push(`Title: ${recipe.name || recipe.headline || "Untitled"}`);
-  if (recipe.description) parts.push(`Description: ${recipe.description}`);
-  if (recipe.recipeIngredient?.length) {
-    parts.push("Ingredients:");
-    parts.push(...recipe.recipeIngredient.map((i: string) => `- ${i}`));
-  }
-  if (recipe.recipeInstructions?.length) {
-    parts.push("Instructions:");
-    const instructions = Array.isArray(recipe.recipeInstructions)
-      ? recipe.recipeInstructions
-          .map((i: any) => i.text || i.description || i.name || "")
-          .filter(Boolean)
-          .join("\n")
-      : typeof recipe.recipeInstructions === "string"
-        ? recipe.recipeInstructions
-        : "";
-    parts.push(instructions);
-  }
-  if (recipe.nutrition?.calories) parts.push(`Calories: ${recipe.nutrition.calories}`);
-  if (recipe.prepTime) parts.push(`Prep Time: ${recipe.prepTime}`);
-  if (recipe.cookTime) parts.push(`Cook Time: ${recipe.cookTime}`);
-  return parts.join("\n");
+function recipeFromTextFallback(text: string, sourceUrl?: string) {
+  const lines = text.split(/\n+/).map((l) => l.trim()).filter(Boolean);
+  const name = lines[0]?.slice(0, 120) || "Imported recipe";
+  return {
+    title: name,
+    emoji: "📖",
+    prepTime: "30 min",
+    tags: ["Imported"],
+    ingredients: [],
+    instructions: text.slice(0, 4000),
+    servings: 4,
+    calories: 0,
+    protein: null,
+    carbs: null,
+    fat: null,
+    image: undefined,
+    sourceUrl,
+    needsReview: true,
+  };
 }
 
 async function callConsuelaParseRecipe({
@@ -114,11 +180,29 @@ async function callConsuelaParseRecipe({
         extractedText.slice(0, 12000),
       ].join("\n"),
     }),
+    signal: AbortSignal.timeout(60000),
   });
+
+  if (!res.ok) throw new Error(`Consuela unavailable (${res.status})`);
 
   const data = await res.json();
   const actions = data?.actions || [];
-  const first = actions.find((a: any) => a.type === "recipe") || actions[0];
+  let first = actions.find((a: any) => a.type === "recipe") || actions[0];
+
+  if (!first && typeof data?.content === "string") {
+    const contentMatch = data.content.match(/\{[\s\S]*\}/);
+    if (contentMatch) {
+      try {
+        const contentJson = JSON.parse(contentMatch[0]);
+        if (contentJson && typeof contentJson === "object" && (contentJson.title || contentJson.ingredients)) {
+          first = { type: "recipe", detail: JSON.stringify(contentJson) };
+        }
+      } catch {
+        // not JSON content — fall through
+      }
+    }
+  }
+
   if (!first) throw new Error("Consuela did not return a recipe action");
 
   const detail = first.detail;
@@ -128,7 +212,7 @@ async function callConsuelaParseRecipe({
     try {
       parsed = JSON.parse(detail);
     } catch (e: any) {
-    console.error("[recipes/ingest]", e);
+      console.error("[recipes/ingest]", e);
       // Not JSON — ignore.
     }
   }
@@ -180,18 +264,76 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Missing url" }, { status: 400 });
       }
 
-      const scrapedText = await fetchAndExtract(url);
-      if (!scrapedText || scrapedText.length < 80) {
-        return NextResponse.json({ error: "Could not extract useful text from URL" }, { status: 422 });
+      let html: string;
+      try {
+        html = await fetchHtml(url);
+      } catch (e: any) {
+        if (e instanceof FetchError) {
+          return NextResponse.json({ error: e.message }, { status: e.status });
+        }
+        if (e?.name === "TimeoutError" || e?.name === "AbortError") {
+          return NextResponse.json(
+            { error: "The site took too long to respond. Try again, or paste the recipe text instead." },
+            { status: 504 },
+          );
+        }
+        return NextResponse.json(
+          { error: "Could not reach that site. Check the link and try again." },
+          { status: 502 },
+        );
       }
 
-      const parsed = await callConsuelaParseRecipe({
-        sourceLabel: sourceLabel || "Web",
-        url,
-        extractedText: scrapedText,
-      });
+      const structured = extractStructuredRecipe(html, url);
+      if (structured) {
+        return NextResponse.json({
+          recipe: {
+            title: structured.name,
+            emoji: "📖",
+            description: structured.description,
+            prepTime: structured.prepTime || structured.totalTime || "30 min",
+            cookTime: structured.cookTime,
+            totalTime: structured.totalTime,
+            tags: ["Imported"],
+            ingredients: structured.ingredients,
+            instructions: structured.instructions,
+            servings: structured.servings ?? 4,
+            calories: structured.calories ?? 0,
+            protein: null,
+            carbs: null,
+            fat: null,
+            image: structured.image,
+            author: structured.author,
+            sourceUrl: structured.sourceUrl,
+          },
+          structured: true,
+        });
+      }
 
-      return NextResponse.json({ recipe: parsed });
+      const scrapedText = extractReadableText(html);
+      if (!scrapedText || scrapedText.length < 80) {
+        return NextResponse.json(
+          {
+            error:
+              "Could not find a recipe on that page. If it's a video or app-only post, try the Paste text tab instead.",
+          },
+          { status: 422 },
+        );
+      }
+
+      try {
+        const parsed = await callConsuelaParseRecipe({
+          sourceLabel: sourceLabel || "Web",
+          url,
+          extractedText: scrapedText,
+        });
+        return NextResponse.json({ recipe: { ...parsed, sourceUrl: url }, structured: false });
+      } catch {
+        return NextResponse.json({
+          recipe: recipeFromTextFallback(scrapedText, url),
+          structured: false,
+          needsReview: true,
+        });
+      }
     }
 
     if (type === "pdf") {
@@ -203,13 +345,20 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Missing fileText" }, { status: 400 });
       }
 
-      const parsed = await callConsuelaParseRecipe({
-        sourceLabel: sourceLabel || "Text",
-        url: undefined,
-        extractedText: fileText,
-      });
-
-      return NextResponse.json({ recipe: parsed });
+      try {
+        const parsed = await callConsuelaParseRecipe({
+          sourceLabel: sourceLabel || "Text",
+          url: undefined,
+          extractedText: fileText,
+        });
+        return NextResponse.json({ recipe: parsed, structured: false });
+      } catch {
+        return NextResponse.json({
+          recipe: recipeFromTextFallback(fileText),
+          structured: false,
+          needsReview: true,
+        });
+      }
     }
 
     return NextResponse.json({ error: "Unknown type" }, { status: 400 });
