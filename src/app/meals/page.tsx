@@ -448,6 +448,7 @@ function MealHubContent() {
         onClose={() => setShowImportModal(false)}
         recipes={recipes}
         onSave={saveCatalogRecipe}
+        onOpenExisting={startEditRecipe}
         showToast={showToast}
       />
     </PageShell>

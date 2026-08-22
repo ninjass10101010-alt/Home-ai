@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { RECIPE_TAGS, foodEmojis } from "@/data/meals";
 import { Recipe } from "@/types/meals";
@@ -67,12 +67,14 @@ export default function RecipeImportModal({
   onClose,
   recipes,
   onSave,
+  onOpenExisting,
   showToast,
 }: {
   open: boolean;
   onClose: () => void;
   recipes: Recipe[];
   onSave: (recipe: Recipe) => Promise<void> | void;
+  onOpenExisting?: (recipe: Recipe) => void;
   showToast: (msg: string) => void;
 }) {
   const [tab, setTab] = useState<ImportTab>("url");
@@ -82,6 +84,13 @@ export default function RecipeImportModal({
   const [draft, setDraft] = useState<DraftRecipe>(EMPTY_DRAFT);
   const [errorMessage, setErrorMessage] = useState("");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -165,8 +174,13 @@ export default function RecipeImportModal({
   const handleSave = async () => {
     if (!draft.name.trim()) return;
     if (existingByUrl) {
-      showToast(`📖 "${existingByUrl.name}" is already in your catalog`);
-      onClose();
+      if (onOpenExisting) {
+        onClose();
+        onOpenExisting(existingByUrl);
+      } else {
+        showToast(`📖 "${existingByUrl.name}" is already in your catalog`);
+        onClose();
+      }
       return;
     }
     setPhase("saving");
@@ -188,7 +202,7 @@ export default function RecipeImportModal({
         image: draft.image || undefined,
       });
       setPhase("done");
-      setTimeout(() => onClose(), 900);
+      closeTimerRef.current = setTimeout(() => onClose(), 900);
     } catch {
       setErrorMessage("Saving failed. Try again.");
       setPhase("error");
@@ -390,7 +404,7 @@ export default function RecipeImportModal({
                   <div className="relative w-20 h-20 rounded-2xl overflow-hidden bg-surface-2 border border-surface-3 flex items-center justify-center shrink-0">
                     {draft.image ? (
                       <>
-                        <img src={draft.image} alt="" className="w-full h-full object-cover" />
+                        <img src={draft.image} alt="" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
                         <button
                           onClick={() => setDraft((d) => ({ ...d, image: "" }))}
                           aria-label="Remove photo"
