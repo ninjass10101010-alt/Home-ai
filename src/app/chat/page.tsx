@@ -259,6 +259,7 @@ function ChatContent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: text,
+          role: isLoggedIn ? currentUser?.role : undefined,
           history: messages.slice(-12).map(m => ({
             role: m.role,
             content: m.role === "assistant"

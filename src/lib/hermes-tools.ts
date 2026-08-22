@@ -3,6 +3,7 @@ import { defaultMeals, mealIdeas, initialGroceryItems, groceryCategories } from 
 import { withAdmin } from "@/lib/pb-auth";
 import { weekKey } from "@/lib/task-utils";
 import type { Transaction, WeekData } from "@/types/tasks";
+import { getHAWebSocketClient } from "@/lib/ha/websocket-client";
 
 export interface ToolDefinition {
   name: string;
@@ -1062,7 +1063,123 @@ const TOOLS: Tool[] = [
       }
     },
   },
+
+  // ---- House control (HA Phase 2) — allowlisted domains only. Alarms and
+  // locks are permanently excluded at the code level, never by prompt. ----
+  {
+    definition: {
+      name: "ha_list_devices",
+      description:
+        "List controllable Home Assistant devices (lights, switches, scenes, thermostats, media players, vacuums) with their entity_id and current state.",
+      parameters: {
+        type: "object",
+        properties: {
+          domain: { type: "string", description: "Optional domain filter, e.g. light or climate" },
+        },
+        required: [],
+      },
+    },
+    handler: async (args) => {
+      try {
+        const entities = (await withAdmin(async (pb) =>
+          pb.collection("ha_entities").getFullList()
+        )) as Array<{ entity_id: string; domain: string; friendly_name?: string; state?: string }>;
+        const domainFilter = typeof args.domain === "string" ? args.domain : null;
+        const devices = entities
+          .filter((e) => HA_ALLOWED_DOMAINS.has(String(e.entity_id).split(".")[0]))
+          .filter((e) => (domainFilter && HA_ALLOWED_DOMAINS.has(domainFilter) ? e.domain === domainFilter : true))
+          .slice(0, 30)
+          .map((e) => ({
+            entity_id: e.entity_id,
+            name: e.friendly_name || e.entity_id,
+            state: e.state ?? "",
+          }));
+        return JSON.stringify(devices);
+      } catch {
+        return "Home Assistant device list unavailable right now.";
+      }
+    },
+  },
+  {
+    definition: {
+      name: "ha_control_device",
+      description:
+        "Control a smart home device. Provide entity_id and action; value is needed only for set_temperature (°F number) and volume_set (0 to 1).",
+      parameters: {
+        type: "object",
+        properties: {
+          entity_id: { type: "string", description: "Target entity, e.g. light.kitchen" },
+          action: { type: "string", description: "toggle, turn_on, turn_off, set_temperature, set_hvac_mode, volume_set, media_play, media_pause, start, pause, stop, return_to_base" },
+          value: { type: "number", description: "Temperature or volume when required by the action" },
+        },
+        required: ["entity_id", "action"],
+      },
+    },
+    handler: async (args) => {
+      const entityId = String(args.entity_id ?? "");
+      const action = String(args.action ?? "");
+      const domain = entityId.split(".")[0];
+
+      if (!HA_ALLOWED_DOMAINS.has(domain)) {
+        return "❌ I'm not allowed to control that type of device.";
+      }
+
+      const allowedByDomain: Record<string, string[]> = {
+        light: ["toggle", "turn_on", "turn_off"],
+        switch: ["toggle", "turn_on", "turn_off"],
+        scene: ["turn_on"],
+        climate: ["set_temperature", "set_hvac_mode"],
+        media_player: ["volume_set", "media_play", "media_pause"],
+        vacuum: ["start", "pause", "stop", "return_to_base"],
+      };
+      const allowed = allowedByDomain[domain] ?? [];
+      if (!allowed.includes(action)) {
+        return `❌ "${action}" isn't something I can do with a ${domain}. Try one of: ${allowed.join(", ")}.`;
+      }
+
+      const serviceData: Record<string, unknown> = { entity_id: entityId };
+      if (action === "set_temperature") {
+        if (typeof args.value !== "number" || !Number.isFinite(args.value)) {
+          return "❌ Tell me the temperature to set (a number).";
+        }
+        serviceData.temperature = args.value;
+      }
+      if (action === "set_hvac_mode") {
+        const mode = typeof args.value === "string" ? args.value : typeof args.mode === "string" ? args.mode : "";
+        if (!mode) {
+          return "❌ Tell me which mode to set (heat, cool, off…).";
+        }
+        serviceData.hvac_mode = mode;
+      }
+      if (action === "volume_set") {
+        if (typeof args.value !== "number" || args.value < 0 || args.value > 1) {
+          return "❌ Volume needs a number between 0 and 1.";
+        }
+        serviceData.volume_level = args.value;
+      }
+
+      let friendlyName = entityId;
+      try {
+        const entities = (await withAdmin(async (pb) =>
+          pb.collection("ha_entities").getFullList()
+        )) as Array<{ entity_id: string; friendly_name?: string }>;
+        friendlyName = entities.find((e) => e.entity_id === entityId)?.friendly_name || entityId;
+      } catch {
+        /* cosmetic only */
+      }
+
+      try {
+        await getHAWebSocketClient().callService(domain, action, serviceData);
+        return `✅ Done — ${friendlyName} · ${action}`;
+      } catch (err) {
+        return `⚠️ Home Assistant didn't respond (${err instanceof Error ? err.message : String(err)}).`;
+      }
+    },
+  },
 ];
+
+const HA_ALLOWED_DOMAINS = new Set(["light", "switch", "scene", "climate", "media_player", "vacuum"]);
+const HA_HOUSE_TOOL_NAMES = new Set(["ha_list_devices", "ha_control_device"]);
 
 export function getAllTools(): Tool[] {
   return TOOLS;
@@ -1076,11 +1193,14 @@ export function getTool(name: string): Tool | undefined {
   return TOOLS.find((t) => t.definition.name === name);
 }
 
-export function buildToolsForOpenAI(): Array<{
+export function buildToolsForOpenAI(options?: {
+  houseControl?: boolean;
+}): Array<{
   type: "function";
   function: { name: string; description: string; parameters: ToolDefinition["parameters"] };
 }> {
-  return TOOLS.map((t) => ({
+  const houseControl = options?.houseControl !== false;
+  return TOOLS.filter((t) => houseControl || !HA_HOUSE_TOOL_NAMES.has(t.definition.name)).map((t) => ({
     type: "function" as const,
     function: {
       name: t.definition.name,
