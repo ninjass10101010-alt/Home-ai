@@ -282,6 +282,7 @@ export const COLLECTIONS = [
       { name: "carbs", type: "number" },
       { name: "fat", type: "number" },
       { name: "source", type: "text" },
+      { name: "sourceUrl", type: "text" },
       { name: "difficulty", type: "text" },
       { name: "favorite", type: "bool" },
       { name: "rating", type: "number" },
@@ -333,6 +334,31 @@ export const COLLECTIONS = [
       { name: "last_triggered", type: "text" },
     ],
     indexes: [],
+  },
+  {
+    name: "ha_notify_config",
+    schema: [
+      { name: "target", type: "text", required: true },
+      {
+        name: "channel",
+        type: "select",
+        options: { values: ["ha", "telegram"] },
+      },
+      { name: "enabled", type: "bool" },
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_ha_notify_config_target ON ha_notify_config (target)",
+    ],
+  },
+  {
+    name: "ha_notify_prefs",
+    schema: [
+      { name: "key", type: "text", required: true },
+      { name: "enabled", type: "bool" },
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_ha_notify_prefs_key ON ha_notify_prefs (key)",
+    ],
   },
 ];
 
