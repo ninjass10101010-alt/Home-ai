@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { sendSMSViaEmail, sendEmailAlert } from "@/lib/free-communication";
+import { broadcastHouseAlert } from "@/lib/ha/notify";
 
 export const dynamic = "force-dynamic";
 
@@ -58,6 +59,19 @@ export async function POST(request: NextRequest) {
     };
 
     const message = `${emergencyMessages[type as keyof typeof emergencyMessages]} Time: ${new Date(timestamp).toLocaleString()}`;
+
+    // House-alert channels (HA companion push + Telegram) fire alongside
+    // SMS/email so a carrier or Gmail outage can never silence an alert.
+    // Failures are captured as notes — they must not break the request.
+    let houseAlert: { sent: number; failed: number; notes: string[] } | null = null;
+    try {
+      houseAlert = await broadcastHouseAlert(
+        `🚨 EMERGENCY - ${type.toUpperCase()}`,
+        message
+      );
+    } catch (notifyError) {
+      console.error("House alert broadcast failed:", notifyError);
+    }
 
     // Check if Gmail credentials are configured for free email service
     if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
@@ -131,7 +145,10 @@ export async function POST(request: NextRequest) {
         total: primaryContacts.length,
         successful: successfulContacts,
         failed: failedContacts,
-        results: notificationResults
+        results: notificationResults,
+        ...(houseAlert
+          ? { houseAlert: { sent: houseAlert.sent, failed: houseAlert.failed, notes: houseAlert.notes } }
+          : null),
       }
     });
 
