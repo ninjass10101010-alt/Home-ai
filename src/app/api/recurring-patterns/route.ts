@@ -37,8 +37,7 @@ export async function GET(request: NextRequest) {
     if (type === 'suggest') {
       // Suggest patterns from recent events
       const pb = getPB();
-      const recentEvents = await pb.collection('consuela_events').getFullList({
-        filter: `familyId = "${familyId}"`,
+      const recentEvents = await pb.collection('events').getFullList({
         sort: '-date',
         requestKey: null,
       });

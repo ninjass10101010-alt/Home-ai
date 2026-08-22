@@ -59,6 +59,13 @@ Rules:
 4. For admin actions, confirm with the user before triggering updates or restarts. Use check_for_update or get_container_status first.
 5. If the user references a previous action (e.g. 'did you add milk?'), use a read tool to check current state rather than assuming.`;
 
+const HOUSE_CONTROL_PROMPT_ADDENDUM = `
+
+House control — you can also control smart home devices:
+- ha_list_devices: List controllable lights, switches, scenes, thermostats, media players, and vacuums.
+- ha_control_device: Control a device by entity_id and action (toggle/turn_on/turn_off, set_temperature, set_hvac_mode, volume_set, media_play/pause, vacuum start/pause/stop/return_to_base).
+Never control devices unless the user clearly asks. Alarms and locks are permanently excluded for safety.`;
+
 function parseToolArgs(raw: string | undefined): Record<string, any> {
   if (!raw) return {};
   try {
@@ -102,20 +109,22 @@ async function callHermes(
 }
 
 export async function POST(request: NextRequest) {
-  let body: { message?: string; history?: any[] };
+  let body: { message?: string; history?: any[]; role?: string };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { message, history = [] } = body;
+  const { message, history = [], role } = body;
   if (!message || !message.trim()) {
     return NextResponse.json({ error: "Message is required" }, { status: 400 });
   }
+  // Kid sessions never get house-control tools; everyone else on the LAN does.
+  const houseControl = role !== "child";
 
   try {
-    const tools = buildToolsForOpenAI();
+    const tools = buildToolsForOpenAI({ houseControl });
     const recentHistory = (history || [])
       .slice(-6)
       .filter((h: any) => h && typeof h.content === "string" && h.content.trim())
@@ -125,7 +134,7 @@ export async function POST(request: NextRequest) {
       }));
 
     const messages: ChatMessage[] = [
-      { role: "system", content: SYSTEM_PROMPT },
+      { role: "system", content: SYSTEM_PROMPT + (houseControl ? HOUSE_CONTROL_PROMPT_ADDENDUM : "") },
       ...recentHistory,
       { role: "user", content: message },
     ];

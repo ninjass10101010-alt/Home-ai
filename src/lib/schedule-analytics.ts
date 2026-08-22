@@ -93,8 +93,8 @@ export async function calculateScheduleAnalytics(
     const pb = getPB();
     
     // Fetch events in date range
-    const events = await pb.collection('consuela_events').getFullList({
-      filter: `familyId = "${familyId}" && date >= "${startDate}" && date <= "${endDate}"`,
+    const events = await pb.collection('events').getFullList({
+      filter: `date >= "${startDate}" && date <= "${endDate}"`,
       requestKey: null,
     });
 
@@ -328,31 +328,33 @@ export async function getTaskCompletionStats(
     else startDate.setFullYear(startDate.getFullYear() - 1);
 
     // Fetch tasks
-    const tasks = await pb.collection('consuela_tasks').getFullList({
-      filter: `familyId = "${familyId}" && createdAt >= "${startDate.toISOString()}"`,
+    const tasks = await pb.collection('tasks').getFullList({
+      filter: `createdAt >= "${startDate.toISOString()}"`,
       requestKey: null,
     });
 
-    const completedTasks = tasks.filter((t: any) => t.status === 'completed').length;
+    const completedTasks = tasks.filter((t: any) => t.status === 'done').length;
     const overdueTasks = tasks.filter((t: any) => {
-      if (t.status === 'completed') return false;
-      const dueDate = new Date(t.dueDate);
+      if (t.status === 'done') return false;
+      if (!t.due) return false;
+      const dueDate = new Date(t.due);
       return dueDate < new Date();
     }).length;
 
     // Calculate member stats
     const memberMap: Record<string, any[]> = {};
     tasks.forEach((task: any) => {
-      const member = task.assignedTo || 'unassigned';
+      const member = task.assignee || task.assigned || 'unassigned';
       if (!memberMap[member]) memberMap[member] = [];
       memberMap[member].push(task);
     });
 
     const memberStats: MemberTaskStats[] = Object.entries(memberMap).map(([memberId, memberTasks]) => {
-      const completed = memberTasks.filter((t: any) => t.status === 'completed').length;
+      const completed = memberTasks.filter((t: any) => t.status === 'done').length;
       const overdue = memberTasks.filter((t: any) => {
-        if (t.status === 'completed') return false;
-        const dueDate = new Date(t.dueDate);
+        if (t.status === 'done') return false;
+        if (!t.due) return false;
+        const dueDate = new Date(t.due);
         return dueDate < new Date();
       }).length;
 
@@ -402,11 +404,12 @@ export async function getTimeSpentAnalytics(
     else if (period === 'month') startDate.setMonth(startDate.getMonth() - 1);
     else startDate.setFullYear(startDate.getFullYear() - 1);
 
-    // Fetch events with duration
-    const events = await pb.collection('consuela_events').getFullList({
-      filter: `familyId = "${familyId}" && date >= "${startDate.toISOString()}" && duration > 0`,
+    // Fetch events with duration (duration filter applied client-side — the
+    // events schema has no duration field to filter on server-side)
+    const events = (await pb.collection('events').getFullList({
+      filter: `date >= "${startDate.toISOString().split('T')[0]}"`,
       requestKey: null,
-    });
+    })).filter((e: any) => (e.duration || 0) > 0);
 
     const totalMinutes = events.reduce((sum: number, e: any) => sum + (e.duration || 0), 0);
 

@@ -60,8 +60,8 @@ export async function detectRecurringPatterns(
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - lookbackDays);
 
-    const events = await pb.collection('consuela_events').getFullList({
-      filter: `familyId = "${familyId}" && date >= "${startDate.toISOString()}"`,
+    const events = await pb.collection('events').getFullList({
+      filter: `date >= "${startDate.toISOString().split('T')[0]}"`,
       sort: 'date',
       requestKey: null,
     });
@@ -169,14 +169,14 @@ export async function storePattern(pattern: RecurringPattern): Promise<boolean> 
     const pb = getPB();
     
     // Check if pattern already exists
-    const existing = await pb.collection('consuela_recurring_patterns').getFirstListItem(
+    const existing = await pb.collection('recurring_patterns').getFirstListItem(
       `patternKey = "${pattern.patternKey}"`,
       { requestKey: null }
     ).catch(() => null);
 
     if (existing) {
       // Update existing pattern
-      await pb.collection('consuela_recurring_patterns').update(
+      await pb.collection('recurring_patterns').update(
         existing.id,
         {
           occurrences: pattern.occurrences,
@@ -188,7 +188,7 @@ export async function storePattern(pattern: RecurringPattern): Promise<boolean> 
       );
     } else {
       // Create new pattern
-      await pb.collection('consuela_recurring_patterns').create(pattern, {
+      await pb.collection('recurring_patterns').create(pattern, {
         requestKey: null,
       });
     }
@@ -207,7 +207,7 @@ export async function enableAutoSchedule(patternId: string): Promise<boolean> {
   try {
     const pb = getPB();
     
-    await pb.collection('consuela_recurring_patterns').update(
+    await pb.collection('recurring_patterns').update(
       patternId,
       {
         autoScheduleEnabled: true,
@@ -230,7 +230,7 @@ export async function disableAutoSchedule(patternId: string): Promise<boolean> {
   try {
     const pb = getPB();
     
-    await pb.collection('consuela_recurring_patterns').update(
+    await pb.collection('recurring_patterns').update(
       patternId,
       {
         autoScheduleEnabled: false,
@@ -253,7 +253,7 @@ export async function getFamilyPatterns(familyId: string): Promise<RecurringPatt
   try {
     const pb = getPB();
     
-    const patterns = await pb.collection('consuela_recurring_patterns').getFullList({
+    const patterns = await pb.collection('recurring_patterns').getFullList({
       filter: `familyId = "${familyId}"`,
       sort: '-confidence',
       requestKey: null,
@@ -297,8 +297,8 @@ export async function autoScheduleUpcomingEvents(
         if (nextDate >= startDate && nextDate <= endDate) {
           // Check if event already exists
           const pb = getPB();
-          const existing = await pb.collection('consuela_events').getFirstListItem(
-            `familyId = "${familyId}" && title = "${pattern.title}" && date >= "${nextDate.toISOString()}" && date < "${new Date(nextDate.getTime() + 60000).toISOString()}"`,
+          const existing = await pb.collection('events').getFirstListItem(
+            `title = "${pattern.title}" && date >= "${nextDate.toISOString().split('T')[0]}"`,
             { requestKey: null }
           ).catch(() => null);
 
@@ -312,15 +312,11 @@ export async function autoScheduleUpcomingEvents(
             });
 
             // Store in database
-            await pb.collection('consuela_events').create({
-              familyId,
+            await pb.collection('events').create({
               title: pattern.title,
-              date: nextDate.toISOString(),
-              duration: pattern.duration,
-              category: pattern.category,
-              source: 'auto_schedule',
-              patternId: pattern.id,
-              createdAt: new Date().toISOString(),
+              date: nextDate.toISOString().split('T')[0],
+              time: pattern.time,
+              icon: '🔁',
             }, { requestKey: null });
 
             scheduled++;
@@ -453,7 +449,7 @@ export async function suggestPatterns(
 export async function deletePattern(patternId: string): Promise<boolean> {
   try {
     const pb = getPB();
-    await pb.collection('consuela_recurring_patterns').delete(patternId, {
+    await pb.collection('recurring_patterns').delete(patternId, {
       requestKey: null,
     });
     return true;
