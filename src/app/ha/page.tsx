@@ -11,6 +11,8 @@ import RoomSheet from "@/components/ha/RoomSheet";
 import SecurityPanel from "@/components/ha/SecurityPanel";
 import ClimateCard from "@/components/ha/ClimateCard";
 import LightsGrid from "@/components/ha/LightsGrid";
+import VacuumCard from "@/components/ha/VacuumCard";
+import EnergyCard from "@/components/ha/EnergyCard";
 import { entitiesByDomain, entityFriendlyName, useHAState, type HAState } from "@/hooks/useHAState";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -92,6 +94,8 @@ export default function HomeControlsPage() {
                   })}
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
+                  <EnergyCard />
+                  <VacuumCard />
                   {rooms.map(({ room, states: roomStates }) => (
                     <RoomCard key={room} room={room} states={roomStates} onOpen={() => setSelectedRoom(room)} />
                   ))}

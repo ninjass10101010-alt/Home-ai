@@ -11,6 +11,7 @@ export const HA_WATCH_DOMAINS = [
   "alarm_control_panel",
   "sensor",
   "automation",
+  "vacuum",
 ] as const;
 
 export interface HAFilteredState {
