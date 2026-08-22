@@ -1,9 +1,9 @@
 import { Recipe } from "@/types/meals";
+import { THEMEALDB_ATTRIBUTION, THEMEALDB_SITE_URL } from "@/lib/themealdb-constants";
 
+export { THEMEALDB_ATTRIBUTION, THEMEALDB_SITE_URL };
 export const THEMEALDB_API_KEY = "1";
 export const THEMEALDB_BASE_URL = `https://www.themealdb.com/api/json/v1/${THEMEALDB_API_KEY}`;
-export const THEMEALDB_SITE_URL = "https://www.themealdb.com";
-export const THEMEALDB_ATTRIBUTION = "Recipes by TheMealDB";
 
 const FETCH_TIMEOUT_MS = 10_000;
 const MAX_INGREDIENT_SLOTS = 20;

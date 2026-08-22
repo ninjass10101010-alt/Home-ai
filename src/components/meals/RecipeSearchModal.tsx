@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Recipe } from "@/types/meals";
-import { THEMEALDB_SITE_URL } from "@/lib/themealdb";
+import { THEMEALDB_ATTRIBUTION, THEMEALDB_SITE_URL } from "@/lib/themealdb-constants";
 
 type Phase = "idle" | "loading" | "results" | "empty" | "error" | "detail" | "saving" | "done";
 
@@ -321,7 +321,7 @@ export default function RecipeSearchModal({
             rel="noopener noreferrer"
             className="text-[11px] font-semibold text-text-muted hover:text-text-secondary transition-colors"
           >
-            Recipes by TheMealDB
+            {THEMEALDB_ATTRIBUTION}
           </a>
         </div>
       </div>
