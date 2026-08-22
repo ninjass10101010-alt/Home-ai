@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { weekDays, foodEmojis, RECIPE_TAGS } from "@/data/meals";
 import { Meal } from "@/types/meals";
 
@@ -29,7 +30,7 @@ export default function RecipeModal({
     }));
   };
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[200] flex flex-col" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(12px)" }}>
       {/* Modal sheet */}
       <div
@@ -304,6 +305,7 @@ export default function RecipeModal({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
