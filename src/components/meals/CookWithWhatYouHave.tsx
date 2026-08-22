@@ -49,8 +49,8 @@ export default function CookWithWhatYouHave({ recipes, pantryItems, onAddMissing
               />
             </div>
             {readiness.missing.length > 0 && (
-              <div className="mt-3 flex items-center justify-between gap-2">
-                <p className="min-w-0 flex-1 truncate text-[11px] text-text-secondary">
+              <div className="mt-3 flex items-start justify-between gap-2">
+                <p className="min-w-0 flex-1 text-[11px] leading-relaxed text-text-secondary">
                   Missing: {readiness.missing.join(", ")}
                 </p>
                 <SoftButton variant="ghost" size="sm" onClick={() => onAddMissing(readiness.missing)}>
