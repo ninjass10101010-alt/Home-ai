@@ -27,6 +27,7 @@ import MoreMenuItem from "@/components/patterns/MoreMenuItem";
 import SectionCard from "@/components/patterns/SectionCard";
 import SettingsErrorBoundary from "@/components/ui/SettingsErrorBoundary";
 import GoogleConnectCard from "@/components/settings/GoogleConnectCard";
+import HaNotificationsCard from "@/components/settings/HaNotificationsCard";
 import AvatarPicker from "@/components/profile/AvatarPicker";
 import { warmGlassAccentOptions } from "@/lib/design-tokens";
 import { defaultAccentHex, type AccentTarget } from "@/lib/theme-config";
@@ -710,6 +711,7 @@ export default function SettingsPage() {
             icon="🔗"
           >
             <GoogleConnectCard />
+            <HaNotificationsCard />
           </SectionCard>
 
           <SectionCard title="Layout & display" description="Show, hide, and reorder Home widgets." icon="🧩">
