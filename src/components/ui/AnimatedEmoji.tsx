@@ -8,6 +8,8 @@ interface AnimatedEmojiProps {
   name?: string;
   size?: "sm" | "md" | "lg" | "xl";
   className?: string;
+  // Opt out of the idle bobbing (calm planner surfaces like the Kitchen).
+  animated?: boolean;
 }
 
 const sizeMap = {
@@ -17,7 +19,7 @@ const sizeMap = {
   xl: 64,
 };
 
-export default function AnimatedEmoji({ emoji, name, size = "md", className = "" }: AnimatedEmojiProps) {
+export default function AnimatedEmoji({ emoji, name, size = "md", className = "", animated = true }: AnimatedEmojiProps) {
   const s = sizeMap[size];
   const cx = s / 2;
   const cy = s / 2;
@@ -224,7 +226,7 @@ export default function AnimatedEmoji({ emoji, name, size = "md", className = ""
         width: s,
         height: s,
         fontSize: s * 0.7,
-        animation: "popBounce 2s infinite",
+        animation: animated ? "popBounce 2s infinite" : undefined,
         transformOrigin: "center bottom",
       }}
     >

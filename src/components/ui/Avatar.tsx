@@ -14,6 +14,8 @@ interface AvatarProps {
   skinColor?: string;
   hairColor?: string;
   glow?: boolean;
+  // Opt out of the idle emoji bobbing (calm planner surfaces like the Kitchen).
+  animated?: boolean;
 }
 
 const colorMap: Record<string, string> = {
@@ -313,7 +315,7 @@ function FamilyIllustration({
 }
 
 export default function Avatar({ 
-  name, color = "green", size = "md", emoji, variant = "illustrated", skinColor, hairColor, glow = false
+  name, color = "green", size = "md", emoji, variant = "illustrated", skinColor, hairColor, glow = false, animated = true
 }: AvatarProps) {
   const avatarSize = sizeMap[size] ?? sizeMap.md;
   const avatarTextSize = textMap[size] ?? textMap.md;
@@ -337,7 +339,7 @@ export default function Avatar({
         className={`${colorMap[color] ?? colorMap.green} ${avatarSize} ${avatarTextSize} rounded-full flex items-center justify-center shrink-0 transition-transform duration-200 hover:scale-110 active:scale-90 ring-2 ${ringClass}`}
         style={avatarGlow}
       >
-        <AnimatedEmoji emoji={emoji} size={animatedSizeMap[size] ?? "md"} />
+        <AnimatedEmoji emoji={emoji} size={animatedSizeMap[size] ?? "md"} animated={animated} />
       </div>
     );
   }

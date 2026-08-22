@@ -653,7 +653,7 @@ export default function MealsTab({
               </h3>
               <span className="text-[10px] font-semibold text-text-muted">{eatingMembers.length} / {familyMembers.length}</span>
             </div>
-            <div className="mt-3 flex items-center gap-2 flex-wrap">
+            <div className="mt-3 flex items-start gap-2 flex-wrap">
               {familyMembers.map((member: any) => {
                 const isEating = eatingMembers.includes(member.name);
                 return (
@@ -667,7 +667,7 @@ export default function MealsTab({
                           : [...prev, member.name]
                       );
                     }}
-                    className={`flex flex-col items-center gap-1 transition-all active:scale-90 ${
+                    className={`flex w-16 min-w-0 flex-col items-center gap-1 transition-all active:scale-90 ${
                       isEating ? "opacity-100" : "opacity-35 grayscale"
                     }`}
                     aria-label={isEating ? `Remove ${member.name}` : `Add ${member.name}`}
@@ -679,8 +679,9 @@ export default function MealsTab({
                       emoji={member.emoji}
                       size="md"
                       variant="emoji"
+                      animated={false}
                     />
-                    <span className="text-[11px] font-bold text-text-secondary">{member.name}</span>
+                    <span className="w-full min-w-0 truncate text-center text-[11px] font-bold text-text-secondary">{member.name}</span>
                   </button>
                 );
               })}
@@ -688,7 +689,7 @@ export default function MealsTab({
                 <button
                   type="button"
                   onClick={() => setShowMemberPicker(v => !v)}
-                  className="ml-1 flex h-12 w-12 cursor-pointer items-center justify-center rounded-full border-2 border-dashed border-[var(--color-surface-4)] text-xl font-bold text-text-muted/70 transition hover:bg-[var(--color-surface-0)]/60 hover:border-[var(--color-accent-selected)]/40"
+                  className="ml-1 flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border-2 border-dashed border-[var(--color-surface-4)] text-xl font-bold text-text-muted/70 transition hover:bg-[var(--color-surface-0)]/60 hover:border-[var(--color-accent-selected)]/40"
                   aria-label="Add members"
                   title="Add members"
                 >

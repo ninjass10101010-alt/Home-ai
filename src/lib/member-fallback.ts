@@ -18,11 +18,17 @@ export const memberFallbacks = [
 // Merge live PB member records with the built-in fallbacks that are missing
 // from PB, so client and server see the same member universe. Live records win.
 export function mergeMemberFallbacks(pbMembers: any[]): any[] {
+  // Guard against corrupt rows (e.g. a blank member record left behind by a
+  // failed profile save): a member with no name can never render, match a PIN,
+  // or be addressed — drop it here so every consumer (client cache, server
+  // auth) is protected and the fallbacks for the missing real members still
+  // get merged in.
+  const live = (pbMembers || []).filter((m: any) => (m.name || "").trim());
   const pbFirstNames = new Set(
-    (pbMembers || []).map((m: any) => (m.name || "").split(" ")[0].toLowerCase())
+    live.map((m: any) => m.name.split(" ")[0].toLowerCase())
   );
   const missingFallback = memberFallbacks.filter(
     (f: any) => !pbFirstNames.has(f.name.split(" ")[0].toLowerCase())
   );
-  return [...(pbMembers || []), ...missingFallback];
+  return [...live, ...missingFallback];
 }
