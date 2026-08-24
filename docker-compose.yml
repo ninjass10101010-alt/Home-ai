@@ -1,32 +1,3 @@
-<<<<<<< HEAD
-version: 3.8
-services:
-  consuela-dashboard:
-    build: .
-    container_name: consuela-dashboard
-    restart: unless-stopped
-    ports:
-      - 3000:3000
-    environment:
-      - NODE_ENV=production
-      - POCKETBASE_URL=http://pocketbase:8090
-      - PB_URL=http://pocketbase:8090
-      - PB_ADMIN_EMAIL=admin@family.local
-      - PB_ADMIN_PASSWORD=${PB_ADM...D}
-      - HERMES_API_URL=http://hermes-agent-2:8642/v1
-      - HERMES_API_KEY=${HERMES...Y}
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM...N}
-      - OPENROUTER_API_KEY=${OPENROUTER...Y}
-    networks:
-      - consuela-net
-      - media-stack_default
-
-networks:
-  consuela-net:
-    name: familydashboard_consuela-net
-    external: true
-  media-stack_default:
-=======
 services:
   pocketbase:
     image: ghcr.io/muchobien/pocketbase:latest
@@ -54,16 +25,23 @@ services:
     environment:
       - NODE_ENV=production
       - NEXT_PUBLIC_PB_URL=http://pocketbase:8090
-      - PB_ADMIN_EMAIL=${PB_ADMIN_EMAIL:-admin@consuela.app}
-      - PB_ADMIN_PASS=${PB_ADMIN_PASS:-changeme}
+      # Fail fast instead of booting with known defaults — set both in .env
+      - PB_ADMIN_EMAIL=${PB_ADMIN_EMAIL:?set PB_ADMIN_EMAIL in .env}
+      - PB_ADMIN_PASS=${PB_ADMIN_PASS:?set PB_ADMIN_PASS in .env}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
       - GOOGLE_OAUTH_SCOPES=${GOOGLE_OAUTH_SCOPES:-openid email https://www.googleapis.com/auth/calendar}
       - CONSUELA_ENCRYPTION_KEY=${CONSUELA_ENCRYPTION_KEY}
-      - CRON_SECRET=${CRON_SECRET:-changeme-please-set-me}
+      # Cron routes reject ALL traffic when this is empty (fail-closed), so
+      # scheduled syncs/briefings silently stop without it — required.
+      - CRON_SECRET=${CRON_SECRET:?set CRON_SECRET in .env}
+      # Server-only gate for /api/admin/* self-calls from chat tools.
+      - ADMIN_SECRET=${ADMIN_SECRET:?set ADMIN_SECRET in .env}
+      # Signs httpOnly session cookies — required or login will fail closed.
+      - SESSION_SECRET=${SESSION_SECRET:?set SESSION_SECRET in .env}
       - GOOGLE_POLL_INTERVAL_MS=300000
       - HERMES_API_URL=http://hermes-agent-2:8642
-      - HERMES_API_KEY=consuela-api-key-2026
+      - HERMES_API_KEY=${HERMES_API_KEY:-consuela-api-key-2026}
       - OPENROUTER_API_KEY=
       - TELEGRAM_BOT_TOKEN=
       - TELEGRAM_MIRROR_BOT_TOKEN=${TELEGRAM_MIRROR_BOT_TOKEN}
@@ -76,5 +54,4 @@ volumes:
 networks:
   dashboard-net:
     name: familydashboard_consuela-net
->>>>>>> kitchen-ui
     external: true
