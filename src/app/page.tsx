@@ -348,7 +348,7 @@ export default function HomePage() {
                 case "todayEvents": {
                   const visibleEvents = todayEvents.slice(0, 3);
                   const hiddenEvents = todayEvents.length - visibleEvents.length;
-                  const upcoming = Array.isArray(upcomingImportant) ? upcomingImportant.slice(0, 3) : [];
+                  const upcoming = Array.isArray(upcomingImportant) ? upcomingImportant.slice(0, 2) : [];
                   return (
                     <div key="todayEvents" className={span}>
                       <SectionCard title="Today" description={`${todayEvents.length} events on the family calendar`} icon="📅" tone="#3b82f6" compact centeredHeader className="h-full"
@@ -357,6 +357,7 @@ export default function HomePage() {
                             <Link href="/calendar" className="tap-sm text-xs font-semibold widget-accent-text">+{hiddenEvents} more · See all →</Link>
                           ) : undefined
                         }>
+                        <div className="min-h-0 flex-1 overflow-y-auto">
                         {visibleEvents.length === 0 ? (
                           <EmptyState title="Quiet day" description="No events are scheduled for today." icon="🌿" flat />
                         ) : (
@@ -405,6 +406,7 @@ export default function HomePage() {
                             </div>
                           </div>
                         )}
+                        </div>
                       </SectionCard>
                     </div>
                   );

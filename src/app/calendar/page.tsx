@@ -625,7 +625,7 @@ export default function CalendarPage() {
             <span className="calendar-member-avatar">{`\uD83D\uDC65`}</span>
             <span>All</span>
           </button>
-          {members.map((m: any) => {
+          {members.filter((m: any) => m.name !== "All").map((m: any) => {
             const active = filterMember === m.name;
             const chipColor = getMemberColor(m);
             return (

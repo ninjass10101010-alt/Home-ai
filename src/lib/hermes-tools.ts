@@ -811,7 +811,10 @@ const TOOLS: Tool[] = [
     handler: async () => {
       try {
         const base = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-        const res = await fetch(`${base}/api/admin/version`, { signal: AbortSignal.timeout(10000) });
+        const res = await fetch(`${base}/api/admin/version`, {
+          headers: { authorization: `Bearer ${process.env.ADMIN_SECRET || ""}` },
+          signal: AbortSignal.timeout(10000),
+        });
         if (!res.ok) return summarize({ error: `Version check returned ${res.status}` });
         const data = await res.json();
         return summarize({
@@ -840,6 +843,7 @@ const TOOLS: Tool[] = [
         const base = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
         const res = await fetch(`${base}/api/admin/update`, {
           method: "POST",
+          headers: { authorization: `Bearer ${process.env.ADMIN_SECRET || ""}` },
           signal: AbortSignal.timeout(300000),
         });
         const data = await res.json();
@@ -863,7 +867,10 @@ const TOOLS: Tool[] = [
     handler: async () => {
       try {
         const base = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-        const res = await fetch(`${base}/api/admin/containers`, { signal: AbortSignal.timeout(10000) });
+        const res = await fetch(`${base}/api/admin/containers`, {
+          headers: { authorization: `Bearer ${process.env.ADMIN_SECRET || ""}` },
+          signal: AbortSignal.timeout(10000),
+        });
         if (!res.ok) return summarize({ error: `Container check returned ${res.status}` });
         const data = await res.json();
         return summarize({
@@ -902,7 +909,7 @@ const TOOLS: Tool[] = [
         const base = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
         const res = await fetch(`${base}/api/admin/restart`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", authorization: `Bearer ${process.env.ADMIN_SECRET || ""}` },
           body: JSON.stringify({ container: name }),
           signal: AbortSignal.timeout(35000),
         });

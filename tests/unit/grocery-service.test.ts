@@ -21,7 +21,7 @@ const h = vi.hoisted(() => {
 
 vi.mock("@/lib/pb", () => ({
   getPB: () => ({ collection: () => h.collectionMock }),
-  getAdminPB: () => ({ collection: () => h.collectionMock, autoCancellation: () => {} }),
+  getAdminPB: () => ({ collection: () => h.collectionMock }),
 }));
 
 import { upsertGroceryItem, parseQuantityString } from "@/lib/grocery-service";
