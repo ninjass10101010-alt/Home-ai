@@ -35,12 +35,12 @@ export default function PinModal({ memberName, memberEmoji, memberColor, onClose
     inputRef.current?.focus();
   }, []);
 
-  const handleSubmit = () => {
-    if (pinInput.length < 4) return;
+  const handleSubmit = async () => {
+    if (pinInput.length < 4 || loading) return;
     setLoading(true);
     setPinError("");
 
-    const result = login(safeName, pinInput);
+    const result = await login(safeName, pinInput);
     if (result.success) {
       onSuccess?.();
     } else {

@@ -1,6 +1,7 @@
 import { withAdmin } from "./pb-auth";
 import { memberPinMatches, resolveMemberPin } from "./member-pins";
 import { mergeMemberFallbacks } from "./member-fallback";
+import { resolveDefaultMemberPin } from "./pb-seed";
 
 export interface ServerMember {
   id: string;
@@ -28,12 +29,20 @@ export function namesMatch(recordName: string, query: string): boolean {
 // The client-side cache composes live PB members with the built-in fallbacks
 // that PB doesn't have (e.g. a fresh dev/integration instance with an empty
 // members collection). Mirror that here so server-side PIN verification sees
-// the same member universe as the client.
+// the same member universe as the client. Fallback rows carry no pins, so
+// members whose PB record has no stored pin yet resolve against the seed-side
+// defaults — server-only, never shipped to the browser.
+function withResolvedPins(members: any[]): any[] {
+  return members.map((m: any) =>
+    m.pin ? m : { ...m, pin: resolveDefaultMemberPin(m.name) }
+  );
+}
+
 export async function findMemberByName(name: string): Promise<any | null> {
   if (!name) return null;
   return withAdmin(async (pb) => {
     const records = await pb.collection("members").getFullList({ requestKey: null });
-    const merged = mergeMemberFallbacks(records);
+    const merged = withResolvedPins(mergeMemberFallbacks(records));
     return merged.find((r: any) => namesMatch(r.name, name)) || null;
   });
 }
@@ -54,7 +63,7 @@ export async function verifyPinAgainstAnyMember(pin: string): Promise<any | null
   if (!pin) return null;
   return withAdmin(async (pb) => {
     const records = await pb.collection("members").getFullList({ requestKey: null });
-    const merged = mergeMemberFallbacks(records);
+    const merged = withResolvedPins(mergeMemberFallbacks(records));
     const member = merged.find((r: any) => memberPinMatches(r, pin));
     return member || null;
   });
@@ -76,7 +85,7 @@ export async function findOrCreateMemberRecord(
   }
   return pb.collection("members").create({
     name: actor.name,
-    pin: resolveMemberPin(actor),
+    pin: resolveMemberPin(actor) || resolveDefaultMemberPin(actor.name),
     emoji: actor.emoji || "😊",
     role: actor.role || "member",
     ...patch,

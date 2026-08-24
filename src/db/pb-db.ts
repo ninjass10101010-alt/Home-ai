@@ -76,7 +76,7 @@ export const db = {
     if (records.length === 0) return membersFallback.map(m => ({
       id: m.id, name: m.name.split(' ')[0], fullName: m.name,
       role: m.role, color: memberColor(m.id - 1), emoji: m.emoji || "😊",
-      skinColor: m.skinColor, hairColor: m.hairColor, pin: (m as any).pin,
+      skinColor: m.skinColor, hairColor: m.hairColor,
     }));
     return records.map((r: any, i: number) => ({
       id: r.id, name: r.name.split(' ')[0], fullName: r.name,
@@ -91,7 +91,7 @@ export const db = {
       name: m.name, role: m.role === 'parent' ? 'Parent' : m.role === 'pet' ? 'Pet' : 'Child',
       emoji: m.emoji || "😊", color: memberColor(m.id - 1),
       age: m.age.toString(), joined: m.joined,
-      skinColor: m.skinColor, hairColor: m.hairColor, pin: (m as any).pin || "",
+      skinColor: m.skinColor, hairColor: m.hairColor,
       avatarSize: (m as any).avatarSize || "md", glow: (m as any).glow || false,
     }));
     return records.map((r: any, i: number) => ({

@@ -20,19 +20,20 @@ export interface MemberFallback {
   joined: string;
   skinColor: string;
   hairColor: string;
-  pin: string;
 }
 
+// No `pin` fields here — real PINs live in PocketBase; seed-side defaults are
+// server-only (src/lib/pb-seed.ts). The browser bundle never carries them.
 export const membersFallback: MemberFallback[] = [
-  { id: 1, name: "Rebecca (Mom)", fullName: "Rebecca Garcia", role: "parent", emoji: "🐱", age: 38, joined: "Feb 2024", skinColor: "#fdbcb4", hairColor: "#b45309", pin: "0202" },
-  { id: 2, name: "Jeffery (Dad)", fullName: "Jeffery Garcia", role: "parent", emoji: "👨", age: 40, joined: "Feb 2024", skinColor: "#fdbcb4", hairColor: "#1e40af", pin: "0828" },
-  { id: 3, name: "Emily", fullName: "Emily Garcia", role: "child", emoji: "👧", age: 14, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#5b21b6", pin: "1024" },
-  { id: 4, name: "Bailey", fullName: "Bailey Garcia", role: "child", emoji: "👧", age: 12, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#166534", pin: "1005" },
-  { id: 5, name: "Jasmine", fullName: "Jasmine Garcia", role: "child", emoji: "👧", age: 10, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#b45309", pin: "0402" },
-  { id: 6, name: "Aurora", fullName: "Aurora Garcia", role: "child", emoji: "👧", age: 7, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#5b21b6", pin: "1025" },
-  { id: 7, name: "Caspian", fullName: "Caspian Garcia", role: "child", emoji: "🧒", age: 5, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#166534", pin: "1010" },
-  { id: 8, name: "Rocco", fullName: "Rocco (Frenchie)", role: "pet", emoji: "🐶", age: 3, joined: "Feb 2024", skinColor: "", hairColor: "", pin: "0000" },
-  { id: 9, name: "Rico", fullName: "Rico (Poodle)", role: "pet", emoji: "🐩", age: 5, joined: "Feb 2024", skinColor: "", hairColor: "", pin: "0000" },
+  { id: 1, name: "Rebecca (Mom)", fullName: "Rebecca Garcia", role: "parent", emoji: "🐱", age: 38, joined: "Feb 2024", skinColor: "#fdbcb4", hairColor: "#b45309" },
+  { id: 2, name: "Jeffery (Dad)", fullName: "Jeffery Garcia", role: "parent", emoji: "👨", age: 40, joined: "Feb 2024", skinColor: "#fdbcb4", hairColor: "#1e40af" },
+  { id: 3, name: "Emily", fullName: "Emily Garcia", role: "child", emoji: "👧", age: 14, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#5b21b6" },
+  { id: 4, name: "Bailey", fullName: "Bailey Garcia", role: "child", emoji: "👧", age: 12, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#166534" },
+  { id: 5, name: "Jasmine", fullName: "Jasmine Garcia", role: "child", emoji: "👧", age: 10, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#b45309" },
+  { id: 6, name: "Aurora", fullName: "Aurora Garcia", role: "child", emoji: "👧", age: 7, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#5b21b6" },
+  { id: 7, name: "Caspian", fullName: "Caspian Garcia", role: "child", emoji: "🧒", age: 5, joined: "Mar 2024", skinColor: "#fdbcb4", hairColor: "#166534" },
+  { id: 8, name: "Rocco", fullName: "Rocco (Frenchie)", role: "pet", emoji: "🐶", age: 3, joined: "Feb 2024", skinColor: "", hairColor: "" },
+  { id: 9, name: "Rico", fullName: "Rico (Poodle)", role: "pet", emoji: "🐩", age: 5, joined: "Feb 2024", skinColor: "", hairColor: "" },
 ];
 
 // ─── Events ────────────────────────────────────────────────────────────────

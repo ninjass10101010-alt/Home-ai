@@ -1,18 +1,12 @@
-// Shared member-PIN resolution: client login and server-side PIN verification
-// must agree on a member's PIN. PocketBase member records may have an empty
-// `pin` (the seeder only creates the schema); both sides fall back to the
-// known family defaults so a user can sign in with the same PIN everywhere.
-
-import { memberFallbacks } from "./member-fallback";
-
-const FALLBACK_PINS: Record<string, string> = Object.fromEntries(
-  memberFallbacks.map((m) => [m.name.split(" ")[0].toLowerCase(), m.pin])
-);
+// Pure member-PIN resolution against a record's stored pin. There are NO
+// default pins here: the known family defaults live server-side only (see
+// MEMBER_DEFAULT_PINS in src/lib/pb-seed.ts) so they never reach the browser
+// bundle. Server-side verification applies them after merging PB records with
+// the fallbacks; client code only ever sees pins that PocketBase itself
+// served for the signed-in flow's own records.
 
 export function resolveMemberPin(member: { name?: string; pin?: string }): string {
-  if (member?.pin) return String(member.pin);
-  const firstName = (member?.name || "").split(" ")[0].toLowerCase();
-  return FALLBACK_PINS[firstName] || "";
+  return member?.pin ? String(member.pin) : "";
 }
 
 export function memberPinMatches(member: { name?: string; pin?: string }, pin: string): boolean {

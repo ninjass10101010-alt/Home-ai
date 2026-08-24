@@ -2,11 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { sendSMSViaEmail, sendEmailAlert } from "@/lib/free-communication";
 import { broadcastHouseAlert } from "@/lib/ha/notify";
+import { verifyPinAgainstAnyMember } from "@/lib/server-auth";
 
 export const dynamic = "force-dynamic";
 
 const EMERGENCY_PIN_HEADER = "x-emergency-pin";
-const EMERGENCY_PIN_BYPASS = process.env.EMERGENCY_PIN_BYPASS || "";
+// Read lazily (per request) so tests can stub the env var via vi.stubEnv;
+// runtime behavior is identical to capturing it at module load.
+const emergencyPinBypass = () => process.env.EMERGENCY_PIN_BYPASS || "";
 
 export async function POST(request: NextRequest) {
   try {
@@ -29,15 +32,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "PIN required to trigger emergency alert" }, { status: 401 });
     }
 
-    // Verify PIN against any family member
-    const members = db.selectMembers();
-    const verifiedMember = members.find((m: any) => {
-      const memberPin = (m as any).pin;
-      return memberPin && memberPin === providedPin;
-    });
+    // Verify PIN against any family member — server-side against PocketBase
+    // (the source of truth), never via the client-side member cache.
+    const verifiedMember = await verifyPinAgainstAnyMember(String(providedPin));
 
-    if (!verifiedMember && providedPin !== EMERGENCY_PIN_BYPASS) {
-      return NextResponse.json({ error: "Invalid PIN" }, { status: 403 });
+    if (!verifiedMember && providedPin !== emergencyPinBypass()) {
+      return NextResponse.json({ error: "Invalid PIN" }, { status: 401 });
     }
 
     // Fetch emergency contacts from database

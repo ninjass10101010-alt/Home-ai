@@ -3,15 +3,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ProactiveSuggestion, SuggestionStatus } from "@/lib/consuela/types";
-import { useAuth } from "@/hooks/useAuth";
 
 const REFRESH_INTERVAL_MS = 60_000;
 
-// C3 — the suggestions write routes (PATCH + POST /act) require the session
-// PIN. The PIN is forwarded from the useAuth context (in-memory only, never
-// persisted to localStorage). Because the PIN only exists in memory after a
-// login(), a reloaded session (or a guest) has no PIN: the hook then surfaces
-// needsPin and queues the pending action until submitPin() supplies one.
+// C3 — the suggestions write routes (PATCH + POST /act) require a family
+// PIN verified server-side. The client never stores a PIN: the hook surfaces
+// needsPin and queues the pending action until submitPin() supplies one; the
+// typed PIN lives in memory only for this hook's lifetime and is cleared as
+// soon as the server rejects it.
 export const PIN_HEADER = "x-consuela-pin";
 
 export const VIEW_TOOLS = ["get_pending_tasks", "get_weekly_meals", "open_calendar"];
@@ -63,16 +62,11 @@ export function useSuggestions(limit = 20) {
   const [loading, setLoading] = useState(true);
   const [needsPin, setNeedsPin] = useState(false);
   const [pinError, setPinError] = useState<string | null>(null);
-  const { currentUser } = useAuth();
 
-  // In-memory PIN cache: seeded from the auth session (login()), extended by
-  // submitPin(). Never persisted. Cleared when the server rejects it (401).
-  const pinRef = useRef<string | undefined>(currentUser?.pin);
+  // In-memory PIN cache: filled only by submitPin(). Never persisted and
+  // never seeded from the auth context (the client no longer holds PINs).
+  const pinRef = useRef<string | undefined>(undefined);
   const pendingRef = useRef<PendingAction | null>(null);
-
-  useEffect(() => {
-    if (currentUser?.pin) pinRef.current = currentUser.pin;
-  }, [currentUser?.pin]);
 
   const refresh = async () => {
     try {

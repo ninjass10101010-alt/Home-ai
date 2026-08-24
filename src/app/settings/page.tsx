@@ -379,11 +379,16 @@ export default function SettingsPage() {
 
   const saveMember = () => {
     if (!memberForm.name.trim()) return;
-    const payload = {
+    const base = {
       ...memberForm,
       name: memberForm.name.trim(),
       emoji: memberForm.imageUrl?.trim() || memberForm.emoji,
     };
+    // A blank PIN field means "leave the stored PIN unchanged" — never wipe
+    // an existing PocketBase pin just because the form prefilled empty.
+    const payload = editingMember && !base.pin
+      ? Object.fromEntries(Object.entries(base).filter(([k]) => k !== "pin"))
+      : base;
     if (editingMember) {
       db.updateMember(editingMember.name, payload);
       showToast(`✅ Updated ${memberForm.name.trim()}`);

@@ -37,7 +37,6 @@ export interface AuthUser {
   role: 'parent' | 'child' | 'pet';
   emoji: string;
   color: string;
-  pin: string;
   avatarSize: string;
   glow: boolean;
 }
@@ -46,9 +45,8 @@ interface AuthContextValue {
   currentUser: AuthUser | null;
   isLoggedIn: boolean;
   isParent: boolean;
-  login: (memberName: string, pin: string) => { success: boolean; error?: string };
+  login: (memberName: string, pin: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
-  changePin: (newPin: string) => Promise<boolean>;
   sessionRemainingMs: number;
   sessionWarning: boolean;
   extendSession: () => void;
@@ -109,12 +107,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const stored = localStorage.getItem(AUTH_STORAGE_KEY);
       if (stored) {
         const parsed: AuthUser = JSON.parse(stored);
-        const members = db.selectMembersDetailed();
-        const member = members.find((m: any) => memberMatchesName(m, parsed.name));
+        const member = db.selectMembersDetailed().find((m: any) => memberMatchesName(m, parsed.name));
         if (member) {
           const hydrated = {
-            ...parsed,
+            id: Number(parsed.id) || 0,
+            name: parsed.name,
+            role: parsed.role,
             emoji: parsed.emoji || member.emoji,
+            color: parsed.color || 'amber',
             avatarSize: member.avatarSize || parsed.avatarSize || "md",
             glow: Boolean(member.glow ?? parsed.glow),
           };
@@ -130,15 +130,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           if (session?.memberName) {
             const member = db.selectMembersDetailed().find((m: any) => memberMatchesName(m, session.memberName));
             if (member) {
-              const members = db.selectMembers();
-              const m = members.find((x: any) => memberMatchesName(x, session.memberName));
+              // selectMembers carries the numeric cache ids used by the UI.
+              const cached = db.selectMembers().find((x: any) => memberMatchesName(x, session.memberName));
               const restored: AuthUser = {
-                id: Number(m?.id) || 0,
+                id: Number(cached?.id) || 0,
                 name: session.memberName,
                 role: (member as any).role || 'child',
                 emoji: (member as any).emoji || '👤',
                 color: (member as any).color || 'amber',
-                pin: '',
                 avatarSize: (member as any).avatarSize || 'md',
                 glow: Boolean((member as any).glow),
               };
@@ -211,25 +210,38 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     };
   }, [handleActivity, clearTimers, logout]);
 
-  const login = useCallback((memberName: string, pin: string): { success: boolean; error?: string } => {
-    const members = db.selectMembers();
-    const detailedMembers = db.selectMembersDetailed();
-    const member = members.find((m: any) => memberMatchesName(m, memberName));
-    const detailedMember = detailedMembers.find((m: any) => memberMatchesName(m, memberName));
-    if (!member) return { success: false, error: 'Member not found' };
+  const login = useCallback(async (memberName: string, pin: string): Promise<{ success: boolean; error?: string }> => {
+    // PIN verification happens server-side (POST /api/auth/login verifies
+    // against PocketBase and sets an httpOnly session cookie). The client
+    // never sees a pin — only the sanitized member record.
+    let res: Response;
+    try {
+      res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ memberName, pin }),
+      });
+    } catch {
+      return { success: false, error: 'Network error' };
+    }
+    if (!res.ok) return { success: false, error: 'Incorrect PIN' };
 
-    const verified = db.verifyMemberPin(memberName, pin);
-    if (!verified) return { success: false, error: 'Incorrect PIN' };
+    let member: any;
+    try {
+      ({ member } = await res.json());
+    } catch {
+      return { success: false, error: 'Login failed' };
+    }
+    if (!member?.name) return { success: false, error: 'Login failed' };
 
     const authUser: AuthUser = {
-      id: member.id,
-      name: verified.name,
-      role: verified.role,
-      emoji: member.emoji,
-      color: member.color,
-      pin,
-      avatarSize: detailedMember?.avatarSize || "md",
-      glow: Boolean(detailedMember?.glow),
+      id: Number(member.id) || 0,
+      name: member.name,
+      role: member.role,
+      emoji: member.emoji || '😊',
+      color: member.color || 'amber',
+      avatarSize: member.avatarSize || "md",
+      glow: Boolean(member.glow),
     };
 
     setCurrentUser(authUser);
@@ -242,7 +254,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       id: authUser.id,
       name: authUser.name,
       role: authUser.role,
-      emoji: (member.emoji && member.emoji.startsWith('data:')) ? '' : member.emoji,
+      emoji: authUser.emoji.startsWith('data:') ? '' : authUser.emoji,
       color: authUser.color,
       avatarSize: authUser.avatarSize,
       glow: authUser.glow,
@@ -252,7 +264,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     // Persist session to PB for cross-device awareness
     pbDb.createAuthSession({
       token: getDeviceId(),
-      memberName: verified.name,
+      memberName: authUser.name,
       deviceName: navigator.platform || 'unknown',
       createdAt: new Date().toISOString(),
       lastActiveAt: new Date().toISOString(),
@@ -264,15 +276,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const isLoggedIn = currentUser !== null;
   const isParent = isLoggedIn && currentUser.role === 'parent';
 
-  const changePin = useCallback(async (newPin: string): Promise<boolean> => {
-    const activeUser = currentUserRef.current;
-    if (!activeUser) return false;
-    const updated = { ...activeUser, pin: newPin };
-    currentUserRef.current = updated;
-    setCurrentUser(updated);
-    return true;
-  }, []);
-
   return (
     <AuthContext.Provider
       value={{
@@ -281,7 +284,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         isParent,
         login,
         logout,
-        changePin,
         sessionRemainingMs,
         sessionWarning,
         extendSession,

@@ -1,7 +1,7 @@
 import { db as pbDb } from "./pb-db";
 import { gatewayList, gatewayCreate, gatewayUpdate, gatewayDelete } from "./gateway-client";
 import { defaultMeals, mealIdeas, initialGroceryItems } from "../data/meals";
-import { resolveMemberPin, memberPinMatches } from "@/lib/member-pins";
+import { memberPinMatches } from "@/lib/member-pins";
 import { memberFallbacks, mergeMemberFallbacks } from "@/lib/member-fallback";
 
 function isServer() {
@@ -169,11 +169,7 @@ function markRefreshed(name: string) {
 async function refreshMembersCache() {
   try {
     const fresh = await pbDb.selectMembers();
-    const pbMembers = fresh || [];
-    for (const pbm of pbMembers) {
-      pbm.pin = resolveMemberPin(pbm);
-    }
-    membersCache = mergeMemberFallbacks(pbMembers);
+    membersCache = mergeMemberFallbacks(fresh || []);
     markRefreshed("members");
     window.dispatchEvent(new CustomEvent("consuela-members-updated"));
   } catch {}
@@ -246,9 +242,6 @@ void (async () => {
       dualFetch.grocery().catch(() => []),
     ]);
     const pbMembers = (m as any[]) || [];
-    for (const pbm of pbMembers) {
-      pbm.pin = resolveMemberPin(pbm);
-    }
     membersCache = mergeMemberFallbacks(pbMembers);
     eventsCache = e as any[];
     tasksCache = t as any[];
@@ -270,7 +263,7 @@ export const db = {
   selectMembers: () => {
     if (membersCache.length === 0) return membersFallback.map(m => ({
       id: m.id, name: m.name.split(' ')[0], fullName: m.name, role: m.role,
-      color: cacheMemberColor(m, m.id - 1), emoji: m.emoji || "😊", pin: (m as any).pin,
+      color: cacheMemberColor(m, m.id - 1), emoji: m.emoji || "😊",
     }));
     return membersCache.map((m: any, i: number) => ({
       id: i + 1, name: m.name?.split(' ')[0] || m.name, fullName: m.name,
@@ -284,7 +277,7 @@ export const db = {
       name: m.name, role: m.role === 'parent' ? 'Parent' : m.role === 'pet' ? 'Pet' : 'Child',
       emoji: m.emoji || "😊", color: cacheMemberColor(m, m.id - 1),
       age: m.age.toString(), joined: m.joined, skinColor: (m as any).skinColor,
-      hairColor: (m as any).hairColor, pin: (m as any).pin || "",
+      hairColor: (m as any).hairColor,
       avatarSize: (m as any).avatarSize || "md", glow: (m as any).glow || false,
     }));
     return membersCache.map((m: any, i: number) => ({

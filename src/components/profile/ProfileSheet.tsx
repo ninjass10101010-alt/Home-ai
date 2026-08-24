@@ -19,7 +19,7 @@ interface ProfileSheetProps {
 }
 
 export default function ProfileSheet({ open, onClose, member }: ProfileSheetProps) {
-  const { logout, changePin } = useAuth();
+  const { logout } = useAuth();
 
   const [avatarValue, setAvatarValue] = useState<string>(member.emoji || "😊");
   const [avatarPin, setAvatarPin] = useState("");
@@ -89,7 +89,6 @@ export default function ProfileSheet({ open, onClose, member }: ProfileSheetProp
         setPinError(data?.error || "Could not change your PIN.");
         return;
       }
-      await changePin(newPin);
       setPinSuccess(true);
       setCurrentPin("");
       setNewPin("");

@@ -1,5 +1,27 @@
 import { withAdmin } from "./pb-auth";
 
+// SERVER ONLY — the default family PINs, kept here (seed-side truth) so they
+// never enter the browser bundle. They are used when a member's PocketBase
+// record has no stored pin yet (fresh installs): server-side verification and
+// record creation resolve against this map, and any PIN change via
+// /api/members/pin persists the real value into PB from then on.
+export const MEMBER_DEFAULT_PINS: Record<string, string> = {
+  rebecca: "0202",
+  jeffery: "0828",
+  emily: "1024",
+  bailey: "1005",
+  jasmine: "0402",
+  aurora: "1025",
+  caspian: "1010",
+  rocco: "0000",
+  rico: "0000",
+};
+
+export function resolveDefaultMemberPin(name?: string): string {
+  const firstName = (name || "").split(" ")[0].toLowerCase();
+  return MEMBER_DEFAULT_PINS[firstName] || "";
+}
+
 export const COLLECTIONS = [
   {
     name: "members",

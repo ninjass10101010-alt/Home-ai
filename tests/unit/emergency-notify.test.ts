@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
   sendSMSViaEmail: vi.fn(),
   sendEmailAlert: vi.fn(),
   broadcastHouseAlert: vi.fn(),
-  selectMembers: vi.fn(),
+  verifyPinAgainstAnyMember: vi.fn(),
   selectEmergencyContacts: vi.fn(),
 }));
 
@@ -18,9 +18,13 @@ vi.mock("@/lib/ha/notify", () => ({
   broadcastHouseAlert: mocks.broadcastHouseAlert,
 }));
 
+// Task 9: the route verifies PINs server-side via verifyPinAgainstAnyMember.
+vi.mock("@/lib/server-auth", () => ({
+  verifyPinAgainstAnyMember: mocks.verifyPinAgainstAnyMember,
+}));
+
 vi.mock("@/db", () => ({
   db: {
-    selectMembers: mocks.selectMembers,
     selectEmergencyContacts: mocks.selectEmergencyContacts,
   },
 }));
@@ -39,7 +43,7 @@ describe("emergency route × house-alert channels", () => {
   beforeEach(() => {
     vi.stubEnv("GMAIL_USER", "fam@gmail.com");
     vi.stubEnv("GMAIL_APP_PASSWORD", "app-pass");
-    mocks.selectMembers.mockReset().mockReturnValue([{ name: "Jeffery", pin: "1234" }]);
+    mocks.verifyPinAgainstAnyMember.mockReset().mockResolvedValue({ name: "Jeffery", role: "parent" });
     mocks.selectEmergencyContacts.mockReset().mockReturnValue([
       { name: "Rebecca", phone: "+15551234567", email: "r@x.com", carrier: "verizon", isPrimary: true },
     ]);

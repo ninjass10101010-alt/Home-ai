@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
-import { useAuth } from "@/hooks/useAuth";
 
 interface EmergencyButtonProps {
   className?: string;
@@ -21,12 +20,16 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
   const [selectedType, setSelectedType] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
   const [result, setResult] = useState<{success: boolean, message: string, details?: any} | null>(null);
+  const [pinInput, setPinInput] = useState("");
+  const pinReady = /^\d{4}$/.test(pinInput);
   const router = useRouter();
-  const { currentUser } = useAuth();
 
   const { colors, accentRgb } = useAtmosphericTheme();
 
   const handleEmergency = async (type: string) => {
+    // The PIN is typed by the user here and verified server-side against
+    // PocketBase — the client never stores or carries a copy of it.
+    if (!pinReady) return;
     setSelectedType(type);
     setIsSending(true);
     setResult(null);
@@ -36,9 +39,9 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-emergency-pin": currentUser?.pin || "",
+          "x-emergency-pin": pinInput,
         },
-        body: JSON.stringify({ type, timestamp: new Date().toISOString(), pin: currentUser?.pin }),
+        body: JSON.stringify({ type, timestamp: new Date().toISOString(), pin: pinInput }),
       });
 
       const data = await response.json();
@@ -124,14 +127,27 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
               // Emergency type selection
               <>
                 <h3 className="text-text-primary font-semibold mb-3 text-center">Emergency Type</h3>
-                <p className="text-text-muted text-xs mb-4 text-center">Select the type of emergency</p>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={4}
+                  value={pinInput}
+                  onChange={(e) => setPinInput(e.target.value.replace(/[^0-9]/g, ""))}
+                  placeholder="Family PIN"
+                  aria-label="Family PIN"
+                  disabled={isSending}
+                  className="w-full bg-[var(--color-surface-2)] text-text-primary text-center text-xl tracking-[0.5em] rounded-2xl px-4 py-2 outline-none border border-white/10 focus:border-rose-400/50 placeholder:text-text-muted placeholder:tracking-normal disabled:opacity-50 mb-3"
+                />
+                {!pinReady && (
+                  <p className="text-text-muted text-xs text-center -mt-2 mb-3">Enter any family member&apos;s 4-digit PIN</p>
+                )}
                 <div className="space-y-2">
                   {emergencyTypes.map((type) => (
                     <button
                       key={type.id}
                       onClick={() => handleEmergency(type.id)}
-                      disabled={isSending}
-                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-text-primary transition-all hover:bg-white/[0.06]"
+                      disabled={isSending || !pinReady}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-text-primary transition-all hover:bg-white/[0.06] disabled:opacity-40 disabled:pointer-events-none"
                       style={{ background: `rgba(${accentRgb},0.15)` }}
                     >
                       {isSending && selectedType === type.id ? (
