@@ -15,7 +15,7 @@ import { verifyPinAgainstAnyMember } from "./server-auth";
 //                     "child" are rejected even with a valid PIN: deploying
 //                     code / restarting containers is an adults-only action.
 //
-// When NEITHER applies, every request is rejected.
+// When none applies, every request is rejected.
 
 export interface AdminAuthResult {
   ok: boolean;
