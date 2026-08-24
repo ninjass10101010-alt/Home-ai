@@ -13,6 +13,17 @@ const API_EXEMPT = [
   "/api/emergency",
 ];
 
+// MF-5 — exact-match OR trailing-slash semantics. Plain startsWith(p) made
+// the /api/emergency exemption also cover its EXISTING sibling
+// /api/emergency-contacts (read-only contact roster), leaving that route
+// unauthenticated.
+function isExempt(pathname: string): boolean {
+  return API_EXEMPT.some((p) => {
+    const base = p.endsWith("/") ? p.slice(0, -1) : p;
+    return base === pathname || pathname.startsWith(base + "/");
+  });
+}
+
 export async function middleware(request: NextRequest) {
   // Keep the existing design-system preview rewrite working.
   if (request.nextUrl.pathname === "/_design-system") {
@@ -20,7 +31,7 @@ export async function middleware(request: NextRequest) {
   }
 
   const { pathname } = request.nextUrl;
-  if (pathname.startsWith("/api/") && !API_EXEMPT.some((p) => pathname.startsWith(p))) {
+  if (pathname.startsWith("/api/") && !isExempt(pathname)) {
     const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
     if (!session) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });

@@ -62,6 +62,35 @@ describe("middleware /api gate", () => {
     expect(res?.status ?? 0).toBe(401);
   });
 
+  // MF-5 — exemption matching must be exact-or-trailing-slash. The old
+  // startsWith("/api/emergency") also exempted the EXISTING sibling
+  // /api/emergency-contacts route (read-only contact roster), leaving it
+  // unauthenticated.
+  it("still exempts exactly /api/emergency (own PIN gate)", async () => {
+    const res = await middleware(req("/api/emergency"));
+    expect(res.headers.get("x-middleware-next")).toBe("1");
+  });
+
+  it("gates the sibling /api/emergency-contacts route", async () => {
+    const res = await middleware(req("/api/emergency-contacts"));
+    expect(res?.status ?? 0).toBe(401);
+  });
+
+  it("lets a valid session reach /api/emergency-contacts", async () => {
+    const token = await signSession({ memberId: "m1", name: "R", role: "parent" });
+    const res = await middleware(req("/api/emergency-contacts", `${SESSION_COOKIE}=${token}`));
+    expect(res.headers.get("x-middleware-next")).toBe("1");
+  });
+
+  it("exempt prefixes still cover subpaths (exact-or-slash semantics)", async () => {
+    // /api/auth/ keeps covering deep auth subpaths…
+    expect((await middleware(req("/api/auth/login/deep"))).headers.get("x-middleware-next")).toBe("1");
+    // …and an exact-match exemption covers its own trailing-slash path too.
+    expect((await middleware(req("/api/ha/alarm"))).headers.get("x-middleware-next")).toBe("1");
+    // But a non-exact prefix must NOT leak onto lookalike siblings.
+    expect((await middleware(req("/api/ha/alarm-extra"))).status ?? 0).toBe(401);
+  });
+
   it("does not touch non-API routes", async () => {
     expect((await middleware(req("/settings"))).headers.get("x-middleware-next")).toBe(
       "1"
