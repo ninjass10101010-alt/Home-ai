@@ -11,6 +11,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { pollTelegramUpdates, sanitizeTelegramError, type TgUpdate } from "@/lib/telegram/get-updates";
+import { isCronAuthorized } from "@/lib/cron-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,7 @@ function dateISO(unixSeconds: number): string {
 }
 
 export async function POST(request: NextRequest) {
-  if (request.headers.get("authorization") !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!isCronAuthorized(request)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   if (!process.env.TELEGRAM_MIRROR_BOT_TOKEN) {

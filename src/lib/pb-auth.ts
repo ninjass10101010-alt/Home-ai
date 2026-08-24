@@ -25,7 +25,6 @@ export async function ensureAuth(): Promise<string> {
 export async function withAdmin<T>(fn: (pb: ReturnType<typeof getAdminPB>) => Promise<T>): Promise<T> {
   if (!cachedAdminPB) {
     cachedAdminPB = getAdminPB();
-    cachedAdminPB.autoCancellation(false);
   }
   cachedAdminPB.authStore.save(await ensureAuth(), null);
   return fn(cachedAdminPB);

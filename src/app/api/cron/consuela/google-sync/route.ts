@@ -3,12 +3,13 @@ import { syncCalendar } from "@/lib/google/calendar";
 import { checkQuota } from "@/lib/google/quota-guard";
 import { isGoogleConnected } from "@/lib/google/oauth-client";
 import { ensureGoogleCollections } from "@/lib/google/pb-collections";
+import { isCronAuthorized } from "@/lib/cron-auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
-  if (request.headers.get("authorization") !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!isCronAuthorized(request)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 

@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { localTodayISO } from "@/lib/local-date";
 import { withAdmin } from "@/lib/pb-auth";
 import { broadcastHouseAlert } from "@/lib/ha/notify";
+import { isCronAuthorized } from "@/lib/cron-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -27,8 +28,7 @@ async function briefingPushEnabled(): Promise<boolean> {
 }
 
 export async function POST(request: NextRequest) {
-  const expected = `Bearer ${process.env.CRON_SECRET}`;
-  if (request.headers.get("authorization") !== expected) {
+  if (!isCronAuthorized(request)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const scopeDate = todayISO();

@@ -10,13 +10,10 @@ export function getPB(): PocketBase {
   }
   if (!pb) {
     pb = new PocketBase(PB_URL);
-    pb.autoCancellation(false);
   }
   return pb;
 }
 
 export function getAdminPB(): PocketBase {
-  const client = new PocketBase(PB_URL);
-  client.autoCancellation(false);
-  return client;
+  return new PocketBase(PB_URL);
 }

@@ -1,16 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { scoreEvent } from "@/lib/calendar/importance";
 import { withAdmin } from "@/lib/pb-auth";
+import { isCronAuthorized } from "@/lib/cron-auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-
-function isAuthorized(request: NextRequest): boolean {
-  const expected = `Bearer ${process.env.CRON_SECRET}`;
-  // If CRON_SECRET is unset, require explicit dev fallback to avoid open endpoint
-  if (!process.env.CRON_SECRET) return false;
-  return request.headers.get("authorization") === expected;
-}
 
 function getDurationMinutes(event: any): number {
   if (typeof event.duration === "number" && !Number.isNaN(event.duration)) {
@@ -65,7 +59,7 @@ function getEventDateStr(event: any): string | null {
 }
 
 async function handle(request: NextRequest) {
-  if (!isAuthorized(request)) {
+  if (!isCronAuthorized(request)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 

@@ -1,10 +1,17 @@
 import { NextResponse } from "next/server";
 import { getHAWebSocketClient } from "@/lib/ha/websocket-client";
+import { isHAServiceAllowed } from "@/lib/ha/service-allowlist";
 
 // NOTE (accepted risk): this route is intentionally UNAUTHENTICATED. The
 // dashboard is LAN-only and the product decision is that HA controls are not
 // PIN-gated for family convenience. Do not expose this app to the internet.
 // If remote access is ever added, add a bearer/PIN gate here first.
+//
+// Unauthenticated does NOT mean unrestricted: only an explicit allowlist of
+// domain/service pairs (the ones the House tab UI uses) is forwarded to Home
+// Assistant — see src/lib/ha/service-allowlist.ts. Everything else, including
+// locks, scripts, automations, shell_command and alarm arm_away/trigger,
+// is rejected with 403.
 
 const NAME_PATTERN = /^[a-z0-9_]+$/;
 const MAX_NAME_LENGTH = 64;
@@ -34,6 +41,13 @@ export async function POST(req: Request) {
       return NextResponse.json(
         { success: false, error: "invalid_request" },
         { status: 400 }
+      );
+    }
+
+    if (!isHAServiceAllowed(domain, service)) {
+      return NextResponse.json(
+        { success: false, error: "service_not_allowed" },
+        { status: 403 }
       );
     }
 
