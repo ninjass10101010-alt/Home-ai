@@ -55,6 +55,13 @@ describe("middleware /api gate", () => {
     expect(res?.status ?? 0).toBe(401);
   });
 
+  // Task 8 controller mandate: the browser data path itself is blocked
+  // without a session, not just the /api/db/ prefix in the abstract.
+  it("401s anonymous /api/db/tasks (no session)", async () => {
+    const res = await middleware(req("/api/db/tasks"));
+    expect(res?.status ?? 0).toBe(401);
+  });
+
   it("does not touch non-API routes", async () => {
     expect((await middleware(req("/settings"))).headers.get("x-middleware-next")).toBe(
       "1"

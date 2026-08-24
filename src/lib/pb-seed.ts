@@ -497,28 +497,27 @@ export const COLLECTIONS = [
   },
 ];
 
-// The dashboard client reads/writes PocketBase WITHOUT an auth token
-// (writes by chat tools/crons go through server-side withAdmin, but the
-// everyday UI — events, tasks, grocery, pantry, schedules, members — calls
-// the PB SDK directly from the browser). Collections must therefore be
-// publicly accessible or every client call 403s and the UI silently falls
-// back to demo data. All app collections use open rules; system/auth
-// collections are excluded.
-const PUBLIC_RULES = {
-  listRule: "",
-  viewRule: "",
-  createRule: "",
-  updateRule: "",
-  deleteRule: "",
+// All browser data traffic now flows through the sessioned /api/db/* gateway
+// (src/middleware.ts gates every /api/* route on a valid session cookie), so
+// no collection needs public API rules. null = only PB superusers (the
+// server-side withAdmin path) may access; "" would mean publicly open.
+// All app collections are locked to admin-only and seedCollections() enforces
+// that state on every run — any rule drifted away from null is patched back.
+const LOCKED_RULES = {
+  listRule: null,
+  viewRule: null,
+  createRule: null,
+  updateRule: null,
+  deleteRule: null,
 };
 
 function rulesMatch(live: any): boolean {
   return (
-    live.listRule === "" &&
-    live.viewRule === "" &&
-    live.createRule === "" &&
-    live.updateRule === "" &&
-    live.deleteRule === ""
+    live.listRule === null &&
+    live.viewRule === null &&
+    live.createRule === null &&
+    live.updateRule === null &&
+    live.deleteRule === null
   );
 }
 
@@ -586,15 +585,15 @@ export async function seedCollections() {
           created.push(`${col.name} (already exists)`);
         }
         if (!rulesMatch(live)) {
-          await pb.collections.update(live.id, { ...PUBLIC_RULES });
-          created[created.length - 1] += " (rules opened)";
+          await pb.collections.update(live.id, { ...LOCKED_RULES });
+          created[created.length - 1] += " (locked)";
         }
         continue;
       }
       await pb.collections.create({
         name: col.name,
         type: "base",
-        ...PUBLIC_RULES,
+        ...LOCKED_RULES,
         fields: col.schema.map((s: any) => {
           const base: any = {
             name: s.name,
