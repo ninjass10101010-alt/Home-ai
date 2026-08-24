@@ -166,12 +166,22 @@ function markRefreshed(name: string) {
   lastRefreshed[name] = Date.now();
 }
 
+// MF-2 — browser roster comes from the sessioned sanitized route. The old
+// pbDb.selectMembers() path 403'd under locked PB rules and silently kept
+// stale/fallback members forever.
+async function fetchMembersRoster(): Promise<any[]> {
+  const res = await fetch("/api/members/admin", { cache: "no-store" });
+  if (!res.ok) throw new Error(`members roster ${res.status}`);
+  const data = await res.json();
+  return Array.isArray(data?.members) ? data.members : [];
+}
+
 async function refreshMembersCache() {
   try {
-    const fresh = await pbDb.selectMembers();
+    const fresh = isServer() ? await pbDb.selectMembers() : await fetchMembersRoster();
     membersCache = mergeMemberFallbacks(fresh || []);
     markRefreshed("members");
-    window.dispatchEvent(new CustomEvent("consuela-members-updated"));
+    if (!isServer()) window.dispatchEvent(new CustomEvent("consuela-members-updated"));
   } catch {}
 }
 
@@ -232,7 +242,7 @@ const dualFetch = {
 void (async () => {
   try {
     const [m, e, t, s, ec, ml, p, g] = await Promise.all([
-      pbDb.selectMembers().catch(() => []),
+      (isServer() ? pbDb.selectMembers() : fetchMembersRoster()).catch(() => []),
       dualFetch.events().catch(() => []),
       dualFetch.pendingTasks().catch(() => []),
       dualFetch.todaysSchedulesRaw().catch(() => []),

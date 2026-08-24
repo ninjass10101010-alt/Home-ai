@@ -24,6 +24,12 @@ vi.mock("@/lib/pb", () => ({
   getAdminPB: () => ({ collection: () => h.collectionMock }),
 }));
 
+// MF-2 — pb-db's safe* helpers now execute server-side PB ops via withAdmin;
+// resolve it with the same collection mock so the service still sees PB rows.
+vi.mock("@/lib/pb-auth", () => ({
+  withAdmin: async (fn: any) => fn({ collection: () => h.collectionMock }),
+}));
+
 import { upsertGroceryItem, parseQuantityString } from "@/lib/grocery-service";
 
 describe("parseQuantityString", () => {

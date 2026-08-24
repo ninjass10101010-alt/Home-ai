@@ -16,9 +16,27 @@ function pb() {
   }
 }
 
+// MF-2 — PB execution client for the safe* helpers. Server code MUST run on
+// the superuser client now that LOCKED_RULES makes every app collection
+// admin-only: the public client 403s on every read/write and callers silently
+// degrade to fallback data (worst case: /api/emergency read placeholder
+// contacts and alerts vanished). The browser keeps its historical public
+// client — useAuth's legacy auth_sessions calls are the only direct client
+// reach into this module, and they keep failing soft under lockdown (caught
+// by each helper below).
+async function pbClient(): Promise<ReturnType<typeof getPB> | null> {
+  if (typeof window !== "undefined") return pb();
+  try {
+    return await withAdmin(async (admin) => admin);
+  } catch {
+    localFallback = true;
+    return null;
+  }
+}
+
 async function safeList<T>(collection: string, fallback: T[]): Promise<T[]> {
   try {
-    const client = pb();
+    const client = await pbClient();
     if (!client) return fallback;
     const records = await client.collection(collection).getFullList<T>({ requestKey: null });
     return records as any;
@@ -30,7 +48,7 @@ async function safeList<T>(collection: string, fallback: T[]): Promise<T[]> {
 
 async function safeGet<T>(collection: string, id: string, fallback: T | null): Promise<T | null> {
   try {
-    const client = pb();
+    const client = await pbClient();
     if (!client) return fallback;
     return (await client.collection(collection).getOne<T>(id, { requestKey: null })) as any;
   } catch {
@@ -40,7 +58,7 @@ async function safeGet<T>(collection: string, id: string, fallback: T | null): P
 
 async function safeCreate<T>(collection: string, data: any): Promise<T | null> {
   try {
-    const client = pb();
+    const client = await pbClient();
     if (!client) return null;
     return (await client.collection(collection).create<T>(data)) as any;
   } catch {
@@ -50,7 +68,7 @@ async function safeCreate<T>(collection: string, data: any): Promise<T | null> {
 
 async function safeUpdate<T>(collection: string, id: string, data: any): Promise<T | null> {
   try {
-    const client = pb();
+    const client = await pbClient();
     if (!client) return null;
     return (await client.collection(collection).update<T>(id, data)) as any;
   } catch {
@@ -60,7 +78,7 @@ async function safeUpdate<T>(collection: string, id: string, data: any): Promise
 
 async function safeDelete(collection: string, id: string): Promise<boolean> {
   try {
-    const client = pb();
+    const client = await pbClient();
     if (!client) return false;
     await client.collection(collection).delete(id);
     return true;
@@ -336,7 +354,7 @@ export const db = {
   },
   async deleteExpiredAuthSessions(maxAgeDays = 30): Promise<void> {
     try {
-      const client = pb();
+      const client = await pbClient();
       if (!client) return;
       const cutoff = new Date(Date.now() - maxAgeDays * 86400000).toISOString();
       const records = await client.collection("auth_sessions").getFullList({

@@ -125,6 +125,28 @@ describe("db/index client mode (browser)", () => {
     );
     expect(pb.upsertTask).not.toHaveBeenCalled();
   });
+
+  // MF-2 — the browser members cache must refresh via the sessioned
+  // sanitized roster route; pbDb.selectMembers() 403s under locked rules.
+  it("refreshes the members cache via GET /api/members/admin, not pb-db", async () => {
+    fetchMock.mockImplementation(async (url: any) => {
+      if (String(url).includes("/api/members/admin")) {
+        return {
+          ok: true,
+          json: async () => ({ members: [{ id: "m9", name: "Rebecca", role: "parent", emoji: "🐱" }] }),
+        };
+      }
+      return { ok: true, json: async () => ({ items: [] }) };
+    });
+    const { mod, pb } = await loadDb();
+    await mod.refreshCaches();
+
+    const called = fetchMock.mock.calls.some(([u]: unknown[]) => String(u).includes("/api/members/admin"));
+    expect(called).toBe(true);
+    expect(pb.selectMembers).not.toHaveBeenCalled();
+    const names = mod.selectMembers().map((m: any) => m.name);
+    expect(names).toContain("Rebecca");
+  });
 });
 
 describe("db/index server mode", () => {

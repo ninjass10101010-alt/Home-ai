@@ -24,12 +24,33 @@ const h = vi.hoisted(() => {
       state.records.splice(idx, 1);
     },
   };
-  return { state, collectionMock };
+  // Distinct PUBLIC client: under LOCKED_RULES the server-side safe* helpers
+  // must never touch it — every call would 403 and silently fall back.
+  const publicCalls: string[] = [];
+  const publicCollectionMock = {
+    getFullList: async () => { publicCalls.push("getFullList"); throw new Error("403 locked"); },
+    getOne: async () => { publicCalls.push("getOne"); throw new Error("403 locked"); },
+    create: async () => { publicCalls.push("create"); throw new Error("403 locked"); },
+    update: async () => { publicCalls.push("update"); throw new Error("403 locked"); },
+    delete: async () => { publicCalls.push("delete"); throw new Error("403 locked"); },
+  };
+  const adminFlags = { used: false, failNext: false };
+  return { state, collectionMock, publicCalls, publicCollectionMock, adminFlags };
 });
 
 vi.mock("@/lib/pb", () => ({
-  getPB: () => ({ collection: () => h.collectionMock }),
-  getAdminPB: () => ({ collection: () => h.collectionMock, autoCancellation: () => {} }),
+  getPB: () => ({ collection: () => h.publicCollectionMock }),
+  getAdminPB: () => ({ collection: () => h.collectionMock }),
+}));
+
+// MF-2 — mock the admin wrapper so tests can prove the safe* helpers route
+// through it (and observe graceful fallback when it fails).
+vi.mock("@/lib/pb-auth", () => ({
+  withAdmin: async (fn: any) => {
+    if (h.adminFlags.failNext) throw new Error("admin unavailable");
+    h.adminFlags.used = true;
+    return fn({ collection: () => h.collectionMock });
+  },
 }));
 
 import { db } from "@/db/pb-db";
@@ -38,6 +59,9 @@ describe("pb-db grocery id handling", () => {
   beforeEach(() => {
     h.state.records = [];
     h.state.calls = [];
+    h.publicCalls.length = 0;
+    h.adminFlags.used = false;
+    h.adminFlags.failNext = false;
   });
 
   it("updates the record matched by id and omits id from the payload", async () => {
@@ -75,5 +99,56 @@ describe("pb-db grocery id handling", () => {
   it("deleteGroceryItem returns false for an unknown id instead of throwing", async () => {
     const ok = await db.deleteGroceryItem("does_not_exist");
     expect(ok).toBe(false);
+  });
+});
+
+// MF-2 — after LOCKED_RULES every app collection is admin-only, so the safe*
+// helpers' server execution path must use the superuser client. The public
+// client would 403 on everything and silently degrade (worst case:
+// /api/emergency read placeholder contacts and alerts vanished).
+describe("pb-db lockdown routing (server path uses admin client)", () => {
+  beforeEach(() => {
+    h.state.records = [];
+    h.state.calls = [];
+    h.publicCalls.length = 0;
+    h.adminFlags.used = false;
+    h.adminFlags.failNext = false;
+  });
+
+  it("selectEmergencyContacts reads via the admin client, never the public one", async () => {
+    h.state.records.push({ id: "ec1", name: "Mom", phone: "+15550000001", isPrimary: true });
+    const contacts = await db.selectEmergencyContacts();
+
+    expect(h.adminFlags.used).toBe(true);
+    expect(h.publicCalls).toEqual([]);
+    expect(contacts).toHaveLength(1);
+    expect((contacts[0] as any).phone).toBe("+15550000001");
+  });
+
+  it("grocery reads/writes also ride the admin client", async () => {
+    h.state.records.push({ id: "g1", name: "Milk", needed: true });
+    const saved = await db.upsertGroceryItem({ id: "g1", name: "Milk", needed: false });
+
+    expect(h.adminFlags.used).toBe(true);
+    expect(h.publicCalls).toEqual([]);
+    expect(saved?.needed).toBe(false);
+  });
+
+  it("degrades to placeholder fallback contacts when the admin path fails", async () => {
+    h.adminFlags.failNext = true;
+    const contacts = await db.selectEmergencyContacts();
+
+    // emergencyFallback placeholders — the documented worst case, still honest.
+    expect(contacts.length).toBeGreaterThan(0);
+    expect((contacts[0] as any).phone).toBe("+15551234567");
+  });
+
+  it("auth-session helpers keep a working path server-side too", async () => {
+    h.state.records.push({ id: "s1", token: "dev_123", memberName: "Caspian" });
+    const session = await db.findAuthSession("dev_123");
+
+    expect(h.adminFlags.used).toBe(true);
+    expect(h.publicCalls).toEqual([]);
+    expect(session?.memberName).toBe("Caspian");
   });
 });
