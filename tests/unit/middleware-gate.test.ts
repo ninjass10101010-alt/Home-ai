@@ -30,14 +30,23 @@ describe("middleware /api gate", () => {
     expect(res.headers.get("x-middleware-next")).toBe("1");
   });
 
+  // /api/auth/* is prefix-exempt so an expired-cookie user can still reach
+  // POST /api/auth/logout and get the httpOnly cookie cleared; login enforces
+  // its own validation, whoami its own 401 (tests/unit/auth-routes.test.ts).
   it.each([
     "/api/cron/consuela/briefing",
     "/api/admin/version",
     "/api/ha/alarm",
     "/api/emergency",
     "/api/auth/login",
+    "/api/auth/logout",
   ])("exempts %s (own gate)", async (path) => {
     const res = await middleware(req(path));
+    expect(res.headers.get("x-middleware-next")).toBe("1");
+  });
+
+  it("exempts /api/auth/* (route-level 401 protects whoami)", async () => {
+    const res = await middleware(req("/api/auth/whoami"));
     expect(res.headers.get("x-middleware-next")).toBe("1");
   });
 

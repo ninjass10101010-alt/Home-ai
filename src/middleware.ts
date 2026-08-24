@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifySession, SESSION_COOKIE } from "@/lib/session";
 
 // Prefixes that carry their own auth gate (CRON_SECRET bearer, admin
-// pin/secret, alarm PIN, emergency PIN, login itself).
+// pin/secret, alarm PIN, emergency PIN). /api/auth/* is exempt so an
+// expired-cookie user can still POST /api/auth/logout and clear the
+// httpOnly cookie; login/whoami enforce their own 401s at route level.
 const API_EXEMPT = [
-  "/api/auth/login",
+  "/api/auth/",
   "/api/cron/",
   "/api/admin/",
   "/api/ha/alarm",
