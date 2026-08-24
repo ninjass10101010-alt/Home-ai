@@ -7,6 +7,7 @@ vi.mock("@/lib/pb-auth", () => ({ withAdmin: (fn: any) => mocks.withAdmin(fn) })
 
 import { GET as listGET, POST as createPOST } from "@/app/api/db/[collection]/route";
 import { PATCH as patchOne, DELETE as deleteOne } from "@/app/api/db/[collection]/[id]/route";
+import { isSafeFilter } from "@/lib/db-gateway";
 
 function sessionReq(url: string, init?: RequestInit): NextRequest {
   return new NextRequest(url, {
@@ -68,5 +69,43 @@ describe("db gateway", () => {
     const p = { params: Promise.resolve({ collection: "tasks", id: "r1" }) } as any;
     expect((await patchOne(await withSession(sessionReq("http://x/api/db/tasks/r1", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ done: true }) })), p)).status).toBe(200);
     expect((await deleteOne(await withSession(sessionReq("http://x/api/db/tasks/r1", { method: "DELETE" })), p)).status).toBe(200);
+  });
+
+  // MF-4 — the PB filter grammar allows @collection joins, which turn any
+  // sessioned gateway read into a boolean oracle (e.g. ~5k requests to crack
+  // a member PIN via @collection.members.pin="0202").
+  it("rejects @collection join filters with 400 invalid_filter", async () => {
+    const res = await listGET(
+      await withSession(sessionReq(`http://x/api/db/tasks?filter=${encodeURIComponent('@collection.members.pin="0202"')}`)),
+      { params: Promise.resolve({ collection: "tasks" }) } as any
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("invalid_filter");
+    expect(col.getFullList).not.toHaveBeenCalled();
+  });
+
+  it("rejects @request filters too", async () => {
+    const res = await listGET(
+      await withSession(sessionReq(`http://x/api/db/tasks?filter=${encodeURIComponent("@request.auth.id='x'")}`)),
+      { params: Promise.resolve({ collection: "tasks" }) } as any
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("passes normal field filters through", async () => {
+    const res = await listGET(
+      await withSession(sessionReq(`http://x/api/db/grocery_list_items?filter=${encodeURIComponent('name="Milk"')}`)),
+      { params: Promise.resolve({ collection: "grocery_list_items" }) } as any
+    );
+    expect(res.status).toBe(200);
+    expect(col.getFullList).toHaveBeenCalledWith(expect.objectContaining({ filter: 'name="Milk"' }));
+  });
+
+  it("isSafeFilter treats null/absent as safe and joins as unsafe", () => {
+    expect(isSafeFilter(null)).toBe(true);
+    expect(isSafeFilter("")).toBe(true);
+    expect(isSafeFilter('status="pending"')).toBe(true);
+    expect(isSafeFilter('@collection.members.pin="0202"')).toBe(false);
+    expect(isSafeFilter("@REQUEST.auth.id='x'")).toBe(false);
   });
 });
