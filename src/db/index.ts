@@ -1,7 +1,145 @@
 import { db as pbDb } from "./pb-db";
+import { gatewayList, gatewayCreate, gatewayUpdate, gatewayDelete } from "./gateway-client";
 import { defaultMeals, mealIdeas, initialGroceryItems } from "../data/meals";
 import { resolveMemberPin, memberPinMatches } from "@/lib/member-pins";
 import { memberFallbacks, mergeMemberFallbacks } from "@/lib/member-fallback";
+
+function isServer() {
+  return typeof window === "undefined";
+}
+
+// === Client-mode (browser) helpers ===
+// The gateway returns raw PocketBase rows; these replicate the small amount of
+// mapping pb-db does internally so caller-facing shapes stay identical.
+// (pb-db's mappers are not exported — duplicated minimally here on purpose.)
+
+function parseJsonArray(value: any): any[] {
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return Array.isArray(value) ? value : [];
+}
+
+function stringifyMealArrays(row: Record<string, any>): Record<string, any> {
+  const data = { ...row };
+  for (const key of ["ingredients", "tags"]) {
+    if (Array.isArray(data[key])) data[key] = JSON.stringify(data[key]);
+  }
+  return data;
+}
+
+async function safeGatewayRow(fn: () => Promise<any>): Promise<any | null> {
+  try {
+    return await fn();
+  } catch {
+    return null;
+  }
+}
+
+async function gatewayDeleteOk(collection: string, id: number | string): Promise<boolean> {
+  try {
+    await gatewayDelete(collection, String(id));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function clientListOrEmpty(collection: string): Promise<any[]> {
+  try {
+    return await gatewayList(collection);
+  } catch {
+    return [];
+  }
+}
+
+// Mirrors pb-db selectMembers' mapped shape for event/task/schedule joins
+// without fetching members over PB (members stay excluded from the gateway).
+function memberJoinList(): any[] {
+  const base = membersCache.length > 0 ? membersCache : (membersFallback as any[]);
+  return base.map((m: any, i: number) => ({
+    name: m.name?.split(" ")[0] || m.name,
+    fullName: m.name,
+    color: memberColor(i),
+    emoji: m.emoji || "😊",
+  }));
+}
+
+function findJoinMember(list: any[], name?: string) {
+  return list.find((m: any) => m.fullName === name || m.name === name);
+}
+
+function formatTime12h(time?: string): string | undefined {
+  if (!time) return undefined;
+  return new Date(`2000-01-01T${time}`).toLocaleTimeString("en-US", {
+    hour: "numeric", minute: "2-digit", hour12: true,
+  });
+}
+
+function filterQuery(filter: string, sort?: string): string {
+  const params = new URLSearchParams({ filter });
+  if (sort) params.set("sort", sort);
+  return `?${params.toString()}`;
+}
+
+async function clientSelectTodaysEvents(): Promise<any[]> {
+  const rows = await gatewayList("events");
+  const today = new Date().toISOString().split('T')[0];
+  const members = memberJoinList();
+  return rows
+    .filter((e: any) => e.date === today)
+    .sort((a: any, b: any) => (a.time || '').localeCompare(b.time || ''))
+    .map((event: any) => {
+      const member = findJoinMember(members, event.member);
+      return {
+        id: event.id, title: event.title,
+        time: formatTime12h(event.time),
+        member: member?.fullName || event.member || 'Unknown',
+        emoji: member?.emoji || '👤',
+        color: member?.color || 'amber',
+        icon: event.icon || '📅',
+      };
+    });
+}
+
+async function clientSelectPendingTasks(): Promise<any[]> {
+  const rows = await gatewayList("tasks");
+  const members = memberJoinList();
+  return rows
+    .filter((t: any) => t.status === 'pending')
+    .slice(0, 3)
+    .map((task: any) => {
+      const member = findJoinMember(members, task.assigned);
+      const d = task.due;
+      const isToday = d === new Date().toISOString().split('T')[0];
+      const isTomorrow = d === new Date(Date.now() + 86400000).toISOString().split('T')[0];
+      return {
+        id: task.id, title: task.title,
+        assigned: member?.fullName || task.assigned || 'Unassigned',
+        due: isToday ? 'Today' : isTomorrow ? 'Tomorrow' : task.due || 'Later',
+        points: task.priority === 'high' ? 20 : task.priority === 'medium' ? 15 : task.points || 10,
+        done: task.status === 'done',
+      };
+    });
+}
+
+async function clientSelectTodaysSchedulesRaw(): Promise<any[]> {
+  const rows = await gatewayList("schedules");
+  const today = new Date().toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
+  const members = memberJoinList();
+  return rows
+    .filter((s: any) => s.days === 'all' || s.days?.includes(today))
+    .sort((a: any, b: any) => a.time.localeCompare(b.time))
+    .map((s: any) => {
+      const member = s.member ? findJoinMember(members, s.member) : null;
+      return { id: s.id, title: s.title, time: s.time, emoji: s.icon, type: s.type, color: s.color, member: member?.fullName, memberColor: member?.color || 'amber' };
+    });
+}
 
 const memberColor = (i: number) =>
   ["green", "cyan", "violet", "amber", "rose", "blue", "cyan", "green", "cyan"][i % 9] || "green";
@@ -72,18 +210,40 @@ const scheduleData = [
   { id: 10, title: "Take medication", time: "08:00", days: "all", memberId: 1, type: "reminder", icon: "💊", color: "rose" },
 ];
 
+// Dual-mode cache fetchers: browser → sessioned gateway, server → pb-db.
+// Used by the module-level hydrate and refreshCaches.
+const dualFetch = {
+  events: () => (isServer() ? pbDb.selectTodaysEvents() : clientSelectTodaysEvents()),
+  pendingTasks: () => (isServer() ? pbDb.selectPendingTasks() : clientSelectPendingTasks()),
+  todaysSchedulesRaw: () => (isServer() ? pbDb.selectTodaysSchedulesRaw() : clientSelectTodaysSchedulesRaw()),
+  emergencyContacts: () => (isServer() ? pbDb.selectEmergencyContacts() : clientListOrEmpty("emergency_contacts")),
+  meals: async (): Promise<any[]> => {
+    if (!isServer()) {
+      const rows = await clientListOrEmpty("meal_plan_entries");
+      return rows.map((meal: any) => ({
+        ...meal,
+        ingredients: parseJsonArray(meal.ingredients),
+        tags: parseJsonArray(meal.tags),
+      }));
+    }
+    return pbDb.selectMeals();
+  },
+  pantry: () => (isServer() ? pbDb.selectPantry() : clientListOrEmpty("pantry_items")),
+  grocery: () => (isServer() ? pbDb.selectGrocery() : clientListOrEmpty("grocery_list_items")),
+};
+
 // Hydrate once
 void (async () => {
   try {
     const [m, e, t, s, ec, ml, p, g] = await Promise.all([
       pbDb.selectMembers().catch(() => []),
-      pbDb.selectTodaysEvents().catch(() => []),
-      pbDb.selectPendingTasks().catch(() => []),
-      pbDb.selectTodaysSchedulesRaw().catch(() => []),
-      pbDb.selectEmergencyContacts().catch(() => []),
-      pbDb.selectMeals().catch(() => []),
-      pbDb.selectPantry().catch(() => []),
-      pbDb.selectGrocery().catch(() => []),
+      dualFetch.events().catch(() => []),
+      dualFetch.pendingTasks().catch(() => []),
+      dualFetch.todaysSchedulesRaw().catch(() => []),
+      dualFetch.emergencyContacts(),
+      dualFetch.meals().catch(() => []),
+      dualFetch.pantry().catch(() => []),
+      dualFetch.grocery().catch(() => []),
     ]);
     const pbMembers = (m as any[]) || [];
     for (const pbm of pbMembers) {
@@ -192,12 +352,16 @@ export const db = {
   },
 
   insertEvent: async (event: any) => {
-    const result = await pbDb.insertEvent(event);
+    const result = isServer()
+      ? await pbDb.insertEvent(event)
+      : await safeGatewayRow(() => gatewayCreate("events", event));
     if (result) eventsCache.push(result);
     return result;
   },
   updateEvent: async (id: number | string, updates: any) => {
-    const result = await pbDb.updateEvent(id, updates);
+    const result = isServer()
+      ? await pbDb.updateEvent(id, updates)
+      : await safeGatewayRow(() => gatewayUpdate("events", String(id), updates));
     if (result) {
       const idx = eventsCache.findIndex((e: any) => e.id == id);
       if (idx !== -1) eventsCache[idx] = result;
@@ -205,7 +369,7 @@ export const db = {
     return result;
   },
   deleteEvent: async (id: number | string) => {
-    const result = await pbDb.deleteEvent(id);
+    const result = isServer() ? await pbDb.deleteEvent(id) : await gatewayDeleteOk("events", id);
     if (result) {
       const idx = eventsCache.findIndex((e: any) => e.id == id);
       if (idx !== -1) eventsCache.splice(idx, 1);
@@ -216,12 +380,16 @@ export const db = {
   selectPendingTasks: () => tasksCache,
 
   insertTask: async (task: any) => {
-    const result = await pbDb.insertTask(task);
+    const result = isServer()
+      ? await pbDb.insertTask(task)
+      : await safeGatewayRow(() => gatewayCreate("tasks", task));
     if (result) tasksCache.push(result);
     return result;
   },
   updateTask: async (id: number | string, updates: any) => {
-    const result = await pbDb.updateTask(id, updates);
+    const result = isServer()
+      ? await pbDb.updateTask(id, updates)
+      : await safeGatewayRow(() => gatewayUpdate("tasks", String(id), updates));
     if (result) {
       const idx = tasksCache.findIndex((t: any) => t.id == id);
       if (idx !== -1) tasksCache[idx] = result;
@@ -229,7 +397,7 @@ export const db = {
     return result;
   },
   deleteTask: async (id: number | string) => {
-    const result = await pbDb.deleteTask(id);
+    const result = isServer() ? await pbDb.deleteTask(id) : await gatewayDeleteOk("tasks", id);
     if (result) {
       const idx = tasksCache.findIndex((t: any) => t.id == id);
       if (idx !== -1) tasksCache.splice(idx, 1);
@@ -260,12 +428,16 @@ export const db = {
   },
 
   insertSchedule: async (schedule: any) => {
-    const result = await pbDb.insertSchedule(schedule);
+    const result = isServer()
+      ? await pbDb.insertSchedule(schedule)
+      : await safeGatewayRow(() => gatewayCreate("schedules", schedule));
     if (result) schedulesCache.push(result);
     return result;
   },
   updateSchedule: async (id: number | string, updates: any) => {
-    const result = await pbDb.updateSchedule(id, updates);
+    const result = isServer()
+      ? await pbDb.updateSchedule(id, updates)
+      : await safeGatewayRow(() => gatewayUpdate("schedules", String(id), updates));
     if (result) {
       const idx = schedulesCache.findIndex((s: any) => s.id == id);
       if (idx !== -1) schedulesCache[idx] = result;
@@ -273,7 +445,7 @@ export const db = {
     return result;
   },
   deleteSchedule: async (id: number | string) => {
-    const result = await pbDb.deleteSchedule(id);
+    const result = isServer() ? await pbDb.deleteSchedule(id) : await gatewayDeleteOk("schedules", id);
     if (result) {
       const idx = schedulesCache.findIndex((s: any) => s.id == id);
       if (idx !== -1) schedulesCache.splice(idx, 1);
@@ -284,13 +456,17 @@ export const db = {
   selectEmergencyContacts: () => emergencyCache,
 
   insertEmergencyContact: async (data: any) => {
-    const result = await pbDb.insertEmergencyContact(data);
+    const result = isServer()
+      ? await pbDb.insertEmergencyContact(data)
+      : await safeGatewayRow(() => gatewayCreate("emergency_contacts", data));
     if (result) emergencyCache.push(result);
     return result;
   },
 
   updateEmergencyContact: async (id: number | string, updates: any) => {
-    const result = await pbDb.updateEmergencyContact(id, updates);
+    const result = isServer()
+      ? await pbDb.updateEmergencyContact(id, updates)
+      : await safeGatewayRow(() => gatewayUpdate("emergency_contacts", String(id), updates));
     if (result) {
       const idx = emergencyCache.findIndex((c: any) => c.id == id);
       if (idx !== -1) emergencyCache[idx] = { ...emergencyCache[idx], ...updates };
@@ -299,7 +475,7 @@ export const db = {
   },
 
   deleteEmergencyContact: async (id: number | string) => {
-    const result = await pbDb.deleteEmergencyContact(id);
+    const result = isServer() ? await pbDb.deleteEmergencyContact(id) : await gatewayDeleteOk("emergency_contacts", id);
     if (result) {
       const idx = emergencyCache.findIndex((c: any) => c.id == id);
       if (idx !== -1) emergencyCache.splice(idx, 1);
@@ -307,15 +483,19 @@ export const db = {
     return result;
   },
 
-  selectMeals: async () => pbDb.selectMeals(),
+  selectMeals: async () => dualFetch.meals(),
   selectMealIdeas: () => mealIdeas,
   insertMeal: async (meal: any) => {
-    const result = await pbDb.insertMeal(meal);
+    const result = isServer()
+      ? await pbDb.insertMeal(meal)
+      : await safeGatewayRow(() => gatewayCreate("meal_plan_entries", stringifyMealArrays(meal)));
     if (result) mealsCache.push(result);
     return result;
   },
   updateMeal: async (id: string, updates: any) => {
-    const result = await pbDb.updateMeal(id, updates);
+    const result = isServer()
+      ? await pbDb.updateMeal(id, updates)
+      : await safeGatewayRow(() => gatewayUpdate("meal_plan_entries", id, stringifyMealArrays(updates)));
     if (result) {
       const idx = mealsCache.findIndex((m: any) => m.id == id);
       if (idx !== -1) mealsCache[idx] = result;
@@ -323,7 +503,7 @@ export const db = {
     return result;
   },
   deleteMeal: async (id: string) => {
-    const result = await pbDb.deleteMeal(id);
+    const result = isServer() ? await pbDb.deleteMeal(id) : await gatewayDeleteOk("meal_plan_entries", id);
     if (result) {
       const idx = mealsCache.findIndex((m: any) => m.id == id);
       if (idx !== -1) mealsCache.splice(idx, 1);
@@ -331,10 +511,23 @@ export const db = {
     return result;
   },
 
-  selectPantry: async () => pbDb.selectPantry(),
-  selectGrocery: async () => pbDb.selectGrocery(),
+  selectPantry: async () => dualFetch.pantry(),
+  selectGrocery: async () => dualFetch.grocery(),
   upsertPantryItem: async (item: any) => {
-    const result = await pbDb.upsertPantryItem(item);
+    let result: any;
+    if (!isServer()) {
+      try {
+        const items = await gatewayList("pantry_items");
+        const existing = items.find((p: any) => (p.item || p.name)?.toLowerCase() === item.name?.toLowerCase());
+        result = existing
+          ? await gatewayUpdate("pantry_items", existing.id, { ...item, item: item.name })
+          : await gatewayCreate("pantry_items", { ...item, item: item.name });
+      } catch {
+        result = null;
+      }
+    } else {
+      result = await pbDb.upsertPantryItem(item);
+    }
     if (result) {
       const idx = pantryCache.findIndex((p: any) => p.name?.toLowerCase() === item.name?.toLowerCase() || p.item?.toLowerCase() === item.name?.toLowerCase());
       if (idx !== -1) pantryCache[idx] = result;
@@ -344,7 +537,7 @@ export const db = {
   },
 
   deletePantryItem: async (id: number | string) => {
-    const result = await pbDb.deletePantryItem(id);
+    const result = isServer() ? await pbDb.deletePantryItem(id) : await gatewayDeleteOk("pantry_items", id);
     if (result) {
       const idx = pantryCache.findIndex((p: any) => p.id == id);
       if (idx !== -1) pantryCache.splice(idx, 1);
@@ -353,7 +546,26 @@ export const db = {
   },
 
   upsertGroceryItem: async (item: any) => {
-    const result = await pbDb.upsertGroceryItem(item);
+    let result: any;
+    if (!isServer()) {
+      try {
+        const items = await gatewayList("grocery_list_items");
+        const byId = item.id != null
+          ? items.find((g: any) => String(g.id) === String(item.id))
+          : undefined;
+        const existing = byId || items.find((g: any) =>
+          g.name?.toLowerCase() === item.name?.toLowerCase() && !g.manualOverride
+        );
+        const { id: _omitId, ...data } = item;
+        result = existing
+          ? await gatewayUpdate("grocery_list_items", existing.id, data)
+          : await gatewayCreate("grocery_list_items", data);
+      } catch {
+        result = null;
+      }
+    } else {
+      result = await pbDb.upsertGroceryItem(item);
+    }
     if (result) {
       const idx = groceryCache.findIndex((g: any) => g.name?.toLowerCase() === item.name?.toLowerCase());
       if (idx !== -1) groceryCache[idx] = result;
@@ -363,7 +575,9 @@ export const db = {
   },
 
   toggleGroceryOverride: async (id: number | string, override: boolean) => {
-    const result = await pbDb.toggleGroceryOverride(id, override);
+    const result = isServer()
+      ? await pbDb.toggleGroceryOverride(id, override)
+      : await safeGatewayRow(() => gatewayUpdate("grocery_list_items", String(id), { manualOverride: override }));
     if (result) {
       const item = groceryCache.find((g: any) => g.id == id);
       if (item) item.manualOverride = override;
@@ -372,7 +586,7 @@ export const db = {
   },
 
   deleteGroceryItem: async (id: number | string) => {
-    const result = await pbDb.deleteGroceryItem(id);
+    const result = isServer() ? await pbDb.deleteGroceryItem(id) : await gatewayDeleteOk("grocery_list_items", id);
     if (result) {
       const idx = groceryCache.findIndex((g: any) => g.id == id);
       if (idx !== -1) groceryCache.splice(idx, 1);
@@ -382,45 +596,157 @@ export const db = {
 
     // === PB pass-through methods for collections without local cache ===
 
-  selectSchedules: async () => pbDb.selectSchedules(),
+  selectSchedules: async () => isServer() ? pbDb.selectSchedules() : clientListOrEmpty("schedules"),
 
-  upsertTask: async (task: any) => pbDb.upsertTask(task),
-  selectAllTasks: async () => pbDb.selectAllTasks(),
-  deleteTaskByTaskId: async (taskId: number) => pbDb.deleteTaskByTaskId(taskId),
+  upsertTask: async (task: any) => {
+    if (!isServer()) {
+      try {
+        const records = await gatewayList("tasks");
+        const existing = records.find((r: any) => r.taskId === task.taskId);
+        if (existing) return await gatewayUpdate("tasks", existing.id, task);
+        return await gatewayCreate("tasks", task);
+      } catch {
+        return null;
+      }
+    }
+    return pbDb.upsertTask(task);
+  },
+  selectAllTasks: async () => isServer() ? pbDb.selectAllTasks() : clientListOrEmpty("tasks"),
+  deleteTaskByTaskId: async (taskId: number) => {
+    if (!isServer()) {
+      try {
+        const records = await gatewayList("tasks");
+        const task = records.find((r: any) => r.taskId === taskId);
+        if (!task) return false;
+        await gatewayDelete("tasks", task.id);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    return pbDb.deleteTaskByTaskId(taskId);
+  },
 
-  getWeekData: async (weekStart: string) => pbDb.getWeekData(weekStart),
-  upsertWeekData: async (data: any) => pbDb.upsertWeekData(data),
-  archiveWeek: async (data: any) => pbDb.archiveWeek(data),
-  listArchivedWeeks: async () => pbDb.listArchivedWeeks(),
+  getWeekData: async (weekStart: string) => {
+    if (!isServer()) {
+      try {
+        const records = await gatewayList("week_data", filterQuery(`weekStart="${weekStart}"`));
+        return records.find((r: any) => r.weekStart === weekStart) || null;
+      } catch {
+        return null;
+      }
+    }
+    return pbDb.getWeekData(weekStart);
+  },
+  upsertWeekData: async (data: any) => {
+    if (!isServer()) {
+      try {
+        const records = await gatewayList("week_data", filterQuery(`weekStart="${data.weekStart}"`));
+        const existing = records.find((r: any) => r.weekStart === data.weekStart);
+        if (existing) return await gatewayUpdate("week_data", existing.id, data);
+        return await gatewayCreate("week_data", data);
+      } catch {
+        return null;
+      }
+    }
+    return pbDb.upsertWeekData(data);
+  },
+  archiveWeek: async (data: any) =>
+    isServer()
+      ? pbDb.archiveWeek(data)
+      : safeGatewayRow(() => gatewayCreate("week_archive", data)),
+  listArchivedWeeks: async () => isServer() ? pbDb.listArchivedWeeks() : clientListOrEmpty("week_archive"),
 
-  selectRewards: async () => pbDb.selectRewards(),
-  upsertReward: async (data: any) => pbDb.upsertReward(data),
-  deleteReward: async (id: string) => pbDb.deleteReward(id),
+  selectRewards: async () => isServer() ? pbDb.selectRewards() : clientListOrEmpty("rewards"),
+  upsertReward: async (data: any) => {
+    if (!isServer()) {
+      try {
+        const records = await gatewayList("rewards");
+        const existing = records.find((r: any) => r.name === data.name);
+        if (existing) return await gatewayUpdate("rewards", existing.id, data);
+        return await gatewayCreate("rewards", data);
+      } catch {
+        return null;
+      }
+    }
+    return pbDb.upsertReward(data);
+  },
+  deleteReward: async (id: string) => isServer() ? pbDb.deleteReward(id) : gatewayDeleteOk("rewards", id),
 
-  selectPenalties: async () => pbDb.selectPenalties(),
-  upsertPenalty: async (data: any) => pbDb.upsertPenalty(data),
-  deletePenalty: async (id: string) => pbDb.deletePenalty(id),
+  selectPenalties: async () => isServer() ? pbDb.selectPenalties() : clientListOrEmpty("penalties"),
+  upsertPenalty: async (data: any) => {
+    if (!isServer()) {
+      try {
+        const records = await gatewayList("penalties");
+        const existing = records.find((r: any) => r.name === data.name);
+        if (existing) return await gatewayUpdate("penalties", existing.id, data);
+        return await gatewayCreate("penalties", data);
+      } catch {
+        return null;
+      }
+    }
+    return pbDb.upsertPenalty(data);
+  },
+  deletePenalty: async (id: string) => isServer() ? pbDb.deletePenalty(id) : gatewayDeleteOk("penalties", id),
 
-  getActiveFamilyGoal: async () => pbDb.getActiveFamilyGoal(),
-  upsertFamilyGoal: async (data: any) => pbDb.upsertFamilyGoal(data),
+  getActiveFamilyGoal: async () => {
+    if (!isServer()) {
+      try {
+        const records = await gatewayList("family_goals");
+        return records.find((r: any) => r.active !== false) || null;
+      } catch {
+        return null;
+      }
+    }
+    return pbDb.getActiveFamilyGoal();
+  },
+  upsertFamilyGoal: async (data: any) => {
+    if (!isServer()) {
+      try {
+        const records = await gatewayList("family_goals");
+        const existing = records.find((r: any) => r.active !== false || r.weekStart === data.weekStart);
+        if (existing) return await gatewayUpdate("family_goals", existing.id, data);
+        return await gatewayCreate("family_goals", data);
+      } catch {
+        return null;
+      }
+    }
+    return pbDb.upsertFamilyGoal(data);
+  },
 
-  insertHallOfFameEntry: async (data: any) => pbDb.insertHallOfFameEntry(data),
-  selectHallOfFame: async () => pbDb.selectHallOfFame(),
+  insertHallOfFameEntry: async (data: any) =>
+    isServer()
+      ? pbDb.insertHallOfFameEntry(data)
+      : safeGatewayRow(() => gatewayCreate("hall_of_fame", data)),
+  selectHallOfFame: async () => isServer() ? pbDb.selectHallOfFame() : clientListOrEmpty("hall_of_fame"),
 
-  selectRecipes: async () => pbDb.selectRecipes(),
-  upsertRecipe: async (recipe: any) => pbDb.upsertRecipe(recipe),
-  deleteRecipe: async (id: string) => pbDb.deleteRecipe(id),
+  selectRecipes: async () => isServer() ? pbDb.selectRecipes() : clientListOrEmpty("recipes"),
+  upsertRecipe: async (recipe: any) => {
+    if (!isServer()) {
+      try {
+        const records = await gatewayList("recipes");
+        const existing = records.find((r: any) => r.name?.toLowerCase() === recipe.name?.toLowerCase());
+        const data = stringifyMealArrays(recipe);
+        if (existing) return await gatewayUpdate("recipes", existing.id, data);
+        return await gatewayCreate("recipes", data);
+      } catch {
+        return null;
+      }
+    }
+    return pbDb.upsertRecipe(recipe);
+  },
+  deleteRecipe: async (id: string) => isServer() ? pbDb.deleteRecipe(id) : gatewayDeleteOk("recipes", id),
 
   // Refresh all caches from PB (for cross-device sync)
   refreshCaches: async () => {
     await Promise.allSettled([
       refreshMembersCache(),
-      refreshCache("events", () => pbDb.selectTodaysEvents(), eventsCache),
-      refreshCache("schedules", () => pbDb.selectTodaysSchedulesRaw(), schedulesCache),
-      refreshCache("emergency", () => pbDb.selectEmergencyContacts(), emergencyCache),
-      refreshCache("meals", () => pbDb.selectMeals(), mealsCache),
-      refreshCache("pantry", () => pbDb.selectPantry(), pantryCache),
-      refreshCache("grocery", () => pbDb.selectGrocery(), groceryCache),
+      refreshCache("events", dualFetch.events, eventsCache),
+      refreshCache("schedules", dualFetch.todaysSchedulesRaw, schedulesCache),
+      refreshCache("emergency", dualFetch.emergencyContacts, emergencyCache),
+      refreshCache("meals", dualFetch.meals, mealsCache),
+      refreshCache("pantry", dualFetch.pantry, pantryCache),
+      refreshCache("grocery", dualFetch.grocery, groceryCache),
     ]);
   },
 
@@ -429,22 +755,122 @@ export const db = {
   pantryStore: pantryCache,
   groceryStore: groceryCache,
 
-  selectMealWeekArchives: async () => pbDb.selectMealWeekArchives(),
-  upsertMealWeekArchive: async (entry: any) => pbDb.upsertMealWeekArchive(entry),
-  deleteMealWeekArchive: async (weekStart: string) => pbDb.deleteMealWeekArchive(weekStart),
+  selectMealWeekArchives: async () => isServer() ? pbDb.selectMealWeekArchives() : clientListOrEmpty("meal_week_archive"),
+  upsertMealWeekArchive: async (entry: any) => {
+    if (!isServer()) {
+      try {
+        const records = await gatewayList("meal_week_archive", filterQuery(`weekStart="${entry.weekStart}"`));
+        const existing = records.find((r: any) => r.weekStart === entry.weekStart);
+        if (existing) return await gatewayUpdate("meal_week_archive", existing.id, entry);
+        return await gatewayCreate("meal_week_archive", entry);
+      } catch {
+        return null;
+      }
+    }
+    return pbDb.upsertMealWeekArchive(entry);
+  },
+  deleteMealWeekArchive: async (weekStart: string) => {
+    if (!isServer()) {
+      try {
+        const records = await gatewayList("meal_week_archive", filterQuery(`weekStart="${weekStart}"`));
+        const entry = records.find((r: any) => r.weekStart === weekStart);
+        if (!entry) return false;
+        await gatewayDelete("meal_week_archive", entry.id);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    return pbDb.deleteMealWeekArchive(weekStart);
+  },
 
+  // insertProactiveSuggestions / deleteStaleSuggestions stay server-only:
+  // their only callers are the cron engine and cron routes (never the browser).
   insertProactiveSuggestions: async (items: any[]) => pbDb.insertProactiveSuggestions(items),
-  selectPendingSuggestions: async (opts?: { scopeDate?: string; limit?: number }) => pbDb.selectPendingSuggestions(opts),
-  updateSuggestion: async (id: string, patch: { status?: any; snoozedUntil?: string }) => pbDb.updateSuggestion(id, patch),
+  selectPendingSuggestions: async (opts?: { scopeDate?: string; limit?: number }) => {
+    if (!isServer()) {
+      const now = new Date().toISOString();
+      const limit = opts?.limit ?? 20;
+      const filterParts = [
+        'status="pending"',
+        `(snoozedUntil=null || snoozedUntil<"${now}")`,
+      ];
+      if (opts?.scopeDate) filterParts.push(`scopeDate="${opts.scopeDate}"`);
+      const records = await gatewayList("proactive_suggestions", filterQuery(filterParts.join(" && "), "-createdAt"));
+      return records.slice(0, limit);
+    }
+    return pbDb.selectPendingSuggestions(opts);
+  },
+  updateSuggestion: async (id: string, patch: { status?: any; snoozedUntil?: string }) => {
+    if (isServer()) return pbDb.updateSuggestion(id, patch);
+    await gatewayUpdate("proactive_suggestions", id, patch);
+  },
   deleteStaleSuggestions: async (beforeISO: string) => pbDb.deleteStaleSuggestions(beforeISO),
 
-  upsertMorningBriefing: async (scopeDate: string, summary: any) => pbDb.upsertMorningBriefing(scopeDate, summary),
-  selectMorningBriefing: async (scopeDate?: string) => pbDb.selectMorningBriefing(scopeDate),
-  ackMorningBriefing: async (id: string) => pbDb.ackMorningBriefing(id),
+  upsertMorningBriefing: async (scopeDate: string, summary: any) => {
+    if (!isServer()) {
+      const existing = await gatewayList("morning_briefing", filterQuery(`scopeDate="${scopeDate}"`));
+      const body = {
+        scopeDate,
+        summary,
+        generatedAt: new Date().toISOString(),
+      };
+      if (existing.length > 0) {
+        return gatewayUpdate("morning_briefing", existing[0].id, body);
+      }
+      return gatewayCreate("morning_briefing", { ...body, acknowledged: false });
+    }
+    return pbDb.upsertMorningBriefing(scopeDate, summary);
+  },
+  selectMorningBriefing: async (scopeDate?: string) => {
+    if (!isServer()) {
+      const filter = scopeDate ? `scopeDate="${scopeDate}"` : "";
+      const query = filter ? filterQuery(filter, "-scopeDate") : "?sort=-scopeDate";
+      const records = await gatewayList("morning_briefing", query);
+      return records.length > 0 ? records[0] : null;
+    }
+    return pbDb.selectMorningBriefing(scopeDate);
+  },
+  ackMorningBriefing: async (id: string) =>
+    isServer()
+      ? pbDb.ackMorningBriefing(id)
+      : gatewayUpdate("morning_briefing", id, { acknowledged: true }),
 
-  insertChatMessage: async (msg: any) => pbDb.insertChatMessage(msg),
-  selectChatMessages: async (threadId: string, sinceISO?: string) => pbDb.selectChatMessages(threadId, sinceISO),
+  insertChatMessage: async (msg: any) => {
+    if (isServer()) return pbDb.insertChatMessage(msg);
+    return gatewayCreate("chat_messages", {
+      ...msg,
+      createdAt: msg.createdAt || new Date().toISOString(),
+    });
+  },
+  selectChatMessages: async (threadId: string, sinceISO?: string) => {
+    if (isServer()) return pbDb.selectChatMessages(threadId, sinceISO);
+    const filter = sinceISO
+      ? `threadId="${threadId}" && createdAt>"${sinceISO}"`
+      : `threadId="${threadId}"`;
+    return gatewayList("chat_messages", filterQuery(filter, "createdAt"));
+  },
 
-  getState: async (key: string) => pbDb.getState(key),
-  setState: async (key: string, value: any, expectedPrev?: any) => pbDb.setState(key, value, expectedPrev),
+  getState: async (key: string) => {
+    if (!isServer()) {
+      const records = await gatewayList("consuela_state", filterQuery(`key="${key}"`));
+      return records.length > 0 ? records[0].value : null;
+    }
+    return pbDb.getState(key);
+  },
+  setState: async (key: string, value: any, expectedPrev?: any) => {
+    if (!isServer()) {
+      const records = await gatewayList("consuela_state", filterQuery(`key="${key}"`));
+      if (records.length > 0) {
+        if (expectedPrev !== undefined && records[0].value !== expectedPrev) {
+          return false;
+        }
+        await gatewayUpdate("consuela_state", records[0].id, { value });
+        return true;
+      }
+      await gatewayCreate("consuela_state", { key, value });
+      return true;
+    }
+    return pbDb.setState(key, value, expectedPrev);
+  },
 };

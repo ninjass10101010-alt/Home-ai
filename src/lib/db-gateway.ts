@@ -3,6 +3,7 @@ export const DB_GATEWAY_COLLECTIONS: ReadonlySet<string> = new Set([
   "recipes", "events", "schedules", "tasks", "week_data", "week_archive",
   "rewards", "penalties", "family_goals", "hall_of_fame",
   "chat_messages", "morning_briefing", "proactive_suggestions", "consuela_state",
+  "emergency_contacts",
 ]);
 
 export function isGatewayCollection(collection: string): boolean {
