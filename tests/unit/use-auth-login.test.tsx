@@ -122,4 +122,29 @@ describe("useAuth.login — server-side authentication", () => {
 
     vi.unstubAllGlobals();
   });
+
+  // MF-1 — sign-out must also POST /api/auth/logout so the httpOnly
+  // consuela_session cookie dies; clearing localStorage alone left the
+  // server session alive (≤7d) on shared devices.
+  it("logout POSTs /api/auth/logout to clear the httpOnly session cookie", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ success: true }),
+      { status: 200 }
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    localStorage.setItem("consuela-auth-user", JSON.stringify({ id: 7, name: "Caspian" }));
+    renderProvider();
+    act(() => {
+      ctxRef.current!.logout();
+    });
+
+    const call = fetchMock.mock.calls.find(([u]: unknown[]) => String(u).includes("/api/auth/logout"));
+    expect(call).toBeTruthy();
+    expect((call as any[])[1].method).toBe("POST");
+    expect(localStorage.getItem("consuela-auth-user")).toBeNull();
+    expect(ctxRef.current!.isLoggedIn).toBe(false);
+
+    vi.unstubAllGlobals();
+  });
 });

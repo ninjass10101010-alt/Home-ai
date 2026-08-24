@@ -83,6 +83,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const logout = useCallback(() => {
+    // MF-1 — clear the httpOnly session cookie too: localStorage cleanup alone
+    // left the server session alive (≤7d) on shared devices. Fire-and-forget so
+    // sign-out never blocks or fails on a dead network.
+    fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+
     setCurrentUser(null);
     currentUserRef.current = null;
     localStorage.removeItem(AUTH_STORAGE_KEY);
