@@ -1,23 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Mocks must be hoisted before imports
-const mockGetList = vi.fn();
-const mockGetFullList = vi.fn();
+const mockGatewayList = vi.fn();
 const mockSelectTodaysEvents = vi.fn();
 
-vi.mock("@/lib/pb", () => ({
-  getPB: vi.fn(() => ({
-    collection: vi.fn(() => ({
-      getList: mockGetList,
-      getFullList: mockGetFullList,
-    })),
-  })),
-  getAdminPB: vi.fn(() => ({
-    collection: vi.fn(() => ({
-      getList: mockGetList,
-      getFullList: mockGetFullList,
-    })),
-  })),
+vi.mock("@/db/gateway-client", () => ({
+  gatewayList: mockGatewayList,
 }));
 
 vi.mock("@/db", () => ({
@@ -59,15 +47,19 @@ function dateOffset(days: number): string {
   return formatLocalDate(t);
 }
 
+function lastQuery(): URLSearchParams {
+  const qs: string = mockGatewayList.mock.calls[0][1];
+  expect(qs.startsWith("?")).toBe(true);
+  return new URLSearchParams(qs);
+}
+
 describe("getHomeEvents", () => {
   beforeEach(() => {
-    mockGetList.mockReset();
-    mockGetFullList.mockReset();
+    mockGatewayList.mockReset();
     mockSelectTodaysEvents.mockReset();
-    mockGetFullList.mockResolvedValue([]);
-    // default: selectTodaysEvents returns empty, getList returns empty items
+    // default: selectTodaysEvents returns empty, gateway list returns empty rows
     mockSelectTodaysEvents.mockReturnValue([]);
-    mockGetList.mockResolvedValue({ items: [] });
+    mockGatewayList.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -82,7 +74,7 @@ describe("getHomeEvents", () => {
     const { getHomeEvents } = await load();
     const todayEvents = [{ id: "t1", title: "Today event", date: todayStr() }];
     mockSelectTodaysEvents.mockReturnValue(todayEvents);
-    mockGetList.mockResolvedValue({ items: [] });
+    mockGatewayList.mockResolvedValue([]);
 
     const res = await getHomeEvents();
     expect(mockSelectTodaysEvents).toHaveBeenCalledTimes(1);
@@ -100,9 +92,9 @@ describe("getHomeEvents", () => {
       date: tom,
       importanceScore: 80 - i,
     }));
-    // Server was asked to limit 3, but we also test JS slice path: if getList returns 5,
-    // the hook should still slice to 3 after sorting.
-    mockGetList.mockResolvedValue({ items });
+    // Gateway caps server-side via limit param; if more rows come back anyway,
+    // the hook must still slice to 3 after sorting.
+    mockGatewayList.mockResolvedValue(items);
 
     const res = await getHomeEvents();
     expect(res.upcomingImportant).toHaveLength(3);
@@ -114,22 +106,19 @@ describe("getHomeEvents", () => {
     const { getHomeEvents } = await load();
     mockSelectTodaysEvents.mockReturnValue([]);
     const tom = tomorrowStr();
-    mockGetList.mockResolvedValue({
-      items: [
-        { id: "1", date: tom, importanceScore: 70 },
-        { id: "2", date: tom, importanceScore: 40 },
-        { id: "3", date: tom, importanceScore: 50 },
-        { id: "4", date: tom, importanceScore: 49 },
-      ],
-    });
+    mockGatewayList.mockResolvedValue([
+      { id: "1", date: tom, importanceScore: 70 },
+      { id: "2", date: tom, importanceScore: 40 },
+      { id: "3", date: tom, importanceScore: 50 },
+      { id: "4", date: tom, importanceScore: 49 },
+    ]);
 
-    const res = await getHomeEvents();
-    // Our JS re-sort slice will keep all, but needsJsFilter will detect low scores?
-    // Actually items are within window but scores <50 should be filtered in fallback path.
-    // However primary getList path assumes PB already filtered. To test the hook's
-    // JS enforcement, we force fallback by making getList throw, then getFullList returns mixed scores.
-    mockGetList.mockRejectedValueOnce(new Error("force fallback"));
-    mockGetFullList.mockResolvedValue([
+    await getHomeEvents();
+
+    // Force the JS-enforcement path: primary query fails, fetch-all fallback
+    // returns mixed scores; the hook must filter <50 itself.
+    mockGatewayList.mockRejectedValueOnce(new Error("force fallback"));
+    mockGatewayList.mockResolvedValue([
       { id: "1", date: tom, importanceScore: 70 },
       { id: "2", date: tom, importanceScore: 40 },
       { id: "3", date: tom, importanceScore: 50 },
@@ -141,28 +130,28 @@ describe("getHomeEvents", () => {
     expect(res2.upcomingImportant.every((e: any) => e.importanceScore >= 50)).toBe(true);
   });
 
-  it("queries PB with date window tomorrow inclusive and end exclusive (local date)", async () => {
+  it("queries the events collection with windowed filter, sort and limit 3", async () => {
     const { getHomeEvents } = await load();
     mockSelectTodaysEvents.mockReturnValue([]);
-    mockGetList.mockResolvedValue({ items: [] });
+    mockGatewayList.mockResolvedValue([]);
 
     await getHomeEvents();
 
-    expect(mockGetList).toHaveBeenCalledTimes(1);
-    const args = mockGetList.mock.calls[0];
-    expect(args[0]).toBe(1);
-    expect(args[1]).toBe(3);
-    const opts = args[2];
-    expect(opts.sort).toBe("-importanceScore,date");
+    expect(mockGatewayList).toHaveBeenCalledTimes(1);
+    const args = mockGatewayList.mock.calls[0];
+    expect(args[0]).toBe("events");
+    const opts = lastQuery();
+    expect(opts.get("limit")).toBe("3");
+    expect(opts.get("sort")).toBe("-importanceScore,date");
     // Filter should contain local dates
     const tom = tomorrowStr();
     const end = endStr();
-    expect(opts.filter).toContain(`date >= "${tom}"`);
-    expect(opts.filter).toContain(`date < "${end}"`);
-    expect(opts.filter).toContain(`importanceScore >= 50`);
+    expect(opts.get("filter")).toContain(`date >= "${tom}"`);
+    expect(opts.get("filter")).toContain(`date < "${end}"`);
+    expect(opts.get("filter")).toContain(`importanceScore >= 50`);
     // Must not include today
     const today = todayStr();
-    expect(opts.filter).not.toContain(`date >= "${today}"`);
+    expect(opts.get("filter")).not.toContain(`date >= "${today}"`);
   });
 
   it("excludes today and includes tomorrow, excludes end boundary", async () => {
@@ -174,8 +163,8 @@ describe("getHomeEvents", () => {
     const afterEnd = dateOffset(9);
 
     // Force JS path to verify window logic
-    mockGetList.mockRejectedValueOnce(new Error("filter error"));
-    mockGetFullList.mockResolvedValue([
+    mockGatewayList.mockRejectedValueOnce(new Error("filter error"));
+    mockGatewayList.mockResolvedValue([
       { id: "today", date: today, importanceScore: 90 },
       { id: "tom", date: tom, importanceScore: 80 },
       { id: "end", date: end, importanceScore: 95 }, // exclusive -> excluded
@@ -199,8 +188,8 @@ describe("getHomeEvents", () => {
     const d2 = dateOffset(2);
     const d3 = dateOffset(3);
     // Force JS fallback path
-    mockGetList.mockRejectedValueOnce(new Error("filter error"));
-    mockGetFullList.mockResolvedValue([
+    mockGatewayList.mockRejectedValueOnce(new Error("filter error"));
+    mockGatewayList.mockResolvedValue([
       { id: "a", date: d3, importanceScore: 80 },
       { id: "b", date: tom, importanceScore: 80 }, // same score earlier date first
       { id: "c", date: d2, importanceScore: 95 }, // highest score first
@@ -221,8 +210,8 @@ describe("getHomeEvents", () => {
     const startIso = tomDate.toISOString();
     const endIso = new Date(tomDate.getTime() + 60 * 60000).toISOString();
 
-    mockGetList.mockRejectedValueOnce(new Error("filter error"));
-    mockGetFullList.mockResolvedValue([
+    mockGatewayList.mockRejectedValueOnce(new Error("filter error"));
+    mockGatewayList.mockResolvedValue([
       { id: "start1", start: startIso, end: endIso, title: "Doctor via start", importanceScore: 70 },
     ]);
 
@@ -234,25 +223,23 @@ describe("getHomeEvents", () => {
   it("uses local date string not UTC for window", async () => {
     const { getHomeEvents } = await load();
     mockSelectTodaysEvents.mockReturnValue([]);
-    mockGetList.mockResolvedValue({ items: [] });
+    mockGatewayList.mockResolvedValue([]);
     await getHomeEvents();
-    const opts = mockGetList.mock.calls[0][2];
+    const opts = lastQuery();
     // Ensure filter dates are YYYY-MM-DD and equal to locally computed strings
     const tom = tomorrowStr();
     const end = endStr();
     // They should be local-derived, not ISO UTC slicing
-    // We verify they match our local helper (already done) and are not necessarily equal to UTC today
     expect(tom).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(end).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect(opts.filter).toContain(tom);
-    expect(opts.filter).toContain(end);
+    expect(opts.get("filter")).toContain(tom);
+    expect(opts.get("filter")).toContain(end);
   });
 
-  it("returns empty upcomingImportant on PB error", async () => {
+  it("returns empty upcomingImportant on gateway failure", async () => {
     const { getHomeEvents } = await load();
     mockSelectTodaysEvents.mockReturnValue([]);
-    mockGetList.mockRejectedValue(new Error("pb down"));
-    mockGetFullList.mockRejectedValue(new Error("also down"));
+    mockGatewayList.mockRejectedValue(new Error("gateway down"));
     const res = await getHomeEvents();
     expect(res.upcomingImportant).toEqual([]);
     expect(res.todayEvents).toEqual([]);
@@ -263,7 +250,7 @@ describe("getHomeEvents", () => {
     mockSelectTodaysEvents.mockReturnValue([{ id: "today1", date: todayStr() }]);
     // Provide 10 in-window events with varying scores; only top 3 sorted should survive
     const tom = tomorrowStr();
-    mockGetList.mockRejectedValueOnce(new Error("fallback"));
+    mockGatewayList.mockRejectedValueOnce(new Error("fallback"));
     const many = Array.from({ length: 10 }, (_, i) => ({
       id: `e${i}`,
       date: dateOffset(1 + (i % 7)), // days 1..7 rotating, all in 7-day window
@@ -271,7 +258,7 @@ describe("getHomeEvents", () => {
     }));
     // Make one score below threshold to ensure filtering
     many.push({ id: "low", date: tom, importanceScore: 30 });
-    mockGetFullList.mockResolvedValue(many);
+    mockGatewayList.mockResolvedValue(many);
 
     const res = await getHomeEvents();
     expect(res.upcomingImportant.length).toBeLessThanOrEqual(3);

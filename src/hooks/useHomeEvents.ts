@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { db } from "@/db";
-import { getPB } from "@/lib/pb";
+import { gatewayList } from "@/db/gateway-client";
 
 /**
  * Home data hook for upcoming important events.
@@ -15,9 +15,8 @@ import { getPB } from "@/lib/pb";
  * Window is 7 full days after today: tomorrow..today+7 inclusive
  * (end = today+8 exclusive) per global constraint.
  *
- * Uses public PocketBase client (getPB) — no admin auth — so the hook
- * is safe to run in a "use client" component. The `events` collection
- * has public listRule (null) and is readable without PB_ADMIN env.
+ * Reads go through the sessioned DB gateway (/api/db/*, src/db/gateway-client.ts)
+ * so the hook stays safe in a "use client" component under locked PB rules.
  * Uses local date strings (YYYY-MM-DD) to match the cron scorer's
  * local-midnight windowing. Falls back to JS filtering for `start`
  * shaped rows and for PB filter failures.
@@ -82,26 +81,17 @@ export async function getHomeEvents(): Promise<HomeEventsResult> {
 
   let upcomingImportant: any[] = [];
 
-  // Primary: server-filtered getList (limit 3, sorted) via public PB client
+  // Primary: server-filtered list (limit 3, sorted) via the sessioned gateway.
+  // Mirrors the old PB getList(1, 3, { filter, sort }) call exactly.
+  const windowParams = new URLSearchParams({
+    filter: `date >= "${tomorrowStr}" && date < "${endStr}" && importanceScore >= 50`,
+    sort: "-importanceScore,date",
+    limit: "3",
+  });
+
   try {
-    const pb = getPB();
-    const col: any = pb.collection("events");
-    let items: any[] = [];
-    if (typeof col.getList === "function") {
-      const page = await col.getList(1, 3, {
-        filter: `date >= "${tomorrowStr}" && date < "${endStr}" && importanceScore >= 50`,
-        sort: "-importanceScore,date",
-        requestKey: null,
-      });
-      // getList returns { items, ... } or array in some mocks
-      if (Array.isArray(page)) items = page;
-      else if (page && Array.isArray(page.items)) items = page.items;
-      else items = [];
-    } else {
-      // Fallback if getList unavailable: fetch all and filter in JS
-      const all = await col.getFullList({ requestKey: null });
-      items = all as any[];
-    }
+    let items: any[] = await gatewayList("events", `?${windowParams.toString()}`);
+    if (!Array.isArray(items)) items = [];
 
     // If primary used getList, items are already filtered/sorted/limited.
     // If it used getFullList fallback shape, we still need JS filter/sort/limit.
@@ -157,9 +147,9 @@ export async function getHomeEvents(): Promise<HomeEventsResult> {
         .slice(0, 3);
     }
   } catch {
-    // Secondary fallback: fetch all and filter in JS via public PB client
+    // Secondary fallback: fetch all events via the sessioned gateway, filter in JS
     try {
-      const all: any[] = await getPB().collection("events").getFullList({ requestKey: null } as any);
+      const all: any[] = await gatewayList("events");
       upcomingImportant = (all as any[])
         .filter((e: any) => {
           const d = getEventDateStr(e);
