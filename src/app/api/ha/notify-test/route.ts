@@ -23,8 +23,19 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "telegram_not_configured" }, { status: 400 });
     }
     try {
-      await sendTelegramMessage(chatId, `${TEST_TITLE}\n${TEST_MESSAGE}`);
-      return NextResponse.json({ ok: true });
+      // {success:false} means the send failed (bad token, chat gone) — the
+      // Test button must show failure, not a false "Sent ✓".
+      const result = await sendTelegramMessage(chatId, `${TEST_TITLE}\n${TEST_MESSAGE}`);
+      if (result?.success === true) {
+        return NextResponse.json({ ok: true });
+      }
+      return NextResponse.json(
+        {
+          ok: false,
+          error: result && "error" in result ? String(result.error) : "telegram_send_failed",
+        },
+        { status: 502 }
+      );
     } catch (err) {
       return NextResponse.json(
         { ok: false, error: err instanceof Error ? err.message : String(err) },

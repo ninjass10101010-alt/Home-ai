@@ -71,8 +71,17 @@ export async function broadcastHouseAlert(title: string, message: string): Promi
   const telegramChatId = process.env.TELEGRAM_ALERT_CHAT_ID;
   if (telegramChatId) {
     try {
-      await sendTelegramMessage(telegramChatId, `${title}\n${message}`);
-      result.sent += 1;
+      // sendTelegramMessage reports failures as {success:false} rather than
+      // throwing — a false "delivered" on the emergency path is dangerous,
+      // so the result must be checked, not assumed.
+      const tg = await sendTelegramMessage(telegramChatId, `${title}\n${message}`);
+      if (tg?.success === true) {
+        result.sent += 1;
+      } else {
+        result.failed += 1;
+        const detail = tg && "error" in tg ? String(tg.error) : "unknown error";
+        result.notes.push(`telegram: ${detail}`);
+      }
     } catch (err) {
       result.failed += 1;
       result.notes.push(`telegram: ${err instanceof Error ? err.message : String(err)}`);

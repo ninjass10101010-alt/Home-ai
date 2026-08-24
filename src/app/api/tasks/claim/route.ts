@@ -32,7 +32,7 @@ function normalizeMemberName(member: any): string {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { taskId, claimantName, claimantPin, title, points, assigneeEmoji } = body || {};
+    const { taskId, claimantName, claimantPin, assigneeEmoji } = body || {};
 
     if (taskId === undefined || !claimantName || !claimantPin) {
       return NextResponse.json({ error: "taskId, claimantName, and claimantPin are required" }, { status: 400 });
@@ -47,6 +47,15 @@ export async function POST(request: NextRequest) {
     const normalizedName = normalizeMemberName(claimant);
 
     const result = await withAdmin(async (pb) => {
+      // Server-authoritative task lookup FIRST: the stored row decides the
+      // points value. The request body is never trusted for scoring — a
+      // forged body could otherwise mint arbitrary points.
+      const taskRecords = await pb.collection("tasks").getFullList({ requestKey: null });
+      const task = taskRecords.find((r: any) => r.taskId === Number(taskId));
+      if (!task) {
+        return { ok: false, reason: "unknown-task" } as const;
+      }
+
       const weekRecords = await pb.collection("week_data").getFullList({ requestKey: null });
       let week = weekRecords.find((r: any) => r.weekStart === currentWeek) || null;
 
@@ -66,14 +75,14 @@ export async function POST(request: NextRequest) {
       }
 
       const now = new Date().toISOString();
-      const amount = Number(points) || 0;
+      const amount = Number(task.points) || 0;
       const tx: Transaction = {
         id: Date.now() + Math.floor(Math.random() * 1000),
         timestamp: now,
         member: normalizedName,
         type: "earn",
         amount,
-        description: `Completed: ${title || "task"}${amount > 0 ? ` (+${amount}pts)` : ""}`,
+        description: `Completed: ${task.title || "task"}${amount > 0 ? ` (+${amount}pts)` : ""}`,
         taskId: Number(taskId),
       };
 
@@ -92,25 +101,39 @@ export async function POST(request: NextRequest) {
         await pb.collection("week_data").create(updatedWeek);
       }
 
-      // Also record the claim on the task row so the tasks collection reflects the new assignee
-      const taskRecords = await pb.collection("tasks").getFullList({ requestKey: null });
-      const task = taskRecords.find((r: any) => r.taskId === Number(taskId));
-      if (task) {
-        await pb.collection("tasks").update(task.id, {
-          assignee: normalizedName,
-          assigneeEmoji: assigneeEmoji || claimant.emoji || "",
-        }).catch(() => {});
+      // Lost-update detection: PocketBase has no conditional updates, so a
+      // concurrent claim can overwrite ours after both passed the guard
+      // above. Re-read what actually landed — if our transaction is gone,
+      // another device won the race and we must report an honest 409 rather
+      // than pretend the claim succeeded.
+      const verifyRow: any = week
+        ? await pb.collection("week_data").getOne(week.id, { requestKey: null })
+        : (await pb.collection("week_data").getFullList({ requestKey: null }))
+            .find((r: any) => r.weekStart === currentWeek);
+      const verifiedHistory = parseJSON<Transaction[]>(verifyRow?.history, []);
+      if (!verifiedHistory.some((t) => t.id === tx.id)) {
+        const winner = verifiedHistory.find(
+          (t) => t.taskId === Number(taskId) && t.type === "earn"
+        );
+        return { ok: false, reason: "already-claimed", claimedBy: winner?.member };
       }
+
+      // Record the claim on the task row so the tasks collection reflects the new assignee
+      await pb.collection("tasks").update(task.id, {
+        assignee: normalizedName,
+        assigneeEmoji: assigneeEmoji || claimant.emoji || "",
+      }).catch(() => {});
 
       return { ok: true, claimedBy: normalizedName, weekData: updatedWeek };
     });
 
     if (!result.ok) {
+      const status = result.reason === "unknown-task" ? 404 : 409;
       return NextResponse.json({
         success: false,
         reason: result.reason,
-        claimedBy: result.claimedBy,
-      }, { status: 409 });
+        claimedBy: (result as any).claimedBy,
+      }, { status });
     }
 
     return NextResponse.json({ success: true, ...result });

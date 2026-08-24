@@ -1,9 +1,11 @@
 "use client";
 
+import { useState } from "react";
 import Chip from "@/components/ui/Chip";
 import SoftButton from "@/components/ui/SoftButton";
-import { entitiesByDomain, entityFriendlyName, useHACall, type HAState } from "@/hooks/useHAState";
+import { entitiesByDomain, entityFriendlyName, useAlarmCall, type HAState } from "@/hooks/useHAState";
 import { useAuth } from "@/hooks/useAuth";
+import AlarmPinModal from "./AlarmPinModal";
 
 const OPEN_SENSOR_CLASSES = new Set(["door", "window", "motion"]);
 
@@ -22,7 +24,8 @@ function alarmLabel(state: string): string {
 export default function SecurityPanel({ states, onRefresh }: SecurityPanelProps) {
   const { currentUser } = useAuth();
   const readOnly = currentUser?.role === "child";
-  const { calling, callService } = useHACall();
+  const { calling, setAlarm } = useAlarmCall();
+  const [pendingAction, setPendingAction] = useState<"arm_home" | "disarm" | null>(null);
 
   const alarm = states.find((s) => s.entity_id.startsWith("alarm_control_panel."));
   const armed = Boolean(alarm && alarm.state !== "disarmed");
@@ -38,16 +41,11 @@ export default function SecurityPanel({ states, onRefresh }: SecurityPanelProps)
       OPEN_SENSOR_CLASSES.has(s.attributes.device_class as string)
   );
 
-  const armHome = async () => {
-    if (!alarm) return;
-    const ok = await callService("alarm_control_panel", "alarm_arm_home", { entity_id: alarm.entity_id });
+  const handlePinSubmit = async (pin: string): Promise<boolean> => {
+    if (!alarm || !pendingAction) return false;
+    const ok = await setAlarm(pendingAction, alarm.entity_id, pin);
     if (ok) await onRefresh?.();
-  };
-
-  const disarm = async () => {
-    if (!alarm) return;
-    const ok = await callService("alarm_control_panel", "alarm_disarm", { entity_id: alarm.entity_id });
-    if (ok) await onRefresh?.();
+    return ok;
   };
 
   return (
@@ -59,15 +57,23 @@ export default function SecurityPanel({ states, onRefresh }: SecurityPanelProps)
           <p className="mt-1 text-xs text-text-secondary">{entityFriendlyName(alarm)}</p>
           {!readOnly &&
             (armed ? (
-              <SoftButton size="lg" variant="danger" loading={calling} onClick={disarm} className="mt-4 w-full sm:w-auto">
+              <SoftButton size="lg" variant="danger" loading={calling} onClick={() => setPendingAction("disarm")} className="mt-4 w-full sm:w-auto">
                 Disarm
               </SoftButton>
             ) : (
-              <SoftButton size="lg" loading={calling} onClick={armHome} className="mt-4 w-full sm:w-auto">
+              <SoftButton size="lg" loading={calling} onClick={() => setPendingAction("arm_home")} className="mt-4 w-full sm:w-auto">
                 Arm home
               </SoftButton>
             ))}
         </div>
+      )}
+
+      {pendingAction && alarm && !readOnly && (
+        <AlarmPinModal
+          action={pendingAction}
+          onSubmit={handlePinSubmit}
+          onClose={() => setPendingAction(null)}
+        />
       )}
 
       <div className="rounded-3xl border border-white/10 bg-[var(--color-surface-0)]/30 p-5 backdrop-blur-xl">

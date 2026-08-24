@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { authorizeAdminRequest } from "@/lib/admin-auth";
 import { execSync } from "child_process";
 import { readFile } from "fs/promises";
 import path from "path";
@@ -33,7 +34,12 @@ async function runCmd(cmd: string, cwd?: string): Promise<string> {
   });
 }
 
-export async function POST() {
+export async function POST(request: Request) {
+  const auth = await authorizeAdminRequest(request);
+  if (!auth.ok) {
+    return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
+  }
+
   const logs: UpdateLog[] = [];
   const ts = () => new Date().toISOString();
 

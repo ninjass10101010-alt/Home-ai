@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { authorizeAdminRequest } from "@/lib/admin-auth";
 import { restartContainer } from "@/lib/docker-api";
 
 export const dynamic = "force-dynamic";
@@ -6,6 +7,11 @@ export const dynamic = "force-dynamic";
 const ALLOWED = ["consuela-dashboard", "pocketbase", "hermes-agent-2"];
 
 export async function POST(request: NextRequest) {
+  const auth = await authorizeAdminRequest(request);
+  if (!auth.ok) {
+    return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
+  }
+
   let body: { container?: string };
   try {
     body = await request.json();

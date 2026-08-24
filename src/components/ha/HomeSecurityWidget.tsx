@@ -1,11 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import SectionCard from "@/components/patterns/SectionCard";
 import Chip from "@/components/ui/Chip";
 import SoftButton from "@/components/ui/SoftButton";
-import { entitiesByDomain, entityFriendlyName, useHACall, useHAState } from "@/hooks/useHAState";
+import { entitiesByDomain, entityFriendlyName, useAlarmCall, useHAState } from "@/hooks/useHAState";
 import { useAuth } from "@/hooks/useAuth";
+import AlarmPinModal from "./AlarmPinModal";
 
 const OPEN_SENSOR_CLASSES = new Set(["door", "window", "motion", "smoke", "gas", "moisture"]);
 
@@ -13,7 +15,8 @@ export default function HomeSecurityWidget({ className }: { className?: string }
   const { currentUser } = useAuth();
   const readOnly = currentUser?.role === "child";
   const { states } = useHAState();
-  const { calling, callService } = useHACall();
+  const { calling, setAlarm } = useAlarmCall();
+  const [pendingAction, setPendingAction] = useState<"arm_home" | "disarm" | null>(null);
 
   const people = entitiesByDomain(states, "person");
   const homeCount = people.filter((p) => p.state === "home").length;
@@ -28,14 +31,9 @@ export default function HomeSecurityWidget({ className }: { className?: string }
 
   const alarm = states.find((s) => s.entity_id.startsWith("alarm_control_panel."));
 
-  const armHome = async () => {
-    if (!alarm) return;
-    await callService("alarm_control_panel", "alarm_arm_home", { entity_id: alarm.entity_id });
-  };
-
-  const disarm = async () => {
-    if (!alarm) return;
-    await callService("alarm_control_panel", "alarm_disarm", { entity_id: alarm.entity_id });
+  const handlePinSubmit = async (pin: string): Promise<boolean> => {
+    if (!alarm || !pendingAction) return false;
+    return setAlarm(pendingAction, alarm.entity_id, pin);
   };
 
   return (
@@ -94,17 +92,25 @@ export default function HomeSecurityWidget({ className }: { className?: string }
             <Chip size="sm" tone={alarm.state === "disarmed" ? "success" : "danger"}>{alarm.state}</Chip>
             {!readOnly &&
               (alarm.state === "disarmed" ? (
-                <SoftButton size="sm" variant="secondary" loading={calling} onClick={armHome}>
+                <SoftButton size="sm" variant="secondary" loading={calling} onClick={() => setPendingAction("arm_home")}>
                   Arm home
                 </SoftButton>
               ) : alarm.state === "armed_home" || alarm.state === "armed_away" ? (
-                <SoftButton size="sm" variant="secondary" loading={calling} onClick={disarm}>
+                <SoftButton size="sm" variant="secondary" loading={calling} onClick={() => setPendingAction("disarm")}>
                   Disarm
                 </SoftButton>
               ) : null)}
           </div>
         )}
       </div>
+
+      {pendingAction && alarm && !readOnly && (
+        <AlarmPinModal
+          action={pendingAction}
+          onSubmit={handlePinSubmit}
+          onClose={() => setPendingAction(null)}
+        />
+      )}
     </SectionCard>
   );
 }

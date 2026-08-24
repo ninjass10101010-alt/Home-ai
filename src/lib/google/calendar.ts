@@ -148,9 +148,23 @@ export async function syncCalendar(): Promise<SyncOutcome> {
   const run = (async () => {
     try {
       const existingToken = await getSyncToken();
-      const { events, nextSyncToken } = await listAllEvents(
-        existingToken ? { syncToken: existingToken } : {},
-      );
+      let events: GoogleCalendarEvent[];
+      let nextSyncToken: string | null;
+
+      try {
+        ({ events, nextSyncToken } = await listAllEvents(
+          existingToken ? { syncToken: existingToken } : {},
+        ));
+      } catch (err) {
+        // Google returns 410 GONE once an incremental syncToken is expired or
+        // invalidated (e.g. after ~a week of downtime, permission changes, or
+        // a revoked re-grant). Without this fallback the stale token stays in
+        // PB forever and every subsequent cron run fails with the same error.
+        // Clear it and do one full-window resync instead.
+        if ((err as any)?.status !== 410 || !existingToken) throw err;
+        console.log("[google-sync] sync token invalidated (410) — performing full resync");
+        ({ events, nextSyncToken } = await listAllEvents({}));
+      }
 
       let upserted = 0;
       let deleted = 0;

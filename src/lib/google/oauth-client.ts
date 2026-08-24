@@ -143,7 +143,12 @@ export async function googleFetch<T = unknown>(
 
   if (!res.ok) {
     const reason = (data && (data.error?.message || data.error_description)) || text || res.statusText;
-    throw new Error(`Google API ${res.status}: ${reason}`);
+    // Carry the HTTP status on the error so callers can react to specific
+    // codes — notably 410 GONE, which means an incremental syncToken expired
+    // and the caller must clear it and fall back to a full resync.
+    const err = new Error(`Google API ${res.status}: ${reason}`) as Error & { status?: number };
+    err.status = res.status;
+    throw err;
   }
 
   return { status: res.status, data: data as T, headers: res.headers };

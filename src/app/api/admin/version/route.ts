@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { authorizeAdminRequest } from "@/lib/admin-auth";
 import { readFile } from "fs/promises";
 import path from "path";
 
@@ -20,7 +21,12 @@ interface GitHubCommit {
   commit: { message: string; author: { date: string; name: string } };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const auth = await authorizeAdminRequest(request);
+  if (!auth.ok) {
+    return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
+  }
+
   try {
     const versionPath = path.join(process.cwd(), "public", "version.json");
     let builtAt: VersionInfo | null = null;

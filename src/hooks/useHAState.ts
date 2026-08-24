@@ -179,6 +179,53 @@ export function useHACall(): {
   return { calling, callService };
 }
 
+/** PIN-gated alarm arm/disarm via POST /api/ha/alarm. Arm/disarm is
+ * human-only: every call must carry a family-member PIN that the server
+ * verifies before touching Home Assistant. Returns false on wrong PIN. */
+export function useAlarmCall(): {
+  calling: boolean;
+  setAlarm: (
+    action: "arm_home" | "disarm",
+    entityId: string,
+    pin: string
+  ) => Promise<boolean>;
+} {
+  const [calling, setCalling] = useState(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const setAlarm = useCallback(
+    async (action: "arm_home" | "disarm", entityId: string, pin: string): Promise<boolean> => {
+      setCalling(true);
+      try {
+        const res = await fetch("/api/ha/alarm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action, entity_id: entityId, pin }),
+        });
+        const data: unknown = await res.json().catch(() => null);
+        const body = data as { success?: boolean } | null;
+        const ok = Boolean(body && body.success === true);
+        if (ok) scheduleHARerefetch();
+        return ok;
+      } catch {
+        return false;
+      } finally {
+        if (mountedRef.current) setCalling(false);
+      }
+    },
+    []
+  );
+
+  return { calling, setAlarm };
+}
+
 /** Entities whose id starts with the given domain (first segment before "."). */
 export function entitiesByDomain(states: HAState[], domain: string): HAState[] {
   const prefix = `${domain}.`;
