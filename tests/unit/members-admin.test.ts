@@ -5,9 +5,22 @@ const mocks = vi.hoisted(() => ({
   withAdmin: vi.fn(),
   findMemberByName: vi.fn(),
   listMembersSanitized: vi.fn(),
+  createMemberRecord: vi.fn(),
   verifySession: vi.fn(),
   authorizeAdminRequest: vi.fn(),
 }));
+
+function fakePB(overrides: {
+  members?: any[];
+  onCreate?: (args: any) => any;
+}) {
+  return {
+    collection: () => ({
+      getFullList: async () => overrides.members ?? [],
+      create: async (args: any) => overrides.onCreate?.(args),
+    }),
+  };
+}
 
 vi.mock("@/lib/pb-auth", () => ({
   withAdmin: (fn: (pb: unknown) => Promise<unknown>) => mocks.withAdmin(fn),
@@ -16,6 +29,7 @@ vi.mock("@/lib/pb-auth", () => ({
 vi.mock("@/lib/server-auth", () => ({
   findMemberByName: mocks.findMemberByName,
   listMembersSanitized: mocks.listMembersSanitized,
+  createMemberRecord: mocks.createMemberRecord,
   sanitizeMember: (m: any) => {
     const { pin, ...rest } = m;
     return rest;
@@ -31,7 +45,7 @@ vi.mock("@/lib/admin-auth", () => ({
   authorizeAdminRequest: mocks.authorizeAdminRequest,
 }));
 
-import { GET, PATCH, DELETE } from "@/app/api/members/admin/route";
+import { GET, PATCH, POST, DELETE } from "@/app/api/members/admin/route";
 
 function req(init?: { method?: string; body?: unknown; cookie?: string }): NextRequest {
   return new NextRequest("http://localhost/api/members/admin", {
@@ -195,5 +209,97 @@ describe("DELETE /api/members/admin", () => {
     mocks.authorizeAdminRequest.mockResolvedValue(ADULT);
     mocks.findMemberByName.mockResolvedValue(null);
     expect((await DELETE(req({ method: "DELETE", body: { name: "Nobody" } }))).status).toBe(404);
+  });
+});
+
+describe("POST /api/members/admin (route)", () => {
+  it("creates a member for an adult session and returns the sanitized row", async () => {
+    mocks.authorizeAdminRequest.mockResolvedValue(ADULT);
+    mocks.createMemberRecord.mockResolvedValue({
+      id: "pb-row-new",
+      name: "Nova Garcia",
+      role: "child",
+      emoji: "🦄",
+      pin: "1234",
+    });
+
+    const res = await POST(
+      req({ method: "POST", body: { name: "Nova Garcia", role: "child", emoji: "🦄" } })
+    );
+
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body.member).toMatchObject({ id: "pb-row-new", name: "Nova Garcia" });
+    expect(body.member.pin).toBeUndefined();
+    expect(mocks.createMemberRecord).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Nova Garcia" })
+    );
+  });
+
+  it("rejects a child session with 403 before touching data", async () => {
+    mocks.authorizeAdminRequest.mockResolvedValue(CHILD);
+
+    const res = await POST(req({ method: "POST", body: { name: "Sneaky Kid", role: "parent" } }));
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ error: "adult_only" });
+    expect(mocks.createMemberRecord).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 duplicate when a matching member already exists", async () => {
+    mocks.authorizeAdminRequest.mockResolvedValue(ADULT);
+    mocks.createMemberRecord.mockResolvedValue(null);
+
+    const res = await POST(req({ method: "POST", body: { name: "Rebecca" } }));
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: "duplicate" });
+  });
+
+  it("returns 400 when name is missing", async () => {
+    mocks.authorizeAdminRequest.mockResolvedValue(ADULT);
+
+    const res = await POST(req({ method: "POST", body: { role: "child" } }));
+
+    expect(res.status).toBe(400);
+    expect(mocks.createMemberRecord).not.toHaveBeenCalled();
+  });
+});
+
+describe("createMemberRecord (real server-auth helper)", () => {
+  async function realHelper() {
+    const actual = await vi.importActual<typeof import("@/lib/server-auth")>("@/lib/server-auth");
+    return actual.createMemberRecord;
+  }
+
+  it("ignores a client-supplied pin and stores the seed-side default so the member can log in", async () => {
+    const createMemberRecord = await realHelper();
+    let created: any = null;
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) =>
+      fn(fakePB({ members: [], onCreate: (args) => ((created = args), { ...args, id: "new-1" }) }))
+    );
+
+    const row = await createMemberRecord({ name: "Rebecca", role: "parent", emoji: "🦊", pin: "9999" });
+
+    expect(row).toMatchObject({ id: "new-1", name: "Rebecca", role: "parent", emoji: "🦊" });
+    // The client's pin never wins; the server-side resolved default does.
+    expect(created.pin).toBe("0202");
+    expect(JSON.stringify(created)).not.toContain("9999");
+  });
+
+  it("returns null without creating when an existing PB record matches the name", async () => {
+    const createMemberRecord = await realHelper();
+    let created: any = null;
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) =>
+      fn(fakePB({
+        members: [{ id: "r1", name: "Rebecca Garcia", role: "parent" }],
+        onCreate: (args) => ((created = args), args),
+      }))
+    );
+
+    const row = await createMemberRecord({ name: "Rebecca" });
+
+    expect(row).toBeNull();
+    expect(created).toBeNull();
   });
 });

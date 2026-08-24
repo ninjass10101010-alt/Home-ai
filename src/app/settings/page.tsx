@@ -408,7 +408,29 @@ export default function SettingsPage() {
       }
       showToast(`✅ Updated ${memberForm.name.trim()}`);
     } else {
-      db.insertMember({ ...payload, joined: new Date().toLocaleDateString("en-US", { month: "short", year: "numeric" }) });
+      // Adds go through the adults-only server route too — the browser can no
+      // longer create members straight in PocketBase (locked createRule), and
+      // the server resolves the new member's PIN itself.
+      try {
+        const res = await fetch("/api/members/admin", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...payload, joined: new Date().toLocaleDateString("en-US", { month: "short", year: "numeric" }) }),
+        });
+        if (!res.ok) {
+          showToast(
+            res.status === 403
+              ? "🔒 Adults only — sign in as a parent to add members."
+              : res.status === 409
+                ? `⚠️ ${memberForm.name.trim()} is already on the family list.`
+                : "❌ Couldn't add member"
+          );
+          return;
+        }
+      } catch {
+        showToast("❌ Couldn't add member");
+        return;
+      }
       showToast(`✅ Added ${memberForm.name.trim()}`);
     }
     setMembers(db.selectMembersDetailed());

@@ -106,3 +106,26 @@ export function sanitizeMember(member: any): ServerMember {
   const { pin, ...rest } = member;
   return rest as ServerMember;
 }
+
+// Create a brand-new member row (Settings → Family Members "Add member").
+// Mirrors findOrCreateMemberRecord's PIN handling: the request may never carry
+// a pin — any client-supplied value is dropped and the seed-side default for
+// the name is resolved server-side (MEMBER_DEFAULT_PINS) so the new member can
+// log in immediately. Returns null when an existing PB record matches the name
+// (the caller maps that to 409 duplicate).
+export async function createMemberRecord(
+  fields: Record<string, unknown>
+): Promise<any | null> {
+  const { pin: _ignored, ...clean } = fields;
+  const name = String(clean.name || "").trim();
+  if (!name) return null;
+  return withAdmin(async (pb) => {
+    const records = await pb.collection("members").getFullList({ requestKey: null });
+    if (records.some((r: any) => namesMatch(r.name, name))) return null;
+    return pb.collection("members").create({
+      ...clean,
+      name,
+      pin: resolveDefaultMemberPin(name),
+    });
+  });
+}

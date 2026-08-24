@@ -1,18 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withAdmin } from "@/lib/pb-auth";
-import { findMemberByName, listMembersSanitized, sanitizeMember } from "@/lib/server-auth";
+import { createMemberRecord, findMemberByName, listMembersSanitized, sanitizeMember } from "@/lib/server-auth";
 import { verifySession, SESSION_COOKIE } from "@/lib/session";
 import { authorizeAdminRequest } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 
 // Members admin surface for Settings → Family Members, replacing the old
-// client-direct PB writes (db.updateMember / db.deleteMember) that broke once
-// PB rules locked down and that were insecure anyway.
+// client-direct PB writes (db.insertMember / db.updateMember / db.deleteMember)
+// that broke once PB rules locked down and that were insecure anyway.
 //
 //   GET    — any VALID SESSION (adult or child): read-only sanitized roster.
-//   PATCH  — adults only (session role ≠ child, ADMIN_SECRET bearer, or
-//            x-admin-pin): update a member by resolved id.
+//   POST   — adults only (same gate as PATCH/DELETE): create a member. The body
+//            may never carry a pin — a server-side seed-side default is
+//            resolved for the name so the new member can log in. Duplicate
+//            names → 409 {error:"duplicate"}.
+//   PATCH  — adults only: update a member by resolved id.
 //   DELETE — same adult gate; refuses to delete the last parent-role member.
 
 export async function GET(request: NextRequest) {
@@ -26,6 +29,27 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("Members admin GET error:", error);
     return NextResponse.json({ error: "Failed to list members" }, { status: 500 });
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const gate = await authorizeAdminRequest(request);
+    if (!gate.ok) {
+      return NextResponse.json({ error: gate.error ?? "unauthorized" }, { status: gate.status ?? 401 });
+    }
+    const body = await request.json();
+    if (!body || typeof body !== "object" || !body.name) {
+      return NextResponse.json({ error: "name is required" }, { status: 400 });
+    }
+    const member = await createMemberRecord(body);
+    if (!member) {
+      return NextResponse.json({ error: "duplicate" }, { status: 409 });
+    }
+    return NextResponse.json({ member: sanitizeMember(member) }, { status: 201 });
+  } catch (error) {
+    console.error("Members admin POST error:", error);
+    return NextResponse.json({ error: "Failed to create member" }, { status: 500 });
   }
 }
 
