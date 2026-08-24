@@ -45,6 +45,23 @@ describe("POST /api/auth/login", () => {
     expect((await loginPOST(req("http://x", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ memberName: "R", pin: "0000" }) }))).status).toBe(401);
     expect((await loginPOST(req("http://x", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}) }))).status).toBe(400);
   });
+
+  it("returns 500 without issuing a cookie when SESSION_SECRET is unset", async () => {
+    vi.stubEnv("SESSION_SECRET", "");
+    mocks.verifyPinFromPB.mockResolvedValue({ id: "m1", name: "Rebecca", role: "parent", pin: "9999" });
+
+    const res = await loginPOST(req("http://x/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ memberName: "Rebecca", pin: "1234" }),
+    }));
+
+    expect(res.status).toBe(500);
+    expect((await res.json()).error).toContain("SESSION_SECRET");
+    expect(res.headers.get("set-cookie")).toBeNull();
+    // Guard sits after PIN verification: bad config must not skip the auth check
+    expect(mocks.verifyPinFromPB).toHaveBeenCalledWith("Rebecca", "1234");
+  });
 });
 
 describe("GET /api/auth/whoami", () => {
