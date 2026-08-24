@@ -47,6 +47,16 @@ export async function findMemberByName(name: string): Promise<any | null> {
   });
 }
 
+// Full merged member universe, sanitized: PB rows win, built-in fallbacks fill
+// gaps (fresh dev/integration instances), and every pin — stored or seed-side
+// default — is stripped before anything leaves the server.
+export async function listMembersSanitized(): Promise<any[]> {
+  return withAdmin(async (pb) => {
+    const records = await pb.collection("members").getFullList({ requestKey: null });
+    return withResolvedPins(mergeMemberFallbacks(records)).map(sanitizeMember);
+  });
+}
+
 export async function verifyPinFromPB(name: string, pin: string): Promise<any | null> {
   if (!name || !pin) return null;
   const member = await findMemberByName(name);

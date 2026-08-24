@@ -377,7 +377,7 @@ export default function SettingsPage() {
     setMemberModalOpen(true);
   };
 
-  const saveMember = () => {
+  const saveMember = async () => {
     if (!memberForm.name.trim()) return;
     const base = {
       ...memberForm,
@@ -390,7 +390,22 @@ export default function SettingsPage() {
       ? Object.fromEntries(Object.entries(base).filter(([k]) => k !== "pin"))
       : base;
     if (editingMember) {
-      db.updateMember(editingMember.name, payload);
+      // Edits go through the adults-only server route — the browser can no
+      // longer write members straight to PocketBase.
+      try {
+        const res = await fetch("/api/members/admin", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: editingMember.name, patch: payload }),
+        });
+        if (!res.ok) {
+          showToast(res.status === 403 ? "🔒 Adults only — sign in as a parent to edit members." : "❌ Couldn't update member");
+          return;
+        }
+      } catch {
+        showToast("❌ Couldn't update member");
+        return;
+      }
       showToast(`✅ Updated ${memberForm.name.trim()}`);
     } else {
       db.insertMember({ ...payload, joined: new Date().toLocaleDateString("en-US", { month: "short", year: "numeric" }) });
@@ -400,8 +415,22 @@ export default function SettingsPage() {
     setMemberModalOpen(false);
   };
 
-  const deleteMember = (member: any) => {
-    db.deleteMember(member.name);
+  const deleteMember = async (member: any) => {
+    try {
+      const res = await fetch("/api/members/admin", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: member.name }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}) as any);
+        showToast(err.error === "last_parent" ? "⚠️ At least one parent must remain." : "❌ Couldn't remove member");
+        return;
+      }
+    } catch {
+      showToast("❌ Couldn't remove member");
+      return;
+    }
     showToast(`🗑️ Removed ${member.name}`);
     setMembers(db.selectMembersDetailed());
   };

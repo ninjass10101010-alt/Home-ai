@@ -127,6 +127,23 @@ function migrateDueToISO(tasks: Task[]): Task[] {
   });
 }
 
+// PINs are verified server-side against PocketBase truth — the client bundle
+// never sees member pins. Truthy result = proceed (same semantics the old
+// client-side db.verifyMemberPin had).
+async function verifyPinRemote(memberName: string, pin: string): Promise<any | null> {
+  try {
+    const res = await fetch("/api/members/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ memberName, pin }),
+    });
+    if (!res.ok) return null;
+    return (await res.json()).member ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function safeDisplayEmoji(emoji: any): string {
   return typeof emoji === "string" && emoji.startsWith("data:") ? "👤" : emoji || "👤";
 }
@@ -597,9 +614,13 @@ export default function TasksPage() {
     setRedeemForMember(defaultMember);
   };
 
-  const approveParentReward = () => {
+  const approveParentReward = async () => {
     if (!parentApprovalReward || !parentApprovalPin) return;
-    const parent = membersData.find((m: any) => m.role === "parent" && db.verifyMemberPin(m.fullName, parentApprovalPin));
+    let parent: any = null;
+    for (const m of membersData.filter((m: any) => m.role === "parent")) {
+      parent = await verifyPinRemote(m.fullName, parentApprovalPin) ? m : null;
+      if (parent) break;
+    }
     if (!parent) {
       setParentApprovalError("Parent PIN required to approve large rewards.");
       setParentApprovalPin("");
@@ -631,12 +652,12 @@ export default function TasksPage() {
     return member ? member.fullName : rawName;
   };
 
-  const submitUndo = () => {
+  const submitUndo = async () => {
     if (!undoTaskId || !undoPin) return;
     const task = tasks.find(t => t.id === undoTaskId);
     if (!task || !task.completed) return;
     const memberName = task.completedBy || task.assignee;
-    const verified = db.verifyMemberPin(memberName, undoPin);
+    const verified = await verifyPinRemote(memberName, undoPin);
     if (!verified) {
       setUndoError("Wrong PIN. Try again.");
       setUndoPin("");
@@ -655,7 +676,7 @@ export default function TasksPage() {
     showToast(`Undone: ${task.title}`);
   };
 
-  const submitPin = () => {
+  const submitPin = async () => {
     if (!pinInput) return;
     if (pinReward) {
       const memberName = redeemForMember;
@@ -665,7 +686,7 @@ export default function TasksPage() {
         setTimeout(() => setPinError(""), 2000);
         return;
       }
-      const verified = db.verifyMemberPin(memberName, pinInput);
+      const verified = await verifyPinRemote(memberName, pinInput);
       if (verified) {
         const normalizedName = normalizeName((verified as any).name);
         const cost = pinReward.cost;
@@ -693,7 +714,13 @@ export default function TasksPage() {
         setTimeout(() => setPinError(""), 2000);
         return;
       }
-      const verified = db.verifyMemberPin(memberName, pinInput) || membersData.find((m: any) => m.role === "parent" && db.verifyMemberPin(m.fullName, pinInput));
+      let verified = await verifyPinRemote(memberName, pinInput);
+      if (!verified) {
+        for (const m of membersData.filter((m: any) => m.role === "parent")) {
+          verified = await verifyPinRemote(m.fullName, pinInput);
+          if (verified) break;
+        }
+      }
       if (verified) {
         const normalizedName = membersData.find((m: any) => m.fullName === penaltyForMember)?.fullName || penaltyForMember;
         const penaltyPoints = pinPenalty?.points ?? 0;
@@ -726,7 +753,7 @@ export default function TasksPage() {
         setTimeout(() => setPinError(""), 2000);
         return;
       }
-      const verified = db.verifyMemberPin(claimant, pinInput);
+      const verified = await verifyPinRemote(claimant, pinInput);
       if (verified) {
         const normalizedName = normalizeName((verified as any).name);
         const claimantEmoji = (membersData.find((m: any) => m.fullName === normalizedName)?.emoji) || task.assigneeEmoji;
@@ -777,7 +804,7 @@ export default function TasksPage() {
       return;
     }
 
-    const verified = db.verifyMemberPin(task.assignee, pinInput);
+    const verified = await verifyPinRemote(task.assignee, pinInput);
     if (verified) {
       const normalizedName = normalizeName((verified as any).name);
       setTasks(prev => prev.map(t => t.id === pinTaskId ? { ...t, completed: true, completedBy: normalizedName, completedAt: now, completedInWeek: currentWeek } : t));
@@ -868,9 +895,13 @@ export default function TasksPage() {
     setAdjustSuccess("");
   };
 
-  const submitAdjust = () => {
+  const submitAdjust = async () => {
     if (!adjustMember || !adjustPin) return;
-    const parent = membersData.find((m: any) => m.role === "parent" && db.verifyMemberPin(m.fullName, adjustPin));
+    let parent: any = null;
+    for (const m of membersData.filter((m: any) => m.role === "parent")) {
+      parent = await verifyPinRemote(m.fullName, adjustPin) ? m : null;
+      if (parent) break;
+    }
     if (!parent) {
       setAdjustError("Parent PIN required. Try again.");
       setAdjustPin("");
