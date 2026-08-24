@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildToolsForOpenAI, getTool } from "@/lib/hermes-tools";
 import { db } from "@/db";
+import { verifySession, SESSION_COOKIE } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -116,11 +117,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { message, history = [], role } = body;
+  const { message, history = [] } = body;
   if (!message || !message.trim()) {
     return NextResponse.json({ error: "Message is required" }, { status: 400 });
   }
-  // Kid sessions never get house-control tools; everyone else on the LAN does.
+  // MF-3 — role comes from the signed session cookie only; body.role is
+  // ignored entirely (any kid could otherwise post role:"parent"). No valid
+  // session → child-role default: no house-control tools.
+  const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
+  const role = session?.role ?? "child";
   const houseControl = role !== "child";
 
   try {
