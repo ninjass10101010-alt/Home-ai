@@ -39,7 +39,7 @@ The dashboard is a mobile-first, glass-morphism, bottom-nav app with a persisten
 | Meals          | `/meals`       | Pot / plate                                      | Weekly recipe-style meal planner + pantry sync + grocery generator (Calendar is a primary tab; Grocery is its own tab; Emergency lives in Settings) |
 | Tasks          | `/tasks`       | Checklist                                        | Chore list with points |
 | Calendar       | `/calendar`    | Calendar grid (rect + binding rings + day dots) | Family routines, events, and month view |
-| House          | `/ha`        | House with signal dot                     | Home Assistant controls: Overview, Security (arm/disarm), Climate, Lights, Automations. Hidden for kids (child role) |
+| House          | `/ha`        | Sliders (3 vertical faders)               | Home Assistant controls: Overview, Security (arm/disarm), Climate, Lights, Automations. Hidden for kids (child role) |
 | Settings       | `/settings`    | Gear                                             | Far-right tab. Theme (dark/light/system + 10 accents + high-contrast), family members, emergency contacts config |
 
 **Floating Emergency Button (always on Home, `EmergencyButton.tsx`):**
@@ -82,6 +82,14 @@ Use this exact delta format in the "What's New" area and update 1.5 journeys:
 - Agent action required: Update this section + "Current Dashboard Snapshot" + Change Log. HA credentials (HA_HOST + HA_TOKEN) are server-side only — never add them to client code or client env vars.
 - User-facing description (copy-paste ready for responses):
   > "There's a new House tab in the bottom bar (between Calendar and Settings) that turns the dashboard into your home controls: an Overview of every room, a Security screen with a big Arm home / Disarm switch, Climate with your thermostat, Lights with quick toggles, and your Automations. The Home screen also gained three cards — Home Security, Home Climate, and Home Lights — that you can show, hide, or reorder in Settings → Layout & display. It's powered by your Home Assistant (and optionally Zigbee2MQTT) with the token kept safely on the server, and kids' screens stay just as calm as before — the House tab is hidden for them."
+
+### UI Change Record — 2026-08-24 — House tab icon: house → sliders (nav de-duplication)
+- Added / Changed: `src/components/ui/CapsuleNav.tsx` (House `/ha` item icon swapped from "house with signal dot" to a 3-fader vertical-sliders SVG — same stroke family, strokeWidth active 2.5 / inactive 2, round caps)
+- Visual / Motion: The House tab no longer looks like a second Home tab. It now shows three vertical faders with staggered knob positions (reads as "device controls" — lights/climate/vacuum). No motion change; active pill behavior untouched.
+- Color sources: None — currentColor stroke only.
+- Agent action required: Update this section + §1.1 nav table + Change Log.
+- User-facing description (copy-paste ready for responses):
+  > "The House tab at the bottom now uses a little sliders/equalizer icon instead of a house shape — it reads as 'device controls' and can't be confused with the Home screen's house anymore."
 
 ### UI Change Record — 2026-08-22 — HA Phase 2: Notifications card, chat house control, vacuum + energy cards
 - Added / Changed: `src/lib/ha/notify.ts` (NEW — listHANotifyTargets / sendHANotification / broadcastHouseAlert), `src/app/api/ha/notify-targets|notify-config|notify-test/route.ts` (NEW), `src/lib/pb-seed.ts` (+ha_notify_config, ha_notify_prefs, ha_mirror_state), `src/app/api/emergency/route.ts` (house-alert fan-out after SMS/email; failures become details.houseAlert notes, response shape otherwise unchanged), `src/app/api/cron/consuela/briefing/route.ts` (opt-in digest via ha_notify_prefs key "briefing"), `src/components/settings/HaNotificationsCard.tsx` (NEW — 🔔 amber card inside Settings → Integrations), `src/lib/hermes-tools.ts` (+ha_list_devices, +ha_control_device; buildToolsForOpenAI({houseControl})), `src/app/api/hermes/chat/route.ts` (role param → kid gating + HOUSE_CONTROL_PROMPT_ADDENDUM), `src/app/chat/page.tsx` (sends signed-in role), `src/lib/ha/rest-client.ts` (+vacuum domain), `src/components/ha/VacuumCard.tsx` + `EnergyCard.tsx` (NEW on House overview), `src/app/ha/page.tsx` (renders both), `src/lib/ha/todo-mirror.ts` + `src/app/api/cron/consuela/ha-todo-mirror/route.ts` (NEW 5-min one-way grocery mirror), `scripts/consuela/host-crontab.example` (+mirror line), `.env.example` (+TELEGRAM_ALERT_CHAT_ID, HA_GROCERY_TODO_NAME)

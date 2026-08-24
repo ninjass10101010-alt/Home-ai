@@ -73,10 +73,15 @@ const navItems = [
     label: "House",
     icon: (active: boolean) => (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 2.5 : 2} strokeLinecap="round" strokeLinejoin="round">
-        <path d="M3.5 10.5 12 3.5l8.5 7" />
-        <path d="M6 9.5V18a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V9.5" />
-        <path d="M9.5 20v-5h5v5" />
-        <circle cx="17.5" cy="6" r="1.6" fill="currentColor" stroke="none" />
+        <path d="M5 4v4" />
+        <path d="M5 12v8" />
+        <path d="M3 10h4" />
+        <path d="M12 4v9" />
+        <path d="M12 17v3" />
+        <path d="M10 15h4" />
+        <path d="M19 4v3" />
+        <path d="M19 11v9" />
+        <path d="M17 9h4" />
       </svg>
     ),
   },
