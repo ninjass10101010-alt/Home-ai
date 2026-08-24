@@ -76,9 +76,7 @@ function VersionCard() {
     setUpdateLogs([]);
     setUpdateDone(false);
     try {
-      const r = await fetch("/api/admin/update", {
-          method: "POST",
-        });
+      const r = await fetch("/api/admin/update", { method: "POST" });
       if (!r.ok) {
         const err = await r.json().catch(() => ({ error: "unauthorized" }));
         setUpdateLogs([{ step: "auth", status: "error", detail: err.error === "adult_only" ? "Adults only — sign in as a parent." : "Sign in required.", timestamp: new Date().toISOString() }]);
