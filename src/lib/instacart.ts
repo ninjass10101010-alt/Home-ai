@@ -83,7 +83,7 @@ export async function createShoppingList(
   const apiKey = await getServiceConfig("instacart", "INSTACART_API_KEY");
   if (!apiKey) throw new Error("INSTACART_API_KEY not configured");
   if (!isInstacartEnabled()) {
-    throw new Error("Instacart integration is not enabled. Set INSTACART_API_KEY and NEXT_PUBLIC_INSTACART_ENABLED=true");
+    throw new Error("Set your Instacart API key in Settings → Services & Keys.");
   }
 
   const response = await fetch(`${INSTACART_BASE}/products/products_link`, {
