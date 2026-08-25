@@ -31,7 +31,7 @@ describe("runServiceTest", () => {
   it("short-circuits not_configured without any outbound call", async () => {
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
-    mocks.withAdmin.mockImplementation((fn: any) => fn(pbForRows([])));
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pbForRows([]).pb));
 
     const result = await runServiceTest("instacart");
 
@@ -48,13 +48,13 @@ describe("runServiceTest", () => {
       json: async () => ({ ok: true, result: { username: "consuela_bot" } }),
     }));
     vi.stubGlobal("fetch", fetchSpy);
-    mocks.withAdmin.mockImplementation((fn: any) => fn(pbForRows([])));
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pbForRows([]).pb));
 
     const result = await runServiceTest("telegram_alert");
 
     expect(result.ok).toBe(false);
     expect(result.detail).toContain("TELEGRAM_ALERT_CHAT_ID");
-    expect(fetchSpy.mock.calls[0][0]).toBe("https://api.telegram.org/bot123:abc/getMe");
+    expect((fetchSpy.mock.calls[0] as any[])[0]).toBe("https://api.telegram.org/bot123:abc/getMe");
     delete process.env.TELEGRAM_BOT_TOKEN;
   });
 
@@ -65,7 +65,7 @@ describe("runServiceTest", () => {
       "fetch",
       vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ ok: true, result: { username: "b" } }) }))
     );
-    mocks.withAdmin.mockImplementation((fn: any) => fn(pbForRows([])));
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pbForRows([]).pb));
 
     const result = await runServiceTest("telegram_alert");
     expect(result).toMatchObject({ ok: true });
@@ -78,13 +78,13 @@ describe("runServiceTest", () => {
     process.env.HA_TOKEN = "tok";
     const fetchSpy = vi.fn(async () => ({ ok: false, status: 401, json: async () => ({}) }));
     vi.stubGlobal("fetch", fetchSpy);
-    mocks.withAdmin.mockImplementation((fn: any) => fn(pbForRows([])));
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pbForRows([]).pb));
 
     const result = await runServiceTest("home_assistant");
 
     expect(result.ok).toBe(false);
     expect(result.detail).toContain("401");
-    expect(fetchSpy.mock.calls[0][0]).toBe("http://ha:8123/api/");
+    expect((fetchSpy.mock.calls[0] as any[])[0]).toBe("http://ha:8123/api/");
     delete process.env.HA_HOST;
     delete process.env.HA_TOKEN;
   });
@@ -94,7 +94,7 @@ describe("runServiceTest", () => {
       "fetch",
       vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ meals: null }) }))
     );
-    mocks.withAdmin.mockImplementation((fn: any) => fn(pbForRows([])));
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pbForRows([]).pb));
 
     const result = await runServiceTest("themealdb");
 
@@ -109,14 +109,15 @@ describe("runServiceTest", () => {
   it("uses a 5s AbortSignal timeout on outbound calls", async () => {
     process.env.INSTACART_API_KEY = "k";
     let seenSignal: AbortSignal | undefined;
+
     vi.stubGlobal(
       "fetch",
       vi.fn((_url: string, init?: RequestInit) => {
-        seenSignal = init?.signal;
+        seenSignal = init?.signal as AbortSignal | undefined;
         return Promise.resolve({ status: 200 });
       })
     );
-    mocks.withAdmin.mockImplementation((fn: any) => fn(pbForRows([])));
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pbForRows([]).pb));
 
     await runServiceTest("instacart");
 
