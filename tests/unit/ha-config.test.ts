@@ -1,4 +1,4 @@
-import { vi, expect } from "vitest";
+import { vi, expect, test } from "vitest";
 
 vi.mock("@/lib/pb-auth", () => ({ withAdmin: async () => [] }));
 
