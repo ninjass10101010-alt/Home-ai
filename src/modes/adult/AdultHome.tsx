@@ -143,7 +143,7 @@ function CompactWeather() {
         }
       })
       .catch(() => {});
-  }, []);
+  }, [runtime?.weather_location?.LAT, runtime?.weather_location?.LON]);
 
   return (
     <Surface variant="glass-subtle" radius="xl" padding="sm">

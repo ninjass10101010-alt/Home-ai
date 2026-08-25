@@ -75,7 +75,7 @@ export default function FogBackground() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [runtime?.weather_location?.LAT, runtime?.weather_location?.LON]);
 
   useEffect(() => {
     if (!fogConfig.enabled) {
