@@ -5,7 +5,7 @@ echo "🚀 Consuela Dashboard Updater"
 echo ""
 
 REPO="${REPO:-https://github.com/ninjass10101010-alt/Home-ai}"
-BRANCH="${BRANCH:-main}"
+BRANCH="${BRANCH:-warm-glass-v2}"
 COMPOSE_DIR="${COMPOSE_DIR:-/share/Family-Dashboard}"
 
 cd "$COMPOSE_DIR" || {
