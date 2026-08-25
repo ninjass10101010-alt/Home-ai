@@ -8,7 +8,9 @@ const mocks = vi.hoisted(() => ({
   buildToolsForOpenAI: vi.fn(() => []),
   getTool: vi.fn(() => undefined),
   insertChatMessage: vi.fn(async () => ({})),
-  getServiceConfig: vi.fn(async () => null as string | null),
+  getServiceConfig: vi.fn(
+    async (..._args: unknown[]) => null as string | null
+  ),
 }));
 
 vi.mock("@/lib/hermes-tools", () => ({
@@ -105,7 +107,7 @@ describe("hermes chat — house-control role from session only", () => {
 describe("hermes chat — resolved auth header is actually sent", () => {
   it("registry-resolved HERMES_API_KEY goes out as Authorization: Bearer", async () => {
     mocks.getServiceConfig.mockImplementation(
-      async (service: string, key: string) =>
+      async (service: unknown, key: unknown) =>
         service === "hermes" && key === "HERMES_API_KEY" ? "registry-key-456" : null
     );
     await post({ message: "hi" });
