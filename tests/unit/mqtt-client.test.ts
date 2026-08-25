@@ -3,6 +3,7 @@ vi.mock("@/lib/pb-auth", () => ({ withAdmin: async (fn: any) => fn({ collection:
 import {
   HAMQTTClient,
   getHAMQTTClient,
+  resetHAMQTTClient,
   DeviceMessage,
 } from "../../src/lib/mqtt/client";
 import type { MqttClient, IClientOptions } from "mqtt";
@@ -293,5 +294,13 @@ describe("HAMQTTClient", () => {
     process.env.HA_HOST = "http://homeassistant:8123";
     process.env.HA_TOKEN = "test-token";
     expect(await getHAMQTTClient()).toBeInstanceOf(HAMQTTClient);
+  });
+
+  it("resetHAMQTTClient drops the singleton so the next getter builds a NEW instance", async () => {
+    process.env.HA_HOST = "http://homeassistant:8123";
+    process.env.HA_TOKEN = "test-token";
+    const first = await getHAMQTTClient();
+    resetHAMQTTClient();
+    expect(await getHAMQTTClient()).not.toBe(first);
   });
 });

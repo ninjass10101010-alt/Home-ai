@@ -123,3 +123,8 @@ export async function getHAMQTTClient(): Promise<HAMQTTClient> {
   }
   return singleton;
 }
+
+/** Drop the singleton so the next getter re-reads config (credential rotation). */
+export function resetHAMQTTClient(): void {
+  singleton = null;
+}

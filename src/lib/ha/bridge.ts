@@ -1,5 +1,5 @@
-import { HAWebSocketClient, HAStateChange } from "./websocket-client";
-import { HAMQTTClient } from "../mqtt/client";
+import { HAWebSocketClient, HAStateChange, resetHAWebSocketClient } from "./websocket-client";
+import { HAMQTTClient, resetHAMQTTClient } from "../mqtt/client";
 import { getHAConfig } from "./config";
 import { deleteHAEntity, upsertHAEntity, HAEntityRecord } from "./persist";
 
@@ -147,7 +147,10 @@ export function getHABridgeStatus(): HABridgeStatus {
 }
 
 /** Reconnect support for Services & Keys: stop the bridge and drop the
- * singleton clients so a fresh startHABridge() re-reads config. */
+ * singleton clients so a fresh startHABridge() re-reads config. The
+ * control-path singletons (getHAWebSocketClient/getHAMQTTClient used by
+ * call-service/alarm/notify/todo-mirror) are reset too — otherwise they keep
+ * serving the OLD credentials after rotation. */
 export async function resetHABridge(): Promise<void> {
   try {
     await wsClient?.close();
@@ -162,4 +165,8 @@ export async function resetHABridge(): Promise<void> {
   wsClient = null;
   mqttClient = null;
   started = false;
+  // Control path: drop singletons BEFORE the next startHABridge()/getter so
+  // every consumer rebuilds from the freshly saved config.
+  resetHAWebSocketClient();
+  resetHAMQTTClient();
 }

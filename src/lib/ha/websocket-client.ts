@@ -369,3 +369,9 @@ export async function getHAWebSocketClient(): Promise<HAWebSocketClient> {
   }
   return singleton;
 }
+
+/** Drop the control-path singleton so the next getter re-reads config —
+ * called on credential rotation so stale tokens stop being served. */
+export function resetHAWebSocketClient(): void {
+  singleton = null;
+}

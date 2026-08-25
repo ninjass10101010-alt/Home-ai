@@ -27,6 +27,7 @@ vi.mock("../../src/lib/ha/websocket-client", () => ({
     connect = mocks.connect;
     onStateChange = mocks.onStateChange;
   },
+  resetHAWebSocketClient: vi.fn(),
 }));
 
 vi.mock("../../src/lib/mqtt/client", () => ({
@@ -36,6 +37,7 @@ vi.mock("../../src/lib/mqtt/client", () => ({
     onDeviceMessage = mocks.onDeviceMessage;
     stop = vi.fn();
   },
+  resetHAMQTTClient: vi.fn(),
 }));
 
 vi.mock("../../src/lib/ha/config", () => ({

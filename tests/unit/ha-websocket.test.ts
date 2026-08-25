@@ -3,6 +3,7 @@ vi.mock("@/lib/pb-auth", () => ({ withAdmin: async (fn: any) => fn({ collection:
 import {
   HAWebSocketClient,
   getHAWebSocketClient,
+  resetHAWebSocketClient,
   WebSocketLike,
 } from "../../src/lib/ha/websocket-client";
 
@@ -317,5 +318,11 @@ describe("HAWebSocketClient", () => {
 
   it("getHAWebSocketClient returns the same singleton instance", async () => {
     expect(await getHAWebSocketClient()).toBe(await getHAWebSocketClient());
+  });
+
+  it("resetHAWebSocketClient drops the singleton so the next getter builds a NEW instance", async () => {
+    const first = await getHAWebSocketClient();
+    resetHAWebSocketClient();
+    expect(await getHAWebSocketClient()).not.toBe(first);
   });
 });
