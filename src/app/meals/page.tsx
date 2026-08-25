@@ -452,7 +452,7 @@ function MealHubContent() {
       )}
 
       <RecipeImportModal
-        key={importModalKey}
+        key={`import-${importModalKey}`}
         open={showImportModal}
         onClose={() => setShowImportModal(false)}
         recipes={recipes}
@@ -462,7 +462,7 @@ function MealHubContent() {
       />
 
       <RecipeSearchModal
-        key={searchModalKey}
+        key={`search-${searchModalKey}`}
         open={showSearchModal}
         onClose={() => setShowSearchModal(false)}
         recipes={recipes}
