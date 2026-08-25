@@ -215,9 +215,9 @@ export default function ServicesKeysCard() {
         {services.map((svc) => {
           const dot = dotTone(svc, testedMap[svc.id] ?? null);
           const open = expanded === svc.id;
-          const overridden = svc.status.some(
-            (f) => f.source === "db" && `${svc.id}.${f.key}` in drafts
-          );
+          // Save is enabled exactly when this service has unsaved drafts —
+          // including rotating an existing DB override.
+          const hasDrafts = svc.status.some((f) => `${svc.id}.${f.key}` in drafts);
           return (
             <div key={svc.id} className="rounded-xl border border-white/10 bg-[var(--color-surface-0)]/30">
               <button
@@ -284,7 +284,7 @@ export default function ServicesKeysCard() {
                   })}
 
                   <div className="flex flex-wrap items-center gap-2 pt-1">
-                    <SoftButton size="sm" loading={busy} onClick={() => void saveService(svc)} disabled={overridden}>
+                    <SoftButton size="sm" loading={busy} onClick={() => void saveService(svc)} disabled={!hasDrafts}>
                       Save
                     </SoftButton>
                     <SoftButton size="sm" variant="secondary" loading={busy} onClick={() => void testService(svc.id)}>
