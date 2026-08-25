@@ -39,9 +39,9 @@ services:
       - ADMIN_SECRET=${ADMIN_SECRET:?set ADMIN_SECRET in .env}
       # Signs httpOnly session cookies — required or login will fail closed.
       - SESSION_SECRET=${SESSION_SECRET:?set SESSION_SECRET in .env}
-            - HERMES_API_URL=http://hermes-agent-2:8642
+      - HERMES_API_URL=http://hermes-agent-2:8642
       - HERMES_API_KEY=${HERMES_API_KEY:-consuela-api-key-2026}
-            - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_MIRROR_BOT_TOKEN=${TELEGRAM_MIRROR_BOT_TOKEN}
       - HA_HOST=${HA_HOST:-}
       - HA_TOKEN=${HA_TOKEN:-}
