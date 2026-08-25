@@ -15,6 +15,7 @@ import {
 export interface ServiceFieldStatus {
   key: string;
   label: string;
+  helpText: string;
   secret: boolean;
   required: boolean;
   set: boolean;
@@ -75,6 +76,7 @@ export async function getServiceStatus(
       return {
         key: f.key,
         label: f.label,
+        helpText: f.helpText,
         secret: f.secret,
         required: f.required,
         set,

@@ -9,6 +9,7 @@
  * so keys never sit in .env.local for user-configured services.
  */
 
+// ⚠️ DEPRECATED shim (2026-08-24): legacy widget support only — new code uses Settings → Services & Keys.
 import type { ConnectionStatus, ConnectionCredentials, StoredConnection } from "./types";
 
 const STORAGE_KEY = "consuela-connections";
