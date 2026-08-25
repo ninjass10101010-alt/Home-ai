@@ -34,7 +34,7 @@ const SYNC_STATES = [
 
 interface CallRecord {
   url: string;
-  body: { domain: string; service: string; serviceData?: Record<string, unknown> };
+  body: Record<string, unknown>;
 }
 
 function stubFetch() {
@@ -48,9 +48,9 @@ function stubFetch() {
         json: async () => ({ success: true, count: SYNC_STATES.length, states: SYNC_STATES }),
       };
     }
-    if (u.endsWith("/api/ha/call-service")) {
+    if (u.endsWith("/api/ha/call-service") || u.endsWith("/api/ha/alarm")) {
       calls.push({ url: u, body: JSON.parse(String(init?.body)) });
-      return { ok: true, status: 200, json: async () => ({ success: true, result: { ok: true } }) };
+      return { ok: true, status: 200, json: async () => ({ success: true }) };
     }
     return { ok: false, status: 404, json: async () => ({ success: false, error: "not_found" }) };
   });
@@ -108,7 +108,7 @@ describe("HA tab (/ha) HomeControlsPage", () => {
     expect(el.textContent).not.toContain("Read-only for kids");
   });
 
-  it("Security tab shows Arm home and posts alarm_arm_home", async () => {
+  it("Security tab shows Arm home and arms only after PIN confirmation", async () => {
     const { calls } = stubFetch();
     const el = render(<HomeControlsPage />);
     await settle();
@@ -116,15 +116,33 @@ describe("HA tab (/ha) HomeControlsPage", () => {
     act(() => findRadio(el, /Security/).click());
     await settle();
 
-    const arm = findButton(el, /Arm home/);
-    act(() => arm.click());
+    act(() => findButton(el, /Arm home/).click());
+    await settle();
+
+    // Human-only: no HA request until a PIN is submitted.
+    expect(calls).toHaveLength(0);
+
+    const pinInput = el.querySelector('input[type="password"]') as HTMLInputElement;
+    expect(pinInput).toBeTruthy();
+    const setNativeValue = Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value"
+    )!.set!;
+    act(() => {
+      setNativeValue.call(pinInput, "5678");
+      pinInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await settle();
+
+    act(() => findButton(el, /Confirm Arm home/).click());
     await settle();
 
     expect(calls).toHaveLength(1);
+    expect(calls[0].url.endsWith("/api/ha/alarm")).toBe(true);
     expect(calls[0].body).toEqual({
-      domain: "alarm_control_panel",
-      service: "alarm_arm_home",
-      serviceData: { entity_id: "alarm_control_panel.alarm" },
+      action: "arm_home",
+      entity_id: "alarm_control_panel.alarm",
+      pin: "5678",
     });
   });
 

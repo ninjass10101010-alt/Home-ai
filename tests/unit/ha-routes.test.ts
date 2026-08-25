@@ -98,6 +98,46 @@ describe("POST /api/ha/call-service", () => {
     expect(res.status).toBe(502);
     expect(await res.json()).toEqual({ success: false, error: "Not connected" });
   });
+
+  it("allows a legitimate House tab call through to the client", async () => {
+    mocks.callService.mockResolvedValue({ ok: true });
+
+    const res = await callServicePOST(
+      jsonRequest("http://localhost/api/ha/call-service", {
+        domain: "light",
+        service: "toggle",
+        serviceData: { entity_id: "light.kitchen" },
+      })
+    );
+
+    expect(res.status).toBe(200);
+    expect(mocks.callService).toHaveBeenCalledWith("light", "toggle", {
+      entity_id: "light.kitchen",
+    });
+  });
+
+  it.each([
+    ["lock", "unlock"],
+    ["alarm_control_panel", "alarm_arm_home"],
+    ["alarm_control_panel", "alarm_disarm"],
+    ["alarm_control_panel", "alarm_arm_away"],
+    ["script", "turn_on"],
+    ["automation", "trigger"],
+    ["shell_command", "run"],
+    ["notify", "mobile_app_phone"],
+  ])("returns 403 and does not forward %s.%s", async (domain, service) => {
+    const res = await callServicePOST(
+      jsonRequest("http://localhost/api/ha/call-service", {
+        domain,
+        service,
+        serviceData: { entity_id: `${domain}.x` },
+      })
+    );
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ success: false, error: "service_not_allowed" });
+    expect(mocks.callService).not.toHaveBeenCalled();
+  });
 });
 
 describe("GET /api/ha/health", () => {

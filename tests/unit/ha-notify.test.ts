@@ -116,7 +116,7 @@ describe("broadcastHouseAlert", () => {
     mocks.callService.mockImplementation(async (_d: string, service: string) => {
       if (service === "mobile_app_bad") throw new Error("device off");
     });
-    mocks.sendTelegramMessage.mockResolvedValue(undefined);
+    mocks.sendTelegramMessage.mockResolvedValue({ success: true });
 
     const result = await broadcastHouseAlert("Alert", "Body");
 
@@ -125,6 +125,22 @@ describe("broadcastHouseAlert", () => {
     expect(result.notes).toHaveLength(1);
     expect(result.notes[0]).toContain("mobile_app_bad: device off");
     expect(mocks.sendTelegramMessage).toHaveBeenCalledWith("12345", "Alert\nBody");
+  });
+
+  it("counts a Telegram {success:false} result as failed, not delivered", async () => {
+    mockConfig([{ target: "mobile_app_ok", enabled: true }]);
+    mocks.callService.mockResolvedValue(null);
+    mocks.sendTelegramMessage.mockResolvedValue({
+      success: false,
+      error: "Bad Request: chat not found",
+    });
+
+    const result = await broadcastHouseAlert("Fire", "Kitchen");
+
+    // HA push went out; the Telegram leg must NOT be reported as delivered.
+    expect(result.sent).toBe(1);
+    expect(result.failed).toBe(1);
+    expect(result.notes.some((n: string) => n.includes("telegram") && n.includes("chat not found"))).toBe(true);
   });
 
   it("never throws even when every channel fails", async () => {
@@ -152,7 +168,7 @@ describe("broadcastHouseAlert", () => {
 
   it("treats a PB failure as zero config rows but still sends telegram", async () => {
     mocks.withAdmin.mockRejectedValue(new Error("PB down"));
-    mocks.sendTelegramMessage.mockResolvedValue(undefined);
+    mocks.sendTelegramMessage.mockResolvedValue({ success: true });
 
     const result = await broadcastHouseAlert("A", "B");
 
