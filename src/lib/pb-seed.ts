@@ -392,6 +392,22 @@ export const COLLECTIONS = [
       "CREATE UNIQUE INDEX idx_ha_mirror_state_key ON ha_mirror_state (key)",
     ],
   },
+  // Services & Keys registry overrides (src/lib/services/*). Secrets stored
+  // AES-256-GCM encrypted; absence of a row = .env fallback.
+  {
+    name: "consuela_service_config",
+    schema: [
+      { name: "service", type: "text", required: true },
+      { name: "key", type: "text", required: true },
+      { name: "value", type: "text", required: true },
+      { name: "is_secret", type: "bool" },
+      { name: "updated_at", type: "text" },
+      { name: "updated_by", type: "text" },
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_service_config_pair ON consuela_service_config (service, key)",
+    ],
+  },
   // Skill tree (src/lib/skill-tree.ts). The lib identifies users/branches/
   // quests by plain string ids (e.g. "demo-user"), so id fields are text —
   // NOT relations — and array fields are json.
