@@ -27,7 +27,8 @@ export async function POST(request: NextRequest) {
       maxAge: SESSION_TTL_SECONDS,
     });
     return res;
-  } catch {
+  } catch (err) {
+    console.error("[auth/login] failed:", err);
     return NextResponse.json({ error: "Login failed" }, { status: 500 });
   }
 }
