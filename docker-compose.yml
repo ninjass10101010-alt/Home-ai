@@ -39,12 +39,20 @@ services:
       - ADMIN_SECRET=${ADMIN_SECRET:?set ADMIN_SECRET in .env}
       # Signs httpOnly session cookies — required or login will fail closed.
       - SESSION_SECRET=${SESSION_SECRET:?set SESSION_SECRET in .env}
-      - GOOGLE_POLL_INTERVAL_MS=300000
-      - HERMES_API_URL=http://hermes-agent-2:8642
+            - HERMES_API_URL=http://hermes-agent-2:8642
       - HERMES_API_KEY=${HERMES_API_KEY:-consuela-api-key-2026}
-      - OPENROUTER_API_KEY=
-      - TELEGRAM_BOT_TOKEN=
+            - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_MIRROR_BOT_TOKEN=${TELEGRAM_MIRROR_BOT_TOKEN}
+      - HA_HOST=${HA_HOST:-}
+      - HA_TOKEN=${HA_TOKEN:-}
+      - MQTT_BROKER=${MQTT_BROKER:-}
+      - MQTT_USER=${MQTT_USER:-}
+      - MQTT_PASS=${MQTT_PASS:-}
+      - HA_GROCERY_TODO_NAME=${HA_GROCERY_TODO_NAME:-}
+      - TELEGRAM_ALERT_CHAT_ID=${TELEGRAM_ALERT_CHAT_ID:-}
+      - GMAIL_USER=${GMAIL_USER:-}
+      - GMAIL_APP_PASSWORD=${GMAIL_APP_PASSWORD:-}
+      - INSTACART_API_KEY=${INSTACART_API_KEY:-}
     networks:
       - dashboard-net
 
