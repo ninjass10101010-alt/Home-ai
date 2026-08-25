@@ -1,3 +1,5 @@
+import { getServiceConfig } from "@/lib/services/config";
+
 export interface TgMessage {
   message_id: number;
   from?: { id: number; first_name?: string; username?: string; is_bot?: boolean };
@@ -25,7 +27,7 @@ export function sanitizeTelegramError(message: string): string {
 const POLL_TIMEOUT_MS = 30_000;
 
 export async function pollTelegramUpdates(lastUpdateId?: number): Promise<TgUpdate[]> {
-  const token = process.env.TELEGRAM_MIRROR_BOT_TOKEN;
+  const token = (await getServiceConfig("telegram_mirror", "TELEGRAM_MIRROR_BOT_TOKEN")) || process.env.TELEGRAM_MIRROR_BOT_TOKEN;
   if (!token) throw new Error("TELEGRAM_MIRROR_BOT_TOKEN missing");
   const offset = lastUpdateId ? lastUpdateId + 1 : "";
   const url = `https://api.telegram.org/bot${token}/getUpdates?offset=${offset}&timeout=10`;

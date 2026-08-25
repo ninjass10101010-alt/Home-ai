@@ -6,6 +6,7 @@ import { useFogConfig } from "@/hooks/useFogConfig";
 import { getFogParams } from "@/lib/fog-weather-mapping";
 import type { FogEffect } from "@/lib/vanta-fog";
 import type { ShaderOptions } from "@/lib/vanta-shader-base";
+import { useRuntimeConfig } from "@/hooks/useRuntimeConfig";
 
 type Condition =
   | "sunny"
@@ -39,6 +40,7 @@ export default function FogBackground() {
 
   const atmosphere = useAtmosphericTheme();
   const { config: fogConfig } = useFogConfig();
+  const { runtime } = useRuntimeConfig();
   const [weatherCondition, setWeatherCondition] = useState<Condition>("partly-cloudy");
   const prefersReducedMotion = useRef(false);
 
@@ -55,8 +57,8 @@ export default function FogBackground() {
   }, []);
 
   useEffect(() => {
-    const lat = 42.7875;
-    const lon = -86.1089;
+    const lat = Number(runtime?.weather_location?.LAT ?? 42.7875);
+    const lon = Number(runtime?.weather_location?.LON ?? -86.1089);
     let cancelled = false;
 
     fetch(

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+vi.mock("@/lib/pb-auth", () => ({ withAdmin: async (fn: any) => fn({ collection: () => ({ getFullList: async () => [] }) }) }));
 import {
   HAWebSocketClient,
   getHAWebSocketClient,
@@ -314,7 +315,7 @@ describe("HAWebSocketClient", () => {
     expect(sockets[0].sent).toContainEqual({ type: "pong", id: 7 });
   });
 
-  it("getHAWebSocketClient returns the same singleton instance", () => {
-    expect(getHAWebSocketClient()).toBe(getHAWebSocketClient());
+  it("getHAWebSocketClient returns the same singleton instance", async () => {
+    expect(await getHAWebSocketClient()).toBe(await getHAWebSocketClient());
   });
 });

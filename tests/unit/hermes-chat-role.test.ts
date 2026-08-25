@@ -15,6 +15,10 @@ vi.mock("@/lib/hermes-tools", () => ({
   getTool: mocks.getTool,
 }));
 
+vi.mock("@/lib/services/config", () => ({
+  getServiceConfig: async () => null,
+}));
+
 vi.mock("@/db", () => ({
   db: { insertChatMessage: mocks.insertChatMessage },
 }));

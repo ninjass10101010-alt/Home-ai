@@ -51,7 +51,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const result = await getHAWebSocketClient().callService(
+    const result = await (await getHAWebSocketClient()).callService(
       domain,
       service,
       serviceData

@@ -1176,7 +1176,7 @@ const TOOLS: Tool[] = [
       }
 
       try {
-        await getHAWebSocketClient().callService(domain, action, serviceData);
+        await (await getHAWebSocketClient()).callService(domain, action, serviceData);
         return `✅ Done — ${friendlyName} · ${action}`;
       } catch (err) {
         return `⚠️ Home Assistant didn't respond (${err instanceof Error ? err.message : String(err)}).`;

@@ -22,10 +22,10 @@ export class HAMQTTClient {
   private _status: MQTTStatus = "disconnected";
 
   constructor(
-    config?: HAConfig,
+    config: HAConfig,
     connectFactory?: (url: string, opts: IClientOptions) => MqttClient
   ) {
-    this.config = config ?? getHAConfig();
+    this.config = config;
     this.connectFactory = connectFactory ?? ((url, opts) => connect(url, opts));
   }
 
@@ -117,9 +117,9 @@ export class HAMQTTClient {
 
 let singleton: HAMQTTClient | null = null;
 
-export function getHAMQTTClient(): HAMQTTClient {
+export async function getHAMQTTClient(): Promise<HAMQTTClient> {
   if (!singleton) {
-    singleton = new HAMQTTClient(getHAConfig());
+    singleton = new HAMQTTClient(await getHAConfig());
   }
   return singleton;
 }

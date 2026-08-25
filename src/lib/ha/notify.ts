@@ -21,7 +21,7 @@ export async function sendHANotification(
   message: string,
   data?: Record<string, unknown>
 ): Promise<void> {
-  await getHAWebSocketClient().callService("notify", serviceFor(target), {
+  await (await getHAWebSocketClient()).callService("notify", serviceFor(target), {
     title,
     message,
     ...data,

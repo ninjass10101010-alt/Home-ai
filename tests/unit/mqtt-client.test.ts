@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+vi.mock("@/lib/pb-auth", () => ({ withAdmin: async (fn: any) => fn({ collection: () => ({ getFullList: async () => [] }) }) }));
 import {
   HAMQTTClient,
   getHAMQTTClient,
@@ -288,9 +289,9 @@ describe("HAMQTTClient", () => {
     expect(client.status).toBe("disconnected");
   });
 
-  it("getHAMQTTClient returns a HAMQTTClient instance", () => {
+  it("getHAMQTTClient returns a HAMQTTClient instance", async () => {
     process.env.HA_HOST = "http://homeassistant:8123";
     process.env.HA_TOKEN = "test-token";
-    expect(getHAMQTTClient()).toBeInstanceOf(HAMQTTClient);
+    expect(await getHAMQTTClient()).toBeInstanceOf(HAMQTTClient);
   });
 });

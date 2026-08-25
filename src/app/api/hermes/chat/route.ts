@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildToolsForOpenAI, getTool } from "@/lib/hermes-tools";
+import { getServiceConfig } from "@/lib/services/config";
 import { db } from "@/db";
 import { verifySession, SESSION_COOKIE } from "@/lib/session";
 
@@ -24,9 +25,17 @@ async function persistChatPair(request: NextRequest, userMessage: string, assist
   }
 }
 
-const HERMES_API_KEY = process.env.HERMES_API_KEY || "consuela-api-key-2026";
-const HERMES_URL =
-  process.env.HERMES_URL || process.env.HERMES_API_URL || "http://hermes-agent-2:8642";
+// Registry override → env → code fallback. The old hardcoded key default is
+// gone; unset keys simply send no Authorization header.
+async function resolveHermes(): Promise<{ url: string; key: string | null }> {
+  const url =
+    (await getServiceConfig("hermes", "HERMES_API_URL")) ||
+    process.env.HERMES_URL ||
+    process.env.HERMES_API_URL ||
+    "http://hermes-agent-2:8642";
+  const key = (await getServiceConfig("hermes", "HERMES_API_KEY")) ?? process.env.HERMES_API_KEY ?? null;
+  return { url, key };
+}
 const HERMES_MODEL = "consuela";
 const MAX_ROUNDS = 4;
 
@@ -81,11 +90,13 @@ async function callHermes(
   messages: ChatMessage[],
   opts: { maxTokens?: number; tools?: ReturnType<typeof buildToolsForOpenAI>; toolChoice?: "auto" | "none" } = {},
 ): Promise<{ content: string; tool_calls?: ToolCall[] }> {
-  const res = await fetch(`${HERMES_URL}/v1/chat/completions`, {
+  const hermes = await resolveHermes();
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (hermes.key) headers.Authorization = `Bearer ${hermes.key}`;
+  const res = await fetch(`${hermes.url}/v1/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${HERMES_API_KEY}`,
     },
     body: JSON.stringify({
       model: HERMES_MODEL,

@@ -5,6 +5,7 @@ import { useState, useEffect, useRef } from "react";
 import { useWeatherConfig } from "@/hooks/useWeather";
 import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
 import { HolidayOverride } from "@/lib/weather-config";
+import { useRuntimeConfig } from "@/hooks/useRuntimeConfig";
 
 
 // ─── Types ─────────────────────────────────────────────────────────────────
@@ -1656,10 +1657,11 @@ export default function WeatherWidget({ className = "" }: { className?: string }
     forecast: ForecastDay[]; humidity: number; wind: number;
   } | null>(null);
   const [loading, setLoading] = useState(true);
+  const { runtime } = useRuntimeConfig();
 
   useEffect(() => {
-    const lat = 42.7875;
-    const lon = -86.1089;
+    const lat = Number(runtime?.weather_location?.LAT ?? 42.7875);
+    const lon = Number(runtime?.weather_location?.LON ?? -86.1089);
     fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto&forecast_days=6`)
       .then(r => r.json())
       .then(data => {
@@ -1701,7 +1703,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, []);
+  }, [runtime?.weather_location?.LAT, runtime?.weather_location?.LON]);
 
 
   useEffect(() => {

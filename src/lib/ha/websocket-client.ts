@@ -50,10 +50,10 @@ export class HAWebSocketClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
-    config?: HAConfig,
+    config: HAConfig,
     socketFactory?: (url: string) => WebSocketLike
   ) {
-    this.config = config ?? getHAConfig();
+    this.config = config;
     this.socketFactory =
       socketFactory ?? ((url: string) => new WebSocket(url) as WebSocketLike);
   }
@@ -363,9 +363,9 @@ export class HAWebSocketClient {
 
 let singleton: HAWebSocketClient | null = null;
 
-export function getHAWebSocketClient(): HAWebSocketClient {
+export async function getHAWebSocketClient(): Promise<HAWebSocketClient> {
   if (!singleton) {
-    singleton = new HAWebSocketClient(getHAConfig());
+    singleton = new HAWebSocketClient(await getHAConfig());
   }
   return singleton;
 }

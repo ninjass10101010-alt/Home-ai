@@ -39,6 +39,7 @@ import LearningWidget from "@/components/integrations/LearningWidget";
 import Link from "next/link";
 import { db } from "@/db";
 import { useRouter } from "next/navigation";
+import { useRuntimeConfig } from "@/hooks/useRuntimeConfig";
 
 const avatarSizes = new Set<AvatarSize>(["xs", "sm", "md", "base", "lg"]);
 function normalizeAvatarSize(size?: string) {
@@ -105,6 +106,7 @@ function Dot() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function CompactWeather() {
+  const { runtime } = useRuntimeConfig();
   const [temp, setTemp] = useState<number | null>(null);
   const [condition, setCondition] = useState("Loading...");
   const [emoji, setEmoji] = useState("⛅");
@@ -112,7 +114,7 @@ function CompactWeather() {
 
   useEffect(() => {
     fetch(
-      "https://api.open-meteo.com/v1/forecast?latitude=42.7875&longitude=-86.1089&current=temperature_2m,weather_code&daily=weather_code,temperature_2m_max&temperature_unit=fahrenheit&timezone=auto&forecast_days=5"
+      `https://api.open-meteo.com/v1/forecast?latitude=${runtime?.weather_location?.LAT ?? "42.7875"}&longitude=${runtime?.weather_location?.LON ?? "-86.1089"}&current=temperature_2m,weather_code&daily=weather_code,temperature_2m_max&temperature_unit=fahrenheit&timezone=auto&forecast_days=5`
     )
       .then((r) => r.json())
       .then((data) => {

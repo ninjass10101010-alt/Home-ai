@@ -46,7 +46,7 @@ export async function POST(req: Request) {
       );
     }
 
-    await getHAWebSocketClient().callService(
+    await (await getHAWebSocketClient()).callService(
       "alarm_control_panel",
       service,
       { entity_id: entityId }

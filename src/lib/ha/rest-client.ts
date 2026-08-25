@@ -33,7 +33,7 @@ interface HARawState {
 export async function fetchHADeviceStates(
   config?: HAConfig
 ): Promise<HAFilteredState[]> {
-  const cfg = config ?? getHAConfig();
+  const cfg = config ?? (await getHAConfig());
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REST_TIMEOUT_MS);
   try {

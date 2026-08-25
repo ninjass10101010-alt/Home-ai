@@ -2,8 +2,14 @@ import { Recipe } from "@/types/meals";
 import { THEMEALDB_ATTRIBUTION, THEMEALDB_SITE_URL } from "@/lib/themealdb-constants";
 
 export { THEMEALDB_ATTRIBUTION, THEMEALDB_SITE_URL };
-export const THEMEALDB_API_KEY = "1";
-export const THEMEALDB_BASE_URL = `https://www.themealdb.com/api/json/v1/${THEMEALDB_API_KEY}`;
+import { getServiceConfig } from "@/lib/services/config";
+
+// Registry-overridable; falls back to the public test key.
+export const DEFAULT_MEALDB_KEY = "1";
+export async function getMealDbBaseUrl(): Promise<string> {
+  const key = (await getServiceConfig("themealdb", "MEALDB_KEY")) || DEFAULT_MEALDB_KEY;
+  return `https://www.themealdb.com/api/json/v1/${key}`;
+}
 
 const FETCH_TIMEOUT_MS = 10_000;
 const MAX_INGREDIENT_SLOTS = 20;
@@ -73,7 +79,8 @@ async function fetchMealDb(path: string): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(`${THEMEALDB_BASE_URL}/${path}`, {
+    const baseUrl = await getMealDbBaseUrl();
+    const res = await fetch(`${baseUrl}/${path}`, {
       signal: controller.signal,
       headers: { Accept: "application/json" },
     });

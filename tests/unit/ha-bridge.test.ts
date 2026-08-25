@@ -22,19 +22,33 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock("../../src/lib/ha/websocket-client", () => ({
-  getHAWebSocketClient: () => ({
-    status: "connected",
-    connect: mocks.connect,
-    onStateChange: mocks.onStateChange,
-  }),
+  HAWebSocketClient: class {
+    status = "connected";
+    connect = mocks.connect;
+    onStateChange = mocks.onStateChange;
+  },
 }));
 
 vi.mock("../../src/lib/mqtt/client", () => ({
-  getHAMQTTClient: () => ({
-    status: "connected",
-    start: mocks.mqttStart,
-    onDeviceMessage: mocks.onDeviceMessage,
-  }),
+  HAMQTTClient: class {
+    status = "connected";
+    start = mocks.mqttStart;
+    onDeviceMessage = mocks.onDeviceMessage;
+    stop = vi.fn();
+  },
+}));
+
+vi.mock("../../src/lib/ha/config", () => ({
+  getHAConfig: async () => {
+    if (!process.env.HA_HOST || !process.env.HA_TOKEN) {
+      throw new Error("HA_HOST required");
+    }
+    return {
+      haHost: process.env.HA_HOST,
+      haToken: process.env.HA_TOKEN,
+      mqttBroker: process.env.MQTT_BROKER || undefined,
+    };
+  },
 }));
 
 vi.mock("../../src/lib/ha/persist", () => ({
@@ -93,7 +107,7 @@ describe("startHABridge", () => {
     delete process.env.HA_TOKEN;
 
     const { startHABridge } = await loadBridge();
-    startHABridge();
+    await startHABridge();
 
     expect(mocks.connect).not.toHaveBeenCalled();
     expect(mocks.mqttStart).not.toHaveBeenCalled();
@@ -101,7 +115,7 @@ describe("startHABridge", () => {
 
   it("connects the WS client and persists mapped state changes (source ha)", async () => {
     const { startHABridge } = await loadBridge();
-    startHABridge();
+    await startHABridge();
 
     expect(mocks.connect).toHaveBeenCalledTimes(1);
     expect(mocks.onStateChange).toHaveBeenCalledTimes(1);
@@ -130,7 +144,7 @@ describe("startHABridge", () => {
 
   it("persists MQTT messages as synthetic sensor.z2m_* entities (source mqtt)", async () => {
     const { startHABridge } = await loadBridge();
-    startHABridge();
+    await startHABridge();
 
     expect(mocks.mqttStart).toHaveBeenCalledTimes(1);
     expect(mocks.onDeviceMessage).toHaveBeenCalledTimes(1);
@@ -155,8 +169,8 @@ describe("startHABridge", () => {
 
   it("is idempotent (second call does not reconnect)", async () => {
     const { startHABridge } = await loadBridge();
-    startHABridge();
-    startHABridge();
+    await startHABridge();
+    await startHABridge();
 
     expect(mocks.connect).toHaveBeenCalledTimes(1);
     expect(mocks.mqttStart).toHaveBeenCalledTimes(1);
@@ -164,7 +178,7 @@ describe("startHABridge", () => {
 
   it("deletes the cached row when HA reports a removed entity (new_state null)", async () => {
     const { startHABridge } = await loadBridge();
-    startHABridge();
+    await startHABridge();
 
     const handler = mocks.getCapturedHandler();
     expect(handler).toBeTruthy();
@@ -189,7 +203,7 @@ describe("startHABridge", () => {
       lastEventAt: null,
     });
 
-    startHABridge();
+    await startHABridge();
 
     expect(getHABridgeStatus()).toEqual({
       started: true,

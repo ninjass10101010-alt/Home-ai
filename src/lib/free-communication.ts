@@ -1,4 +1,13 @@
 import nodemailer from 'nodemailer';
+import { getServiceConfig } from "@/lib/services/config";
+
+async function resolveGmailCreds(): Promise<{ user: string | null; pass: string | null }> {
+  const [user, pass] = await Promise.all([
+    getServiceConfig("gmail_emergency", "GMAIL_USER"),
+    getServiceConfig("gmail_emergency", "GMAIL_APP_PASSWORD"),
+  ]);
+  return { user: user || process.env.GMAIL_USER || null, pass: pass || process.env.GMAIL_APP_PASSWORD || null };
+}
 
 // Email-to-SMS gateways for major US carriers
 export const smsGateways = {
@@ -64,17 +73,19 @@ async function sendToCarrier(
   const emailAddress = `${phoneNumber}${gateway}`;
 
   // Create transporter using Gmail SMTP (free)
+  const { user: gmailUser, pass: gmailPass } = await resolveGmailCreds();
+  if (!gmailUser || !gmailPass) throw new Error("gmail_not_configured");
   const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
-      user: process.env.GMAIL_USER,
-      pass: process.env.GMAIL_APP_PASSWORD,
+      user: gmailUser,
+      pass: gmailPass,
     },
   });
 
   try {
     await transporter.sendMail({
-      from: process.env.GMAIL_USER,
+      from: gmailUser,
       to: emailAddress,
       subject: 'EMERGENCY ALERT',
       text: message.substring(0, 160), // SMS length limit
@@ -98,17 +109,19 @@ async function sendToCarrier(
 // Alternative: SendGrid for email (100 free/day)
 export async function sendEmailAlert(to: string, subject: string, message: string) {
   // Using nodemailer with Gmail for free option
+  const { user: gmailUser, pass: gmailPass } = await resolveGmailCreds();
+  if (!gmailUser || !gmailPass) throw new Error("gmail_not_configured");
   const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
-      user: process.env.GMAIL_USER,
-      pass: process.env.GMAIL_APP_PASSWORD,
+      user: gmailUser,
+      pass: gmailPass,
     },
   });
 
   try {
     await transporter.sendMail({
-      from: process.env.GMAIL_USER,
+      from: gmailUser,
       to,
       subject,
       text: message,
@@ -130,7 +143,7 @@ export async function sendEmailAlert(to: string, subject: string, message: strin
 }
 
 export async function sendTelegramMessage(chatId: string, text: string) {
-  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  const botToken = (await getServiceConfig("telegram_alert", "TELEGRAM_BOT_TOKEN")) || process.env.TELEGRAM_BOT_TOKEN || null;
   if (!botToken) {
     return { success: false, error: 'TELEGRAM_BOT_TOKEN not configured' };
   }

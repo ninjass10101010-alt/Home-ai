@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { fetchHADeviceStates } from "../../src/lib/ha/rest-client";
+vi.mock("../../src/lib/pb-auth", () => ({ withAdmin: async (fn: any) => fn({ collection: () => ({ getFullList: async () => [] }) }) }));
 
 describe("fetchHADeviceStates", () => {
   beforeEach(() => {

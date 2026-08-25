@@ -19,6 +19,7 @@
 
 const INSTACART_BASE = "https://connect.instacart.com/idp/v1";
 
+import { getServiceConfig } from "@/lib/services/config";
 interface Ingredient {
   name: string;
   quantity?: number;
@@ -52,18 +53,8 @@ interface InstacartResponse {
  * Check if Instacart integration is configured and enabled.
  * Checks both environment variables AND the connection store.
  */
-export function isInstacartEnabled(): boolean {
-  // Check env var first (for server-side)
-  if (process.env.INSTACART_API_KEY && process.env.NEXT_PUBLIC_INSTACART_ENABLED === "true") {
-    return true;
-  }
-  // Check client-side connection store
-  try {
-    const { isConnected } = require("@/lib/connections/store");
-    return isConnected("instacart");
-  } catch {
-    return false;
-  }
+export async function isInstacartEnabled(): Promise<boolean> {
+  return (await getServiceConfig("instacart", "INSTACART_API_KEY")) !== null;
 }
 
 /**
@@ -89,6 +80,8 @@ export function isInstacartEnabled(): boolean {
 export async function createShoppingList(
   params: CreateShoppingListParams,
 ): Promise<InstacartResponse> {
+  const apiKey = await getServiceConfig("instacart", "INSTACART_API_KEY");
+  if (!apiKey) throw new Error("INSTACART_API_KEY not configured");
   if (!isInstacartEnabled()) {
     throw new Error("Instacart integration is not enabled. Set INSTACART_API_KEY and NEXT_PUBLIC_INSTACART_ENABLED=true");
   }
@@ -96,7 +89,7 @@ export async function createShoppingList(
   const response = await fetch(`${INSTACART_BASE}/products/products_link`, {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${process.env.INSTACART_API_KEY}`,
+      "Authorization": `Bearer ${apiKey}`,
       "Content-Type": "application/json",
       "Accept": "application/json",
     },
@@ -159,6 +152,8 @@ export async function createShoppingList(
 export async function createRecipePage(
   params: CreateRecipePageParams,
 ): Promise<InstacartResponse> {
+  const apiKey = await getServiceConfig("instacart", "INSTACART_API_KEY");
+  if (!apiKey) throw new Error("INSTACART_API_KEY not configured");
   if (!isInstacartEnabled()) {
     throw new Error("Instacart integration is not enabled");
   }
@@ -166,7 +161,7 @@ export async function createRecipePage(
   const response = await fetch(`${INSTACART_BASE}/products/recipe`, {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${process.env.INSTACART_API_KEY}`,
+      "Authorization": `Bearer ${apiKey}`,
       "Content-Type": "application/json",
       "Accept": "application/json",
     },

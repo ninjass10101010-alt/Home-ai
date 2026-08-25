@@ -3,7 +3,7 @@ import { getHAWebSocketClient } from "@/lib/ha/websocket-client";
 import { getHABridgeStatus } from "@/lib/ha/bridge";
 
 export async function GET() {
-  const client = getHAWebSocketClient();
+  const client = await getHAWebSocketClient();
   return NextResponse.json({
     ok: true,
     wsStatus: client.status,

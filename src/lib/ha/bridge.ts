@@ -1,5 +1,6 @@
-import { getHAWebSocketClient, HAStateChange } from "./websocket-client";
-import { getHAMQTTClient } from "../mqtt/client";
+import { HAWebSocketClient, HAStateChange } from "./websocket-client";
+import { HAMQTTClient } from "../mqtt/client";
+import { getHAConfig } from "./config";
 import { deleteHAEntity, upsertHAEntity, HAEntityRecord } from "./persist";
 
 export interface HABridgeStatus {
@@ -11,6 +12,8 @@ export interface HABridgeStatus {
 
 let started = false;
 let lastEventAt: string | null = null;
+let wsClient: HAWebSocketClient | null = null;
+let mqttClient: HAMQTTClient | null = null;
 
 const MQTT_STATE_KEYS = [
   "state",
@@ -82,12 +85,18 @@ function mapMqttMessage(msg: {
   };
 }
 
-export function startHABridge(): void {
+export async function startHABridge(): Promise<void> {
   if (started) return;
-  if (!process.env.HA_HOST || !process.env.HA_TOKEN) return;
+  let cfg;
+  try {
+    cfg = await getHAConfig();
+  } catch {
+    return; // not configured — bridge stays off, House tab shows empty states
+  }
   started = true;
 
-  const ws = getHAWebSocketClient();
+  const ws = new HAWebSocketClient(cfg);
+  wsClient = ws;
   ws.onStateChange((change) => {
     lastEventAt = new Date().toISOString();
     // HA sends new_state: null when an entity is removed — delete the cached
@@ -107,8 +116,9 @@ export function startHABridge(): void {
     console.warn("[ha] WS connect failed", message);
   });
 
-  if (process.env.MQTT_BROKER) {
-    const mqtt = getHAMQTTClient();
+  if (cfg.mqttBroker) {
+    const mqtt = new HAMQTTClient(cfg);
+    mqttClient = mqtt;
     mqtt.onDeviceMessage((msg) => {
       lastEventAt = new Date().toISOString();
       const record = mapMqttMessage(msg);
@@ -128,12 +138,28 @@ export function getHABridgeStatus(): HABridgeStatus {
       lastEventAt,
     };
   }
-  const ws = getHAWebSocketClient();
-  const mqtt = process.env.MQTT_BROKER ? getHAMQTTClient() : null;
   return {
     started: true,
-    wsConnected: ws.status === "connected",
-    mqttStatus: mqtt ? mqtt.status : "disabled",
+    wsConnected: wsClient?.status === "connected",
+    mqttStatus: mqttClient ? mqttClient.status : "disabled",
     lastEventAt,
   };
+}
+
+/** Reconnect support for Services & Keys: stop the bridge and drop the
+ * singleton clients so a fresh startHABridge() re-reads config. */
+export async function resetHABridge(): Promise<void> {
+  try {
+    await wsClient?.close();
+  } catch {
+    /* already closed */
+  }
+  try {
+    mqttClient?.stop?.();
+  } catch {
+    /* mqtt optional */
+  }
+  wsClient = null;
+  mqttClient = null;
+  started = false;
 }

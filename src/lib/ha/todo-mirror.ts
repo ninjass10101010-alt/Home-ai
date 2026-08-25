@@ -70,7 +70,7 @@ export async function syncGroceryMirror(): Promise<MirrorResult> {
     return { ok: true, added: [], removed: [] };
   }
 
-  const client = getHAWebSocketClient();
+  const client = await getHAWebSocketClient();
   for (const name of toAdd) {
     await client.callService("todo", "add_item", { item: name, list: listEntityId });
   }
