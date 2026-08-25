@@ -201,9 +201,9 @@ export default function RecipeSearchModal({
 
           {phase === "results" && (
             <div className="grid grid-cols-2 gap-3">
-              {results.map((recipe) => (
+              {results.map((recipe, idx) => (
                 <button
-                  key={recipe.sourceUrl || recipe.id}
+                  key={recipe.sourceUrl || `recipe-${recipe.id ?? idx}-${idx}`}
                   onClick={() => openDetail(recipe)}
                   className="text-left rounded-2xl overflow-hidden glass border border-[var(--color-surface-3)] hover:border-[var(--color-accent-selected)]/40 transition-colors tap-sm cursor-pointer"
                 >
@@ -246,8 +246,8 @@ export default function RecipeSearchModal({
                   <h3 className="text-text-primary font-bold text-base">{selected.name}</h3>
                   {selected.tags?.length > 0 && (
                     <div className="mt-1.5 flex flex-wrap gap-1.5">
-                      {selected.tags.slice(0, 4).map((tag) => (
-                        <span key={tag} className="glass-subtle rounded-full px-2 py-0.5 text-[10px] font-bold text-text-secondary">
+                      {selected.tags.slice(0, 4).map((tag, tagIdx) => (
+                        <span key={`${tag}-${tagIdx}`} className="glass-subtle rounded-full px-2 py-0.5 text-[10px] font-bold text-text-secondary">
                           {tag}
                         </span>
                       ))}
