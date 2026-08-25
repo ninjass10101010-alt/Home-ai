@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   buildToolsForOpenAI: vi.fn(() => []),
   getTool: vi.fn(() => undefined),
   insertChatMessage: vi.fn(async () => ({})),
+  getServiceConfig: vi.fn(async () => null as string | null),
 }));
 
 vi.mock("@/lib/hermes-tools", () => ({
@@ -16,7 +17,7 @@ vi.mock("@/lib/hermes-tools", () => ({
 }));
 
 vi.mock("@/lib/services/config", () => ({
-  getServiceConfig: async () => null,
+  getServiceConfig: mocks.getServiceConfig,
 }));
 
 vi.mock("@/db", () => ({
@@ -48,10 +49,14 @@ async function post(body: Record<string, unknown>, cookie?: string) {
 
 beforeEach(() => {
   vi.stubEnv("SESSION_SECRET", "test-secret-0123456789");
+  // Empty (not unset) so the no-auth case is deterministic even if the host
+  // shell exports HERMES_API_KEY — "" is falsy → no Authorization header.
+  vi.stubEnv("HERMES_API_KEY", "");
   vi.stubGlobal("fetch", vi.fn(async () => hermesReply()));
   mocks.buildToolsForOpenAI.mockClear();
   mocks.getTool.mockClear();
   mocks.insertChatMessage.mockClear();
+  mocks.getServiceConfig.mockReset().mockImplementation(async () => null);
 });
 
 afterEach(() => {
@@ -94,5 +99,28 @@ describe("hermes chat — house-control role from session only", () => {
     const res = await post({ message: "hi" });
     expect(res.status).toBe(200);
     expect(mocks.buildToolsForOpenAI).toHaveBeenCalledWith({ houseControl: false });
+  });
+});
+
+describe("hermes chat — resolved auth header is actually sent", () => {
+  it("registry-resolved HERMES_API_KEY goes out as Authorization: Bearer", async () => {
+    mocks.getServiceConfig.mockImplementation(
+      async (service: string, key: string) =>
+        service === "hermes" && key === "HERMES_API_KEY" ? "registry-key-456" : null
+    );
+    await post({ message: "hi" });
+
+    const init = (globalThis.fetch as any).mock.calls[0][1];
+    expect(init.headers.Authorization).toBe("Bearer registry-key-456");
+    expect(init.headers["Content-Type"]).toBe("application/json");
+  });
+
+  it("null config (and no env fallback) sends NO Authorization header", async () => {
+    mocks.getServiceConfig.mockImplementation(async () => null);
+    await post({ message: "hi" });
+
+    const init = (globalThis.fetch as any).mock.calls[0][1];
+    expect(init.headers.Authorization).toBeUndefined();
+    expect(Object.keys(init.headers)).not.toContain("Authorization");
   });
 });

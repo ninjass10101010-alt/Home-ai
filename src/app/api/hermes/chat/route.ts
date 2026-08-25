@@ -95,9 +95,7 @@ async function callHermes(
   if (hermes.key) headers.Authorization = `Bearer ${hermes.key}`;
   const res = await fetch(`${hermes.url}/v1/chat/completions`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers,
     body: JSON.stringify({
       model: HERMES_MODEL,
       messages,
