@@ -35,7 +35,7 @@ export const SERVICES_REGISTRY: ServiceDef[] = [
       { key: "HA_TOKEN", label: "Long-lived access token", secret: true, required: true, helpText: "HA → Profile → Security → Long-lived access tokens" },
       { key: "MQTT_BROKER", label: "MQTT broker URL", secret: false, required: false, helpText: "Optional Zigbee2MQTT tap, e.g. mqtt://192.168.0.28:1883" },
       { key: "MQTT_USER", label: "MQTT username", secret: false, required: false, helpText: "Only if your broker requires auth" },
-      { key: "MQTT_PASS", label: "MQTT password", secret: true, required: false, helpText: "" },
+      { key: "MQTT_PASS", label: "MQTT password", secret: true, required: false, helpText: "Only if your broker requires auth" },
       { key: "HA_GROCERY_TODO_NAME", label: "Grocery todo list name", secret: false, required: false, helpText: "List created inside HA; default 'Consuela Grocery'", placeholder: "Consuela Grocery" },
     ],
   },
