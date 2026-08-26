@@ -128,7 +128,10 @@ export function useGrocery(showToast: (msg: string) => void, plannedMeals: Meal[
     const categoryAisle = catDef?.aisles?.[0]?.split('-')[0] || "1";
 
     const existing = groceryItems.find(i => normalizeName(i.name) === normalizeName(trimmed));
-    const saved: any = await db.upsertGroceryItem({ name: trimmed, category, priority, emoji: emojiOverride, quantity, notes });
+    let saved: any = null;
+    try {
+      saved = await db.upsertGroceryItem({ name: trimmed, category, priority, emoji: emojiOverride, quantity, notes });
+    } catch { saved = null; }
 
     let item: any;
     if (!saved) {
@@ -181,8 +184,8 @@ export function useGrocery(showToast: (msg: string) => void, plannedMeals: Meal[
     const item = groceryItems.find(i => i.id === id);
     if (!item) return;
     const wasNeeded = item.needed;
-    await db.upsertGroceryItem({ ...item, needed: !wasNeeded, id: item.id });
     setGroceryItems(prev => prev.map(i => i.id === id ? { ...i, needed: !i.needed } : i));
+    try { await db.upsertGroceryItem({ ...item, needed: !wasNeeded, id: item.id }); } catch { /* best-effort */ }
     if (wasNeeded) {
       setRecentlyBought(prev => {
         const filtered = prev.filter(r => normalizeName(r.name) !== normalizeName(item.name));
@@ -192,24 +195,25 @@ export function useGrocery(showToast: (msg: string) => void, plannedMeals: Meal[
   };
 
   const deleteGroceryItem = async (id: number | string) => {
-    await db.deleteGroceryItem(id);
+    const item = groceryItems.find(i => i.id === id);
     setGroceryItems(prev => prev.filter(i => i.id !== id));
+    try { await db.deleteGroceryItem(id, item?.name); } catch { /* best-effort */ }
   };
 
   const updateGroceryItem = async (id: number | string, updates: { name: string; quantity: string; notes: string }) => {
     const item = groceryItems.find(i => i.id === id);
     const trimmedName = updates.name.trim();
     if (!item || !trimmedName) return;
-    await db.upsertGroceryItem({ ...item, id, name: trimmedName, quantity: updates.quantity.trim(), notes: updates.notes.trim() });
     setGroceryItems(prev => prev.map(i => i.id === id ? { ...i, name: trimmedName, quantity: updates.quantity.trim(), notes: updates.notes.trim() } : i));
+    try { await db.upsertGroceryItem({ ...item, id, name: trimmedName, quantity: updates.quantity.trim(), notes: updates.notes.trim() }); } catch { /* best-effort */ }
   };
 
   const toggleManualOverride = async (id: number | string) => {
     const item = groceryItems.find(i => i.id === id);
     if (!item) return;
     const next = !item.manualOverride;
-    await db.toggleGroceryOverride(id, next);
     setGroceryItems(prev => prev.map(i => i.id === id ? { ...i, manualOverride: next } : i));
+    try { await db.toggleGroceryOverride(id, next); } catch { /* best-effort */ }
     showToast(next ? `📌 ${item.name} locked from auto-sync` : `🔓 ${item.name} unlocked for auto-sync`);
   };
 

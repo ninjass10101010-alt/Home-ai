@@ -562,7 +562,7 @@ export const db = {
         const { id: _omitId, ...data } = item;
         result = existing
           ? await gatewayUpdate("grocery_list_items", existing.id, data)
-          : await gatewayCreate("grocery_list_items", data);
+          : await gatewayCreate("grocery_list_items", { userId: "demo", ...data });
       } catch {
         result = null;
       }
@@ -588,8 +588,15 @@ export const db = {
     return result;
   },
 
-  deleteGroceryItem: async (id: number | string) => {
-    const result = isServer() ? await pbDb.deleteGroceryItem(id) : await gatewayDeleteOk("grocery_list_items", id);
+  deleteGroceryItem: async (id: number | string, name?: string) => {
+    let result = isServer() ? await pbDb.deleteGroceryItem(id) : await gatewayDeleteOk("grocery_list_items", id);
+    if (!result && name && !isServer()) {
+      try {
+        const items = await gatewayList("grocery_list_items");
+        const match = items.find((g: any) => g.name?.toLowerCase() === name.toLowerCase());
+        if (match) result = await gatewayDeleteOk("grocery_list_items", match.id);
+      } catch { /* best-effort */ }
+    }
     if (result) {
       const idx = groceryCache.findIndex((g: any) => g.id == id);
       if (idx !== -1) groceryCache.splice(idx, 1);

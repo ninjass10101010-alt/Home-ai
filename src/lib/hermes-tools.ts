@@ -99,6 +99,7 @@ async function adminUpsertGroceryItem(input: {
         return pb.collection("grocery_list_items").update(existing.id, patch);
       }
       return pb.collection("grocery_list_items").create({
+        userId: "demo",
         name: trimmed,
         emoji,
         category,

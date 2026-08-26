@@ -322,7 +322,7 @@ export const db = {
     );
     const { id: _omitId, ...data } = item;
     if (existing) return safeUpdate("grocery_list_items", existing.id, data);
-    return safeCreate("grocery_list_items", data);
+    return safeCreate("grocery_list_items", { userId: "demo", ...data });
   },
 
   async toggleGroceryOverride(id: number | string, override: boolean): Promise<any> {

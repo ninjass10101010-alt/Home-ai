@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, Suspense } from "react";
+import { useState, useRef, useEffect, Suspense } from "react";
 import PageShell from "@/components/ui/PageShell";
 import { useSearchParams } from "next/navigation";
 import { db } from "@/db";
@@ -32,15 +32,24 @@ import ListRow from "@/components/ui/ListRow";
 import StatTile from "@/components/patterns/StatTile";
 import SectionCard from "@/components/patterns/SectionCard";
 
+const VALID_TABS: Tab[] = ["meals", "grocery", "pantry", "recipes"];
+
 function MealHubContent() {
   const searchParams = useSearchParams();
-  const initialTab = (searchParams.get("tab") as Tab) || "meals";
+  const requestedTab = searchParams.get("tab") as Tab | null;
+  const initialTab = requestedTab && VALID_TABS.includes(requestedTab) ? requestedTab : "meals";
   const [activeTab, setActiveTab] = useState<Tab>(initialTab);
   const [notification, setNotification] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+  }, []);
 
   const showToast = (msg: string) => {
     setNotification(msg);
-    setTimeout(() => setNotification(null), 3000);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setNotification(null), 3000);
   };
 
   const normalizeName = (name: string) => name.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -283,12 +292,6 @@ function MealHubContent() {
   };
 
   const neededCount = groceryItems.filter(i => i.needed).length;
-  const weekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day, index) => ({
-    id: day,
-    label: day,
-    detail: String(index + 1),
-    active: day === activeDay,
-  }));
 
   return (
     <PageShell>
@@ -338,7 +341,7 @@ function MealHubContent() {
           meals.length === 0 ? (
             <EmptyState title="No meals planned yet" description="Start with a simple breakfast, lunch, snack, or dinner for the week." actionLabel="Add meal" onAction={() => openRecipeModal()} />
           ) : (
-          <div className="space-y-5">
+          <div key="meals" className="panel-swap space-y-5">
             <div className="grid gap-3 sm:grid-cols-3">
               <StatTile label="Planned" value={meals.length} detail="This week" icon="📅" tone="accent" compact />
               <StatTile label="Tonight" value={activeMeals.length} detail="Selected day" icon="🌙" tone="warning" compact />
@@ -371,6 +374,7 @@ function MealHubContent() {
         ))}
 
         {activeTab === "grocery" && (
+          <div key="grocery" className="panel-swap">
           <GroceryTab
             groceryItems={groceryItems}
             setGroceryItems={setGroceryItems}
@@ -393,10 +397,11 @@ function MealHubContent() {
             removePantryItem={removePantryItem}
             toggleManualOverride={toggleManualOverride}
           />
+          </div>
         )}
 
         {activeTab === "pantry" && (
-          <>
+          <div key="pantry" className="panel-swap">
             <PantryTab
               pantryItems={pantryItems}
               groceryItems={groceryItems}
@@ -409,10 +414,11 @@ function MealHubContent() {
             <div className="mt-6">
               <CookWithWhatYouHave recipes={recipes} pantryItems={pantryItems} onAddMissing={addMissingToGrocery} />
             </div>
-          </>
+          </div>
         )}
 
         {activeTab === "recipes" && (
+          <div key="recipes" className="panel-swap">
           <RecipesTab
             recipes={recipes}
             activeDay={activeDay}
@@ -426,6 +432,7 @@ function MealHubContent() {
             openImportModal={openImportModal}
             openSearchModal={openSearchModal}
           />
+          </div>
         )}
       </div>
 
@@ -476,7 +483,7 @@ function MealHubContent() {
 
 export default function MealHubPage() {
   return (
-    <Suspense fallback={<div className="flex min-h-screen items-center justify-center"><div className="h-12 w-12 animate-spin rounded-full border-2 border-t-transparent border-[var(--color-accent-selected)]" /></div>}>
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center"><div className="h-12 w-12 motion-safe:animate-spin rounded-full border-2 border-t-transparent border-[var(--color-accent-selected)]" /></div>}>
       <MealHubContent />
     </Suspense>
   );
