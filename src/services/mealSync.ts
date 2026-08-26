@@ -7,6 +7,18 @@ export interface SyncResult {
   removed: number;
 }
 
+export interface SyncPreviewItem {
+  name: string;
+  quantity: string;
+  category: string;
+  priority: "low" | "medium" | "high";
+}
+
+export interface SyncPreview {
+  items: SyncPreviewItem[];
+  alreadyOnList: number;
+}
+
 interface RequiredIngredient {
   name: string;
   unit: string;
@@ -152,6 +164,69 @@ export class MealSyncService {
       console.warn('[MealSync] syncPantryToGrocery failed', e);
       return { added: 0, updated: 0, removed: 0 };
     }
+  }
+
+  previewMealPlanToGrocery(meals: Meal[], pantryItems: PantryItem[], groceryItems: GroceryListItem[]): SyncPreview {
+    const pantry = (pantryItems || []).map(p => ({ ...p, name: p.name || p.item || "" }));
+    const items: SyncPreviewItem[] = [];
+    let alreadyOnList = 0;
+    const ingredientDeficits = new Map<string, RequiredIngredient>();
+
+    for (const meal of meals || []) {
+      for (const ingredient of this.calculateRequiredIngredients(meal)) {
+        const key = this.normalizeIngredientName(ingredient.name);
+        const pantryStock = this.findPantryStock(pantry, ingredient.name);
+        const deficit = this.calculateDeficit(ingredient, pantryStock);
+        if (deficit <= 0) continue;
+        const accumulated = ingredientDeficits.get(key);
+        if (accumulated) accumulated.quantity += deficit;
+        else ingredientDeficits.set(key, { ...ingredient, quantity: deficit });
+      }
+    }
+
+    for (const [, ingredient] of ingredientDeficits) {
+      const existing = (groceryItems || []).find(g =>
+        !g.manualOverride && !this.isManualSource(g.source) && this.ingredientNamesMatch(g.name, ingredient.name)
+      );
+      if (existing) { alreadyOnList++; continue; }
+      items.push({
+        name: ingredient.name,
+        quantity: this.formatQuantity(ingredient.quantity, ingredient.unit),
+        category: ingredient.category,
+        priority: this.getPriorityForDeficit(ingredient.quantity),
+      });
+    }
+
+    return { items, alreadyOnList };
+  }
+
+  previewPantryToGrocery(pantryItems: PantryItem[], groceryItems: GroceryListItem[]): SyncPreview {
+    const items: SyncPreviewItem[] = [];
+    let alreadyOnList = 0;
+    const seen = new Set<string>();
+
+    for (const raw of pantryItems || []) {
+      if (raw.status === "plenty") continue;
+      const name = raw.name || raw.item || "";
+      if (!name) continue;
+      const key = this.normalizeIngredientName(name);
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const existing = (groceryItems || []).find(g =>
+        !g.manualOverride && !this.isManualSource(g.source) && this.ingredientNamesMatch(g.name, name)
+      );
+      if (existing) { alreadyOnList++; continue; }
+      const category = this.getCategoryForIngredient(name);
+      items.push({
+        name,
+        quantity: "1",
+        category,
+        priority: raw.status === "out" ? "high" : "medium",
+      });
+    }
+
+    return { items, alreadyOnList };
   }
 
   async toggleManualOverride(groceryId: number | string, override: boolean): Promise<void> {
