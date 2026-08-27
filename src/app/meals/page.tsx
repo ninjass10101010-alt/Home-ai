@@ -12,7 +12,7 @@ import { usePantry } from "@/hooks/usePantry";
 import { useRecipes } from "@/hooks/useRecipes";
 import PlanTab from "@/components/meals/PlanTab";
 import ShopTab from "@/components/meals/ShopTab";
-import PantryTab from "@/components/meals/PantryTab";
+import StockTab from "@/components/meals/StockTab";
 import RecipesTab from "@/components/meals/RecipesTab";
 import CookWithWhatYouHave from "@/components/meals/CookWithWhatYouHave";
 import RecipeModal from "@/components/meals/RecipeModal";
@@ -412,14 +412,14 @@ function MealHubContent() {
 
         {activeTab === "pantry" && (
           <div key="pantry" className="panel-swap">
-            <PantryTab
+            <StockTab
               pantryItems={pantryItems}
               groceryItems={groceryItems}
               addPantryItem={addPantryItem}
               updatePantryStatus={updatePantryStatus}
               removePantryItem={removePantryItem}
-              syncPantryToGrocery={syncPantryToGrocery}
-              isSyncing={isSyncing}
+              addGroceryItem={addGroceryItem}
+              flowSummary={`${pantryItems.length} items tracked`}
             />
             <div className="mt-6">
               <CookWithWhatYouHave recipes={recipes} pantryItems={pantryItems} onAddMissing={addMissingToGrocery} />
