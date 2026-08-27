@@ -15,15 +15,22 @@ export async function GET(request: NextRequest) {
   }
 
   const out: Record<string, Record<string, string>> = {};
-  for (const svc of SERVICES_REGISTRY) {
-    for (const field of svc.fields) {
-      if (!field.publicRuntime) continue;
-      const value = await getServiceConfig(svc.id, field.key);
-      if (value !== null) {
-        out[svc.id] = out[svc.id] || {};
-        out[svc.id][field.key] = value;
+  try {
+    for (const svc of SERVICES_REGISTRY) {
+      for (const field of svc.fields) {
+        if (!field.publicRuntime) continue;
+        const value = await getServiceConfig(svc.id, field.key);
+        if (value !== null) {
+          out[svc.id] = out[svc.id] || {};
+          out[svc.id][field.key] = value;
+        }
       }
     }
+    return NextResponse.json({ runtime: out });
+  } catch (err) {
+    // Config store unreachable — widgets fall back to their own defaults,
+    // so return an empty runtime (200) rather than breaking every caller.
+    console.error("[services/runtime] GET failed:", err);
+    return NextResponse.json({ runtime: out, error: "config_store_unreachable" });
   }
-  return NextResponse.json({ runtime: out });
 }

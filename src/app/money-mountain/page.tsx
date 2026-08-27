@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { motion } from 'framer-motion';
+import { motion, MotionConfig } from 'framer-motion';
 import { Plus, Mountain } from 'lucide-react';
 import PageShell from '@/components/ui/PageShell';
 import Button from '@/components/ui/Button';
@@ -18,6 +18,7 @@ import { CreateMountainForm } from '@/components/money-mountain/CreateMountainFo
 import { TransactionLogger } from '@/components/money-mountain/TransactionLogger';
 import { MilestoneBadge } from '@/components/money-mountain/MilestoneBadge';
 import { TransactionHistory } from '@/components/money-mountain/TransactionHistory';
+import { formatCurrency } from '@/db/features/money-mountain';
 import type { MoneyMountain, MountainTransaction } from '@/db/features/money-mountain';
 
 const FogBackground = dynamic(() => import('@/components/ui/FogBackground'), { ssr: false });
@@ -40,6 +41,13 @@ export default function MoneyMountainPage() {
   useEffect(() => {
     loadMountains();
   }, []);
+
+  // Auto-dismiss celebration toasts so they never linger.
+  useEffect(() => {
+    if (!toast.open) return;
+    const timer = setTimeout(() => setToast((t) => ({ ...t, open: false })), 4000);
+    return () => clearTimeout(timer);
+  }, [toast.open]);
 
   const loadMountains = async () => {
     setLoading(true);
@@ -122,7 +130,7 @@ export default function MoneyMountainPage() {
       if (result.milestoneReached) {
         setToast({ open: true, message: `🏔️ Milestone reached: ${result.milestoneReached.label}!`, tone: 'success' });
       } else if (result.matchAmount) {
-        setToast({ open: true, message: `🎉 Parent match! +$${result.matchAmount.toFixed(2)} added to your mountain!`, tone: 'success' });
+        setToast({ open: true, message: `🎉 Parent match! +${formatCurrency(result.matchAmount)} added to your mountain!`, tone: 'success' });
       }
     } else {
       throw new Error('Failed to add transaction');
@@ -164,6 +172,7 @@ export default function MoneyMountainPage() {
   }
 
   return (
+    <MotionConfig reducedMotion="user">
     <AtmosphericProvider>
       <FogBackground />
       <PageShell style={{ backgroundColor: 'transparent' }}>
@@ -175,18 +184,18 @@ export default function MoneyMountainPage() {
             animate={{ opacity: 1, y: 0 }}
             className="mb-8"
           >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <Surface variant="warm" radius="xl" padding="md" className="flex h-14 w-14 items-center justify-center floating">
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+              <div className="flex min-w-0 items-center gap-4">
+                <Surface variant="warm" radius="xl" padding="md" className="flex h-14 w-14 shrink-0 items-center justify-center floating">
                   <Mountain className="h-7 w-7 text-[var(--color-accent-mint)]" />
                 </Surface>
-                <div>
-                  <h1 className="text-3xl font-bold text-text-primary">Money Mountain</h1>
-                  <p className="text-text-secondary">Set goals, save money, climb mountains!</p>
+                <div className="min-w-0">
+                  <h1 className="text-2xl sm:text-3xl font-bold text-text-primary">Money Mountain</h1>
+                  <p className="text-text-secondary truncate">Set goals, save money, climb mountains!</p>
                 </div>
               </div>
 
-              <Button onClick={() => setShowCreateForm(true)}>
+              <Button onClick={() => setShowCreateForm(true)} className="shrink-0">
                 <Plus className="h-4 w-4" />
                 New Goal
               </Button>
@@ -246,7 +255,7 @@ export default function MoneyMountainPage() {
                     {/* Milestones */}
                     <Surface variant="warm" padding="md" radius="2xl">
                       <h3 className="text-sm font-semibold text-text-primary mb-4">Milestones</h3>
-                      <div className="flex items-center justify-around">
+                      <div className="flex flex-wrap items-center justify-around gap-x-2 gap-y-4">
                         {selectedMountain.milestones.map((milestone: any) => (
                           <MilestoneBadge
                             key={milestone.id}
@@ -298,5 +307,6 @@ export default function MoneyMountainPage() {
         </Toast>
       </PageShell>
     </AtmosphericProvider>
+    </MotionConfig>
   );
 }

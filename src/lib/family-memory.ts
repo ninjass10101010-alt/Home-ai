@@ -4,7 +4,7 @@
  * in natural language for personalized AI assistance
  */
 
-import { getPB } from './pb';
+import { getAuthedPB } from './pb-auth';
 
 export interface FamilyMemory {
   id: string;
@@ -61,7 +61,7 @@ export async function storeMemory(
   confidence: number = 0.8
 ): Promise<FamilyMemory | null> {
   try {
-    const pb = getPB();
+    const pb = await getAuthedPB();
     
     // Check if memory already exists
     const existing = await pb.collection('consuela_family_memories').getFirstListItem(
@@ -116,7 +116,7 @@ export async function storeMemory(
  */
 export async function queryMemories(query: MemoryQuery): Promise<FamilyMemory[]> {
   try {
-    const pb = getPB();
+    const pb = await getAuthedPB();
     const filters: string[] = [];
 
     if (query.userId) filters.push(`userId = "${query.userId}"`);
@@ -197,7 +197,7 @@ export async function updateMemory(
   updates: MemoryUpdate
 ): Promise<FamilyMemory | null> {
   try {
-    const pb = getPB();
+    const pb = await getAuthedPB();
     const updateData: any = {
       updatedAt: new Date().toISOString(),
     };
@@ -224,7 +224,7 @@ export async function updateMemory(
  */
 export async function deleteMemory(memoryId: string): Promise<boolean> {
   try {
-    const pb = getPB();
+    const pb = await getAuthedPB();
     await pb.collection('consuela_family_memories').delete(memoryId, {
       requestKey: null,
     });
@@ -308,7 +308,7 @@ export async function buildMemoryContext(
  */
 export async function incrementMemoryUsage(memoryId: string): Promise<void> {
   try {
-    const pb = getPB();
+    const pb = await getAuthedPB();
     const memory = await pb.collection('consuela_family_memories').getOne(memoryId, {
       requestKey: null,
     });

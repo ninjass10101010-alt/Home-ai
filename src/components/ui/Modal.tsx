@@ -1,6 +1,9 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+
+const EXIT_MS = 150;
 
 interface ModalProps {
   open: boolean;
@@ -12,21 +15,47 @@ interface ModalProps {
 }
 
 export default function Modal({ open, onClose, title, description, children, footer }: ModalProps) {
+  const [phase, setPhase] = useState<"closed" | "open" | "closing">("closed");
+
   useEffect(() => {
-    if (!open) return;
+    if (open) {
+      setPhase("open");
+      return;
+    }
+    setPhase((prev) => (prev === "closed" ? prev : "closing"));
+  }, [open]);
+
+  useEffect(() => {
+    if (phase !== "closing") return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setPhase("closed");
+      return;
+    }
+    const t = setTimeout(() => setPhase("closed"), EXIT_MS);
+    return () => clearTimeout(t);
+  }, [phase]);
+
+  useEffect(() => {
+    if (phase !== "open") return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open, onClose]);
+  }, [phase, onClose]);
 
-  if (!open) return null;
+  if (phase === "closed") return null;
+  const closing = phase === "closing";
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/50 p-4 backdrop-blur-sm sm:items-center" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-[80] flex items-end justify-center bg-black/50 p-4 backdrop-blur-sm sm:items-center"
+      style={closing ? { animation: `overlayExit ${EXIT_MS}ms var(--ease-standard) both` } : undefined}
+      onClick={onClose}
+    >
       <div
-        className="material-thick w-full max-w-lg rounded-[2rem] border border-white/12 bg-[var(--color-surface-0)]/80 p-5 shadow-2xl backdrop-blur-2xl animate-[modalEnter_0.35s_cubic-bezier(0.34,1.56,0.64,1)] sm:pb-safe"
+        className="material-thick w-full max-w-lg rounded-[2rem] border border-white/12 bg-[var(--color-surface-0)]/80 p-5 shadow-2xl backdrop-blur-2xl sm:pb-safe"
+        style={{ animation: closing ? `modalExit ${EXIT_MS}ms var(--ease-standard) both` : `modalEnter 0.35s var(--ease-spring) both` }}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="mb-4">

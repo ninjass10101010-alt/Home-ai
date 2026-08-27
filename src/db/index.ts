@@ -260,6 +260,13 @@ void (async () => {
     mealsCache = ml as any[];
     pantryCache = p as any[];
     groceryCache = g as any[];
+    // Tell client consumers the real roster has landed (mirrors
+    // refreshMembersCache). Only on a successful fetch — a fallback-only
+    // cache must not fire member-matching side effects (useAuth treats a
+    // missing member as deleted and signs out).
+    if (!isServer() && pbMembers.length > 0) {
+      window.dispatchEvent(new CustomEvent("consuela-members-updated"));
+    }
   } catch { /* fallback data used below */ }
 
   if (membersCache.length === 0) membersCache = membersFallback as any;
@@ -269,18 +276,30 @@ function cacheMemberColor(m: any, i: number) {
   return memberColor(i);
 }
 
+// Deterministic mapping of the static fallback family. Unlike selectMembers(),
+// it NEVER reflects the async-warmed membersCache: the server warms that cache
+// from PB during SSR while the browser hasn't fetched the roster yet at
+// hydration, so any pre-mount render reading the cache mismatches. Pre-mount
+// render sites must use this (see PlanTab's member strip).
+function mappedMembersFallback() {
+  return membersFallback.map(m => ({
+    id: m.id, name: m.name.split(' ')[0], fullName: m.name, role: m.role,
+    color: cacheMemberColor(m, m.id - 1), emoji: m.emoji || "😊",
+  }));
+}
+
 export const db = {
   selectMembers: () => {
-    if (membersCache.length === 0) return membersFallback.map(m => ({
-      id: m.id, name: m.name.split(' ')[0], fullName: m.name, role: m.role,
-      color: cacheMemberColor(m, m.id - 1), emoji: m.emoji || "😊",
-    }));
+    if (membersCache.length === 0) return mappedMembersFallback();
     return membersCache.map((m: any, i: number) => ({
       id: i + 1, name: m.name?.split(' ')[0] || m.name, fullName: m.name,
       role: m.role || "member", color: cacheMemberColor(m, i), emoji: m.emoji || "😊",
       pin: m.pin,
     }));
   },
+
+  // Deterministic pre-mount render source — see mappedMembersFallback above.
+  selectMembersFallback: () => mappedMembersFallback(),
 
   selectMembersDetailed: () => {
     if (membersCache.length === 0) return membersFallback.map(m => ({

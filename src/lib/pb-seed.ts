@@ -74,6 +74,7 @@ export const COLLECTIONS = [
   {
     name: "grocery_list_items",
     schema: [
+      { name: "userId", type: "text" },
       { name: "name", type: "text", required: true },
       { name: "emoji", type: "text" },
       { name: "category", type: "text" },
@@ -249,6 +250,19 @@ export const COLLECTIONS = [
     ],
     indexes: [
       "CREATE UNIQUE INDEX idx_key_unique ON consuela_state (key)",
+    ],
+  },
+  // Structured tasks/leaderboard snapshot store used by /api/tasks/sync
+  // (previously only created lazily by src/lib/google/pb-collections.ts).
+  {
+    name: "consuela_data_snapshots",
+    schema: [
+      { name: "key", type: "text", required: true },
+      { name: "data", type: "json" },
+      { name: "updated_at", type: "date" },
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_consuela_data_snapshots_key ON consuela_data_snapshots (key)",
     ],
   },
   {
@@ -533,6 +547,25 @@ export const COLLECTIONS = [
       "CREATE UNIQUE INDEX idx_recurring_patterns_key ON recurring_patterns (patternKey)",
     ],
   },
+  {
+    name: "consuela_family_memories",
+    schema: [
+      { name: "userId", type: "text", required: true },
+      { name: "familyId", type: "text" },
+      { name: "category", type: "text" },
+      { name: "key", type: "text", required: true },
+      { name: "content", type: "text", required: true },
+      { name: "tags", type: "text" },
+      { name: "confidence", type: "number" },
+      { name: "usageCount", type: "number" },
+      { name: "lastUsed", type: "text" },
+      { name: "createdAt", type: "text" },
+      { name: "updatedAt", type: "text" },
+    ],
+    indexes: [
+      "CREATE INDEX idx_family_memories_user ON consuela_family_memories (userId)",
+    ],
+  },
 ];
 
 // All browser data traffic now flows through the sessioned /api/db/* gateway
@@ -548,6 +581,44 @@ const LOCKED_RULES = {
   updateRule: null,
   deleteRule: null,
 };
+
+// Every app collection carries the PB-standard created/updated autodate
+// fields. The /api/db gateway sorts by -created by default and client code
+// relies on record timestamps — a collection without these fields makes
+// every sorted read fail (PB 400 → gateway 500 → silent client fallback).
+const AUTODATE_CREATED = { name: "created", type: "autodate", onCreate: true };
+const AUTODATE_UPDATED = { name: "updated", type: "autodate", onCreate: true, onUpdate: true };
+
+function withAutodate(schema: any[]): any[] {
+  const has = (n: string) => schema.some((f: any) => f.name === n);
+  const extra: any[] = [];
+  if (!has("created")) extra.push({ ...AUTODATE_CREATED });
+  if (!has("updated")) extra.push({ ...AUTODATE_UPDATED });
+  return extra.length ? [...schema, ...extra] : schema;
+}
+
+/** Field builder shared by the create and patch paths. */
+function buildField(s: any): any {
+  const base: any = { name: s.name, type: s.type };
+  if (s.type === "autodate") {
+    base.onCreate = s.onCreate !== false;
+    if (s.onUpdate) base.onUpdate = true;
+    return base;
+  }
+  base.required = s.required || false;
+  if (s.type === "select" && s.options) {
+    base.values = s.options.values;
+    base.options = s.options;
+    if (s.options.maxSelect) base.maxSelect = s.options.maxSelect;
+  }
+  if (s.type === "json") base.type = "json";
+  if (s.type === "number" && s.options) base.options = s.options;
+  if (s.type === "date" && s.options) base.options = s.options;
+  if (s.type === "text" && s.options) base.options = s.options;
+  // generic fallback: preserve any options
+  if (s.options && !base.options) base.options = s.options;
+  return base;
+}
 
 function rulesMatch(live: any): boolean {
   return (
@@ -565,6 +636,7 @@ export async function seedCollections() {
     const created: string[] = [];
 
     for (const col of COLLECTIONS) {
+      const schema = withAutodate(col.schema);
       if (existing.includes(col.name)) {
         const live = (await pb.collections.getFullList()).find((c: any) => c.name === col.name);
         if (!live) {
@@ -572,7 +644,7 @@ export async function seedCollections() {
           continue;
         }
         const liveFieldNames = new Set((live.fields || []).map((f: any) => f.name));
-        const missingFields = col.schema.filter((s: any) => !liveFieldNames.has(s.name));
+        const missingFields = schema.filter((s: any) => !liveFieldNames.has(s.name));
 
         const liveIndexNames = new Set(
           (live.indexes || []).map((i: any) => {
@@ -595,21 +667,7 @@ export async function seedCollections() {
           if (missingFields.length) {
             const mergedFields = [
               ...(live.fields || []),
-              ...missingFields.map((s: any) => {
-                const base: any = { name: s.name, type: s.type, required: s.required || false };
-                if (s.type === "select" && s.options) {
-                  base.values = s.options.values;
-                  base.options = s.options;
-                  if (s.options.maxSelect) base.maxSelect = s.options.maxSelect;
-                }
-                if (s.type === "json") base.type = "json";
-                if (s.type === "number" && s.options) base.options = s.options;
-                if (s.type === "date" && s.options) base.options = s.options;
-                if (s.type === "text" && s.options) base.options = s.options;
-                // generic fallback: preserve any options
-                if (s.options && !base.options) base.options = s.options;
-                return base;
-              }),
+              ...missingFields.map(buildField),
             ];
             await pb.collections.update(live.id, { fields: mergedFields });
             parts.push(`+${missingFields.length} fields: ${missingFields.map((m: any) => m.name).join(", ")}`);
@@ -632,21 +690,7 @@ export async function seedCollections() {
         name: col.name,
         type: "base",
         ...LOCKED_RULES,
-        fields: col.schema.map((s: any) => {
-          const base: any = {
-            name: s.name,
-            type: s.type,
-            required: s.required || false,
-          };
-          if (s.type === "select" && s.options) {
-            base.values = s.options.values;
-            base.options = s.options;
-            if (s.options.maxSelect) base.maxSelect = s.options.maxSelect;
-          }
-          if (s.type === "json") base.type = "json";
-          if (s.options) base.options = s.options;
-          return base;
-        }),
+        fields: schema.map(buildField),
         indexes: col.indexes || [],
       });
       created.push(col.name);

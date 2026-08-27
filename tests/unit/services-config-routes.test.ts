@@ -104,6 +104,13 @@ describe("GET /api/services/config", () => {
     const tokenField = ha.status.find((f: any) => f.key === "HA_TOKEN");
     expect(tokenField.secret).toBe(true);
   });
+
+  it("returns 503 config_store_unreachable when PocketBase is down", async () => {
+    mocks.withAdmin.mockRejectedValue(new Error("PB unreachable"));
+    const res = await GET(req("GET", undefined, { cookie: await sessionCookie() }));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ services: [], error: "config_store_unreachable" });
+  });
 });
 
 describe("PUT /api/services/config", () => {

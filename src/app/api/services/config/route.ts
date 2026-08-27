@@ -24,16 +24,26 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const services = await Promise.all(
-    SERVICES_REGISTRY.map(async (svc) => ({
-      id: svc.id,
-      displayName: svc.displayName,
-      description: svc.description,
-      testFnId: svc.testFnId,
-      status: await getServiceStatus(svc.id),
-    }))
-  );
-  return NextResponse.json({ services });
+  try {
+    const services = await Promise.all(
+      SERVICES_REGISTRY.map(async (svc) => ({
+        id: svc.id,
+        displayName: svc.displayName,
+        description: svc.description,
+        testFnId: svc.testFnId,
+        status: await getServiceStatus(svc.id),
+      }))
+    );
+    return NextResponse.json({ services });
+  } catch (err) {
+    // PocketBase unreachable (or the config collection missing) — return an
+    // honest, parseable error instead of a bare 500 with an empty body.
+    console.error("[services/config] GET failed:", err);
+    return NextResponse.json(
+      { services: [], error: "config_store_unreachable" },
+      { status: 503 }
+    );
+  }
 }
 
 export async function PUT(request: NextRequest) {

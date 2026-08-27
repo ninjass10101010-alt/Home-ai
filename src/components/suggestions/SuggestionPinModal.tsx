@@ -1,6 +1,7 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Modal from "@/components/ui/Modal";
 import SoftButton from "@/components/ui/SoftButton";
 import { useAuth } from "@/hooks/useAuth";
@@ -11,6 +12,7 @@ import { useAuth } from "@/hooks/useAuth";
 // when useSuggestions exposes needsPin=true; the submitted PIN is kept in
 // memory only (never persisted) and retried against the queued action.
 function PinModalInner({
+  open,
   error,
   onClose,
   onSubmit,
@@ -18,6 +20,7 @@ function PinModalInner({
   error: string | null;
   onClose: () => void;
   onSubmit: (pin: string) => void;
+  open: boolean;
 }) {
   const [pinValue, setPinValue] = useState("");
   const { isLoggedIn } = useAuth();
@@ -31,7 +34,7 @@ function PinModalInner({
 
   return (
     <Modal
-      open
+      open={open}
       onClose={onClose}
       title="Enter a PIN"
       description={
@@ -64,7 +67,7 @@ function PinModalInner({
           autoFocus
           className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-4 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted"
         />
-        {error && <p className="text-center text-sm text-rose-300">{error}</p>}
+        {error && <p className="text-center text-sm text-[var(--color-accent-rose)]">{error}</p>}
       </div>
     </Modal>
   );
@@ -81,7 +84,11 @@ export default function SuggestionPinModal({
   onClose: () => void;
   onSubmit: (pin: string) => void;
 }) {
-  if (!open) return null;
-  // fresh mount per open so the input always starts empty
-  return <PinModalInner key="pin" error={error} onClose={onClose} onSubmit={onSubmit} />;
+  const [session, setSession] = useState(0);
+  useEffect(() => {
+    if (open) setSession((s) => s + 1);
+  }, [open]);
+  // fresh mount per open so the input always starts empty; staying mounted
+  // on close lets the shared Modal play its exit animation
+  return <PinModalInner key={session} open={open} error={error} onClose={onClose} onSubmit={onSubmit} />;
 }

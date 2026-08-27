@@ -84,7 +84,13 @@ describe("pb rules lockdown", () => {
     const live = {
       id: "evt_live_1",
       name: "events",
-      fields: eventsDef.schema.map((s: any) => ({ name: s.name })),
+      // Include the autodate fields the seeder self-heals so this collection
+      // is genuinely up-to-date and needs no patch.
+      fields: [
+        ...eventsDef.schema.map((s: any) => ({ name: s.name })),
+        { name: "created" },
+        { name: "updated" },
+      ],
       indexes: [],
       listRule: null,
       viewRule: null,

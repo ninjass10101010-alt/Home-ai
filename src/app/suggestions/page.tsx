@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import PageShell from "@/components/ui/PageShell";
 import PageHeader from "@/components/patterns/PageHeader";
@@ -10,6 +10,7 @@ import SoftButton from "@/components/ui/SoftButton";
 import IconButton from "@/components/ui/IconButton";
 import Chip from "@/components/ui/Chip";
 import EmptyState from "@/components/ui/EmptyState";
+import Skeleton from "@/components/ui/Skeleton";
 import { useSuggestions } from "@/components/suggestions/hooks/useSuggestions";
 import SuggestionPinModal from "@/components/suggestions/SuggestionPinModal";
 import { suggestionActionRoute } from "@/components/suggestions/HomeSuggestionsWidget";
@@ -36,11 +37,13 @@ const KIND_LABELS: Record<SuggestionKind, string> = {
 
 function SuggestionCard({
   suggestion,
+  busy = false,
   onSnooze,
   onDismiss,
   onAct,
 }: {
   suggestion: ProactiveSuggestion;
+  busy?: boolean;
   onSnooze: (id: string) => void;
   onDismiss: (id: string) => void;
   onAct: (suggestion: ProactiveSuggestion) => Promise<void>;
@@ -73,19 +76,19 @@ function SuggestionCard({
             {suggestion.actionLabel &&
               (route ? (
                 <Link href={route}>
-                  <SoftButton size="sm" variant="secondary">{suggestion.actionLabel}</SoftButton>
+                  <SoftButton size="sm" variant="secondary" disabled={busy}>{suggestion.actionLabel}</SoftButton>
                 </Link>
               ) : (
-                <SoftButton size="sm" variant="secondary" loading={acting} onClick={handleAct}>
+                <SoftButton size="sm" variant="secondary" loading={acting} disabled={busy} onClick={handleAct}>
                   {suggestion.actionLabel}
                 </SoftButton>
               ))}
-            <SoftButton size="sm" variant="ghost" onClick={() => onSnooze(suggestion.id)} title="Snooze until tomorrow">
+            <SoftButton size="sm" variant="ghost" disabled={busy} onClick={() => onSnooze(suggestion.id)} title="Snooze until tomorrow">
               Snooze
             </SoftButton>
           </div>
         </div>
-        <IconButton size="sm" variant="ghost" aria-label="Dismiss suggestion" onClick={() => onDismiss(suggestion.id)}>
+        <IconButton variant="ghost" aria-label="Dismiss suggestion" disabled={busy} onClick={() => onDismiss(suggestion.id)}>
           <span>×</span>
         </IconButton>
       </div>
@@ -97,16 +100,22 @@ export default function SuggestionsPage() {
   const [mounted, setMounted] = useState(false);
   const [filter, setFilter] = useState<FilterKind>("all");
   const [toast, setToast] = useState<{ msg: string; tone: "success" | "error" } | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { items, loading, refresh, dismiss, snooze, act, needsPin, pinError, submitPin, cancelPin } =
     useSuggestions(100);
 
   useEffect(() => {
     setMounted(true);
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
   }, []);
 
   const showToast = (msg: string, tone: "success" | "error") => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     setToast({ msg, tone });
-    setTimeout(() => setToast(null), 3000);
+    toastTimerRef.current = setTimeout(() => setToast(null), 3000);
   };
 
   const handleAct = async (suggestion: ProactiveSuggestion) => {
@@ -116,16 +125,27 @@ export default function SuggestionsPage() {
     else showToast(`⚠️ ${res.message}`, "error");
   };
 
-  const handleDismiss = async (id: string) => {
-    const res = await dismiss(id);
-    if (res && !res.ok && !res.prompted) showToast(`⚠️ ${res.message}`, "error");
+  const runWithBusy = async (id: string, run: () => Promise<void>) => {
+    setBusyId(id);
+    try {
+      await run();
+    } finally {
+      setBusyId(null);
+    }
   };
 
-  const handleSnooze = async (id: string) => {
-    const res = await snooze(id);
-    if (res && !res.ok && !res.prompted) showToast(`⚠️ ${res.message}`, "error");
-    else if (res && res.ok) showToast("😴 Snoozed until tomorrow", "success");
-  };
+  const handleDismiss = (id: string) =>
+    runWithBusy(id, async () => {
+      const res = await dismiss(id);
+      if (res && !res.ok && !res.prompted) showToast(`⚠️ ${res.message}`, "error");
+    });
+
+  const handleSnooze = (id: string) =>
+    runWithBusy(id, async () => {
+      const res = await snooze(id);
+      if (res && !res.ok && !res.prompted) showToast(`⚠️ ${res.message}`, "error");
+      else if (res && res.ok) showToast("😴 Snoozed until tomorrow", "success");
+    });
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: items.length };
@@ -153,7 +173,7 @@ export default function SuggestionsPage() {
         subtitle={items.length > 0 ? `${items.length} waiting for your attention` : "Proactive alerts from Consuela"}
         icon="✨"
         action={
-          <IconButton aria-label="Refresh suggestions" onClick={refresh}>
+          <IconButton aria-label="Refresh suggestions" onClick={refresh} disabled={loading}>
             <span>↻</span>
           </IconButton>
         }
@@ -177,7 +197,7 @@ export default function SuggestionsPage() {
         {loading && filtered.length === 0 ? (
           <div className="space-y-2">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="h-16 rounded-2xl bg-white/5 animate-pulse" />
+              <Skeleton key={i} className="h-16 rounded-2xl" />
             ))}
           </div>
         ) : filtered.length === 0 ? (
@@ -196,6 +216,7 @@ export default function SuggestionsPage() {
               <SuggestionCard
                 key={suggestion.id}
                 suggestion={suggestion}
+                busy={busyId === suggestion.id}
                 onSnooze={handleSnooze}
                 onDismiss={handleDismiss}
                 onAct={handleAct}

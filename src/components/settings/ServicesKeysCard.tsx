@@ -41,6 +41,7 @@ export default function ServicesKeysCard() {
   const [testedMap, setTestedMap] = useState<Record<string, boolean | null>>({});
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const [loadFailed, setLoadFailed] = useState(false);
   const [legacyBlob, setLegacyBlob] = useState<object | string | null>(null);
 
   const isAdult = currentUser?.role !== "child";
@@ -48,11 +49,16 @@ export default function ServicesKeysCard() {
   const load = useCallback(async () => {
     try {
       const res = await fetch("/api/services/config");
-      if (!res.ok) return;
+      if (!res.ok) {
+        setLoadFailed(true);
+        return;
+      }
       const body = await res.json();
       setServices(body.services ?? []);
+      setLoadFailed(false);
     } catch {
       /* offline — keep previous state */
+      setLoadFailed(true);
     }
   }, []);
 
@@ -210,6 +216,12 @@ export default function ServicesKeysCard() {
               Import
             </SoftButton>
           </div>
+        )}
+
+        {loadFailed && services.length === 0 && (
+          <p className="text-sm text-text-secondary">
+            Services config is unreachable right now — check the PocketBase connection and reload.
+          </p>
         )}
 
         {services.map((svc) => {

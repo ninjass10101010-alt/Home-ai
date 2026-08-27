@@ -14,7 +14,6 @@ interface ShareCardProps {
 }
 
 export default function ShareCard({ open, memberName, memberEmoji, rank, points, onClose }: ShareCardProps) {
-  if (!open) return null;
   const firstName = memberName.split(" ")[0];
   const shareText = `${memberEmoji} ${firstName} is #${rank} this week with ${points} pts! 👑`;
 

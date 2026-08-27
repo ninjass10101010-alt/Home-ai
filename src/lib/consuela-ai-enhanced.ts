@@ -27,37 +27,53 @@ export async function processMessageWithClarification(
 ): Promise<EnhancedAIResponse> {
   const pb = getPB();
 
-  // Get family context
-  const familyMembers = await pb.collection('consuela_family_members').getFullList({
-    requestKey: null,
-  });
+  // Get family context. These collections may not exist yet — fall back to
+  // empty context rather than throwing (this is an enhancement layer; the
+  // chat still flows through the main AI when no clarification is needed).
+  let familyMembers: any[] = [];
+  try {
+    familyMembers = await pb.collection('consuela_family_members').getFullList({
+      requestKey: null,
+    });
+  } catch {
+    // collection missing — proceed without family members
+  }
 
-  const savedLocations = await pb.collection('consuela_saved_locations').getFullList({
-    requestKey: null,
-  });
+  let savedLocations: any[] = [];
+  try {
+    savedLocations = await pb.collection('consuela_saved_locations').getFullList({
+      requestKey: null,
+    });
+  } catch {
+    // collection missing — proceed without saved locations
+  }
 
-  // Step 1: Check for ambiguity
-  const ambiguity = analyzeMessageAmbiguity(message, {
-    familyMembers: familyMembers.map((m: any) => ({
-      name: m.name,
-      id: m.id,
-      role: m.role,
-    })),
-    savedLocations: savedLocations.map((l: any) => ({
-      name: l.name,
-      address: l.address,
-    })),
-  });
+  // Step 1: Check for ambiguity — only meaningful when family context exists.
+  // With no members/locations loaded, skip it so messages pass through to the
+  // main AI instead of prompting for clarification on everything.
+  if (familyMembers.length > 0 || savedLocations.length > 0) {
+    const ambiguity = analyzeMessageAmbiguity(message, {
+      familyMembers: familyMembers.map((m: any) => ({
+        name: m.name,
+        id: m.id,
+        role: m.role,
+      })),
+      savedLocations: savedLocations.map((l: any) => ({
+        name: l.name,
+        address: l.address,
+      })),
+    });
 
-  // If ambiguous, return clarification request
-  if (ambiguity.isAmbiguous) {
-    const clarification = buildClarificationRequest(message, ambiguity);
+    // If ambiguous, return clarification request
+    if (ambiguity.isAmbiguous) {
+      const clarification = buildClarificationRequest(message, ambiguity);
 
-    return {
-      reply: `💭 I need a bit more information to help you with that.`,
-      clarification: clarification || undefined,
-      actions: [],
-    };
+      return {
+        reply: `💭 I need a bit more information to help you with that.`,
+        clarification: clarification || undefined,
+        actions: [],
+      };
+    }
   }
 
   // Step 2: Parse intent and extract event details

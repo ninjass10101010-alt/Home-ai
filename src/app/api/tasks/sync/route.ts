@@ -9,27 +9,39 @@ const COLLECTION = "consuela_data_snapshots";
 export async function GET() {
   try {
     const result = await withAdmin(async (pb) => {
-      try {
-        const rows = await pb.collection(COLLECTION).getFullList({
-          requestKey: null,
-          filter: `key = "${KEY}"`,
-        });
-        const row = rows[0] as any;
-        if (row?.data) return row.data;
-        return null;
-      } catch {
-        return null;
-      }
+      const rows = await pb.collection(COLLECTION).getFullList({
+        requestKey: null,
+        filter: `key = "${KEY}"`,
+      });
+      const row = rows[0] as any;
+      return row?.data ?? null;
     });
     return NextResponse.json({ ok: true, snapshot: result });
-  } catch {
-    return NextResponse.json({ ok: true, snapshot: null });
+  } catch (e: any) {
+    console.error("[tasks/sync] read failed:", e?.message);
+    return NextResponse.json({ ok: false, error: "db_error" }, { status: 502 });
   }
 }
 
 export async function POST(req: NextRequest) {
+  let body: any;
   try {
-    const body = await req.json();
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ ok: false, error: "invalid_body" }, { status: 400 });
+  }
+
+  if (
+    !body ||
+    !Array.isArray(body.tasks) ||
+    typeof body.weekData !== "object" ||
+    body.weekData === null ||
+    typeof body.weekData.weekStart !== "string"
+  ) {
+    return NextResponse.json({ ok: false, error: "invalid_body" }, { status: 400 });
+  }
+
+  try {
     await withAdmin(async (pb) => {
       const rows = await pb.collection(COLLECTION).getFullList({
         requestKey: null,
@@ -49,6 +61,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, saved: true });
   } catch (e: any) {
     console.error("[tasks/sync] save failed:", e?.message);
-    return NextResponse.json({ ok: false, error: e?.message || "Save failed" }, { status: 500 });
+    return NextResponse.json({ ok: false, error: "db_error" }, { status: 502 });
   }
 }

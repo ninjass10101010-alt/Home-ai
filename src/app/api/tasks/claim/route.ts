@@ -56,6 +56,19 @@ export async function POST(request: NextRequest) {
         return { ok: false, reason: "unknown-task" } as const;
       }
 
+      // Only universal ("up for grabs") tasks are claimable. Rows without a
+      // universal flag (legacy/seed rows) are tolerated — only an explicit
+      // false is rejected.
+      if (task.universal === false) {
+        return { ok: false, reason: "not_universal" } as const;
+      }
+
+      // A task already marked done cannot be claimed again (the weekly
+      // history guard below only covers this week's transactions).
+      if (task.completed === true || task.status === "done") {
+        return { ok: false, reason: "already_completed" } as const;
+      }
+
       const weekRecords = await pb.collection("week_data").getFullList({ requestKey: null });
       let week = weekRecords.find((r: any) => r.weekStart === currentWeek) || null;
 
@@ -67,11 +80,22 @@ export async function POST(request: NextRequest) {
         (tx) => tx.taskId === Number(taskId) && tx.type === "earn"
       );
       if (existingTx) {
-        return {
-          ok: false,
-          reason: "already-claimed",
-          claimedBy: existingTx.member,
-        };
+        // An undo reverses the earn with an "adjust" tx carrying the same
+        // taskId — a reversed earn releases the task for claiming again.
+        const reversed = history.some(
+          (tx) =>
+            tx.taskId === Number(taskId) &&
+            tx.type === "adjust" &&
+            tx.amount < 0 &&
+            tx.timestamp >= existingTx.timestamp
+        );
+        if (!reversed) {
+          return {
+            ok: false,
+            reason: "already-claimed",
+            claimedBy: existingTx.member,
+          };
+        }
       }
 
       const now = new Date().toISOString();
@@ -112,23 +136,49 @@ export async function POST(request: NextRequest) {
             .find((r: any) => r.weekStart === currentWeek);
       const verifiedHistory = parseJSON<Transaction[]>(verifyRow?.history, []);
       if (!verifiedHistory.some((t) => t.id === tx.id)) {
-        const winner = verifiedHistory.find(
+        const winnerTx = verifiedHistory.find(
           (t) => t.taskId === Number(taskId) && t.type === "earn"
         );
-        return { ok: false, reason: "already-claimed", claimedBy: winner?.member };
+        const winnerReversed = winnerTx
+          ? verifiedHistory.some(
+              (t) =>
+                t.taskId === Number(taskId) &&
+                t.type === "adjust" &&
+                t.amount < 0 &&
+                t.timestamp >= winnerTx.timestamp
+            )
+          : false;
+        // Only report a real conflict if another LIVE claim exists. If the
+        // winning earn was undone (reversed) our write was simply clobbered —
+        // surface it as a conflict without a misleading winner name.
+        return {
+          ok: false,
+          reason: "already-claimed",
+          claimedBy: winnerTx && !winnerReversed ? winnerTx.member : undefined,
+        };
       }
 
-      // Record the claim on the task row so the tasks collection reflects the new assignee
+      // Record the claim on the task row so the tasks collection reflects the
+      // new assignee AND the completion (keeps PB consistent with the client).
       await pb.collection("tasks").update(task.id, {
         assignee: normalizedName,
+        assigned: normalizedName,
         assigneeEmoji: assigneeEmoji || claimant.emoji || "",
+        completed: true,
+        status: "done",
+        completedBy: normalizedName,
+        completedAt: now,
+        completedInWeek: currentWeek,
       }).catch(() => {});
 
       return { ok: true, claimedBy: normalizedName, weekData: updatedWeek };
     });
 
     if (!result.ok) {
-      const status = result.reason === "unknown-task" ? 404 : 409;
+      const status =
+        result.reason === "unknown-task" ? 404 :
+        result.reason === "not_universal" ? 400 :
+        409;
       return NextResponse.json({
         success: false,
         reason: result.reason,

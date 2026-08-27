@@ -141,7 +141,7 @@ async function seedAIPreferences(pb: any): Promise<number> {
 
   try {
     // Get all users
-    const users = await pb.collection('users').getFullList();
+    const users = await pb.collection('members').getFullList();
     
     for (const user of users) {
       try {
@@ -172,7 +172,7 @@ async function seedAIPreferences(pb: any): Promise<number> {
       }
     }
   } catch {
-    // Users collection might not exist
+    // Members collection might not exist
   }
 
   console.log(`    ✅ Seeded ${count} AI preference profiles`);
@@ -187,7 +187,7 @@ async function seedBriefingPreferences(pb: any): Promise<number> {
   let count = 0;
 
   try {
-    const users = await pb.collection('users').getFullList();
+    const users = await pb.collection('members').getFullList();
     
     for (const user of users) {
       try {
@@ -222,7 +222,7 @@ async function seedBriefingPreferences(pb: any): Promise<number> {
       }
     }
   } catch {
-    // Users collection might not exist
+    // Members collection might not exist
   }
 
   console.log(`    ✅ Seeded ${count} briefing preference profiles`);

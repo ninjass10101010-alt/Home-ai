@@ -1,18 +1,15 @@
 /* eslint-disable react-hooks/set-state-in-effect, react-hooks/purity */
 "use client";
 
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, type CSSProperties } from "react";
 import PageShell from "@/components/ui/PageShell";
 import PageHeader from "@/components/patterns/PageHeader";
 import SectionCard from "@/components/patterns/SectionCard";
 import Surface from "@/components/ui/Surface";
 import SoftButton from "@/components/ui/SoftButton";
 import IconButton from "@/components/ui/IconButton";
-import Chip from "@/components/ui/Chip";
-import ListRow from "@/components/ui/ListRow";
 import SwipeableRow from "@/components/ui/SwipeableRow";
 import EmptyState from "@/components/ui/EmptyState";
-import ErrorState from "@/components/ui/ErrorState";
 import Modal from "@/components/ui/Modal";
 import Toast from "@/components/ui/Toast";
 import SegmentedControl from "@/components/ui/SegmentedControl";
@@ -23,7 +20,7 @@ import Avatar from "@/components/ui/Avatar";
 import { db } from "@/db";
 import { useAuth } from "@/hooks/useAuth";
 import type { Task, LeaderboardEntry, Reward, Penalty, WeekData } from "@/types/tasks";
-import { getLevel, LEVELS, BADGES } from "@/types/tasks";
+import { getLevel, BADGES } from "@/types/tasks";
 import {
   TASKS_STORAGE_KEY, REWARDS_KEY, PENALTIES_KEY,
   todayMondayISO, weekKey, todayISO, emptyWeekData,
@@ -34,7 +31,8 @@ import {
   loadPenalties, savePenalties,
   getArchivedWeeks, getMemberAllTimePoints, getMemberAllTimeCompletions,
   getPreviousWeekRanks, loadHallOfFame,
-  syncAllTasksToPB,
+  syncAllTasksToPB, syncWeekDataToPB,
+  archiveAndResetWeek, archiveWeekWinner, saveCurrentWeekRanksForNextWeek,
 } from "@/lib/task-utils";
 import Podium from "@/components/leaderboard/Podium";
 import YourCard from "@/components/leaderboard/YourCard";
@@ -152,6 +150,23 @@ function memberOptionLabel(member: any): string {
   return `${safeDisplayEmoji(member?.emoji)} ${member?.fullName || member?.name || "Member"}`;
 }
 
+const memberColorValues: Record<string, string> = {
+  green: "var(--color-accent-selected)",
+  violet: "var(--color-accent-violet)",
+  amber: "var(--color-accent-amber)",
+  cyan: "var(--color-accent-cyan)",
+  rose: "var(--color-accent-rose)",
+  blue: "var(--color-accent-nori)",
+};
+
+function memberChipColor(colorName?: string): string {
+  return memberColorValues[colorName ?? "green"] ?? "var(--color-accent-selected)";
+}
+
+function priorityColor(priority: Task["priority"]): string {
+  return priority === "high" ? "var(--color-accent-rose)" : priority === "medium" ? "var(--color-accent-amber)" : "var(--color-accent-mint)";
+}
+
 const initialTasks: Task[] = [
   { id: 1, title: "Take out trash", assignee: "Caspian", assigneeEmoji: "🧒", due: getISO.today, points: 10, recurring: "Weekly · Thu", category: "Chores", completed: false, priority: "high" },
   { id: 2, title: "Grocery run", assignee: "Rebecca (Mom)", assigneeEmoji: "👩", due: getISO.today, points: 20, recurring: null, category: "Errands", completed: false, priority: "high" },
@@ -194,6 +209,22 @@ function migrateAssigneeNames(tasks: Task[], members: any[]): Task[] {
     }
     return t;
   });
+}
+
+// Competition-ranked point entries for a week (ties share a rank) — feeds the
+// Hall of Fame winner record and the previous-week rank arrows.
+function rankedEntriesFromWeek(week: WeekData, emojis: Record<string, string>): { name: string; emoji: string; points: number; rank: number }[] {
+  const entries = Object.entries(week.points || {})
+    .map(([name, points]) => ({ name, emoji: emojis[name] || "👤", points: points || 0, rank: 0 }))
+    .filter((e) => e.points > 0)
+    .sort((a, b) => b.points - a.points);
+  let lastPoints = Number.NaN;
+  let lastRank = 0;
+  entries.forEach((e, i) => {
+    if (e.points !== lastPoints) { lastRank = i + 1; lastPoints = e.points; }
+    e.rank = lastRank;
+  });
+  return entries;
 }
 
 function loadFromStorage<T>(key: string, fallback: T): T {
@@ -250,6 +281,7 @@ export default function TasksPage() {
 
   const membersData = useMemo(() => db.selectMembers(), []);
   const { currentUser, isLoggedIn } = useAuth();
+  const isKid = isLoggedIn && currentUser?.role === "child";
   const allMembers = useMemo(() => {
     const names = membersData.map((m: any) => m.fullName);
     return isLoggedIn ? ["My Tasks", ...names, "Up for grabs"] : ["All", ...names, "Up for grabs"];
@@ -288,13 +320,25 @@ export default function TasksPage() {
   useEffect(() => { saveTasks(tasks); }, [tasks]);
   useEffect(() => { saveWeekData(weekData); }, [weekData]);
 
+  const [ranksVersion, setRanksVersion] = useState(0);
+
   useEffect(() => {
     if (!mounted) return;
     const interval = setInterval(() => {
       const current = weekKey();
       if (current !== weekData.weekStart) {
-        saveWeekData({ ...weekData });
-        setWeekData(emptyWeekData());
+        // Record the finished week BEFORE resetting: archive it, enshrine the
+        // winner in the Hall of Fame, and keep the ranks for next week's
+        // movement arrows. (archiveAndResetWeek also persists the archive +
+        // the fresh empty week, so the saveWeekData effect can't clobber it.)
+        const entries = rankedEntriesFromWeek(weekData, memberEmojis);
+        if (entries.length) {
+          archiveWeekWinner(entries, weekData.weekStart);
+          saveCurrentWeekRanksForNextWeek(entries);
+        }
+        archiveAndResetWeek(weekData, current);
+        setWeekData(emptyWeekData(current));
+        setRanksVersion((v) => v + 1);
         setTasks(prev => {
           const regenerated = regenerateRecurringTasks(prev);
           saveTasks(regenerated);
@@ -303,7 +347,7 @@ export default function TasksPage() {
       }
     }, 60000);
     return () => clearInterval(interval);
-  }, [mounted, weekData]);
+  }, [mounted, weekData, memberEmojis]);
 
   const [filterMember, setFilterMember] = useState("All");
   useEffect(() => {
@@ -322,6 +366,7 @@ export default function TasksPage() {
   const [pinInput, setPinInput] = useState("");
   const [pinError, setPinError] = useState("");
   const [pinSuccess, setPinSuccess] = useState("");
+  const [pinBusy, setPinBusy] = useState(false);
   const [snatchForMember, setSnatchForMember] = useState("");
   const [redeemForMember, setRedeemForMember] = useState("");
   const [penaltyForMember, setPenaltyForMember] = useState("");
@@ -384,7 +429,11 @@ export default function TasksPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tasks, weekData }),
-      }).catch(() => {});
+      })
+        .then((res) => {
+          if (!res.ok) console.warn(`Tasks snapshot sync failed (${res.status}) — will retry on next change`);
+        })
+        .catch(() => {});
       syncPendingRef.current = false;
     }, 2000);
     return () => { clearTimeout(t); syncPendingRef.current = false; };
@@ -408,7 +457,7 @@ export default function TasksPage() {
     if (!mounted || restoreAttempted.current) return;
     restoreAttempted.current = true;
     fetch("/api/tasks/sync")
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (!data?.snapshot) return;
         const snap = data.snapshot;
@@ -418,23 +467,55 @@ export default function TasksPage() {
           const localWk = loadWeekData();
           if (localWk.weekStart !== snap.weekData.weekStart) {
             setWeekData((prev: any) => ({ ...prev, ...snap.weekData }));
+          } else if ((snap.weekData.history?.length || 0) > (localWk.history?.length || 0)) {
+            // Same week, but another device recorded more transactions —
+            // adopt the richer weekData so cross-device points aren't lost.
+            setWeekData((prev: any) => ({ ...prev, ...snap.weekData }));
           }
         }
         if (snap.tasks?.length) {
           setTasks((prev: any) => {
             const restored = snap.tasks.map((t: any) => ({
-              ...t, id: Date.now() + Math.random(),
-              assignee: t.assigned || t.assignee || "All", assigneeEmoji: "👤",
-              completed: t.completed || false, completedBy: null, completedInWeek: null,
+              ...t,
+              // Preserve the real numeric id and completion attribution —
+              // regenerating ids here broke swipe/edit/undo targeting and
+              // wiped who completed what.
+              id: typeof t.id === "number" ? t.id : Number(t.id) || Date.now() + Math.floor(Math.random() * 100000),
+              assignee: t.assignee || t.assigned || "All",
+              assigneeEmoji: t.assigneeEmoji || "👤",
+              completed: t.completed || false,
+              completedBy: t.completedBy ?? undefined,
+              completedAt: t.completedAt ?? undefined,
+              completedInWeek: t.completedInWeek ?? undefined,
             }));
-            return [...prev, ...restored.filter((t: any) => !prev.find((p: any) => p.title === t.title))];
+            return [...prev, ...restored.filter((t: any) => !prev.find((p: any) => p.id === t.id || p.title === t.title))];
           });
         }
       })
       .catch(() => {});
   }, [mounted]);
 
+  // Backfill the Hall of Fame + previous-week ranks for weeks that rolled over
+  // while the page was closed (loadWeekData archives them on load, but the
+  // winner/ranks were never recorded on that path). Idempotent: skips weeks
+  // already enshrined.
+  useEffect(() => {
+    if (!mounted) return;
+    const archive = getArchivedWeeks();
+    const weeks = Object.keys(archive).sort();
+    if (!weeks.length) return;
+    const latest = weeks[weeks.length - 1];
+    if (loadHallOfFame().some((h) => h.weekStart === latest)) return;
+    const entries = rankedEntriesFromWeek(archive[latest], memberEmojis);
+    if (!entries.length) return;
+    archiveWeekWinner(entries, latest);
+    saveCurrentWeekRanksForNextWeek(entries);
+    setRanksVersion((v) => v + 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mounted]);
+
   const triggerConfetti = useCallback(() => {
+    if (typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     setConfettiActive(true);
     setTimeout(() => setConfettiActive(false), 2500);
   }, []);
@@ -597,11 +678,17 @@ export default function TasksPage() {
   };
 
   const openRewardPin = (reward: Reward, memberName?: string) => {
+    const member = memberName || (membersData.find((m: any) => m.role !== "pet")?.fullName ?? "");
+    const balance = weekData.points[member] || 0;
+    if (balance < reward.cost) {
+      showToast(`${member.split(" ")[0]} needs ${reward.cost - balance} more pts for ${reward.emoji} ${reward.name}`);
+      return;
+    }
     if (reward.cost > 100) {
       setParentApprovalReward(reward);
       setParentApprovalPin("");
       setParentApprovalError("");
-      setRedeemForMember(memberName || (membersData.find((m: any) => m.role !== "pet")?.fullName ?? ""));
+      setRedeemForMember(member);
       return;
     }
     setPinReward(reward);
@@ -610,30 +697,34 @@ export default function TasksPage() {
     setPinInput("");
     setPinError("");
     setPinSuccess("");
-    const defaultMember = memberName || (membersData.find((m: any) => m.role !== "pet")?.fullName ?? "");
-    setRedeemForMember(defaultMember);
+    setRedeemForMember(member);
   };
 
   const approveParentReward = async () => {
-    if (!parentApprovalReward || !parentApprovalPin) return;
-    let parent: any = null;
-    for (const m of membersData.filter((m: any) => m.role === "parent")) {
-      parent = await verifyPinRemote(m.fullName, parentApprovalPin) ? m : null;
-      if (parent) break;
-    }
-    if (!parent) {
-      setParentApprovalError("Parent PIN required to approve large rewards.");
+    if (!parentApprovalReward || !parentApprovalPin || pinBusy) return;
+    setPinBusy(true);
+    try {
+      let parent: any = null;
+      for (const m of membersData.filter((m: any) => m.role === "parent")) {
+        parent = await verifyPinRemote(m.fullName, parentApprovalPin) ? m : null;
+        if (parent) break;
+      }
+      if (!parent) {
+        setParentApprovalError("Parent PIN required to approve large rewards.");
+        setParentApprovalPin("");
+        setTimeout(() => setParentApprovalError(""), 2500);
+        return;
+      }
+      setPinReward(parentApprovalReward);
+      setParentApprovalReward(null);
       setParentApprovalPin("");
-      setTimeout(() => setParentApprovalError(""), 2500);
-      return;
+      setParentApprovalError("");
+      setPinInput("");
+      setPinError("");
+      setPinSuccess("");
+    } finally {
+      setPinBusy(false);
     }
-    setPinReward(parentApprovalReward);
-    setParentApprovalReward(null);
-    setParentApprovalPin("");
-    setParentApprovalError("");
-    setPinInput("");
-    setPinError("");
-    setPinSuccess("");
   };
 
   const openPenaltyPin = (penalty: Penalty) => {
@@ -653,31 +744,40 @@ export default function TasksPage() {
   };
 
   const submitUndo = async () => {
-    if (!undoTaskId || !undoPin) return;
-    const task = tasks.find(t => t.id === undoTaskId);
-    if (!task || !task.completed) return;
-    const memberName = task.completedBy || task.assignee;
-    const verified = await verifyPinRemote(memberName, undoPin);
-    if (!verified) {
-      setUndoError("Wrong PIN. Try again.");
+    if (!undoTaskId || !undoPin || pinBusy) return;
+    setPinBusy(true);
+    try {
+      const task = tasks.find(t => t.id === undoTaskId);
+      if (!task || !task.completed) return;
+      const memberName = task.completedBy || task.assignee;
+      const verified = await verifyPinRemote(memberName, undoPin);
+      if (!verified) {
+        setUndoError("Wrong PIN. Try again.");
+        setUndoPin("");
+        setTimeout(() => setUndoError(""), 2000);
+        return;
+      }
+      const normalizedName = normalizeName(memberName);
+      setTasks(prev => prev.map(t => t.id === undoTaskId ? { ...t, completed: false, completedBy: undefined, completedAt: undefined, completedInWeek: undefined } : t));
+      const current = (weekData.points[normalizedName] || 0) - task.points;
+      const updated = { ...weekData, points: { ...weekData.points, [normalizedName]: Math.max(0, current) } };
+      const nextWeek = addTransaction(updated, "adjust", -task.points, `Undo: ${task.title} (-${task.points}pts)`, normalizedName, task.id);
+      setWeekData(nextWeek);
+      // Push the reversal now (not on the 5s debounce) so the server-side claim
+      // guard releases the task for re-claiming immediately.
+      syncWeekDataToPB(nextWeek);
+      setUndoTaskId(null);
       setUndoPin("");
-      setTimeout(() => setUndoError(""), 2000);
-      return;
+      showToast(`Undone: ${task.title}`);
+    } finally {
+      setPinBusy(false);
     }
-    const normalizedName = normalizeName(memberName);
-    setTasks(prev => prev.map(t => t.id === undoTaskId ? { ...t, completed: false, completedBy: undefined, completedAt: undefined, completedInWeek: undefined } : t));
-    setWeekData(prev => {
-      const current = (prev.points[normalizedName] || 0) - task.points;
-      const updated = { ...prev, points: { ...prev.points, [normalizedName]: Math.max(0, current) } };
-      return addTransaction(updated, "adjust", -task.points, `Undo: ${task.title} (-${task.points}pts)`, normalizedName, task.id);
-    });
-    setUndoTaskId(null);
-    setUndoPin("");
-    showToast(`Undone: ${task.title}`);
   };
 
   const submitPin = async () => {
-    if (!pinInput) return;
+    if (!pinInput || pinBusy) return;
+    setPinBusy(true);
+    try {
     if (pinReward) {
       const memberName = redeemForMember;
       if (!memberName) {
@@ -690,12 +790,20 @@ export default function TasksPage() {
       if (verified) {
         const normalizedName = normalizeName((verified as any).name);
         const cost = pinReward.cost;
+        const balance = weekData.points[normalizedName] || 0;
+        if (balance < cost) {
+          setPinError(`Not enough points — ${pinReward.name} costs ${cost}pts, ${normalizedName.split(" ")[0]} has ${balance}pts.`);
+          setPinInput("");
+          setTimeout(() => setPinError(""), 2500);
+          return;
+        }
         setWeekData(prev => {
           const current = prev.points[normalizedName] || 0;
           if (current < cost) return prev;
           const updated = { ...prev, points: { ...prev.points, [normalizedName]: current - cost } };
           return addTransaction(updated, "redeem", -cost, `Redeemed: ${pinReward.name} (-${cost}pts)`, normalizedName);
         });
+        setPinInput("");
         setPinSuccess(`${pinReward.emoji} ${normalizedName.split(" ")[0]} redeemed ${pinReward.name}! -${cost}pts`);
         setTimeout(() => { setPinReward(null); setPinSuccess(""); }, 1500);
       } else {
@@ -728,6 +836,7 @@ export default function TasksPage() {
           const updated = { ...prev, points: { ...prev.points, [normalizedName]: Math.max(0, (prev.points[normalizedName] || 0) - penaltyPoints) } };
           return addTransaction(updated, "penalty", -penaltyPoints, `Penalty: ${pinPenalty.name} (-${penaltyPoints}pts)`, normalizedName);
         });
+        setPinInput("");
         setPinSuccess(`-${penaltyPoints}pts from ${normalizedName.split(" ")[0]}`);
         setTimeout(() => { setPinPenalty(null); setPinSuccess(""); }, 1500);
       } else {
@@ -764,9 +873,10 @@ export default function TasksPage() {
           const updated = { ...prev, points: { ...prev.points, [normalizedName]: (prev.points[normalizedName] || 0) + task.points } };
           return addTransaction(updated, "earn", task.points, `Completed: ${task.title}${pointsMsg ? ` (${pointsMsg})` : ""}`, normalizedName, task.id);
         });
+        setPinInput("");
         setPinSuccess(`${normalizedName.split(" ")[0]} completed ${task.title}! ${pointsMsg}`);
         triggerConfetti();
-        setTimeout(() => { setPinTaskId(null); setPinSuccess(""); setSnatchForMember(""); setPinInput(""); }, 1500);
+        setTimeout(() => { setPinTaskId(null); setPinSuccess(""); setSnatchForMember(""); }, 1500);
 
         // Server-authoritative claim: exactly one family member wins the race
         fetch("/api/tasks/claim", {
@@ -790,8 +900,26 @@ export default function TasksPage() {
               setWeekData(snap.weekData);
               claimSnapshotRef.current = null;
             }
-            const grabbedBy = data?.claimedBy ? ` ${data.claimedBy.split(" ")[0]}` : "";
-            showToast(`🤝 ${grabbedBy ? `${grabbedBy} ` : "Someone"}already grabbed that one!`);
+            if (res.status === 409 && data?.claimedBy) {
+              showToast(`🤝 ${data.claimedBy.split(" ")[0]} already grabbed that one!`);
+            } else if (res.status === 409) {
+              showToast("That task was already claimed.");
+            } else if (res.status === 404) {
+              showToast("Task isn't synced yet — try again in a few seconds.");
+            } else if (res.status === 400) {
+              showToast("That task isn't up for grabs.");
+            } else if (res.status === 401) {
+              showToast("PIN rejected by the server — try again.");
+            } else {
+              showToast("Claim failed — try again.");
+            }
+          } else if (data?.weekData?.weekStart === weekKey()) {
+            // Server is authoritative for the week ledger: adopt its weekData
+            // when it's at least as fresh as ours (picks up other devices).
+            setWeekData((prev) =>
+              (data.weekData.history?.length || 0) >= (prev.history?.length || 0) ? data.weekData : prev
+            );
+            claimSnapshotRef.current = null;
           }
         }).catch(() => {
           // Offline: keep the optimistic claim (local sync will reconcile)
@@ -813,13 +941,17 @@ export default function TasksPage() {
         const updated = { ...prev, points: { ...prev.points, [normalizedName]: (prev.points[normalizedName] || 0) + task.points } };
         return addTransaction(updated, "earn", task.points, `Completed: ${task.title}${pointsMsg ? ` (${pointsMsg})` : ""}`, normalizedName, task.id);
       });
+      setPinInput("");
       setPinSuccess(`${normalizedName.split(" ")[0]} completed ${task.title}! ${pointsMsg}`);
       triggerConfetti();
-      setTimeout(() => { setPinTaskId(null); setPinSuccess(""); setSnatchForMember(""); setPinInput(""); }, 1500);
+      setTimeout(() => { setPinTaskId(null); setPinSuccess(""); setSnatchForMember(""); }, 1500);
     } else {
       setPinError("Wrong PIN. Try again.");
       setPinInput("");
       setTimeout(() => setPinError(""), 2000);
+    }
+    } finally {
+      setPinBusy(false);
     }
   };
 
@@ -896,28 +1028,33 @@ export default function TasksPage() {
   };
 
   const submitAdjust = async () => {
-    if (!adjustMember || !adjustPin) return;
-    let parent: any = null;
-    for (const m of membersData.filter((m: any) => m.role === "parent")) {
-      parent = await verifyPinRemote(m.fullName, adjustPin) ? m : null;
-      if (parent) break;
+    if (!adjustMember || !adjustPin || pinBusy) return;
+    setPinBusy(true);
+    try {
+      let parent: any = null;
+      for (const m of membersData.filter((m: any) => m.role === "parent")) {
+        parent = await verifyPinRemote(m.fullName, adjustPin) ? m : null;
+        if (parent) break;
+      }
+      if (!parent) {
+        setAdjustError("Parent PIN required. Try again.");
+        setAdjustPin("");
+        setTimeout(() => setAdjustError(""), 2500);
+        return;
+      }
+      const delta = parseInt(adjustAmount) || 0;
+      const change = adjustDir === "+" ? delta : -delta;
+      setWeekData(prev => {
+        const updated = { ...prev, points: { ...prev.points, [adjustMember]: Math.max(0, (prev.points[adjustMember] || 0) + change) } };
+        const reason = adjustReason ? ` (${adjustReason})` : "";
+        return addTransaction(updated, "adjust", change, `Manual adjust: ${change > 0 ? "+" : ""}${change}pts${reason}`, adjustMember, undefined, parent.fullName);
+      });
+      const label = adjustDir === "+" ? `+${delta}` : `-${delta}`;
+      setAdjustSuccess(`${label} pts applied to ${adjustMember.split(" ")[0]}!`);
+      setTimeout(() => { setAdjustMember(null); setAdjustSuccess(""); }, 1500);
+    } finally {
+      setPinBusy(false);
     }
-    if (!parent) {
-      setAdjustError("Parent PIN required. Try again.");
-      setAdjustPin("");
-      setTimeout(() => setAdjustError(""), 2500);
-      return;
-    }
-    const delta = parseInt(adjustAmount) || 0;
-    const change = adjustDir === "+" ? delta : -delta;
-    setWeekData(prev => {
-      const updated = { ...prev, points: { ...prev.points, [adjustMember]: Math.max(0, (prev.points[adjustMember] || 0) + change) } };
-      const reason = adjustReason ? ` (${adjustReason})` : "";
-      return addTransaction(updated, "adjust", change, `Manual adjust: ${change > 0 ? "+" : ""}${change}pts${reason}`, adjustMember, undefined, parent.fullName);
-    });
-    const label = adjustDir === "+" ? `+${delta}` : `-${delta}`;
-    setAdjustSuccess(`${label} pts applied to ${adjustMember.split(" ")[0]}!`);
-    setTimeout(() => { setAdjustMember(null); setAdjustSuccess(""); }, 1500);
   };
 
   const filtered = tasks.filter((t) => {
@@ -938,7 +1075,6 @@ export default function TasksPage() {
   const completed = filtered.filter((t) => t.completed);
   const thisWeeksCompleted = getThisWeeksCompletedTasks(tasks);
   const thisWeeksCompletedCount = thisWeeksCompleted.length;
-  const thisWeeksCompletedDates = useMemo(() => getThisWeeksCompletedDates(tasks), [tasks]);
 
   const dynamicLeaderboard: LeaderboardEntry[] = useMemo(() => {
     const entries = membersData
@@ -948,7 +1084,9 @@ export default function TasksPage() {
         const weeklyPoints = weekData.points[name] || 0;
         const allTimePoints = getMemberAllTimePoints(name, weekData);
         const allTimeComps = getMemberAllTimeCompletions(name, tasks, weekData);
-        const streak = calculateRealStreak(name, weekData, thisWeeksCompletedDates);
+        // Streaks are per-member: filter this week's completion dates to this
+        // member before walking back consecutive days.
+        const streak = calculateRealStreak(name, weekData, getThisWeeksCompletedDates(tasks, name));
         const { level, title, emoji, progress } = getLevel(allTimePoints);
         const earnedBadges = BADGES.filter(b => b.condition(allTimePoints, streak, allTimeComps)).map(b => b.emoji);
         const currentMonday = weekData.weekStart;
@@ -975,14 +1113,19 @@ export default function TasksPage() {
       })
       .sort((a, b) => b.points - a.points);
 
-    return entries.map((e, i) => ({ ...e, rank: i + 1 }));
-  }, [weekData, membersData, thisWeeksCompletedDates, tasks]);
+    // Tied points share a rank (standard competition ranking) so equal scores
+    // don't read as 1st vs 2nd or flicker between the two on every recompute.
+    return entries.map((e, i) => ({
+      ...e,
+      rank: i > 0 && e.points === entries[i - 1].points ? entries[i - 1].rank : i + 1,
+    }));
+  }, [weekData, membersData, tasks]);
 
   const topScorer = dynamicLeaderboard[0];
   const familyTotal = dynamicLeaderboard.reduce((sum, entry) => sum + entry.points, 0);
   const championShare = familyTotal > 0 ? topScorer.points / familyTotal : 0;
   const weeklyEarned = Object.values(weekData.points).reduce((a, b) => a + b, 0);
-  const previousRanks = useMemo(() => getPreviousWeekRanks(), [weekData]); // eslint-disable-line react-hooks/exhaustive-deps
+  const previousRanks = useMemo(() => getPreviousWeekRanks(), [weekData, ranksVersion]); // eslint-disable-line react-hooks/exhaustive-deps
   const sheetEntry = sheetMember ? dynamicLeaderboard.find(e => e.name === sheetMember) : null;
 
   useEffect(() => {
@@ -1030,7 +1173,7 @@ export default function TasksPage() {
   return (
     <PageShell>
       <ConfettiBurst active={confettiActive} />
-      <Toast open={Boolean(toast)} tone={toast?.includes("Failed") ? "error" : "success"}>{toast}</Toast>
+      <Toast open={Boolean(toast)} tone={toast?.includes("Failed") ? "error" : toast?.includes("grabbed") || toast?.includes("not connected") || toast?.includes("not granted") ? "neutral" : "success"}>{toast}</Toast>
 
       <PageHeader
         title="Tasks"
@@ -1052,6 +1195,7 @@ export default function TasksPage() {
 
         <SegmentedControl
           aria-label="Tasks view"
+          emphasize
           value={activeTab}
           onChange={(value) => setActiveTab(value as "tasks" | "leaderboard")}
           options={[
@@ -1061,21 +1205,23 @@ export default function TasksPage() {
         />
 
         {activeTab === "tasks" && (
+          <div key="tasks" className="panel-swap">
           <>
-              <div className="snap-x snap-mandatory overscroll-contain overflow-x-auto pb-2">
+              <div className="member-strip snap-x snap-mandatory overscroll-contain pb-2">
                 {allMembers.map((member) => (
-                  <Chip
+                  <button
                     key={member}
-                    tone="neutral"
-                    selected={filterMember === member}
+                    type="button"
+                    aria-pressed={filterMember === member}
                     onClick={() => setFilterMember(member)}
-                    className="shrink-0 snap-start"
+                    className={`member-chip shrink-0 snap-start tap-sm ${filterMember === member ? "is-active" : ""} ${isKid ? "min-h-[52px]" : ""}`}
+                    style={{ "--chip-color": memberChipColor(memberColors[member]) } as CSSProperties}
                   >
-                  <span>{memberEmojis[member]}</span>
-                  <span>{member.split(" ")[0]}</span>
-                </Chip>
-              ))}
-            </div>
+                    <Avatar name={member} color={memberColors[member] || "green"} emoji={memberEmojis[member]} size="xs" variant="emoji" />
+                    <span>{member.split(" ")[0]}</span>
+                  </button>
+                ))}
+              </div>
 
             {(isAdding || editingId !== null) && (
               <Modal
@@ -1174,48 +1320,118 @@ export default function TasksPage() {
                 <EmptyState title="All caught up" description="No pending tasks right now." icon="🎉" />
               ) : (
                 <div className="space-y-2">
-                  {pending.map((task) => (
+                  {pending.map((task, idx) => {
+                    const rowColor = priorityColor(task.priority);
+                    return (
                     <SwipeableRow key={task.id} leftAction={<span className="text-sm font-bold">✓</span>} rightAction={<span className="text-sm font-bold">×</span>} onSwipeRight={() => openPinEntry(task.id)} onSwipeLeft={() => startEdit(task)}>
-                      <ListRow
-                        title={task.title}
-                        subtitle={`${task.assignee.split(" ")[0]} · ${formatDueLabel(task.due)} · ${task.category}`}
-                        leftRailColor={task.priority === "high" ? "var(--color-accent-rose)" : task.priority === "medium" ? "var(--color-accent-amber)" : "var(--color-accent-mint)"}
-                        leading={<Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={task.assigneeEmoji} size="sm" variant="emoji" />}
-                        trailing={<Chip size="sm" tone={task.priority === "high" ? "danger" : task.priority === "medium" ? "warning" : "success"}>+{task.points}pts</Chip>}
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Complete ${task.title}`}
                         onClick={() => openPinEntry(task.id)}
-                      />
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            openPinEntry(task.id);
+                          }
+                        }}
+                        className="schedule-row liquid-glass flex cursor-pointer items-center gap-3 px-3 py-2.5 animate-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-selected)]"
+                        style={{
+                          animationDelay: `${idx * 0.05}s`,
+                          backgroundImage: `linear-gradient(135deg, color-mix(in srgb, ${rowColor} 40%, transparent) 0%, color-mix(in srgb, ${rowColor} 20%, transparent) 100%)`,
+                        }}
+                      >
+                        <div
+                          className="h-8 w-0.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: rowColor, boxShadow: `0 0 8px ${rowColor}` }}
+                        />
+                        <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={task.assigneeEmoji} size="sm" variant="emoji" />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm text-text-primary">{task.title}</div>
+                          <div className="truncate text-xs text-text-secondary">{task.assignee.split(" ")[0]} · {formatDueLabel(task.due)} · {task.category}</div>
+                        </div>
+                        <span
+                          className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-semibold text-text-primary glass-subtle"
+                          style={{
+                            background: `linear-gradient(135deg, color-mix(in srgb, ${rowColor} 55%, transparent), color-mix(in srgb, ${rowColor} 30%, transparent))`,
+                          }}
+                        >
+                          +{task.points}pts
+                        </span>
+                      </div>
                     </SwipeableRow>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </SectionCard>
 
             {thisWeeksCompletedCount > 0 && (
               <SectionCard title="Completed" description={`${thisWeeksCompletedCount} done this week`} icon="✅">
-                <button type="button" onClick={() => setShowCompleted(!showCompleted)} className="mb-3 flex w-full items-center justify-between text-sm font-semibold text-text-secondary">
+                <button type="button" onClick={() => setShowCompleted(!showCompleted)} aria-expanded={showCompleted} className="mb-3 flex min-h-[44px] w-full items-center justify-between rounded-xl px-1 text-sm font-semibold text-text-secondary">
                   <span>{showCompleted ? "Hide completed" : "Show completed"}</span>
                   <span>{showCompleted ? "↑" : "↓"}</span>
                 </button>
                 {showCompleted && (
                   <div className="space-y-2">
-                    {tasks.filter(t => t.completed).map((task) => (
-                      <ListRow
-                        key={task.id}
-                        title={task.title}
-                        subtitle={`${task.assignee.split(" ")[0]} · ${task.completedBy?.split(" ")[0] || task.assignee.split(" ")[0]} · ${task.completedInWeek === weekData.weekStart ? "This week" : "Past"}`}
-                        leftRailColor="var(--color-accent-mint)"
-                        leading={<Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={task.assigneeEmoji} size="sm" variant="emoji" />}
-                        trailing={<div className="flex items-center gap-1"><Chip size="sm" tone="success">Done</Chip><IconButton size="sm" variant="ghost" aria-label="Undo complete" onClick={() => openPinEntry(task.id)}>↩</IconButton></div>}
-                      />
-                    ))}
+                    {completed.length === 0 ? (
+                      <p className="py-2 text-center text-xs text-text-muted">No completed tasks for this filter yet.</p>
+                    ) : (
+                      completed.map((task) => {
+                        const rowColor = "var(--color-accent-mint)";
+                        return (
+                        <div
+                          key={task.id}
+                          role="button"
+                          tabIndex={0}
+                          aria-label={`Undo completion of ${task.title}`}
+                          onClick={() => openPinEntry(task.id)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              openPinEntry(task.id);
+                            }
+                          }}
+                          className="schedule-row liquid-glass flex cursor-pointer items-center gap-3 px-3 py-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-selected)]"
+                          style={{
+                            backgroundImage: `linear-gradient(135deg, color-mix(in srgb, ${rowColor} 40%, transparent) 0%, color-mix(in srgb, ${rowColor} 20%, transparent) 100%)`,
+                          }}
+                        >
+                          <div
+                            className="h-8 w-0.5 shrink-0 rounded-full"
+                            style={{ backgroundColor: rowColor, boxShadow: `0 0 8px ${rowColor}` }}
+                          />
+                          <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={task.assigneeEmoji} size="sm" variant="emoji" />
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm text-text-primary">{task.title}</div>
+                            <div className="truncate text-xs text-text-secondary">{task.assignee.split(" ")[0]} · {task.completedBy?.split(" ")[0] || task.assignee.split(" ")[0]} · {task.completedInWeek === weekData.weekStart ? "This week" : "Past"}</div>
+                          </div>
+                          <span
+                            className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-semibold text-text-primary glass-subtle"
+                            style={{
+                              background: `linear-gradient(135deg, color-mix(in srgb, ${rowColor} 55%, transparent), color-mix(in srgb, ${rowColor} 30%, transparent))`,
+                            }}
+                          >
+                            Done
+                          </span>
+                          <IconButton size="sm" variant="ghost" aria-label="Undo complete" onClick={() => openPinEntry(task.id)}>↩</IconButton>
+                        </div>
+                        );
+                      })
+                    )}
                   </div>
                 )}
               </SectionCard>
             )}
           </>
+          </div>
         )}
 
         {activeTab === "leaderboard" && (
+          dynamicLeaderboard.length === 0 ? (
+            <EmptyState title="No champions yet" description="Add family members in Settings, then complete tasks to fill the board." icon="🏆" />
+          ) : (
+          <div key="leaderboard" className="panel-swap">
           <>
             <Surface variant="warm" radius="2xl" padding="lg" glow>
               <div className="relative overflow-hidden">
@@ -1232,7 +1448,10 @@ export default function TasksPage() {
                         <span className="font-semibold text-[var(--color-accent-selected)]">{topScorer.points}</span> pts
                       </p>
                       {topScorer.streak > 0 && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-semibold text-amber-400">
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold"
+                          style={{ background: "color-mix(in srgb, var(--color-accent-amber) 12%, transparent)", color: "var(--color-accent-amber)" }}
+                        >
                           🔥 {topScorer.streak}d
                         </span>
                       )}
@@ -1358,21 +1577,17 @@ export default function TasksPage() {
                 <div className="space-y-1.5 max-h-48 overflow-y-auto">
                   {weekData.history.slice().reverse().slice(0, 15).map((tx) => (
                     <div key={tx.id} className="flex items-center gap-2 rounded-xl px-2 py-1 text-xs">
-                      <span className={`shrink-0 text-base ${
-                        tx.type === "earn" ? "" :
-                        tx.type === "redeem" ? "" :
-                        tx.type === "penalty" ? "" :
-                        ""
-                      }`}>
+                      <span className="shrink-0 text-base">
                         {tx.type === "earn" ? "✅" : tx.type === "redeem" ? "🎁" : tx.type === "penalty" ? "⚠️" : "⚙️"}
                       </span>
                       <span className="flex-1 truncate text-text-secondary">
                         <span className="font-medium text-text-primary">{tx.member.split(" ")[0]}</span>{" "}
                         {tx.description}
                       </span>
-                      <span className={`shrink-0 font-semibold ${
-                        tx.amount > 0 ? "text-emerald-400" : "text-rose-400"
-                      }`}>
+                      <span
+                        className="shrink-0 font-semibold"
+                        style={{ color: tx.amount > 0 ? "var(--color-accent-mint)" : "var(--color-accent-rose)" }}
+                      >
                         {tx.amount > 0 ? "+" : ""}{tx.amount}
                       </span>
                       <span className="text-text-muted shrink-0">
@@ -1412,7 +1627,7 @@ export default function TasksPage() {
                       <span className="text-xl">{reward.emoji}</span>
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-semibold text-text-primary">{reward.name}</div>
-                        <div className="text-xs text-text-muted">{reward.cost} pts {reward.cost > 100 && <span className="text-amber-400 ml-1">· needs parent</span>}</div>
+                        <div className="text-xs text-text-muted">{reward.cost} pts {reward.cost > 100 && <span className="ml-1" style={{ color: "var(--color-accent-amber)" }}>· needs parent</span>}</div>
                       </div>
                       <SoftButton size="sm" variant="secondary" onClick={() => openRewardPin(reward)}>Redeem</SoftButton>
                       <IconButton size="sm" variant="ghost" aria-label="Edit reward" onClick={() => startEditReward(reward)}>✎</IconButton>
@@ -1443,6 +1658,8 @@ export default function TasksPage() {
               </div>
             </SectionCard>
           </>
+          </div>
+          )
         )}
       </div>
 
@@ -1522,11 +1739,11 @@ export default function TasksPage() {
               ? `Redeem "${pinReward.name}" for ${pinReward.cost}pts`
               : pinPenalty
               ? `Apply "${pinPenalty.name}" penalty (-${pinPenalty.points}pts)`
-              : `Complete "${tasks.find(t => t.id === pinTaskId)?.title}"`
+              : `Complete "${tasks.find(t => t.id === pinTaskId)?.title ?? "this task"}"`
           }
           footer={
             <>
-              <SoftButton onClick={submitPin} disabled={pinInput.length < 4} className="flex-1">{pinPenalty ? "Deduct" : "Submit"}</SoftButton>
+              <SoftButton onClick={submitPin} loading={pinBusy} disabled={pinInput.length < 4 || pinBusy} className="flex-1">{pinPenalty ? "Deduct" : "Submit"}</SoftButton>
               <SoftButton variant="secondary" onClick={() => { setPinTaskId(null); setPinReward(null); setPinPenalty(null); }} className="flex-1">Cancel</SoftButton>
             </>
           }
@@ -1567,7 +1784,7 @@ export default function TasksPage() {
               autoFocus
               className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-4 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted"
             />
-            {pinError && <p className="text-center text-sm text-rose-300">{pinError}</p>}
+            {pinError && <p className="text-center text-sm text-[var(--color-accent-rose)]">{pinError}</p>}
             {pinSuccess && <p className="text-center text-sm text-[var(--color-accent-selected)]">{pinSuccess}</p>}
           </div>
         </Modal>
@@ -1581,7 +1798,7 @@ export default function TasksPage() {
           description={`Reverse "${tasks.find(t => t.id === undoTaskId)?.title}"`}
           footer={
             <>
-              <SoftButton onClick={submitUndo} disabled={undoPin.length < 4} variant="danger" className="flex-1">Undo</SoftButton>
+              <SoftButton onClick={submitUndo} loading={pinBusy} disabled={undoPin.length < 4 || pinBusy} variant="danger" className="flex-1">Undo</SoftButton>
               <SoftButton variant="secondary" onClick={() => { setUndoTaskId(null); setUndoPin(""); }} className="flex-1">Cancel</SoftButton>
             </>
           }
@@ -1599,7 +1816,7 @@ export default function TasksPage() {
               autoFocus
               className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-4 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted"
             />
-            {undoError && <p className="text-center text-sm text-rose-300">{undoError}</p>}
+            {undoError && <p className="text-center text-sm text-[var(--color-accent-rose)]">{undoError}</p>}
           </div>
         </Modal>
       )}
@@ -1612,7 +1829,7 @@ export default function TasksPage() {
           description={`Adjust points for ${adjustMember.split(" ")[0]}`}
           footer={
             <>
-              <SoftButton onClick={submitAdjust} disabled={!adjustPin} className="flex-1">Apply</SoftButton>
+              <SoftButton onClick={submitAdjust} loading={pinBusy} disabled={!adjustPin || pinBusy} className="flex-1">Apply</SoftButton>
               <SoftButton variant="secondary" onClick={() => setAdjustMember(null)} className="flex-1">Cancel</SoftButton>
             </>
           }
@@ -1634,7 +1851,7 @@ export default function TasksPage() {
               <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Parent PIN</span>
               <input type="password" inputMode="numeric" maxLength={4} value={adjustPin} onChange={(e) => { setAdjustPin(e.target.value.replace(/[^0-9]/g, "")); setAdjustError(""); }} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted" placeholder="0000" />
             </label>
-            {adjustError && <p className="text-center text-sm text-rose-300">{adjustError}</p>}
+            {adjustError && <p className="text-center text-sm text-[var(--color-accent-rose)]">{adjustError}</p>}
             {adjustSuccess && <p className="text-center text-sm text-[var(--color-accent-selected)]">{adjustSuccess}</p>}
           </div>
         </Modal>
@@ -1648,7 +1865,7 @@ export default function TasksPage() {
           description={`"${parentApprovalReward.name}" costs ${parentApprovalReward.cost}pts — needs a parent PIN to unlock.`}
           footer={
             <>
-              <SoftButton onClick={approveParentReward} disabled={!parentApprovalPin} className="flex-1">Approve</SoftButton>
+              <SoftButton onClick={approveParentReward} loading={pinBusy} disabled={!parentApprovalPin || pinBusy} className="flex-1">Approve</SoftButton>
               <SoftButton variant="secondary" onClick={() => { setParentApprovalReward(null); setParentApprovalPin(""); }} className="flex-1">Cancel</SoftButton>
             </>
           }
@@ -1666,7 +1883,7 @@ export default function TasksPage() {
               autoFocus
               className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-4 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted"
             />
-            {parentApprovalError && <p className="text-center text-sm text-rose-300">{parentApprovalError}</p>}
+            {parentApprovalError && <p className="text-center text-sm text-[var(--color-accent-rose)]">{parentApprovalError}</p>}
           </div>
         </Modal>
       )}

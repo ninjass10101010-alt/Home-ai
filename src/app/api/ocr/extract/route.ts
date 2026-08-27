@@ -15,6 +15,14 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(request: NextRequest) {
   try {
+    const contentType = request.headers.get('content-type') || '';
+    if (!contentType.includes('multipart/form-data')) {
+      return NextResponse.json(
+        { error: 'Request must be multipart/form-data with an "image" file' },
+        { status: 400 }
+      );
+    }
+
     const formData = await request.formData();
     const imageFile = formData.get('image') as File;
 

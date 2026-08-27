@@ -4,7 +4,7 @@
  * and provides insights for better family planning
  */
 
-import { getPB } from './pb';
+import { getAuthedPB } from './pb-auth';
 
 export interface ScheduleAnalytics {
   familyId: string;
@@ -90,7 +90,7 @@ export async function calculateScheduleAnalytics(
   endDate: string
 ): Promise<ScheduleAnalytics> {
   try {
-    const pb = getPB();
+    const pb = await getAuthedPB();
     
     // Fetch events in date range
     const events = await pb.collection('events').getFullList({
@@ -317,7 +317,7 @@ export async function getTaskCompletionStats(
   period: 'week' | 'month' | 'year' = 'month'
 ): Promise<TaskCompletionStats> {
   try {
-    const pb = getPB();
+    const pb = await getAuthedPB();
     
     // Calculate date range
     const endDate = new Date();
@@ -394,7 +394,7 @@ export async function getTimeSpentAnalytics(
   period: 'week' | 'month' | 'year' = 'month'
 ): Promise<TimeSpentAnalytics> {
   try {
-    const pb = getPB();
+    const pb = await getAuthedPB();
     
     // Calculate date range
     const endDate = new Date();

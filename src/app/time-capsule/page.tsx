@@ -1,7 +1,9 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 'use client';
 
 import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
+import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { Plus, Sparkles } from 'lucide-react';
 import PageShell from '@/components/ui/PageShell';
@@ -9,9 +11,8 @@ import Button from '@/components/ui/Button';
 import Surface from '@/components/ui/Surface';
 import Skeleton from '@/components/ui/Skeleton';
 import EmptyState from '@/components/ui/EmptyState';
+import ErrorState from '@/components/ui/ErrorState';
 import EmergencyButton from '@/components/ui/EmergencyButton';
-import SectionCard from '@/components/patterns/SectionCard';
-import Toast from '@/components/ui/Toast';
 import { AtmosphericProvider } from '@/hooks/useAtmosphericTheme';
 import { TimeCapsuleCard } from '@/components/time-capsule/TimeCapsuleCard';
 import { CreateCapsuleForm } from '@/components/time-capsule/CreateCapsuleForm';
@@ -20,14 +21,11 @@ import type { TimeCapsule, CreateCapsuleRequest } from '@/db/features/time-capsu
 const FogBackground = dynamic(() => import('@/components/ui/FogBackground'), { ssr: false });
 
 export default function TimeCapsulePage() {
+  const router = useRouter();
   const [capsules, setCapsules] = useState<TimeCapsule[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    loadCapsules();
-  }, []);
 
   const loadCapsules = async () => {
     setLoading(true);
@@ -52,6 +50,10 @@ export default function TimeCapsulePage() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    loadCapsules();
+  }, []);
 
   const handleCreateCapsule = async (data: CreateCapsuleRequest) => {
     const response = await fetch('/api/time-capsules', {
@@ -83,14 +85,14 @@ export default function TimeCapsulePage() {
             animate={{ opacity: 1, y: 0 }}
             className="mb-8"
           >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <Surface variant="warm" radius="xl" padding="md" className="flex h-14 w-14 items-center justify-center floating">
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+              <div className="flex min-w-0 items-center gap-4">
+                <Surface variant="warm" radius="xl" padding="md" className="flex h-14 w-14 shrink-0 items-center justify-center floating">
                   <Sparkles className="h-7 w-7 text-[var(--color-accent-violet)]" />
                 </Surface>
-                <div>
-                  <h1 className="text-3xl font-bold text-text-primary">Time Capsules</h1>
-                  <p className="text-text-secondary">Lock away memories for the future</p>
+                <div className="min-w-0">
+                  <h1 className="truncate text-3xl font-bold text-text-primary">Time Capsules</h1>
+                  <p className="truncate text-text-secondary">Lock away memories for the future</p>
                 </div>
               </div>
 
@@ -115,12 +117,11 @@ export default function TimeCapsulePage() {
               ))}
             </div>
           ) : error ? (
-            <EmptyState
+            <ErrorState
               title="Unable to Load Capsules"
               description={error}
-              icon="🕰️"
-              actionLabel="Retry"
-              onAction={loadCapsules}
+              retryLabel="Retry"
+              onRetry={loadCapsules}
             />
           ) : capsules.length === 0 ? (
             <motion.div
@@ -146,7 +147,7 @@ export default function TimeCapsulePage() {
                   key={capsule.id}
                   capsule={capsule}
                   onClick={() => {
-                    window.location.href = `/time-capsule/${capsule.id}`;
+                    router.push(`/time-capsule/${capsule.id}`);
                   }}
                 />
               ))}

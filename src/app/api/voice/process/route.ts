@@ -5,10 +5,18 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { processVoiceInput } from '@/lib/voice-input';
-import { getPB } from '@/lib/pb';
+import { withAdmin } from '@/lib/pb-auth';
 
 export async function POST(request: NextRequest) {
   try {
+    const contentType = request.headers.get('content-type') || '';
+    if (!contentType.includes('multipart/form-data')) {
+      return NextResponse.json(
+        { error: 'Request must be multipart/form-data with an "audio" file' },
+        { status: 400 }
+      );
+    }
+
     // Get audio from request
     const formData = await request.formData();
     const audioFile = formData.get('audio') as File;
@@ -36,15 +44,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get family context for parsing
-    const pb = getPB();
-    const familyMembers = await pb.collection('users').getFullList({
-      requestKey: null,
-    });
+    // Get family context for parsing (admin client — collections are locked)
+    const familyMembers = await withAdmin((pb) =>
+      pb.collection('members').getFullList({ requestKey: null })
+    );
 
-    const savedLocations = await pb.collection('consuela_saved_locations').getFullList({
-      requestKey: null,
-    });
+    let savedLocations: any[] = [];
+    try {
+      savedLocations = await withAdmin((pb) =>
+        pb.collection('consuela_saved_locations').getFullList({ requestKey: null })
+      );
+    } catch {
+      // Collection may not exist yet — proceed without saved locations
+    }
 
     // Convert File to Blob
     const audioBlob = new Blob([await audioFile.arrayBuffer()], { type: audioFile.type });

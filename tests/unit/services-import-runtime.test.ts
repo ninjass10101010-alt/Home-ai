@@ -120,4 +120,11 @@ describe("GET /api/services/runtime", () => {
     delete process.env.LAT;
     delete process.env.LON;
   });
+
+  it("returns an empty runtime (200) with an error flag when the config store is down", async () => {
+    mocks.withAdmin.mockRejectedValue(new Error("PB unreachable"));
+    const res = await runtimeGET(req("GET", undefined, { cookie: await cookie() }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ runtime: {}, error: "config_store_unreachable" });
+  });
 });

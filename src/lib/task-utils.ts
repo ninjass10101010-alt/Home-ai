@@ -115,6 +115,13 @@ export function addTransaction(
   return { ...week, history: [...week.history, tx] };
 }
 
+/**
+ * Count consecutive days (today back to this week's Monday) on which at
+ * least one completion occurred. `allCompletionsThisWeek` MUST already be
+ * filtered to the member whose streak is being computed (e.g. via
+ * `getThisWeeksCompletedDates(tasks, memberName)`) — this function does not
+ * filter by member itself.
+ */
 export function calculateRealStreak(
   memberName: string,
   week: WeekData,
@@ -147,19 +154,31 @@ export function regenerateRecurringTasks(tasks: Task[]): Task[] {
   if (regenKey === monday) return tasks;
   saveJSON(REGEN_TRACKER_KEY, monday);
 
-  const recurringTasksToClone = tasks.filter(
-    (t) => t.completed && t.recurring
+  // Clone sources: recurring tasks completed in a PRIOR week (or with no
+  // completedInWeek recorded). Tasks completed THIS week are left untouched —
+  // they regen next week.
+  const sources = tasks.filter(
+    (t) => t.completed && t.recurring && t.completedInWeek !== monday
   );
 
-  const clones = recurringTasksToClone.map((t) => {
-    let due = now;
-    if (t.recurring === "Daily") {
-      due = now;
-    } else if (t.recurring?.startsWith("Weekly")) {
-      due = now;
-    } else if (t.recurring === "Monthly") {
-      due = now;
-    }
+  // Dedupe by lineage so duplicate completed rows never compound into
+  // multiple clones — keep only the first source per lineage.
+  const seenLineages = new Set<string>();
+  const lineageSources: Task[] = [];
+  for (const t of sources) {
+    const lineage = `${t.title}|${t.recurring}|${t.universal ? "universal" : t.assignee}`;
+    if (seenLineages.has(lineage)) continue;
+    seenLineages.add(lineage);
+    lineageSources.push(t);
+  }
+
+  // The consumed completed sources are removed — their completion record
+  // lives in week_data history/archives. Keeping them would re-clone them
+  // every week (1→2→4 growth).
+  const consumedIds = new Set(sources.map((t) => t.id));
+  const remaining = tasks.filter((t) => !consumedIds.has(t.id));
+
+  const clones = lineageSources.map((t) => {
     const cloneId = Date.now() + Math.floor(Math.random() * 100000);
     return {
       ...t,
@@ -171,20 +190,27 @@ export function regenerateRecurringTasks(tasks: Task[]): Task[] {
       // Universal recurring tasks come back unclaimed — no ghost assignee from last week
       assignee: t.universal ? "All" : t.assignee,
       assigneeEmoji: t.universal ? "🤝" : t.assigneeEmoji,
-      due,
+      due: now,
     };
   });
 
-  return [...tasks, ...clones];
+  return [...remaining, ...clones];
 }
 
-export function getThisWeeksCompletedDates(tasks: Task[]): string[] {
+export function getThisWeeksCompletedDates(tasks: Task[], memberName?: string): string[] {
   const monday = todayMondayISO();
   const now = todayISO();
   return tasks
-    .filter((t) => t.completed && t.completedAt)
+    .filter(
+      (t) =>
+        t.completed &&
+        t.completedAt &&
+        (!memberName || t.completedBy === memberName)
+    )
     .map((t) => t.completedAt!)
-    .filter((d) => d >= monday && d <= now);
+    // completedAt values are full ISO timestamps — compare date parts only,
+    // otherwise today's completions never satisfy `d <= now` (date-only).
+    .filter((d) => d.slice(0, 10) >= monday && d.slice(0, 10) <= now);
 }
 
 export function getThisWeeksCompletedTasks(tasks: Task[]): Task[] {
@@ -371,13 +397,18 @@ export async function syncTasksToPB(tasks: Task[]): Promise<void> {
       title: task.title,
       assignee: task.assignee,
       assigneeEmoji: task.assigneeEmoji,
+      // Home widget's selectPendingTasks reads `assigned` + `status` —
+      // without these the row is invisible to the pending-tasks reader.
+      assigned: task.assignee,
+      status: task.completed ? "done" : "pending",
       due: task.due,
       points: task.points,
       recurring: task.recurring,
       category: task.category,
       priority: task.priority,
       universal: task.universal || false,
-      createdAt: new Date().toISOString(),
+      completedInWeek: task.completedInWeek ?? null,
+      completedAt: task.completedAt ?? null,
     }).catch(() => {});
   }
 }
@@ -430,7 +461,14 @@ export async function syncFamilyGoalToPB(goal: FamilyGoal | null): Promise<void>
 }
 
 export async function syncHallOfFameToPB(entries: HallOfFameEntry[]): Promise<void> {
+  // Idempotent sync: skip entries whose member + weekStart already exist in
+  // PB (insertHallOfFameEntry always creates — re-inserting would duplicate).
+  const existing = await db.selectHallOfFame().catch(() => [] as any[]);
   for (const e of entries) {
+    const alreadySynced = existing.some(
+      (row: any) => row.member === e.member && row.weekStart === e.weekStart
+    );
+    if (alreadySynced) continue;
     await db.insertHallOfFameEntry({
       member: e.member,
       emoji: e.emoji,

@@ -3,6 +3,8 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 
+const EXIT_MS = 180;
+
 interface ToastProps {
   open: boolean;
   children: ReactNode;
@@ -11,14 +13,27 @@ interface ToastProps {
 
 export default function Toast({ open, children, tone = "neutral" }: ToastProps) {
   const [visible, setVisible] = useState(open);
+  const [closing, setClosing] = useState(false);
 
   useEffect(() => {
-    if (open) setVisible(true);
-    else {
-      const timer = setTimeout(() => setVisible(false), 200);
-      return () => clearTimeout(timer);
+    if (open) {
+      setVisible(true);
+      setClosing(false);
+      return;
     }
-  }, [open]);
+    if (!visible) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setVisible(false);
+      setClosing(false);
+      return;
+    }
+    setClosing(true);
+    const timer = setTimeout(() => {
+      setVisible(false);
+      setClosing(false);
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [open, visible]);
 
   if (!visible) return null;
 
@@ -32,7 +47,12 @@ export default function Toast({ open, children, tone = "neutral" }: ToastProps) 
     <div
       role="status"
       aria-live="polite"
-      className={`fixed left-1/2 top-4 z-[90] max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-2xl border px-4 py-3 text-sm font-semibold shadow-2xl backdrop-blur-xl animate-[toastSlide_0.4s_cubic-bezier(0.34,1.56,0.64,1)] ${toneMap[tone]}`}
+      className={`fixed left-1/2 top-4 z-[90] max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-2xl border px-4 py-3 text-sm font-semibold shadow-2xl backdrop-blur-xl ${toneMap[tone]}`}
+      style={{
+        animation: closing
+          ? `toastExit ${EXIT_MS}ms var(--ease-standard) both`
+          : `toastSlide 0.4s var(--ease-spring) both`,
+      }}
     >
       {children}
     </div>

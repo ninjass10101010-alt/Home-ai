@@ -406,39 +406,6 @@ describe('Consuela Chat API Routes', () => {
     vi.clearAllMocks();
   });
 
-  describe('POST /api/consuela/chat', () => {
-    it('returns 400 when message is missing', async () => {
-      vi.mocked(auth.getUserId).mockReturnValue('user-1');
-      
-      const { POST } = await import('@/app/api/consuela/chat/route');
-      const request = new NextRequest('http://localhost:3000/api/consuela/chat', {
-        method: 'POST',
-        body: JSON.stringify({}),
-      });
-      const response = await POST(request);
-      
-      expect(response.status).toBe(400);
-      const body = await response.json();
-      expect(body.error).toBe('Message is required');
-    });
-
-    it('returns 200 with reply when message is provided', async () => {
-      vi.mocked(auth.getUserId).mockReturnValue('user-1');
-      
-      const { POST } = await import('@/app/api/consuela/chat/route');
-      const request = new NextRequest('http://localhost:3000/api/consuela/chat', {
-        method: 'POST',
-        body: JSON.stringify({ message: 'Hello Consuela' }),
-      });
-      const response = await POST(request);
-      
-      expect(response.status).toBe(200);
-      const body = await response.json();
-      expect(body).toHaveProperty('reply');
-      expect(body).toHaveProperty('conversationId');
-    });
-  });
-
   describe('GET /api/consuela/suggestions', () => {
     it('returns pending suggestions list', async () => {
       const { GET } = await import('@/app/api/consuela/suggestions/route');

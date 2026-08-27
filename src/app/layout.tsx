@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import Script from "next/script";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { WeatherProvider } from "@/hooks/useWeather";
@@ -48,7 +49,8 @@ export const viewport: Viewport = {
 
 // Anti-FOUC script: runs inline before React hydrates so the correct
 // data-theme is set on <html> from the very first paint, avoiding the
-// "stuck between dark and light" flash.
+// "stuck between dark and light" flash. next/script beforeInteractive
+// injects it into the server HTML head (Next.js 16 app-router supported).
 const themeScript = `
 (function() {
   try {
@@ -87,10 +89,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`} suppressHydrationWarning>
-        <script
-          id="theme-init"
-          dangerouslySetInnerHTML={{ __html: themeScript }}
-        />
+        <Script id="theme-init" strategy="beforeInteractive">{themeScript}</Script>
 
         <AuthProvider>
           <ThemeProvider>

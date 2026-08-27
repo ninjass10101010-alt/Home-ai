@@ -23,11 +23,20 @@ function PodiumSlot({
   onClick, onAdjust, isAdmin,
 }: PodiumSlotProps) {
   return (
-    <div className={`flex flex-col items-center ${heightClass}`}>
+    <div className={`flex min-w-0 flex-1 flex-col items-center ${heightClass}`}>
       <div
-        className={`relative rounded-2xl border p-3 min-w-[120px] cursor-pointer ${bgClass} ${isYou ? "widget-row-glow" : ""} transition hover:scale-105 active:scale-95`}
+        className={`relative w-full rounded-2xl border p-3 cursor-pointer ${bgClass} ${isYou ? "widget-row-glow" : ""} transition hover:scale-105 active:scale-95`}
         style={isYou ? ({ "--row-color": color } as React.CSSProperties) : undefined}
+        role="button"
+        tabIndex={0}
+        aria-label={`${entry.name}: ${entry.points} points, rank ${rank}`}
         onClick={onClick}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onClick();
+          }
+        }}
       >
         <div className="absolute -top-3 left-1/2 -translate-x-1/2 text-2xl animate-crown-glow">{medalEmoji}</div>
         <div className="flex flex-col items-center gap-1.5 mt-1">
@@ -88,11 +97,14 @@ export default function Podium({
   const second = entries.length > 1 ? entries[1] : null;
   const third = entries.length > 2 ? entries[2] : null;
 
+  const rankOf = (points: number) =>
+    entries.filter((o) => (o.points ?? 0) > (points ?? 0)).length + 1;
+
   return (
-    <div className="flex items-end justify-center gap-2 py-2">
+    <div className="flex w-full items-end justify-center gap-2 py-2">
       {second && (
         <PodiumSlot
-          entry={second} rank={2} heightClass="h-[170px]" medalEmoji="🥈"
+          entry={second} rank={rankOf(second.points)} heightClass="h-[170px]" medalEmoji={rankOf(second.points) === 1 ? "🥇" : rankOf(second.points) === 2 ? "🥈" : "🥉"}
           bgClass="bg-slate-300/10 border-slate-300/15"
           isYou={isYou(second.name)} color={getMemberColor(second.name)}
           previousRank={previousRanks[second.name]}
@@ -102,8 +114,8 @@ export default function Podium({
         />
       )}
       <PodiumSlot
-        entry={first} rank={1} heightClass="h-[200px]" medalEmoji="🥇"
-        bgClass="bg-amber-400/15 border-amber-400/25 animate-rank-pulse min-w-[140px]"
+        entry={first} rank={rankOf(first.points)} heightClass="h-[200px]" medalEmoji={rankOf(first.points) === 1 ? "🥇" : rankOf(first.points) === 2 ? "🥈" : "🥉"}
+        bgClass="bg-amber-400/15 border-amber-400/25 animate-rank-pulse"
         isYou={isYou(first.name)} color={getMemberColor(first.name)}
         previousRank={previousRanks[first.name]}
         onClick={() => onOpenSheet(first.name)}
@@ -112,7 +124,7 @@ export default function Podium({
       />
       {third && (
         <PodiumSlot
-          entry={third} rank={3} heightClass="h-[150px]" medalEmoji="🥉"
+          entry={third} rank={rankOf(third.points)} heightClass="h-[150px]" medalEmoji={rankOf(third.points) === 1 ? "🥇" : rankOf(third.points) === 2 ? "🥈" : "🥉"}
           bgClass="bg-amber-700/10 border-amber-700/15"
           isYou={isYou(third.name)} color={getMemberColor(third.name)}
           previousRank={previousRanks[third.name]}

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { motion } from 'framer-motion';
+import { motion, MotionConfig } from 'framer-motion';
 import { BookOpen, Trophy } from 'lucide-react';
 import PageShell from '@/components/ui/PageShell';
 import Button from '@/components/ui/Button';
@@ -10,6 +10,7 @@ import Surface from '@/components/ui/Surface';
 import Skeleton from '@/components/ui/Skeleton';
 import EmptyState from '@/components/ui/EmptyState';
 import EmergencyButton from '@/components/ui/EmergencyButton';
+import Toast from '@/components/ui/Toast';
 import { AtmosphericProvider } from '@/hooks/useAtmosphericTheme';
 import { SkillTreeVisualization } from '@/components/skill-tree/SkillTreeVisualization';
 import { AchievementGallery } from '@/components/skill-tree/AchievementGallery';
@@ -22,7 +23,6 @@ import type {
   Achievement,
   UserAchievement,
 } from '@/db/features/skill-tree';
-import { calculateLevelFromXP, calculateXPProgress } from '@/db/features/skill-tree';
 
 const FogBackground = dynamic(() => import('@/components/ui/FogBackground'), { ssr: false });
 
@@ -55,10 +55,18 @@ export default function SkillTreePage() {
   const [selectedQuest, setSelectedQuest] = useState<Quest | null>(null);
   const [showLevelUp, setShowLevelUp] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ open: boolean; message: string; tone: 'success' | 'error' }>({ open: false, message: '', tone: 'error' });
 
   useEffect(() => {
     loadSkillTree();
   }, []);
+
+  // Auto-dismiss feedback toasts so they never linger.
+  useEffect(() => {
+    if (!toast.open) return;
+    const timer = setTimeout(() => setToast((t) => ({ ...t, open: false })), 4000);
+    return () => clearTimeout(timer);
+  }, [toast.open]);
 
   const loadSkillTree = async () => {
     setLoading(true);
@@ -96,9 +104,12 @@ export default function SkillTreePage() {
       if (response.ok) {
         await loadSkillTree();
         setSelectedQuest(null);
+      } else {
+        setToast({ open: true, message: "Couldn't start that quest — give it another go!", tone: 'error' });
       }
     } catch (err) {
       console.error('Failed to start quest:', err);
+      setToast({ open: true, message: "Couldn't start that quest — give it another go!", tone: 'error' });
     }
   };
 
@@ -122,9 +133,12 @@ export default function SkillTreePage() {
         if (result.leveledUp) {
           setShowLevelUp(result.newLevel);
         }
+      } else {
+        setToast({ open: true, message: "Couldn't save that completion — try again!", tone: 'error' });
       }
     } catch (err) {
       console.error('Failed to complete quest:', err);
+      setToast({ open: true, message: "Couldn't save that completion — try again!", tone: 'error' });
     }
   };
 
@@ -139,9 +153,12 @@ export default function SkillTreePage() {
 
       if (response.ok) {
         await loadSkillTree();
+      } else {
+        setToast({ open: true, message: "Couldn't unlock that branch yet — try again!", tone: 'error' });
       }
     } catch (err) {
       console.error('Failed to unlock branch:', err);
+      setToast({ open: true, message: "Couldn't unlock that branch yet — try again!", tone: 'error' });
     }
   };
 

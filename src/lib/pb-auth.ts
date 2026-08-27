@@ -29,3 +29,14 @@ export async function withAdmin<T>(fn: (pb: ReturnType<typeof getAdminPB>) => Pr
   cachedAdminPB.authStore.save(await ensureAuth(), null);
   return fn(cachedAdminPB);
 }
+
+// Return the shared authenticated client directly for call sites that make
+// several sequential PB requests and read more naturally with a `pb` handle
+// than a withAdmin callback. Same cached client + token refresh as withAdmin.
+export async function getAuthedPB(): Promise<ReturnType<typeof getAdminPB>> {
+  if (!cachedAdminPB) {
+    cachedAdminPB = getAdminPB();
+  }
+  cachedAdminPB.authStore.save(await ensureAuth(), null);
+  return cachedAdminPB;
+}

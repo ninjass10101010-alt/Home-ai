@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect, useMemo, useSyncExternalStore, type CSSProperties } from "react";
+import { useState, useEffect, useMemo, useRef, useSyncExternalStore, type CSSProperties } from "react";
 import PageShell from "@/components/ui/PageShell";
 import TopBar from "@/components/ui/TopBar";
-import Card from "@/components/ui/Card";
+import WidgetCard from "@/components/patterns/WidgetCard";
 import Badge from "@/components/ui/Badge";
-import AnimatedEmoji from "@/components/ui/AnimatedEmoji";
+import Avatar from "@/components/ui/Avatar";
 import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
+import { mapGoogleEvent, eventInMonth } from "@/lib/calendar/google-mapping";
 import { db } from "@/db";
 
 const DAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
@@ -72,6 +73,8 @@ interface CalEvent {
   color: "green" | "violet" | "amber" | "cyan" | "rose";
   emoji: string;
   day: number;
+  month?: number;
+  year?: number;
 }
 
 type ScheduleColor =
@@ -237,6 +240,10 @@ function loadFromStorage<T>(key: string, fallback: T): T {
   }
 }
 
+const subscribeNoop = () => () => {};
+const clientTrue = () => true;
+const serverFalse = () => false;
+
 function getGreeting() {
   const hour = new Date().getHours();
   if (hour < 12) return "Good Morning \u2600\uFE0F";
@@ -259,7 +266,7 @@ export default function CalendarPage() {
     getServerMembersSnapshot,
     getClientMembersSnapshot
   );
-  const { colors, accentRgb } = useAtmosphericTheme();
+  const { accentRgb } = useAtmosphericTheme();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
   const [selectedDay, setSelectedDay] = useState(today.getDate());
@@ -269,7 +276,16 @@ export default function CalendarPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showToast = (msg: string) => {
+    setToast(msg);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 3000);
+  };
+
+  useEffect(() => () => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+  }, []);
 
   const [calEvents, setCalEvents] = useState<CalEvent[]>(() => loadFromStorage(EVENTS_STORAGE_KEY, events));
   const [editingEventId, setEditingEventId] = useState<number | string | null>(null);
@@ -290,6 +306,15 @@ export default function CalendarPage() {
   const [editingSchedId, setEditingSchedId] = useState<number | null>(null);
   const [schedForm, setSchedForm] = useState<ScheduleItem>(emptySchedule());
   const [isAddingSched, setIsAddingSched] = useState(false);
+  const [schedFormSession, setSchedFormSession] = useState(0);
+
+  const mounted = useSyncExternalStore(subscribeNoop, clientTrue, serverFalse);
+
+  const renderEvents = useMemo(() => (mounted ? calEvents : events), [mounted, calEvents]);
+  const renderSchedules = useMemo(
+    () => (mounted ? schedules : getInitialSchedules()),
+    [mounted, schedules]
+  );
 
   useEffect(() => {
     localStorage.setItem(EVENTS_STORAGE_KEY, JSON.stringify(calEvents));
@@ -300,11 +325,11 @@ export default function CalendarPage() {
   }, [schedules]);
 
   const sortedSchedules = useMemo(() => {
-    return [...schedules].sort((a, b) => {
+    return [...renderSchedules].sort((a, b) => {
       const getMinutes = (t: string) => parseTimeToMinutes(t) || parseInt(t.replace(":", ""), 10);
       return getMinutes(a.time) - getMinutes(b.time);
     });
-  }, [schedules]);
+  }, [renderSchedules]);
 
   const filteredSchedules = useMemo(() => {
     if (scheduleFilter === "all") return sortedSchedules;
@@ -334,22 +359,27 @@ export default function CalendarPage() {
 
   const dayEventMap = useMemo(() => {
     const map = new Map<number, CalEvent[]>();
-    calEvents.forEach((e) => {
+    renderEvents.forEach((e) => {
+      if (!eventInMonth(e, month, year)) return;
       if (!map.has(e.day)) map.set(e.day, []);
       map.get(e.day)!.push(e);
     });
     return map;
-  }, [calEvents]);
+  }, [renderEvents, month, year]);
 
   const selectedEvents = useMemo(() => {
-    return calEvents.filter(
-      (e) => e.day === selectedDay && (filterMember === "All" || e.member === filterMember || e.member === "All")
+    return renderEvents.filter(
+      (e) =>
+        e.day === selectedDay &&
+        eventInMonth(e, month, year) &&
+        (filterMember === "All" || e.member === filterMember || e.member === "All")
     );
-  }, [calEvents, selectedDay, filterMember]);
+  }, [renderEvents, selectedDay, filterMember, month, year]);
 
   const upcomingByDay = useMemo(() => {
     const map: Record<number, CalEvent[]> = {};
-    calEvents.forEach((e) => {
+    renderEvents.forEach((e) => {
+      if (!eventInMonth(e, month, year)) return;
       if (e.day > selectedDay && e.day <= daysInMonth) {
         if (!map[e.day]) map[e.day] = [];
         map[e.day].push(e);
@@ -357,7 +387,7 @@ export default function CalendarPage() {
     });
     Object.values(map).forEach((evts) => evts.sort((a, b) => parseTimeToMinutes(a.time) - parseTimeToMinutes(b.time)));
     return map;
-  }, [calEvents, selectedDay, daysInMonth]);
+  }, [renderEvents, selectedDay, daysInMonth, month, year]);
 
   const upcomingCards = useMemo(() => {
     const cards: { day: number; events: CalEvent[] }[] = [];
@@ -368,13 +398,18 @@ export default function CalendarPage() {
     return cards;
   }, [upcomingByDay, selectedDay, daysInMonth]);
 
+  const selectViewMonth = (m: number, y: number) => {
+    setMonth(m);
+    setYear(y);
+    setSelectedDay(y === today.getFullYear() && m === today.getMonth() ? today.getDate() : 1);
+  };
   const prevMonth = () => {
-    if (month === 0) { setMonth(11); setYear((y) => y - 1); }
-    else setMonth((m) => m - 1);
+    if (month === 0) selectViewMonth(11, year - 1);
+    else selectViewMonth(month - 1, year);
   };
   const nextMonth = () => {
-    if (month === 11) { setMonth(0); setYear((y) => y + 1); }
-    else setMonth((m) => m + 1);
+    if (month === 11) selectViewMonth(0, year + 1);
+    else selectViewMonth(month + 1, year);
   };
   const goToToday = () => {
     setMonth(today.getMonth());
@@ -439,11 +474,13 @@ export default function CalendarPage() {
     setSchedForm(emptySchedule());
     setIsAddingSched(true);
     setEditingSchedId(null);
+    setSchedFormSession((s) => s + 1);
   };
   const startEditSched = (s: ScheduleItem) => {
     setSchedForm({ ...s });
     setEditingSchedId(s.id);
     setIsAddingSched(false);
+    setSchedFormSession((v) => v + 1);
   };
   const cancelSchedEdit = () => { setEditingSchedId(null); setIsAddingSched(false); };
   const saveSched = () => {
@@ -493,40 +530,20 @@ export default function CalendarPage() {
       if (data.events?.length) {
         setCalEvents((prev) => {
           const filtered = prev.filter((e: any) => e.member !== "Google");
-          const todayYear = today.getFullYear();
-          const todayMonth = today.getMonth();
           for (const ge of data.events) {
-            const startIso = ge.start_iso || "";
-            if (!startIso) continue;
-            // All-day events carry a date-only "YYYY-MM-DD" string; `new Date()`
-            // parses that as UTC midnight and shifts the day back one in US
-            // timezones. Parse it as a local calendar date instead.
-            let d: Date;
-            if (ge.all_day && /^\d{4}-\d{2}-\d{2}$/.test(startIso)) {
-              const [y, m, dd] = startIso.split("-").map(Number);
-              d = new Date(y, m - 1, dd);
-            } else {
-              d = new Date(startIso);
-            }
-            if (Number.isNaN(d.getTime())) continue;
-            const evYear = d.getFullYear();
-            const evMonth = d.getMonth();
-            if (evYear !== todayYear || evMonth !== todayMonth) continue;
-            const dayNum = d.getDate();
-            const time = ge.all_day
-              ? "All day"
-              : d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
-            const title = ge.summary || "(no title)";
-            if (!filtered.find((e) => e.title === title && e.day === dayNum && e.time === time)) {
-              filtered.push({
-                id: `g_${ge.google_id}_${dayNum}_${time}`,
-                title,
-                time,
-                member: "Google",
-                color: "cyan" as const,
-                emoji: "📅",
-                day: dayNum,
-              });
+            const mapped = mapGoogleEvent(ge);
+            if (!mapped) continue;
+            if (
+              !filtered.find(
+                (e: any) =>
+                  e.title === mapped.title &&
+                  e.day === mapped.day &&
+                  e.month === mapped.month &&
+                  e.year === mapped.year &&
+                  e.time === mapped.time
+              )
+            ) {
+              filtered.push(mapped);
             }
           }
           return filtered;
@@ -559,9 +576,15 @@ export default function CalendarPage() {
       style={{ "--calendar-accent-rgb": accentRgb } as CSSProperties}
     >
       {toast && (
-        <div className={`calendar-toast ${
-          toast.includes("\u274C") ? "bg-rose-500/20 border border-rose-500/30 text-rose-300" : "bg-emerald-500/20 border border-emerald-500/30 text-emerald-300"
-        }`}>
+        <div
+          role="status"
+          aria-live="polite"
+          className={`calendar-toast border ${
+            toast.includes("\u274C")
+              ? "border-[rgba(244,63,94,.35)] bg-[rgba(244,63,94,.16)] text-[var(--color-accent-rose)]"
+              : "border-[rgba(74,222,128,.32)] bg-[rgba(74,222,128,.14)] text-[var(--color-accent-mint)]"
+          }`}
+        >
           {toast}
         </div>
       )}
@@ -573,7 +596,7 @@ export default function CalendarPage() {
           <button
             onClick={activeTab === "calendar" ? startAddEvent : startAddSched}
             className="calendar-icon-btn"
-            aria-label="Add"
+            aria-label={activeTab === "calendar" ? "Add event" : "Add routine"}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
               <path d="M12 5v14M5 12h14" strokeLinecap="round" />
@@ -583,14 +606,11 @@ export default function CalendarPage() {
       />
 
       <div className="px-4 mt-4 space-y-4">
-        <section
-          className="calendar-hero-card"
-          style={{ "--calendar-accent-soft": `rgba(${accentRgb},0.22)` } as CSSProperties}
-        >
+        <section className="calendar-hero-card widget-card">
           <div className="calendar-hero-content">
             <div>
               <p className="calendar-hero-kicker">{weekdayName} &middot; {selectedEvents.length} event{selectedEvents.length !== 1 ? "s" : ""}</p>
-              <h1 className="calendar-hero-title">{getGreeting()}</h1>
+              <h1 className="calendar-hero-title" suppressHydrationWarning>{getGreeting()}</h1>
               <p className="calendar-hero-copy">
                 {isSelectedToday ? "Here\u2019s your day at a glance" : `What\u2019s on for ${weekdayName} ${MONTHS[month].slice(0, 3)} ${selectedDay}`}
               </p>
@@ -614,15 +634,9 @@ export default function CalendarPage() {
           <button
             onClick={() => setFilterMember("All")}
             className={`calendar-member-chip ${filterMember === "All" ? "is-active" : ""}`}
-            style={{
-              "--chip-color": "var(--color-accent-selected)",
-              ...(filterMember === "All" ? {
-                background: `linear-gradient(135deg, rgba(${accentRgb},0.24), rgba(255,255,255,0.06))`,
-                borderColor: `rgba(${accentRgb},0.35)`,
-              } : {}),
-            } as CSSProperties}
+            style={{ "--chip-color": "var(--color-accent-selected)" } as CSSProperties}
           >
-            <span className="calendar-member-avatar">{`\uD83D\uDC65`}</span>
+            <Avatar name="All" color="green" emoji={`\uD83D\uDC65`} size="xs" variant="emoji" />
             <span>All</span>
           </button>
           {members.filter((m: any) => m.name !== "All").map((m: any) => {
@@ -633,17 +647,9 @@ export default function CalendarPage() {
                 key={m.name}
                 onClick={() => setFilterMember(m.name)}
                 className={`calendar-member-chip ${active ? "is-active" : ""}`}
-                style={{
-                  "--chip-color": chipColor,
-                  ...(active ? {
-                    background: `linear-gradient(135deg, rgba(${accentRgb},0.24), rgba(255,255,255,0.06))`,
-                    borderColor: `rgba(${accentRgb},0.35)`,
-                  } : {}),
-                } as CSSProperties}
+                style={{ "--chip-color": chipColor } as CSSProperties}
               >
-                <span className="calendar-member-avatar">
-                  <AnimatedEmoji emoji={m.emoji} name={m.name} size="sm" />
-                </span>
+                <Avatar name={m.name} color={m.color} emoji={m.emoji} size="xs" variant="emoji" />
                 <span>{m.name}</span>
               </button>
             );
@@ -663,19 +669,17 @@ export default function CalendarPage() {
         </div>
 
         {activeTab === "calendar" && (
-          <div className="space-y-4">
-            <Card className="calendar-grid-card !p-0">
+          <div key="calendar" className="panel-swap space-y-4">
+            <WidgetCard tone="#3b82f6" className="calendar-grid-card">
               <div className="calendar-panel-header calendar-grid-header">
-                <div>
-                  <h2 className="calendar-month-title">
-                    {MONTHS[month]} <span className="calendar-month-year">{year}</span>
-                  </h2>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <button onClick={goToToday} className="calendar-today-btn">Today</button>
+                <h2 className="calendar-month-title">
+                  {MONTHS[month]} <span className="calendar-month-year">{year}</span>
+                </h2>
+                <div className="calendar-month-nav">
                   <button onClick={prevMonth} className="calendar-icon-btn" aria-label="Previous month">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M15 18l-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" /></svg>
                   </button>
+                  <button onClick={goToToday} className="calendar-today-btn">Today</button>
                   <button onClick={nextMonth} className="calendar-icon-btn" aria-label="Next month">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" /></svg>
                   </button>
@@ -699,9 +703,9 @@ export default function CalendarPage() {
                       key={`${year}-${month}-${day}`}
                       type="button"
                       onClick={() => setSelectedDay(day)}
-                      className={`calendar-day-btn ${isSelected ? "is-selected" : isToday ? "is-today" : ""}`}
+                      className={`calendar-day-btn${isSelected ? " is-selected" : ""}${isToday ? " is-today" : ""}`}
                     >
-                      <span className="calendar-day-number">{day}</span>
+                      <span className={`calendar-day-number${isToday ? " is-today-number" : ""}`}>{day}</span>
                       {visibleDots.length > 0 && (
                         <div className="calendar-day-dots">
                           {visibleDots.map((ev, di) => (
@@ -717,9 +721,9 @@ export default function CalendarPage() {
                   );
                 })}
               </div>
-            </Card>
+            </WidgetCard>
 
-            <section className="calendar-panel">
+            <section className="calendar-panel widget-card" style={{ "--widget-tone": "#22d3ee" } as CSSProperties}>
               <div className="calendar-panel-header">
                 <div className="calendar-panel-heading">
                   <div className="calendar-panel-icon">{`\uD83D\uDCC5`}</div>
@@ -755,7 +759,7 @@ export default function CalendarPage() {
                           <span className="calendar-event-divider" />
                         </div>
                         <div className="calendar-event-content">
-                          <p className="calendar-event-title">{ev.title}</p>
+                          <p className="calendar-event-title break-words">{ev.title}</p>
                           <div className="calendar-event-meta">
                             <Badge variant={badgeVariants[ev.color] ?? "gray"} size="sm">{ev.member}</Badge>
                             {ev.member === "Google" && (
@@ -781,7 +785,7 @@ export default function CalendarPage() {
             </section>
 
             {(isAddingEvent || editingEventId !== null) && (
-              <Card className="calendar-form-card !p-3">
+              <WidgetCard tone="#8b5cf6" className="calendar-form-card">
                 <h4 className="calendar-form-heading">{isAddingEvent ? "Add Event" : "Edit Event"}</h4>
                 <div className="space-y-2.5">
                   <input
@@ -793,7 +797,7 @@ export default function CalendarPage() {
                     <input type="text" placeholder="Time (e.g. 4:00 PM)" value={eventForm.time} onChange={(e) => setEventForm({ ...eventForm, time: e.target.value })} className="calendar-input" />
                     <input type="text" placeholder="Emoji" value={eventForm.emoji} onChange={(e) => setEventForm({ ...eventForm, emoji: e.target.value })} className="calendar-input" />
                     <input type="text" placeholder="Member" value={eventForm.member} onChange={(e) => setEventForm({ ...eventForm, member: e.target.value })} className="calendar-input" />
-                    <input type="number" placeholder="Day" value={eventForm.day} onChange={(e) => setEventForm({ ...eventForm, day: parseInt(e.target.value) || 1 })} className="calendar-input" />
+                    <input type="number" min={1} max={daysInMonth} placeholder="Day" value={eventForm.day} onChange={(e) => { const parsed = parseInt(e.target.value, 10); setEventForm({ ...eventForm, day: Number.isNaN(parsed) ? 1 : Math.min(Math.max(parsed, 1), daysInMonth) }); }} className="calendar-input" />
                   </div>
                   <div className="calendar-color-swatches">
                     {(["green", "violet", "amber", "cyan", "rose"] as const).map((c) => (
@@ -813,15 +817,15 @@ export default function CalendarPage() {
                     </button>
                     <button onClick={cancelEventEdit} className="calendar-secondary-btn">Cancel</button>
                     {!isAddingEvent && (
-                      <button onClick={() => deleteEvent(eventForm.id)} className="calendar-delete-btn">{`\uD83D\uDDD1\uFE0F`}</button>
+                      <button onClick={() => deleteEvent(eventForm.id)} className="calendar-delete-btn" aria-label="Delete event">{`\uD83D\uDDD1\uFE0F`}</button>
                     )}
                   </div>
                 </div>
-              </Card>
+              </WidgetCard>
             )}
 
             {upcomingCards.length > 0 && (
-              <section className="calendar-panel">
+              <section className="calendar-panel widget-card" style={{ "--widget-tone": "#10b981" } as CSSProperties}>
                 <div className="calendar-upcoming-header">
                   <div className="calendar-upcoming-icon">
                     <svg viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth={2.5} className="w-3.5 h-3.5">
@@ -839,7 +843,7 @@ export default function CalendarPage() {
                       key={card.day}
                       type="button"
                       onClick={() => setSelectedDay(card.day)}
-                      className="calendar-upcoming-card"
+                      className="calendar-upcoming-card widget-card"
                     >
                       <p className="calendar-upcoming-day-label">{getShortWeekday(year, month, card.day)}</p>
                       <p className="calendar-upcoming-day-num">{card.day}</p>
@@ -867,9 +871,9 @@ export default function CalendarPage() {
         )}
 
         {activeTab === "schedule" && (
-          <div className="space-y-4">
+          <div key="schedule" className="panel-swap space-y-4">
             {(isAddingSched || editingSchedId !== null) && (
-              <Card className="calendar-form-card !p-3">
+              <WidgetCard tone="#8b5cf6" className="calendar-form-card">
                 <h4 className="calendar-form-heading">{isAddingSched ? "Add Schedule Item" : "Edit Schedule Item"}</h4>
                 <div className="space-y-2.5">
                   <input
@@ -881,7 +885,7 @@ export default function CalendarPage() {
                      <div className="calendar-time-picker">
                        <input
                          type="number" min={1} max={12} inputMode="numeric"
-                         key={`sched-hour-${editingSchedId ?? "new"}`}
+                         key={`sched-hour-${schedFormSession}`}
                          defaultValue={(() => { const t = formatTo12Hour(schedForm.time); return t.hour; })()}
                          onChange={(e) => {
                            const t = formatTo12Hour(schedForm.time);
@@ -893,10 +897,10 @@ export default function CalendarPage() {
                          aria-label="Hour"
                        />
                        <span className="calendar-time-sep">:</span>
-                       <input
-                         type="number" min={0} max={59} inputMode="numeric"
-                         key={`sched-min-${editingSchedId ?? "new"}`}
-                         defaultValue={(() => { const t = formatTo12Hour(schedForm.time); return t.minute; })()}
+                        <input
+                          type="number" min={0} max={59} inputMode="numeric"
+                          key={`sched-min-${schedFormSession}`}
+                          defaultValue={(() => { const t = formatTo12Hour(schedForm.time); return t.minute; })()}
                          onChange={(e) => {
                            const t = formatTo12Hour(schedForm.time);
                            let v = e.target.value.replace(/[^0-9]/g, "").slice(0, 2);
@@ -965,20 +969,20 @@ export default function CalendarPage() {
                     </button>
                     <button onClick={cancelSchedEdit} className="calendar-secondary-btn">Cancel</button>
                     {!isAddingSched && (
-                      <button onClick={() => deleteSched(schedForm.id)} className="calendar-delete-btn">{`\uD83D\uDDD1\uFE0F`}</button>
+                      <button onClick={() => deleteSched(schedForm.id)} className="calendar-delete-btn" aria-label="Delete routine">{`\uD83D\uDDD1\uFE0F`}</button>
                     )}
-                  </div>
                 </div>
-              </Card>
+              </div>
+              </WidgetCard>
             )}
 
-            <section className="calendar-panel">
+            <section className="calendar-panel widget-card" style={{ "--widget-tone": "#22d3ee" } as CSSProperties}>
               <div className="calendar-panel-header">
                 <div className="calendar-panel-heading">
                   <div className="calendar-panel-icon">{`\uD83D\uDD04`}</div>
                   <div>
                     <h3 className="calendar-panel-title">Family Routines</h3>
-                    <p className="calendar-panel-subtitle">{schedules.length} routine{schedules.length !== 1 ? "s" : ""} &middot; {filteredSchedules.length} shown</p>
+                    <p className="calendar-panel-subtitle">{renderSchedules.length} routine{renderSchedules.length !== 1 ? "s" : ""} &middot; {filteredSchedules.length} shown</p>
                   </div>
                 </div>
                 <button onClick={startAddSched} className="calendar-add-link">+ Add</button>
@@ -1006,15 +1010,15 @@ export default function CalendarPage() {
               {filteredSchedules.length === 0 ? (
                 <div className="calendar-empty mt-3">
                   <div className="calendar-empty-icon">{`\u23F0`}</div>
-                  <p className="calendar-empty-title">No routine items</p>
-                  <button onClick={startAddSched} className="calendar-add-link mt-2 block">+ Add your first</button>
+                  <p className="calendar-empty-title">{renderSchedules.length === 0 ? "No routine items yet" : "Nothing at this time of day"}</p>
+                  <p className="calendar-empty-subtitle">{renderSchedules.length === 0 ? "Build your family\u2019s daily rhythm" : "Try another filter above"}</p>
+                  <button onClick={startAddSched} className="calendar-add-link mt-2 block">{renderSchedules.length === 0 ? "+ Add your first" : "+ Add a routine"}</button>
                 </div>
               ) : (
                 <div className="mt-3 space-y-0">
                   {(Object.entries(groupedSchedules) as [ScheduleCategory, ScheduleItem[]][]).map(([category, items]) => {
                     if (items.length === 0) return null;
                     const meta = scheduleCategories[category];
-                    const activeDayIndices = getActiveDayIndices("all");
                     return (
                       <div key={category} className="calendar-category-group">
                         <div className="calendar-category-header">
@@ -1040,7 +1044,7 @@ export default function CalendarPage() {
                             const itemColor = item.color ?? "green";
                             const dayIndices = getActiveDayIndices(item.days);
                             return (
-                              <div key={item.id} className="calendar-routine-card">
+                              <div key={item.id} className="calendar-routine-card" style={{ "--routine-color": scheduleColorValues[itemColor] } as CSSProperties}>
                                 <div
                                   className="calendar-routine-icon-circle"
                                   style={{
@@ -1051,9 +1055,9 @@ export default function CalendarPage() {
                                 </div>
 
                                 <div className="calendar-routine-body">
-                                  <p className="calendar-routine-title">{item.title}</p>
+                                  <p className="calendar-routine-title break-words">{item.title}</p>
                                   <div className="calendar-routine-meta">
-                                    <span className="calendar-routine-time" style={{ color: scheduleColorValues[itemColor] }}>
+                                    <span className="calendar-routine-time" style={{ color: `color-mix(in srgb, ${scheduleColorValues[itemColor]} 55%, var(--color-text-primary))` }}>
                                       {item.time}
                                     </span>
                                     <Badge variant={item.type === "routine" ? "amber" : "rose"} size="sm">{item.type}</Badge>

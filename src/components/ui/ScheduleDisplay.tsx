@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import Link from "next/link";
 import WidgetCard from "@/components/patterns/WidgetCard";
+import DayLine, { parseTimeToMinutes } from "@/components/patterns/DayLine";
 import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
 
 interface ScheduleItem {
@@ -42,30 +43,7 @@ interface ScheduleDisplayProps {
   className?: string;
 }
 
-/** Parse "8:00 AM" | "2:30 PM" → minutes since midnight for accurate sort + comparison */
-function parseTimeToMinutes(timeStr: string): number {
-  // Supports:
-  // - "8:00 AM" / "2:30 PM"
-  // - "07:00" / "18:30" (24h from calendar schedule editor)
-  const ampmMatch = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-  if (ampmMatch) {
-    let hours = parseInt(ampmMatch[1], 10);
-    const minutes = parseInt(ampmMatch[2], 10);
-    const ampm = ampmMatch[3].toUpperCase();
-    if (ampm === "PM" && hours !== 12) hours += 12;
-    if (ampm === "AM" && hours === 12) hours = 0;
-    return hours * 60 + minutes;
-  }
-
-  const time24Match = timeStr.match(/^(\d{1,2}):(\d{2})$/);
-  if (time24Match) {
-    const hours = parseInt(time24Match[1], 10);
-    const minutes = parseInt(time24Match[2], 10);
-    return hours * 60 + minutes;
-  }
-
-  return 0;
-}
+// parseTimeToMinutes is shared — see src/components/patterns/DayLine.tsx
 
 export default function ScheduleDisplay({ schedule, title = "Today's Schedule", className = "" }: ScheduleDisplayProps) {
   const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
@@ -139,6 +117,13 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
         <span className="mt-0.5 text-[10px] font-medium text-text-muted">{upcomingCount} upcoming</span>
       </div>
       <div className="flex min-h-0 flex-1 flex-col p-5">
+        <DayLine
+          className="mb-3"
+          tone="#22d3ee"
+          markers={schedule
+            .filter((item) => /\d{1,2}:\d{2}/.test(item.time ?? ""))
+            .map((item) => ({ at: parseTimeToMinutes(item.time), color: `rgb(${getAccentRgb(item.color || "green").join(",")})` }))}
+        />
         {sortedSchedule.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-2 py-4 text-text-muted">
             <p className="text-xs">All done for today 🎉</p>

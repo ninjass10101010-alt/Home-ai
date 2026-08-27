@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import WidgetCard from "@/components/patterns/WidgetCard";
+import DayLine from "@/components/patterns/DayLine";
 import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
 
 const SCHEDULES_STORAGE_KEY = "consuela-schedules";
@@ -46,6 +47,7 @@ export default function CurrentMealWidget({ className = "" }: { className?: stri
   const [currentTimeStr, setCurrentTimeStr] = useState("");
   const [scheduledTime, setScheduledTime] = useState<string>("");
   const [activeMealData, setActiveMealData] = useState<any>(null);
+  const [mealMarkers, setMealMarkers] = useState<number[]>([]);
 
   useEffect(() => {
     const update = () => {
@@ -76,6 +78,8 @@ export default function CurrentMealWidget({ className = "" }: { className?: stri
         })
         .filter(Boolean)
         .sort((a: any, b: any) => a.minutes - b.minutes);
+
+      setMealMarkers(activeMealSchedules.map((m: any) => m.minutes).filter((m: number) => m > 0));
 
       let current = activeMealSchedules[0];
       for (const meal of activeMealSchedules) {
@@ -141,6 +145,13 @@ export default function CurrentMealWidget({ className = "" }: { className?: stri
         <p className="text-text-secondary text-xs mb-4 text-center">
           {scheduledTime ? `Scheduled at ${scheduledTime}` : "Set a meal schedule to see times"}
         </p>
+
+        {/* The day's meal times on the household clock */}
+        {mealMarkers.length > 0 && (
+          <div className="mb-4">
+            <DayLine tone={atm.accentColor} markers={mealMarkers.map((m) => ({ at: m }))} />
+          </div>
+        )}
 
         {/* Meal card */}
         <div

@@ -1,4 +1,4 @@
-import { getPB } from '@/lib/pb';
+import { getAuthedPB } from '@/lib/pb-auth';
 import type {
   SkillTreeProfile,
   SkillBranch,
@@ -17,7 +17,7 @@ import {
  * Get or create a skill tree profile for a user.
  */
 export async function getSkillTreeProfile(userId: string): Promise<SkillTreeProfile | null> {
-  const pb = getPB();
+  const pb = await getAuthedPB();
   
   try {
     const profiles = await pb.collection('skill_tree_profiles').getList<SkillTreeProfile>(1, 1, {
@@ -54,7 +54,7 @@ export async function getSkillTreeProfile(userId: string): Promise<SkillTreeProf
  * Get all skill branches.
  */
 export async function getSkillBranches(): Promise<SkillBranch[]> {
-  const pb = getPB();
+  const pb = await getAuthedPB();
   
   try {
     const branches = await pb.collection('skill_branches').getFullList<SkillBranch>({
@@ -72,7 +72,7 @@ export async function getSkillBranches(): Promise<SkillBranch[]> {
  * Get all quests for a specific branch.
  */
 export async function getBranchQuests(branchId: string): Promise<Quest[]> {
-  const pb = getPB();
+  const pb = await getAuthedPB();
   
   try {
     const quests = await pb.collection('quests').getFullList<Quest>({
@@ -91,7 +91,7 @@ export async function getBranchQuests(branchId: string): Promise<Quest[]> {
  * Get all quests.
  */
 export async function getAllQuests(): Promise<Quest[]> {
-  const pb = getPB();
+  const pb = await getAuthedPB();
   
   try {
     const quests = await pb.collection('quests').getFullList<Quest>({
@@ -113,7 +113,7 @@ export async function completeQuest(
   userId: string,
   proof?: string
 ): Promise<{ success: boolean; xpEarned: number; newLevel?: number; leveledUp?: boolean }> {
-  const pb = getPB();
+  const pb = await getAuthedPB();
   
   try {
     // Get quest
@@ -204,7 +204,7 @@ export async function completeQuest(
  * Start a quest (mark as active).
  */
 export async function startQuest(questId: string, userId: string): Promise<boolean> {
-  const pb = getPB();
+  const pb = await getAuthedPB();
   
   try {
     const quest = await pb.collection('quests').getOne<Quest>(questId);
@@ -239,7 +239,7 @@ export async function startQuest(questId: string, userId: string): Promise<boole
  * Get all achievements.
  */
 export async function getAchievements(): Promise<Achievement[]> {
-  const pb = getPB();
+  const pb = await getAuthedPB();
   
   try {
     const achievements = await pb.collection('achievements').getFullList<Achievement>({
@@ -257,7 +257,7 @@ export async function getAchievements(): Promise<Achievement[]> {
  * Get user's earned achievements.
  */
 export async function getUserAchievements(userId: string): Promise<UserAchievement[]> {
-  const pb = getPB();
+  const pb = await getAuthedPB();
   
   try {
     const userAchievements = await pb.collection('user_achievements').getFullList<UserAchievement>({
@@ -282,7 +282,7 @@ async function checkAndAwardAchievements(
   streak: number,
   questsCompleted: number
 ): Promise<void> {
-  const pb = getPB();
+  const pb = await getAuthedPB();
   
   try {
     const achievements = await getAchievements();
@@ -339,7 +339,7 @@ async function checkAndAwardAchievements(
  * Unlock a skill branch.
  */
 export async function unlockBranch(branchId: string, userId: string): Promise<boolean> {
-  const pb = getPB();
+  const pb = await getAuthedPB();
   
   try {
     const branch = await pb.collection('skill_branches').getOne<SkillBranch>(branchId);

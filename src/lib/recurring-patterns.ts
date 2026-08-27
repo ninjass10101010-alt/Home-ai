@@ -4,7 +4,7 @@
  * Learns from family patterns and makes intelligent scheduling suggestions
  */
 
-import { getPB } from './pb';
+import { getAuthedPB } from './pb-auth';
 import { createCalendarEvent } from './google/calendar';
 
 export interface RecurringPattern {
@@ -54,7 +54,7 @@ export async function detectRecurringPatterns(
   lookbackDays: number = 90
 ): Promise<PatternDetectionResult> {
   try {
-    const pb = getPB();
+    const pb = await getAuthedPB();
     
     // Fetch past events
     const startDate = new Date();
@@ -166,7 +166,7 @@ export async function detectRecurringPatterns(
  */
 export async function storePattern(pattern: RecurringPattern): Promise<boolean> {
   try {
-    const pb = getPB();
+    const pb = await getAuthedPB();
     
     // Check if pattern already exists
     const existing = await pb.collection('recurring_patterns').getFirstListItem(
@@ -205,7 +205,7 @@ export async function storePattern(pattern: RecurringPattern): Promise<boolean> 
  */
 export async function enableAutoSchedule(patternId: string): Promise<boolean> {
   try {
-    const pb = getPB();
+    const pb = await getAuthedPB();
     
     await pb.collection('recurring_patterns').update(
       patternId,
@@ -228,7 +228,7 @@ export async function enableAutoSchedule(patternId: string): Promise<boolean> {
  */
 export async function disableAutoSchedule(patternId: string): Promise<boolean> {
   try {
-    const pb = getPB();
+    const pb = await getAuthedPB();
     
     await pb.collection('recurring_patterns').update(
       patternId,
@@ -251,7 +251,7 @@ export async function disableAutoSchedule(patternId: string): Promise<boolean> {
  */
 export async function getFamilyPatterns(familyId: string): Promise<RecurringPattern[]> {
   try {
-    const pb = getPB();
+    const pb = await getAuthedPB();
     
     const patterns = await pb.collection('recurring_patterns').getFullList({
       filter: `familyId = "${familyId}"`,
@@ -296,7 +296,7 @@ export async function autoScheduleUpcomingEvents(
         // Check if within range
         if (nextDate >= startDate && nextDate <= endDate) {
           // Check if event already exists
-          const pb = getPB();
+          const pb = await getAuthedPB();
           const existing = await pb.collection('events').getFirstListItem(
             `title = "${pattern.title}" && date >= "${nextDate.toISOString().split('T')[0]}"`,
             { requestKey: null }
@@ -448,7 +448,7 @@ export async function suggestPatterns(
  */
 export async function deletePattern(patternId: string): Promise<boolean> {
   try {
-    const pb = getPB();
+    const pb = await getAuthedPB();
     await pb.collection('recurring_patterns').delete(patternId, {
       requestKey: null,
     });

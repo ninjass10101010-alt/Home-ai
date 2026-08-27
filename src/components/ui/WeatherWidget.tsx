@@ -6,6 +6,8 @@ import { useWeatherConfig } from "@/hooks/useWeather";
 import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
 import { HolidayOverride } from "@/lib/weather-config";
 import { useRuntimeConfig } from "@/hooks/useRuntimeConfig";
+import Modal from "@/components/ui/Modal";
+import Skeleton from "@/components/ui/Skeleton";
 
 
 // ─── Types ─────────────────────────────────────────────────────────────────
@@ -1657,6 +1659,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
     forecast: ForecastDay[]; humidity: number; wind: number;
   } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const { runtime } = useRuntimeConfig();
 
   useEffect(() => {
@@ -1700,9 +1703,13 @@ export default function WeatherWidget({ className = "" }: { className?: string }
           humidity: current.relative_humidity_2m,
           wind: Math.round(current.wind_speed_10m),
         });
+        setFetchError(null);
         setLoading(false);
       })
-      .catch(() => setLoading(false));
+      .catch(() => {
+        setFetchError("Weather unavailable — check connection or try again.");
+        setLoading(false);
+      });
   }, [runtime?.weather_location?.LAT, runtime?.weather_location?.LON]);
 
 
@@ -1771,7 +1778,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
   return (
     <div
       className={`relative ${className}`}
-      style={{ animation: mounted ? "weatherCardEnter 1s cubic-bezier(0.34,1.56,0.64,1) both" : undefined }}
+      style={{ animation: mounted ? "weatherCardEnter 1s var(--ease-spring) both" : undefined }}
     >
       {/* ── Protruding weather icon — overhangs the card's top-left corner ── */}
       <div
@@ -1799,6 +1806,8 @@ export default function WeatherWidget({ className = "" }: { className?: string }
       </div>
 
       <div
+        role="img"
+        aria-label={`${displayTemp} degrees, ${weatherData?.currentCondition ?? "Partly Cloudy"} in ${weather.location}, feels like ${displayFeels} degrees`}
         className="rounded-2xl overflow-hidden relative h-full flex flex-col"
         style={{
           background: theme.bgGradient,
@@ -1840,18 +1849,17 @@ export default function WeatherWidget({ className = "" }: { className?: string }
         {mounted && <WeatherParticles type={particleType} tod={tod} />}
 
         {/* ── Glassmorphism content overlay ── */}
-        <div
-          className="relative z-20 flex flex-1 min-h-0 flex-col px-5 pb-5 pt-3"
-          style={{
-            backdropFilter: "blur(8px) saturate(1.15)",
-            background:
-              tod === "night"
-                ? "rgba(15,23,42,0.16)"
-                : "rgba(60,30,10,0.07)",
-            border: "none",
-            borderRadius: 0,
-          }}
-        >
+          <div
+            className="relative z-20 flex flex-1 min-h-0 flex-col px-5 pb-5 pt-3"
+            style={{
+              background:
+                tod === "night"
+                  ? "rgba(15,23,42,0.16)"
+                  : "rgba(60,30,10,0.07)",
+              border: "none",
+              borderRadius: 0,
+            }}
+          >
           {/* Header: location + season badge (left padding clears the protruding icon) */}
           <div className="flex items-center justify-between mb-3 pl-[72px]">
             <div className="flex items-center gap-1.5 text-sm font-medium min-w-0">
@@ -1860,7 +1868,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
                 <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
                 <circle cx="12" cy="10" r="3" />
               </svg>
-              <span className="truncate text-white/80">{weather.location}</span>
+              <span className="truncate text-white/80 drop-shadow-[0_1px_4px_rgba(0,0,0,0.55)]">{weather.location}</span>
               {activeHoliday !== "none" && holidayLabels[activeHoliday] && (
                 <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ml-1 flex-shrink-0"
                   style={{ background: `${accentHex.selected}33`, color: accentHex.selected, border: `1px solid ${accentHex.selected}55` }}>
@@ -1869,7 +1877,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
               )}
             </div>
             <span
-              className="text-xs font-semibold px-3 py-1 rounded-full shrink-0 ml-2"
+              className="text-xs font-semibold px-3 py-1 rounded-full shrink-0 ml-2 drop-shadow-[0_1px_3px_rgba(0,0,0,0.45)]"
               style={{
                 background: `${accentHex.selected}25`,
                 color: accentHex.selected,
@@ -1881,31 +1889,51 @@ export default function WeatherWidget({ className = "" }: { className?: string }
             </span>
           </div>
 
-          {/* Main display row */}
-          <div className="flex flex-1 items-center gap-3 mb-4">
+          {/* Main display row — scrim-backed for hierarchy + contrast */}
+          <div className="flex flex-1 items-center gap-3 mb-3 rounded-2xl border border-white/10 bg-black/20 px-3 py-2.5" role="status" aria-live="polite" aria-atomic="true">
             <div className="flex-1 min-w-0">
-              <div key={tempKey} className="flex items-start leading-none mb-1"
-                style={{ animation: tempKey > 0 ? "weatherTempPop 0.7s cubic-bezier(0.34,1.56,0.64,1)" : undefined }}>
-                <span className="text-[60px] font-black tabular-nums leading-none tracking-tight"
-                  style={{ color: accentHex.selected, textShadow: "0 0 30px rgba(0,0,0,0.45), 0 2px 8px rgba(0,0,0,0.35)" }}>
-                  {displayTemp}
-                </span>
-                <span className="text-3xl font-light mt-3 ml-1 text-white/50">°</span>
-              </div>
-              <p className="text-white text-base font-semibold mb-0.5 drop-shadow">{weatherData?.currentCondition ?? "Partly Cloudy"}</p>
-              <p className="text-white/70 text-xs">Feels like {displayFeels}°{weather.unit} · {season} · {tod}</p>
+              {loading ? (
+                <div className="space-y-2">
+                  <Skeleton variant="title" className="h-9 w-24 bg-white/15" />
+                  <Skeleton variant="text" className="h-3 w-28 bg-white/10" />
+                  <Skeleton variant="text" className="h-3 w-36 bg-white/10" />
+                </div>
+              ) : (
+                <>
+                  <div key={tempKey} className="flex items-start leading-none mb-1"
+                    style={{ animation: tempKey > 0 ? "weatherTempPop 0.7s var(--ease-spring)" : undefined }}>
+                    <span className="text-[44px] sm:text-[52px] font-black tabular-nums leading-none tracking-[-0.02em]"
+                      style={{ color: accentHex.selected, textShadow: "0 1px 14px rgba(0,0,0,0.65), 0 0 1px rgba(0,0,0,0.9), 0 0 18px rgba(0,0,0,0.35)" }}>
+                      {displayTemp}
+                    </span>
+                    <span className="text-2xl font-light mt-1.5 ml-1 text-white/60" aria-hidden="true">°</span>
+                    <span className="sr-only"> degrees</span>
+                  </div>
+                  <p className="text-white text-sm font-semibold leading-none drop-shadow-[0_1px_6px_rgba(0,0,0,0.6)]">{weatherData?.currentCondition ?? "Partly Cloudy"}</p>
+                  <p className="text-white/75 text-xs mt-0.5 drop-shadow-[0_1px_3px_rgba(0,0,0,0.45)]">Feels like {displayFeels}°{weather.unit} · {season} · {tod}</p>
+                  {fetchError && (
+                    <p className="mt-1.5 text-[11px] font-medium text-amber-200 bg-amber-500/15 border border-amber-300/20 rounded-full px-2.5 py-1 inline-flex items-center gap-1" role="alert">
+                      {fetchError}
+                    </p>
+                  )}
+                </>
+              )}
             </div>
           </div>
 
           {/* Expand toggle → opens details modal */}
           <button
+            type="button"
             onClick={() => setDetailsOpen(true)}
-            className="w-full flex items-center justify-center gap-1.5 text-xs font-semibold py-1.5 rounded-lg transition-all duration-200 active:scale-95"
-            style={{ color: theme.accentColor, background: `${theme.accentColor}15`, border: `1px solid ${theme.accentColor}25` }}
+            aria-expanded={detailsOpen}
+            aria-controls="weather-details-dialog"
+            aria-label="Open weather details"
+            className="w-full flex items-center justify-center gap-1.5 min-h-[36px] text-xs font-semibold py-2 rounded-xl border backdrop-blur transition-all duration-200 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-0"
+            style={{ color: accentHex.selected, background: `${accentHex.selected}18`, borderColor: `${accentHex.selected}30` }}
           >
             More details
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}
-              className="w-3.5 h-3.5 transition-transform duration-300">
+              className={`w-3.5 h-3.5 transition-transform duration-300 ${detailsOpen ? "rotate-180" : ""}`} aria-hidden="true">
               <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </button>
@@ -1925,6 +1953,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
       {/* ── Weather details — immersive sheet ── */}
       {detailsOpen && (
         <div
+          id="weather-details-dialog"
           className="fixed inset-0 z-[80] flex items-center justify-center bg-[#0a0f1c]/55 p-3 backdrop-blur-[2px] sm:p-4"
           onClick={() => setDetailsOpen(false)}
           role="dialog"
@@ -1937,7 +1966,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
               background: theme.bgGradient,
               border: `1px solid ${atm.glowColor}`,
               boxShadow: `0 0 80px ${theme.glowColor}, 0 24px 64px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.09)`,
-              animation: "modalEnter 0.38s cubic-bezier(0.34,1.56,0.64,1) both",
+              animation: "modalEnter 0.38s var(--ease-spring) both",
             }}
             onClick={(e) => e.stopPropagation()}
           >

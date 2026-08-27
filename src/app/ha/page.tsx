@@ -6,6 +6,7 @@ import SegmentedControl from "@/components/ui/SegmentedControl";
 import Chip from "@/components/ui/Chip";
 import EmptyState from "@/components/ui/EmptyState";
 import ListRow from "@/components/ui/ListRow";
+import Skeleton from "@/components/ui/Skeleton";
 import RoomCard from "@/components/ha/RoomCard";
 import RoomSheet from "@/components/ha/RoomSheet";
 import SecurityPanel from "@/components/ha/SecurityPanel";
@@ -55,7 +56,7 @@ export default function HomeControlsPage() {
 
   return (
     <PageShell>
-      <div className="px-4 pt-8">
+      <div className="px-4 pt-10">
         <div className="flex items-center gap-3">
           <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-[var(--color-accent-selected)]/15 text-2xl">🏠</div>
           <div className="min-w-0">
@@ -67,7 +68,9 @@ export default function HomeControlsPage() {
 
       <div className="mt-4 space-y-4 px-4">
         <div className="flex flex-wrap items-center gap-2">
-          <SegmentedControl options={TABS} value={tab} onChange={setTab} aria-label="Home Assistant tabs" className="flex-1" />
+          <div className="min-w-0 flex-1 overflow-x-auto no-scrollbar">
+            <SegmentedControl options={TABS} value={tab} onChange={setTab} aria-label="Home Assistant tabs" className="min-w-[360px]" />
+          </div>
           {readOnly && (
             <Chip size="sm" tone="warning">
               Read-only for kids
@@ -75,13 +78,28 @@ export default function HomeControlsPage() {
           )}
         </div>
 
+        {!loading && error && (
+          <Chip tone="warning" className="w-fit">Home Assistant offline — showing last known state</Chip>
+        )}
+
         {loading && states.length === 0 ? (
-          <p className="py-12 text-center text-sm text-text-secondary">Connecting to Home Assistant…</p>
+          <div className="space-y-3">
+            <p className="sr-only" role="status">Connecting to Home Assistant…</p>
+            <div className="flex gap-1.5">
+              <Skeleton className="h-7 w-24 rounded-full" />
+              <Skeleton className="h-7 w-20 rounded-full" />
+              <Skeleton className="h-7 w-28 rounded-full" />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {[1, 2, 3, 4].map((i) => (
+                <Skeleton key={i} variant="block" />
+              ))}
+            </div>
+          </div>
         ) : (
-          <>
+          <div key={tab} className="panel-swap">
             {tab === "overview" && (
               <div className="space-y-4">
-                {error && <Chip tone="warning">Home Assistant offline — showing last known state</Chip>}
                 <div className="flex flex-wrap gap-1.5">
                   {people.map((person) => {
                     const first = entityFriendlyName(person).split(" ")[0];
@@ -129,7 +147,7 @@ export default function HomeControlsPage() {
                 )}
               </div>
             )}
-          </>
+          </div>
         )}
       </div>
 

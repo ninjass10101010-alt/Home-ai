@@ -95,7 +95,7 @@ export default function SwipeableRow({ children, leftAction, rightAction, onSwip
   }, []);
 
   return (
-    <div className={`relative overflow-hidden rounded-2xl ${className}`} style={{ touchAction: "none" }}>
+    <div className={`relative overflow-hidden rounded-2xl ${className}`}>
       <div className="absolute inset-y-0 left-0 flex w-20 items-center justify-start rounded-l-2xl bg-emerald-500/20 text-emerald-300">
         {leftAction}
       </div>
@@ -103,7 +103,6 @@ export default function SwipeableRow({ children, leftAction, rightAction, onSwip
         {rightAction}
       </div>
       <div
-        className="touch-none"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -111,7 +110,7 @@ export default function SwipeableRow({ children, leftAction, rightAction, onSwip
         style={{
           transform: `translateX(${offset}px)`,
           transition: snapping ? `transform ${SNAP_MS}ms cubic-bezier(0.2, 0, 0, 1)` : "none",
-          touchAction: "none",
+          touchAction: "pan-y",
           cursor: grabbing ? "grabbing" : "grab",
         }}
       >

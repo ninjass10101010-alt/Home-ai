@@ -12,14 +12,12 @@ import PageHeader from "@/components/patterns/PageHeader";
 import Surface from "@/components/ui/Surface";
 import SoftButton from "@/components/ui/SoftButton";
 import IconButton from "@/components/ui/IconButton";
-import Chip from "@/components/ui/Chip";
 import Toggle from "@/components/ui/Toggle";
 import SegmentedControl from "@/components/ui/SegmentedControl";
 import Modal from "@/components/ui/Modal";
 import Toast from "@/components/ui/Toast";
 import ListRow from "@/components/ui/ListRow";
 import EmptyState from "@/components/ui/EmptyState";
-import ErrorState from "@/components/ui/ErrorState";
 import Avatar from "@/components/ui/Avatar";
 import TextField from "@/components/ui/TextField";
 import FormField from "@/components/patterns/FormField";
@@ -45,6 +43,13 @@ function hexToRgb(hex: string) {
   const m = normalized.match(/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i);
   if (!m) return "59,130,246";
   return `${parseInt(m[1], 16)},${parseInt(m[2], 16)},${parseInt(m[3], 16)}`;
+}
+
+function rgbaToHex(rgb: string) {
+  const m = rgb.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+  if (!m) return null;
+  const part = (n: number) => Math.max(0, Math.min(255, n)).toString(16).padStart(2, "0");
+  return `#${part(+m[1])}${part(+m[2])}${part(+m[3])}`;
 }
 
 function VersionCard() {
@@ -103,6 +108,19 @@ function VersionCard() {
       <div className="flex items-center gap-3">
         <div className="h-4 w-32 animate-pulse rounded bg-[var(--color-surface-2)]" />
         <div className="h-3 w-20 animate-pulse rounded bg-[var(--color-surface-2)]" />
+      </div>
+    );
+  }
+
+  if (data.ok === false) {
+    return (
+      <div className="space-y-3">
+        <p className="text-sm text-text-secondary">
+          {data.error === "adult_only"
+            ? "Adults only — sign in as a parent to check dashboard updates."
+            : "Couldn't reach the update service — check your connection and try again."}
+        </p>
+        <SoftButton onClick={checkNow} loading={checking} size="sm">Try again</SoftButton>
       </div>
     );
   }
@@ -226,7 +244,6 @@ export default function SettingsPage() {
   const { currentUser, isLoggedIn, logout } = useAuth();
   const [toast, setToast] = useState<string | null>(null);
   const [accentTarget, setAccentTarget] = useState<AccentTarget>("selected");
-  const [customHex, setCustomHex] = useState(defaultAccentHex[accentTarget]);
   const [memberModalOpen, setMemberModalOpen] = useState(false);
   const [contactModalOpen, setContactModalOpen] = useState(false);
   const [editingMember, setEditingMember] = useState<any | null>(null);
@@ -239,6 +256,13 @@ export default function SettingsPage() {
   const [draggingId, setDraggingId] = useState<WidgetId | null>(null);
   const [dropTargetId, setDropTargetId] = useState<WidgetId | null>(null);
   const [editingOrientation, setEditingOrientation] = useState<LayoutMode>(orientation);
+  const [savingMember, setSavingMember] = useState(false);
+  const [memberErrors, setMemberErrors] = useState<{ name?: string; pin?: string }>({});
+  const [contactErrors, setContactErrors] = useState<{ name?: string; phone?: string; email?: string }>({});
+  const [confirmDelete, setConfirmDelete] = useState<{ kind: "member" | "contact"; item: any } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [testingAlert, setTestingAlert] = useState(false);
+  const [pushingCloud, setPushingCloud] = useState(false);
 
   const rowRefs = useRef(new Map<WidgetId, HTMLDivElement | null>());
   const prevPositions = useRef<Map<WidgetId, number> | null>(null);
@@ -354,12 +378,16 @@ export default function SettingsPage() {
     }
   }, [editingOrdered]);
 
+  const accentTargetHex = (target: AccentTarget) => {
+    const value = theme.accentHex[target];
+    return normalizeHex(value.startsWith("#") ? value : rgbaToHex(value) ?? defaultAccentHex.selected);
+  };
+
   const setTargetColor = (target: AccentTarget, value: string) => {
     const hex = normalizeHex(value);
     if (target === "glow") setAccentHex("glow", `rgba(${hexToRgb(hex)},0.28)`);
     else if (target === "border") setAccentHex("border", `rgba(${hexToRgb(hex)},0.35)`);
     else setAccentHex(target, hex);
-    setCustomHex(hex);
   };
 
   const openMemberModal = (member?: any) => {
@@ -375,97 +403,134 @@ export default function SettingsPage() {
       glow: member.glow || false,
       imageUrl: hasCustomImage ? currentEmoji : "",
     } : { name: "", emoji: "😊", role: "child", pin: "", avatarSize: "md", glow: false, imageUrl: "" });
+    setMemberErrors({});
     setMemberModalOpen(true);
   };
 
+  const validateMember = () => {
+    const errors: { name?: string; pin?: string } = {};
+    if (!memberForm.name.trim()) errors.name = "Enter a name so tasks and avatars know who this is.";
+    if (memberForm.pin && !/^\d{4}$/.test(memberForm.pin))
+      errors.pin = editingMember
+        ? "PIN must be exactly 4 digits — or leave it blank to keep the current PIN."
+        : "PIN must be exactly 4 digits.";
+    setMemberErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
   const saveMember = async () => {
-    if (!memberForm.name.trim()) return;
-    const base = {
-      ...memberForm,
-      name: memberForm.name.trim(),
-      emoji: memberForm.imageUrl?.trim() || memberForm.emoji,
-    };
-    // A blank PIN field means "leave the stored PIN unchanged" — never wipe
-    // an existing PocketBase pin just because the form prefilled empty.
-    const payload = editingMember && !base.pin
-      ? Object.fromEntries(Object.entries(base).filter(([k]) => k !== "pin"))
-      : base;
-    if (editingMember) {
-      // Edits go through the adults-only server route — the browser can no
-      // longer write members straight to PocketBase.
-      try {
-        const res = await fetch("/api/members/admin", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: editingMember.name, patch: payload }),
-        });
-        if (!res.ok) {
-          showToast(res.status === 403 ? "🔒 Adults only — sign in as a parent to edit members." : "❌ Couldn't update member");
+    if (!validateMember()) return;
+    setSavingMember(true);
+    try {
+      const base = {
+        ...memberForm,
+        name: memberForm.name.trim(),
+        emoji: memberForm.imageUrl?.trim() || memberForm.emoji,
+      };
+      // A blank PIN field means "leave the stored PIN unchanged" — never wipe
+      // an existing PocketBase pin just because the form prefilled empty.
+      const payload = editingMember && !base.pin
+        ? Object.fromEntries(Object.entries(base).filter(([k]) => k !== "pin"))
+        : base;
+      if (editingMember) {
+        // Edits go through the adults-only server route — the browser can no
+        // longer write members straight to PocketBase.
+        try {
+          const res = await fetch("/api/members/admin", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: editingMember.name, patch: payload }),
+          });
+          if (!res.ok) {
+            showToast(res.status === 403 ? "🔒 Adults only — sign in as a parent to edit members." : "❌ Couldn't update member");
+            return;
+          }
+        } catch {
+          showToast("❌ Couldn't update member");
           return;
         }
-      } catch {
-        showToast("❌ Couldn't update member");
-        return;
-      }
-      showToast(`✅ Updated ${memberForm.name.trim()}`);
-    } else {
-      // Adds go through the adults-only server route too — the browser can no
-      // longer create members straight in PocketBase (locked createRule), and
-      // the server resolves the new member's PIN itself.
-      try {
-        const res = await fetch("/api/members/admin", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...payload, joined: new Date().toLocaleDateString("en-US", { month: "short", year: "numeric" }) }),
-        });
-        if (!res.ok) {
-          showToast(
-            res.status === 403
-              ? "🔒 Adults only — sign in as a parent to add members."
-              : res.status === 409
-                ? `⚠️ ${memberForm.name.trim()} is already on the family list.`
-                : "❌ Couldn't add member"
-          );
+        showToast(`✅ Updated ${memberForm.name.trim()}`);
+      } else {
+        // Adds go through the adults-only server route too — the browser can no
+        // longer create members straight in PocketBase (locked createRule), and
+        // the server resolves the new member's PIN itself.
+        try {
+          const res = await fetch("/api/members/admin", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...payload, joined: new Date().toLocaleDateString("en-US", { month: "short", year: "numeric" }) }),
+          });
+          if (!res.ok) {
+            showToast(
+              res.status === 403
+                ? "🔒 Adults only — sign in as a parent to add members."
+                : res.status === 409
+                  ? `⚠️ ${memberForm.name.trim()} is already on the family list.`
+                  : "❌ Couldn't add member"
+            );
+            return;
+          }
+        } catch {
+          showToast("❌ Couldn't add member");
           return;
         }
-      } catch {
-        showToast("❌ Couldn't add member");
-        return;
+        showToast(`✅ Added ${memberForm.name.trim()}`);
       }
-      showToast(`✅ Added ${memberForm.name.trim()}`);
+      setMembers(db.selectMembersDetailed());
+      setMemberModalOpen(false);
+    } finally {
+      setSavingMember(false);
     }
-    setMembers(db.selectMembersDetailed());
-    setMemberModalOpen(false);
   };
 
   const deleteMember = async (member: any) => {
+    setDeleting(true);
     try {
-      const res = await fetch("/api/members/admin", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: member.name }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}) as any);
-        showToast(err.error === "last_parent" ? "⚠️ At least one parent must remain." : "❌ Couldn't remove member");
+      try {
+        const res = await fetch("/api/members/admin", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: member.name }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}) as any);
+          showToast(err.error === "last_parent" ? "⚠️ At least one parent must remain." : "❌ Couldn't remove member");
+          return;
+        }
+      } catch {
+        showToast("❌ Couldn't remove member");
         return;
       }
-    } catch {
-      showToast("❌ Couldn't remove member");
-      return;
+      showToast(`🗑️ Removed ${member.name}`);
+      setMembers(db.selectMembersDetailed());
+    } finally {
+      setDeleting(false);
+      setConfirmDelete(null);
     }
-    showToast(`🗑️ Removed ${member.name}`);
-    setMembers(db.selectMembersDetailed());
   };
 
   const openContactModal = (contact?: any) => {
     setEditingContact(contact || null);
     setContactForm(contact || { name: "", phone: "", email: "", relationship: "parent", isPrimary: false, emoji: "👤" });
+    setContactErrors({});
     setContactModalOpen(true);
   };
 
+  const validateContact = () => {
+    const errors: { name?: string; phone?: string; email?: string } = {};
+    if (!contactForm.name.trim()) errors.name = "Enter a name for this contact.";
+    if (!contactForm.phone.trim()) errors.phone = "Enter a phone number so alerts can reach them.";
+    else if (contactForm.phone.replace(/\D/g, "").length < 7)
+      errors.phone = "That number looks too short — include the country code, e.g. +15551234567.";
+    if (!contactForm.email.trim()) errors.email = "Enter an email as a backup alert channel.";
+    else if (!/^\S+@\S+\.\S+$/.test(contactForm.email.trim()))
+      errors.email = "That email looks incomplete — try something like name@example.com.";
+    setContactErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
   const saveContact = () => {
-    if (!contactForm.name.trim() || !contactForm.phone.trim() || !contactForm.email.trim()) return;
+    if (!validateContact()) return;
     if (editingContact) {
       db.updateEmergencyContact(editingContact.id, { ...contactForm, name: contactForm.name.trim(), phone: contactForm.phone.trim(), email: contactForm.email.trim() });
       showToast(`✅ Updated ${contactForm.name.trim()}`);
@@ -481,6 +546,7 @@ export default function SettingsPage() {
     db.deleteEmergencyContact(contact.id);
     showToast(`🗑️ Removed ${contact.name}`);
     setContacts(db.selectEmergencyContacts());
+    setConfirmDelete(null);
   };
 
   const handleResetLayout = () => {
@@ -503,12 +569,15 @@ export default function SettingsPage() {
   };
 
   const testEmergencyAlert = async () => {
+    setTestingAlert(true);
     try {
       const res = await fetch("/api/emergency", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "General", timestamp: new Date().toISOString() }) });
       const data = await res.json();
       showToast(data.success ? "✅ Test alert sent" : "❌ Alert failed — check emergency contacts");
     } catch {
       showToast("❌ Could not send test alert");
+    } finally {
+      setTestingAlert(false);
     }
   };
 
@@ -532,6 +601,23 @@ export default function SettingsPage() {
     a.click();
     URL.revokeObjectURL(url);
     showToast("✅ Exported settings");
+  };
+
+  const pushToCloud = async () => {
+    setPushingCloud(true);
+    showToast("⏳ Pushing local data to cloud...");
+    try {
+      const { pushLocalToPB } = await import("@/lib/push-local-to-pb");
+      const results = await pushLocalToPB();
+      const total = results.reduce((s, r) => s + r.pushed, 0);
+      const errors = results.reduce((s, r) => s + r.errors, 0);
+      const detail = results.filter(r => r.pushed > 0).map(r => `${r.collection}: ${r.pushed}`).join(", ");
+      showToast(`☁️ Pushed ${total} items to PB${errors ? ` (${errors} errors)` : ""} — ${detail}`);
+    } catch {
+      showToast("❌ Push failed — check console for details");
+    } finally {
+      setPushingCloud(false);
+    }
   };
 
   return (
@@ -580,6 +666,8 @@ export default function SettingsPage() {
                   <button
                     key={accent.id}
                     type="button"
+                    aria-pressed={theme.accentColor === accent.id}
+                    title={accent.description}
                     onClick={() => {
                       setAccentColor(accent.id);
                       setAccentHex("selected", accent.hex);
@@ -587,7 +675,7 @@ export default function SettingsPage() {
                       setAccentHex("button", accent.hex);
                       setAccentHex("border", accent.glow);
                     }}
-                    className={`rounded-2xl border p-3 text-left transition ${
+                    className={`tap-sm rounded-2xl border p-3 text-left ${
                       theme.accentColor === accent.id ? "border-[var(--color-accent-selected)] bg-[var(--color-accent-selected)]/10" : "border-white/10 bg-[var(--color-surface-0)]/30"
                     }`}
                   >
@@ -603,10 +691,7 @@ export default function SettingsPage() {
                   <SegmentedControl
                     aria-label="Accent target"
                     value={accentTarget}
-                    onChange={(value) => {
-                      setAccentTarget(value as AccentTarget);
-                      setCustomHex(value === "glow" || value === "border" ? "#3b82f6" : defaultAccentHex[value as AccentTarget]);
-                    }}
+                    onChange={(value) => setAccentTarget(value as AccentTarget)}
                     options={[
                       { id: "selected", label: "Selected" },
                       { id: "glow", label: "Glow" },
@@ -617,8 +702,9 @@ export default function SettingsPage() {
                   <div className="mt-4 flex items-center gap-3">
                     <input
                       type="color"
-                      value={normalizeHex(customHex)}
+                      value={accentTargetHex(accentTarget)}
                       onChange={(event) => setTargetColor(accentTarget, event.target.value)}
+                      aria-label={`Custom ${accentTarget} accent color`}
                       className="h-12 w-12 rounded-2xl border border-white/10 bg-[var(--color-surface-2)] p-1"
                     />
                     <div className="min-w-0 flex-1">
@@ -646,35 +732,38 @@ export default function SettingsPage() {
                 <>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="mb-1 block text-xs font-semibold text-text-secondary">Highlight color</label>
+                      <label htmlFor="fog-highlight-color" className="mb-1 block text-xs font-semibold text-text-secondary">Highlight color</label>
                       <div className="flex items-center gap-2">
                         <input
+                          id="fog-highlight-color"
                           type="color"
                           value={fog.config.highlightColor}
                           onChange={(e) => fog.setHighlightColor(e.target.value)}
-                          className="h-9 w-9 shrink-0 rounded-xl border border-white/10 bg-[var(--color-surface-2)] p-1"
+                          className="h-11 w-11 shrink-0 rounded-xl border border-white/10 bg-[var(--color-surface-2)] p-1"
                         />
                         <span className="truncate text-[11px] text-text-muted">{fog.config.highlightColor}</span>
                       </div>
                     </div>
                     <div>
-                      <label className="mb-1 block text-xs font-semibold text-text-secondary">Lowlight color</label>
+                      <label htmlFor="fog-lowlight-color" className="mb-1 block text-xs font-semibold text-text-secondary">Lowlight color</label>
                       <div className="flex items-center gap-2">
                         <input
+                          id="fog-lowlight-color"
                           type="color"
                           value={fog.config.lowlightColor}
                           onChange={(e) => fog.setLowlightColor(e.target.value)}
-                          className="h-9 w-9 shrink-0 rounded-xl border border-white/10 bg-[var(--color-surface-2)] p-1"
+                          className="h-11 w-11 shrink-0 rounded-xl border border-white/10 bg-[var(--color-surface-2)] p-1"
                         />
                         <span className="truncate text-[11px] text-text-muted">{fog.config.lowlightColor}</span>
                       </div>
                     </div>
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-text-secondary">
+                    <label htmlFor="fog-speed" className="mb-1 block text-xs font-semibold text-text-secondary">
                       Speed — {fog.config.speed.toFixed(1)}
                     </label>
                     <input
+                      id="fog-speed"
                       type="range"
                       min={0}
                       max={2}
@@ -689,10 +778,11 @@ export default function SettingsPage() {
                     </div>
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-text-secondary">
+                    <label htmlFor="fog-blur" className="mb-1 block text-xs font-semibold text-text-secondary">
                       Blur — {fog.config.blurFactor.toFixed(2)}
                     </label>
                     <input
+                      id="fog-blur"
                       type="range"
                       min={0.1}
                       max={1.0}
@@ -726,7 +816,7 @@ export default function SettingsPage() {
                   trailing={
                     <div className="flex items-center gap-1">
                       <IconButton size="sm" variant="ghost" aria-label="Edit member" onClick={() => openMemberModal(member)}>✎</IconButton>
-                      <IconButton size="sm" variant="danger" aria-label="Delete member" onClick={() => deleteMember(member)}>×</IconButton>
+                      <IconButton size="sm" variant="danger" aria-label={`Remove ${member.name}`} onClick={() => setConfirmDelete({ kind: "member", item: member })}>×</IconButton>
                     </div>
                   }
                 />
@@ -751,7 +841,7 @@ export default function SettingsPage() {
                   trailing={
                     <div className="flex items-center gap-1">
                       <IconButton size="sm" variant="ghost" aria-label="Edit contact" onClick={() => openContactModal(contact)}>✎</IconButton>
-                      <IconButton size="sm" variant="danger" aria-label="Delete contact" onClick={() => deleteContact(contact)}>×</IconButton>
+                      <IconButton size="sm" variant="danger" aria-label={`Remove ${contact.name}`} onClick={() => setConfirmDelete({ kind: "contact", item: contact })}>×</IconButton>
                     </div>
                   }
                 />
@@ -760,7 +850,7 @@ export default function SettingsPage() {
             </div>
             <div className="mt-4 flex gap-2">
               <SoftButton onClick={() => openContactModal()} className="flex-1">Add contact</SoftButton>
-              <SoftButton variant="secondary" onClick={testEmergencyAlert} className="flex-1">Test</SoftButton>
+              <SoftButton variant="secondary" onClick={testEmergencyAlert} loading={testingAlert} className="flex-1">Test</SoftButton>
             </div>
           </SectionCard>
 
@@ -870,19 +960,8 @@ export default function SettingsPage() {
             <div className="mt-4 flex flex-col gap-2">
               <SoftButton onClick={exportData} className="w-full">Export JSON</SoftButton>
               <SoftButton
-                onClick={async () => {
-                  const { pushLocalToPB } = await import("@/lib/push-local-to-pb");
-                  showToast("⏳ Pushing local data to cloud...");
-                  try {
-                    const results = await pushLocalToPB();
-                    const total = results.reduce((s, r) => s + r.pushed, 0);
-                    const errors = results.reduce((s, r) => s + r.errors, 0);
-                    const detail = results.filter(r => r.pushed > 0).map(r => `${r.collection}: ${r.pushed}`).join(", ");
-                    showToast(`☁️ Pushed ${total} items to PB${errors ? ` (${errors} errors)` : ""} — ${detail}`);
-                  } catch {
-                    showToast("❌ Push failed — check console for details");
-                  }
-                }}
+                onClick={pushToCloud}
+                loading={pushingCloud}
                 variant="secondary"
                 className="w-full"
               >
@@ -903,14 +982,14 @@ export default function SettingsPage() {
           description="Family members appear in avatars, tasks, and the Home row."
           footer={
             <>
-              <SoftButton onClick={saveMember} className="flex-1">Save</SoftButton>
+              <SoftButton onClick={saveMember} loading={savingMember} className="flex-1">Save</SoftButton>
               <SoftButton variant="secondary" onClick={() => setMemberModalOpen(false)} className="flex-1">Cancel</SoftButton>
             </>
           }
         >
           <div className="space-y-4">
-            <FormField label="Name">
-              <input value={memberForm.name} onChange={(e) => setMemberForm((prev: any) => ({ ...prev, name: e.target.value }))} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none" placeholder="Member name" />
+            <FormField label="Name" errorText={memberErrors.name}>
+              <input value={memberForm.name} onChange={(e) => { setMemberForm((prev: any) => ({ ...prev, name: e.target.value })); setMemberErrors((prev) => ({ ...prev, name: undefined })); }} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none placeholder:text-text-secondary" placeholder="Member name" />
             </FormField>
             <FormField label="Avatar">
               <AvatarPicker
@@ -931,8 +1010,8 @@ export default function SettingsPage() {
                 <option value="pet">Pet</option>
               </select>
             </FormField>
-            <FormField label="PIN">
-              <input type="password" inputMode="numeric" maxLength={4} value={memberForm.pin} onChange={(e) => setMemberForm((prev: any) => ({ ...prev, pin: e.target.value.replace(/[^0-9]/g, "") }))} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted" placeholder="0000" />
+            <FormField label="PIN" helperText={editingMember ? "Leave blank to keep the current PIN." : "4 digits — used to sign in and approve things."} errorText={memberErrors.pin}>
+              <input type="password" inputMode="numeric" autoComplete="one-time-code" maxLength={4} value={memberForm.pin} onChange={(e) => { setMemberForm((prev: any) => ({ ...prev, pin: e.target.value.replace(/[^0-9]/g, "") })); setMemberErrors((prev) => ({ ...prev, pin: undefined })); }} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-secondary" placeholder="0000" />
             </FormField>
             <div className="flex items-center justify-between">
               <FormField label="Avatar size">
@@ -941,8 +1020,9 @@ export default function SettingsPage() {
                     <button
                       key={s}
                       type="button"
+                      aria-pressed={memberForm.avatarSize === s}
                       onClick={() => setMemberForm((prev: any) => ({ ...prev, avatarSize: s }))}
-                      className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-colors ${
+                      className={`tap-sm rounded-xl px-3 py-1.5 text-xs font-bold ${
                         memberForm.avatarSize === s
                           ? "bg-[var(--color-accent-selected)] text-white"
                           : "glass-subtle text-text-secondary hover:text-text-primary"
@@ -975,14 +1055,14 @@ export default function SettingsPage() {
           }
         >
           <div className="space-y-4">
-            <FormField label="Name">
-              <input value={contactForm.name} onChange={(e) => setContactForm((prev: any) => ({ ...prev, name: e.target.value }))} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none" placeholder="Contact name" />
+            <FormField label="Name" errorText={contactErrors.name}>
+              <input value={contactForm.name} onChange={(e) => { setContactForm((prev: any) => ({ ...prev, name: e.target.value })); setContactErrors((prev) => ({ ...prev, name: undefined })); }} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none placeholder:text-text-secondary" placeholder="Contact name" />
             </FormField>
-            <FormField label="Phone">
-              <input value={contactForm.phone} onChange={(e) => setContactForm((prev: any) => ({ ...prev, phone: e.target.value }))} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none" placeholder="+15551234567" />
+            <FormField label="Phone" helperText="Include the country code so carrier SMS gateways can deliver." errorText={contactErrors.phone}>
+              <input type="tel" value={contactForm.phone} onChange={(e) => { setContactForm((prev: any) => ({ ...prev, phone: e.target.value })); setContactErrors((prev) => ({ ...prev, phone: undefined })); }} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none placeholder:text-text-secondary" placeholder="+15551234567" />
             </FormField>
-            <FormField label="Email">
-              <input value={contactForm.email} onChange={(e) => setContactForm((prev: any) => ({ ...prev, email: e.target.value }))} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none" placeholder="name@example.com" />
+            <FormField label="Email" errorText={contactErrors.email}>
+              <input type="email" value={contactForm.email} onChange={(e) => { setContactForm((prev: any) => ({ ...prev, email: e.target.value })); setContactErrors((prev) => ({ ...prev, email: undefined })); }} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none placeholder:text-text-secondary" placeholder="name@example.com" />
             </FormField>
             <FormField label="Relationship">
               <select value={contactForm.relationship} onChange={(e) => setContactForm((prev: any) => ({ ...prev, relationship: e.target.value }))} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none">
@@ -995,6 +1075,35 @@ export default function SettingsPage() {
             </FormField>
             <Toggle checked={contactForm.isPrimary} onCheckedChange={(checked) => setContactForm((prev: any) => ({ ...prev, isPrimary: checked }))} label="Primary contact" />
           </div>
+        </Modal>
+
+        <Modal
+          open={Boolean(confirmDelete)}
+          onClose={() => setConfirmDelete(null)}
+          title={confirmDelete ? `Remove ${confirmDelete.item.name}?` : "Remove"}
+          footer={
+            <>
+              <SoftButton
+                variant="danger"
+                loading={deleting}
+                onClick={() => {
+                  if (!confirmDelete) return;
+                  if (confirmDelete.kind === "member") deleteMember(confirmDelete.item);
+                  else deleteContact(confirmDelete.item);
+                }}
+                className="flex-1"
+              >
+                Remove
+              </SoftButton>
+              <SoftButton variant="secondary" onClick={() => setConfirmDelete(null)} className="flex-1">Keep</SoftButton>
+            </>
+          }
+        >
+          <p className="text-sm text-text-secondary">
+            {confirmDelete?.kind === "member"
+              ? `${confirmDelete.item.name} will disappear from avatars, tasks, and the family row on every device.`
+              : "They will stop receiving emergency alerts. You can add them back anytime."}
+          </p>
         </Modal>
 
         <Modal open={helpModalOpen} onClose={() => setHelpModalOpen(false)} title="Layout & display help" description="Control which widgets appear on your Home dashboard." footer={<SoftButton variant="secondary" onClick={() => setHelpModalOpen(false)} className="flex-1">Got it</SoftButton>}>

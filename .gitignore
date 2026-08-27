@@ -12,6 +12,14 @@
 
 # testing
 /coverage
+/test-results
+
+# agent session state
+.superpowers
+
+# local scratch scripts (may contain credentials — never commit)
+seed-demo-events.mjs
+tmp-seed-demo.cjs
 
 # next.js
 /.next/
@@ -41,3 +49,4 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 consuela.db
+DEPLOY_NAS_LOCAL.md

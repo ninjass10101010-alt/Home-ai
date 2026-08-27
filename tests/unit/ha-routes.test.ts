@@ -197,6 +197,21 @@ describe("GET /api/ha/health", () => {
       },
     });
   });
+
+  it("reports not_configured (200) instead of throwing when HA config is absent", async () => {
+    mocks.getHAWebSocketClient.mockRejectedValue(new Error("HA_HOST is not set"));
+
+    const res = await healthGET();
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: false,
+      configured: false,
+      reason: "not_configured",
+      wsStatus: "disconnected",
+      wsConnected: false,
+    });
+  });
 });
 
 describe("POST /api/ha/sync", () => {

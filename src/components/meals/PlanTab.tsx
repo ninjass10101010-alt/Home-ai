@@ -103,16 +103,30 @@ export default function PlanTab({
   const [initializedEaters, setInitializedEaters] = useState(false);
   const [showRecipeBox, setShowRecipeBox] = useState(false);
 
-  // Defer reading db.selectMembersDetailed() until after mount.
-  // db/index.ts hydrates membersStore from localStorage at module load, so
-  // on the server `typeof window === "undefined"` returns the default emoji
-  // list (🐱, 🧒, etc.), but on the client it returns the user's custom
-  // avatars (often base64 data URLs). Reading on the first render causes a
-  // hydration mismatch (server: 🐱 / client: data:image/webp;...). The other
-  // pages in the app already use this `mounted` pattern (see tasks/page.tsx,
-  // page.tsx, etc.) — we apply it here too.
+  // Defer reading db.selectMembersDetailed() until after mount, and render the
+  // STATIC fallback family before mount. The module-load hydrate in db/index.ts
+  // warms membersCache from PocketBase ON THE SERVER (admin PB access), so SSR
+  // sees the real PB members (e.g. Jeffery's customized 😎 emoji) while the
+  // client's first render still has an empty cache (the browser roster fetch is
+  // async and 401s for guests) and sees the fallbacks (👨) — reading
+  // db.selectMembers() pre-mount made the two sides disagree (hydration error).
+  // db.selectMembersFallback() never reflects the warmed cache, so the server
+  // and the client's first render produce identical HTML; the real roster swaps
+  // in after mount.
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
+
+  // The real roster lands asynchronously after mount — db/index.ts dispatches
+  // consuela-members-updated when the members cache warms. Bump a version so
+  // the strip swaps from the deterministic fallbacks to the real family when
+  // it arrives (without this the memo freezes at whatever the cache held the
+  // moment mounted flipped).
+  const [membersVersion, setMembersVersion] = useState(0);
+  useEffect(() => {
+    const onMembersUpdated = () => setMembersVersion(v => v + 1);
+    window.addEventListener("consuela-members-updated", onMembersUpdated);
+    return () => window.removeEventListener("consuela-members-updated", onMembersUpdated);
+  }, []);
 
   useEffect(() => {
     if (!focusRecipeBox) return;
@@ -148,10 +162,14 @@ export default function PlanTab({
   const fatPct = Math.min(100, Math.round((totalFat / FAT_GOAL) * 100));
 
   const familyMembers = useMemo(() => {
-    if (!mounted) return db.selectMembers().filter((m: any) => (m.name || "").trim()).slice(0, 6);
+    if (!mounted) return db.selectMembersFallback().filter((m: any) => (m.name || "").trim()).slice(0, 6);
     return ((db as any).selectMembersDetailed?.()?.filter?.((m: any) => m.role !== "Pet" && m.role !== "pet" && (m.name || "").trim()) ??
       db.selectMembers().filter((m: any) => (m.name || "").trim()).slice(0, 6));
-  }, [mounted]);
+    // membersVersion bumps when the async members cache warms (see the
+    // consuela-members-updated listener above) so the real roster replaces
+    // the fallbacks without a remount — deliberate recompute trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mounted, membersVersion]);
 
   useEffect(() => {
     if (mounted && familyMembers.length && !initializedEaters) {
