@@ -66,8 +66,8 @@ export default function KitchenFlowCard({ step, summary }: { step: KitchenStep; 
         </div>
         <button
           onClick={toggle}
-          aria-expanded={!collapsed}
-          aria-label={collapsed ? "Expand kitchen flow card" : "Collapse kitchen flow card"}
+          aria-expanded={!mounted || !collapsed}
+          aria-label={mounted && collapsed ? "Expand kitchen flow card" : "Collapse kitchen flow card"}
           className="shrink-0 rounded-lg px-2 py-1 text-[11px] font-semibold text-text-muted hover:text-text-primary tap-sm"
         >
           {mounted && collapsed ? "Show" : "Hide"}

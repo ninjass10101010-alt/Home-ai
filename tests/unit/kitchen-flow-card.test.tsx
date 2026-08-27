@@ -38,4 +38,14 @@ describe("KitchenFlowCard", () => {
     expect(root.textContent).not.toContain("24 stocked");
     expect(localStorage.getItem("consuela-kitchen-flow-collapsed")).toBe("1");
   });
+
+  it("restores the collapsed state from storage on mount", async () => {
+    localStorage.setItem("consuela-kitchen-flow-collapsed", "1");
+    const root = await render({ step: "stock", summary: "24 stocked · 3 running low · 1 out" });
+    expect(root.textContent).toContain("Show");
+    expect(root.textContent).not.toContain("24 stocked");
+    const toggle = Array.from(root.querySelectorAll("button")).find(b => b.getAttribute("aria-label") === "Expand kitchen flow card") as HTMLButtonElement;
+    expect(toggle).toBeTruthy();
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  });
 });
