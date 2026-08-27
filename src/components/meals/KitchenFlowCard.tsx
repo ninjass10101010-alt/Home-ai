@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import WidgetCard from "@/components/patterns/WidgetCard";
 
 export type KitchenStep = "plan" | "shop" | "stock";
@@ -24,14 +24,15 @@ const STEP_TONE: Record<KitchenStep, string> = {
 
 const COLLAPSE_KEY = "consuela-kitchen-flow-collapsed";
 
-export default function KitchenFlowCard({ step, summary }: { step: KitchenStep; summary: string }) {
-  const [collapsed, setCollapsed] = useState(false);
-  const [mounted, setMounted] = useState(false);
+const subscribeNoop = () => () => {};
+const clientTrue = () => true;
+const serverFalse = () => false;
 
-  useEffect(() => {
-    setMounted(true);
-    try { setCollapsed(localStorage.getItem(COLLAPSE_KEY) === "1"); } catch { /* SSR/no storage */ }
-  }, []);
+export default function KitchenFlowCard({ step, summary }: { step: KitchenStep; summary: string }) {
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem(COLLAPSE_KEY) === "1"; } catch { return false; }
+  });
+  const mounted = useSyncExternalStore(subscribeNoop, clientTrue, serverFalse);
 
   const toggle = () => {
     setCollapsed(prev => {
