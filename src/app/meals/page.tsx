@@ -93,9 +93,9 @@ function MealHubContent() {
   } = useMeals();
 
   const {
-    groceryItems, activeCategory, setActiveCategory, isSyncing, setGroceryItems,
+    groceryItems, activeCategory, setActiveCategory, setGroceryItems,
     addGroceryItem, toggleGroceryNeeded, deleteGroceryItem, updateGroceryItem,
-    syncMealToGrocery, syncPantryToGrocery, recentlyBought, clearRecentlyBought,
+    recentlyBought,
     parseManualGroceryInput, guessCategory: guessGroceryCategoryHook, toggleManualOverride
   } = useGrocery(showToast, meals);
 
@@ -377,15 +377,11 @@ function MealHubContent() {
             setGroceryItems={setGroceryItems}
             activeCategory={activeCategory}
             setActiveCategory={setActiveCategory}
-            isSyncing={isSyncing}
             recentlyBought={recentlyBought}
-            clearRecentlyBought={clearRecentlyBought}
             addGroceryItem={addGroceryItem}
             toggleGroceryNeeded={toggleGroceryNeeded}
             deleteGroceryItem={deleteGroceryItem}
             updateGroceryItem={updateGroceryItem}
-            syncMealToGrocery={syncMealToGrocery}
-            syncPantryToGrocery={syncPantryToGrocery}
             parseManualGroceryInput={parseManualGroceryInput}
             guessCategory={guessGroceryCategoryHook}
             showToast={showToast}

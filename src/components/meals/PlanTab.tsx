@@ -523,7 +523,7 @@ export default function PlanTab({
                         ) : (
                           <div className="text-center py-4">
                             <p className="text-text-muted text-xs">No recipes in your catalog yet.</p>
-                            <p className="text-text-muted text-[10px] mt-1">Go to 📖 Recipes tab to add/import.</p>
+                            <p className="text-text-muted text-[10px] mt-1">Use the 📖 Recipe box below to add/import.</p>
                           </div>
                         )}
                       </div>
