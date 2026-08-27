@@ -13,31 +13,23 @@ import { useRecipes } from "@/hooks/useRecipes";
 import PlanTab from "@/components/meals/PlanTab";
 import ShopTab from "@/components/meals/ShopTab";
 import StockTab from "@/components/meals/StockTab";
-import RecipesTab from "@/components/meals/RecipesTab";
 import CookWithWhatYouHave from "@/components/meals/CookWithWhatYouHave";
 import RecipeModal from "@/components/meals/RecipeModal";
 import RecipeImportModal from "@/components/meals/RecipeImportModal";
 import RecipeSearchModal from "@/components/meals/RecipeSearchModal";
+import { mapKitchenTabParam, isRecipesDeepLink } from "@/lib/kitchen-tabs";
+import { mealSyncService } from "@/services/mealSync";
 import PageHeader from "@/components/patterns/PageHeader";
 import SegmentedControl from "@/components/ui/SegmentedControl";
-import Surface from "@/components/ui/Surface";
 import SoftButton from "@/components/ui/SoftButton";
 import IconButton from "@/components/ui/IconButton";
-import Chip from "@/components/ui/Chip";
-import EmptyState from "@/components/ui/EmptyState";
-import ErrorState from "@/components/ui/ErrorState";
-import Modal from "@/components/ui/Modal";
 import Toast from "@/components/ui/Toast";
-import ListRow from "@/components/ui/ListRow";
-import StatTile from "@/components/patterns/StatTile";
-import SectionCard from "@/components/patterns/SectionCard";
-
-const VALID_TABS: Tab[] = ["meals", "grocery", "pantry", "recipes"];
 
 function MealHubContent() {
   const searchParams = useSearchParams();
-  const requestedTab = searchParams.get("tab") as Tab | null;
-  const initialTab = requestedTab && VALID_TABS.includes(requestedTab) ? requestedTab : "meals";
+  const requestedTab = searchParams.get("tab");
+  const initialTab = mapKitchenTabParam(requestedTab);
+  const focusRecipeBox = isRecipesDeepLink(requestedTab);
   const [activeTab, setActiveTab] = useState<Tab>(initialTab);
   const [notification, setNotification] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -292,27 +284,34 @@ function MealHubContent() {
   };
 
   const neededCount = groceryItems.filter(i => i.needed).length;
+  const planPreview = mealSyncService.previewMealPlanToGrocery(meals, pantryItems, groceryItems);
+  const missingCount = planPreview.items.length;
+  const checkedCount = groceryItems.filter(i => !i.needed).length;
+  const plenty = pantryItems.filter(p => p.status === "plenty").length;
+  const low = pantryItems.filter(p => p.status === "low").length;
+  const out = pantryItems.filter(p => p.status === "out").length;
+  const planSummary = `${meals.length} meal${meals.length === 1 ? "" : "s"} planned · ${missingCount} ingredient${missingCount === 1 ? "" : "s"} missing`;
+  const shopSummary = `${neededCount} item${neededCount === 1 ? "" : "s"} to buy · ${checkedCount} checked off`;
+  const stockSummary = `${plenty} stocked · ${low} running low · ${out} out`;
 
   return (
     <PageShell>
       <Toast open={Boolean(notification)} tone={notification?.includes("❌") ? "error" : "success"}>{notification}</Toast>
 
       <PageHeader
-        title={activeTab === "meals" && !meals.length ? "Meals" : "Kitchen"}
+        title={activeTab === "plan" && !meals.length ? "Meals" : "Kitchen"}
         subtitle={
-          activeTab === "meals" && !meals.length
+          activeTab === "plan" && !meals.length
             ? "Family meal planning"
-            : activeTab === "meals"
+            : activeTab === "plan"
               ? "This week"
-              : activeTab === "grocery"
+              : activeTab === "shop"
                 ? `${neededCount} items needed`
-                : activeTab === "pantry"
-                  ? `${pantryItems.length} items tracked`
-                  : "Recipe Catalog"
+                : `${pantryItems.length} items tracked`
         }
         action={
-          activeTab === "meals" ? (
-            activeTab === "meals" && !meals.length ? (
+          activeTab === "plan" ? (
+            activeTab === "plan" && !meals.length ? (
               <IconButton aria-label="Add meal" onClick={() => openRecipeModal()}><span>＋</span></IconButton>
             ) : (
               <SoftButton size="sm" variant="secondary" onClick={generateAiMeals} disabled={aiMealLoading}>
@@ -326,28 +325,18 @@ function MealHubContent() {
 
       <div className="px-4 space-y-5 pb-8">
         <SegmentedControl
-          aria-label="Meal hub"
+          aria-label="Kitchen"
           value={activeTab}
           onChange={(value) => setActiveTab(value as Tab)}
           options={[
-            { id: "meals", label: "🍽️ Meals" },
-            { id: "grocery", label: "🛒 Grocery" },
-            { id: "pantry", label: "🥫 Pantry" },
-            { id: "recipes", label: "📖 Recipes" },
+            { id: "plan", label: "🍽️ Plan" },
+            { id: "shop", label: "🛒 Shop" },
+            { id: "stock", label: "🥫 Stock" },
           ]}
         />
 
-        {activeTab === "meals" && (
-          meals.length === 0 ? (
-            <EmptyState title="No meals planned yet" description="Start with a simple breakfast, lunch, snack, or dinner for the week." actionLabel="Add meal" onAction={() => openRecipeModal()} />
-          ) : (
-          <div key="meals" className="panel-swap space-y-5">
-            <div className="grid gap-3 sm:grid-cols-3">
-              <StatTile label="Planned" value={meals.length} detail="This week" icon="📅" tone="accent" compact />
-              <StatTile label="Tonight" value={activeMeals.length} detail="Selected day" icon="🌙" tone="warning" compact />
-              <StatTile label="Sync" value={isSyncing ? "…" : "Ready"} detail="Pantry + grocery" icon="🔁" tone="success" compact />
-            </div>
-
+        {activeTab === "plan" && (
+          <div key="plan" className="panel-swap space-y-5">
             <PlanTab
               meals={meals}
               activeDay={activeDay}
@@ -366,8 +355,8 @@ function MealHubContent() {
               goToWeek={goToWeek}
               archiveCurrentWeek={archiveCurrentWeek}
               isCurrentWeek={isCurrentWeek}
-              flowSummary={`${meals.length} meals planned`}
-              focusRecipeBox={false}
+              flowSummary={planSummary}
+              focusRecipeBox={focusRecipeBox}
               saveCatalogRecipe={saveCatalogRecipe}
               deleteCatalogRecipe={deleteCatalogRecipe}
               addRecipeToPlan={addRecipeToPlan}
@@ -379,10 +368,10 @@ function MealHubContent() {
               openSearchModal={openSearchModal}
             />
           </div>
-        ))}
+        )}
 
-        {activeTab === "grocery" && (
-          <div key="grocery" className="panel-swap">
+        {activeTab === "shop" && (
+          <div key="shop" className="panel-swap">
           <ShopTab
             groceryItems={groceryItems}
             setGroceryItems={setGroceryItems}
@@ -405,13 +394,13 @@ function MealHubContent() {
             removePantryItem={removePantryItem}
             toggleManualOverride={toggleManualOverride}
             meals={meals}
-            flowSummary={`${neededCount} items to buy`}
+            flowSummary={shopSummary}
           />
           </div>
         )}
 
-        {activeTab === "pantry" && (
-          <div key="pantry" className="panel-swap">
+        {activeTab === "stock" && (
+          <div key="stock" className="panel-swap">
             <StockTab
               pantryItems={pantryItems}
               groceryItems={groceryItems}
@@ -419,29 +408,11 @@ function MealHubContent() {
               updatePantryStatus={updatePantryStatus}
               removePantryItem={removePantryItem}
               addGroceryItem={addGroceryItem}
-              flowSummary={`${pantryItems.length} items tracked`}
+              flowSummary={stockSummary}
             />
             <div className="mt-6">
               <CookWithWhatYouHave recipes={recipes} pantryItems={pantryItems} onAddMissing={addMissingToGrocery} />
             </div>
-          </div>
-        )}
-
-        {activeTab === "recipes" && (
-          <div key="recipes" className="panel-swap">
-          <RecipesTab
-            recipes={recipes}
-            activeDay={activeDay}
-            saveCatalogRecipe={saveCatalogRecipe}
-            deleteCatalogRecipe={deleteCatalogRecipe}
-            addRecipeToPlan={addRecipeToPlan}
-            addRecipeToGrocery={addRecipeToGrocery}
-            startAddRecipe={startAddRecipe}
-            startEditRecipe={startEditRecipe}
-            handleFileUpload={handleFileUpload}
-            openImportModal={openImportModal}
-            openSearchModal={openSearchModal}
-          />
           </div>
         )}
       </div>

@@ -7,7 +7,7 @@ import { Recipe } from "@/types/meals";
 
 const recipeFilters = ["All", ...RECIPE_TAGS];
 
-export default function RecipesTab({
+export default function RecipeBox({
   recipes,
   activeDay,
   saveCatalogRecipe,

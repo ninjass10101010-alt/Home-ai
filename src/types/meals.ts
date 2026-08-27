@@ -73,4 +73,4 @@ export interface GroceryItem {
   pinned?: boolean;
 }
 
-export type Tab = "meals" | "grocery" | "pantry" | "recipes";
+export type Tab = "plan" | "shop" | "stock";

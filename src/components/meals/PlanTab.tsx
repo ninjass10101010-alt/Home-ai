@@ -10,7 +10,7 @@ import { Meal } from "@/types/meals";
 import { db } from "@/db";
 import { weekLabel } from "@/lib/meals-week-utils";
 import KitchenFlowCard from "@/components/meals/KitchenFlowCard";
-import RecipesTab from "@/components/meals/RecipesTab";
+import RecipeBox from "@/components/meals/RecipeBox";
 
 const mealTypes = [
   { id: "breakfast", label: "Breakfast", icon: "🌅" },
@@ -771,7 +771,7 @@ export default function PlanTab({
         </button>
         {showRecipeBox && (
           <div className="border-t border-white/10 p-5">
-            <RecipesTab
+            <RecipeBox
               recipes={recipes}
               activeDay={activeDay}
               saveCatalogRecipe={saveCatalogRecipe}
