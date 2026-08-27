@@ -16,7 +16,7 @@ export default function CookWithWhatYouHave({ recipes, pantryItems, onAddMissing
   if (cookable.length === 0) {
     return (
       <SectionCard title="Cook with what you have" icon="🍳" description="Based on your pantry">
-        <p className="text-sm text-text-muted">No recipes with ingredients yet — add some in the Recipes tab.</p>
+        <p className="text-sm text-text-muted">No recipes with ingredients yet — add some in the Recipe box on the Plan tab.</p>
       </SectionCard>
     );
   }
@@ -50,7 +50,7 @@ export default function CookWithWhatYouHave({ recipes, pantryItems, onAddMissing
             </div>
             {readiness.missing.length > 0 && (
               <div className="mt-3 flex items-start justify-between gap-2">
-                <p className="min-w-0 flex-1 text-[11px] leading-relaxed text-text-secondary">
+                <p className="min-w-0 flex-1 text-[11px] leading-relaxed text-text-secondary line-clamp-2">
                   Missing: {readiness.missing.join(", ")}
                 </p>
                 <SoftButton variant="ghost" size="sm" onClick={() => onAddMissing(readiness.missing)}>

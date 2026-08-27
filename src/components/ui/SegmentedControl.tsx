@@ -41,7 +41,7 @@ export default function SegmentedControl({ options, value, onChange, className =
           }`}
         >
           {option.icon}
-          <span>{option.label}</span>
+          <span className="whitespace-nowrap">{option.label}</span>
         </button>
       ))}
     </div>
