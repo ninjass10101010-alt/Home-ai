@@ -11,7 +11,7 @@ import { useGrocery } from "@/hooks/useGrocery";
 import { usePantry } from "@/hooks/usePantry";
 import { useRecipes } from "@/hooks/useRecipes";
 import PlanTab from "@/components/meals/PlanTab";
-import GroceryTab from "@/components/meals/GroceryTab";
+import ShopTab from "@/components/meals/ShopTab";
 import PantryTab from "@/components/meals/PantryTab";
 import RecipesTab from "@/components/meals/RecipesTab";
 import CookWithWhatYouHave from "@/components/meals/CookWithWhatYouHave";
@@ -383,7 +383,7 @@ function MealHubContent() {
 
         {activeTab === "grocery" && (
           <div key="grocery" className="panel-swap">
-          <GroceryTab
+          <ShopTab
             groceryItems={groceryItems}
             setGroceryItems={setGroceryItems}
             activeCategory={activeCategory}
@@ -404,6 +404,8 @@ function MealHubContent() {
             addPantryItem={addPantryItem}
             removePantryItem={removePantryItem}
             toggleManualOverride={toggleManualOverride}
+            meals={meals}
+            flowSummary={`${neededCount} items to buy`}
           />
           </div>
         )}

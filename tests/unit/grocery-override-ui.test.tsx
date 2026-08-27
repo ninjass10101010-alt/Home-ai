@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
-import GroceryTab from "@/components/meals/GroceryTab";
+import ShopTab from "@/components/meals/ShopTab";
 
 function makeProps(overrides: any = {}) {
   const calls = { toggleOverride: [] as any[] };
@@ -11,6 +11,8 @@ function makeProps(overrides: any = {}) {
       { id: "g1", name: "Milk", emoji: "🥛", category: "dairy", priority: "medium", needed: true, manualOverride: false },
       { id: "g2", name: "Bread", emoji: "🍞", category: "pantry", priority: "medium", needed: true, manualOverride: true },
     ],
+    meals: [],
+    flowSummary: "",
     activeCategory: "all",
     setActiveCategory: () => {},
     isSyncing: false,
@@ -37,7 +39,7 @@ function makeProps(overrides: any = {}) {
 async function render(props: any) {
   const el = document.createElement("div");
   document.body.appendChild(el);
-  await act(async () => { createRoot(el).render(<GroceryTab {...props} />); });
+  await act(async () => { createRoot(el).render(<ShopTab {...props} />); });
   return el;
 }
 
