@@ -10,7 +10,7 @@ import { useMeals } from "@/hooks/useMeals";
 import { useGrocery } from "@/hooks/useGrocery";
 import { usePantry } from "@/hooks/usePantry";
 import { useRecipes } from "@/hooks/useRecipes";
-import MealsTab from "@/components/meals/MealsTab";
+import PlanTab from "@/components/meals/PlanTab";
 import GroceryTab from "@/components/meals/GroceryTab";
 import PantryTab from "@/components/meals/PantryTab";
 import RecipesTab from "@/components/meals/RecipesTab";
@@ -348,16 +348,13 @@ function MealHubContent() {
               <StatTile label="Sync" value={isSyncing ? "…" : "Ready"} detail="Pantry + grocery" icon="🔁" tone="success" compact />
             </div>
 
-            <MealsTab
+            <PlanTab
               meals={meals}
               activeDay={activeDay}
               setActiveDay={setActiveDay}
               activeMeals={activeMeals}
               deleteMeal={deleteMeal}
               openRecipeModal={openRecipeModal}
-              setActiveTab={setActiveTab}
-              handleSyncMealToGrocery={syncMealToGrocery}
-              isSyncing={isSyncing}
               showAiSuggestions={showAiSuggestions}
               aiMealIdeas={aiMealIdeas}
               aiMealLoading={aiMealLoading}
@@ -369,6 +366,17 @@ function MealHubContent() {
               goToWeek={goToWeek}
               archiveCurrentWeek={archiveCurrentWeek}
               isCurrentWeek={isCurrentWeek}
+              flowSummary={`${meals.length} meals planned`}
+              focusRecipeBox={false}
+              saveCatalogRecipe={saveCatalogRecipe}
+              deleteCatalogRecipe={deleteCatalogRecipe}
+              addRecipeToPlan={addRecipeToPlan}
+              addRecipeToGrocery={addRecipeToGrocery}
+              startAddRecipe={startAddRecipe}
+              startEditRecipe={startEditRecipe}
+              handleFileUpload={handleFileUpload}
+              openImportModal={openImportModal}
+              openSearchModal={openSearchModal}
             />
           </div>
         ))}
