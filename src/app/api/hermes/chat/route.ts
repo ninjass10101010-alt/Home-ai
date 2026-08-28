@@ -32,7 +32,7 @@ async function resolveHermes(): Promise<{ url: string; key: string | null }> {
     (await getServiceConfig("hermes", "HERMES_API_URL")) ||
     process.env.HERMES_URL ||
     process.env.HERMES_API_URL ||
-    "http://hermes-agent-2:8642";
+    "http://hermes-agent-2:8643";
   const key = (await getServiceConfig("hermes", "HERMES_API_KEY")) ?? process.env.HERMES_API_KEY ?? null;
   return { url, key };
 }
