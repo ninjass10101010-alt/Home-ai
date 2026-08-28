@@ -52,7 +52,7 @@ function SuggestionRow({
         <div className="min-w-0 flex-1">
           <div className="text-sm font-semibold text-text-primary">{suggestion.title}</div>
           {suggestion.body && (
-            <div className="mt-1 text-xs leading-5 text-text-muted">{suggestion.body}</div>
+            <div className="mt-1 line-clamp-2 text-xs leading-5 text-text-muted">{suggestion.body}</div>
           )}
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -150,16 +150,23 @@ export default function HomeSuggestionsWidget({ className = "" }: { className?: 
       action={<Link href="/suggestions" className="text-sm widget-accent-text">See all →</Link>}
     >
       {items.length === 0 && loading ? (
-        <div className="space-y-2">
+        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
           {[1, 2].map((i) => (
             <div key={i} className="h-14 rounded-2xl bg-white/5 animate-pulse" />
           ))}
         </div>
       ) : (
-        <div className="space-y-2">
-          {items.slice(0, 3).map((suggestion) => (
+        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto">
+          {items.slice(0, 2).map((suggestion) => (
             <SuggestionRow key={suggestion.id} suggestion={suggestion} onDismiss={handleDismiss} onAct={handleAct} />
           ))}
+        </div>
+      )}
+      {items.length > 2 && (
+        <div className="mt-3 shrink-0 border-t border-white/10 pt-3">
+          <Link href="/suggestions" className="tap-sm text-xs font-semibold widget-accent-text">
+            +{items.length - 2} more · See all →
+          </Link>
         </div>
       )}
       {toast && <Toast open tone={toast.tone}>{toast.msg}</Toast>}

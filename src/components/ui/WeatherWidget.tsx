@@ -1,20 +1,22 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
+import dynamic from "next/dynamic";
 import { useWeatherConfig } from "@/hooks/useWeather";
-import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
 import { HolidayOverride } from "@/lib/weather-config";
 import { useRuntimeConfig } from "@/hooks/useRuntimeConfig";
-import Modal from "@/components/ui/Modal";
 import Skeleton from "@/components/ui/Skeleton";
+import WeatherScene, { SceneState, moonPhase, moonPhaseName } from "./WeatherScene";
+import { getWeatherSkin, cardinalFromDegrees, SeasonKey } from "./WeatherSkins";
+import type { ParticleKind } from "./WeatherParticles";
 
+const SeasonHolidayArt = dynamic(() => import("./WeatherSeasonArt"), { ssr: false });
+const HolidayParticles = dynamic(() => import("./WeatherParticles"), { ssr: false });
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
-type Condition = "sunny" | "partly-cloudy" | "cloudy" | "rainy" | "snowy";
 type TimeOfDayFlag = "day" | "night";
-type SeasonKey = "spring" | "summer" | "autumn" | "winter";
 
 interface ForecastDay {
   day: string;
@@ -23,36 +25,135 @@ interface ForecastDay {
   condition: string;
   emoji: string;
   precipitation: number;
-  humidity: number;
-  wind: number;
 }
 
-interface Particle {
-  id: number;
-  x: number;
-  y?: number;
-  delay: string;
-  duration: string;
-  size: number;
-  color?: string;
-  rotate?: number;
-  opacity?: number;
-  amplitude?: number;
+interface HourPoint {
+  time: string;
+  temp: number;
+  code: number;
+  precip: number;
+  isDay: boolean;
+  cloud: number;
+  wind: number;
+  windDir: number;
+  humidity: number;
+  visibility: number | null;
+}
+
+interface WeatherData {
+  temp: number;
+  feelsLike: number;
+  humidity: number;
+  wind: number;
+  windDir: number;
+  code: number;
+  isDay: boolean;
+  cloud: number;
+  uv: number | null;
+  pressure: number | null;
+  visibility: number | null;
+  condition: string;
+  sunriseISO: string | null;
+  sunsetISO: string | null;
+  hours: HourPoint[];
+  forecast: ForecastDay[];
+  todayHigh: number | null;
+  todayLow: number | null;
+  outlook: string | null;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function detectCondition(text: string): Condition {
-  const t = text.toLowerCase();
-  if (t.includes("sun") || t.includes("clear")) return "sunny";
-  if (t.includes("partly") || t.includes("partial")) return "partly-cloudy";
-  if (t.includes("cloud")) return "cloudy";
-  if (t.includes("rain") || t.includes("shower") || t.includes("drizzle")) return "rainy";
-  if (t.includes("snow") || t.includes("blizzard")) return "snowy";
-  return "partly-cloudy";
+function toC(f: number) { return Math.round((f - 32) * 5 / 9); }
+
+const RAIN_CODES = new Set([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99]);
+const SNOW_CODES = new Set([71, 73, 75, 77, 85, 86]);
+
+function wmoToCondition(code: number) {
+  if (code === 0) return { condition: "Clear", emoji: "☀️" };
+  if (code <= 3) return { condition: "Partly Cloudy", emoji: "⛅" };
+  if (code <= 48) return { condition: "Foggy", emoji: "🌫️" };
+  if (code <= 57) return { condition: "Drizzle", emoji: "🌦️" };
+  if (code <= 67) return { condition: "Rainy", emoji: "🌧️" };
+  if (code <= 77) return { condition: "Snowy", emoji: "❄️" };
+  if (code <= 82) return { condition: "Rain Showers", emoji: "🌧️" };
+  return { condition: "Thunderstorm", emoji: "⛈️" };
 }
 
-function toC(f: number) { return Math.round((f - 32) * 5 / 9); }
+function formatHourLabel(iso: string): string {
+  const h = new Date(iso).getHours();
+  const hour12 = h % 12 === 0 ? 12 : h % 12;
+  return `${hour12} ${h >= 12 ? "PM" : "AM"}`;
+}
+
+function formatHourTick(iso: string): string {
+  const h = new Date(iso).getHours();
+  const hour12 = h % 12 === 0 ? 12 : h % 12;
+  return `${hour12}${h >= 12 ? "PM" : "AM"}`;
+}
+
+function pickLabelIndices(hours: HourPoint[], x: (i: number) => number, minGap: number): number[] {
+  const idx = [0];
+  for (let i = 1; i < hours.length; i++) {
+    if (new Date(hours[i].time).getHours() % 3 !== 0) continue;
+    if (x(i) - x(idx[idx.length - 1]) < minGap) continue;
+    idx.push(i);
+  }
+  return idx;
+}
+
+interface HourlyBlock {
+  time?: string[];
+  weather_code?: number[];
+  precipitation_probability?: (number | null)[];
+}
+
+function deriveOutlook(hourly: HourlyBlock | undefined, condition: string): string | null {
+  const times = hourly?.time;
+  const codes = hourly?.weather_code;
+  const precip = hourly?.precipitation_probability;
+  if (!times || !codes || !precip) return null;
+  const nowMs = Date.now();
+  const start = times.findIndex((t) => new Date(t).getTime() >= nowMs - 59 * 60 * 1000);
+  if (start === -1) return null;
+  const end = Math.min(start + 12, times.length - 1);
+  const isPrecipCode = (code: number) => RAIN_CODES.has(code) || SNOW_CODES.has(code);
+  let hit = -1;
+  for (let i = start + 1; i <= end && hit === -1; i++) {
+    if ((precip[i] ?? 0) >= 50) hit = i;
+  }
+  for (let i = start + 1; i <= end && hit === -1; i++) {
+    if ((precip[i] ?? 0) >= 30 && isPrecipCode(codes[i])) hit = i;
+  }
+  for (let i = start + 1; i <= end && hit === -1; i++) {
+    if (isPrecipCode(codes[i])) hit = i;
+  }
+  if (hit !== -1) {
+    const when = formatHourLabel(times[hit]);
+    return SNOW_CODES.has(codes[hit]) ? `Snow expected around ${when}` : `Rain likely around ${when}`;
+  }
+  const c = condition.toLowerCase();
+  if (c.includes("rain") || c.includes("snow") || c.includes("drizzle") || c.includes("shower") || c.includes("thunder")) {
+    return `${condition.charAt(0)}${condition.slice(1).toLowerCase()} for the rest of the day`;
+  }
+  return "No rain expected today";
+}
+
+function mixHex(a: string, b: string, t: number): string {
+  const pa = parseInt(a.slice(1), 16);
+  const pb = parseInt(b.slice(1), 16);
+  const ch = (shift: number) => {
+    const ca = (pa >> shift) & 255;
+    const cb = (pb >> shift) & 255;
+    return Math.round(ca + (cb - ca) * t);
+  };
+  return `rgb(${ch(16)}, ${ch(8)}, ${ch(0)})`;
+}
+
+function tempBarColor(t: number): string {
+  const x = Math.max(0, Math.min(1, t));
+  return x < 0.5 ? mixHex("#38bdf8", "#fbbf24", x * 2) : mixHex("#fbbf24", "#fb923c", (x - 0.5) * 2);
+}
 
 function getRealTimeOfDay(): TimeOfDayFlag {
   const hour = new Date().getHours();
@@ -67,1579 +168,368 @@ function getRealSeason(): SeasonKey {
   return "winter";
 }
 
-// Auto-detect holiday based on current date
 function detectAutoHoliday(): HolidayOverride {
   const now = new Date();
-  const month = now.getMonth(); // 0-indexed
+  const month = now.getMonth();
   const day = now.getDate();
-
-  // Christmas season: Dec 15 - Dec 31
   if (month === 11 && day >= 15) return "christmas";
-  // New Year's: Jan 1-7
   if (month === 0 && day <= 7) return "newyears";
-  // Valentine's: Feb 10-16
   if (month === 1 && day >= 10 && day <= 16) return "valentines";
-  // St. Patrick's Day: Mar 14-17
   if (month === 2 && day >= 14 && day <= 17) return "stpatricks";
-  // Cinco de Mayo: May 3-6
   if (month === 4 && day >= 3 && day <= 6) return "cincodemayo";
-  // Mexican Independence: Sep 15-16
   if (month === 8 && day >= 15 && day <= 16) return "mexicanindependence";
-  // Halloween season: Oct 25 - Oct 30 (Día de los Muertos starts 31st)
   if (month === 9 && day >= 25 && day <= 30) return "halloween";
-  // Día de los Muertos: Oct 31 - Nov 2
   if ((month === 9 && day === 31) || (month === 10 && day >= 1 && day <= 2)) return "diadelosmuertos";
-  // 4th of July: July 1-7
   if (month === 6 && day >= 1 && day <= 7) return "july4th";
-  // Thanksgiving: approx Nov 22-28
   if (month === 10 && day >= 22 && day <= 28) return "thanksgiving";
-  // Virgin of Guadalupe: Dec 11 - Dec 13
   if (month === 11 && day >= 11 && day <= 13) return "virginguadalupe";
-
   return "none";
 }
 
-// ─── Season & Holiday Visual Systems ────────────────────────────────────────
-
-interface VisualTheme {
-  bgGradient: string;
-  glowColor: string;
-  accentColor: string;
-  particleType: string;
-  overlayType: string;
-}
-
-// Used for live UI accent wiring (WeatherWidget visuals).
-interface WeatherAccent {
-  selected: string;
-  glow: string;
-  button: string;
-  border: string;
-}
-
-function getSeasonTheme(season: SeasonKey, tod: TimeOfDayFlag, condition: Condition): VisualTheme {
-  const isNight = tod === "night";
-
-  switch (season) {
-    case "spring":
-      return {
-        bgGradient: isNight
-          ? "linear-gradient(160deg, #1a0d2e 0%, #0d1f2d 40%, #0a2d1a 100%)"
-          : "linear-gradient(160deg, #ffd6e8 0%, #ffe8f5 30%, #e8f5e9 60%, #f0fff4 100%)",
-        glowColor: isNight ? "rgba(255,182,218,0.20)" : "rgba(255,182,218,0.35)",
-        accentColor: isNight ? "#f9a8d4" : "#ec4899",
-        particleType: "blossom",
-        overlayType: "spring-mist",
-      };
-    case "summer":
-      return {
-        bgGradient: isNight
-          ? "linear-gradient(160deg, #0f172a 0%, #1e1b4b 40%, #0c4a6e 100%)"
-          : "linear-gradient(160deg, #fed7aa 0%, #fef08a 25%, #bbf7d0 60%, #7dd3fc 100%)",
-        glowColor: isNight ? "rgba(251,191,36,0.15)" : "rgba(251,191,36,0.40)",
-        accentColor: isNight ? "#fbbf24" : "#d97706",
-        particleType: "firefly",
-        overlayType: "heat-haze",
-      };
-    case "autumn":
-      return {
-        bgGradient: isNight
-          ? "linear-gradient(160deg, #1c0a00 0%, #2d1200 40%, #1a150a 100%)"
-          : "linear-gradient(160deg, #fde68a 0%, #fca5a5 25%, #f97316 50%, #92400e 100%)",
-        glowColor: isNight ? "rgba(249,115,22,0.20)" : "rgba(249,115,22,0.35)",
-        accentColor: isNight ? "#fb923c" : "#c2410c",
-        particleType: "leaf",
-        overlayType: "autumn-fog",
-      };
-    case "winter":
-      return {
-        bgGradient: isNight
-          ? "linear-gradient(160deg, #020617 0%, #0c1445 40%, #0f2744 100%)"
-          : "linear-gradient(160deg, #dbeafe 0%, #e0f2fe 35%, #f0f9ff 65%, #f8faff 100%)",
-        glowColor: isNight ? "rgba(147,197,253,0.20)" : "rgba(186,230,253,0.50)",
-        accentColor: isNight ? "#93c5fd" : "#2563eb",
-        particleType: "snowflake",
-        overlayType: "aurora",
-      };
-  }
-}
-
-function getHolidayTheme(holiday: HolidayOverride): Partial<VisualTheme> | null {
-  switch (holiday) {
-    case "christmas":
-      return {
-        bgGradient: "linear-gradient(160deg, #0a2010 0%, #15350f 40%, #0a1a00 100%)",
-        glowColor: "rgba(255,80,60,0.25)",
-        accentColor: "#ef4444",
-        overlayType: "christmas",
-        particleType: "christmas-snow",
-      };
-    case "halloween":
-      return {
-        bgGradient: "linear-gradient(160deg, #0d0010 0%, #1a0530 40%, #2d0a00 100%)",
-        glowColor: "rgba(249,115,22,0.30)",
-        accentColor: "#f97316",
-        overlayType: "halloween",
-        particleType: "bat",
-      };
-    case "july4th":
-      return {
-        bgGradient: "linear-gradient(160deg, #030712 0%, #0c1445 50%, #1e0036 100%)",
-        glowColor: "rgba(239,68,68,0.25)",
-        accentColor: "#ef4444",
-        overlayType: "fireworks",
-        particleType: "spark",
-      };
-    case "valentines":
-      return {
-        bgGradient: "linear-gradient(160deg, #2d0a1a 0%, #4c0519 40%, #1a0010 100%)",
-        glowColor: "rgba(244,63,94,0.30)",
-        accentColor: "#f43f5e",
-        overlayType: "valentines",
-        particleType: "heart",
-      };
-    case "newyears":
-      return {
-        bgGradient: "linear-gradient(160deg, #030712 0%, #1e1b4b 50%, #0f172a 100%)",
-        glowColor: "rgba(234,179,8,0.30)",
-        accentColor: "#eab308",
-        overlayType: "newyears",
-        particleType: "spark",
-      };
-    case "cincodemayo":
-      return {
-        bgGradient: "linear-gradient(160deg, #0a1a00 0%, #1a0a00 25%, #1a0000 50%, #00001a 75%, #001a0a 100%)",
-        glowColor: "rgba(220,38,38,0.30)",
-        accentColor: "#f59e0b",
-        overlayType: "cincodemayo",
-        particleType: "confetti",
-      };
-    case "thanksgiving":
-      return {
-        bgGradient: "linear-gradient(160deg, #1c0a00 0%, #2d1600 35%, #1a0f00 65%, #0d0a00 100%)",
-        glowColor: "rgba(217,119,6,0.30)",
-        accentColor: "#d97706",
-        overlayType: "thanksgiving",
-        particleType: "harvest",
-      };
-    case "stpatricks":
-      return {
-        bgGradient: "linear-gradient(160deg, #001a00 0%, #002d00 35%, #001500 65%, #000d00 100%)",
-        glowColor: "rgba(34,197,94,0.30)",
-        accentColor: "#22c55e",
-        overlayType: "stpatricks",
-        particleType: "shamrock",
-      };
-    case "diadelosmuertos":
-      return {
-        bgGradient: "linear-gradient(160deg, #1b0222 0%, #3a003f 40%, #580c2f 70%, #d97706 100%)",
-        glowColor: "rgba(245,158,11,0.25)",
-        accentColor: "#ec4899",
-        overlayType: "diadelosmuertos",
-        particleType: "marigold",
-      };
-    case "mexicanindependence":
-      return {
-        bgGradient: "linear-gradient(160deg, #021a0c 0%, #0c351c 30%, #1c2d3a 65%, #3c0c14 100%)",
-        glowColor: "rgba(34,197,94,0.25)",
-        accentColor: "#22c55e",
-        overlayType: "mexicanindependence",
-        particleType: "tricolor-sparks",
-      };
-    case "virginguadalupe":
-      return {
-        bgGradient: "linear-gradient(160deg, #061f2d 0%, #0d3846 45%, #2c1628 75%, #4c1130 100%)",
-        glowColor: "rgba(45,212,191,0.20)",
-        accentColor: "#0d9488",
-        overlayType: "virginguadalupe",
-        particleType: "holy-roses",
-      };
-    default:
-      return null;
-  }
-}
-
-// ─── Animated SVG Weather Icons ─────────────────────────────────────────────
-
-function AnimatedSunIcon({ tod }: { tod: TimeOfDayFlag }) {
-  const SIZE = 72;
-  const CX = SIZE / 2;
-  const CY = SIZE / 2;
-
-  if (tod === "night") {
-    return (
-      <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} fill="none" aria-hidden="true">
-        <circle cx={CX} cy={CY} r="32" fill="rgba(167,139,250,0.07)" style={{ animation: "weatherGlowPulse 8s ease-in-out infinite" }} />
-        <path d="M40 20 A14 14 0 1 0 52 32 A18 18 0 0 1 40 20 Z" fill="#c4b5fd" />
-        <path d="M38 22 A12 12 0 1 0 48 32 A16 16 0 0 1 38 22 Z" fill="#8b5cf6" />
-        <g style={{ animation: "weatherSpin 32s linear infinite", transformOrigin: `${CX}px ${CY}px` }}>
-          <circle cx={CX - 20} cy={CY - 15} r="1.5" fill="#fde047" style={{ animation: "weatherGlowPulse 4s ease-in-out infinite" }} />
-          <circle cx={CX + 15} cy={CY + 20} r="2" fill="#fde047" style={{ animation: "weatherGlowPulse 6s ease-in-out infinite" }} />
-          <circle cx={CX - 10} cy={CY + 25} r="1" fill="#fde047" style={{ animation: "weatherGlowPulse 5s ease-in-out infinite" }} />
-        </g>
-      </svg>
-    );
-  }
-
-  return (
-    <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} fill="none" aria-hidden="true">
-      <circle cx={CX} cy={CY} r="32" fill="rgba(251,191,36,0.07)" style={{ animation: "weatherGlowPulse 7s ease-in-out infinite" }} />
-      <g style={{ animation: "weatherSpin 28s linear infinite", transformOrigin: `${CX}px ${CY}px` }}>
-        {Array.from({ length: 8 }, (_, i) => {
-          const a = (i / 8) * Math.PI * 2;
-          return (<circle key={i} cx={CX + Math.cos(a) * 30} cy={CY + Math.sin(a) * 30} r="2.5" fill="rgba(251,191,36,0.5)" />);
-        })}
-      </g>
-      {Array.from({ length: 8 }, (_, i) => {
-        const a = (i / 8) * Math.PI * 2;
-        return (
-          <line key={i} x1={CX + Math.cos(a) * 15} y1={CY + Math.sin(a) * 15} x2={CX + Math.cos(a) * 23} y2={CY + Math.sin(a) * 23}
-            stroke="#fbbf24" strokeWidth="3" strokeLinecap="round"
-            style={{ animation: `weatherRayPulse 4.4s ease-in-out ${i * 0.45}s infinite`, transformOrigin: `${CX}px ${CY}px` }} />
-        );
-      })}
-      <circle cx={CX} cy={CY} r="14" fill="rgba(251,191,36,0.18)" style={{ animation: "weatherGlowPulse 4.4s ease-in-out 1.2s infinite" }} />
-      <circle cx={CX} cy={CY} r="12" fill="#fbbf24" />
-      <circle cx={CX} cy={CY} r="10" fill="#f59e0b" />
-      <circle cx={CX - 3.5} cy={CY - 3.5} r="3.5" fill="rgba(254,243,199,0.45)" />
-    </svg>
-  );
-}
-
-function AnimatedPartlyCloudyIcon({ tod }: { tod: TimeOfDayFlag }) {
-  return (
-    <svg width="72" height="72" viewBox="0 0 72 72" fill="none" aria-hidden="true">
-      {tod === "night" ? (
-        <g style={{ animation: "weatherGlowPulse 10s ease-in-out infinite" }}>
-          <path d="M35 15 A10 10 0 1 0 45 25 A12 12 0 0 1 35 15 Z" fill="#a78bfa" />
-        </g>
-      ) : (
-        <g style={{ animation: "weatherGlowPulse 8s ease-in-out infinite" }}>
-          {Array.from({ length: 6 }, (_, i) => {
-            const a = (i / 6) * Math.PI * 2;
-            return (
-              <line key={i} x1={24 + Math.cos(a) * 11} y1={24 + Math.sin(a) * 11} x2={24 + Math.cos(a) * 16} y2={24 + Math.sin(a) * 16}
-                stroke="#fbbf24" strokeWidth="2.5" strokeLinecap="round" />
-            );
-          })}
-          <circle cx="24" cy="24" r="9" fill="#fbbf24" />
-          <circle cx="24" cy="24" r="7" fill="#f59e0b" />
-          <circle cx="21" cy="21" r="2.5" fill="rgba(254,243,199,0.4)" />
-        </g>
-      )}
-      <g style={{ animation: "weatherCloudBob 10s ease-in-out infinite" }}>
-        <path d="M12 54 Q11 44 21 44 Q23 37 33 39 Q41 36 43 42 Q51 42 51 51 Q51 56 46 56 L18 56 Q12 56 12 54 Z"
-          fill="rgba(203,213,225,0.9)" stroke="rgba(255,255,255,0.4)" strokeWidth="1" />
-        <path d="M19 48 Q27 44 35 46" stroke="rgba(255,255,255,0.6)" strokeWidth="2" strokeLinecap="round" fill="none" />
-      </g>
-    </svg>
-  );
-}
-
-function AnimatedCloudyIcon() {
-  return (
-    <svg width="72" height="72" viewBox="0 0 72 72" fill="none" aria-hidden="true">
-      <g style={{ animation: "weatherCloudBob 12s ease-in-out 3.6s infinite" }}>
-        <path d="M28 46 Q27 38 36 38 Q38 31 47 33 Q54 31 56 37 Q63 37 63 45 Q63 49 58 49 L34 49 Q28 49 28 46 Z" fill="rgba(148,163,184,0.7)" />
-      </g>
-      <g style={{ animation: "weatherCloudBob 11s ease-in-out infinite" }}>
-        <path d="M6 52 Q5 42 15 42 Q17 35 27 37 Q35 34 38 40 Q46 40 46 49 Q46 54 41 54 L12 54 Q6 54 6 52 Z"
-          fill="rgba(203,213,225,0.9)" stroke="rgba(255,255,255,0.3)" strokeWidth="0.5" />
-        <path d="M13 46 Q21 42 29 44" stroke="rgba(255,255,255,0.5)" strokeWidth="2" strokeLinecap="round" fill="none" />
-      </g>
-    </svg>
-  );
-}
-
-function AnimatedRainyIcon() {
-  const drops = [{ x: 11, delay: "0s" }, { x: 21, delay: "0.5s" }, { x: 31, delay: "1s" }, { x: 41, delay: "0.25s" }, { x: 16, delay: "1.25s" }, { x: 26, delay: "0.75s" }, { x: 36, delay: "1.5s" }];
-  return (
-    <svg width="72" height="72" viewBox="0 0 72 72" fill="none" aria-hidden="true">
-      <g style={{ animation: "weatherCloudBob 9s ease-in-out infinite" }}>
-        <path d="M8 38 Q7 28 17 28 Q19 21 29 23 Q37 20 40 26 Q48 26 48 35 Q48 40 42 40 L14 40 Q8 40 8 38 Z" fill="rgba(100,116,139,0.88)" />
-        <path d="M15 32 Q24 28 32 30" stroke="rgba(255,255,255,0.35)" strokeWidth="2" strokeLinecap="round" fill="none" />
-      </g>
-      {drops.map((d, i) => (
-        <line key={i} x1={d.x + 2} y1="44" x2={d.x} y2="58" stroke="rgba(96,165,250,0.8)" strokeWidth="2.5" strokeLinecap="round"
-          style={{ animation: `weatherRainDrop 2.2s linear ${d.delay} infinite` }} />
-      ))}
-    </svg>
-  );
-}
-
-function AnimatedSnowyIcon() {
-  const flakes = [{ x: 13, delay: "0s" }, { x: 23, delay: "1.1s" }, { x: 33, delay: "0.55s" }, { x: 43, delay: "1.6s" }, { x: 18, delay: "2.1s" }, { x: 38, delay: "0.25s" }];
-  return (
-    <svg width="72" height="72" viewBox="0 0 72 72" fill="none" aria-hidden="true">
-      <g style={{ animation: "weatherCloudBob 9s ease-in-out infinite" }}>
-        <path d="M8 35 Q7 25 17 25 Q19 18 29 20 Q37 17 40 23 Q48 23 48 32 Q48 37 42 37 L14 37 Q8 37 8 35 Z" fill="rgba(186,230,253,0.88)" />
-        <path d="M15 29 Q24 25 32 27" stroke="rgba(255,255,255,0.55)" strokeWidth="2" strokeLinecap="round" fill="none" />
-      </g>
-      {flakes.map((f, i) => (
-        <g key={i} style={{ animation: `weatherSnowDrift 4.5s ease-in-out ${f.delay} infinite` }}>
-          <circle cx={f.x} cy="52" r="3" fill="rgba(224,242,254,0.95)" />
-          <line x1={f.x - 4} y1="52" x2={f.x + 4} y2="52" stroke="rgba(186,230,253,0.8)" strokeWidth="1.5" strokeLinecap="round" />
-          <line x1={f.x} y1="48" x2={f.x} y2="56" stroke="rgba(186,230,253,0.8)" strokeWidth="1.5" strokeLinecap="round" />
-        </g>
-      ))}
-    </svg>
-  );
-}
-
-const ICONS: Record<Condition, (props: { tod: TimeOfDayFlag }) => React.ReactElement> = {
-  sunny: AnimatedSunIcon,
-  "partly-cloudy": AnimatedPartlyCloudyIcon,
-  cloudy: AnimatedCloudyIcon,
-  rainy: AnimatedRainyIcon,
-  snowy: AnimatedSnowyIcon,
+const HOLIDAY_STYLE: Partial<Record<HolidayOverride, { accent: string; particle: ParticleKind; label: string }>> = {
+  christmas: { accent: "#ef4444", particle: "christmas-snow", label: "🎄 Christmas" },
+  halloween: { accent: "#f97316", particle: "bat", label: "🎃 Halloween" },
+  july4th: { accent: "#ef4444", particle: "spark", label: "🎆 4th of July" },
+  valentines: { accent: "#f43f5e", particle: "heart", label: "💝 Valentine's" },
+  newyears: { accent: "#eab308", particle: "spark", label: "🥂 New Year's" },
+  cincodemayo: { accent: "#f59e0b", particle: "confetti", label: "🪅 Cinco de Mayo" },
+  thanksgiving: { accent: "#d97706", particle: "harvest", label: "🦃 Thanksgiving" },
+  stpatricks: { accent: "#22c55e", particle: "shamrock", label: "🍀 St. Patrick's" },
+  diadelosmuertos: { accent: "#ec4899", particle: "marigold", label: "💀 Día de los Muertos" },
+  mexicanindependence: { accent: "#22c55e", particle: "tricolor-sparks", label: "🔔 Independence Day" },
+  virginguadalupe: { accent: "#0d9488", particle: "holy-roses", label: "🌹 Virgin of Guadalupe" },
 };
 
-// ─── Season Background Art ────────────────────────────────────────────────────
-
-function SpringBackdrop({ tod }: { tod: TimeOfDayFlag }) {
-  const branchColor = tod === "night" ? "#f9a8d4" : "#be185d";
-  const blossomFill = tod === "night" ? "#fbcfe8" : "#fce7f3";
-  const blossomCenter = tod === "night" ? "#f472b6" : "#ec4899";
-  const grassColor = tod === "night" ? "#4ade80" : "#16a34a";
-
-  return (
-    <svg className="absolute inset-0 w-full h-full" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-      {/* Sky gradient overlay */}
-      <defs>
-        <linearGradient id="springSkyday" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={tod === "night" ? "#1a0d2e" : "#fce7f3"} stopOpacity="0.4" />
-          <stop offset="100%" stopColor="transparent" />
-        </linearGradient>
-      </defs>
-      <rect width="320" height="120" fill="url(#springSkyday)" />
-
-      {/* Left branch cluster */}
-      <g opacity="0.30">
-        <line x1="0" y1="100" x2="35" y2="55" stroke={branchColor} strokeWidth="5" strokeLinecap="round"/>
-        <line x1="35" y1="55" x2="15" y2="20" stroke={branchColor} strokeWidth="3.5" strokeLinecap="round"/>
-        <line x1="35" y1="55" x2="65" y2="30" stroke={branchColor} strokeWidth="3" strokeLinecap="round"/>
-        <line x1="15" y1="20" x2="5" y2="0" stroke={branchColor} strokeWidth="2.5" strokeLinecap="round"/>
-        <line x1="15" y1="20" x2="30" y2="5" stroke={branchColor} strokeWidth="2" strokeLinecap="round"/>
-        <line x1="65" y1="30" x2="80" y2="10" stroke={branchColor} strokeWidth="2" strokeLinecap="round"/>
-        <line x1="65" y1="30" x2="50" y2="10" stroke={branchColor} strokeWidth="2" strokeLinecap="round"/>
-        {/* Left blossoms */}
-        {[[5,0],[18,6],[32,5],[50,10],[65,10],[80,10],[10,20],[25,15],[38,22],[60,30],[70,28]].map(([cx,cy],i) => (
-          <g key={i} transform={`translate(${cx},${cy})`} style={{ animation: `weatherGlowPulse ${1.8+i*0.25}s ease-in-out ${i*0.18}s infinite` }}>
-            {[0,72,144,216,288].map((angle,j) => (
-              <ellipse key={j} cx={Math.cos(angle*Math.PI/180)*4} cy={Math.sin(angle*Math.PI/180)*4} rx="3.8" ry="2.6" transform={`rotate(${angle})`} fill={blossomFill} opacity="0.95"/>
-            ))}
-            <circle cx="0" cy="0" r="1.6" fill={blossomCenter}/>
-          </g>
-        ))}
-      </g>
-
-      {/* Right branch cluster */}
-      <g opacity="0.28">
-        <line x1="320" y1="80" x2="285" y2="40" stroke={branchColor} strokeWidth="5" strokeLinecap="round"/>
-        <line x1="285" y1="40" x2="260" y2="10" stroke={branchColor} strokeWidth="3.5" strokeLinecap="round"/>
-        <line x1="285" y1="40" x2="310" y2="15" stroke={branchColor} strokeWidth="3" strokeLinecap="round"/>
-        <line x1="260" y1="10" x2="245" y2="0" stroke={branchColor} strokeWidth="2" strokeLinecap="round"/>
-        {[[260,10],[250,2],[270,5],[295,15],[308,15],[285,40],[272,32],[295,32]].map(([cx,cy],i) => (
-          <g key={i} transform={`translate(${cx},${cy})`} style={{ animation: `weatherGlowPulse ${2+i*0.2}s ease-in-out ${i*0.15}s infinite` }}>
-            {[0,72,144,216,288].map((angle,j) => (
-              <ellipse key={j} cx={Math.cos(angle*Math.PI/180)*3.5} cy={Math.sin(angle*Math.PI/180)*3.5} rx="3.2" ry="2.2" transform={`rotate(${angle})`} fill={blossomFill} opacity="0.9"/>
-            ))}
-            <circle cx="0" cy="0" r="1.4" fill={blossomCenter}/>
-          </g>
-        ))}
-      </g>
-
-      {/* Rolling meadow hills */}
-      <g opacity={tod === "night" ? 0.18 : 0.28}>
-        <ellipse cx="60" cy="195" rx="120" ry="30" fill={grassColor} />
-        <ellipse cx="260" cy="198" rx="100" ry="25" fill={grassColor} />
-      </g>
-
-      {/* Swaying tall grass blades */}
-      <g opacity={tod === "night" ? 0.15 : 0.22}>
-        {[8,22,38,54,70,86,102,118,134,150,166,182,198,214,230,246,262,278,294,310].map((x,i) => (
-          <path key={i} d={`M${x} 200 Q${x+(i%2===0?-6:6)} ${178+(i%3)*4} ${x+(i%2===0?3:-3)} ${160+(i%4)*6}`}
-            stroke={grassColor} strokeWidth="1.8" fill="none" strokeLinecap="round"
-            style={{ animation: `weatherCloudBob ${2.5+i*0.1}s ease-in-out ${i*0.08}s infinite` }} />
-        ))}
-      </g>
-
-      {/* Night: moon glow + firefly bokeh */}
-      {tod === "night" && (
-        <g>
-          <circle cx="60" cy="35" r="28" fill="rgba(249,168,212,0.08)" style={{ animation: "weatherSunHalo 5s ease-in-out infinite" }}/>
-          <circle cx="60" cy="35" r="18" fill="rgba(249,168,212,0.15)"/>
-          <path d="M58 22 A14 14 0 1 0 72 36 A18 18 0 0 1 58 22 Z" fill="rgba(253,164,175,0.7)"/>
-          {/* Bokeh dots */}
-          {[[40,90],[80,70],[140,110],[200,80],[250,95],[170,60],[110,85],[280,75]].map(([x,y],i) => (
-            <circle key={i} cx={x} cy={y} r={1.5+i%2} fill="rgba(249,168,212,0.5)"
-              style={{ animation: `weatherGlowPulse ${1.5+i*0.3}s ease-in-out ${i*0.2}s infinite` }}/>
-          ))}
-        </g>
-      )}
-
-      {/* Day: sun rays peaking from top-left */}
-      {tod === "day" && (
-        <g opacity="0.18">
-          <circle cx="30" cy="25" r="45" fill="rgba(251,207,232,0.3)" style={{ animation: "weatherSunHalo 4s ease-in-out infinite" }}/>
-          {[0,30,60,90,120,150,180].map((a,i) => {
-            const rad = a * Math.PI / 180;
-            return <line key={i} x1={30+Math.cos(rad)*22} y1={25+Math.sin(rad)*22} x2={30+Math.cos(rad)*38} y2={25+Math.sin(rad)*38}
-              stroke="#fce7f3" strokeWidth="2" strokeLinecap="round"
-              style={{ animation: `weatherRayPulse 2.5s ease-in-out ${i*0.3}s infinite` }}/>;
-          })}
-          <circle cx="30" cy="25" r="18" fill="rgba(252,231,243,0.5)"/>
-        </g>
-      )}
-
-      {/* Ground mist */}
-      <ellipse cx="160" cy="202" rx="200" ry="35" fill={tod === "night" ? "rgba(217,70,239,0.07)" : "rgba(249,168,212,0.18)"} />
-    </svg>
-  );
+function sunProgressAt(timeISO: string, sunriseISO: string | null, sunsetISO: string | null): number {
+  if (!sunriseISO || !sunsetISO) return 0.5;
+  const t = new Date(timeISO).getTime();
+  const sr = new Date(sunriseISO).getTime();
+  const ss = new Date(sunsetISO).getTime();
+  if (!isFinite(t) || !isFinite(sr) || !isFinite(ss) || ss <= sr) return 0.5;
+  return Math.max(0, Math.min(1, (t - sr) / (ss - sr)));
 }
 
-function PalmSilhouette({
-  x, y, scale, opacity, sunlit, shadow,
-}: {
-  x: number; y: number; scale: number; opacity: number; sunlit: string; shadow: string;
-}) {
-  return (
-    <g opacity={opacity} transform={`translate(${x} ${y}) scale(${scale})`}>
-      {/* Tapered trunk, sunlit crown → shadow base */}
-      <path d="M-6 0 C-6 -50 -4 -100 0 -126 L 8 -124 C4 -100 6 -50 6 0 Z"
-        fill="url(#summerPalmTrunk)" stroke="#2d1810" strokeWidth="0.75" strokeOpacity="0.35" />
-      {/* Segmented trunk ring texture */}
-      {[-30, -55, -80, -105].map((ry) => (
-        <path key={ry} d={`M-5.5 ${ry} Q0 ${ry - 2} 5.5 ${ry + 1}`} fill="none"
-          stroke="#2d1810" strokeWidth="1" opacity="0.3" />
-      ))}
-      {/* Crown shadow mass */}
-      <path d="M-28 -126 Q-24 -158 0 -162 Q24 -158 28 -126 Q12 -114 -12 -114 Q-24 -116 -28 -126 Z"
-        fill={shadow} opacity="0.55" />
-      {/* Sunlit fronds (up-left, up, up-right, right) */}
-      <path d="M-1 -125 Q-17 -141 -25 -153 Q-13 -147 1 -125 Z" fill={sunlit} />
-      <path d="M0 -127 Q-1 -153 0 -167 Q5 -153 4 -127 Z" fill={sunlit} />
-      <path d="M1 -127 Q15 -155 25 -163 Q13 -147 3 -127 Z" fill={sunlit} />
-      <path d="M3 -126 Q21 -135 33 -131 Q19 -123 5 -124 Z" fill={sunlit} />
-      {/* Shadow fronds (down-right, left, down-left) */}
-      <path d="M3 -125 Q19 -111 27 -99 Q15 -109 5 -123 Z" fill={shadow} />
-      <path d="M-1 -125 Q-17 -131 -25 -125 Q-15 -119 1 -123 Z" fill={shadow} />
-      <path d="M-1 -124 Q-11 -107 -17 -97 Q-7 -107 -1 -122 Z" fill={shadow} />
-      {/* Midrib veining */}
-      <path d="M0 -126 Q-15 -144 -23 -152" fill="none" stroke={shadow} strokeWidth="0.8" opacity="0.5" />
-      <path d="M0 -127 Q0 -154 0 -165" fill="none" stroke={shadow} strokeWidth="0.8" opacity="0.5" />
-      <path d="M1 -126 Q14 -152 23 -161" fill="none" stroke={shadow} strokeWidth="0.8" opacity="0.5" />
-      <path d="M3 -125 Q20 -134 31 -130" fill="none" stroke={shadow} strokeWidth="0.8" opacity="0.5" />
-      <path d="M3 -125 Q17 -112 25 -101" fill="none" stroke={shadow} strokeWidth="0.8" opacity="0.5" />
-      <path d="M0 -125 Q-16 -130 -24 -125" fill="none" stroke={shadow} strokeWidth="0.8" opacity="0.5" />
-      <path d="M0 -124 Q-9 -109 -15 -99" fill="none" stroke={shadow} strokeWidth="0.8" opacity="0.5" />
-      {/* Coconuts */}
-      <circle cx="-2" cy="-125" r="2.2" fill="#3f2412" />
-      <circle cx="3" cy="-124" r="2.2" fill="#3f2412" />
-      <circle cx="0.5" cy="-121.5" r="2" fill="#3f2412" />
-    </g>
-  );
+function stripEndIndex(hours: HourPoint[]): number {
+  if (hours.length === 0) return -1;
+  const dayOfNow = new Date(hours[0].time).getDate();
+  let end = hours.findIndex((h) => new Date(h.time).getDate() !== dayOfNow);
+  end = end === -1 ? hours.length - 1 : Math.max(0, end - 1);
+  return Math.max(end, Math.min(8, hours.length - 1));
 }
 
-function SummerBackdrop({ tod }: { tod: TimeOfDayFlag }) {
-  return (
-    <svg className="absolute inset-0 w-full h-full" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-      <defs>
-        <radialGradient id="summerSunGlow" cx="85%" cy="15%" r="50%">
-          <stop offset="0%" stopColor="rgba(251,191,36,0.18)" />
-          <stop offset="100%" stopColor="transparent" />
-        </radialGradient>
-        <radialGradient id="summerMoonGlow" cx="15%" cy="15%" r="40%">
-          <stop offset="0%" stopColor="rgba(167,139,250,0.12)" />
-          <stop offset="100%" stopColor="transparent" />
-        </radialGradient>
-        <linearGradient id="summerPalmTrunk" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#7c4a1e" />
-          <stop offset="100%" stopColor="#2d1810" />
-        </linearGradient>
-      </defs>
-
-      {tod === "night" ? (
-        /* Night: rich galaxy scene */
-        <g>
-          <rect width="320" height="200" fill="url(#summerMoonGlow)" />
-          {/* Milky way arch */}
-          <ellipse cx="160" cy="80" rx="210" ry="55" fill="none" stroke="rgba(167,139,250,0.08)" strokeWidth="32" />
-          <ellipse cx="160" cy="80" rx="210" ry="55" fill="none" stroke="rgba(196,181,253,0.04)" strokeWidth="10" />
-          {/* Stars — varied brightness */}
-          {Array.from({ length: 55 }, (_, i) => (
-            <circle key={i}
-              cx={(i * 83 + 17) % 320} cy={(i * 53 + 11) % 200}
-              r={i%7===0 ? 2 : i%3===0 ? 1.2 : 0.6}
-              fill="white" opacity={0.3 + (i % 5) * 0.12}
-              style={{ animation: `weatherGlowPulse ${1.2+(i%5)*0.4}s ease-in-out ${i*0.12}s infinite` }} />
-          ))}
-          {/* Shooting star 1 */}
-          <line x1="260" y1="20" x2="190" y2="65" stroke="rgba(255,255,255,0.7)" strokeWidth="1.2"
-            strokeLinecap="round" style={{ animation: "weatherParticleSun 5s ease-out 0.5s infinite" }} />
-          {/* Shooting star 2 */}
-          <line x1="100" y1="15" x2="40" y2="50" stroke="rgba(255,255,255,0.5)" strokeWidth="0.8"
-            strokeLinecap="round" style={{ animation: "weatherParticleSun 5s ease-out 2.8s infinite" }} />
-          {/* Crescent moon */}
-          <circle cx="275" cy="35" r="22" fill="rgba(254,240,138,0.14)" style={{ animation: "weatherSunHalo 5s ease-in-out infinite" }}/>
-          <path d="M272 20 A16 16 0 1 0 290 36 A20 20 0 0 1 272 20 Z" fill="rgba(253,224,71,0.65)"/>
-          {/* Warm sea glow at bottom */}
-          <ellipse cx="160" cy="200" rx="200" ry="30" fill="rgba(56,189,248,0.06)" style={{ animation: "weatherCloudBob 6s ease-in-out infinite" }}/>
-        </g>
-      ) : (
-        /* Day: blazing tropical scene */
-        <g>
-          <rect width="320" height="200" fill="url(#summerSunGlow)" />
-          {/* Sun halo rings */}
-          <circle cx="285" cy="28" r="70" fill="rgba(251,191,36,0.05)" style={{ animation: "weatherSunHalo 3s ease-in-out infinite" }}/>
-          <circle cx="285" cy="28" r="50" fill="rgba(251,191,36,0.08)" style={{ animation: "weatherSunHalo 2.5s ease-in-out 0.5s infinite" }}/>
-          <circle cx="285" cy="28" r="30" fill="rgba(251,191,36,0.12)" style={{ animation: "weatherSunHalo 2s ease-in-out 1s infinite" }}/>
-          {/* Sun rays */}
-          {Array.from({length:12},(_, i) => {
-            const a = (i/12)*Math.PI*2;
-            return <line key={i} x1={285+Math.cos(a)*32} y1={28+Math.sin(a)*32} x2={285+Math.cos(a)*52} y2={28+Math.sin(a)*52}
-              stroke="rgba(251,191,36,0.25)" strokeWidth="2" strokeLinecap="round"
-              style={{ animation: `weatherRayPulse 2s ease-in-out ${i*0.17}s infinite` }}/>;
-          })}
-          <circle cx="285" cy="28" r="18" fill="rgba(251,191,36,0.9)"/>
-          <circle cx="285" cy="28" r="14" fill="#f59e0b"/>
-          {/* Tall palm tree — left side */}
-          <PalmSilhouette x={55} y={200} scale={1} opacity={0.28} sunlit="#16a34a" shadow="#15803d" />
-          {/* Distant palm — right */}
-          <PalmSilhouette x={292} y={196} scale={0.6} opacity={0.18} sunlit="#166534" shadow="#14532d" />
-          {/* Ocean horizon glow */}
-          <ellipse cx="160" cy="200" rx="220" ry="28" fill="rgba(56,189,248,0.18)" />
-          {/* Heat shimmer waves */}
-          {[0,1,2,3].map(i => (
-            <path key={i} d={`M0 ${155+i*12} Q80 ${150+i*12} 160 ${157+i*12} Q240 ${164+i*12} 320 ${155+i*12}`}
-              stroke="rgba(251,191,36,0.07)" strokeWidth="3" fill="none"
-              style={{ animation: `weatherCloudBob ${2.5+i*0.8}s ease-in-out ${i*0.6}s infinite` }}/>
-          ))}
-        </g>
-      )}
-    </svg>
-  );
-}
-
-function AutumnBackdrop({ tod }: { tod: TimeOfDayFlag }) {
-  const trunkColor = tod === "night" ? "#92400e" : "#6b2d0a";
-  return (
-    <svg className="absolute inset-0 w-full h-full" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-      <defs>
-        <radialGradient id="autumnMoon" cx="85%" cy="18%" r="20%">
-          <stop offset="0%" stopColor="rgba(251,191,36,0.22)" />
-          <stop offset="100%" stopColor="transparent" />
-        </radialGradient>
-      </defs>
-
-      {/* Sky wash */}
-      {tod === "night" && <rect width="320" height="200" fill="url(#autumnMoon)" />}
-
-      {/* Large oak tree — left, with full foliage crown */}
-      <g opacity={tod === "night" ? 0.28 : 0.32}>
-        {/* Trunk + main branches */}
-        <line x1="60" y1="200" x2="62" y2="140" stroke={trunkColor} strokeWidth="8" strokeLinecap="round"/>
-        <line x1="62" y1="140" x2="45" y2="90" stroke={trunkColor} strokeWidth="5.5" strokeLinecap="round"/>
-        <line x1="62" y1="140" x2="85" y2="100" stroke={trunkColor} strokeWidth="5" strokeLinecap="round"/>
-        <line x1="45" y1="90" x2="28" y2="55" stroke={trunkColor} strokeWidth="4" strokeLinecap="round"/>
-        <line x1="45" y1="90" x2="62" y2="58" stroke={trunkColor} strokeWidth="3.5" strokeLinecap="round"/>
-        <line x1="85" y1="100" x2="105" y2="68" stroke={trunkColor} strokeWidth="3.5" strokeLinecap="round"/>
-        <line x1="85" y1="100" x2="72" y2="72" stroke={trunkColor} strokeWidth="3" strokeLinecap="round"/>
-        <line x1="28" y1="55" x2="15" y2="28" stroke={trunkColor} strokeWidth="2.5" strokeLinecap="round"/>
-        <line x1="28" y1="55" x2="38" y2="30" stroke={trunkColor} strokeWidth="2.5" strokeLinecap="round"/>
-        <line x1="62" y1="58" x2="52" y2="35" stroke={trunkColor} strokeWidth="2.5" strokeLinecap="round"/>
-        <line x1="62" y1="58" x2="75" y2="35" stroke={trunkColor} strokeWidth="2" strokeLinecap="round"/>
-        <line x1="105" y1="68" x2="118" y2="42" stroke={trunkColor} strokeWidth="2.5" strokeLinecap="round"/>
-        <line x1="105" y1="68" x2="96" y2="42" stroke={trunkColor} strokeWidth="2" strokeLinecap="round"/>
-        {/* Foliage cloud clusters — warm autumn colors */}
-        {[
-          [20, 22, 35, tod === "night" ? "rgba(154,52,18,0.55)" : "rgba(234,88,12,0.60)"],
-          [40, 28, 30, tod === "night" ? "rgba(180,83,9,0.50)" : "rgba(245,158,11,0.58)"],
-          [62, 30, 28, tod === "night" ? "rgba(161,47,0,0.55)" : "rgba(220,38,38,0.55)"],
-          [80, 38, 32, tod === "night" ? "rgba(154,52,18,0.45)" : "rgba(234,88,12,0.50)"],
-          [105, 45, 30, tod === "night" ? "rgba(120,53,15,0.50)" : "rgba(202,138,4,0.55)"],
-          [48, 55, 25, tod === "night" ? "rgba(180,83,9,0.40)" : "rgba(249,115,22,0.50)"],
-          [72, 55, 22, tod === "night" ? "rgba(161,47,0,0.40)" : "rgba(239,68,68,0.48)"],
-          [28, 50, 20, tod === "night" ? "rgba(120,53,15,0.35)" : "rgba(202,138,4,0.45)"],
-          [95, 60, 20, tod === "night" ? "rgba(154,52,18,0.35)" : "rgba(234,88,12,0.42)"],
-        ].map(([cx, cy, r, fill], i) => (
-          <ellipse key={i} cx={cx as number} cy={cy as number} rx={(r as number) * 1.4} ry={r as number}
-            fill={fill as string}
-            style={{ animation: `weatherCloudBob ${3.5+i*0.4}s ease-in-out ${i*0.25}s infinite` }}/>
-        ))}
-      </g>
-
-      {/* Smaller bare tree — right */}
-      <g opacity={tod === "night" ? 0.20 : 0.22}>
-        <line x1="280" y1="200" x2="278" y2="155" stroke={trunkColor} strokeWidth="5" strokeLinecap="round"/>
-        <line x1="278" y1="155" x2="265" y2="115" stroke={trunkColor} strokeWidth="3.5" strokeLinecap="round"/>
-        <line x1="278" y1="155" x2="295" y2="125" stroke={trunkColor} strokeWidth="3" strokeLinecap="round"/>
-        <line x1="265" y1="115" x2="252" y2="88" stroke={trunkColor} strokeWidth="2.5" strokeLinecap="round"/>
-        <line x1="265" y1="115" x2="274" y2="88" stroke={trunkColor} strokeWidth="2" strokeLinecap="round"/>
-        <line x1="295" y1="125" x2="308" y2="100" stroke={trunkColor} strokeWidth="2.5" strokeLinecap="round"/>
-        <line x1="295" y1="125" x2="285" y2="100" stroke={trunkColor} strokeWidth="2" strokeLinecap="round"/>
-        {/* Small foliage clumps */}
-        {[
-          [252, 82, 18, tod === "night" ? "rgba(180,83,9,0.40)" : "rgba(234,88,12,0.45)"],
-          [278, 82, 16, tod === "night" ? "rgba(154,52,18,0.35)" : "rgba(245,158,11,0.40)"],
-          [308, 94, 15, tod === "night" ? "rgba(120,53,15,0.35)" : "rgba(220,38,38,0.40)"],
-        ].map(([cx, cy, r, fill], i) => (
-          <ellipse key={i} cx={cx as number} cy={cy as number} rx={(r as number)*1.3} ry={r as number}
-            fill={fill as string}
-            style={{ animation: `weatherCloudBob ${4+i*0.5}s ease-in-out ${i*0.3}s infinite` }}/>
-        ))}
-      </g>
-
-      {/* Harvest moon (night) or warm sun (day) */}
-      {tod === "night" ? (
-        <g>
-          <circle cx="240" cy="30" r="36" fill="rgba(251,191,36,0.10)" style={{ animation: "weatherSunHalo 5s ease-in-out infinite" }}/>
-          <circle cx="240" cy="30" r="24" fill="rgba(251,191,36,0.18)"/>
-          <circle cx="240" cy="30" r="18" fill="rgba(253,224,71,0.55)"/>
-          <circle cx="233" cy="24" r="5" fill="rgba(245,158,11,0.3)"/>
-          <circle cx="245" cy="32" r="3" fill="rgba(245,158,11,0.25)"/>
-        </g>
-      ) : (
-        <g>
-          <circle cx="260" cy="25" r="45" fill="rgba(251,191,36,0.10)" style={{ animation: "weatherSunHalo 3.5s ease-in-out infinite" }}/>
-          <circle cx="260" cy="25" r="28" fill="rgba(251,191,36,0.18)"/>
-        </g>
-      )}
-
-      {/* Rolling ground */}
-      <path d="M0 185 Q55 175 110 182 Q165 189 220 178 Q270 167 320 178 L320 200 L0 200 Z"
-        fill={tod === "night" ? "rgba(120,53,15,0.18)" : "rgba(146,64,14,0.28)"} />
-
-      {/* Fog banks */}
-      {[0,1,2].map(i => (
-        <ellipse key={i} cx={70+i*90} cy={190+i*6} rx={85+i*15} ry={22+i*4}
-          fill={tod === "night" ? `rgba(180,140,100,0.06)` : `rgba(253,186,116,0.10)`}
-          style={{ animation: `weatherCloudBob ${5+i*2}s ease-in-out ${i}s infinite` }} />
-      ))}
-    </svg>
-  );
-}
-
-function WinterBackdrop({ tod }: { tod: TimeOfDayFlag }) {
-  const iceColor = tod === "night" ? "rgba(147,197,253,0.30)" : "rgba(219,234,254,0.55)";
-  const snowColor = tod === "night" ? "rgba(186,230,253,0.14)" : "rgba(219,234,254,0.50)";
-  const treeColor = tod === "night" ? "#1e3a5f" : "#1d4ed8";
-
-  return (
-    <svg className="absolute inset-0 w-full h-full" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-      <defs>
-        <linearGradient id="auroraGrad1" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="rgba(52,211,153,0)" />
-          <stop offset="30%" stopColor="rgba(52,211,153,0.22)" />
-          <stop offset="70%" stopColor="rgba(99,102,241,0.18)" />
-          <stop offset="100%" stopColor="rgba(99,102,241,0)" />
-        </linearGradient>
-        <linearGradient id="auroraGrad2" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="rgba(167,139,250,0)" />
-          <stop offset="40%" stopColor="rgba(167,139,250,0.16)" />
-          <stop offset="60%" stopColor="rgba(52,211,153,0.12)" />
-          <stop offset="100%" stopColor="rgba(52,211,153,0)" />
-        </linearGradient>
-        <linearGradient id="auroraGrad3" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="rgba(236,72,153,0)" />
-          <stop offset="50%" stopColor="rgba(236,72,153,0.10)" />
-          <stop offset="100%" stopColor="rgba(147,197,253,0)" />
-        </linearGradient>
-      </defs>
-
-      {/* Aurora borealis bands (night) */}
-      {tod === "night" && (
-        <g>
-          <path d="M-20 55 Q80 15 160 45 Q240 75 340 35" stroke="url(#auroraGrad1)" strokeWidth="30" fill="none" strokeLinecap="round"
-            style={{ animation: "weatherAuroraPulse 7s ease-in-out infinite" }} />
-          <path d="M-20 75 Q90 35 175 60 Q260 85 340 50" stroke="url(#auroraGrad2)" strokeWidth="22" fill="none" strokeLinecap="round"
-            style={{ animation: "weatherAuroraPulse 9s ease-in-out 1.5s infinite" }} />
-          <path d="M-20 95 Q100 50 185 75 Q265 100 340 65" stroke="url(#auroraGrad3)" strokeWidth="15" fill="none" strokeLinecap="round"
-            style={{ animation: "weatherAuroraPulse 8s ease-in-out 3s infinite" }} />
-          <path d="M-20 115 Q110 65 195 90 Q270 115 340 80" stroke="url(#auroraGrad1)" strokeWidth="10" fill="none" strokeLinecap="round"
-            style={{ animation: "weatherAuroraPulse 6s ease-in-out 4.5s infinite" }} />
-          {/* Stars */}
-          {Array.from({ length: 30 }, (_, i) => (
-            <circle key={i} cx={(i * 97 + 23) % 320} cy={(i * 41 + 8) % 130} r={0.5 + (i % 3) * 0.6}
-              fill="white" opacity={0.35 + (i % 4) * 0.12}
-              style={{ animation: `weatherGlowPulse ${1.8+(i%4)*0.4}s ease-in-out ${i*0.1}s infinite` }}/>
-          ))}
-          {/* Moon */}
-          <circle cx="265" cy="28" r="30" fill="rgba(147,197,253,0.10)" style={{ animation: "weatherSunHalo 6s ease-in-out infinite" }}/>
-          <circle cx="265" cy="28" r="18" fill="rgba(186,230,253,0.22)"/>
-          <path d="M263 14 A16 16 0 1 0 281 30 A20 20 0 0 1 263 14 Z" fill="rgba(219,234,254,0.65)"/>
-        </g>
-      )}
-
-      {/* Day: bright overcast glow */}
-      {tod === "day" && (
-        <g>
-          <circle cx="160" cy="-10" r="80" fill="rgba(219,234,254,0.30)" style={{ animation: "weatherSunHalo 5s ease-in-out infinite" }}/>
-        </g>
-      )}
-
-      {/* Dense pine forest — left */}
-      {[0, 30, 58].map((ox, j) => (
-        <g key={j} opacity={0.22 - j*0.04}>
-          <polygon points={`${ox+10} 200,${ox+36} 200,${ox+23} 145`} fill={treeColor} />
-          <polygon points={`${ox+5} 168,${ox+41} 168,${ox+23} 120`} fill={treeColor} />
-          <polygon points={`${ox+10} 143,${ox+36} 143,${ox+23} 100`} fill={treeColor} />
-          <polygon points={`${ox+14} 120,${ox+32} 120,${ox+23} 82`} fill={treeColor} />
-          {/* Snow caps on each tier */}
-          <ellipse cx={ox+23} cy={145} rx="14" ry="4" fill={iceColor}/>
-          <ellipse cx={ox+23} cy={120} rx="12" ry="3.5" fill={iceColor}/>
-          <ellipse cx={ox+23} cy={100} rx="10" ry="3" fill={iceColor}/>
-          <ellipse cx={ox+23} cy={82} rx="7" ry="2.5" fill={iceColor}/>
-        </g>
-      ))}
-
-      {/* Dense pine forest — right */}
-      {[250, 278, 305].map((ox, j) => (
-        <g key={j} opacity={0.20 - j*0.03}>
-          <polygon points={`${ox+10} 200,${ox+36} 200,${ox+23} 150`} fill={treeColor} />
-          <polygon points={`${ox+4} 172,${ox+42} 172,${ox+23} 125`} fill={treeColor} />
-          <polygon points={`${ox+10} 148,${ox+36} 148,${ox+23} 108`} fill={treeColor} />
-          <ellipse cx={ox+23} cy={150} rx="14" ry="4" fill={iceColor}/>
-          <ellipse cx={ox+23} cy={125} rx="12" ry="3.5" fill={iceColor}/>
-          <ellipse cx={ox+23} cy={108} rx="9" ry="3" fill={iceColor}/>
-        </g>
-      ))}
-
-      {/* Icicles row — varied lengths */}
-      {Array.from({length: 14}, (_, i) => {
-        const x = 8 + i * 22;
-        const h = 8 + (i % 4) * 7;
-        return (
-          <g key={i}>
-            <path d={`M${x-4} 0 L${x} ${h} L${x+4} 0`} fill={iceColor}/>
-            <ellipse cx={x} cy={0} rx="4" ry="2" fill={iceColor}/>
-          </g>
-        );
-      })}
-
-      {/* Snow ground — layered bumps */}
-      <path d="M0 182 Q28 172 58 178 Q88 184 118 176 Q148 168 178 175 Q208 182 238 174 Q268 166 298 173 Q312 177 320 175 L320 200 L0 200 Z"
-        fill={snowColor} />
-      <path d="M0 192 Q50 188 100 191 Q150 194 200 189 Q250 184 320 190 L320 200 L0 200 Z"
-        fill={tod === "night" ? "rgba(186,230,253,0.20)" : "rgba(219,234,254,0.65)"} />
-      {/* Footprints in snow */}
-      {[[80,188],[90,185],[100,188],[110,185]].map(([x,y],i) => (
-        <ellipse key={i} cx={x} cy={y} rx="4" ry="2.5" fill={tod === "night" ? "rgba(147,197,253,0.15)" : "rgba(186,230,253,0.35)"}/>
-      ))}
-    </svg>
-  );
-}
-
-// ─── Holiday Overlay Art ─────────────────────────────────────────────────────
-
-function ChristmasOverlay() {
-  return (
-    <svg className="absolute inset-0 w-full h-full" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style={{ pointerEvents: "none" }}>
-      {/* Fairy lights string */}
-      <path d="M0 8 Q40 3 80 10 Q120 17 160 8 Q200 -1 240 8 Q280 17 320 8" stroke="rgba(120,80,40,0.5)" strokeWidth="1.5" fill="none"/>
-      {/* Light bulbs */}
-      {[15, 55, 95, 135, 175, 215, 255, 295].map((x, i) => {
-        const y = 8 + Math.sin((x / 320) * Math.PI * 2) * 5;
-        const colors = ["#ef4444", "#22c55e", "#3b82f6", "#eab308", "#f97316", "#a855f7", "#ec4899", "#06b6d4"];
-        return (
-          <g key={i}>
-            <circle cx={x} cy={y + 4} r="5" fill={colors[i % colors.length]} opacity="0.85"
-              style={{ animation: `weatherGlowPulse ${1.5 + i * 0.3}s ease-in-out ${i * 0.2}s infinite`, filter: `drop-shadow(0 0 4px ${colors[i % colors.length]})` }} />
-          </g>
-        );
-      })}
-      {/* Snow on edges */}
-      {[0, 40, 80, 120, 160, 200, 240, 280, 320].map((x, i) => (
-        <ellipse key={i} cx={x} cy={200} rx="25" ry="10" fill="rgba(219,234,254,0.20)" />
-      ))}
-      {/* Cozy warm glow */}
-      <circle cx="160" cy="220" r="120" fill="rgba(251,146,60,0.04)" />
-    </svg>
-  );
-}
-
-function HalloweenOverlay() {
-  return (
-    <svg className="absolute inset-0 w-full h-full" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style={{ pointerEvents: "none" }}>
-      {/* Moon */}
-      <circle cx="270" cy="35" r="28" fill="rgba(253,224,71,0.12)" style={{ animation: "weatherGlowPulse 3s ease-in-out infinite" }}>
-        <animate attributeName="r" values="28;31;28" dur="3s" repeatCount="indefinite" />
-      </circle>
-      <circle cx="270" cy="35" r="20" fill="rgba(253,224,71,0.20)" />
-      {/* Silhouetted bats */}
-      {[
-        { x: 80, y: 40, s: 1.0, delay: "0s" },
-        { x: 180, y: 20, s: 0.7, delay: "0.8s" },
-        { x: 130, y: 60, s: 0.85, delay: "0.4s" },
-      ].map((bat, i) => (
-        <g key={i} style={{ animation: `weatherCloudBob ${3 + i}s ease-in-out ${bat.delay} infinite` }}
-          transform={`translate(${bat.x},${bat.y}) scale(${bat.s})`}>
-          <path d="M0 0 Q-12 -8 -18 -2 Q-12 2 0 0" fill="rgba(30,0,60,0.8)" />
-          <path d="M0 0 Q12 -8 18 -2 Q12 2 0 0" fill="rgba(30,0,60,0.8)" />
-          <ellipse cx="0" cy="1" rx="3" ry="4" fill="rgba(30,0,60,0.9)" />
-        </g>
-      ))}
-      {/* Ground fog / mist */}
-      {[0, 1, 2].map(i => (
-        <ellipse key={i} cx={60 + i * 100} cy="195" rx={90 + i * 10} ry="20"
-          fill={`rgba(120,0,180,0.0${5 + i})`}
-          style={{ animation: `weatherCloudBob ${4 + i}s ease-in-out ${i * 1.5}s infinite` }} />
-      ))}
-      {/* Eerie glow at bottom */}
-      <ellipse cx="160" cy="210" rx="150" ry="40" fill="rgba(249,115,22,0.05)" />
-    </svg>
-  );
-}
-
-function FireworksOverlay() {
-  const bursts = [
-    { cx: 80, cy: 50, color: "#ef4444", delay: "0s" },
-    { cx: 200, cy: 35, color: "#3b82f6", delay: "0.6s" },
-    { cx: 280, cy: 65, color: "#f8fafc", delay: "1.2s" },
-    { cx: 140, cy: 80, color: "#ef4444", delay: "1.8s" },
-  ];
-  return (
-    <svg className="absolute inset-0 w-full h-full" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style={{ pointerEvents: "none" }}>
-      {bursts.map((b, i) => (
-        <g key={i} style={{ animation: `weatherGlowPulse 2.4s ease-in-out ${b.delay} infinite` }}>
-          {Array.from({ length: 12 }, (_, j) => {
-            const angle = (j / 12) * Math.PI * 2;
-            const r = 22;
-            return (
-              <line key={j}
-                x1={b.cx} y1={b.cy}
-                x2={b.cx + Math.cos(angle) * r} y2={b.cy + Math.sin(angle) * r}
-                stroke={b.color} strokeWidth="1.5" strokeLinecap="round" opacity="0.7" />
-            );
-          })}
-          <circle cx={b.cx} cy={b.cy} r="4" fill={b.color} opacity="0.9" />
-        </g>
-      ))}
-      {/* Red white blue glow bands */}
-      <rect x="0" y="170" width="320" height="4" fill="rgba(239,68,68,0.20)" rx="2" />
-      <rect x="0" y="180" width="320" height="4" fill="rgba(248,250,252,0.15)" rx="2" />
-      <rect x="0" y="190" width="320" height="4" fill="rgba(59,130,246,0.20)" rx="2" />
-    </svg>
-  );
-}
-
-function ValentinesOverlay() {
-  return (
-    <svg className="absolute inset-0 w-full h-full" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style={{ pointerEvents: "none" }}>
-      {/* Large glowing heart in background */}
-      <path d="M160 160 C160 160 110 125 105 100 C100 75 120 65 135 80 C142 87 155 98 160 110 C165 98 178 87 185 80 C200 65 220 75 215 100 C210 125 160 160 160 160 Z"
-        fill="rgba(244,63,94,0.08)" style={{ animation: "weatherGlowPulse 3s ease-in-out infinite" }} />
-      {/* Small floating hearts */}
-      {[
-        { x: 40, y: 30 }, { x: 270, y: 55 }, { x: 100, y: 75 }, { x: 230, y: 25 },
-      ].map((h, i) => (
-        <g key={i} style={{ animation: `weatherGlowPulse ${2 + i * 0.5}s ease-in-out ${i * 0.4}s infinite` }}>
-          <path d={`M${h.x} ${h.y + 4} C${h.x} ${h.y + 4} ${h.x - 6} ${h.y} ${h.x - 6} ${h.y - 3} C${h.x - 6} ${h.y - 6} ${h.x - 3} ${h.y - 8} ${h.x} ${h.y - 5} C${h.x + 3} ${h.y - 8} ${h.x + 6} ${h.y - 6} ${h.x + 6} ${h.y - 3} C${h.x + 6} ${h.y} ${h.x} ${h.y + 4} ${h.x} ${h.y + 4}`}
-            fill="rgba(244,63,94,0.35)" />
-        </g>
-      ))}
-      {/* Rose glow at corners */}
-      <circle cx="0" cy="200" r="80" fill="rgba(244,63,94,0.06)" />
-      <circle cx="320" cy="0" r="60" fill="rgba(244,63,94,0.06)" />
-    </svg>
-  );
-}
-
-function NewYearsOverlay() {
-  return (
-    <svg className="absolute inset-0 w-full h-full" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style={{ pointerEvents: "none" }}>
-      {/* Gold shimmer aura */}
-      <circle cx="160" cy="100" r="140" fill="rgba(234,179,8,0.04)" style={{ animation: "weatherGlowPulse 2.5s ease-in-out infinite" }} />
-      {/* Gold star bursts */}
-      {[{ cx: 50, cy: 40 }, { cx: 270, cy: 30 }, { cx: 160, cy: 20 }, { cx: 100, cy: 80 }, { cx: 230, cy: 70 }].map((s, i) => (
-        <g key={i} style={{ animation: `weatherGlowPulse ${1.5 + i * 0.4}s ease-in-out ${i * 0.3}s infinite` }}>
-          {Array.from({ length: 8 }, (_, j) => {
-            const a = (j / 8) * Math.PI * 2;
-            return (
-              <line key={j} x1={s.cx} y1={s.cy}
-                x2={s.cx + Math.cos(a) * 12} y2={s.cy + Math.sin(a) * 12}
-                stroke="rgba(234,179,8,0.6)" strokeWidth="1.5" strokeLinecap="round" />
-            );
-          })}
-          <circle cx={s.cx} cy={s.cy} r="3" fill="rgba(234,179,8,0.9)" />
-        </g>
-      ))}
-      {/* Champagne fizz at bottom */}
-      <path d="M0 185 Q80 178 160 185 Q240 192 320 185 L320 200 L0 200 Z" fill="rgba(234,179,8,0.08)" />
-    </svg>
-  );
-}
-
-function CincoDeMayoOverlay() {
-  // Papel picado banner string + colorful triangle cut-outs
-  const bannerColors = ["#ef4444","#f59e0b","#22c55e","#3b82f6","#a855f7","#ec4899","#ffffff"];
-  return (
-    <svg className="absolute inset-0 w-full h-full" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style={{ pointerEvents: "none" }}>
-      {/* Fiesta string 1 — main banner */}
-      <path d="M0 6 Q40 2 80 8 Q120 14 160 6 Q200 -2 240 6 Q280 14 320 6" stroke="rgba(80,40,0,0.6)" strokeWidth="1.5" fill="none"/>
-      {/* Papel picado flags */}
-      {bannerColors.map((color, i) => {
-        const x = 15 + i * 42;
-        const ys = 6 + Math.sin((x/320)*Math.PI*2)*4;
-        return (
-          <g key={i} style={{ animation: `weatherCloudBob ${2+i*0.3}s ease-in-out ${i*0.2}s infinite` }}>
-            <polygon points={`${x-10} ${ys+2},${x+10} ${ys+2},${x} ${ys+22}`} fill={color} opacity="0.88"/>
-            {/* Cut-out diamond */}
-            <polygon points={`${x-5} ${ys+10},${x} ${ys+6},${x+5} ${ys+10},${x} ${ys+14}`} fill="rgba(0,0,0,0.25)"/>
-            {/* Glow */}
-            <circle cx={x} cy={ys+12} r="8" fill={color} opacity="0.10" style={{ filter: `drop-shadow(0 0 6px ${color})` }}/>
-          </g>
-        );
-      })}
-
-      {/* Fiesta string 2 — lower */}
-      <path d="M0 30 Q50 26 100 32 Q150 38 200 30 Q260 22 320 30" stroke="rgba(80,40,0,0.4)" strokeWidth="1" fill="none"/>
-      {["#fbbf24","#ef4444","#22c55e","#60a5fa","#d946ef"].map((color, i) => {
-        const x = 30 + i * 60;
-        const ys = 30 + Math.sin((x/320)*Math.PI*2)*3;
-        return (
-          <g key={i} style={{ animation: `weatherCloudBob ${2.5+i*0.25}s ease-in-out ${i*0.35}s infinite` }}>
-            <polygon points={`${x-8} ${ys+2},${x+8} ${ys+2},${x} ${ys+18}`} fill={color} opacity="0.82"/>
-            <polygon points={`${x-4} ${ys+9},${x} ${ys+5},${x+4} ${ys+9},${x} ${ys+13}`} fill="rgba(0,0,0,0.2)"/>
-          </g>
-        );
-      })}
-
-      {/* Warm golden glow at bottom */}
-      <ellipse cx="160" cy="210" rx="180" ry="45" fill="rgba(245,158,11,0.08)"/>
-      {/* Mexico flag color bands at base */}
-      <rect x="0" y="188" width="107" height="4" fill="rgba(34,197,94,0.25)" rx="2"/>
-      <rect x="107" y="188" width="106" height="4" fill="rgba(255,255,255,0.20)" rx="2"/>
-      <rect x="213" y="188" width="107" height="4" fill="rgba(220,38,38,0.25)" rx="2"/>
-      {/* Starburst lantern decorations */}
-      {[[50,50],[270,45],[160,35]].map(([cx,cy],i) => (
-        <g key={i} style={{ animation: `weatherGlowPulse ${2+i*0.6}s ease-in-out ${i*0.4}s infinite` }}>
-          {Array.from({length:8},(_,j) => {
-            const a=(j/8)*Math.PI*2;
-            return <line key={j} x1={cx} y1={cy} x2={cx+Math.cos(a)*12} y2={cy+Math.sin(a)*12}
-              stroke={bannerColors[(i+j)%bannerColors.length]} strokeWidth="1.5" strokeLinecap="round" opacity="0.7"/>;
-          })}
-          <circle cx={cx} cy={cy} r="5" fill={bannerColors[i*2%bannerColors.length]} opacity="0.8"/>
-        </g>
-      ))}
-    </svg>
-  );
-}
-
-function ThanksgivingOverlay() {
-  return (
-    <svg className="absolute inset-0 w-full h-full" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style={{ pointerEvents: "none" }}>
-      {/* Harvest moon backdrop */}
-      <circle cx="260" cy="38" r="50" fill="rgba(217,119,6,0.08)" style={{ animation: "weatherSunHalo 5s ease-in-out infinite" }}/>
-      <circle cx="260" cy="38" r="32" fill="rgba(245,158,11,0.15)"/>
-      <circle cx="260" cy="38" r="22" fill="rgba(251,191,36,0.35)"/>
-
-      {/* Cornucopia horn silhouette — right side */}
-      <g opacity="0.28">
-        <path d="M180 120 Q220 100 265 90 Q295 85 310 95 Q295 105 280 110 Q260 115 240 120 Q210 128 180 145 Z"
-          fill="rgba(146,64,14,0.7)" />
-        <path d="M180 120 Q170 130 175 140 Q178 143 180 145 Z" fill="rgba(120,53,15,0.8)"/>
-        {/* Horn spiral */}
-        <path d="M195 130 Q205 120 215 122 Q210 127 200 128 Q195 130 195 130" stroke="rgba(253,186,116,0.5)" strokeWidth="1.5" fill="none" strokeLinecap="round"/>
-      </g>
-
-      {/* Autumn leaf crown — scattered leaves */}
-      {[
-        {x:15,y:22,r:0,color:"rgba(239,68,68,0.50)",size:14},
-        {x:40,y:15,r:20,color:"rgba(249,115,22,0.55)",size:12},
-        {x:70,y:18,r:-15,color:"rgba(202,138,4,0.50)",size:16},
-        {x:100,y:12,r:10,color:"rgba(234,88,12,0.50)",size:13},
-        {x:130,y:20,r:-10,color:"rgba(245,158,11,0.55)",size:11},
-        {x:25,y:32,r:30,color:"rgba(220,38,38,0.45)",size:10},
-        {x:55,y:28,r:-20,color:"rgba(251,191,36,0.45)",size:14},
-        {x:85,y:30,r:15,color:"rgba(239,68,68,0.40)",size:12},
-      ].map(({x,y,r,color,size},i) => (
-        <g key={i} transform={`translate(${x},${y}) rotate(${r})`}
-          style={{ animation: `weatherHarvestFloat ${3+i*0.4}s ease-in-out ${i*0.3}s infinite` }}>
-          {/* Leaf shape */}
-          <path d={`M0 0 Q${size*0.5} ${-size*0.7} ${size} 0 Q${size*0.5} ${size*0.7} 0 0`} fill={color}/>
-          <line x1="0" y1="0" x2={size} y2="0" stroke="rgba(255,255,255,0.3)" strokeWidth="0.8"/>
-        </g>
-      ))}
-
-      {/* Ground fog + warm harvest glow */}
-      {[0,1,2].map(i => (
-        <ellipse key={i} cx={80+i*80} cy={195+i*4} rx={75+i*12} ry={18+i*3}
-          fill={`rgba(217,119,6,0.0${5+i*2})`}
-          style={{ animation: `weatherCloudBob ${5+i*1.5}s ease-in-out ${i}s infinite` }}/>
-      ))}
-      <ellipse cx="160" cy="210" rx="190" ry="40" fill="rgba(180,83,9,0.07)"/>
-    </svg>
-  );
-}
-
-function StPatricksOverlay() {
-  return (
-    <svg className="absolute inset-0 w-full h-full" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style={{ pointerEvents: "none" }}>
-      {/* Rainbow arc */}
-      <g opacity="0.20">
-        <path d="M-10 200 Q80 50 160 40 Q240 50 330 200" stroke="rgba(239,68,68,0.8)" strokeWidth="5" fill="none" strokeLinecap="round"/>
-        <path d="M-10 200 Q80 62 160 52 Q240 62 330 200" stroke="rgba(249,115,22,0.8)" strokeWidth="5" fill="none" strokeLinecap="round"/>
-        <path d="M-10 200 Q80 74 160 64 Q240 74 330 200" stroke="rgba(234,179,8,0.8)" strokeWidth="5" fill="none" strokeLinecap="round"/>
-        <path d="M-10 200 Q80 86 160 76 Q240 86 330 200" stroke="rgba(34,197,94,0.9)" strokeWidth="5" fill="none" strokeLinecap="round"/>
-        <path d="M-10 200 Q80 98 160 88 Q240 98 330 200" stroke="rgba(59,130,246,0.8)" strokeWidth="5" fill="none" strokeLinecap="round"/>
-        <path d="M-10 200 Q80 110 160 100 Q240 110 330 200" stroke="rgba(139,92,246,0.8)" strokeWidth="5" fill="none" strokeLinecap="round"/>
-      </g>
-
-      {/* Pot of gold — bottom right */}
-      <g transform="translate(250,155)" opacity="0.40">
-        <ellipse cx="0" cy="-5" rx="25" ry="8" fill="rgba(234,179,8,0.8)"/>
-        <path d="M-22 0 Q-24 25 0 28 Q24 25 22 0 Z" fill="rgba(120,53,15,0.7)"/>
-        <path d="M-20 2 Q-22 22 0 25 Q22 22 20 2 Z" fill="rgba(146,64,14,0.8)"/>
-        {/* Gold coins peeking */}
-        {[-10,0,10].map((x,i) => (
-          <ellipse key={i} cx={x} cy={-3+i*2} rx="6" ry="4" fill="rgba(251,191,36,0.9)" style={{ animation: `weatherGlowPulse ${1.5+i*0.3}s ease-in-out ${i*0.2}s infinite` }}/>
-        ))}
-      </g>
-
-      {/* Clover field at base */}
-      {[15,40,65,90,115,140,165,190,215,240,265,290].map((x,i) => (
-        <g key={i} transform={`translate(${x},${182+(i%3)*5})`} opacity={0.35+i%3*0.08}
-          style={{ animation: `weatherCloudBob ${3+i*0.2}s ease-in-out ${i*0.15}s infinite` }}>
-          {/* 3-leaf clover */}
-          <circle cx="0" cy="-6" r="4.5" fill="rgba(34,197,94,0.8)"/>
-          <circle cx="-5" cy="0" r="4.5" fill="rgba(22,163,74,0.8)"/>
-          <circle cx="5" cy="0" r="4.5" fill="rgba(21,128,61,0.8)"/>
-          {i%4===0 && <circle cx="0" cy="6" r="4.5" fill="rgba(34,197,94,0.75)"/>}
-          <line x1="0" y1="0" x2="0" y2="10" stroke="rgba(21,128,61,0.7)" strokeWidth="1.5" strokeLinecap="round"/>
-        </g>
-      ))}
-
-      {/* Emerald green glow */}
-      <ellipse cx="160" cy="210" rx="200" ry="45" fill="rgba(34,197,94,0.07)"/>
-      <circle cx="160" cy="100" r="120" fill="rgba(34,197,94,0.03)" style={{ animation: "weatherSunHalo 6s ease-in-out infinite" }}/>
-    </svg>
-  );
-}
-
-function DiaDeLosMuertosOverlay() {
-  const flags = [
-    { color: "#d946ef", label: "💀" },
-    { color: "#ea580c", label: "🌼" },
-    { color: "#8b5cf6", label: "💀" },
-    { color: "#ec4899", label: "🌼" },
-    { color: "#fbbf24", label: "💀" },
-    { color: "#a855f7", label: "🌼" },
-    { color: "#f97316", label: "💀" }
-  ];
-  return (
-    <svg className="absolute inset-0 w-full h-full" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style={{ pointerEvents: "none" }}>
-      {/* Papel Picado string */}
-      <path d="M-10 10 Q40 2 80 12 Q120 22 160 12 Q200 2 240 12 Q280 22 330 10" stroke="rgba(255,255,255,0.25)" strokeWidth="1" fill="none"/>
-      
-      {/* Hanging papel picado flags */}
-      {flags.map((f, i) => {
-        const x = 20 + i * 40;
-        const y = 10 + Math.sin((x / 320) * Math.PI * 2) * 5;
-        return (
-          <g key={i} transform={`translate(${x}, ${y})`} style={{ animation: `weatherCloudBob ${2.5 + i * 0.3}s ease-in-out ${i * 0.1}s infinite` }}>
-            <path d="M-15 0 L15 0 L15 22 L5 22 L0 16 L-5 22 L-15 22 Z" fill={f.color} opacity="0.82" />
-            {/* Traditional cut-out detail */}
-            <circle cx="0" cy="8" r="4.5" fill="rgba(0,0,0,0.3)" />
-            <text x="0" y="11" fontSize="8" textAnchor="middle" fill="rgba(255,255,255,0.85)" style={{ userSelect: "none" }}>{f.label}</text>
-            {/* Tiny glow */}
-            <circle cx="0" cy="8" r="10" fill={f.color} opacity="0.08" style={{ filter: `drop-shadow(0 0 4px ${f.color})` }} />
-          </g>
-        );
-      })}
-
-      {/* Ofrenda Altar Arch - Silhouette in gold/marigold */}
-      <g opacity="0.25">
-        {/* Arch */}
-        <path d="M40 200 Q40 100 160 100 Q280 100 280 200" stroke="#f59e0b" strokeWidth="8" fill="none" strokeLinecap="round"/>
-        {/* Flower circles along the arch */}
-        {[0, 15, 30, 45, 60, 75, 90, 105, 120, 135, 150, 165, 180].map((angle, i) => {
-          const rad = (angle * Math.PI) / 180;
-          const cx = 160 + Math.cos(rad) * 120;
-          const cy = 200 - Math.sin(rad) * 100;
-          return <circle key={i} cx={cx} cy={cy} r="4.5" fill="#f97316" />;
-        })}
-      </g>
-
-      {/* Altar steps at base */}
-      <path d="M20 200 L300 200 L280 188 L40 188 Z" fill="rgba(88,12,47,0.4)" opacity="0.7"/>
-      <path d="M50 188 L270 188 L255 178 L65 178 Z" fill="rgba(58,0,63,0.5)" opacity="0.8"/>
-
-      {/* Altar decorations: candles + cempasúchil flower heads */}
-      {[[75, 184], [105, 174], [135, 174], [160, 172], [185, 174], [215, 174], [245, 184]].map(([cx, cy], i) => (
-        <g key={i} transform={`translate(${cx}, ${cy})`}>
-          {/* Candle body */}
-          <rect x="-2" y="2" width="4" height="12" fill="#fff" rx="1"/>
-          {/* Flame with pulse animation */}
-          <path d="M-1.5 2 Q0 -6 1.5 2 Z" fill="#f59e0b" style={{ animation: `weatherGlowPulse ${1 + i * 0.2}s ease-in-out ${i * 0.15}s infinite` }}/>
-          <circle cx="0" cy="-2" r="5" fill="#f97316" opacity="0.3" style={{ animation: `weatherGlowPulse ${1 + i * 0.2}s ease-in-out ${i * 0.15}s infinite` }}/>
-        </g>
-      ))}
-
-      {/* Marigold flowers piled at base */}
-      {[25, 45, 60, 90, 120, 150, 170, 200, 230, 260, 280, 295].map((x, i) => (
-        <g key={i} transform={`translate(${x}, ${192 + (i % 3) * 3})`} opacity="0.75" style={{ animation: `weatherCloudBob ${3.5 + i * 0.15}s ease-in-out ${i * 0.2}s infinite` }}>
-          <circle cx="0" cy="0" r="5.5" fill="#f97316"/>
-          <circle cx="0" cy="0" r="3.5" fill="#fbbf24"/>
-          <circle cx="0" cy="0" r="1.5" fill="#ef4444"/>
-        </g>
-      ))}
-
-      {/* Warm golden light projection */}
-      <ellipse cx="160" cy="195" rx="150" ry="35" fill="rgba(245,158,11,0.06)" />
-      <circle cx="160" cy="150" r="80" fill="rgba(236,72,153,0.02)" style={{ animation: "weatherSunHalo 8s ease-in-out infinite" }} />
-    </svg>
-  );
-}
-
-function MexicanIndependenceOverlay() {
-  return (
-    <svg className="absolute inset-0 w-full h-full" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style={{ pointerEvents: "none" }}>
-      {/* Independence Bell (Campana de Dolores) at top center */}
-      <g transform="translate(160, 32)" opacity="0.75">
-        {/* Support beam */}
-        <rect x="-24" y="-12" width="48" height="4" fill="rgba(120,53,15,0.8)" rx="1"/>
-        <rect x="-18" y="-8" width="36" height="2" fill="rgba(78,53,15,0.9)" />
-        {/* Hanger */}
-        <path d="M-4 -8 L-4 -2 L4 -2 L4 -8 Z" fill="rgba(156,163,175,0.9)" />
-        {/* Bell curve */}
-        <path d="M-12 12 Q-14 -2 0 -2 Q14 -2 12 12 Q16 16 16 19 L-16 19 Q-16 16 -12 12 Z" fill="rgba(217,119,6,0.9)" />
-        <path d="M-10 12 Q-12 0 0 0 Q12 0 10 12 Q13 14 13 17 L-13 17 Q-13 14 -10 12 Z" fill="rgba(251,191,36,0.95)" />
-        {/* Clapper (bell tongue) */}
-        <circle cx="0" cy="22" r="3" fill="rgba(120,53,15,0.9)" style={{ animation: "weatherCloudBob 1.5s ease-in-out infinite", transformOrigin: "0px 10px" }}/>
-        {/* Sound waves glowing */}
-        <circle cx="0" cy="14" r="28" fill="rgba(251,191,36,0.05)" style={{ animation: "weatherSunHalo 3s ease-in-out infinite" }}/>
-      </g>
-
-      {/* Elegant tricolor flag-drape banners at top corners */}
-      <g opacity="0.35">
-        {/* Left corner banner */}
-        <path d="M0 0 L60 0 C45 20 25 35 0 40 Z" fill="rgba(22,163,74,0.7)" />
-        <path d="M0 0 L45 0 C32 15 18 25 0 30 Z" fill="rgba(255,255,255,0.6)" />
-        <path d="M0 0 L30 0 C20 10 10 18 0 20 Z" fill="rgba(220,38,38,0.7)" />
-        
-        {/* Right corner banner */}
-        <path d="M320 0 L260 0 C275 20 295 35 320 40 Z" fill="rgba(220,38,38,0.7)" />
-        <path d="M320 0 L275 0 C288 15 302 25 320 30 Z" fill="rgba(255,255,255,0.6)" />
-        <path d="M320 0 L290 0 C300 10 310 18 320 20 Z" fill="rgba(22,163,74,0.7)" />
-      </g>
-
-      {/* Angel of Independence Silhouette — Bottom center rising elegantly */}
-      <g transform="translate(160, 200)" opacity="0.22">
-        {/* Column pedestal */}
-        <rect x="-8" y="-45" width="16" height="45" fill="rgba(255,255,255,0.6)" rx="1"/>
-        <path d="-14 -45 L14 -45 L8 -55 L-8 -55 Z" fill="rgba(255,255,255,0.5)"/>
-        <rect x="-16" y="-3" width="32" height="3" fill="rgba(255,255,255,0.7)" rx="1"/>
-        
-        {/* Winged Angel Statue Silhouette */}
-        <g transform="translate(0, -66)">
-          {/* Body */}
-          <ellipse cx="0" cy="3" rx="3.5" ry="7" fill="rgba(251,191,36,0.8)"/>
-          <circle cx="0" cy="-6" r="2.8" fill="rgba(251,191,36,0.8)"/>
-          {/* Wings */}
-          <path d="M0 0 Q-15 -18 -18 -8 Q-12 -2 0 4 Z" fill="rgba(251,191,36,0.7)"/>
-          <path d="M0 0 Q15 -18 18 -8 Q12 -2 0 4 Z" fill="rgba(251,191,36,0.7)"/>
-          {/* Raised arms with wreath */}
-          <path d="M0 -3 Q-6 -10 -9 -8" stroke="rgba(251,191,36,0.8)" strokeWidth="1.8" fill="none" strokeLinecap="round"/>
-          <path d="M0 -3 Q6 -10 9 -8" stroke="rgba(251,191,36,0.8)" strokeWidth="1.8" fill="none" strokeLinecap="round"/>
-          <circle cx="-10" cy="-9" r="2" fill="none" stroke="rgba(34,197,94,0.8)" strokeWidth="1"/>
-        </g>
-      </g>
-
-      {/* Tricolor flag base line highlight */}
-      <rect x="0" y="194" width="107" height="6" fill="rgba(34,197,94,0.3)" rx="2"/>
-      <rect x="107" y="194" width="106" height="6" fill="rgba(255,255,255,0.22)" rx="2"/>
-      <rect x="213" y="194" width="107" height="6" fill="rgba(220,38,38,0.3)" rx="2"/>
-
-      {/* Festive sparkles glow */}
-      <circle cx="160" cy="35" r="50" fill="rgba(34,197,94,0.04)" style={{ animation: "weatherSunHalo 4s ease-in-out infinite" }}/>
-      <circle cx="160" cy="130" r="90" fill="rgba(220,38,38,0.03)" style={{ animation: "weatherSunHalo 6s ease-in-out 1s infinite" }}/>
-    </svg>
-  );
-}
-
-function VirginGuadalupeOverlay() {
-  return (
-    <svg className="absolute inset-0 w-full h-full" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style={{ pointerEvents: "none" }}>
-      {/* Holy Ray Sunburst (Resplandor) in center background */}
-      <g transform="translate(160, 95)" opacity="0.18">
-        <circle cx="0" cy="0" r="50" fill="rgba(253,224,71,0.25)" style={{ animation: "weatherSunHalo 5s ease-in-out infinite" }}/>
-        {Array.from({ length: 16 }, (_, i) => {
-          const a = (i / 16) * Math.PI * 2;
-          const isLong = i % 2 === 0;
-          const r1 = 15;
-          const r2 = isLong ? 68 : 45;
-          return (
-            <line key={i} x1={Math.cos(a) * r1} y1={Math.sin(a) * r1} x2={Math.cos(a) * r2} y2={Math.sin(a) * r2}
-              stroke="rgba(253,224,71,0.7)" strokeWidth={isLong ? 2.5 : 1.5} strokeLinecap="round"
-              style={{ animation: `weatherRayPulse ${2.8 + (i % 3) * 0.4}s ease-in-out ${(i * 0.15).toFixed(2)}s infinite` }} />
-          );
-        })}
-      </g>
-
-      {/* Starry Constellation Backdrop (Mantle design stars) */}
-      <g opacity="0.30">
-        {[
-          [80, 50], [95, 38], [115, 42], [105, 65],
-          [240, 50], [225, 38], [205, 42], [215, 65],
-          [60, 90], [75, 110], [100, 100], [90, 125],
-          [260, 90], [245, 110], [220, 100], [230, 125],
-          [130, 70], [190, 70], [125, 120], [195, 120]
-        ].map(([cx, cy], i) => (
-          <g key={i} transform={`translate(${cx}, ${cy})`} style={{ animation: `weatherGlowPulse ${2 + i * 0.25}s ease-in-out ${i * 0.1}s infinite` }}>
-            {/* 8-pointed gold stars */}
-            <path d="M-3 0 L3 0 M0 -3 L0 3 M-2 -2 L2 2 M-2 2 L2 -2" stroke="#fde047" strokeWidth="1" />
-            <circle cx="0" cy="0" r="1" fill="#fff" />
-          </g>
-        ))}
-      </g>
-
-      {/* Castile roses blooming at base */}
-      {[
-        { x: 35, y: 188, size: 8, color: "#ef4444" },
-        { x: 65, y: 184, size: 9, color: "#ec4899" },
-        { x: 95, y: 188, size: 7.5, color: "#ef4444" },
-        { x: 130, y: 182, size: 10, color: "#f43f5e" },
-        { x: 160, y: 185, size: 11, color: "#ef4444" },
-        { x: 190, y: 182, size: 10, color: "#f43f5e" },
-        { x: 225, y: 188, size: 7.5, color: "#ef4444" },
-        { x: 255, y: 184, size: 9, color: "#ec4899" },
-        { x: 285, y: 188, size: 8, color: "#ef4444" },
-        // Front layer
-        { x: 50, y: 192, size: 7, color: "#ec4899" },
-        { x: 110, y: 191, size: 8.5, color: "#f43f5e" },
-        { x: 145, y: 190, size: 9.5, color: "#ef4444" },
-        { x: 175, y: 190, size: 9.5, color: "#ef4444" },
-        { x: 210, y: 191, size: 8.5, color: "#f43f5e" },
-        { x: 270, y: 192, size: 7, color: "#ec4899" }
-      ].map((rose, i) => (
-        <g key={i} transform={`translate(${rose.x}, ${rose.y})`} opacity="0.8" style={{ animation: `weatherCloudBob ${3 + i * 0.2}s ease-in-out ${i * 0.15}s infinite` }}>
-          {/* Castile Rose Vector */}
-          <circle cx="0" cy="0" r={rose.size} fill={rose.color}/>
-          <circle cx="-3" cy="-1" r={rose.size * 0.7} fill="#f43f5e" opacity="0.9"/>
-          <circle cx="3" cy="-1" r={rose.size * 0.7} fill="#ec4899" opacity="0.9"/>
-          <circle cx="0" cy="3" r={rose.size * 0.7} fill="#ef4444" opacity="0.9"/>
-          <circle cx="0" cy="0" r={rose.size * 0.35} fill="#fb7185"/>
-          {/* Leaves */}
-          <path d={`M${-rose.size} 2 Q${-rose.size - 4} 6 ${-rose.size} 8 Q${-rose.size + 4} 6 ${-rose.size} 2`} fill="rgba(13,148,136,0.6)" />
-          <path d={`M${rose.size} 2 Q${rose.size + 4} 6 ${rose.size} 8 Q${rose.size - 4} 6 ${rose.size} 2`} fill="rgba(13,148,136,0.6)" />
-        </g>
-      ))}
-
-      {/* Subtle crescent moon silhouette at bottom center */}
-      <g transform="translate(160, 168)" opacity="0.22">
-        <circle cx="0" cy="0" r="14" fill="rgba(255,255,255,0.06)" style={{ animation: "weatherGlowPulse 4s ease-in-out infinite" }} />
-        <path d="M-10 -4 A10 10 0 1 0 10 4 A12 12 0 0 1 -10 -4 Z" fill="rgba(156,163,175,0.95)" />
-      </g>
-
-      {/* Heavenly turquoise and gold base glow */}
-      <ellipse cx="160" cy="205" rx="160" ry="32" fill="rgba(45,212,191,0.08)"/>
-      <ellipse cx="160" cy="210" rx="100" ry="20" fill="rgba(253,224,71,0.05)"/>
-    </svg>
-  );
-}
-
-// ─── Particle System ─────────────────────────────────────────────────────────
-
-type ParticleKind = "blossom" | "leaf" | "firefly" | "snowflake" | "christmas-snow" | "bat" | "spark" | "heart" | "confetti" | "harvest" | "shamrock" | "marigold" | "tricolor-sparks" | "holy-roses" | "none";
-
-
-function WeatherParticles({ type, tod }: { type: ParticleKind; tod: TimeOfDayFlag }) {
-  const [particles, setParticles] = useState<Particle[]>([]);
-
+function useMeasureWidth<T extends HTMLElement>() {
+  const ref = useRef<T | null>(null);
+  const [width, setWidth] = useState(0);
   useEffect(() => {
-    if (type === "none") return;
+    const el = ref.current;
+    if (!el) return;
+    setWidth(el.getBoundingClientRect().width);
+    const ro = new ResizeObserver((entries) => {
+      setWidth(entries[0]?.contentRect.width ?? 0);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, width] as const;
+}
 
-    const counts: Record<ParticleKind, number> = {
-      blossom: 22,
-      leaf: 20,
-      firefly: 16,
-      snowflake: 26,
-      "christmas-snow": 24,
-      bat: 6,
-      spark: 35,
-      heart: 14,
-      confetti: 28,
-      harvest: 10,
-      shamrock: 18,
-      marigold: 20,
-      "tricolor-sparks": 32,
-      "holy-roses": 18,
-      none: 0,
+function useAnimatedNumber(target: number, duration = 550): number {
+  const [display, setDisplay] = useState(target);
+  const prevRef = useRef(target);
+  useEffect(() => {
+    const from = prevRef.current;
+    if (from === target) { setDisplay(target); return; }
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      prevRef.current = target;
+      setDisplay(target);
+      return;
+    }
+    let raf = 0;
+    const t0 = performance.now();
+    const step = (t: number) => {
+      const p = Math.min(1, (t - t0) / duration);
+      const eased = 1 - Math.pow(1 - p, 3);
+      setDisplay(Math.round(from + (target - from) * eased));
+      if (p < 1) raf = requestAnimationFrame(step);
+      else prevRef.current = target;
     };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [target, duration]);
+  return display;
+}
 
-    setParticles(
-      Array.from({ length: counts[type] || 12 }, (_, i) => ({
-        id: i,
-        x: Math.random() * 100,
-        y: Math.random() * 100,
-        delay: `${(Math.random() * 4).toFixed(2)}s`,
-        duration: `${(2 + Math.random() * 3.5).toFixed(2)}s`,
-        size: type === "snowflake" || type === "christmas-snow" ? 3 + Math.random() * 5
-            : type === "blossom" ? 5 + Math.random() * 7
-            : type === "leaf" ? 6 + Math.random() * 8
-            : type === "heart" ? 6 + Math.random() * 6
-            : type === "spark" || type === "tricolor-sparks" ? 2 + Math.random() * 3
-            : type === "firefly" ? 3 + Math.random() * 3
-            : type === "marigold" || type === "holy-roses" ? 8 + Math.random() * 8
-            : 4 + Math.random() * 4,
-        rotate: Math.random() * 360,
-        opacity: 0.6 + Math.random() * 0.4,
-        amplitude: 3 + Math.random() * 12,
-      }))
-    );
-  }, [type]);
+// ─── Day strip — rest-of-day temperature curve with rain ticks + press-to-preview ───
 
-  if (type === "none" || particles.length === 0) return null;
+function DayStrip({ hours, conv, skin, accent, previewIdx, onPreview }: {
+  hours: HourPoint[];
+  conv: (f: number) => number;
+  skin: ReturnType<typeof getWeatherSkin>;
+  accent: string;
+  previewIdx: number | null;
+  onPreview: (idx: number | null) => void;
+}) {
+  const [wrapRef, width] = useMeasureWidth<HTMLDivElement>();
+  const draggingRef = useRef(false);
+
+  if (hours.length < 2) return null;
+
+  const H = 64;
+  const padL = 10;
+  const padR = 10;
+  const curveTop = 14;
+  const curveBottom = 38;
+  const w = Math.max(width, 120);
+  const step = (w - padL - padR) / (hours.length - 1);
+  const temps = hours.map((h) => h.temp);
+  const tMin = Math.min(...temps);
+  const tMax = Math.max(...temps);
+  const span = Math.max(tMax - tMin, 1);
+  const x = (i: number) => padL + i * step;
+  const y = (t: number) => curveBottom - ((t - tMin) / span) * (curveBottom - curveTop);
+
+  let d = `M ${x(0)} ${y(temps[0])}`;
+  for (let i = 1; i < hours.length; i++) {
+    const mx = (x(i - 1) + x(i)) / 2;
+    d += ` Q ${x(i - 1)} ${y(temps[i - 1])} ${mx} ${(y(temps[i - 1]) + y(temps[i])) / 2}`;
+  }
+  d += ` T ${x(hours.length - 1)} ${y(temps[hours.length - 1])}`;
+
+  const idxFromClientX = (clientX: number) => {
+    const el = wrapRef.current;
+    if (!el) return 0;
+    const rect = el.getBoundingClientRect();
+    const t = (clientX - rect.left - padL) / Math.max(rect.width - padL - padR, 1);
+    return Math.max(0, Math.min(hours.length - 1, Math.round(t * (hours.length - 1))));
+  };
+
+  const pv = previewIdx != null ? hours[previewIdx] : null;
+  const labelIdx = pickLabelIndices(hours, x, 44);
 
   return (
-    <div className="absolute inset-0 overflow-hidden rounded-2xl pointer-events-none z-10" aria-hidden="true">
-      {particles.map((p) => {
-        // ── Blossom petals ──
-        if (type === "blossom") {
-          const colors = ["#fbcfe8", "#f9a8d4", "#fce7f3", "#fdf2f8", "#fda4af"];
-          const color = colors[p.id % colors.length];
-          return (
-            <div key={p.id} className="absolute top-0"
-              style={{
-                left: `${p.x}%`,
-                width: `${p.size}px`,
-                height: `${p.size * 1.3}px`,
-                background: color,
-                borderRadius: "60% 10% 60% 10%",
-                opacity: p.opacity,
-                animation: `weatherBlossomFall ${p.duration} ease-in-out ${p.delay} infinite`,
-                transform: `rotate(${p.rotate}deg)`,
-                boxShadow: `0 0 ${p.size}px ${color}55`,
-              }} />
-          );
-        }
-
-        // ── Autumn leaves ──
-        if (type === "leaf") {
-          const colors = ["#fbbf24", "#f97316", "#ef4444", "#dc2626", "#b45309", "#d97706", "#92400e"];
-          const color = colors[p.id % colors.length];
-          return (
-            <div key={p.id} className="absolute top-0"
-              style={{
-                left: `${p.x}%`,
-                width: `${p.size}px`,
-                height: `${p.size}px`,
-                background: color,
-                borderRadius: "50% 0% 50% 0%",
-                opacity: p.opacity,
-                animation: `weatherLeafFall ${p.duration} ease-in-out ${p.delay} infinite`,
-                transform: `rotate(${p.rotate}deg)`,
-              }} />
-          );
-        }
-
-        // ── Fireflies ──
-        if (type === "firefly") {
-          return (
-            <div key={p.id} className="absolute rounded-full"
-              style={{
-                left: `${p.x}%`,
-                top: `${30 + (p.y || 0) * 0.5}%`,
-                width: `${p.size}px`,
-                height: `${p.size}px`,
-                background: "radial-gradient(circle, #fef08a, #fbbf24)",
-                boxShadow: `0 0 ${p.size * 2}px ${p.size}px rgba(251,191,36,0.4)`,
-                animation: `weatherFirefly ${p.duration} ease-in-out ${p.delay} infinite`,
-              }} />
-          );
-        }
-
-        // ── Snowflakes ──
-        if (type === "snowflake" || type === "christmas-snow") {
-          const color = type === "christmas-snow" ? "rgba(219,234,254,0.90)" : "rgba(186,230,253,0.95)";
-          return (
-            <div key={p.id} className="absolute top-0 flex items-center justify-center"
-              style={{
-                left: `${p.x}%`,
-                width: `${p.size}px`,
-                height: `${p.size}px`,
-                animation: `weatherParticleSnow ${p.duration} ease-in-out ${p.delay} infinite`,
-              }}>
-              <svg viewBox="0 0 20 20" width={p.size} height={p.size}>
-                {/* Hexagonal snowflake */}
-                {[0, 60, 120, 180, 240, 300].map((a, j) => (
-                  <g key={j} transform={`rotate(${a} 10 10)`}>
-                    <line x1="10" y1="2" x2="10" y2="18" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
-                    <line x1="7" y1="5" x2="13" y2="5" stroke={color} strokeWidth="1" strokeLinecap="round" />
-                    <line x1="7" y1="15" x2="13" y2="15" stroke={color} strokeWidth="1" strokeLinecap="round" />
-                  </g>
-                ))}
-              </svg>
-            </div>
-          );
-        }
-
-        // ── Sparks (fireworks/new year) ──
-        if (type === "spark") {
-          const colors = ["#ef4444", "#3b82f6", "#f8fafc", "#eab308", "#f97316", "#a855f7"];
-          const color = colors[p.id % colors.length];
-          return (
-            <div key={p.id} className="absolute rounded-full"
-              style={{
-                left: `${p.x}%`,
-                top: `${p.y}%`,
-                width: `${p.size}px`,
-                height: `${p.size}px`,
-                background: color,
-                boxShadow: `0 0 ${p.size * 2}px ${p.size}px ${color}66`,
-                animation: `weatherSparkle ${p.duration} ease-out ${p.delay} infinite`,
-              }} />
-          );
-        }
-
-        // ── Hearts ──
-        if (type === "heart") {
-          return (
-            <div key={p.id} className="absolute top-0"
-              style={{
-                left: `${p.x}%`,
-                animation: `weatherBlossomFall ${p.duration} ease-in-out ${p.delay} infinite`,
-                fontSize: `${p.size}px`,
-                opacity: p.opacity,
-              }}>❤️</div>
-          );
-        }
-
-        // ── Confetti (Cinco de Mayo / party) ──
-        if (type === "confetti") {
-          const confettiColors = ["#ef4444", "#22c55e", "#3b82f6", "#f59e0b", "#a855f7", "#ec4899", "#ffffff"];
-          const color = confettiColors[p.id % confettiColors.length];
-          const isRect = p.id % 3 !== 0;
-          return (
-            <div key={p.id} className="absolute top-0"
-              style={{
-                left: `${p.x}%`,
-                width: isRect ? `${p.size * 0.5}px` : `${p.size * 0.7}px`,
-                height: isRect ? `${p.size * 1.2}px` : `${p.size * 0.7}px`,
-                background: color,
-                borderRadius: isRect ? "1px" : "50%",
-                opacity: p.opacity,
-                animation: `weatherConfettiFall ${p.duration} ease-in ${p.delay} infinite`,
-                boxShadow: `0 0 ${p.size}px ${color}55`,
-              }} />
-          );
-        }
-
-        // ── Harvest leaves (Thanksgiving) ──
-        if (type === "harvest") {
-          const harvestEmojis = ["🍂", "🍁", "🌽", "🎃", "🍄"];
-          const emoji = harvestEmojis[p.id % harvestEmojis.length];
-          return (
-            <div key={p.id} className="absolute"
-              style={{
-                left: `${p.x}%`,
-                top: `${20 + (p.y || 0) * 0.6}%`,
-                fontSize: `${p.size + 4}px`,
-                opacity: p.opacity,
-                animation: `weatherHarvestFloat ${p.duration} ease-in-out ${p.delay} infinite`,
-              }}>{emoji}</div>
-          );
-        }
-
-        // ── Shamrocks (St. Patrick's) ──
-        if (type === "shamrock") {
-          const stEmojis = ["🍀", "☘️", "🌈", "💚"];
-          const emoji = stEmojis[p.id % stEmojis.length];
-          return (
-            <div key={p.id} className="absolute top-0"
-              style={{
-                left: `${p.x}%`,
-                fontSize: `${p.size + 2}px`,
-                opacity: p.opacity,
-                animation: `weatherShamrockFloat ${p.duration} ease-in-out ${p.delay} infinite`,
-              }}>{emoji}</div>
-          );
-        }
-
-        // ── Marigolds, Sugar Skulls & Candles (Día de los Muertos) ──
-        if (type === "marigold") {
-          const muertosEmojis = ["🌼", "💀", "🕯️", "🏵️", "🍂", "💀"];
-          const emoji = muertosEmojis[p.id % muertosEmojis.length];
-          return (
-            <div key={p.id} className="absolute"
-              style={{
-                left: `${p.x}%`,
-                top: `${(p.y || 0) * 0.9}%`,
-                fontSize: `${p.size + 3}px`,
-                opacity: p.opacity,
-                animation: `weatherHarvestFloat ${p.duration} ease-in-out ${p.delay} infinite`,
-                filter: emoji === "🕯️" ? "drop-shadow(0 0 6px rgba(251,191,36,0.8))" : "none",
-              }}>{emoji}</div>
-          );
-        }
-
-        // ── Tricolor Sparks & Independence Bells (Mexican Independence) ──
-        if (type === "tricolor-sparks") {
-          const flagColors = ["#22c55e", "#ffffff", "#ef4444"];
-          const color = flagColors[p.id % flagColors.length];
-          const isBell = p.id % 6 === 0;
-          return isBell ? (
-            <div key={p.id} className="absolute top-0"
-              style={{
-                left: `${p.x}%`,
-                fontSize: `${p.size + 4}px`,
-                opacity: p.opacity,
-                animation: `weatherConfettiFall ${p.duration} ease-in-out ${p.delay} infinite`,
-              }}>🔔</div>
-          ) : (
-            <div key={p.id} className="absolute rounded-full"
-              style={{
-                left: `${p.x}%`,
-                top: `${p.y}%`,
-                width: `${p.size}px`,
-                height: `${p.size}px`,
-                background: color,
-                boxShadow: `0 0 ${p.size * 2}px ${p.size}px ${color}55`,
-                animation: `weatherSparkle ${p.duration} ease-out ${p.delay} infinite`,
-              }} />
-          );
-        }
-
-        // ── Castile Roses & Heavenly Stars (Virgin of Guadalupe) ──
-        if (type === "holy-roses") {
-          const isStar = p.id % 2 === 0;
-          return isStar ? (
-            <div key={p.id} className="absolute"
-              style={{
-                left: `${p.x}%`,
-                top: `${p.y}%`,
-                fontSize: `${p.size + 1}px`,
-                opacity: p.opacity,
-                animation: `weatherSparkle ${p.duration} ease-in-out ${p.delay} infinite`,
-                filter: "drop-shadow(0 0 4px rgba(253,224,71,0.8))",
-              }}>⭐</div>
-          ) : (
-            <div key={p.id} className="absolute top-0"
-              style={{
-                left: `${p.x}%`,
-                fontSize: `${p.size + 4}px`,
-                opacity: p.opacity,
-                animation: `weatherBlossomFall ${p.duration} ease-in-out ${p.delay} infinite`,
-              }}>🌹</div>
-          );
-        }
-
-        return null;
-      })}
+    <div
+      ref={wrapRef}
+      role="slider"
+      tabIndex={0}
+      aria-label="Preview the rest of the day"
+      aria-valuemin={0}
+      aria-valuemax={hours.length - 1}
+      aria-valuenow={previewIdx ?? 0}
+      aria-valuetext={pv ? `${formatHourLabel(pv.time)}, ${conv(pv.temp)} degrees, ${pv.precip}% chance of precipitation` : "Now"}
+      className="relative shrink-0 cursor-pointer select-none outline-none rounded-xl focus-visible:ring-2 focus-visible:ring-offset-0"
+      style={{ height: H, touchAction: "none", ["--tw-ring-color" as string]: accent }}
+      onPointerDown={(e) => {
+        draggingRef.current = true;
+        (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+        onPreview(idxFromClientX(e.clientX));
+      }}
+      onPointerMove={(e) => {
+        if (draggingRef.current) onPreview(idxFromClientX(e.clientX));
+      }}
+      onPointerUp={() => { draggingRef.current = false; onPreview(null); }}
+      onPointerCancel={() => { draggingRef.current = false; onPreview(null); }}
+      onKeyDown={(e) => {
+        if (e.key === "ArrowRight") { e.preventDefault(); onPreview(Math.min(hours.length - 1, (previewIdx ?? 0) + 1)); }
+        else if (e.key === "ArrowLeft") { e.preventDefault(); onPreview(Math.max(0, (previewIdx ?? 0) - 1)); }
+        else if (e.key === "Escape" || e.key === "Home") { e.preventDefault(); onPreview(null); }
+      }}
+      onBlur={() => onPreview(null)}
+    >
+      {width > 0 && (
+        <svg width={w} height={H} className="block" aria-hidden="true">
+          <line x1={x(0)} y1={curveTop - 4} x2={x(0)} y2={52} stroke={accent} strokeWidth={1.25} opacity={0.55} />
+          {hours.map((h, i) => (
+            h.precip >= 40 ? (
+              <rect
+                key={`r${i}`}
+                x={x(i) - 1.5}
+                y={44}
+                width={3}
+                height={7}
+                rx={1.5}
+                fill={accent}
+                opacity={Math.min(0.4 + h.precip / 140, 1)}
+              />
+            ) : null
+          ))}
+          <path d={d} fill="none" stroke={accent} strokeWidth={2.25} strokeLinecap="round" opacity={0.9} />
+          <circle cx={x(0)} cy={y(temps[0])} r={3.5} fill={accent} />
+          {labelIdx.map((i) => (
+            <text
+              key={`t${i}`}
+              x={x(i)}
+              y={60}
+              textAnchor={i === 0 ? "start" : i === hours.length - 1 ? "end" : "middle"}
+              fontSize={8.5}
+              fontWeight={700}
+              letterSpacing={0.4}
+              fill={i === 0 ? accent : skin.inkSoft}
+            >
+              {i === 0 ? "NOW" : formatHourTick(hours[i].time)}
+            </text>
+          ))}
+          {previewIdx != null && pv && (
+            <g style={{ animation: "wxThumbIn 0.22s var(--ease-settle, ease-out) both" }}>
+              <circle cx={x(previewIdx)} cy={y(pv.temp)} r={5} fill={accent} stroke={skin.night ? "#0A0A0A" : "#FFFFFF"} strokeWidth={2} />
+              <rect x={x(previewIdx) - 17} y={y(pv.temp) - 26} width={34} height={16} rx={8} fill={skin.night ? "rgba(255,255,255,0.14)" : "rgba(0,0,0,0.10)"} />
+              <text x={x(previewIdx)} y={y(pv.temp) - 14.5} textAnchor="middle" fontSize={9.5} fontWeight={800} fill={skin.ink}>
+                {conv(pv.temp)}°
+              </text>
+            </g>
+          )}
+        </svg>
+      )}
     </div>
   );
 }
 
-// ─── Stat Pill ───────────────────────────────────────────────────────────────
+// ─── Modal pieces ───────────────────────────────────────────────────────────
 
-function StatPill({ icon, label, value, delay, accentColor }: { icon: string; label: string; value: string; delay: string; accentColor: string }) {
+function LeaderRow({ label, value, hidden }: { label: string; value: string; hidden?: boolean }) {
+  if (hidden) return null;
   return (
-    <div className="flex flex-col items-center gap-1 py-2.5 px-1 rounded-2xl"
-      style={{ background: "rgba(255,255,255,0.06)", backdropFilter: "blur(8px)", animation: `weatherForecastIn 0.35s ease-out ${delay} both` }}>
-      <span className="text-lg leading-none">{icon}</span>
-      <span className="text-xs font-bold" style={{ color: accentColor }}>{value}</span>
-      <span className="text-text-muted text-[10px]">{label}</span>
+    <div className="flex items-baseline gap-2.5">
+      <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-white/60">{label}</span>
+      <span className="flex-1 border-b border-dotted border-white/25" aria-hidden="true" />
+      <span className="rounded-full bg-white/10 px-2.5 py-1 text-[13px] font-bold tabular-nums text-white">{value}</span>
+    </div>
+  );
+}
+
+function UvDots({ uv, accent }: { uv: number; accent: string }) {
+  const filled = Math.max(uv > 0 ? 1 : 0, Math.min(5, Math.round(uv / 2)));
+  return (
+    <span className="inline-flex items-center gap-1" aria-label={`UV index ${uv}`}>
+      {[0, 1, 2, 3, 4].map((i) => (
+        <span
+          key={i}
+          className="inline-block h-2 w-2 rounded-full"
+          style={{ background: i < filled ? accent : "rgba(255,255,255,0.18)" }}
+        />
+      ))}
+    </span>
+  );
+}
+
+function SunArc({ sunriseISO, sunsetISO, progress, accent }: {
+  sunriseISO: string; sunsetISO: string; progress: number; accent: string;
+}) {
+  const P0 = { x: 16, y: 58 };
+  const C = { x: 140, y: -10 };
+  const P1 = { x: 264, y: 58 };
+  const t = Math.max(0, Math.min(1, progress));
+  const px = (1 - t) ** 2 * P0.x + 2 * (1 - t) * t * C.x + t ** 2 * P1.x;
+  const py = (1 - t) ** 2 * P0.y + 2 * (1 - t) * t * C.y + t ** 2 * P1.y;
+  const ms = new Date(sunsetISO).getTime() - new Date(sunriseISO).getTime();
+  const dayLen = ms > 0 ? `${Math.floor(ms / 3_600_000)}h ${Math.round((ms % 3_600_000) / 60_000)}m` : null;
+  return (
+    <div>
+      <svg viewBox="0 0 280 66" className="block w-full" aria-hidden="true">
+        <path d={`M ${P0.x} ${P0.y} Q ${C.x} ${C.y} ${P1.x} ${P1.y}`} fill="none" stroke="rgba(255,255,255,0.22)" strokeWidth={1.5} strokeDasharray="3 5" strokeLinecap="round" />
+        <line x1={8} y1={58} x2={272} y2={58} stroke="rgba(255,255,255,0.14)" strokeWidth={1} />
+        <circle cx={px} cy={py} r={6} fill={accent} style={{ filter: `drop-shadow(0 0 6px ${accent})` }} />
+      </svg>
+      <div className="mt-1 flex items-center justify-between text-[11px] font-semibold text-white/70">
+        <span>↑ {formatHourLabel(sunriseISO)}</span>
+        {dayLen && <span className="text-white/50">{dayLen} of daylight</span>}
+        <span>↓ {formatHourLabel(sunsetISO)}</span>
+      </div>
+    </div>
+  );
+}
+
+function TimelineScrubber({ hours, conv, accent, idx, onIdx }: {
+  hours: HourPoint[];
+  conv: (f: number) => number;
+  accent: string;
+  idx: number;
+  onIdx: (i: number) => void;
+}) {
+  const [wrapRef, width] = useMeasureWidth<HTMLDivElement>();
+  const draggingRef = useRef(false);
+  const [dragging, setDragging] = useState(false);
+  if (hours.length < 2) return null;
+
+  const padL = 12;
+  const padR = 12;
+  const w = Math.max(width, 120);
+  const step = (w - padL - padR) / (hours.length - 1);
+  const x = (i: number) => padL + i * step;
+
+  const idxFromClientX = (clientX: number) => {
+    const el = wrapRef.current;
+    if (!el) return 0;
+    const rect = el.getBoundingClientRect();
+    const t = (clientX - rect.left - padL) / Math.max(rect.width - padL - padR, 1);
+    return Math.max(0, Math.min(hours.length - 1, Math.round(t * (hours.length - 1))));
+  };
+
+  const cur = hours[idx];
+  const labelIdx = pickLabelIndices(hours, x, 48);
+
+  return (
+    <div
+      ref={wrapRef}
+      role="slider"
+      aria-label="Scrub through the next 24 hours"
+      aria-valuemin={0}
+      aria-valuemax={hours.length - 1}
+      aria-valuenow={idx}
+      aria-valuetext={`${formatHourLabel(cur.time)}, ${conv(cur.temp)} degrees, ${cur.precip}% chance of precipitation`}
+      tabIndex={0}
+      className="relative cursor-ew-resize select-none rounded-xl py-3 outline-none focus-visible:ring-2 focus-visible:ring-white/50"
+      style={{ touchAction: "none" }}
+      onPointerDown={(e) => {
+        draggingRef.current = true;
+        setDragging(true);
+        (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+        onIdx(idxFromClientX(e.clientX));
+      }}
+      onPointerMove={(e) => { if (draggingRef.current) onIdx(idxFromClientX(e.clientX)); }}
+      onPointerUp={() => { draggingRef.current = false; setDragging(false); }}
+      onPointerCancel={() => { draggingRef.current = false; setDragging(false); }}
+      onKeyDown={(e) => {
+        if (e.key === "ArrowRight") { e.preventDefault(); onIdx(Math.min(hours.length - 1, idx + 1)); }
+        else if (e.key === "ArrowLeft") { e.preventDefault(); onIdx(Math.max(0, idx - 1)); }
+        else if (e.key === "Home") { e.preventDefault(); onIdx(0); }
+        else if (e.key === "End") { e.preventDefault(); onIdx(hours.length - 1); }
+      }}
+    >
+      <div className="relative h-1.5 rounded-full bg-white/12">
+        {hours.map((h, i) => (
+          h.precip >= 35 ? (
+            <div
+              key={i}
+              className="absolute top-1/2 h-[7px] -translate-y-1/2 rounded-full"
+              style={{
+                left: x(i) - step / 2,
+                width: step,
+                background: accent,
+                opacity: Math.min(0.35 + h.precip / 150, 0.95),
+              }}
+            />
+          ) : null
+        ))}
+        <div
+          className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white"
+          style={{ left: x(idx), background: accent, boxShadow: `0 0 10px ${accent}AA`, transition: dragging ? "none" : "left 0.18s ease" }}
+        />
+      </div>
+      <div className="relative mt-2 h-4">
+        {labelIdx.map((i) => (
+          <span
+            key={i}
+            className="absolute text-[9px] font-bold tracking-wide"
+            style={{
+              left: x(i),
+              transform: i === 0 ? "translateX(0)" : i === hours.length - 1 ? "translateX(-100%)" : "translateX(-50%)",
+              color: i === 0 ? accent : "rgba(255,255,255,0.55)",
+            }}
+          >
+            {i === 0 ? "NOW" : formatHourTick(hours[i].time)}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1647,62 +537,92 @@ function StatPill({ icon, label, value, delay, accentColor }: { icon: string; la
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function WeatherWidget({ className = "" }: { className?: string }) {
-  const { weather } = useWeatherConfig();
-  const atm = useAtmosphericTheme();
+  const { weather, setUnit } = useWeatherConfig();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const [tempKey, setTempKey] = useState(0);
-  const prevUnitRef = useRef(weather.unit);
+  const [previewIdx, setPreviewIdx] = useState<number | null>(null);
+  const releaseTimerRef = useRef<number | null>(null);
 
-  const [weatherData, setWeatherData] = useState<{
-    currentTemp: number; currentCondition: string; feelsLike: number;
-    forecast: ForecastDay[]; humidity: number; wind: number;
-  } | null>(null);
+  const [weatherData, setWeatherData] = useState<WeatherData | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
+  const [clockTick, setClockTick] = useState(0);
+  const [tabHidden, setTabHidden] = useState(false);
   const { runtime } = useRuntimeConfig();
 
   useEffect(() => {
     const lat = Number(runtime?.weather_location?.LAT ?? 42.7875);
     const lon = Number(runtime?.weather_location?.LON ?? -86.1089);
-    fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto&forecast_days=6`)
+    fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m,is_day,cloud_cover,uv_index,pressure_msl,visibility&hourly=temperature_2m,weather_code,precipitation_probability,is_day,cloud_cover,wind_speed_10m,wind_direction_10m,relative_humidity_2m,visibility&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max,sunrise,sunset,uv_index_max&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto&forecast_days=6`)
       .then(r => r.json())
       .then(data => {
-        const current = data.current;
+        const current = data.current ?? {};
         const daily = data.daily;
-        const wmoToCondition = (code: number) => {
-          if (code === 0) return { condition: "Clear", emoji: "☀️" };
-          if (code <= 3) return { condition: "Partly Cloudy", emoji: "⛅" };
-          if (code <= 48) return { condition: "Foggy", emoji: "🌫️" };
-          if (code <= 57) return { condition: "Drizzle", emoji: "🌦️" };
-          if (code <= 67) return { condition: "Rainy", emoji: "🌧️" };
-          if (code <= 77) return { condition: "Snowy", emoji: "❄️" };
-          if (code <= 82) return { condition: "Rain Showers", emoji: "🌧️" };
-          return { condition: "Thunderstorm", emoji: "⛈️" };
-        };
-        const currentWMO = wmoToCondition(current.weather_code);
+        const hourly = data.hourly;
+        const currentWMO = wmoToCondition(current.weather_code ?? 1);
         const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-        const forecast: ForecastDay[] = daily.time.slice(1, 6).map((date: string, i: number) => {
-          const wmo = wmoToCondition(daily.weather_code[i + 1]);
-          return {
-            day: days[new Date(date).getDay()],
-            high: Math.round(daily.temperature_2m_max[i + 1]),
-            low: Math.round(daily.temperature_2m_min[i + 1]),
-            condition: wmo.condition,
-            emoji: wmo.emoji,
-            precipitation: daily.precipitation_probability_max[i + 1] || 0,
-            humidity: current.relative_humidity_2m,
-            wind: Math.round(current.wind_speed_10m),
-          };
-        });
+
+        const hours: HourPoint[] = [];
+        if (hourly?.time) {
+          const nowMs = Date.now();
+          let start = hourly.time.findIndex((t: string) => new Date(t).getTime() >= nowMs - 59 * 60 * 1000);
+          if (start === -1) start = 0;
+          const fallbackIsDay = getRealTimeOfDay() === "day";
+          for (let i = start; i < Math.min(start + 24, hourly.time.length); i++) {
+            hours.push({
+              time: hourly.time[i],
+              temp: hourly.temperature_2m?.[i] ?? current.temperature_2m ?? 60,
+              code: hourly.weather_code?.[i] ?? current.weather_code ?? 1,
+              precip: hourly.precipitation_probability?.[i] ?? 0,
+              isDay: hourly.is_day?.[i] != null ? hourly.is_day[i] === 1 : fallbackIsDay,
+              cloud: hourly.cloud_cover?.[i] ?? current.cloud_cover ?? 25,
+              wind: hourly.wind_speed_10m?.[i] ?? current.wind_speed_10m ?? 5,
+              windDir: hourly.wind_direction_10m?.[i] ?? current.wind_direction_10m ?? 270,
+              humidity: hourly.relative_humidity_2m?.[i] ?? current.relative_humidity_2m ?? 50,
+              visibility: typeof hourly.visibility?.[i] === "number"
+                ? hourly.visibility[i]
+                : (typeof current.visibility === "number" ? current.visibility : null),
+            });
+          }
+        }
+
+        const forecast: ForecastDay[] = daily?.time
+          ? daily.time.slice(1, 6).map((date: string, i: number) => {
+            const wmo = wmoToCondition(daily.weather_code?.[i + 1] ?? 1);
+            return {
+              day: days[new Date(date).getDay()],
+              high: Math.round(daily.temperature_2m_max?.[i + 1] ?? 70),
+              low: Math.round(daily.temperature_2m_min?.[i + 1] ?? 55),
+              condition: wmo.condition,
+              emoji: wmo.emoji,
+              precipitation: daily.precipitation_probability_max?.[i + 1] || 0,
+            };
+          })
+          : [];
+
         setWeatherData({
-          currentTemp: Math.round(current.temperature_2m),
-          currentCondition: currentWMO.condition,
-          feelsLike: Math.round(current.apparent_temperature),
+          temp: Math.round(current.temperature_2m ?? 60),
+          feelsLike: Math.round(current.apparent_temperature ?? current.temperature_2m ?? 60),
+          humidity: current.relative_humidity_2m ?? 50,
+          wind: Math.round(current.wind_speed_10m ?? 5),
+          windDir: current.wind_direction_10m ?? 270,
+          code: current.weather_code ?? 1,
+          isDay: current.is_day != null ? current.is_day === 1 : getRealTimeOfDay() === "day",
+          cloud: current.cloud_cover ?? 25,
+          uv: typeof current.uv_index === "number" ? Math.round(current.uv_index) : (typeof daily?.uv_index_max?.[0] === "number" ? Math.round(daily.uv_index_max[0]) : null),
+          pressure: typeof current.pressure_msl === "number" ? Math.round(current.pressure_msl) : null,
+          visibility: typeof current.visibility === "number" ? current.visibility : null,
+          condition: currentWMO.condition,
+          sunriseISO: daily?.sunrise?.[0] ?? null,
+          sunsetISO: daily?.sunset?.[0] ?? null,
+          hours,
           forecast,
-          humidity: current.relative_humidity_2m,
-          wind: Math.round(current.wind_speed_10m),
+          todayHigh: typeof daily?.temperature_2m_max?.[0] === "number" ? Math.round(daily.temperature_2m_max[0]) : null,
+          todayLow: typeof daily?.temperature_2m_min?.[0] === "number" ? Math.round(daily.temperature_2m_min[0]) : null,
+          outlook: deriveOutlook(hourly, currentWMO.condition),
         });
+        setUpdatedAt(Date.now());
         setFetchError(null);
         setLoading(false);
       })
@@ -1712,20 +632,9 @@ export default function WeatherWidget({ className = "" }: { className?: string }
       });
   }, [runtime?.weather_location?.LAT, runtime?.weather_location?.LON]);
 
-
   useEffect(() => {
-    // Avoid setState-in-effect lint rule by deriving mounted state from first paint.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     requestAnimationFrame(() => setMounted(true));
   }, []);
-
-
-  useEffect(() => {
-    if (prevUnitRef.current !== weather.unit) {
-      setTempKey((k) => k + 1);
-      prevUnitRef.current = weather.unit;
-    }
-  }, [weather.unit]);
 
   useEffect(() => {
     if (!detailsOpen) return;
@@ -1734,373 +643,499 @@ export default function WeatherWidget({ className = "" }: { className?: string }
     return () => document.removeEventListener("keydown", onKey);
   }, [detailsOpen]);
 
-  const condition = detectCondition(weatherData?.currentCondition ?? "Partly Cloudy");
-  const tod = weather.timeOfDay === "auto" ? getRealTimeOfDay() : weather.timeOfDay as TimeOfDayFlag;
-  const season = (weather.season === "auto" ? getRealSeason() : weather.season) as SeasonKey;
+  useEffect(() => {
+    if (updatedAt === null) return;
+    const id = setInterval(() => setClockTick(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, [updatedAt]);
 
-  // Resolve active holiday
+  useEffect(() => {
+    const onVisibility = () => setTabHidden(document.hidden);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
+
+  useEffect(() => () => { if (releaseTimerRef.current) window.clearTimeout(releaseTimerRef.current); }, []);
+
+  const conv = (f: number) => (weather.unit === "C" ? toC(f) : Math.round(f));
+
+  const season = (weather.season === "auto" ? getRealSeason() : weather.season) as SeasonKey;
+  const todOverride = weather.timeOfDay;
+
   const rawHoliday = weather.holidayOverride ?? "auto";
   const activeHoliday: HolidayOverride = rawHoliday === "auto" ? detectAutoHoliday() : rawHoliday;
+  const holidayStyle = activeHoliday !== "none" ? HOLIDAY_STYLE[activeHoliday] ?? null : null;
 
-  // Build visual theme: holiday overrides season
-  const seasonTheme = getSeasonTheme(season, tod, condition);
-  const holidayTheme = activeHoliday !== "none" ? getHolidayTheme(activeHoliday) : null;
-  const theme: VisualTheme = { ...seasonTheme, ...(holidayTheme || {}) };
+  const stripHours = useMemo(() => {
+    if (!weatherData) return [] as HourPoint[];
+    const end = stripEndIndex(weatherData.hours);
+    return end < 0 ? [] : weatherData.hours.slice(0, end + 1);
+  }, [weatherData]);
 
-  const accentHex: WeatherAccent = {
-    // WeatherWidget uses its own seasonal/holiday visual colors; map them into the same shape
-    // as the app theme accent hexes for live wiring.
-    selected: theme.accentColor,
-    glow: theme.glowColor,
-    button: theme.accentColor,
-    border: `${theme.accentColor}55`,
+  const activeHour = previewIdx != null ? stripHours[previewIdx] ?? null : null;
+
+  const resolveIsDay = (hourIsDay?: boolean) =>
+    todOverride === "day" ? true : todOverride === "night" ? false : hourIsDay ?? getRealTimeOfDay() === "day";
+
+  const sceneIsDay = resolveIsDay(activeHour ? activeHour.isDay : weatherData?.isDay);
+  const sceneCode = activeHour?.code ?? weatherData?.code ?? 1;
+  const sceneState: SceneState = {
+    code: sceneCode,
+    isDay: sceneIsDay,
+    cloudCover: activeHour?.cloud ?? weatherData?.cloud ?? 25,
+    windSpeed: activeHour?.wind ?? weatherData?.wind ?? 6,
+    windDir: activeHour?.windDir ?? weatherData?.windDir ?? 270,
+    precipProb: activeHour?.precip ?? (RAIN_CODES.has(sceneCode) ? 70 : 8),
+    humidity: activeHour?.humidity ?? weatherData?.humidity ?? 50,
+    sunProgress: sunProgressAt(
+      activeHour?.time ?? new Date().toISOString(),
+      weatherData?.sunriseISO ?? null,
+      weatherData?.sunsetISO ?? null
+    ),
+    visibility: activeHour?.visibility ?? weatherData?.visibility ?? null,
+    timestamp: activeHour ? new Date(activeHour.time).getTime() : weatherData ? new Date().getTime() : 0,
+  };
+  const skin = getWeatherSkin(season, !sceneIsDay, sceneCode);
+  const accent = holidayStyle?.accent ?? skin.accent;
+
+  const heroTempTarget = conv(activeHour ? activeHour.temp : weatherData?.temp ?? 72);
+  const heroTemp = useAnimatedNumber(heroTempTarget);
+
+  const displayHigh = weatherData?.todayHigh == null ? null : conv(weatherData.todayHigh);
+  const displayLow = weatherData?.todayLow == null ? null : conv(weatherData.todayLow);
+
+  const minutesSinceUpdate = updatedAt === null
+    ? null
+    : Math.max(0, Math.floor(((clockTick || updatedAt) - updatedAt) / 60_000));
+  const updatedLabel = minutesSinceUpdate === null
+    ? null
+    : minutesSinceUpdate < 1 ? "Updated just now" : `Updated ${minutesSinceUpdate}m ago`;
+
+  const handlePreview = (idx: number | null) => {
+    if (releaseTimerRef.current) {
+      window.clearTimeout(releaseTimerRef.current);
+      releaseTimerRef.current = null;
+    }
+    if (idx !== null) {
+      setPreviewIdx(idx);
+      return;
+    }
+    releaseTimerRef.current = window.setTimeout(() => setPreviewIdx(null), 650);
   };
 
-  // Particle type: holiday wins if active
-  const particleType = (holidayTheme?.particleType ?? theme.particleType) as ParticleKind;
-
-  const Icon = ICONS[condition];
-  const displayTemp = weather.unit === "C" ? toC(weatherData?.currentTemp ?? 72) : (weatherData?.currentTemp ?? 72);
-  const displayFeels = weather.unit === "C" ? toC(weatherData?.feelsLike ?? 74) : (weatherData?.feelsLike ?? 74);
-
-  // Holiday label badge
-  const holidayLabels: Record<HolidayOverride, string> = {
-    auto: "", none: "",
-    christmas: "🎄 Christmas", halloween: "🎃 Halloween",
-    july4th: "🎆 4th of July", valentines: "💝 Valentine's",
-    newyears: "🥂 New Year's", cincodemayo: "🪅 Cinco de Mayo",
-    thanksgiving: "🦃 Thanksgiving", stpatricks: "🍀 St. Patrick's",
-    diadelosmuertos: "💀 Día de los Muertos",
-    mexicanindependence: "🔔 Independence Day",
-    virginguadalupe: "🌹 Virgin of Guadalupe",
-  };
+  const heroCondition = activeHour
+    ? `${formatHourLabel(activeHour.time)} · ${wmoToCondition(activeHour.code).condition}`
+    : weatherData?.condition ?? "Partly Cloudy";
 
   return (
     <div
       className={`relative ${className}`}
       style={{ animation: mounted ? "weatherCardEnter 1s var(--ease-spring) both" : undefined }}
     >
-      {/* ── Protruding weather icon — overhangs the card's top-left corner ── */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute z-30 top-[-12px] left-[-12px] xl:top-[-24px] xl:left-[-24px] w-[88px] h-[88px]"
-      >
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            background: `radial-gradient(circle, ${accentHex.selected}66 0%, ${accentHex.selected}00 70%)`,
-            filter: "blur(10px)",
-            animation: mounted ? "weatherGlowPulse 7s ease-in-out infinite" : undefined,
-          }}
-        />
-        <div style={{ filter: "drop-shadow(0 10px 18px rgba(0,0,0,0.35))" }}>
-          {mounted ? (
-            <div style={{ transform: "scale(1.2222)", transformOrigin: "top left" }}>
-              <Icon tod={tod} />
-            </div>
-          ) : (
-            <div className="w-[88px] h-[88px] flex items-center justify-center text-7xl leading-none">⛅</div>
-          )}
-        </div>
-      </div>
-
       <div
         role="img"
-        aria-label={`${displayTemp} degrees, ${weatherData?.currentCondition ?? "Partly Cloudy"} in ${weather.location}, feels like ${displayFeels} degrees`}
+        aria-label={`${heroTempTarget} degrees, ${heroCondition} in ${weather.location}${displayHigh !== null && displayLow !== null ? `, high ${displayHigh}, low ${displayLow}` : ""}`}
         className="rounded-2xl overflow-hidden relative h-full flex flex-col"
         style={{
-          background: theme.bgGradient,
-          border: `1px solid ${atm.glowColor}`,
-          boxShadow: `0 0 60px ${theme.glowColor}, 0 16px 48px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.08)`,
-          transition: "box-shadow 0.6s ease, background 0.6s ease, border-color 0.6s ease",
+          border: `1px solid ${skin.border}`,
+          boxShadow: `0 0 60px ${skin.glow}, 0 16px 48px rgba(0,0,0,0.22), inset 0 1px 0 ${skin.night ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.35)"}`,
+          transition: "box-shadow 0.8s ease, border-color 0.8s ease",
           minHeight: "220px",
+          background: skin.skyBottom,
         }}
       >
-        {/* ── Season/Holiday Backdrop Art ── */}
-        {mounted && (
-          <>
-            {activeHoliday === "none" || activeHoliday === "auto" ? (
-              <>
-                {season === "spring" && <SpringBackdrop tod={tod} />}
-                {season === "summer" && <SummerBackdrop tod={tod} />}
-                {season === "autumn" && <AutumnBackdrop tod={tod} />}
-                {season === "winter" && <WinterBackdrop tod={tod} />}
-              </>
-            ) : (
-              <>
-                {activeHoliday === "christmas" && <><WinterBackdrop tod={tod} /><ChristmasOverlay /></>}
-                {activeHoliday === "halloween" && <HalloweenOverlay />}
-                {activeHoliday === "july4th" && <FireworksOverlay />}
-                {activeHoliday === "valentines" && <ValentinesOverlay />}
-                {activeHoliday === "newyears" && <NewYearsOverlay />}
-                {activeHoliday === "cincodemayo" && <CincoDeMayoOverlay />}
-                {activeHoliday === "thanksgiving" && <ThanksgivingOverlay />}
-                {activeHoliday === "stpatricks" && <StPatricksOverlay />}
-                {activeHoliday === "diadelosmuertos" && <DiaDeLosMuertosOverlay />}
-                {activeHoliday === "mexicanindependence" && <MexicanIndependenceOverlay />}
-                {activeHoliday === "virginguadalupe" && <VirginGuadalupeOverlay />}
-              </>
-            )}
-          </>
+        <WeatherScene skin={skin} state={sceneState} season={season} />
+
+        {mounted && activeHoliday !== "none" && activeHoliday !== "auto" && (
+          <div className="pointer-events-none absolute inset-0" aria-hidden="true">
+            <SeasonHolidayArt season={season} tod={sceneIsDay ? "day" : "night"} activeHoliday={activeHoliday} backdrop={false} />
+          </div>
+        )}
+        {mounted && !tabHidden && holidayStyle && (
+          <HolidayParticles type={holidayStyle.particle} tod={sceneIsDay ? "day" : "night"} />
         )}
 
-        {/* ── Particle Layer ── */}
-        {mounted && <WeatherParticles type={particleType} tod={tod} />}
+        <div
+          className="pointer-events-none absolute inset-0 z-10"
+          aria-hidden="true"
+          style={{
+            background: `radial-gradient(70% 55% at 50% 42%, ${skin.night ? "rgba(6,6,9,0.40)" : "rgba(255,255,255,0.30)"} 0%, transparent 72%)`,
+          }}
+        />
 
-        {/* ── Glassmorphism content overlay ── */}
-          <div
-            className="relative z-20 flex flex-1 min-h-0 flex-col px-5 pb-5 pt-3"
-            style={{
-              background:
-                tod === "night"
-                  ? "rgba(15,23,42,0.16)"
-                  : "rgba(60,30,10,0.07)",
-              border: "none",
-              borderRadius: 0,
-            }}
-          >
-          {/* Header: location + season badge (left padding clears the protruding icon) */}
-          <div className="flex items-center justify-between mb-3 pl-[72px]">
-            <div className="flex items-center gap-1.5 text-sm font-medium min-w-0">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
-                className="w-3.5 h-3.5 shrink-0" style={{ color: accentHex.selected }}>
+        <div className="pointer-events-none relative z-20 flex h-full min-h-0 flex-col px-5 pb-4 pt-4">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-1.5 text-sm font-semibold">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2}
+                className="h-3.5 w-3.5 shrink-0" style={{ color: accent }}>
                 <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
                 <circle cx="12" cy="10" r="3" />
               </svg>
-              <span className="truncate text-white/80 drop-shadow-[0_1px_4px_rgba(0,0,0,0.55)]">{weather.location}</span>
-              {activeHoliday !== "none" && holidayLabels[activeHoliday] && (
-                <span className="px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ml-1 flex-shrink-0"
-                  style={{ background: `${accentHex.selected}33`, color: accentHex.selected, border: `1px solid ${accentHex.selected}55` }}>
-                  {holidayLabels[activeHoliday]}
+              <span className="truncate" style={{ color: skin.ink }}>{weather.location}</span>
+              {holidayStyle && (
+                <span
+                  className="ml-1 shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider"
+                  style={{ background: `${holidayStyle.accent}22`, color: skin.night ? holidayStyle.accent : skin.ink, border: `1px solid ${holidayStyle.accent}55` }}
+                >
+                  {holidayStyle.label}
                 </span>
               )}
             </div>
-            <span
-              className="text-xs font-semibold px-3 py-1 rounded-full shrink-0 ml-2 drop-shadow-[0_1px_3px_rgba(0,0,0,0.45)]"
-              style={{
-                background: `${accentHex.selected}25`,
-                color: accentHex.selected,
-                border: `1px solid ${accentHex.selected}40`,
-                transition: "background 0.4s ease",
-              }}
+            <button
+              type="button"
+              onClick={() => setUnit(weather.unit === "F" ? "C" : "F")}
+              aria-label={weather.unit === "F" ? "Switch to Celsius" : "Switch to Fahrenheit"}
+              className="pointer-events-auto shrink-0 rounded-full px-3 py-1 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2"
+              style={{ background: skin.stripTrack, color: skin.ink, ["--tw-ring-color" as string]: accent }}
             >
               °{weather.unit}
-            </span>
+            </button>
           </div>
 
-          {/* Main display row — scrim-backed for hierarchy + contrast */}
-          <div className="flex flex-1 items-center gap-3 mb-3 rounded-2xl border border-white/10 bg-black/20 px-3 py-2.5" role="status" aria-live="polite" aria-atomic="true">
-            <div className="flex-1 min-w-0">
-              {loading ? (
-                <div className="space-y-2">
-                  <Skeleton variant="title" className="h-9 w-24 bg-white/15" />
-                  <Skeleton variant="text" className="h-3 w-28 bg-white/10" />
-                  <Skeleton variant="text" className="h-3 w-36 bg-white/10" />
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center text-center" role="status" aria-live="polite" aria-atomic="true">
+            {loading ? (
+              <div className="w-full space-y-2.5">
+                <Skeleton variant="title" className="mx-auto h-12 w-28 bg-black/10" />
+                <Skeleton variant="text" className="mx-auto h-3 w-24 bg-black/10" />
+                <Skeleton variant="text" className="mx-auto h-3 w-32 bg-black/10" />
+              </div>
+            ) : (
+              <>
+                <div className="flex items-start leading-none">
+                  <span
+                    className="text-[56px] font-black leading-none tracking-[-0.03em] tabular-nums xl:text-[64px]"
+                    style={{ color: skin.ink }}
+                  >
+                    {heroTemp}
+                  </span>
+                  <span className="mt-1.5 ml-0.5 text-[28px] font-light leading-none" style={{ color: skin.inkSoft }} aria-hidden="true">°</span>
+                  <span className="sr-only"> degrees</span>
                 </div>
-              ) : (
-                <>
-                  <div key={tempKey} className="flex items-start leading-none mb-1"
-                    style={{ animation: tempKey > 0 ? "weatherTempPop 0.7s var(--ease-spring)" : undefined }}>
-                    <span className="text-[44px] sm:text-[52px] font-black tabular-nums leading-none tracking-[-0.02em]"
-                      style={{ color: accentHex.selected, textShadow: "0 1px 14px rgba(0,0,0,0.65), 0 0 1px rgba(0,0,0,0.9), 0 0 18px rgba(0,0,0,0.35)" }}>
-                      {displayTemp}
-                    </span>
-                    <span className="text-2xl font-light mt-1.5 ml-1 text-white/60" aria-hidden="true">°</span>
-                    <span className="sr-only"> degrees</span>
-                  </div>
-                  <p className="text-white text-sm font-semibold leading-none drop-shadow-[0_1px_6px_rgba(0,0,0,0.6)]">{weatherData?.currentCondition ?? "Partly Cloudy"}</p>
-                  <p className="text-white/75 text-xs mt-0.5 drop-shadow-[0_1px_3px_rgba(0,0,0,0.45)]">Feels like {displayFeels}°{weather.unit} · {season} · {tod}</p>
-                  {fetchError && (
-                    <p className="mt-1.5 text-[11px] font-medium text-amber-200 bg-amber-500/15 border border-amber-300/20 rounded-full px-2.5 py-1 inline-flex items-center gap-1" role="alert">
-                      {fetchError}
-                    </p>
-                  )}
-                </>
-              )}
-            </div>
+                <p className="mt-1.5 text-[15px] font-semibold leading-none" style={{ color: skin.ink }}>
+                  {heroCondition}
+                </p>
+                {displayHigh !== null && displayLow !== null && (
+                  <p className="mt-1 text-xs font-semibold" style={{ color: skin.inkSoft }}>
+                    H:{displayHigh}° L:{displayLow}°
+                  </p>
+                )}
+                {!activeHour && weatherData?.outlook && (
+                  <p className="mt-0.5 text-xs font-medium" style={{ color: skin.inkSoft }}>
+                    {weatherData.outlook}
+                  </p>
+                )}
+                {fetchError && (
+                  <p className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2.5 py-1 text-[11px] font-medium text-amber-900" role="alert">
+                    {fetchError}
+                  </p>
+                )}
+              </>
+            )}
           </div>
 
-          {/* Expand toggle → opens details modal */}
-          <button
-            type="button"
-            onClick={() => setDetailsOpen(true)}
-            aria-expanded={detailsOpen}
-            aria-controls="weather-details-dialog"
-            aria-label="Open weather details"
-            className="w-full flex items-center justify-center gap-1.5 min-h-[36px] text-xs font-semibold py-2 rounded-xl border backdrop-blur transition-all duration-200 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-0"
-            style={{ color: accentHex.selected, background: `${accentHex.selected}18`, borderColor: `${accentHex.selected}30` }}
-          >
-            More details
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}
-              className={`w-3.5 h-3.5 transition-transform duration-300 ${detailsOpen ? "rotate-180" : ""}`} aria-hidden="true">
-              <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
+          {!loading && stripHours.length >= 2 && (
+            <div className="pointer-events-auto shrink-0">
+              <p className="mb-0.5 text-[9px] font-bold uppercase tracking-[0.16em]" style={{ color: skin.inkSoft }}>
+                Rest of today
+              </p>
+              <DayStrip
+                hours={stripHours}
+                conv={conv}
+                skin={skin}
+                accent={accent}
+                previewIdx={previewIdx}
+                onPreview={handlePreview}
+              />
+            </div>
+          )}
 
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <span className="text-[11px] font-medium" style={{ color: skin.inkSoft }}>
+              {updatedLabel ?? ""}
+            </span>
+            <button
+              type="button"
+              onClick={() => setDetailsOpen(true)}
+              aria-expanded={detailsOpen}
+              aria-controls="weather-details-dialog"
+              aria-label="Open weather details"
+              className="pointer-events-auto flex min-h-[36px] items-center gap-1 rounded-lg px-1.5 text-xs font-bold transition-all duration-200 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-0"
+              style={{ color: skin.night ? accent : skin.ink, ["--tw-ring-color" as string]: accent }}
+            >
+              Details
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}
+                className={`h-3.5 w-3.5 transition-transform duration-300 ${detailsOpen ? "rotate-180" : ""}`} aria-hidden="true">
+                <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          </div>
         </div>
-
-        {/* Atmospheric bottom edge — color bleeds downward */}
-        <div
-          className="absolute bottom-0 left-0 right-0 h-3 pointer-events-none"
-          style={{
-            background: `linear-gradient(180deg, transparent, ${atm.bridgeGlow})`,
-            opacity: 0.6,
-          }}
-        />
       </div>
 
-      {/* ── Weather details — immersive sheet ── */}
-      {detailsOpen && (
-        <div
-          id="weather-details-dialog"
-          className="fixed inset-0 z-[80] flex items-center justify-center bg-[#0a0f1c]/55 p-3 backdrop-blur-[2px] sm:p-4"
-          onClick={() => setDetailsOpen(false)}
-          role="dialog"
-          aria-modal="true"
-          aria-label="Weather details"
-        >
-          <div
-            className="relative flex w-full max-w-[440px] max-h-[88vh] flex-col overflow-hidden rounded-[2rem] sm:max-h-[82vh]"
-            style={{
-              background: theme.bgGradient,
-              border: `1px solid ${atm.glowColor}`,
-              boxShadow: `0 0 80px ${theme.glowColor}, 0 24px 64px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.09)`,
-              animation: "modalEnter 0.38s var(--ease-spring) both",
-            }}
-            onClick={(e) => e.stopPropagation()}
+      {detailsOpen && weatherData && (
+        <WeatherDetailsModal
+          data={weatherData}
+          location={weather.location}
+          unit={weather.unit}
+          conv={conv}
+          season={season}
+          todOverride={todOverride}
+          accent={accent}
+          onClose={() => setDetailsOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Details modal — 24h timeline scrubber + exploded metrics ───────────────
+
+function WeatherDetailsModal({ data, location, unit, conv, season, todOverride, accent, onClose }: {
+  data: WeatherData;
+  location: string;
+  unit: string;
+  conv: (f: number) => number;
+  season: SeasonKey;
+  todOverride: "auto" | "day" | "night";
+  accent: string;
+  onClose: () => void;
+}) {
+  const [scrubIdx, setScrubIdx] = useState(0);
+  const [view, setView] = useState<"hourly" | "daily">("hourly");
+
+  const hours = data.hours;
+  const scrubHour = hours[scrubIdx] ?? null;
+
+  const mIsDay = todOverride === "day" ? true : todOverride === "night" ? false : scrubHour?.isDay ?? data.isDay;
+  const mCode = scrubHour?.code ?? data.code;
+  const mSkin = getWeatherSkin(season, !mIsDay, mCode);
+
+  const scrubTemp = useAnimatedNumber(conv(scrubHour?.temp ?? data.temp));
+
+  const nowMoon = moonPhase(new Date().getTime());
+
+  const forecastRows = data.forecast.map((day) => ({
+    ...day,
+    displayHigh: conv(day.high),
+    displayLow: conv(day.low),
+  }));
+  const weekMin = forecastRows.length ? Math.min(...forecastRows.map((d) => d.displayLow)) : 0;
+  const weekMax = forecastRows.length ? Math.max(...forecastRows.map((d) => d.displayHigh)) : 1;
+  const weekSpan = Math.max(weekMax - weekMin, 1);
+
+  const sceneState: SceneState = {
+    code: mCode,
+    isDay: mIsDay,
+    cloudCover: scrubHour?.cloud ?? data.cloud,
+    windSpeed: scrubHour?.wind ?? data.wind,
+    windDir: scrubHour?.windDir ?? data.windDir,
+    precipProb: scrubHour?.precip ?? (RAIN_CODES.has(mCode) ? 70 : 8),
+    humidity: scrubHour?.humidity ?? data.humidity,
+    sunProgress: sunProgressAt(scrubHour?.time ?? new Date().toISOString(), data.sunriseISO, data.sunsetISO),
+    visibility: scrubHour?.visibility ?? data.visibility,
+    timestamp: scrubHour ? new Date(scrubHour.time).getTime() : new Date().getTime(),
+  };
+
+  return (
+    <div
+      id="weather-details-dialog"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-[#0a0f1c]/55 p-3 backdrop-blur-[2px] sm:p-4"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Weather details"
+    >
+      <div
+        className="relative flex w-full max-w-[440px] max-h-[88vh] flex-col overflow-hidden rounded-[2rem] sm:max-h-[84vh]"
+        style={{
+          background: "linear-gradient(170deg, rgba(16,20,34,0.92) 0%, rgba(10,13,24,0.94) 100%)",
+          border: "1px solid rgba(255,255,255,0.12)",
+          boxShadow: `0 0 80px ${mSkin.glow}, 0 24px 64px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.09)`,
+          animation: "modalEnter 0.38s var(--ease-spring) both",
+          backdropFilter: "blur(18px) saturate(1.2)",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-white/10 bg-[rgba(8,12,24,0.42)] px-5 py-3 backdrop-blur-md">
+          <div className="min-w-0">
+            <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-white/60">Weather</p>
+            <p className="truncate text-sm font-semibold text-white">{location}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close weather details"
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-white/12 bg-white/10 text-white/80 backdrop-blur transition hover:bg-white/16 hover:text-white active:scale-95"
           >
-            {/* Backdrop art — faint, behind frost */}
-            {mounted && (
-              <div className="pointer-events-none absolute inset-0 opacity-[0.18]" aria-hidden="true">
-                {activeHoliday === "none" || activeHoliday === "auto" ? (
-                  <>
-                    {season === "spring" && <SpringBackdrop tod={tod} />}
-                    {season === "summer" && <SummerBackdrop tod={tod} />}
-                    {season === "autumn" && <AutumnBackdrop tod={tod} />}
-                    {season === "winter" && <WinterBackdrop tod={tod} />}
-                  </>
-                ) : (
-                  <>
-                    {activeHoliday === "christmas" && <><WinterBackdrop tod={tod} /><ChristmasOverlay /></>}
-                    {activeHoliday === "halloween" && <HalloweenOverlay />}
-                    {activeHoliday === "july4th" && <FireworksOverlay />}
-                    {activeHoliday === "valentines" && <ValentinesOverlay />}
-                    {activeHoliday === "newyears" && <NewYearsOverlay />}
-                  </>
-                )}
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M1 1L13 13M13 1L1 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          <div className="space-y-5 p-5">
+            <div className="relative h-48 overflow-hidden rounded-2xl" style={{ border: "1px solid rgba(255,255,255,0.10)" }}>
+              <WeatherScene skin={mSkin} state={sceneState} season={season} />
+              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
+                <div className="flex items-start leading-none">
+                  <span
+                    className="text-[60px] font-black leading-none tracking-[-0.03em] tabular-nums"
+                    style={{ color: mSkin.ink, textShadow: mSkin.night ? "none" : "0 1px 12px rgba(255,255,255,0.35)" }}
+                  >
+                    {scrubTemp}
+                  </span>
+                  <span className="mt-1 ml-0.5 text-2xl font-light leading-none" style={{ color: mSkin.night ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.45)" }} aria-hidden="true">°</span>
+                </div>
+                <p className="mt-1.5 text-sm font-semibold" style={{ color: mSkin.ink, textShadow: mSkin.night ? "none" : "0 1px 10px rgba(255,255,255,0.3)" }}>
+                  {scrubHour ? `${formatHourLabel(scrubHour.time)} · ${wmoToCondition(scrubHour.code).condition}` : data.condition}
+                </p>
+              </div>
+            </div>
+
+            {hours.length >= 2 && (
+              <div>
+                <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.16em] text-white/50">Next 24 Hours</p>
+                <TimelineScrubber hours={hours} conv={conv} accent={accent} idx={scrubIdx} onIdx={setScrubIdx} />
               </div>
             )}
-            {mounted && <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[2rem] opacity-40"><WeatherParticles type={particleType} tod={tod} /></div>}
 
-            {/* Scrollable frosted content */}
-            <div
-              className="relative flex-1 overflow-y-auto"
-              style={{
-                backdropFilter: "blur(10px) saturate(1.15)",
-                background: tod === "night" ? "rgba(10,16,32,0.52)" : "rgba(40,20,10,0.22)",
-              }}
-            >
-              {/* Handle + close */}
-              <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-white/10 bg-[rgba(8,12,24,0.28)] px-5 py-3 backdrop-blur-md">
-                <div className="min-w-0">
-                  <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-white/70" style={{ textShadow: "0 1px 6px rgba(0,0,0,0.6)" }}>Weather</p>
-                  <p className="truncate text-sm font-semibold text-white" style={{ textShadow: "0 1px 8px rgba(0,0,0,0.65), 0 0 1px rgba(0,0,0,0.9)" }}>{weather.location} · {weatherData?.currentCondition ?? "Partly Cloudy"}</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setDetailsOpen(false)}
-                  aria-label="Close weather details"
-                  className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-white/12 bg-white/10 text-white/80 backdrop-blur transition hover:bg-white/16 hover:text-white active:scale-95"
-                >
-                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M1 1L13 13M13 1L1 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
-                </button>
+            <div className="space-y-2.5">
+              <LeaderRow label="Humidity" value={`${Math.round(scrubHour?.humidity ?? data.humidity)}%`} />
+              <LeaderRow
+                label="Wind"
+                value={`${Math.round(scrubHour?.wind ?? data.wind)} mph ${cardinalFromDegrees(scrubHour?.windDir ?? data.windDir)}`}
+              />
+              <LeaderRow label="Precipitation" value={`${Math.round(scrubHour?.precip ?? 0)}%`} />
+              <LeaderRow label="Cloud cover" value={`${Math.round(scrubHour?.cloud ?? data.cloud)}%`} />
+              <LeaderRow label="Feels like" value={`${conv(data.feelsLike)}°`} hidden={scrubIdx !== 0} />
+              <div className="flex items-baseline gap-2.5" style={{ display: scrubIdx !== 0 ? "none" : undefined }}>
+                <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-white/60">UV index</span>
+                <span className="flex-1 border-b border-dotted border-white/25" aria-hidden="true" />
+                <span className="flex items-center gap-2 rounded-full bg-white/10 px-2.5 py-1">
+                  {data.uv != null && <UvDots uv={data.uv} accent={accent} />}
+                  <span className="text-[13px] font-bold tabular-nums text-white">{data.uv != null ? data.uv : "—"}</span>
+                </span>
               </div>
+              <LeaderRow label="Pressure" value={data.pressure != null ? `${data.pressure} hPa` : "—"} hidden={scrubIdx !== 0 || data.pressure == null} />
+            </div>
 
-              <div className="space-y-5 p-5">
-                {/* Hero — icon + temp + condition */}
-                <div className="flex items-center gap-4">
-                  <div className="relative grid h-[88px] w-[88px] shrink-0 place-items-center">
-                    <div aria-hidden="true" className="absolute inset-0 rounded-full" style={{ background: `radial-gradient(circle, ${accentHex.selected}28 0%, transparent 72%)`, filter: "blur(12px)" }} />
-                    <div style={{ filter: "drop-shadow(0 10px 18px rgba(0,0,0,0.35))" }}>
-                      <div style={{ transform: "scale(1.22)", transformOrigin: "center" }}><Icon tod={tod} /></div>
-                    </div>
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-baseline gap-1">
-                      <span className="text-[52px] font-black leading-none tracking-tight" style={{ color: accentHex.selected, textShadow: "0 1px 18px rgba(0,0,0,0.45), 0 0 1px rgba(0,0,0,0.7)" }}>{displayTemp}</span>
-                      <span className="text-2xl font-light text-white" style={{ textShadow: "0 1px 6px rgba(0,0,0,0.6)" }}>°{weather.unit}</span>
-                    </div>
-                    <p className="text-[15px] font-semibold leading-none text-white mt-1" style={{ textShadow: "0 1px 8px rgba(0,0,0,0.65), 0 0 1px rgba(0,0,0,0.85)" }}>{weatherData?.currentCondition ?? "Partly Cloudy"}</p>
-                    <p className="mt-1 text-xs font-medium text-white/85" style={{ textShadow: "0 1px 6px rgba(0,0,0,0.65)" }}>Feels like {displayFeels}° · {season} · {tod} · Humidity {weatherData?.humidity ?? 55}%</p>
-                  </div>
+            {data.sunriseISO && data.sunsetISO && scrubIdx === 0 && (
+              <div className="rounded-2xl border border-white/10 bg-white/[0.05] p-4">
+                <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.16em] text-white/50">Daylight</p>
+                <SunArc
+                  sunriseISO={data.sunriseISO}
+                  sunsetISO={data.sunsetISO}
+                  progress={sunProgressAt(new Date().toISOString(), data.sunriseISO, data.sunsetISO)}
+                  accent={accent}
+                />
+                <div className="mt-3 flex items-baseline gap-2.5">
+                  <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-white/60">Moon</span>
+                  <span className="flex-1 border-b border-dotted border-white/25" aria-hidden="true" />
+                  <span className="text-[13px] font-bold text-white">
+                    {moonPhaseName(nowMoon.phase)} · {Math.round(nowMoon.illumination * 100)}%
+                  </span>
                 </div>
+              </div>
+            )}
 
-                {/* Bento stats — 2×2 */}
-                <div className="grid grid-cols-2 gap-3">
-                    {[
-                    { k: "Hum", label: "Humidity", value: `${weatherData?.humidity ?? 55}%`, sub: "Dew point comfortable", icon: "🌫️" },
-                    { k: "Wind", label: "Wind", value: `${weatherData?.wind ?? 8} mph`, sub: "Light breeze", icon: "💨" },
-                    { k: "Rain", label: "Rain chance", value: `${weatherData?.forecast?.[0]?.precipitation ?? 10}%`, sub: "Today", icon: "💧" },
-                    { k: "Feel", label: "Feels like", value: `${displayFeels}°`, sub: weatherData?.currentCondition ?? "Partly Cloudy", icon: "🌡️" },
-                  ].map((s) => (
-                    <div key={s.k} className="rounded-2xl border border-white/12 bg-[rgba(8,12,24,0.22)] px-4 py-4 backdrop-blur-md">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-white/70" style={{ textTransform: "uppercase", textShadow: "0 1px 5px rgba(0,0,0,0.6)" }}>{s.label}</span>
-                        <span className="text-base leading-none drop-shadow-[0_1px_4px_rgba(0,0,0,0.5)]">{s.icon}</span>
-                      </div>
-                      <p className="mt-2 text-[22px] font-black leading-none tracking-tight text-white" style={{ textShadow: "0 1px 10px rgba(0,0,0,0.7), 0 0 1px rgba(0,0,0,0.9)" }}>{s.value}</p>
-                      <p className="mt-1 truncate text-xs font-medium text-white/75" style={{ textShadow: "0 1px 6px rgba(0,0,0,0.65)" }}>{s.sub}</p>
-                    </div>
+            <div>
+              <div className="mb-2.5 flex items-center justify-between">
+                <h4 className="text-[11px] font-bold uppercase tracking-[0.14em] text-white/70">
+                  {view === "hourly" ? "Hourly" : "5-Day Forecast"}
+                </h4>
+                <div className="flex rounded-full border border-white/12 bg-white/[0.06] p-0.5" role="tablist" aria-label="Forecast view">
+                  {(["hourly", "daily"] as const).map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      role="tab"
+                      aria-selected={view === v}
+                      onClick={() => setView(v)}
+                      className="rounded-full px-3 py-1 text-[11px] font-bold capitalize transition-colors"
+                      style={view === v ? { background: accent, color: "#fff" } : { color: "rgba(255,255,255,0.6)" }}
+                    >
+                      {v}
+                    </button>
                   ))}
                 </div>
+              </div>
 
-                {/* 5-day — refined list, not tiny pills */}
-                <div>
-                  <div className="mb-2.5 flex items-baseline justify-between">
-                    <h4 className="text-[11px] font-bold uppercase tracking-[0.14em] text-white/75" style={{ textShadow: "0 1px 6px rgba(0,0,0,0.65)" }}>5-Day Forecast</h4>
-                    <span className="text-[11px] font-medium text-white/60" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.6)" }}>High · Low</span>
-                  </div>
-                  <div className="overflow-hidden rounded-2xl border border-white/12 bg-[rgba(8,12,24,0.20)] backdrop-blur-md">
-                    {(weatherData?.forecast ?? []).map((day, i) => (
+              {view === "hourly" ? (
+                <div className="flex gap-1 overflow-x-auto pb-1" role="list">
+                  {hours.map((h, i) => (
+                    <button
+                      key={h.time}
+                      type="button"
+                      role="listitem"
+                      onClick={() => setScrubIdx(i)}
+                      className="relative flex shrink-0 flex-col items-center gap-1.5 rounded-xl px-2.5 py-2.5 transition-colors"
+                      style={i === scrubIdx ? { background: `${accent}1F` } : undefined}
+                      aria-label={`${formatHourLabel(h.time)}, ${conv(h.temp)} degrees`}
+                    >
+                      {i === scrubIdx && (
+                        <span className="absolute inset-x-2 top-0 h-[2.5px] rounded-full" style={{ background: accent }} aria-hidden="true" />
+                      )}
+                      <span className="text-[10px] font-bold" style={{ color: i === scrubIdx ? accent : "rgba(255,255,255,0.6)" }}>
+                        {i === 0 ? "NOW" : formatHourTick(h.time)}
+                      </span>
+                      <span className="text-base leading-none">{wmoToCondition(h.code).emoji}</span>
+                      <span className="text-sm font-black tabular-nums text-white">{conv(h.temp)}°</span>
+                      <span className="text-[10px] font-semibold tabular-nums" style={{ color: accent, opacity: h.precip >= 20 ? 1 : 0 }}>
+                        {h.precip}%
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div role="list" className="overflow-hidden rounded-2xl border border-white/12 bg-[rgba(8,12,24,0.20)] backdrop-blur-md">
+                  {forecastRows.map((day, i) => {
+                    const leftPct = ((day.displayLow - weekMin) / weekSpan) * 100;
+                    const widthPct = Math.max(((day.displayHigh - day.displayLow) / weekSpan) * 100, 4);
+                    return (
                       <div
                         key={day.day}
-                        className="flex items-center justify-between gap-3 px-4 py-3.5"
+                        role="listitem"
+                        className="flex items-center gap-3 px-4 py-3.5"
                         style={{
                           borderTop: i === 0 ? "none" : "1px solid rgba(255,255,255,0.06)",
                           background: i % 2 === 1 ? "rgba(255,255,255,0.02)" : "transparent",
                         }}
                       >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <span className="w-9 shrink-0 text-xs font-bold tracking-wide text-white" style={{ textShadow: "0 1px 6px rgba(0,0,0,0.6)" }}>{day.day}</span>
-                          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-white/10 text-[15px] leading-none ring-1 ring-white/10">{day.emoji}</span>
-                          <span className="hidden truncate text-xs font-medium text-white/75 sm:block" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.6)" }}>{day.condition}</span>
+                        <span className="w-9 shrink-0 text-xs font-bold tracking-wide text-white">{day.day}</span>
+                        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-white/10 text-[15px] leading-none ring-1 ring-white/10">{day.emoji}</span>
+                        <span className="hidden min-w-0 flex-1 truncate text-xs font-medium text-white/75 sm:block">{day.condition}</span>
+                        <span className="shrink-0 rounded-full px-2 py-1 text-xs font-bold leading-none text-white" style={{ background: `${accent}22`, border: `1px solid ${accent}30` }}>{day.precipitation}%</span>
+                        <span className="w-8 shrink-0 text-right text-sm font-semibold text-white/70">{day.displayLow}°</span>
+                        <div className="relative h-1.5 min-w-10 flex-1 rounded-full bg-white/10 sm:max-w-24" aria-hidden="true">
+                          <div
+                            className="absolute inset-y-0 rounded-full"
+                            style={{
+                              left: `${leftPct}%`,
+                              width: `${widthPct}%`,
+                              background: `linear-gradient(90deg, ${tempBarColor((day.displayLow - weekMin) / weekSpan)}, ${tempBarColor((day.displayHigh - weekMin) / weekSpan)})`,
+                            }}
+                          />
                         </div>
-                        <div className="flex shrink-0 items-center gap-1.5">
-                          <span className="rounded-full px-2 py-1 text-xs font-bold leading-none text-white" style={{ background: `${accentHex.selected}22`, border: `1px solid ${accentHex.selected}30`, textShadow: "0 1px 4px rgba(0,0,0,0.6)" }}>{day.precipitation}%</span>
-                          <span className="w-10 text-right text-sm font-black" style={{ color: accentHex.selected, textShadow: "0 1px 8px rgba(0,0,0,0.5)" }}>{weather.unit === "C" ? toC(day.high) : day.high}°</span>
-                          <span className="w-8 text-right text-sm font-semibold text-white/70" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.6)" }}>{weather.unit === "C" ? toC(day.low) : day.low}°</span>
-                        </div>
+                        <span className="w-8 shrink-0 text-right text-sm font-black" style={{ color: accent }}>{day.displayHigh}°</span>
                       </div>
-                    ))}
-                  </div>
-                  <p className="mt-2 text-center text-[11px] leading-relaxed text-white/65" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.6)" }}>Tip: tap “°F” on the widget to switch to Celsius — the sheet follows.</p>
+                    );
+                  })}
                 </div>
-              </div>
-
-              <div className="sticky bottom-0 border-t border-white/06 bg-[rgba(0,0,0,0.10)] p-4 backdrop-blur-md">
-                <button
-                  type="button"
-                  onClick={() => setDetailsOpen(false)}
-                  className="w-full rounded-full border border-white/12 bg-white/12 py-3 text-sm font-bold text-white backdrop-blur transition hover:bg-white/16 active:scale-[0.99]"
-                >
-                  Close
-                </button>
-              </div>
+              )}
+              <p className="mt-2 text-center text-[11px] leading-relaxed text-white/55">Tip: tap “°{unit}” on the widget to switch units — the sheet follows.</p>
             </div>
           </div>
         </div>
-      )}
+
+        <div className="sticky bottom-0 border-t border-white/[0.06] bg-[rgba(0,0,0,0.18)] p-4 backdrop-blur-md">
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full rounded-full border border-white/12 bg-white/12 py-3 text-sm font-bold text-white backdrop-blur transition hover:bg-white/16 active:scale-[0.99]"
+          >
+            Close
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

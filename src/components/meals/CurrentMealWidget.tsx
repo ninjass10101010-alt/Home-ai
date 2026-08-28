@@ -34,6 +34,30 @@ function formatTime(t: string): string {
   return `${displayH}:${m.toString().padStart(2, "0")} ${period}`;
 }
 
+function formatDuration(totalMinutes: number): string {
+  const mins = Math.max(0, Math.round(totalMinutes));
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}
+
+// 0 while >90m away, ramps to 1 at the scheduled time, holds 1 for up to
+// 60m after start, then back to 0.
+function proximityFactor(minutesUntil: number): number {
+  if (minutesUntil > 90) return 0;
+  if (minutesUntil > 0) return 1 - minutesUntil / 90;
+  if (minutesUntil >= -60) return 1;
+  return 0;
+}
+
+function alphaHex(value: number): string {
+  return Math.round(Math.max(0, Math.min(255, value)))
+    .toString(16)
+    .padStart(2, "0");
+}
+
 const MEAL_THEMES: Record<string, { icon: string; label: string }> = {
   breakfast: { icon: "🌅", label: "Breakfast" },
   lunch:     { icon: "☀️", label: "Lunch" },
@@ -48,6 +72,8 @@ export default function CurrentMealWidget({ className = "" }: { className?: stri
   const [scheduledTime, setScheduledTime] = useState<string>("");
   const [activeMealData, setActiveMealData] = useState<any>(null);
   const [mealMarkers, setMealMarkers] = useState<number[]>([]);
+  const [activeMinutes, setActiveMinutes] = useState<number | null>(null);
+  const [minutesUntil, setMinutesUntil] = useState<number | null>(null);
 
   useEffect(() => {
     const update = () => {
@@ -89,6 +115,16 @@ export default function CurrentMealWidget({ className = "" }: { className?: stri
       if (current) {
         setCurrentMealType(current.mealType);
         setScheduledTime(formatTime(current.time));
+        if (current.minutes > 0) {
+          setActiveMinutes(current.minutes);
+          setMinutesUntil(current.minutes - nowMinutes);
+        } else {
+          setActiveMinutes(null);
+          setMinutesUntil(null);
+        }
+      } else {
+        setActiveMinutes(null);
+        setMinutesUntil(null);
       }
 
       const todayShort = now.toLocaleDateString("en-US", { weekday: "short" });
@@ -103,11 +139,30 @@ export default function CurrentMealWidget({ className = "" }: { className?: stri
     };
 
     update();
-    const interval = setInterval(update, 60000);
+    const interval = setInterval(update, 30000);
     return () => clearInterval(interval);
   }, []);
 
   const mealInfo = MEAL_THEMES[currentMealType] ?? MEAL_THEMES.dinner;
+
+  const proximity = minutesUntil === null ? 0 : proximityFactor(minutesUntil);
+  const isNear = minutesUntil !== null && minutesUntil > 0 && minutesUntil <= 15;
+
+  const subtitle = !scheduledTime
+    ? "Set a meal schedule to see times"
+    : minutesUntil === null || minutesUntil > 90
+      ? `Scheduled at ${scheduledTime}`
+      : minutesUntil > 0
+        ? isNear
+          ? `Almost time · in ${formatDuration(minutesUntil)}`
+          : `In ${formatDuration(minutesUntil)} · at ${scheduledTime}`
+        : `Started at ${scheduledTime}`;
+
+  const cardBorderAlpha = alphaHex(0x15 + (0x45 - 0x15) * proximity);
+  const cardBgAlpha = alphaHex(0x0a + (0x14 - 0x0a) * proximity);
+  const cardGlowRadius = Math.round((8 + 20 * proximity) * proximity);
+  const emojiGlowRadius = Math.round(16 + 12 * proximity);
+  const emojiBorderAlpha = alphaHex(0x20 + 0x18 * proximity + (isNear ? 0x15 : 0));
 
   return (
     <WidgetCard tone="#10b981" icon="🍽️" className={className}>
@@ -125,12 +180,12 @@ export default function CurrentMealWidget({ className = "" }: { className?: stri
       <div className="relative z-10 flex min-h-0 flex-1 flex-col justify-center p-5">
         {/* Header row */}
         <div className="flex items-center justify-center gap-2">
-          <h2 className="text-text-primary font-bold text-base flex items-center gap-2">
+          <h2 className="text-text-primary font-bold text-base flex items-center gap-2 whitespace-nowrap">
             <span className="meal-icon-pulse">{mealInfo.icon}</span>
             {mealInfo.label} Time
           </h2>
           <span
-            className="text-xs font-bold px-2.5 py-1 rounded-lg meal-time-badge"
+            className="text-xs font-bold px-2.5 py-1 rounded-lg meal-time-badge shrink-0"
             style={{
               color: `var(--widget-accent-strong, ${atm.accentColor})`,
               background: `${atm.accentColor}18`,
@@ -143,47 +198,52 @@ export default function CurrentMealWidget({ className = "" }: { className?: stri
         </div>
 
         <p className="text-text-secondary text-xs mb-4 text-center">
-          {scheduledTime ? `Scheduled at ${scheduledTime}` : "Set a meal schedule to see times"}
+          {subtitle}
         </p>
 
         {/* The day's meal times on the household clock */}
         {mealMarkers.length > 0 && (
           <div className="mb-4">
-            <DayLine tone={atm.accentColor} markers={mealMarkers.map((m) => ({ at: m }))} />
+            <DayLine
+              tone={atm.accentColor}
+              markers={mealMarkers.map((m) => ({
+                at: m,
+                color: m === activeMinutes ? atm.accentColor : undefined,
+              }))}
+            />
           </div>
         )}
 
         {/* Meal card */}
         <div
-          className="rounded-2xl p-3.5 flex items-center gap-3"
+          className="meal-card-glow rounded-2xl p-3.5 flex items-center gap-3"
           style={{
-            background: `${atm.accentColor}0a`,
-            border: `1px solid ${atm.accentColor}15`,
+            background: `${atm.accentColor}${cardBgAlpha}`,
+            border: `1px solid ${atm.accentColor}${cardBorderAlpha}`,
+            boxShadow: `0 0 ${cardGlowRadius}px ${atm.glowColor}`,
             backdropFilter: "blur(12px)",
-            transition: "border-color 0.4s ease, background 0.4s ease",
           }}
         >
           <div
-            className="w-14 h-14 rounded-2xl flex items-center justify-center text-3xl shrink-0 meal-emoji-bob"
+            className="meal-emoji-glow w-14 h-14 rounded-2xl flex items-center justify-center text-3xl shrink-0 meal-emoji-bob"
             style={{
               background: `${atm.accentColor}12`,
-              border: `1px solid ${atm.accentColor}20`,
-              boxShadow: `0 0 16px ${atm.glowColor}`,
-              transition: "box-shadow 0.4s ease, background 0.4s ease",
+              border: `1px solid ${atm.accentColor}${emojiBorderAlpha}`,
+              boxShadow: `0 0 ${emojiGlowRadius}px ${atm.glowColor}`,
             }}
           >
             {activeMealData?.emoji || "🍽️"}
           </div>
           <div className="flex-1 min-w-0">
-            <h3 className="text-text-primary font-bold text-lg leading-tight truncate">
+            <h3 className="text-text-primary font-bold text-lg leading-snug line-clamp-2">
               {activeMealData ? activeMealData.name : "No meal planned yet"}
             </h3>
             {activeMealData ? (
               <div className="flex gap-1.5 mt-1.5 flex-wrap">
-                {activeMealData.tags?.map((t: string) => (
+                {(activeMealData.tags ?? []).slice(0, 3).map((t: string) => (
                   <span
                     key={t}
-                    className="px-2 py-0.5 rounded-md text-[10px] font-medium"
+                    className="px-2 py-0.5 rounded-md text-[11px] font-medium"
                     style={{
                       color: `var(--widget-accent-strong, ${atm.accentColor})`,
                       background: `${atm.accentColor}15`,
@@ -193,6 +253,18 @@ export default function CurrentMealWidget({ className = "" }: { className?: stri
                     {t}
                   </span>
                 ))}
+                {(activeMealData.tags?.length ?? 0) > 3 && (
+                  <span
+                    className="px-2 py-0.5 rounded-md text-[11px] font-medium"
+                    style={{
+                      color: `var(--widget-accent-strong, ${atm.accentColor})`,
+                      background: `${atm.accentColor}15`,
+                      transition: "color 0.4s ease, background 0.4s ease",
+                    }}
+                  >
+                    +{activeMealData.tags.length - 3}
+                  </span>
+                )}
               </div>
             ) : (
               <p className="text-text-muted text-xs mt-1">

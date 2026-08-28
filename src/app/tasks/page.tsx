@@ -281,7 +281,6 @@ export default function TasksPage() {
 
   const membersData = useMemo(() => db.selectMembers(), []);
   const { currentUser, isLoggedIn } = useAuth();
-  const isKid = isLoggedIn && currentUser?.role === "child";
   const allMembers = useMemo(() => {
     const names = membersData.map((m: any) => m.fullName);
     return isLoggedIn ? ["My Tasks", ...names, "Up for grabs"] : ["All", ...names, "Up for grabs"];
@@ -1207,18 +1206,18 @@ export default function TasksPage() {
         {activeTab === "tasks" && (
           <div key="tasks" className="panel-swap">
           <>
-              <div className="member-strip snap-x snap-mandatory overscroll-contain pb-2">
+              <div className="member-strip member-strip-tiles snap-x snap-mandatory overscroll-contain pb-2">
                 {allMembers.map((member) => (
                   <button
                     key={member}
                     type="button"
                     aria-pressed={filterMember === member}
                     onClick={() => setFilterMember(member)}
-                    className={`member-chip shrink-0 snap-start tap-sm ${filterMember === member ? "is-active" : ""} ${isKid ? "min-h-[52px]" : ""}`}
+                    className={`member-tile shrink-0 snap-start tap-sm ${filterMember === member ? "is-active" : ""}`}
                     style={{ "--chip-color": memberChipColor(memberColors[member]) } as CSSProperties}
                   >
-                    <Avatar name={member} color={memberColors[member] || "green"} emoji={memberEmojis[member]} size="xs" variant="emoji" />
-                    <span>{member.split(" ")[0]}</span>
+                    <Avatar name={member} color={memberColors[member] || "green"} emoji={memberEmojis[member]} size="sm" variant="emoji" />
+                    <span className="member-tile-name">{["All", "My Tasks", "Up for grabs"].includes(member) ? member : member.split(" ")[0]}</span>
                   </button>
                 ))}
               </div>
