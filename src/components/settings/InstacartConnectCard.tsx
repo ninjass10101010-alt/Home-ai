@@ -89,7 +89,7 @@ export default function InstacartConnectCard() {
               <span className="font-bold text-text-muted shrink-0">1.</span>
               <span>
                 Get an API key from{" "}
-                <a href="https://docs.instacart.com/developer_platform_api/guide/get_api_key" target="_blank" rel="noopener noreferrer" className="text-[var(--color-accent-selected)] underline">
+                <a href="https://docs.instacart.com/developer_platform_api/get_started/api-keys" target="_blank" rel="noopener noreferrer" className="text-[var(--color-accent-selected)] underline">
                   Instacart Developer Portal
                 </a>
               </span>

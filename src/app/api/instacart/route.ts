@@ -33,7 +33,7 @@ export async function POST(request: NextRequest) {
       {
         success: false,
         error: "Instacart integration is not enabled. Configure INSTACART_API_KEY in your environment.",
-        setup_url: "https://docs.instacart.com/developer_platform_api/guide/get_api_key",
+        setup_url: "https://docs.instacart.com/developer_platform_api/get_started/api-keys",
       },
       { status: 503 },
     );

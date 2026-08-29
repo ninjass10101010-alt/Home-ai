@@ -12,9 +12,9 @@
  * can select a store, review items, and check out.
  *
  * Setup:
- *   1. Get an API key from https://docs.instacart.com/developer_platform_api/guide/get_api_key
- *   2. Set INSTACART_API_KEY in .env.local
- *   3. Set NEXT_PUBLIC_INSTACART_ENABLED=true to enable the UI
+ *   1. Get an API key from https://docs.instacart.com/developer_platform_api/get_started/api-keys
+ *   2. Save it as INSTACART_API_KEY via Settings → Integrations → Services & Keys
+ *      (encrypted in PocketBase), or set INSTACART_API_KEY in .env.local
  */
 
 const INSTACART_BASE = "https://connect.instacart.com/idp/v1";
