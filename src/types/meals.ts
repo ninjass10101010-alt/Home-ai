@@ -71,6 +71,8 @@ export interface GroceryItem {
   quantityValue?: number;
   unit?: string;
   pinned?: boolean;
+  /** Store where this item should be purchased. "any" = no preference. */
+  store?: string;
 }
 
 export type Tab = "plan" | "shop" | "stock";

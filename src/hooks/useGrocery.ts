@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { GroceryItem, Meal } from "@/types/meals";
 import { groceryCategories } from "@/data/meals";
 import { mealSyncService } from "@/services/mealSync";
+import { getDefaultStore } from "@/lib/stores";
 
 const GROCERY_KEY = "consuela-grocery";
 const RECENTLY_BOUGHT_KEY = "consuela-recently-bought";
@@ -145,6 +146,7 @@ export function useGrocery(showToast: (msg: string) => void, plannedMeals: Meal[
         notes,
         priority,
         needed: true,
+        store: getDefaultStore(category),
       };
     } else {
       item = {
@@ -154,6 +156,7 @@ export function useGrocery(showToast: (msg: string) => void, plannedMeals: Meal[
         aisle: saved.aisle || categoryAisle,
         priority: saved.priority || priority,
         needed: saved.needed !== false,
+        store: saved.store || getDefaultStore(saved.category || category),
       };
     }
 
