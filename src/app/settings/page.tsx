@@ -262,6 +262,8 @@ export default function SettingsPage() {
   const [confirmDelete, setConfirmDelete] = useState<{ kind: "member" | "contact"; item: any } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [testingAlert, setTestingAlert] = useState(false);
+  const [testPinOpen, setTestPinOpen] = useState(false);
+  const [testPinInput, setTestPinInput] = useState("");
   const [pushingCloud, setPushingCloud] = useState(false);
 
   const rowRefs = useRef(new Map<WidgetId, HTMLDivElement | null>());
@@ -568,18 +570,15 @@ export default function SettingsPage() {
     }
   };
 
-  const testEmergencyAlert = async () => {
-    // NOTE: the session pin is never held in the client bundle (security
-    // model — see AGENTS.md). `currentUser?.pin` is therefore undefined; the
-    // test button is disabled unless a pin is available. Kept read-only here
-    // for wire-compatibility with /api/emergency, which expects a pin.
-    const sessionPin = (currentUser as { pin?: string } | null)?.pin;
+  const testEmergencyAlert = async (pin: string) => {
+    // The family PIN is typed here and verified server-side against PocketBase
+    // — the client never stores or carries a copy of it (security model).
     setTestingAlert(true);
     try {
       const res = await fetch("/api/emergency", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "General", timestamp: new Date().toISOString(), pin: sessionPin }),
+        body: JSON.stringify({ type: "General", timestamp: new Date().toISOString(), pin }),
       });
       const data = await res.json();
       showToast(data.success ? "✅ Test alert sent" : "❌ Alert failed — check emergency contacts");
@@ -859,9 +858,39 @@ export default function SettingsPage() {
             </div>
             <div className="mt-4 flex gap-2">
               <SoftButton onClick={() => openContactModal()} className="flex-1">Add contact</SoftButton>
-              <SoftButton variant="secondary" onClick={testEmergencyAlert} loading={testingAlert} disabled={!(currentUser as { pin?: string } | null)?.pin} className="flex-1">
-                {(currentUser as { pin?: string } | null)?.pin ? "Test" : "Sign in to test"}
+              <SoftButton variant="secondary" onClick={() => setTestPinOpen(true)} loading={testingAlert} className="flex-1">
+                Test
               </SoftButton>
+              <Modal
+                open={testPinOpen}
+                onClose={() => setTestPinOpen(false)}
+                title="Test emergency alert"
+                description="Enter any family member's 4-digit PIN to send a test alert."
+                footer={
+                  <>
+                    <SoftButton onClick={() => setTestPinOpen(false)} variant="ghost" className="flex-1">Cancel</SoftButton>
+                    <SoftButton
+                      onClick={() => { setTestPinOpen(false); setTestPinInput(""); testEmergencyAlert(testPinInput); }}
+                      loading={testingAlert}
+                      disabled={!/^\d{4}$/.test(testPinInput)}
+                      className="flex-1"
+                    >
+                      Send test
+                    </SoftButton>
+                  </>
+                }
+              >
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={4}
+                  value={testPinInput}
+                  onChange={(e) => setTestPinInput(e.target.value.replace(/[^0-9]/g, ""))}
+                  placeholder="0000"
+                  className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-secondary"
+                />
+              </Modal>
             </div>
           </SectionCard>
 
