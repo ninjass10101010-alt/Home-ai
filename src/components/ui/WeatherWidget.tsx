@@ -645,6 +645,11 @@ export default function WeatherWidget({ className = "" }: { className?: string }
   useEffect(() => { loadWeather(); }, [loadWeather]);
 
   useEffect(() => {
+    const id = setInterval(loadWeather, 15 * 60_000);
+    return () => clearInterval(id);
+  }, [loadWeather]);
+
+  useEffect(() => {
     requestAnimationFrame(() => setMounted(true));
   }, []);
 

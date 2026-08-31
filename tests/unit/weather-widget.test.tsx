@@ -326,6 +326,26 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(birds).toBeTruthy();
     expect(birds!.style.opacity).toBe("0");
   });
+
+  it("refetches weather every 15 minutes on its own", async () => {
+    vi.useFakeTimers();
+    try {
+      mockOpenMeteo(makeOpenMeteoPayload());
+      render(<WeatherWidget />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      const weatherCalls = () =>
+        vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes("api.open-meteo.com"));
+
+      expect(weatherCalls()).toHaveLength(1);
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(15 * 60_000); });
+
+      expect(weatherCalls()).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("moon phase model", () => {
