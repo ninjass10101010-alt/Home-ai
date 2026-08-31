@@ -8,10 +8,13 @@ import ListRow from "@/components/ui/ListRow";
 import SectionCard from "@/components/patterns/SectionCard";
 import KitchenFlowCard from "@/components/meals/KitchenFlowCard";
 import SyncPreviewSheet from "@/components/meals/SyncPreviewSheet";
+import StorePill from "@/components/meals/StorePill";
+import StorePicker from "@/components/meals/StorePicker";
 import { mealSyncService, type SyncPreview } from "@/services/mealSync";
 import { groceryCategories } from "@/data/meals";
 import { GroceryItem, Meal } from "@/types/meals";
 import { parseQuantityString } from "@/lib/grocery-service";
+import { StoreId, getDefaultStore } from "@/lib/stores";
 
 const UNDO_MS = 8000;
 
@@ -45,6 +48,8 @@ export default function ShopTab({
   const [sending, setSending] = useState(false);
   const [undoing, setUndoing] = useState(false);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [storePickerOpen, setStorePickerOpen] = useState(false);
+  const [storePickerItemId, setStorePickerItemId] = useState<number | string | null>(null);
 
   const [preview, setPreview] = useState<SyncPreview | null>(null);
   const [syncBusy, setSyncBusy] = useState(false);
@@ -193,6 +198,17 @@ export default function ShopTab({
       showToast(`↩️ Restored ${undo.items.length} item${undo.items.length === 1 ? "" : "s"} to grocery`);
     } finally {
       setUndoing(false);
+    }
+  };
+
+  const handleStoreChange = (item: GroceryItem) => {
+    setStorePickerItemId(item.id);
+    setStorePickerOpen(true);
+  };
+
+  const handleStoreSelect = (storeId: StoreId) => {
+    if (storePickerItemId != null) {
+      updateGroceryItem(storePickerItemId, { store: storeId });
     }
   };
 
@@ -404,7 +420,11 @@ export default function ShopTab({
                         }
                         subtitle={item.quantity || undefined}
                         trailing={
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1.5">
+                            <StorePill
+                              store={item.store || "any"}
+                              onClick={() => handleStoreChange(item)}
+                            />
                             {!item.needed && (
                               <button
                                 onClick={(e) => { e.stopPropagation(); sendSingleToPantry(item); }}
@@ -522,6 +542,17 @@ export default function ShopTab({
         busy={syncBusy}
         onConfirm={confirmMealSync}
         onCancel={() => setPreview(null)}
+      />
+
+      <StorePicker
+        open={storePickerOpen}
+        onClose={() => { setStorePickerOpen(false); setStorePickerItemId(null); }}
+        currentStore={
+          storePickerItemId != null
+            ? groceryItems.find((i: any) => i.id === storePickerItemId)?.store || "any"
+            : "any"
+        }
+        onSelect={handleStoreSelect}
       />
     </div>
   );
