@@ -4,6 +4,16 @@ import { signSession, SESSION_COOKIE, SESSION_TTL_SECONDS } from "@/lib/session"
 
 export const dynamic = "force-dynamic";
 
+// The dashboard is served over plain HTTP on the LAN (http://192.168.0.28:3000).
+// Browsers refuse to send Secure cookies over http, so a hardcoded
+// `secure: NODE_ENV === "production"` silently killed every session-gated call
+// in the NAS deployment (recipes wouldn't save, chat tools 401'd, etc.).
+// Default stays secure in production; set SESSION_COOKIE_SECURE=false for
+// HTTP-only LAN deployments.
+export function sessionCookieSecure(): boolean {
+  return process.env.NODE_ENV === "production" && process.env.SESSION_COOKIE_SECURE !== "false";
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { memberName, pin } = await request.json();
@@ -22,7 +32,7 @@ export async function POST(request: NextRequest) {
     res.cookies.set(SESSION_COOKIE, token, {
       httpOnly: true,
       sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
+      secure: sessionCookieSecure(),
       path: "/",
       maxAge: SESSION_TTL_SECONDS,
     });

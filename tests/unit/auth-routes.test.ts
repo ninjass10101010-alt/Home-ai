@@ -14,6 +14,7 @@ vi.mock("@/lib/server-auth", () => ({
 import { POST as loginPOST } from "@/app/api/auth/login/route";
 import { GET as whoamiGET } from "@/app/api/auth/whoami/route";
 import { POST as logoutPOST } from "@/app/api/auth/logout/route";
+import { sessionCookieSecure } from "@/app/api/auth/login/route";
 
 function req(url: string, init?: RequestInit): NextRequest {
   return new NextRequest(url, init as any);
@@ -61,6 +62,26 @@ describe("POST /api/auth/login", () => {
     expect(res.headers.get("set-cookie")).toBeNull();
     // Guard sits after PIN verification: bad config must not skip the auth check
     expect(mocks.verifyPinFromPB).toHaveBeenCalledWith("Rebecca", "1234");
+  });
+});
+
+describe("sessionCookieSecure", () => {
+  it("is Secure in production by default", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SESSION_COOKIE_SECURE", "");
+    expect(sessionCookieSecure()).toBe(true);
+  });
+
+  it("is NOT Secure when SESSION_COOKIE_SECURE=false (LAN http deployments)", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SESSION_COOKIE_SECURE", "false");
+    expect(sessionCookieSecure()).toBe(false);
+  });
+
+  it("is NOT Secure in development", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("SESSION_COOKIE_SECURE", "");
+    expect(sessionCookieSecure()).toBe(false);
   });
 });
 
