@@ -5,6 +5,30 @@ import { weekKey } from "@/lib/task-utils";
 import { localTodayISO, localPreviousDayISO } from "@/lib/local-date";
 import type { NewSuggestion } from "./types";
 
+export async function scanGroceryStoreOptimization(scopeDate: string): Promise<NewSuggestion[]> {
+  const groceryItems = await withAdmin(async (pb) =>
+    pb.collection("grocery_list_items").getFullList({ requestKey: null }) as unknown as Array<{
+      id: string; name?: string; needed?: boolean; store?: string;
+    }>
+  );
+  const needed = groceryItems.filter((i) => i.needed !== false);
+  if (needed.length < 3) return [];
+
+  const anyItems = needed.filter((i) => !i.store || i.store === "any");
+  if (anyItems.length < 2) return [];
+
+  return [{
+    kind: "grocery_store_optimization" as const,
+    severity: "info" as const,
+    title: `${anyItems.length} items have no store assigned`,
+    body: `Assign stores to your grocery items for smarter shopping and price comparison.`,
+    emoji: "🛒",
+    actionLabel: "Assign stores",
+    actionPayload: { tool: "open_grocery", args: {} },
+    scopeDate,
+  }];
+}
+
 export async function scanPantryLow(scopeDate: string): Promise<NewSuggestion[]> {
   const pantry = await withAdmin(async (pb) =>
     pb.collection("pantry_items").getFullList({ requestKey: null }) as unknown as Array<{
@@ -182,7 +206,7 @@ async function fetchExistingConditionKeys(): Promise<Set<string>> {
 }
 
 export async function runEngine({ scopeDate }: { scopeDate: string }): Promise<{ scanned: number; inserted: number; rejected: number }> {
-  const scanners = [scanPantryLow, scanTaskPenaltyStreak, scanCalendarConflicts, scanStaleData];
+  const scanners = [scanPantryLow, scanTaskPenaltyStreak, scanCalendarConflicts, scanStaleData, scanGroceryStoreOptimization];
   let all: NewSuggestion[] = [];
   for (const s of scanners) {
     try {
