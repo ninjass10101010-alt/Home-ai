@@ -631,7 +631,9 @@ export default function WeatherWidget({ className = "" }: { className?: string }
           todayLow: typeof daily?.temperature_2m_min?.[0] === "number" ? Math.round(daily.temperature_2m_min[0]) : null,
           outlook: deriveOutlook(hourly, currentWMO.condition),
         });
-        setUpdatedAt(Date.now());
+        const fetchedAt = Date.now();
+        setUpdatedAt(fetchedAt);
+        updatedAtRef.current = fetchedAt;
         setFetchError(null);
         setLoading(false);
       })
@@ -667,10 +669,19 @@ export default function WeatherWidget({ className = "" }: { className?: string }
   }, [updatedAt]);
 
   useEffect(() => {
-    const onVisibility = () => setTabHidden(document.hidden);
+    const onVisibility = () => {
+      setTabHidden(document.hidden);
+      if (
+        !document.hidden &&
+        updatedAtRef.current !== null &&
+        Date.now() - updatedAtRef.current > 10 * 60_000
+      ) {
+        loadWeather();
+      }
+    };
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, []);
+  }, [loadWeather]);
 
   useEffect(() => () => { if (releaseTimerRef.current) window.clearTimeout(releaseTimerRef.current); }, []);
 

@@ -18,14 +18,20 @@ class FakeResizeObserver {
   disconnect() {}
 }
 
+const roots: ReturnType<typeof createRoot>[] = [];
+
 function render(ui: ReactElement): HTMLElement {
   const el = document.createElement("div");
   document.body.appendChild(el);
-  act(() => createRoot(el).render(
-    <WeatherProvider>
-      <AtmosphericProvider>{ui}</AtmosphericProvider>
-    </WeatherProvider>
-  ));
+  act(() => {
+    const root = createRoot(el);
+    roots.push(root);
+    root.render(
+      <WeatherProvider>
+        <AtmosphericProvider>{ui}</AtmosphericProvider>
+      </WeatherProvider>
+    );
+  });
   return el.firstChild as HTMLElement;
 }
 
@@ -126,6 +132,10 @@ describe("WeatherWidget — Not Boring redesign", () => {
   });
 
   afterEach(() => {
+    act(() => {
+      roots.forEach((r) => r.unmount());
+    });
+    roots.length = 0;
     vi.unstubAllGlobals();
     document.body.innerHTML = "";
   });
@@ -342,6 +352,48 @@ describe("WeatherWidget — Not Boring redesign", () => {
       await act(async () => { await vi.advanceTimersByTimeAsync(15 * 60_000); });
 
       expect(weatherCalls()).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("refetches when the tab becomes visible again with stale data", async () => {
+    vi.useFakeTimers();
+    try {
+      mockOpenMeteo(makeOpenMeteoPayload());
+      render(<WeatherWidget />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      const weatherCalls = () =>
+        vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes("api.open-meteo.com"));
+      expect(weatherCalls()).toHaveLength(1);
+
+      // 11 minutes pass (under the 15-min poll threshold, over the 10-min stale threshold)
+      await act(async () => { await vi.advanceTimersByTimeAsync(11 * 60_000); });
+      act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      expect(weatherCalls()).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not refetch on tab wake when data is still fresh", async () => {
+    vi.useFakeTimers();
+    try {
+      mockOpenMeteo(makeOpenMeteoPayload());
+      render(<WeatherWidget />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      const weatherCalls = () =>
+        vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes("api.open-meteo.com"));
+      expect(weatherCalls()).toHaveLength(1);
+
+      // only 5 minutes pass
+      await act(async () => { await vi.advanceTimersByTimeAsync(5 * 60_000); });
+      act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      expect(weatherCalls()).toHaveLength(1);
     } finally {
       vi.useRealTimers();
     }
