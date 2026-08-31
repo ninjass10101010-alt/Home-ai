@@ -2,7 +2,6 @@
 import { useState, useEffect } from "react";
 import { db } from "@/db";
 import { Recipe } from "@/types/meals";
-import { defaultRecipes } from "@/data/meals";
 
 const RECIPES_KEY = "consuela-recipes";
 
@@ -47,10 +46,10 @@ export function useRecipes(showToast: (msg: string) => void) {
         const localExtra = local.filter(r => !pbNames.has(r.name.toLowerCase()));
         setRecipes([...normalized, ...localExtra]);
       } else {
-        setRecipes(local.length > 0 ? local : defaultRecipes);
+        setRecipes(local);
       }
     }).catch(() => {
-      setRecipes(local.length > 0 ? local : defaultRecipes);
+      setRecipes(local);
     });
   }, []);
 

@@ -167,19 +167,7 @@ function priorityColor(priority: Task["priority"]): string {
   return priority === "high" ? "var(--color-accent-rose)" : priority === "medium" ? "var(--color-accent-amber)" : "var(--color-accent-mint)";
 }
 
-const initialTasks: Task[] = [
-  { id: 1, title: "Take out trash", assignee: "Caspian", assigneeEmoji: "🧒", due: getISO.today, points: 10, recurring: "Weekly · Thu", category: "Chores", completed: false, priority: "high" },
-  { id: 2, title: "Grocery run", assignee: "Rebecca (Mom)", assigneeEmoji: "👩", due: getISO.today, points: 20, recurring: null, category: "Errands", completed: false, priority: "high" },
-  { id: 3, title: "Load dishwasher", assignee: "Jasmine", assigneeEmoji: "👧", due: getISO.today, points: 8, recurring: "Daily", category: "Chores", completed: false, priority: "medium" },
-  { id: 4, title: "Vacuum living room", assignee: "Caspian", assigneeEmoji: "🧒", due: getISO.tomorrow, points: 15, recurring: "Weekly", category: "Chores", completed: false, priority: "medium" },
-  { id: 5, title: "Pay electric bill", assignee: "Jeffery (Dad)", assigneeEmoji: "👨", due: getISO.fri, points: 0, recurring: "Monthly", category: "Admin", completed: false, priority: "high" },
-  { id: 6, title: "Clean bathroom", assignee: "Jasmine", assigneeEmoji: "👧", due: getISO.tomorrow, points: 15, recurring: "Weekly", category: "Chores", completed: false, priority: "medium" },
-  { id: 7, title: "Walk Rocco", assignee: "Caspian", assigneeEmoji: "🧒", due: getISO.today, points: 12, recurring: "Daily", category: "Pets", completed: false, priority: "low" },
-  { id: 8, title: "Book dentist appt", assignee: "Rebecca (Mom)", assigneeEmoji: "👩", due: getISO.thisWeek, points: 0, recurring: null, category: "Health", completed: false, priority: "medium" },
-  { id: 9, title: "Car oil change", assignee: "Jeffery (Dad)", assigneeEmoji: "👨", due: getISO.sat, points: 0, recurring: null, category: "Errands", completed: false, priority: "low" },
-  { id: 10, title: "Chew the bone", assignee: "Rocco", assigneeEmoji: "🐶", due: getISO.today, points: 5, recurring: "Daily", category: "Pets", completed: false, priority: "low" },
-  { id: 11, title: "Grooming appointment", assignee: "Rico", assigneeEmoji: "🐩", due: getISO.tomorrow, points: 0, recurring: "Monthly", category: "Pets", completed: false, priority: "medium" },
-];
+const initialTasks: Task[] = [];
 
 const categories = ["Chores", "Errands", "Admin", "Health", "Pets", "School"];
 
@@ -373,23 +361,13 @@ export default function TasksPage() {
   const [googleSyncing, setGoogleSyncing] = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState<Task[]>([]);
   const [toast, setToast] = useState<string | null>(null);
-  const [rewards, setRewards] = useState<Reward[]>(() => loadFromStorage(REWARDS_KEY, []).length > 0 ? loadFromStorage(REWARDS_KEY, []) : [
-    { id: 1, name: "Movie pick", emoji: "🎬", cost: 50 },
-    { id: 2, name: "Skip 1 chore", emoji: "🎟️", cost: 75 },
-    { id: 3, name: "Extra screen time", emoji: "📱", cost: 100 },
-    { id: 4, name: "Family outing", emoji: "🎡", cost: 200 },
-  ]);
+  const [rewards, setRewards] = useState<Reward[]>(() => loadFromStorage(REWARDS_KEY, []));
   const [editingRewardId, setEditingRewardId] = useState<number | null>(null);
   const [rewardForm, setRewardForm] = useState<Reward>({ id: 0, name: "", emoji: "🎁", cost: 50 });
   const [addingReward, setAddingReward] = useState(false);
   const [aiRewardSuggesting, setAiRewardSuggesting] = useState(false);
   const [aiRewards, setAiRewards] = useState<Reward[]>([]);
-  const [penalties, setPenalties] = useState<Penalty[]>(() => loadFromStorage(PENALTIES_KEY, []).length > 0 ? loadFromStorage(PENALTIES_KEY, []) : [
-    { id: 1, name: "Missed chore", emoji: "🧹", points: 10 },
-    { id: 2, name: "Left mess", emoji: "🗑️", points: 8 },
-    { id: 3, name: "Forgot homework", emoji: "📚", points: 15 },
-    { id: 4, name: "Late bedtime", emoji: "🌙", points: 5 },
-  ]);
+  const [penalties, setPenalties] = useState<Penalty[]>(() => loadFromStorage(PENALTIES_KEY, []));
   const [editingPenaltyId, setEditingPenaltyId] = useState<number | null>(null);
   const [penaltyForm, setPenaltyForm] = useState<Penalty>({ id: 0, name: "", emoji: "⚠️", points: 10 });
   const [addingPenalty, setAddingPenalty] = useState(false);

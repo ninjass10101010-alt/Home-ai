@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { defaultMeals, mealIdeas, initialGroceryItems, groceryCategories } from "@/data/meals";
+import { groceryCategories } from "@/data/meals";
 import { withAdmin } from "@/lib/pb-auth";
 import { weekKey } from "@/lib/task-utils";
 import type { Transaction, WeekData } from "@/types/tasks";
@@ -497,7 +497,7 @@ const TOOLS: Tool[] = [
     },
     handler: async () => {
       const meals = await db.selectMeals();
-      let data = meals.length > 0 ? meals : defaultMeals;
+      let data = meals.length > 0 ? meals : [];
       const byDay: Record<string, any[]> = {};
       for (const m of data) {
         const day = m.time || m.day || "unscheduled";
@@ -528,7 +528,7 @@ const TOOLS: Tool[] = [
     },
     handler: async (args) => {
       const meals = await db.selectMeals();
-      let recipes = meals.length > 0 ? meals.filter((m: any) => m.name && m.ingredients) : defaultMeals.filter((m: any) => m.name && m.ingredients);
+      let recipes = meals.length > 0 ? meals.filter((m: any) => m.name && m.ingredients) : [];
       if (args.tag) {
         const tag = String(args.tag).toLowerCase();
         recipes = recipes.filter((r: any) => (r.tags || []).some((t: string) => t.toLowerCase().includes(tag)));
@@ -561,7 +561,6 @@ const TOOLS: Tool[] = [
     },
     handler: async (args) => {
       let items = await db.selectGrocery();
-      if (items.length === 0) items = initialGroceryItems;
       if (args.needed_only) items = items.filter((i: any) => i.needed !== false);
       const byCategory: Record<string, any[]> = {};
       for (const i of items) {

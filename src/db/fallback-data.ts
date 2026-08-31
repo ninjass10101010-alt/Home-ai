@@ -38,64 +38,20 @@ export const membersFallback: MemberFallback[] = [
 
 // ─── Events ────────────────────────────────────────────────────────────────
 
-export const eventsFallback = [
-  { id: 1, title: "Soccer Practice", date: new Date().toISOString().split('T')[0], time: "16:00", member: "Emily", icon: "⚽", color: "violet" },
-  { id: 2, title: "Dentist — Bailey", date: new Date().toISOString().split('T')[0], time: "17:30", member: "Bailey", icon: "🦷", color: "amber" },
-  { id: 3, title: "Team dinner", date: new Date().toISOString().split('T')[0], time: "19:00", member: "Jeffery (Dad)", icon: "🍽️", color: "cyan" },
-];
+export const eventsFallback: any[] = [];
 
-// ─── Tasks ─────────────────────────────────────────────────────────────────
+export const tasksFallback: any[] = [];
 
-export const tasksFallback = [
-  { id: 1, title: "Take out trash", assigned: "Emily", due: new Date().toISOString().split('T')[0], priority: "medium", status: "pending", points: 15 },
-  { id: 2, title: "Grocery run", assigned: "Rebecca (Mom)", due: new Date().toISOString().split('T')[0], priority: "high", status: "pending", points: 20 },
-  { id: 3, title: "Clean bathroom", assigned: "Jasmine", due: new Date(Date.now() + 86400000).toISOString().split('T')[0], priority: "medium", status: "completed", points: 15 },
-];
-
-// ─── Schedules ─────────────────────────────────────────────────────────────
-
-export const schedulesFallback = [
-  { id: 1, title: "Wake up / Morning routine", time: "07:00", days: "weekdays", type: "routine", icon: "⏰", color: "amber" },
-  { id: 2, title: "Breakfast", time: "07:30", days: "all", type: "routine", icon: "🥞", color: "green" },
-  { id: 3, title: "School / Learning time", time: "08:30", days: "weekdays", type: "routine", icon: "📚", color: "cyan" },
-  { id: 4, title: "Lunch", time: "12:00", days: "all", type: "routine", icon: "🍽️", color: "amber" },
-  { id: 5, title: "Screen time", time: "15:30", days: "weekdays", type: "routine", icon: "📱", color: "violet" },
-  { id: 6, title: "Dinner", time: "18:00", days: "all", type: "routine", icon: "🍝", color: "green" },
-  { id: 7, title: "Bedtime routine", time: "20:30", days: "all", type: "routine", icon: "🛁", color: "violet" },
-  { id: 8, title: "Lights out", time: "21:00", days: "all", type: "routine", icon: "🌙", color: "rose" },
-  { id: 9, title: "Family movie night", time: "19:00", days: "friday", type: "routine", icon: "🎬", color: "cyan" },
-  { id: 10, title: "Take medication", time: "08:00", days: "all", memberId: 1, type: "reminder", icon: "💊", color: "rose" },
-];
-
-// ─── Emergency Contacts ────────────────────────────────────────────────────
+export const schedulesFallback: any[] = [];
 
 export const emergencyFallback = [
   { id: 1, name: "Parent 1", phone: "+15551234567", email: "parent1@example.com", carrier: "verizon", relationship: "parent", isPrimary: true, emoji: "👩" },
   { id: 2, name: "Parent 2", phone: "+15559876543", email: "parent2@example.com", carrier: "verizon", relationship: "parent", isPrimary: false, emoji: "👨" },
 ];
 
-// ─── Pantry ────────────────────────────────────────────────────────────────
+export const pantryFallback: any[] = [];
 
-export const pantryFallback = [
-  { id: 101, name: "Olive oil", status: "plenty" },
-  { id: 102, name: "Rice", status: "plenty" },
-  { id: 103, name: "Pasta", status: "low" },
-  { id: 104, name: "Canned tomatoes", status: "plenty" },
-  { id: 105, name: "Chicken broth", status: "plenty" },
-  { id: 106, name: "Flour", status: "plenty" },
-  { id: 107, name: "Sugar", status: "plenty" },
-  { id: 108, name: "Salt", status: "plenty" },
-  { id: 109, name: "Black pepper", status: "low" },
-];
-
-// ─── Grocery List ──────────────────────────────────────────────────────────
-
-export const groceryFallback = [
-  { id: 201, name: "Ground beef", category: "meat", aisle: "6", quantity: "1 lb", priority: "high", needed: true },
-  { id: 202, name: "Taco shells", category: "pantry", aisle: "8", priority: "medium", needed: true },
-  { id: 203, name: "Lettuce", category: "produce", aisle: "1", priority: "medium", needed: true },
-  { id: 204, name: "Cheese", category: "dairy", aisle: "4", priority: "low", needed: true },
-];
+export const groceryFallback: any[] = [];
 
 // ─── Utilities ─────────────────────────────────────────────────────────────
 

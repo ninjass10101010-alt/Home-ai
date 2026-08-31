@@ -142,12 +142,7 @@ interface ScheduleItem {
   mealType?: "breakfast" | "lunch" | "dinner" | "snack" | "none";
 }
 
-const getInitialSchedules = (): ScheduleItem[] => db.selectTodaysSchedulesRaw().map((s: any) => ({
-  ...s,
-  days: "all" as string,
-  icon: s.emoji || s.icon || "⏰",
-  color: (s.color as ScheduleColor) || "green",
-}));
+const getInitialSchedules = (): ScheduleItem[] => [];
 
 const dayLabels: Record<string, string> = {
   all: "Every day", weekdays: "Weekdays", weekends: "Weekends", friday: "Fridays",

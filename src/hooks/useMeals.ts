@@ -2,7 +2,6 @@
 import { useState, useEffect } from "react";
 import { db } from "@/db";
 import { Meal } from "@/types/meals";
-import { defaultMeals, mealIdeas } from "@/data/meals";
 import { todayMondayISO, shiftWeek } from "@/lib/meals-week-utils";
 
 const MEALS_KEY = "consuela-meals";
@@ -36,10 +35,10 @@ export function useMeals() {
         }
         setMeals(merged);
       } else {
-        setMeals(local.length > 0 ? local : defaultMeals);
+        setMeals(local);
       }
     }).catch(() => {
-      setMeals(local.length > 0 ? local : defaultMeals);
+      setMeals(local);
     });
   }, []);
 
@@ -73,9 +72,9 @@ export function useMeals() {
           emoji: a.emoji || "🍽️",
           tags: a.detail?.split("·").map((t: string) => t.trim()).filter(Boolean) || ["Family"],
         }));
-      setAiMealIdeas(ideas.length > 0 ? ideas : mealIdeas);
+      setAiMealIdeas(ideas.length > 0 ? ideas : []);
     } catch {
-      setAiMealIdeas(mealIdeas);
+      setAiMealIdeas([]);
     }
     setAiMealLoading(false);
   };

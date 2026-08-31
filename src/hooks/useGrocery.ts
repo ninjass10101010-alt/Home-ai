@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { db } from "@/db";
 import { GroceryItem, Meal } from "@/types/meals";
-import { initialGroceryItems, groceryCategories } from "@/data/meals";
+import { groceryCategories } from "@/data/meals";
 import { mealSyncService } from "@/services/mealSync";
 
 const GROCERY_KEY = "consuela-grocery";
@@ -89,11 +89,11 @@ export function useGrocery(showToast: (msg: string) => void, plannedMeals: Meal[
         }
         setGroceryItems(merged);
       } else {
-        setGroceryItems(local.length > 0 ? local : initialGroceryItems);
+        setGroceryItems(local);
       }
       setLoaded(true);
     }).catch(() => {
-      setGroceryItems(local.length > 0 ? local : initialGroceryItems);
+      setGroceryItems(local);
       setLoaded(true);
     });
     const savedRecent = loadJSON<{ name: string; emoji: string; category: string }[]>(RECENTLY_BOUGHT_KEY, []);
