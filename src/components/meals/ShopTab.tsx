@@ -304,6 +304,10 @@ export default function ShopTab({
     .filter((i: any) => i.needed !== false)
     .map((i: any) => ({ name: i.name, prices: {} }));
 
+  // Unchecked items grouped by store, excluding "any" (unassigned) and Walmart (not on Instacart in Holland)
+  const instacartStoreIds = Object.keys(groupByStore(groceryItems.filter((i: any) => i.needed !== false)))
+    .filter((storeId) => storeId !== "any" && storeId !== "walmart");
+
   const pickedUp = groceryItems.filter((i: any) => !i.needed).length;
   const totalItems = groceryItems.length;
   const checkedCount = pickedUp;
@@ -605,6 +609,25 @@ export default function ShopTab({
                 <SoftButton variant="ghost" size="md" onClick={clearCompleted} className="w-full text-emerald-400">
                   ✨ Clear {pickedUp} checked item{pickedUp > 1 ? "s" : ""}
                 </SoftButton>
+              )}
+              {instacartStoreIds.length > 0 && (
+                <div className="space-y-1.5 border-t border-white/10 pt-3">
+                  <p className="text-[11px] font-semibold text-text-muted">Shop with Ask Instacart</p>
+                  {instacartStoreIds.slice(0, 4).map((storeId) => (
+                    <SoftButton
+                      key={storeId}
+                      variant="ghost"
+                      size="sm"
+                      className="w-full"
+                      onClick={() => window.open(`https://www.instacart.com/store/${storeId}`, "_blank", "noopener,noreferrer")}
+                    >
+                      🤖 Ask Instacart at {getStoreLabel(storeId)}
+                    </SoftButton>
+                  ))}
+                  {instacartStoreIds.length > 4 && (
+                    <p className="text-[11px] text-text-muted">…and {instacartStoreIds.length - 4} more</p>
+                  )}
+                </div>
               )}
             </div>
           </SectionCard>
