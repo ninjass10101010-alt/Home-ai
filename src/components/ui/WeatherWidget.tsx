@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { useWeatherConfig } from "@/hooks/useWeather";
 import { HolidayOverride } from "@/lib/weather-config";
@@ -554,7 +554,13 @@ export default function WeatherWidget({ className = "" }: { className?: string }
   const [tabHidden, setTabHidden] = useState(false);
   const { runtime } = useRuntimeConfig();
 
-  useEffect(() => {
+  const dataLoadedRef = useRef(false);
+  const inFlightRef = useRef(false);
+  const updatedAtRef = useRef<number | null>(null);
+
+  const loadWeather = useCallback(() => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     const lat = Number(runtime?.weather_location?.LAT ?? 42.7875);
     const lon = Number(runtime?.weather_location?.LON ?? -86.1089);
     fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_direction_10m,is_day,cloud_cover,uv_index,pressure_msl,visibility&hourly=temperature_2m,weather_code,precipitation_probability,is_day,cloud_cover,wind_speed_10m,wind_direction_10m,relative_humidity_2m,visibility&daily=temperature_2m_max,temperature_2m_min,weather_code,precipitation_probability_max,sunrise,sunset,uv_index_max&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto&forecast_days=6`)
@@ -632,8 +638,11 @@ export default function WeatherWidget({ className = "" }: { className?: string }
       .catch(() => {
         setFetchError("Weather unavailable — check connection or try again.");
         setLoading(false);
-      });
+      })
+      .finally(() => { inFlightRef.current = false; });
   }, [runtime?.weather_location?.LAT, runtime?.weather_location?.LON]);
+
+  useEffect(() => { loadWeather(); }, [loadWeather]);
 
   useEffect(() => {
     requestAnimationFrame(() => setMounted(true));
