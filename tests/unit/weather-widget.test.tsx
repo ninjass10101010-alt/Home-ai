@@ -470,6 +470,86 @@ describe("WeatherWidget — Not Boring redesign", () => {
       vi.useRealTimers();
     }
   });
+
+  it("shows the unavailable banner when the first fetch for a new location fails", async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveRuntime!: (v: { weather_location: { LAT: string; LON: string } }) => void;
+      const runtime = new Promise<{ weather_location: { LAT: string; LON: string } }>((r) => { resolveRuntime = r; });
+      let calls = 0;
+      const payload = makeOpenMeteoPayload();
+      vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("api.open-meteo.com")) {
+          calls += 1;
+          if (calls === 1) return Promise.resolve({ json: () => Promise.resolve(payload) });
+          return Promise.reject(new Error("network down"));
+        }
+        if (url.includes("/api/services/runtime")) {
+          return runtime.then((body) => ({ ok: true, json: () => Promise.resolve(body) }));
+        }
+        return Promise.reject(new Error("no network"));
+      }));
+
+      const el = render(<WeatherWidget />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(el.textContent).toContain("H:75°"); // old location loaded fine
+
+      // location changes while the widget stays mounted: the runtime config
+      // resolves with new coordinates → loadWeather is recreated → the mount
+      // effect refetches for the new location
+      await act(async () => {
+        resolveRuntime({ weather_location: { LAT: "39.7392", LON: "-104.9903" } });
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      // the new location's FIRST fetch failed → the banner must show
+      expect(el.textContent).toContain("Weather unavailable");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("skips a refresh that fires while a fetch is already in flight", async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveSecond!: (v: { json: () => Promise<unknown> }) => void;
+      const second = new Promise<{ json: () => Promise<unknown> }>((r) => { resolveSecond = r; });
+      let calls = 0;
+      const payload = makeOpenMeteoPayload();
+      vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("api.open-meteo.com")) {
+          calls += 1;
+          if (calls === 1) return Promise.resolve({ json: () => Promise.resolve(payload) });
+          return second;
+        }
+        return Promise.reject(new Error("no network"));
+      }));
+      const weatherCalls = () =>
+        vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes("api.open-meteo.com"));
+
+      render(<WeatherWidget />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(weatherCalls()).toHaveLength(1);
+
+      // first 15-min poll starts a refresh and holds it unresolved (in flight)
+      await act(async () => { await vi.advanceTimersByTimeAsync(15 * 60_000); });
+      expect(weatherCalls()).toHaveLength(2);
+
+      // second poll fires while the first is still in flight → overlap guard skips it
+      await act(async () => { await vi.advanceTimersByTimeAsync(15 * 60_000); });
+      expect(weatherCalls()).toHaveLength(2);
+
+      // let the in-flight refresh complete so the test exits clean
+      await act(async () => {
+        resolveSecond({ json: () => Promise.resolve(payload) });
+        await vi.advanceTimersByTimeAsync(0);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("moon phase model", () => {

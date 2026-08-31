@@ -647,7 +647,11 @@ export default function WeatherWidget({ className = "" }: { className?: string }
       .finally(() => { inFlightRef.current = false; });
   }, [runtime?.weather_location?.LAT, runtime?.weather_location?.LON]);
 
-  useEffect(() => { loadWeather(); }, [loadWeather]);
+  useEffect(() => {
+    dataLoadedRef.current = false; // new location = no data has ever loaded for it
+    updatedAtRef.current = null;
+    loadWeather();
+  }, [loadWeather]);
 
   useEffect(() => {
     const id = setInterval(loadWeather, 15 * 60_000);
