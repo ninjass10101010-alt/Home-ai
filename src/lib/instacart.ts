@@ -235,3 +235,54 @@ export function getInstacartSearchUrl(query: string): string {
 export function getInstacartHomeUrl(): string {
   return "https://www.instacart.com";
 }
+
+/**
+ * Create a shopping list page via Composio's INSTACART toolkit.
+ * Primary path when COMPOSIO_API_KEY is configured.
+ */
+export async function createShoppingListViaComposio(params: {
+  apiKey: string;
+  title: string;
+  items: Ingredient[];
+  imageUrl?: string;
+  instructions?: string[];
+}): Promise<InstacartResponse> {
+  const payload: Record<string, any> = {
+    title: params.title,
+    line_items: params.items.map((item) => ({
+      name: item.name,
+      quantity: item.quantity || 1,
+      unit: item.unit || "each",
+    })),
+  };
+  if (params.imageUrl) payload.image_url = params.imageUrl;
+  if (params.instructions) payload.instructions = params.instructions.join("\n");
+
+  const res = await fetch(
+    "https://backend.composio.dev/api/v3.1/tools/execute/INSTACART_CREATE_SHOPPING_LIST_PAGE",
+    {
+      method: "POST",
+      headers: {
+        "X-API-Key": params.apiKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ arguments: payload }),
+    },
+  );
+
+  if (!res.ok) {
+    const error = await res.text();
+    throw new Error(`Composio API error (${res.status}): ${error}`);
+  }
+
+  const data = await res.json();
+  const url =
+    data?.result?.output?.shopping_list_url ??
+    data?.result?.output?.url;
+  if (!url) throw new Error("Composio did not return a shopping list URL");
+
+  return {
+    url,
+    expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+  };
+}
