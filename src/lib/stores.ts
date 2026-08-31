@@ -75,3 +75,48 @@ const CATEGORY_DEFAULTS: Record<string, StoreId> = {
 export function getDefaultStore(category: string): StoreId {
   return CATEGORY_DEFAULTS[category.toLowerCase()] ?? "any";
 }
+
+export interface PriceCompareItem {
+  name: string;
+  prices: Partial<Record<StoreId, number>>;
+}
+
+export interface PriceCompareResult {
+  totalByStore: Partial<Record<StoreId, number>>;
+  cheapestStore: StoreId | null;
+  savings: number;
+}
+
+export function calculateCheapestSplit(items: PriceCompareItem[]): PriceCompareResult {
+  const totals: Partial<Record<StoreId, number>> = {};
+
+  for (const item of items) {
+    for (const [store, price] of Object.entries(item.prices)) {
+      if (typeof price !== "number") continue;
+      totals[store as StoreId] = (totals[store as StoreId] ?? 0) + price;
+    }
+  }
+
+  let cheapest: StoreId | null = null;
+  let cheapestTotal = Infinity;
+  for (const [store, total] of Object.entries(totals)) {
+    if (typeof total === "number" && total < cheapestTotal) {
+      cheapestTotal = total;
+      cheapest = store as StoreId;
+    }
+  }
+
+  const secondCheapest = Object.values(totals)
+    .filter((t): t is number => typeof t === "number" && t !== cheapestTotal)
+    .sort((a, b) => a - b)[0];
+
+  return {
+    totalByStore: totals,
+    cheapestStore: cheapest,
+    savings: secondCheapest ? secondCheapest - cheapestTotal : 0,
+  };
+}
+
+export function formatStoreTotal(amount: number): string {
+  return `$${amount.toFixed(2)}`;
+}
