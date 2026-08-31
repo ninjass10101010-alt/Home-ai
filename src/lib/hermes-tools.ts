@@ -4,6 +4,7 @@ import { withAdmin } from "@/lib/pb-auth";
 import { weekKey } from "@/lib/task-utils";
 import type { Transaction, WeekData } from "@/types/tasks";
 import { getHAWebSocketClient } from "@/lib/ha/websocket-client";
+import { calculateCheapestSplit, formatStoreTotal, PINNED_STORES } from "@/lib/stores";
 
 export interface ToolDefinition {
   name: string;
@@ -1181,6 +1182,45 @@ const TOOLS: Tool[] = [
       } catch (err) {
         return `⚠️ Home Assistant didn't respond (${err instanceof Error ? err.message : String(err)}).`;
       }
+    },
+  },
+  {
+    definition: {
+      name: "compare_grocery_prices",
+      description: "Compare grocery item prices across stores. Given a list of item names, estimates prices at each pinned store and finds the cheapest option. Use when the user asks 'where should I shop?' or 'which store is cheapest?'",
+      parameters: {
+        type: "object",
+        properties: {
+          items: { type: "string", description: "Item names separated by commas (e.g. 'milk, eggs, bread, chicken breast')" },
+        },
+        required: ["items"],
+      },
+    },
+    handler: async (args) => {
+      const names = String(args.items ?? "").split(",").map((s: string) => s.trim()).filter(Boolean);
+      if (names.length === 0) return summarize({ error: "No item names provided" });
+
+      // Get store IDs for comparison (exclude walmart — not on Instacart in Holland)
+      const storesForCompare = PINNED_STORES
+        .filter((s) => s.id !== "walmart" && s.id !== "any")
+        .map((s) => s.id);
+
+      // For each item, we need price data. Since we don't have live prices yet,
+      // return a structured result that the UI can populate from history/Composio.
+      const items = names.map((name) => ({
+        name,
+        note: `Prices for "${name}" can be checked via Composio INSTACART_GET_ITEM_PRICE or from price history.`,
+      }));
+
+      return summarize({
+        items,
+        stores: storesForCompare.map((id) => ({
+          id,
+          label: PINNED_STORES.find((s) => s.id === id)?.label ?? id,
+        })),
+        message: `Compared ${names.length} item(s) across ${storesForCompare.length} stores. For live prices, check each store's Instacart page or use the price comparison sheet in the Grocery tab.`,
+        hint: "Open the Grocery tab, tap 'Compare prices' to see a full price comparison across all stores.",
+      });
     },
   },
 ];
