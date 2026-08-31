@@ -11,11 +11,14 @@ import SyncPreviewSheet from "@/components/meals/SyncPreviewSheet";
 import StorePill from "@/components/meals/StorePill";
 import StorePicker from "@/components/meals/StorePicker";
 import PriceCompareSheet from "@/components/meals/PriceCompareSheet";
+import StoreOrderSheet from "@/components/meals/StoreOrderSheet";
+import ShopGuide from "@/components/meals/ShopGuide";
+import ClemAssistant from "@/components/meals/ClemAssistant";
 import { mealSyncService, type SyncPreview } from "@/services/mealSync";
 import { groceryCategories } from "@/data/meals";
 import { GroceryItem, Meal } from "@/types/meals";
 import { parseQuantityString } from "@/lib/grocery-service";
-import { StoreId, getDefaultStore, PriceCompareItem, getStoreLabel, ALL_STORES } from "@/lib/stores";
+import { StoreId, getDefaultStore, PriceCompareItem, getStoreLabel, ALL_STORES, groupByStore } from "@/lib/stores";
 
 const UNDO_MS = 8000;
 
@@ -52,6 +55,9 @@ export default function ShopTab({
   const [storePickerOpen, setStorePickerOpen] = useState(false);
   const [storePickerItemId, setStorePickerItemId] = useState<number | string | null>(null);
   const [compareOpen, setCompareOpen] = useState(false);
+  const [orderSheetOpen, setOrderSheetOpen] = useState(false);
+  const [ordering, setOrdering] = useState(false);
+  const [orderingStore, setOrderingStore] = useState<string | null>(null);
 
   const [preview, setPreview] = useState<SyncPreview | null>(null);
   const [syncBusy, setSyncBusy] = useState(false);
@@ -226,6 +232,72 @@ export default function ShopTab({
       .forEach((i: any) => toggleGroceryNeeded(i.id));
   };
 
+  const orderStore = async (storeId: string, items: GroceryItem[]) => {
+    if (ordering) return;
+    setOrdering(true);
+    setOrderingStore(storeId);
+    try {
+      const res = await fetch("/api/instacart", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "shopping_list",
+          title: `${getStoreLabel(storeId)} Grocery List`,
+          items: items
+            .filter((i) => i.needed !== false)
+            .map((i) => ({ name: i.name, quantity: 1 })),
+          store: storeId,
+        }),
+      });
+      const data = await res.json();
+      if (data.url) window.open(data.url, "_blank", "noopener,noreferrer");
+      else if (data.error) showToast(`❌ ${data.error}`);
+    } catch {
+      showToast("❌ Couldn't create Instacart list — check connection");
+    } finally {
+      setOrdering(false);
+      setOrderingStore(null);
+    }
+  };
+
+  const orderAllStores = async () => {
+    if (ordering) return;
+    setOrdering(true);
+    setOrderingStore("all");
+    try {
+      const groups = groupByStore(groceryItems.filter((i: any) => i.needed !== false));
+      const storesPayload: Record<string, { name: string; quantity: number }[]> = {};
+      for (const [storeId, items] of Object.entries(groups)) {
+        if (storeId === "any") continue;
+        storesPayload[storeId] = items.map((i: any) => ({ name: i.name, quantity: 1 }));
+      }
+      const res = await fetch("/api/instacart", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "shopping_list",
+          title: "Weekly Grocery Run",
+          stores: storesPayload,
+        }),
+      });
+      const data = await res.json();
+      if (data.type === "multi_store" && data.stores) {
+        data.stores.forEach((s: any) => {
+          if (s.url) window.open(s.url, "_blank", "noopener,noreferrer");
+        });
+      } else if (data.url) {
+        window.open(data.url, "_blank", "noopener,noreferrer");
+      } else if (data.error) {
+        showToast(`❌ ${data.error}`);
+      }
+    } catch {
+      showToast("❌ Couldn't create Instacart lists — check connection");
+    } finally {
+      setOrdering(false);
+      setOrderingStore(null);
+    }
+  };
+
   const filteredGrocery = activeCategory === "all" ? groceryItems : groceryItems.filter((i: any) => i.category === activeCategory);
 
   const priceCompareItems: PriceCompareItem[] = groceryItems
@@ -250,6 +322,7 @@ export default function ShopTab({
   return (
     <div className="space-y-5 pb-6">
       <KitchenFlowCard step="shop" summary={flowSummary} />
+      <ShopGuide />
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_280px]">
         <div className="space-y-5 min-w-0">
@@ -296,6 +369,9 @@ export default function ShopTab({
           <div className="glass rounded-2xl p-4">
             <SoftButton variant="primary" size="md" onClick={openMealSync} disabled={syncBusy} className="w-full">
               🍽️ {syncBusy ? "Adding…" : "Add missing from meal plan"}
+            </SoftButton>
+            <SoftButton variant="ghost" size="md" onClick={() => setOrderSheetOpen(true)} className="mt-2 w-full">
+              📤 Order from Instacart
             </SoftButton>
             <SoftButton variant="ghost" size="md" onClick={() => setCompareOpen(true)} className="mt-2 w-full">
               💰 Compare Prices
@@ -576,6 +652,25 @@ export default function ShopTab({
           });
           showToast(`✅ Set all items to ${getStoreLabel(cheapestStore)}`);
         }}
+      />
+
+      <StoreOrderSheet
+        open={orderSheetOpen}
+        onClose={() => setOrderSheetOpen(false)}
+        items={groceryItems}
+        stores={groupByStore(groceryItems.filter((i: any) => i.needed !== false))}
+        onOrderStore={orderStore}
+        onOrderAll={orderAllStores}
+        ordering={ordering}
+        orderingStore={orderingStore}
+      />
+
+      <ClemAssistant
+        groceryItems={groceryItems}
+        pantryItems={pantryItems}
+        storeContext={ALL_STORES.map((s) => s.id).join(", ")}
+        addGroceryItem={addGroceryItem}
+        showToast={showToast}
       />
     </div>
   );
