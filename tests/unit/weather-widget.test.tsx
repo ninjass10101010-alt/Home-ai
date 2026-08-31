@@ -398,6 +398,78 @@ describe("WeatherWidget — Not Boring redesign", () => {
       vi.useRealTimers();
     }
   });
+
+  it("refreshes silently — no skeleton flash and stale data stays during the in-flight refresh", async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveSecond!: (v: { json: () => Promise<unknown> }) => void;
+      const second = new Promise<{ json: () => Promise<unknown> }>((r) => { resolveSecond = r; });
+      let calls = 0;
+      const payload = makeOpenMeteoPayload();
+      vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("api.open-meteo.com")) {
+          calls += 1;
+          if (calls === 1) return Promise.resolve({ json: () => Promise.resolve(payload) });
+          return second;
+        }
+        return Promise.reject(new Error("no network"));
+      }));
+      const weatherCalls = () =>
+        vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes("api.open-meteo.com"));
+
+      const el = render(<WeatherWidget />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(el.textContent).toContain("H:75°");
+
+      // fire the 15-min poll; second request is now in flight (unresolved)
+      await act(async () => { await vi.advanceTimersByTimeAsync(15 * 60_000); });
+      expect(weatherCalls()).toHaveLength(2);
+      expect(el.querySelector(".animate-pulse")).toBeNull(); // no Skeleton
+      expect(el.textContent).toContain("H:75°"); // stale data still shown
+
+      const updated = makeOpenMeteoPayload();
+      updated.current.temperature_2m = 81;
+      await act(async () => {
+        resolveSecond({ json: () => Promise.resolve(updated) });
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(el.textContent).toContain("81"); // new temp landed (reduced-motion stub → instant)
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps stale data and shows no error banner when a background refresh fails", async () => {
+    vi.useFakeTimers();
+    try {
+      const payload = makeOpenMeteoPayload();
+      let calls = 0;
+      vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("api.open-meteo.com")) {
+          calls += 1;
+          if (calls === 1) return Promise.resolve({ json: () => Promise.resolve(payload) });
+          return Promise.reject(new Error("network down"));
+        }
+        return Promise.reject(new Error("no network"));
+      }));
+      const weatherCalls = () =>
+        vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes("api.open-meteo.com"));
+
+      const el = render(<WeatherWidget />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(el.textContent).toContain("H:75°");
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(15 * 60_000); });
+
+      expect(weatherCalls()).toHaveLength(2);
+      expect(el.textContent).toContain("H:75°"); // stale data kept
+      expect(el.textContent).not.toContain("Weather unavailable"); // no banner
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("moon phase model", () => {

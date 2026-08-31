@@ -635,11 +635,14 @@ export default function WeatherWidget({ className = "" }: { className?: string }
         setUpdatedAt(fetchedAt);
         updatedAtRef.current = fetchedAt;
         setFetchError(null);
+        dataLoadedRef.current = true;
         setLoading(false);
       })
       .catch(() => {
-        setFetchError("Weather unavailable — check connection or try again.");
-        setLoading(false);
+        if (!dataLoadedRef.current) {
+          setFetchError("Weather unavailable — check connection or try again.");
+          setLoading(false);
+        }
       })
       .finally(() => { inFlightRef.current = false; });
   }, [runtime?.weather_location?.LAT, runtime?.weather_location?.LON]);
