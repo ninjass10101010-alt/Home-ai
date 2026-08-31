@@ -1,8 +1,8 @@
-/* eslint-disable react-hooks/set-state-in-effect */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { db } from "@/db";
 import { Meal } from "@/types/meals";
 import { todayMondayISO, shiftWeek } from "@/lib/meals-week-utils";
+import { extractActions } from "@/lib/ai-response";
 
 const MEALS_KEY = "consuela-meals";
 
@@ -20,7 +20,10 @@ export function useMeals() {
   // AI Suggestions
   const [aiMealIdeas, setAiMealIdeas] = useState<Array<{ name: string; emoji: string; tags: string[] }>>([]);
   const [aiMealLoading, setAiMealLoading] = useState(false);
+  const [aiMealError, setAiMealError] = useState<string | null>(null);
   const [showAiSuggestions, setShowAiSuggestions] = useState(false);
+  const [weeklyPlanLoading, setWeeklyPlanLoading] = useState(false);
+  const [weeklyPlanError, setWeeklyPlanError] = useState<string | null>(null);
 
   useEffect(() => {
     const local = loadJSON<any[]>(MEALS_KEY, []);
@@ -54,8 +57,9 @@ export function useMeals() {
   const generateAiMeals = async () => {
     setAiMealLoading(true);
     setShowAiSuggestions(true);
+    setAiMealError(null);
     try {
-      const pantry = (await db.selectPantry()).map((p: any) => p.name).join(", ");
+      const pantry = (await db.selectPantry()).map((p: any) => p.name || p.item).join(", ");
       const res = await fetch('/api/hermes/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -64,20 +68,99 @@ export function useMeals() {
         }),
       });
       const data = await res.json();
-      const actions = data.actions || [];
+      if (!res.ok) throw new Error(data.error || "Failed to get suggestions");
+      const actions = extractActions(data.content || "");
       const ideas = actions
         .filter((a: any) => a.type === "meal")
         .map((a: any) => ({
-          name: a.title,
+          name: a.title || a.name,
           emoji: a.emoji || "🍽️",
           tags: a.detail?.split("·").map((t: string) => t.trim()).filter(Boolean) || ["Family"],
         }));
       setAiMealIdeas(ideas.length > 0 ? ideas : []);
-    } catch {
+      if (ideas.length === 0) setAiMealError("No ideas returned — try again");
+    } catch (e: any) {
+      setAiMealError(e?.message || "Failed to get suggestions");
       setAiMealIdeas([]);
     }
     setAiMealLoading(false);
   };
+
+  const generateWeeklyPlan = useCallback(async (weekOf: string, overwrite = false) => {
+    setWeeklyPlanLoading(true);
+    setWeeklyPlanError(null);
+    try {
+      const pantry = (await db.selectPantry()).map((p: any) => p.name || p.item).join(", ");
+      const res = await fetch('/api/hermes/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: `Generate a complete week of meals for a family of 7 (kids ages 5-14). Daily targets: 2000 kcal, 150g protein, 300g carbs, 65g fat. Pantry has: ${pantry || "basic ingredients"}. Return ONLY JSON as {"meal_plan":[ ... 28 entries ... ]} — each entry: {"day":"Mon","mealType":"breakfast","name":"Meal Name","emoji":"🍳","tags":["Kid-friendly","Quick"],"prepTime":"30 min"}. Cover breakfast, lunch, snack, and dinner for Mon, Tue, Wed, Thu, Fri, Sat, Sun. No prose, just the JSON.`,
+          persist: false,
+        }),
+      });
+      if (!res.ok) throw new Error("Failed to generate plan");
+      const data = await res.json();
+
+      let planItems: any[] = [];
+      try {
+        planItems = extractActions(data.content || "");
+      } catch {
+        planItems = [];
+      }
+      if (!planItems.length) {
+        try {
+          const parsed = JSON.parse(data.content || "{}");
+          planItems = parsed.meal_plan || parsed.meals || parsed.actions || [];
+        } catch {
+          planItems = [];
+        }
+      }
+
+      if (!planItems.length) {
+        setWeeklyPlanError("No plan returned — try again");
+        setWeeklyPlanLoading(false);
+        return;
+      }
+
+      const existing = meals.filter((m) => (m.weekOf || todayMondayISO()) === weekOf);
+      if (overwrite) {
+        for (const m of existing) await db.deleteMeal(String(m.id));
+        setMeals((prev) => prev.filter((m) => (m.weekOf || todayMondayISO()) !== weekOf));
+      }
+      const occupied = new Set(existing.map((m) => `${m.time}-${m.mealType}`));
+
+      for (const item of planItems) {
+        const day = item.day || item.time;
+        const mealType = item.mealType || item.meal_type;
+        if (!day || !mealType) continue;
+        if (!overwrite && occupied.has(`${day}-${mealType}`)) continue;
+        const meal: Meal = {
+          id: Date.now() + Math.floor(Math.random() * 1000),
+          name: item.name || item.title || "Meal",
+          emoji: item.emoji || "🍽️",
+          time: day,
+          mealType,
+          weekOf,
+          prepTime: item.prepTime || "30 min",
+          tags: item.tags || [],
+          ingredients: item.ingredients || [],
+          servings: 7,
+          calories: Number(item.calories) || 0,
+          protein: Number(item.protein) || 0,
+          carbs: Number(item.carbs) || 0,
+          fat: Number(item.fat) || 0,
+          instructions: item.instructions || "",
+          autoGenerated: true,
+        };
+        await db.insertMeal(meal);
+        setMeals((prev) => [...prev, meal]);
+      }
+    } catch (e: any) {
+      setWeeklyPlanError(e?.message || "Failed to generate plan");
+    }
+    setWeeklyPlanLoading(false);
+  }, [meals]);
 
   const deleteMeal = async (id: number) => {
     await db.deleteMeal(String(id));
@@ -119,8 +202,12 @@ export function useMeals() {
     deleteMeal,
     aiMealIdeas,
     aiMealLoading,
+    aiMealError,
     showAiSuggestions,
     generateAiMeals,
+    generateWeeklyPlan,
+    weeklyPlanLoading,
+    weeklyPlanError,
     goToWeek,
     archiveCurrentWeek,
     isCurrentWeek,

@@ -88,8 +88,9 @@ function MealHubContent() {
 
   const {
     meals, setMeals, activeDay, setActiveDay, activeMeals, deleteMeal,
-    aiMealIdeas, aiMealLoading, showAiSuggestions, generateAiMeals,
+    aiMealIdeas, aiMealLoading, aiMealError, showAiSuggestions, generateAiMeals,
     activeWeek, goToWeek, archiveCurrentWeek, isCurrentWeek,
+    generateWeeklyPlan, weeklyPlanLoading, weeklyPlanError,
   } = useMeals();
 
   const {
@@ -366,6 +367,10 @@ function MealHubContent() {
               handleFileUpload={handleFileUpload}
               openImportModal={openImportModal}
               openSearchModal={openSearchModal}
+              aiMealError={aiMealError}
+              weeklyPlanLoading={weeklyPlanLoading}
+              weeklyPlanError={weeklyPlanError}
+              generateWeeklyPlan={generateWeeklyPlan}
             />
           </div>
         )}

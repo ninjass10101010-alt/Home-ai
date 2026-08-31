@@ -1,7 +1,7 @@
-/* eslint-disable react-hooks/set-state-in-effect */
 import { useState, useEffect } from "react";
 import { db } from "@/db";
 import { Recipe } from "@/types/meals";
+import { extractActions } from "@/lib/ai-response";
 
 const RECIPES_KEY = "consuela-recipes";
 
@@ -143,7 +143,7 @@ export function useRecipes(showToast: (msg: string) => void) {
         }),
       });
       const data = await res.json();
-      const actions = data.actions || [];
+      const actions = extractActions(data.content || "");
 
       if (actions.length > 0 && actions[0].type === "recipe") {
         const a = actions[0];

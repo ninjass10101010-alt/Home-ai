@@ -5,6 +5,7 @@ import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
 import Card from "@/components/ui/Card";
 import Avatar from "@/components/ui/Avatar";
 import Badge from "@/components/ui/Badge";
+import SoftButton from "@/components/ui/SoftButton";
 import { weekDays, mealIdeas, mealPresets, slotMeta, CALORIE_GOAL, PROTEIN_GOAL, CARBS_GOAL, FAT_GOAL } from "@/data/meals";
 import { Meal } from "@/types/meals";
 import { db } from "@/db";
@@ -90,6 +91,7 @@ export default function PlanTab({
   flowSummary, focusRecipeBox,
   saveCatalogRecipe, deleteCatalogRecipe, addRecipeToPlan, addRecipeToGrocery,
   startAddRecipe, startEditRecipe, handleFileUpload, openImportModal, openSearchModal,
+  aiMealError, weeklyPlanLoading, weeklyPlanError, generateWeeklyPlan,
 }: any) {
 
   const { colors, accentRgb } = useAtmosphericTheme();
@@ -267,6 +269,21 @@ export default function PlanTab({
                   >
                     Archive
                   </button>
+                )}
+                {generateWeeklyPlan && (
+                  <SoftButton
+                    size="sm"
+                    variant="secondary"
+                    loading={weeklyPlanLoading}
+                    onClick={() => generateWeeklyPlan(activeWeek, false)}
+                  >
+                    ✨ Generate
+                  </SoftButton>
+                )}
+                {weeklyPlanError && (
+                  <span className="text-[10px] px-2 py-1 rounded-lg bg-[var(--color-accent-rose)]/15 text-[var(--color-accent-rose)]">
+                    {weeklyPlanError}
+                  </span>
                 )}
                 <button
                   onClick={() => goToWeek?.(1)}
@@ -772,6 +789,9 @@ export default function PlanTab({
           </div>
           {aiMealLoading && (
             <p className="text-text-muted text-xs text-center mt-2">Asking Consuela for ideas...</p>
+          )}
+          {aiMealError && !aiMealLoading && (
+            <p className="text-[var(--color-accent-rose)] text-xs text-center mt-2">{aiMealError}</p>
           )}
         </section>
       )}

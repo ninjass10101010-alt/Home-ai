@@ -2,6 +2,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef, type CSSProperties } from "react";
+import { extractActions } from "@/lib/ai-response";
 import PageShell from "@/components/ui/PageShell";
 import PageHeader from "@/components/patterns/PageHeader";
 import SectionCard from "@/components/patterns/SectionCard";
@@ -562,7 +563,7 @@ export default function TasksPage() {
         }),
       });
       const data = await res.json();
-      const actions = data.actions || [];
+      const actions = extractActions(data.content || "");
       const suggestions: Task[] = actions.filter((a: any) => a.type === "task").map((a: any) => {
         const assignee = a.detail?.split("·")?.[0]?.trim() || "Caspian";
         const points = parseInt(a.detail?.match(/(\d+)\s*pts?/)?.[1] || "8");
@@ -965,7 +966,7 @@ export default function TasksPage() {
         }),
       });
       const data = await res.json();
-      const actions = data.actions || [];
+      const actions = extractActions(data.content || "");
       const ideas: Reward[] = actions.filter((a: any) => a.type === "reward" || a.type === "task").map((a: any, i: number) => ({
         id: Date.now() + i,
         name: a.title,
