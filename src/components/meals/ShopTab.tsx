@@ -10,11 +10,12 @@ import KitchenFlowCard from "@/components/meals/KitchenFlowCard";
 import SyncPreviewSheet from "@/components/meals/SyncPreviewSheet";
 import StorePill from "@/components/meals/StorePill";
 import StorePicker from "@/components/meals/StorePicker";
+import PriceCompareSheet from "@/components/meals/PriceCompareSheet";
 import { mealSyncService, type SyncPreview } from "@/services/mealSync";
 import { groceryCategories } from "@/data/meals";
 import { GroceryItem, Meal } from "@/types/meals";
 import { parseQuantityString } from "@/lib/grocery-service";
-import { StoreId, getDefaultStore } from "@/lib/stores";
+import { StoreId, getDefaultStore, PriceCompareItem, getStoreLabel, ALL_STORES } from "@/lib/stores";
 
 const UNDO_MS = 8000;
 
@@ -50,6 +51,7 @@ export default function ShopTab({
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [storePickerOpen, setStorePickerOpen] = useState(false);
   const [storePickerItemId, setStorePickerItemId] = useState<number | string | null>(null);
+  const [compareOpen, setCompareOpen] = useState(false);
 
   const [preview, setPreview] = useState<SyncPreview | null>(null);
   const [syncBusy, setSyncBusy] = useState(false);
@@ -226,6 +228,10 @@ export default function ShopTab({
 
   const filteredGrocery = activeCategory === "all" ? groceryItems : groceryItems.filter((i: any) => i.category === activeCategory);
 
+  const priceCompareItems: PriceCompareItem[] = groceryItems
+    .filter((i: any) => i.needed !== false)
+    .map((i: any) => ({ name: i.name, prices: {} }));
+
   const pickedUp = groceryItems.filter((i: any) => !i.needed).length;
   const totalItems = groceryItems.length;
   const checkedCount = pickedUp;
@@ -290,6 +296,9 @@ export default function ShopTab({
           <div className="glass rounded-2xl p-4">
             <SoftButton variant="primary" size="md" onClick={openMealSync} disabled={syncBusy} className="w-full">
               🍽️ {syncBusy ? "Adding…" : "Add missing from meal plan"}
+            </SoftButton>
+            <SoftButton variant="ghost" size="md" onClick={() => setCompareOpen(true)} className="mt-2 w-full">
+              💰 Compare Prices
             </SoftButton>
             {syncNote && <p role="status" className="mt-2 text-center text-xs font-semibold text-text-secondary">{syncNote}</p>}
           </div>
@@ -553,6 +562,20 @@ export default function ShopTab({
             : "any"
         }
         onSelect={handleStoreSelect}
+      />
+
+      <PriceCompareSheet
+        open={compareOpen}
+        onClose={() => setCompareOpen(false)}
+        items={priceCompareItems}
+        onApply={(cheapestStore) => {
+          groceryItems.forEach((item: any) => {
+            if (item.needed !== false) {
+              updateGroceryItem(item.id, { store: cheapestStore });
+            }
+          });
+          showToast(`✅ Set all items to ${getStoreLabel(cheapestStore)}`);
+        }}
       />
     </div>
   );

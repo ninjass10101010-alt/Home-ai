@@ -82,7 +82,7 @@ export async function createShoppingList(
 ): Promise<InstacartResponse> {
   const apiKey = await getServiceConfig("instacart", "INSTACART_API_KEY");
   if (!apiKey) throw new Error("INSTACART_API_KEY not configured");
-  if (!isInstacartEnabled()) {
+  if (!(await isInstacartEnabled())) {
     throw new Error("Set your Instacart API key in Settings → Services & Keys.");
   }
 
@@ -154,7 +154,7 @@ export async function createRecipePage(
 ): Promise<InstacartResponse> {
   const apiKey = await getServiceConfig("instacart", "INSTACART_API_KEY");
   if (!apiKey) throw new Error("INSTACART_API_KEY not configured");
-  if (!isInstacartEnabled()) {
+  if (!(await isInstacartEnabled())) {
     throw new Error("Instacart integration is not enabled");
   }
 

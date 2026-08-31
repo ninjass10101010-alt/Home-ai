@@ -170,14 +170,18 @@ export async function POST(request: NextRequest) {
 }
 
 /**
- * GET /api/instacart/status — Check if Instacart is enabled.
+ * GET /api/instacart — Check if Instacart is enabled.
  */
 export async function GET() {
-  const composioEnabled = await getServiceConfig("composio", "COMPOSIO_API_KEY");
+  const composioKey = await getServiceConfig("composio", "COMPOSIO_API_KEY");
+  const instacartKey = await getServiceConfig("instacart", "INSTACART_API_KEY");
   const directKeySet = Boolean(process.env.INSTACART_API_KEY);
+  const composioEnabled = composioKey !== null;
+  const instacartEnabled = instacartKey !== null;
+
   return NextResponse.json({
-    enabled: composioEnabled !== null || directKeySet,
-    composio_enabled: composioEnabled !== null,
-    api_key_set: directKeySet || composioEnabled !== null,
+    enabled: instacartEnabled || composioEnabled || directKeySet,
+    composio_enabled: composioEnabled,
+    api_key_set: instacartEnabled || directKeySet || composioEnabled,
   });
 }

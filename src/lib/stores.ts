@@ -120,3 +120,15 @@ export function calculateCheapestSplit(items: PriceCompareItem[]): PriceCompareR
 export function formatStoreTotal(amount: number): string {
   return `$${amount.toFixed(2)}`;
 }
+
+export function groupByStore<T extends { store?: string }>(
+  items: T[]
+): Record<string, T[]> {
+  const groups: Record<string, T[]> = {};
+  for (const item of items) {
+    const store = item.store || "any";
+    if (!groups[store]) groups[store] = [];
+    groups[store].push(item);
+  }
+  return groups;
+}

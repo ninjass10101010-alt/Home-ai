@@ -15,7 +15,7 @@ export default function InstacartConnectCard() {
   const checkStatus = async () => {
     setChecking(true);
     try {
-      const res = await fetch("/api/instacart/status");
+      const res = await fetch("/api/instacart");
       const data = await res.json();
       setStatus(data);
     } catch {

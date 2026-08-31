@@ -5,19 +5,22 @@ import { verifySession, SESSION_COOKIE } from "@/lib/session";
 // pin/secret, alarm PIN, emergency PIN). /api/auth/* is exempt so an
 // expired-cookie user can still POST /api/auth/logout and clear the
 // httpOnly cookie; login/whoami enforce their own 401s at route level.
+// /api/recipes/* is a public TheMealDB catalog lookup (no family data),
+// so guests can search recipes without a session.
 const API_EXEMPT = [
   "/api/auth/",
   "/api/cron/",
   "/api/admin/",
   "/api/ha/alarm",
   "/api/emergency",
+  "/api/recipes/",
 ];
 
 // MF-5 — exact-match OR trailing-slash semantics. Plain startsWith(p) made
 // the /api/emergency exemption also cover its EXISTING sibling
 // /api/emergency-contacts (read-only contact roster), leaving that route
 // unauthenticated.
-function isExempt(pathname: string): boolean {
+export function isExempt(pathname: string): boolean {
   return API_EXEMPT.some((p) => {
     const base = p.endsWith("/") ? p.slice(0, -1) : p;
     return base === pathname || pathname.startsWith(base + "/");
