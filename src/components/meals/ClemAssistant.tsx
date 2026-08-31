@@ -69,7 +69,7 @@ export default function ClemAssistant({ groceryItems, storeContext, showToast }:
       const res = await fetch("/api/hermes/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, history: [], system: systemPrompt }),
+        body: JSON.stringify({ message: text, history: messages.slice(-6), system: systemPrompt, agent: "clem" }),
       });
       if (!res.ok) throw new Error(`Chat request failed (${res.status})`);
       const data = await res.json();

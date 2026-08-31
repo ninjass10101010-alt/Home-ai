@@ -30,13 +30,25 @@ async function persistChatPair(request: NextRequest, userMessage: string, assist
 async function resolveHermes(): Promise<{ url: string; key: string | null }> {
   const url =
     (await getServiceConfig("hermes", "HERMES_API_URL")) ||
-    process.env.HERMES_URL ||
     process.env.HERMES_API_URL ||
-    "http://hermes-agent-2:8643";
+    "http://hermes-agent-2:8642";
   const key = (await getServiceConfig("hermes", "HERMES_API_KEY")) ?? process.env.HERMES_API_KEY ?? null;
   return { url, key };
 }
 const HERMES_MODEL = "consuela";
+
+const CLEM_SYSTEM_PROMPT =
+  "You are Clem, a smart grocery shopping assistant for the Garcia family. You know their grocery list and stores. Help them decide what to buy, compare prices, and order via Instacart. Keep responses short and helpful.";
+
+const CLEM_TOOLS = [
+  "get_grocery_list",
+  "get_pantry",
+  "add_grocery_item",
+  "complete_grocery_item",
+  "get_weekly_meals",
+  "get_recipes",
+  "compare_grocery_prices",
+];
 const MAX_ROUNDS = 4;
 
 interface ToolCall {
@@ -119,14 +131,14 @@ async function callHermes(
 }
 
 export async function POST(request: NextRequest) {
-  let body: { message?: string; history?: any[]; role?: string };
+  let body: { message?: string; history?: any[]; role?: string; system?: string; agent?: string };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { message, history = [] } = body;
+  const { message, history = [], system, agent } = body;
   if (!message || !message.trim()) {
     return NextResponse.json({ error: "Message is required" }, { status: 400 });
   }
@@ -138,7 +150,10 @@ export async function POST(request: NextRequest) {
   const houseControl = role !== "child";
 
   try {
-    const tools = buildToolsForOpenAI({ houseControl });
+    const isClem = agent === "clem";
+    const tools = isClem
+      ? buildToolsForOpenAI({ houseControl: false }).filter((t) => CLEM_TOOLS.includes(t.function.name))
+      : buildToolsForOpenAI({ houseControl });
     const recentHistory = (history || [])
       .slice(-6)
       .filter((h: any) => h && typeof h.content === "string" && h.content.trim())
@@ -147,8 +162,16 @@ export async function POST(request: NextRequest) {
         content: h.content,
       }));
 
+    const baseSystem = isClem ? CLEM_SYSTEM_PROMPT : SYSTEM_PROMPT + (houseControl ? HOUSE_CONTROL_PROMPT_ADDENDUM : "");
+    let addendum: string | null = null;
+    if (typeof system === "string") {
+      const trimmed = system.trim();
+      if (trimmed) addendum = trimmed.slice(0, 2000);
+    }
+
     const messages: ChatMessage[] = [
-      { role: "system", content: SYSTEM_PROMPT + (houseControl ? HOUSE_CONTROL_PROMPT_ADDENDUM : "") },
+      { role: "system", content: baseSystem },
+      ...(addendum ? [{ role: "system" as const, content: addendum }] : []),
       ...recentHistory,
       { role: "user", content: message },
     ];
@@ -157,7 +180,7 @@ export async function POST(request: NextRequest) {
       const { content, tool_calls } = await callHermes(messages, { tools, toolChoice: "auto" });
 
       if (!tool_calls || tool_calls.length === 0) {
-        await persistChatPair(request, message, content);
+        if (!isClem) await persistChatPair(request, message, content);
         return NextResponse.json({ content });
       }
 

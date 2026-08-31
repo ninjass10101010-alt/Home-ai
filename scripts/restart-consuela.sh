@@ -12,7 +12,7 @@ docker run -d \
   -e PB_URL=http://pocketbase:8090 \
   -e "PB_ADMIN_EMAIL=admin@family.local" \
   -e "PB_ADMIN_PASSWORD=" \
-  -e HERMES_API_URL=http://hermes-agent-2:8643 \
+  -e HERMES_API_URL=http://hermes-agent-2:8642 \
   -e "HERMES_API_KEY=consuela-api-key-2026" \
   -e "TELEGRAM_BOT_TOKEN=8509642029:AAE3eBxRQbgayiX-FXLxpIeXr3gVH2MWSHc" \
   -e "OPENROUTER_API_KEY=" \
