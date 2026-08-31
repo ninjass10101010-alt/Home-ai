@@ -180,6 +180,42 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(el.textContent).toContain("L:58°");
   });
 
+  it("appends feels-like to the H/L line when it differs from the actual temperature", async () => {
+    mockOpenMeteo(makeOpenMeteoPayload());
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    // payload: temp 70, feels like 72 → note visible
+    expect(el.textContent).toContain("Feels like 72°");
+  });
+
+  it("hides the feels-like note when it matches the actual temperature", async () => {
+    const payload = makeOpenMeteoPayload();
+    payload.current.apparent_temperature = 70;
+    mockOpenMeteo(payload);
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    expect(el.textContent).not.toContain("Feels like");
+  });
+
+  it("shows the wind arrow rotated to the flow direction in the modal", async () => {
+    mockOpenMeteo(makeOpenMeteoPayload());
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    const button = findDetailsButton(el);
+    act(() => button!.click());
+
+    const windRow = Array.from(document.querySelectorAll("div")).find(
+      (d) => d.textContent?.startsWith("Wind") && d.querySelector("svg[viewBox='0 0 16 16']")
+    );
+    expect(windRow).toBeTruthy();
+    // payload windDir 250 → arrow rotated to 250+180 = 430 % 360 = 70deg (where wind blows TO)
+    const svg = windRow!.querySelector("svg[viewBox='0 0 16 16']") as SVGElement;
+    expect(svg.style.transform).toBe("rotate(70deg)");
+  });
+
   it("renders the day strip as an accessible slider with rain ticks when rain is likely", async () => {
     mockOpenMeteo(makeOpenMeteoPayload({ precip: 80 }));
     const el = render(<WeatherWidget />);

@@ -385,13 +385,16 @@ function DayStrip({ hours, conv, skin, accent, previewIdx, onPreview }: {
 
 // ─── Modal pieces ───────────────────────────────────────────────────────────
 
-function LeaderRow({ label, value, hidden }: { label: string; value: string; hidden?: boolean }) {
+function LeaderRow({ label, value, hidden, children }: { label: string; value: string; hidden?: boolean; children?: React.ReactNode }) {
   if (hidden) return null;
   return (
     <div className="flex items-baseline gap-2.5">
       <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-white/60">{label}</span>
       <span className="flex-1 border-b border-dotted border-white/25" aria-hidden="true" />
-      <span className="rounded-full bg-white/10 px-2.5 py-1 text-[13px] font-bold tabular-nums text-white">{value}</span>
+      <span className="flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1 text-[13px] font-bold tabular-nums text-white">
+        {children}
+        {value}
+      </span>
     </div>
   );
 }
@@ -704,6 +707,10 @@ export default function WeatherWidget({ className = "" }: { className?: string }
   const displayHigh = weatherData?.todayHigh == null ? null : conv(weatherData.todayHigh);
   const displayLow = weatherData?.todayLow == null ? null : conv(weatherData.todayLow);
 
+  const feelsNote = !activeHour && weatherData != null && Math.abs(conv(weatherData.feelsLike) - conv(weatherData.temp)) >= 2
+    ? `Feels like ${conv(weatherData.feelsLike)}°`
+    : null;
+
   const minutesSinceUpdate = updatedAt === null
     ? null
     : Math.max(0, Math.floor(((clockTick || updatedAt) - updatedAt) / 60_000));
@@ -816,7 +823,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
                 </p>
                 {displayHigh !== null && displayLow !== null && (
                   <p className="mt-1 text-xs font-semibold" style={{ color: skin.inkSoft }}>
-                    H:{displayHigh}° L:{displayLow}°
+                    H:{displayHigh}° L:{displayLow}°{feelsNote && ` · ${feelsNote}`}
                   </p>
                 )}
                 {!activeHour && weatherData?.outlook && (
@@ -876,7 +883,6 @@ export default function WeatherWidget({ className = "" }: { className?: string }
         <WeatherDetailsModal
           data={weatherData}
           location={weather.location}
-          unit={weather.unit}
           conv={conv}
           season={season}
           todOverride={todOverride}
@@ -890,10 +896,9 @@ export default function WeatherWidget({ className = "" }: { className?: string }
 
 // ─── Details modal — 24h timeline scrubber + exploded metrics ───────────────
 
-function WeatherDetailsModal({ data, location, unit, conv, season, todOverride, accent, onClose }: {
+function WeatherDetailsModal({ data, location, conv, season, todOverride, accent, onClose }: {
   data: WeatherData;
   location: string;
-  unit: string;
   conv: (f: number) => number;
   season: SeasonKey;
   todOverride: "auto" | "day" | "night";
@@ -1003,7 +1008,16 @@ function WeatherDetailsModal({ data, location, unit, conv, season, todOverride, 
               <LeaderRow
                 label="Wind"
                 value={`${Math.round(scrubHour?.wind ?? data.wind)} mph ${cardinalFromDegrees(scrubHour?.windDir ?? data.windDir)}`}
-              />
+              >
+                <svg
+                  viewBox="0 0 16 16"
+                  className="h-3.5 w-3.5 shrink-0"
+                  style={{ color: accent, transform: `rotate(${((scrubHour?.windDir ?? data.windDir) + 180) % 360}deg)`, transition: "transform 0.6s var(--ease-settle, ease-out)" }}
+                  aria-hidden="true"
+                >
+                  <path d="M8 1.5 L11 10.5 L8 8.8 L5 10.5 Z" fill="currentColor" />
+                </svg>
+              </LeaderRow>
               <LeaderRow label="Precipitation" value={`${Math.round(scrubHour?.precip ?? 0)}%`} />
               <LeaderRow label="Cloud cover" value={`${Math.round(scrubHour?.cloud ?? data.cloud)}%`} />
               <LeaderRow label="Feels like" value={`${conv(data.feelsLike)}°`} hidden={scrubIdx !== 0} />
@@ -1062,12 +1076,11 @@ function WeatherDetailsModal({ data, location, unit, conv, season, todOverride, 
               {view === "hourly" ? (
                 <div className="flex gap-1 overflow-x-auto pb-1" role="list">
                   {hours.map((h, i) => (
+                    <div key={h.time} role="listitem" className="shrink-0">
                     <button
-                      key={h.time}
                       type="button"
-                      role="listitem"
                       onClick={() => setScrubIdx(i)}
-                      className="relative flex shrink-0 flex-col items-center gap-1.5 rounded-xl px-2.5 py-2.5 transition-colors"
+                      className="relative flex flex-col items-center gap-1.5 rounded-xl px-2.5 py-2.5 transition-colors"
                       style={i === scrubIdx ? { background: `${accent}1F` } : undefined}
                       aria-label={`${formatHourLabel(h.time)}, ${conv(h.temp)} degrees`}
                     >
@@ -1083,6 +1096,7 @@ function WeatherDetailsModal({ data, location, unit, conv, season, todOverride, 
                         {h.precip}%
                       </span>
                     </button>
+                    </div>
                   ))}
                 </div>
               ) : (
@@ -1121,7 +1135,6 @@ function WeatherDetailsModal({ data, location, unit, conv, season, todOverride, 
                   })}
                 </div>
               )}
-              <p className="mt-2 text-center text-[11px] leading-relaxed text-white/55">Tip: tap “°{unit}” on the widget to switch units — the sheet follows.</p>
             </div>
           </div>
         </div>
