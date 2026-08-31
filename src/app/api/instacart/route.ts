@@ -27,21 +27,22 @@ import { getStoreLabel } from "@/lib/stores";
 import { getServiceConfig } from "@/lib/services/config";
 
 export async function POST(request: NextRequest) {
-  // Check if Instacart or Composio is configured
-  const enabled = await isInstacartEnabled();
-  const composioKey = await getServiceConfig("composio", "COMPOSIO_API_KEY");
-  if (!enabled && !composioKey) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: "Instacart integration is not enabled. Configure COMPOSIO_API_KEY in Settings → Services & Keys.",
-        setup_url: "https://docs.instacart.com/developer_platform_api/get_started/api-keys",
-      },
-      { status: 503 },
-    );
-  }
-
   try {
+    // Check if Instacart or Composio is configured (inside try so failures
+    // return an honest JSON 503 instead of a raw non-JSON 500).
+    const enabled = await isInstacartEnabled();
+    const composioKey = await getServiceConfig("composio", "COMPOSIO_API_KEY");
+    if (!enabled && !composioKey) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Instacart integration is not enabled. Configure COMPOSIO_API_KEY in Settings → Services & Keys.",
+          setup_url: "https://docs.instacart.com/developer_platform_api/get_started/api-keys",
+        },
+        { status: 503 },
+      );
+    }
+
     const body = await request.json();
     const {
       type = "shopping_list",
@@ -78,9 +79,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Multi-store: split items by store, create one URL per store
+    // Multi-store: split items by store, create one URL per store.
+    // Each store is isolated so one failure doesn't abort the whole request.
     if (stores && typeof stores === "object" && !Array.isArray(stores)) {
-      const results: { store: string; url: string; item_count: number }[] = [];
+      const results: {
+        store: string;
+        url?: string;
+        item_count: number;
+        error?: string;
+      }[] = [];
 
       for (const [storeId, storeItems] of Object.entries(stores)) {
         if (!Array.isArray(storeItems) || storeItems.length === 0) continue;
@@ -97,32 +104,46 @@ export async function POST(request: NextRequest) {
         }
 
         const storeTitle = `${title} — ${getStoreLabel(storeId)}`;
-        let result;
+        try {
+          let result;
 
-        if (composioKey) {
-          result = await createShoppingListViaComposio({
-            apiKey: composioKey,
-            title: storeTitle,
-            items: storeItems,
-            imageUrl,
-            instructions,
-          });
-        } else {
-          result = await createShoppingList({
-            title: storeTitle,
-            items: storeItems,
-            imageUrl,
-            instructions,
+          if (composioKey) {
+            result = await createShoppingListViaComposio({
+              apiKey: composioKey,
+              title: storeTitle,
+              items: storeItems,
+              imageUrl,
+              instructions,
+            });
+          } else {
+            result = await createShoppingList({
+              title: storeTitle,
+              items: storeItems,
+              imageUrl,
+              instructions,
+            });
+          }
+
+          results.push({ store: storeId, url: result.url, item_count: storeItems.length });
+        } catch (storeErr: any) {
+          console.error(`Instacart store "${storeId}" failed:`, storeErr);
+          results.push({
+            store: storeId,
+            item_count: storeItems.length,
+            error: storeErr?.message || "Failed to create list for this store",
           });
         }
-
-        results.push({ store: storeId, url: result.url, item_count: storeItems.length });
       }
 
+      // Partial success: at least one store produced a URL.
+      const success = results.some((r) => r.url);
+      const storeErrors = results.filter((r) => r.error).length;
+
       return NextResponse.json({
-        success: true,
+        success,
         type: "multi_store",
         title,
+        partial: storeErrors > 0 && success,
         stores: results,
       });
     }
@@ -173,15 +194,28 @@ export async function POST(request: NextRequest) {
  * GET /api/instacart — Check if Instacart is enabled.
  */
 export async function GET() {
-  const composioKey = await getServiceConfig("composio", "COMPOSIO_API_KEY");
-  const instacartKey = await getServiceConfig("instacart", "INSTACART_API_KEY");
-  const directKeySet = Boolean(process.env.INSTACART_API_KEY);
-  const composioEnabled = composioKey !== null;
-  const instacartEnabled = instacartKey !== null;
+  try {
+    const composioKey = await getServiceConfig("composio", "COMPOSIO_API_KEY");
+    const instacartKey = await getServiceConfig("instacart", "INSTACART_API_KEY");
+    const directKeySet = Boolean(process.env.INSTACART_API_KEY);
+    const composioEnabled = composioKey !== null;
+    const instacartEnabled = instacartKey !== null;
 
-  return NextResponse.json({
-    enabled: instacartEnabled || composioEnabled || directKeySet,
-    composio_enabled: composioEnabled,
-    api_key_set: instacartEnabled || directKeySet || composioEnabled,
-  });
+    return NextResponse.json({
+      enabled: instacartEnabled || composioEnabled || directKeySet,
+      composio_enabled: composioEnabled,
+      api_key_set: instacartEnabled || directKeySet || composioEnabled,
+    });
+  } catch (error: any) {
+    console.error("Instacart status error:", error);
+    return NextResponse.json(
+      {
+        enabled: false,
+        composio_enabled: false,
+        api_key_set: false,
+        error: error?.message || "Failed to read service config",
+      },
+      { status: 500 },
+    );
+  }
 }

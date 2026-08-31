@@ -56,6 +56,7 @@ services:
       - GMAIL_USER=${GMAIL_USER:-}
       - GMAIL_APP_PASSWORD=${GMAIL_APP_PASSWORD:-}
       - INSTACART_API_KEY=${INSTACART_API_KEY:-}
+      - COMPOSIO_API_KEY=${COMPOSIO_API_KEY:-}
     networks:
       - dashboard-net
 
