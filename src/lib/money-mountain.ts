@@ -1,4 +1,4 @@
-import { getPB } from '@/lib/pb';
+import { getAuthedPB } from '@/lib/pb-auth';
 import type {
   MoneyMountain,
   MountainTransaction,
@@ -18,7 +18,7 @@ import {
  * Get all mountains for a user.
  */
 export async function getUserMountains(userId: string): Promise<MoneyMountain[]> {
-  const pb = getPB();
+  const pb = await getAuthedPB();
   
   try {
     const mountains = await pb.collection('money_mountains').getFullList<MoneyMountain>({
@@ -41,7 +41,7 @@ export async function getMountain(mountainId: string): Promise<{
   milestones: any[];
   transactions: MountainTransaction[];
 } | null> {
-  const pb = getPB();
+  const pb = await getAuthedPB();
   
   try {
     const mountain = await pb.collection('money_mountains').getOne<MoneyMountain>(mountainId);
@@ -83,7 +83,7 @@ export async function createMountain(
     matchCap?: number;
   }
 ): Promise<MoneyMountain | null> {
-  const pb = getPB();
+  const pb = await getAuthedPB();
   
   try {
     // Create the mountain
@@ -146,7 +146,7 @@ export async function addTransaction(
     parentId?: string; // For matching
   }
 ): Promise<{ success: boolean; matchAmount?: number; milestoneReached?: any }> {
-  const pb = getPB();
+  const pb = await getAuthedPB();
   
   try {
     const mountain = await pb.collection('money_mountains').getOne<MoneyMountain>(mountainId);
@@ -275,7 +275,7 @@ export async function updateMountain(
   mountainId: string,
   data: Partial<MoneyMountain>
 ): Promise<MoneyMountain | null> {
-  const pb = getPB();
+  const pb = await getAuthedPB();
   
   try {
     const mountain = await pb.collection('money_mountains').update<MoneyMountain>(mountainId, data);
@@ -290,7 +290,7 @@ export async function updateMountain(
  * Delete a mountain and all its data.
  */
 export async function deleteMountain(mountainId: string): Promise<boolean> {
-  const pb = getPB();
+  const pb = await getAuthedPB();
   
   try {
     // Delete milestones
@@ -325,7 +325,7 @@ export async function getAllowanceSettings(
   parentId: string,
   childId: string
 ): Promise<AllowanceSettings | null> {
-  const pb = getPB();
+  const pb = await getAuthedPB();
   
   try {
     const settings = await pb.collection('allowance_settings').getFirstListItem<AllowanceSettings>(
@@ -345,7 +345,7 @@ export async function saveAllowanceSettings(
   childId: string,
   data: Partial<AllowanceSettings>
 ): Promise<AllowanceSettings | null> {
-  const pb = getPB();
+  const pb = await getAuthedPB();
   
   try {
     const existing = await getAllowanceSettings(parentId, childId);

@@ -104,16 +104,6 @@ export const COLLECTIONS = [
     ],
   },
   {
-    name: "tasks",
-    schema: [
-      { name: "title", type: "text", required: true },
-      { name: "assigned", type: "text" },
-      { name: "due", type: "text" },
-      { name: "points", type: "number" },
-      { name: "status", type: "select", options: { values: ["pending", "done"] } },
-    ],
-  },
-  {
     name: "emergency_contacts",
     schema: [
       { name: "name", type: "text", required: true },
@@ -564,6 +554,134 @@ export const COLLECTIONS = [
     ],
     indexes: [
       "CREATE INDEX idx_family_memories_user ON consuela_family_memories (userId)",
+    ],
+  },
+  // Money Mountain (src/lib/money-mountain.ts) — text userId, no relation to users.
+  {
+    name: "money_mountains",
+    schema: [
+      { name: "userId", type: "text", required: true },
+      { name: "name", type: "text", required: true },
+      { name: "description", type: "text" },
+      { name: "targetAmount", type: "number" },
+      { name: "currentAmount", type: "number" },
+      { name: "currency", type: "text" },
+      { name: "imageUrl", type: "text" },
+      { name: "icon", type: "text" },
+      { name: "color", type: "text" },
+      { name: "mountainTheme", type: "text" },
+      { name: "status", type: "text" },
+      { name: "deadline", type: "text" },
+      { name: "isCompleted", type: "bool" },
+      { name: "percentageComplete", type: "number" },
+      { name: "milestoneIndex", type: "number" },
+      { name: "daysActive", type: "number" },
+      { name: "matchEnabled", type: "bool" },
+      { name: "matchPercentage", type: "number" },
+      { name: "matchCap", type: "number" },
+      { name: "matchedAmount", type: "number" },
+      { name: "totalDeposits", type: "number" },
+      { name: "totalWithdrawals", type: "number" },
+      { name: "transactionCount", type: "number" },
+    ],
+    indexes: [
+      "CREATE INDEX idx_money_mountains_user ON money_mountains (userId)",
+    ],
+  },
+  {
+    name: "mountain_milestones",
+    schema: [
+      { name: "mountainId", type: "text", required: true },
+      { name: "percentage", type: "number" },
+      { name: "label", type: "text" },
+      { name: "icon", type: "text" },
+      { name: "isReached", type: "bool" },
+    ],
+    indexes: [
+      "CREATE INDEX idx_mountain_milestones_mountain ON mountain_milestones (mountainId)",
+    ],
+  },
+  {
+    name: "mountain_transactions",
+    schema: [
+      { name: "mountainId", type: "text", required: true },
+      { name: "userId", type: "text" },
+      { name: "type", type: "text" },
+      { name: "amount", type: "number" },
+      { name: "currency", type: "text" },
+      { name: "date", type: "text" },
+      { name: "description", type: "text" },
+      { name: "source", type: "text" },
+      { name: "isMatch", type: "bool" },
+      { name: "note", type: "text" },
+      { name: "approved", type: "bool" },
+      { name: "matchParentId", type: "text" },
+      { name: "originalAmount", type: "number" },
+      { name: "matchAmount", type: "number" },
+    ],
+    indexes: [
+      "CREATE INDEX idx_mountain_transactions_mountain ON mountain_transactions (mountainId)",
+    ],
+  },
+  {
+    name: "allowance_settings",
+    schema: [
+      { name: "parentId", type: "text", required: true },
+      { name: "childId", type: "text", required: true },
+      { name: "weeklyAmount", type: "number" },
+      { name: "currency", type: "text" },
+      { name: "payDay", type: "number" },
+      { name: "matchEnabled", type: "bool" },
+      { name: "matchPercentage", type: "number" },
+      { name: "requiresApproval", type: "bool" },
+      { name: "spendPercent", type: "number" },
+      { name: "savePercent", type: "number" },
+      { name: "givePercent", type: "number" },
+    ],
+  },
+  // Time Capsule (src/lib/time-capsule.ts) — text createdBy/recipients, no relation.
+  {
+    name: "time_capsules",
+    schema: [
+      { name: "title", type: "text", required: true },
+      { name: "description", type: "text" },
+      { name: "unlockDate", type: "text" },
+      { name: "createdBy", type: "text", required: true },
+      { name: "recipients", type: "json" },
+      { name: "isFamilyWide", type: "bool" },
+      { name: "status", type: "text" },
+      { name: "contentCount", type: "number" },
+      { name: "totalSize", type: "number" },
+      { name: "unlockNotificationSent", type: "bool" },
+      { name: "viewedBy", type: "json" },
+      { name: "unlockMessage", type: "text" },
+      { name: "tags", type: "json" },
+      { name: "color", type: "text" },
+    ],
+    indexes: [
+      "CREATE INDEX idx_time_capsules_created ON time_capsules (createdBy)",
+    ],
+  },
+  {
+    name: "capsule_contents",
+    schema: [
+      { name: "capsuleId", type: "text", required: true },
+      { name: "type", type: "text" },
+      { name: "data", type: "text" },
+      { name: "createdBy", type: "text" },
+      { name: "caption", type: "text" },
+      { name: "order", type: "number" },
+    ],
+    indexes: [
+      "CREATE INDEX idx_capsule_contents_capsule ON capsule_contents (capsuleId)",
+    ],
+  },
+  // Consuela buffer scheduling settings (src/lib/auto-buffer-scheduling.ts).
+  {
+    name: "consuela_buffer_settings",
+    schema: [
+      { name: "userId", type: "text" },
+      { name: "settings", type: "json" },
     ],
   },
 ];

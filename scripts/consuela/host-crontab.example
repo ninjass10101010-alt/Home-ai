@@ -4,3 +4,4 @@ CONSUELA_CRON_SECRET=__replace_me__
 */5 * * * * curl -fs -m 30 -H "Authorization: Bearer $CONSUELA_CRON_SECRET" http://localhost:3000/api/cron/consuela/google-sync     >> ~/consuela-cron.log 2>&1
 */30 * * * * curl -fs -m 30 -H "Authorization: Bearer $CONSUELA_CRON_SECRET" http://localhost:3000/api/cron/consuela/telegram-poll  >> ~/consuela-cron.log 2>&1
 */5 * * * *  curl -fs -m 30 -H "Authorization: Bearer $CONSUELA_CRON_SECRET" http://localhost:3000/api/cron/consuela/ha-todo-mirror >> ~/consuela-cron.log 2>&1
+*/15 * * * * curl -fs -m 30 -X POST -H "Authorization: Bearer $CONSUELA_CRON_SECRET" http://localhost:3000/api/cron/calendar/score-importance >> ~/consuela-cron.log 2>&1

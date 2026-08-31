@@ -1,4 +1,4 @@
-import { getPB } from '@/lib/pb';
+import { getAuthedPB } from '@/lib/pb-auth';
 import type {
   TimeCapsule,
   CapsuleContent,
@@ -13,7 +13,7 @@ import { getDaysUntilUnlock, isCapsuleUnlocked } from '@/db/features/time-capsul
  * Get all time capsules for a user.
  */
 export async function getUserCapsules(userId: string): Promise<TimeCapsule[]> {
-  const pb = getPB();
+  const pb = await getAuthedPB();
   
   try {
     const records = await pb.collection('time_capsules').getFullList<TimeCapsule>({
@@ -35,7 +35,7 @@ export async function getCapsule(capsuleId: string): Promise<{
   capsule: TimeCapsule;
   contents: CapsuleContent[];
 } | null> {
-  const pb = getPB();
+  const pb = await getAuthedPB();
   
   try {
     const capsule = await pb.collection('time_capsules').getOne<TimeCapsule>(capsuleId);
@@ -58,7 +58,7 @@ export async function createCapsule(
   userId: string,
   data: CreateCapsuleRequest
 ): Promise<TimeCapsule | null> {
-  const pb = getPB();
+  const pb = await getAuthedPB();
   
   try {
     const capsule = await pb.collection('time_capsules').create<TimeCapsule>({
@@ -93,7 +93,7 @@ export async function addCapsuleContent(
   userId: string,
   data: AddContentRequest
 ): Promise<CapsuleContent | null> {
-  const pb = getPB();
+  const pb = await getAuthedPB();
   
   try {
     const content = await pb.collection('capsule_contents').create<CapsuleContent>({
@@ -126,7 +126,7 @@ export async function updateCapsule(
   capsuleId: string,
   data: UpdateCapsuleRequest
 ): Promise<TimeCapsule | null> {
-  const pb = getPB();
+  const pb = await getAuthedPB();
   
   try {
     const capsule = await pb.collection('time_capsules').update<TimeCapsule>(capsuleId, data);
@@ -141,7 +141,7 @@ export async function updateCapsule(
  * Delete a capsule and all its contents.
  */
 export async function deleteCapsule(capsuleId: string): Promise<boolean> {
-  const pb = getPB();
+  const pb = await getAuthedPB();
   
   try {
     // Delete all contents first
@@ -166,7 +166,7 @@ export async function deleteCapsule(capsuleId: string): Promise<boolean> {
  * Mark a capsule as viewed by a user.
  */
 export async function markCapsuleViewed(capsuleId: string, userId: string): Promise<void> {
-  const pb = getPB();
+  const pb = await getAuthedPB();
   
   try {
     const capsule = await pb.collection('time_capsules').getOne<TimeCapsule>(capsuleId);
@@ -194,7 +194,7 @@ export async function markCapsuleViewed(capsuleId: string, userId: string): Prom
  * This should be called periodically (e.g., daily).
  */
 export async function checkAndUnlockCapsules(): Promise<number> {
-  const pb = getPB();
+  const pb = await getAuthedPB();
   
   try {
     const now = new Date().toISOString();
