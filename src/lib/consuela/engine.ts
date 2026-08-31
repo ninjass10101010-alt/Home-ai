@@ -24,7 +24,7 @@ export async function scanGroceryStoreOptimization(scopeDate: string): Promise<N
     body: `Assign stores to your grocery items for smarter shopping and price comparison.`,
     emoji: "🛒",
     actionLabel: "Assign stores",
-    actionPayload: { tool: "open_grocery", args: {} },
+    actionPayload: { tool: "get_grocery_list", args: {} },
     scopeDate,
   }];
 }

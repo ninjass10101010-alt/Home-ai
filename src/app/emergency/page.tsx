@@ -6,6 +6,7 @@ import PageShell from "@/components/ui/PageShell";
 import TopBar from "@/components/ui/TopBar";
 import Card from "@/components/ui/Card";
 import Skeleton from "@/components/ui/Skeleton";
+import { db } from "@/db";
 interface EmergencyContact {
   id: number;
   name: string;
@@ -68,14 +69,27 @@ function cleanPhoneForTel(phone: string): string {
 export default function EmergencyPage() {
   const [contacts, setContacts] = useState<EmergencyContact[]>([]);
   const [loading, setLoading] = useState(true);
+  const [usingFallback, setUsingFallback] = useState(false);
 
   useEffect(() => {
     fetch('/api/emergency-contacts')
-      .then(r => r.json())
-      .then(data => {
-        if (data.contacts) setContacts(data.contacts);
+      .then((r) => {
+        if (!r.ok) {
+          // Guests (and expired sessions) are gated by the session middleware —
+          // fall back to the local contact cache instead of crashing.
+          setContacts(db.selectEmergencyContacts() as EmergencyContact[]);
+          setUsingFallback(true);
+          return null;
+        }
+        return r.json();
       })
-      .catch(() => {})
+      .then((data) => {
+        if (data?.contacts) setContacts(data.contacts);
+      })
+      .catch(() => {
+        setContacts(db.selectEmergencyContacts() as EmergencyContact[]);
+        setUsingFallback(true);
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -126,7 +140,13 @@ export default function EmergencyPage() {
             </div>
           </section>
         ) : (
-          <>
+           <>
+            {usingFallback && (
+              <p className="text-xs text-text-secondary text-center -mb-2">
+                Using offline fallback — sign in to see live contacts
+              </p>
+            )}
+
             {/* Primary Contacts */}
             {primaryContacts.length > 0 && (
               <section>

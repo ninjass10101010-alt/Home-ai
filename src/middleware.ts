@@ -14,6 +14,9 @@ const API_EXEMPT = [
   "/api/ha/alarm",
   "/api/emergency",
   "/api/recipes/",
+  "/api/hermes/",
+  "/api/consuela/suggestions",
+  "/api/consuela/briefing",
 ];
 
 // MF-5 — exact-match OR trailing-slash semantics. Plain startsWith(p) made

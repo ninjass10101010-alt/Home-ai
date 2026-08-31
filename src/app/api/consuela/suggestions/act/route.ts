@@ -28,6 +28,7 @@ const ALLOWED_TOOLS = new Set([
   "complete_grocery_item",
   "add_event",
   "remove_event",
+  "get_grocery_list",
   "dismiss_suggestion",
 ]);
 

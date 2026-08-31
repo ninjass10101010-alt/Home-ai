@@ -569,9 +569,18 @@ export default function SettingsPage() {
   };
 
   const testEmergencyAlert = async () => {
+    // NOTE: the session pin is never held in the client bundle (security
+    // model — see AGENTS.md). `currentUser?.pin` is therefore undefined; the
+    // test button is disabled unless a pin is available. Kept read-only here
+    // for wire-compatibility with /api/emergency, which expects a pin.
+    const sessionPin = (currentUser as { pin?: string } | null)?.pin;
     setTestingAlert(true);
     try {
-      const res = await fetch("/api/emergency", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "General", timestamp: new Date().toISOString() }) });
+      const res = await fetch("/api/emergency", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "General", timestamp: new Date().toISOString(), pin: sessionPin }),
+      });
       const data = await res.json();
       showToast(data.success ? "✅ Test alert sent" : "❌ Alert failed — check emergency contacts");
     } catch {
@@ -850,7 +859,9 @@ export default function SettingsPage() {
             </div>
             <div className="mt-4 flex gap-2">
               <SoftButton onClick={() => openContactModal()} className="flex-1">Add contact</SoftButton>
-              <SoftButton variant="secondary" onClick={testEmergencyAlert} loading={testingAlert} className="flex-1">Test</SoftButton>
+              <SoftButton variant="secondary" onClick={testEmergencyAlert} loading={testingAlert} disabled={!(currentUser as { pin?: string } | null)?.pin} className="flex-1">
+                {(currentUser as { pin?: string } | null)?.pin ? "Test" : "Sign in to test"}
+              </SoftButton>
             </div>
           </SectionCard>
 

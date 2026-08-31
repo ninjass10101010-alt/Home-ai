@@ -16,6 +16,7 @@ import type { ProactiveSuggestion } from "@/lib/consuela/types";
 const TOOL_ROUTES: Record<string, string> = {
   get_pending_tasks: "/tasks",
   get_weekly_meals: "/meals",
+  get_grocery_list: "/meals",
   open_calendar: "/calendar",
 };
 
