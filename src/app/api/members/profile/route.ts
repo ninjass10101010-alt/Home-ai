@@ -5,7 +5,10 @@ import { verifyPinFromPB, sanitizeMember, findOrCreateMemberRecord } from "@/lib
 export const dynamic = "force-dynamic";
 
 const ALLOWED_FIELDS = ["emoji", "avatarSize", "glow", "color"] as const;
-const MAX_AVATAR_CHARS = 400_000;
+// Must stay in lockstep with the seed's members.emoji field max (pb-seed.ts) —
+// the client resizes photos to a base64 data URL that can exceed PocketBase's
+// built-in 5000-char text default, so both caps have to agree.
+export const MAX_AVATAR_CHARS = 400_000;
 
 export async function POST(request: NextRequest) {
   try {

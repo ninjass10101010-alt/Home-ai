@@ -775,7 +775,7 @@ export async function seedCollections() {
         // every photo-avatar save). Only fields the seed defines an explicit
         // options.max for are healed, so unrelated options are left alone.
         const fieldDrift: any[] = schema
-          .filter((s: any) => s.options?.max !== undefined && liveFieldNames.has(s.name))
+          .filter((s: any) => s.type === "text" && s.options?.max !== undefined && liveFieldNames.has(s.name))
           .map((s: any) => {
             const liveField = (live.fields || []).find((f: any) => f.name === s.name);
             return liveField && liveField.max !== s.options.max
@@ -800,15 +800,24 @@ export async function seedCollections() {
           return !liveIndexNames.has(name);
         });
 
-        if (missingFields.length || missingIndexes.length) {
+        if (missingFields.length || missingIndexes.length || fieldDrift.length) {
           const parts: string[] = [];
-          if (missingFields.length) {
+          if (missingFields.length || fieldDrift.length) {
             const mergedFields = [
               ...(live.fields || []),
               ...missingFields.map(buildField),
             ];
+            for (const d of fieldDrift) {
+              const lf = mergedFields.find((f: any) => f.name === d.schemaField.name);
+              if (lf) lf.max = d.schemaField.options.max;
+            }
             await pb.collections.update(live.id, { fields: mergedFields });
-            parts.push(`+${missingFields.length} fields: ${missingFields.map((m: any) => m.name).join(", ")}`);
+            if (missingFields.length) {
+              parts.push(`+${missingFields.length} fields: ${missingFields.map((m: any) => m.name).join(", ")}`);
+            }
+            if (fieldDrift.length) {
+              parts.push(`+${fieldDrift.length} field options (${fieldDrift.map((d: any) => d.schemaField.name).join(", ")})`);
+            }
           }
           if (missingIndexes.length) {
             await pb.collections.update(live.id, { indexes: [...(live.indexes || []), ...missingIndexes] });

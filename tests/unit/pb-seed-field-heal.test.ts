@@ -7,6 +7,7 @@ vi.mock("@/lib/pb-auth", () => ({
 }));
 
 import { COLLECTIONS, seedCollections } from "@/lib/pb-seed";
+import { MAX_AVATAR_CHARS } from "@/app/api/members/profile/route";
 
 const LOCKED = {
   listRule: null,
@@ -98,5 +99,11 @@ describe("members.emoji text-field max", () => {
     );
     // No rules drift, no missing fields, no missing indexes, no field drift -> no update.
     expect(updateCall).toBeUndefined();
+  });
+
+  it("keeps the route's avatar cap in lockstep with the seed's emoji field max", () => {
+    const membersDef = COLLECTIONS.find((c) => c.name === "members")!;
+    const emoji = membersDef.schema.find((s: any) => s.name === "emoji");
+    expect((emoji as any).options?.max).toBe(MAX_AVATAR_CHARS);
   });
 });
