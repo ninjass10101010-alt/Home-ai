@@ -27,7 +27,12 @@ export const COLLECTIONS = [
     name: "members",
     schema: [
       { name: "name", type: "text", required: true },
-      { name: "emoji", type: "text" },
+      // Profile photos are stored inline as base64 data URLs in this field.
+      // PocketBase treats a text field's max of 0 as the built-in 5000-char
+      // default, which rejected every real photo save (256px webp base64 is
+      // ~8-60KB). Keep the explicit max in lockstep with the profile route's
+      // MAX_AVATAR_CHARS so the client cap and the DB cap agree.
+      { name: "emoji", type: "text", options: { max: 400000 } },
       { name: "color", type: "text" },
       { name: "role", type: "text" },
       { name: "avatarSize", type: "text" },
@@ -763,6 +768,21 @@ export async function seedCollections() {
         }
         const liveFieldNames = new Set((live.fields || []).map((f: any) => f.name));
         const missingFields = schema.filter((s: any) => !liveFieldNames.has(s.name));
+
+        // Field-option drift: fields that exist live but whose options differ
+        // from the seed (e.g. members.emoji max — PocketBase treats a text
+        // field's max of 0 as the built-in 5000-char default, which rejected
+        // every photo-avatar save). Only fields the seed defines an explicit
+        // options.max for are healed, so unrelated options are left alone.
+        const fieldDrift: any[] = schema
+          .filter((s: any) => s.options?.max !== undefined && liveFieldNames.has(s.name))
+          .map((s: any) => {
+            const liveField = (live.fields || []).find((f: any) => f.name === s.name);
+            return liveField && liveField.max !== s.options.max
+              ? { schemaField: s, liveField }
+              : null;
+          })
+          .filter(Boolean);
 
         const liveIndexNames = new Set(
           (live.indexes || []).map((i: any) => {
