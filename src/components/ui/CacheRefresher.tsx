@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { db } from '@/db';
+import { flushPendingWrites } from '@/lib/pending-writes';
 
 const REFRESH_INTERVAL_MS = 60_000;
 
@@ -12,15 +13,17 @@ export function CacheRefresher({ children }: { children: React.ReactNode }) {
     if (mounted.current) return;
     mounted.current = true;
 
-    db.refreshCaches();
+    // Replay queued meal/recipe writes first so the subsequent cache
+    // refresh reads back everything the server now holds.
+    flushPendingWrites().then(() => db.refreshCaches());
 
     const interval = setInterval(() => {
-      db.refreshCaches();
+      flushPendingWrites().then(() => db.refreshCaches());
     }, REFRESH_INTERVAL_MS);
 
     const onVisible = () => {
       if (document.visibilityState === 'visible') {
-        db.refreshCaches();
+        flushPendingWrites().then(() => db.refreshCaches());
       }
     };
     document.addEventListener('visibilitychange', onVisible);

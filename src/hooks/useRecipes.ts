@@ -1,9 +1,26 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { db } from "@/db";
 import { Recipe } from "@/types/meals";
 import { extractActions } from "@/lib/ai-response";
+import { saveOrQueue, type PendingWrite } from "@/lib/pending-writes";
 
 const RECIPES_KEY = "consuela-recipes";
+
+const recipeUpsertWrite = (recipe: Recipe): PendingWrite => ({
+  key: `recipe:upsert:${recipe.name?.toLowerCase() || recipe.id}`,
+  collection: "recipes",
+  op: "create",
+  payload: recipe,
+  queuedAt: new Date().toISOString(),
+});
+
+const recipeDeleteWrite = (id: number | string): PendingWrite => ({
+  key: `recipe:delete:${id}`,
+  collection: "recipes",
+  op: "delete",
+  id,
+  queuedAt: new Date().toISOString(),
+});
 
 const loadJSON = <T,>(key: string, fallback: T): T => {
   if (typeof window === "undefined") return fallback;
@@ -37,7 +54,7 @@ const normalizeRecipe = (recipe: Partial<Recipe>, fallbackId?: number): Recipe =
 export function useRecipes(showToast: (msg: string) => void) {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
 
-  useEffect(() => {
+  const pullRecipes = useCallback(() => {
     const local = loadJSON<Recipe[]>(RECIPES_KEY, []);
     db.selectRecipes().then((pbData: any) => {
       if (pbData && pbData.length > 0) {
@@ -54,32 +71,58 @@ export function useRecipes(showToast: (msg: string) => void) {
   }, []);
 
   useEffect(() => {
+    pullRecipes();
+    const onRefreshed = () => pullRecipes();
+    window.addEventListener("consuela-data-refreshed", onRefreshed);
+    return () => window.removeEventListener("consuela-data-refreshed", onRefreshed);
+  }, [pullRecipes]);
+
+  useEffect(() => {
     if (recipes.length) localStorage.setItem(RECIPES_KEY, JSON.stringify(recipes));
   }, [recipes]);
 
   const saveCatalogRecipe = async (recipe: Recipe) => {
     const cleanRecipe = normalizeRecipe(recipe, recipe.id);
     if (!cleanRecipe.name.trim()) return;
-    await db.upsertRecipe(cleanRecipe);
+    const saved = await saveOrQueue(recipeUpsertWrite(cleanRecipe), () => db.upsertRecipe(cleanRecipe));
 
     const recipeId = String(cleanRecipe.id);
     const linkedMeals = (db.mealsStore || []).filter((m: any) => m.recipeId === recipeId);
     const now = new Date().toISOString();
     for (const meal of linkedMeals) {
-      await db.updateMeal(String(meal.id), {
-        ingredients: cleanRecipe.ingredients ?? meal.ingredients,
-        instructions: cleanRecipe.instructions ?? meal.instructions,
-        servings: cleanRecipe.servings ?? meal.servings,
-        calories: cleanRecipe.calories ?? meal.calories,
-        protein: cleanRecipe.protein ?? meal.protein,
-        carbs: cleanRecipe.carbs ?? meal.carbs,
-        fat: cleanRecipe.fat ?? meal.fat,
-        recipeSnapshotAt: now,
-      });
+      await saveOrQueue(
+        { key: `meal:update:${meal.id}`, collection: "meal_plan_entries", op: "update", id: meal.id, payload: {
+          ingredients: cleanRecipe.ingredients ?? meal.ingredients,
+          instructions: cleanRecipe.instructions ?? meal.instructions,
+          servings: cleanRecipe.servings ?? meal.servings,
+          calories: cleanRecipe.calories ?? meal.calories,
+          protein: cleanRecipe.protein ?? meal.protein,
+          carbs: cleanRecipe.carbs ?? meal.carbs,
+          fat: cleanRecipe.fat ?? meal.fat,
+          recipeSnapshotAt: now,
+        }, queuedAt: now },
+        () => db.updateMeal(String(meal.id), {
+          ingredients: cleanRecipe.ingredients ?? meal.ingredients,
+          instructions: cleanRecipe.instructions ?? meal.instructions,
+          servings: cleanRecipe.servings ?? meal.servings,
+          calories: cleanRecipe.calories ?? meal.calories,
+          protein: cleanRecipe.protein ?? meal.protein,
+          carbs: cleanRecipe.carbs ?? meal.carbs,
+          fat: cleanRecipe.fat ?? meal.fat,
+          recipeSnapshotAt: now,
+        })
+      );
     }
 
     const existing = recipes.find(r => r.id === cleanRecipe.id || r.name.toLowerCase() === cleanRecipe.name.toLowerCase());
-    if (existing) {
+    if (!saved) {
+      if (existing) {
+        setRecipes(prev => prev.map(r => r.id === existing.id ? { ...cleanRecipe, id: existing.id } : r));
+      } else {
+        setRecipes(prev => [...prev, { ...cleanRecipe, id: Date.now(), createdAt: new Date().toISOString() }]);
+      }
+      showToast(`⚠️ "${cleanRecipe.name}" saved on this device — will sync automatically`);
+    } else if (existing) {
       setRecipes(prev => prev.map(r => r.id === existing.id ? { ...cleanRecipe, id: existing.id } : r));
       showToast(`✅ "${cleanRecipe.name}" updated!`);
     } else {
@@ -90,7 +133,7 @@ export function useRecipes(showToast: (msg: string) => void) {
   };
 
   const deleteCatalogRecipe = async (id: number) => {
-    await db.deleteRecipe(String(id));
+    await saveOrQueue(recipeDeleteWrite(id), () => db.deleteRecipe(String(id)));
     setRecipes(prev => prev.filter(r => r.id !== id));
     showToast(`🗑️ Recipe deleted.`);
   };

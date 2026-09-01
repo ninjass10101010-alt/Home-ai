@@ -59,3 +59,46 @@ export function eventInMonth(
   if (e.month == null || e.year == null) return true;
   return e.month === month && e.year === year;
 }
+
+export interface DbEventRow {
+  id: string;
+  title?: string;
+  date?: string;
+  time?: string;
+  icon?: string;
+  color?: string;
+  member?: string;
+}
+
+export interface MappedDbEvent {
+  id: string;
+  title: string;
+  time: string;
+  member: string;
+  color: string;
+  emoji: string;
+  day: number;
+  month: number;
+  year: number;
+}
+
+// Maps a PocketBase `events` row (manually added family events) to the
+// calendar page's CalEvent shape. Date-only strings are parsed as local
+// dates so the day never shifts across timezones.
+export function dbEventToCalEvent(row: DbEventRow | null | undefined): MappedDbEvent | null {
+  if (!row?.title || !row.date) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(row.date);
+  if (!m) return null;
+  const [, y, mo, d] = m.map(Number);
+  return {
+    id: row.id,
+    title: row.title,
+    time: row.time || "All day",
+    member: row.member || "All",
+    color: row.color || "green",
+    emoji: row.icon || "\uD83D\uDCC5",
+    day: d,
+    month: mo - 1,
+    year: y,
+  };
+}

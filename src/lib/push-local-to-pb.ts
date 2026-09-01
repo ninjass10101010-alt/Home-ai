@@ -61,15 +61,25 @@ export async function pushLocalToPB(): Promise<{ collection: string; pushed: num
   }
   results.push({ collection: "pantry_items", pushed, errors });
 
-  // Meals (insert — no dedup check; runs once for initial migration)
+  // Meals (dedupe by name+weekOf so re-pushing a device's cache after a
+  // partial sync doesn't duplicate rows the server already holds)
   const meals = loadJSON<any[]>("consuela-meals", []);
   pushed = 0; errors = 0;
   if (meals.length) {
+    let existingMeals: any[] = [];
+    try {
+      existingMeals = await db.selectMeals();
+    } catch { existingMeals = []; }
+    const existingKeys = new Set(
+      existingMeals.map((m: any) => `${m.name?.toLowerCase()}|${m.weekOf || ""}`)
+    );
     await Promise.allSettled(
-      meals.map((meal: any) =>
-        track("meal_plan_entries", () => db.insertMeal(meal))
-          .then(() => pushed++).catch(() => {})
-      )
+      meals.map((meal: any) => {
+        const key = `${meal.name?.toLowerCase()}|${meal.weekOf || ""}`;
+        if (meal.name && existingKeys.has(key)) return Promise.resolve();
+        return track("meal_plan_entries", () => db.insertMeal(meal))
+          .then(() => pushed++).catch(() => {});
+      })
     );
   }
   results.push({ collection: "meal_plan_entries", pushed, errors });

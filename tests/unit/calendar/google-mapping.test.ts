@@ -82,3 +82,44 @@ describe("eventInMonth", () => {
     expect(eventInMonth(sep12, 7, 2026)).toBe(false);
   });
 });
+
+import { dbEventToCalEvent } from "@/lib/calendar/google-mapping";
+
+describe("dbEventToCalEvent", () => {
+  it("maps a PB events row to a dated CalEvent (0-based month)", () => {
+    const e = dbEventToCalEvent({
+      id: "pb_e1",
+      title: "Recital",
+      date: "2026-09-15",
+      time: "7:00 PM",
+      icon: "🎹",
+      color: "amber",
+      member: "Emily",
+    });
+    expect(e).toEqual({
+      id: "pb_e1",
+      title: "Recital",
+      time: "7:00 PM",
+      member: "Emily",
+      color: "amber",
+      emoji: "🎹",
+      day: 15,
+      month: 8,
+      year: 2026,
+    });
+  });
+
+  it("returns null for rows without a title or a parseable date", () => {
+    expect(dbEventToCalEvent({ id: "x", title: "", date: "2026-09-15" })).toBeNull();
+    expect(dbEventToCalEvent({ id: "x", title: "Y", date: "garbage" })).toBeNull();
+    expect(dbEventToCalEvent(null)).toBeNull();
+  });
+
+  it("defaults missing icon/color/member", () => {
+    const e = dbEventToCalEvent({ id: "pb_e2", title: "Simple", date: "2026-12-01" })!;
+    expect(e.emoji).toBe("📅");
+    expect(e.color).toBe("green");
+    expect(e.member).toBe("All");
+    expect(e.month).toBe(11);
+  });
+});

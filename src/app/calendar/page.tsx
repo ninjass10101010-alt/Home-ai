@@ -7,8 +7,10 @@ import WidgetCard from "@/components/patterns/WidgetCard";
 import Badge from "@/components/ui/Badge";
 import Avatar from "@/components/ui/Avatar";
 import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
-import { mapGoogleEvent, eventInMonth } from "@/lib/calendar/google-mapping";
+import { mapGoogleEvent, eventInMonth, dbEventToCalEvent } from "@/lib/calendar/google-mapping";
 import { db } from "@/db";
+import { gatewayList } from "@/db/gateway-client";
+import { saveOrQueue, type PendingWrite } from "@/lib/pending-writes";
 
 const DAYS = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 const MONTHS = [
@@ -81,18 +83,45 @@ type ScheduleColor =
   | "green" | "amber" | "cyan" | "violet" | "rose"
   | "blue" | "indigo" | "pink" | "teal";
 
-const events: CalEvent[] = [
-  { id: 1, title: "Soccer Practice", time: "4:00 PM", member: "Caspian", color: "violet", emoji: "⚽", day: 18 },
-  { id: 2, title: "Piano Lesson", time: "3:00 PM", member: "Emily", color: "amber", emoji: "🎹", day: 19 },
-  { id: 3, title: "Team Dinner", time: "7:00 PM", member: "Jeffery (Dad)", color: "cyan", emoji: "🍽️", day: 19 },
-  { id: 4, title: "Dentist — Emily", time: "2:00 PM", member: "Emily", color: "amber", emoji: "🦷", day: 21 },
-  { id: 5, title: "Car Service", time: "10:00 AM", member: "Jeffery (Dad)", color: "cyan", emoji: "🚗", day: 21 },
-  { id: 6, title: "Movie Night", time: "8:00 PM", member: "All", color: "green", emoji: "🎬", day: 22 },
-  { id: 7, title: "Park Picnic", time: "11:00 AM", member: "All", color: "green", emoji: "🌳", day: 23 },
-  { id: 8, title: "Grocery Run", time: "10:00 AM", member: "Rebecca (Mom)", color: "green", emoji: "🛒", day: 20 },
-  { id: 9, title: "Swim Class", time: "9:00 AM", member: "Caspian", color: "violet", emoji: "🏊", day: 25 },
-  { id: 10, title: "Book Club", time: "6:30 PM", member: "Rebecca (Mom)", color: "green", emoji: "📚", day: 26 },
-];
+// No demo/seed events — the calendar shows real Google Calendar events
+// (synced from the server) and family-added events (persisted to PB).
+const events: CalEvent[] = [];
+
+function eventDateStr(ev: CalEvent, year: number, month: number): string {
+  return `${year}-${String(month + 1).padStart(2, "0")}-${String(ev.day).padStart(2, "0")}`;
+}
+
+function eventCreateWrite(ev: CalEvent, year: number, month: number): PendingWrite {
+  const date = eventDateStr(ev, year, month);
+  return {
+    key: `event:create:${ev.title}|${date}|${ev.time}`,
+    collection: "events",
+    op: "create",
+    payload: { title: ev.title, date, time: ev.time, icon: ev.emoji, color: ev.color, member: ev.member },
+    queuedAt: new Date().toISOString(),
+  };
+}
+
+function eventUpdateWrite(id: string, ev: CalEvent): PendingWrite {
+  return {
+    key: `event:update:${id}`,
+    collection: "events",
+    op: "update",
+    id,
+    payload: { title: ev.title, time: ev.time, icon: ev.emoji, color: ev.color, member: ev.member },
+    queuedAt: new Date().toISOString(),
+  };
+}
+
+function eventDeleteWrite(id: string): PendingWrite {
+  return {
+    key: `event:delete:${id}`,
+    collection: "events",
+    op: "delete",
+    id,
+    queuedAt: new Date().toISOString(),
+  };
+}
 
 const eventColorValues: Record<CalEvent["color"], string> = {
   green: "var(--color-accent-selected)",
@@ -432,36 +461,40 @@ export default function CalendarPage() {
     setIsAddingEvent(false);
   };
   const cancelEventEdit = () => { setEditingEventId(null); setIsAddingEvent(false); };
-  const saveEvent = () => {
+  const saveEvent = async () => {
     if (!eventForm.title.trim()) return;
     if (isAddingEvent) {
       const newEvent = { ...eventForm, id: Date.now() };
       setCalEvents((prev) => [...prev, newEvent]);
-      db.insertEvent({
-        title: newEvent.title,
-        date: `${year}-${String(month + 1).padStart(2, "0")}-${String(newEvent.day).padStart(2, "0")}`,
-        time: newEvent.time,
-        icon: newEvent.emoji,
-        color: newEvent.color,
-        member: newEvent.member,
-      }).catch(() => {});
+      const landed = await saveOrQueue(
+        eventCreateWrite(newEvent, year, month),
+        async () => {
+          const saved = await db.insertEvent(eventCreateWrite(newEvent, year, month).payload);
+          if (saved?.id) {
+            setCalEvents((prev) => prev.map((e) => (e.id === newEvent.id ? { ...e, id: saved.id } : e)));
+          }
+          return saved;
+        }
+      );
+      showToast(landed ? "✅ Event added" : "⚠️ Event saved on this device — will sync automatically");
     } else {
-      setCalEvents((prev) => prev.map((e) => e.id === editingEventId ? { ...eventForm } : e));
-      if (typeof editingEventId === "number") {
-        db.updateEvent(editingEventId, {
-          title: eventForm.title,
-          time: eventForm.time,
-          icon: eventForm.emoji,
-          color: eventForm.color,
-          member: eventForm.member,
-        }).catch(() => {});
+      setCalEvents((prev) => prev.map((e) => (e.id === editingEventId ? { ...eventForm } : e)));
+      if (typeof editingEventId === "string") {
+        const landed = await saveOrQueue(
+          eventUpdateWrite(editingEventId, eventForm),
+          () => db.updateEvent(editingEventId, eventUpdateWrite(editingEventId, eventForm).payload)
+        );
+        showToast(landed ? "✅ Event updated" : "⚠️ Update saved on this device — will sync automatically");
       }
     }
     cancelEventEdit();
   };
-  const deleteEvent = (id: number | string) => {
+  const deleteEvent = async (id: number | string) => {
     setCalEvents((prev) => prev.filter((e) => e.id !== id));
-    db.deleteEvent(id).catch(() => {});
+    if (typeof id === "string") {
+      const landed = await saveOrQueue(eventDeleteWrite(id), () => db.deleteEvent(id));
+      if (!landed) showToast("⚠️ Delete saved on this device — will sync automatically");
+    }
     cancelEventEdit();
   };
 
@@ -522,30 +555,35 @@ export default function CalendarPage() {
         if (!silent) showToast("Connect Google in Settings → Integrations");
         return;
       }
-      if (data.events?.length) {
-        setCalEvents((prev) => {
-          const filtered = prev.filter((e: any) => e.member !== "Google");
-          for (const ge of data.events) {
-            const mapped = mapGoogleEvent(ge);
-            if (!mapped) continue;
-            if (
-              !filtered.find(
-                (e: any) =>
-                  e.title === mapped.title &&
-                  e.day === mapped.day &&
-                  e.month === mapped.month &&
-                  e.year === mapped.year &&
-                  e.time === mapped.time
-              )
-            ) {
-              filtered.push(mapped);
-            }
+      const mappedList = (data.events || [])
+        .map((ge: any) => mapGoogleEvent(ge))
+        .filter(Boolean);
+      // Always replace the Google rows (even with an empty result) so
+      // deleted/moved-out events don't linger from an old cache.
+      setCalEvents((prev) => {
+        const filtered = prev.filter((e: any) => e.member !== "Google");
+        for (const mapped of mappedList) {
+          if (
+            !filtered.find(
+              (e: any) =>
+                e.title === mapped!.title &&
+                e.day === mapped!.day &&
+                e.month === mapped!.month &&
+                e.year === mapped!.year &&
+                e.time === mapped!.time
+            )
+          ) {
+            filtered.push(mapped as CalEvent);
           }
-          return filtered;
-        });
-        if (!silent) showToast(`\u2705 Synced ${data.events.length} Google events`);
-      } else {
-        if (!silent) showToast("No Google Calendar events found");
+        }
+        return filtered;
+      });
+      if (!silent) {
+        showToast(
+          mappedList.length
+            ? `\u2705 Synced ${mappedList.length} Google events`
+            : "No Google Calendar events found"
+        );
       }
     } catch {
       if (!silent) showToast("\u274C Sync failed");
@@ -559,6 +597,47 @@ export default function CalendarPage() {
   useEffect(() => {
     syncGoogleEvents(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Pull family-added events from PocketBase on mount so events created on
+  // one device appear on every other device (they used to live only in the
+  // creating browser's localStorage).
+  useEffect(() => {
+    let cancelled = false;
+    gatewayList("events")
+      .then((rows) => {
+        if (cancelled || !Array.isArray(rows)) return;
+        const mapped = rows.map(dbEventToCalEvent).filter(Boolean) as CalEvent[];
+        if (!mapped.length) return;
+        setCalEvents((prev) => {
+          const out = [...prev];
+          for (const me of mapped) {
+            const dupe = out.find(
+              (e) =>
+                String(e.id) === String(me.id) ||
+                (e.title === me.title &&
+                  e.day === me.day &&
+                  e.month === me.month &&
+                  e.year === me.year &&
+                  e.time === me.time)
+            );
+            if (dupe) {
+              // Adopt the server id so later edits/deletes target the PB row.
+              if (typeof dupe.id === "number" && typeof me.id === "string") {
+                const idx = out.indexOf(dupe);
+                out[idx] = { ...dupe, id: me.id };
+              }
+            } else {
+              out.push(me);
+            }
+          }
+          return out;
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const isSelectedToday = selectedDay === today.getDate() && month === today.getMonth() && year === today.getFullYear();

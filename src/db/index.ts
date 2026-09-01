@@ -777,6 +777,11 @@ export const db = {
       refreshCache("pantry", dualFetch.pantry, pantryCache),
       refreshCache("grocery", dualFetch.grocery, groceryCache),
     ]);
+    // Let mounted hooks (useMeals/useRecipes) re-merge the fresh caches
+    // without a manual reload — the cross-device/browser read path.
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("consuela-data-refreshed"));
+    }
   },
 
   // Expose cache for direct access

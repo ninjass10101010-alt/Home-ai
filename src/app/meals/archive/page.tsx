@@ -8,6 +8,9 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { db } from "@/db";
 import { weekLabel, isoDateForWeekday } from "@/lib/meals-week-utils";
+import { saveOrQueue } from "@/lib/pending-writes";
+import { mealCreateWrite } from "@/hooks/useMeals";
+import { Meal } from "@/types/meals";
 import ErrorState from "@/components/ui/ErrorState";
 import Skeleton from "@/components/ui/Skeleton";
 
@@ -54,11 +57,12 @@ export default function MealsArchivePage() {
       const meals = Array.isArray(entry.data) ? entry.data : [];
       for (const meal of meals) {
         const { id, ...rest } = meal;
-        await db.insertMeal({
+        const restored: Meal = {
           ...rest,
           weekOf: meal.weekOf || weekStart,
           date: meal.date || isoDateForWeekday(weekStart, meal.time || "Mon"),
-        });
+        };
+        await saveOrQueue(mealCreateWrite(restored), () => db.insertMeal(restored));
       }
       await db.deleteMealWeekArchive(weekStart);
       setArchives(prev => prev.filter(a => a.weekStart !== weekStart));

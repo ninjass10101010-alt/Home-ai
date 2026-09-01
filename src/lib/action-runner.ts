@@ -1,5 +1,6 @@
 import { db } from "@/db";
 import { upsertGroceryItem } from "./grocery-service";
+import { saveOrQueue } from "./pending-writes";
 
 export type LocalActionType =
   | "event"
@@ -118,7 +119,16 @@ export async function runAction(action: ActionCard): Promise<{ success: boolean;
           calories: 500,
           userId: "demo",
         };
-        await db.insertMeal(newMeal);
+        await saveOrQueue(
+          {
+            key: `meal:create:${newMeal.name}|${newMeal.time}|${newMeal.mealType}|`,
+            collection: "meal_plan_entries",
+            op: "create",
+            payload: newMeal,
+            queuedAt: new Date().toISOString(),
+          },
+          () => db.insertMeal(newMeal)
+        );
         if (typeof window !== "undefined") {
           try {
             const stored = localStorage.getItem(MEALS_KEY);

@@ -23,6 +23,7 @@ vi.mock("@/db", () => ({
   db: {
     selectMembers: vi.fn(() => []),
     selectMembersDetailed: vi.fn(() => []),
+    refreshCaches: vi.fn(async () => {}),
   },
 }));
 

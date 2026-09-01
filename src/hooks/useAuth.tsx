@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, createContext, useContext, ReactNode, useRef } from 'react';
 import { db } from '@/db';
 import { db as pbDb } from '@/db/pb-db';
+import { flushPendingWrites } from '@/lib/pending-writes';
 
 const AUTH_STORAGE_KEY = 'consuela-auth-user';
 const DEVICE_KEY = 'consuela-device-id';
@@ -274,6 +275,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       createdAt: new Date().toISOString(),
       lastActiveAt: new Date().toISOString(),
     }).catch(() => {});
+
+    // Session is now valid: replay any queued meal/recipe writes and pull
+    // fresh server data so other devices' changes appear without a reload.
+    flushPendingWrites().then(() => db.refreshCaches());
 
     return { success: true };
   }, []);

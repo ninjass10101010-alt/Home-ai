@@ -6,7 +6,8 @@ import { useSearchParams } from "next/navigation";
 import { db } from "@/db";
 import { emptyRecipe, groceryCategories } from "@/data/meals";
 import { Meal, Recipe, Tab } from "@/types/meals";
-import { useMeals } from "@/hooks/useMeals";
+import { useMeals, mealCreateWrite, mealUpdateWrite } from "@/hooks/useMeals";
+import { saveOrQueue } from "@/lib/pending-writes";
 import { useGrocery } from "@/hooks/useGrocery";
 import { usePantry } from "@/hooks/usePantry";
 import { useRecipes } from "@/hooks/useRecipes";
@@ -141,7 +142,13 @@ function MealHubContent() {
       } as Meal;
       setMeals(prev => prev.map(m => m.id === editingMealId ? updated : m));
       if (updated.time !== activeDay) setActiveDay(updated.time);
-      showToast(`✅ "${updated.name}" updated!`);
+      const saved = await saveOrQueue(
+        mealUpdateWrite(editingMealId, updated),
+        () => db.updateMeal(String(editingMealId), updated)
+      );
+      showToast(saved
+        ? `✅ "${updated.name}" updated!`
+        : `⚠️ "${updated.name}" saved on this device — will sync automatically`);
     } else {
       const newMeal: Meal = {
         ...recipe,
@@ -159,7 +166,7 @@ function MealHubContent() {
         fat: Number(recipe.fat) || 0,
         tags: recipe.tags?.filter(Boolean) ?? [],
       } as Meal;
-      await db.insertMeal(newMeal);
+      const saved = await saveOrQueue(mealCreateWrite(newMeal), () => db.insertMeal(newMeal));
       setMeals(prev => {
         const filtered = prev.filter(
           m => !(m.time === newMeal.time && m.mealType === newMeal.mealType)
@@ -167,7 +174,9 @@ function MealHubContent() {
         return [...filtered, newMeal];
       });
       setActiveDay(newMeal.time);
-      showToast(`✅ "${newMeal.name}" added to ${newMeal.time}!`);
+      showToast(saved
+        ? `✅ "${newMeal.name}" added to ${newMeal.time}!`
+        : `⚠️ "${newMeal.name}" saved on this device — will sync automatically`);
     }
     setShowRecipeModal(false);
     setEditingMealId(null);
@@ -192,19 +201,20 @@ function MealHubContent() {
 
   const startEditRecipe = (r: Recipe) => { setEditingRecipeId(r.id); setRecipe({ ...r } as any); setShowRecipeEditor(true); };
 
-  const addRecipeToPlan = (recipeData: Recipe, day = activeDay, mealType: Meal["mealType"] = "dinner") => {
+  const addRecipeToPlan = async (recipeData: Recipe, day = activeDay, mealType: Meal["mealType"] = "dinner") => {
     const newMeal: Meal = {
       id: Date.now(), name: recipeData.name, emoji: recipeData.emoji || "🍽️", time: day, mealType,
       prepTime: recipeData.prepTime || "30 min", tags: recipeData.tags?.filter(Boolean) ?? [], ingredients: (recipeData.ingredients ?? []).map(i => i.trim()).filter(Boolean),
       servings: Number(recipeData.servings) || 4, calories: Number(recipeData.calories) || 0, protein: Number(recipeData.protein) || 0, carbs: Number(recipeData.carbs) || 0, fat: Number(recipeData.fat) || 0, instructions: recipeData.instructions,
       weekOf: activeWeek, recipeId: String(recipeData.id), recipeSnapshotAt: new Date().toISOString(),
     };
+    await saveOrQueue(mealCreateWrite(newMeal), () => db.insertMeal(newMeal));
     setMeals(prev => [...prev.filter(m => !(m.time === day && m.mealType === mealType)), newMeal]);
     setActiveDay(day);
     showToast(`✅ Added ${recipeData.name} to ${day} ${mealType}`);
   };
 
-  const addRecipeToMealSlot = (recipeData: Recipe, day: string, mealType: Meal["mealType"]) => {
+  const addRecipeToMealSlot = async (recipeData: Recipe, day: string, mealType: Meal["mealType"]) => {
     const newMeal: Meal = {
       id: Date.now(),
       name: recipeData.name,
@@ -222,6 +232,7 @@ function MealHubContent() {
       instructions: recipeData.instructions,
       weekOf: activeWeek, recipeId: String(recipeData.id), recipeSnapshotAt: new Date().toISOString(),
     };
+    await saveOrQueue(mealCreateWrite(newMeal), () => db.insertMeal(newMeal));
     setMeals(prev => [...prev.filter(m => !(m.time === day && m.mealType === mealType)), newMeal]);
     setActiveDay(day);
     showToast(`✅ Added ${recipeData.name} to ${day} (${mealType})`);
@@ -255,7 +266,7 @@ function MealHubContent() {
     setShowSearchModal(true);
   };
 
-  const copyDayMeals = (fromDay: string, toDay: string) => {
+  const copyDayMeals = async (fromDay: string, toDay: string) => {
     if (fromDay === toDay) return;
     const sourceMeals = meals.filter(m => m.time === fromDay && (m.weekOf || activeWeek) === activeWeek);
     if (!sourceMeals.length) { showToast(`No meals planned for ${fromDay}`); return; }
@@ -264,7 +275,7 @@ function MealHubContent() {
     for (const meal of sourceMeals) {
       if (!occupiedTypes.has(meal.mealType)) {
         const newMeal: Meal = { ...meal, id: Date.now() + copied, time: toDay, weekOf: activeWeek };
-        db.insertMeal(newMeal);
+        await saveOrQueue(mealCreateWrite(newMeal), () => db.insertMeal(newMeal));
         setMeals(prev => [...prev, newMeal]);
         copied++;
       }
@@ -273,12 +284,12 @@ function MealHubContent() {
     setActiveDay(toDay);
   };
 
-  const duplicateMeal = (meal: Meal, targetDay: string) => {
+  const duplicateMeal = async (meal: Meal, targetDay: string) => {
     if (meal.time === targetDay) return;
     const existing = meals.find(m => m.time === targetDay && m.mealType === meal.mealType && (m.weekOf || activeWeek) === activeWeek);
     if (existing) { showToast(`⏭ Already have a ${meal.mealType} planned for ${targetDay}`); return; }
     const newMeal: Meal = { ...meal, id: Date.now(), time: targetDay, weekOf: activeWeek };
-    db.insertMeal(newMeal);
+    await saveOrQueue(mealCreateWrite(newMeal), () => db.insertMeal(newMeal));
     setMeals(prev => [...prev, newMeal]);
     showToast(`↗️ ${meal.name} copied to ${targetDay} (${meal.mealType})`);
     setActiveDay(targetDay);
