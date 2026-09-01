@@ -107,18 +107,25 @@ async function testHermes(): Promise<ServiceTestResult> {
 
 async function testInstacart(): Promise<ServiceTestResult> {
   const t = timed();
-  const key = await required("instacart", "INSTACART_API_KEY");
-  if (!key) return { ok: false, detail: "not_configured", ms: t.done() };
-  try {
-    const res = await fetch(`https://connect.instacart.com/idp/v1/retailers`, {
-      headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-    if (res.status === 401 || res.status === 403) return { ok: false, detail: `key rejected (${res.status})`, ms: t.done() };
-    return { ok: true, detail: `accepted (${res.status})`, ms: t.done() };
-  } catch (err) {
-    return { ok: false, detail: errDetail(err), ms: t.done() };
+  const key = await getServiceConfig("instacart", "INSTACART_API_KEY");
+  if (key) {
+    try {
+      const res = await fetch(`https://connect.instacart.com/idp/v1/retailers`, {
+        headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+      if (res.status === 401 || res.status === 403) return { ok: false, detail: `key rejected (${res.status})`, ms: t.done() };
+      return { ok: true, detail: `accepted (${res.status})`, ms: t.done() };
+    } catch (err) {
+      return { ok: false, detail: errDetail(err), ms: t.done() };
+    }
   }
+  // No direct key — the dashboard delivers Instacart through Composio (the
+  // same branch /api/instacart takes). Report it honestly so the Settings dot
+  // isn't a misleading "Not configured" when ordering actually works.
+  const composioKey = await getServiceConfig("composio", "COMPOSIO_API_KEY");
+  if (composioKey) return { ok: true, detail: "connected via Composio", ms: t.done() };
+  return { ok: false, detail: "not_configured", ms: t.done() };
 }
 
 async function testThemealdb(): Promise<ServiceTestResult> {
@@ -157,6 +164,29 @@ async function bearerReachable(
   }
 }
 
+/** Composio-specific probe: hit the live v3.1 tools list, which returns
+ * 200 for a valid key and 401 for a rejected one — the old v1 endpoint
+ * was decommissioned (410) and any status <500 (incl. 401) showed green. */
+async function testComposio(): Promise<ServiceTestResult> {
+  const t = timed();
+  const key = await required("composio", "COMPOSIO_API_KEY");
+  if (!key) return { ok: false, detail: "not_configured", ms: t.done() };
+  try {
+    const { res, body } = await fetchJson("https://backend.composio.dev/api/v3.1/tools?limit=1", {
+      headers: { "X-API-Key": key },
+    });
+    if (res.status === 401 || res.status === 403) {
+      const msg = (body as any)?.error?.message || (body as any)?.error?.code || "";
+      return { ok: false, detail: `key rejected (${res.status})${msg ? `: ${msg}` : ""}`, ms: t.done() };
+    }
+    if (res.status >= 500) return { ok: false, detail: `Composio returned ${res.status}`, ms: t.done() };
+    if (res.status === 410) return { ok: false, detail: "endpoint gone (410) — upgrade API path", ms: t.done() };
+    return { ok: true, detail: `key accepted (${res.status})`, ms: t.done() };
+  } catch (err) {
+    return { ok: false, detail: errDetail(err), ms: t.done() };
+  }
+}
+
 /** Registry-driven entry point. */
 export async function runServiceTest(service: string): Promise<ServiceTestResult> {
   switch (service) {
@@ -167,7 +197,7 @@ export async function runServiceTest(service: string): Promise<ServiceTestResult
     case "hermes": return testHermes();
     case "instacart": return testInstacart();
     case "themealdb": return testThemealdb();
-    case "composio": return bearerReachable("composio", "COMPOSIO_API_KEY", "https://backend.composio.dev/api/v1/actions", "X-API-Key");
+    case "composio": return testComposio();
     case "greenlight":
     case "khanacademy": {
       // Stored-only integrations: report configuration state honestly.

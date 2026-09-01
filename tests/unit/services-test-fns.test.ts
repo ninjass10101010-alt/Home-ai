@@ -125,3 +125,44 @@ describe("runServiceTest", () => {
     delete process.env.INSTACART_API_KEY;
   });
 });
+
+describe("runServiceTest — instacart (Composio is the primary path)", () => {
+  it("reports connected via Composio when no direct key but Composio is configured", async () => {
+    vi.stubEnv("INSTACART_API_KEY", "");
+    vi.stubEnv("COMPOSIO_API_KEY", "ak_test");
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pbForRows([]).pb));
+
+    const result = await runServiceTest("instacart");
+
+    expect(result.ok).toBe(true);
+    expect(result.detail).toContain("Composio");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("tests the direct key against connect.instacart.com when one is set", async () => {
+    vi.stubEnv("INSTACART_API_KEY", "keys_direct");
+    const fetchSpy = vi.fn(async () => ({ status: 200, json: async () => ({}) }));
+    vi.stubGlobal("fetch", fetchSpy);
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pbForRows([]).pb));
+
+    const result = await runServiceTest("instacart");
+
+    expect(result.ok).toBe(true);
+    expect((fetchSpy.mock.calls[0] as any[])[0]).toContain("connect.instacart.com");
+  });
+
+  it("reports not_configured when neither a direct key nor Composio exists", async () => {
+    vi.stubEnv("INSTACART_API_KEY", "");
+    vi.stubEnv("COMPOSIO_API_KEY", "");
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pbForRows([]).pb));
+
+    const result = await runServiceTest("instacart");
+
+    expect(result).toMatchObject({ ok: false, detail: "not_configured" });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});

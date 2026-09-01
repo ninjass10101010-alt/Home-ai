@@ -13,15 +13,12 @@ describe("createShoppingListViaComposio", () => {
     h.fetchMock.mockReset();
   });
 
-  it("calls Composio INSTACART_CREATE_SHOPPING_LIST_PAGE and returns URL", async () => {
+  it("calls Composio INSTACART_CREATE_SHOPPING_LIST_PAGE and returns URL (real v3.1 shape: data.url)", async () => {
     h.fetchMock.mockResolvedValueOnce({
       ok: true,
       json: async () => ({
-        result: {
-          output: {
-            shopping_list_url: "https://customers.dev.instacart.tools/store/shopping_lists/12345",
-          },
-        },
+        data: { url: "https://customers.dev.instacart.tools/store/shopping_lists/12345" },
+        successful: true,
       }),
     });
 
@@ -43,6 +40,56 @@ describe("createShoppingListViaComposio", () => {
         headers: expect.objectContaining({ "X-API-Key": "ak_test_key" }),
       }),
     );
+  });
+
+  it("still accepts the legacy result.output.shopping_list_url shape", async () => {
+    h.fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        result: {
+          output: {
+            shopping_list_url: "https://customers.dev.instacart.tools/store/shopping_lists/legacy",
+          },
+        },
+      }),
+    });
+
+    const result = await createShoppingListViaComposio({
+      apiKey: "ak_test_key",
+      title: "Test",
+      items: [{ name: "milk" }],
+    });
+    expect(result.url).toBe("https://customers.dev.instacart.tools/store/shopping_lists/legacy");
+  });
+
+  it("throws a descriptive error when the response has no URL in any known shape", async () => {
+    h.fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ data: { somethingElse: true } }),
+    });
+
+    await expect(
+      createShoppingListViaComposio({
+        apiKey: "ak_test_key",
+        title: "Test",
+        items: [{ name: "milk" }],
+      }),
+    ).rejects.toThrow(/no.*URL|did not return/i);
+  });
+
+  it("surfaces Composio's error message on failure (successful:false)", async () => {
+    h.fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ data: null, successful: false, error: { message: "tool unavailable" } }),
+    });
+
+    await expect(
+      createShoppingListViaComposio({
+        apiKey: "ak_test_key",
+        title: "Test",
+        items: [{ name: "milk" }],
+      }),
+    ).rejects.toThrow(/tool unavailable/i);
   });
 
   it("throws on non-ok response", async () => {

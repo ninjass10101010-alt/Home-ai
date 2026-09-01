@@ -84,7 +84,7 @@ export const SERVICES_REGISTRY: ServiceDef[] = [
     description: "Meal plan → shoppable carts",
     testFnId: "instacart",
     fields: [
-      { key: "INSTACART_API_KEY", label: "API key", secret: true, required: true, helpText: "From the Instacart developer portal" },
+      { key: "INSTACART_API_KEY", label: "Direct API key (optional)", secret: true, required: false, helpText: "Instacart works automatically through Composio — leave this blank unless you have a direct Instacart developer key (keys.…)." },
     ],
   },
   {

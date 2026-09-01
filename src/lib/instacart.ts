@@ -276,10 +276,21 @@ export async function createShoppingListViaComposio(params: {
   }
 
   const data = await res.json();
+  // Composio v3.1 responds { data: { url }, successful, error } — the older
+  // toolkit shape was { result: { output: { shopping_list_url } } }. Accept
+  // both so a payload tweak upstream doesn't break list creation.
   const url =
+    data?.data?.url ??
     data?.result?.output?.shopping_list_url ??
     data?.result?.output?.url;
-  if (!url) throw new Error("Composio did not return a shopping list URL");
+  if (!url) {
+    const errMsg = data?.error?.message || data?.error || "";
+    throw new Error(
+      errMsg
+        ? `Composio list creation failed: ${errMsg}`
+        : "Composio did not return a shopping list URL"
+    );
+  }
 
   return {
     url,

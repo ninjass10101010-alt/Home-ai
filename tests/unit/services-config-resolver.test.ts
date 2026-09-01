@@ -88,4 +88,38 @@ describe("getServiceStatus", () => {
     expect(key).toMatchObject({ source: "env", set: true, preview: "cd" });
     delete process.env.HERMES_API_KEY;
   });
+
+  it("reports secret fields as unreadable when the stored ciphertext cannot be decrypted", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.withAdmin.mockImplementation((fn: any) =>
+      fn(pbForRows([{ service: "composio", key: "COMPOSIO_API_KEY", value: "v1.bad.bad.bad", is_secret: true }]))
+    );
+    delete (process.env as any).COMPOSIO_API_KEY;
+
+    const status = await getServiceStatus("composio");
+    const key = status.find((f) => f.key === "COMPOSIO_API_KEY")!;
+
+    // The row exists but yields no usable value → not set, flagged unreadable.
+    expect(key.set).toBe(false);
+    expect(key.source).toBe("db");
+    expect((key as any).unreadable).toBe(true);
+    expect(key.preview).toBeUndefined();
+    warn.mockRestore();
+  });
+
+  it("still reports env as the effective source when the stored row is unreadable", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.withAdmin.mockImplementation((fn: any) =>
+      fn(pbForRows([{ service: "composio", key: "COMPOSIO_API_KEY", value: "v1.bad.bad.bad", is_secret: true }]))
+    );
+    process.env.COMPOSIO_API_KEY = "env-key";
+
+    const status = await getServiceStatus("composio");
+    const key = status.find((f) => f.key === "COMPOSIO_API_KEY")!;
+    expect(key.set).toBe(true);
+    expect(key.source).toBe("env");
+    expect((key as any).unreadable).toBe(true);
+    warn.mockRestore();
+    delete process.env.COMPOSIO_API_KEY;
+  });
 });

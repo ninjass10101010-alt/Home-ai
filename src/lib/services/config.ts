@@ -21,6 +21,19 @@ export interface ServiceFieldStatus {
   set: boolean;
   source: "db" | "env" | "unset";
   preview?: string;
+  /** Stored secret exists but can't be decrypted (e.g. the server's
+   *  CONSUELA_ENCRYPTION_KEY changed since the value was saved). The
+   *  runtime falls back to env — the owner should re-enter the value. */
+  unreadable?: boolean;
+}
+
+interface StoredRead {
+  /** Raw row value (null when no row exists). */
+  raw: string | null;
+  /** Row exists and is a secret that failed to decrypt. */
+  unreadable: boolean;
+  /** Decrypted/plain value when readable (null otherwise). */
+  value: string | null;
 }
 
 async function readStoredRow(
@@ -28,6 +41,15 @@ async function readStoredRow(
   key: string,
   secret: boolean
 ): Promise<string | null> {
+  const read = await readStoredRowDetailed(service, key, secret);
+  return read.value;
+}
+
+async function readStoredRowDetailed(
+  service: string,
+  key: string,
+  secret: boolean
+): Promise<StoredRead> {
   const rows = (await withAdmin(async (pb) =>
     pb.collection("consuela_service_config").getFullList({
       requestKey: null,
@@ -35,16 +57,16 @@ async function readStoredRow(
     })
   )) as any[];
   const row: any = rows[0];
-  if (!row) return null;
-  if (!secret) return row.value ?? null;
+  if (!row) return { raw: null, unreadable: false, value: null };
+  if (!secret) return { raw: row.value ?? null, unreadable: false, value: row.value ?? null };
   // Corrupt ciphertext (wrong/rotated encryption key) → warn once and let the
   // caller fall back to env rather than silently feeding garbage upstream.
   const plain = decryptSecret(row.value);
   if (plain === null) {
     console.warn(`[services] stored value for ${service}.${key} could not be decrypted; using env fallback`);
-    return null;
+    return { raw: row.value ?? null, unreadable: true, value: null };
   }
-  return plain;
+  return { raw: row.value ?? null, unreadable: false, value: plain };
 }
 
 export async function getServiceConfig(
@@ -69,10 +91,10 @@ export async function getServiceStatus(
   if (!def) return [];
   return Promise.all(
     def.fields.map(async (f) => {
-      const stored = await readStoredRow(service, f.key, f.secret);
+      const read = await readStoredRowDetailed(service, f.key, f.secret);
       const envVal = process.env[f.key] || "";
-      const value = stored !== null && stored !== "" ? stored : envVal;
-      const set = value !== "";
+      const storedReadable = read.value !== null && read.value !== "";
+      const set = storedReadable || envVal !== "";
       return {
         key: f.key,
         label: f.label,
@@ -80,9 +102,16 @@ export async function getServiceStatus(
         secret: f.secret,
         required: f.required,
         set,
-        source: stored ? ("db" as const) : set ? ("env" as const) : ("unset" as const),
-        preview: f.secret && set ? value.slice(-2) : undefined,
-      };
+        source: storedReadable
+          ? ("db" as const)
+          : envVal !== ""
+            ? ("env" as const)
+            : read.raw !== null
+              ? ("db" as const) // row exists but is unreadable — flag below
+              : ("unset" as const),
+        preview: f.secret && set ? (storedReadable ? read.value! : envVal).slice(-2) : undefined,
+        unreadable: read.unreadable || undefined,
+      } satisfies ServiceFieldStatus;
     })
   );
 }

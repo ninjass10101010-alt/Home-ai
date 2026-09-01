@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import SectionCard from "@/components/patterns/SectionCard";
 import SoftButton from "@/components/ui/SoftButton";
 import { useAuth } from "@/hooks/useAuth";
@@ -14,6 +14,7 @@ interface FieldStatus {
   set: boolean;
   source: "db" | "env" | "unset";
   preview?: string;
+  unreadable?: boolean;
 }
 
 interface ServiceEntry {
@@ -25,11 +26,18 @@ interface ServiceEntry {
 
 const LEGACY_STORAGE_KEY = "consuela-connections";
 
-function dotTone(svc: ServiceEntry, tested: boolean | null): { cls: string; label: string } {
+interface TestResult {
+  ok: boolean;
+  detail: string;
+}
+
+function dotTone(svc: ServiceEntry, tested: TestResult | null): { cls: string; label: string } {
+  const hasUnreadable = svc.status.some((f) => f.unreadable && f.required);
+  if (hasUnreadable) return { cls: "bg-rose-400", label: "Saved — unreadable (re-enter)" };
   const requiredSet = svc.status.filter((f) => f.required).every((f) => f.set);
   if (!requiredSet) return { cls: "bg-rose-400", label: "Not configured" };
-  if (tested === true) return { cls: "bg-emerald-400", label: "Test passed" };
-  if (tested === false) return { cls: "bg-rose-400", label: "Test failed" };
+  if (tested?.ok) return { cls: "bg-emerald-400", label: tested.detail || "Test passed" };
+  if (tested && !tested.ok) return { cls: "bg-rose-400", label: "Test failed" };
   return { cls: "bg-amber-300", label: "Configured — untested" };
 }
 
@@ -38,7 +46,7 @@ export default function ServicesKeysCard() {
   const [services, setServices] = useState<ServiceEntry[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
-  const [testedMap, setTestedMap] = useState<Record<string, boolean | null>>({});
+  const [testedMap, setTestedMap] = useState<Record<string, TestResult | null>>({});
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   const [loadFailed, setLoadFailed] = useState(false);
@@ -72,6 +80,36 @@ export default function ServicesKeysCard() {
       /* no legacy blob */
     }
   }, [isAdult, load]);
+
+  const autoTestedRef = useRef(false);
+  const testAll = useCallback(async (showNotice = true) => {
+    if (showNotice) setBusy(true);
+    const entries = services.filter((s) => s.status.filter((f) => f.required).every((f) => f.set));
+    const results = await Promise.allSettled(
+      entries.map(async (svc) => {
+        const res = await fetch("/api/services/test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ service: svc.id }),
+        });
+        const body = await res.json().catch(() => null);
+        return { id: svc.id, ok: Boolean(body?.ok), detail: body?.detail ?? "unknown" };
+      })
+    );
+    const map: Record<string, TestResult> = {};
+    for (const r of results) {
+      if (r.status === "fulfilled") map[r.value.id] = { ok: r.value.ok, detail: String(r.value.detail) };
+    }
+    setTestedMap((m) => ({ ...m, ...map }));
+    if (showNotice) setNotice("Connection tests complete.");
+    setBusy(false);
+  }, [services]);
+
+  useEffect(() => {
+    if (!isAdult || autoTestedRef.current || services.length === 0) return;
+    autoTestedRef.current = true;
+    void testAll(false);
+  }, [isAdult, services, testAll]);
 
   if (!isAdult) return null;
 
@@ -179,7 +217,7 @@ export default function ServicesKeysCard() {
         body: JSON.stringify({ service: svcId }),
       });
       const body = await res.json().catch(() => null);
-      setTestedMap((m) => ({ ...m, [svcId]: Boolean(body?.ok) }));
+      setTestedMap((m) => ({ ...m, [svcId]: { ok: Boolean(body?.ok), detail: String(body?.detail ?? "") } }));
       setNotice(body ? `${svcId}: ${body.detail}` : "Test failed to run.");
     } catch {
       setNotice("Test failed to run.");
@@ -222,6 +260,24 @@ export default function ServicesKeysCard() {
           <p className="text-sm text-text-secondary">
             Services config is unreachable right now — check the PocketBase connection and reload.
           </p>
+        )}
+
+        {services.length > 0 && (
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-text-muted">
+              {Object.keys(testedMap).length > 0
+                ? `${Object.values(testedMap).filter((v) => v?.ok).length}/${Object.keys(testedMap).length} passed`
+                : "Testing…"}
+            </p>
+            <SoftButton
+              size="sm"
+              variant="secondary"
+              loading={busy}
+              onClick={() => void testAll(true)}
+            >
+              Test all
+            </SoftButton>
+          </div>
         )}
 
         {services.map((svc) => {
@@ -267,11 +323,13 @@ export default function ServicesKeysCard() {
                             inputMode={f.key === "LAT" || f.key === "LON" ? "decimal" : undefined}
                             autoComplete="off"
                             placeholder={
-                              f.secret && f.set
-                                ? "•••••••• (leave blank to keep)"
-                                : f.source === "env" && f.set
-                                  ? ".env value in use — type to override"
-                                  : ""
+                              f.unreadable && f.secret
+                                ? "Re-enter key — stored value unreadable"
+                                : f.secret && f.set
+                                  ? "•••••••• (leave blank to keep)"
+                                  : f.source === "env" && f.set
+                                    ? ".env value in use — type to override"
+                                    : ""
                             }
                             value={drafts[draftKey] ?? ""}
                             onChange={(e) =>
@@ -291,6 +349,11 @@ export default function ServicesKeysCard() {
                           )}
                         </div>
                         {f.helpText && <p className="text-[11px] text-text-muted">{f.helpText}</p>}
+                        {f.unreadable && (
+                          <p className="text-[11px] text-rose-400">
+                            Saved but unreadable — the server&apos;s encryption key has changed since this was saved. Re-enter the value below.
+                          </p>
+                        )}
                       </div>
                     );
                   })}
