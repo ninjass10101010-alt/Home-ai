@@ -47,6 +47,7 @@ export const COLLECTIONS = [
     name: "meal_plan_entries",
     schema: [
       { name: "name", type: "text", required: true },
+      { name: "userId", type: "text", required: false },
       { name: "emoji", type: "text" },
       { name: "time", type: "text" },
       { name: "mealType", type: "text" },
@@ -772,15 +773,17 @@ export async function seedCollections() {
         // Field-option drift: fields that exist live but whose options differ
         // from the seed (e.g. members.emoji max — PocketBase treats a text
         // field's max of 0 as the built-in 5000-char default, which rejected
-        // every photo-avatar save). Only fields the seed defines an explicit
-        // options.max for are healed, so unrelated options are left alone.
+        // every photo-avatar save; or meal_plan_entries.userId required —
+        // a required userId blocked every Generate insert). Only fields the
+        // seed defines an explicit options.max or required are healed.
         const fieldDrift: any[] = schema
-          .filter((s: any) => s.type === "text" && s.options?.max !== undefined && liveFieldNames.has(s.name))
+          .filter((s: any) => s.type === "text" && (s.options?.max !== undefined || s.required !== undefined) && liveFieldNames.has(s.name))
           .map((s: any) => {
             const liveField = (live.fields || []).find((f: any) => f.name === s.name);
-            return liveField && liveField.max !== s.options.max
-              ? { schemaField: s, liveField }
-              : null;
+            if (!liveField) return null;
+            const maxDrift = s.options?.max !== undefined && liveField.max !== s.options.max;
+            const requiredDrift = s.required !== undefined && !!liveField.required !== !!s.required;
+            return maxDrift || requiredDrift ? { schemaField: s, liveField } : null;
           })
           .filter(Boolean);
 
@@ -809,7 +812,10 @@ export async function seedCollections() {
             ];
             for (const d of fieldDrift) {
               const lf = mergedFields.find((f: any) => f.name === d.schemaField.name);
-              if (lf) lf.max = d.schemaField.options.max;
+              if (lf) {
+                if (d.schemaField.options?.max !== undefined) lf.max = d.schemaField.options.max;
+                if (d.schemaField.required !== undefined) lf.required = !!d.schemaField.required;
+              }
             }
             await pb.collections.update(live.id, { fields: mergedFields });
             if (missingFields.length) {
