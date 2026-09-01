@@ -1,6 +1,6 @@
 const http = require("http");
 
-const HERMES_API_URL = process.env.HERMES_API_URL || "http://hermes-agent-2:8642/v1";
+const HERMES_API_URL = process.env.HERMES_API_URL || "http://hermes-agent-2:8643/v1";
 const HERMES_API_KEY = process.env.HERMES_API_KEY || "consuela-api-key-2026";
 const PORT = 3005;
 

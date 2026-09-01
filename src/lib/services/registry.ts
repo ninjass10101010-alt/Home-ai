@@ -74,7 +74,7 @@ export const SERVICES_REGISTRY: ServiceDef[] = [
     description: "Ask Consuela intelligence + recipe parsing",
     testFnId: "hermes",
     fields: [
-      { key: "HERMES_API_URL", label: "Hermes URL", secret: false, required: true, helpText: "OpenAI-compatible endpoint base", placeholder: "http://hermes-agent-2:8642" },
+      { key: "HERMES_API_URL", label: "Hermes URL", secret: false, required: true, helpText: "OpenAI-compatible endpoint base", placeholder: "http://hermes-agent-2:8643" },
       { key: "HERMES_API_KEY", label: "API key", secret: true, required: false, helpText: "Leave empty if Hermes runs without a key" },
     ],
   },

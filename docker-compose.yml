@@ -43,7 +43,7 @@ services:
       # LAN HTTP deploys: browsers refuse to send Secure cookies over http,
       # so keep the session cookie non-Secure (default false on the NAS).
       - SESSION_COOKIE_SECURE=${SESSION_COOKIE_SECURE:-false}
-      - HERMES_API_URL=http://hermes-agent-2:8642
+      - HERMES_API_URL=http://hermes-agent-2:8643
       - HERMES_API_KEY=${HERMES_API_KEY:-consuela-api-key-2026}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_MIRROR_BOT_TOKEN=${TELEGRAM_MIRROR_BOT_TOKEN}

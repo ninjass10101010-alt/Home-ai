@@ -431,11 +431,17 @@ export default function TasksPage() {
 
   // Restore tasks state from PocketBase snapshot on mount (bridges container restarts)
   const restoreAttempted = useRef(false);
+  // True when the snapshot read 401'd — a signed-out browser can't read the
+  // sessioned gateway, so an empty list here means "hidden", not "done".
+  const [guestSyncBlocked, setGuestSyncBlocked] = useState(false);
   useEffect(() => {
     if (!mounted || restoreAttempted.current) return;
     restoreAttempted.current = true;
     fetch("/api/tasks/sync")
-      .then((r) => (r.ok ? r.json() : null))
+      .then((r) => {
+        setGuestSyncBlocked(r.status === 401);
+        return r.ok ? r.json() : null;
+      })
       .then((data) => {
         if (!data?.snapshot) return;
         const snap = data.snapshot;
@@ -1295,7 +1301,11 @@ export default function TasksPage() {
 
             <SectionCard title="Pending" description={`${pending.length} open tasks`} icon="📋">
               {pending.length === 0 ? (
-                <EmptyState title="All caught up" description="No pending tasks right now." icon="🎉" />
+                !isLoggedIn && guestSyncBlocked && tasks.length === 0 ? (
+                  <EmptyState title="Tasks are synced to the family account" description="Sign in with your PIN to see everyone's tasks. Your chores aren't gone — they're waiting on the family server." icon="🔐" />
+                ) : (
+                  <EmptyState title="All caught up" description="No pending tasks right now." icon="🎉" />
+                )
               ) : (
                 <div className="space-y-2">
                   {pending.map((task, idx) => {

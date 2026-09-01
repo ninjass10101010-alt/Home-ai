@@ -31,7 +31,7 @@ async function resolveHermes(): Promise<{ url: string; key: string | null }> {
   const url =
     (await getServiceConfig("hermes", "HERMES_API_URL")) ||
     process.env.HERMES_API_URL ||
-    "http://hermes-agent-2:8642";
+    "http://hermes-agent-2:8643";
   const key = (await getServiceConfig("hermes", "HERMES_API_KEY")) ?? process.env.HERMES_API_KEY ?? null;
   return { url, key };
 }
@@ -100,9 +100,9 @@ function parseToolArgs(raw: string | undefined): Record<string, any> {
 
 async function callHermes(
   messages: ChatMessage[],
-  opts: { maxTokens?: number; tools?: ReturnType<typeof buildToolsForOpenAI>; toolChoice?: "auto" | "none" } = {},
+  opts: { maxTokens?: number; tools?: ReturnType<typeof buildToolsForOpenAI>; toolChoice?: "auto" | "none"; hermes?: { url: string; key: string | null } } = {},
 ): Promise<{ content: string; tool_calls?: ToolCall[] }> {
-  const hermes = await resolveHermes();
+  const hermes = opts.hermes ?? (await resolveHermes());
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (hermes.key) headers.Authorization = `Bearer ${hermes.key}`;
   const res = await fetch(`${hermes.url}/v1/chat/completions`, {
@@ -151,6 +151,13 @@ export async function POST(request: NextRequest) {
 
   try {
     const isClem = agent === "clem";
+    // Clem must always hit the Consuela gateway at 8643 — never finance (8642 is Alex).
+    // Hardcode to avoid any PB/env override that might point Clem at finance.
+    const clemHermes = isClem
+      ? { url: "http://hermes-agent-2:8643", key: (await getServiceConfig("hermes", "HERMES_API_KEY")) ?? process.env.HERMES_API_KEY ?? null }
+      : null;
+    const hermesForLog = clemHermes ?? (await resolveHermes());
+    console.log(`[hermes] agent=${agent || "consuela"} isClem=${isClem} url=${hermesForLog.url} model=${HERMES_MODEL} role=${role}`);
     const tools = isClem
       ? buildToolsForOpenAI({ houseControl: false }).filter((t) => CLEM_TOOLS.includes(t.function.name))
       : buildToolsForOpenAI({ houseControl });
@@ -177,7 +184,7 @@ export async function POST(request: NextRequest) {
     ];
 
     for (let round = 0; round < MAX_ROUNDS; round++) {
-      const { content, tool_calls } = await callHermes(messages, { tools, toolChoice: "auto" });
+      const { content, tool_calls } = await callHermes(messages, { tools, toolChoice: "auto", hermes: hermesForLog });
 
       if (!tool_calls || tool_calls.length === 0) {
         if (!isClem) await persistChatPair(request, message, content);
