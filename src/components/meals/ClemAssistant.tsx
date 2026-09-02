@@ -5,6 +5,7 @@ import Modal from "@/components/ui/Modal";
 import TextField from "@/components/ui/TextField";
 import SoftButton from "@/components/ui/SoftButton";
 import Chip from "@/components/ui/Chip";
+import { streamConsuelaChat } from "@/lib/chat-stream";
 import type { GroceryItem } from "@/types/meals";
 
 interface ClemAssistantProps {
@@ -43,6 +44,8 @@ export default function ClemAssistant({ groceryItems, storeContext, showToast }:
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ClemMessage[]>([]);
   const [loading, setLoading] = useState(false);
+  const [statusText, setStatusText] = useState("Clem is thinking…");
+  const streamingRef = useRef(false);
   const historyRef = useRef<HTMLDivElement>(null);
 
   const systemPrompt = useMemo(() => {
@@ -65,20 +68,38 @@ export default function ClemAssistant({ groceryItems, storeContext, showToast }:
     setMessages((prev) => [...prev, { role: "user", content: text }]);
     setInput("");
     setLoading(true);
+    setStatusText("Clem is thinking…");
     try {
-      const res = await fetch("/api/hermes/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, history: messages.slice(-6), system: systemPrompt, agent: "clem" }),
+      const { content } = await streamConsuelaChat({
+        message: text,
+        history: messages.slice(-6),
+        system: systemPrompt,
+        agent: "clem",
+        onStatus: (label) => setStatusText(label),
+        onToken: (full) => {
+          setLoading(false);
+          setMessages((prev) => {
+            const last = prev[prev.length - 1];
+            if (last && last.role === "assistant" && streamingRef.current) {
+              return [...prev.slice(0, -1), { role: "assistant", content: full }];
+            }
+            return [...prev, { role: "assistant", content: full }];
+          });
+          streamingRef.current = true;
+        },
       });
-      if (!res.ok) throw new Error(`Chat request failed (${res.status})`);
-      const data = await res.json();
-      const reply = data.content || data.reply || "Sorry, I didn't catch that.";
-      setMessages((prev) => [...prev, { role: "assistant", content: reply }]);
-    } catch {
-      showToast("Couldn't reach Clem right now — try again");
-    } finally {
+      streamingRef.current = false;
       setLoading(false);
+      const reply = content || "Sorry, I didn't catch that.";
+      setMessages((prev) => {
+        const last = prev[prev.length - 1];
+        if (last && last.role === "assistant") return [...prev.slice(0, -1), { role: "assistant", content: reply }];
+        return [...prev, { role: "assistant", content: reply }];
+      });
+    } catch {
+      streamingRef.current = false;
+      setLoading(false);
+      showToast("Couldn't reach Clem right now — try again");
     }
   };
 
@@ -138,7 +159,7 @@ export default function ClemAssistant({ groceryItems, storeContext, showToast }:
             {loading && (
               <div className="flex justify-start">
                 <div className="max-w-[85%] rounded-2xl rounded-bl-md bg-[var(--color-surface-2)] px-3 py-2 text-sm italic text-text-secondary">
-                  Clem is thinking…
+                  {statusText}
                 </div>
               </div>
             )}
