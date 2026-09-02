@@ -21,11 +21,11 @@ async function newPage(vp) {
   console.log("\n[desktop 1440 — day]");
   const { page, errors } = await newPage({ width: 1440, height: 900 });
   await page.goto(url, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector('[role="img"][aria-label*="degrees"]', { timeout: 15000 }).catch(() => {});
+  await page.waitForSelector('[role="group"][aria-label*="degrees"]', { timeout: 15000 }).catch(() => {});
   await page.waitForTimeout(3000);
 
   const probe = await page.evaluate(() => {
-    const card = document.querySelector('[role="img"][aria-label*="degrees"]');
+    const card = document.querySelector('[role="group"][aria-label*="degrees"]');
     if (!card) return { card: false };
     const rect = card.getBoundingClientRect();
     const activeSky = card.querySelector('.wx-sky[data-active="true"]');
@@ -46,7 +46,7 @@ async function newPage(vp) {
       labels: strip?.textContent ?? "",
       details: !!details,
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-      tempText: card.querySelector('[role="status"]')?.textContent?.slice(0, 80) ?? "",
+      tempText: card.querySelector('[role="status"]')?.textContent?.trim()?.slice(0, 80) ?? "",
     };
   });
 
@@ -66,6 +66,7 @@ async function newPage(vp) {
 
   // press-to-preview
   if (probe.strip) {
+    await page.locator('[role="slider"][aria-label="Preview the rest of the day"]').scrollIntoViewIfNeeded();
     const box = await page.locator('[role="slider"][aria-label="Preview the rest of the day"]').boundingBox();
     if (box) {
       await page.mouse.move(box.x + box.width * 0.55, box.y + box.height / 2);
@@ -151,14 +152,14 @@ async function newPage(vp) {
     localStorage.setItem("home-ai-weather-config", JSON.stringify({ timeOfDay: "night" }));
   });
   await page.goto(url, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector('[role="img"][aria-label*="degrees"]', { timeout: 15000 }).catch(() => {});
+  await page.waitForSelector('[role="group"][aria-label*="degrees"]', { timeout: 15000 }).catch(() => {});
   await page.waitForTimeout(3000);
 
   const night = await page.evaluate(() => {
-    const card = document.querySelector('[role="img"][aria-label*="degrees"]');
+    const card = document.querySelector('[role="group"][aria-label*="degrees"]');
     if (!card) return { card: false };
     const activeSky = card.querySelector('.wx-sky[data-active="true"]');
-    const temp = card.querySelector('[role="status"] span');
+    const temp = card.querySelector('[data-testid="wx-hero-temp"]');
     return {
       card: true,
       sky: activeSky ? getComputedStyle(activeSky).backgroundColor : null,
@@ -168,7 +169,7 @@ async function newPage(vp) {
   });
   check(night.card, "card rendered at night", "card missing at night");
   if (night.card) {
-    check(night.skyBg?.includes("rgb(6, 6, 9)"), `night sky active (${night.skyBg}…)`, `night sky wrong: ${night.skyBg}`);
+    check(night.skyBg?.includes("rgb(27, 30, 51)"), `night sky active (${night.skyBg}…)`, `night sky wrong: ${night.skyBg}`);
     check(night.tempColor === "rgb(255, 255, 255)", `white hero numerals (${night.tempColor})`, `hero color ${night.tempColor}`);
   }
   check(errors.length === 0, "0 page errors", `page errors: ${errors.join(" | ")}`);
@@ -180,11 +181,11 @@ async function newPage(vp) {
   console.log("\n[phone 390]");
   const { page, errors } = await newPage({ width: 390, height: 844 });
   await page.goto(url, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector('[role="img"][aria-label*="degrees"]', { timeout: 15000 }).catch(() => {});
+  await page.waitForSelector('[role="group"][aria-label*="degrees"]', { timeout: 15000 }).catch(() => {});
   await page.waitForTimeout(3000);
 
   const phone = await page.evaluate(() => {
-    const card = document.querySelector('[role="img"][aria-label*="degrees"]');
+    const card = document.querySelector('[role="group"][aria-label*="degrees"]');
     if (!card) return { card: false };
     const rect = card.getBoundingClientRect();
     const strip = card.querySelector('[role="slider"][aria-label="Preview the rest of the day"]');

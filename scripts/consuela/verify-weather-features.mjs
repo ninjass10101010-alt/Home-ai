@@ -70,7 +70,7 @@ ok(/hourly=[^&]*visibility/.test(fetchedUrl), "fetch requests hourly visibility"
 
 console.log("[procedural clouds — 90% cover]");
 const cloudInfo = await page.evaluate(() => {
-  const card = document.querySelector('[role="img"]');
+  const card = document.querySelector('[role="group"]');
   const svgs = Array.from(card.querySelectorAll('svg[viewBox="0 0 200 70"]'));
   return { count: svgs.length, blobCounts: svgs.map((s) => s.querySelectorAll("ellipse").length) };
 });
@@ -79,7 +79,7 @@ ok(cloudInfo.blobCounts.every((n) => n >= 4), "each cloud is a unique multi-blob
 
 console.log("[tap-to-puff]");
 const puffResult = await page.evaluate(async () => {
-  const card = document.querySelector('[role="img"]');
+  const card = document.querySelector('[role="group"]');
   const svgs = Array.from(card.querySelectorAll('svg[viewBox="0 0 200 70"]'));
   const visible = svgs.map((s) => s.closest("div[style]")).find((w) => Number(getComputedStyle(w).opacity) > 0.4);
   if (!visible) return { tapped: false };

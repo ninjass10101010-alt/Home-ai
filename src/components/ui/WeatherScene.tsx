@@ -298,27 +298,27 @@ export default function WeatherScene({ skin, state, season, animated = true }: {
       <div
         className="absolute inset-0 wx-sky"
         data-active={!skin.night && season === "spring"}
-        style={{ background: "linear-gradient(175deg, #FDF0C4 0%, #E9DFF9 100%)" }}
+        style={{ background: skin.skyGradient("spring") }}
       />
       <div
         className="absolute inset-0 wx-sky"
         data-active={!skin.night && season === "summer"}
-        style={{ background: "linear-gradient(175deg, #FFD8CB 0%, #FFEBCF 100%)" }}
+        style={{ background: skin.skyGradient("summer") }}
       />
       <div
         className="absolute inset-0 wx-sky"
         data-active={!skin.night && season === "autumn"}
-        style={{ background: "linear-gradient(175deg, #FFDCC8 0%, #F5BCA0 100%)" }}
+        style={{ background: skin.skyGradient("autumn") }}
       />
       <div
         className="absolute inset-0 wx-sky"
         data-active={!skin.night && season === "winter"}
-        style={{ background: "linear-gradient(175deg, #D9EAFB 0%, #F4F8FD 100%)" }}
+        style={{ background: skin.skyGradient("winter") }}
       />
       <div
         className="absolute inset-0 wx-sky"
         data-active={skin.night}
-        style={{ background: "linear-gradient(175deg, #060609 0%, #141420 100%)" }}
+        style={{ background: skin.skyGradient(null) }}
       />
 
       {skin.night && cloudCover < 60 && (
@@ -385,16 +385,25 @@ export default function WeatherScene({ skin, state, season, animated = true }: {
           </div>
         </div>
       ) : (
-        <div className="absolute" style={{ left: "76%", top: "16%", width: "14%", aspectRatio: "1", transform: "translate(-50%, -50%)" }}>
-          <div
-            className="absolute inset-[-45%] rounded-full"
-            style={{ background: `radial-gradient(circle, rgba(244,241,232,${(0.12 + mp.illumination * 0.2).toFixed(3)}) 0%, transparent 70%)` }}
-          />
-          <svg viewBox="0 0 40 40" className="absolute inset-0 w-full h-full" data-testid="wx-moon">
-            <circle cx="20" cy="20" r="16" fill="rgba(255,255,255,0.10)" />
-            <path d={moonPathD(20, 20, 16, mp.phase)} fill={skin.celestial} data-testid="wx-moon-lit" />
-          </svg>
-        </div>
+        (() => {
+          // The moon rides the opposite arc: it rises where the sun set and
+          // sets where it rises, driven by the same real sun progress.
+          const mp2 = 1 - Math.max(0, Math.min(1, sunProgress));
+          const moonLeft = 8 + mp2 * 80;
+          const moonTop = 56 - Math.sin(mp2 * Math.PI) * 40;
+          return (
+            <div className="absolute" style={{ left: `${moonLeft}%`, top: `${moonTop}%`, width: "14%", aspectRatio: "1", transform: "translate(-50%, -50%)", transition: "left 0.8s ease, top 0.8s ease" }}>
+              <div
+                className="absolute inset-[-45%] rounded-full"
+                style={{ background: `radial-gradient(circle, rgba(244,241,232,${(0.12 + mp.illumination * 0.2).toFixed(3)}) 0%, transparent 70%)` }}
+              />
+              <svg viewBox="0 0 40 40" className="absolute inset-0 w-full h-full" data-testid="wx-moon">
+                <circle cx="20" cy="20" r="16" fill="rgba(255,255,255,0.10)" />
+                <path d={moonPathD(20, 20, 16, mp.phase)} fill={skin.celestial} data-testid="wx-moon-lit" />
+              </svg>
+            </div>
+          );
+        })()
       )}
 
       {CLOUD_SLOTS.map((slot, i) => (

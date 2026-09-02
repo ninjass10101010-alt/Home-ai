@@ -1416,7 +1416,11 @@ body {
   [style*="weatherSparkle"],
   [style*="weatherParticleSun"],
   [style*="weatherParticleHeat"],
-  [style*="weatherParticleIce"] {
+  [style*="weatherParticleIce"],
+  [style*="weatherConfettiFall"],
+  [style*="weatherShamrockFloat"],
+  [style*="weatherHarvestFloat"],
+  [style*="weatherSnowAccumulate"] {
     animation: none !important;
     transition: none !important;
   }

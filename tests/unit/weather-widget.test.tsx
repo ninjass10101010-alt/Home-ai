@@ -5,8 +5,19 @@ import { act } from "react";
 import type { ReactElement } from "react";
 import WeatherWidget from "@/components/ui/WeatherWidget";
 import { moonPhase, moonPhaseName, makeCloudSpec } from "@/components/ui/WeatherScene";
+import { wearAdvice, stormAdvice, snowAdvice, fusionOutlook } from "@/lib/weather-insights";
+import { getWeatherSkin, resolveAccent } from "@/components/ui/WeatherSkins";
 import { WeatherProvider } from "@/hooks/useWeather";
 import { AtmosphericProvider } from "@/hooks/useAtmosphericTheme";
+import { AuthProvider } from "@/hooks/useAuth";
+
+// db.selectTodaysEvents reads a module-private cache hydrated by the global
+// CacheRefresher — never reachable in unit tests. Expose the seam.
+const { dbEventsMock } = vi.hoisted(() => ({ dbEventsMock: [] as any[] }));
+vi.mock("@/db", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/db")>();
+  return { ...actual, db: { ...actual.db, selectTodaysEvents: () => dbEventsMock } };
+});
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -27,9 +38,11 @@ function render(ui: ReactElement): HTMLElement {
     const root = createRoot(el);
     roots.push(root);
     root.render(
-      <WeatherProvider>
-        <AtmosphericProvider>{ui}</AtmosphericProvider>
-      </WeatherProvider>
+      <AuthProvider>
+        <WeatherProvider>
+          <AtmosphericProvider>{ui}</AtmosphericProvider>
+        </WeatherProvider>
+      </AuthProvider>
     );
   });
   return el.firstChild as HTMLElement;
@@ -266,7 +279,181 @@ describe("WeatherWidget — Not Boring redesign", () => {
 
     const activeSky = el.querySelector('.wx-sky[data-active="true"]') as HTMLElement | null;
     expect(activeSky).toBeTruthy();
-    expect(activeSky!.style.background).toContain("rgb(6, 6, 9)");
+    // Consuela night: lamplit indigo, not near-black
+    expect(activeSky!.style.background).toContain("rgb(27, 30, 51)");
+  });
+
+  it("renders a storm-gray day sky with amber accent and storm copy when a thunderstorm code arrives", async () => {
+    mockOpenMeteo(makeOpenMeteoPayload({ code: 95 }));
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    const activeSky = el.querySelector('.wx-sky[data-active="true"]') as HTMLElement | null;
+    expect(activeSky).toBeTruthy();
+    // summer pastel #FFD8CB (255,216,203) pulled 62% toward storm gray #9AA3AE
+    expect(activeSky!.style.background).not.toContain("rgb(255, 216, 203)");
+    expect(activeSky!.style.background).toContain("linear-gradient");
+    // every mocked hour is stormy, so "clearing time unknown" is the honest line
+    expect(el.textContent).toContain("Thunderstorms — inside is best right now");
+    expect(el.textContent).toContain("Clearing time unknown");
+  });
+
+  it("announces the storm clearing time when the hourly data shows it ending", async () => {
+    const payload = makeOpenMeteoPayload({ code: 95 });
+    // first 3 hours stay stormy (95), then it clears (code 1)
+    payload.hourly.weather_code = payload.hourly.weather_code.map((c, i) => (i <= 3 ? 95 : 1));
+    mockOpenMeteo(payload);
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    expect(el.textContent).toContain("Thunderstorms — inside is best right now");
+    expect(el.textContent).toContain("Clearing by around");
+  });
+
+  it("treats heavy snow as severe: advisory pill + slate sky", async () => {
+    mockOpenMeteo(makeOpenMeteoPayload({ code: 75 }));
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    expect(el.textContent).toContain("Big snow today — boots by the door");
+    expect(el.textContent).not.toContain("Raincoats ready");
+    const activeSky = el.querySelector('.wx-sky[data-active="true"]') as HTMLElement | null;
+    // winter pastel #D9EAFB (217,234,251) pulled toward slate #8B99B5
+    expect(activeSky!.style.background).not.toContain("rgb(217, 234, 251)");
+  });
+
+  it("keeps the Try again recovery tappable inside the pointer-events-none overlay", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("api.open-meteo.com")) return Promise.reject(new Error("network down"));
+        return Promise.reject(new Error("no network"));
+      }));
+
+      const el = render(<WeatherWidget />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      const retry = Array.from(el.querySelectorAll("button")).find((b) => b.textContent?.includes("Try again"));
+      expect(retry).toBeTruthy();
+      // the regression: without pointer-events-auto, real taps hit the fog layer
+      expect(retry!.className).toContain("pointer-events-auto");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("pins the preview on tap and releases it via Back to now", async () => {
+    mockOpenMeteo(makeOpenMeteoPayload());
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    const strip = el.querySelector('[role="slider"][aria-label="Preview the rest of the day"]') as HTMLElement;
+    expect(strip).toBeTruthy();
+
+    const pointerAt = (type: string, x: number) => {
+      const e = new Event(type, { bubbles: true });
+      Object.assign(e, { clientX: x, clientY: 0, pointerId: 1 });
+      strip.dispatchEvent(e);
+    };
+    const lastIdx = () => {
+      const max = Number(strip.getAttribute("aria-valuemax"));
+      return max;
+    };
+
+    // tap (down + up at the same x, no horizontal intent) → pins the last hour
+    act(() => { pointerAt("pointerdown", 500); });
+    act(() => { pointerAt("pointerup", 500); });
+    await settle();
+    expect(strip.getAttribute("aria-valuenow")).toBe(String(lastIdx()));
+
+    // pinned: no 650ms auto-revert
+    await settle(800);
+    expect(strip.getAttribute("aria-valuenow")).toBe(String(lastIdx()));
+
+    // "Back to now" chip visible → releases
+    const back = Array.from(el.querySelectorAll("button")).find((b) => b.textContent?.includes("Back to now"));
+    expect(back).toBeTruthy();
+    act(() => back!.click());
+    await settle(800);
+    expect(strip.getAttribute("aria-valuenow")).toBe("0");
+    expect(Array.from(el.querySelectorAll("button")).find((b) => b.textContent?.includes("Back to now"))).toBeUndefined();
+  });
+
+  it("shows the tappable Try again action when the first fetch fails", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("api.open-meteo.com")) return Promise.reject(new Error("network down"));
+        return Promise.reject(new Error("no network"));
+      }));
+
+      const el = render(<WeatherWidget />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(el.textContent).toContain("Weather unavailable");
+
+      const retry = Array.from(el.querySelectorAll("button")).find((b) => b.textContent?.includes("Try again"));
+      expect(retry).toBeTruthy();
+
+      // wire success, tap retry → banner clears and data lands
+      vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("api.open-meteo.com")) return Promise.resolve({ json: () => Promise.resolve(makeOpenMeteoPayload()) });
+        return Promise.reject(new Error("no network"));
+      }));
+      await act(async () => { retry!.click(); await vi.advanceTimersByTimeAsync(0); });
+      expect(el.textContent).toContain("H:75°");
+      expect(el.textContent).not.toContain("Weather unavailable");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows an em-dash hero instead of a fabricated temperature when the API omits it", async () => {
+    const payload = makeOpenMeteoPayload();
+    (payload.current as Record<string, unknown>).temperature_2m = null;
+    (payload.current as Record<string, unknown>).apparent_temperature = null;
+    (payload.daily as Record<string, unknown>).temperature_2m_max = [null, 76, 77, 78, 79, 80];
+    (payload.daily as Record<string, unknown>).temperature_2m_min = [null, 59, 60, 61, 62, 63];
+    mockOpenMeteo(payload);
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    // no invented 60°/72° — honest "—", no feels-like fiction, and today's
+    // H/L row drops entirely instead of fabricating values
+    expect(el.textContent).toContain("—");
+    expect(el.textContent).not.toContain("Feels like");
+    expect(el.textContent).not.toContain("H:");
+  });
+
+  it("promotes a calendar-fused rain note into the tinted pill when an event lines up", async () => {
+    // rain hits the next hour boundary; the family event sits on that hour
+    const payload = makeOpenMeteoPayload();
+    payload.hourly.precipitation_probability = payload.hourly.precipitation_probability.map((p, i) => (i >= 1 ? 70 : p));
+    const nextHour = new Date();
+    nextHour.setHours(nextHour.getHours() + 1, 0, 0, 0);
+    const hh = String(nextHour.getHours()).padStart(2, "0");
+    const mm = String(nextHour.getMinutes()).padStart(2, "0");
+    dbEventsMock.splice(0, dbEventsMock.length, {
+      id: 1,
+      title: "Soccer Practice",
+      time: `${hh}:${mm}`,
+      date: nextHour.toISOString().split("T")[0],
+      member: "Emily",
+      icon: "⚽",
+    });
+    mockOpenMeteo(payload);
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    expect(el.textContent).toContain("Rain around Soccer Practice");
+    const pill = Array.from(el.querySelectorAll("div")).find(
+      (d) => d.className.includes("rounded-2xl") && d.textContent?.includes("Rain around Soccer Practice")
+    );
+    expect(pill).toBeTruthy(); // promoted out of the flat text stack
+    // wear line cedes to the fusion answer (one stronger line, not both)
+    expect(el.textContent).not.toContain("Raincoats ready");
+    dbEventsMock.length = 0;
   });
 
   it("modal scrubber exposes spoken value text and UV dots render for the current hour", async () => {
@@ -550,6 +737,64 @@ describe("WeatherWidget — Not Boring redesign", () => {
       vi.useRealTimers();
     }
   });
+
+  it("aborts a hung fetch so later refreshes still fire (12s timeout)", async () => {
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      const payload = makeOpenMeteoPayload();
+      let hungReject: ((e: unknown) => void) | null = null;
+      vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("api.open-meteo.com")) {
+          calls += 1;
+          if (calls === 1) {
+            // a real hung request never settles — abort() must reject it
+            return new Promise((_, reject) => { hungReject = reject; });
+          }
+          return Promise.resolve({ json: () => Promise.resolve(payload) });
+        }
+        return Promise.reject(new Error("no network"));
+      }));
+      const weatherCalls = () =>
+        vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes("api.open-meteo.com"));
+
+      render(<WeatherWidget />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(weatherCalls()).toHaveLength(1);
+
+      // wire the abort → rejection (as a real fetch does) via the request's signal
+      const signal = (vi.mocked(fetch).mock.calls[0]?.[1] as RequestInit | undefined)?.signal as AbortSignal | undefined;
+      expect(signal).toBeTruthy();
+      signal!.addEventListener("abort", () => hungReject?.(new DOMException("Aborted", "AbortError")));
+
+      // the hung request holds the guard only until the 12s abort fires
+      await act(async () => { await vi.advanceTimersByTimeAsync(12_500); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(15 * 60_000); });
+      expect(weatherCalls()).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps screen-reader controls reachable — no role=img flattening and a quiet hero live region", async () => {
+    mockOpenMeteo(makeOpenMeteoPayload());
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    expect(el.querySelector('[role="img"]')).toBeNull();
+    const group = el.querySelector('[role="group"][aria-label*="degrees"]');
+    expect(group).toBeTruthy();
+
+    const unitToggle = Array.from(el.querySelectorAll("button")).find((b) => b.getAttribute("aria-label") === "Switch to Celsius");
+    expect(unitToggle).toBeTruthy();
+
+    // single sr-only live region, refreshed on data — not per scrub step
+    const liveRegions = el.querySelectorAll('[role="status"][aria-live="polite"]');
+    expect(liveRegions.length).toBe(1);
+    const region = liveRegions[0] as HTMLElement;
+    expect(region.className).toContain("sr-only");
+  });
 });
 
 describe("moon phase model", () => {
@@ -609,5 +854,125 @@ describe("procedural clouds", () => {
     const thin = makeCloudSpec(55, 0.1);
     const full = makeCloudSpec(55, 1);
     expect(full.blobs.length).toBeGreaterThanOrEqual(thin.blobs.length);
+  });
+});
+
+describe("weather skins — severity + Consuela night", () => {
+  it("desaturates the day sky and switches to storm amber for severe codes", () => {
+    const calm = getWeatherSkin("summer", false, 1);
+    const storm = getWeatherSkin("summer", false, 95);
+    expect(storm.severe).toBe(true);
+    expect(storm.severeFamily).toBe("storm");
+    expect(storm.accent).toBe("#FFB44F");
+    expect(storm.skyTop).not.toBe(calm.skyTop); // pastel lemon pulled toward gray
+    expect(calm.severe).toBe(false);
+  });
+
+  it("treats heavy snow as severe with its own slate treatment", () => {
+    const calm = getWeatherSkin("winter", false, 71); // light snow = calm
+    expect(calm.severe).toBe(false);
+    for (const code of [73, 75, 85, 86]) {
+      const snow = getWeatherSkin("winter", false, code);
+      expect(snow.severe).toBe(true);
+      expect(snow.severeFamily).toBe("snow");
+      expect(snow.accent).toBe("#7FA8D9");
+      expect(snow.skyTop).not.toBe(calm.skyTop);
+    }
+  });
+
+  it("keeps the lamplit indigo night instead of near-black", () => {
+    const night = getWeatherSkin("summer", true, 1);
+    expect(night.night).toBe(true);
+    expect(night.skyTop).toBe("#1B1E33");
+    expect(night.ink).toBe("#FFFFFF");
+  });
+
+  it("severity owns the accent — the holiday party color never wins on a severe card", () => {
+    const storm = getWeatherSkin("summer", false, 95);
+    const calm = getWeatherSkin("summer", false, 1);
+    expect(resolveAccent(storm, "#f97316")).toBe(storm.accent); // halloween orange refused
+    expect(resolveAccent(calm, "#f97316")).toBe("#f97316"); // calm day borrows the party
+    expect(resolveAccent(calm, null)).toBe(calm.accent);
+  });
+
+  it("emits one sky gradient source shared by the scene", () => {
+    const summer = getWeatherSkin("summer", false, 1);
+    expect(summer.skyGradient("summer")).toBe("linear-gradient(175deg, #FFD8CB 0%, #FFEBCF 100%)");
+    expect(summer.skyGradient(null)).toBe("linear-gradient(175deg, #1B1E33 0%, #2A2440 100%)");
+    const storm = getWeatherSkin("summer", false, 95);
+    expect(storm.skyGradient("summer")).toBe(storm.skyGradient("winter"));
+  });
+});
+
+describe("weather insights — family language helpers", () => {  it("wearAdvice answers the kid question with kid copy and rain beats warmth", () => {
+    expect(wearAdvice(75, 5, false).headline).toBe("Sunglasses weather");
+    expect(wearAdvice(75, 5, true).headline).toBe("No jacket needed");
+    expect(wearAdvice(34, 10, true).headline).toBe("Grab a coat");
+    expect(wearAdvice(50, 10, false).headline).toBe("Light jacket");
+    expect(wearAdvice(95, 10, false).headline).toBe("Water-bottle weather");
+    const wet = wearAdvice(75, 60, false);
+    expect(wet.headline).toBe("Raincoats ready");
+    expect(wet.detail).toBe("Sunglasses weather");
+    const wetKid = wearAdvice(50, 60, true);
+    expect(wetKid.headline).toBe("Bring a raincoat");
+    expect(wetKid.detail).toBe("Bring a jacket");
+  });
+
+  it("stormAdvice names the storm and answers when it clears", () => {
+    const end = new Date();
+    end.setHours(18, 0, 0, 0);
+    const a = stormAdvice(end.toISOString(), false);
+    expect(a.headline).toContain("Thunderstorms");
+    expect(a.detail).toContain("6 PM");
+    const kid = stormAdvice(end.toISOString(), true);
+    expect(kid.headline).toContain("stay inside");
+    expect(stormAdvice(null, false).detail).toContain("unknown");
+  });
+
+  it("snowAdvice names the snow, answers boots, and shares the clearing line", () => {
+    const end = new Date();
+    end.setHours(15, 0, 0, 0);
+    const a = snowAdvice(end.toISOString(), false);
+    expect(a.headline).toBe("Big snow today — boots by the door");
+    expect(a.detail).toContain("3 PM");
+    const kid = snowAdvice(end.toISOString(), true);
+    expect(kid.headline).toBe("Big snow! Boots and mittens today");
+    expect(snowAdvice(null, false).detail).toContain("unknown");
+  });
+
+  it("fusionOutlook pairs a rain hit with a same-day family event", () => {
+    const day = new Date();
+    day.setHours(0, 0, 0, 0);
+    const dayStart = day.getTime();
+    const now = dayStart + 12 * 3600_000; // noon
+    const rainAt = new Date(dayStart + 16 * 3600_000).toISOString(); // 4 PM
+    const events = [
+      { title: "Dentist", member: "Bailey", time: "9:00 AM" }, // past → ignored
+      { title: "Soccer Practice", member: "Emily", time: "4:30 PM" }, // within 75 min
+      { title: "Movie Night", time: "7:00 PM" },
+    ];
+    const fused = fusionOutlook(rainAt, "Rain likely around 4 PM", events, now);
+    expect(fused).toBeTruthy();
+    expect(fused!.headline).toBe("Rain around Soccer Practice");
+
+    // rain passes well before the next event → reassurance, not a match
+    const early = fusionOutlook(rainAt, "Rain likely around 4 PM", [{ title: "Movie Night", time: "7:00 PM" }], now);
+    expect(early!.headline).toBe("Rain likely around 4 PM");
+    expect(early!.detail).toContain("before Movie Night");
+
+    // no events, no fusion
+    expect(fusionOutlook(rainAt, "Rain likely around 4 PM", [], now)).toBeNull();
+  });
+
+  it("fusionOutlook parses both 24h and 12h event times", () => {
+    const day = new Date();
+    day.setHours(0, 0, 0, 0);
+    const dayStart = day.getTime();
+    const now = dayStart + 3600_000;
+    const rainAt = new Date(dayStart + 16 * 3600_000).toISOString();
+    const h24 = fusionOutlook(rainAt, "Rain likely around 4 PM", [{ title: "Pickup", time: "16:20" }], now);
+    expect(h24!.headline).toBe("Rain around Pickup");
+    const h12 = fusionOutlook(rainAt, "Rain likely around 4 PM", [{ title: "Pickup", time: "4:20 PM" }], now);
+    expect(h12!.headline).toBe("Rain around Pickup");
   });
 });
