@@ -694,7 +694,7 @@ function ChatContent() {
           paddingBottom: "calc(env(safe-area-inset-bottom) + 5.5rem)",
         }}
       >
-        <UnifiedInput onSendMessage={sendMessage} />
+        <UnifiedInput onSendMessage={sendMessage} disabled={isTyping} />
       </div>
 
       <CapsuleNav />
