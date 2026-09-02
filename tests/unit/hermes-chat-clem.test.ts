@@ -139,11 +139,20 @@ describe("hermes chat — Clem persona", () => {
     expect(mocks.insertChatMessage).toHaveBeenCalledTimes(2);
   });
 
-  it("fallback URL is :8642 when no registry or env", async () => {
+  it("fallback URL is :8643 when no registry or env", async () => {
     await post({ message: "hi" });
     const fetchUrl = (globalThis.fetch as any).mock.calls[0][0] as string;
-    expect(fetchUrl).toContain("http://hermes-agent-2:8642");
-    expect(fetchUrl).not.toContain("8643");
+    expect(fetchUrl).toContain("http://hermes-agent-2:8643");
+    expect(fetchUrl).not.toContain("8642");
+  });
+
+  it("clem hardcodes the Consuela gateway :8643 regardless of registry/env", async () => {
+    mocks.getServiceConfig.mockImplementation(async (service: unknown, key: unknown) =>
+      service === "hermes" && key === "HERMES_API_URL" ? "http://finance:8642" : null
+    );
+    await post({ message: "hi", agent: "clem" });
+    const fetchUrl = (globalThis.fetch as any).mock.calls[0][0] as string;
+    expect(fetchUrl).toContain("http://hermes-agent-2:8643");
   });
 
   it("registry HERMES_API_URL takes precedence over fallback", async () => {
