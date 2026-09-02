@@ -7,6 +7,8 @@
 //
 // `toLocaleString("en-CA", ...)` formats as YYYY-MM-DD, so splitting on "," is
 // deterministic across Node and browsers.
+import { weekStartForDate } from "@/lib/meals-week-utils";
+
 export function localTodayISO(now: Date = new Date()): string {
   const tz = process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
   return now.toLocaleString("en-CA", { timeZone: tz }).split(",")[0];
@@ -32,13 +34,9 @@ export function weekdayOfISO(iso: string): string {
 }
 
 export function localWeekStartISO(now: Date = new Date()): string {
-  const today = localTodayISO(now);
-  const d = new Date(`${today}T12:00:00`); // noon: immune to DST/UTC-date shifts
-  const diff = d.getDate() - d.getDay() + (d.getDay() === 0 ? -6 : 1);
-  const mon = new Date(d);
-  mon.setDate(diff);
-  mon.setHours(12, 0, 0, 0);
-  return mon.toLocaleString("en-CA", { timeZone: familyTimeZone() }).split(",")[0];
+  // Single source of truth for week-start math (see meals-week-utils.ts).
+  // weekStartForDate serializes from LOCAL date parts, so it is correct in any timezone.
+  return weekStartForDate(localTodayISO(now));
 }
 
 export interface LocalDateContext {
