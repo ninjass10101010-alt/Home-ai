@@ -34,6 +34,7 @@ import {
   getPreviousWeekRanks, loadHallOfFame,
   syncAllTasksToPB, syncWeekDataToPB,
   archiveAndResetWeek, archiveWeekWinner, saveCurrentWeekRanksForNextWeek,
+  pickDefaultClaimMember,
 } from "@/lib/task-utils";
 import Podium from "@/components/leaderboard/Podium";
 import YourCard from "@/components/leaderboard/YourCard";
@@ -279,7 +280,10 @@ export default function TasksPage() {
     All: "👨‍👩‍👧‍👦",
     "My Tasks": currentUser?.emoji || "👤",
     "Up for grabs": "🤝",
-    ...Object.fromEntries(membersData.map((m: any) => [m.fullName, safeDisplayEmoji(m.emoji)]))
+    // Raw emoji here: every consumer renders it through <Avatar variant="emoji">,
+    // which turns photo data URLs into real images. The 👤 sanitizing in
+    // safeDisplayEmoji belongs ONLY in text contexts (memberOptionLabel).
+    ...Object.fromEntries(membersData.map((m: any) => [m.fullName, m.emoji || "👤"]))
   }), [membersData, currentUser]);
 
   const memberColors: Record<string, string> = useMemo(() => {
@@ -654,7 +658,9 @@ export default function TasksPage() {
     setPinError("");
     setPinSuccess("");
     if (task.universal) {
-      const defaultSnatcher = membersData.find((m: any) => m.role !== "pet")?.fullName ?? task.assignee;
+      // Default the claim to the signed-in member — a kid typing their own
+      // PIN against a select stuck on "Rebecca (Mom)" reads as "wrong PIN".
+      const defaultSnatcher = pickDefaultClaimMember(membersData, currentUser?.name) || task.assignee;
       setSnatchForMember(defaultSnatcher);
     } else {
       setSnatchForMember("");

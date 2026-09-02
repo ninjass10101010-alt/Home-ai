@@ -253,6 +253,25 @@ export function getArchivedWeeks(): WeekArchive {
   return loadJSON<WeekArchive>(ARCHIVE_KEY, {});
 }
 
+// The universal-task "Claim for" select must default to WHOEVER IS SIGNED IN —
+// a kid completing an "Up for grabs" task types their own PIN, and verifying
+// that PIN against the wrong member reads to them as "your PIN is wrong".
+// Falls back to the first non-pet member for guests/unknown names; pets can
+// never claim, so they're excluded from matching and from the fallback.
+export function pickDefaultClaimMember(
+  members: { name?: string; fullName?: string; role?: string }[],
+  signedInName?: string | null
+): string {
+  const nonPets = (members || []).filter((m) => m.role !== "pet");
+  const first = (v?: string) => (v || "").trim().split(" ")[0].toLowerCase();
+  const target = first(signedInName || "");
+  if (target) {
+    const mine = nonPets.find((m) => first(m.fullName) === target || first(m.name) === target);
+    if (mine) return mine.fullName || mine.name || "";
+  }
+  return nonPets[0]?.fullName || nonPets[0]?.name || "";
+}
+
 export function getMemberAllTimePoints(
   memberName: string,
   currentWeek: WeekData

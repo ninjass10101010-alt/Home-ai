@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 export const CROP_OUTPUT_SIZE = 256;
 export const MIN_ZOOM = 1;
@@ -185,7 +186,11 @@ export default function PhotoCropEditor({ src, onApply, onCancel }: PhotoCropEdi
   const cover = coverScale(imgDims.w, imgDims.h, view);
   const scale = cover * zoom;
 
-  return (
+  // Portaled to <body>: the editor is opened from inside the ProfileSheet /
+  // Settings member Modal, which live in PageShell's `relative z-10` <main>
+  // stacking context — an inline overlay there paints UNDER the z-50 capsule
+  // nav and its Apply/Cancel buttons become untappable.
+  return createPortal(
     <div
       className="fixed inset-0 z-[80] flex flex-col bg-black/70 backdrop-blur-sm"
       style={{ animation: "consuela-fade-in .2s ease both" }}
@@ -271,6 +276,7 @@ export default function PhotoCropEditor({ src, onApply, onCancel }: PhotoCropEdi
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
