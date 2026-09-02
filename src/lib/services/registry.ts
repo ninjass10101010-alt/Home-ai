@@ -52,7 +52,7 @@ export const SERVICES_REGISTRY: ServiceDef[] = [
   {
     id: "telegram_mirror",
     displayName: "Telegram Mirror Bot",
-    description: "Mirrors family group messages into Ask Consuela (30-min poll)",
+    description: "Mirrors family group messages into Ask Consuela (5-min poll)",
     testFnId: "telegram_mirror",
     fields: [
       { key: "TELEGRAM_MIRROR_BOT_TOKEN", label: "Mirror bot token", secret: true, required: true, helpText: "A second bot added to the group, from @BotFather" },
