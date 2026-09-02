@@ -66,7 +66,10 @@ export async function streamConsuelaChat(opts: StreamConsuelaChatOptions): Promi
   if (!ctype.includes("text/event-stream") || !res.body) {
     const data = await res.json();
     const content = String(data.content || data.reply || "");
-    if (content) opts.onToken?.(content, content);
+    // No onToken here: on the buffered path there is nothing to stream, and
+    // emitting the whole reply early would let callers render before their
+    // thinking-floor/animation beat. The caller sets the final content after
+    // the await (gated on `streamed: false`).
     return { content, streamed: false };
   }
 

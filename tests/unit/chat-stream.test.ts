@@ -83,7 +83,9 @@ describe("streamConsuelaChat", () => {
     const seen: string[] = [];
     const res = await streamConsuelaChat({ message: "hi", onToken: (full) => seen.push(full) });
     expect(res).toEqual({ content: "buffered", streamed: false });
-    expect(seen).toEqual(["buffered"]);
+    // the buffered fallback must NOT emit tokens: rendering is the caller's
+    // decision after the await (the 400ms thinking floor lives there).
+    expect(seen).toEqual([]);
   });
 
   it("sends stream:true and the message payload", async () => {
