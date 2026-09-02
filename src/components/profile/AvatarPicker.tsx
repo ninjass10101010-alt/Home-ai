@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import Avatar from "@/components/ui/Avatar";
+import PhotoCropEditor from "@/components/profile/PhotoCropEditor";
 
 interface EmojiCategory {
   id: string;
@@ -43,9 +44,23 @@ const EMOJI_CATEGORIES: EmojiCategory[] = [
 ];
 
 const MAX_AVATAR_DIMENSION = 256;
+const EDITOR_MAX_DIM = 1024;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
-async function fileToDataUrl(file: File): Promise<string> {
+// Centered-square crop of the source bitmap. The reposition editor starts from this
+// default framing (centered, zoom = 1) — kept exported so its unit tests hold.
+export function centerCropSquare(srcWidth: number, srcHeight: number) {
+  const side = Math.min(srcWidth, srcHeight);
+  return {
+    side,
+    sx: Math.floor((srcWidth - side) / 2),
+    sy: Math.floor((srcHeight - side) / 2),
+  };
+}
+
+// Aspect-preserving resize to ≤ maxDim. Produces the uncropped source shown in the
+// reposition editor (no crop here — the editor crops to a square on Apply).
+async function resizeImageToDataUrl(file: File, maxDim: number): Promise<string> {
   const buffer = await file.arrayBuffer();
   let bitmap: ImageBitmap;
   try {
@@ -54,7 +69,7 @@ async function fileToDataUrl(file: File): Promise<string> {
     throw new Error("Could not read that image. Try a different one.");
   }
 
-  const scale = Math.min(1, MAX_AVATAR_DIMENSION / Math.max(bitmap.width, bitmap.height));
+  const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
   const w = Math.max(1, Math.round(bitmap.width * scale));
   const h = Math.max(1, Math.round(bitmap.height * scale));
 
@@ -83,6 +98,7 @@ export default function AvatarPicker({ value, onChange, fallbackEmoji }: AvatarP
   const [activeCategory, setActiveCategory] = useState<string>("faces");
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [editorSrc, setEditorSrc] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const category = EMOJI_CATEGORIES.find((c) => c.id === activeCategory) ?? EMOJI_CATEGORIES[0];
@@ -101,8 +117,9 @@ export default function AvatarPicker({ value, onChange, fallbackEmoji }: AvatarP
     setUploading(true);
     setUploadError(null);
     try {
-      const dataUrl = await fileToDataUrl(file);
-      onChange(dataUrl);
+      // Resize to an uncropped editor source, then open the reposition editor.
+      const src = await resizeImageToDataUrl(file, EDITOR_MAX_DIM);
+      setEditorSrc(src);
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : "Could not upload that photo.");
     } finally {
@@ -171,7 +188,10 @@ export default function AvatarPicker({ value, onChange, fallbackEmoji }: AvatarP
         {isPhoto && (
           <button
             type="button"
-            onClick={() => onChange(defaultEmoji)}
+            onClick={() => {
+              setEditorSrc(null);
+              onChange(defaultEmoji);
+            }}
             className="tap-sm flex-1 rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-3 py-2.5 text-sm font-semibold text-text-primary transition hover:bg-[var(--color-surface-1)]"
           >
             🙂 Use emoji
@@ -186,6 +206,17 @@ export default function AvatarPicker({ value, onChange, fallbackEmoji }: AvatarP
         onChange={(e) => handleFile(e.target.files?.[0])}
       />
       {uploadError && <p className="text-xs font-medium text-rose-300">{uploadError}</p>}
+
+      {editorSrc && (
+        <PhotoCropEditor
+          src={editorSrc}
+          onApply={(cropped) => {
+            onChange(cropped);
+            setEditorSrc(null);
+          }}
+          onCancel={() => setEditorSrc(null)}
+        />
+      )}
     </div>
   );
 }
