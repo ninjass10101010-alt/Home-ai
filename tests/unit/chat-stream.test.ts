@@ -66,6 +66,17 @@ describe("streamConsuelaChat", () => {
     await expect(streamConsuelaChat({ message: "hi" })).rejects.toThrow("boom");
   });
 
+  it("throws on an error frame after partial content", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      sseResponse('data: {"t":"par"}\n\ndata: {"t":"tial"}\n\nevent: error\ndata: {"message":"boom"}\n\n')));
+    const seen: string[] = [];
+    await expect(
+      streamConsuelaChat({ message: "hi", onToken: (full) => seen.push(full) })
+    ).rejects.toThrow("boom");
+    // the tokens that did land are still surfaced before the rejection
+    expect(seen).toEqual(["par", "partial"]);
+  });
+
   it("falls back to buffered JSON when the route answers non-SSE", async () => {
     vi.stubGlobal("fetch", vi.fn(async () =>
       new Response(JSON.stringify({ content: "buffered" }), { status: 200, headers: { "content-type": "application/json" } })));
