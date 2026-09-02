@@ -7,6 +7,7 @@ import Avatar from "@/components/ui/Avatar";
 import SigmaImage from "@/components/ui/SigmaImage";
 import { Icon3D } from "@/components/3d";
 import { UnifiedInput } from "@/components/chat/UnifiedInput";
+import { streamConsuelaChat } from "@/lib/chat-stream";
 
 import { db } from "@/db";
 import { useSearchParams } from "next/navigation";
@@ -53,6 +54,9 @@ function saveChatHistory(msgs: Message[]) {
 function todayISO(): string {
   return new Date().toISOString().split("T")[0];
 }
+
+// Short beat so the orb animation doesn't flash on instant buffered replies.
+const MIN_THINKING_DELAY = 400;
 
 // Read the daily PB thread (union of dashboard + telegram messages).
 // Returns [] on any failure so callers keep their localStorage state.
@@ -206,6 +210,7 @@ function ChatContent() {
 
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const [statusLine, setStatusLine] = useState<string | null>(null);
   const [showSpeakerPicker, setShowSpeakerPicker] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -302,52 +307,53 @@ function ChatContent() {
     setPinnedToBottom(true);
     setInput("");
     setIsTyping(true);
+    setStatusLine(null);
+
+    msgCounter.current += 1;
+    const streamId = msgCounter.current;
+    let bubbleOpen = false;
 
     try {
       const t0 = Date.now();
-      const res = await fetch('/api/hermes/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: text,
-          role: isLoggedIn ? currentUser?.role : undefined,
-          history: messagesRef.current.slice(-12).map(m => ({
-            role: m.role,
-            content: m.role === "assistant"
-              ? m.content.replace(/\n\n✅[\s\S]*$/, "").trim()
-              : m.content,
-          })),
-        }),
+      const { content, streamed } = await streamConsuelaChat({
+        message: trimmed,
+        history: messagesRef.current.slice(-12).map(m => ({
+          role: m.role,
+          content: m.role === "assistant"
+            ? m.content.replace(/\n\n✅[\s\S]*$/, "").trim()
+            : m.content,
+        })),
+        onStatus: (label) => setStatusLine(label),
+        onToken: (full) => {
+          if (!bubbleOpen) { bubbleOpen = true; setIsTyping(false); }
+          setMessages(prev => prev.some(m => m.id === streamId)
+            ? prev.map(m => (m.id === streamId ? { ...m, content: full } : m))
+            : [...prev, { id: streamId, role: "assistant" as const, content: full, timestamp: "Just now" }]);
+        },
       });
-      if (!res.ok) throw new Error(`Chat request failed (${res.status})`);
-      const aiResponse = await res.json();
 
-      // Short beat so the orb animation doesn't flash on instant replies.
-      // Streamed answers (Task 7) bypass this entirely — tokens render live.
-      const MIN_THINKING_DELAY = 400;
-      const elapsed = Date.now() - t0;
-      if (elapsed < MIN_THINKING_DELAY) {
-        await new Promise(r => setTimeout(r, MIN_THINKING_DELAY - elapsed));
+      // Buffered fallback keeps a short beat so the orb doesn't flash;
+      // streamed replies already rendered live.
+      if (!streamed) {
+        const elapsed = Date.now() - t0;
+        if (elapsed < MIN_THINKING_DELAY) {
+          await new Promise(r => setTimeout(r, MIN_THINKING_DELAY - elapsed));
+        }
       }
-
       setIsTyping(false);
+      setStatusLine(null);
 
-      const content = aiResponse.content || aiResponse.reply || "I processed that.";
-
-      msgCounter.current += 1;
-      const response: Message = {
-        id: msgCounter.current,
-        role: "assistant",
-        content,
-        timestamp: "Just now",
-      };
-      setMessages(prev => [...prev, response]);
+      const finalContent = content || "I processed that.";
+      setMessages(prev => prev.some(m => m.id === streamId)
+        ? prev.map(m => (m.id === streamId ? { ...m, content: finalContent } : m))
+        : [...prev, { id: streamId, role: "assistant" as const, content: finalContent, timestamp: "Just now" }]);
 
       // Reconcile against PB (picks up anything that arrived on other devices).
       const pbMsgs = await fetchPBThread();
       if (pbMsgs.length > 0) setMessages(prev => mergePBThread(prev, pbMsgs));
     } catch (error) {
       setIsTyping(false);
+      setStatusLine(null);
       msgCounter.current += 1;
       setMessages(prev => [...prev, {
         id: msgCounter.current,
@@ -676,7 +682,11 @@ function ChatContent() {
                 border: "1px solid rgba(255,255,255,0.08)",
               }}
             >
-              <span className="sr-only">Consuela is thinking…</span>
+              {statusLine ? (
+                <span className="text-xs text-text-secondary whitespace-nowrap">{statusLine}</span>
+              ) : (
+                <span className="sr-only">Consuela is thinking…</span>
+              )}
               {[0, 1, 2].map((i) => (
                 <div key={i} className="chat-dot chat-dot-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
               ))}
