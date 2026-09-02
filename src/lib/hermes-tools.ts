@@ -5,8 +5,8 @@ import { weekKey } from "@/lib/task-utils";
 import type { Transaction, WeekData } from "@/types/tasks";
 import { getHAWebSocketClient } from "@/lib/ha/websocket-client";
 import { calculateCheapestSplit, formatStoreTotal, PINNED_STORES } from "@/lib/stores";
-import { localTodayISO, localWeekdayShort, familyTimeZone } from "@/lib/local-date";
-import { weekStartForDate } from "@/lib/meals-week-utils";
+import { localTodayISO, localWeekdayShort, familyTimeZone, weekdayOfISO } from "@/lib/local-date";
+import { weekStartForDate, isoDateForWeekday } from "@/lib/meals-week-utils";
 
 export interface ToolDefinition {
   name: string;
@@ -78,6 +78,29 @@ async function adminInsertEvent(event: Record<string, unknown>): Promise<any | n
   } catch (e: any) {
     console.error("[hermes-tools] insertEvent failed:", e?.message);
     return null;
+  }
+}
+
+async function adminUpsertMeal(meal: Record<string, unknown>): Promise<{ row: any | null; replaced: boolean }> {
+  try {
+    return await withAdmin(async (pb) => {
+      const records = await pb.collection("meal_plan_entries").getFullList({ requestKey: null });
+      const existing = records.find(
+        (r: any) =>
+          r.time === meal.time &&
+          (r.mealType || "dinner") === (meal.mealType || "dinner") &&
+          (r.weekOf || "") === (meal.weekOf || "")
+      );
+      if (existing) {
+        const row = await pb.collection("meal_plan_entries").update(existing.id, meal);
+        return { row, replaced: true };
+      }
+      const row = await pb.collection("meal_plan_entries").create(meal);
+      return { row, replaced: false };
+    });
+  } catch (e: any) {
+    console.error("[hermes-tools] upsertMeal failed:", e?.message);
+    return { row: null, replaced: false };
   }
 }
 
@@ -521,6 +544,65 @@ const TOOLS: Tool[] = [
         today: `${localWeekdayShort()} (${localTodayISO()})`,
         current_week_monday: weekStartForDate(localTodayISO()),
         days: byDay,
+      });
+    },
+  },
+  {
+    definition: {
+      name: "add_meal",
+      description:
+        "Add or replace a meal on the family meal planner for a specific day. Use when the user says what they ate or wants planned (e.g. 'yesterday was pizza dinner', 'put leftovers on Tuesday lunch'). Day must be a weekday short (Mon..Sun) or a YYYY-MM-DD date — resolve 'today'/'yesterday' using the Current date block in your system prompt.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Meal name (e.g. 'Little Caesars Pizza')" },
+          day: { type: "string", description: "Weekday short (Mon/Tue/Wed/Thu/Fri/Sat/Sun) or YYYY-MM-DD" },
+          mealType: { type: "string", enum: ["breakfast", "lunch", "dinner", "snack"], description: "Which meal (default dinner)" },
+          emoji: { type: "string", description: "Emoji for the meal (default 🍽️)" },
+        },
+        required: ["name", "day"],
+      },
+    },
+    handler: async (args) => {
+      const name = String(args.name ?? "").trim();
+      if (!name) return summarize({ ok: false, error: "Meal name is required" });
+      const dayRaw = String(args.day ?? "").trim();
+      const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+      const todayISO = localTodayISO();
+      let mealDate: string;
+      let weekdayShort: string;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dayRaw)) {
+        mealDate = dayRaw;
+        weekdayShort = weekdayOfISO(dayRaw);
+      } else {
+        const idx = WEEKDAYS.findIndex((d) => d.toLowerCase() === dayRaw.toLowerCase());
+        if (idx === -1) {
+          return summarize({ ok: false, error: `day must be Mon..Sun or YYYY-MM-DD, got "${dayRaw}"` });
+        }
+        weekdayShort = WEEKDAYS[idx];
+        mealDate = isoDateForWeekday(weekStartForDate(todayISO), weekdayShort);
+      }
+      const weekOf = weekStartForDate(mealDate);
+      const mealType = (typeof args.mealType === "string" ? args.mealType : "dinner").toLowerCase();
+      const meal: Record<string, unknown> = {
+        name,
+        emoji: typeof args.emoji === "string" && args.emoji ? args.emoji : "🍽️",
+        time: weekdayShort,
+        mealType,
+        weekOf,
+        date: mealDate,
+        prepTime: "30 min",
+        tags: JSON.stringify([]),
+        ingredients: JSON.stringify([]),
+        servings: 7,
+        calories: 0,
+      };
+      const { row, replaced } = await adminUpsertMeal(meal);
+      if (!row) return summarize({ ok: false, error: "Could not save the meal" });
+      return summarize({
+        ok: true,
+        replaced,
+        meal: { id: row.id, name: row.name, day: row.time, time: row.time, mealType: row.mealType, date: row.date, weekOf: row.weekOf },
       });
     },
   },
