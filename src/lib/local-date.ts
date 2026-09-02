@@ -17,7 +17,8 @@ export function localTodayISO(now: Date = new Date()): string {
 export function localPreviousDayISO(iso: string): string {
   const d = new Date(`${iso}T12:00:00`);
   d.setDate(d.getDate() - 1);
-  return d.toISOString().split("T")[0];
+  // Serialize in the family timezone (not UTC) so this is correct in any zone.
+  return d.toLocaleString("en-CA", { timeZone: familyTimeZone() }).split(",")[0];
 }
 
 export function familyTimeZone(): string {

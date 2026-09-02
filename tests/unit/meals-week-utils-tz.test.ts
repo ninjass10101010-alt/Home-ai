@@ -5,7 +5,7 @@ import {
   shiftWeek,
   isoDateForWeekday,
 } from "@/lib/meals-week-utils";
-import { localTodayISO, localWeekStartISO } from "@/lib/local-date";
+import { localTodayISO, localWeekStartISO, localPreviousDayISO } from "@/lib/local-date";
 
 const REAL_TZ = process.env.TZ;
 afterEach(() => {
@@ -33,5 +33,10 @@ describe("meals-week-utils timezone safety", () => {
     process.env.TZ = "America/Detroit";
     const now = new Date();
     expect(localWeekStartISO(now)).toBe(todayMondayISO());
+  });
+
+  it("localPreviousDayISO is correct in a UTC-ahead zone", () => {
+    process.env.TZ = "Australia/Sydney";
+    expect(localPreviousDayISO("2026-09-01")).toBe("2026-08-31");
   });
 });
