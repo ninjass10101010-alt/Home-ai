@@ -207,15 +207,15 @@ async function fetchExistingConditionKeys(): Promise<Set<string>> {
 
 export async function runEngine({ scopeDate }: { scopeDate: string }): Promise<{ scanned: number; inserted: number; rejected: number }> {
   const scanners = [scanPantryLow, scanTaskPenaltyStreak, scanCalendarConflicts, scanStaleData, scanGroceryStoreOptimization];
-  let all: NewSuggestion[] = [];
-  for (const s of scanners) {
+  const results = await Promise.all(scanners.map(async (s) => {
     try {
-      const items = await s(scopeDate);
-      all = all.concat(items);
+      return await s(scopeDate);
     } catch (e) {
       console.error("[consuela.engine] scanner failed:", (e as Error).message);
+      return [] as NewSuggestion[];
     }
-  }
+  }));
+  const all = results.flat();
   if (all.length === 0) return { scanned: 0, inserted: 0, rejected: 0 };
   const existingKeys = await fetchExistingConditionKeys();
   const seen = new Set<string>();

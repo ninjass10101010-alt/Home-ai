@@ -20,26 +20,25 @@ function todayISO(): string { return localTodayISO(); }
 export async function generateBriefing({ scopeDate }: { scopeDate: string }): Promise<BriefingSummary> {
   await runEngine({ scopeDate });
 
-  const events = await withAdmin(async (pb) =>
-    pb.collection("events").getFullList({
-      filter: `date="${scopeDate}"`,
-      requestKey: null,
-    }) as unknown as BriefingRow[]
-  );
-
-  const tasks = await withAdmin(async (pb) =>
-    pb.collection("tasks").getFullList({ requestKey: null })
-  ) as unknown as BriefingRow[];
-
   const currentWeekStart = weekStartForDate(todayISO());
-  const meals = await withAdmin(async (pb) =>
-    pb.collection("meal_plan_entries").getFullList({
-      filter: `weekOf="${currentWeekStart}"`,
-      requestKey: null,
-    })
-  ) as unknown as BriefingRow[];
-
-  const suggestions = await db.selectPendingSuggestions({ scopeDate, limit: 5 });
+  const [events, tasks, meals, suggestions] = await Promise.all([
+    withAdmin(async (pb) =>
+      pb.collection("events").getFullList({
+        filter: `date="${scopeDate}"`,
+        requestKey: null,
+      }) as unknown as BriefingRow[]
+    ),
+    withAdmin(async (pb) =>
+      pb.collection("tasks").getFullList({ requestKey: null })
+    ) as unknown as BriefingRow[],
+    withAdmin(async (pb) =>
+      pb.collection("meal_plan_entries").getFullList({
+        filter: `weekOf="${currentWeekStart}"`,
+        requestKey: null,
+      })
+    ) as unknown as BriefingRow[],
+    db.selectPendingSuggestions({ scopeDate, limit: 5 }),
+  ]);
 
   const summary: BriefingSummary = {
     events: events.slice(0, 5),
