@@ -288,10 +288,14 @@ function ChatContent() {
   const msgCounter = useRef(Math.max(100, ...messages.map(m => m.id)));
   const messagesRef = useRef(messages);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
+  // Spans the ENTIRE stream — the visual isTyping flag drops on the first
+  // token (intended UX), so it can't also be the double-send guard.
+  const streamInFlightRef = useRef(false);
 
   const sendMessage = async (text: string) => {
     const trimmed = text.trim();
-    if (!trimmed || isTyping) return;
+    if (!trimmed || isTyping || streamInFlightRef.current) return;
+    streamInFlightRef.current = true;
 
     msgCounter.current += 1;
     const userMsg: Message = {
@@ -362,6 +366,8 @@ function ChatContent() {
         timestamp: "Just now",
         errorFor: trimmed,
       }]);
+    } finally {
+      streamInFlightRef.current = false;
     }
   };
 

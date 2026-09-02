@@ -96,6 +96,30 @@ describe("chat page streaming", () => {
     expect(el.textContent).not.toContain("Checking the pantry…");
   });
 
+  it("ignores a second send while the first stream is in flight", async () => {
+    const resolvers: ((r: { content: string; streamed: boolean }) => void)[] = [];
+    streamMock.fn.mockImplementation(({ onToken }: any) => {
+      onToken("STREAMED-REPLY", "STREAMED-REPLY");
+      return new Promise((res) => { resolvers.push(res); });
+    });
+    const el = render(<ChatPage />);
+    let first: Promise<void> | undefined;
+    act(() => { first = capturedSend!("first-message"); });
+    // Second send fires while the first stream is still appending (the typing
+    // indicator is already false after the first token — the old guard let this through).
+    let second: Promise<void> | undefined;
+    act(() => { second = capturedSend!("SECOND-SEND"); });
+    await act(async () => {
+      for (const res of resolvers) res({ content: "STREAMED-REPLY", streamed: true });
+      await first;
+      await second;
+    });
+    expect(streamMock.fn).toHaveBeenCalledTimes(1);
+    // exactly one assistant bubble, carrying the first stream's content
+    expect((el.textContent?.match(/STREAMED-REPLY/g) || []).length).toBe(1);
+    expect(el.textContent).not.toContain("SECOND-SEND");
+  });
+
   it("shows the error bubble + Try again when the stream throws", async () => {
     streamMock.fn.mockRejectedValue(new Error("boom"));
     const el = render(<ChatPage />);

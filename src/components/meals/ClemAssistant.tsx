@@ -46,6 +46,9 @@ export default function ClemAssistant({ groceryItems, storeContext, showToast }:
   const [loading, setLoading] = useState(false);
   const [statusText, setStatusText] = useState("Clem is thinking…");
   const streamingRef = useRef(false);
+  // Spans the ENTIRE stream — loading drops on the first token (intended UX),
+  // so it can't also be the double-send guard.
+  const streamInFlightRef = useRef(false);
   const historyRef = useRef<HTMLDivElement>(null);
 
   const systemPrompt = useMemo(() => {
@@ -64,7 +67,8 @@ export default function ClemAssistant({ groceryItems, storeContext, showToast }:
 
   const send = async (raw: string) => {
     const text = raw.trim();
-    if (!text || loading) return;
+    if (!text || loading || streamInFlightRef.current) return;
+    streamInFlightRef.current = true;
     setMessages((prev) => [...prev, { role: "user", content: text }]);
     setInput("");
     setLoading(true);
@@ -100,6 +104,8 @@ export default function ClemAssistant({ groceryItems, storeContext, showToast }:
       streamingRef.current = false;
       setLoading(false);
       showToast("Couldn't reach Clem right now — try again");
+    } finally {
+      streamInFlightRef.current = false;
     }
   };
 
