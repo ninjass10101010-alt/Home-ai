@@ -735,7 +735,7 @@ const TOOLS: Tool[] = [
               });
               out.push({ name: existing.name || trimmed, emoji: existing.emoji || emoji, category: existing.category || category });
             } else {
-              await pb.collection("grocery_list_items").create({
+              const created = await pb.collection("grocery_list_items").create({
                 userId: "demo",
                 name: trimmed,
                 emoji,
@@ -746,6 +746,7 @@ const TOOLS: Tool[] = [
                 needed: true,
                 source: "chat",
               });
+              byNorm.set(normalizeGroceryName(trimmed), created);
               out.push({ name: trimmed, emoji, category });
             }
           }

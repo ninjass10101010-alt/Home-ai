@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const calls: Array<{ collection: string; filter?: string }> = [];
+const creates: Array<{ collection: string; data: any }> = [];
 const rows: Record<string, any[]> = {};
 
 vi.mock("@/lib/pb-auth", () => ({
@@ -11,7 +12,10 @@ vi.mock("@/lib/pb-auth", () => ({
         return rows[name] ?? [];
       },
       update: async (_id: string, d: any) => ({ id: _id, ...d }),
-      create: async (d: any) => ({ id: `new-${calls.length}`, ...d }),
+      create: async (d: any) => {
+        creates.push({ collection: name, data: d });
+        return { id: `new-${creates.length}`, ...d };
+      },
       delete: async () => true,
     }),
   })),
@@ -29,6 +33,7 @@ import { getTool } from "@/lib/hermes-tools";
 
 beforeEach(() => {
   calls.length = 0;
+  creates.length = 0;
   for (const k of Object.keys(rows)) delete rows[k];
 });
 
@@ -48,6 +53,14 @@ describe("hermes-tools — PB-side filters + batching", () => {
     await tool.handler({ items: "milk, eggs, bread" });
     const groceryReads = calls.filter((c) => c.collection === "grocery_list_items" && c.filter === undefined);
     expect(groceryReads.length).toBeLessThanOrEqual(1);
+  });
+
+  it("add_grocery_item dedupes repeated names within one call (second hit updates, not creates)", async () => {
+    rows.grocery_list_items = [];
+    const tool = getTool("add_grocery_item")!;
+    await tool.handler({ items: "milk, milk" });
+    const groceryCreates = creates.filter((c) => c.collection === "grocery_list_items");
+    expect(groceryCreates.length).toBe(1);
   });
 
   it("remove_event filters events by title (and date when given)", async () => {
