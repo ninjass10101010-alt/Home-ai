@@ -322,9 +322,9 @@ function ChatContent() {
       if (!res.ok) throw new Error(`Chat request failed (${res.status})`);
       const aiResponse = await res.json();
 
-      // Minimum 2s delay so the hero orb animation plays fully —
-      // also creates a buffer that absorbs connectivity jitter gracefully.
-      const MIN_THINKING_DELAY = 2000;
+      // Short beat so the orb animation doesn't flash on instant replies.
+      // Streamed answers (Task 7) bypass this entirely — tokens render live.
+      const MIN_THINKING_DELAY = 400;
       const elapsed = Date.now() - t0;
       if (elapsed < MIN_THINKING_DELAY) {
         await new Promise(r => setTimeout(r, MIN_THINKING_DELAY - elapsed));
