@@ -11,9 +11,9 @@ vi.mock("@/lib/chat-stream", () => ({ streamConsuelaChat: (opts: any) => streamM
 
 let capturedSend: ((text: string) => Promise<void>) | null = null;
 vi.mock("@/components/chat/UnifiedInput", () => ({
-  UnifiedInput: ({ onSendMessage }: { onSendMessage: (t: string) => Promise<void> }) => {
+  UnifiedInput: ({ onSendMessage, disabled }: { onSendMessage: (t: string) => Promise<void>; disabled?: boolean }) => {
     capturedSend = onSendMessage;
-    return null;
+    return <textarea data-testid="composer" data-disabled={String(disabled)} readOnly />;
   },
 }));
 vi.mock("@/components/ui/CapsuleNav", () => ({ default: () => null }));
@@ -109,6 +109,9 @@ describe("chat page streaming", () => {
     // indicator is already false after the first token — the old guard let this through).
     let second: Promise<void> | undefined;
     act(() => { second = capturedSend!("SECOND-SEND"); });
+    // The composer must stay visibly disabled mid-stream — the ref guard alone
+    // silently drops whatever the user typed with no feedback.
+    expect(el.querySelector("[data-testid='composer']")?.getAttribute("data-disabled")).toBe("true");
     await act(async () => {
       for (const res of resolvers) res({ content: "STREAMED-REPLY", streamed: true });
       await first;
@@ -118,6 +121,30 @@ describe("chat page streaming", () => {
     // exactly one assistant bubble, carrying the first stream's content
     expect((el.textContent?.match(/STREAMED-REPLY/g) || []).length).toBe(1);
     expect(el.textContent).not.toContain("SECOND-SEND");
+  });
+
+  it("reconciles with a 10-minute safety window behind the watermark (backdated telegram rows)", async () => {
+    streamMock.fn.mockResolvedValue({ content: "ok", streamed: true });
+    const fetchMock = vi.fn(async (url: string) => {
+      const u = String(url);
+      const messages = u.includes("since=")
+        ? []
+        : [{ role: "assistant", content: "telegram-row", createdAt: "2026-09-02T10:00:00.000Z" }];
+      return new Response(JSON.stringify({ ok: true, messages }), {
+        status: 200, headers: { "content-type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ChatPage />);
+    // let the hydrate fetch land so the watermark is set
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    await act(async () => { await capturedSend!("hi"); });
+    const reconcileUrl = fetchMock.mock.calls
+      .map((c) => String(c[0]))
+      .find((u) => u.includes("since="));
+    expect(reconcileUrl).toBeDefined();
+    const since = new URL(reconcileUrl!, "http://localhost").searchParams.get("since")!;
+    expect(Date.parse(since)).toBeLessThanOrEqual(Date.parse("2026-09-02T09:50:00.000Z"));
   });
 
   it("shows the error bubble + Try again when the stream throws", async () => {

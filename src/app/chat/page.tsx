@@ -304,11 +304,15 @@ function ChatContent() {
   // Spans the ENTIRE stream — the visual isTyping flag drops on the first
   // token (intended UX), so it can't also be the double-send guard.
   const streamInFlightRef = useRef(false);
+  // Render-visible mirror of the ref: keeps the composer disabled for the
+  // whole stream so a mid-stream send can't be silently swallowed.
+  const [composerLocked, setComposerLocked] = useState(false);
 
   const sendMessage = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || isTyping || streamInFlightRef.current) return;
     streamInFlightRef.current = true;
+    setComposerLocked(true);
 
     msgCounter.current += 1;
     const userMsg: Message = {
@@ -367,7 +371,12 @@ function ChatContent() {
 
       // Reconcile against PB (picks up anything that arrived on other devices) —
       // incremental: only rows newer than the last watermark we've seen.
-      const { messages: fresh, latest } = await fetchPBThread(lastPBCreatedRef.current ?? undefined);
+      // Safety window: Telegram rows land with their real send time, which can
+      // predate the watermark — re-fetch 10 min back and let mergePBThread dedupe.
+      const since = lastPBCreatedRef.current
+        ? new Date(Date.parse(lastPBCreatedRef.current) - 10 * 60 * 1000).toISOString()
+        : undefined;
+      const { messages: fresh, latest } = await fetchPBThread(since);
       if (latest) lastPBCreatedRef.current = latest;
       if (fresh.length > 0) setMessages(prev => mergePBThread(prev, fresh));
     } catch (error) {
@@ -383,6 +392,7 @@ function ChatContent() {
       }]);
     } finally {
       streamInFlightRef.current = false;
+      setComposerLocked(false);
     }
   };
 
@@ -725,7 +735,7 @@ function ChatContent() {
           paddingBottom: "calc(env(safe-area-inset-bottom) + 5.5rem)",
         }}
       >
-        <UnifiedInput onSendMessage={sendMessage} disabled={isTyping} />
+        <UnifiedInput onSendMessage={sendMessage} disabled={isTyping || composerLocked} />
       </div>
 
       <CapsuleNav />

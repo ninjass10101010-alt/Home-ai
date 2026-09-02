@@ -97,4 +97,12 @@ describe("streamConsuelaChat", () => {
     expect(body.agent).toBe("clem");
     expect(body.history).toEqual([{ role: "user", content: "prior" }]);
   });
+
+  it("passes a client-side watchdog signal to the fetch", async () => {
+    const fetchMock = vi.fn(async () => sseResponse("data: [DONE]\n\n"));
+    vi.stubGlobal("fetch", fetchMock);
+    await streamConsuelaChat({ message: "hi" });
+    const init = (fetchMock.mock.calls[0] as any)[1];
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
 });

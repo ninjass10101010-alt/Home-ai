@@ -241,6 +241,9 @@ const TOOLS: Tool[] = [
     handler: async (args) => {
       const title = String(args.title).trim().toLowerCase();
       const date = args.date ? String(args.date) : undefined;
+      // Model-supplied garbage must never reach the PB filter string unescaped;
+      // an invalid date degrades to a title-only search (same as omitting it).
+      const safeDate = date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : undefined;
       let result: { removed: boolean; title?: any; reason?: string };
       try {
         result = await withAdmin(async (pb) => {
@@ -248,11 +251,11 @@ const TOOLS: Tool[] = [
           // stays authoritative (semantics unchanged).
           const titleLike = title.replace(/"/g, "");
           const records = await pb.collection("events").getFullList({
-            filter: `title ~ "${titleLike}"${date ? ` && date="${date}"` : ""}`,
+            filter: `title ~ "${titleLike}"${safeDate ? ` && date="${safeDate}"` : ""}`,
             requestKey: null,
           });
           const match = records.find(
-            (e: any) => String(e.title).trim().toLowerCase() === title && (!date || e.date === date)
+            (e: any) => String(e.title).trim().toLowerCase() === title && (!safeDate || e.date === safeDate)
           );
           if (!match) return { removed: false, reason: "not found" };
           await pb.collection("events").delete(match.id);

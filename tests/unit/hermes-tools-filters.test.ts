@@ -72,6 +72,14 @@ describe("hermes-tools — PB-side filters + batching", () => {
     expect(eventCall?.filter).toContain('date="2026-09-05"');
   });
 
+  it("remove_event drops a malformed date instead of interpolating it into the filter", async () => {
+    rows.events = [{ id: "e1", title: "Soccer practice", date: "2026-09-05" }];
+    const tool = getTool("remove_event")!;
+    await expect(tool.handler({ title: "Soccer practice", date: 'x"y' })).resolves.toBeDefined();
+    const eventCall = calls.find((c) => c.collection === "events");
+    expect(eventCall?.filter).not.toContain("date=");
+  });
+
   it("add_task upserts with a taskId filter (no full tasks scan)", async () => {
     rows.tasks = [];
     const tool = getTool("add_task")!;
