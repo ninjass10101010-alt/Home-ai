@@ -60,20 +60,28 @@ const MIN_THINKING_DELAY = 400;
 
 // Read the daily PB thread (union of dashboard + telegram messages).
 // Returns [] on any failure so callers keep their localStorage state.
-async function fetchPBThread(): Promise<Message[]> {
+// Pass sinceISO to fetch only rows newer than that createdAt (incremental reconcile).
+async function fetchPBThread(sinceISO?: string): Promise<{ messages: Message[]; latest: string | null }> {
   try {
-    const res = await fetch(`/api/chat/messages?threadId=${todayISO()}`, { cache: "no-store" });
-    if (!res.ok) return [];
+    const params = new URLSearchParams({ threadId: todayISO() });
+    if (sinceISO) params.set("since", sinceISO);
+    const res = await fetch(`/api/chat/messages?${params.toString()}`, { cache: "no-store" });
+    if (!res.ok) return { messages: [], latest: null };
     const json = await res.json();
-    if (!json.ok || !Array.isArray(json.messages)) return [];
-    return json.messages.map((m: any, i: number) => ({
-      id: 1000000 + i,
-      role: m.role === "user" ? ("user" as const) : ("assistant" as const),
-      content: m.content || "",
-      timestamp: new Date(m.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
-      ...(m.role === "user" && m.userId ? { speaker: m.userId } : {}),
-    }));
-  } catch { return []; }
+    if (!json.ok || !Array.isArray(json.messages)) return { messages: [], latest: null };
+    let latest: string | null = null;
+    const messages = json.messages.map((m: any, i: number) => {
+      if (m.createdAt && (!latest || String(m.createdAt) > latest)) latest = String(m.createdAt);
+      return {
+        id: 1000000 + i,
+        role: m.role === "user" ? ("user" as const) : ("assistant" as const),
+        content: m.content || "",
+        timestamp: new Date(m.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
+        ...(m.role === "user" && m.userId ? { speaker: m.userId } : {}),
+      };
+    });
+    return { messages, latest };
+  } catch { return { messages: [], latest: null }; }
 }
 
 // Merge PB rows into the local list without duplicating rows already shown.
@@ -184,14 +192,19 @@ function ChatContent() {
 
   const hydratedRef = useRef(false);
   const [hydrated, setHydrated] = useState(false);
+  // Newest createdAt seen in the PB thread — post-send reconciles read only
+  // rows after this watermark instead of refetching the whole day.
+  const lastPBCreatedRef = useRef<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       // PB is the union of dashboard + telegram — it wins over the localStorage
       // seed when it has anything; otherwise keep the local history as-is.
-      const pbMsgs = await fetchPBThread();
+      // Hydration stays a FULL read; only post-send reconciles go incremental.
+      const { messages: pbMsgs, latest } = await fetchPBThread();
       if (cancelled) return;
+      if (latest) lastPBCreatedRef.current = latest;
       if (pbMsgs.length > 0) {
         setMessages(pbMsgs);
       } else {
@@ -352,9 +365,11 @@ function ChatContent() {
         ? prev.map(m => (m.id === streamId ? { ...m, content: finalContent } : m))
         : [...prev, { id: streamId, role: "assistant" as const, content: finalContent, timestamp: "Just now" }]);
 
-      // Reconcile against PB (picks up anything that arrived on other devices).
-      const pbMsgs = await fetchPBThread();
-      if (pbMsgs.length > 0) setMessages(prev => mergePBThread(prev, pbMsgs));
+      // Reconcile against PB (picks up anything that arrived on other devices) —
+      // incremental: only rows newer than the last watermark we've seen.
+      const { messages: fresh, latest } = await fetchPBThread(lastPBCreatedRef.current ?? undefined);
+      if (latest) lastPBCreatedRef.current = latest;
+      if (fresh.length > 0) setMessages(prev => mergePBThread(prev, fresh));
     } catch (error) {
       setIsTyping(false);
       setStatusLine(null);

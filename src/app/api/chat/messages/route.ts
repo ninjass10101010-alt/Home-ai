@@ -14,8 +14,12 @@ export async function GET(request: NextRequest) {
     }
   }
   const threadId = rawThreadId || new Date().toISOString().split("T")[0];
+  const since = request.nextUrl.searchParams.get("since");
+  if (since !== null && (since.includes('"') || since.includes("\\"))) {
+    return NextResponse.json({ error: "invalid since" }, { status: 400 });
+  }
   try {
-    const messages = await db.selectChatMessages(threadId);
+    const messages = await db.selectChatMessages(threadId, since || undefined);
     return NextResponse.json({ ok: true, threadId, messages });
   } catch (e: any) {
     return NextResponse.json(
