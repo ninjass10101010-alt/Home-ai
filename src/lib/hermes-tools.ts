@@ -62,7 +62,10 @@ function normalizeGroceryName(name: string): string {
 async function adminUpsertTask(task: Record<string, unknown>): Promise<any | null> {
   try {
     return await withAdmin(async (pb) => {
-      const records = await pb.collection("tasks").getFullList({ requestKey: null });
+      const records = await pb.collection("tasks").getFullList({
+        filter: `taskId=${Number(task.taskId)}`,
+        requestKey: null,
+      });
       const existing = records.find((r: any) => r.taskId === task.taskId);
       return existing ? pb.collection("tasks").update(existing.id, task) : pb.collection("tasks").create(task);
     });
@@ -104,48 +107,13 @@ async function adminUpsertMeal(meal: Record<string, unknown>): Promise<{ row: an
   }
 }
 
-async function adminUpsertGroceryItem(input: {
-  name: string;
-  category?: string;
-  source?: string;
-  needed?: boolean;
-}): Promise<any | null> {
-  try {
-    return await withAdmin(async (pb) => {
-      const trimmed = input.name.trim();
-      const category = input.category || "pantry";
-      const catDef = groceryCategories.find((c) => c.id === category);
-      const emoji = catDef?.emoji || "📦";
-      const aisle = catDef?.aisles?.[0]?.split("-")[0] || "1";
-      const records = await pb.collection("grocery_list_items").getFullList({ requestKey: null });
-      const existing = records.find((g: any) => g.name && normalizeGroceryName(g.name) === normalizeGroceryName(trimmed));
-      if (existing) {
-        const patch: Record<string, unknown> = { needed: input.needed ?? true };
-        if (input.needed === undefined) patch.source = input.source || existing.source || "chat";
-        return pb.collection("grocery_list_items").update(existing.id, patch);
-      }
-      return pb.collection("grocery_list_items").create({
-        userId: "demo",
-        name: trimmed,
-        emoji,
-        category,
-        aisle,
-        quantity: "",
-        priority: "medium",
-        needed: true,
-        source: input.source || "chat",
-      });
-    });
-  } catch (e: any) {
-    console.error("[hermes-tools] upsertGroceryItem failed:", e?.message);
-    return null;
-  }
-}
-
 async function adminUpsertWeekData(data: WeekData): Promise<any | null> {
   try {
     return await withAdmin(async (pb) => {
-      const records = await pb.collection("week_data").getFullList({ requestKey: null });
+      const records = await pb.collection("week_data").getFullList({
+        filter: `weekStart="${data.weekStart}"`,
+        requestKey: null,
+      });
       const existing = records.find((r: any) => r.weekStart === data.weekStart);
       return existing
         ? pb.collection("week_data").update(existing.id, data as any)
@@ -276,7 +244,13 @@ const TOOLS: Tool[] = [
       let result: { removed: boolean; title?: any; reason?: string };
       try {
         result = await withAdmin(async (pb) => {
-          const records = await pb.collection("events").getFullList({ requestKey: null });
+          // PB `~` is a coarse pre-narrowing; the exact client-side match below
+          // stays authoritative (semantics unchanged).
+          const titleLike = title.replace(/"/g, "");
+          const records = await pb.collection("events").getFullList({
+            filter: `title ~ "${titleLike}"${date ? ` && date="${date}"` : ""}`,
+            requestKey: null,
+          });
           const match = records.find(
             (e: any) => String(e.title).trim().toLowerCase() === title && (!date || e.date === date)
           );
@@ -457,7 +431,10 @@ const TOOLS: Tool[] = [
           }
 
           const currentWeek = weekKey();
-          const weekRecords = await pb.collection("week_data").getFullList({ requestKey: null });
+          const weekRecords = await pb.collection("week_data").getFullList({
+            filter: `weekStart="${currentWeek}"`,
+            requestKey: null,
+          });
           const week = weekRecords.find((r: any) => r.weekStart === currentWeek) || null;
           const points = parseJSON<Record<string, number>>(week?.points, {});
           const history = parseJSON<Transaction[]>(week?.history, []);
@@ -736,16 +713,46 @@ const TOOLS: Tool[] = [
       const names = String(args.items ?? "").split(",").map((s: string) => s.trim()).filter(Boolean);
       if (names.length === 0) return summarize({ inserted: 0, items: [], error: "No item names provided" });
       const category = args.category || "pantry";
-      const inserted: Array<{ name: string; emoji: string; category: string }> = [];
-      for (const name of names) {
-        const row = await adminUpsertGroceryItem({ name, category, source: "chat" });
-        if (row) {
-          inserted.push({
-            name: row.name || name,
-            emoji: row.emoji || "🛒",
-            category: row.category || category,
-          });
-        }
+      let inserted: Array<{ name: string; emoji: string; category: string }> = [];
+      try {
+        inserted = await withAdmin(async (pb) => {
+          const records = await pb.collection("grocery_list_items").getFullList({ requestKey: null });
+          const byNorm = new Map<string, any>();
+          for (const g of records as any[]) {
+            if (g.name) byNorm.set(normalizeGroceryName(g.name), g);
+          }
+          const catDef = groceryCategories.find((c) => c.id === category);
+          const emoji = catDef?.emoji || "📦";
+          const aisle = catDef?.aisles?.[0]?.split("-")[0] || "1";
+          const out: Array<{ name: string; emoji: string; category: string }> = [];
+          for (const name of names) {
+            const trimmed = name.trim();
+            const existing = byNorm.get(normalizeGroceryName(trimmed));
+            if (existing) {
+              await pb.collection("grocery_list_items").update(existing.id, {
+                needed: true,
+                source: existing.source || "chat",
+              });
+              out.push({ name: existing.name || trimmed, emoji: existing.emoji || emoji, category: existing.category || category });
+            } else {
+              await pb.collection("grocery_list_items").create({
+                userId: "demo",
+                name: trimmed,
+                emoji,
+                category,
+                aisle,
+                quantity: "",
+                priority: "medium",
+                needed: true,
+                source: "chat",
+              });
+              out.push({ name: trimmed, emoji, category });
+            }
+          }
+          return out;
+        });
+      } catch (e: any) {
+        return summarize({ inserted: 0, items: [], error: e?.message || "grocery add failed" });
       }
       return summarize({
         inserted: inserted.length,
