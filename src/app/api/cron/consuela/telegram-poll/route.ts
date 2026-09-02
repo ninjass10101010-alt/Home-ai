@@ -1,4 +1,4 @@
-// Telegram mirror poller cron route (host crontab: */30 * * * *).
+// Telegram mirror poller cron route (host crontab: */5 * * * *).
 //
 // Polls the Consuela Mirror bot's getUpdates feed and mirrors family-group text
 // messages into the daily chat_messages thread (source: "telegram").
