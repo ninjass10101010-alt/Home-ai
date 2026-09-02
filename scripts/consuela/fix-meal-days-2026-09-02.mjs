@@ -71,11 +71,21 @@ async function main() {
     const beforeRes = await fetch(`${PB_URL}/api/collections/meal_plan_entries/records/${fix.id}`, { headers });
     if (!beforeRes.ok) {
       console.error(`❌ [${fix.name}] read before failed: ${beforeRes.status}`);
+      process.exitCode = 1;
       continue;
     }
     const before = await beforeRes.json();
     console.log(`\n[${fix.name}] (id ${fix.id})`);
     console.log(`  before: time=${before.time} date=${before.date} weekOf=${before.weekOf}`);
+
+    const fromMismatch = Object.keys(fix.from).find((key) => before[key] !== fix.from[key]);
+    if (fromMismatch) {
+      console.error(
+        `❌ [${fix.name}] before does not match expected "from" (${fromMismatch}: before=${before[fromMismatch]} expected=${fix.from[fromMismatch]}) — skipping patch`,
+      );
+      process.exitCode = 1;
+      continue;
+    }
 
     const patched = await fetch(`${PB_URL}/api/collections/meal_plan_entries/records/${fix.id}`, {
       method: "PATCH",
