@@ -5,6 +5,8 @@ import { weekKey } from "@/lib/task-utils";
 import type { Transaction, WeekData } from "@/types/tasks";
 import { getHAWebSocketClient } from "@/lib/ha/websocket-client";
 import { calculateCheapestSplit, formatStoreTotal, PINNED_STORES } from "@/lib/stores";
+import { localTodayISO, localWeekdayShort, familyTimeZone } from "@/lib/local-date";
+import { weekStartForDate } from "@/lib/meals-week-utils";
 
 export interface ToolDefinition {
   name: string;
@@ -28,7 +30,7 @@ async function summarize(obj: any): Promise<string> {
 }
 
 function todayISO(): string {
-  return new Date().toISOString().split("T")[0];
+  return localTodayISO();
 }
 
 function formatTime(iso?: string): string {
@@ -511,9 +513,15 @@ const TOOLS: Tool[] = [
           calories: m.calories,
           servings: m.servings,
           tags: m.tags,
+          weekOf: m.weekOf,
+          date: m.date,
         });
       }
-      return summarize(byDay);
+      return summarize({
+        today: `${localWeekdayShort()} (${localTodayISO()})`,
+        current_week_monday: weekStartForDate(localTodayISO()),
+        days: byDay,
+      });
     },
   },
   {
@@ -708,13 +716,16 @@ const TOOLS: Tool[] = [
       const events = db.selectTodaysEvents();
       const tasks = db.selectPendingTasks();
       const meals = await db.selectMeals();
-      const today = todayISO();
+      const today = localTodayISO();
+      const todayWeekday = localWeekdayShort();
       const todayMeals = meals.filter((m: any) => {
         const day = m.time || m.day || "";
-        return day.toLowerCase() === new Date().toLocaleDateString("en-US", { weekday: "short" }).toLowerCase();
+        return day.toLowerCase() === todayWeekday.toLowerCase();
       });
       return summarize({
         date: today,
+        today_weekday: todayWeekday,
+        family_timezone: familyTimeZone(),
         events: events.map((e: any) => ({ title: e.title, time: e.time, member: e.member })),
         pending_tasks: tasks.filter((t: any) => t.status === "pending" || !t.done).map((t: any) => ({
           title: t.title,
