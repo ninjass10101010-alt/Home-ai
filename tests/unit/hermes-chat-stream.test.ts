@@ -123,6 +123,24 @@ describe("hermes chat — streaming mode", () => {
     expect(aYieldedEarly).toBe(true);
   });
 
+  it("streams the exhaustion message when it runs out of rounds", async () => {
+    // EVERY Hermes round answers with a tool call → MAX_ROUNDS exhausts with no
+    // final answer. The synthesized fallback must reach the client as a token
+    // frame (not just the DB) so the live view matches the persisted thread.
+    mocks.getTool.mockReturnValue({ handler: vi.fn(async () => '{"ok":true}') });
+    vi.stubGlobal("fetch", vi.fn(async () => sseResponse([toolCallRound("c1", "get_pantry", "{}")])));
+    const res = await post({ message: "keep going", stream: true });
+    const body = await res.text();
+    const exhaustion = "I kept needing to look things up and ran out of steps — give me a moment and try again! 🔧";
+    const frame = `data: ${JSON.stringify({ t: exhaustion })}`;
+    expect(body).toContain(frame);
+    expect(body.indexOf(frame)).toBeLessThan(body.indexOf("data: [DONE]"));
+    const assistantRow = mocks.insertChatMessage.mock.calls
+      .map((c: any[]) => c[0])
+      .find((r: any) => r.role === "assistant");
+    expect(assistantRow?.content).toBe(exhaustion);
+  });
+
   it("falls back to buffered when Hermes ignores stream:true, and stops asking next time", async () => {
     const buffered = () => new Response(
       JSON.stringify({ choices: [{ message: { role: "assistant", content: "buffered answer" } }] }),

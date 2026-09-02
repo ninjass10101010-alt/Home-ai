@@ -355,6 +355,8 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
       }
       if (!finalContent) {
         finalContent = "I kept needing to look things up and ran out of steps — give me a moment and try again! 🔧";
+        // Streamed clients must see exactly what gets persisted.
+        write(sseFrame(JSON.stringify({ t: finalContent })));
       }
       if (!isClem) await persistChatPair(request, message, finalContent);
       write(sseFrame("[DONE]"));
