@@ -21,7 +21,7 @@ vi.mock("@/db", () => ({
   db: { insertChatMessage: mocks.insertChatMessage },
 }));
 
-import { POST } from "@/app/api/hermes/chat/route";
+import { POST, resetHermesChatForTests } from "@/app/api/hermes/chat/route";
 
 function hermesReply(content = "ok") {
   return new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content } }] }), { status: 200 });
@@ -38,9 +38,10 @@ async function post(body: Record<string, unknown>) {
 }
 
 beforeEach(() => {
+  resetHermesChatForTests();
   vi.stubEnv("SESSION_SECRET", "test-secret-0123456789");
   vi.stubEnv("HERMES_API_KEY", "");
-  // Ensure env fallback doesn't interfere with 8642 fallback check
+  // Ensure env fallback doesn't interfere with 8643 fallback check
   vi.stubEnv("HERMES_API_URL", "");
   // @ts-ignore
   delete process.env.HERMES_URL;
@@ -153,6 +154,7 @@ describe("hermes chat — Clem persona", () => {
     await post({ message: "hi", agent: "clem" });
     const fetchUrl = (globalThis.fetch as any).mock.calls[0][0] as string;
     expect(fetchUrl).toContain("http://hermes-agent-2:8643");
+    expect(fetchUrl).not.toContain("8642");
   });
 
   it("registry HERMES_API_URL takes precedence over fallback", async () => {

@@ -26,7 +26,7 @@ vi.mock("@/db", () => ({
   db: { insertChatMessage: mocks.insertChatMessage },
 }));
 
-import { POST } from "@/app/api/hermes/chat/route";
+import { POST, resetHermesChatForTests } from "@/app/api/hermes/chat/route";
 import { signSession, SESSION_COOKIE } from "@/lib/session";
 
 function hermesReply() {
@@ -50,6 +50,7 @@ async function post(body: Record<string, unknown>, cookie?: string) {
 }
 
 beforeEach(() => {
+  resetHermesChatForTests();
   vi.stubEnv("SESSION_SECRET", "test-secret-0123456789");
   // Empty (not unset) so the no-auth case is deterministic even if the host
   // shell exports HERMES_API_KEY — "" is falsy → no Authorization header.

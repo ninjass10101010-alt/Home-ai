@@ -18,22 +18,45 @@ async function persistChatPair(request: NextRequest, userMessage: string, assist
     if (!reply || reply === "I processed that.") return;
     const userId = request.cookies.get("x-consuela-user")?.value || "guest";
     const threadId = todayISO();
-    await db.insertChatMessage({ userId, role: "user", content: userMessage, source: "dashboard", threadId });
-    await db.insertChatMessage({ userId: "consuela", role: "assistant", content: reply, source: "dashboard", threadId });
+    // Explicit createdAt keeps the user row strictly before the assistant row
+    // in the createdAt-ascending thread sort even when both land in the same ms.
+    const userAt = new Date();
+    const assistantAt = new Date(userAt.getTime() + 1);
+    await Promise.all([
+      db.insertChatMessage({ userId, role: "user", content: userMessage, source: "dashboard", threadId, createdAt: userAt.toISOString() }),
+      db.insertChatMessage({ userId: "consuela", role: "assistant", content: reply, source: "dashboard", threadId, createdAt: assistantAt.toISOString() }),
+    ]);
   } catch (e: any) {
     console.error("Failed to persist chat messages:", e?.message || e);
   }
 }
 
-// Registry override → env → code fallback. The old hardcoded key default is
-// gone; unset keys simply send no Authorization header.
+// Registry override → env → code fallback. The resolved endpoint is cached
+// in-process for 10 minutes — it changes rarely, and two PB reads per chat
+// message were pure latency. Settings → Services "Test" reads fresh config
+// independently, so a key edit is verified immediately even while cached.
+const HERMES_CONFIG_TTL_MS = 10 * 60 * 1000;
+const HERMES_TIMEOUT_MS = 60_000;
+
+let hermesConfigCache: { value: { url: string; key: string | null }; expiresAt: number } | null = null;
+
+/** Test-only: clears the module-scope caches between vitest cases. */
+export function resetHermesChatForTests() {
+  hermesConfigCache = null;
+}
+
 async function resolveHermes(): Promise<{ url: string; key: string | null }> {
-  const url =
-    (await getServiceConfig("hermes", "HERMES_API_URL")) ||
-    process.env.HERMES_API_URL ||
-    "http://hermes-agent-2:8643";
-  const key = (await getServiceConfig("hermes", "HERMES_API_KEY")) ?? process.env.HERMES_API_KEY ?? null;
-  return { url, key };
+  if (hermesConfigCache && hermesConfigCache.expiresAt > Date.now()) return hermesConfigCache.value;
+  const [storedUrl, storedKey] = await Promise.all([
+    getServiceConfig("hermes", "HERMES_API_URL"),
+    getServiceConfig("hermes", "HERMES_API_KEY"),
+  ]);
+  const value = {
+    url: storedUrl || process.env.HERMES_API_URL || "http://hermes-agent-2:8643",
+    key: storedKey ?? process.env.HERMES_API_KEY ?? null,
+  };
+  hermesConfigCache = { value, expiresAt: Date.now() + HERMES_CONFIG_TTL_MS };
+  return value;
 }
 const HERMES_MODEL = "consuela";
 
@@ -108,6 +131,7 @@ async function callHermes(
   const res = await fetch(`${hermes.url}/v1/chat/completions`, {
     method: "POST",
     headers,
+    signal: AbortSignal.timeout(HERMES_TIMEOUT_MS),
     body: JSON.stringify({
       model: HERMES_MODEL,
       messages,
@@ -154,7 +178,7 @@ export async function POST(request: NextRequest) {
     // Clem must always hit the Consuela gateway at 8643 — never finance (8642 is Alex).
     // Hardcode to avoid any PB/env override that might point Clem at finance.
     const clemHermes = isClem
-      ? { url: "http://hermes-agent-2:8643", key: (await getServiceConfig("hermes", "HERMES_API_KEY")) ?? process.env.HERMES_API_KEY ?? null }
+      ? { url: "http://hermes-agent-2:8643", key: (await resolveHermes()).key }
       : null;
     const hermesForLog = clemHermes ?? (await resolveHermes());
     console.log(`[hermes] agent=${agent || "consuela"} isClem=${isClem} url=${hermesForLog.url} model=${HERMES_MODEL} role=${role}`);
