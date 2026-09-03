@@ -30,6 +30,22 @@ export function isExempt(pathname: string): boolean {
   });
 }
 
+// Ledger integration (2026-09-02): Alex's finance app is proxied same-origin
+// (see next.config.ts rewrites) and must be parent-only. Page paths bounce
+// to Home; asset/api paths 403. Role comes from the HMAC-signed session.
+// /ledger-app is the iframe root (a machine path, like /assets) — it 403s
+// rather than redirecting, so a child's iframe never loads Home.
+const ADULT_ONLY_PREFIXES = ["/ledger", "/ledger-app", "/assets", "/api/data", "/api/ofx"];
+const ADULT_ONLY_PAGE_PREFIXES = ["/ledger"];
+
+export function isAdultOnlyPath(pathname: string): boolean {
+  return ADULT_ONLY_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + "/"));
+}
+
+function isAdultOnlyPage(pathname: string): boolean {
+  return ADULT_ONLY_PAGE_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + "/"));
+}
+
 export async function middleware(request: NextRequest) {
   // Keep the existing design-system preview rewrite working.
   if (request.nextUrl.pathname === "/_design-system") {
@@ -37,6 +53,23 @@ export async function middleware(request: NextRequest) {
   }
 
   const { pathname } = request.nextUrl;
+
+  // Adult-only ledger paths — must run BEFORE the generic /api gate so
+  // children get the honest 403 `adult_only` instead of a bare 401.
+  if (isAdultOnlyPath(pathname)) {
+    const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
+    if (!session || session.role === "child") {
+      if (isAdultOnlyPage(pathname)) {
+        const url = request.nextUrl.clone();
+        url.pathname = "/";
+        url.search = "";
+        return NextResponse.redirect(url);
+      }
+      return NextResponse.json({ error: "adult_only" }, { status: 403 });
+    }
+    return NextResponse.next();
+  }
+
   if (pathname.startsWith("/api/") && !isExempt(pathname)) {
     const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
     if (!session) {
@@ -48,5 +81,6 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/api/:path*", "/_design-system"],
+  // note: "/ledger/:path*" with zero-or-more semantics matches "/ledger" itself
+  matcher: ["/api/:path*", "/_design-system", "/ledger/:path*", "/ledger-app/:path*", "/assets/:path*"],
 };
