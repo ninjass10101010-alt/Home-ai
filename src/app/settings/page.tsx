@@ -19,6 +19,7 @@ import Toast from "@/components/ui/Toast";
 import ListRow from "@/components/ui/ListRow";
 import EmptyState from "@/components/ui/EmptyState";
 import Avatar from "@/components/ui/Avatar";
+import { normalizeAvatarSize, AVATAR_SIZE_OPTIONS } from "@/lib/avatar-size";
 import TextField from "@/components/ui/TextField";
 import FormField from "@/components/patterns/FormField";
 import MoreMenuItem from "@/components/patterns/MoreMenuItem";
@@ -647,7 +648,7 @@ export default function SettingsPage() {
         <div className="px-4 space-y-6 pb-8">
           <SectionCard title="Profile" description="Who is using Consuela right now?" icon="👤">
             <div className="flex items-center gap-4">
-              <Avatar name={profileMember?.name || "Family"} color="green" emoji={profileMember?.emoji || "😊"} size="lg" variant="emoji" glow />
+              <Avatar name={profileMember?.name || "Family"} color={profileMember?.color || "green"} emoji={profileMember?.emoji || "😊"} size={normalizeAvatarSize(profileMember?.avatarSize)} variant="emoji" glow={Boolean(profileMember?.glow)} />
               <div className="min-w-0 flex-1">
                 <h3 className="text-base font-bold text-text-primary">{profileMember?.name || "Family"}</h3>
                 <p className="mt-0.5 text-sm text-text-secondary">{profileMember?.role || "Family"}</p>
@@ -1035,6 +1036,8 @@ export default function SettingsPage() {
               <AvatarPicker
                 value={memberForm.imageUrl?.startsWith("data:") || memberForm.imageUrl?.startsWith("http") ? memberForm.imageUrl : memberForm.emoji || "😊"}
                 fallbackEmoji={memberForm.emoji || "😊"}
+                previewSize={memberForm.avatarSize}
+                previewGlow={memberForm.glow}
                 onChange={(next) =>
                   setMemberForm((prev: any) => {
                     const isImage = next.startsWith("data:") || next.startsWith("http");
@@ -1056,19 +1059,19 @@ export default function SettingsPage() {
             <div className="flex items-center justify-between">
               <FormField label="Avatar size">
                 <div className="flex gap-1.5">
-                  {(["xs", "sm", "md", "lg"] as const).map((s) => (
+                  {AVATAR_SIZE_OPTIONS.map((opt) => (
                     <button
-                      key={s}
+                      key={opt.value}
                       type="button"
-                      aria-pressed={memberForm.avatarSize === s}
-                      onClick={() => setMemberForm((prev: any) => ({ ...prev, avatarSize: s }))}
+                      aria-pressed={memberForm.avatarSize === opt.value}
+                      onClick={() => setMemberForm((prev: any) => ({ ...prev, avatarSize: opt.value }))}
                       className={`tap-sm rounded-xl px-3 py-1.5 text-xs font-bold ${
-                        memberForm.avatarSize === s
+                        memberForm.avatarSize === opt.value
                           ? "bg-[var(--color-accent-selected)] text-white"
                           : "glass-subtle text-text-secondary hover:text-text-primary"
                       }`}
                     >
-                      {s}
+                      {opt.label}
                     </button>
                   ))}
                 </div>

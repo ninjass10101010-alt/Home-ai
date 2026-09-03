@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import Avatar from "@/components/ui/Avatar";
+import { normalizeAvatarSize } from "@/lib/avatar-size";
 import PhotoCropEditor from "@/components/profile/PhotoCropEditor";
 
 interface EmojiCategory {
@@ -91,9 +92,13 @@ interface AvatarPickerProps {
   value: string;
   onChange: (next: string) => void;
   fallbackEmoji?: string;
+  /** Reflect the member's chosen size in the preview (defaults to "md"). */
+  previewSize?: string;
+  /** Reflect the member's glow setting in the preview. */
+  previewGlow?: boolean;
 }
 
-export default function AvatarPicker({ value, onChange, fallbackEmoji }: AvatarPickerProps) {
+export default function AvatarPicker({ value, onChange, fallbackEmoji, previewSize, previewGlow = false }: AvatarPickerProps) {
   const defaultEmoji = fallbackEmoji || "😊";
   const [activeCategory, setActiveCategory] = useState<string>("faces");
   const [uploading, setUploading] = useState(false);
@@ -131,7 +136,7 @@ export default function AvatarPicker({ value, onChange, fallbackEmoji }: AvatarP
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-3">
-        <Avatar name="Preview" color="green" emoji={value || "😊"} size="base" variant="emoji" />
+        <Avatar name="Preview" color="green" emoji={value || "😊"} size={normalizeAvatarSize(previewSize)} variant="emoji" glow={previewGlow} />
         <div className="text-xs text-text-muted">
           <span className="font-semibold text-text-secondary">{isPhoto ? "Photo avatar" : "Emoji avatar"}</span>
           <span className="mt-0.5 block">Shown on Home, Tasks, and the leaderboard.</span>

@@ -42,14 +42,9 @@ import LedgerWidget from "@/components/finance/LedgerWidget";
 import { useMorningBriefing, briefingSectionsEmpty } from "@/components/briefing/hooks/useMorningBriefing";
 import ProfileSheet from "@/components/profile/ProfileSheet";
 import { useHomeEvents } from "@/hooks/useHomeEvents";
+import { normalizeAvatarSize } from "@/lib/avatar-size";
 
 const FogBackground = dynamic(() => import("@/components/ui/FogBackground"), { ssr: false });
-
-const avatarSizes = new Set<AvatarSize>(["xs", "sm", "md", "base", "lg"]);
-
-function normalizeAvatarSize(size?: string) {
-  return avatarSizes.has(size as AvatarSize) ? (size as AvatarSize) : "md";
-}
 
 function memberMatchesName(member: any, name: string) {
   const firstName = name.split(" ")[0];

@@ -1,11 +1,9 @@
 "use client";
 
 import Modal from "@/components/ui/Modal";
-import Avatar, { type AvatarSize } from "@/components/ui/Avatar";
+import Avatar from "@/components/ui/Avatar";
 import SoftButton from "@/components/ui/SoftButton";
-
-const avatarSizes = new Set<AvatarSize>(["xs", "sm", "md", "base", "lg"]);
-const normalizeAvatarSize = (size?: string): AvatarSize => (avatarSizes.has(size as AvatarSize) ? (size as AvatarSize) : "md");
+import { normalizeAvatarSize } from "@/lib/avatar-size";
 
 export interface PickerMember {
   name: string;

@@ -6,11 +6,9 @@ import Modal from "@/components/ui/Modal";
 import SoftButton from "@/components/ui/SoftButton";
 import Avatar, { type AvatarSize } from "@/components/ui/Avatar";
 import AvatarPicker from "@/components/profile/AvatarPicker";
+import { normalizeAvatarSize, AVATAR_SIZE_OPTIONS } from "@/lib/avatar-size";
 import { useAuth, type AuthUser } from "@/hooks/useAuth";
 import { db } from "@/db";
-
-const avatarSizes = new Set<AvatarSize>(["xs", "sm", "md", "base", "lg"]);
-const normalizeAvatarSize = (size?: string): AvatarSize => (avatarSizes.has(size as AvatarSize) ? (size as AvatarSize) : "md");
 
 interface ProfileSheetProps {
   open: boolean;
@@ -21,7 +19,9 @@ interface ProfileSheetProps {
 export default function ProfileSheet({ open, onClose, member }: ProfileSheetProps) {
   const { logout } = useAuth();
 
+  const memberSize = normalizeAvatarSize(member.avatarSize);
   const [avatarValue, setAvatarValue] = useState<string>(member.emoji || "😊");
+  const [sizeValue, setSizeValue] = useState<AvatarSize>(memberSize);
   const [avatarPin, setAvatarPin] = useState("");
   const [savingAvatar, setSavingAvatar] = useState(false);
   const [avatarSaved, setAvatarSaved] = useState(false);
@@ -36,7 +36,9 @@ export default function ProfileSheet({ open, onClose, member }: ProfileSheetProp
   const [pinSuccess, setPinSuccess] = useState(false);
 
   const saveAvatar = async () => {
-    if (!avatarValue || avatarValue === member.emoji) return;
+    const emojiChanged = Boolean(avatarValue) && avatarValue !== member.emoji;
+    const sizeChanged = sizeValue !== memberSize;
+    if (!emojiChanged && !sizeChanged) return;
     if (!avatarPin || !/^\d{4}$/.test(avatarPin)) {
       setAvatarError("Enter your 4-digit PIN to save.");
       return;
@@ -45,10 +47,13 @@ export default function ProfileSheet({ open, onClose, member }: ProfileSheetProp
     setAvatarError(null);
     setAvatarSaved(false);
     try {
+      const patch: Record<string, unknown> = {};
+      if (emojiChanged) patch.emoji = avatarValue;
+      if (sizeChanged) patch.avatarSize = sizeValue;
       const res = await fetch("/api/members/profile", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ actorName: member.name, actorPin: avatarPin, patch: { emoji: avatarValue } }),
+        body: JSON.stringify({ actorName: member.name, actorPin: avatarPin, patch }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -56,7 +61,10 @@ export default function ProfileSheet({ open, onClose, member }: ProfileSheetProp
         return;
       }
       await db.refreshCaches();
-      db.patchMemberLocal(member.name, { emoji: data.member?.emoji || avatarValue });
+      const localPatch: Record<string, unknown> = {};
+      if (emojiChanged) localPatch.emoji = data.member?.emoji || avatarValue;
+      if (sizeChanged) localPatch.avatarSize = data.member?.avatarSize || sizeValue;
+      db.patchMemberLocal(member.name, localPatch);
       setAvatarSaved(true);
       setTimeout(() => setAvatarSaved(false), 2000);
     } catch {
@@ -132,12 +140,32 @@ export default function ProfileSheet({ open, onClose, member }: ProfileSheetProp
 
         <div className="rounded-3xl border border-white/10 bg-[var(--color-surface-0)]/50 p-4">
           <h5 className="mb-3 text-sm font-bold text-text-primary">Change your avatar</h5>
-          <AvatarPicker value={avatarValue} onChange={setAvatarValue} fallbackEmoji={member.emoji || "😊"} />
+          <AvatarPicker value={avatarValue} onChange={setAvatarValue} fallbackEmoji={member.emoji || "😊"} previewSize={sizeValue} previewGlow={member.glow} />
+          <div className="mt-3">
+            <p className="mb-1.5 text-xs font-semibold text-text-secondary">Avatar size</p>
+            <div className="flex gap-1.5">
+              {AVATAR_SIZE_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  aria-pressed={sizeValue === opt.value}
+                  onClick={() => setSizeValue(opt.value)}
+                  className={`tap-sm flex-1 rounded-xl px-2 py-1.5 text-xs font-bold ${
+                    sizeValue === opt.value
+                      ? "bg-[var(--color-accent-selected)] text-white"
+                      : "glass-subtle text-text-secondary hover:text-text-primary"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="mt-3 space-y-2.5">
             <input type="password" inputMode="numeric" maxLength={4} value={avatarPin} onChange={(e) => setAvatarPin(e.target.value.replace(/[^0-9]/g, ""))} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-2.5 text-center text-lg tracking-[0.4em] text-text-primary outline-none placeholder:text-text-muted" placeholder="Enter PIN to confirm" />
             <SoftButton
               onClick={saveAvatar}
-              disabled={savingAvatar || !avatarValue || avatarValue === member.emoji || avatarPin.length < 4}
+              disabled={savingAvatar || !avatarValue || avatarPin.length < 4 || (avatarValue === member.emoji && sizeValue === memberSize)}
               className="w-full"
             >
               {savingAvatar ? "Saving…" : avatarSaved ? "Saved ✓" : "Save avatar"}
