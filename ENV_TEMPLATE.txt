@@ -27,3 +27,11 @@ GMAIL_APP_PASSWORD=your_app_specific_password
 
 # ─── Docker / Deployment ─────────────────────────────────────────────────────
 NEXT_PUBLIC_URL=http://localhost:3000
+
+# ─── The Ledger (Alex's finance app, parents-only embed) ──────────────────────
+# Proxied same-origin at /ledger-app, /assets, /api/data, /api/ofx.
+# BAKED AT BUILD TIME (Next writes rewrites into routes-manifest), so the docker
+# build must pass --build-arg FINANCE_DASHBOARD_URL (see Dockerfile / compose).
+# NAS: http://finance-dashboard (container on familydashboard_consuela-net).
+# Local dev (Mac on the LAN): http://192.168.0.28:9080
+FINANCE_DASHBOARD_URL=http://192.168.0.28:9080

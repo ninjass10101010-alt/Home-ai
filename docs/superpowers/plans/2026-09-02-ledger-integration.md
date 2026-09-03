@@ -4,7 +4,7 @@
 
 **Goal:** Bring Alex's finance ledger ("The Ledger") into the Consuela family dashboard as an adults-only Home widget + an embedded full page, with server-enforced parent-only access and zero changes to Alex's app.
 
-**Architecture:** The dashboard's Next.js server proxies the `finance-dashboard` container (Alex's ledger app) under `/ledger-app/*`, `/assets/*`, `/api/data/*`, `/api/ofx/*` via declarative `rewrites()`, making the ledger same-origin with the dashboard (satisfying the ledger's `X-Frame-Options: SAMEORIGIN`). Middleware gates all ledger paths behind a parent session (`role !== "child"`). A new warm-glass Home widget summarizes balances from `GET /api/data/dashboard` and links to the full embed at `/ledger`.
+**Architecture:** The dashboard's Next.js server proxies the `finance-dashboard` container (Alex's ledger app) under `/ledger-app/*`, `/assets/*`, `/api/data/*`, `/api/ofx/*` via declarative `rewrites()`, making the ledger same-origin with the dashboard (satisfying the ledger's `X-Frame-Options: SAMEORIGIN`). Middleware gates all ledger paths behind a parent session (`role === "parent"` allowlist). A new warm-glass Home widget summarizes balances from `GET /api/data/dashboard` and links to the full embed at `/ledger`.
 
 **Tech Stack:** Next.js 16 (app router) + React 19, Vitest (jsdom via createRoot/act pattern), Playwright probe scripts, docker on QNAP NAS.
 
@@ -14,7 +14,7 @@
 
 - Work happens in this repo (Home-ai submodule) on branch `warm-glass-v2`.
 - **Zero changes** to Alex's app, `finance-dashboard` container config, nginx, or pipeline.
-- Adults-only = valid `consuela_session` cookie AND `session.role !== "child"`. No PIN step-up (user decision 2026-09-02). The 30-min inactivity auto-logout is the shared-device net.
+- Adults-only = valid `consuela_session` cookie AND `session.role === "parent"` (ALLOWLIST — the roster has a third role `"pet"` with default PIN `0000` and unfiltered login, so denying only `role === "child"` would leak the ledger to a pet session; discovered in final review 2026-09-03). No PIN step-up (user decision 2026-09-02). The 30-min inactivity auto-logout is the shared-device net.
 - Session role values are lowercase (`"parent"` / `"child"`); see `tests/unit/middleware-gate.test.ts` for the session-cookie test harness (`signSession`).
 - Honest failure states only (no fabricated numbers); reduced-motion untouched; no new palette entries — the ledger widget tone is `#22c55e`.
 - TDD: failing test → minimal implementation → passing test → commit, per task. `npm run typecheck` and `npm run lint` clean on touched files.

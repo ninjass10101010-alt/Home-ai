@@ -55,10 +55,13 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Adult-only ledger paths — must run BEFORE the generic /api gate so
-  // children get the honest 403 `adult_only` instead of a bare 401.
+  // non-adults get the honest 403 `adult_only` instead of a bare 401.
+  // ALLOWLIST on `parent`: the roster has a third role `pet` (default PIN
+  // 0000, login-unfiltered), so denying only `child` would let a pet session
+  // read the whole ledger. Only `parent` passes; child/pet/unknown all denied.
   if (isAdultOnlyPath(pathname)) {
     const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
-    if (!session || session.role === "child") {
+    if (!session || session.role !== "parent") {
       if (isAdultOnlyPage(pathname)) {
         const url = request.nextUrl.clone();
         url.pathname = "/";

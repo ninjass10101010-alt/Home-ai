@@ -138,6 +138,30 @@ await check("child /api/data/dashboard 403s", async () => {
   });
   if (res.status !== 403) throw new Error(`got ${res.status}`);
 });
+
+// --- pet-role bypass regression (Critical 2026-09-03): pets are a THIRD role
+// with default PIN 0000 and unfiltered login; they MUST NOT read the ledger. ---
+let petCookie = null;
+try {
+  petCookie = await loginCookie({ name: process.env.PET_NAME ?? "Rocco", pin: process.env.PET_PIN ?? "0000" });
+} catch {
+  /* pet login may be disabled in some envs; skip if it fails */
+}
+if (petCookie) {
+  await check("pet /api/data/dashboard 403s (no ledger leak to pet role)", async () => {
+    const res = await fetch(`${BASE}/api/data/dashboard`, {
+      headers: { cookie: `consuela_session=${petCookie}` },
+    });
+    if (res.status !== 403) throw new Error(`got ${res.status} — LEDGER LEAK to pet role`);
+  });
+  await check("pet /ledger redirects to /", async () => {
+    const res = await fetch(`${BASE}/ledger`, {
+      headers: { cookie: `consuela_session=${petCookie}` },
+      redirect: "manual",
+    });
+    if (res.status !== 307) throw new Error(`got ${res.status}`);
+  });
+}
 {
   const ctx = await authedContext(childCookie, { name: "Emily", role: "child", emoji: "👧", color: "violet" });
   const page = await ctx.newPage();

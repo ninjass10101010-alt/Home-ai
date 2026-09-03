@@ -68,7 +68,7 @@ Browser (parent)                  consuela-dashboard (Next.js, :3000)
 `src/middleware.ts` gains an **adult-only** gate next to the existing session gate:
 
 - New matcher entries: `/ledger`, `/ledger-app/:path*`, `/assets/:path*`. (`/api/data/*` + `/api/ofx/*` are already under the `/api/:path*` matcher.)
-- New rule for those prefixes: `verifySession()` must succeed **and** `session.role !== "child"`.
+- New rule for those prefixes: `verifySession()` must succeed **and** `session.role === "parent"` (allowlist). NOTE (final-review correction 2026-09-03): the original `role !== "child"` was a security defect — the roster has a third role `"pet"` (Rocco/Rico, default PIN `0000`, login-unfiltered) that would have passed a `!== "child"` deny and read the whole ledger. Only `parent` is admitted.
   - `/ledger` (page navigation) → `307` redirect to `/`.
   - Asset/data paths → `403 { error: "adult_only" }` (matches the existing admin-auth vocabulary).
 - Defense in depth: `/ledger` page also checks `useAuth()` client-side and renders a "Parents only 🔒" locked state if a child/guest render ever occurs (kid reaches it via cached client nav, etc.).
