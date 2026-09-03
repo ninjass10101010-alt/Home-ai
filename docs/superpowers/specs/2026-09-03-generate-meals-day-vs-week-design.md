@@ -44,7 +44,7 @@ No new paths — reuses `weeklyPlanError` ("No plan returned — try again", fet
   1. Day scope: mocked response containing Wed + Thu + Fri entries → only Wed meals are inserted; prompt body contains the single-day request.
   2. Week mode unchanged: 28-entry response fills empty slots across days; prompt still asks for the full week.
   3. Occupied-slot skip still applies in day mode (existing Wed dinner → only 3 new meals).
-- **NEW PlanTab sheet test** (extend or sibling of existing PlanTab tests): Generate opens the sheet; "Just Wed" calls `generateWeeklyPlan` with `["Wed"]`; "Whole week" calls without days; full-day card disabled.
+- **NEW `tests/unit/generate-scope-sheet.test.tsx`**: the sheet shows both options with slot counts, tapping "Just Wednesday"/"Whole week" fires the right handler, and a full day disables the day card. PlanTab's wiring (button opens the sheet, callbacks pass `[activeDay]`) is verified by the live Playwright probe rather than a full-PlanTab unit test — PlanTab pulls in the atmospheric theme + member roster and is impractical to render in isolation.
 - Full suite + `tsc` + `eslint` on touched files must stay clean.
 
 ## Out of scope
