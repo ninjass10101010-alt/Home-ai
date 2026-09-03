@@ -12,6 +12,7 @@ import { db } from "@/db";
 import { weekLabel } from "@/lib/meals-week-utils";
 import KitchenFlowCard from "@/components/meals/KitchenFlowCard";
 import RecipeBox from "@/components/meals/RecipeBox";
+import GenerateScopeSheet from "@/components/meals/GenerateScopeSheet";
 
 const mealTypes = [
   { id: "breakfast", label: "Breakfast", icon: "🌅" },
@@ -105,6 +106,7 @@ export default function PlanTab({
   const [showMemberPicker, setShowMemberPicker] = useState(false);
   const [initializedEaters, setInitializedEaters] = useState(false);
   const [showRecipeBox, setShowRecipeBox] = useState(false);
+  const [generateSheetOpen, setGenerateSheetOpen] = useState(false);
 
   // Defer reading db.selectMembersDetailed() until after mount, and render the
   // STATIC fallback family before mount. The module-load hydrate in db/index.ts
@@ -206,6 +208,12 @@ export default function PlanTab({
   const ringCircumference = 2 * Math.PI * 42;
   const ringStroke = (pct: number) => `${(pct / 100) * ringCircumference} ${ringCircumference}`;
 
+  const weekMealKeys = new Set(
+    meals.filter((m: Meal) => (m.weekOf || activeWeek) === activeWeek).map((m: Meal) => `${m.time}-${m.mealType}`)
+  );
+  const dayEmpty = mealTypes.filter((t) => !weekMealKeys.has(`${activeDay}-${t.id}`)).length;
+  const weekEmpty = weekDays.reduce((n, d) => n + mealTypes.filter((t) => !weekMealKeys.has(`${d}-${t.id}`)).length, 0);
+
   return (
     <div className="space-y-6 pb-6">
       <KitchenFlowCard step="plan" summary={flowSummary} />
@@ -285,7 +293,7 @@ export default function PlanTab({
                     size="sm"
                     variant="secondary"
                     loading={weeklyPlanLoading}
-                    onClick={() => generateWeeklyPlan(activeWeek, false)}
+                    onClick={() => setGenerateSheetOpen(true)}
                   >
                     ✨ Generate
                   </SoftButton>
@@ -836,6 +844,16 @@ export default function PlanTab({
           </div>
         )}
       </div>
+
+      <GenerateScopeSheet
+        open={generateSheetOpen}
+        dayName={activeDay}
+        dayEmpty={dayEmpty}
+        weekEmpty={weekEmpty}
+        onDay={() => { setGenerateSheetOpen(false); generateWeeklyPlan(activeWeek, false, [activeDay]); }}
+        onWeek={() => { setGenerateSheetOpen(false); generateWeeklyPlan(activeWeek, false); }}
+        onCancel={() => setGenerateSheetOpen(false)}
+      />
 
     </div>
   );
