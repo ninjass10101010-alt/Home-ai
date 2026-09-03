@@ -3,6 +3,7 @@ import { gatewayList, gatewayCreate, gatewayUpdate, gatewayDelete } from "./gate
 import { defaultMeals, mealIdeas, initialGroceryItems } from "../data/meals";
 import { memberPinMatches } from "@/lib/member-pins";
 import { memberFallbacks, mergeMemberFallbacks } from "@/lib/member-fallback";
+import { mapMealRows, mapRecipeRows } from "@/lib/meal-rows";
 
 function isServer() {
   return typeof window === "undefined";
@@ -750,6 +751,36 @@ export const db = {
   selectHallOfFame: async () => isServer() ? pbDb.selectHallOfFame() : clientListOrEmpty("hall_of_fame"),
 
   selectRecipes: async () => isServer() ? pbDb.selectRecipes() : clientListOrEmpty("recipes"),
+
+  // Honest read for the meals/recipes hooks: unlike clientListOrEmpty (which
+  // swallows 401s into an indistinguishable empty list), this reports whether
+  // the sessioned gateway read was BLOCKED so the UI can say "sign in" instead
+  // of silently showing stale local cache as truth.
+  gatewayReadStatus: async (collection: string): Promise<{ items: any[]; blocked: boolean }> => {
+    if (isServer()) {
+      // Server path: reuse the existing pb-db reads (meals parse their
+      // stringified arrays there; recipes map below so both paths agree).
+      try {
+        if (collection === "meal_plan_entries") return { items: await pbDb.selectMeals(), blocked: false };
+        if (collection === "recipes") return { items: mapRecipeRows(await pbDb.selectRecipes()), blocked: false };
+        return { items: [], blocked: false };
+      } catch {
+        return { items: [], blocked: false };
+      }
+    }
+    try {
+      const rows = await gatewayList(collection);
+      const items = collection === "meal_plan_entries"
+        ? mapMealRows(rows)
+        : collection === "recipes"
+          ? mapRecipeRows(rows)
+          : rows;
+      return { items, blocked: false };
+    } catch {
+      return { items: [], blocked: true };
+    }
+  },
+
   upsertRecipe: async (recipe: any) => {
     if (!isServer()) {
       try {

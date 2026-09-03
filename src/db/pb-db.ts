@@ -4,6 +4,7 @@ import { withAdmin } from "@/lib/pb-auth";
 import { idempotencyHashOf } from "@/lib/consuela/hash";
 import type { NewSuggestion, ProactiveSuggestion, SuggestionStatus } from "@/lib/consuela/types";
 import { memberFallbacks as membersFallback } from "@/lib/member-fallback";
+import { mapMealRows } from "@/lib/meal-rows";
 
 let localFallback = false;
 
@@ -268,11 +269,7 @@ export const db = {
 
   async selectMeals(userId = "demo") {
     const meals = await safeList<any>("meal_plan_entries", []);
-    return meals.map((meal: any) => ({
-      ...meal,
-      ingredients: typeof meal.ingredients === 'string' ? JSON.parse(meal.ingredients) : meal.ingredients ?? [],
-      tags: typeof meal.tags === 'string' ? JSON.parse(meal.tags) : meal.tags ?? [],
-    }));
+    return mapMealRows(meals);
   },
 
   async insertMeal(meal: any): Promise<any> {

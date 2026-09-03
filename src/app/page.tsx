@@ -100,6 +100,16 @@ export default function HomePage() {
   const [confirmingLogout, setConfirmingLogout] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Live roster: db/index.ts dispatches consuela-members-updated whenever the
+  // members cache refreshes (60s CacheRefresher pull, patchMemberLocal after a
+  // profile save). Bump a version so the family strip re-reads the roster
+  // instead of freezing at whatever it held at mount.
+  const [membersVersion, setMembersVersion] = useState(0);
+  useEffect(() => {
+    const onMembersUpdated = () => setMembersVersion(v => v + 1);
+    window.addEventListener("consuela-members-updated", onMembersUpdated);
+    return () => window.removeEventListener("consuela-members-updated", onMembersUpdated);
+  }, []);
 
   const router = useRouter();
   const { currentUser, isLoggedIn, logout, sessionRemainingMs, sessionWarning, extendSession } = useAuth();
@@ -131,14 +141,6 @@ export default function HomePage() {
     setNow(new Date());
 
     try {
-      const members = db.selectMembersDetailed().map((member: any, idx: number) => ({
-        name: member.name,
-        color: member.color || (idx % 4 === 0 ? "green" : idx % 4 === 1 ? "cyan" : idx % 4 === 2 ? "violet" : "amber"),
-        emoji: member.emoji,
-        avatarSize: normalizeAvatarSize(member.avatarSize),
-        glow: member.glow || false,
-      }));
-      setFamilyMembers(members);
       setTodayEvents(db.selectTodaysEvents());
       const storedTasks = typeof window !== "undefined" ? localStorage.getItem("consuela-tasks") : null;
       if (storedTasks) {
@@ -191,6 +193,25 @@ export default function HomePage() {
       setHomeError("Consuela could not load your family dashboard.");
     }
   }, []);
+
+  // Family strip roster read — its own effect so the roster re-reads when the
+  // members cache refreshes (consuela-members-updated bumps membersVersion)
+  // without re-running the clock/schedule/tasks mount logic above.
+  useEffect(() => {
+    try {
+      const members = db.selectMembersDetailed().map((member: any, idx: number) => ({
+        name: member.name,
+        color: member.color || (idx % 4 === 0 ? "green" : idx % 4 === 1 ? "cyan" : idx % 4 === 2 ? "violet" : "amber"),
+        emoji: member.emoji,
+        avatarSize: normalizeAvatarSize(member.avatarSize),
+        glow: member.glow || false,
+      }));
+      setFamilyMembers(members);
+    } catch {
+      // Keep whatever the strip already holds — a roster read failure must not
+      // blank the family avatars.
+    }
+  }, [membersVersion]);
 
   useEffect(() => {
     if (!mounted) return;

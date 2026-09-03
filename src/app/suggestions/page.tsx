@@ -25,6 +25,7 @@ const FILTERS: { id: FilterKind; label: string }[] = [
   { id: "task_penalty_streak", label: "⚠️ Tasks" },
   { id: "calendar_conflict", label: "📅 Calendar" },
   { id: "stale_data", label: "🍽️ Meals" },
+  { id: "grocery_store_optimization", label: "🛒 Grocery" },
 ];
 
 const KIND_LABELS: Record<SuggestionKind, string> = {

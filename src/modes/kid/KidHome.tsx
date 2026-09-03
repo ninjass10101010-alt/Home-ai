@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 /**
  * KidHome — The "Personal Adventure"
  *
@@ -208,12 +209,21 @@ export default function KidHome() {
   const [points, setPoints] = useState(0);
   const [tonightMeal, setTonightMeal] = useState<any>(null);
   const [celebration, setCelebration] = useState<{ points: number; leveledUp: boolean; newLevel: number } | null>(null);
+  // Live roster: bump a version on consuela-members-updated so the leaderboard
+  // re-reads the roster when the members cache refreshes.
+  const [membersVersion, setMembersVersion] = useState(0);
 
   const { currentUser } = useAuth();
   const { isBedtime, isWeekend } = useDashboardMode();
   const router = useRouter();
 
   const POINTS_PER_LEVEL = 50;
+
+  useEffect(() => {
+    const onMembersUpdated = () => setMembersVersion(v => v + 1);
+    window.addEventListener("consuela-members-updated", onMembersUpdated);
+    return () => window.removeEventListener("consuela-members-updated", onMembersUpdated);
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -231,6 +241,21 @@ export default function KidHome() {
       const dinner = allMeals.find((m: any) => m.time === todayName && m.mealType === "dinner") || allMeals.find((m: any) => m.mealType === "dinner");
       if (dinner) setTonightMeal(dinner);
 
+      // Load my points
+      if (currentUser) {
+        const myPoints = typeof window !== "undefined"
+          ? parseInt(localStorage.getItem(`consuela-points-${currentUser.name}`) || "0")
+          : 0;
+        setPoints(myPoints);
+      }
+    } catch {}
+    })();
+  }, [currentUser]);
+
+  // Roster read for the kid leaderboard — its own effect so consuela-members-updated
+  // (membersVersion) re-reads the roster without replaying the task/meal load above.
+  useEffect(() => {
+    try {
       const memberList = db.selectMembersDetailed().map((m: any) => ({
         name: m.name,
         color: m.color || "green",
@@ -243,17 +268,8 @@ export default function KidHome() {
           : 0,
       }));
       setMembers(memberList);
-
-      // Load my points
-      if (currentUser) {
-        const myPoints = typeof window !== "undefined"
-          ? parseInt(localStorage.getItem(`consuela-points-${currentUser.name}`) || "0")
-          : 0;
-        setPoints(myPoints);
-      }
     } catch {}
-    })();
-  }, [currentUser]);
+  }, [membersVersion]);
 
   const user = currentUser;
   const firstName = user?.name?.split(" ")[0] || "Buddy";

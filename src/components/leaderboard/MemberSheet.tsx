@@ -119,7 +119,7 @@ export default function MemberSheet({
               {pendingTasks.slice(0, 5).map((t: any) => (
                 <Surface key={t.id} variant="glass-subtle" radius="xl" padding="sm">
                   <div className="flex items-center gap-2 text-sm">
-                    <span className="text-base">{t.assigneeEmoji}</span>
+                    <Avatar name={t.assignee} color={getMemberColor(t.assignee)} emoji={t.assigneeEmoji} size="xs" variant="emoji" />
                     <span className="flex-1 truncate text-text-primary">{t.title}</span>
                     <Chip size="sm" tone="success">+{t.points}pts</Chip>
                   </div>

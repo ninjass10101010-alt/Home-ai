@@ -19,6 +19,7 @@ export default function RecipeBox({
   handleFileUpload,
   openImportModal,
   openSearchModal,
+  syncBlocked,
 }: any) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("All");
@@ -239,7 +240,15 @@ export default function RecipeBox({
         })}
       </div>
 
-      {visible.length === 0 && (
+      {syncBlocked && recipes.length === 0 && (
+        <div className="glass rounded-2xl p-8 text-center">
+          <p className="text-4xl">🔐</p>
+          <p className="mt-2 font-bold text-text-primary">Recipes are synced to the family account</p>
+          <p className="text-xs font-medium text-text-muted mt-1">Sign in with your PIN to see the family recipe box.</p>
+        </div>
+      )}
+
+      {visible.length === 0 && !syncBlocked && (
         <div className="glass rounded-2xl p-10 text-center">
           <p className="text-4xl">🍽️</p>
           <p className="mt-2 font-bold text-text-primary">No recipes match that</p>

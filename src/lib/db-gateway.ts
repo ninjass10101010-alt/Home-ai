@@ -21,6 +21,24 @@ export function isSafeFilter(filter: string | null): boolean {
 
 /** Strip anything that looks like internal/credential fields before writing
  * client-supplied rows, and cap list sizes. */
+// Credential-key matcher — deliberately precise. The old /pin/i substring rule
+// also stripped `pinned` (the grocery 📌 manual-override boolean) from every
+// gateway grocery write, silently losing the pin state. Keys like
+// pinned/isPinned/manualPinned describe a UI state, not a credential, so the
+// carve-out preserves them while still stripping exact pin/pins, camelCase or
+// separator-bounded pin compounds (pinCode, pinField, pin_code, member_pin),
+// keys ending in pin (memberPin), and secret/password/token fields.
+function isCredentialKey(key: string): boolean {
+  return (
+    /^(pin|pins)$/.test(key) ||
+    /^pin[A-Z]/.test(key) ||
+    /pincode/i.test(key) ||
+    /pin$/i.test(key) ||
+    /(?:^|[_-])pin(?:$|[_-])/.test(key) ||
+    /secret|password|token/i.test(key)
+  );
+}
+
 export function sanitizeClientRow(row: Record<string, unknown>): Record<string, unknown> {
   const clean = { ...row };
   delete clean.id;
@@ -29,7 +47,7 @@ export function sanitizeClientRow(row: Record<string, unknown>): Record<string, 
   delete clean.collectionId;
   delete clean.collectionName;
   for (const k of Object.keys(clean)) {
-    if (/pin|secret|password|token/i.test(k)) delete clean[k];
+    if (isCredentialKey(k)) delete clean[k];
   }
   return clean;
 }

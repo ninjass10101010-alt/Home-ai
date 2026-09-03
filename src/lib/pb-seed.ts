@@ -92,6 +92,7 @@ export const COLLECTIONS = [
       { name: "source", type: "text" },
       { name: "quantityValue", type: "number" },
       { name: "unit", type: "text" },
+      { name: "store", type: "text" },
       { name: "pinned", type: "bool" },
     ],
   },
@@ -194,7 +195,7 @@ export const COLLECTIONS = [
     name: "proactive_suggestions",
     schema: [
       { name: "idempotencyHash", type: "text", required: true },
-      { name: "kind", type: "select", options: { values: ["pantry_low","task_penalty_streak","calendar_conflict","stale_data","custom"] } },
+      { name: "kind", type: "select", options: { values: ["pantry_low","task_penalty_streak","calendar_conflict","stale_data","custom","grocery_store_optimization"] } },
       { name: "severity", type: "select", options: { values: ["info","warn","alert"] } },
       { name: "title", type: "text", required: true },
       { name: "body", type: "text" },
@@ -776,14 +777,29 @@ export async function seedCollections() {
         // every photo-avatar save; or meal_plan_entries.userId required —
         // a required userId blocked every Generate insert). Only fields the
         // seed defines an explicit options.max or required are healed.
+        // Select fields heal by exact value match: the seed's values list is
+        // the source of truth, so any live drift (out-of-band additions,
+        // missing values like proactive_suggestions.kind's
+        // grocery_store_optimization) is patched back to the seed's values.
         const fieldDrift: any[] = schema
-          .filter((s: any) => s.type === "text" && (s.options?.max !== undefined || s.required !== undefined) && liveFieldNames.has(s.name))
+          .filter((s: any) => liveFieldNames.has(s.name))
           .map((s: any) => {
             const liveField = (live.fields || []).find((f: any) => f.name === s.name);
             if (!liveField) return null;
-            const maxDrift = s.options?.max !== undefined && liveField.max !== s.options.max;
-            const requiredDrift = s.required !== undefined && !!liveField.required !== !!s.required;
-            return maxDrift || requiredDrift ? { schemaField: s, liveField } : null;
+            if (s.type === "text" && (s.options?.max !== undefined || s.required !== undefined)) {
+              const maxDrift = s.options?.max !== undefined && liveField.max !== s.options.max;
+              const requiredDrift = s.required !== undefined && !!liveField.required !== !!s.required;
+              return maxDrift || requiredDrift ? { schemaField: s, liveField } : null;
+            }
+            if (s.type === "select" && s.options?.values) {
+              const seedValues = s.options.values;
+              const liveValues = liveField.values || [];
+              const valuesDrift =
+                liveValues.length !== seedValues.length ||
+                seedValues.some((v: any, idx: number) => liveValues[idx] !== v);
+              return valuesDrift ? { schemaField: s, liveField } : null;
+            }
+            return null;
           })
           .filter(Boolean);
 
@@ -813,8 +829,12 @@ export async function seedCollections() {
             for (const d of fieldDrift) {
               const lf = mergedFields.find((f: any) => f.name === d.schemaField.name);
               if (lf) {
-                if (d.schemaField.options?.max !== undefined) lf.max = d.schemaField.options.max;
-                if (d.schemaField.required !== undefined) lf.required = !!d.schemaField.required;
+                if (d.schemaField.type === "select") {
+                  lf.values = d.schemaField.options.values;
+                } else {
+                  if (d.schemaField.options?.max !== undefined) lf.max = d.schemaField.options.max;
+                  if (d.schemaField.required !== undefined) lf.required = !!d.schemaField.required;
+                }
               }
             }
             await pb.collections.update(live.id, { fields: mergedFields });

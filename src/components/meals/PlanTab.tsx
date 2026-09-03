@@ -92,6 +92,7 @@ export default function PlanTab({
   saveCatalogRecipe, deleteCatalogRecipe, addRecipeToPlan, addRecipeToGrocery,
   startAddRecipe, startEditRecipe, handleFileUpload, openImportModal, openSearchModal,
   aiMealError, weeklyPlanLoading, weeklyPlanError, generateWeeklyPlan,
+  syncBlocked,
 }: any) {
 
   const { colors, accentRgb } = useAtmosphericTheme();
@@ -208,6 +209,15 @@ export default function PlanTab({
   return (
     <div className="space-y-6 pb-6">
       <KitchenFlowCard step="plan" summary={flowSummary} />
+
+      {/* ── Sign-in hint (blocked PB read + no local cache) ── */}
+      {syncBlocked && meals.length === 0 && (
+        <div className="glass rounded-2xl p-8 text-center">
+          <p className="text-4xl">🔐</p>
+          <p className="mt-2 font-bold text-text-primary">Meals are synced to the family account</p>
+          <p className="text-xs font-medium text-text-muted mt-1">Sign in with your PIN to see everyone&apos;s meals — they&apos;re waiting on the family server.</p>
+        </div>
+      )}
 
       {/* ── Meal-type filter pills ── */}
       <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
@@ -821,6 +831,7 @@ export default function PlanTab({
               handleFileUpload={handleFileUpload}
               openImportModal={openImportModal}
               openSearchModal={openSearchModal}
+              syncBlocked={syncBlocked}
             />
           </div>
         )}

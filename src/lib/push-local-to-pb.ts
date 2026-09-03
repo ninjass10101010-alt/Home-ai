@@ -18,17 +18,22 @@ function normalizeTaskCollection(data: any): any[] {
   return Object.values(data).filter((v: any) => v && typeof v === "object");
 }
 
+// Runs one item write and reports the outcome honestly. The browser db layer
+// never throws on a failed gateway write (safeGatewayRow swallows the 401 and
+// returns null), so counting must look at the RESULT: a returned row is a
+// push, null or a throw is an error. The old `.then(() => pushed++)` counted
+// swallowed failures as pushes — a fully-401'd push reported "Pushed N items"
+// with errors: 0.
+async function pushItem(fn: () => Promise<any>): Promise<boolean> {
+  try {
+    return Boolean(await fn());
+  } catch {
+    return false;
+  }
+}
+
 export async function pushLocalToPB(): Promise<{ collection: string; pushed: number; errors: number }[]> {
   const results: { collection: string; pushed: number; errors: number }[] = [];
-
-  const track = async <T>(collection: string, fn: () => Promise<T>): Promise<T> => {
-    try {
-      return await fn();
-    } catch {
-      results[results.length - 1].errors++;
-      throw undefined;
-    }
-  };
 
   let pushed = 0;
   let errors = 0;
@@ -37,13 +42,11 @@ export async function pushLocalToPB(): Promise<{ collection: string; pushed: num
   const grocery = loadJSON<any[]>("consuela-grocery", []);
   pushed = 0; errors = 0;
   if (grocery.length) {
-    await Promise.allSettled(
-      grocery.map((item: any) =>
-        track("grocery_list_items", () => db.upsertGroceryItem(item))
-          .then(() => pushed++)
-          .catch(() => {})
-      )
+    const outcomes = await Promise.all(
+      grocery.map((item: any) => pushItem(() => db.upsertGroceryItem(item)))
     );
+    pushed = outcomes.filter(Boolean).length;
+    errors = outcomes.length - pushed;
   }
   results.push({ collection: "grocery_list_items", pushed, errors });
 
@@ -51,13 +54,13 @@ export async function pushLocalToPB(): Promise<{ collection: string; pushed: num
   const pantry = loadJSON<any[]>("consuela-pantry", []);
   pushed = 0; errors = 0;
   if (pantry.length) {
-    await Promise.allSettled(
+    const outcomes = await Promise.all(
       pantry.map((item: any) =>
-        track("pantry_items", () =>
-          db.upsertPantryItem({ name: item.item || item.name, status: item.status || "plenty" })
-        ).then(() => pushed++).catch(() => {})
+        pushItem(() => db.upsertPantryItem({ name: item.item || item.name, status: item.status || "plenty" }))
       )
     );
+    pushed = outcomes.filter(Boolean).length;
+    errors = outcomes.length - pushed;
   }
   results.push({ collection: "pantry_items", pushed, errors });
 
@@ -73,14 +76,18 @@ export async function pushLocalToPB(): Promise<{ collection: string; pushed: num
     const existingKeys = new Set(
       existingMeals.map((m: any) => `${m.name?.toLowerCase()}|${m.weekOf || ""}`)
     );
-    await Promise.allSettled(
+    const outcomes = await Promise.all(
       meals.map((meal: any) => {
         const key = `${meal.name?.toLowerCase()}|${meal.weekOf || ""}`;
-        if (meal.name && existingKeys.has(key)) return Promise.resolve();
-        return track("meal_plan_entries", () => db.insertMeal(meal))
-          .then(() => pushed++).catch(() => {});
+        // Deduped meals resolve to null: neither a push nor an error.
+        if (meal.name && existingKeys.has(key)) return Promise.resolve(null);
+        return pushItem(() => db.insertMeal(meal)).then((ok) => (ok ? "pushed" : "error"));
       })
     );
+    for (const outcome of outcomes) {
+      if (outcome === "pushed") pushed++;
+      else if (outcome === "error") errors++;
+    }
   }
   results.push({ collection: "meal_plan_entries", pushed, errors });
 
@@ -88,12 +95,11 @@ export async function pushLocalToPB(): Promise<{ collection: string; pushed: num
   const recipes = loadJSON<any[]>("consuela-recipes", []);
   pushed = 0; errors = 0;
   if (recipes.length) {
-    await Promise.allSettled(
-      recipes.map((recipe: any) =>
-        track("recipes", () => db.upsertRecipe(recipe))
-          .then(() => pushed++).catch(() => {})
-      )
+    const outcomes = await Promise.all(
+      recipes.map((recipe: any) => pushItem(() => db.upsertRecipe(recipe)))
     );
+    pushed = outcomes.filter(Boolean).length;
+    errors = outcomes.length - pushed;
   }
   results.push({ collection: "recipes", pushed, errors });
 
@@ -101,12 +107,11 @@ export async function pushLocalToPB(): Promise<{ collection: string; pushed: num
   const events = loadJSON<any[]>("consuela-events", []);
   pushed = 0; errors = 0;
   if (events.length) {
-    await Promise.allSettled(
-      events.map((ev: any) =>
-        track("events", () => db.insertEvent(ev))
-          .then(() => pushed++).catch(() => {})
-      )
+    const outcomes = await Promise.all(
+      events.map((ev: any) => pushItem(() => db.insertEvent(ev)))
     );
+    pushed = outcomes.filter(Boolean).length;
+    errors = outcomes.length - pushed;
   }
   results.push({ collection: "events", pushed, errors });
 
@@ -114,12 +119,11 @@ export async function pushLocalToPB(): Promise<{ collection: string; pushed: num
   const schedules = loadJSON<any[]>("consuela-schedules", []);
   pushed = 0; errors = 0;
   if (schedules.length) {
-    await Promise.allSettled(
-      schedules.map((sch: any) =>
-        track("schedules", () => db.insertSchedule(sch))
-          .then(() => pushed++).catch(() => {})
-      )
+    const outcomes = await Promise.all(
+      schedules.map((sch: any) => pushItem(() => db.insertSchedule(sch)))
     );
+    pushed = outcomes.filter(Boolean).length;
+    errors = outcomes.length - pushed;
   }
   results.push({ collection: "schedules", pushed, errors });
 
@@ -165,15 +169,17 @@ export async function pushLocalToPB(): Promise<{ collection: string; pushed: num
   if (contacts.length) {
     const existing = await db.selectEmergencyContacts();
     const existingNames = new Set(existing.map((c: any) => c.name?.toLowerCase()));
-    await Promise.allSettled(
+    const outcomes = await Promise.all(
       contacts.map((c: any) => {
-        if (existingNames.has(c.name?.toLowerCase())) return;
-        return Promise.resolve()
-          .then(() => db.insertEmergencyContact(c))
-          .then(() => pushed++)
-          .catch(() => {});
+        // Deduped contacts resolve to null: neither a push nor an error.
+        if (existingNames.has(c.name?.toLowerCase())) return Promise.resolve(null);
+        return pushItem(() => db.insertEmergencyContact(c)).then((ok) => (ok ? "pushed" : "error"));
       })
     );
+    for (const outcome of outcomes) {
+      if (outcome === "pushed") pushed++;
+      else if (outcome === "error") errors++;
+    }
   }
   results.push({ collection: "emergency_contacts", pushed, errors });
 

@@ -133,7 +133,19 @@ function renderContent(text: string) {
 }
 
 function ChatContent() {
-  const membersData = useMemo(() => db.selectMembers(), []);
+  // Live roster: bump a version on consuela-members-updated so the speaker
+  // picker re-reads the roster when the members cache refreshes (60s
+  // CacheRefresher pull, patchMemberLocal after a profile save).
+  const [membersVersion, setMembersVersion] = useState(0);
+  useEffect(() => {
+    const onMembersUpdated = () => setMembersVersion(v => v + 1);
+    window.addEventListener("consuela-members-updated", onMembersUpdated);
+    return () => window.removeEventListener("consuela-members-updated", onMembersUpdated);
+  }, []);
+  // membersVersion bumps when the async members cache refreshes (see the
+  // consuela-members-updated listener above) so the roster memo recomputes —
+  // deliberate recompute trigger, same pattern as PlanTab's familyMembers.
+  const membersData = useMemo(() => db.selectMembers(), [membersVersion]); // eslint-disable-line react-hooks/exhaustive-deps
   const memberOptions = useMemo(() =>
     membersData.filter((m: any) => m.role !== "pet").map((m: any) => ({
       name: m.name,

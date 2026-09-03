@@ -206,37 +206,11 @@ function getActiveDayIndices(daysKey: string): number[] {
   }
 }
 
-const DEFAULT_CALENDAR_MEMBERS = [
-  { name: "All", color: "green", emoji: "👨‍👩‍👧‍👦" },
-  { name: "Rebecca", color: "green", emoji: "🐱" },
-  { name: "Jeffery", color: "cyan", emoji: "👨" },
-  { name: "Emily", color: "violet", emoji: "👧" },
-  { name: "Bailey", color: "amber", emoji: "👧" },
-  { name: "Jasmine", color: "rose", emoji: "👧" },
-  { name: "Aurora", color: "blue", emoji: "👧" },
-  { name: "Caspian", color: "cyan", emoji: "🧒" },
-];
-
-let cachedMembersSnapshot = DEFAULT_CALENDAR_MEMBERS;
-
-function getServerMembersSnapshot() {
-  return DEFAULT_CALENDAR_MEMBERS;
-}
-
-function getClientMembersSnapshot() {
-  return cachedMembersSnapshot;
-}
-
-function subscribeMembersSnapshot(onStoreChange: () => void) {
-  const handleStorage = (event: StorageEvent) => {
-    if (event.key === "consuela-members") {
-      cachedMembersSnapshot = db.selectMembersForCalendar();
-      onStoreChange();
-    }
-  };
-  window.addEventListener("storage", handleStorage);
-  return () => window.removeEventListener("storage", handleStorage);
-}
+import {
+  getServerMembersSnapshot,
+  getClientMembersSnapshot,
+  subscribeMembersSnapshot,
+} from "@/lib/calendar-member-snapshot";
 
 const emptySchedule = (): ScheduleItem => ({
   id: Date.now(),

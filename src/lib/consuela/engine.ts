@@ -36,16 +36,22 @@ export async function scanPantryLow(scopeDate: string): Promise<NewSuggestion[]>
     }>
   );
   const emitting = pantry.filter(p => p.status === "low" || p.status === "out");
-  return emitting.map(p => ({
-    kind: "pantry_low" as const,
-    severity: p.status === "out" ? "warn" as const : "info" as const,
-    title: `${p.item || p.name} is ${p.status === "out" ? "out" : "running low"}`,
-    body: `Pantry shows ${p.quantity ?? 0} ${p.unit ?? ""} of ${p.item || p.name}. Add to grocery list?`,
-    emoji: "🥫",
-    actionLabel: "Add to grocery",
-    actionPayload: { tool: "add_grocery_item", args: { items: p.item || p.name } },
-    scopeDate,
-  }));
+  return emitting.map(p => {
+    const name = p.item || p.name || "Pantry item";
+    const qty = p.quantity ?? 0;
+    const unit = (p.unit ?? "").toString().trim();
+    const qtyUnit = unit ? `${qty} ${unit}` : `${qty}`;
+    return {
+      kind: "pantry_low" as const,
+      severity: p.status === "out" ? "warn" as const : "info" as const,
+      title: `${name} is ${p.status === "out" ? "out" : "running low"}`,
+      body: `Pantry shows ${qtyUnit} of ${name}. Add to grocery list?`,
+      emoji: "🥫",
+      actionLabel: "Add to grocery",
+      actionPayload: { tool: "add_grocery_item", args: { items: name } },
+      scopeDate,
+    };
+  });
 }
 
 export async function scanTaskPenaltyStreak(scopeDate: string): Promise<NewSuggestion[]> {
@@ -61,8 +67,9 @@ export async function scanTaskPenaltyStreak(scopeDate: string): Promise<NewSugge
   const penaltiesByChild: Record<string, number> = {};
   if (week?.history && Array.isArray(week.history)) {
     for (const tx of week.history) {
-      if (tx.type === "penalty" && tx.member && tx.timestamp && new Date(tx.timestamp).getTime() > weekAgo) {
-        penaltiesByChild[tx.member] = (penaltiesByChild[tx.member] ?? 0) + 1;
+      const member = tx.member || "A family member";
+      if (tx.type === "penalty" && tx.timestamp && new Date(tx.timestamp).getTime() > weekAgo) {
+        penaltiesByChild[member] = (penaltiesByChild[member] ?? 0) + 1;
       }
     }
   }
@@ -80,7 +87,8 @@ export async function scanTaskPenaltyStreak(scopeDate: string): Promise<NewSugge
     }));
 }
 
-function parseMinutes(time: string): number {
+function parseMinutes(time: string | undefined): number {
+  if (!time) return NaN;
   const match = time.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
   if (match) {
     let hours = parseInt(match[1], 10);
@@ -116,11 +124,15 @@ export async function scanCalendarConflicts(scopeDate: string): Promise<NewSugge
       // L2 (boundary) — events starting exactly 30 min apart are back-to-back,
       // not a conflict: use `< 30`, not `<= 30`.
       if (parsed[j].mins - parsed[i].mins < 30) {
+        const t1 = parsed[i].title || "Untitled event";
+        const t2 = parsed[j].title || "Untitled event";
+        const time1 = parsed[i].time || "unknown time";
+        const time2 = parsed[j].time || "unknown time";
         suggestions.push({
           kind: "calendar_conflict",
           severity: "warn" as const,
-          title: `${parsed[i].title} and ${parsed[j].title} overlap`,
-          body: `"${parsed[i].title}" (${parsed[i].time}) and "${parsed[j].title}" (${parsed[j].time}) on ${scopeDate} are within 30 minutes of each other.`,
+          title: `${t1} and ${t2} overlap`,
+          body: `"${t1}" (${time1}) and "${t2}" (${time2}) on ${scopeDate} are within 30 minutes of each other.`,
           emoji: "📅",
           actionLabel: "View calendar",
           actionPayload: { tool: "open_calendar", args: { date: scopeDate } },
@@ -148,11 +160,15 @@ export async function scanCalendarConflicts(scopeDate: string): Promise<NewSugge
         // 23:50 + 30min = 00:20 next day (1440+20); overlaps 00:10 (1450 > 1450? no).
         // Overlap iff lateEnd (in next-day minutes) > early start (next-day minutes).
         if (lateMins + 30 > 24 * 60 + early.mins) {
+          const lateTitle = late.title || "Untitled event";
+          const earlyTitle = early.title || "Untitled event";
+          const lateTime = late.time || "unknown time";
+          const earlyTime = early.time || "unknown time";
           suggestions.push({
             kind: "calendar_conflict",
             severity: "warn" as const,
-            title: `${late.title} and ${early.title} overlap`,
-            body: `"${late.title}" (${late.time} on ${previousDay}) runs into "${early.title}" (${early.time} on ${scopeDate}).`,
+            title: `${lateTitle} and ${earlyTitle} overlap`,
+            body: `"${lateTitle}" (${lateTime} on ${previousDay}) runs into "${earlyTitle}" (${earlyTime} on ${scopeDate}).`,
             emoji: "📅",
             actionLabel: "View calendar",
             actionPayload: { tool: "open_calendar", args: { date: scopeDate } },

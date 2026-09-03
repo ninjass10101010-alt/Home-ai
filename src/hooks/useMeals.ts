@@ -45,6 +45,9 @@ export function useMeals() {
   const [meals, setMeals] = useState<Meal[]>([]);
   const [activeDay, setActiveDay] = useState(new Date().toLocaleDateString('en-US', { weekday: 'short' }));
   const [activeWeek, setActiveWeek] = useState(todayMondayISO());
+  // True when the sessioned PB read was blocked (401) — the local cache may be
+  // stale, so the UI can say "sign in" instead of showing it as truth.
+  const [syncBlocked, setSyncBlocked] = useState(false);
 
   // AI Suggestions
   const [aiMealIdeas, setAiMealIdeas] = useState<Array<{ name: string; emoji: string; tags: string[] }>>([]);
@@ -56,7 +59,11 @@ export function useMeals() {
 
   const pullMeals = useCallback(() => {
     const local = loadJSON<any[]>(MEALS_KEY, []);
-    db.selectMeals().then((pbData: any) => {
+    // gatewayReadStatus reports blocked reads instead of swallowing the 401
+    // into an empty list the way db.selectMeals' fallback path does.
+    (db as any).gatewayReadStatus("meal_plan_entries").then(({ items, blocked }: { items: any[]; blocked: boolean }) => {
+      setSyncBlocked(blocked);
+      const pbData = items;
       if (pbData && pbData.length > 0) {
         const merged = [...pbData];
         const pbNames = new Set(pbData.map((m: any) => m.name?.toLowerCase()));
@@ -229,6 +236,7 @@ export function useMeals() {
   return {
     meals,
     setMeals,
+    syncBlocked,
     activeDay,
     setActiveDay,
     activeWeek,

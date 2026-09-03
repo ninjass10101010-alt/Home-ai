@@ -53,10 +53,17 @@ const normalizeRecipe = (recipe: Partial<Recipe>, fallbackId?: number): Recipe =
 
 export function useRecipes(showToast: (msg: string) => void) {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
+  // True when the sessioned PB read was blocked (401) — the local catalog may
+  // be stale, so the UI can say "sign in" instead of showing it as truth.
+  const [syncBlocked, setSyncBlocked] = useState(false);
 
   const pullRecipes = useCallback(() => {
     const local = loadJSON<Recipe[]>(RECIPES_KEY, []);
-    db.selectRecipes().then((pbData: any) => {
+    // gatewayReadStatus reports blocked reads instead of swallowing the 401
+    // into an empty list the way db.selectRecipes' fallback path does.
+    (db as any).gatewayReadStatus("recipes").then(({ items, blocked }: { items: any[]; blocked: boolean }) => {
+      setSyncBlocked(blocked);
+      const pbData: any[] = items;
       if (pbData && pbData.length > 0) {
         const normalized = pbData.map((r: any) => normalizeRecipe(r, r.id));
         const pbNames = new Set(normalized.map((r: any) => r.name.toLowerCase()));
@@ -219,6 +226,7 @@ export function useRecipes(showToast: (msg: string) => void) {
 
   return {
     recipes,
+    syncBlocked,
     saveCatalogRecipe,
     deleteCatalogRecipe,
     handleFileUpload,

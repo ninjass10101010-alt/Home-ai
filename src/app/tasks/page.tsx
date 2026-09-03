@@ -269,7 +269,22 @@ export default function TasksPage() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
 
-  const membersData = useMemo(() => db.selectMembers(), []);
+  // Live roster: db/index.ts dispatches consuela-members-updated whenever the
+  // members cache refreshes (60s CacheRefresher pull, patchMemberLocal after a
+  // profile save). Bump a version so the member memos below re-read the roster
+  // instead of freezing at whatever the cache held at mount — same pattern as
+  // PlanTab's familyMembers.
+  const [membersVersion, setMembersVersion] = useState(0);
+  useEffect(() => {
+    const onMembersUpdated = () => setMembersVersion(v => v + 1);
+    window.addEventListener("consuela-members-updated", onMembersUpdated);
+    return () => window.removeEventListener("consuela-members-updated", onMembersUpdated);
+  }, []);
+
+  // membersVersion bumps when the async members cache refreshes (see the
+  // consuela-members-updated listener above) so the roster memos recompute —
+  // deliberate recompute trigger, same pattern as PlanTab's familyMembers.
+  const membersData = useMemo(() => db.selectMembers(), [membersVersion]); // eslint-disable-line react-hooks/exhaustive-deps
   const { currentUser, isLoggedIn } = useAuth();
   const allMembers = useMemo(() => {
     const names = membersData.map((m: any) => m.fullName);
@@ -1285,7 +1300,7 @@ export default function TasksPage() {
                   {aiSuggestions.map((suggestion) => (
                     <Surface key={suggestion.title} variant="glass-subtle" radius="xl" padding="sm">
                       <div className="flex items-start gap-3">
-                        <span className="text-xl">{suggestion.assigneeEmoji}</span>
+                        <Avatar name={suggestion.assignee} color={memberColors[suggestion.assignee] || "green"} emoji={suggestion.assigneeEmoji} size="sm" variant="emoji" />
                         <div className="min-w-0 flex-1">
                           <div className="text-sm font-semibold text-text-primary">{suggestion.title}</div>
                           <div className="mt-1 text-xs text-text-muted">{suggestion.assignee} · +{suggestion.points}pts</div>

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRoot } from "react-dom/client";
-import { act } from "react";
+import { act, useEffect } from "react";
 
 const h = vi.hoisted(() => ({
   meals: [] as any[],
@@ -11,6 +11,15 @@ const h = vi.hoisted(() => ({
 
 vi.mock("@/db", () => ({
   db: {
+    gatewayReadStatus: async (collection: string) => {
+      if (collection === "meal_plan_entries") {
+        return { items: h.meals.map((m) => ({ ...m })), blocked: false };
+      }
+      if (collection === "recipes") {
+        return { items: h.recipes.map((r) => ({ ...r })), blocked: false };
+      }
+      return { items: [], blocked: false };
+    },
     selectMeals: async () => h.meals.map((m) => ({ ...m })),
     insertMeal: async (meal: any) => {
       if (h.failNext) return null;
@@ -64,8 +73,14 @@ let recipesResult: any;
 let toastMsgs: string[];
 
 function Harness() {
-  mealsResult = useMeals();
-  recipesResult = useRecipes((msg: string) => toastMsgs.push(msg));
+  const meals = useMeals();
+  const recipes = useRecipes((msg: string) => toastMsgs.push(msg));
+  useEffect(() => {
+    // Publish the live hook results after render (effect side effects are the
+    // sanctioned way to hand state out of a test harness).
+    mealsResult = meals;
+    recipesResult = recipes;
+  });
   return null;
 }
 
