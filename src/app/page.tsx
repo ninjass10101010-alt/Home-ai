@@ -38,6 +38,7 @@ import MorningBriefingWidget from "@/components/briefing/MorningBriefingWidget";
 import HomeSecurityWidget from "@/components/ha/HomeSecurityWidget";
 import HomeClimateWidget from "@/components/ha/HomeClimateWidget";
 import HomeLightsWidget from "@/components/ha/HomeLightsWidget";
+import LedgerWidget from "@/components/finance/LedgerWidget";
 import { useMorningBriefing, briefingSectionsEmpty } from "@/components/briefing/hooks/useMorningBriefing";
 import ProfileSheet from "@/components/profile/ProfileSheet";
 import { useHomeEvents } from "@/hooks/useHomeEvents";
@@ -112,10 +113,12 @@ export default function HomePage() {
   }, []);
 
   const router = useRouter();
-  const { currentUser, isLoggedIn, logout, sessionRemainingMs, sessionWarning, extendSession } = useAuth();
+  const { currentUser, isLoggedIn, isParent, logout, sessionRemainingMs, sessionWarning, extendSession } = useAuth();
   const { visibleWidgets, orientation, mounted: layoutMounted } = useHomeLayout();
   const { upcomingImportant } = useHomeEvents();
   const gridClass = layoutMounted ? homeGridClass(orientation) : HOME_GRID_FALLBACK;
+  // The Ledger is parents-only — filtered out entirely (not a hollow cell).
+  const homeWidgets = isParent ? visibleWidgets : visibleWidgets.filter((w) => w.id !== "financeLedger");
 
   const sessionSecondsRemaining = Math.ceil(sessionRemainingMs / 1000);
   const showSessionPill = isLoggedIn && sessionRemainingMs < 30 * 60 * 1000 - 60 * 1000;
@@ -369,11 +372,11 @@ export default function HomePage() {
 
             <div className={gridClass}>
 
-            {visibleWidgets.map((w, index) => {
+            {homeWidgets.map((w, index) => {
               const id = w.id;
               const span = layoutMounted
                 ? orientation === "tablet"
-                  ? tabletSpanFor(id, index, visibleWidgets)
+                  ? tabletSpanFor(id, index, homeWidgets)
                   : widgetSpanClass(id, orientation)
                 : (WIDGET_SPANS[id] ?? "lg:col-span-1");
               switch (id) {
@@ -586,6 +589,9 @@ export default function HomePage() {
                       </WidgetCard>
                     </div>
                   );
+
+                case "financeLedger":
+                  return <div key="financeLedger" className={span}><LedgerWidget className="h-full" /></div>;
 
                 default:
                   return null;

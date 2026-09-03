@@ -18,7 +18,8 @@ export type WidgetId =
   | "tasks"
   | "homeSecurity"
   | "homeClimate"
-  | "homeLights";
+  | "homeLights"
+  | "financeLedger";
 
 /** Layout mode bucket. "phone"/"tablet" require portrait aspect + width bands;
  * everything else (landscape, or portrait >= 1280px) is "desktop". */
@@ -62,6 +63,7 @@ export const ALL_WIDGETS: WidgetDef[] = [
   { id: "homeSecurity", label: "Home Security", emoji: "🛡️", description: "Who's home, doors & locks, alarm" },
   { id: "homeClimate", label: "Home Climate",   emoji: "🌡️", description: "Indoor temperature and thermostat" },
   { id: "homeLights",  label: "Home Lights",    emoji: "💡", description: "Quick light toggles and scenes" },
+  { id: "financeLedger", label: "The Ledger", emoji: "📒", description: "Parents only — family balances & budget (Alex)" },
 ];
 
 /**
@@ -86,6 +88,7 @@ export const WIDGET_TIERS: Record<WidgetId, { phone: string; tablet: string; des
   homeSecurity: { phone: "", tablet: "col-span-1", desktop: "" },
   homeClimate: { phone: "", tablet: "col-span-1", desktop: "" },
   homeLights: { phone: "", tablet: "col-span-1", desktop: "" },
+  financeLedger: { phone: "", tablet: "col-span-1", desktop: "" },
 };
 
 export interface OrientationLayout {
@@ -114,13 +117,13 @@ export interface HomeLayoutConfig {
  */
 /** Phone (single-column) default order — the source order tablet derives from. */
 const PHONE_DEFAULT_WIDGETS: WidgetId[] = [
-  "morningBriefing", "weather", "aiQuickAsk", "consuelaSuggestions", "leaderboard", "todayEvents", "schedule", "currentMeal", "tasks", "homeSecurity", "homeClimate", "homeLights",
+  "morningBriefing", "weather", "aiQuickAsk", "consuelaSuggestions", "leaderboard", "todayEvents", "schedule", "currentMeal", "tasks", "homeSecurity", "homeClimate", "homeLights", "financeLedger",
 ];
 
 export const DEFAULT_LAYOUT: HomeLayoutConfig = {
   phone: { widgets: [...PHONE_DEFAULT_WIDGETS], hidden: [] },
   tablet: { widgets: [...PHONE_DEFAULT_WIDGETS], hidden: [] },
-  desktop: { widgets: ["morningBriefing", "aiQuickAsk", "leaderboard", "weather", "consuelaSuggestions", "currentMeal", "schedule", "tasks", "todayEvents", "homeSecurity", "homeClimate", "homeLights"], hidden: [] },
+  desktop: { widgets: ["morningBriefing", "aiQuickAsk", "leaderboard", "weather", "consuelaSuggestions", "currentMeal", "schedule", "tasks", "todayEvents", "homeSecurity", "homeClimate", "homeLights", "financeLedger"], hidden: [] },
 };
 
 /**
@@ -142,6 +145,7 @@ export const WIDGET_SPANS: Record<WidgetId, string> = {
   homeSecurity: "col-span-1",
   homeClimate: "col-span-1",
   homeLights: "col-span-1",
+  financeLedger: "col-span-1",
 };
 
 /**
