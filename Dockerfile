@@ -5,6 +5,11 @@ RUN npm cache clean --force 2>/dev/null; npm install
 COPY . .
 ARG NEXT_PUBLIC_PB_URL
 ENV NEXT_PUBLIC_PB_URL=$NEXT_PUBLIC_PB_URL
+# Next bakes rewrites() at build time, so the ledger proxy target must be
+# present here (not only as a runtime env). NAS build passes
+# --build-arg FINANCE_DASHBOARD_URL=http://finance-dashboard.
+ARG FINANCE_DASHBOARD_URL
+ENV FINANCE_DASHBOARD_URL=$FINANCE_DASHBOARD_URL
 RUN npm run build
 
 FROM node:20-alpine AS runner

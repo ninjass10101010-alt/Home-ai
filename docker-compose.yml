@@ -15,6 +15,7 @@ services:
       context: .
       args:
         - NEXT_PUBLIC_PB_URL=http://pocketbase:8090
+        - FINANCE_DASHBOARD_URL=http://finance-dashboard
     container_name: consuela-dashboard
     restart: unless-stopped
     ports:

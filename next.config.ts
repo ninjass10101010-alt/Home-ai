@@ -5,7 +5,12 @@ import type { NextConfig } from "next";
 // gated by middleware for parents only. NAS: http://finance-dashboard (the
 // container joins familydashboard_consuela-net — see DEPLOY_NAS_LOCAL.md);
 // local dev runs on the Mac, which reaches the published port directly.
-const FINANCE_DASHBOARD_URL = process.env.FINANCE_DASHBOARD_URL ?? "http://192.168.0.28:9080";
+// NOTE: Next.js bakes rewrites() into the build at BUILD time (routes-manifest),
+// so FINANCE_DASHBOARD_URL must be present as a build arg (see Dockerfile),
+// not only a runtime env. `||` (not `??`) so an empty build-arg falls back to
+// the dev default instead of baking a broken "/:path*" destination.
+const FINANCE_DASHBOARD_URL =
+  process.env.FINANCE_DASHBOARD_URL?.trim() || "http://192.168.0.28:9080";
 
 const nextConfig: NextConfig = {
   allowedDevOrigins: ["127.0.0.1", "localhost"],

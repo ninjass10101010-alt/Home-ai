@@ -34,6 +34,14 @@ describe("ledger proxy rewrites", () => {
     expect(rules[0].destination).toBe("http://finance-dashboard/:path*");
   });
 
+  it("falls back to the default when FINANCE_DASHBOARD_URL is empty/whitespace", async () => {
+    // Next bakes rewrites at build time; an unset build-arg arrives as "".
+    vi.stubEnv("FINANCE_DASHBOARD_URL", "   ");
+    const config = await loadConfig();
+    const rules = await config.rewrites();
+    expect(rules[0].destination).toBe("http://192.168.0.28:9080/:path*");
+  });
+
   it("keeps the existing /more → /calendar redirect", async () => {
     const config = await loadConfig();
     const redirects = await (config as any).redirects();
