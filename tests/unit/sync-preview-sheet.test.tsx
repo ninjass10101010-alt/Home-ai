@@ -16,7 +16,9 @@ async function render(props: any) {
   const el = document.createElement("div");
   document.body.appendChild(el);
   await act(async () => { createRoot(el).render(<SyncPreviewSheet {...props} />); });
-  return el;
+  // SyncPreviewSheet renders a Modal, which portals to document.body —
+  // assertions query the body, not the mount container.
+  return document.body;
 }
 
 function makeProps(overrides: any = {}) {

@@ -69,7 +69,7 @@ describe("MemberSheet pending-task photo avatars", () => {
   });
 
   it("renders a photo assigneeEmoji as an <img>, not raw base64 text", async () => {
-    const el = render(
+    render(
       <MemberSheet
         open
         entry={{ name: "Emily", emoji: "👧", streak: 2, rank: 1, levelEmoji: "⭐", levelTitle: "Champ" }}
@@ -84,9 +84,11 @@ describe("MemberSheet pending-task photo avatars", () => {
       />
     );
     await settle();
-    const imgs = Array.from(el.querySelectorAll("img"));
+    // MemberSheet renders a Modal, which portals to document.body.
+    const root = document.body;
+    const imgs = Array.from(root.querySelectorAll("img"));
     expect(imgs.length).toBeGreaterThan(0);
     expect(imgs.some((i) => i.getAttribute("src") === PHOTO)).toBe(true);
-    expect(el.textContent).not.toContain("data:image");
+    expect(root.textContent).not.toContain("data:image");
   });
 });
