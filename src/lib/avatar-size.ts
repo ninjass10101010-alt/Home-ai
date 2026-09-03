@@ -19,6 +19,16 @@ export function normalizeAvatarSize(size?: string): AvatarSize {
 }
 
 /**
+ * The size to show as SELECTED in a picker. Same as normalizeAvatarSize but
+ * maps the legacy "base" alias to "md" (both 40px) so the segmented control
+ * always highlights a real option instead of nothing for a stored "base".
+ */
+export function selectableAvatarSize(size?: string): AvatarSize {
+  const n = normalizeAvatarSize(size);
+  return n === "base" ? "md" : n;
+}
+
+/**
  * The sizes a member can choose in the UI, with friendly labels.
  * "base" is a legacy alias of "md" (both 40px) kept only for back-compat with
  * any stored value — it is intentionally NOT offered as a choice.

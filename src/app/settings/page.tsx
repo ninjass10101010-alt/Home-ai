@@ -19,7 +19,7 @@ import Toast from "@/components/ui/Toast";
 import ListRow from "@/components/ui/ListRow";
 import EmptyState from "@/components/ui/EmptyState";
 import Avatar from "@/components/ui/Avatar";
-import { normalizeAvatarSize, AVATAR_SIZE_OPTIONS } from "@/lib/avatar-size";
+import { normalizeAvatarSize, selectableAvatarSize, AVATAR_SIZE_OPTIONS } from "@/lib/avatar-size";
 import TextField from "@/components/ui/TextField";
 import FormField from "@/components/patterns/FormField";
 import MoreMenuItem from "@/components/patterns/MoreMenuItem";
@@ -402,7 +402,7 @@ export default function SettingsPage() {
       emoji: hasCustomImage ? "😊" : currentEmoji,
       role: member.role || "child",
       pin: member.pin || "",
-      avatarSize: member.avatarSize || "md",
+      avatarSize: selectableAvatarSize(member.avatarSize),
       glow: member.glow || false,
       imageUrl: hasCustomImage ? currentEmoji : "",
     } : { name: "", emoji: "😊", role: "child", pin: "", avatarSize: "md", glow: false, imageUrl: "" });

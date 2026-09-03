@@ -6,7 +6,7 @@ import Modal from "@/components/ui/Modal";
 import SoftButton from "@/components/ui/SoftButton";
 import Avatar, { type AvatarSize } from "@/components/ui/Avatar";
 import AvatarPicker from "@/components/profile/AvatarPicker";
-import { normalizeAvatarSize, AVATAR_SIZE_OPTIONS } from "@/lib/avatar-size";
+import { normalizeAvatarSize, selectableAvatarSize, AVATAR_SIZE_OPTIONS } from "@/lib/avatar-size";
 import { useAuth, type AuthUser } from "@/hooks/useAuth";
 import { db } from "@/db";
 
@@ -19,7 +19,7 @@ interface ProfileSheetProps {
 export default function ProfileSheet({ open, onClose, member }: ProfileSheetProps) {
   const { logout } = useAuth();
 
-  const memberSize = normalizeAvatarSize(member.avatarSize);
+  const memberSize = selectableAvatarSize(member.avatarSize);
   const [avatarValue, setAvatarValue] = useState<string>(member.emoji || "😊");
   const [sizeValue, setSizeValue] = useState<AvatarSize>(memberSize);
   const [avatarPin, setAvatarPin] = useState("");
