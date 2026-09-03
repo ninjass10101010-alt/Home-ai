@@ -128,16 +128,22 @@ export function useMeals() {
     setAiMealLoading(false);
   };
 
-  const generateWeeklyPlan = useCallback(async (weekOf: string, overwrite = false) => {
+  const generateWeeklyPlan = useCallback(async (weekOf: string, overwrite = false, days?: string[]) => {
     setWeeklyPlanLoading(true);
     setWeeklyPlanError(null);
     try {
       const pantry = (await db.selectPantry()).map((p: any) => p.name || p.item).join(", ");
+      const dayList = days?.join(", ") || "Mon, Tue, Wed, Thu, Fri, Sat, Sun";
+      const coverage = days?.length
+        ? `Cover breakfast, lunch, snack, and dinner for ${dayList} only (${days.length * 4} entries).`
+        : "Cover breakfast, lunch, snack, and dinner for Mon, Tue, Wed, Thu, Fri, Sat, Sun.";
+      const FULL_DAYS: Record<string, string> = { Mon: "Monday", Tue: "Tuesday", Wed: "Wednesday", Thu: "Thursday", Fri: "Friday", Sat: "Saturday", Sun: "Sunday" };
+      const dayPhrase = days?.length ? `${days.map((d) => FULL_DAYS[d] || d).join(", ")} only — a day of meals` : "a complete week of meals";
       const res = await fetch('/api/hermes/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: `Generate a complete week of meals for a family of 7 (kids ages 5-14). Daily targets: 2000 kcal, 150g protein, 300g carbs, 65g fat. Pantry has: ${pantry || "basic ingredients"}. Return ONLY JSON as {"meal_plan":[ ... 28 entries ... ]} — each entry: {"day":"Mon","mealType":"breakfast","name":"Meal Name","emoji":"🍳","tags":["Kid-friendly","Quick"],"prepTime":"30 min"}. Cover breakfast, lunch, snack, and dinner for Mon, Tue, Wed, Thu, Fri, Sat, Sun. No prose, just the JSON.`,
+          message: `Generate ${dayPhrase} for a family of 7 (kids ages 5-14). Daily targets: 2000 kcal, 150g protein, 300g carbs, 65g fat. Pantry has: ${pantry || "basic ingredients"}. Return ONLY JSON as {"meal_plan":[ ... ${days?.length ? days.length * 4 : 28} entries ... ]} — each entry: {"day":"Mon","mealType":"breakfast","name":"Meal Name","emoji":"🍳","tags":["Kid-friendly","Quick"],"prepTime":"30 min"}. ${coverage} No prose, just the JSON.`,
           persist: false,
         }),
       });
@@ -157,6 +163,13 @@ export function useMeals() {
         } catch {
           planItems = [];
         }
+      }
+
+      if (days?.length) {
+        const scope = new Set(days.map((d) => d.toLowerCase()));
+        planItems = planItems.filter((item: any) =>
+          scope.has(String(item.day || item.time || "").toLowerCase())
+        );
       }
 
       if (!planItems.length) {
