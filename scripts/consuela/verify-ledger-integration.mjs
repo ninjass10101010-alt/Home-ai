@@ -39,12 +39,35 @@ async function loginCookie(member) {
 
 const browser = await chromium.launch();
 
-async function authedContext(cookieValue) {
+async function authedContext(cookieValue, member) {
   const ctx = await browser.newContext();
   const url = new URL(BASE);
   await ctx.addCookies([
     { name: "consuela_session", value: cookieValue, domain: url.hostname, path: "/" },
   ]);
+  // The httpOnly cookie satisfies the SERVER gate, but the client widget/page
+  // gate on useAuth().isParent, which hydrates from localStorage (a real UI
+  // login sets both). Seed the same auth record the login flow writes so the
+  // browser checks exercise the true parent path.
+  if (member) {
+    const authUser = {
+      id: member.id ?? 1,
+      name: member.name,
+      role: member.role,
+      emoji: member.emoji ?? "🙂",
+      color: member.color ?? "rose",
+      avatarSize: "md",
+      glow: false,
+    };
+    await ctx.addInitScript(
+      ([key, val]) => {
+        try {
+          localStorage.setItem(key, val);
+        } catch {}
+      },
+      ["consuela-auth-user", JSON.stringify(authUser)]
+    );
+  }
   return ctx;
 }
 
@@ -86,7 +109,7 @@ await check("parent /api/data/dashboard returns yearData", async () => {
 });
 
 {
-  const ctx = await authedContext(parentCookie);
+  const ctx = await authedContext(parentCookie, { name: "Rebecca", role: "parent", emoji: "🐱", color: "rose" });
   const page = await ctx.newPage();
   await check("Home shows The Ledger card for parent", async () => {
     await page.goto(BASE, { waitUntil: "domcontentloaded" });
@@ -116,7 +139,7 @@ await check("child /api/data/dashboard 403s", async () => {
   if (res.status !== 403) throw new Error(`got ${res.status}`);
 });
 {
-  const ctx = await authedContext(childCookie);
+  const ctx = await authedContext(childCookie, { name: "Emily", role: "child", emoji: "👧", color: "violet" });
   const page = await ctx.newPage();
   await check("Home hides The Ledger card for child", async () => {
     await page.goto(BASE, { waitUntil: "domcontentloaded" });
