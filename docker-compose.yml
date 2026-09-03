@@ -47,6 +47,9 @@ services:
       # to the next day at 7-8 PM Eastern, which mis-dated AI-logged meals.
       - TZ=America/Detroit
       - HERMES_API_URL=http://hermes-agent-2:8643
+      # Alex's finance app (The Ledger) — proxied same-origin at /ledger-app,
+      # /assets, /api/data, /api/ofx. Container must join familydashboard_consuela-net.
+      - FINANCE_DASHBOARD_URL=http://finance-dashboard
       - HERMES_API_KEY=${HERMES_API_KEY:-consuela-api-key-2026}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_MIRROR_BOT_TOKEN=${TELEGRAM_MIRROR_BOT_TOKEN}
