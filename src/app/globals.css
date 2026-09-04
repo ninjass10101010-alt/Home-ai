@@ -455,6 +455,21 @@ body {
   color: var(--widget-accent, var(--color-accent-selected));
 }
 
+/* Kitchen (Meals / Pantry / Grocery) surfaces use plain cards, not
+   .widget-card, so their informational labels inherited the base muted token
+   (#4e5a72 ≈ 2.5:1) and failed AA. Re-scope the same AA text tokens the widget
+   cards use, applied once at the page root so secondary text meets contrast
+   without touching the global disabled-text token or 100+ call sites. */
+.kitchen-text {
+  --color-text-secondary: #a5afc7;
+  --color-text-muted: #8b99b5;
+}
+:root[data-theme="light"] .kitchen-text,
+:root:not([data-theme="dark"]) .kitchen-text {
+  --color-text-secondary: #57637a;
+  --color-text-muted: #4e596b;
+}
+
 /* Schedule rows: solid scrim under the per-color tint so the animated page
    fog can't wash the tint to a mid-tone and break text contrast. The tint
    gradient itself is applied inline as background-image. */

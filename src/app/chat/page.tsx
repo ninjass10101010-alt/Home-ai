@@ -449,7 +449,7 @@ function ChatContent() {
           ✨
         </div>
         <div className="flex-1 min-w-0">
-          <h1 className="text-sm font-semibold text-text-primary truncate">Consuela</h1>
+          <span className="block text-sm font-semibold text-text-primary truncate">Consuela</span>
           <div className="flex items-center gap-1.5">
             <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse shrink-0" />
             <span className="text-[10px] text-text-secondary truncate">AI Family Assistant</span>

@@ -344,7 +344,7 @@ function MealHubContent() {
         icon="🍽️"
       />
 
-      <div className="px-4 space-y-5 pb-8">
+      <div className="kitchen-text px-4 space-y-5 pb-8">
         <SegmentedControl
           aria-label="Kitchen"
           value={activeTab}

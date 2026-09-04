@@ -546,6 +546,7 @@ export default function ShopTab({
                             </button>
                             <button
                               onClick={(e) => { e.stopPropagation(); startEditing(item); }}
+                              aria-label={`Edit ${item.name}`}
                               className="flex h-11 w-11 items-center justify-center rounded-xl text-text-muted hover:bg-[var(--color-surface-2)] hover:text-text-primary tap-sm"
                             >
                               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-3.5 w-3.5">
@@ -555,6 +556,7 @@ export default function ShopTab({
                             </button>
                             <button
                               onClick={(e) => { e.stopPropagation(); deleteGroceryItem(item.id); }}
+                              aria-label={`Delete ${item.name}`}
                               className="flex h-11 w-11 items-center justify-center rounded-xl text-text-muted hover:bg-[var(--color-accent-rose)]/10 hover:text-[var(--color-accent-rose)] tap-sm"
                             >
                               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-3.5 w-3.5">
