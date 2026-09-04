@@ -105,4 +105,49 @@ describe("streamConsuelaChat", () => {
     const init = (fetchMock.mock.calls[0] as any)[1];
     expect(init.signal).toBeInstanceOf(AbortSignal);
   });
+
+  it("accepts an external abort signal and rejects when it fires", async () => {
+    const fetchMock = vi.fn(async () => sseResponse("data: [DONE]\n\n"));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+    await streamConsuelaChat({ message: "hi", signal: controller.signal });
+    const init = (fetchMock.mock.calls[0] as any)[1];
+    // The route gets an abortable signal whose [DONE] fast path still resolves.
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(init.signal.aborted).toBe(false);
+    expect(controller.signal.aborted).toBe(false);
+    // Aborting mid-stream propagates as a rejection, not a silent hang.
+    const neverStream = new ReadableStream<Uint8Array>({
+      start() { /* never enqueues, never closes */ },
+    });
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(neverStream, { status: 200, headers: { "content-type": "text/event-stream" } })));
+    const pending = streamConsuelaChat({ message: "hi", signal: controller.signal });
+    controller.abort();
+    await expect(pending).rejects.toThrow();
+  });
+
+  it("reports a user-intended abort distinctly from a network failure", async () => {
+    // Stream delivers two tokens then stays open — the abort fires mid-flight.
+    const enc = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(enc.encode('data: {"t":"par"}\n\ndata: {"t":"tial"}\n\n'));
+      },
+    });
+    vi.stubGlobal("fetch", vi.fn(async () =>
+      new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } })));
+    const controller = new AbortController();
+    const seen: string[] = [];
+    const pending = streamConsuelaChat({
+      message: "hi",
+      signal: controller.signal,
+      onToken: (full) => seen.push(full),
+    });
+    await vi.waitFor(() => expect(seen).toEqual(["par", "partial"]));
+    controller.abort();
+    const err = await pending.then(() => null, (e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).name).toBe("AbortError");
+  });
 });

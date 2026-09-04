@@ -40,3 +40,19 @@ The weather card alone speaks (Not Boring) Weather's interface language, in Cons
 - Card: press-and-drag the day strip to preview any hour (scene, temp, condition follow); release animates back to now. Tap elsewhere on the card → modal.
 - Modal: 24h scrubber (`role="slider"` with spoken `aria-valuetext`), exploded metric rows, UV 5-dot scale, pressure, sun arc, hourly/daily toggle.
 - Missing data hides rows; it never fakes values.
+
+## Ask Consuela chat — "Consuela's kitchen table" (accent unification, 2026-09-04)
+
+The chat surface joins the dashboard's accent system completely; its former fixed-violet identity is retired. Violet survives only as the default value of `--color-accent-selected` — pick another accent in Accent Studio and the whole chat follows.
+
+### Grammar
+- **The opening is the family's day, not a mascot screen.** Arrival order: who's speaking → dinner → next up → Consuela's open loops → composer. The orb is a ~72px companion beside the greeting; it swells (140px + ripple rings) only while thinking, then hands off to the thread.
+- **Every tap is a draft.** Brief cards, open-loop chips, and suggestion chips fill the composer as editable text; nothing on this surface writes family data in one tap (kid-safety rule).
+- **Open loops are real.** The chip row renders the suggestion engine's pending notices (kid-filtered via `visibleSuggestionsForRole`); static category drafts appear only as the empty-state fallback.
+- **The thread tells its own story.** Telegram-mirrored messages wear a `via Telegram · {member}` origin label; the active thread keeps a one-line today strip (speaker · dinner · next) above the messages.
+- **Zero raw palette literals.** All tints derive from `color-mix(in srgb, var(--color-accent-selected) N%, transparent)` — bubbles (18%/8%), chips (14–16%/5–6%), avatars (30%/15%), glows and ripples likewise. White-on-`--color-accent-button` for user bubbles only (the WCAG-safe white-text token).
+
+### Honesty rules (carried from the polish pass)
+- Signed-out chat says so (amber banner, thread-specific copy) — guest AI still answers, and silence would lie about the family thread.
+- Empty states are real: "Nothing planned yet" dinner, "Quiet rest of day" events, engine-quiet fallback chips. Never invented data.
+- **The orb can speak.** A 44px 🔊 companion beside the today-strip reads the last reply aloud for pre-readers (system voice, stripped of markdown/emoji); error replies are never read; it stops on tap. **The brief is alive** — it re-reads on the family data pulse and counts down to what's next. **Do-it is confirm-gated** — actionable loops carry a separate accent button through the shared PIN flow; the primary tap still drafts.

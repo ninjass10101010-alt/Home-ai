@@ -95,19 +95,24 @@ export function VoiceInputButton({ onTranscript, disabled }: VoiceInputButtonPro
     }
   };
 
+  const status = isRecording ? 'Recording…' : isProcessing ? 'Transcribing…' : error ?? '';
+  const stateLabel = isRecording ? 'Stop recording' : 'Start voice input';
+
   return (
     <div className="flex flex-col items-center gap-2">
       <button
         onClick={handleClick}
         disabled={disabled || isProcessing}
-        className={`flex h-12 w-12 items-center justify-center rounded-full transition-all ${
+        aria-label={stateLabel}
+        aria-pressed={isRecording}
+        title={stateLabel}
+        className={`tap-sm flex h-12 w-12 items-center justify-center rounded-full ${
           isRecording
-            ? 'bg-red-500 hover:bg-red-600 animate-pulse'
+            ? 'bg-[var(--color-accent-rose)] shadow-[0_0_16px_rgba(244,63,94,0.35)]'
             : isProcessing
-            ? 'bg-gray-400 cursor-not-allowed'
-            : 'bg-primary hover:bg-primary/90'
+            ? 'bg-[var(--color-surface-3,#3a4256)] cursor-not-allowed'
+            : 'bg-[var(--color-accent-button,var(--color-accent-selected))]'
         } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-        title={isRecording ? 'Stop recording' : 'Start voice input'}
       >
         {isProcessing ? (
           <Loader2 className="h-6 w-6 animate-spin text-white" />
@@ -118,16 +123,20 @@ export function VoiceInputButton({ onTranscript, disabled }: VoiceInputButtonPro
         )}
       </button>
 
+      {/* Live region: recording / transcribing / error announce to screen readers */}
+      <span role="status" aria-live="polite" className="sr-only">{status}</span>
+
+      {/* Visual status stays for sighted users (state also carried by the button color) */}
       {isRecording && (
-        <span className="text-xs text-red-500 font-medium">Recording...</span>
+        <span className="text-xs text-[var(--color-accent-rose)] font-medium">Recording…</span>
       )}
 
       {isProcessing && (
-        <span className="text-xs text-gray-500">Processing...</span>
+        <span className="text-xs text-text-secondary">Transcribing…</span>
       )}
 
       {error && (
-        <span className="text-xs text-red-500 text-center max-w-xs">{error}</span>
+        <span className="text-xs text-[var(--color-accent-rose)] text-center max-w-xs">{error}</span>
       )}
     </div>
   );

@@ -68,3 +68,48 @@ describe("UnifiedInput — direct send", () => {
     expect((el.querySelector("textarea") as HTMLTextAreaElement).disabled).toBe(true);
   });
 });
+
+describe("UnifiedInput — drafting during generation", () => {
+  it("sendDisabled blocks sending but keeps the textarea editable", () => {
+    vi.stubGlobal("fetch", vi.fn());
+    const onSend = vi.fn();
+    const el = render(<UnifiedInput onSendMessage={onSend} sendDisabled />);
+    const textarea = el.querySelector("textarea") as HTMLTextAreaElement;
+    expect(textarea.disabled).toBe(false);
+    typeInto(el, "next question");
+    clickSend(el);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("shows a stop control while streaming and calls it instead of sending", () => {
+    vi.stubGlobal("fetch", vi.fn());
+    const onSend = vi.fn();
+    const onStop = vi.fn();
+    const el = render(<UnifiedInput onSendMessage={onSend} streaming onStop={onStop} />);
+    const stop = el.querySelector("button[aria-label='Stop generating']") as HTMLButtonElement;
+    expect(stop).toBeDefined();
+    act(() => { stop.click(); });
+    expect(onStop).toHaveBeenCalledTimes(1);
+    expect(onSend).not.toHaveBeenCalled();
+    // Drafting stays possible while the reply streams.
+    expect((el.querySelector("textarea") as HTMLTextAreaElement).disabled).toBe(false);
+  });
+
+  it("prefills the composer with initialValue (quick-action draft)", () => {
+    vi.stubGlobal("fetch", vi.fn());
+    const el = render(<UnifiedInput onSendMessage={vi.fn()} initialValue="Add soccer practice tomorrow at 4pm" />);
+    expect((el.querySelector("textarea") as HTMLTextAreaElement).value).toBe("Add soccer practice tomorrow at 4pm");
+  });
+
+  it("labels the message field for screen readers", () => {
+    vi.stubGlobal("fetch", vi.fn());
+    const el = render(<UnifiedInput onSendMessage={vi.fn()} />);
+    expect(el.querySelector("textarea")!.getAttribute("aria-label")).toBe("Message Consuela");
+  });
+
+  it("hides the tip line when showTip is false (thread underway)", () => {
+    vi.stubGlobal("fetch", vi.fn());
+    const el = render(<UnifiedInput onSendMessage={vi.fn()} showTip={false} />);
+    expect(el.textContent).not.toContain("💡 Tip:");
+  });
+});

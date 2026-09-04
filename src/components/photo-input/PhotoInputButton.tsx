@@ -70,6 +70,8 @@ export function PhotoInputButton({ onExtracted, disabled }: PhotoInputButtonProp
     setError(null);
   };
 
+  const status = isProcessing ? 'Extracting text…' : error ?? '';
+
   return (
     <div className="flex flex-col items-center gap-2">
       <input
@@ -78,18 +80,20 @@ export function PhotoInputButton({ onExtracted, disabled }: PhotoInputButtonProp
         accept="image/*"
         capture="environment"
         onChange={handleFileChange}
+        aria-label="Photo to extract text from"
         className="hidden"
       />
 
       <button
         onClick={handleClick}
         disabled={disabled || isProcessing}
-        className={`flex h-12 w-12 items-center justify-center rounded-full transition-all ${
-          isProcessing
-            ? 'bg-gray-400 cursor-not-allowed'
-            : 'bg-primary hover:bg-primary/90'
-        } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+        aria-label="Take photo or upload image"
         title="Take photo or upload image"
+        className={`tap-sm flex h-12 w-12 items-center justify-center rounded-full ${
+          isProcessing
+            ? 'bg-[var(--color-surface-3,#3a4256)] cursor-not-allowed'
+            : 'bg-[var(--color-accent-button,var(--color-accent-selected))]'
+        } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
       >
         {isProcessing ? (
           <Loader2 className="h-6 w-6 animate-spin text-white" />
@@ -98,24 +102,30 @@ export function PhotoInputButton({ onExtracted, disabled }: PhotoInputButtonProp
         )}
       </button>
 
+      {/* Live region: extracting / error announce to screen readers */}
+      <span role="status" aria-live="polite" className="sr-only">{status}</span>
+
       {isProcessing && (
-        <span className="text-xs text-gray-500">Extracting text...</span>
+        <span className="text-xs text-text-secondary">Extracting text…</span>
       )}
 
       {error && (
-        <span className="text-xs text-red-500 text-center max-w-xs">{error}</span>
+        <span className="text-xs text-[var(--color-accent-rose)] text-center max-w-xs">{error}</span>
       )}
 
       {preview && (
         <div className="relative mt-2">
+          {/* eslint-disable-next-line @next/next/no-img-element -- local data-URL preview */}
           <img
             src={preview}
-            alt="Preview"
-            className="h-24 w-24 object-cover rounded-lg border-2 border-gray-300"
+            alt="Photo preview before sending"
+            className="h-24 w-24 object-cover rounded-lg border border-white/10"
           />
           <button
             onClick={clearPreview}
-            className="absolute -top-2 -right-2 h-6 w-6 bg-red-500 rounded-full flex items-center justify-center hover:bg-red-600"
+            aria-label="Remove photo"
+            title="Remove photo"
+            className="tap-sm absolute -top-2 -right-2 h-6 w-6 rounded-full bg-[var(--color-accent-rose)] flex items-center justify-center before:absolute before:-inset-2.5 before:content-['']"
           >
             <X className="h-4 w-4 text-white" />
           </button>

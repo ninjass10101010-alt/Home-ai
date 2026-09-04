@@ -5,9 +5,15 @@ import { useState, useRef, useEffect, useMemo, Suspense } from "react";
 import CapsuleNav from "@/components/ui/CapsuleNav";
 import Avatar from "@/components/ui/Avatar";
 import SigmaImage from "@/components/ui/SigmaImage";
+import SyncStatusBanner from "@/components/ui/SyncStatusBanner";
+import Modal from "@/components/ui/Modal";
 import { Icon3D } from "@/components/3d";
 import { UnifiedInput } from "@/components/chat/UnifiedInput";
 import { streamConsuelaChat } from "@/lib/chat-stream";
+import { FamilyBrief } from "./FamilyBrief";
+import { OpenLoopChips } from "./OpenLoopChips";
+import { messageOrigin, stripForSpeech } from "@/lib/consuela/chat-context";
+import { speak, stopSpeaking, isSpeaking, isSpeechSupported } from "@/lib/consuela/speech";
 
 import { db } from "@/db";
 import { useSearchParams } from "next/navigation";
@@ -22,6 +28,8 @@ interface Message {
   speaker?: string;
   speakerEmoji?: string;
   errorFor?: string;
+  /** Telegram-mirrored row — wears an origin badge in the thread. */
+  source?: "telegram";
 }
 
 const CHAT_STORAGE_KEY = "consuela-chat-messages";
@@ -70,14 +78,15 @@ async function fetchPBThread(sinceISO?: string): Promise<{ messages: Message[]; 
     const json = await res.json();
     if (!json.ok || !Array.isArray(json.messages)) return { messages: [], latest: null };
     let latest: string | null = null;
-    const messages = json.messages.map((m: any, i: number) => {
+    const messages = json.messages.map((m: any) => {
       if (m.createdAt && (!latest || String(m.createdAt) > latest)) latest = String(m.createdAt);
       return {
-        id: 1000000 + i,
+        id: pbSyntheticIdCounter++,
         role: m.role === "user" ? ("user" as const) : ("assistant" as const),
         content: m.content || "",
         timestamp: new Date(m.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
         ...(m.role === "user" && m.userId ? { speaker: m.userId } : {}),
+        ...(m.source === "telegram" ? { source: "telegram" as const } : {}),
       };
     });
     return { messages, latest };
@@ -97,19 +106,20 @@ function mergePBThread(prev: Message[], pbMsgs: Message[]): Message[] {
   return merged;
 }
 
+// Synthetic ids for PB-hydrated rows must be unique ACROSS reconciles, not
+// just within one fetch — a per-fetch index collides (fetch #2's row can get
+// the same id as fetch #1's) and duplicate React keys break list diffing.
+// Monotonic global counter, module-scoped so every fetch keeps counting up.
+let pbSyntheticIdCounter = 2_000_000;
+
 const initialGreeting: Message = {
   id: 1,
   role: "assistant",
-  content: "Hey there! 👋 I'm Consuela, your family assistant. I can help you manage your calendar, plan meals, organize tasks, and build grocery lists.\n\nJust tell me what you need!",
+  // The hero already introduces Consuela; the seed message just opens the
+  // door (no double introduction once the thread starts).
+  content: "What can I help you with today? 🏡",
   timestamp: "Now",
 };
-
-const quickActions = [
-  { icon: "calendar" as const, label: "Add Event", prompt: "Add soccer practice tomorrow at 4pm for Caspian" },
-  { icon: "meals" as const, label: "Plan Meals", prompt: "Plan dinners for this week" },
-  { icon: "tasks" as const, label: "Assign Chore", prompt: "Assign trash duty to Caspian every Thursday with 10 points" },
-  { icon: "grocery" as const, label: "Grocery List", prompt: "Generate grocery list for this week's meals" },
-];
 
 function escapeHtml(s: string) {
   return s
@@ -121,15 +131,40 @@ function escapeHtml(s: string) {
 
 function renderContent(text: string) {
   const lines = text.split("\n");
-  return lines.map((line, i) => {
-    const bold = escapeHtml(line).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-    return (
+  const nodes: React.ReactNode[] = [];
+  let listBuffer: string[] = [];
+  const flushList = (key: string) => {
+    if (listBuffer.length === 0) return;
+    nodes.push(
+      <ul key={`ul-${key}`} className="my-1 ml-4 list-disc space-y-0.5">
+        {listBuffer.map((item, j) => (
+          <li key={j} dangerouslySetInnerHTML={{ __html: item }} />
+        ))}
+      </ul>
+    );
+    listBuffer = [];
+  };
+  lines.forEach((line, i) => {
+    const escaped = escapeHtml(line);
+    // Markdown list lines ("- item" / "* item") render as real list items.
+    const listItem = /^\s*[-*•]\s+(.*)$/.exec(line);
+    if (listItem) {
+      listBuffer.push(
+        escapeHtml(listItem[1]).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      );
+      if (i === lines.length - 1) flushList(`end-${i}`);
+      return;
+    }
+    flushList(`mid-${i}`);
+    const bold = escaped.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+    nodes.push(
       <span key={i}>
         <span dangerouslySetInnerHTML={{ __html: bold }} />
         {i < lines.length - 1 && <br />}
       </span>
     );
   });
+  return nodes;
 }
 
 function ChatContent() {
@@ -233,14 +268,10 @@ function ChatContent() {
     if (hydrated && messages.length > 0) saveChatHistory(messages);
   }, [messages, hydrated]);
 
-  const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [statusLine, setStatusLine] = useState<string | null>(null);
   const [showSpeakerPicker, setShowSpeakerPicker] = useState(false);
-  const [isListening, setIsListening] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const recognitionRef = useRef<any>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const speakerPickerRef = useRef<HTMLDivElement>(null);
   const [pinnedToBottom, setPinnedToBottom] = useState(true);
@@ -254,6 +285,37 @@ function ChatContent() {
 
   // Hide quick actions while Consuela is thinking — don't let them tap again
   const showQuickActions = userMessageCount === 0 && !isTyping;
+
+  // ─── Read-aloud orb (pre-readers): the strip's mini orb speaks the last reply ───
+  const lastAssistantReply = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role === "assistant" && m.content.trim() && !m.errorFor) return m.content;
+    }
+    return null;
+  }, [messages]);
+  const [speaking, setSpeaking] = useState(false);
+  useEffect(() => {
+    if (!speaking) return;
+    // Sync with natural utterance ends (cheap poll while active).
+    const t = window.setInterval(() => {
+      if (!isSpeaking()) setSpeaking(false);
+    }, 500);
+    return () => window.clearInterval(t);
+  }, [speaking]);
+  const toggleReadAloud = () => {
+    if (speaking) {
+      stopSpeaking();
+      setSpeaking(false);
+      return;
+    }
+    if (!lastAssistantReply) return;
+    speak(stripForSpeech(lastAssistantReply));
+    setSpeaking(isSpeechSupported());
+  };
+  useEffect(() => {
+    if (speaking && !isSpeechSupported()) setSpeaking(false);
+  }, [speaking]);
 
   // Only auto-scroll while the reader is already near the bottom — never
   // fight someone scrolling back through history.
@@ -293,38 +355,29 @@ function ChatContent() {
     };
   }, [showSpeakerPicker]);
 
-  useEffect(() => {
-    if (typeof window !== "undefined" && ("webkitSpeechRecognition" in window || "SpeechRecognition" in window)) {
-      const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
-      recognitionRef.current = new SpeechRecognition();
-      recognitionRef.current.continuous = false;
-      recognitionRef.current.interimResults = false;
-      recognitionRef.current.lang = "en-US";
-      recognitionRef.current.onresult = (event: any) => {
-        setInput(event.results[0][0].transcript);
-        setIsListening(false);
-      };
-      recognitionRef.current.onerror = () => setIsListening(false);
-      recognitionRef.current.onend = () => setIsListening(false);
-    }
-    return () => { if (recognitionRef.current) recognitionRef.current.stop(); };
-  }, []);
-
   const msgCounter = useRef(Math.max(100, ...messages.map(m => m.id)));
   const messagesRef = useRef(messages);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
   // Spans the ENTIRE stream — the visual isTyping flag drops on the first
   // token (intended UX), so it can't also be the double-send guard.
   const streamInFlightRef = useRef(false);
-  // Render-visible mirror of the ref: keeps the composer disabled for the
-  // whole stream so a mid-stream send can't be silently swallowed.
+  // Live AbortController for the in-flight stream — the stop button's handle.
+  const abortRef = useRef<AbortController | null>(null);
+  // Render-visible mirror of the ref: keeps the composer's send path disabled
+  // for the whole stream so a mid-stream send can't be silently swallowed.
   const [composerLocked, setComposerLocked] = useState(false);
+
+  const stopGenerating = () => {
+    abortRef.current?.abort();
+  };
 
   const sendMessage = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || isTyping || streamInFlightRef.current) return;
     streamInFlightRef.current = true;
     setComposerLocked(true);
+    const controller = new AbortController();
+    abortRef.current = controller;
 
     msgCounter.current += 1;
     const userMsg: Message = {
@@ -338,13 +391,14 @@ function ChatContent() {
 
     setMessages(prev => [...prev, userMsg]);
     setPinnedToBottom(true);
-    setInput("");
     setIsTyping(true);
     setStatusLine(null);
 
     msgCounter.current += 1;
     const streamId = msgCounter.current;
     let bubbleOpen = false;
+    // Whatever streamed before a stop/failure — a stopped reply keeps its words.
+    let streamedSoFar = "";
 
     try {
       const t0 = Date.now();
@@ -356,8 +410,10 @@ function ChatContent() {
             ? m.content.replace(/\n\n✅[\s\S]*$/, "").trim()
             : m.content,
         })),
+        signal: controller.signal,
         onStatus: (label) => setStatusLine(label),
         onToken: (full) => {
+          streamedSoFar = full;
           if (!bubbleOpen) { bubbleOpen = true; setIsTyping(false); }
           setMessages(prev => prev.some(m => m.id === streamId)
             ? prev.map(m => (m.id === streamId ? { ...m, content: full } : m))
@@ -394,46 +450,67 @@ function ChatContent() {
     } catch (error) {
       setIsTyping(false);
       setStatusLine(null);
-      msgCounter.current += 1;
-      setMessages(prev => [...prev, {
-        id: msgCounter.current,
-        role: "assistant",
-        content: "Sorry, I'm having trouble right now.",
-        timestamp: "Just now",
-        errorFor: trimmed,
-      }]);
+
+      if (controller.signal.aborted) {
+        // User pressed stop — not an error. Keep whatever streamed; if nothing
+        // did, say so plainly instead of dropping a silent hole in the thread.
+        const stoppedContent = streamedSoFar.trim() || "Stopped.";
+        setMessages(prev => prev.some(m => m.id === streamId)
+          ? prev.map(m => (m.id === streamId ? { ...m, content: stoppedContent } : m))
+          : [...prev, { id: streamId, role: "assistant" as const, content: stoppedContent, timestamp: "Just now" }]);
+      } else {
+        // Honest failure: name the problem (offline vs server) and the recovery.
+        const offline = typeof navigator !== "undefined" && !navigator.onLine;
+        const failedContent = offline
+          ? "You're offline — I can't reach the family server right now. Check the connection and try again."
+          : "I couldn't reach the family server just now. Your message is still here — try again in a moment.";
+        msgCounter.current += 1;
+        setMessages(prev => [...prev, {
+          id: msgCounter.current,
+          role: "assistant",
+          content: failedContent,
+          timestamp: "Just now",
+          errorFor: trimmed,
+        }]);
+      }
     } finally {
+      abortRef.current = null;
       streamInFlightRef.current = false;
       setComposerLocked(false);
     }
   };
 
   const retryMessage = (failedText: string, failedId: number) => {
+    // Never remove the failed bubble unless the retry will actually run —
+    // a mid-stream guard drop would otherwise eat the user's message.
+    if (isTyping || streamInFlightRef.current) return;
     setMessages(prev => prev.filter(m => m.id !== failedId));
     sendMessage(failedText);
   };
 
+  const [confirmClearOpen, setConfirmClearOpen] = useState(false);
+  // Quick-action chips fill the composer as an EDITABLE draft (remount via
+  // key) instead of firing a real write on one tap — a stray tap on the
+  // kitchen phone must never create family data by itself.
+  const [draft, setDraft] = useState<{ text: string; seq: number } | null>(null);
+  const draftSeq = useRef(0);
+  const fillDraft = (text: string) => {
+    draftSeq.current += 1;
+    setDraft({ text, seq: draftSeq.current });
+  };
   const clearChat = () => {
     setMessages([initialGreeting]);
     saveChatHistory([initialGreeting]);
+    setConfirmClearOpen(false);
   };
 
   // Deep-link query: /chat?q=... fires the query exactly once, after the
   // thread has hydrated, and strips the param from the URL immediately.
   usePendingChatQuery(queryParam, hydrated, sendMessage);
 
-  const toggleListening = () => {
-    if (!recognitionRef.current) return;
-    isListening ? recognitionRef.current.stop() : recognitionRef.current.start();
-    setIsListening(!isListening);
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage(input);
-    }
-  };
+  // Speaker-picker handoff for the FamilyBrief's speaker card (guests only —
+  // signed-in members speak as themselves).
+  const openSpeakerPicker = () => setShowSpeakerPicker(true);
 
   return (
     <div className="page-settle min-h-screen max-w-lg mx-auto flex flex-col relative bg-surface-0">
@@ -444,7 +521,7 @@ function ChatContent() {
         style={{ marginTop: "calc(env(safe-area-inset-top) + 0.5rem)" }}
       >
         <div className="w-9 h-9 rounded-2xl flex items-center justify-center text-lg shrink-0"
-          style={{ background: "linear-gradient(135deg, var(--color-accent-violet), var(--color-accent-lavender))", boxShadow: "0 0 16px rgba(124,111,247,0.3)" }}
+          style={{ background: "linear-gradient(135deg, var(--color-accent-selected), color-mix(in srgb, var(--color-accent-selected) 55%, white))", boxShadow: "0 0 16px color-mix(in srgb, var(--color-accent-selected) 30%, transparent)" }}
         >
           ✨
         </div>
@@ -452,7 +529,7 @@ function ChatContent() {
           <h1 className="text-sm font-semibold text-text-primary truncate">Consuela</h1>
           <div className="flex items-center gap-1.5">
             <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse shrink-0" />
-            <span className="text-[10px] text-text-secondary truncate">AI Family Assistant</span>
+            <span className="text-[11px] text-text-secondary truncate">AI Family Assistant</span>
           </div>
         </div>
 
@@ -489,12 +566,12 @@ function ChatContent() {
                     role="menuitem"
                     onClick={() => saveSpeaker(m)}
                     className={`relative w-full flex items-center gap-2 px-3 py-2.5 text-xs transition-colors hover:bg-white/5 focus-visible:bg-white/5 ${
-                      currentSpeaker.name === m.name ? "text-[var(--color-accent-violet)] bg-[var(--color-accent-violet)]/10" : "text-text-primary"
+                      currentSpeaker.name === m.name ? "text-[var(--color-accent-selected)] bg-[color-mix(in_srgb,var(--color-accent-selected)_10%,transparent)]" : "text-text-primary"
                     }`}
                   >
                     <EmojiSpan emoji={m.emoji} alt={m.name} />
                     <span>{m.name}</span>
-                    {currentSpeaker.name === m.name && <span className="ml-auto text-[var(--color-accent-violet)]">✓</span>}
+                    {currentSpeaker.name === m.name && <span className="ml-auto text-[var(--color-accent-selected)]">✓</span>}
                   </button>
                 ))}
               </div>
@@ -503,7 +580,7 @@ function ChatContent() {
         )}
 
         <button
-          onClick={clearChat}
+          onClick={() => setConfirmClearOpen(true)}
           aria-label="Clear conversation"
           title="Clear chat"
           className="relative w-8 h-8 flex items-center justify-center rounded-2xl glass-subtle text-text-secondary hover:text-text-primary transition-colors shrink-0 before:absolute before:-inset-1.5 before:content-['']"
@@ -514,6 +591,12 @@ function ChatContent() {
         </button>
       </div>
 
+      {/* ─── Signed-out honesty: chat without a session is this-device-only ─── */}
+      <SyncStatusBanner
+        message="🔐 Signed out — this conversation stays on this device. Sign in with your PIN to join the family thread."
+        className="mx-3 sm:mx-4 mt-3"
+      />
+
       {/* ─── Messages area ─── */}
       <div
         ref={scrollAreaRef}
@@ -522,123 +605,137 @@ function ChatContent() {
         aria-label="Conversation with Consuela"
         className="flex-1 overflow-y-auto px-4 py-4 space-y-4"
       >
-        {/* Hero greeting state */}
-        {showHero && (
-          <div className="flex flex-col items-center pt-10 pb-6">
-            {/* Orb + ring container */}
-            <div className="relative w-[200px] h-[200px] flex items-center justify-center chat-hero-enter">
-              {/* Ambient glow — large soft halo behind the orb, visible only while thinking */}
-              {isTyping && (
-                <div
-                  className="chat-ambient-glow absolute inset-0 rounded-full"
-                  style={{
-                    background: "radial-gradient(circle, rgba(167,139,250,0.5) 0%, rgba(124,111,247,0.2) 40%, transparent 70%)",
-                    filter: "blur(24px)",
-                  }}
-                />
-              )}
-
-              {/* Glowing orb — elastic morph when thinking */}
-              <div
-                className={`w-[140px] h-[140px] rounded-full ${isTyping ? "chat-orb-think" : "chat-hero-orb"}`}
-                style={{
-                  background: "radial-gradient(circle at 40% 35%, rgba(167,139,250,0.9) 0%, rgba(124,111,247,0.6) 35%, rgba(99,102,241,0.2) 70%, transparent 100%)",
-                  boxShadow: `0 0 80px rgba(124,111,247,${isTyping ? "0.40" : "0.25"}), 0 0 160px rgba(167,139,250,0.12), inset 0 2px 0 rgba(255,255,255,0.2)`,
-                }}
+        {/* Active-thread glance: who's speaking + today in one line + read-aloud orb */}
+        {!showHero && (
+          <div className="flex items-center gap-2 mx-3 sm:mx-4 mt-2">
+            <div className="flex-1 min-w-0">
+              <FamilyBrief
+                compact
+                speaker={activeSpeaker}
+                onDraft={fillDraft}
+                onSpeakerTap={openSpeakerPicker}
+                signedIn={isLoggedIn}
               />
-
-              {/* Siri-style concentric ripple rings — 5 rings staggered evenly across 1.8s */}
-              {isTyping && (
-                <svg className="absolute inset-0 w-full h-full" viewBox="0 0 200 200">
-                  {[0, 1, 2, 3, 4].map((i) => {
-                    const phase = i / 5;
-                    const strokeAlpha = 0.55 - phase * 0.4;
-                    const strokeWidth = 2.0 - phase * 0.35;
-                    return (
-                      <circle
-                        key={i}
-                        cx="100" cy="100" r="78"
-                        fill="none"
-                        stroke={`rgba(192,132,252,${strokeAlpha.toFixed(2)})`}
-                        strokeWidth={strokeWidth}
-                        className="chat-ripple"
-                        style={{
-                          animationDelay: `${(phase * 1.8).toFixed(2)}s`,
-                          transformOrigin: "100px 100px",
-                        }}
-                      />
-                    );
-                  })}
-                </svg>
-              )}
-
-              {/* Dotted ring — spins faster while thinking */}
-              <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 200 200">
-                <circle
-                  cx="100" cy="100" r="88"
-                  fill="none"
-                  stroke="rgba(192,132,252,0.40)"
-                  strokeWidth="1.0"
-                  strokeDasharray="6 14"
-                  strokeLinecap="round"
-                  className={isTyping ? "chat-hero-ring-fast" : "chat-hero-ring"}
-                />
-                <circle
-                  cx="100" cy="100" r="88"
-                  fill="none"
-                  stroke="rgba(147,51,234,0.25)"
-                  strokeWidth="0.6"
-                  strokeDasharray="3 17"
-                  strokeLinecap="round"
-                  style={{ animation: `chatRingSweep${isTyping ? "Fast" : ""} 25s linear infinite reverse` }}
-                />
-              </svg>
             </div>
-
-            {/* Greeting / thinking text */}
+            {lastAssistantReply && isSpeechSupported() && (
+              <button
+                onClick={toggleReadAloud}
+                aria-label={speaking ? "Stop reading" : "Read the last reply aloud"}
+                title={speaking ? "Stop reading" : "Read the last reply aloud"}
+                className={`tap-sm shrink-0 w-11 h-11 rounded-full flex items-center justify-center text-lg ${
+                  speaking
+                    ? "bg-[var(--color-accent-selected)]/25 ring-2 ring-[var(--color-accent-selected)]/50"
+                    : "glass-subtle"
+                }`}
+              >
+                <span aria-hidden>{speaking ? "⏹" : "🔊"}</span>
+              </button>
+            )}
+          </div>
+        )}
+        {/* Hero: the family's day + a companion orb — the brief IS the opening */}
+        {showHero && (
+          <div className="flex flex-col items-center pt-6 pb-6 gap-5">
             {isTyping ? (
-              <p className="text-sm text-text-secondary mt-3 chat-hero-enter chat-hero-enter-delay-100">
-                Thinking…
-              </p>
-            ) : (
-              <>
-                <h2 className="text-2xl font-bold mt-2 chat-hero-enter chat-hero-enter-delay-100"
-                  style={{
-                    background: "linear-gradient(135deg, var(--color-accent-violet), var(--color-accent-lavender))",
-                    WebkitBackgroundClip: "text",
-                    WebkitTextFillColor: "transparent",
-                    backgroundClip: "text",
-                  }}
-                >
-                  Hi, I&apos;m Consuela
-                </h2>
-                <p className="text-sm text-text-secondary mt-1 chat-hero-enter chat-hero-enter-delay-200">
-                  What can I help you with today?
+              <div className="flex flex-col items-center pt-4">
+                <div className="relative w-[200px] h-[200px] flex items-center justify-center chat-hero-enter">
+                  <div
+                    className="chat-ambient-glow absolute inset-0 rounded-full"
+                    style={{
+                      background: "radial-gradient(circle, color-mix(in srgb, var(--color-accent-selected) 50%, transparent) 0%, color-mix(in srgb, var(--color-accent-selected) 20%, transparent) 40%, transparent 70%)",
+                      filter: "blur(24px)",
+                    }}
+                  />
+                  <div
+                    className="w-[140px] h-[140px] rounded-full chat-orb-think"
+                    style={{
+                      background: "radial-gradient(circle at 40% 35%, color-mix(in srgb, var(--color-accent-selected) 85%, white) 0%, color-mix(in srgb, var(--color-accent-selected) 60%, transparent) 35%, color-mix(in srgb, var(--color-accent-selected) 20%, transparent) 70%, transparent 100%)",
+                      boxShadow: "0 0 80px color-mix(in srgb, var(--color-accent-selected) 40%, transparent), 0 0 160px color-mix(in srgb, var(--color-accent-selected) 12%, transparent), inset 0 2px 0 rgba(255,255,255,0.2)",
+                    }}
+                  />
+                  <svg className="absolute inset-0 w-full h-full" viewBox="0 0 200 200" aria-hidden>
+                    {[0, 1, 2, 3, 4].map((i) => {
+                      const phase = i / 5;
+                      const strokeAlpha = 0.55 - phase * 0.4;
+                      const strokeWidth = 2.0 - phase * 0.35;
+                      return (
+                        <circle
+                          key={i}
+                          cx="100" cy="100" r="78"
+                          fill="none"
+                          style={{
+                            stroke: `color-mix(in srgb, var(--color-accent-selected) ${Math.round(strokeAlpha * 100)}%, transparent)`,
+                            strokeWidth,
+                            animationDelay: `${(phase * 1.8).toFixed(2)}s`,
+                            transformOrigin: "100px 100px",
+                          }}
+                          className="chat-ripple"
+                        />
+                      );
+                    })}
+                  </svg>
+                  <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 200 200" aria-hidden>
+                    <circle
+                      cx="100" cy="100" r="88"
+                      fill="none"
+                      style={{ stroke: "color-mix(in srgb, var(--color-accent-selected) 40%, transparent)" }}
+                      strokeWidth="1.0"
+                      strokeDasharray="6 14"
+                      strokeLinecap="round"
+                      className="chat-hero-ring-fast"
+                    />
+                  </svg>
+                </div>
+                <p className="text-sm text-text-secondary mt-3 chat-hero-enter chat-hero-enter-delay-100">
+                  Thinking…
                 </p>
-              </>
-            )}
-
-            {/* Quick action chips — hidden while thinking */}
-            {showQuickActions && (
-            <div className="grid grid-cols-2 gap-3 w-full mt-6 chat-hero-enter chat-hero-enter-delay-300">
-              {quickActions.map((a) => (
-                <button
-                  key={a.label}
-                  onClick={() => sendMessage(a.prompt)}
-                  className="liquid-glass flex items-center gap-4 px-5 py-4 text-left group"
-                  style={{ background: "linear-gradient(135deg, rgba(124,111,247,0.24) 0%, rgba(124,111,247,0.10) 100%)" }}
-                >
-                  <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0"
-                    style={{ background: "linear-gradient(135deg, rgba(124,111,247,0.4), rgba(167,139,250,0.2))" }}
+              </div>
+            ) : (
+              <div className="flex items-center gap-4 w-full px-1 chat-hero-enter">
+                <div
+                  className="w-[72px] h-[72px] rounded-full shrink-0 chat-hero-orb"
+                  style={{
+                    background: "radial-gradient(circle at 40% 35%, color-mix(in srgb, var(--color-accent-selected) 85%, white) 0%, color-mix(in srgb, var(--color-accent-selected) 60%, transparent) 35%, color-mix(in srgb, var(--color-accent-selected) 20%, transparent) 70%, transparent 100%)",
+                    boxShadow: "0 0 40px color-mix(in srgb, var(--color-accent-selected) 25%, transparent), inset 0 2px 0 rgba(255,255,255,0.2)",
+                  }}
+                  aria-hidden
+                />
+                <div className="min-w-0">
+                  <h2 className="text-2xl font-bold leading-tight"
+                    style={{
+                      background: "linear-gradient(135deg, var(--color-accent-selected), color-mix(in srgb, var(--color-accent-selected) 60%, white))",
+                      WebkitBackgroundClip: "text",
+                      WebkitTextFillColor: "transparent",
+                      backgroundClip: "text",
+                    }}
                   >
-                    <Icon3D variant={a.icon} size="md" animated={false} className="w-6 h-6" />
-                  </div>
-                  <span className="text-sm font-medium text-text-primary">{a.label}</span>
-                </button>
-              ))}
-            </div>
+                    Hi, I&apos;m Consuela
+                  </h2>
+                  <p className="text-sm text-text-secondary mt-0.5">
+                    Here&apos;s today — ask me anything.
+                  </p>
+                </div>
+              </div>
             )}
 
+            {/* The family's day — dinner, next up, who's speaking */}
+            {!isTyping && (
+              <div className="w-full chat-hero-enter chat-hero-enter-delay-200">
+                <FamilyBrief
+                  speaker={activeSpeaker}
+                  onDraft={fillDraft}
+                  onSpeakerTap={openSpeakerPicker}
+                  signedIn={isLoggedIn}
+                />
+              </div>
+            )}
+
+            {/* Consuela's live open loops (static drafts when the engine is quiet) */}
+            {showQuickActions && (
+              <div className="w-full chat-hero-enter chat-hero-enter-delay-300">
+                <OpenLoopChips onDraft={fillDraft} role={currentUser?.role} />
+              </div>
+            )}
           </div>
         )}
 
@@ -651,8 +748,8 @@ function ChatContent() {
             {msg.role === "assistant" && (
               <div className="w-8 h-8 rounded-2xl flex items-center justify-center text-sm shrink-0 mt-0.5"
                 style={{
-                  background: "linear-gradient(135deg, rgba(124,111,247,0.3), rgba(167,139,250,0.15))",
-                  boxShadow: "0 0 12px rgba(124,111,247,0.15)",
+                  background: "linear-gradient(135deg, color-mix(in srgb, var(--color-accent-selected) 30%, transparent), color-mix(in srgb, var(--color-accent-selected) 15%, transparent))",
+                  boxShadow: "0 0 12px color-mix(in srgb, var(--color-accent-selected) 15%, transparent)",
                 }}
               >
                 ✨
@@ -665,9 +762,11 @@ function ChatContent() {
                 size="sm" variant="emoji" />
             )}
             <div className={`max-w-[82%] min-w-0 space-y-2 ${msg.role === "user" ? "items-end" : "items-start"} flex flex-col`}>
-              {msg.role === "user" && msg.speaker && (
-                <span className="text-[10px] text-text-secondary px-1">{msg.speaker.split(" ")[0]}</span>
-              )}
+              {msg.role === "user" && (messageOrigin(msg) ? (
+                <span className="text-[11px] text-text-secondary px-1">{messageOrigin(msg)}</span>
+              ) : msg.speaker ? (
+                <span className="text-[11px] text-text-secondary px-1">{msg.speaker.split(" ")[0]}</span>
+              ) : null)}
               <div
                 className={`rounded-2xl px-4 py-3 text-sm leading-relaxed break-words [overflow-wrap:anywhere] ${
                   msg.role === "user"
@@ -676,9 +775,9 @@ function ChatContent() {
                 }`}
                 style={
                   msg.role === "user"
-                    ? { background: "linear-gradient(135deg, var(--color-accent-violet), var(--color-accent-lavender))" }
+                    ? { background: "linear-gradient(135deg, var(--color-accent-button), color-mix(in srgb, var(--color-accent-button) 72%, white))" }
                     : {
-                        background: "linear-gradient(135deg, rgba(124,111,247,0.18) 0%, rgba(124,111,247,0.08) 100%)",
+                        background: "linear-gradient(135deg, color-mix(in srgb, var(--color-accent-selected) 18%, transparent) 0%, color-mix(in srgb, var(--color-accent-selected) 8%, transparent) 100%)",
                         backdropFilter: "blur(16px)",
                         WebkitBackdropFilter: "blur(16px)",
                         border: "1px solid rgba(255,255,255,0.10)",
@@ -692,7 +791,7 @@ function ChatContent() {
               {msg.role === "assistant" && msg.errorFor && (
                 <button
                   onClick={() => msg.errorFor && retryMessage(msg.errorFor, msg.id)}
-                  className="tap-sm relative inline-flex min-h-[44px] items-center gap-1.5 self-start rounded-full glass-subtle px-4 py-2.5 text-xs font-semibold text-[var(--color-accent-violet)]"
+                  className="tap-sm relative inline-flex min-h-[44px] items-center gap-1.5 self-start rounded-full glass-subtle px-4 py-2.5 text-xs font-semibold text-[var(--color-accent-selected)]"
                 >
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5">
                     <path d="M21 12a9 9 0 1 1-2.64-6.36" strokeLinecap="round" strokeLinejoin="round" />
@@ -702,7 +801,7 @@ function ChatContent() {
                 </button>
               )}
 
-              <span className="text-[10px] text-text-secondary px-1">{msg.timestamp}</span>
+              <span className="text-[11px] text-text-secondary px-1">{msg.timestamp}</span>
             </div>
           </div>
         ))}
@@ -711,8 +810,8 @@ function ChatContent() {
           <div role="status" aria-live="polite" className="flex gap-2.5">
             <div className="w-8 h-8 rounded-2xl flex items-center justify-center text-sm shrink-0"
               style={{
-                background: "linear-gradient(135deg, rgba(124,111,247,0.3), rgba(167,139,250,0.15))",
-                boxShadow: "0 0 12px rgba(124,111,247,0.15)",
+                background: "linear-gradient(135deg, color-mix(in srgb, var(--color-accent-selected) 30%, transparent), color-mix(in srgb, var(--color-accent-selected) 15%, transparent))",
+                boxShadow: "0 0 12px color-mix(in srgb, var(--color-accent-selected) 15%, transparent)",
               }}
             >
               ✨
@@ -720,13 +819,13 @@ function ChatContent() {
             <div
               className="rounded-2xl rounded-tl-md px-4 py-3 flex items-center gap-1"
               style={{
-                background: "linear-gradient(135deg, rgba(124,111,247,0.12) 0%, rgba(124,111,247,0.06) 100%)",
+                background: "linear-gradient(135deg, color-mix(in srgb, var(--color-accent-selected) 12%, transparent) 0%, color-mix(in srgb, var(--color-accent-selected) 6%, transparent) 100%)",
                 backdropFilter: "blur(12px)",
                 border: "1px solid rgba(255,255,255,0.08)",
               }}
             >
               {statusLine ? (
-                <span className="text-xs text-text-secondary whitespace-nowrap">{statusLine}</span>
+                <span className="text-xs text-text-secondary whitespace-nowrap min-w-0 max-w-[60vw] sm:max-w-xs truncate">{statusLine}</span>
               ) : (
                 <span className="sr-only">Consuela is thinking…</span>
               )}
@@ -747,8 +846,45 @@ function ChatContent() {
           paddingBottom: "calc(env(safe-area-inset-bottom) + 5.5rem)",
         }}
       >
-        <UnifiedInput onSendMessage={sendMessage} disabled={isTyping || composerLocked} />
+        <UnifiedInput
+          key={draft?.seq ?? "fresh"}
+          initialValue={draft?.text}
+          onSendMessage={sendMessage}
+          disabled={false}
+          sendDisabled={isTyping || composerLocked}
+          streaming={isTyping || composerLocked}
+          onStop={stopGenerating}
+          showTip={userMessageCount === 0}
+        />
       </div>
+
+      {/* ─── Clear-conversation confirmation — destructive action, honest scope ─── */}
+      <Modal
+        open={confirmClearOpen}
+        onClose={() => setConfirmClearOpen(false)}
+        title="Clear this conversation?"
+        description="This clears the chat on this device only. The family thread is kept on the home server and comes back next time the day's messages load."
+        footer={
+          <>
+            <button
+              onClick={() => setConfirmClearOpen(false)}
+              className="flex-1 rounded-full border border-white/10 px-4 py-3 text-sm font-semibold text-text-primary tap-sm"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={clearChat}
+              className="flex-1 rounded-full bg-[var(--color-accent-rose)] px-4 py-3 text-sm font-semibold text-white tap-sm"
+            >
+              Clear conversation
+            </button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-2 text-sm text-text-secondary">
+          <span>Messages shared to the family thread (including from Telegram) are not deleted.</span>
+        </div>
+      </Modal>
 
       <CapsuleNav />
 
@@ -761,7 +897,7 @@ function ChatContent() {
           width: 0.5rem;
           height: 0.5rem;
           border-radius: 9999px;
-          background: var(--color-accent-violet);
+          background: var(--color-accent-selected);
         }
         .chat-dot-bounce {
           animation: bounce 1s ease-in-out infinite;
@@ -780,7 +916,7 @@ export default function ChatPage() {
   return (
     <Suspense fallback={
       <div role="status" className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-[var(--color-accent-violet)]" />
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-[var(--color-accent-selected)]" />
         <span className="sr-only">Loading conversation…</span>
       </div>
     }>
