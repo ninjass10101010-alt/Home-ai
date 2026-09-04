@@ -49,6 +49,9 @@ export function usePrefersReducedMotion(): boolean {
   const [prefersReduced, setPrefersReduced] = useState(false);
 
   useEffect(() => {
+    // matchMedia is absent during SSR and in some test environments — treat its
+    // absence as "no preference" rather than throwing.
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
     setPrefersReduced(mq.matches);
     const handler = (e: MediaQueryListEvent) => setPrefersReduced(e.matches);
