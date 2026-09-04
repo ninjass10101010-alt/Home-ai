@@ -14,7 +14,7 @@ import Skeleton from "@/components/ui/Skeleton";
 import { useSuggestions } from "@/components/suggestions/hooks/useSuggestions";
 import SuggestionPinModal from "@/components/suggestions/SuggestionPinModal";
 import { useAuth } from "@/hooks/useAuth";
-import { visibleSuggestionsForRole } from "@/lib/consuela/suggestion-visibility";
+import { visibleSuggestionsForRole, PARENT_ONLY_SUGGESTION_KINDS } from "@/lib/consuela/suggestion-visibility";
 import { suggestionActionRoute } from "@/components/suggestions/HomeSuggestionsWidget";
 import Toast from "@/components/ui/Toast";
 import type { ProactiveSuggestion, SuggestionKind } from "@/lib/consuela/types";
@@ -110,6 +110,12 @@ export default function SuggestionsPage() {
   const { items: allItems, loading, refresh, dismiss, snooze, act, needsPin, pinError, submitPin, cancelPin } =
     useSuggestions(100);
   const items = visibleSuggestionsForRole(allItems, currentUser?.role);
+  // Hide parent-only filter chips from kids too, so they don't tap a chip to an
+  // empty list (the rows behind it are already filtered out above).
+  const visibleFilters =
+    currentUser?.role === "child"
+      ? FILTERS.filter((f) => f.id === "all" || !PARENT_ONLY_SUGGESTION_KINDS.has(f.id))
+      : FILTERS;
 
   useEffect(() => {
     setMounted(true);
@@ -187,7 +193,7 @@ export default function SuggestionsPage() {
 
       <div className="px-4 pb-8 space-y-5">
         <div className="flex flex-wrap gap-2">
-          {FILTERS.map((f) => (
+          {visibleFilters.map((f) => (
             <Chip
               key={f.id}
               selected={filter === f.id}
