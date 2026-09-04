@@ -211,13 +211,21 @@ export async function scanStaleData(scopeDate: string): Promise<NewSuggestion[]>
 // This also gracefully absorbs the L1 hash-format migration: old-format
 // pending rows (different hash, same condition) block new inserts until acted
 // on — intended.
+// Condition identity for dedup: kind + title with volatile counts normalized
+// out. A "N items have no store assigned" suggestion changes its count between
+// scans; without stripping digits, each new count is a fresh key and the same
+// condition stacks into contradictory rows ("2 items…" beside "3 items…").
+function conditionKey(kind?: string, title?: string): string {
+  return `${kind ?? ""}|${(title ?? "").trim().toLowerCase().replace(/\d+/g, "#")}`;
+}
+
 async function fetchExistingConditionKeys(): Promise<Set<string>> {
   return withAdmin(async (pb) => {
     const rows = await pb.collection("proactive_suggestions").getFullList({
       filter: 'status="pending"',
       requestKey: null,
     }) as unknown as Array<{ kind?: string; title?: string }>;
-    return new Set(rows.map((r) => `${r.kind ?? ""}|${(r.title ?? "").trim().toLowerCase()}`));
+    return new Set(rows.map((r) => conditionKey(r.kind, r.title)));
   });
 }
 
@@ -236,7 +244,7 @@ export async function runEngine({ scopeDate }: { scopeDate: string }): Promise<{
   const existingKeys = await fetchExistingConditionKeys();
   const seen = new Set<string>();
   const fresh = all.filter((s) => {
-    const key = `${s.kind}|${s.title.trim().toLowerCase()}`;
+    const key = conditionKey(s.kind, s.title);
     if (existingKeys.has(key) || seen.has(key)) return false;
     seen.add(key);
     return true;

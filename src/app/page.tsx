@@ -360,7 +360,7 @@ export default function HomePage() {
 
           <div className="px-4 space-y-6 relative z-10">
             <div className="grid grid-cols-3 gap-3">
-              <StatTile label="Events" value={todayEvents.length} detail="Today" icon="📅" tone={todayEvents.length > 0 ? "warning" : "accent"} compact progress={dayFraction} />
+              <StatTile label={todayEvents.length === 1 ? "Event" : "Events"} value={todayEvents.length} detail="Today" icon="📅" tone={todayEvents.length > 0 ? "warning" : "accent"} compact progress={dayFraction} />
               <StatTile label="Tasks" value={pendingTasks.length} detail="Pending" icon="✅" tone={pendingTasks.length > 0 ? "danger" : "success"} compact />
               <StatTile label="Week" value="7" detail="Days planned" icon="🍽️" tone="accent" compact progress={weekFraction} />
             </div>
@@ -398,7 +398,7 @@ export default function HomePage() {
                   const upcoming = Array.isArray(upcomingImportant) ? upcomingImportant.slice(0, 2) : [];
                   return (
                     <div key="todayEvents" className={span}>
-                      <SectionCard title="Today" description={`${todayEvents.length} events on the family calendar`} icon="📅" tone="#3b82f6" compact centeredHeader className="h-full"
+                      <SectionCard title="Today" description={`${todayEvents.length} ${todayEvents.length === 1 ? "event" : "events"} on the family calendar`} icon="📅" tone="#3b82f6" compact centeredHeader className="h-full"
                         footer={
                           hiddenEvents > 0 ? (
                             <Link href="/calendar" className="tap-sm text-xs font-semibold widget-accent-text">+{hiddenEvents} more · See all →</Link>

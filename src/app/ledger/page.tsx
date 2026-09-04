@@ -85,11 +85,23 @@ export default function LedgerPage() {
             </button>
           </div>
         ) : (
-          <div className="overflow-hidden rounded-3xl border border-white/10 bg-[#f8f5ef]">
+          <div className="overflow-hidden rounded-3xl border border-white/10 bg-[var(--color-surface-0)]/60 shadow-[0_20px_50px_-20px_rgba(0,0,0,0.5)]">
+            {/* Window chrome: honestly frames the embedded app as Alex's, so the
+                cream editorial world reads as a deliberate window, not a theme clash. */}
+            <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-white/[0.04] px-4 py-2.5">
+              <div className="flex items-center gap-2 min-w-0">
+                <span aria-hidden className="text-base leading-none">📒</span>
+                <span className="truncate text-sm font-semibold text-text-primary">The Ledger</span>
+                <span className="hidden truncate text-xs text-text-muted sm:inline">— Alex&apos;s finance app</span>
+              </div>
+              <span className="shrink-0 rounded-full border border-white/10 bg-white/5 px-2.5 py-0.5 text-[11px] font-medium text-text-secondary">
+                Opens Alex&apos;s app
+              </span>
+            </div>
             <iframe
               src="/ledger-app/"
               title="The Ledger — Alex's finance tracker"
-              className="block h-[calc(100dvh-220px)] w-full"
+              className="block h-[calc(100dvh-264px)] w-full"
             />
           </div>
         )}

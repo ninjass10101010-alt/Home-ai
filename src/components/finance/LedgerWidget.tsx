@@ -85,19 +85,23 @@ export default function LedgerWidget({ className = "" }: { className?: string })
       )}
       {status === "ok" && summary && (
         <Link href="/ledger" className="tap group flex flex-1 flex-col justify-center gap-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div>
+            <p className="text-[11px] uppercase tracking-wide text-text-muted">Cash on hand</p>
+            <p className="text-3xl font-bold tabular-nums text-text-primary">{formatUSD(summary.cash)}</p>
+          </div>
+          <div className="flex items-end justify-between gap-3 border-t border-white/10 pt-3">
             <div>
-              <p className="text-[11px] uppercase tracking-wide text-text-muted">Cash</p>
-              <p className="text-2xl font-bold tabular-nums text-text-primary">{formatUSD(summary.cash)}</p>
+              <p className="text-[11px] uppercase tracking-wide text-text-muted">{summary.monthLabel}</p>
+              <p className="text-sm font-semibold tabular-nums text-text-primary">
+                {formatUSD(summary.spent)}{" "}
+                <span className="font-normal text-text-muted">of {formatUSD(summary.budgeted)}</span>
+              </p>
             </div>
-            <div>
+            <div className="text-right">
               <p className="text-[11px] uppercase tracking-wide text-text-muted">Debt</p>
-              <p className="text-2xl font-bold tabular-nums text-text-primary">{formatUSD(summary.debt)}</p>
+              <p className="text-sm font-semibold tabular-nums text-text-secondary">{formatUSD(summary.debt)}</p>
             </div>
           </div>
-          <p className="text-sm text-text-secondary">
-            {summary.monthLabel}: {formatUSD(summary.spent)} of {formatUSD(summary.budgeted)} budgeted
-          </p>
         </Link>
       )}
     </SectionCard>
