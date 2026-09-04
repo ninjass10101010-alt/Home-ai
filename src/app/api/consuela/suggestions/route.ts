@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { verifyPinAgainstAnyMember } from "@/lib/server-auth";
+import { verifySession, SESSION_COOKIE } from "@/lib/session";
+import { PARENT_ONLY_SUGGESTION_KINDS } from "@/lib/consuela/suggestion-visibility";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +22,17 @@ async function isAuthorized(request: NextRequest): Promise<boolean> {
 export async function GET(request: NextRequest) {
   const rawLimit = Number.parseInt(request.nextUrl.searchParams.get("limit") || "20", 10);
   const limit = Number.isNaN(rawLimit) ? 20 : Math.min(200, Math.max(1, rawLimit));
-  const items = await db.selectPendingSuggestions({ limit });
+  // A child's Home must not be starved by parent-only rows filling the window:
+  // pantry_low emits one row per low item, so filtering client-side AFTER a
+  // limit-20 fetch can leave a kid with "All clear" while their own chore /
+  // calendar suggestions sit past row 20. Filter by role server-side and apply
+  // the limit AFTER filtering. Guests (no session) are not children → full list.
+  const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
+  const isChild = session?.role === "child";
+  const rows = await db.selectPendingSuggestions({ limit: isChild ? 200 : limit });
+  const items = isChild
+    ? rows.filter((s: { kind?: string }) => !PARENT_ONLY_SUGGESTION_KINDS.has(s.kind ?? "")).slice(0, limit)
+    : rows;
   return NextResponse.json({ items });
 }
 
