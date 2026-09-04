@@ -4,6 +4,7 @@ import { weekStartForDate } from "@/lib/meals-week-utils";
 import { weekKey } from "@/lib/task-utils";
 import { localTodayISO, localPreviousDayISO } from "@/lib/local-date";
 import type { NewSuggestion } from "./types";
+import { conditionKey } from "./suggestion-key";
 
 export async function scanGroceryStoreOptimization(scopeDate: string): Promise<NewSuggestion[]> {
   const groceryItems = await withAdmin(async (pb) =>
@@ -211,14 +212,7 @@ export async function scanStaleData(scopeDate: string): Promise<NewSuggestion[]>
 // This also gracefully absorbs the L1 hash-format migration: old-format
 // pending rows (different hash, same condition) block new inserts until acted
 // on — intended.
-// Condition identity for dedup: kind + title with volatile counts normalized
-// out. A "N items have no store assigned" suggestion changes its count between
-// scans; without stripping digits, each new count is a fresh key and the same
-// condition stacks into contradictory rows ("2 items…" beside "3 items…").
-function conditionKey(kind?: string, title?: string): string {
-  return `${kind ?? ""}|${(title ?? "").trim().toLowerCase().replace(/\d+/g, "#")}`;
-}
-
+// Condition identity for dedup lives in ./suggestion-key (pure, unit-tested).
 async function fetchExistingConditionKeys(): Promise<Set<string>> {
   return withAdmin(async (pb) => {
     const rows = await pb.collection("proactive_suggestions").getFullList({

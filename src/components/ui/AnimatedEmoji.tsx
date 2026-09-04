@@ -158,9 +158,10 @@ export default function AnimatedEmoji({ emoji, name, size = "md", className = ""
             100% { transform: translateY(-20px) scale(1.2); opacity: 0; }
           }
         `}</style>
-        {/* Bubbles */}
-        <circle cx="48" cy="30" r="3" fill="#67e8f9" opacity="0" style={{ animation: anim("bubbleUp 2s infinite linear") }} />
-        <circle cx="52" cy="20" r="2" fill="#67e8f9" opacity="0" style={{ animation: anim("bubbleUp 2s infinite linear 1s") }} />
+        {/* Bubbles — hidden until the rise animation carries them; when motion
+            is off, show them statically so the artwork doesn't lose elements. */}
+        <circle cx="48" cy="30" r="3" fill="#67e8f9" opacity={doAnim ? 0 : 0.8} style={{ animation: anim("bubbleUp 2s infinite linear") }} />
+        <circle cx="52" cy="20" r="2" fill="#67e8f9" opacity={doAnim ? 0 : 0.8} style={{ animation: anim("bubbleUp 2s infinite linear 1s") }} />
         
         <g style={{ animation: anim("swim 3s infinite ease-in-out") }}>
           {/* Tail */}

@@ -13,6 +13,8 @@ import EmptyState from "@/components/ui/EmptyState";
 import Skeleton from "@/components/ui/Skeleton";
 import { useSuggestions } from "@/components/suggestions/hooks/useSuggestions";
 import SuggestionPinModal from "@/components/suggestions/SuggestionPinModal";
+import { useAuth } from "@/hooks/useAuth";
+import { visibleSuggestionsForRole } from "@/lib/consuela/suggestion-visibility";
 import { suggestionActionRoute } from "@/components/suggestions/HomeSuggestionsWidget";
 import Toast from "@/components/ui/Toast";
 import type { ProactiveSuggestion, SuggestionKind } from "@/lib/consuela/types";
@@ -104,8 +106,10 @@ export default function SuggestionsPage() {
   const [toast, setToast] = useState<{ msg: string; tone: "success" | "error" } | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const { items, loading, refresh, dismiss, snooze, act, needsPin, pinError, submitPin, cancelPin } =
+  const { currentUser } = useAuth();
+  const { items: allItems, loading, refresh, dismiss, snooze, act, needsPin, pinError, submitPin, cancelPin } =
     useSuggestions(100);
+  const items = visibleSuggestionsForRole(allItems, currentUser?.role);
 
   useEffect(() => {
     setMounted(true);

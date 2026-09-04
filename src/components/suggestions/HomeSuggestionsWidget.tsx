@@ -12,12 +12,8 @@ import Toast from "@/components/ui/Toast";
 import { useSuggestions } from "./hooks/useSuggestions";
 import SuggestionPinModal from "./SuggestionPinModal";
 import { useAuth } from "@/hooks/useAuth";
+import { visibleSuggestionsForRole } from "@/lib/consuela/suggestion-visibility";
 import type { ProactiveSuggestion } from "@/lib/consuela/types";
-
-// Kitchen/grocery ops are the parents' domain — surfacing "assign stores" or
-// "pantry low" on a child's Home is noise they can't act on (the action needs
-// a parent PIN). Chores and calendar conflicts stay visible to kids.
-const PARENT_ONLY_SUGGESTION_KINDS = new Set(["grocery_store_optimization", "pantry_low"]);
 
 const TOOL_ROUTES: Record<string, string> = {
   get_pending_tasks: "/tasks",
@@ -86,11 +82,8 @@ export default function HomeSuggestionsWidget({ className = "" }: { className?: 
   const [mounted, setMounted] = useState(false);
   const [toast, setToast] = useState<{ msg: string; tone: "success" | "error" } | null>(null);
   const { currentUser } = useAuth();
-  const isChild = currentUser?.role === "child";
   const { items: allItems, loading, dismiss, act, needsPin, pinError, submitPin, cancelPin } = useSuggestions(20);
-  const items = isChild
-    ? allItems.filter((s) => !PARENT_ONLY_SUGGESTION_KINDS.has(s.kind))
-    : allItems;
+  const items = visibleSuggestionsForRole(allItems, currentUser?.role);
 
   useEffect(() => {
     setMounted(true);

@@ -24,7 +24,7 @@ describe("AnimatedEmoji reduced-motion", () => {
 
   it("applies the idle animation when motion is allowed", () => {
     const el = render(<AnimatedEmoji emoji="🐩" name="Rico" size="md" />);
-    expect(el.innerHTML).toContain("poodleBounce");
+    expect(el.innerHTML).toMatch(/animation:\s*poodleBounce/);
   });
 
   it("renders the same artwork with NO animation when reduced motion is preferred", () => {
