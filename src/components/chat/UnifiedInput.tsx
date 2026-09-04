@@ -78,7 +78,7 @@ export function UnifiedInput({ onSendMessage, disabled }: UnifiedInputProps) {
               onClick={handleSubmit}
               disabled={!message.trim() || disabled}
               aria-label="Send message"
-              className="absolute right-2 bottom-2 h-10 w-10 flex items-center justify-center rounded-full bg-[var(--color-accent-button)] hover:brightness-110 text-white transition disabled:opacity-50 disabled:cursor-not-allowed"
+              className="absolute right-2 bottom-2 h-10 w-10 flex items-center justify-center rounded-full bg-[var(--color-accent-button,var(--color-accent-selected))] hover:brightness-110 text-white transition disabled:opacity-50 disabled:cursor-not-allowed"
               title="Send message"
             >
               <Send className="h-5 w-5" />
@@ -87,7 +87,7 @@ export function UnifiedInput({ onSendMessage, disabled }: UnifiedInputProps) {
         </div>
 
         {/* Help Text */}
-        <div className="mt-2 text-xs text-text-muted text-center">
+        <div className="mt-2 text-xs text-text-secondary text-center">
           💡 Tip: Say “Add dentist appointment tomorrow at 3pm” or snap a photo of a flyer
         </div>
       </div>
