@@ -69,7 +69,7 @@ export function UnifiedInput({ onSendMessage, disabled }: UnifiedInputProps) {
               placeholder="Type a message, or use voice/photo..."
               disabled={disabled}
               rows={1}
-              className="w-full px-4 py-3 pr-12 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 resize-none disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full px-4 py-3 pr-12 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-selected)] resize-none disabled:opacity-50 disabled:cursor-not-allowed"
               style={{ minHeight: '48px', maxHeight: '200px' }}
             />
 

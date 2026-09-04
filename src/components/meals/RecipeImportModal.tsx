@@ -225,7 +225,7 @@ export default function RecipeImportModal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[200] flex flex-col"
+      className="kitchen-text fixed inset-0 z-[200] flex flex-col"
       style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(12px)" }}
       onClick={onClose}
     >
@@ -241,7 +241,7 @@ export default function RecipeImportModal({
         <div className="px-5 pb-4 flex items-center justify-between border-b border-surface-3">
           <div>
             <h2 className="text-text-primary font-bold text-lg">🌐 Import recipe</h2>
-            <p className="text-text-muted text-xs">From a link or pasted text — review before saving</p>
+            <p className="text-text-muted text-xs">From a link or pasted text. Review before saving.</p>
           </div>
           <button
             onClick={onClose}
@@ -303,7 +303,7 @@ export default function RecipeImportModal({
                     </button>
                   </div>
                   <p className="text-text-muted text-xs">
-                    Works best with recipe blogs. Sites that block import (Pinterest, TikTok) — use Paste text instead.
+                    Works best with recipe blogs. For sites that block import (Pinterest, TikTok), use Paste text instead.
                   </p>
                 </div>
               ) : (
@@ -311,7 +311,7 @@ export default function RecipeImportModal({
                   <textarea
                     value={pastedText}
                     onChange={(e) => setPastedText(e.target.value)}
-                    placeholder={"Paste the recipe here…\n\nName, ingredients, steps — any format works."}
+                    placeholder={"Paste the recipe here…\n\nName, ingredients, steps. Any format works."}
                     rows={8}
                     className={`${inputClass} resize-none`}
                   />
@@ -346,7 +346,7 @@ export default function RecipeImportModal({
               {draft.needsReview && (
                 <div className="rounded-2xl border border-[var(--color-accent-amber)]/30 bg-[var(--color-accent-amber)]/10 px-4 py-3">
                   <p className="text-sm font-semibold text-text-primary">
-                    {"🔍 Couldn't fully parse this one — please check the fields below before saving."}
+                    {"🔍 Couldn't fully parse this one. Please check the fields below before saving."}
                   </p>
                 </div>
               )}

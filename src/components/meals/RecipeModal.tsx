@@ -31,7 +31,7 @@ export default function RecipeModal({
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[200] flex flex-col" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(12px)" }}>
+    <div className="kitchen-text fixed inset-0 z-[200] flex flex-col" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(12px)" }}>
       {/* Modal sheet */}
       <div
         className="absolute bottom-0 left-0 right-0 rounded-t-3xl flex flex-col overflow-hidden"
@@ -62,6 +62,7 @@ export default function RecipeModal({
           </div>
           <button
             onClick={() => setShowRecipeModal(false)}
+            aria-label="Close"
             className="w-9 h-9 rounded-2xl glass flex items-center justify-center text-text-secondary hover:text-text-primary transition-colors"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
@@ -77,6 +78,7 @@ export default function RecipeModal({
             <div className="relative">
               <button
                 onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                aria-label="Choose recipe emoji"
                 className="w-16 h-16 rounded-2xl bg-surface-2 flex items-center justify-center text-4xl hover:bg-surface-3 transition-colors border-2 border-dashed border-surface-4 hover:border-[var(--color-accent-selected)]/40"
               >
                 {recipe.emoji}
@@ -121,6 +123,7 @@ export default function RecipeModal({
                     <img src={recipe.image} alt="" className="w-full h-full object-cover" />
                     <button
                       onClick={() => setRecipe((r: any) => ({ ...r, image: "" }))}
+                      aria-label="Remove photo"
                       className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/50 text-white flex items-center justify-center text-xs"
                     >
                       ✕
@@ -249,7 +252,11 @@ export default function RecipeModal({
                     className="flex-1 bg-surface-2 text-text-primary text-sm rounded-2xl px-3 py-2 outline-none border border-surface-3 focus:border-[var(--color-accent-selected)]/50 placeholder:text-text-muted"
                   />
                   {(recipe.ingredients || []).length > 1 && (
-                    <button onClick={() => removeIngredientRow(idx)} className="p-1.5 text-text-muted hover:text-rose-400 transition-colors">
+                    <button
+                      onClick={() => removeIngredientRow(idx)}
+                      aria-label={`Remove ingredient ${idx + 1}`}
+                      className="p-1.5 text-text-muted hover:text-rose-400 transition-colors"
+                    >
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4">
                         <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>

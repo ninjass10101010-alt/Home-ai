@@ -449,7 +449,7 @@ function ChatContent() {
           ✨
         </div>
         <div className="flex-1 min-w-0">
-          <span className="block text-sm font-semibold text-text-primary truncate">Consuela</span>
+          <h1 className="text-sm font-semibold text-text-primary truncate">Consuela</h1>
           <div className="flex items-center gap-1.5">
             <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse shrink-0" />
             <span className="text-[10px] text-text-secondary truncate">AI Family Assistant</span>
@@ -602,7 +602,7 @@ function ChatContent() {
               </p>
             ) : (
               <>
-                <h1 className="text-2xl font-bold mt-2 chat-hero-enter chat-hero-enter-delay-100"
+                <h2 className="text-2xl font-bold mt-2 chat-hero-enter chat-hero-enter-delay-100"
                   style={{
                     background: "linear-gradient(135deg, var(--color-accent-violet), var(--color-accent-lavender))",
                     WebkitBackgroundClip: "text",
@@ -611,7 +611,7 @@ function ChatContent() {
                   }}
                 >
                   Hi, I&apos;m Consuela
-                </h1>
+                </h2>
                 <p className="text-sm text-text-secondary mt-1 chat-hero-enter chat-hero-enter-delay-200">
                   What can I help you with today?
                 </p>

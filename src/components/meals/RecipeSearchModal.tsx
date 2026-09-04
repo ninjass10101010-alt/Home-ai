@@ -122,7 +122,7 @@ export default function RecipeSearchModal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[200] flex flex-col"
+      className="kitchen-text fixed inset-0 z-[200] flex flex-col"
       style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(12px)" }}
       onClick={onClose}
     >
@@ -174,7 +174,7 @@ export default function RecipeSearchModal({
 
           {phase === "idle" && (
             <p className="text-text-muted text-xs">
-              Search hundreds of free recipes — tap one to preview it, then save it to your catalog.
+              Search hundreds of free recipes. Tap one to preview it, then save it to your catalog.
             </p>
           )}
 
