@@ -19,6 +19,7 @@ vi.mock("@/components/ui/SyncInit", () => ({ default: () => null }));
 
 vi.mock("@/db", () => ({
   db: {
+    refreshMembersCache: vi.fn(async () => {}),
     selectMembers: () => [
       { id: 1, name: "Rebecca", fullName: "Rebecca", role: "parent", emoji: "👩", color: "violet" },
       { id: 2, name: "Jasmine", fullName: "Jasmine", role: "child", emoji: "👧", color: "rose" },
@@ -123,5 +124,35 @@ describe("stealable tasks surface", () => {
 
     expect(document.body.textContent).toMatch(/Enter your PIN/);
     expect(document.body.textContent).not.toContain("Claim for");
+  });
+});
+
+describe("Add/Edit form: stealable toggle + pet exclusion", () => {
+  it("offers the 'Up for grabs when late' toggle and no pet assignees", async () => {
+    stubGuestFetches();
+    const el = await renderAsync(<TasksPage />);
+    await settle();
+    [...el.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Add task")!.click();
+    await settle();
+
+    const modal = document.body;
+    expect(modal.textContent).toContain("Up for grabs when late");
+
+    const selects = [...modal.querySelectorAll("select")];
+    const assignee = selects.find((s) => (s.textContent || "").includes("Rebecca"));
+    expect(assignee).toBeTruthy();
+    const options = [...assignee!.querySelectorAll("option")].map((o) => o.textContent);
+    expect(options.some((o) => o!.includes("Rocco"))).toBe(false);
+    expect(options.some((o) => o!.includes("Rebecca"))).toBe(true);
+  });
+
+  it("the member filter strip omits pets", async () => {
+    stubGuestFetches();
+    const el = await renderAsync(<TasksPage />);
+    await settle();
+    const tiles = [...el.querySelectorAll(".member-tile")].map((t) => (t.textContent || "").trim());
+    expect(tiles.some((t) => t.includes("Rocco"))).toBe(false);
+    expect(tiles.some((t) => t.includes("Rebecca"))).toBe(true);
+    expect(tiles.length).toBe(5); // All + 3 human members + Up for grabs; pets excluded
   });
 });

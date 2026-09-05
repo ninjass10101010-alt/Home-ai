@@ -280,7 +280,9 @@ export default function TasksPage() {
   const membersData = useMemo(() => db.selectMembers(), [membersVersion]); // eslint-disable-line react-hooks/exhaustive-deps
   const { currentUser, isLoggedIn } = useAuth();
   const allMembers = useMemo(() => {
-    const names = membersData.map((m: any) => m.fullName);
+    // Pets are never assignees — a task handed to 🐶 would strand its points
+    // (leaderboard and claims exclude pets by design).
+    const names = membersData.filter((m: any) => m.role !== "pet").map((m: any) => m.fullName);
     return isLoggedIn ? ["My Tasks", ...names, "Up for grabs"] : ["All", ...names, "Up for grabs"];
   }, [membersData, isLoggedIn]);
 
@@ -358,7 +360,7 @@ export default function TasksPage() {
   const [activeTab, setActiveTab] = useState<"tasks" | "leaderboard">("tasks");
   const [showCompleted, setShowCompleted] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editForm, setEditForm] = useState<Task>(emptyTask(membersData[0]));
+  const [editForm, setEditForm] = useState<Task>(() => emptyTask(membersData.find((m: any) => m.role !== "pet")));
   const [isAdding, setIsAdding] = useState(false);
   const [pinTaskId, setPinTaskId] = useState<number | null>(null);
   const [pinReward, setPinReward] = useState<Reward | null>(null);
@@ -565,9 +567,10 @@ export default function TasksPage() {
 
   const startAdd = () => {
     setEditingId(null);
+    const firstNonPet = membersData.find((m: any) => m.role !== "pet");
     const defaultMember = isLoggedIn && currentUser
       ? { name: currentUser.name, emoji: currentUser.emoji }
-      : { name: membersData[0]?.fullName || "Caspian", emoji: membersData[0]?.emoji || "🧒" };
+      : { name: firstNonPet?.fullName || membersData[0]?.fullName || "", emoji: firstNonPet?.emoji || membersData[0]?.emoji || "👤" };
     setEditForm(emptyTask(defaultMember));
     setIsAdding(true);
   };
@@ -1309,7 +1312,7 @@ export default function TasksPage() {
                     <label className="block">
                       <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Assignee</span>
                       <select value={editForm.assignee} onChange={(e) => updateForm("assignee", e.target.value)} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none">
-                        {membersData.map((m: any) => <option key={m.fullName} value={m.fullName}>{memberOptionLabel(m)}</option>)}
+                        {membersData.filter((m: any) => m.role !== "pet").map((m: any) => <option key={m.fullName} value={m.fullName}>{memberOptionLabel(m)}</option>)}
                       </select>
                     </label>
                     <label className="block">
@@ -1344,6 +1347,7 @@ export default function TasksPage() {
                     </label>
                   </div>
                   <Toggle checked={!!editForm.universal} onCheckedChange={(checked) => updateForm("universal", checked)} label="Universal task" description="Any member can claim it." />
+                  <Toggle checked={!!editForm.stealable} onCheckedChange={(checked) => updateForm("stealable", checked)} label="⏰ Up for grabs when late" description="If it's not done after the due date, anyone can grab it for the points." />
                 </div>
               </Modal>
             )}
