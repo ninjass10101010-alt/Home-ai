@@ -1179,6 +1179,27 @@ export default function TasksPage() {
   const familyTotal = dynamicLeaderboard.reduce((sum, entry) => sum + entry.points, 0);
   const championShare = familyTotal > 0 ? topScorer.points / familyTotal : 0;
   const weeklyEarned = Object.values(weekData.points).reduce((a, b) => a + b, 0);
+
+  // The three StatTiles all follow the member filter: a parent tapping a kid's
+  // tile reads that kid's open chores / this-week completions / this week's
+  // points. "All" and "Up for grabs" stay family-wide.
+  const scopedMember = useMemo(() => {
+    if (filterMember === "All" || filterMember === "Up for grabs") return null;
+    const target = filterMember === "My Tasks" ? currentUser?.name : filterMember;
+    if (!target) return null;
+    return dynamicLeaderboard.find((e) => e.name === target || e.name.startsWith(target)) ?? null;
+  }, [filterMember, currentUser, dynamicLeaderboard]);
+
+  const scopedCompletedCount = useMemo(() => {
+    if (filterMember === "Up for grabs") return thisWeeksCompleted.filter((t) => t.universal || t.stealable).length;
+    if (!scopedMember) return thisWeeksCompletedCount;
+    return thisWeeksCompleted.filter((t) =>
+      t.completedBy === scopedMember.name || t.completedBy?.startsWith(scopedMember.name) ||
+      t.assignee === scopedMember.name || t.assignee.startsWith(scopedMember.name)
+    ).length;
+  }, [filterMember, scopedMember, thisWeeksCompleted, thisWeeksCompletedCount]);
+
+  const scopedEarned = scopedMember ? scopedMember.points : weeklyEarned;
   const previousRanks = useMemo(() => getPreviousWeekRanks(), [weekData, ranksVersion]); // eslint-disable-line react-hooks/exhaustive-deps
   const sheetEntry = sheetMember ? dynamicLeaderboard.find(e => e.name === sheetMember) : null;
 
@@ -1229,6 +1250,7 @@ export default function TasksPage() {
       <ConfettiBurst active={confettiActive} />
       <Toast open={Boolean(toast)} tone={toast?.includes("Failed") ? "error" : toast?.includes("grabbed") || toast?.includes("not connected") || toast?.includes("not granted") ? "neutral" : "success"}>{toast}</Toast>
 
+      <div className="mx-auto w-full lg:max-w-3xl">
       <PageHeader
         title="Tasks"
         subtitle={`${pending.length} pending`}
@@ -1243,8 +1265,8 @@ export default function TasksPage() {
       <div className="px-4 space-y-5 pb-8">
         <div className="grid gap-3 sm:grid-cols-3">
           <StatTile label="Pending" value={pending.length} detail="Open tasks" icon="📋" tone="warning" compact />
-          <StatTile label="Completed" value={thisWeeksCompletedCount} detail="This week" icon="🎉" tone="success" compact />
-          <StatTile label="Earned" value={weeklyEarned} detail="This week's points" icon="🏆" tone="accent" compact />
+          <StatTile label="Completed" value={scopedCompletedCount} detail="This week" icon="🎉" tone="success" compact />
+          <StatTile label="Earned" value={scopedEarned} detail="This week's points" icon="🏆" tone="accent" compact />
         </div>
 
         <SegmentedControl
@@ -1357,7 +1379,7 @@ export default function TasksPage() {
                         </div>
                         <div className="flex gap-1">
                           <SoftButton size="sm" onClick={() => adoptSuggestion(suggestion)}>Add</SoftButton>
-                          <IconButton size="sm" variant="ghost" aria-label="Dismiss" onClick={() => dismissSuggestion(suggestion.title)}>×</IconButton>
+                          <IconButton size="sm" variant="ghost" aria-label="Dismiss" className="hit-44" onClick={() => dismissSuggestion(suggestion.title)}>×</IconButton>
                         </div>
                       </div>
                     </Surface>
@@ -1374,6 +1396,12 @@ export default function TasksPage() {
               {pending.length === 0 ? (
                 !isLoggedIn && guestSyncBlocked && tasks.length === 0 ? (
                   <EmptyState title="Tasks are synced to the family account" description="Sign in with your PIN to see everyone's tasks. Your chores aren't gone — they're waiting on the family server." icon="🔐" />
+                ) : filterMember === "Up for grabs" ? (
+                  <EmptyState title="All quiet" description="Nothing is up for grabs right now." icon="🤝" />
+                ) : filterMember === "My Tasks" ? (
+                  <EmptyState title="All caught up" description="Nothing on your plate right now." icon="🎉" />
+                ) : filterMember !== "All" ? (
+                  <EmptyState title="All caught up" description={`Nothing pending for ${filterMember.split(" ")[0]} right now.`} icon="🎉" />
                 ) : (
                   <EmptyState title="All caught up" description="No pending tasks right now." icon="🎉" />
                 )
@@ -1396,7 +1424,7 @@ export default function TasksPage() {
                         }}
                         className="schedule-row liquid-glass flex cursor-pointer items-center gap-3 px-3 py-2.5 animate-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-selected)]"
                         style={{
-                          animationDelay: `${idx * 0.05}s`,
+                          animationDelay: `${Math.min(idx, 8) * 0.05}s`,
                           backgroundImage: `linear-gradient(135deg, color-mix(in srgb, ${rowColor} 40%, transparent) 0%, color-mix(in srgb, ${rowColor} 20%, transparent) 100%)`,
                         }}
                       >
@@ -1473,7 +1501,7 @@ export default function TasksPage() {
                           >
                             Done
                           </span>
-                          <IconButton size="sm" variant="ghost" aria-label="Undo complete" onClick={() => openPinEntry(task.id)}>↩</IconButton>
+                          <IconButton size="sm" variant="ghost" aria-label="Undo complete" className="hit-44" onClick={() => openPinEntry(task.id)}>↩</IconButton>
                         </div>
                         );
                       })
@@ -1707,7 +1735,7 @@ export default function TasksPage() {
                         <div className="text-xs text-text-muted">{reward.cost} pts {reward.cost > 100 && <span className="ml-1" style={{ color: "var(--color-accent-amber)" }}>· needs parent</span>}</div>
                       </div>
                       <SoftButton size="sm" variant="secondary" onClick={() => openRewardPin(reward)}>Redeem</SoftButton>
-                      <IconButton size="sm" variant="ghost" aria-label="Edit reward" onClick={() => startEditReward(reward)}>✎</IconButton>
+                      <IconButton size="sm" variant="ghost" aria-label="Edit reward" className="hit-44" onClick={() => startEditReward(reward)}>✎</IconButton>
                     </div>
                   </Surface>
                 ))}
@@ -1727,8 +1755,8 @@ export default function TasksPage() {
                         <div className="text-sm font-semibold text-text-primary">{penalty.name}</div>
                         <div className="text-xs text-text-muted">-{penalty.points} pts</div>
                       </div>
-                      <IconButton size="sm" variant="ghost" aria-label="Apply penalty" onClick={() => openPenaltyPin(penalty)}>⚠️</IconButton>
-                      <IconButton size="sm" variant="ghost" aria-label="Edit penalty" onClick={() => startEditPenalty(penalty)}>✎</IconButton>
+                      <IconButton size="sm" variant="ghost" aria-label="Apply penalty" className="hit-44" onClick={() => openPenaltyPin(penalty)}>⚠️</IconButton>
+                      <IconButton size="sm" variant="ghost" aria-label="Edit penalty" className="hit-44" onClick={() => startEditPenalty(penalty)}>✎</IconButton>
                     </div>
                   </Surface>
                 ))}
@@ -1738,6 +1766,7 @@ export default function TasksPage() {
           </div>
           )
         )}
+      </div>
       </div>
 
       {(addingReward || editingRewardId !== null) && (
