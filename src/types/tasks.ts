@@ -13,6 +13,7 @@ export interface Task {
   completedAt?: string;
   completedInWeek?: string;
   universal?: boolean;
+  stealable?: boolean;
 }
 
 export interface Transaction {

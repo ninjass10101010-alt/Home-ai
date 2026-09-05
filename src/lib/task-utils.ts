@@ -1,4 +1,5 @@
 import { db } from "@/db";
+import { localTodayISO } from "@/lib/local-date";
 import type { Task, WeekData, Transaction, WeekArchive, FamilyGoal, HallOfFameEntry, Reward, Penalty } from "@/types/tasks";
 
 export const TASKS_STORAGE_KEY = "consuela-tasks";
@@ -29,6 +30,15 @@ export function weekKey(date?: Date): string {
 
 export function todayISO(): string {
   return new Date().toISOString().split("T")[0];
+}
+
+// A stealable task becomes anyone's game the day AFTER its due date (day
+// precision — tasks carry date-only dues). Universal claiming is orthogonal:
+// a task may be universal AND stealable. `today` defaults to the family's
+// local calendar date (not UTC — at 8pm Detroit UTC has already rolled to
+// tomorrow, which would make same-day dues falsely snatchable).
+export function isSnatchable(task: Task, today: string = localTodayISO()): boolean {
+  return !!task.stealable && !task.completed && !!task.due && task.due < today;
 }
 
 export function emptyWeekData(startISO?: string): WeekData {
@@ -231,6 +241,82 @@ export function loadTasks(): Task[] {
 
 export function saveTasks(tasks: Task[]): void {
   saveJSON(TASKS_STORAGE_KEY, tasks);
+}
+
+/**
+ * Pure merge of a /api/tasks/sync snapshot into local task/week state — the
+ * same guards the Tasks page's restoreFromSnapshot uses: adopt only richer/
+ * longer server state (new tasks by id-or-title, a different or richer week),
+ * never clobber local rows. A no-change refresh returns the inputs unchanged
+ * so callers can skip their persistence effects.
+ */
+export function mergeTasksSnapshot(
+  currentTasks: Task[],
+  currentWeekData: WeekData,
+  snapshot: any
+): { tasks: Task[]; weekData: WeekData; tasksChanged: boolean; weekChanged: boolean } {
+  let tasks = currentTasks;
+  let weekData = currentWeekData;
+  let tasksChanged = false;
+  let weekChanged = false;
+  if (!snapshot) return { tasks, weekData, tasksChanged, weekChanged };
+
+  if (Array.isArray(snapshot.tasks) && snapshot.tasks.length) {
+    const restored = snapshot.tasks.map((t: any) => ({
+      ...t,
+      // Preserve the real numeric id and completion attribution (the same
+      // fields restoreFromSnapshot guards — regenerating ids broke targeting).
+      id: typeof t.id === "number" ? t.id : Number(t.id) || Date.now() + Math.floor(Math.random() * 100000),
+      assignee: t.assignee || t.assigned || "All",
+      assigneeEmoji: t.assigneeEmoji || "👤",
+      completed: t.completed || false,
+      completedBy: t.completedBy ?? undefined,
+      completedAt: t.completedAt ?? undefined,
+      completedInWeek: t.completedInWeek ?? undefined,
+    }));
+    const fresh = restored.filter(
+      (t: any) => !currentTasks.some((p: any) => p.id === t.id || p.title === t.title)
+    );
+    if (fresh.length) {
+      tasks = [...currentTasks, ...fresh];
+      tasksChanged = true;
+    }
+  }
+
+  if (snapshot.weekData?.weekStart) {
+    const snapWk = snapshot.weekData;
+    if (currentWeekData.weekStart !== snapWk.weekStart) {
+      weekData = { ...currentWeekData, ...snapWk };
+      weekChanged = true;
+    } else if ((snapWk.history?.length || 0) > (currentWeekData.history?.length || 0)) {
+      // Same week, but another device recorded more transactions — adopt the
+      // richer weekData so cross-device points aren't lost.
+      weekData = { ...currentWeekData, ...snapWk };
+      weekChanged = true;
+    }
+  }
+
+  return { tasks, weekData, tasksChanged, weekChanged };
+}
+
+/**
+ * Store-level seam for the 60s refresh loop (db.refreshCaches): the caller
+ * reads /api/tasks/sync and hands the snapshot here, which merges it into the
+ * same localStorage stores loadTasks()/loadWeekData() read — so KidHome's
+ * dataVersion listener and Home's widgets actually see another device's
+ * tasks when they re-read on `consuela-data-refreshed`. Returns whether
+ * anything changed.
+ */
+export function applyTasksSnapshotToStores(snapshot: any): boolean {
+  if (!snapshot) return false;
+  const { tasks, weekData, tasksChanged, weekChanged } = mergeTasksSnapshot(
+    loadTasks(),
+    loadWeekData(),
+    snapshot
+  );
+  if (tasksChanged) saveTasks(tasks);
+  if (weekChanged) saveWeekData(weekData);
+  return tasksChanged || weekChanged;
 }
 
 export function loadRewards<T>(fallback: T): T {
