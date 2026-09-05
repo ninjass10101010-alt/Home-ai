@@ -455,6 +455,28 @@ body {
   color: var(--widget-accent, var(--color-accent-selected));
 }
 
+/* Chip tone text: success/warning/danger sit on the light frosted chip
+   surface (surface-0/20 over the light canvas ≈ white), where the light
+   accent tokens compute ~3.8:1 (mint) / ~3.2:1 (amber) / ~4.4:1 (rose on
+   the composited surface) — under the 4.5:1 body-text floor. Deepen all
+   three tones in LIGHT mode only, following the --widget-accent
+   "accent 72% black" precedent from the 2026-08-06 contrast pass
+   (on white: mint → 6.45:1, amber → 5.61:1, rose → 7.80:1). Dark theme is
+   untouched. The :not(.chip-selected) guard keeps the selected state's
+   white-on-accent fill intact. */
+:root[data-theme="light"] .chip-tone-success:not(.chip-selected),
+:root:not([data-theme="dark"]) .chip-tone-success:not(.chip-selected) {
+  color: color-mix(in srgb, var(--color-accent-mint) 72%, black);
+}
+:root[data-theme="light"] .chip-tone-warning:not(.chip-selected),
+:root:not([data-theme="dark"]) .chip-tone-warning:not(.chip-selected) {
+  color: color-mix(in srgb, var(--color-accent-amber) 72%, black);
+}
+:root[data-theme="light"] .chip-tone-danger:not(.chip-selected),
+:root:not([data-theme="dark"]) .chip-tone-danger:not(.chip-selected) {
+  color: color-mix(in srgb, var(--color-accent-rose) 72%, black);
+}
+
 /* Kitchen (Meals / Pantry / Grocery) surfaces use plain cards, not
    .widget-card, so their informational labels inherited the base muted token
    (#4e5a72 ≈ 2.5:1) and failed AA. Re-scope the same AA text tokens the widget
@@ -511,6 +533,12 @@ body {
   @apply focus-visible:ring-[var(--color-accent-selected)] focus-visible:ring-offset-2;
 }
 
+/* Invisible hit-area expansion — small (36px or less) controls become ≥44px
+   effective tap targets without changing their visual size. Same documented
+   pattern as the chat photo-remove button. Absolute pseudo, pointer-safe. */
+.hit-44 { position: relative; }
+.hit-44::before { content: ""; position: absolute; inset: -4px; }
+
 /* ─── CapsuleNav (expanding pill bottom nav) ───
    The active item expands into a neon-lime pill; inactive items stay
    compact dark circles. Width expansion is driven by a 0fr -> 1fr
@@ -543,28 +571,6 @@ body {
 
 .pb-safe {
   padding-bottom: env(safe-area-inset-bottom, 0px);
-}
-
-/* ─── Gradient text variants ─── */
-.gradient-text {
-  background: linear-gradient(135deg, #60a5fa 0%, #06b6d4 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-.gradient-text-warm {
-  background: linear-gradient(135deg, var(--color-accent-coral) 0%, var(--color-accent-amber) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-.gradient-text-cool {
-  background: linear-gradient(135deg, var(--color-accent-lavender) 0%, var(--color-accent-cyan) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
 }
 
 /* ─── Glass variants ─── */
@@ -677,6 +683,36 @@ body {
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
   }
   :root:not([data-theme="dark"]) .material-thick {
+    background: rgba(255, 255, 255, 0.8);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  }
+}
+
+/* Legacy .glass / .glass-strong aliases need their own light overrides
+   (the .material-* rules above don't match elements carrying only the
+   alias class) — same precedent as .glass-subtle below. Values mirror
+   .material-regular / .material-thick so light-mode glass surfaces frost
+   white under dark text (AA ≥4.5:1); dark theme is untouched, and the
+   [data-contrast="boost"] border rules keep winning via !important. */
+:root[data-theme="light"] .glass {
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+}
+:root[data-theme="light"] .glass-strong {
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .glass {
+    background: rgba(255, 255, 255, 0.6);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+  }
+  :root:not([data-theme="dark"]) .glass-strong {
     background: rgba(255, 255, 255, 0.8);
     border: 1px solid rgba(0, 0, 0, 0.08);
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);

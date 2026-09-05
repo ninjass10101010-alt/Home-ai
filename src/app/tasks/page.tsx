@@ -1493,11 +1493,28 @@ export default function TasksPage() {
           <div key="leaderboard" className="panel-swap">
           <>
             <Surface variant="warm" radius="2xl" padding="lg" glow>
+              {familyTotal === 0 ? (
+                <div className="py-2 text-center">
+                  <span className="text-2xl animate-crown-glow">👑</span>
+                  <h3 className="mt-1 text-xl font-bold text-text-primary">The crown is up for grabs</h3>
+                  <p className="mt-1 text-sm text-text-secondary">Everyone starts at zero — the first completed task takes the crown.</p>
+                </div>
+              ) : (
               <div className="relative overflow-hidden">
+                <div className="absolute right-0 top-0">
+                  <SoftButton
+                    size="sm"
+                    variant="ghost"
+                    className="hit-44"
+                    aria-label={`Share ${topScorer.name.split(" ")[0]}'s week`}
+                    onClick={() => topScorer && setShareCard({ memberName: topScorer.name, memberEmoji: topScorer.emoji, rank: 1, points: topScorer.points })}
+                  >
+                    ↗ Share
+                  </SoftButton>
+                </div>
                 <div className="flex items-center justify-between gap-4">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">This week&apos;s champion</p>
-                    <button type="button" onClick={() => topScorer && setShareCard({ memberName: topScorer.name, memberEmoji: topScorer.emoji, rank: 1, points: topScorer.points })} className="text-xs text-[var(--color-accent-selected)] hover:underline ml-2">Share</button>
                     <div className="flex items-center gap-2 mt-1">
                       <span className="text-2xl animate-crown-glow">👑</span>
                       <h3 className="text-xl font-bold text-text-primary">{topScorer.name.split(" ")[0]}</h3>
@@ -1533,6 +1550,7 @@ export default function TasksPage() {
                   </div>
                 )}
               </div>
+              )}
             </Surface>
 
             {isLoggedIn && currentUser && (() => {
