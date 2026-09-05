@@ -1567,7 +1567,7 @@ export default function TasksPage() {
             {myPendingQuests.length > 0 && activeTab === "leaderboard" && (
               <DailyQuestCard
                 quests={myPendingQuests}
-                onAccept={(quest) => { adoptSuggestion(quest); setAiSuggestions(prev => prev.filter(s => s.title !== quest.title)); }}
+                onAccept={(quest) => openPinEntry(quest.id)}
                 onGoToTasks={() => setActiveTab("tasks")}
               />
             )}

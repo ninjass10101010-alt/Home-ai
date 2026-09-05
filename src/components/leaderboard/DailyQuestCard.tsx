@@ -26,7 +26,7 @@ export default function DailyQuestCard({ quests, onAccept, onGoToTasks }: DailyQ
             <Avatar name={quest.assignee} color="green" emoji={quest.assigneeEmoji} size="sm" variant="emoji" />
             <span className="flex-1 text-sm text-text-primary truncate">{quest.title}</span>
             <Chip size="sm" tone="success">+{quest.points}pts</Chip>
-            <SoftButton size="sm" onClick={() => onAccept(quest)}>Go</SoftButton>
+            <SoftButton size="sm" aria-label={`Do ${quest.title}`} onClick={() => onAccept(quest)}>Do it</SoftButton>
           </div>
         ))}
       </div>
