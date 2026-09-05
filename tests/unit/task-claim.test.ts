@@ -37,6 +37,7 @@ function jsonReq(body: unknown): NextRequest {
 function makePb(opts?: {
   taskPoints?: number | null;
   weekHistoryAfterWrite?: string;
+  taskRow?: Record<string, unknown>;
 }) {
   const weekRow = {
     id: "w1",
@@ -46,9 +47,10 @@ function makePb(opts?: {
     lastActive: "{}",
     history: "[]",
   };
-  const taskRow = opts?.taskPoints === null ? [] : [
-    { id: "task-row-1", taskId: 42, title: "Dishes", points: opts?.taskPoints ?? 5 },
+  const taskRowBase = opts?.taskPoints === null ? [] : [
+    { id: "task-row-1", taskId: 42, title: "Dishes", points: opts?.taskPoints ?? 5, ...(opts?.taskRow || {}) },
   ];
+  const taskRow = taskRowBase;
   let written: any = null;
   return {
     weekUpdates: () => written,
@@ -143,5 +145,40 @@ describe("POST /api/tasks/claim", () => {
     const body = await res.json();
     expect(body.success).toBe(true);
     expect(body.weekData.history[0].amount).toBe(7);
+  });
+
+  it("accepts a stealable task whose due date passed (universal false)", async () => {
+    const yesterday = (() => { const d = new Date(); d.setDate(d.getDate() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })();
+    const { pb } = makePb({ taskPoints: 5, taskRow: { universal: false, stealable: true, due: yesterday } });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ taskId: 42, claimantName: "Alex", claimantPin: "1234" }));
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.weekData.history[0].description).toMatch(/^Snatched:/);
+  });
+
+  it("rejects a stealable task that is not late yet", async () => {
+    const tomorrow = (() => { const d = new Date(); d.setDate(d.getDate() + 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })();
+    const { pb } = makePb({ taskPoints: 5, taskRow: { universal: false, stealable: true, due: tomorrow } });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ taskId: 42, claimantName: "Alex", claimantPin: "1234" }));
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ success: false, reason: "not_late_yet" });
+  });
+
+  it("rejects a non-universal, non-stealable task", async () => {
+    const yesterday = (() => { const d = new Date(); d.setDate(d.getDate() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })();
+    const { pb } = makePb({ taskPoints: 5, taskRow: { universal: false, stealable: false, due: yesterday } });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ taskId: 42, claimantName: "Alex", claimantPin: "1234" }));
+
+    expect(res.status).toBe(400);
+    expect((await res.json()).reason).toBe("not_universal");
   });
 });

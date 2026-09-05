@@ -14,6 +14,13 @@ function currentWeekKey(): string {
   return d.toISOString().split("T")[0];
 }
 
+// Day-precision "today" from the server's local clock (the host carries
+// TZ=America/Detroit) for the stealable-late gate — due dates are date-only.
+function localTodayISO(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 function parseJSON<T>(value: unknown, fallback: T): T {
   if (typeof value === "string") {
     try {
@@ -56,11 +63,18 @@ export async function POST(request: NextRequest) {
         return { ok: false, reason: "unknown-task" } as const;
       }
 
-      // Only universal ("up for grabs") tasks are claimable. Rows without a
-      // universal flag (legacy/seed rows) are tolerated — only an explicit
-      // false is rejected.
-      if (task.universal === false) {
-        return { ok: false, reason: "not_universal" } as const;
+      // Claimable = universal ("up for grabs") OR stealable whose due date has
+      // passed (day precision; the family-local day decides "late"). Rows
+      // without a universal flag (legacy/seed rows) are tolerated — only an
+      // explicit false blocks the universal path.
+      const universalOk = task.universal !== false;
+      const stealableLate =
+        task.stealable === true &&
+        typeof task.due === "string" &&
+        task.due.length === 10 &&
+        task.due < localTodayISO();
+      if (!universalOk && !stealableLate) {
+        return { ok: false, reason: task.stealable === true ? "not_late_yet" : "not_universal" } as const;
       }
 
       // A task already marked done cannot be claimed again (the weekly
@@ -100,13 +114,14 @@ export async function POST(request: NextRequest) {
 
       const now = new Date().toISOString();
       const amount = Number(task.points) || 0;
+      const isSnatch = !universalOk && stealableLate;
       const tx: Transaction = {
         id: Date.now() + Math.floor(Math.random() * 1000),
         timestamp: now,
         member: normalizedName,
         type: "earn",
         amount,
-        description: `Completed: ${task.title || "task"}${amount > 0 ? ` (+${amount}pts)` : ""}`,
+        description: `${isSnatch ? "Snatched" : "Completed"}: ${task.title || "task"}${amount > 0 ? ` (+${amount}pts)` : ""}`,
         taskId: Number(taskId),
       };
 
@@ -178,6 +193,7 @@ export async function POST(request: NextRequest) {
       const status =
         result.reason === "unknown-task" ? 404 :
         result.reason === "not_universal" ? 400 :
+        result.reason === "not_late_yet" ? 400 :
         409;
       return NextResponse.json({
         success: false,
