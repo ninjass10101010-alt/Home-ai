@@ -156,6 +156,7 @@ export const COLLECTIONS = [
       { name: "category", type: "text" },
       { name: "priority", type: "text" },
       { name: "universal", type: "bool" },
+      { name: "stealable", type: "bool" },
       { name: "createdAt", type: "text" },
       { name: "status", type: "select", options: { values: ["pending", "done"] } },
       { name: "completedInWeek", type: "text" },

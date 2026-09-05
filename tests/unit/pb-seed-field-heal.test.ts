@@ -108,4 +108,11 @@ describe("members.emoji text-field max", () => {
     const emoji = membersDef.schema.find((s: any) => s.name === "emoji");
     expect((emoji as any).options?.max).toBe(MAX_AVATAR_CHARS);
   });
+
+  it("tasks collection carries the stealable bool field", () => {
+    const tasksDef = COLLECTIONS.find((c) => c.name === "tasks")!;
+    const f = tasksDef.schema.find((s: any) => s.name === "stealable");
+    expect(f).toBeDefined();
+    expect(f!.type).toBe("bool");
+  });
 });
