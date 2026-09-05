@@ -117,4 +117,24 @@ describe("filter-aware stat tiles + scoped empty copy", () => {
     const last = rows[rows.length - 1] as HTMLElement;
     expect(last.style.animationDelay).toBe("0.4s"); // min(9, 8) * 0.05
   });
+
+  it("'Up for grabs' Completed tile only counts what the list can show (universal, not completed-stealable)", async () => {
+    localStorage.setItem("consuela-tasks", JSON.stringify([
+      { id: 1, title: "Universal done this week", assignee: "Bailey", assigneeEmoji: "👧", due: TODAY, points: 5, recurring: null, category: "Chores", completed: true, completedBy: "Bailey", completedAt: new Date().toISOString(), completedInWeek: thisMondayISO(), priority: "low", universal: true },
+      { id: 2, title: "Stolen-and-done this week", assignee: "Bailey", assigneeEmoji: "👧", due: TODAY, points: 9, recurring: null, category: "Chores", completed: true, completedBy: "Bailey", completedAt: new Date().toISOString(), completedInWeek: thisMondayISO(), priority: "low", stealable: true },
+    ]));
+    localStorage.setItem("consuela-week-data", JSON.stringify({ weekStart: thisMondayISO(), points: { Bailey: 14 }, history: [], streak: {}, lastActive: {} }));
+
+    const el = await renderAsync(<TasksPage />);
+    await settle();
+
+    clickTile(el, "Up for grabs");
+    await settle();
+
+    const tileText = () => [...el.querySelectorAll(".grid.gap-3.sm\\:grid-cols-3 > *")].map((t) => (t.textContent || "")).join("|");
+    // Completed tile = 1 (only the universal one; the completed stealable task
+    // can never appear in this filter's list because isSnatchable turns false).
+    expect(tileText()).toContain("Completed");
+    expect(tileText()).not.toContain("2This week");
+  });
 });

@@ -1191,7 +1191,9 @@ export default function TasksPage() {
   }, [filterMember, currentUser, dynamicLeaderboard]);
 
   const scopedCompletedCount = useMemo(() => {
-    if (filterMember === "Up for grabs") return thisWeeksCompleted.filter((t) => t.universal || t.stealable).length;
+    // Only universal tasks survive the Up-for-grabs filter once completed
+    // (isSnatchable turns false) — count what the list can actually show.
+    if (filterMember === "Up for grabs") return thisWeeksCompleted.filter((t) => t.universal).length;
     if (!scopedMember) return thisWeeksCompletedCount;
     return thisWeeksCompleted.filter((t) =>
       t.completedBy === scopedMember.name || t.completedBy?.startsWith(scopedMember.name) ||
