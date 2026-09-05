@@ -638,19 +638,13 @@ export default function TasksPage() {
           priority: points >= 15 ? "high" : points >= 10 ? "medium" : "low",
         } as Task;
       });
-      setAiSuggestions(suggestions.length > 0 ? suggestions : [
-        { id: uid(), title: "Make your bed", assignee: "Caspian", assigneeEmoji: "🧒", due: getISO.today, points: 5, recurring: "Daily", category: "AI Suggested", completed: false, priority: "low" },
-        { id: uid(), title: "Help set the table", assignee: "Aurora", assigneeEmoji: "👧", due: getISO.today, points: 8, recurring: "Daily", category: "AI Suggested", completed: false, priority: "medium" },
-        { id: uid(), title: "Sweep the kitchen", assignee: "Jasmine", assigneeEmoji: "👧", due: getISO.today, points: 12, recurring: null, category: "AI Suggested", completed: false, priority: "medium" },
-        { id: uid(), title: "Organize the pantry", assignee: "Bailey", assigneeEmoji: "👧", due: getISO.today, points: 15, recurring: "Weekly", category: "AI Suggested", completed: false, priority: "high" },
-      ]);
+      if (suggestions.length > 0) {
+        setAiSuggestions(suggestions);
+      } else {
+        showToast("Consuela couldn't come up with ideas right now — try again in a bit.");
+      }
     } catch {
-      setAiSuggestions([
-        { id: uid(), title: "Make your bed", assignee: "Caspian", assigneeEmoji: "🧒", due: getISO.today, points: 5, recurring: "Daily", category: "AI Suggested", completed: false, priority: "low" },
-        { id: uid(), title: "Help set the table", assignee: "Aurora", assigneeEmoji: "👧", due: getISO.today, points: 8, recurring: "Daily", category: "AI Suggested", completed: false, priority: "medium" },
-        { id: uid(), title: "Sweep the kitchen", assignee: "Jasmine", assigneeEmoji: "👧", due: getISO.today, points: 12, recurring: null, category: "AI Suggested", completed: false, priority: "medium" },
-        { id: uid(), title: "Organize the pantry", assignee: "Bailey", assigneeEmoji: "👧", due: getISO.today, points: 15, recurring: "Weekly", category: "AI Suggested", completed: false, priority: "high" },
-      ]);
+      showToast("Consuela couldn't come up with ideas right now — try again in a bit.");
     }
     setAiSuggesting(false);
   };
@@ -1052,19 +1046,13 @@ export default function TasksPage() {
         emoji: a.emoji || "🎁",
         cost: parseInt(a.detail?.match(/(\d+)/)?.[1] || "50"),
       }));
-      setAiRewards(ideas.length > 0 ? ideas : [
-        { id: Date.now()+1, name: "Pick dessert", emoji: "🍰", cost: 25 },
-        { id: Date.now()+2, name: "Stay up 30min late", emoji: "🌙", cost: 50 },
-        { id: Date.now()+3, name: "Choose weekend activity", emoji: "🎯", cost: 100 },
-        { id: Date.now()+4, name: "New video game", emoji: "🎮", cost: 200 },
-      ]);
+      if (ideas.length > 0) {
+        setAiRewards(ideas);
+      } else {
+        showToast("Consuela couldn't come up with reward ideas right now — try again in a bit.");
+      }
     } catch {
-      setAiRewards([
-        { id: Date.now()+1, name: "Pick dessert", emoji: "🍰", cost: 25 },
-        { id: Date.now()+2, name: "Stay up 30min late", emoji: "🌙", cost: 50 },
-        { id: Date.now()+3, name: "Choose weekend activity", emoji: "🎯", cost: 100 },
-        { id: Date.now()+4, name: "New video game", emoji: "🎮", cost: 200 },
-      ]);
+      showToast("Consuela couldn't come up with reward ideas right now — try again in a bit.");
     }
     setAiRewardSuggesting(false);
   };
@@ -1355,7 +1343,7 @@ export default function TasksPage() {
             <SectionCard title="Consuela suggests" description="Fresh ideas for the family." icon="✨">
               <div className="flex gap-2">
                 <SoftButton variant="secondary" onClick={generateAiTasks} disabled={aiSuggesting} className="flex-1">{aiSuggesting ? "Thinking..." : "Generate"}</SoftButton>
-                <SoftButton variant="ghost" onClick={syncGoogleTasks} disabled={googleSyncing} className="flex-1">{googleSyncing ? "Syncing..." : "Google"}</SoftButton>
+                <SoftButton variant="ghost" onClick={syncGoogleTasks} disabled={googleSyncing} className="flex-1">{googleSyncing ? "Syncing..." : "Sync Google Tasks"}</SoftButton>
               </div>
               {aiSuggestions.length > 0 ? (
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
