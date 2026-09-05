@@ -34,8 +34,12 @@ import {
   getPreviousWeekRanks, loadHallOfFame,
   syncAllTasksToPB, syncWeekDataToPB,
   archiveAndResetWeek, archiveWeekWinner, saveCurrentWeekRanksForNextWeek,
-  pickDefaultClaimMember,
+  pickDefaultClaimMember, isSnatchable,
 } from "@/lib/task-utils";
+import {
+  readRewardsStamp, touchRewardsStamp, writeRewardsStamp,
+  verifyPinRemote, unreachableCopy,
+} from "@/modes/kid/kid-store";
 import Podium from "@/components/leaderboard/Podium";
 import YourCard from "@/components/leaderboard/YourCard";
 import MemberSheet from "@/components/leaderboard/MemberSheet";
@@ -128,21 +132,10 @@ function migrateDueToISO(tasks: Task[]): Task[] {
 }
 
 // PINs are verified server-side against PocketBase truth — the client bundle
-// never sees member pins. Truthy result = proceed (same semantics the old
-// client-side db.verifyMemberPin had).
-async function verifyPinRemote(memberName: string, pin: string): Promise<any | null> {
-  try {
-    const res = await fetch("/api/members/verify", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ memberName, pin }),
-    });
-    if (!res.ok) return null;
-    return (await res.json()).member ?? null;
-  } catch {
-    return null;
-  }
-}
+// never sees member pins. The shared kid-store helper returns a DISCRIMINATED
+// {ok | wrongPin | unreachable} result so a flaky network or an asleep NAS is
+// never reported to a parent as "Wrong PIN" (honesty rule: offline-vs-server
+// distinction, same contract the kid lanes shipped).
 
 function safeDisplayEmoji(emoji: any): string {
   return typeof emoji === "string" && emoji.startsWith("data:") ? "👤" : emoji || "👤";
@@ -425,7 +418,10 @@ export default function TasksPage() {
       fetch("/api/tasks/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tasks, weekData }),
+        // The rewards catalog rides the snapshot WITH its last-write-wins
+        // stamp (kid-store) so a Settings delete (newer stamp) is never
+        // overwritten by a stale snapshot on the next restore.
+        body: JSON.stringify({ tasks, weekData, rewards, rewardsUpdatedAt: readRewardsStamp() }),
       })
         .then((res) => {
           if (!res.ok) console.warn(`Tasks snapshot sync failed (${res.status}) — will retry on next change`);
@@ -434,7 +430,7 @@ export default function TasksPage() {
       syncPendingRef.current = false;
     }, 2000);
     return () => { clearTimeout(t); syncPendingRef.current = false; };
-  }, [tasks, weekData, mounted]);
+  }, [tasks, weekData, rewards, mounted]);
 
   // Structured PB sync (individual collections)
   useEffect(() => {
@@ -453,6 +449,55 @@ export default function TasksPage() {
   // True when the snapshot read 401'd — a signed-out browser can't read the
   // sessioned gateway, so an empty list here means "hidden", not "done".
   const [guestSyncBlocked, setGuestSyncBlocked] = useState(false);
+  // Restore tasks state from a PocketBase snapshot (bridges container restarts
+  // and merges another device's changes). Guards adopt richer/longer server
+  // state only, so a no-change refresh leaves state untouched (and never
+  // triggers the debounced push-back below). The REWARDS leg is the exception:
+  // "longer wins" is delete-blind (a parent's Settings delete is a SHORTER,
+  // NEWER list), so rewards merge by last-write-wins on the kid-store stamp —
+  // a stale snapshot can never resurrect a deleted reward.
+  const restoreFromSnapshot = useCallback((data: any) => {
+    if (!data?.snapshot) return;
+    const snap = data.snapshot;
+    if (Array.isArray(snap.rewards)) {
+      const snapStamp = typeof snap.rewardsUpdatedAt === "string" ? snap.rewardsUpdatedAt : "";
+      if (snapStamp && snapStamp > readRewardsStamp()) {
+        writeRewardsStamp(snapStamp);
+        setRewards(snap.rewards);
+      }
+    }
+    if (snap.penalties?.length) setPenalties((prev: any) => snap.penalties.length > prev.length ? snap.penalties : prev);
+    if (snap.weekData?.weekStart) {
+      const localWk = loadWeekData();
+      if (localWk.weekStart !== snap.weekData.weekStart) {
+        setWeekData((prev: any) => ({ ...prev, ...snap.weekData }));
+      } else if ((snap.weekData.history?.length || 0) > (localWk.history?.length || 0)) {
+        // Same week, but another device recorded more transactions —
+        // adopt the richer weekData so cross-device points aren't lost.
+        setWeekData((prev: any) => ({ ...prev, ...snap.weekData }));
+      }
+    }
+    if (snap.tasks?.length) {
+      setTasks((prev: any) => {
+        const restored = snap.tasks.map((t: any) => ({
+          ...t,
+          // Preserve the real numeric id and completion attribution —
+          // regenerating ids here broke swipe/edit/undo targeting and
+          // wiped who completed what.
+          id: typeof t.id === "number" ? t.id : Number(t.id) || Date.now() + Math.floor(Math.random() * 100000),
+          assignee: t.assignee || t.assigned || "All",
+          assigneeEmoji: t.assigneeEmoji || "👤",
+          completed: t.completed || false,
+          completedBy: t.completedBy ?? undefined,
+          completedAt: t.completedAt ?? undefined,
+          completedInWeek: t.completedInWeek ?? undefined,
+        }));
+        const fresh = restored.filter((t: any) => !prev.find((p: any) => p.id === t.id || p.title === t.title));
+        return fresh.length ? [...prev, ...fresh] : prev;
+      });
+    }
+  }, []);
+
   useEffect(() => {
     if (!mounted || restoreAttempted.current) return;
     restoreAttempted.current = true;
@@ -461,42 +506,26 @@ export default function TasksPage() {
         setGuestSyncBlocked(r.status === 401);
         return r.ok ? r.json() : null;
       })
-      .then((data) => {
-        if (!data?.snapshot) return;
-        const snap = data.snapshot;
-        if (snap.rewards?.length) setRewards((prev: any) => snap.rewards.length > prev.length ? snap.rewards : prev);
-        if (snap.penalties?.length) setPenalties((prev: any) => snap.penalties.length > prev.length ? snap.penalties : prev);
-        if (snap.weekData?.weekStart) {
-          const localWk = loadWeekData();
-          if (localWk.weekStart !== snap.weekData.weekStart) {
-            setWeekData((prev: any) => ({ ...prev, ...snap.weekData }));
-          } else if ((snap.weekData.history?.length || 0) > (localWk.history?.length || 0)) {
-            // Same week, but another device recorded more transactions —
-            // adopt the richer weekData so cross-device points aren't lost.
-            setWeekData((prev: any) => ({ ...prev, ...snap.weekData }));
-          }
-        }
-        if (snap.tasks?.length) {
-          setTasks((prev: any) => {
-            const restored = snap.tasks.map((t: any) => ({
-              ...t,
-              // Preserve the real numeric id and completion attribution —
-              // regenerating ids here broke swipe/edit/undo targeting and
-              // wiped who completed what.
-              id: typeof t.id === "number" ? t.id : Number(t.id) || Date.now() + Math.floor(Math.random() * 100000),
-              assignee: t.assignee || t.assigned || "All",
-              assigneeEmoji: t.assigneeEmoji || "👤",
-              completed: t.completed || false,
-              completedBy: t.completedBy ?? undefined,
-              completedAt: t.completedAt ?? undefined,
-              completedInWeek: t.completedInWeek ?? undefined,
-            }));
-            return [...prev, ...restored.filter((t: any) => !prev.find((p: any) => p.id === t.id || p.title === t.title))];
-          });
-        }
-      })
+      .then((data) => restoreFromSnapshot(data))
       .catch(() => {});
-  }, [mounted]);
+  }, [mounted, restoreFromSnapshot]);
+
+  // Cross-device sync: re-pull the snapshot when the global refresher
+  // finishes a cycle (60s tick, tab-wake, post-login) so a task added on
+  // another device appears without a manual reload.
+  useEffect(() => {
+    const onRefreshed = () => {
+      fetch("/api/tasks/sync")
+        .then((r) => {
+          setGuestSyncBlocked(r.status === 401);
+          return r.ok ? r.json() : null;
+        })
+        .then((data) => restoreFromSnapshot(data))
+        .catch(() => {});
+    };
+    window.addEventListener("consuela-data-refreshed", onRefreshed);
+    return () => window.removeEventListener("consuela-data-refreshed", onRefreshed);
+  }, [restoreFromSnapshot]);
 
   // Backfill the Hall of Fame + previous-week ranks for weeks that rolled over
   // while the page was closed (loadWeekData archives them on load, but the
@@ -672,7 +701,7 @@ export default function TasksPage() {
     setPinInput("");
     setPinError("");
     setPinSuccess("");
-    if (task.universal) {
+    if (task.universal || isSnatchable(task)) {
       // Default the claim to the signed-in member — a kid typing their own
       // PIN against a select stuck on "Rebecca (Mom)" reads as "wrong PIN".
       const defaultSnatcher = pickDefaultClaimMember(membersData, currentUser?.name) || task.assignee;
@@ -710,9 +739,17 @@ export default function TasksPage() {
     setPinBusy(true);
     try {
       let parent: any = null;
+      let unreachable = false;
       for (const m of membersData.filter((m: any) => m.role === "parent")) {
-        parent = await verifyPinRemote(m.fullName, parentApprovalPin) ? m : null;
-        if (parent) break;
+        const result = await verifyPinRemote(m.fullName, parentApprovalPin);
+        if (result.status === "ok") { parent = m; break; }
+        if (result.status === "unreachable") { unreachable = true; break; }
+      }
+      if (unreachable) {
+        setParentApprovalError(unreachableCopy());
+        setParentApprovalPin("");
+        setTimeout(() => setParentApprovalError(""), 2500);
+        return;
       }
       if (!parent) {
         setParentApprovalError("Parent PIN required to approve large rewards.");
@@ -755,13 +792,20 @@ export default function TasksPage() {
       const task = tasks.find(t => t.id === undoTaskId);
       if (!task || !task.completed) return;
       const memberName = task.completedBy || task.assignee;
-      const verified = await verifyPinRemote(memberName, undoPin);
-      if (!verified) {
+      const result = await verifyPinRemote(memberName, undoPin);
+      if (result.status === "unreachable") {
+        setUndoError(unreachableCopy());
+        setUndoPin("");
+        setTimeout(() => setUndoError(""), 2000);
+        return;
+      }
+      if (result.status === "wrongPin") {
         setUndoError("Wrong PIN. Try again.");
         setUndoPin("");
         setTimeout(() => setUndoError(""), 2000);
         return;
       }
+      const verified = result.member;
       const normalizedName = normalizeName(memberName);
       setTasks(prev => prev.map(t => t.id === undoTaskId ? { ...t, completed: false, completedBy: undefined, completedAt: undefined, completedInWeek: undefined } : t));
       const current = (weekData.points[normalizedName] || 0) - task.points;
@@ -791,8 +835,9 @@ export default function TasksPage() {
         setTimeout(() => setPinError(""), 2000);
         return;
       }
-      const verified = await verifyPinRemote(memberName, pinInput);
-      if (verified) {
+      const result = await verifyPinRemote(memberName, pinInput);
+      if (result.status === "ok") {
+        const verified = result.member;
         const normalizedName = normalizeName((verified as any).name);
         const cost = pinReward.cost;
         const balance = weekData.points[normalizedName] || 0;
@@ -812,7 +857,7 @@ export default function TasksPage() {
         setPinSuccess(`${pinReward.emoji} ${normalizedName.split(" ")[0]} redeemed ${pinReward.name}! -${cost}pts`);
         setTimeout(() => { setPinReward(null); setPinSuccess(""); }, 1500);
       } else {
-        setPinError("Wrong code for selected member. Try again.");
+        setPinError(result.status === "unreachable" ? unreachableCopy() : "Wrong code for selected member. Try again.");
         setPinInput("");
         setTimeout(() => setPinError(""), 2000);
       }
@@ -827,14 +872,14 @@ export default function TasksPage() {
         setTimeout(() => setPinError(""), 2000);
         return;
       }
-      let verified = await verifyPinRemote(memberName, pinInput);
-      if (!verified) {
+      let result = await verifyPinRemote(memberName, pinInput);
+      if (result.status === "wrongPin") {
         for (const m of membersData.filter((m: any) => m.role === "parent")) {
-          verified = await verifyPinRemote(m.fullName, pinInput);
-          if (verified) break;
+          result = await verifyPinRemote(m.fullName, pinInput);
+          if (result.status !== "wrongPin") break;
         }
       }
-      if (verified) {
+      if (result.status === "ok") {
         const normalizedName = membersData.find((m: any) => m.fullName === penaltyForMember)?.fullName || penaltyForMember;
         const penaltyPoints = pinPenalty?.points ?? 0;
         setWeekData(prev => {
@@ -845,7 +890,7 @@ export default function TasksPage() {
         setPinSuccess(`-${penaltyPoints}pts from ${normalizedName.split(" ")[0]}`);
         setTimeout(() => { setPinPenalty(null); setPinSuccess(""); }, 1500);
       } else {
-        setPinError("Wrong PIN. Try again.");
+        setPinError(result.status === "unreachable" ? unreachableCopy() : "Wrong PIN. Try again.");
         setPinInput("");
         setTimeout(() => setPinError(""), 2000);
       }
@@ -859,7 +904,7 @@ export default function TasksPage() {
     const now = new Date().toISOString();
     const currentWeek = weekKey();
 
-    if (task.universal) {
+    if (task.universal || isSnatchable(task)) {
       const claimant = snatchForMember;
       if (!claimant) {
         setPinError("Select who is claiming this task.");
@@ -867,8 +912,10 @@ export default function TasksPage() {
         setTimeout(() => setPinError(""), 2000);
         return;
       }
-      const verified = await verifyPinRemote(claimant, pinInput);
-      if (verified) {
+      const result = await verifyPinRemote(claimant, pinInput);
+      if (result.status === "ok") {
+        const verified = result.member;
+        const wasSnatch = !task.universal && isSnatchable(task);
         const normalizedName = normalizeName((verified as any).name);
         const claimantEmoji = (membersData.find((m: any) => m.fullName === normalizedName)?.emoji) || task.assigneeEmoji;
         claimSnapshotRef.current = { tasks, weekData };
@@ -876,10 +923,10 @@ export default function TasksPage() {
         const pointsMsg = task.points > 0 ? `+${task.points}pts` : "";
         setWeekData(prev => {
           const updated = { ...prev, points: { ...prev.points, [normalizedName]: (prev.points[normalizedName] || 0) + task.points } };
-          return addTransaction(updated, "earn", task.points, `Completed: ${task.title}${pointsMsg ? ` (${pointsMsg})` : ""}`, normalizedName, task.id);
+          return addTransaction(updated, "earn", task.points, `${wasSnatch ? "Snatched" : "Completed"}: ${task.title}${pointsMsg ? ` (${pointsMsg})` : ""}`, normalizedName, task.id);
         });
         setPinInput("");
-        setPinSuccess(`${normalizedName.split(" ")[0]} completed ${task.title}! ${pointsMsg}`);
+        setPinSuccess(`🎯 ${normalizedName.split(" ")[0]} ${wasSnatch ? "snatched" : "completed"} ${task.title}! ${pointsMsg}`);
         triggerConfetti();
         setTimeout(() => { setPinTaskId(null); setPinSuccess(""); setSnatchForMember(""); }, 1500);
 
@@ -930,15 +977,16 @@ export default function TasksPage() {
           // Offline: keep the optimistic claim (local sync will reconcile)
         });
       } else {
-        setPinError("Wrong code for selected member. Try again.");
+        setPinError(result.status === "unreachable" ? unreachableCopy() : "Wrong code for selected member. Try again.");
         setPinInput("");
         setTimeout(() => setPinError(""), 2000);
       }
       return;
     }
 
-    const verified = await verifyPinRemote(task.assignee, pinInput);
-    if (verified) {
+    const result = await verifyPinRemote(task.assignee, pinInput);
+    if (result.status === "ok") {
+      const verified = result.member;
       const normalizedName = normalizeName((verified as any).name);
       setTasks(prev => prev.map(t => t.id === pinTaskId ? { ...t, completed: true, completedBy: normalizedName, completedAt: now, completedInWeek: currentWeek } : t));
       const pointsMsg = task.points > 0 ? `+${task.points}pts` : "";
@@ -951,7 +999,7 @@ export default function TasksPage() {
       triggerConfetti();
       setTimeout(() => { setPinTaskId(null); setPinSuccess(""); setSnatchForMember(""); }, 1500);
     } else {
-      setPinError("Wrong PIN. Try again.");
+      setPinError(result.status === "unreachable" ? unreachableCopy() : "Wrong PIN. Try again.");
       setPinInput("");
       setTimeout(() => setPinError(""), 2000);
     }
@@ -966,10 +1014,11 @@ export default function TasksPage() {
     if (!rewardForm.name.trim()) return;
     if (addingReward) setRewards(prev => [...prev, { ...rewardForm, id: Date.now() }]);
     else setRewards(prev => prev.map(r => r.id === editingRewardId ? { ...rewardForm } : r));
+    touchRewardsStamp();
     setEditingRewardId(null);
     setAddingReward(false);
   };
-  const deleteReward = (id: number) => { setRewards(prev => prev.filter(r => r.id !== id)); setEditingRewardId(null); };
+  const deleteReward = (id: number) => { setRewards(prev => prev.filter(r => r.id !== id)); touchRewardsStamp(); setEditingRewardId(null); };
 
   const startAddPenalty = () => { setEditingPenaltyId(null); setAddingPenalty(true); setPenaltyForm({ id: Date.now(), name: "", emoji: "⚠️", points: 10 }); };
   const startEditPenalty = (p: Penalty) => { setEditingPenaltyId(p.id); setAddingPenalty(false); setPenaltyForm({ ...p }); };
@@ -1019,6 +1068,7 @@ export default function TasksPage() {
 
   const adoptReward = (r: Reward) => {
     setRewards(prev => [...prev, { ...r, id: Date.now() }]);
+    touchRewardsStamp();
     setAiRewards(prev => prev.filter(rr => rr.name !== r.name));
   };
 
@@ -1037,9 +1087,17 @@ export default function TasksPage() {
     setPinBusy(true);
     try {
       let parent: any = null;
+      let unreachable = false;
       for (const m of membersData.filter((m: any) => m.role === "parent")) {
-        parent = await verifyPinRemote(m.fullName, adjustPin) ? m : null;
-        if (parent) break;
+        const result = await verifyPinRemote(m.fullName, adjustPin);
+        if (result.status === "ok") { parent = m; break; }
+        if (result.status === "unreachable") { unreachable = true; break; }
+      }
+      if (unreachable) {
+        setAdjustError(unreachableCopy());
+        setAdjustPin("");
+        setTimeout(() => setAdjustError(""), 2500);
+        return;
       }
       if (!parent) {
         setAdjustError("Parent PIN required. Try again.");
@@ -1064,11 +1122,11 @@ export default function TasksPage() {
 
   const filtered = tasks.filter((t) => {
     if (filterMember === "Up for grabs") {
-      return t.universal && (showCompleted ? true : !t.completed);
+      return (t.universal || isSnatchable(t)) && (showCompleted ? true : !t.completed);
     }
     if (filterMember === "My Tasks" && currentUser) {
       const mine = t.assignee === currentUser.name;
-      const claimable = t.universal && !t.completed;
+      const claimable = (t.universal || isSnatchable(t)) && !t.completed;
       return (mine || claimable) && (showCompleted ? true : !t.completed);
     }
     const memberMatch = filterMember === "All" || t.assignee === filterMember;
@@ -1357,7 +1415,7 @@ export default function TasksPage() {
                         <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={task.assigneeEmoji} size="sm" variant="emoji" />
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-sm text-text-primary">{task.title}</div>
-                          <div className="truncate text-xs text-text-secondary">{task.assignee.split(" ")[0]} · {formatDueLabel(task.due)} · {task.category}</div>
+                          <div className="truncate text-xs text-text-secondary">{task.assignee.split(" ")[0]} · {isSnatchable(task) ? `was due ${formatDueLabel(task.due)}` : formatDueLabel(task.due)} · {task.category}</div>
                         </div>
                         <span
                           className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-semibold text-text-primary glass-subtle"
@@ -1758,7 +1816,7 @@ export default function TasksPage() {
           }
         >
           <div className="space-y-4">
-            {!pinReward && tasks.find((t) => t.id === pinTaskId)?.universal && (
+            {!pinReward && (() => { const t = pinTaskId !== null ? tasks.find((x) => x.id === pinTaskId) : undefined; return !!t && (t.universal || isSnatchable(t)); })() && (
               <label className="block">
                 <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Claim for</span>
                 <select value={snatchForMember} onChange={(e) => setSnatchForMember(e.target.value)} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none">
