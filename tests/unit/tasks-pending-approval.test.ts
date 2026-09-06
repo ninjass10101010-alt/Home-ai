@@ -120,3 +120,17 @@ describe("sendBackPendingCompletion", () => {
     expect(sendBackPendingCompletion(tasks, 999)).toBe(tasks);
   });
 });
+
+describe("syncTasksToPB pendingApproval persistence", () => {
+  it("writes the pending record when set, null otherwise", async () => {
+    const { syncTasksToPB } = await import("@/lib/task-utils");
+    const { db } = await import("@/db");
+    await syncTasksToPB([
+      t({ completed: true, pendingApproval: { byName: "Jasmine", at: NOW, points: 5 } }),
+      t({ id: 2, title: "No pending" }),
+    ]);
+    const calls = vi.mocked(db.upsertTask).mock.calls;
+    expect(calls[0][0].pendingApproval).toEqual({ byName: "Jasmine", at: NOW, points: 5 });
+    expect(calls[1][0].pendingApproval).toBeNull();
+  });
+});

@@ -115,4 +115,11 @@ describe("members.emoji text-field max", () => {
     expect(f).toBeDefined();
     expect(f!.type).toBe("bool");
   });
+
+  it("tasks collection carries the pendingApproval json field", () => {
+    const tasksDef = COLLECTIONS.find((c) => c.name === "tasks")!;
+    const f = tasksDef.schema.find((s: any) => s.name === "pendingApproval");
+    expect(f).toBeDefined();
+    expect(f!.type).toBe("json");
+  });
 });

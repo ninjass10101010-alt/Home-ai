@@ -590,6 +590,7 @@ export async function syncTasksToPB(tasks: Task[]): Promise<void> {
       priority: task.priority,
       universal: task.universal || false,
       stealable: task.stealable || false,
+      pendingApproval: task.pendingApproval ?? null,
       completedInWeek: task.completedInWeek ?? null,
       completedAt: task.completedAt ?? null,
     }).catch(() => {});
