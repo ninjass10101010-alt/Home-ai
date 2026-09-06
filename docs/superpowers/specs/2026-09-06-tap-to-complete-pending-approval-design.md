@@ -114,6 +114,12 @@ a per-task approval toggle; touching the >100pt reward approval gate.
 - Conflicts: last-write-wins on the task row via shared snapshot sync, and
   the `earn` tx is idempotent by `taskId` (same guard the claim route uses) —
   a double-approve from two devices cannot double-pay.
+  - Concurrency caveat (recorded at review): that idempotency is
+    client-side by `taskId` against local `weekData` — two parent devices
+    approving the same pending row inside the sync window (~60s) can
+    double-pay. Parents review on one device at a time; a
+    server-authoritative approve route (mirroring `/api/tasks/claim`) is
+    the follow-up if it ever bites.
 
 ## Section 5 — Testing
 
