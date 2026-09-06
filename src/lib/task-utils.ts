@@ -245,7 +245,7 @@ export function regenerateRecurringTasks(tasks: Task[]): Task[] {
   // completedInWeek recorded). Tasks completed THIS week are left untouched —
   // they regen next week.
   const sources = tasks.filter(
-    (t) => t.completed && t.recurring && t.completedInWeek !== monday
+    (t) => t.completed && t.recurring && t.completedInWeek !== monday && !t.pendingApproval
   );
 
   // Dedupe by lineage so duplicate completed rows never compound into
