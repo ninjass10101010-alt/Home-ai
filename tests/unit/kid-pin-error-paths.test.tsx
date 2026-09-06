@@ -68,6 +68,18 @@ vi.mock("@/lib/task-utils", () => ({
   calculateRealStreak: () => 0,
   syncTasksToPB: store.syncTasksToPB,
   syncWeekDataToPB: store.syncWeekDataToPB,
+  // Trust-but-verify (Task 7): non-universal kid quests complete PIN-free as
+  // done-but-unpaid — faithful inline mirror of the real task-utils helpers.
+  shouldUsePendingTap: (role: string | undefined, task: any) =>
+    role === "child" && !task.completed && !task.universal,
+  tapCompletePending: (task: any, byName: string, nowISO: string, week: string) => ({
+    ...task,
+    completed: true,
+    completedBy: byName,
+    completedAt: nowISO,
+    completedInWeek: week,
+    pendingApproval: { byName, at: nowISO, points: task.points },
+  }),
 }));
 
 vi.mock("@/components/integrations/SpotifyWidget", () => ({ default: () => null }));
@@ -154,54 +166,74 @@ describe("KidHome — honest error paths on the quest PIN gate", () => {
     vi.unstubAllGlobals();
   });
 
-  it("a SERVER ERROR (500) on verify says 'Couldn't reach', never 'Wrong PIN', and clears the PIN", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
+  it("a SERVER ERROR (500) no longer blocks a kid quest — it lands pending with zero verify traffic", async () => {
+    const spyFetch = vi.fn(async (..._args: any[]) => ({ ok: false, status: 500, json: async () => ({}) }));
+    vi.stubGlobal("fetch", spyFetch);
     const el = await renderAsync(<KidHome />);
     await settle();
     await completeQuestWithPin(el, "Feed the dog", "1234");
 
-    const text = document.body.textContent || "";
-    expect(text).toContain("Couldn't reach Consuela");
-    expect(text).not.toContain("Wrong PIN");
-    // Nothing completed; the typed PIN was cleared from the input.
-    expect(store.saveTasks).not.toHaveBeenCalled();
+    // Pending contract: done-but-unpaid even when the server errors — the kid
+    // path performs no verify round trip, so the 500 is never even observed.
+    expect(store.saveTasks).toHaveBeenCalled();
+    const saved = store.saveTasks.mock.calls[0][0];
+    expect(saved.find((t: any) => t.id === 7)?.pendingApproval).toMatchObject({ byName: "Caspian", points: 10 });
+    expect(spyFetch.mock.calls.filter((call) => String(call[0]).includes("/api/members/verify"))).toHaveLength(0);
     expect(store.saveWeekData).not.toHaveBeenCalled();
-    const input = document.querySelector('input[aria-label="Your 4-digit PIN"]') as HTMLInputElement;
-    expect(input.value).toBe("");
+    expect(store.week.history).toHaveLength(0);
+    expect(document.querySelector('[aria-label^="Congratulations"]')).not.toBeNull();
   });
 
-  it("a NETWORK REJECTION on verify is reported as unreachable, not a wrong PIN", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Failed to fetch"); }));
+  it("a NETWORK REJECTION no longer blocks a kid quest — it lands pending, not unreachable", async () => {
+    const spyFetch = vi.fn(async (..._args: any[]) => { throw new TypeError("Failed to fetch"); });
+    vi.stubGlobal("fetch", spyFetch);
     const el = await renderAsync(<KidHome />);
     await settle();
     await completeQuestWithPin(el, "Feed the dog", "1234");
 
-    const text = document.body.textContent || "";
-    expect(text).toContain("Couldn't reach Consuela");
-    expect(text).not.toContain("Wrong PIN");
-    expect(store.saveTasks).not.toHaveBeenCalled();
+    expect(store.saveTasks).toHaveBeenCalled();
+    const saved = store.saveTasks.mock.calls[0][0];
+    expect(saved.find((t: any) => t.id === 7)?.pendingApproval).toMatchObject({ byName: "Caspian", points: 10 });
+    expect(spyFetch.mock.calls.filter((call) => String(call[0]).includes("/api/members/verify"))).toHaveLength(0);
+    expect(store.saveWeekData).not.toHaveBeenCalled();
+    expect(store.week.history).toHaveLength(0);
+    expect(document.querySelector('[aria-label^="Congratulations"]')).not.toBeNull();
   });
 
-  it("a genuine WRONG PIN (401) still reads 'Wrong PIN. Try again.'", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 401, json: async () => ({}) })));
+  it("ANY pin completes a kid quest as pending — no verify call, no earn, points unchanged", async () => {
+    const spyFetch = vi.fn(async (..._args: any[]) => ({ ok: false, status: 401, json: async () => ({}) }));
+    vi.stubGlobal("fetch", spyFetch);
     const el = await renderAsync(<KidHome />);
     await settle();
     await completeQuestWithPin(el, "Feed the dog", "9999");
 
-    expect(document.body.textContent || "").toContain("Wrong PIN. Try again.");
-    expect(store.saveTasks).not.toHaveBeenCalled();
+    // Even a "wrong" PIN lands pending: the kid gate no longer verifies.
+    expect(store.saveTasks).toHaveBeenCalled();
+    const saved = store.saveTasks.mock.calls[0][0];
+    expect(saved.find((t: any) => t.id === 7)?.pendingApproval).toMatchObject({ byName: "Caspian", points: 10 });
+    expect(spyFetch.mock.calls.filter((call) => String(call[0]).includes("/api/members/verify"))).toHaveLength(0);
+    expect(store.saveWeekData).not.toHaveBeenCalled();
+    expect(store.week.history).toHaveLength(0);
+    expect(document.querySelector('[aria-label^="Congratulations"]')).not.toBeNull();
   });
 
-  it("an OFFLINE network failure gets the offline copy (navigator.onLine false)", async () => {
+  it("an OFFLINE kid quest still lands pending locally (syncs when the connection returns)", async () => {
     Object.defineProperty(window.navigator, "onLine", { value: false, configurable: true });
-    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Failed to fetch"); }));
+    const spyFetch = vi.fn(async (..._args: any[]) => { throw new TypeError("Failed to fetch"); });
+    vi.stubGlobal("fetch", spyFetch);
     const el = await renderAsync(<KidHome />);
     await settle();
     await completeQuestWithPin(el, "Feed the dog", "1234");
 
-    const text = document.body.textContent || "";
-    expect(text).toContain("You're offline");
-    expect(text).not.toContain("Wrong PIN");
+    // Local-first pending write: no network needed, no verify, no earn.
+    expect(store.saveTasks).toHaveBeenCalled();
+    const saved = store.saveTasks.mock.calls[0][0];
+    expect(saved.find((t: any) => t.id === 7)?.pendingApproval).toMatchObject({ byName: "Caspian", points: 10 });
+    expect(spyFetch.mock.calls.filter((call) => String(call[0]).includes("/api/members/verify"))).toHaveLength(0);
+    expect(store.saveWeekData).not.toHaveBeenCalled();
+    expect(store.week.history).toHaveLength(0);
+    expect(store.syncTasksToPB).toHaveBeenCalled();
+    expect(document.querySelector('[aria-label^="Congratulations"]')).not.toBeNull();
   });
 
   it("a NETWORK REJECTION on the claim POST is caught (was: escaped the onClick, silent)", async () => {
