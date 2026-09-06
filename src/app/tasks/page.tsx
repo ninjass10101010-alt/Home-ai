@@ -493,6 +493,7 @@ export default function TasksPage() {
           completedBy: t.completedBy ?? undefined,
           completedAt: t.completedAt ?? undefined,
           completedInWeek: t.completedInWeek ?? undefined,
+          pendingApproval: t.pendingApproval ?? undefined,
         }));
         const fresh = restored.filter((t: any) => !prev.find((p: any) => p.id === t.id || p.title === t.title));
         return fresh.length ? [...prev, ...fresh] : prev;

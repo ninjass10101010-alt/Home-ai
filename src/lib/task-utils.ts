@@ -338,8 +338,9 @@ export function mergeTasksSnapshot(
   let weekChanged = false;
   if (!snapshot) return { tasks, weekData, tasksChanged, weekChanged };
 
+  let restored: any[] = [];
   if (Array.isArray(snapshot.tasks) && snapshot.tasks.length) {
-    const restored = snapshot.tasks.map((t: any) => ({
+    restored = snapshot.tasks.map((t: any) => ({
       ...t,
       // Preserve the real numeric id and completion attribution (the same
       // fields restoreFromSnapshot guards — regenerating ids broke targeting).
@@ -350,6 +351,7 @@ export function mergeTasksSnapshot(
       completedBy: t.completedBy ?? undefined,
       completedAt: t.completedAt ?? undefined,
       completedInWeek: t.completedInWeek ?? undefined,
+      pendingApproval: (t as any).pendingApproval ?? undefined,
     }));
     const fresh = restored.filter(
       (t: any) => !currentTasks.some((p: any) => p.id === t.id || p.title === t.title)
@@ -359,6 +361,48 @@ export function mergeTasksSnapshot(
       tasksChanged = true;
     }
   }
+
+  // Adopt completion/pending field changes on KNOWN rows: a kid's tap on the
+  // kitchen phone must land on a parent's device even though the row id
+  // already exists locally. A remote clear only wins when the snapshot's
+  // weekData carries the earn tx (approval happened elsewhere) — otherwise a
+  // stale snapshot would wipe a fresh local tap.
+  const byId = new Map(restored.map((t: any) => [t.id, t]));
+  let merged = tasks;
+  for (const snapRow of byId.values()) {
+    const local = merged.find((p: any) => p.id === snapRow.id);
+    if (!local) continue;
+    const snapshotPending = (snapRow as any).pendingApproval ?? undefined;
+    const localPending = (local as any).pendingApproval ?? undefined;
+    const pendingDiffers =
+      JSON.stringify(snapshotPending ?? null) !== JSON.stringify(localPending ?? null);
+    const completionDiffers =
+      !!snapRow.completed !== !!local.completed ||
+      (snapRow.completedBy ?? undefined) !== (local.completedBy ?? undefined) ||
+      (snapRow.completedAt ?? undefined) !== (local.completedAt ?? undefined) ||
+      (snapRow.completedInWeek ?? undefined) !== (local.completedInWeek ?? undefined);
+    if (!pendingDiffers && !completionDiffers) continue;
+    if (localPending && !snapshotPending) {
+      const paidElsewhere = (snapshot.weekData?.history || []).some(
+        (tx: any) => tx.type === "earn" && tx.taskId === snapRow.id
+      );
+      if (!paidElsewhere) continue;
+    }
+    merged = merged.map((p: any) =>
+      p.id === snapRow.id
+        ? {
+            ...p,
+            completed: snapRow.completed,
+            completedBy: snapRow.completedBy ?? undefined,
+            completedAt: snapRow.completedAt ?? undefined,
+            completedInWeek: snapRow.completedInWeek ?? undefined,
+            pendingApproval: snapshotPending,
+          }
+        : p
+    );
+    tasksChanged = true;
+  }
+  tasks = merged;
 
   if (snapshot.weekData?.weekStart) {
     const snapWk = snapshot.weekData;
