@@ -9,6 +9,7 @@ import {
   buildKidSystemPrompt,
 } from "@/lib/consuela-prompts";
 import { buildToolsForOpenAI } from "@/lib/hermes-tools";
+import { AI_BOOT } from "@/lib/ai-boot.generated";
 
 const kidToolNames = () =>
   buildToolsForOpenAI({ role: "child" }).map((t) => t.function.name).sort();
@@ -18,8 +19,21 @@ const adultToolNames = () =>
 describe("kid soul prompt", () => {
   it("exists and is kid-friendly, not the adult soul", () => {
     expect(KID_SYSTEM_PROMPT).toBeTruthy();
-    expect(KID_SYSTEM_PROMPT).not.toContain("cross-section");
+    expect(KID_SYSTEM_PROMPT).toContain("Kid Soul (child sessions ONLY)");
     expect(KID_SYSTEM_PROMPT.length).toBeGreaterThan(200);
+    // The kid soul never carries the adult boot content.
+    expect(KID_SYSTEM_PROMPT).not.toContain("Dashboard Tool Reference (Consuela)");
+    expect(KID_SYSTEM_PROMPT).not.toContain("trigger_update");
+  });
+
+  it("boot files are embedded (SOUL/IDENTITY/TOOLS/KID from ai/)", () => {
+    expect(AI_BOOT.SOUL_MD).toContain("Dashboard Agent");
+    expect(AI_BOOT.IDENTITY_MD).toContain("Garcia household AI");
+    expect(AI_BOOT.TOOLS_MD).toContain("get_dashboard_summary");
+    expect(AI_BOOT.TOOLS_MD).toContain("trigger_update");
+    expect(AI_BOOT.KID_MD).toContain("Kid Soul");
+    // Generator ran — no placeholder content.
+    for (const v of Object.values(AI_BOOT)) expect(v.length).toBeGreaterThan(100);
   });
 
   it("names the kid when a name is provided", () => {
@@ -49,9 +63,10 @@ describe("kid soul prompt", () => {
     expect(KID_SYSTEM_PROMPT).toMatch(/PIN|password|address/i);
   });
 
-  it("adult prompt is unchanged by kid work", () => {
-    expect(SYSTEM_PROMPT).toContain("You are Consuela");
-    expect(SYSTEM_PROMPT).toContain("Admin capabilities");
+  it("adult prompt is the composed boot files (SOUL + IDENTITY + TOOLS), unchanged in scope", () => {
+    expect(SYSTEM_PROMPT).toContain("Dashboard Agent");
+    expect(SYSTEM_PROMPT).toContain("Garcia household AI");
+    expect(SYSTEM_PROMPT).toContain("Dashboard Tool Reference (Consuela)");
     expect(buildConsuelaSystemPrompt(new Date("2026-09-06T12:00:00"))).toContain(
       "Today is Sun, 2026-09-06"
     );

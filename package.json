@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "prebuild": "node scripts/write-version.mjs || true",
+    "prebuild": "node scripts/write-version.mjs || true; node scripts/write-ai-boot.mjs",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
@@ -16,7 +16,8 @@
     "migrate:features": "tsx src/db/features/migrate.ts",
     "seed:features": "tsx src/db/features/seed.ts",
     "test": "vitest",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "ai:boot": "node scripts/write-ai-boot.mjs"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

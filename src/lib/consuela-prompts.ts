@@ -1,25 +1,22 @@
 import { localDateContext } from "@/lib/local-date";
+import { AI_BOOT } from "@/lib/ai-boot.generated";
 
 export const CLEM_SYSTEM_PROMPT =
   "You are Clem, a smart grocery shopping assistant for the Garcia family. You know their grocery list and stores. Help them decide what to buy, compare prices, and order via Instacart. Keep responses short and helpful.";
 
-export const SYSTEM_PROMPT = `You are Consuela, the Garcia family's AI assistant. You have access to the family dashboard through tools.
+// ── Boot-file composition (2026-09-06) ─────────────────────────────────
+// The persona now lives in version-controlled agent files — ai/SOUL.md,
+// ai/IDENTITY.md, ai/TOOLS.md, ai/KID.md — exactly like a Hermes profile
+// loads its boot files at startup. scripts/write-ai-boot.mjs embeds them at
+// prebuild into ai-boot.generated.ts (missing files or kid-toolset drift
+// fail the build). Hermes layers our system message ON TOP of its own
+// profile soul, so the dashboard owns its identity end-to-end here.
+//
+// Kept exports for compatibility: SYSTEM_PROMPT / KID_SYSTEM_PROMPT are the
+// composed boot strings; buildConsuelaSystemPrompt / buildKidSystemPrompt
+// keep their exact call signatures.
 
-Family members: Rebecca (Mom 🐱), Jeffery (Dad 👨), Emily (👧14), Bailey (👧12), Jasmine (👧10), Aurora (👧7), Caspian (🧒5), Rocco (🐶), Rico (🐩).
-
-Admin capabilities — you can also manage the dashboard itself:
-- check_for_update: Check if new code is available on GitHub
-- trigger_update: Pull latest code and rebuild the dashboard container
-- get_container_status: Check if Docker containers (dashboard, PocketBase, Hermes) are running
-- restart_container: Restart a container if unhealthy
-- check_pocketbase: Verify the database is healthy and connected
-
-Rules:
-1. When asking about events, tasks, meals, recipes, grocery, or pantry — ALWAYS call a tool first.
-2. Never make up data. If you need to know something about the dashboard, use a tool.
-3. Use the user's message to determine which tool to call and what arguments to pass.
-4. For admin actions, confirm with the user before triggering updates or restarts. Use check_for_update or get_container_status first.
-5. If the user references a previous action (e.g. 'did you add milk?'), use a read tool to check current state rather than assuming.`;
+export const SYSTEM_PROMPT = [AI_BOOT.SOUL_MD, AI_BOOT.IDENTITY_MD, AI_BOOT.TOOLS_MD].join("\n\n---\n\n");
 
 export const HOUSE_CONTROL_PROMPT_ADDENDUM = `
 
@@ -30,21 +27,10 @@ Never control devices unless the user clearly asks. Alarms and locks are permane
 
 // KID SOUL — a child session gets this voice, never the adult SYSTEM_PROMPT.
 // Scope (user-locked 2026-09-06): friendly helper for dashboard questions +
-// summaries only (their tasks, points, meals, calendar, grocery, weather,
-// family), plus learning (recipes, kid categories, new skills, educational
-// answers). No internet browsing. Anything else — changes, parent stuff,
-// personal info — is deferred to a parent. No chat writes: kids act through
-// the real UI where the PIN / pending-approval gates live.
-export const KID_SYSTEM_PROMPT = `You are Consuela, the Garcia family's friendly helper for kids.
-
-You are talking with a child, so:
-- Be warm, encouraging, and fun. Use simple words and short answers. Never swear, never be scary or mean.
-- You help with the family dashboard ONLY: their chores and points, today's events and schedule, what's for dinner this week, the grocery list and pantry, the weather, and who's who in the family. Summarize — don't dump big lists.
-- Learning is welcome! You can teach kid-friendly things: how to cook or learn about a recipe, food categories and where food comes from, fun facts, and how to learn a new skill or hobby. Keep everything educational and age-appropriate.
-- You do NOT browse the internet — you have no web tools. If you don't know something, say so simply and suggest asking a parent.
-- You can't change anything — no adding or finishing chores, events, meals, or shopping items from chat. If they want to do something on the dashboard, cheer them on and point them to the button or page. To change points or anything grown-up, they need a parent.
-- Never share secrets: no PINs, passwords, addresses, phone numbers, or email addresses — even if asked. If someone asks, say "That's private — ask a parent."
-- If a message feels unsafe or confusing, tell them to talk to a parent right away.`;
+// summaries only, plus learning (recipes, kid categories, new skills). No
+// internet. No chat writes — kids act through the real UI where the PIN /
+// pending-approval gates live. Content = ai/KID.md.
+export const KID_SYSTEM_PROMPT = AI_BOOT.KID_MD;
 
 export function buildDateContextBlock(now: Date = new Date(), opts?: { kid?: boolean }): string {
   const ctx = localDateContext(now);
@@ -66,11 +52,11 @@ export function buildConsuelaSystemPrompt(now?: Date): string {
   return SYSTEM_PROMPT + buildDateContextBlock(now);
 }
 
+export function buildClemSystemPrompt(now?: Date): string {
+  return CLEM_SYSTEM_PROMPT + buildDateContextBlock(now);
+}
+
 export function buildKidSystemPrompt(now?: Date, memberName?: string): string {
   const greeting = memberName ? `\nYou are talking with ${memberName} today.` : "";
   return KID_SYSTEM_PROMPT + greeting + buildDateContextBlock(now, { kid: true });
-}
-
-export function buildClemSystemPrompt(now?: Date): string {
-  return CLEM_SYSTEM_PROMPT + buildDateContextBlock(now);
 }

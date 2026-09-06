@@ -111,9 +111,12 @@ describe("hermes chat — kid soul for child sessions (2026-09-06)", () => {
     const res = await post({ message: "hi" }, `${SESSION_COOKIE}=${token}`);
     expect(res.status).toBe(200);
     const sent = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
-    expect(sent.messages[0].content).toContain("friendly helper for kids");
+    // Kid boot file (ai/KID.md) + per-child greeting.
+    expect(sent.messages[0].content).toContain("Kid Soul (child sessions ONLY)");
     expect(sent.messages[0].content).toContain("You are talking with Emily today.");
-    expect(sent.messages[0].content).not.toContain("Admin capabilities");
+    // The adult soul files never leak into the kid prompt.
+    expect(sent.messages[0].content).not.toContain("Dashboard Tool Reference (Consuela)");
+    expect(sent.messages[0].content).not.toContain("trigger_update");
   });
 
   it("parent session keeps the adult soul with admin + house-control lines", async () => {
@@ -121,9 +124,13 @@ describe("hermes chat — kid soul for child sessions (2026-09-06)", () => {
     const res = await post({ message: "hi" }, `${SESSION_COOKIE}=${token}`);
     expect(res.status).toBe(200);
     const sent = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
-    expect(sent.messages[0].content).toContain("You are Consuela, the Garcia family's AI assistant");
-    expect(sent.messages[0].content).toContain("Admin capabilities");
+    // Adult boot files: SOUL + IDENTITY + TOOLS + house-control addendum.
+    expect(sent.messages[0].content).toContain("Dashboard Agent");
+    expect(sent.messages[0].content).toContain("Dashboard Tool Reference (Consuela)");
+    expect(sent.messages[0].content).toContain("trigger_update");
     expect(sent.messages[0].content).toContain("House control");
+    // The kid soul never leaks into the parent prompt.
+    expect(sent.messages[0].content).not.toContain("Kid Soul (child sessions ONLY)");
   });
 });
 

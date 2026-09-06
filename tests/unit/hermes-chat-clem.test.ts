@@ -27,11 +27,14 @@ function hermesReply(content = "ok") {
   return new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content } }] }), { status: 200 });
 }
 
-async function post(body: Record<string, unknown>) {
+async function post(body: Record<string, unknown>, cookie?: string) {
   return POST(
     new NextRequest("http://localhost/api/hermes/chat", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...(cookie ? { cookie } : {}),
+      },
       body: JSON.stringify(body),
     })
   );
@@ -94,11 +97,16 @@ describe("hermes chat — Clem persona", () => {
     expect(mocks.buildToolsForOpenAI).toHaveBeenCalledWith({ houseControl: false });
   });
 
-  it("non-clem still gets full tools and Consuela prompt", async () => {
-    await post({ message: "hi" });
+  it("non-clem parent session still gets full tools and Consuela prompt", async () => {
+    // No session → child default → kid soul (by design since 2026-09-06);
+    // the adult Consuela prompt requires a real parent session.
+    const { signSession, SESSION_COOKIE } = await import("@/lib/session");
+    process.env.SESSION_SECRET = "test-secret-0123456789";
+    const token = await signSession({ memberId: "m1", name: "Rebecca", role: "parent" });
+    await post({ message: "hi" }, `${SESSION_COOKIE}=${token}`);
     const sent = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
     const systemContent = sent.messages[0].content as string;
-    expect(systemContent).toContain("You are Consuela");
+    expect(systemContent).toContain("Dashboard Agent");
     // non-clem should have all tools (mock returns 10)
     expect(sent.tools.length).toBe(10);
   });
