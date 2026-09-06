@@ -55,6 +55,18 @@ vi.mock("@/lib/task-utils", () => ({
   calculateRealStreak: () => 0,
   syncTasksToPB: store.syncTasksToPB,
   syncWeekDataToPB: store.syncWeekDataToPB,
+  // Trust-but-verify (Task 7): non-universal kid quests complete PIN-free as
+  // done-but-unpaid — faithful inline mirror of the real task-utils helpers.
+  shouldUsePendingTap: (role: string | undefined, task: any) =>
+    role === "child" && !task.completed && !task.universal,
+  tapCompletePending: (task: any, byName: string, nowISO: string, week: string) => ({
+    ...task,
+    completed: true,
+    completedBy: byName,
+    completedAt: nowISO,
+    completedInWeek: week,
+    pendingApproval: { byName, at: nowISO, points: task.points },
+  }),
 }));
 
 vi.mock("@/components/integrations/SpotifyWidget", () => ({ default: () => null }));
@@ -108,7 +120,7 @@ function setInputValue(input: HTMLInputElement, value: string) {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-describe("KidHome quest safety (PIN gate + celebration ordering)", () => {
+describe("KidHome quest completion (pending approval, PIN-free for kid quests)", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
     localStorage.clear();
@@ -133,8 +145,9 @@ describe("KidHome quest safety (PIN gate + celebration ordering)", () => {
     vi.unstubAllGlobals();
   });
 
-  it("tapping a quest opens the PIN gate — nothing completes or celebrates before the PIN", async () => {
-    vi.stubGlobal("fetch", fetchHandler(true));
+  it("tapping a quest opens the confirm sheet; confirming writes pendingApproval with zero earn tx and zero verify traffic", async () => {
+    const spyFetch = vi.fn(async (..._args: any[]) => ({ ok: true, status: 200, json: async () => ({}) }));
+    vi.stubGlobal("fetch", spyFetch);
     const el = await renderAsync(<KidHome />);
     await settle();
 
@@ -144,16 +157,41 @@ describe("KidHome quest safety (PIN gate + celebration ordering)", () => {
     await act(async () => { card.click(); });
     await settle();
 
-    // PIN modal (portaled to body) is up; no persistence, no celebration.
+    // Confirm sheet (portaled to body) is up; nothing persisted yet.
     const modalText = document.body.textContent || "";
     expect(modalText).toContain("Confirm it's you");
     expect(store.saveTasks).not.toHaveBeenCalled();
-    expect(store.saveWeekData).not.toHaveBeenCalled();
     expect(document.querySelector('[aria-label^="Congratulations"]')).toBeNull();
+
+    const input = document.querySelector('input[aria-label="Your 4-digit PIN"]') as HTMLInputElement;
+    await act(async () => { setInputValue(input, "1234"); });
+    const completeBtn = Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.includes("Complete")) as HTMLButtonElement;
+    await act(async () => { completeBtn.click(); });
+    await settle();
+
+    // Pending contract: done-but-unpaid, no earn, no verify round trip.
+    expect(store.saveTasks).toHaveBeenCalled();
+    const saved = store.saveTasks.mock.calls[0][0];
+    const row = saved.find((t: any) => t.id === 7);
+    expect(row.completed).toBe(true);
+    expect(row.pendingApproval).toMatchObject({ byName: "Caspian", points: 10 });
+    expect(typeof row.pendingApproval.at).toBe("string");
+    expect(store.saveWeekData).not.toHaveBeenCalled();
+    expect(store.syncWeekDataToPB).not.toHaveBeenCalled();
+    expect(store.week.history).toHaveLength(0);
+    expect(spyFetch.mock.calls.filter((call) => String(call[0]).includes("/api/members/verify"))).toHaveLength(0);
+    expect(store.syncTasksToPB).toHaveBeenCalled();
+
+    // Celebration fires on the pending completion.
+    expect(document.querySelector('[aria-label^="Congratulations"]')).not.toBeNull();
+    // PIN never persisted anywhere.
+    expect(localStorage.getItem("consuela-points-Caspian")).toBeNull();
+    expect(JSON.stringify(localStorage)).not.toContain("1234");
   });
 
-  it("a WRONG PIN never completes, celebrates, or persists the PIN", async () => {
-    vi.stubGlobal("fetch", fetchHandler(false));
+  it("ANY pin completes a kid quest as pending — no verify traffic, no earn, points unchanged", async () => {
+    const spyFetch = vi.fn(async (..._args: any[]) => ({ ok: false, status: 401, json: async () => ({}) }));
+    vi.stubGlobal("fetch", spyFetch);
     const el = await renderAsync(<KidHome />);
     await settle();
     const card = el.querySelector('[aria-label^="Complete quest: Feed the dog"]') as HTMLElement;
@@ -167,17 +205,22 @@ describe("KidHome quest safety (PIN gate + celebration ordering)", () => {
     await act(async () => { completeBtn.click(); });
     await settle();
 
-    expect(store.saveTasks).not.toHaveBeenCalled();
+    // Even a "wrong" PIN lands pending: the kid gate no longer verifies.
+    expect(store.saveTasks).toHaveBeenCalled();
+    const saved = store.saveTasks.mock.calls[0][0];
+    expect(saved.find((t: any) => t.id === 7)?.pendingApproval).toMatchObject({ byName: "Caspian", points: 10 });
+    expect(spyFetch.mock.calls.filter((call) => String(call[0]).includes("/api/members/verify"))).toHaveLength(0);
     expect(store.saveWeekData).not.toHaveBeenCalled();
-    expect(document.querySelector('[aria-label^="Congratulations"]')).toBeNull();
-    expect((document.body.textContent || "")).toContain("Wrong PIN");
+    expect(store.week.history).toHaveLength(0);
+    expect(document.querySelector('[aria-label^="Congratulations"]')).not.toBeNull();
     // PIN never persisted anywhere.
     expect(localStorage.getItem("consuela-points-Caspian")).toBeNull();
     expect(JSON.stringify(localStorage)).not.toContain("9999");
   });
 
-  it("a CORRECT PIN completes through the store layer and celebrates AFTER success", async () => {
-    vi.stubGlobal("fetch", fetchHandler(true));
+  it("a confirmed quest is done-but-unpaid: pendingApproval present, points unchanged, history empty, tasks synced", async () => {
+    const spyFetch = vi.fn(async (..._args: any[]) => ({ ok: true, status: 200, json: async () => ({}) }));
+    vi.stubGlobal("fetch", spyFetch);
     const el = await renderAsync(<KidHome />);
     await settle();
     const card = el.querySelector('[aria-label^="Complete quest: Feed the dog"]') as HTMLElement;
@@ -190,18 +233,23 @@ describe("KidHome quest safety (PIN gate + celebration ordering)", () => {
     await act(async () => { completeBtn.click(); });
     await settle();
 
-    // Real completion: task row + weekData earn transaction via the store.
+    // Done-but-unpaid: task row + pendingApproval via the store, zero earn.
     expect(store.saveTasks).toHaveBeenCalled();
     const saved = store.saveTasks.mock.calls[0][0];
-    expect(saved.find((t: any) => t.id === 7)?.completed).toBe(true);
-    expect(store.saveWeekData).toHaveBeenCalled();
-    const week = store.saveWeekData.mock.calls[0][0];
-    expect(week.points.Caspian).toBe(30);
-    expect(week.history.some((tx: any) => tx.type === "earn" && tx.amount === 10)).toBe(true);
+    const row = saved.find((t: any) => t.id === 7);
+    expect(row.completed).toBe(true);
+    expect(row.completedBy).toBe("Caspian");
+    expect(row.pendingApproval).toMatchObject({ byName: "Caspian", points: 10 });
+    expect(row.completedInWeek).toBe("2026-09-01");
+    // No points move until a parent approves: week store untouched.
+    expect(store.saveWeekData).not.toHaveBeenCalled();
+    expect(store.week.points.Caspian).toBe(20);
+    expect(store.week.history.some((tx: any) => tx.type === "earn")).toBe(false);
     expect(store.syncTasksToPB).toHaveBeenCalled();
-    expect(store.syncWeekDataToPB).toHaveBeenCalled();
+    expect(store.syncWeekDataToPB).not.toHaveBeenCalled();
+    expect(spyFetch.mock.calls.filter((call) => String(call[0]).includes("/api/members/verify"))).toHaveLength(0);
 
-    // Celebration fires only now, after the successful completion.
+    // Celebration fires on the pending completion.
     expect(document.querySelector('[aria-label^="Congratulations"]')).not.toBeNull();
     // PIN cleared from state (input reset on modal close).
     expect(JSON.stringify(localStorage)).not.toContain("1234");

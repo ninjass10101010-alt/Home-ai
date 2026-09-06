@@ -7,9 +7,10 @@
  * Features:
  *   - Hero avatar (large, animated, center-stage)
  *   - Level bar with XP progress + level-up celebrations
- *   - Tasks as "Quests" — completing one goes through the SAME server-side
- *     PIN gate the Tasks page uses (/api/members/verify, /api/tasks/claim);
- *     the PIN is typed per attempt and never persisted anywhere
+ *   - Tasks as "Quests" — tapping one completes it immediately as
+ *     done-but-unpaid (pending parent approval, no PIN round trip); points
+ *     land only when a parent approves on the Tasks page. Universal quests
+ *     keep the server-side claim gate (/api/tasks/claim).
  *   - Positive leaderboard framing ("YOU'RE #1!")
  *   - Bedtime mode (no quests, sweet dreams)
  *   - Weekend mode (bonus quests)
@@ -45,6 +46,8 @@ import {
   calculateRealStreak,
   syncTasksToPB,
   syncWeekDataToPB,
+  shouldUsePendingTap,
+  tapCompletePending,
 } from "@/lib/task-utils";
 import QuestCard from "./QuestCard";
 import LevelBar from "./LevelBar";
@@ -375,41 +378,19 @@ export default function KidHome() {
         void syncTasksToPB(tasks);
         celebrate(task.points || 0, before);
       } else {
-        const result = await verifyPinRemote(user.name, questPin);
-        if (result.status === "wrongPin") {
-          setQuestPinError("Wrong PIN. Try again.");
-          setQuestPin("");
-          return;
-        }
-        if (result.status === "unreachable") {
-          // The server never answered (offline / NAS asleep) — say so honestly
-          // instead of blaming a kid's typing.
-          setQuestPinError(unreachableCopy());
-          setQuestPin("");
-          return;
-        }
-        const verified = result.member;
-        const myName = verified.name || user.name;
+        // Trust-but-verify: kid quests land immediately as done-but-unpaid —
+        // no PIN round trip. Points move only on parent approval.
         const now = new Date().toISOString();
         const currentWeek = weekKey();
-        const tasks = loadTasks().map((t: any) =>
-          t.id === task.id
-            ? { ...t, completed: true, completedBy: myName, completedAt: now, completedInWeek: currentWeek }
-            : t
-        );
-        saveTasks(tasks);
+        const myName = user.name;
         const week = loadWeekData();
         const before = pointsFor(week.points, myName);
-        const earned = task.points || 0;
-        const withPoints = {
-          ...week,
-          points: { ...week.points, [myName]: (week.points[myName] ?? before) + earned },
-        };
-        const updated = addTransaction(withPoints, "earn", earned, `Completed: ${task.title} (+${earned}pts)`, myName, task.id);
-        saveWeekData(updated);
+        const tasks = loadTasks().map((t: any) =>
+          t.id === task.id ? tapCompletePending(t, myName, now, currentWeek) : t
+        );
+        saveTasks(tasks);
         void syncTasksToPB(tasks);
-        void syncWeekDataToPB(updated);
-        celebrate(earned, before);
+        celebrate(task.points || 0, before);
       }
       setQuestPinTask(null);
       setQuestPin("");
