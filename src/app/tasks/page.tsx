@@ -1264,7 +1264,7 @@ export default function TasksPage() {
         icon="✅"
       />
 
-      <div className="px-4 space-y-5 pb-8">
+      <div className="px-4 space-y-6 pb-8">
         <div className="grid gap-3 sm:grid-cols-3">
           <StatTile label="Pending" value={pending.length} detail="Open tasks" icon="📋" tone="warning" compact />
           <StatTile label="Completed" value={scopedCompletedCount} detail="This week" icon="🎉" tone="success" compact />
@@ -1283,7 +1283,7 @@ export default function TasksPage() {
         />
 
         {activeTab === "tasks" && (
-          <div key="tasks" className="panel-swap">
+          <div key="tasks" className="panel-swap space-y-6">
           <>
               <div className="member-strip member-strip-tiles snap-x snap-mandatory overscroll-contain pb-2">
                 {allMembers.map((member) => (
@@ -1520,7 +1520,7 @@ export default function TasksPage() {
           dynamicLeaderboard.length === 0 ? (
             <EmptyState title="No champions yet" description="Add family members in Settings, then complete tasks to fill the board." icon="🏆" />
           ) : (
-          <div key="leaderboard" className="panel-swap">
+          <div key="leaderboard" className="panel-swap space-y-6">
           <>
             <Surface variant="warm" radius="2xl" padding="lg" glow>
               {familyTotal === 0 ? (

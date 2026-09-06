@@ -137,4 +137,20 @@ describe("filter-aware stat tiles + scoped empty copy", () => {
     expect(tileText()).toContain("Completed");
     expect(tileText()).not.toContain("2This week");
   });
+
+  it("tab panels carry vertical rhythm (protruding icons need ≥24px gaps — the Home gap-6 standard)", async () => {
+    const el = await renderAsync(<TasksPage />);
+    await settle();
+    // The tasks + leaderboard panels were spacing-free since the 2026-08-26
+    // panel-swap motion change — cards stacked with 0 gap and each card's
+    // protruding icon (-12px, -24px at xl) overlapped the card above.
+    const panels = [...el.querySelectorAll(".panel-swap")];
+    expect(panels.length).toBeGreaterThanOrEqual(1);
+    for (const panel of panels) {
+      expect(panel.className).toContain("space-y-6");
+    }
+    // The outer content column matches the same 24px rhythm.
+    const content = el.querySelector(".px-4.pb-8");
+    expect(content?.className).toContain("space-y-6");
+  });
 });
