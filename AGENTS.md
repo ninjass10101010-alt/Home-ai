@@ -5,6 +5,32 @@
 > Always start here before answering operational questions. Cross-reference the linked deep docs.  
 > **Mandatory:** After any code change that touches UI, navigation, meals, emergency, or integrations, update this file in the same session.
 
+---
+
+## ⚠️ SECRETS — read before touching anything (HARD RULE)
+
+The dashboard runs against a real home NAS with real family accounts. **NEVER commit or echo a secret to git / GitHub / this file.** The live remotes are public-ish (`github.com/ninjass10101010-alt/*`) and a leaked credential is a permanent burn, not a code review comment.
+
+**Never put these in a committed file (AGENTS.md, .md, source, tests, probes, comments, commit messages, or curl examples):**
+- NAS SSH password / `sshpass` helpers, PocketBase admin email/password, `SESSION_SECRET`, `ADMIN_SECRET`, `CRON_SECRET`, `CONSUELA_ENCRYPTION_KEY`
+- `GOOGLE_*` OAuth credentials, `TELEGRAM_BOT_TOKEN` / mirror tokens / chat ids
+- Any `*_API_KEY`, `*_TOKEN`, `*_SECRET`, VAPID keys, Plex/qBittorrent/Sonarr/Radarr/Prowlarr keys, Hermes/OpenRouter/Groq/OpenCode keys
+- The contents of `.env.local`, `.env`, `.env.docker`, or the NAS `/tmp/new.env`
+
+**Where secrets actually live (and their rules):**
+- `DEPLOY_NAS_LOCAL.md` — **gitignored**, holds the NAS SSH creds + deploy runbook. ✋ Read it for ops, NEVER copy its contents into any committed file.
+- `.env.local` / `.env` / `.env.docker` — **gitignored** (`.env*` with `!.env.example` opt-in). Real values stay on the NAS and this Mac.
+- `.env.example` — the ONLY committed env file: variable NAMES and placeholders only, never real values.
+- `memories/hermes-gateway-setup.md` — **currently tracked.** It documents the Hermes gateway profiles (default/drogon, consuela, finance, and now rubio) but must never record auth tokens, `.env` contents, or the Telegram bot token literal. If you extend it, reference env-var names and config paths, not values.
+
+**When running commands against the NAS:** redact before quoting output back. Use `sed`/grep to strip token/key/password values, and print only KEY NAMES (e.g. `sed 's/=.*/=[REDACTED]/'`), not values.
+
+**Before any `git add`/`git commit`:** `git status` + `git diff` review — stage only intended files, and check no `.env*` (except `.env.example`), no `DEPLOY_NAS_LOCAL.md`, and no literal secrets slipped into a comment/probe/test.
+
+If you are asked to document or debug something that touches credentials, describe the shape and env-var names, never the values.
+
+---
+
 **Current Dashboard Snapshot** (maintain on every relevant change)  
 - **Last Updated:** 2026-09-05 | **Champion card: Share vs avatar overlap fixed.** Follow-up geometry pass on the /tasks overlap report found a second collision the body-rect probe missed: the absolutely-positioned ↗ Share button (76×36, `absolute right-0 top-0`, added 2026-09-04) and the champion avatar (48×48 + amber glow ring, the header row's `justify-between` right resident) physically intersected — 48×22px phone / 48×26px desktop. Fix: the header row gains `pr-24` (96px right clearance = Share visual + hit-44 + gap) so the avatar shifts left of Share; verified 0 intersecting elements at 390+1280. The live probe (`verify-tasks-polish.mjs`) now pins this geometry permanently — 29/29 (new "Share clears the champion avatar" check; 2D overlap requires BOTH axes positive). Suite 1183/1183, tsc clean.
 - **Last Updated:** 2026-09-05 | **Tasks page card-overlap fixed — the tab panels had no vertical rhythm.** User-reported "cards overlapping" on /tasks: measured via geometry probe (bounding-box + protruding-icon intersection), the section cards inside BOTH tab panels stacked with **0px gap** and every card's protruding top-left icon (`top:-12px`, `xl:-24px`) overlapped the card above (11px phone / 23px desktop). Root cause (git-verified, pre-existing since the 2026-08-26 motion change): tab content moved inside `<div className="panel-swap">` wrappers, so the cards stopped being direct children of the outer `space-y-5` container — Calendar got `panel-swap space-y-4` and Meals `panel-swap space-y-5` in their wrappers, but the Tasks page's two panels (tasks + leaderboard) never did. Fix: `panel-swap space-y-6` on both tasks-page panels + the outer column bumped `space-y-5`→`space-y-6` (24px — the Home `gap-6` standard, the only value that fully clears the `-24px` xl icon overhang; Home was already standardized to space-y-6 in the 2026-06-15 rhythm pass). Geometry probe now reports **0 overlaps** (phone+desktop, dark+light, both tabs). Lesson: the old overlap probe compared card BODY rects only — touching cards (gap 0) don't intersect, and the absolute icon layers aren't card rects; icon-vs-previous-card intersection is now part of the check. Tests +1 (`tasks-polish-copy` rhythm assertion), suite 1183/1183, `verify-tasks-polish.mjs` 28/28, tsc clean.
