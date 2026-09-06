@@ -1542,7 +1542,10 @@ export default function TasksPage() {
                     ↗ Share
                   </SoftButton>
                 </div>
-                <div className="flex items-center justify-between gap-4">
+                {/* pr-24 keeps the avatar clear of the absolutely-positioned
+                    Share button that occupies this card's top-right corner
+                    (96px = Share 76px + hit-area + gap). */}
+                <div className="flex items-center justify-between gap-4 pr-24">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">This week&apos;s champion</p>
                     <div className="flex items-center gap-2 mt-1">

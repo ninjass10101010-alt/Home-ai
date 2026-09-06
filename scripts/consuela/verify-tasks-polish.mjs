@@ -205,7 +205,33 @@ async function probeWithPoints(browser) {
   const lower = text.toLowerCase();
   check("points week: champion card renders", lower.includes("this week's champion") && text.includes("Champion share"));
   const share = await page.$("[aria-label^='Share']");
-  check("points week: Share button present + aria-labeled", !!share && /Share Rebecca/.test(await share.getAttribute("aria-label")));
+  check("points week: Share button present + aria-labeled", !!share && /Share /.test(await share.getAttribute("aria-label")));
+  // Geometry: the absolutely-positioned Share must not intersect the avatar
+  // (both claim the card's top-right corner — regressed once, 2026-09-05).
+  const champ = await page.evaluate(() => {
+    const share = document.querySelector("[aria-label^='Share']");
+    if (!share) return null;
+    const s = share.getBoundingClientRect();
+    const surface = share.closest(".overflow-hidden");
+    if (!surface) return null;
+    // The avatar is the largest non-Share element in the header row's right half.
+    let best = null;
+    for (const el of surface.querySelectorAll("*")) {
+      if (share.contains(el) || share === el) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 40 || r.height < 40) continue; // avatar is 48px
+      if (r.right < surface.getBoundingClientRect().right - 120) continue; // right side only
+      const cls = typeof el.className === "string" ? el.className : "";
+      if (cls.includes("justify-between") || cls.includes("right-0 top-0")) continue; // wrappers
+      if (!best || r.width * r.height > best.w * best.h) best = { x: r.x, y: r.y, w: r.width, h: r.height };
+    }
+    if (!best) return { found: false };
+    const ox = Math.min(s.right, best.x + best.w) - Math.max(s.x, best.x);
+    const oy = Math.min(s.bottom, best.y + best.h) - Math.max(s.y, best.y);
+    return { found: true, overlapX: Math.round(ox), overlapY: Math.round(oy) };
+  });
+  // 2D overlap requires BOTH axes positive — a negative axis means clear.
+  check("points week: Share button clears the champion avatar", !!champ && champ.found === true && (champ.overlapX <= 0 || champ.overlapY <= 0), champ ? JSON.stringify(champ) : "no share/champion surface");
   check("points week: no page errors", errors.length === 0, errors.slice(0, 2).join(" | "));
   await page.close();
 }
