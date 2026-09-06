@@ -405,6 +405,10 @@ export default function TasksPage() {
   const [parentApprovalReward, setParentApprovalReward] = useState<Reward | null>(null);
   const [parentApprovalPin, setParentApprovalPin] = useState("");
   const [parentApprovalError, setParentApprovalError] = useState("");
+  const [approvalTaskId, setApprovalTaskId] = useState<number | null>(null);
+  const [approvalMode, setApprovalMode] = useState<"approve" | "sendback">("approve");
+  const [approvalPin, setApprovalPin] = useState("");
+  const [approvalError, setApprovalError] = useState("");
 
   useEffect(() => { saveRewards(rewards); }, [rewards]);
   useEffect(() => { savePenalties(penalties); }, [penalties]);
@@ -786,6 +790,47 @@ export default function TasksPage() {
     }
   };
 
+  const submitApproval = async () => {
+    if (approvalTaskId === null || !approvalPin || pinBusy) return;
+    setPinBusy(true);
+    try {
+      let parent: any = null;
+      let unreachable = false;
+      for (const m of membersData.filter((m: any) => m.role === "parent")) {
+        const result = await verifyPinRemote(m.fullName, approvalPin);
+        if (result.status === "ok") { parent = m; break; }
+        if (result.status === "unreachable") { unreachable = true; break; }
+      }
+      if (unreachable) {
+        setApprovalError(unreachableCopy());
+        setApprovalPin("");
+        setTimeout(() => setApprovalError(""), 2500);
+        return;
+      }
+      if (!parent) {
+        setApprovalError("Parent PIN required to review tapped tasks.");
+        setApprovalPin("");
+        setTimeout(() => setApprovalError(""), 2500);
+        return;
+      }
+      if (approvalMode === "approve") {
+        const target = tasks.find((x) => x.id === approvalTaskId);
+        const { tasks: nt, weekData: nw } = approvePendingCompletion(tasks, weekData, approvalTaskId);
+        setTasks(nt);
+        setWeekData(nw);
+        showToast(`Approved! +${target?.points ?? 0}pts for ${(target?.pendingApproval?.byName ?? "").split(" ")[0]}.`);
+      } else {
+        setTasks((prev) => sendBackPendingCompletion(prev, approvalTaskId));
+        showToast("Sent back — no points were given.");
+      }
+      setApprovalTaskId(null);
+      setApprovalPin("");
+      setApprovalError("");
+    } finally {
+      setPinBusy(false);
+    }
+  };
+
   const openPenaltyPin = (penalty: Penalty) => {
     setPinPenalty(penalty);
     setPinTaskId(null);
@@ -1155,6 +1200,7 @@ export default function TasksPage() {
   });
 
   const pending = filtered.filter((t) => !t.completed);
+  const pendingApprovals = useMemo(() => tasks.filter(isPendingApproval), [tasks]);
   const completed = filtered.filter((t) => t.completed);
   const thisWeeksCompleted = getThisWeeksCompletedTasks(tasks);
   const thisWeeksCompletedCount = thisWeeksCompleted.length;
@@ -1483,6 +1529,30 @@ export default function TasksPage() {
                 </div>
               )}
             </SectionCard>
+
+            {isLoggedIn && currentUser?.role === "parent" && pendingApprovals.length > 0 && (
+              <SectionCard title="Needs approval" description={`${pendingApprovals.length} tapped — review to award points`} icon="⏳">
+                <div className="space-y-2">
+                  {pendingApprovals.map((task) => (
+                    <div
+                      key={task.id}
+                      className="schedule-row liquid-glass flex items-center gap-3 px-3 py-2.5"
+                      style={{
+                        backgroundImage: `linear-gradient(135deg, color-mix(in srgb, var(--color-accent-amber) 40%, transparent) 0%, color-mix(in srgb, var(--color-accent-amber) 20%, transparent) 100%)`,
+                      }}
+                    >
+                      <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={task.assigneeEmoji} size="sm" variant="emoji" />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm text-text-primary">{task.title}</div>
+                        <div className="truncate text-xs text-text-secondary">{task.pendingApproval!.byName.split(" ")[0]} · tapped {task.pendingApproval!.at.split("T")[0]} · {task.points}pts</div>
+                      </div>
+                      <button type="button" aria-label={`Approve ${task.title}`} onClick={() => { setApprovalTaskId(task.id); setApprovalMode("approve"); setApprovalPin(""); setApprovalError(""); }} className="tap-sm min-h-[44px] shrink-0 rounded-full px-3 text-xs font-bold text-text-primary glass-subtle">Approve</button>
+                      <button type="button" aria-label={`Send back ${task.title}`} onClick={() => { setApprovalTaskId(task.id); setApprovalMode("sendback"); setApprovalPin(""); setApprovalError(""); }} className="tap-sm min-h-[44px] shrink-0 rounded-full px-3 text-xs font-semibold text-text-secondary">Send back</button>
+                    </div>
+                  ))}
+                </div>
+              </SectionCard>
+            )}
 
             {thisWeeksCompletedCount > 0 && (
               <SectionCard title="Completed" description={`${thisWeeksCompletedCount} done this week`} icon="✅">
@@ -2060,6 +2130,42 @@ export default function TasksPage() {
               className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-4 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted"
             />
             {parentApprovalError && <p className="text-center text-sm text-[var(--color-accent-rose)]">{parentApprovalError}</p>}
+          </div>
+        </Modal>
+      )}
+
+      {approvalTaskId !== null && (
+        <Modal
+          open
+          onClose={() => { setApprovalTaskId(null); setApprovalPin(""); }}
+          title={approvalMode === "approve" ? "Approve points" : "Send back"}
+          description={(() => {
+            const target = tasks.find((x) => x.id === approvalTaskId);
+            return approvalMode === "approve"
+              ? `"${target?.title}" tapped by ${target?.pendingApproval?.byName} — award +${target?.points ?? 0}pts?`
+              : `"${target?.title}" goes back on the list with no points.`;
+          })()}
+          footer={
+            <>
+              <SoftButton onClick={submitApproval} loading={pinBusy} disabled={!approvalPin || pinBusy} className="flex-1">{approvalMode === "approve" ? "Approve" : "Send back"}</SoftButton>
+              <SoftButton variant="secondary" onClick={() => { setApprovalTaskId(null); setApprovalPin(""); }} className="flex-1">Cancel</SoftButton>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-text-secondary">Tapped completions need a parent PIN. Enter a parent PIN to continue.</p>
+            <input
+              type="password"
+              inputMode="numeric"
+              maxLength={4}
+              value={approvalPin}
+              onChange={(e) => { setApprovalPin(e.target.value.replace(/[^0-9]/g, "")); setApprovalError(""); }}
+              onKeyDown={(e) => { if (e.key === "Enter") submitApproval(); }}
+              placeholder="Parent PIN"
+              autoFocus
+              className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-4 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted"
+            />
+            {approvalError && <p className="text-center text-sm text-[var(--color-accent-rose)]">{approvalError}</p>}
           </div>
         </Modal>
       )}

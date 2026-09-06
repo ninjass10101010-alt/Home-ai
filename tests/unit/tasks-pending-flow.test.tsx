@@ -161,3 +161,124 @@ describe("kid tap-to-complete", () => {
     expect(verifyCalls()).not.toContain("/api/members/verify");
   });
 });
+
+function pendingSeed() {
+  return [{
+    ...OPEN, id: 52, completed: true, completedBy: "Jasmine",
+    completedAt: new Date().toISOString(), completedInWeek: weekKey(),
+    pendingApproval: { byName: "Jasmine", at: new Date().toISOString(), points: 5 },
+  }];
+}
+
+function stubVerifyOk() {
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    if (String(input).includes("/api/members/verify")) {
+      return { ok: true, status: 200, json: async () => ({ member: { name: "Rebecca (Mom)", fullName: "Rebecca (Mom)" } }) };
+    }
+    return { ok: true, status: 200, json: async () => ({ snapshot: null }) };
+  }));
+}
+
+function setInputValue(input: HTMLInputElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+  setter.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function buttonByText(text: string): HTMLButtonElement | undefined {
+  // Scope to the open dialog first: the Needs-approval rows behind the modal
+  // carry identically-labeled buttons ("Approve"/"Send back") that come
+  // earlier in document order (the modal portals to document.body) and would
+  // otherwise win the find and merely reset the modal instead of submitting.
+  const scope = document.querySelector('[role="dialog"]') ?? document;
+  return Array.from(scope.querySelectorAll("button")).find((b) => b.textContent?.includes(text)) as HTMLButtonElement | undefined;
+}
+
+async function clickByAriaLabel(label: string) {
+  const el = document.querySelector(`[aria-label="${label}"]`) as HTMLElement;
+  expect(el).not.toBeNull();
+  await act(async () => { el.click(); });
+  await settle();
+}
+
+async function typeAndSubmit(placeholder: string, buttonText: string, pin = "1234") {
+  const input = document.querySelector(`input[placeholder="${placeholder}"]`) as HTMLInputElement;
+  expect(input).not.toBeNull();
+  await act(async () => { setInputValue(input, pin); });
+  await act(async () => { buttonByText(buttonText)!.click(); });
+  await settle();
+}
+
+describe("needs approval queue", () => {
+  it("hidden for kids and guests, shown for parents", async () => {
+    stubGuestFetches();
+    mockAuth.currentUser = { name: "Jasmine", role: "child" };
+    mockAuth.isLoggedIn = true;
+    seed(pendingSeed());
+    await renderAsync(<TasksPage />);
+    await settle();
+    expect(document.body.textContent || "").not.toContain("Needs approval");
+
+    document.body.innerHTML = "";
+    mockAuth.currentUser = { name: "Rebecca (Mom)", role: "parent" };
+    await renderAsync(<TasksPage />);
+    await settle();
+    expect(document.body.textContent || "").toContain("Needs approval");
+  });
+
+  it("approve with parent PIN awards points and clears the queue", async () => {
+    stubVerifyOk();
+    mockAuth.currentUser = { name: "Rebecca (Mom)", role: "parent" };
+    mockAuth.isLoggedIn = true;
+    seed(pendingSeed());
+    await renderAsync(<TasksPage />);
+    await settle();
+
+    await clickByAriaLabel("Approve Make bed");
+    await settle();
+    expect(document.body.textContent || "").toContain("Approve points");
+    await typeAndSubmit("Parent PIN", "Approve");
+
+    const week = JSON.parse(localStorage.getItem("consuela-week-data") || "{}");
+    expect(week.points["Jasmine"]).toBe(5);
+    expect(week.history).toHaveLength(1);
+    expect(week.history[0].type).toBe("earn");
+    expect(storedTasks()[0].pendingApproval).toBeUndefined();
+    expect(document.body.textContent || "").not.toContain("Needs approval");
+  });
+
+  it("send-back reopens with zero ledger entries", async () => {
+    stubVerifyOk();
+    mockAuth.currentUser = { name: "Rebecca (Mom)", role: "parent" };
+    mockAuth.isLoggedIn = true;
+    seed(pendingSeed());
+    await renderAsync(<TasksPage />);
+    await settle();
+
+    await clickByAriaLabel("Send back Make bed");
+    await settle();
+    await typeAndSubmit("Parent PIN", "Send back");
+
+    const saved = storedTasks();
+    expect(saved[0].completed).toBe(false);
+    expect(saved[0].pendingApproval).toBeUndefined();
+    expect(storedHistory()).toHaveLength(0);
+  });
+
+  it("wrong parent PIN keeps the queue and says Parent PIN required", async () => {
+    stubGuestFetches();
+    mockAuth.currentUser = { name: "Rebecca (Mom)", role: "parent" };
+    mockAuth.isLoggedIn = true;
+    seed(pendingSeed());
+    await renderAsync(<TasksPage />);
+    await settle();
+
+    await clickByAriaLabel("Approve Make bed");
+    await settle();
+    await typeAndSubmit("Parent PIN", "Approve", "0000");
+
+    expect(document.body.textContent || "").toContain("Parent PIN required to review tapped tasks.");
+    expect(storedTasks()[0].pendingApproval).toBeDefined();
+    expect(storedHistory()).toHaveLength(0);
+  });
+});
