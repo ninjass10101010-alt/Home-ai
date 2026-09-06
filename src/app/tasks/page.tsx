@@ -34,7 +34,8 @@ import {
   getPreviousWeekRanks, loadHallOfFame,
   syncAllTasksToPB, syncWeekDataToPB,
   archiveAndResetWeek, archiveWeekWinner, saveCurrentWeekRanksForNextWeek,
-  pickDefaultClaimMember, isSnatchable,
+  pickDefaultClaimMember, isSnatchable, isPendingApproval, shouldUsePendingTap,
+  tapCompletePending, sendBackPendingCompletion, approvePendingCompletion,
 } from "@/lib/task-utils";
 import {
   readRewardsStamp, touchRewardsStamp, writeRewardsStamp,
@@ -687,9 +688,27 @@ export default function TasksPage() {
     const task = tasks.find((x) => x.id === taskId);
     if (!task) return;
     if (task.completed) {
+      if (isPendingApproval(task) && isLoggedIn && currentUser?.role === "child" && task.pendingApproval?.byName === currentUser.name) {
+        // The kid who tapped can take it back PIN-free: nothing was verified,
+        // so there is nothing to un-verify. No points ever moved.
+        setTasks((prev) => sendBackPendingCompletion(prev, taskId));
+        showToast("Back on the list — no points were given.");
+        return;
+      }
       setUndoTaskId(taskId);
       setUndoPin("");
       setUndoError("");
+      return;
+    }
+    if (shouldUsePendingTap(currentUser?.role, task)) {
+      // Trust-but-verify: a kid's tap lands immediately as done-but-unpaid —
+      // no PIN round trip. Points move only on parent approval.
+      if (task.completedInWeek === weekKey()) return;
+      const now = new Date().toISOString();
+      const me = currentUser!.name;
+      setTasks((prev) => prev.map((t) => (t.id === taskId ? tapCompletePending(t, me, now, weekKey()) : t)));
+      triggerConfetti();
+      showToast(`Done! +${task.points}pts on the way — a parent approves.`);
       return;
     }
     setPinTaskId(taskId);
@@ -805,6 +824,15 @@ export default function TasksPage() {
       }
       const verified = result.member;
       const normalizedName = normalizeName(memberName);
+      if (isPendingApproval(task)) {
+        // PIN verified above, but pending taps hold no points — reopen with no
+        // ledger entry instead of the standard points-reversing undo.
+        setTasks((prev) => sendBackPendingCompletion(prev, task.id));
+        setUndoTaskId(null);
+        setUndoPin("");
+        showToast("Sent back — no points were given.");
+        return;
+      }
       setTasks(prev => prev.map(t => t.id === undoTaskId ? { ...t, completed: false, completedBy: undefined, completedAt: undefined, completedInWeek: undefined } : t));
       const current = (weekData.points[normalizedName] || 0) - task.points;
       const updated = { ...weekData, points: { ...weekData.points, [normalizedName]: Math.max(0, current) } };
@@ -1468,6 +1496,42 @@ export default function TasksPage() {
                       <p className="py-2 text-center text-xs text-text-muted">No completed tasks for this filter yet.</p>
                     ) : (
                       completed.map((task) => {
+                        if (isPendingApproval(task)) {
+                          const owner = task.pendingApproval!;
+                          const mine = isLoggedIn && currentUser?.role === "child" && owner.byName === currentUser.name;
+                          return (
+                          <div
+                            key={task.id}
+                            role={mine ? "button" : undefined}
+                            tabIndex={mine ? 0 : undefined}
+                            aria-label={mine ? `Cancel completion of ${task.title}` : `${task.title} waiting for parent approval`}
+                            onClick={mine ? () => openPinEntry(task.id) : undefined}
+                            onKeyDown={mine ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openPinEntry(task.id); } } : undefined}
+                            className="schedule-row liquid-glass flex items-center gap-3 px-3 py-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-selected)]"
+                            style={{
+                              backgroundImage: `linear-gradient(135deg, color-mix(in srgb, var(--color-accent-amber) 40%, transparent) 0%, color-mix(in srgb, var(--color-accent-amber) 20%, transparent) 100%)`,
+                            }}
+                          >
+                            <div
+                              className="h-8 w-0.5 shrink-0 rounded-full"
+                              style={{ backgroundColor: "var(--color-accent-amber)", boxShadow: `0 0 8px var(--color-accent-amber)` }}
+                            />
+                            <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={task.assigneeEmoji} size="sm" variant="emoji" />
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-sm text-text-primary">{task.title}</div>
+                              <div className="truncate text-xs text-text-secondary">{owner.byName.split(" ")[0]} · tapped {owner.at.split("T")[0]} · {task.points}pts on the way</div>
+                            </div>
+                            <span
+                              className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-semibold text-text-primary glass-subtle"
+                              style={{
+                                background: `linear-gradient(135deg, color-mix(in srgb, var(--color-accent-amber) 55%, transparent), color-mix(in srgb, var(--color-accent-amber) 30%, transparent))`,
+                              }}
+                            >
+                              ⏳ On the way
+                            </span>
+                          </div>
+                          );
+                        }
                         const rowColor = "var(--color-accent-mint)";
                         return (
                         <div
