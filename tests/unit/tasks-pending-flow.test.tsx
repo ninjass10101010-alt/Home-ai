@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
 import type { ReactElement } from "react";
-import { todayMondayISO, todayISO, weekKey } from "@/lib/task-utils";
+import { todayMondayISO, todayISO, weekKey, pendingPointsFor } from "@/lib/task-utils";
 import TasksPage from "@/app/tasks/page";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -18,16 +18,19 @@ vi.mock("@/hooks/useAuth", () => ({ useAuth: () => mockAuth }));
 
 vi.mock("@/components/ui/SyncInit", () => ({ default: () => null }));
 
+// Jasmine's roster row has DISTINCT name vs fullName: the auth session signs
+// in as "Jasmine" but the ledger key (weekData.points) is the roster-resolved
+// fullName "Jasmine Rose" — the same key the classic PIN path credits.
 vi.mock("@/db", () => ({
   db: {
     refreshMembersCache: vi.fn(async () => {}),
     selectMembers: () => [
       { id: 1, name: "Rebecca", fullName: "Rebecca (Mom)", role: "parent", emoji: "👩", color: "violet" },
-      { id: 2, name: "Jasmine", fullName: "Jasmine", role: "child", emoji: "👧", color: "rose" },
+      { id: 2, name: "Jasmine", fullName: "Jasmine Rose", role: "child", emoji: "👧", color: "rose" },
     ],
     selectMembersFallback: () => [
       { id: 1, name: "Rebecca", fullName: "Rebecca (Mom)", role: "parent", emoji: "👩", color: "violet" },
-      { id: 2, name: "Jasmine", fullName: "Jasmine", role: "child", emoji: "👧", color: "rose" },
+      { id: 2, name: "Jasmine", fullName: "Jasmine Rose", role: "child", emoji: "👧", color: "rose" },
     ],
   },
 }));
@@ -89,6 +92,13 @@ describe("kid tap-to-complete", () => {
     const el = await renderAsync(<TasksPage />);
     await settle();
 
+    // Reach the row through the member tile (filter = roster fullName), the
+    // way the queue resolves: the auth session carries "Jasmine" but the
+    // roster's ledger name is "Jasmine Rose".
+    const jasmineTile = [...el.querySelectorAll(".member-tile-name")].find((s) => (s.textContent || "").trim() === "Jasmine")!.closest("button") as HTMLElement;
+    await act(async () => { jasmineTile.click(); });
+    await settle();
+
     const row = el.querySelector('[aria-label="Complete Make bed"]') as HTMLElement;
     expect(row).not.toBeNull();
     await act(async () => { row.click(); });
@@ -96,7 +106,13 @@ describe("kid tap-to-complete", () => {
 
     const saved = storedTasks();
     expect(saved[0].completed).toBe(true);
-    expect(saved[0].pendingApproval).toEqual({ byName: "Jasmine", at: expect.any(String), points: 5 });
+    // The pending record credits the roster-resolved FULL name (the ledger
+    // key), not the raw auth first name — approve posts the earn to the same
+    // key, so points never strand on a split ledger entry.
+    expect(saved[0].pendingApproval).toEqual({ byName: "Jasmine Rose", at: expect.any(String), points: 5 });
+    expect(saved[0].completedBy).toBe("Jasmine Rose");
+    expect(pendingPointsFor("Jasmine Rose", saved)).toBe(5);
+    expect(pendingPointsFor("Jasmine", saved)).toBe(0);
     expect(storedHistory()).toHaveLength(0);
     expect(verifyCalls()).not.toContain("/api/members/verify");
     expect(el.textContent || "").toContain("on the way");
@@ -140,7 +156,7 @@ describe("kid tap-to-complete", () => {
     stubGuestFetches();
     mockAuth.currentUser = { name: "Jasmine", role: "child" };
     mockAuth.isLoggedIn = true;
-    seed([{ ...OPEN, completed: true, completedBy: "Jasmine", completedAt: new Date().toISOString(), completedInWeek: weekKey(), pendingApproval: { byName: "Jasmine", at: new Date().toISOString(), points: 5 } }]);
+    seed([{ ...OPEN, completed: true, completedBy: "Jasmine Rose", completedAt: new Date().toISOString(), completedInWeek: weekKey(), pendingApproval: { byName: "Jasmine Rose", at: new Date().toISOString(), points: 5 } }]);
     const el = await renderAsync(<TasksPage />);
     await settle();
 
@@ -164,9 +180,9 @@ describe("kid tap-to-complete", () => {
 
 function pendingSeed() {
   return [{
-    ...OPEN, id: 52, completed: true, completedBy: "Jasmine",
+    ...OPEN, id: 52, completed: true, completedBy: "Jasmine Rose",
     completedAt: new Date().toISOString(), completedInWeek: weekKey(),
-    pendingApproval: { byName: "Jasmine", at: new Date().toISOString(), points: 5 },
+    pendingApproval: { byName: "Jasmine Rose", at: new Date().toISOString(), points: 5 },
   }];
 }
 
@@ -210,7 +226,7 @@ async function typeAndSubmit(placeholder: string, buttonText: string, pin = "123
 }
 
 describe("needs approval queue", () => {
-  it("hidden for kids and guests, shown for parents", async () => {
+  it("hidden for kids, shown for parents", async () => {
     stubGuestFetches();
     mockAuth.currentUser = { name: "Jasmine", role: "child" };
     mockAuth.isLoggedIn = true;
@@ -224,6 +240,14 @@ describe("needs approval queue", () => {
     await renderAsync(<TasksPage />);
     await settle();
     expect(document.body.textContent || "").toContain("Needs approval");
+  });
+
+  it("hidden for signed-out guests too (even with pending rows seeded)", async () => {
+    stubGuestFetches();
+    seed(pendingSeed());
+    await renderAsync(<TasksPage />);
+    await settle();
+    expect(document.body.textContent || "").not.toContain("Needs approval");
   });
 
   it("approve with parent PIN awards points and clears the queue", async () => {
@@ -240,9 +264,11 @@ describe("needs approval queue", () => {
     await typeAndSubmit("Parent PIN", "Approve");
 
     const week = JSON.parse(localStorage.getItem("consuela-week-data") || "{}");
-    expect(week.points["Jasmine"]).toBe(5);
+    // The earn lands on the roster-resolved FULL-name ledger key.
+    expect(week.points["Jasmine Rose"]).toBe(5);
     expect(week.history).toHaveLength(1);
     expect(week.history[0].type).toBe("earn");
+    expect(week.history[0].member).toBe("Jasmine Rose");
     expect(storedTasks()[0].pendingApproval).toBeUndefined();
     expect(document.body.textContent || "").not.toContain("Needs approval");
   });

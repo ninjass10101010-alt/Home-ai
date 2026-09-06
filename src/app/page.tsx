@@ -43,7 +43,7 @@ import { useMorningBriefing, briefingSectionsEmpty } from "@/components/briefing
 import ProfileSheet from "@/components/profile/ProfileSheet";
 import { useHomeEvents } from "@/hooks/useHomeEvents";
 import { normalizeAvatarSize } from "@/lib/avatar-size";
-import { loadTasks } from "@/lib/task-utils";
+import { loadTasks, isPendingApproval } from "@/lib/task-utils";
 import { todayMondayISO } from "@/lib/meals-week-utils";
 import { useDashboardMode } from "@/hooks/useDashboardMode";
 
@@ -202,7 +202,8 @@ export default function HomePage() {
             points: t.points, priority: t.priority, category: t.category,
           }));
         setPendingTasks(pending);
-        setPendingApprovalCount(loadTasks().filter((t: any) => t.completed && t.pendingApproval).length);
+        // Single pending gate: isPendingApproval is the ONLY pending check.
+        setPendingApprovalCount(loadTasks().filter(isPendingApproval).length);
 
         // Same pattern as tasks: the Daily Schedule widget is visible, so it
         // reads the db store layer (PB-backed cache with fallback + 60s

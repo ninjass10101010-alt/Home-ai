@@ -68,10 +68,23 @@ vi.mock("@/lib/task-utils", () => ({
   calculateRealStreak: () => 0,
   syncTasksToPB: store.syncTasksToPB,
   syncWeekDataToPB: store.syncWeekDataToPB,
-  // Trust-but-verify (Task 7): non-universal kid quests complete PIN-free as
-  // done-but-unpaid — faithful inline mirror of the real task-utils helpers.
+  // Trust-but-verify: the REAL single decision seam (child + open + assigned
+  // + never snatchable) + the roster-resolved ledger key, mirroring task-utils.
   shouldUsePendingTap: (role: string | undefined, task: any) =>
-    role === "child" && !task.completed && !task.universal,
+    role === "child" && !task.completed && !task.universal && !(task.stealable && !!task.due && task.due < "2026-09-04"),
+  isSnatchable: (task: any, today: string = "2026-09-04") =>
+    !!task.stealable && !task.completed && !!task.due && task.due < today,
+  resolveMemberName: (members: any[], rawName?: string | null) => {
+    const raw = (rawName || "").trim();
+    if (!raw) return rawName || "";
+    const pool = (members || []).filter((m) => m.role !== "pet");
+    const first = (v?: string) => (v || "").trim().split(" ")[0].toLowerCase();
+    const exact = pool.find((m) => m.fullName === raw || m.name === raw);
+    if (exact) return exact.fullName || exact.name || raw;
+    const target = first(raw);
+    const mine = pool.find((m) => first(m.fullName) === target || first(m.name) === target);
+    return mine ? (mine.fullName || mine.name || raw) : raw;
+  },
   tapCompletePending: (task: any, byName: string, nowISO: string, week: string) => ({
     ...task,
     completed: true,

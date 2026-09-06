@@ -25,6 +25,7 @@ vi.mock("@/hooks/useDashboardMode", () => ({
 
 vi.mock("@/db", () => ({
   db: {
+    selectMembers: () => [{ id: 1, name: "Caspian", fullName: "Caspian Garcia", color: "green", emoji: "🧒", role: "child" }],
     selectMembersDetailed: () => [{ name: "Caspian", color: "green", emoji: "🧒" }],
     selectTodaysEvents: () => [],
     selectMeals: async () => [],
@@ -55,10 +56,25 @@ vi.mock("@/lib/task-utils", () => ({
   calculateRealStreak: () => 0,
   syncTasksToPB: store.syncTasksToPB,
   syncWeekDataToPB: store.syncWeekDataToPB,
-  // Trust-but-verify (Task 7): non-universal kid quests complete PIN-free as
-  // done-but-unpaid — faithful inline mirror of the real task-utils helpers.
+  // Trust-but-verify: the REAL single decision seam (child + open + assigned
+  // + never snatchable). The old test mirror dropped the snatchable leg —
+  // the real helper routes late stealable quests to the claim branch.
   shouldUsePendingTap: (role: string | undefined, task: any) =>
-    role === "child" && !task.completed && !task.universal,
+    role === "child" && !task.completed && !task.universal && !(task.stealable && !!task.due && task.due < "2026-09-04"),
+  isSnatchable: (task: any, today: string = "2026-09-04") =>
+    !!task.stealable && !task.completed && !!task.due && task.due < today,
+  // Ledger-key mirror: roster-resolved FULL name (Jasmine-style splits).
+  resolveMemberName: (members: any[], rawName?: string | null) => {
+    const raw = (rawName || "").trim();
+    if (!raw) return rawName || "";
+    const pool = (members || []).filter((m) => m.role !== "pet");
+    const first = (v?: string) => (v || "").trim().split(" ")[0].toLowerCase();
+    const exact = pool.find((m) => m.fullName === raw || m.name === raw);
+    if (exact) return exact.fullName || exact.name || raw;
+    const target = first(raw);
+    const mine = pool.find((m) => first(m.fullName) === target || first(m.name) === target);
+    return mine ? (mine.fullName || mine.name || raw) : raw;
+  },
   tapCompletePending: (task: any, byName: string, nowISO: string, week: string) => ({
     ...task,
     completed: true,
@@ -174,7 +190,7 @@ describe("KidHome quest completion (pending approval, PIN-free for kid quests)",
     const saved = store.saveTasks.mock.calls[0][0];
     const row = saved.find((t: any) => t.id === 7);
     expect(row.completed).toBe(true);
-    expect(row.pendingApproval).toMatchObject({ byName: "Caspian", points: 10 });
+    expect(row.pendingApproval).toMatchObject({ byName: "Caspian Garcia", points: 10 });
     expect(typeof row.pendingApproval.at).toBe("string");
     expect(store.saveWeekData).not.toHaveBeenCalled();
     expect(store.syncWeekDataToPB).not.toHaveBeenCalled();
@@ -208,7 +224,7 @@ describe("KidHome quest completion (pending approval, PIN-free for kid quests)",
     // Even a "wrong" PIN lands pending: the kid gate no longer verifies.
     expect(store.saveTasks).toHaveBeenCalled();
     const saved = store.saveTasks.mock.calls[0][0];
-    expect(saved.find((t: any) => t.id === 7)?.pendingApproval).toMatchObject({ byName: "Caspian", points: 10 });
+    expect(saved.find((t: any) => t.id === 7)?.pendingApproval).toMatchObject({ byName: "Caspian Garcia", points: 10 });
     expect(spyFetch.mock.calls.filter((call) => String(call[0]).includes("/api/members/verify"))).toHaveLength(0);
     expect(store.saveWeekData).not.toHaveBeenCalled();
     expect(store.week.history).toHaveLength(0);
@@ -238,8 +254,8 @@ describe("KidHome quest completion (pending approval, PIN-free for kid quests)",
     const saved = store.saveTasks.mock.calls[0][0];
     const row = saved.find((t: any) => t.id === 7);
     expect(row.completed).toBe(true);
-    expect(row.completedBy).toBe("Caspian");
-    expect(row.pendingApproval).toMatchObject({ byName: "Caspian", points: 10 });
+    expect(row.completedBy).toBe("Caspian Garcia");
+    expect(row.pendingApproval).toMatchObject({ byName: "Caspian Garcia", points: 10 });
     expect(row.completedInWeek).toBe("2026-09-01");
     // No points move until a parent approves: week store untouched.
     expect(store.saveWeekData).not.toHaveBeenCalled();
@@ -255,8 +271,44 @@ describe("KidHome quest completion (pending approval, PIN-free for kid quests)",
     expect(JSON.stringify(localStorage)).not.toContain("1234");
   });
 
-  it("a successful universal claim carries completedBy/At/InWeek into the synced row (no field wipe)", async () => {
+  it("a stealable late quest routes through the server claim branch (NOT the pending path) — surface parity with the Tasks page", async () => {
+    // M1: the old split keyed ONLY on task.universal — a stealable-late quest
+    // completed pending on KidHome but claim-modal on the Tasks page. The
+    // real shouldUsePendingTap gate (wired into KidHome now) routes
+    // universal || isSnatchable through the claim path.
     const claimFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/tasks/claim")) {
+        return { ok: true, status: 200, json: async () => ({ success: true, claimedBy: "Caspian Garcia" }) };
+      }
+      return { ok: true, status: 200, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", claimFetch);
+    store.tasks = [{ id: 11, title: "Late dishes", points: 8, assignee: "Caspian", completed: false, stealable: true, due: "2026-09-01" }];
+
+    const el = await renderAsync(<KidHome />);
+    await settle();
+    const card = el.querySelector('[aria-label^="Complete quest: Late dishes"]') as HTMLElement;
+    expect(card).not.toBeNull();
+    await act(async () => { card.click(); });
+    await settle();
+
+    const input = document.querySelector('input[aria-label="Your 4-digit PIN"]') as HTMLInputElement;
+    await act(async () => { setInputValue(input, "1234"); });
+    const completeBtn = Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.includes("Complete")) as HTMLButtonElement;
+    await act(async () => { completeBtn.click(); });
+    await settle();
+
+    // Claim POST happened, and the row is claimed (no pendingApproval anywhere).
+    expect(claimFetch).toHaveBeenCalledWith(expect.stringContaining("/api/tasks/claim"), expect.objectContaining({ method: "POST" }));
+    const saved = store.saveTasks.mock.calls.at(-1)![0];
+    const row = saved.find((t: any) => t.id === 11);
+    expect(row.completed).toBe(true);
+    expect(row.pendingApproval).toBeUndefined();
+    expect(store.week.history).toHaveLength(0);
+  });
+
+  it("a successful universal claim carries completedBy/At/InWeek into the synced row (no field wipe)", async () => {    const claimFetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/api/tasks/claim")) {
         // Real route shape: { success, claimedBy: <server-normalized FULL

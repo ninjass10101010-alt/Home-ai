@@ -250,7 +250,7 @@ export function regenerateRecurringTasks(tasks: Task[]): Task[] {
   // completedInWeek recorded). Tasks completed THIS week are left untouched —
   // they regen next week.
   const sources = tasks.filter(
-    (t) => t.completed && t.recurring && t.completedInWeek !== monday && !t.pendingApproval
+    (t) => t.completed && t.recurring && t.completedInWeek !== monday && !isPendingApproval(t)
   );
 
   // Dedupe by lineage so duplicate completed rows never compound into
@@ -491,6 +491,27 @@ export function pickDefaultClaimMember(
     if (mine) return mine.fullName || mine.name || "";
   }
   return nonPets[0]?.fullName || nonPets[0]?.name || "";
+}
+
+// Resolve an auth/session name to the roster-resolved FULL name — the same
+// ledger key the classic PIN path credits (normalizeName on the Tasks page).
+// Matching mirrors pickDefaultClaimMember: exact name/fullName, then
+// first-name-insensitive; pets are excluded (they can never earn points).
+// Unknown names pass through untouched — never invent a member.
+export function resolveMemberName(
+  members: { name?: string; fullName?: string; role?: string }[],
+  rawName?: string | null
+): string {
+  const raw = (rawName || "").trim();
+  if (!raw) return rawName || "";
+  const pool = (members || []).filter((m) => m.role !== "pet");
+  const first = (v?: string) => (v || "").trim().split(" ")[0].toLowerCase();
+  const target = first(raw);
+  const exact = pool.find((m) => m.fullName === raw || m.name === raw);
+  if (exact) return exact.fullName || exact.name || raw;
+  const mine = pool.find((m) => first(m.fullName) === target || first(m.name) === target);
+  if (mine) return mine.fullName || mine.name || raw;
+  return raw;
 }
 
 export function getMemberAllTimePoints(

@@ -48,11 +48,13 @@ import {
   syncWeekDataToPB,
   shouldUsePendingTap,
   tapCompletePending,
+  isSnatchable,
+  resolveMemberName,
 } from "@/lib/task-utils";
 import QuestCard from "./QuestCard";
 import LevelBar from "./LevelBar";
 import CelebrationBurst from "./CelebrationBurst";
-import { ledgerKey, pointsFor, currentWeekPoints, verifyPinRemote, unreachableCopy } from "./kid-store";
+import { ledgerKey, pointsFor, currentWeekPoints, unreachableCopy } from "./kid-store";
 import SpotifyWidget from "@/components/integrations/SpotifyWidget";
 import AllowanceWidget from "@/components/integrations/AllowanceWidget";
 import LearningWidget from "@/components/integrations/LearningWidget";
@@ -334,7 +336,10 @@ export default function KidHome() {
     setQuestPinBusy(true);
     const task = questPinTask;
     try {
-      if (task.universal) {
+      // Competitive completions (universal claims AND stealable-late snatches)
+      // keep the server-authoritative claim route — the same branch the Tasks
+      // page uses, so both surfaces agree for every task shape.
+      if (task.universal || isSnatchable(task)) {
         // Server-authoritative claim (same route the Tasks page uses):
         // exactly one family member wins the race, points land on the server.
         const before = currentWeekPoints(user.name).points;
@@ -377,12 +382,15 @@ export default function KidHome() {
         saveTasks(tasks);
         void syncTasksToPB(tasks);
         celebrate(task.points || 0, before);
-      } else {
+      } else if (shouldUsePendingTap(user?.role, task)) {
         // Trust-but-verify: kid quests land immediately as done-but-unpaid —
-        // no PIN round trip. Points move only on parent approval.
+        // no PIN round trip. Points move only on parent approval. The ledger
+        // key is the roster-resolved FULL name (db.selectMembers maps name →
+        // first name + fullName), the same key approve credits — a raw
+        // session first name would split the ledger.
         const now = new Date().toISOString();
         const currentWeek = weekKey();
-        const myName = user.name;
+        const myName = resolveMemberName(db.selectMembers(), user.name);
         const week = loadWeekData();
         const before = pointsFor(week.points, myName);
         const tasks = loadTasks().map((t: any) =>
@@ -391,6 +399,12 @@ export default function KidHome() {
         saveTasks(tasks);
         void syncTasksToPB(tasks);
         celebrate(task.points || 0, before);
+      } else {
+        // Neither branch owns this shape (a non-child session somehow reached
+        // the kid gate) — say so instead of faking a success cleanup.
+        setQuestPinError("Couldn't complete it — try again.");
+        setQuestPin("");
+        return;
       }
       setQuestPinTask(null);
       setQuestPin("");

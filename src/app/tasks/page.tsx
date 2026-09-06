@@ -35,7 +35,7 @@ import {
   syncAllTasksToPB, syncWeekDataToPB,
   archiveAndResetWeek, archiveWeekWinner, saveCurrentWeekRanksForNextWeek,
   pickDefaultClaimMember, isSnatchable, isPendingApproval, shouldUsePendingTap,
-  tapCompletePending, sendBackPendingCompletion, approvePendingCompletion,
+  tapCompletePending, sendBackPendingCompletion, approvePendingCompletion, resolveMemberName,
 } from "@/lib/task-utils";
 import {
   readRewardsStamp, touchRewardsStamp, writeRewardsStamp,
@@ -692,9 +692,11 @@ export default function TasksPage() {
     const task = tasks.find((x) => x.id === taskId);
     if (!task) return;
     if (task.completed) {
-      if (isPendingApproval(task) && isLoggedIn && currentUser?.role === "child" && task.pendingApproval?.byName === currentUser.name) {
+      if (isPendingApproval(task) && isLoggedIn && currentUser?.role === "child" && resolveMemberName(membersData, task.pendingApproval?.byName) === resolveMemberName(membersData, currentUser.name)) {
         // The kid who tapped can take it back PIN-free: nothing was verified,
-        // so there is nothing to un-verify. No points ever moved.
+        // so there is nothing to un-verify. No points ever moved. Names are
+        // compared in the resolved-ledger space — a session first name and a
+        // fullName byName are the same kid.
         setTasks((prev) => sendBackPendingCompletion(prev, taskId));
         showToast("Back on the list — no points were given.");
         return;
@@ -706,10 +708,13 @@ export default function TasksPage() {
     }
     if (shouldUsePendingTap(currentUser?.role, task)) {
       // Trust-but-verify: a kid's tap lands immediately as done-but-unpaid —
-      // no PIN round trip. Points move only on parent approval.
+      // no PIN round trip. Points move only on parent approval. The pending
+      // record's byName is the roster-resolved FULL name (the same ledger key
+      // the classic PIN path credits) so approve posts the earn to the right
+      // ledger entry instead of stranding points on a first-name key.
       if (task.completedInWeek === weekKey()) return;
       const now = new Date().toISOString();
-      const me = currentUser!.name;
+      const me = resolveMemberName(membersData, currentUser!.name);
       setTasks((prev) => prev.map((t) => (t.id === taskId ? tapCompletePending(t, me, now, weekKey()) : t)));
       triggerConfetti();
       showToast(`Done! +${task.points}pts on the way — a parent approves.`);
@@ -1190,7 +1195,9 @@ export default function TasksPage() {
       return (t.universal || isSnatchable(t)) && (showCompleted ? true : !t.completed);
     }
     if (filterMember === "My Tasks" && currentUser) {
-      const mine = t.assignee === currentUser.name;
+      // Ownership in the resolved-ledger space: assignees are migrated to
+      // roster fullNames at mount, while the session may carry a first name.
+      const mine = resolveMemberName(membersData, t.assignee) === resolveMemberName(membersData, currentUser.name);
       const claimable = (t.universal || isSnatchable(t)) && !t.completed;
       return (mine || claimable) && (showCompleted ? true : !t.completed);
     }
@@ -1568,7 +1575,9 @@ export default function TasksPage() {
                       completed.map((task) => {
                         if (isPendingApproval(task)) {
                           const owner = task.pendingApproval!;
-                          const mine = isLoggedIn && currentUser?.role === "child" && owner.byName === currentUser.name;
+                          // Same-kid check in the resolved-ledger space (a
+                          // session first name and a fullName byName agree).
+                          const mine = isLoggedIn && currentUser?.role === "child" && resolveMemberName(membersData, owner.byName) === resolveMemberName(membersData, currentUser.name);
                           return (
                           <div
                             key={task.id}
