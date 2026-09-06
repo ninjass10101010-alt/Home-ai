@@ -3,7 +3,7 @@ import { buildToolsForOpenAI, getTool } from "@/lib/hermes-tools";
 import { getServiceConfig } from "@/lib/services/config";
 import { db } from "@/db";
 import { verifySession, SESSION_COOKIE } from "@/lib/session";
-import { buildClemSystemPrompt, buildConsuelaSystemPrompt, HOUSE_CONTROL_PROMPT_ADDENDUM } from "@/lib/consuela-prompts";
+import { buildClemSystemPrompt, buildConsuelaSystemPrompt, buildKidSystemPrompt, HOUSE_CONTROL_PROMPT_ADDENDUM } from "@/lib/consuela-prompts";
 
 export const dynamic = "force-dynamic";
 
@@ -304,7 +304,7 @@ async function buildChatContext(request: NextRequest, body: ChatRequestBody) {
     : await resolveHermes();
   const tools = isClem
     ? buildToolsForOpenAI({ houseControl: false }).filter((t) => CLEM_TOOLS.includes(t.function.name))
-    : buildToolsForOpenAI({ houseControl });
+    : buildToolsForOpenAI({ houseControl, role });
   const recentHistory = (history || [])
     .slice(-6)
     .filter((h: any) => h && typeof h.content === "string" && h.content.trim())
@@ -312,9 +312,13 @@ async function buildChatContext(request: NextRequest, body: ChatRequestBody) {
       role: h.role === "assistant" ? "assistant" : "user",
       content: h.content,
     }));
+  // Kid soul (2026-09-06): child sessions get the kid-friendly voice and the
+  // read-only tool surface — never the adult soul. Parents are unchanged.
   const baseSystem = isClem
     ? buildClemSystemPrompt()
-    : buildConsuelaSystemPrompt() + (houseControl ? HOUSE_CONTROL_PROMPT_ADDENDUM : "");
+    : role === "child"
+      ? buildKidSystemPrompt(undefined, session?.name)
+      : buildConsuelaSystemPrompt() + (houseControl ? HOUSE_CONTROL_PROMPT_ADDENDUM : "");
   let addendum: string | null = null;
   if (typeof system === "string") {
     const trimmed = system.trim();

@@ -1346,12 +1346,20 @@ export function getTool(name: string): Tool | undefined {
 
 export function buildToolsForOpenAI(options?: {
   houseControl?: boolean;
+  /** Session role. "child" = kid soul surface: reads/summaries ONLY — no
+   * writes, no admin, no logistics, no house. (Voice pair: KID_SYSTEM_PROMPT.
+   * Kids act through the real UI where PIN/pending-approval gates live.) */
+  role?: string;
 }): Array<{
   type: "function";
   function: { name: string; description: string; parameters: ToolDefinition["parameters"] };
 }> {
   const houseControl = options?.houseControl !== false;
-  return TOOLS.filter((t) => houseControl || !HA_HOUSE_TOOL_NAMES.has(t.definition.name)).map((t) => ({
+  const kid = options?.role === "child";
+  const allowed = kid
+    ? (t: Tool) => KID_TOOL_NAMES.has(t.definition.name)
+    : (t: Tool) => houseControl || !HA_HOUSE_TOOL_NAMES.has(t.definition.name);
+  return TOOLS.filter(allowed).map((t) => ({
     type: "function" as const,
     function: {
       name: t.definition.name,
@@ -1360,3 +1368,22 @@ export function buildToolsForOpenAI(options?: {
     },
   }));
 }
+
+// Kid-safe tool surface (user-locked 2026-09-06): dashboard questions +
+// summaries + learning ONLY. Every write (add/complete/remove), admin
+// (update/restart/containers/PB), suggestion ops, logistics (conflicts,
+// buffers, price compare), and house control is excluded for child sessions.
+const KID_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "get_weather",
+  "get_family_members",
+  "get_todays_events",
+  "get_todays_schedule",
+  "get_pending_tasks",
+  "get_weekly_meals",
+  "get_recipes",
+  "get_grocery_list",
+  "get_pantry",
+  "get_leaderboard",
+  "get_dashboard_summary",
+  "get_proactive_suggestions",
+]);

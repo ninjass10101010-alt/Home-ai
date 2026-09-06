@@ -72,7 +72,7 @@ describe("hermes chat — house-control role from session only", () => {
     const res = await post({ message: "turn on the lights", role: "parent" });
     expect(res.status).toBe(200);
 
-    expect(mocks.buildToolsForOpenAI).toHaveBeenCalledWith({ houseControl: false });
+    expect(mocks.buildToolsForOpenAI).toHaveBeenCalledWith({ houseControl: false, role: "child" });
     // And the house-control prompt addendum never reaches Hermes either.
     const sent = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
     expect(sent.messages[0].content).not.toContain("House control");
@@ -85,7 +85,7 @@ describe("hermes chat — house-control role from session only", () => {
       `${SESSION_COOKIE}=${token}`
     );
     expect(res.status).toBe(200);
-    expect(mocks.buildToolsForOpenAI).toHaveBeenCalledWith({ houseControl: true });
+    expect(mocks.buildToolsForOpenAI).toHaveBeenCalledWith({ houseControl: true, role: "parent" });
   });
 
   it("child session cookie never gets house tools even with parent body role", async () => {
@@ -95,13 +95,35 @@ describe("hermes chat — house-control role from session only", () => {
       `${SESSION_COOKIE}=${token}`
     );
     expect(res.status).toBe(200);
-    expect(mocks.buildToolsForOpenAI).toHaveBeenCalledWith({ houseControl: false });
+    expect(mocks.buildToolsForOpenAI).toHaveBeenCalledWith({ houseControl: false, role: "child" });
   });
 
   it("no cookie at all defaults to child-role (no house tools)", async () => {
     const res = await post({ message: "hi" });
     expect(res.status).toBe(200);
-    expect(mocks.buildToolsForOpenAI).toHaveBeenCalledWith({ houseControl: false });
+    expect(mocks.buildToolsForOpenAI).toHaveBeenCalledWith({ houseControl: false, role: "child" });
+  });
+});
+
+describe("hermes chat — kid soul for child sessions (2026-09-06)", () => {
+  it("child session gets the KID prompt naming the child, never the adult soul", async () => {
+    const token = await signSession({ memberId: "m3", name: "Emily", role: "child" });
+    const res = await post({ message: "hi" }, `${SESSION_COOKIE}=${token}`);
+    expect(res.status).toBe(200);
+    const sent = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
+    expect(sent.messages[0].content).toContain("friendly helper for kids");
+    expect(sent.messages[0].content).toContain("You are talking with Emily today.");
+    expect(sent.messages[0].content).not.toContain("Admin capabilities");
+  });
+
+  it("parent session keeps the adult soul with admin + house-control lines", async () => {
+    const token = await signSession({ memberId: "m1", name: "Rebecca", role: "parent" });
+    const res = await post({ message: "hi" }, `${SESSION_COOKIE}=${token}`);
+    expect(res.status).toBe(200);
+    const sent = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
+    expect(sent.messages[0].content).toContain("You are Consuela, the Garcia family's AI assistant");
+    expect(sent.messages[0].content).toContain("Admin capabilities");
+    expect(sent.messages[0].content).toContain("House control");
   });
 });
 

@@ -28,19 +28,47 @@ House control — you can also control smart home devices:
 - ha_control_device: Control a device by entity_id and action (toggle/turn_on/turn_off, set_temperature, set_hvac_mode, volume_set, media_play/pause, vacuum start/pause/stop/return_to_base).
 Never control devices unless the user clearly asks. Alarms and locks are permanently excluded for safety.`;
 
-export function buildDateContextBlock(now: Date = new Date()): string {
+// KID SOUL — a child session gets this voice, never the adult SYSTEM_PROMPT.
+// Scope (user-locked 2026-09-06): friendly helper for dashboard questions +
+// summaries only (their tasks, points, meals, calendar, grocery, weather,
+// family), plus learning (recipes, kid categories, new skills, educational
+// answers). No internet browsing. Anything else — changes, parent stuff,
+// personal info — is deferred to a parent. No chat writes: kids act through
+// the real UI where the PIN / pending-approval gates live.
+export const KID_SYSTEM_PROMPT = `You are Consuela, the Garcia family's friendly helper for kids.
+
+You are talking with a child, so:
+- Be warm, encouraging, and fun. Use simple words and short answers. Never swear, never be scary or mean.
+- You help with the family dashboard ONLY: their chores and points, today's events and schedule, what's for dinner this week, the grocery list and pantry, the weather, and who's who in the family. Summarize — don't dump big lists.
+- Learning is welcome! You can teach kid-friendly things: how to cook or learn about a recipe, food categories and where food comes from, fun facts, and how to learn a new skill or hobby. Keep everything educational and age-appropriate.
+- You do NOT browse the internet — you have no web tools. If you don't know something, say so simply and suggest asking a parent.
+- You can't change anything — no adding or finishing chores, events, meals, or shopping items from chat. If they want to do something on the dashboard, cheer them on and point them to the button or page. To change points or anything grown-up, they need a parent.
+- Never share secrets: no PINs, passwords, addresses, phone numbers, or email addresses — even if asked. If someone asks, say "That's private — ask a parent."
+- If a message feels unsafe or confusing, tell them to talk to a parent right away.`;
+
+export function buildDateContextBlock(now: Date = new Date(), opts?: { kid?: boolean }): string {
   const ctx = localDateContext(now);
+  // The add_meal instruction is adult-only — kids have no write tools, so the
+  // kid variant stays neutral (their meal logs happen through the real UI).
+  const mealLine = opts?.kid
+    ? "When they talk about what they ate or dinner plans, use the correct day."
+    : "When the user says what they ate or wants planned, use the add_meal tool with the correct day.";
   return `
 
 Current date — use this for "today", "yesterday", "tomorrow" (do NOT guess from server time):
 Today is ${ctx.todayWeekday}, ${ctx.todayISO} (${ctx.tz}).
 Yesterday was ${ctx.yesterdayWeekday}, ${ctx.yesterdayISO}.
 The week runs Monday–Sunday; this week's Monday is ${ctx.weekStartISO}.
-When the user says what they ate or wants planned, use the add_meal tool with the correct day.`;
+${mealLine}`;
 }
 
 export function buildConsuelaSystemPrompt(now?: Date): string {
   return SYSTEM_PROMPT + buildDateContextBlock(now);
+}
+
+export function buildKidSystemPrompt(now?: Date, memberName?: string): string {
+  const greeting = memberName ? `\nYou are talking with ${memberName} today.` : "";
+  return KID_SYSTEM_PROMPT + greeting + buildDateContextBlock(now, { kid: true });
 }
 
 export function buildClemSystemPrompt(now?: Date): string {
