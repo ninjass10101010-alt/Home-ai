@@ -19,6 +19,14 @@ function formatRelativeTime(iso: string | null): string {
   return `${d}d ago`;
 }
 
+interface CalendarOption {
+  id: string;
+  summary: string;
+  colorRgb: string | null;
+  selected: boolean;
+  lastSyncAt: string | null;
+}
+
 function CountdownPill({ expiresAt }: { expiresAt: number }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -57,6 +65,15 @@ export default function GoogleConnectCard() {
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
 
+  // Multi-calendar selection (Fix-C): the Google calendarList merged with the
+  // saved selection, editable via checkboxes + Save (PUT /api/google/calendars).
+  const [calendars, setCalendars] = useState<CalendarOption[] | null>(null);
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  const [savingCalendars, setSavingCalendars] = useState(false);
+  const [calendarMsg, setCalendarMsg] = useState<string | null>(null);
+  const [calendarsError, setCalendarsError] = useState<string | null>(null);
+  const [calendarsReload, setCalendarsReload] = useState(0);
+
   useEffect(() => {
     if (status !== "connected") return;
     fetch("/api/google/sync-state")
@@ -64,6 +81,88 @@ export default function GoogleConnectCard() {
       .then((d) => setLastSyncAt(d.calendar_last_sync_at || d.tasks_last_sync_at))
       .catch(() => {});
   }, [status]);
+
+  useEffect(() => {
+    if (status !== "connected") return;
+    let cancelled = false;
+    setCalendarsError(null);
+    fetch("/api/google/calendars")
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        if (d?.ok === false) {
+          setCalendars(null);
+          setCalendarsError(d.error || "Couldn't load your calendars.");
+          return;
+        }
+        const list: CalendarOption[] = Array.isArray(d?.calendars) ? d.calendars : [];
+        setCalendars(list);
+        setCheckedIds(new Set(list.filter((c) => c.selected).map((c) => c.id)));
+      })
+      .catch(() => {
+        if (!cancelled) setCalendarsError("Couldn't load your calendars.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [status, calendarsReload]);
+
+  const selectionDirty = !!calendars && calendars.some((c) => c.selected !== checkedIds.has(c.id));
+
+  const toggleCalendar = (id: string) => {
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+    setCalendarMsg(null);
+  };
+
+  const handleSaveCalendars = async () => {
+    if (!calendars) return;
+    setSavingCalendars(true);
+    setCalendarMsg(null);
+    try {
+      const res = await fetch("/api/google/calendars", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          calendars: calendars.map((c) => ({
+            id: c.id,
+            summary: c.summary,
+            colorRgb: c.colorRgb,
+            selected: checkedIds.has(c.id),
+          })),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setCalendarMsg(
+          res.status === 403
+            ? "Only grown-ups can change calendar sync."
+            : `Save failed: ${data?.error || res.statusText}`,
+        );
+      } else {
+        setCalendarMsg(data?.pruned?.length ? "Saved — removed calendars cleared" : "Saved ✓");
+        // Re-read the merged selection (newly selected calendars appear with
+        // their real state; last-synced lines refresh).
+        fetch("/api/google/calendars")
+          .then((r) => r.json())
+          .then((d) => {
+            const list: CalendarOption[] = Array.isArray(d?.calendars) ? d.calendars : [];
+            setCalendars(list);
+            setCheckedIds(new Set(list.filter((c) => c.selected).map((c) => c.id)));
+          })
+          .catch(() => {});
+      }
+    } catch (e: any) {
+      setCalendarMsg(`Save failed: ${e?.message || "unknown error"}`);
+    } finally {
+      setSavingCalendars(false);
+      setTimeout(() => setCalendarMsg(null), 5000);
+    }
+  };
 
   if (!mounted) {
     return (
@@ -140,6 +239,70 @@ export default function GoogleConnectCard() {
             )}
           </div>
         </div>
+        {calendars && calendars.length > 0 && (
+          <div className="rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/40 p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-text-muted">
+              Calendars
+            </p>
+            <p className="mt-0.5 text-xs text-text-secondary">
+              Choose which Google calendars Consuela syncs.
+            </p>
+            <div className="mt-3 space-y-1.5">
+              {calendars.map((c) => (
+                <label
+                  key={c.id}
+                  className="tap-sm flex cursor-pointer items-start gap-2.5 rounded-xl px-2 py-1.5 hover:bg-white/5"
+                >
+                  <input
+                    type="checkbox"
+                    checked={checkedIds.has(c.id)}
+                    onChange={() => toggleCalendar(c.id)}
+                    className="mt-1 h-4 w-4 shrink-0 accent-[var(--color-accent-selected)]"
+                    aria-label={`Sync ${c.summary}`}
+                  />
+                  <span
+                    aria-hidden
+                    className="mt-1.5 h-3 w-3 shrink-0 rounded-full border border-white/20"
+                    style={{ background: c.colorRgb || "var(--color-accent-cyan)" }}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium text-text-primary">
+                      {c.summary}
+                    </span>
+                    <span className="block text-[11px] text-text-muted">
+                      Last synced {formatRelativeTime(c.lastSyncAt)}
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </div>
+            {calendarMsg && (
+              <p className="mt-2 text-xs text-text-secondary" role="status">
+                {calendarMsg}
+              </p>
+            )}
+            <SoftButton
+              onClick={handleSaveCalendars}
+              loading={savingCalendars}
+              disabled={!selectionDirty || savingCalendars}
+              className="mt-3 w-full"
+            >
+              Save calendars
+            </SoftButton>
+          </div>
+        )}
+        {calendarsError && (
+          <div className="rounded-xl border border-white/10 bg-[var(--color-surface-2)]/60 px-3 py-2 text-xs text-text-secondary" role="status">
+            {calendarsError}{" "}
+            <button
+              type="button"
+              onClick={() => setCalendarsReload((n) => n + 1)}
+              className="font-semibold text-text-primary underline underline-offset-2"
+            >
+              Try again
+            </button>
+          </div>
+        )}
         {syncResult && (
           <div className="rounded-xl border border-white/10 bg-[var(--color-surface-2)]/60 px-3 py-2 text-xs text-text-secondary">
             {syncResult}

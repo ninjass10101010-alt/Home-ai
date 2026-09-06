@@ -4,9 +4,14 @@
 // Usage:
 //   node scripts/consuela/test-capsule-nav.mjs
 //
+// Shipped contract (2026-09-04): BOTH modes render exactly 7 items —
+//   adult/family/guest: Home, Ask, Meals, Tasks, Calendar, House, Settings
+//   kid (any signed-in non-parent): House swapped for Rewards (after Tasks)
+// The 44px-at-390px capsule sizing is computed for 7 items in both modes.
+//
 // What it verifies:
-//   1. The floating glass capsule renders with all 7 items
-//      (Home, Ask, Meals, Tasks, Calendar, House, Settings) as real <button>s.
+//   1. The floating glass capsule renders with all 7 adult items as real
+//      <button>s (the script runs signed-out = family mode = adult nav).
 //   2. On "/" the Home item is expanded (grid-template-columns "56px 1fr"),
 //      carries aria-current="page", and shows its label; the other items
 //      are collapsed ("56px 0fr") with no visible label.
@@ -15,6 +20,10 @@
 //   5. Clicking House navigates to /ha and becomes the active item.
 //   6. At 390px and 375px viewports there is no horizontal page overflow and
 //      the capsule scales down (--capsule-scale < 1).
+//   7. The KID contract (House swapped for Rewards, still 7 items) is
+//      verified statically against src/components/ui/CapsuleNav.tsx —
+//      signing a child in needs a real PIN + live PocketBase, which this
+//      no-dependency smoke run deliberately doesn't boot.
 //
 // Boots its own `npm run dev -p <free port>`; no PocketBase or cron needed
 // (the dashboard runs on in-memory fallbacks).
@@ -69,7 +78,42 @@ const serverLogTail = (logPath) => {
   }
 };
 
-const LABELS = ["Home", "Ask", "Meals", "Tasks", "Calendar", "House", "Settings"];
+const ADULT_LABELS = ["Home", "Ask", "Meals", "Tasks", "Calendar", "House", "Settings"];
+
+// Static verification of the kid-mode contract against the component source
+// (kid mode needs a real PIN + live PocketBase to sign in — out of scope for
+// this no-dependency smoke run).
+function verifyKidContract() {
+  const src = readFileSync(path.join(REPO_ROOT, "src", "components", "ui", "CapsuleNav.tsx"), "utf8");
+  // Adult base list: exactly 7 items, House included, Settings last.
+  const navItemsBlock = src.slice(src.indexOf("const navItems = ["), src.indexOf("const EXPAND_EASE"));
+  const baseHrefs = [...navItemsBlock.matchAll(/href:\s*"([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(baseHrefs, ["/", "/chat", "/meals", "/tasks", "/calendar", "/ha", "/settings"], "adult nav must ship these 7 routes in order");
+  // Kid swap: House filtered out, Rewards inserted after Tasks.
+  assert.match(src, /rewardsItem\s*=\s*\{[\s\S]*?href:\s*"\/rewards",\s*label:\s*"Rewards"/, "kid-only Rewards tab must exist (/rewards)");
+  assert.match(src, /currentUser\.role\s*!==\s*"parent"[\s\S]*?filter\(\(item\) => item\.href !== "\/ha"\)/, "kid mode must hide House");
+  assert.match(src, /findIndex\(\(item\) => item\.href === "\/tasks"\)[\s\S]*?splice\(tasksIdx \+ 1, 0, rewardsItem\)/, "Rewards must be inserted right after Tasks");
+  // Both modes render 7 items (the 44px-at-390px sizing depends on it).
+  // Derive the adult and kid lists by replaying the PARSED swap logic
+  // (House filtered for non-parents, Rewards spliced in after Tasks) —
+  // a hand-counted formula would pass even if the swap broke.
+  const hiddenMatch = src.match(/filter\(\(item\) => item\.href !== "([^"]+)"\)/);
+  assert.ok(hiddenMatch, "kid mode must filter out one adult route");
+  const rewardsMatch = src.match(/rewardsItem\s*=\s*\{[\s\S]*?href:\s*"([^"]+)"/);
+  assert.ok(rewardsMatch, "kid-only Rewards tab must carry an href");
+  const anchorMatch = src.match(/findIndex\(\(item\) => item\.href === "([^"]+)"\)[\s\S]*?splice\(\w+ \+ 1, 0, rewardsItem\)/);
+  assert.ok(anchorMatch, "Rewards splice must name its anchor item");
+  const adultItems = [...baseHrefs];
+  const kidItems = adultItems.filter((href) => href !== hiddenMatch[1]);
+  kidItems.splice(kidItems.indexOf(anchorMatch[1]) + 1, 0, rewardsMatch[1]);
+  assert.equal(adultItems.length, 7, "adult mode must render exactly 7 items");
+  assert.equal(kidItems.length, 7, "kid mode must also render exactly 7 items");
+  assert.ok(kidItems.includes("/rewards"), "kid list must contain /rewards");
+  assert.ok(!kidItems.includes("/ha"), "kid list must lack /ha");
+  assert.ok(adultItems.includes("/ha"), "adult list must contain /ha");
+  assert.ok(!adultItems.includes("/rewards"), "adult list must lack /rewards");
+  console.log("10. kid contract statically verified against CapsuleNav.tsx (7 items both modes, House→Rewards after Tasks)");
+}
 
 async function main() {
   const { child, logPath } = await bootDevServer(PORT);
@@ -89,10 +133,11 @@ async function main() {
 
     const buttons = page.locator('.capsule-nav button[aria-label]');
     assert.equal(await buttons.count(), 7, "expected 7 nav buttons");
-    for (const label of LABELS) {
+    for (const label of ADULT_LABELS) {
       assert.equal(await page.locator(`.capsule-nav button[aria-label="${label}"]`).count(), 1, `missing item ${label}`);
     }
-    console.log("2. seven items present");
+    assert.equal(await page.locator('.capsule-nav button[aria-label="Rewards"]').count(), 0, "guest/family mode must NOT show the kid-only Rewards tab");
+    console.log("2. seven adult items present (no Rewards tab for guests)");
 
     const homeBtn = page.locator('.capsule-nav button[aria-label="Home"]');
     assert.equal(await homeBtn.getAttribute("aria-current"), "page", "Home should be current on /");
@@ -155,6 +200,8 @@ async function main() {
       assert.ok(scale < 1 && scale > 0.5, `capsule should scale down at ${width}px (got ${scale})`);
     }
     console.log("9. no horizontal overflow + capsule auto-scales at 375px and 390px");
+
+    verifyKidContract();
 
     console.log("\nALL CAPSULE NAV CHECKS PASSED");
   } catch (err) {

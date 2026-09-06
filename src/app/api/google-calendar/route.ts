@@ -1,11 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isGoogleConnected, GoogleAuthError } from "@/lib/google/oauth-client";
-import { readCachedEvents, syncCalendar } from "@/lib/google/calendar";
+import { readCachedEvents, syncCalendar, readCalendarSyncRows } from "@/lib/google/calendar";
 import { ensureGoogleCollections } from "@/lib/google/pb-collections";
 import { getStoredTokens } from "@/lib/google/token-store";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+// calendarId → Google colorRgb, so the client can paint each synced event in
+// its own calendar's color (mapGoogleEvent's colorHex passthrough).
+async function calendarColors(): Promise<Record<string, string>> {
+  const rows = await readCalendarSyncRows().catch(() => []);
+  const map: Record<string, string> = {};
+  for (const r of rows) if (r.color_rgb) map[r.calendar_id] = r.color_rgb;
+  return map;
+}
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -34,6 +43,7 @@ export async function GET(request: NextRequest) {
         source: "composio",
         account_email: null,
         last_sync_at: null,
+        calendar_colors: await calendarColors(),
         events: cached,
       });
     } catch (e: any) {
@@ -69,6 +79,7 @@ export async function GET(request: NextRequest) {
       source: "google",
       account_email: tokens?.account_email || null,
       last_sync_at: tokens?.granted_at || null,
+      calendar_colors: await calendarColors(),
       events,
     });
   } catch (e: any) {

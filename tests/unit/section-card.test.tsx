@@ -57,4 +57,30 @@ describe("SectionCard centered header", () => {
     expect(body?.className).toContain("flex-1");
     expect(body?.className).toContain("flex-col");
   });
+
+  it("defaults the title to h3 (zero behavior change for existing consumers)", () => {
+    const card = render(<SectionCard title="Kitchen"><p>body</p></SectionCard>);
+    expect(card.querySelector("h3")?.textContent).toBe("Kitchen");
+    expect(card.querySelector("h2")).toBeNull();
+  });
+
+  it("headingLevel='h2' swaps only the tag — same classes, both header paths", () => {
+    const plain = render(
+      <SectionCard title="Appearance" description="d" compact headingLevel="h2"><p>body</p></SectionCard>
+    );
+    const h2 = plain.querySelector("h2");
+    expect(h2?.textContent).toBe("Appearance");
+    expect(h2?.className).toContain("font-bold");
+    expect(h2?.className).toContain("text-sm"); // compact sizing preserved
+    expect(h2?.className).toContain("text-text-primary");
+    expect(plain.querySelector("h3")).toBeNull();
+
+    const centered = render(
+      <SectionCard title="Today" centeredHeader headingLevel="h2"><p>body</p></SectionCard>
+    );
+    const ch2 = centered.querySelector("h2");
+    expect(ch2?.textContent).toBe("Today");
+    expect(ch2?.className).toContain("text-base"); // non-compact sizing preserved
+    expect(centered.querySelector("h3")).toBeNull();
+  });
 });

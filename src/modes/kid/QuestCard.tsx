@@ -4,17 +4,19 @@
  * Features:
  *   - Large touch target (72px min height, 52px touch area)
  *   - Spring-bounce on tap
- *   - Confetti burst from the checkbox on completion
- *   - Points fly up as golden numbers
  *   - Completed state with green checkmark
- *   - Streak fire for repeated completions
  *
  * The quest card is the PRIMARY interaction in kid mode.
  * It should feel satisfying, not clinical.
+ *
+ * Kid-safety contract: tapping a quest does NOT complete it. The card only
+ * reports the tap via onComplete — the parent (KidHome) runs the shared
+ * server-verified PIN gate and fires the celebration after a SUCCESSFUL
+ * completion. No optimistic self-complete, no premature confetti.
  */
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback } from "react";
 
 interface QuestCardProps {
   task: {
@@ -27,35 +29,25 @@ interface QuestCardProps {
     completed?: boolean;
     emoji?: string;
   };
-  /** Called when the quest is completed */
+  /** Called when the quest is tapped — the parent gates the real completion behind the PIN flow */
   onComplete: (task: any) => void;
   /** Whether the quest is disabled (e.g. bedtime mode) */
   disabled?: boolean;
 }
 
 export default function QuestCard({ task, onComplete, disabled = false }: QuestCardProps) {
-  const [completed, setCompleted] = useState(task.completed || false);
-  const [showCelebration, setShowCelebration] = useState(false);
   const [isPressed, setIsPressed] = useState(false);
-  const cardRef = useRef<HTMLDivElement>(null);
 
   const handleTap = useCallback(() => {
-    if (completed || disabled) return;
+    if (task.completed || disabled) return;
 
-    // Visual feedback: press down
+    // Visual feedback: press down. Completion + celebration belong to the
+    // parent's PIN-verified flow, never to this tap.
     setIsPressed(true);
     setTimeout(() => setIsPressed(false), 150);
 
-    // Mark complete
-    setCompleted(true);
-    setShowCelebration(true);
-
-    // Trigger parent callback
     onComplete(task);
-
-    // Clear celebration after animation
-    setTimeout(() => setShowCelebration(false), 1500);
-  }, [completed, disabled, onComplete, task]);
+  }, [disabled, onComplete, task]);
 
   // Determine quest difficulty tier
   const tier = task.points > 15 ? "epic" : task.points > 10 ? "hard" : "normal";
@@ -88,10 +80,9 @@ export default function QuestCard({ task, onComplete, disabled = false }: QuestC
 
   const config = tierConfig[tier];
 
-  if (completed) {
+  if (task.completed) {
     return (
       <div
-        ref={cardRef}
         className="relative flex items-center gap-3 p-4 rounded-[1.25rem] transition-all duration-500"
         style={{
           background: "rgba(74, 222, 128, 0.06)",
@@ -112,7 +103,6 @@ export default function QuestCard({ task, onComplete, disabled = false }: QuestC
 
   return (
     <div
-      ref={cardRef}
       role="button"
       tabIndex={disabled ? -1 : 0}
       onClick={handleTap}
@@ -150,19 +140,19 @@ export default function QuestCard({ task, onComplete, disabled = false }: QuestC
           {task.title}
         </h3>
         <div className="flex items-center gap-2 mt-1">
-          <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: config.pointColor }}>
+          <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: config.pointColor }}>
             {config.label}
           </span>
           {task.assignee && (
             <>
               <span className="text-text-dim">·</span>
-              <span className="text-[10px] text-text-secondary">{task.assignee.split(" ")[0]}</span>
+              <span className="text-[11px] text-text-secondary">{task.assignee.split(" ")[0]}</span>
             </>
           )}
           {task.due && (
             <>
               <span className="text-text-dim">·</span>
-              <span className="text-[10px] text-text-secondary">{task.due}</span>
+              <span className="text-[11px] text-text-secondary">{task.due}</span>
             </>
           )}
         </div>
@@ -179,7 +169,7 @@ export default function QuestCard({ task, onComplete, disabled = false }: QuestC
         <span className="text-lg font-black tabular-nums" style={{ color: config.pointColor }}>
           +{task.points}
         </span>
-        <span className="text-[9px] text-text-muted font-bold -mt-0.5">pts</span>
+        <span className="text-[11px] text-text-muted font-bold -mt-0.5">pts</span>
       </div>
 
       {/* Tap hint (subtle) */}
@@ -192,55 +182,6 @@ export default function QuestCard({ task, onComplete, disabled = false }: QuestC
         />
       )}
 
-      {/* Local celebration particles (smaller than full-screen burst) */}
-      {showCelebration && (
-        <div className="absolute inset-0 pointer-events-none overflow-hidden rounded-[1.25rem]">
-          {Array.from({ length: 6 }).map((_, i) => {
-            const colors = ["#fbbf24", "#f43f5e", "#3b82f6", "#4ade80", "#a855f7", "#06b6d4"];
-            const color = colors[i % colors.length];
-            const x = (Math.random() - 0.5) * 80;
-            const y = -(20 + Math.random() * 40);
-            return (
-              <span
-                key={i}
-                className="absolute w-2 h-2 rounded-full"
-                style={{
-                  left: "50%",
-                  top: "50%",
-                  background: color,
-                  boxShadow: `0 0 6px ${color}`,
-                  animation: `questParticle 0.6s ease-out ${i * 0.04}s forwards`,
-                  "--px": `${x}px`,
-                  "--py": `${y}px`,
-                } as React.CSSProperties}
-              />
-            );
-          })}
-          {/* Local points fly */}
-          <span
-            className="absolute left-1/2 top-1/3 -translate-x-1/2 text-base font-black tabular-nums"
-            style={{
-              color: "#fbbf24",
-              textShadow: "0 0 10px rgba(251, 191, 36, 0.5)",
-              animation: "questLocalFly 0.7s ease-out forwards",
-            }}
-          >
-            +{task.points}
-          </span>
-        </div>
-      )}
-
-      <style>{`
-        @keyframes questParticle {
-          0%   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-          100% { opacity: 0; transform: translate(calc(-50% + var(--px)), calc(-50% + var(--py))) scale(0); }
-        }
-        @keyframes questLocalFly {
-          0%   { opacity: 0; transform: translate(-50%, 0) scale(0.5); }
-          20%  { opacity: 1; transform: translate(-50%, -5px) scale(1.2); }
-          100% { opacity: 0; transform: translate(-50%, -35px) scale(0.5); }
-        }
-      `}</style>
     </div>
   );
 }

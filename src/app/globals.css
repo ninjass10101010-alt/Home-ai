@@ -1742,8 +1742,8 @@ body {
 }
 
 @keyframes wxThumbIn {
-  from { opacity: 0; transform: translate(-50%, -46%) scale(0.85); }
-  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  from { opacity: 0; transform: scale(0.85); }
+  to   { opacity: 1; transform: scale(1); }
 }
 
 @keyframes wxPuff {
@@ -2170,6 +2170,36 @@ body {
 .calendar-grid-header { padding: .85rem 1rem .6rem; align-items: center; }
 .calendar-month-title { font-size: 1.3rem; font-weight: 600; color: var(--color-text-primary); letter-spacing: -.02em; }
 .calendar-month-year { font-size: .95rem; color: var(--color-text-muted); font-weight: 500; }
+
+@keyframes calendarMonthSettle {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.calendar-month-title.is-animating { animation: calendarMonthSettle .24s var(--ease-settle) both; }
+
+/* Day strip inside the grid card */
+.calendar-day-strip-wrap { overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; padding: .1rem .85rem .45rem; border-bottom: 1px solid rgba(255,255,255,.05); }
+.calendar-day-strip-wrap::-webkit-scrollbar { display: none; }
+.calendar-day-strip { display: flex; gap: .45rem; min-width: max-content; }
+.calendar-strip-day {
+  display: flex; flex-direction: column; align-items: center; gap: .15rem;
+  padding: .4rem .6rem; border-radius: 1rem; border: 1px solid transparent; background: transparent;
+  color: var(--color-text-secondary); cursor: pointer; min-width: 2.75rem;
+  transition: background .18s var(--ease-settle), color .18s var(--ease-settle);
+}
+.calendar-strip-day .wd { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.calendar-strip-day .num {
+  width: 1.9rem; height: 1.9rem; border-radius: 999px; display: flex; align-items: center; justify-content: center;
+  font-size: .82rem; font-weight: 600;
+}
+.calendar-strip-day:hover { background: rgba(255,255,255,.06); color: var(--color-text-primary); }
+:root[data-theme="light"] .calendar-strip-day:hover { background: rgba(0,0,0,.05); }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .calendar-strip-day:hover { background: rgba(0,0,0,.05); } }
+.calendar-strip-day.is-today .num { border: 1.5px solid color-mix(in srgb, var(--color-accent-selected) 60%, transparent); }
+.calendar-strip-day.is-selected .num {
+  background: linear-gradient(135deg, var(--color-accent-button, var(--color-accent-selected)), color-mix(in srgb, var(--color-accent-button, var(--color-accent-selected)) 72%, #111827));
+  color: #fff; box-shadow: 0 6px 16px color-mix(in srgb, var(--color-accent-selected) 30%, transparent);
+}
 .calendar-month-nav { display: flex; align-items: center; gap: .3rem; }
 .calendar-month-nav .calendar-icon-btn {
   width: 2.25rem; height: 2.25rem; border-radius: 999px;
@@ -2208,9 +2238,11 @@ body {
   border-color: color-mix(in srgb, var(--color-accent-selected) 28%, transparent);
 }
 .calendar-day-btn.is-selected {
-  color: #fff; background: linear-gradient(135deg, rgba(var(--calendar-accent-rgb, 59,130,246), .9), rgba(99,102,241,.9));
-  border-color: rgba(255,255,255,.25);
-  transform: scale(1.06); box-shadow: 0 12px 32px rgba(var(--calendar-accent-rgb, 59,130,246), .32);
+  color: #fff;
+  background: linear-gradient(135deg, var(--color-accent-button, var(--color-accent-selected)), color-mix(in srgb, var(--color-accent-button, var(--color-accent-selected)) 70%, #111827));
+  border-color: color-mix(in srgb, var(--color-accent-button, var(--color-accent-selected)) 62%, rgba(255,255,255,.35));
+  transform: scale(1.06);
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--color-accent-selected) 32%, transparent);
   z-index: 1;
 }
 .calendar-day-btn.is-selected:hover { transform: scale(1.06); }
@@ -2232,7 +2264,7 @@ body {
   border-color: color-mix(in srgb, var(--color-accent-selected) 32%, transparent);
 }
 :root[data-theme="light"] .calendar-day-btn.is-selected.is-today {
-  background: color-mix(in srgb, var(--color-accent-selected) 22%, transparent);
+  background: linear-gradient(135deg, var(--color-accent-button, var(--color-accent-selected)), color-mix(in srgb, var(--color-accent-button, var(--color-accent-selected)) 70%, #111827));
   border-color: color-mix(in srgb, var(--color-accent-selected) 62%, rgba(255,255,255,.3));
 }
 @media (prefers-color-scheme: light) {
@@ -2254,7 +2286,7 @@ body {
     border-color: color-mix(in srgb, var(--color-accent-selected) 32%, transparent);
   }
   :root:not([data-theme="dark"]) .calendar-day-btn.is-selected.is-today {
-    background: color-mix(in srgb, var(--color-accent-selected) 22%, transparent);
+    background: linear-gradient(135deg, var(--color-accent-button, var(--color-accent-selected)), color-mix(in srgb, var(--color-accent-button, var(--color-accent-selected)) 70%, #111827));
     border-color: color-mix(in srgb, var(--color-accent-selected) 62%, rgba(255,255,255,.3));
   }
 }
@@ -2565,6 +2597,8 @@ body {
   .calendar-routine-card:hover,
   .calendar-day-btn:hover { transform: none !important; }
   .calendar-fade-in-up { animation: none !important; }
+  .calendar-month-title.is-animating { animation: none !important; } /* calendarMonthSettle */
+  .calendar-strip-day { transition: none !important; }
   .animate-confetti-fall { animation: none !important; }
   .animate-crown-glow { animation: none !important; }
   .animate-badge-sparkle { animation: none !important; }

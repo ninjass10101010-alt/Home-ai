@@ -45,7 +45,7 @@ export default function SyncPreviewSheet({ open, title, preview, busy, onConfirm
       </ul>
       {preview.alreadyOnList > 0 && (
         <p className="mt-3 text-xs font-semibold text-text-muted">
-          {preview.alreadyOnList} more already on your list — they won&apos;t be added again.
+          {preview.alreadyOnList} more already on your list. They won&apos;t be added again.
         </p>
       )}
     </Modal>

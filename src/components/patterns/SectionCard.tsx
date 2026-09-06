@@ -15,6 +15,8 @@ interface SectionCardProps {
   compact?: boolean;
   /** Center the icon above a centered title (Home widgets). Default: left-aligned header with the protruding icon. */
   centeredHeader?: boolean;
+  /** Heading tag for the title. Default "h3"; pages set "h2" on top-level cards directly under the page h1. Same classes — tag only. */
+  headingLevel?: "h2" | "h3";
 }
 
 export default function SectionCard({
@@ -28,13 +30,15 @@ export default function SectionCard({
   className = "",
   compact = false,
   centeredHeader = false,
+  headingLevel = "h3",
 }: SectionCardProps) {
+  const Heading = headingLevel;
   if (centeredHeader) {
     return (
       <WidgetCard tone={tone} icon={icon} className={className}>
         <div className="relative shrink-0 border-b border-white/10 p-4 pb-3 text-center">
           {action && <div className="absolute right-3 top-3">{action}</div>}
-          <h3 className={`mt-1 font-bold text-text-primary ${compact ? "text-sm" : "text-base"}`}>{title}</h3>
+          <Heading className={`mt-1 font-bold text-text-primary ${compact ? "text-sm" : "text-base"}`}>{title}</Heading>
           {description && <p className={`mt-0.5 text-text-secondary ${compact ? "text-[11px]" : "text-xs"}`}>{description}</p>}
         </div>
         <div className={`flex min-h-0 flex-1 flex-col ${compact ? "p-4" : "p-5"}`}>{children}</div>
@@ -48,7 +52,7 @@ export default function SectionCard({
     <WidgetCard tone={tone} icon={icon} className={className}>
       <div className={`flex items-start justify-between gap-4 border-b border-white/10 ${compact ? "p-4 pl-[72px]" : "p-5 pl-[72px]"}`}>
         <div className="min-w-0">
-          <h3 className={`font-bold text-text-primary ${compact ? "text-sm" : "text-base"}`}>{title}</h3>
+          <Heading className={`font-bold text-text-primary ${compact ? "text-sm" : "text-base"}`}>{title}</Heading>
           {description && <p className={`mt-0.5 text-text-secondary ${compact ? "text-[11px]" : "text-xs"}`}>{description}</p>}
         </div>
         {action && <div className="shrink-0 self-center">{action}</div>}

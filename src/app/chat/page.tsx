@@ -517,7 +517,7 @@ function ChatContent() {
 
       {/* ─── Top bar ─── */}
       <div
-        className="sticky top-0 z-40 mx-3 sm:mx-4 mt-3 px-3 sm:px-4 py-3 glass-strong rounded-3xl flex items-center gap-2 sm:gap-3"
+        className="sticky top-0 z-40 mx-3 sm:mx-4 mt-3 px-3 sm:px-4 py-3 glass-strong rounded-3xl flex items-center gap-4"
         style={{ marginTop: "calc(env(safe-area-inset-top) + 0.5rem)" }}
       >
         <div className="w-9 h-9 rounded-2xl flex items-center justify-center text-lg shrink-0"
@@ -545,7 +545,13 @@ function ChatContent() {
               aria-label={`Speaking as ${activeSpeaker.name}`}
               aria-haspopup="menu"
               aria-expanded={showSpeakerPicker}
-              className="relative flex items-center gap-1.5 px-2.5 py-1 rounded-2xl glass-subtle text-text-secondary hover:text-text-primary transition-colors text-xs before:absolute before:-inset-1.5 before:content-['']"
+              // 26px visual pill; ::after -inset-y-3 grows the HIT AREA to
+              // 50px tall (26+24 ≥ 44). -inset-x-2 caps horizontal expansion
+              // at 8px/side so the bar's gap-4 (16px) clears this pill's 8px
+              // + the Clear button's 6px (14px) — adjacent hit areas never
+              // overlap. before:-inset is dead here — the glass-subtle
+              // material ::before wins the pseudo-element.
+              className="relative flex items-center gap-1.5 px-2.5 py-1 rounded-2xl glass-subtle text-text-secondary hover:text-text-primary transition-colors text-xs after:absolute after:-inset-y-3 after:-inset-x-2 after:content-['']"
             >
               <EmojiSpan emoji={activeSpeaker.emoji} alt={activeSpeaker.name} />
               <span className="max-w-[64px] truncate">{activeSpeaker.name.split(" ")[0]}</span>
@@ -583,7 +589,7 @@ function ChatContent() {
           onClick={() => setConfirmClearOpen(true)}
           aria-label="Clear conversation"
           title="Clear chat"
-          className="relative w-8 h-8 flex items-center justify-center rounded-2xl glass-subtle text-text-secondary hover:text-text-primary transition-colors shrink-0 before:absolute before:-inset-1.5 before:content-['']"
+          className="relative w-8 h-8 flex items-center justify-center rounded-2xl glass-subtle text-text-secondary hover:text-text-primary transition-colors shrink-0 after:absolute after:-inset-1.5 after:content-['']"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" className="w-4 h-4">
             <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6M5 6l1 14a2 2 0 002 2h8a2 2 0 002-2l1-14" />

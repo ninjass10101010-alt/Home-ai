@@ -19,7 +19,7 @@ interface GenerateScopeSheetProps {
 export default function GenerateScopeSheet({ open, dayName, dayEmpty, weekEmpty, onDay, onWeek, onCancel }: GenerateScopeSheetProps) {
   const full = dayEmpty === 0;
   return (
-    <Modal open={open} onClose={onCancel} title="Generate meals" description="Consuela fills only empty slots — planned meals stay put.">
+    <Modal open={open} onClose={onCancel} title="Generate meals" description="Consuela fills only empty slots. Planned meals stay put.">
       <div className="space-y-3">
         <button
           type="button"

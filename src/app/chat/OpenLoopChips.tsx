@@ -110,7 +110,10 @@ export function OpenLoopChips({ onDraft, role }: OpenLoopChipsProps) {
             onClick={() => act(s)}
             aria-label={`Do it: ${s.actionLabel ?? s.title}`}
             title={`Do it: ${s.actionLabel ?? s.title}`}
-            className="tap-sm shrink-0 rounded-full px-3 py-2 text-xs font-semibold text-white bg-[var(--color-accent-button,var(--color-accent-selected))] min-h-[36px]"
+            // 36px visual; the ::after -inset-1 grows the HIT AREA to 44px
+            // (before:-inset is dead on glass-* surfaces — the material
+            // ::before wins — so the documented pattern uses ::after).
+            className="tap-sm relative shrink-0 rounded-full px-3 py-2 text-xs font-semibold text-white bg-[var(--color-accent-button,var(--color-accent-selected))] min-h-[36px] after:absolute after:-inset-1 after:content-['']"
           >
             {s.actionLabel ?? "Do it"}
           </button>

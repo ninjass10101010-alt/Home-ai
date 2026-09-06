@@ -28,11 +28,14 @@ export function getDefaultScopes(): string[] {
   if (fromEnv && fromEnv.trim().length > 0) {
     return fromEnv.split(/[\s,]+/).filter(Boolean);
   }
+  // No Tasks scope: Google's Device Flow rejects it ("Invalid device flow
+  // scope"), so including it here only ever failed the grant request. The
+  // full calendar scope covers calendarList + per-calendar events.list,
+  // which is what multi-calendar sync needs. .env.local can override.
   return [
     "openid",
     "email",
     "https://www.googleapis.com/auth/calendar",
-    "https://www.googleapis.com/auth/tasks",
   ];
 }
 

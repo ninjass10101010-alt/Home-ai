@@ -19,6 +19,10 @@ export default function PriceCompareSheet({ open, onClose, items, onApply }: Pri
     (s) => s.id !== "walmart" && result.totalByStore[s.id] !== undefined
   );
 
+  const hasAnyPrice = items.some((item) =>
+    Object.values(item.prices).some((p) => p !== undefined)
+  );
+
   return (
     <Modal
       open={open}
@@ -26,74 +30,81 @@ export default function PriceCompareSheet({ open, onClose, items, onApply }: Pri
       title="Compare prices"
       description={`${items.length} item${items.length === 1 ? "" : "s"} across ${storesWithPrices.length} store${storesWithPrices.length === 1 ? "" : "s"}`}
     >
-      <div className="max-h-[60vh] overflow-auto">
-        {/* Header row — store names */}
-        <div className="sticky top-0 z-10 grid border-b border-white/10 bg-[var(--color-surface-1)]" style={{ gridTemplateColumns: `120px repeat(${storesWithPrices.length}, 1fr)` }}>
-          <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-text-muted">Item</div>
-          {storesWithPrices.map((s) => (
-            <div key={s.id} className={`px-2 py-2 text-center text-[11px] font-semibold ${result.cheapestStore === s.id ? "text-[var(--color-accent-mint)]" : "text-text-muted"}`}>
-              {s.label}
-              {result.cheapestStore === s.id && <span className="ml-1 text-[9px]">★</span>}
-            </div>
-          ))}
-        </div>
+      {!hasAnyPrice ? (
+        <p className="rounded-2xl bg-[var(--color-surface-2)]/60 px-4 py-8 text-center text-sm text-text-muted">
+          No prices found yet. Tap Compare again once Hermes is connected.
+        </p>
+      ) : (
+        <div className="max-h-[60vh] overflow-auto">
+          {/* Header row */}
+          <div className="sticky top-0 z-10 grid border-b border-white/10 bg-[var(--color-surface-1)]" style={{ gridTemplateColumns: `120px repeat(${storesWithPrices.length}, 1fr)` }}>
+            <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-text-muted">Item</div>
+            {storesWithPrices.map((s) => (
+              <div key={s.id} className={`px-2 py-2 text-center text-[11px] font-semibold ${result.cheapestStore === s.id ? "text-[var(--color-accent-mint)]" : "text-text-muted"}`}>
+                {s.label}
+                {result.cheapestStore === s.id && <span className="ml-1 text-[9px]">★</span>}
+              </div>
+            ))}
+          </div>
 
-        {/* Item rows */}
-        {items.map((item, idx) => (
-          <div
-            key={`${item.name}-${idx}`}
-            className="grid border-b border-white/5 last:border-b-0"
-            style={{ gridTemplateColumns: `120px repeat(${storesWithPrices.length}, 1fr)` }}
-          >
-            <div className="truncate px-3 py-2.5 text-sm text-text-primary">{item.name}</div>
+          {/* Item rows */}
+          <div className="divide-y divide-white/5">
+            {items.map((item, idx) => (
+              <div
+                key={`${item.name}-${idx}`}
+                className="grid"
+                style={{ gridTemplateColumns: `120px repeat(${storesWithPrices.length}, 1fr)` }}
+              >
+                <div className="truncate px-3 py-2.5 text-sm text-text-primary">{item.name}</div>
+                {storesWithPrices.map((s) => {
+                  const price = item.prices[s.id];
+                  const isLowest = price !== undefined && Object.values(item.prices).every(
+                    (p) => p === undefined || price <= p
+                  );
+                  return (
+                    <div
+                      key={s.id}
+                      className={`px-2 py-2.5 text-center text-sm tabular-nums ${
+                        price === undefined
+                          ? "text-text-muted"
+                          : isLowest
+                            ? "font-semibold text-[var(--color-accent-mint)]"
+                            : "text-text-secondary"
+                      }`}
+                    >
+                      {price !== undefined ? `$${price.toFixed(2)}` : "N/A"}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+
+          {/* Totals footer */}
+          <div className="sticky bottom-0 grid border-t border-white/10 bg-[var(--color-surface-1)]" style={{ gridTemplateColumns: `120px repeat(${storesWithPrices.length}, 1fr)` }}>
+            <div className="px-3 py-3 text-sm font-bold text-text-primary">Total</div>
             {storesWithPrices.map((s) => {
-              const price = item.prices[s.id];
-              const isLowest = price !== undefined && Object.values(item.prices).every(
-                (p) => p === undefined || price <= p
-              );
+              const total = result.totalByStore[s.id];
+              const isCheapest = result.cheapestStore === s.id;
               return (
                 <div
                   key={s.id}
-                  className={`px-2 py-2.5 text-center text-sm tabular-nums ${
-                    price === undefined
-                      ? "text-text-muted"
-                      : isLowest
-                        ? "font-semibold text-[var(--color-accent-mint)]"
-                        : "text-text-secondary"
+                  className={`px-2 py-3 text-center text-sm font-bold tabular-nums ${
+                    isCheapest
+                      ? "text-[var(--color-accent-mint)]"
+                      : total !== undefined
+                        ? "text-text-primary"
+                        : "text-text-muted"
                   }`}
                 >
-                  {price !== undefined ? `$${price.toFixed(2)}` : "—"}
+                  {total !== undefined ? formatStoreTotal(total) : "N/A"}
                 </div>
               );
             })}
           </div>
-        ))}
-
-        {/* Totals footer */}
-        <div className="sticky bottom-0 grid border-t border-white/10 bg-[var(--color-surface-1)]" style={{ gridTemplateColumns: `120px repeat(${storesWithPrices.length}, 1fr)` }}>
-          <div className="px-3 py-3 text-sm font-bold text-text-primary">Total</div>
-          {storesWithPrices.map((s) => {
-            const total = result.totalByStore[s.id];
-            const isCheapest = result.cheapestStore === s.id;
-            return (
-              <div
-                key={s.id}
-                className={`px-2 py-3 text-center text-sm font-bold tabular-nums ${
-                  isCheapest
-                    ? "text-[var(--color-accent-mint)]"
-                    : total !== undefined
-                      ? "text-text-primary"
-                      : "text-text-muted"
-                }`}
-              >
-                {total !== undefined ? formatStoreTotal(total) : "—"}
-              </div>
-            );
-          })}
         </div>
-      </div>
+      )}
 
-      {/* Savings callout + action */}
       {result.cheapestStore && result.savings > 0 && (
         <div className="mt-4 rounded-2xl border border-[var(--color-accent-mint)]/20 bg-[var(--color-accent-mint)]/10 px-4 py-3 text-center">
           <p className="text-sm font-semibold text-[var(--color-accent-mint)]">

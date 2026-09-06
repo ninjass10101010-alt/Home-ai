@@ -106,12 +106,15 @@ export function fusionOutlook(
   const rainAt = new Date(rainHourISO).getTime();
   if (!isFinite(rainAt)) return null;
 
-  const todayPrefix = new Date(rainAt).toISOString().split("T")[0];
+  // Resolve event times against the rain hour's LOCAL calendar day —
+  // not the UTC date (they diverge after ~8 PM in US timezones, which
+  // silently killed evening fusion like "rain around tonight's 10 PM
+  // practice").
+  const rainDay = new Date(rainAt);
+  const dayStart = new Date(rainDay.getFullYear(), rainDay.getMonth(), rainDay.getDate()).getTime();
   const upcoming = events
     .map((e) => {
       const mins = e.time ? parseEventMinutes(e.time) : null;
-      // Resolve against the rain day's local midnight so comparisons line up.
-      const dayStart = new Date(`${todayPrefix}T00:00:00`).getTime();
       return { e, t: mins != null ? dayStart + mins * 60_000 : NaN };
     })
     .filter((x) => isFinite(x.t))

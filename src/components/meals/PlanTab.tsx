@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
 import Card from "@/components/ui/Card";
+import WidgetCard from "@/components/patterns/WidgetCard";
 import Avatar from "@/components/ui/Avatar";
 import Badge from "@/components/ui/Badge";
 import SoftButton from "@/components/ui/SoftButton";
@@ -113,7 +114,7 @@ export default function PlanTab({
   // warms membersCache from PocketBase ON THE SERVER (admin PB access), so SSR
   // sees the real PB members (e.g. Jeffery's customized 😎 emoji) while the
   // client's first render still has an empty cache (the browser roster fetch is
-  // async and 401s for guests) and sees the fallbacks (👨) — reading
+  // async and 401s for guests) and sees the fallbacks (👨): reading
   // db.selectMembers() pre-mount made the two sides disagree (hydration error).
   // db.selectMembersFallback() never reflects the warmed cache, so the server
   // and the client's first render produce identical HTML; the real roster swaps
@@ -121,7 +122,7 @@ export default function PlanTab({
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
 
-  // The real roster lands asynchronously after mount — db/index.ts dispatches
+  // The real roster lands asynchronously after mount; db/index.ts dispatches
   // consuela-members-updated when the members cache warms. Bump a version so
   // the strip swaps from the deterministic fallbacks to the real family when
   // it arrives (without this the memo freezes at whatever the cache held the
@@ -172,7 +173,7 @@ export default function PlanTab({
       db.selectMembers().filter((m: any) => (m.name || "").trim()).slice(0, 6));
     // membersVersion bumps when the async members cache warms (see the
     // consuela-members-updated listener above) so the real roster replaces
-    // the fallbacks without a remount — deliberate recompute trigger.
+    // the fallbacks without a remount, a deliberate recompute trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mounted, membersVersion]);
 
@@ -223,7 +224,7 @@ export default function PlanTab({
         <div className="glass rounded-2xl p-8 text-center">
           <p className="text-4xl">🔐</p>
           <p className="mt-2 font-bold text-text-primary">Meals are synced to the family account</p>
-          <p className="text-xs font-medium text-text-muted mt-1">Sign in with your PIN to see everyone&apos;s meals — they&apos;re waiting on the family server.</p>
+          <p className="text-xs font-medium text-text-muted mt-1">Sign in with your PIN to see everyone&apos;s meals, they&apos;re waiting on the family server.</p>
         </div>
       )}
 
@@ -240,7 +241,6 @@ export default function PlanTab({
           All
         </button>
         {mealTypes.map(type => {
-          const hasMeal = activeMeals.some((m: Meal) => m.mealType === type.id);
           return (
             <button
               key={type.id}
@@ -256,9 +256,6 @@ export default function PlanTab({
             >
               <span className="text-sm">{type.icon}</span>
               <span>{type.label}</span>
-              {hasMeal && (
-                <span className={`h-1.5 w-1.5 rounded-full ${mealFilter === type.id ? "bg-white/80" : ""}`} style={mealFilter !== type.id ? { backgroundColor: slotColorVar(type.id) } : undefined} />
-              )}
             </button>
           );
         })}
@@ -411,17 +408,13 @@ export default function PlanTab({
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
-                            <span
-                              className="h-2 w-2 rounded-full shrink-0"
-                              style={{ backgroundColor: meta?.color || "var(--color-accent-selected)" }}
-                            />
                             <span className="text-[11px] font-bold uppercase tracking-wider text-text-muted">
                               {meta?.label || type.label} · {meta?.time || ""}
                             </span>
                             <div className="ml-auto flex gap-1.5">
                               <button onClick={() => setDuplicateTarget({ meal: mealForType, open: true })} className="p-1.5 text-text-muted hover:text-[var(--color-accent-selected)] rounded-lg hover:bg-[var(--color-accent-selected)]/10 tap-sm" aria-label="Duplicate meal">↗️</button>
-                              <button onClick={() => openRecipeModal(mealForType)} className="p-1.5 text-text-muted hover:text-text-primary rounded-lg hover:bg-[var(--color-surface-2)] tap-sm">✏️</button>
-                              <button onClick={() => deleteMeal(mealForType.id)} className="p-1.5 text-text-muted hover:text-[var(--color-accent-rose)] rounded-lg hover:bg-[var(--color-accent-rose)]/10 tap-sm">🗑️</button>
+                              <button onClick={() => openRecipeModal(mealForType)} className="p-1.5 text-text-muted hover:text-text-primary rounded-lg hover:bg-[var(--color-surface-2)] tap-sm" aria-label="Edit meal">✏️</button>
+                              <button onClick={() => deleteMeal(mealForType.id)} className="p-1.5 text-text-muted hover:text-[var(--color-accent-rose)] rounded-lg hover:bg-[var(--color-accent-rose)]/10 tap-sm" aria-label="Delete meal">🗑️</button>
                             </div>
                           </div>
                           <h3 className="truncate text-base font-bold text-text-primary leading-tight mt-0.5">
@@ -595,7 +588,7 @@ export default function PlanTab({
                   openRecipeModal();
                 }
               }}
-              className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl border-2 border-dashed border-[var(--color-surface-4)] text-sm font-bold text-text-muted/70 transition hover:bg-[var(--color-accent-selected)]/5 hover:border-[var(--color-accent-selected)]/40 hover:text-[var(--color-accent-selected)] cursor-pointer active:scale-[0.97]"
+              className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl border-2 border-dashed border-[var(--color-surface-4)] text-sm font-bold text-text-muted transition hover:bg-[var(--color-accent-selected)]/5 hover:border-[var(--color-accent-selected)]/40 hover:text-[var(--color-accent-selected)] cursor-pointer active:scale-[0.97]"
             >
               <span className="text-lg leading-none">＋</span> Add a meal to {dayFullNames[activeDay] || activeDay}
             </button>
@@ -606,8 +599,8 @@ export default function PlanTab({
         <div className="space-y-5 min-w-0">
           {/* ── Tonight's Dinner hero ── */}
           {tonightDinner && (
-            <div className="glass rounded-2xl p-5">
-              <div className="flex items-center justify-between mb-2">
+            <WidgetCard tone="#10b981" icon={<span>🌙</span>} className="p-5 pt-16">
+              <div className="flex items-center justify-between mb-2 pl-[72px]">
                 <p className="text-[11px] font-bold uppercase tracking-wider text-text-muted">
                   Tonight&apos;s dinner
                 </p>
@@ -619,7 +612,7 @@ export default function PlanTab({
                 <div className="min-w-0 flex-1">
                   <h3 className="font-bold text-text-primary leading-tight truncate">{tonightDinner.meal.name}</h3>
                   <p className="text-[11px] font-semibold text-text-muted mt-1">
-                    ⏱ {tonightDinner.meal.prepTime || "—"}
+                    ⏱ {tonightDinner.meal.prepTime || "Not set"}
                     {tonightDinner.meal.calories ? ` · 🔥 ${tonightDinner.meal.calories} kcal` : ""}
                     {tonightDinner.meal.servings ? ` · 👨‍👩‍👧‍👦 ${tonightDinner.meal.servings}` : ""}
                   </p>
@@ -650,12 +643,12 @@ export default function PlanTab({
                   ))}
                 </div>
               )}
-            </div>
+            </WidgetCard>
           )}
 
           {/* Nutrition Ring */}
-          <div className="glass rounded-2xl p-5">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-text-muted">
+          <WidgetCard tone="#f59e0b" icon={<span>🍎</span>} className="p-5 pt-16">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-text-muted pl-[72px]">
               Family fuel today
             </h3>
             <div className="mt-4 flex items-center gap-5">
@@ -692,11 +685,11 @@ export default function PlanTab({
                 ))}
               </div>
             </div>
-          </div>
+          </WidgetCard>
 
           {/* Who's Eating */}
-          <div className="glass rounded-2xl p-5">
-            <div className="flex items-center justify-between mb-2">
+          <WidgetCard tone="#8b5cf6" icon={<span>👨‍👩‍👧‍👦</span>} className="p-5 pt-16">
+            <div className="flex items-center justify-between mb-2 pl-[72px]">
               <h3 className="text-xs font-bold uppercase tracking-wider text-text-muted">
                 Who&apos;s eating tonight
               </h3>
@@ -738,7 +731,7 @@ export default function PlanTab({
                 <button
                   type="button"
                   onClick={() => setShowMemberPicker(v => !v)}
-                  className="ml-1 flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border-2 border-dashed border-[var(--color-surface-4)] text-xl font-bold text-text-muted/70 transition hover:bg-[var(--color-surface-0)]/60 hover:border-[var(--color-accent-selected)]/40"
+                  className="ml-1 flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border-2 border-dashed border-[var(--color-surface-4)] text-xl font-bold text-text-muted transition hover:bg-[var(--color-surface-0)]/60 hover:border-[var(--color-accent-selected)]/40"
                   aria-label="Add members"
                   title="Add members"
                 >
@@ -748,7 +741,7 @@ export default function PlanTab({
             </div>
             {showMemberPicker && (
               <div className="mt-3 pt-3 border-t border-[var(--color-surface-4)]/60">
-                <p className="text-[10px] font-semibold text-text-muted mb-2">Not eating tonight — tap to add back:</p>
+                <p className="text-[10px] font-semibold text-text-muted mb-2">Not eating tonight, tap to add back:</p>
                 <div className="flex gap-2 flex-wrap">
                   {familyMembers.filter((m: any) => !eatingMembers.includes(m.name)).map((member: any) => (
                     <button
@@ -767,7 +760,7 @@ export default function PlanTab({
                 </div>
               </div>
             )}
-          </div>
+          </WidgetCard>
         </div>
       </div>
 
@@ -814,19 +807,20 @@ export default function PlanTab({
         </section>
       )}
 
-      <div id="kitchen-recipe-box" className="glass rounded-2xl scroll-mt-24">
-        <button
-          onClick={() => setShowRecipeBox(v => !v)}
-          aria-expanded={showRecipeBox}
-          className="flex w-full items-center justify-between px-5 py-4 tap-sm"
-        >
-          <span className="flex items-center gap-2 text-sm font-bold text-text-primary">📖 Recipe box</span>
-          <svg className={`h-4 w-4 text-text-secondary transition-transform ${showRecipeBox ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
-        {showRecipeBox && (
-          <div className="border-t border-white/10 p-5">
+      <div id="kitchen-recipe-box" className="scroll-mt-24">
+        <WidgetCard tone="#06b6d4" icon={<span>📖</span>}>
+          <button
+            onClick={() => setShowRecipeBox(v => !v)}
+            aria-expanded={showRecipeBox}
+            className="flex w-full items-center justify-between px-5 py-4 tap-sm pl-[72px]"
+          >
+            <span className="flex items-center gap-2 text-sm font-bold text-text-primary">Recipe box</span>
+            <svg className={`h-4 w-4 text-text-secondary transition-transform ${showRecipeBox ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          {showRecipeBox && (
+            <div className="border-t border-white/10 p-5">
             <RecipeBox
               recipes={recipes}
               activeDay={activeDay}
@@ -841,8 +835,9 @@ export default function PlanTab({
               openSearchModal={openSearchModal}
               syncBlocked={syncBlocked}
             />
-          </div>
-        )}
+            </div>
+          )}
+        </WidgetCard>
       </div>
 
       <GenerateScopeSheet

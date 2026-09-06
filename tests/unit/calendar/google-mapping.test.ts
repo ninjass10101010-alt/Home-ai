@@ -123,3 +123,85 @@ describe("dbEventToCalEvent", () => {
     expect(e.month).toBe(11);
   });
 });
+
+describe("mapGoogleEvent — multi-calendar (Fix-C)", () => {
+  it("carries googleId + calendarId as explicit fields", () => {
+    const mapped = mapGoogleEvent({
+      google_id: "abc123",
+      calendar_id: "family@gmail.com",
+      summary: "Soccer",
+      start_iso: "2026-09-12T10:00:00-07:00",
+      all_day: false,
+    })!;
+    expect(mapped.googleId).toBe("abc123");
+    expect(mapped.calendarId).toBe("family@gmail.com");
+  });
+
+  it("treats a missing calendar_id as primary", () => {
+    const mapped = mapGoogleEvent({
+      google_id: "abc123",
+      summary: "Legacy",
+      start_iso: "2026-09-12T10:00:00-07:00",
+      all_day: false,
+    })!;
+    expect(mapped.calendarId).toBe("primary");
+  });
+
+  it("keeps the original id shape for primary events (no localStorage churn)", () => {
+    const mapped = mapGoogleEvent({
+      google_id: "abc123",
+      calendar_id: "primary",
+      summary: "Old shape",
+      start_iso: "2026-09-12",
+      all_day: true,
+    })!;
+    expect(mapped.id).toBe(`g_abc123_12_9_2026_All day`);
+  });
+
+  it("cross-calendar google_id collision produces two distinct client ids", () => {
+    const row = {
+      google_id: "shared1",
+      summary: "Collision",
+      start_iso: "2026-09-12",
+      all_day: true,
+    };
+    const inPrimary = mapGoogleEvent({ ...row, calendar_id: "primary" })!;
+    const inFamily = mapGoogleEvent({ ...row, calendar_id: "family@gmail.com" })!;
+    const inWork = mapGoogleEvent({ ...row, calendar_id: "work@company.com" })!;
+    expect(inPrimary.id).not.toBe(inFamily.id);
+    expect(inFamily.id).not.toBe(inWork.id);
+    // both still resolve back to the same raw Google id
+    expect(inPrimary.googleId).toBe(inFamily.googleId);
+  });
+
+  it("passes colorHex through from a calendarId→colorRgb map", () => {
+    const mapped = mapGoogleEvent(
+      {
+        google_id: "f1",
+        calendar_id: "family@gmail.com",
+        summary: "Recital",
+        start_iso: "2026-09-12",
+        all_day: true,
+      },
+      { "family@gmail.com": "#ab47bc", primary: "#0b804b" },
+    )!;
+    expect(mapped.colorHex).toBe("#ab47bc");
+    expect(mapped.color).toBe("cyan"); // named fallback untouched
+  });
+
+  it("omits colorHex when the calendar has no entry in the map (or no map)", () => {
+    const noMap = mapGoogleEvent({
+      google_id: "f2",
+      calendar_id: "family@gmail.com",
+      summary: "X",
+      start_iso: "2026-09-12",
+      all_day: true,
+    })!;
+    expect("colorHex" in noMap).toBe(false);
+    const unknownCal = mapGoogleEvent(
+      { google_id: "f3", calendar_id: "other@x.com", summary: "Y", start_iso: "2026-09-12", all_day: true },
+      { primary: "#0b804b" },
+    )!;
+    expect("colorHex" in unknownCal).toBe(false);
+  });
+});

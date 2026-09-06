@@ -62,7 +62,9 @@ export const WeatherProvider = ({ children }: { children: ReactNode }) => {
             typeof parsed.location === 'string' && parsed.location.trim() && parsed.location.trim() !== 'New York, NY'
               ? parsed.location.trim()
               : defaultWeatherConfig.location,
-          unit: parsed.unit === 'C' ? 'C' : 'F',
+          // The widget is Fahrenheit-only now — heal any stored 'C' so the
+          // persisted config always reads F (re-persisted below on mount).
+          unit: 'F',
           timeOfDay: VALID_TOD.includes(parsed.timeOfDay as TimeOfDay)
             ? (parsed.timeOfDay as TimeOfDay)
             : defaultWeatherConfig.timeOfDay,

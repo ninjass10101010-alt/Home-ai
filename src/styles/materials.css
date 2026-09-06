@@ -70,28 +70,6 @@
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
-/* ─── Gradient text variants ─── */
-.gradient-text {
-  background: linear-gradient(135deg, #60a5fa 0%, #06b6d4 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-.gradient-text-warm {
-  background: linear-gradient(135deg, var(--color-accent-coral) 0%, var(--color-accent-amber) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-.gradient-text-cool {
-  background: linear-gradient(135deg, var(--color-accent-lavender) 0%, var(--color-accent-cyan) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
 /* ─── Glass variants ─── */
 /* Consolidated Apple-style materials — 3 levels mapped to depth:
    .surface-subtle / .material-thin / .glass-subtle

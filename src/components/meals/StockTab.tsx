@@ -1,6 +1,7 @@
 "use client";
 import { useState, useMemo, useEffect, useRef } from "react";
 import SectionCard from "@/components/patterns/SectionCard";
+import WidgetCard from "@/components/patterns/WidgetCard";
 import TextField from "@/components/ui/TextField";
 import SoftButton from "@/components/ui/SoftButton";
 import KitchenFlowCard from "@/components/meals/KitchenFlowCard";
@@ -111,7 +112,7 @@ export default function StockTab({
       flashNote(`Added ${added} · ${already} were already on list`);
     } catch {
       setPreview(null);
-      flashNote("Couldn't reach the database — items not added");
+      flashNote("Couldn't reach the database, items not added");
     } finally {
       setSyncBusy(false);
     }
@@ -144,7 +145,7 @@ export default function StockTab({
         {/* ── Left Column ── */}
         <div className="space-y-5 min-w-0">
           {/* ── Add Item ── */}
-          <SectionCard title="Add to Pantry" icon="➕" description="Track what you have on hand">
+          <SectionCard title="Add to Pantry" icon="➕" description="Track what you have on hand" tone="#8b5cf6">
             <div className="space-y-3">
               <div className="flex gap-2">
                 <TextField
@@ -152,11 +153,13 @@ export default function StockTab({
                   onChange={e => setNewPantryItem(e.target.value)}
                   onKeyDown={e => e.key === "Enter" && handleAdd()}
                   placeholder="Item name..."
+                  aria-label="Pantry item name"
                   className="flex-1 min-w-0"
                 />
                 <select
                   value={newPantryStatus}
                   onChange={e => setNewPantryStatus(e.target.value as "plenty" | "low" | "out")}
+                  aria-label="Pantry status"
                   className="shrink-0 rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-3 py-2.5 text-sm text-text-primary outline-none transition focus:border-[var(--color-accent-selected)]/50"
                 >
                   <option value="plenty">✅ Plenty</option>
@@ -196,7 +199,7 @@ export default function StockTab({
                           onClick={() => { setActivePresetGroup(g.group); setShowAllPresets(false); }}
                           className={`group flex items-center gap-2.5 rounded-2xl px-3 py-2.5 text-left transition-all duration-150 active:scale-[0.97] ${
                             isSelected
-                              ? "bg-[var(--color-accent-button)] text-white shadow-lg shadow-[var(--color-accent-selected)]/25"
+                              ? "bg-[var(--color-accent-button)] text-white"
                               : "border border-white/10 bg-[var(--color-surface-0)]/30 text-text-secondary hover:text-text-primary hover:border-[var(--color-accent-selected)]/30"
                           }`}
                         >
@@ -335,7 +338,7 @@ export default function StockTab({
                           setPendingDeleteId(p.id);
                         }
                       }}
-                      className={`cursor-pointer rounded-full p-1.5 text-text-muted sm:opacity-0 sm:group-hover:opacity-100 hover:bg-[var(--color-accent-rose)]/10 hover:text-[var(--color-accent-rose)] tap-sm ${
+                      className={`cursor-pointer rounded-full p-1.5 text-text-muted opacity-60 hover:opacity-100 hover:bg-[var(--color-accent-rose)]/10 hover:text-[var(--color-accent-rose)] tap-sm ${
                         pendingDeleteId === p.id ? "opacity-100 !bg-[var(--color-accent-rose)]/20 !text-[var(--color-accent-rose)] ring-2 ring-[var(--color-accent-rose)]/40" : ""
                       }`}
                       title={pendingDeleteId === p.id ? "Tap again to remove" : "Remove item"}
@@ -358,8 +361,8 @@ export default function StockTab({
             <div className="glass rounded-2xl p-10 text-center">
               <p className="text-4xl">🥫</p>
               <p className="mt-2 font-bold text-text-primary">No items here</p>
-              <p className="text-xs font-medium text-text-muted mt-1">
-                {section === "all" ? "Add items to your pantry to get started" : `No ${section === "low" ? "low" : section === "out" ? "out-of-stock" : ""} items — nice!`}
+              <p className="text-xs font-medium text-text-secondary mt-1">
+                {section === "all" ? "Add items to your pantry to get started" : `No ${section === "low" ? "low" : section === "out" ? "out-of-stock" : ""} items, nice!`}
               </p>
             </div>
           )}
@@ -367,12 +370,12 @@ export default function StockTab({
 
         {/* ── Right Column ── */}
         <div className="space-y-5 min-w-0 lg:order-2 order-first lg:order-none">
-          <div className="glass rounded-2xl p-4">
+          <WidgetCard tone="#f59e0b" icon="🥫" className="p-5 pl-[72px]">
             <SoftButton variant="primary" size="md" onClick={openPantrySync} disabled={syncBusy} className="w-full">
               🛒 {syncBusy ? "Adding…" : "Add low & out to grocery list"}
             </SoftButton>
             {syncNote && <p role="status" className="mt-2 text-center text-xs font-semibold text-text-secondary">{syncNote}</p>}
-          </div>
+          </WidgetCard>
         </div>
       </div>
 

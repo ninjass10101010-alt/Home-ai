@@ -20,6 +20,7 @@ import SoftButton from "@/components/ui/SoftButton";
 import { isConnected, getCredentials } from "@/lib/connections/store";
 import { useAuth } from "@/hooks/useAuth";
 import { useDashboardMode } from "@/hooks/useDashboardMode";
+import { currentWeekPoints } from "@/modes/kid/kid-store";
 
 interface Transaction {
   id: string;
@@ -47,11 +48,9 @@ export default function AllowanceWidget() {
   useEffect(() => {
     if (!enabled || !currentUser) return;
 
-    // Load points
-    const myPoints = typeof window !== "undefined"
-      ? parseInt(localStorage.getItem(`consuela-points-${currentUser.name}`) || "0")
-      : 0;
-    setPoints(myPoints);
+    // Load points — same weekData ledger KidHome/RewardsShop read (the old
+    // per-member "consuela-points-*" key was a dead ledger nothing wrote).
+    setPoints(currentWeekPoints(currentUser.name).points);
 
     // Load transaction history
     try {
@@ -95,12 +94,11 @@ export default function AllowanceWidget() {
         );
       }
 
-      // Deduct points
+      // Deduct points (session-local — the real ledger is weekData, and the
+      // Greenlight transfer above is still a simulation; the dead
+      // per-member "consuela-points-*" write is gone with its read).
       const newPoints = 0;
       setPoints(newPoints);
-      if (currentUser) {
-        localStorage.setItem(`consuela-points-${currentUser.name}`, "0");
-      }
     } catch {
       // Failed to cash out
     } finally {

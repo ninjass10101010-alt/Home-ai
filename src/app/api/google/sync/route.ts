@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
       if (c && "skipped" in c) {
         result.calendar = { skipped: true, reason: c.reason };
       } else {
-        result.calendar = { events: c.events, deleted: c.deleted };
+        result.calendar = { events: c.events, deleted: c.deleted, perCalendar: c.perCalendar };
       }
     }
 

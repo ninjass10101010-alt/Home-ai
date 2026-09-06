@@ -4,6 +4,7 @@ import { defaultMeals, mealIdeas, initialGroceryItems } from "../data/meals";
 import { memberPinMatches } from "@/lib/member-pins";
 import { memberFallbacks, mergeMemberFallbacks } from "@/lib/member-fallback";
 import { mapMealRows, mapRecipeRows } from "@/lib/meal-rows";
+import { applyTasksSnapshotToStores } from "@/lib/task-utils";
 
 function isServer() {
   return typeof window === "undefined";
@@ -186,6 +187,24 @@ async function refreshMembersCache() {
   } catch {}
 }
 
+// Tasks/week_data live behind the Tasks page's snapshot gateway
+// (/api/tasks/sync → consuela_data_snapshots). Without this pull the 60s
+// refresh never touches the localStorage stores that KidHome's dataVersion
+// listener and Home's widgets re-read on `consuela-data-refreshed` — they
+// re-read a store nobody updates. The merge guards are the Tasks page's own
+// (task-utils.applyTasksSnapshotToStores), so a no-change refresh is a no-op.
+async function refreshTasksSnapshot() {
+  if (isServer()) return;
+  try {
+    const res = await fetch("/api/tasks/sync", { cache: "no-store" });
+    if (!res.ok) return;
+    const data = await res.json();
+    applyTasksSnapshotToStores(data?.snapshot);
+  } catch {
+    /* snapshot store unavailable — local task state stays authoritative */
+  }
+}
+
 async function refreshCache(name: string, fetcher: () => Promise<any[]>, cache: any[], fallback?: any[]) {
   try {
     const fresh = await fetcher();
@@ -322,6 +341,13 @@ export const db = {
     { name: "All", color: "green", emoji: "👨‍👩‍👧‍👦" },
     ...db.selectMembers().map((m: any) => ({ name: m.name, color: m.color, emoji: m.emoji })),
   ],
+
+  // Re-pull the browser roster cache from the sessioned route and dispatch
+  // `consuela-members-updated` on success. Callers that just wrote a member
+  // (Settings add/edit/delete) await this before re-reading the cache, so
+  // their `selectMembersDetailed()` sees the truth and mounted surfaces
+  // (Calendar chips, Home strip) swap to the new roster.
+  refreshMembersCache: () => refreshMembersCache(),
 
   insertMember: async (data: any) => {
     const result = await pbDb.insertMember(data);
@@ -807,6 +833,7 @@ export const db = {
       refreshCache("meals", dualFetch.meals, mealsCache),
       refreshCache("pantry", dualFetch.pantry, pantryCache),
       refreshCache("grocery", dualFetch.grocery, groceryCache),
+      refreshTasksSnapshot(),
     ]);
     // Let mounted hooks (useMeals/useRecipes) re-merge the fresh caches
     // without a manual reload — the cross-device/browser read path.

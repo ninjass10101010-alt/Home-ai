@@ -23,6 +23,9 @@ const PARENT_USER = {
 const CHILD_USER = {
   currentUser: { id: 2, name: "Caspian", role: "child", emoji: "🧒", color: "#fff", pin: "1234", avatarSize: "md", glow: false },
 };
+const PET_USER = {
+  currentUser: { id: 3, name: "Biscuit", role: "pet", emoji: "🐶", color: "#fff", pin: "0000", avatarSize: "md", glow: false },
+};
 
 function render(ui: ReactElement): HTMLElement {
   const el = document.createElement("div");
@@ -50,13 +53,19 @@ describe("CapsuleNav with the House tab", () => {
     expect(navLabels(el)).toEqual(["Home", "Ask", "Meals", "Tasks", "Calendar", "House", "Settings"]);
   });
 
-  it("renders 6 items for a child and omits House", () => {
+  it("renders 7 items for a child: House swapped for Rewards after Tasks", () => {
     mockUseAuth.mockReturnValue(CHILD_USER);
     const el = render(<CapsuleNav />);
     const labels = navLabels(el);
-    expect(labels).toHaveLength(6);
+    expect(labels).toHaveLength(7);
     expect(labels).not.toContain("House");
-    expect(labels).toEqual(["Home", "Ask", "Meals", "Tasks", "Calendar", "Settings"]);
+    expect(labels).toEqual(["Home", "Ask", "Meals", "Tasks", "Rewards", "Calendar", "Settings"]);
+  });
+
+  it("renders the same kid capsule for a pet session (kid mode = any non-parent)", () => {
+    mockUseAuth.mockReturnValue(PET_USER);
+    const el = render(<CapsuleNav />);
+    expect(navLabels(el)).toEqual(["Home", "Ask", "Meals", "Tasks", "Rewards", "Calendar", "Settings"]);
   });
 
   it("every nav item carries an aria-label", () => {

@@ -100,10 +100,33 @@ const navItems = [
 const EXPAND_EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
 const LABEL_EASE = "cubic-bezier(0.34, 1.56, 0.64, 1)";
 
-/** Kid mode hides the House (Home Assistant) tab. */
+/** Kid-mode-only tab: the gamified reward shop (mode "kid" = child/pet). */
+const rewardsItem = {
+  href: "/rewards",
+  label: "Rewards",
+  icon: (active: boolean) => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 2.5 : 2} strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3.5" y="8" width="17" height="4" rx="1" />
+      <path d="M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7" />
+      <path d="M12 8v12" />
+      <path d="M12 8s-1.2-4-4-4a2.2 2.2 0 0 0 0 4h4Z" />
+      <path d="M12 8s1.2-4 4-4a2.2 2.2 0 0 1 0 4h-4Z" />
+    </svg>
+  ),
+};
+
+/**
+ * Kid mode (mirrors useDashboardMode's resolveMode: any signed-in non-parent
+ * — child or pet — gets the kid experience): hide House (Home Assistant is
+ * adult tooling) and add Rewards. Both modes render exactly 7 items, which
+ * is what the 44px-at-390px capsule sizing below is computed for.
+ */
 function visibleNavItems(currentUser: { role?: string } | null) {
-  if (currentUser?.role === "child") {
-    return navItems.filter((item) => item.href !== "/ha");
+  if (currentUser && currentUser.role !== "parent") {
+    const items = navItems.filter((item) => item.href !== "/ha");
+    const tasksIdx = items.findIndex((item) => item.href === "/tasks");
+    items.splice(tasksIdx + 1, 0, rewardsItem);
+    return items;
   }
   return navItems;
 }
@@ -139,11 +162,18 @@ export default function CapsuleNav() {
             boxShadow: barShadow,
             backdropFilter: "blur(24px) saturate(1.4)",
             WebkitBackdropFilter: "blur(24px) saturate(1.4)",
+            // Tap-target sizing: the globals.css default (500px denominator)
+            // scaled 56px buttons down to ~41px at a 390px viewport. The dock
+            // is 7 items in BOTH modes (kid swaps House for Rewards), so the
+            // natural width is 7×56 + 6×6 gap + 24 padding = 452px — with
+            // this denominator the 390px scale is 366/452 ≈ 0.81 and every
+            // button measures ≈45×45 CSS px (≥44), on one line.
+            "--capsule-scale": "min(1, calc((100vw - 1.5rem) / 452px))",
             transform: "scale(var(--capsule-scale))",
             transformOrigin: "bottom center",
-          }}
+          } as React.CSSProperties}
         >
-          <div className="flex items-center gap-2.5 px-3 py-2">
+          <div className="flex items-center gap-1.5 px-3 py-2">
             {visibleNavItems(currentUser).map((item) => {
               const isActive = pathname === item.href;
 

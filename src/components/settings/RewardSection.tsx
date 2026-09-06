@@ -7,6 +7,12 @@ import Modal from "@/components/ui/Modal";
 import ListRow from "@/components/ui/ListRow";
 import EmptyState from "@/components/ui/EmptyState";
 import FormField from "@/components/patterns/FormField";
+import { REWARDS_KEY, loadRewards, saveRewards } from "@/lib/task-utils";
+import { touchRewardsStamp } from "@/modes/kid/kid-store";
+
+// Retired Settings-only key. The live shop (RewardsShop) and the Tasks page
+// read/write REWARDS_KEY via task-utils — one catalog, one source.
+const LEGACY_CATALOG_KEY = "consuela-rewards-catalog";
 
 const REWARD_CATEGORIES = [
   { id: "screen", label: "📱 Screen Time" },
@@ -29,10 +35,19 @@ export default function RewardSection({ showToast }: RewardSectionProps) {
   const [form, setForm] = useState({ name: "", emoji: "🎁", cost: 25, category: "fun" });
 
   useEffect(() => {
+    // One-time heal: a device whose only catalog is the retired Settings key
+    // migrates it into the live shop key (REWARDS_KEY) so parent edits
+    // survive — and the legacy key is removed ONLY once that copy has
+    // landed. When both keys exist the live key wins for reads and the
+    // legacy copy stays in place: the conflict path never destroys data.
     try {
-      const stored = localStorage.getItem("consuela-rewards-catalog");
-      if (stored) setRewards(JSON.parse(stored));
+      const legacy = localStorage.getItem(LEGACY_CATALOG_KEY);
+      if (legacy !== null && localStorage.getItem(REWARDS_KEY) === null) {
+        localStorage.setItem(REWARDS_KEY, legacy);
+        localStorage.removeItem(LEGACY_CATALOG_KEY);
+      }
     } catch {}
+    setRewards(loadRewards<any[]>([]));
   }, []);
 
   const openModal = (reward?: any) => {
@@ -41,12 +56,17 @@ export default function RewardSection({ showToast }: RewardSectionProps) {
     setModalOpen(true);
   };
 
+  // Every catalog write touches the shared LWW stamp (kid-store) so the
+  // Tasks page's snapshot restore can tell a Settings edit (newer) from a
+  // stale server snapshot (older) — without it, the restore's old "longer
+  // list wins" heuristic resurrected deletes on the next Tasks mount/tick.
   const save = () => {
     if (!form.name.trim()) return;
     const reward = { ...form, name: form.name.trim(), id: editing?.id || `reward-${Date.now()}` };
     const updated = editing ? rewards.map((r) => r.id === editing.id ? reward : r) : [...rewards, reward];
     setRewards(updated);
-    localStorage.setItem("consuela-rewards-catalog", JSON.stringify(updated));
+    saveRewards(updated);
+    touchRewardsStamp();
     showToast(editing ? `✅ Updated "${reward.name}"` : `✅ Added "${reward.name}"`);
     setModalOpen(false);
   };
@@ -54,14 +74,16 @@ export default function RewardSection({ showToast }: RewardSectionProps) {
   const remove = (reward: any) => {
     const updated = rewards.filter((r) => r.id !== reward.id);
     setRewards(updated);
-    localStorage.setItem("consuela-rewards-catalog", JSON.stringify(updated));
+    saveRewards(updated);
+    touchRewardsStamp();
     showToast(`🗑️ Removed "${reward.name}"`);
   };
 
   const resetDefaults = () => {
-    localStorage.removeItem("consuela-rewards-catalog");
+    localStorage.removeItem(REWARDS_KEY);
+    touchRewardsStamp();
     setRewards([]);
-    showToast("✅ Reset to default rewards");
+    showToast("✅ Rewards cleared — the shop starts empty");
   };
 
   return (
@@ -85,7 +107,7 @@ export default function RewardSection({ showToast }: RewardSectionProps) {
         {rewards.length === 0 && (
           <EmptyState
             title="No custom rewards yet"
-            description="Kids will see 8 default rewards. Add your own to personalize the shop!"
+            description="The shop starts empty — rewards you add here are what kids can redeem with their points."
             icon="🏪"
             actionLabel="Add reward"
             onAction={() => openModal()}
@@ -94,7 +116,7 @@ export default function RewardSection({ showToast }: RewardSectionProps) {
       </div>
       <div className="mt-4 flex gap-2">
         <SoftButton onClick={() => openModal()} className="flex-1">Add reward</SoftButton>
-        <SoftButton variant="secondary" className="flex-1" onClick={resetDefaults}>Reset defaults</SoftButton>
+        <SoftButton variant="secondary" className="flex-1" onClick={resetDefaults}>Clear all</SoftButton>
       </div>
 
       <Modal

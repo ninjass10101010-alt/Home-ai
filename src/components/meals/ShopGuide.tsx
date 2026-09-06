@@ -38,7 +38,7 @@ const SECTIONS: { icon: string; title: string; description: string }[] = [
     icon: "🤖",
     title: "Ask Clem",
     description:
-      "Tap the 🛒 floating button at the bottom right to ask Clem — our AI grocery assistant.",
+      "Tap the 🛒 floating button at the bottom right to ask Clem, our AI grocery assistant.",
   },
 ];
 

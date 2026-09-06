@@ -11,9 +11,9 @@ const STEPS: { id: KitchenStep; label: string; emoji: string }[] = [
 ];
 
 const STEP_SENTENCE: Record<KitchenStep, string> = {
-  plan: "Pick this week's meals — missing ingredients become your shopping list.",
-  shop: "Check items off as you buy them — bought items move into your pantry.",
-  stock: "Track what you have — items running low go back on the shopping list.",
+  plan: "Pick this week's meals, and missing ingredients become your shopping list.",
+  shop: "Check items off as you buy them, and bought items move into your pantry.",
+  stock: "Track what you have, and items running low go back on the shopping list.",
 };
 
 const STEP_TONE: Record<KitchenStep, string> = {

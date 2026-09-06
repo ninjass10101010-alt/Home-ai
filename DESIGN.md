@@ -10,6 +10,7 @@
 - **Visuals:** CSS/SVG/emoji only — no stock imagery, no icon libraries, no WebGL.
 - **Motion:** CSS animations only (no framer-motion); state-driven, never decorative infinite loops; pause when tab hidden; every animation has a `prefers-reduced-motion` fallback.
 - **Emoji as iconography:** liberal, lightweight, consistent with family-member emoji avatars.
+- **Emergency + dialogs:** the floating emergency shield is locked to `--color-accent-rose` (rose means alarm only — never decoration); the shared `Modal` carries real dialog semantics (`role="dialog"`, `aria-modal`, `aria-labelledby`, focus trap, focus-return to the trigger) for every consumer.
 
 ## Weather card world — "(Not Boring), Consuela-style" (replacement world, 2026-08-27)
 
@@ -56,3 +57,13 @@ The chat surface joins the dashboard's accent system completely; its former fixe
 - Signed-out chat says so (amber banner, thread-specific copy) — guest AI still answers, and silence would lie about the family thread.
 - Empty states are real: "Nothing planned yet" dinner, "Quiet rest of day" events, engine-quiet fallback chips. Never invented data.
 - **The orb can speak.** A 44px 🔊 companion beside the today-strip reads the last reply aloud for pre-readers (system voice, stripped of markdown/emoji); error replies are never read; it stops on tap. **The brief is alive** — it re-reads on the family data pulse and counts down to what's next. **Do-it is confirm-gated** — actionable loops carry a separate accent button through the shared PIN flow; the primary tap still drafts.
+
+## Kid mode (wired 2026-09-04)
+
+The kid experience is a mode, not a parallel app: `KidHome` renders behind `mode === "kid"` (any signed-in non-parent) on the same Home route, with kid-specific styling scoped in `src/modes/modes.css` (kid-scoped selectors only — no global overrides). The capsule nav gains a 🎁 Rewards entry (House is swapped out; both modes stay 7 items so the ≥44px-at-390px sizing holds). Quest completion runs through the shared PIN flow (`verifyPinRemote` — server-side verification, PINs never client-side), rewards redeem through `RewardsShop` with the same >100pts parent-approval gate as the Tasks page, and the celebration fires only after a real, confirmed success.
+
+## Calendar truth + honest failures (wired 2026-09-04)
+
+- **Google events wear their calendar's color.** Every synced event carries its owning calendar's Google `colorRgb` (`colorHex` from `src/lib/calendar/google-mapping.ts`) on rows and month dots — cyan is the fallback, never a guess. Color is data, not decoration.
+- **A PIN failure says which kind it is.** The shared seam `verifyPinRemote` (`src/modes/kid/kid-store.ts`) returns `ok | wrongPin | unreachable`; every gate (kid quest, redeem, parent approval, all seven Tasks gates) distinguishes "Couldn't reach Consuela" from "Wrong PIN" and clears the input on both paths. Offline is never blamed on the user.
+- **The calendar-member roster is live-primed.** `src/lib/calendar-member-snapshot.ts` primes its cached snapshot at subscribe time, so events that fired while a surface was unmounted are recovered, not lost. Contract for any future surface using it: subscribe → prime → re-read on dispatch, and pass the CLIENT snapshot as `useSyncExternalStore` arg 2 (the deterministic server fallback is arg 3 — swapping them silently pins the UI to placeholders forever).

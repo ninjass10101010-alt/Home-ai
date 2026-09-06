@@ -145,4 +145,24 @@ describe("OpenLoopChips", () => {
     const actBtn = el.querySelector("button[aria-label^='Do it:']");
     expect(actBtn).toBeNull();
   });
+
+  it("Do-it keeps a 36px visual but grows its HIT AREA to ≥44px via the ::after negative-inset pattern", () => {
+    suggestionsMock.items = [
+      {
+        id: "s1", kind: "grocery_store_optimization", title: "3 items have no store assigned",
+        status: "pending", actionLabel: "Assign to Aldi", actionPayload: { tool: "get_grocery_list", args: {} },
+      },
+    ];
+    const el = render(<OpenLoopChips onDraft={vi.fn()} />);
+    const doIt = el.querySelector("button[aria-label='Do it: Assign to Aldi']") as HTMLElement;
+    expect(doIt).not.toBeNull();
+    // 36px visual + 2×4px ::after inset = 44px effective.
+    expect(doIt.className).toContain("min-h-[36px]");
+    expect(doIt.className).toContain("relative");
+    expect(doIt.className).toContain("after:absolute");
+    expect(doIt.className).toContain("after:-inset-1");
+    // before:-inset is DEAD on glass-* surfaces (the material ::before wins)
+    // — the contract is ::after.
+    expect(doIt.className).not.toContain("before:-inset");
+  });
 });

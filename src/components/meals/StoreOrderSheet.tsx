@@ -91,7 +91,7 @@ export default function StoreOrderSheet({
                     🛒 walmart.com search
                   </SoftButton>
                   <p className="mt-2 text-xs text-text-muted">
-                    Walmart isn&apos;t on Instacart in Holland — use walmart.com search instead
+                    Walmart isn&apos;t on Instacart in Holland, use walmart.com search instead
                   </p>
                 </>
               ) : (

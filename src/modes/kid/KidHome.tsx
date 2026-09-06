@@ -7,44 +7,60 @@
  * Features:
  *   - Hero avatar (large, animated, center-stage)
  *   - Level bar with XP progress + level-up celebrations
- *   - Tasks as "Quests" with tap-to-complete + confetti
+ *   - Tasks as "Quests" — completing one goes through the SAME server-side
+ *     PIN gate the Tasks page uses (/api/members/verify, /api/tasks/claim);
+ *     the PIN is typed per attempt and never persisted anywhere
  *   - Positive leaderboard framing ("YOU'RE #1!")
  *   - Bedtime mode (no quests, sweet dreams)
  *   - Weekend mode (bonus quests)
  *   - Spring-bounce easing on all interactions
+ *
+ * Data truth: points/streaks/quests all read the Tasks-page store layer
+ * (src/lib/task-utils loadTasks/loadWeekData) — never a parallel ledger.
  */
 "use client";
 
 import dynamic from "next/dynamic";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import PageShell from "@/components/ui/PageShell";
-import Avatar, { type AvatarSize } from "@/components/ui/Avatar";
+import Avatar from "@/components/ui/Avatar";
 import EmergencyButton from "@/components/ui/EmergencyButton";
+import Modal from "@/components/ui/Modal";
+import SoftButton from "@/components/ui/SoftButton";
 import { AtmosphericProvider } from "@/hooks/useAtmosphericTheme";
 import { useAuth } from "@/hooks/useAuth";
 import { useDashboardMode } from "@/hooks/useDashboardMode";
 import Surface from "@/components/ui/Surface";
-import SoftButton from "@/components/ui/SoftButton";
 import Link from "next/link";
 import { db } from "@/db";
-import { useRouter } from "next/navigation";
+import {
+  loadTasks,
+  saveTasks,
+  loadWeekData,
+  saveWeekData,
+  addTransaction,
+  weekKey,
+  getThisWeeksCompletedTasks,
+  getThisWeeksCompletedDates,
+  calculateRealStreak,
+  syncTasksToPB,
+  syncWeekDataToPB,
+} from "@/lib/task-utils";
 import QuestCard from "./QuestCard";
 import LevelBar from "./LevelBar";
 import CelebrationBurst from "./CelebrationBurst";
+import { ledgerKey, pointsFor, currentWeekPoints, verifyPinRemote, unreachableCopy } from "./kid-store";
 import SpotifyWidget from "@/components/integrations/SpotifyWidget";
 import AllowanceWidget from "@/components/integrations/AllowanceWidget";
 import LearningWidget from "@/components/integrations/LearningWidget";
 
 const FogBackground = dynamic(() => import("@/components/ui/FogBackground"), { ssr: false });
 
-const avatarSizes = new Set<AvatarSize>(["xs", "sm", "md", "base", "lg"]);
-function normalizeAvatarSize(size?: string) {
-  return avatarSizes.has(size as AvatarSize) ? (size as AvatarSize) : "md";
-}
+const POINTS_PER_LEVEL = 50;
 
 // ─── Kid Leaderboard (positive framing) ─────────────────────────────────────
 
-function KidLeaderboard({ members }: { members: any[] }) {
+function KidLeaderboard({ members }: { members: { name: string; color: string; emoji: string; points: number; streak: number }[] }) {
   const { currentUser } = useAuth();
   const myFirstName = currentUser?.name?.split(" ")[0] || "";
 
@@ -56,7 +72,7 @@ function KidLeaderboard({ members }: { members: any[] }) {
     <Surface variant="warm" radius="2xl" padding="none" aria-live="polite" aria-label="Family leaderboard">
       <div className="p-4 pb-2 flex items-center justify-between">
         <h3 className="text-base font-bold text-text-primary">🏆 Leaderboard</h3>
-        <span className="text-[10px] font-semibold text-text-muted">This week</span>
+        <span className="text-[11px] font-semibold text-text-muted">This week</span>
       </div>
       <div className="px-4 pb-4 space-y-2">
         {sorted.slice(0, 5).map((member, i) => {
@@ -67,12 +83,12 @@ function KidLeaderboard({ members }: { members: any[] }) {
               className="flex items-center gap-3 rounded-2xl px-3 py-2.5 transition-all"
               style={{
                 background: isMe
-                  ? "linear-gradient(135deg, rgba(var(--color-accent-selected-rgb, 59,130,246), 0.18), rgba(255,255,255,0.06))"
+                  ? "linear-gradient(135deg, color-mix(in srgb, var(--color-accent-selected) 18%, transparent), rgba(255,255,255,0.06))"
                   : "rgba(255,255,255,0.04)",
                 border: isMe
                   ? "2px solid var(--color-accent-selected)"
                   : "1px solid rgba(255,255,255,0.06)",
-                boxShadow: isMe ? "0 0 20px rgba(var(--color-accent-selected-rgb, 59,130,246), 0.12)" : "none",
+                boxShadow: isMe ? "0 0 20px color-mix(in srgb, var(--color-accent-selected) 12%, transparent)" : "none",
               }}
             >
               <span className="text-lg shrink-0 w-7 text-center">
@@ -91,20 +107,20 @@ function KidLeaderboard({ members }: { members: any[] }) {
                 </span>
                 {isMe && (
                   <span
-                    className="ml-1.5 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md inline-block align-middle"
-                    style={{ background: "var(--color-accent-selected)", color: "white" }}
+                    className="ml-1.5 text-[11px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md inline-block align-middle"
+                    style={{ background: "var(--color-accent-button, var(--color-accent-selected))", color: "white" }}
                   >
                     You!
                   </span>
                 )}
                 {member.streak > 0 && (
-                  <span className="ml-1 text-xs text-amber-400">🔥{member.streak}d</span>
+                  <span className="ml-1 text-xs text-[var(--color-accent-amber)]">🔥{member.streak}d</span>
                 )}
               </div>
               <span className="text-sm font-bold text-text-primary tabular-nums">
                 {member.points || 0}
               </span>
-              <span className="text-[10px] text-text-muted">pts</span>
+              <span className="text-[11px] text-text-muted">pts</span>
             </div>
           );
         })}
@@ -112,7 +128,7 @@ function KidLeaderboard({ members }: { members: any[] }) {
         {/* Positive reinforcement */}
         <div className="pt-2 text-center">
           {myRank === 1 ? (
-            <p className="text-sm font-bold text-amber-400">🎉 You&apos;re in the lead! Keep it up!</p>
+            <p className="text-sm font-bold text-[var(--color-accent-amber)]">🎉 You&apos;re in the lead! Keep it up!</p>
           ) : myRank === 2 ? (
             <p className="text-xs text-text-secondary">
               So close! <span className="text-[var(--color-accent-selected)] font-semibold">You can take #1!</span>
@@ -132,11 +148,9 @@ function KidLeaderboard({ members }: { members: any[] }) {
 
 // ─── Bedtime View ───────────────────────────────────────────────────────────
 
-function BedtimeView({ firstName, points, level, tomorrowEvents }: {
+function BedtimeView({ firstName, pointsToday }: {
   firstName: string;
-  points: number;
-  level: number;
-  tomorrowEvents: any[];
+  pointsToday: number;
 }) {
   return (
     <div className="px-4 space-y-5 relative z-10 pb-8">
@@ -148,11 +162,8 @@ function BedtimeView({ firstName, points, level, tomorrowEvents }: {
             Great job today, {firstName}!
           </h2>
           <p className="text-sm text-text-secondary mt-2">
-            You earned <span className="font-bold text-amber-400">{points} points</span> today!
+            You earned <span className="font-bold text-[var(--color-accent-amber)]">{pointsToday} points</span> today!
           </p>
-          <div className="mt-3 max-w-xs mx-auto">
-            <LevelBar points={points} />
-          </div>
           <p className="text-sm text-text-secondary mt-4">
             Sweet dreams! See you tomorrow 💤
           </p>
@@ -171,28 +182,13 @@ function BedtimeView({ firstName, points, level, tomorrowEvents }: {
       </div>
 
       {/* Tomorrow preview */}
-      {tomorrowEvents.length > 0 && (
-        <div>
-          <h3 className="text-base font-bold text-text-primary mb-3">📋 Tomorrow</h3>
-          <Surface variant="warm" radius="2xl" padding="none">
-            <div className="p-4 space-y-2">
-              {tomorrowEvents.slice(0, 4).map((event) => (
-                <div key={event.id} className="flex items-center gap-3 py-1">
-                  <span className="text-xl">{event.icon || "📅"}</span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-text-primary">{event.title}</p>
-                    <p className="text-[11px] text-text-secondary">{event.time}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Surface>
-        </div>
-      )}
-
-      {/* Leaderboard (read-only at bedtime) */}
-      <div className="opacity-60">
-        <p className="text-xs text-text-muted text-center mb-2">🏆 You&apos;ll still be awesome tomorrow</p>
+      <div>
+        <h3 className="text-base font-bold text-text-primary mb-3">📋 Tomorrow</h3>
+        <Surface variant="warm" radius="2xl" padding="none">
+          <div className="p-4">
+            <p className="text-xs text-text-secondary">Consuela will show tomorrow&apos;s plans here in the morning.</p>
+          </div>
+        </Surface>
       </div>
     </div>
   );
@@ -201,110 +197,233 @@ function BedtimeView({ firstName, points, level, tomorrowEvents }: {
 // ─── Main Component ─────────────────────────────────────────────────────────
 
 export default function KidHome() {
-  const [mounted, setMounted] = useState(false);
   const [pendingTasks, setPendingTasks] = useState<any[]>([]);
   const [completedToday, setCompletedToday] = useState<any[]>([]);
   const [todayEvents, setTodayEvents] = useState<any[]>([]);
-  const [members, setMembers] = useState<any[]>([]);
+  const [members, setMembers] = useState<{ name: string; color: string; emoji: string; points: number; streak: number }[]>([]);
   const [points, setPoints] = useState(0);
+  const [pointsToday, setPointsToday] = useState(0);
+  const [streak, setStreak] = useState(0);
   const [tonightMeal, setTonightMeal] = useState<any>(null);
   const [celebration, setCelebration] = useState<{ points: number; leveledUp: boolean; newLevel: number } | null>(null);
+  // Quest PIN gate — the typed PIN lives in this component's state only and
+  // is cleared after every attempt (never persisted).
+  const [questPinTask, setQuestPinTask] = useState<any | null>(null);
+  const [questPin, setQuestPin] = useState("");
+  const [questPinError, setQuestPinError] = useState("");
+  const [questPinBusy, setQuestPinBusy] = useState(false);
   // Live roster: bump a version on consuela-members-updated so the leaderboard
   // re-reads the roster when the members cache refreshes.
   const [membersVersion, setMembersVersion] = useState(0);
+  // Re-read the task/points store after a completion (and on cross-device
+  // refreshes) so quests, points, and the leaderboard stay honest.
+  const [dataVersion, setDataVersion] = useState(0);
 
   const { currentUser } = useAuth();
   const { isBedtime, isWeekend } = useDashboardMode();
-  const router = useRouter();
-
-  const POINTS_PER_LEVEL = 50;
 
   useEffect(() => {
     const onMembersUpdated = () => setMembersVersion(v => v + 1);
+    const onDataRefreshed = () => setDataVersion(v => v + 1);
     window.addEventListener("consuela-members-updated", onMembersUpdated);
-    return () => window.removeEventListener("consuela-members-updated", onMembersUpdated);
+    window.addEventListener("consuela-data-refreshed", onDataRefreshed);
+    return () => {
+      window.removeEventListener("consuela-members-updated", onMembersUpdated);
+      window.removeEventListener("consuela-data-refreshed", onDataRefreshed);
+    };
   }, []);
 
   useEffect(() => {
     (async () => {
-    setMounted(true);
-    try {
-      const allTasks = db.selectPendingTasks();
-      setPendingTasks(allTasks.filter((t: any) => !t.completed));
-      setCompletedToday(allTasks.filter((t: any) => t.completed));
-      setTodayEvents(db.selectTodaysEvents());
+      try {
+        setTodayEvents(db.selectTodaysEvents());
 
-      // Load tonight's dinner for the fun widget
-      const allMeals = await db.selectMeals();
-      const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-      const todayName = dayNames[new Date().getDay()];
-      const dinner = allMeals.find((m: any) => m.time === todayName && m.mealType === "dinner") || allMeals.find((m: any) => m.mealType === "dinner");
-      if (dinner) setTonightMeal(dinner);
-
-      // Load my points
-      if (currentUser) {
-        const myPoints = typeof window !== "undefined"
-          ? parseInt(localStorage.getItem(`consuela-points-${currentUser.name}`) || "0")
-          : 0;
-        setPoints(myPoints);
-      }
-    } catch {}
+        // Load tonight's dinner for the fun widget
+        const allMeals = await db.selectMeals();
+        const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+        const todayName = dayNames[new Date().getDay()];
+        const dinner = allMeals.find((m: any) => m.time === todayName && m.mealType === "dinner") || allMeals.find((m: any) => m.mealType === "dinner");
+        if (dinner) setTonightMeal(dinner);
+      } catch {}
     })();
-  }, [currentUser]);
+  }, [dataVersion]);
 
-  // Roster read for the kid leaderboard — its own effect so consuela-members-updated
-  // (membersVersion) re-reads the roster without replaying the task/meal load above.
+  // Quests + points + streak: the Tasks page's store layer (loadTasks /
+  // loadWeekData), filtered to this kid. The old parallel localStorage
+  // ledger (consuela-points-*) was fake data nothing else read — gone.
+  useEffect(() => {
+    if (!currentUser) return;
+    try {
+      const myFirst = currentUser.name.split(" ")[0].toLowerCase();
+      const isMine = (name?: string) =>
+        !!name && (name.toLowerCase() === currentUser.name.toLowerCase() || name.split(" ")[0].toLowerCase() === myFirst);
+
+      const tasks = loadTasks();
+      setPendingTasks(tasks.filter((t: any) => !t.completed && (t.universal || isMine(t.assignee))));
+      const doneToday = getThisWeeksCompletedTasks(tasks).filter(
+        (t: any) => t.completedAt?.slice(0, 10) === new Date().toISOString().slice(0, 10) && isMine(t.completedBy || t.assignee)
+      );
+      setCompletedToday(doneToday);
+      setPointsToday(doneToday.reduce((sum: number, t: any) => sum + (t.points || 0), 0));
+
+      const week = loadWeekData();
+      setPoints(pointsFor(week.points, currentUser.name));
+      const key = ledgerKey(week.points, currentUser.name) || currentUser.name;
+      setStreak(calculateRealStreak(key, week, getThisWeeksCompletedDates(tasks, key)));
+    } catch {}
+  }, [currentUser, dataVersion, membersVersion]);
+
+  // Leaderboard roster read — its own effect so consuela-members-updated
+  // (membersVersion) re-reads the roster without replaying the loads above.
   useEffect(() => {
     try {
+      const week = loadWeekData();
+      const tasks = loadTasks();
       const memberList = db.selectMembersDetailed().map((m: any) => ({
         name: m.name,
         color: m.color || "green",
         emoji: m.emoji,
-        points: typeof window !== "undefined"
-          ? parseInt(localStorage.getItem(`consuela-points-${m.name}`) || "0")
-          : 0,
-        streak: typeof window !== "undefined"
-          ? parseInt(localStorage.getItem(`consuela-streak-${m.name}`) || "0")
-          : 0,
+        points: pointsFor(week.points, m.name),
+        streak: calculateRealStreak(m.name, week, getThisWeeksCompletedDates(tasks, m.name)),
       }));
       setMembers(memberList);
     } catch {}
-  }, [membersVersion]);
+  }, [membersVersion, dataVersion]);
 
   const user = currentUser;
   const firstName = user?.name?.split(" ")[0] || "Buddy";
   const level = Math.floor(points / POINTS_PER_LEVEL) + 1;
-  const streak = typeof window !== "undefined"
-    ? parseInt(localStorage.getItem(`consuela-streak-${user?.name}`) || "0")
-    : 0;
 
-  // Quest completion handler
-  const handleQuestComplete = useCallback((task: any) => {
+  // Tap a quest → open the shared server-verified PIN gate. Nothing is
+  // completed or celebrated until the PIN succeeds.
+  const openQuestPin = useCallback((task: any) => {
     if (!user) return;
-
-    const key = `consuela-points-${user.name}`;
-    const currentPoints = parseInt(localStorage.getItem(key) || "0");
-    const earnedPoints = task.points || 10;
-    const newTotal = currentPoints + earnedPoints;
-
-    // Save
-    localStorage.setItem(key, String(newTotal));
-    setPoints(newTotal);
-
-    // Check level up
-    const oldLevel = Math.floor(currentPoints / POINTS_PER_LEVEL) + 1;
-    const newLevel = Math.floor(newTotal / POINTS_PER_LEVEL) + 1;
-    const leveledUp = newLevel > oldLevel;
-
-    // Trigger celebration
-    setCelebration({ points: earnedPoints, leveledUp, newLevel: leveledUp ? newLevel : 0 });
-    setTimeout(() => setCelebration(null), 1500);
-
-    // Update streak
-    const streakKey = `consuela-streak-${user.name}`;
-    const currentStreak = parseInt(localStorage.getItem(streakKey) || "0");
-    localStorage.setItem(streakKey, String(currentStreak + 1));
+    setQuestPinTask(task);
+    setQuestPin("");
+    setQuestPinError("");
   }, [user]);
+
+  const closeQuestPin = useCallback(() => {
+    setQuestPinTask(null);
+    setQuestPin("");
+    setQuestPinError("");
+  }, []);
+
+  const celebrate = useCallback((earned: number, before: number) => {
+    const after = before + earned;
+    const oldLevel = Math.floor(before / POINTS_PER_LEVEL) + 1;
+    const newLevel = Math.floor(after / POINTS_PER_LEVEL) + 1;
+    const leveledUp = newLevel > oldLevel;
+    setCelebration({ points: earned, leveledUp, newLevel: leveledUp ? newLevel : 0 });
+    setTimeout(() => setCelebration(null), 1500);
+  }, []);
+
+  const submitQuestPin = async () => {
+    if (!questPinTask || !user || questPinBusy || questPin.length < 4) return;
+    // Double-completion guard (same as the Tasks page): a stale local cache
+    // row already completed this week must never re-POST or re-award points.
+    if (questPinTask.completedInWeek === weekKey()) {
+      setQuestPinTask(null);
+      setQuestPin("");
+      setQuestPinError("");
+      return;
+    }
+    setQuestPinBusy(true);
+    const task = questPinTask;
+    try {
+      if (task.universal) {
+        // Server-authoritative claim (same route the Tasks page uses):
+        // exactly one family member wins the race, points land on the server.
+        const before = currentWeekPoints(user.name).points;
+        const claimNow = new Date().toISOString();
+        const res = await fetch("/api/tasks/claim", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            taskId: task.id,
+            claimantName: user.name,
+            claimantPin: questPin,
+            completedAt: claimNow,
+            title: task.title,
+            points: task.points,
+          }),
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data?.success) {
+          setQuestPinError(
+            res.status === 401 ? "Wrong PIN. Try again."
+              : res.status === 409 && data?.claimedBy ? `🤝 ${String(data.claimedBy).split(" ")[0]} already grabbed that one!`
+              : res.status === 409 ? "That task was already claimed."
+              : "Couldn't claim it — try again."
+          );
+          setQuestPin("");
+          return;
+        }
+        if (data?.weekData?.weekStart === weekKey()) saveWeekData(data.weekData);
+        // Mirror the claim route's server-side completion fields on the local
+        // row — syncTasksToPB writes completedInWeek/completedAt as-is, so a
+        // bare { completed: true } would WIPE the server's completion fields.
+        const tasks = loadTasks().map((t: any) =>
+          t.id === task.id
+            // claimedBy is the server-normalized FULL name (same as the
+            // non-universal branch's verified.name) — a first name here
+            // would split the ledger key.
+            ? { ...t, completed: true, completedBy: data?.claimedBy || user.name, completedAt: claimNow, completedInWeek: weekKey() }
+            : t
+        );
+        saveTasks(tasks);
+        void syncTasksToPB(tasks);
+        celebrate(task.points || 0, before);
+      } else {
+        const result = await verifyPinRemote(user.name, questPin);
+        if (result.status === "wrongPin") {
+          setQuestPinError("Wrong PIN. Try again.");
+          setQuestPin("");
+          return;
+        }
+        if (result.status === "unreachable") {
+          // The server never answered (offline / NAS asleep) — say so honestly
+          // instead of blaming a kid's typing.
+          setQuestPinError(unreachableCopy());
+          setQuestPin("");
+          return;
+        }
+        const verified = result.member;
+        const myName = verified.name || user.name;
+        const now = new Date().toISOString();
+        const currentWeek = weekKey();
+        const tasks = loadTasks().map((t: any) =>
+          t.id === task.id
+            ? { ...t, completed: true, completedBy: myName, completedAt: now, completedInWeek: currentWeek }
+            : t
+        );
+        saveTasks(tasks);
+        const week = loadWeekData();
+        const before = pointsFor(week.points, myName);
+        const earned = task.points || 0;
+        const withPoints = {
+          ...week,
+          points: { ...week.points, [myName]: (week.points[myName] ?? before) + earned },
+        };
+        const updated = addTransaction(withPoints, "earn", earned, `Completed: ${task.title} (+${earned}pts)`, myName, task.id);
+        saveWeekData(updated);
+        void syncTasksToPB(tasks);
+        void syncWeekDataToPB(updated);
+        celebrate(earned, before);
+      }
+      setQuestPinTask(null);
+      setQuestPin("");
+      setDataVersion(v => v + 1);
+    } catch {
+      // Network rejection (offline / NAS asleep) escaped the onClick before:
+      // the spinner stopped and the kid got NO feedback with the typed PIN
+      // still in state. Honest copy + clear the PIN.
+      setQuestPinError(unreachableCopy());
+      setQuestPin("");
+    } finally {
+      setQuestPinBusy(false);
+    }
+  };
 
   // Greeting based on mode
   const greeting = isBedtime
@@ -319,12 +438,56 @@ export default function KidHome() {
       ? "Bonus quests available today! 🎉"
       : `You have ${pendingTasks.length} quest${pendingTasks.length !== 1 ? "s" : ""} today!`;
 
+  const questPinModal = (
+    <Modal
+      open={questPinTask !== null}
+      onClose={closeQuestPin}
+      title="Confirm it's you"
+      description={questPinTask ? `Enter your PIN to complete "${questPinTask.title}"` : ""}
+      footer={
+        <>
+          <SoftButton variant="secondary" className="flex-1" onClick={closeQuestPin}>
+            Cancel
+          </SoftButton>
+          <SoftButton
+            className="flex-1"
+            loading={questPinBusy}
+            disabled={questPin.length < 4 || questPinBusy}
+            onClick={submitQuestPin}
+          >
+            Complete
+          </SoftButton>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <input
+          type="password"
+          inputMode="numeric"
+          autoComplete="off"
+          maxLength={4}
+          value={questPin}
+          onChange={(e) => {
+            setQuestPin(e.target.value.replace(/\D/g, ""));
+            setQuestPinError("");
+          }}
+          onKeyDown={(e) => { if (e.key === "Enter") submitQuestPin(); }}
+          aria-label="Your 4-digit PIN"
+          className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-center text-2xl font-bold tracking-[0.5em] text-text-primary focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-selected)]"
+        />
+        {questPinError && <p className="text-xs text-[var(--color-accent-rose)]" role="alert">{questPinError}</p>}
+      </div>
+    </Modal>
+  );
+
   // ── BEDTIME MODE ──
   if (isBedtime) {
     return (
       <AtmosphericProvider>
         <FogBackground />
         <PageShell style={{ backgroundColor: "transparent" }}>
+          <EmergencyButton />
+
           {/* Hero (bedtime) */}
           <div className="relative z-10 px-4 pt-8 pb-2 flex flex-col items-center text-center">
             <div className="avatar-hero mb-3">
@@ -340,12 +503,7 @@ export default function KidHome() {
             <h1 className="text-xl font-bold text-text-primary">{greeting}</h1>
           </div>
 
-          <BedtimeView
-            firstName={firstName}
-            points={points}
-            level={level}
-            tomorrowEvents={todayEvents}
-          />
+          <BedtimeView firstName={firstName} pointsToday={pointsToday} />
         </PageShell>
       </AtmosphericProvider>
     );
@@ -358,7 +516,7 @@ export default function KidHome() {
       <PageShell style={{ backgroundColor: "transparent" }}>
         <EmergencyButton />
 
-        {/* Celebration overlay */}
+        {/* Celebration overlay — fires only AFTER a PIN-verified completion */}
         {celebration && (
           <CelebrationBurst
             points={celebration.points}
@@ -393,22 +551,22 @@ export default function KidHome() {
 
           {/* Streak */}
           {streak > 0 && (
-            <div className="mt-3 flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ background: "rgba(251, 191, 36, 0.1)", border: "1px solid rgba(251, 191, 36, 0.2)" }}>
+            <div className="mt-3 flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ background: "color-mix(in srgb, var(--color-accent-amber) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--color-accent-amber) 20%, transparent)" }}>
               <span className="text-lg">🔥</span>
-              <span className="text-sm font-bold text-amber-400 tabular-nums">{streak}-day streak!</span>
+              <span className="text-sm font-bold text-[var(--color-accent-amber)] tabular-nums">{streak}-day streak!</span>
             </div>
           )}
 
           {/* Weekend badge */}
           {isWeekend && (
-            <div className="mt-2 flex items-center gap-1.5 px-3 py-1.5 rounded-full weekend-badge" style={{ background: "rgba(251, 191, 36, 0.08)", border: "1px solid rgba(251, 191, 36, 0.15)" }}>
+            <div className="mt-2 flex items-center gap-1.5 px-3 py-1.5 rounded-full weekend-badge" style={{ background: "color-mix(in srgb, var(--color-accent-amber) 8%, transparent)", border: "1px solid color-mix(in srgb, var(--color-accent-amber) 15%, transparent)" }}>
               <span className="text-sm">🏖️</span>
-              <span className="text-xs font-bold text-amber-400">Weekend Bonus Quests!</span>
+              <span className="text-xs font-bold text-[var(--color-accent-amber)]">Weekend Bonus Quests!</span>
             </div>
           )}
 
           {/* Profile hint */}
-          <p className="mt-3 text-[10px] text-text-muted">
+          <p className="mt-3 text-[11px] text-text-muted">
             Tap the ⚙️ in settings to switch profiles
           </p>
         </div>
@@ -420,7 +578,7 @@ export default function KidHome() {
             <div>
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-base font-bold text-text-primary">🏖️ Weekend Bonus!</h2>
-                <span className="text-[10px] font-bold text-amber-400">Double points today!</span>
+                <span className="text-[11px] font-bold text-[var(--color-accent-amber)]">Double points today!</span>
               </div>
               <Surface variant="warm" radius="2xl" padding="none">
                 <div className="p-4">
@@ -428,8 +586,8 @@ export default function KidHome() {
                     <div
                       className="w-12 h-12 rounded-2xl grid place-items-center text-2xl shrink-0"
                       style={{
-                        background: "linear-gradient(135deg, rgba(251, 191, 36, 0.2), rgba(245, 158, 11, 0.1))",
-                        border: "1px solid rgba(251, 191, 36, 0.25)",
+                        background: "linear-gradient(135deg, color-mix(in srgb, var(--color-accent-amber) 20%, transparent), color-mix(in srgb, var(--color-accent-amber) 10%, transparent))",
+                        border: "1px solid color-mix(in srgb, var(--color-accent-amber) 25%, transparent)",
                       }}
                     >
                       🌟
@@ -441,12 +599,12 @@ export default function KidHome() {
                     <div
                       className="shrink-0 flex flex-col items-center justify-center w-14 h-14 rounded-2xl"
                       style={{
-                        background: "linear-gradient(135deg, rgba(251, 191, 36, 0.15), transparent)",
-                        border: "1px solid rgba(251, 191, 36, 0.2)",
+                        background: "linear-gradient(135deg, color-mix(in srgb, var(--color-accent-amber) 15%, transparent), transparent)",
+                        border: "1px solid color-mix(in srgb, var(--color-accent-amber) 20%, transparent)",
                       }}
                     >
-                      <span className="text-lg font-black tabular-nums text-amber-400">+25</span>
-                      <span className="text-[9px] text-text-muted font-bold -mt-0.5">pts</span>
+                      <span className="text-lg font-black tabular-nums text-[var(--color-accent-amber)]">+25</span>
+                      <span className="text-[11px] text-text-muted font-bold -mt-0.5">pts</span>
                     </div>
                   </div>
                   <p className="text-xs text-text-muted text-center">
@@ -463,7 +621,7 @@ export default function KidHome() {
               <h2 className="text-base font-bold text-text-primary">
                 🎯 Your Quests
               </h2>
-              <Link href="/tasks" className="text-[10px] font-semibold text-[var(--color-accent-selected)]">
+              <Link href="/tasks" className="text-[11px] font-semibold text-[var(--color-accent-selected)]">
                 View all →
               </Link>
             </div>
@@ -479,7 +637,7 @@ export default function KidHome() {
             ) : (
               <div className="space-y-2.5">
                 {pendingTasks.map((task) => (
-                  <QuestCard key={task.id} task={task} onComplete={handleQuestComplete} />
+                  <QuestCard key={task.id} task={task} onComplete={openQuestPin} />
                 ))}
               </div>
             )}
@@ -497,13 +655,13 @@ export default function KidHome() {
                     key={task.id}
                     className="flex items-center gap-2.5 px-3 py-2 rounded-xl opacity-50"
                     style={{
-                      background: "rgba(74, 222, 128, 0.05)",
-                      border: "1px solid rgba(74, 222, 128, 0.1)",
+                      background: "color-mix(in srgb, var(--color-accent-mint) 5%, transparent)",
+                      border: "1px solid color-mix(in srgb, var(--color-accent-mint) 10%, transparent)",
                     }}
                   >
                     <span className="text-sm">✅</span>
                     <span className="text-xs text-text-muted line-through flex-1">{task.title}</span>
-                    <span className="text-[10px] font-bold text-emerald-400">+{task.points}</span>
+                    <span className="text-[11px] font-bold text-[var(--color-accent-mint)]">+{task.points}</span>
                   </div>
                 ))}
               </div>
@@ -544,7 +702,7 @@ export default function KidHome() {
                   {tonightMeal.tags && tonightMeal.tags.length > 0 && (
                     <div className="flex justify-center gap-1.5 mt-2">
                       {tonightMeal.tags.map((tag: string) => (
-                        <span key={tag} className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.1)", color: "var(--color-text-secondary)" }}>
+                        <span key={tag} className="text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.1)", color: "var(--color-text-secondary)" }}>
                           {tag}
                         </span>
                       ))}
@@ -581,6 +739,8 @@ export default function KidHome() {
             </Link>
           </div>
         </div>
+
+        {questPinModal}
       </PageShell>
     </AtmosphericProvider>
   );

@@ -9,7 +9,9 @@ import { useRuntimeConfig } from "@/hooks/useRuntimeConfig";
 import { useAuth } from "@/hooks/useAuth";
 import Skeleton from "@/components/ui/Skeleton";
 import { db } from "@/db";
-import WeatherScene, { SceneState, moonPhase, moonPhaseName } from "./WeatherScene";
+import { moonPhase, moonPhaseName } from "./WeatherScene";
+import { SKY, INK, GLASS, GLASS_NIGHT } from "./wx-tokens";
+import { SceneLayers, Condition, wmoToScene, sceneToCondition, dayCondition } from "./WxToys";
 import { getWeatherSkin, cardinalFromDegrees, SeasonKey, severeFamily, resolveAccent } from "./WeatherSkins";
 import { wearAdvice, stormAdvice, snowAdvice, fusionOutlook, InsightEvent } from "@/lib/weather-insights";
 import type { ParticleKind } from "./WeatherParticles";
@@ -71,7 +73,6 @@ interface WeatherData {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function toC(f: number) { return Math.round((f - 32) * 5 / 9); }
 
 const RAIN_CODES = new Set([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99]);
 const SNOW_CODES = new Set([71, 73, 75, 77, 85, 86]);
@@ -232,7 +233,7 @@ function stripEndIndex(hours: HourPoint[]): number {
   const dayOfNow = new Date(hours[0].time).getDate();
   let end = hours.findIndex((h) => new Date(h.time).getDate() !== dayOfNow);
   end = end === -1 ? hours.length - 1 : Math.max(0, end - 1);
-  return Math.max(end, Math.min(8, hours.length - 1));
+  return end;
 }
 
 function useMeasureWidth<T extends HTMLElement>() {
@@ -286,7 +287,11 @@ function useAnimatedNumber(target: number, duration = 550): number {
   return display;
 }
 
-// ─── Day strip — rest-of-day temperature curve with rain ticks + press-to-preview ───
+// ─── Day strip — rest-of-day hourly clay icons + press-to-preview ───
+
+const STRIP_CELL = 56;
+const STRIP_GAP = 4; // gap-1 in the flex row = 4px
+const STRIP_PITCH = STRIP_CELL + STRIP_GAP; // actual per-cell pitch including gap
 
 function DayStrip({ hours, conv, skin, accent, previewIdx, previewPinned, onPreview, onTapPin, onRelease }: {
   hours: HourPoint[];
@@ -299,48 +304,44 @@ function DayStrip({ hours, conv, skin, accent, previewIdx, previewPinned, onPrev
   onTapPin: (idx: number) => void;
   onRelease: () => void;
 }) {
-  const [wrapRef, width] = useMeasureWidth<HTMLDivElement>();
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const draggingRef = useRef(false);
   const startXRef = useRef<number | null>(null);
   const hasHorizontalIntentRef = useRef(false);
 
+  // The strip can overflow horizontally (up to ~14 cells), but the slider
+  // consumes pan gestures — without this, a previewed hour beyond the fold
+  // is invisible on touch. Scroll the selected cell into view instead.
+  useEffect(() => {
+    if (previewIdx == null) return;
+    const el = scrollRef.current;
+    if (!el || typeof el.scrollBy !== "function") return;
+    const target = previewIdx * STRIP_PITCH;
+    const visible = el.scrollLeft + el.clientWidth;
+    if (target < el.scrollLeft || target + STRIP_CELL > visible) {
+      el.scrollBy({
+        left: target - el.scrollLeft - Math.max(0, (el.clientWidth - STRIP_CELL) / 2),
+        behavior: "auto",
+      });
+    }
+  }, [previewIdx]);
+
   if (hours.length < 2) return null;
 
-  const H = 64;
-  const padL = 10;
-  const padR = 10;
-  const curveTop = 14;
-  const curveBottom = 38;
-  const w = Math.max(width, 120);
-  const step = (w - padL - padR) / (hours.length - 1);
-  const temps = hours.map((h) => h.temp);
-  const tMin = Math.min(...temps);
-  const tMax = Math.max(...temps);
-  const span = Math.max(tMax - tMin, 1);
-  const x = (i: number) => padL + i * step;
-  const y = (t: number) => curveBottom - ((t - tMin) / span) * (curveBottom - curveTop);
-
-  let d = `M ${x(0)} ${y(temps[0])}`;
-  for (let i = 1; i < hours.length; i++) {
-    const mx = (x(i - 1) + x(i)) / 2;
-    d += ` Q ${x(i - 1)} ${y(temps[i - 1])} ${mx} ${(y(temps[i - 1]) + y(temps[i])) / 2}`;
-  }
-  d += ` T ${x(hours.length - 1)} ${y(temps[hours.length - 1])}`;
-
   const idxFromClientX = (clientX: number) => {
-    const el = wrapRef.current;
+    const el = scrollRef.current;
     if (!el) return 0;
     const rect = el.getBoundingClientRect();
-    const t = (clientX - rect.left - padL) / Math.max(rect.width - padL - padR, 1);
-    return Math.max(0, Math.min(hours.length - 1, Math.round(t * (hours.length - 1))));
+    const t = clientX - rect.left + el.scrollLeft;
+    // Each cell is STRIP_CELL wide + STRIP_GAP between cells.
+    // Dividing by STRIP_CELL alone drifts by 1 cell every ~14 hours.
+    return Math.max(0, Math.min(hours.length - 1, Math.floor(t / STRIP_PITCH)));
   };
 
   const pv = previewIdx != null ? hours[previewIdx] : null;
-  const labelIdx = pickLabelIndices(hours, x, 44);
 
   return (
     <div
-      ref={wrapRef}
       role="slider"
       tabIndex={0}
       aria-label="Preview the rest of the day"
@@ -349,7 +350,7 @@ function DayStrip({ hours, conv, skin, accent, previewIdx, previewPinned, onPrev
       aria-valuenow={previewIdx ?? 0}
       aria-valuetext={pv ? `${formatHourLabel(pv.time)}, ${conv(pv.temp)} degrees, ${pv.precip}% chance of precipitation` : "Now"}
       className="relative shrink-0 cursor-grab select-none outline-none rounded-xl focus-visible:ring-2 focus-visible:ring-offset-0 active:cursor-grabbing"
-      style={{ height: H, touchAction: "pan-y", ["--tw-ring-color" as string]: accent }}
+      style={{ touchAction: "pan-y", ["--tw-ring-color" as string]: accent }}
       onPointerDown={(e) => {
         draggingRef.current = true;
         startXRef.current = e.clientX;
@@ -384,50 +385,44 @@ function DayStrip({ hours, conv, skin, accent, previewIdx, previewPinned, onPrev
       }}
       onBlur={() => { if (!previewPinned) onPreview(null); }}
     >
-      {width > 0 && (
-        <svg width={w} height={H} className="block" aria-hidden="true">
-          <line x1={x(0)} y1={curveTop - 4} x2={x(0)} y2={52} stroke={accent} strokeWidth={1.25} opacity={0.55} />
-          {hours.map((h, i) => (
-            h.precip >= 40 ? (
-              <rect
-                key={`r${i}`}
-                x={x(i) - 1.5}
-                y={44}
-                width={3}
-                height={7}
-                rx={1.5}
-                fill={accent}
-                opacity={Math.min(0.4 + h.precip / 140, 1)}
-              />
-            ) : null
-          ))}
-          <path d={d} fill="none" stroke={accent} strokeWidth={2.25} strokeLinecap="round" opacity={0.9} />
-          <circle cx={x(0)} cy={y(temps[0])} r={3.5} fill={accent} />
-          {labelIdx.map((i) => (
-            <text
-              key={`t${i}`}
-              x={x(i)}
-              y={60}
-              textAnchor={i === 0 ? "start" : i === hours.length - 1 ? "end" : "middle"}
-              fontSize={11}
-              fontWeight={700}
-              letterSpacing={0.2}
-              fill={i === 0 ? accent : skin.inkSoft}
+      <div ref={scrollRef} className="scrollbar-hide flex gap-1 overflow-x-auto pb-1" aria-hidden="true">
+        {hours.map((h, i) => {
+          const selected = previewIdx === i;
+          return (
+            <div
+              key={h.time}
+              data-selected={selected || undefined}
+              className="flex shrink-0 flex-col items-center gap-0.5 rounded-2xl px-1 py-1 transition-colors"
+              style={{
+                width: STRIP_CELL,
+                background: selected ? `${accent}26` : undefined,
+                boxShadow: selected ? `inset 0 0 0 1.5px ${accent}` : undefined,
+                animation: selected ? "wxThumbIn 0.22s var(--ease-settle, ease-out) both" : undefined,
+              }}
             >
-              {i === 0 ? "NOW" : formatHourTick(hours[i].time)}
-            </text>
-          ))}
-          {previewIdx != null && pv && (
-            <g style={{ animation: "wxThumbIn 0.22s var(--ease-settle, ease-out) both" }}>
-              <circle cx={x(previewIdx)} cy={y(pv.temp)} r={previewPinned ? 6 : 5} fill={accent} stroke={skin.night ? "#0A0A0A" : "#FFFFFF"} strokeWidth={previewPinned ? 2.5 : 2} />
-              <rect x={x(previewIdx) - 19} y={y(pv.temp) - 26} width={38} height={17} rx={8.5} fill={skin.night ? "rgba(255,255,255,0.14)" : "rgba(0,0,0,0.10)"} />
-              <text x={x(previewIdx)} y={y(pv.temp) - 13.5} textAnchor="middle" fontSize={11} fontWeight={800} fill={skin.ink}>
-                {conv(pv.temp)}°
-              </text>
-            </g>
-          )}
-        </svg>
-      )}
+              <span
+                className="text-[11px] font-bold tracking-wide"
+                style={{ color: i === 0 ? accent : skin.inkSoft }}
+              >
+                {i === 0 ? "NOW" : formatHourTick(h.time)}
+              </span>
+              <span className="flex h-[26px] w-full items-center justify-center">
+                <Condition code={sceneToCondition(wmoToScene(h.code, h.isDay), h.code)} size={26} />
+              </span>
+              <span className="text-[13px] font-black tabular-nums" style={{ color: skin.ink }}>
+                {conv(h.temp)}°
+              </span>
+              {h.precip >= 20 ? (
+                <span className="text-[10px] font-semibold tabular-nums" style={{ color: accent }}>
+                  {h.precip}%
+                </span>
+              ) : (
+                <span className="h-[12px]" />
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -589,7 +584,7 @@ function TimelineScrubber({ hours, conv, accent, idx, onIdx }: {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function WeatherWidget({ className = "" }: { className?: string }) {
-  const { weather, setUnit } = useWeatherConfig();
+  const { weather } = useWeatherConfig();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [previewIdx, setPreviewIdx] = useState<number | null>(null);
@@ -603,6 +598,11 @@ export default function WeatherWidget({ className = "" }: { className?: string }
   const [tabHidden, setTabHidden] = useState(false);
   const [familyEvents, setFamilyEvents] = useState<InsightEvent[]>([]);
   const [previewPinned, setPreviewPinned] = useState(false);
+  const previewPinnedRef = useRef(false);
+  const setPinned = useCallback((v: boolean) => {
+    previewPinnedRef.current = v;
+    setPreviewPinned(v);
+  }, []);
   const detailsBtnRef = useRef<HTMLButtonElement | null>(null);
   const taughtRef = useRef(false);
   const { runtime } = useRuntimeConfig();
@@ -651,7 +651,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
         const hours: HourPoint[] = [];
         if (hourly?.time) {
           const nowMs = Date.now();
-          let start = hourly.time.findIndex((t: string) => parseLocalIso(t) >= nowMs - 59 * 60 * 1000);
+          let start = hourly.time.findIndex((t: string) => new Date(t).getTime() >= nowMs - 59 * 60 * 1000);
           if (start === -1) start = 0;
           const fallbackIsDay = getRealTimeOfDay() === "day";
           for (let i = start; i < Math.min(start + 24, hourly.time.length); i++) {
@@ -698,7 +698,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
         const severeKind = severeFamily(current.weather_code ?? 1);
         if (severeKind && hourly?.time) {
           const nowMs = Date.now();
-          let i = hourly.time.findIndex((t: string) => parseLocalIso(t) >= nowMs - 59 * 60 * 1000);
+          let i = hourly.time.findIndex((t: string) => new Date(t).getTime() >= nowMs - 59 * 60 * 1000);
           if (i === -1) i = 0;
           for (; i < hourly.time.length; i++) {
             if (severeFamily(hourly.weather_code?.[i] ?? 0) !== severeKind) { severeEndISO = hourly.time[i]; break; }
@@ -819,7 +819,9 @@ export default function WeatherWidget({ className = "" }: { className?: string }
 
   useEffect(() => () => { if (releaseTimerRef.current) window.clearTimeout(releaseTimerRef.current); }, []);
 
-  const conv = (f: number) => (weather.unit === "C" ? toC(f) : Math.round(f));
+  // Fahrenheit-only widget — the Open-Meteo fetch requests °F and every
+  // temperature renders as-is; there is no °C toggle anymore.
+  const conv = (f: number) => Math.round(f);
 
   const season = (weather.season === "auto" ? getRealSeason() : weather.season) as SeasonKey;
   const todOverride = weather.timeOfDay;
@@ -842,35 +844,21 @@ export default function WeatherWidget({ className = "" }: { className?: string }
   const sceneIsDay = resolveIsDay(activeHour ? activeHour.isDay : weatherData?.isDay);
   const sceneCode = activeHour?.code ?? weatherData?.code ?? 1;
   const isPaused = !!fetchError && !weatherData;
-  const sceneState: SceneState = isPaused
-    ? {
-        code: 45,
-        isDay: true,
-        cloudCover: 88,
-        windSpeed: 4,
-        windDir: 270,
-        precipProb: 0,
-        humidity: 88,
-        sunProgress: 0.5,
-        visibility: 6000,
-        timestamp: 0,
-      }
-    : {
-        code: sceneCode,
-        isDay: sceneIsDay,
-        cloudCover: activeHour?.cloud ?? weatherData?.cloud ?? 25,
-        windSpeed: activeHour?.wind ?? weatherData?.wind ?? 6,
-        windDir: activeHour?.windDir ?? weatherData?.windDir ?? 270,
-        precipProb: activeHour?.precip ?? (RAIN_CODES.has(sceneCode) ? 70 : 8),
-        humidity: activeHour?.humidity ?? weatherData?.humidity ?? 50,
-        sunProgress: sunProgressAt(
-          activeHour?.time ?? new Date().toISOString(),
-          weatherData?.sunriseISO ?? null,
-          weatherData?.sunsetISO ?? null
-        ),
-        visibility: activeHour?.visibility ?? weatherData?.visibility ?? null,
-        timestamp: activeHour ? new Date(activeHour.time).getTime() : weatherData ? new Date().getTime() : 0,
-      };
+  // Toy hero inputs — the card sky/world/icon derive from the same live
+  // code + day flag the old scene used (active hour while previewing).
+  const heroScene = isPaused ? "cloudy" : wmoToScene(sceneCode, sceneIsDay);
+  const condCode = isPaused ? "cloudy" : sceneToCondition(heroScene, sceneCode);
+  const heroCloud = activeHour?.cloud ?? weatherData?.cloud ?? 25;
+  const heroVis = activeHour?.visibility ?? weatherData?.visibility ?? null;
+  const heroFog = isPaused || sceneCode === 45 || sceneCode === 48 || (heroVis != null && heroVis < 8000);
+  const heroBirds =
+    !fetchError &&
+    sceneIsDay &&
+    heroCloud < 30 &&
+    !RAIN_CODES.has(sceneCode) &&
+    !SNOW_CODES.has(sceneCode) &&
+    !STORM_CODES.has(sceneCode) &&
+    !heroFog;
   const rawSkin = getWeatherSkin(season, !sceneIsDay, sceneCode);
   // Severity owns the card: storms and heavy snow never borrow the holiday
   // party accent, and the celebratory layers stay home until it passes.
@@ -886,14 +874,20 @@ export default function WeatherWidget({ className = "" }: { className?: string }
     return () => obs.disconnect();
   }, []);
   const skin = useMemo(() => {
-    if (!isBoosted) return rawSkin;
+    // Text ink follows the TOY sky, not the legacy skin — the card background
+    // is the SKY stack now, and the skin inks were tuned for the old skies.
+    // storm keeps white; every other scene (incl. the lightened night) reads
+    // as a pastel that dark slate-800 ink passes AA on at every stop.
+    const toyInk = heroScene === "storm" ? "#FFFFFF" : "#1E293B";
+    const softAlpha = isBoosted ? 0.9 : 0.78;
     return {
       ...rawSkin,
-      inkSoft: rawSkin.inkSoft.replace(/0\.\d+\)$/, "0.85)"),
-      border: rawSkin.border.replace(/0\.\d+\)$/, "0.35)"),
-      stripTrack: rawSkin.stripTrack.replace(/0\.\d+\)$/, "0.28)"),
+      ink: toyInk,
+      inkSoft: heroScene === "storm" ? `rgba(255,255,255,${softAlpha})` : `rgba(30,41,59,${softAlpha})`,
+      border: isBoosted ? rawSkin.border.replace(/0\.\d+\)$/, "0.35)") : rawSkin.border,
+      stripTrack: isBoosted ? rawSkin.stripTrack.replace(/0\.\d+\)$/, "0.28)") : rawSkin.stripTrack,
     };
-  }, [rawSkin, isBoosted]);
+  }, [rawSkin, isBoosted, heroScene]);
 
   const heroTempTarget = activeHour
     ? conv(activeHour.temp)
@@ -962,31 +956,35 @@ export default function WeatherWidget({ className = "" }: { className?: string }
   const handleStripTap = (idx: number) => {
     // Tap (no horizontal intent) pins the preview — the answer stays on the
     // card until you look back at it, then release via "Back to now".
-    setPreviewPinned(true);
+    setPinned(true);
     setPreviewIdx(idx);
   };
 
   const handleStripRelease = useCallback(() => {
-    setPreviewPinned(false);
+    setPinned(false);
     setPreviewIdx(null);
-  }, []);
+  }, [setPinned]);
 
   // Teach by demonstration: once, on first data, the scene briefly visits
   // mid-afternoon then glides home — the signature move introduces itself.
+  // A user pin during the demo wins: the revert never un-pins a real answer.
   useEffect(() => {
     if (taughtRef.current || !weatherData || loading || fetchError) return;
     if (stripHours.length < 4) return;
     taughtRef.current = true;
     if (typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const target = Math.min(stripHours.length - 1, 6);
+    let revertId: number | undefined;
     const teachId = window.setTimeout(() => {
       setPreviewIdx(target);
-      window.setTimeout(() => {
-        setPreviewIdx(null);
-        setPreviewPinned(false);
+      revertId = window.setTimeout(() => {
+        if (!previewPinnedRef.current) setPreviewIdx(null);
       }, 1400);
     }, 900);
-    return () => window.clearTimeout(teachId);
+    return () => {
+      window.clearTimeout(teachId);
+      if (revertId != null) window.clearTimeout(revertId);
+    };
   }, [weatherData, loading, fetchError, stripHours.length]);
 
   const heroCondition = activeHour
@@ -1017,11 +1015,16 @@ export default function WeatherWidget({ className = "" }: { className?: string }
           border: `1px solid ${skin.border}`,
           boxShadow: `0 0 60px ${skin.glow}, 0 16px 48px rgba(0,0,0,0.22), inset 0 1px 0 ${skin.night ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.35)"}`,
           transition: "box-shadow 0.8s ease, border-color 0.8s ease",
-          minHeight: "220px",
-          background: skin.skyBottom,
+          minHeight: "clamp(200px, 40vw, 340px)",
+          background: "transparent",
         }}
       >
-        <WeatherScene skin={skin} state={sceneState} season={season} animated={!fetchError} />
+        {Object.entries(SKY).map(([k, g]) => (
+          <div key={k} className={`wx-sky absolute inset-0 bg-gradient-to-b ${g}`} data-active={heroScene === k} />
+        ))}
+        <div className="absolute inset-0 overflow-hidden" aria-hidden="true">
+          <SceneLayers scene={heroScene} showFog={heroFog} showBirds={heroBirds} />
+        </div>
         {fetchError && !weatherData && (
           <div className="pointer-events-none absolute inset-0 z-[1] bg-[rgba(120,128,145,0.38)] backdrop-blur-[1px]" aria-hidden="true" />
         )}
@@ -1039,40 +1042,47 @@ export default function WeatherWidget({ className = "" }: { className?: string }
           className="pointer-events-none absolute inset-0 z-10"
           aria-hidden="true"
           style={{
-            background: `radial-gradient(70% 55% at 50% 42%, ${skin.night ? "rgba(6,6,9,0.40)" : "rgba(255,255,255,0.30)"} 0%, transparent 72%)`,
+            background: `radial-gradient(70% 55% at 50% 42%, ${heroScene === "storm" ? "rgba(6,6,9,0.40)" : "rgba(255,255,255,0.24)"} 0%, transparent 72%)`,
           }}
         />
 
-        <div className="pointer-events-none relative z-20 flex h-full min-h-0 flex-col px-5 pb-4 pt-4">
+        <div className="pointer-events-none relative z-20 flex h-full min-h-0 flex-col px-4 pb-3 pt-3 sm:px-5 sm:pb-4 sm:pt-4">
           <div className="flex items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-1.5 text-sm font-semibold">
+            <div className={`flex min-w-0 items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold ${heroScene === "storm" ? GLASS_NIGHT : GLASS}`}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2}
-                className="h-3.5 w-3.5 shrink-0" style={{ color: accent }}>
+                className="relative h-3.5 w-3.5 shrink-0" style={{ color: accent }}>
                 <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
                 <circle cx="12" cy="10" r="3" />
               </svg>
-              <span className="truncate" style={{ color: skin.ink }}>{weather.location}</span>
+              <span className="relative truncate" style={{ color: skin.ink }}>{weather.location}</span>
               {holidayStyle && (
                 <span
                   className="ml-1 shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider"
-                  style={{ background: `${holidayStyle.accent}22`, color: skin.night ? holidayStyle.accent : skin.ink, border: `1px solid ${holidayStyle.accent}55` }}
+                  style={{ background: `${holidayStyle.accent}22`, color: heroScene === "storm" ? holidayStyle.accent : skin.ink, border: `1px solid ${holidayStyle.accent}55` }}
                 >
                   {holidayStyle.label}
                 </span>
               )}
             </div>
+
             <button
+              ref={detailsBtnRef}
               type="button"
-              onClick={() => setUnit(weather.unit === "F" ? "C" : "F")}
-              aria-label={`Switch to ${weather.unit === "F" ? "Celsius" : "Fahrenheit"}`}
-              className="pointer-events-auto relative z-30 flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-full px-3 text-xs font-bold transition-colors focus-visible:outline-none focus-visible:ring-2"
-              style={{ background: skin.stripTrack, color: skin.ink, ["--tw-ring-color" as string]: accent }}
+              onClick={() => setDetailsOpen(true)}
+              aria-expanded={detailsOpen}
+              aria-controls="weather-details-dialog"
+              aria-label="Open weather details"
+              className={`pointer-events-auto relative z-30 flex min-h-[44px] items-center gap-1 rounded-full px-3 py-1 text-xs font-bold transition-all duration-200 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 ${heroScene === "storm" ? GLASS_NIGHT : GLASS}`}
+              style={{ color: heroScene === "storm" ? accent : skin.ink, ["--tw-ring-color" as string]: accent }}
             >
-              <span aria-hidden="true">°{weather.unit === "F" ? "C" : "F"}</span>
+              <span>Details</span>
+              <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 opacity-60" aria-hidden="true">
+                <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
+              </svg>
             </button>
           </div>
 
-          <div className="flex min-h-0 flex-1 flex-col items-center justify-center text-center">
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-start text-center">
             <div role="status" aria-live="polite" className="sr-only">{liveAnnouncement}</div>
             {loading ? (
               <div className="w-full space-y-2.5">
@@ -1083,37 +1093,43 @@ export default function WeatherWidget({ className = "" }: { className?: string }
             ) : (
               <>
                 {/* isolate: keeps the scene SVG from stacking over the hero digits */}
-                <div className="isolate flex items-start leading-none">
+                <div className="isolate relative mt-1 sm:mt-2 flex w-full items-center justify-between">
+                  <div className="flex items-baseline leading-none">
                   {heroTempTarget == null ? (
-                    <span data-testid="wx-hero-temp" className="text-[56px] font-black leading-none tracking-[-0.03em] xl:text-[64px]" style={{ color: skin.ink }}>—</span>
+                    <span data-testid="wx-hero-temp" className="text-[44px] font-black leading-none tracking-[-0.03em] sm:text-[56px] xl:text-[64px]" style={{ color: skin.ink }}>—</span>
                   ) : (
                     <>
                       <span
                         data-testid="wx-hero-temp"
-                        className="relative z-10 text-[56px] font-black leading-none tracking-[-0.03em] tabular-nums xl:text-[64px]"
+                        className="relative z-10 text-[44px] font-black leading-none tracking-[-0.03em] tabular-nums sm:text-[56px] xl:text-[64px]"
                         style={{ color: skin.ink }}
                       >
                         {heroTemp}
                       </span>
-                      <span className="mt-1.5 ml-0.5 text-[28px] font-light leading-none" style={{ color: skin.inkSoft }} aria-hidden="true">°</span>
+                      <span className="self-start mt-1.5 ml-0.5 text-[22px] font-light leading-none sm:mt-2 sm:text-[28px]" style={{ color: skin.inkSoft }} aria-hidden="true">°</span>
                       <span className="sr-only"> degrees</span>
                     </>
                   )}
+                  </div>
+                  {/* clay condition — clamp prevents overflow on 320 px phones */}
+                  <div data-testid="wx-hero-icon" className="shrink-0 flex items-center justify-center" style={{ width: "clamp(56px, 18vw, 76px)", height: "clamp(56px, 18vw, 76px)", animation: "wxThumbIn .6s cubic-bezier(.2,.8,.2,1) both" }}>
+                    <Condition code={condCode} size={76} />
+                  </div>
                 </div>
                 {heroCondition && (
-                  <p className="relative z-10 mt-1.5 text-[15px] font-semibold leading-none" style={{ color: skin.ink }}>
+                  <p className="relative z-10 mt-1 text-[15px] font-semibold leading-none" style={{ color: skin.ink }}>
                     {heroCondition}
                   </p>
                 )}
                 {severeLine && (
                   <div className="relative z-10 mt-1.5 max-w-full rounded-2xl px-3 py-2 text-center" style={{ background: `${accent}18`, border: `1px solid ${accent}22` }} role="status">
-                    <p className="text-[11px] font-bold leading-tight" style={{ color: skin.night ? "#FFF8EC" : "#4A2E05" }}>{severeFamily(weatherData?.code ?? 0) === "snow" ? "❄️" : "⛈️"} {severeLine.headline}</p>
-                    <p className="mt-0.5 text-[11px] font-medium leading-tight" style={{ color: skin.night ? "rgba(255,248,236,0.85)" : "rgba(74,46,5,0.85)" }}>{severeLine.detail}</p>
+                    <p className="text-[11px] font-bold leading-tight" style={{ color: heroScene === "storm" ? "#FFF8EC" : "#4A2E05" }}>{severeFamily(weatherData?.code ?? 0) === "snow" ? "❄️" : "⛈️"} {severeLine.headline}</p>
+                    <p className="mt-0.5 text-[11px] font-medium leading-tight" style={{ color: heroScene === "storm" ? "rgba(255,248,236,0.85)" : "rgba(74,46,5,0.85)" }}>{severeLine.detail}</p>
                   </div>
                 )}
                 {!severeLine && fusionLine && (
                   <div className="relative z-10 mt-1.5 max-w-full rounded-2xl px-3 py-2 text-center" style={{ background: `${accent}14`, border: `1px solid ${accent}20` }}>
-                    <p className="text-[11px] font-bold leading-tight" style={{ color: skin.night ? accent : skin.ink }}>📅 {fusionLine.headline}</p>
+                    <p className="text-[11px] font-bold leading-tight" style={{ color: heroScene === "storm" ? accent : skin.ink }}>📅 {fusionLine.headline}</p>
                     <p className="mt-0.5 text-[11px] font-medium leading-tight" style={{ color: skin.inkSoft }}>{fusionLine.detail}</p>
                   </div>
                 )}
@@ -1122,14 +1138,14 @@ export default function WeatherWidget({ className = "" }: { className?: string }
                     H:{displayHigh}° L:{displayLow}°{feelsNote && ` · ${feelsNote}`}
                   </p>
                 )}
-                {!severeLine && !fusionLine && !activeHour && wearLine && (
+                {!severeLine && !fusionLine && !activeHour && (weatherData?.outlook || wearLine) && (
                   <p className="relative z-10 mt-0.5 text-xs font-medium" style={{ color: skin.inkSoft }}>
-                    {wearLine.headline}
+                    {weatherData?.outlook ?? wearLine?.headline}
                   </p>
                 )}
-                {!severeLine && !fusionLine && !activeHour && weatherData?.outlook && (
+                {!severeLine && !fusionLine && !activeHour && weatherData?.outlook && wearLine && (
                   <p className="relative z-10 mt-0.5 text-xs font-medium" style={{ color: skin.inkSoft }}>
-                    {weatherData.outlook}
+                    {wearLine.headline}
                   </p>
                 )}
                 {fetchError && (
@@ -1150,25 +1166,39 @@ export default function WeatherWidget({ className = "" }: { className?: string }
           </div>
 
           {!loading && stripHours.length >= 2 && (
-            <div className="pointer-events-auto shrink-0">
-              <p className="mb-1 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.16em]" style={{ color: skin.inkSoft }}>
-                <span>{stripHours.length > 0 && new Date(stripHours[0].time).getDate() !== new Date(stripHours[stripHours.length - 1].time).getDate() ? "Next hours" : "Rest of today"}</span>
-                <svg viewBox="0 0 10 16" className="h-4 w-2.5 shrink-0 opacity-70" aria-hidden="true">
-                  <circle cx="2.5" cy="3" r="1.4" fill="currentColor" /><circle cx="7.5" cy="3" r="1.4" fill="currentColor" />
-                  <circle cx="2.5" cy="8" r="1.4" fill="currentColor" /><circle cx="7.5" cy="8" r="1.4" fill="currentColor" />
-                  <circle cx="2.5" cy="13" r="1.4" fill="currentColor" /><circle cx="7.5" cy="13" r="1.4" fill="currentColor" />
-                </svg>
-                {previewPinned && (
+            <div className="pointer-events-auto mt-auto shrink-0 pt-2">
+              <div className="mb-1.5 flex items-center justify-between text-[11px] font-bold uppercase tracking-[0.16em]" style={{ color: skin.inkSoft }}>
+                <div className="flex items-center gap-1.5">
+                  <span>Rest of today</span>
+                  <svg viewBox="0 0 10 16" className="h-4 w-2.5 shrink-0 opacity-70" aria-hidden="true">
+                    <circle cx="2.5" cy="3" r="1.4" fill="currentColor" /><circle cx="7.5" cy="3" r="1.4" fill="currentColor" />
+                    <circle cx="2.5" cy="8" r="1.4" fill="currentColor" /><circle cx="7.5" cy="8" r="1.4" fill="currentColor" />
+                    <circle cx="2.5" cy="13" r="1.4" fill="currentColor" /><circle cx="7.5" cy="13" r="1.4" fill="currentColor" />
+                  </svg>
+                </div>
+                {previewPinned ? (
                   <button
                     type="button"
                     onClick={handleStripRelease}
-                    className="relative z-30 ml-auto flex min-h-[44px] items-center rounded-full px-3 text-[11px] font-bold normal-case tracking-normal transition-colors focus-visible:outline-none focus-visible:ring-2"
+                    className="hit-44 relative z-30 flex min-h-[36px] items-center rounded-full px-2.5 text-[11px] font-bold normal-case tracking-normal transition-colors focus-visible:outline-none focus-visible:ring-2"
                     style={{ background: skin.stripTrack, color: skin.ink, ["--tw-ring-color" as string]: accent }}
                   >
                     ↩ Back to now
                   </button>
+                ) : (
+                  updatedLabel && (
+                    <span
+                      className="rounded-full px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal"
+                      style={{
+                        color: minutesSinceUpdate != null && minutesSinceUpdate > 30 ? "#92400e" : skin.inkSoft,
+                        background: minutesSinceUpdate != null && minutesSinceUpdate > 30 ? "rgba(251,191,36,0.18)" : "transparent",
+                      }}
+                    >
+                      {updatedLabel}
+                    </span>
+                  )
                 )}
-              </p>
+              </div>
               <DayStrip
                 hours={stripHours}
                 conv={conv}
@@ -1183,29 +1213,11 @@ export default function WeatherWidget({ className = "" }: { className?: string }
             </div>
           )}
 
-          <div className="mt-2 flex items-center justify-between gap-3">
-            <span
-              className="rounded-full px-2 py-0.5 text-[11px] font-medium"
-              style={{
-                color: minutesSinceUpdate != null && minutesSinceUpdate > 30 ? "#92400e" : skin.inkSoft,
-                background: minutesSinceUpdate != null && minutesSinceUpdate > 30 ? "rgba(251,191,36,0.18)" : "transparent",
-              }}
-            >
-              {updatedLabel ?? ""}
-            </span>
-            <button
-              ref={detailsBtnRef}
-              type="button"
-              onClick={() => setDetailsOpen(true)}
-              aria-expanded={detailsOpen}
-              aria-controls="weather-details-dialog"
-              aria-label="Open weather details"
-              className="pointer-events-auto relative z-30 flex min-h-[44px] min-w-[44px] items-center justify-center gap-1 rounded-lg px-2.5 text-xs font-bold transition-all duration-200 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-0"
-              style={{ color: skin.night ? accent : skin.ink, ["--tw-ring-color" as string]: accent }}
-            >
-              Details
-            </button>
-          </div>
+          {(!stripHours || stripHours.length < 2) && updatedLabel && (
+            <div className="mt-auto pt-2 text-right text-[10px] font-medium" style={{ color: skin.inkSoft }}>
+              <span>{updatedLabel}</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1217,6 +1229,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
           season={season}
           todOverride={todOverride}
           accent={accent}
+          fetchError={fetchError}
           onClose={closeDetails}
         />
       )}
@@ -1226,13 +1239,14 @@ export default function WeatherWidget({ className = "" }: { className?: string }
 
 // ─── Details modal — 24h timeline scrubber + exploded metrics ───────────────
 
-function WeatherDetailsModal({ data, location, conv, season, todOverride, accent, onClose }: {
+function WeatherDetailsModal({ data, location, conv, season, todOverride, accent, fetchError, onClose }: {
   data: WeatherData;
   location: string;
   conv: (f: number) => number;
   season: SeasonKey;
   todOverride: "auto" | "day" | "night";
   accent: string;
+  fetchError: string | null;
   onClose: () => void;
 }) {
   const [scrubIdx, setScrubIdx] = useState(0);
@@ -1272,10 +1286,24 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, accent
   const mCode = scrubHour?.code ?? data.code;
   const mSkin = getWeatherSkin(season, !mIsDay, mCode);
 
+  // Toy modal hero follows the scrubbed hour like the card follows preview.
+  const mScene = wmoToScene(mCode, mIsDay);
+  const mCond = sceneToCondition(mScene, mCode);
+  const mVis = scrubHour?.visibility ?? data.visibility;
+  const mFog = mCode === 45 || mCode === 48 || (mVis != null && mVis < 8000);
+  const mCloud = scrubHour?.cloud ?? data.cloud ?? 25;
+  const mBirds =
+    !fetchError &&
+    mIsDay &&
+    mCloud < 30 &&
+    !RAIN_CODES.has(mCode) &&
+    !SNOW_CODES.has(mCode) &&
+    !STORM_CODES.has(mCode) &&
+    !mFog;
+
   const scrubTemp = useAnimatedNumber(conv(scrubHour?.temp ?? data.temp ?? 0));
 
   const nowMoon = moonPhase(new Date().getTime());
-
   const forecastRows = data.forecast.map((day) => ({
     ...day,
     displayHigh: conv(day.high),
@@ -1285,23 +1313,10 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, accent
   const weekMax = forecastRows.length ? Math.max(...forecastRows.map((d) => d.displayHigh)) : 1;
   const weekSpan = Math.max(weekMax - weekMin, 1);
 
-  const sceneState: SceneState = {
-    code: mCode,
-    isDay: mIsDay,
-    cloudCover: scrubHour?.cloud ?? data.cloud ?? 25,
-    windSpeed: scrubHour?.wind ?? data.wind ?? 6,
-    windDir: scrubHour?.windDir ?? data.windDir,
-    precipProb: scrubHour?.precip ?? (RAIN_CODES.has(mCode) ? 70 : 8),
-    humidity: scrubHour?.humidity ?? data.humidity ?? 50,
-    sunProgress: sunProgressAt(scrubHour?.time ?? new Date().toISOString(), data.sunriseISO, data.sunsetISO),
-    visibility: scrubHour?.visibility ?? data.visibility,
-    timestamp: scrubHour ? new Date(scrubHour.time).getTime() : new Date().getTime(),
-  };
-
   return (
     <div
       id="weather-details-dialog"
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-[#0a0f1c]/55 p-3 backdrop-blur-[2px] sm:p-4"
+      className="fixed inset-0 z-[80] flex items-end justify-center bg-[#0a0f1c]/55 p-0 backdrop-blur-[2px] sm:items-center sm:p-4"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -1309,7 +1324,7 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, accent
     >
       <div
         ref={panelRef}
-        className="relative flex w-full max-w-[440px] max-h-[88vh] flex-col overflow-hidden rounded-[2rem] sm:max-h-[84vh]"
+        className="relative flex w-full max-w-[440px] max-h-[92dvh] flex-col overflow-hidden rounded-t-[2rem] rounded-b-none sm:rounded-[2rem] sm:max-h-[84vh]"
         style={{
           background: "linear-gradient(170deg, rgba(16,20,34,0.92) 0%, rgba(10,13,24,0.94) 100%)",
           border: "1px solid rgba(255,255,255,0.12)",
@@ -1319,6 +1334,10 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, accent
         }}
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Drag pill — mobile bottom-sheet affordance */}
+        <div className="flex justify-center pt-2.5 sm:hidden" aria-hidden="true">
+          <div className="h-1 w-10 rounded-full bg-white/25" />
+        </div>
         <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-white/10 bg-[rgba(8,12,24,0.42)] px-5 py-3 backdrop-blur-md">
           <div className="min-w-0">
             <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-white/60">Weather</p>
@@ -1335,11 +1354,17 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, accent
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto" style={{ WebkitOverflowScrolling: "touch", overscrollBehavior: "contain" }}>
           <div className="space-y-5 p-5">
-            <div className="relative h-48 overflow-hidden rounded-2xl" style={{ border: "1px solid rgba(255,255,255,0.10)" }}>
-              <WeatherScene skin={mSkin} state={sceneState} season={season} />
-              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
+            <div className="relative h-56 overflow-hidden rounded-2xl" style={{ border: "1px solid rgba(255,255,255,0.10)" }}>
+              {Object.entries(SKY).map(([k, g]) => (
+                <div key={k} className={`wx-sky absolute inset-0 bg-gradient-to-b ${g}`} data-active={mScene === k} />
+              ))}
+              <div className="absolute inset-0 overflow-hidden" aria-hidden="true">
+                <SceneLayers scene={mScene} showFog={mFog} showBirds={mBirds} />
+              </div>
+              <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 text-center">
+                <Condition code={mCond} size={64} />
                 <div className="flex items-start leading-none">
                   <span
                     className="text-[60px] font-black leading-none tracking-[-0.03em] tabular-nums"
@@ -1461,7 +1486,9 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, accent
                       <span className="text-[11px] font-bold" style={{ color: i === scrubIdx ? accent : "rgba(255,255,255,0.6)" }}>
                         {i === 0 ? "NOW" : formatHourTick(h.time)}
                       </span>
-                      <span className="text-base leading-none">{wmoToCondition(h.code).emoji}</span>
+                      <span className="flex h-[26px] w-full items-center justify-center" aria-hidden="true">
+                        <Condition code={sceneToCondition(wmoToScene(h.code, h.isDay), h.code)} size={24} />
+                      </span>
                       <span className="text-sm font-black tabular-nums text-white">{conv(h.temp)}°</span>
                       {h.precip >= 20 ? (
                         <span className="text-[11px] font-semibold tabular-nums" style={{ color: accent }}>
@@ -1495,10 +1522,13 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, accent
                         }}
                       >
                         <span className="w-9 shrink-0 text-xs font-bold tracking-wide text-white">{day.day}</span>
-                        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-white/10 text-[15px] leading-none ring-1 ring-white/10">{day.emoji}</span>
+                        <span className="grid h-9 w-9 shrink-0 place-items-center" aria-hidden="true">
+                          <Condition code={dayCondition(day.condition)} size={22} />
+                        </span>
                         <span className="hidden min-w-0 flex-1 truncate text-xs font-medium text-white/75 sm:block">{day.condition}</span>
                         <span className="shrink-0 rounded-full px-2 py-1 text-xs font-bold leading-none text-white" style={{ background: `${accent}22`, border: `1px solid ${accent}30` }}>{day.precipitation}%</span>
-                        <span className="w-8 shrink-0 text-right text-sm font-semibold text-white/70">{day.displayLow}°</span>
+                        {/* Low temp hidden on very small phones to avoid crowding */}
+                        <span className="hidden min-[380px]:inline w-8 shrink-0 text-right text-sm font-semibold text-white/70">{day.displayLow}°</span>
                         <div className="relative h-1.5 min-w-10 flex-1 rounded-full bg-white/10 sm:max-w-24" aria-hidden="true">
                           <div
                             className="absolute inset-y-0 rounded-full"

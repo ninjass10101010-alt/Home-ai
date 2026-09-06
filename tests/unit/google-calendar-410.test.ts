@@ -15,20 +15,30 @@ vi.mock("../../src/lib/pb-auth.ts", () => ({
 
 import { syncCalendar } from "../../src/lib/google/calendar.ts";
 
+// Multi-calendar world (Fix-C): per-calendar tokens live in
+// consuela_google_calendar_sync. This mock seeds the primary calendar's row
+// with the stale token (mirroring the post-migration state).
 function pbMock() {
-  const stateUpdates: any[] = [];
+  const calUpdates: any[] = [];
   const eventCreates: any[] = [];
+  const calRow = {
+    id: "cal-row",
+    calendar_id: "primary",
+    summary: "Primary",
+    selected: true,
+    sync_token: "STALE_TOKEN",
+  };
   const pb = {
     collection: (name: string) => {
-      if (name === "consuela_google_sync_state") {
+      if (name === "consuela_google_calendar_sync") {
         return {
-          getFullList: async () => [{ id: "state-row", resource: "calendar", sync_token: "STALE_TOKEN" }],
+          getFullList: async () => [calRow],
           update: async (_id: string, payload: any) => {
-            stateUpdates.push(payload);
-            return { id: "state-row" };
+            calUpdates.push(payload);
+            return { id: "cal-row" };
           },
           create: async (payload: any) => {
-            stateUpdates.push(payload);
+            calUpdates.push(payload);
             return { id: "new-row" };
           },
         };
@@ -44,7 +54,7 @@ function pbMock() {
       };
     },
   };
-  return { pb, stateUpdates, eventCreates };
+  return { pb, calUpdates, eventCreates };
 }
 
 beforeEach(() => {
@@ -54,7 +64,7 @@ beforeEach(() => {
 
 describe("syncCalendar — expired sync token (HTTP 410)", () => {
   it("clears the invalid token and falls back to a full resync in the same run", async () => {
-    const { pb, stateUpdates } = pbMock();
+    const { pb, calUpdates } = pbMock();
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
 
     mocks.googleFetch
@@ -89,19 +99,30 @@ describe("syncCalendar — expired sync token (HTTP 410)", () => {
     expect(secondCall.query.timeMax).toBeTruthy();
 
     // The fresh token replaces the dead one and status is ok
-    expect(stateUpdates).toHaveLength(1);
-    expect(stateUpdates[0].sync_token).toBe("FRESH_TOKEN");
-    expect(stateUpdates[0].last_status).toBe("ok");
+    const saved = calUpdates.find((p) => p.last_status === "ok");
+    expect(saved).toBeTruthy();
+    expect(saved.sync_token).toBe("FRESH_TOKEN");
+    expect(saved.calendar_id).toBe("primary");
   });
 
-  it("still fails loudly for non-410 errors without wiping the token", async () => {
-    const { pb, stateUpdates } = pbMock();
+  it("isolates a non-410 failure to the calendar (recorded, token untouched, run completes)", async () => {
+    const { pb, calUpdates } = pbMock();
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
 
     mocks.googleFetch.mockRejectedValueOnce(Object.assign(new Error("Google API 500: Backend Error"), { status: 500 }));
 
-    await expect(syncCalendar()).rejects.toThrow("Google API 500");
+    const outcome = (await syncCalendar()) as any;
+
     expect(mocks.googleFetch).toHaveBeenCalledTimes(1);
-    expect(stateUpdates).toHaveLength(0);
+    expect(outcome.perCalendar).toHaveLength(1);
+    expect(outcome.perCalendar[0].ok).toBe(false);
+    expect(outcome.perCalendar[0].error).toContain("Google API 500");
+    expect(outcome.events).toBe(0);
+
+    // The failure is recorded against the calendar WITHOUT wiping its token
+    const errSave = calUpdates.find((p) => p.last_status === "error");
+    expect(errSave).toBeTruthy();
+    expect(errSave.last_error).toContain("Google API 500");
+    expect("sync_token" in errSave).toBe(false);
   });
 });

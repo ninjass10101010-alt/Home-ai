@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import SectionCard from "@/components/patterns/SectionCard";
 import Surface from "@/components/ui/Surface";
@@ -13,6 +13,7 @@ import { useSuggestions } from "./hooks/useSuggestions";
 import SuggestionPinModal from "./SuggestionPinModal";
 import { useAuth } from "@/hooks/useAuth";
 import { visibleSuggestionsForRole } from "@/lib/consuela/suggestion-visibility";
+import { conditionKey } from "@/lib/consuela/suggestion-key";
 import type { ProactiveSuggestion } from "@/lib/consuela/types";
 
 const TOOL_ROUTES: Record<string, string> = {
@@ -83,7 +84,21 @@ export default function HomeSuggestionsWidget({ className = "" }: { className?: 
   const [toast, setToast] = useState<{ msg: string; tone: "success" | "error" } | null>(null);
   const { currentUser } = useAuth();
   const { items: allItems, loading, dismiss, act, needsPin, pinError, submitPin, cancelPin } = useSuggestions(20);
-  const items = visibleSuggestionsForRole(allItems, currentUser?.role);
+  // Same runtime dedupe the chat surface uses (OpenLoopChips): insert-time
+  // normalization can't heal stale pre-fix rows still living in PB, and
+  // "Consuela noticed" showing "2 items…" beside "3 items…" is a trust bug.
+  // Newest wins: the feed is sorted -createdAt (NEWEST FIRST, pb-db.ts), so
+  // the FIRST occurrence per key is the freshest scan — keep it, skip later
+  // stale duplicates.
+  const items = useMemo(() => {
+    const visible = visibleSuggestionsForRole(allItems, currentUser?.role);
+    const byKey = new Map<string, ProactiveSuggestion>();
+    for (const s of visible) {
+      const key = conditionKey(s.kind, s.title);
+      if (!byKey.has(key)) byKey.set(key, s);
+    }
+    return Array.from(byKey.values());
+  }, [allItems, currentUser?.role]);
 
   useEffect(() => {
     setMounted(true);

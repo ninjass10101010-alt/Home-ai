@@ -33,7 +33,7 @@ export default function StatTile({ label, value, detail, icon, tone = "accent", 
       </div>
       <div className={`font-bold tracking-tight text-text-primary display-numeral ${compact ? "text-xl" : "text-2xl"}`}>{value}</div>
       <div className={`mt-1 font-medium text-text-secondary ${compact ? "text-[11px]" : "text-xs"}`}>{label}</div>
-      {detail && <div className={`mt-1 text-text-muted ${compact ? "text-[10px]" : "text-[11px]"}`}>{detail}</div>}
+      {detail && <div className="mt-1 text-[11px] text-text-muted">{detail}</div>}
       {clamped !== null && (
         <div className="absolute inset-x-0 bottom-0 h-[2px] bg-white/8">
           <div

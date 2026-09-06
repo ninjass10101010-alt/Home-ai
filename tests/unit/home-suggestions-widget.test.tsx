@@ -90,4 +90,42 @@ describe("HomeSuggestionsWidget containment", () => {
 
     expect(el.textContent).not.toContain("more · See all →");
   });
+
+  it("runtime-dedupes contradictory rows by conditionKey (newest-first feed wins)", async () => {
+    // Mirrors the PB feed contract: sorted -createdAt (NEWEST FIRST). The two
+    // grocery_store_optimization rows are the same condition scanned twice
+    // ("3 items…" is the fresher count) — only it may render.
+    const rows = [
+      { id: "new", kind: "grocery_store_optimization", severity: "info", title: "3 items have no store assigned", body: "Assign stores", emoji: "🛒", status: "pending", scopeDate: "2026-09-04", createdAt: "2026-09-04T10:00:00.000Z" },
+      { id: "old", kind: "grocery_store_optimization", severity: "info", title: "2 items have no store assigned", body: "Assign stores", emoji: "🛒", status: "pending", scopeDate: "2026-09-03", createdAt: "2026-09-03T10:00:00.000Z" },
+      { id: "other", kind: "calendar_conflict", severity: "warning", title: "Soccer overlaps Piano", body: "Two events", emoji: "📅", status: "pending", scopeDate: "2026-09-04", createdAt: "2026-09-04T09:00:00.000Z" },
+    ];
+    stubFetchWith(rows);
+    const el = render(<HomeSuggestionsWidget />);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 30));
+    });
+
+    expect(el.textContent).toContain("3 items have no store assigned");
+    expect(el.textContent).not.toContain("2 items have no store assigned");
+    // A genuinely different condition still renders.
+    expect(el.textContent).toContain("Soccer overlaps Piano");
+  });
+
+  it("keeps distinct same-kind rows whose titles carry distinguishing names", async () => {
+    // pantry_low titles name the item — digit-normalization must NOT merge
+    // two genuinely different low-stock conditions.
+    const rows = [
+      { id: "a", kind: "pantry_low", severity: "info", title: "Vitamin B12 is running low", body: "", emoji: "🥫", status: "pending", scopeDate: "2026-09-04", createdAt: "2026-09-04T10:00:00.000Z" },
+      { id: "b", kind: "pantry_low", severity: "info", title: "Olive oil is running low", body: "", emoji: "🥫", status: "pending", scopeDate: "2026-09-04", createdAt: "2026-09-04T09:00:00.000Z" },
+    ];
+    stubFetchWith(rows);
+    const el = render(<HomeSuggestionsWidget />);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 30));
+    });
+
+    expect(el.textContent).toContain("Vitamin B12 is running low");
+    expect(el.textContent).toContain("Olive oil is running low");
+  });
 });

@@ -194,6 +194,39 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(document.body.textContent).not.toContain("Humidity");
   });
 
+  it("renders Fahrenheit on the card AND in the details modal even when the stored unit is Celsius", async () => {
+    localStorage.setItem(
+      "home-ai-weather-config",
+      JSON.stringify({ location: "Holland, MI", unit: "C", timeOfDay: "auto", season: "auto", holidayOverride: "auto" })
+    );
+    try {
+      mockOpenMeteo(makeOpenMeteoPayload()); // payload temps are °F (70 / 75 / 58)
+      const el = render(<WeatherWidget />);
+      await settle();
+
+      // card — 70°F, not 21°C
+      expect(el.querySelector('[data-testid="wx-hero-temp"]')?.textContent).toBe("70");
+      expect(el.textContent).toContain("H:75°");
+
+      // no °F/°C toggle anywhere on the card
+      const anyUnitToggle = Array.from(el.querySelectorAll("button")).some((b) => b.getAttribute("aria-label")?.startsWith("Switch to"));
+      expect(anyUnitToggle).toBe(false);
+
+      // details modal — every temp stays Fahrenheit
+      const button = findDetailsButton(el);
+      act(() => button!.click());
+      const modalText = document.body.textContent ?? "";
+      expect(modalText).toContain("70°");
+      expect(modalText).not.toContain("21°");
+      expect(modalText).toContain("72°"); // feels-like row
+
+      // stored config is healed back to F
+      expect((JSON.parse(localStorage.getItem("home-ai-weather-config") ?? "{}") as { unit?: string }).unit).toBe("F");
+    } finally {
+      localStorage.removeItem("home-ai-weather-config");
+    }
+  });
+
   it("shows today's high and low when weather data loads", async () => {
     mockOpenMeteo(makeOpenMeteoPayload());
     const el = render(<WeatherWidget />);
@@ -239,7 +272,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(svg.style.transform).toBe("rotate(70deg)");
   });
 
-  it("renders the day strip as an accessible slider with rain ticks when rain is likely", async () => {
+  it("renders the day strip as an accessible slider with clay icons and precip labels when rain is likely", async () => {
     mockOpenMeteo(makeOpenMeteoPayload({ precip: 80 }));
     const el = render(<WeatherWidget />);
     await settle();
@@ -248,8 +281,11 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(strip).toBeTruthy();
     expect(strip!.textContent).toContain("NOW");
 
-    const ticks = strip!.querySelectorAll("svg rect");
-    expect(ticks.length).toBeGreaterThan(0);
+    // one clay icon cell per hour instead of the old SVG curve…
+    expect(strip!.textContent).toContain("70°");
+    // …and rain shows as precip labels, not SVG rain ticks
+    expect(strip!.textContent).toContain("80%");
+    expect(strip!.querySelectorAll("svg rect").length).toBe(0);
   });
 
   it("previews the next hour via keyboard and returns to now on Escape", async () => {
@@ -272,27 +308,35 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(strip.getAttribute("aria-valuenow")).toBe("0");
   });
 
-  it("switches to the night skin when the API reports is_day=0", async () => {
+  it("switches to the night sky when the API reports is_day=0", async () => {
     mockOpenMeteo(makeOpenMeteoPayload({ isDay: 0 }));
     const el = render(<WeatherWidget />);
     await settle();
 
     const activeSky = el.querySelector('.wx-sky[data-active="true"]') as HTMLElement | null;
     expect(activeSky).toBeTruthy();
-    // Consuela night: lamplit indigo, not near-black
-    expect(activeSky!.style.background).toContain("rgb(27, 30, 51)");
+    // toy night: lightened dusk wash (slate-800 ink passes AA at every stop)
+    expect(activeSky!.className).toContain("from-[#6f74a8]");
+    // night text ink follows the toy sky: slate-800, not the old white-on-lilac
+    const heroTemp = el.querySelector('[data-testid="wx-hero-temp"]') as HTMLElement | null;
+    expect(heroTemp).toBeTruthy();
+    expect(heroTemp!.style.color).toBe("rgb(30, 41, 59)");
   });
 
-  it("renders a storm-gray day sky with amber accent and storm copy when a thunderstorm code arrives", async () => {
+  it("renders a storm-violet sky and storm copy when a thunderstorm code arrives", async () => {
     mockOpenMeteo(makeOpenMeteoPayload({ code: 95 }));
     const el = render(<WeatherWidget />);
     await settle();
 
     const activeSky = el.querySelector('.wx-sky[data-active="true"]') as HTMLElement | null;
     expect(activeSky).toBeTruthy();
-    // summer pastel #FFD8CB (255,216,203) pulled 62% toward storm gray #9AA3AE
-    expect(activeSky!.style.background).not.toContain("rgb(255, 216, 203)");
-    expect(activeSky!.style.background).toContain("linear-gradient");
+    // storm wash, not the clear pastel
+    expect(activeSky!.className).toContain("from-[#6a6f96]");
+    expect(activeSky!.className).not.toContain("from-[#bfe3ff]");
+    // storm keeps WHITE ink — the deepened wash passes AA at every stop
+    const heroTemp = el.querySelector('[data-testid="wx-hero-temp"]') as HTMLElement | null;
+    expect(heroTemp).toBeTruthy();
+    expect(heroTemp!.style.color).toBe("rgb(255, 255, 255)");
     // every mocked hour is stormy, so "clearing time unknown" is the honest line
     expect(el.textContent).toContain("Thunderstorms — inside is best right now");
     expect(el.textContent).toContain("Clearing time unknown");
@@ -318,8 +362,8 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(el.textContent).toContain("Big snow today — boots by the door");
     expect(el.textContent).not.toContain("Raincoats ready");
     const activeSky = el.querySelector('.wx-sky[data-active="true"]') as HTMLElement | null;
-    // winter pastel #D9EAFB (217,234,251) pulled toward slate #8B99B5
-    expect(activeSky!.style.background).not.toContain("rgb(217, 234, 251)");
+    // toy snow wash, not the clear pastel
+    expect(activeSky!.className).toContain("from-[#f4f7fb]");
   });
 
   it("keeps the Try again recovery tappable inside the pointer-events-none overlay", async () => {
@@ -361,8 +405,9 @@ describe("WeatherWidget — Not Boring redesign", () => {
     };
 
     // tap (down + up at the same x, no horizontal intent) → pins the last hour
-    act(() => { pointerAt("pointerdown", 500); });
-    act(() => { pointerAt("pointerup", 500); });
+    // Use a large x so idxFromClientX clamps to hours.length - 1 in jsdom (no real layout)
+    act(() => { pointerAt("pointerdown", 9999); });
+    act(() => { pointerAt("pointerup", 9999); });
     await settle();
     expect(strip.getAttribute("aria-valuenow")).toBe(String(lastIdx()));
 
@@ -377,6 +422,36 @@ describe("WeatherWidget — Not Boring redesign", () => {
     await settle(800);
     expect(strip.getAttribute("aria-valuenow")).toBe("0");
     expect(Array.from(el.querySelectorAll("button")).find((b) => b.textContent?.includes("Back to now"))).toBeUndefined();
+  });
+
+  it("maps a tap to the hour actually touched — a mid-strip x pins hour 4, not the last hour", async () => {
+    mockOpenMeteo(makeOpenMeteoPayload());
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    const strip = el.querySelector('[role="slider"][aria-label="Preview the rest of the day"]') as HTMLElement;
+    expect(strip).toBeTruthy();
+
+    // jsdom has no real layout (getBoundingClientRect → 0s, scrollLeft 0), so
+    // a scroll container mock makes x → index deterministic: with the strip
+    // scrolled 1 cell off, x=300 lands at floor((300 + 60) / 60) = 6. The
+    // STRIP_PITCH division (56 + 4 gap) is the contract under test.
+    const scroller = strip.querySelector(".scrollbar-hide") as HTMLElement;
+    expect(scroller).toBeTruthy();
+    const realGBCR = scroller.getBoundingClientRect.bind(scroller);
+    vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue({ ...realGBCR(), left: 0, width: 340 });
+    (scroller as HTMLElement & { scrollLeft: number }).scrollLeft = 60;
+
+    const pointerAt = (type: string, x: number) => {
+      const e = new Event(type, { bubbles: true });
+      Object.assign(e, { clientX: x, clientY: 0, pointerId: 1 });
+      strip.dispatchEvent(e);
+    };
+    act(() => { pointerAt("pointerdown", 300); });
+    act(() => { pointerAt("pointerup", 300); });
+    await settle();
+
+    expect(strip.getAttribute("aria-valuenow")).toBe("6");
   });
 
   it("shows the tappable Try again action when the first fetch fails", async () => {
@@ -487,13 +562,15 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(el.querySelector('[data-testid="wx-fog"]')).toBeNull();
   });
 
-  it("renders the true moon phase in the night scene", async () => {
+  it("renders the clay crescent moon in the night scene", async () => {
     mockOpenMeteo(makeOpenMeteoPayload({ isDay: 0 }));
     const el = render(<WeatherWidget />);
     await settle();
-    const lit = el.querySelector('[data-testid="wx-moon-lit"]');
-    expect(lit).toBeTruthy();
-    expect(lit!.getAttribute("d")).toMatch(/^M 20 4 A 16 16/);
+    // The card hero is a clay crescent now (disc + sky-colored offset
+    // bite), not the WeatherScene terminator path (the modal keeps that).
+    const moon = el.querySelector('[data-testid="wx-moon"]');
+    expect(moon).toBeTruthy();
+    expect(moon!.querySelectorAll("div").length).toBe(2);
   });
 
   it("birds fly around the sun on a clear day", async () => {
@@ -522,6 +599,83 @@ describe("WeatherWidget — Not Boring redesign", () => {
     const birds = el.querySelector('[data-testid="wx-birds"]') as HTMLElement | null;
     expect(birds).toBeTruthy();
     expect(birds!.style.opacity).toBe("0");
+  });
+
+  it("maps WMO codes to toy scenes, day and night", async () => {
+    const { wmoToScene, sceneToCondition } = await import("@/components/ui/WxToys");
+    expect(wmoToScene(0, true)).toBe("clear");
+    expect(wmoToScene(1, true)).toBe("clear");
+    expect(wmoToScene(3, true)).toBe("cloudy");
+    expect(wmoToScene(45, true)).toBe("cloudy");
+    expect(wmoToScene(61, true)).toBe("rain");
+    expect(wmoToScene(71, true)).toBe("snow");
+    expect(wmoToScene(95, true)).toBe("storm");
+    expect(wmoToScene(0, false)).toBe("night");
+    expect(wmoToScene(3, false)).toBe("night");
+    expect(wmoToScene(61, false)).toBe("rain"); // precip keeps its sky after dark
+    expect(sceneToCondition(wmoToScene(1, true), 1)).toBe("partly");
+    expect(sceneToCondition(wmoToScene(45, true), 45)).toBe("fog");
+    expect(sceneToCondition(wmoToScene(95, true), 95)).toBe("storm");
+  });
+
+  it("hero shows the clay icon for the live condition", async () => {
+    mockOpenMeteo(makeOpenMeteoPayload({ code: 0 }));
+    const el = render(<WeatherWidget />);
+    await settle();
+    // code 0 by day → clear → clay sun disc with an inline clay gradient
+    const icon = el.querySelector('[data-testid="wx-hero-icon"]');
+    expect(icon).toBeTruthy();
+    const sun = icon!.firstChild as HTMLElement;
+    expect(sun.style.background).toContain("linear-gradient");
+  });
+
+  it("hero shows the clay moon after dark", async () => {
+    mockOpenMeteo(makeOpenMeteoPayload({ code: 0, isDay: 0 }));
+    const el = render(<WeatherWidget />);
+    await settle();
+    const icon = el.querySelector('[data-testid="wx-hero-icon"]');
+    expect(icon?.querySelector('[data-testid="wx-moon"]')).toBeTruthy();
+  });
+
+  it("hero shows thunder: clay bolt plus lightning flash on storm codes", async () => {
+    mockOpenMeteo(makeOpenMeteoPayload({ code: 95 }));
+    const el = render(<WeatherWidget />);
+    await settle();
+    // storm Condition = night-toned cloud + clay bolt svg in the hero icon
+    const icon = el.querySelector('[data-testid="wx-hero-icon"]');
+    expect(icon?.querySelector("svg")).toBeTruthy();
+    // full-bleed lightning wash layer behind the content
+    expect(el.querySelector(".mix-blend-overlay")).toBeTruthy();
+  });
+
+  it("details modal shows the toy hero and clay icons, no emoji", async () => {
+    mockOpenMeteo(makeOpenMeteoPayload({ code: 61 }));
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    act(() => findDetailsButton(el)!.click());
+    await settle();
+
+    const dialog = document.querySelector("#weather-details-dialog") as HTMLElement;
+    expect(dialog).toBeTruthy();
+    // toy sky crossfade follows the scrubbed (rainy) hour
+    const skies = Array.from(dialog.querySelectorAll('.wx-sky[data-active="true"]'));
+    expect(skies.length).toBe(1);
+    expect(skies[0].className).toContain("from-[#b9c4d8]");
+    // hourly chips render clay icons (inline clay gradients) instead of emoji glyphs
+    const chips = dialog.querySelector('[role="list"]');
+    expect(chips?.innerHTML).toContain("linear-gradient");
+    expect(chips?.textContent).not.toMatch(/☀|🌤|⛅|☁|🌧|❄|⛈|🌫/);
+  });
+
+  it("maps 5-day condition text to clay icons", async () => {
+    const { dayCondition } = await import("@/components/ui/WxToys");
+    expect(dayCondition("Clear")).toBe("clear");
+    expect(dayCondition("Partly Cloudy")).toBe("partly");
+    expect(dayCondition("Foggy")).toBe("fog");
+    expect(dayCondition("Rain Showers")).toBe("rain");
+    expect(dayCondition("Snowy")).toBe("snow");
+    expect(dayCondition("Thunderstorm")).toBe("storm");
   });
 
   it("refetches weather every 15 minutes on its own", async () => {
@@ -786,8 +940,9 @@ describe("WeatherWidget — Not Boring redesign", () => {
     const group = el.querySelector('[role="group"][aria-label*="degrees"]');
     expect(group).toBeTruthy();
 
-    const unitToggle = Array.from(el.querySelectorAll("button")).find((b) => b.getAttribute("aria-label") === "Switch to Celsius");
-    expect(unitToggle).toBeTruthy();
+    // The widget is Fahrenheit-only — no unit toggle may exist.
+    const unitToggle = Array.from(el.querySelectorAll("button")).find((b) => b.getAttribute("aria-label")?.startsWith("Switch to"));
+    expect(unitToggle).toBeUndefined();
 
     // single sr-only live region, refreshed on data — not per scrub step
     const liveRegions = el.querySelectorAll('[role="status"][aria-live="polite"]');

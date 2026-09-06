@@ -5,10 +5,12 @@ import { ThemeProvider } from "@/hooks/useTheme";
 import { WeatherProvider } from "@/hooks/useWeather";
 import { AtmosphericProvider } from "@/hooks/useAtmosphericTheme";
 import { AuthProvider } from "@/hooks/useAuth";
+import { DashboardModeProvider } from "@/hooks/useDashboardMode";
 import { LayoutProvider } from "@/hooks/useHomeLayout";
 import { FogProvider } from "@/hooks/useFogConfig";
 import { CacheRefresher } from "@/components/ui/CacheRefresher";
 import "./globals.css";
+import "@/modes/modes.css";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -92,19 +94,21 @@ export default function RootLayout({
         <Script id="theme-init" strategy="beforeInteractive">{themeScript}</Script>
 
         <AuthProvider>
-          <ThemeProvider>
-            <WeatherProvider>
-              <AtmosphericProvider>
-                <FogProvider>
-                  <LayoutProvider>
-                    <CacheRefresher>
-                      {children}
-                    </CacheRefresher>
-                  </LayoutProvider>
-                </FogProvider>
-              </AtmosphericProvider>
-            </WeatherProvider>
-          </ThemeProvider>
+          <DashboardModeProvider>
+            <ThemeProvider>
+              <WeatherProvider>
+                <AtmosphericProvider>
+                  <FogProvider>
+                    <LayoutProvider>
+                      <CacheRefresher>
+                        {children}
+                      </CacheRefresher>
+                    </LayoutProvider>
+                  </FogProvider>
+                </AtmosphericProvider>
+              </WeatherProvider>
+            </ThemeProvider>
+          </DashboardModeProvider>
         </AuthProvider>
       </body>
     </html>

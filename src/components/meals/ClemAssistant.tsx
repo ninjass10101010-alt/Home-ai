@@ -103,7 +103,7 @@ export default function ClemAssistant({ groceryItems, storeContext, showToast }:
     } catch {
       streamingRef.current = false;
       setLoading(false);
-      showToast("Couldn't reach Clem right now — try again");
+      showToast("Couldn't reach Clem right now, try again");
     } finally {
       streamInFlightRef.current = false;
     }
@@ -141,10 +141,10 @@ export default function ClemAssistant({ groceryItems, storeContext, showToast }:
         </button>
       )}
 
-      <Modal open={open} onClose={() => setOpen(false)} title="Clem — Grocery Assistant">
+      <Modal open={open} onClose={() => setOpen(false)} title="Clem, grocery assistant">
         <div className="mb-3">
           <p className="text-sm font-semibold text-text-primary">🛒 Clem · Smart grocery helper</p>
-          <p className="mt-0.5 text-xs text-text-secondary">I know your list and stores — ask me anything</p>
+          <p className="mt-0.5 text-xs text-text-secondary">I know your list and stores, ask me anything</p>
         </div>
 
         {messages.length > 0 && (

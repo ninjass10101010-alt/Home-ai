@@ -19,7 +19,7 @@ describe("mealSaveToast", () => {
     const msg = mealSaveToast(false, "Tacos", "added");
     expect(msg).toContain("⚠️");
     expect(msg).toContain("Tacos");
-    expect(msg).toContain("saved on this device — will sync automatically");
+    expect(msg).toContain("saved on this device. It will sync automatically");
     expect(msg).not.toContain("✅");
   });
 

@@ -26,7 +26,8 @@ export default function StorePicker({ open, onClose, currentStore, onSelect }: S
             <button
               key={s.id}
               onClick={() => { onSelect(s.id); onClose(); }}
-              className={`rounded-xl px-3 py-2.5 text-sm font-semibold transition-all active:scale-[0.97] ${
+              aria-label={s.label}
+              className={`rounded-xl px-3 py-2.5 text-sm font-semibold tap-sm ${
                 currentStore === s.id
                   ? "bg-[var(--color-accent-selected)]/20 text-[var(--color-accent-selected)] border-2 border-[var(--color-accent-selected)]/40"
                   : "bg-[var(--color-surface-2)] text-text-primary border-2 border-transparent hover:border-white/10"
@@ -39,14 +40,14 @@ export default function StorePicker({ open, onClose, currentStore, onSelect }: S
         {!showAll && (
           <button
             onClick={() => setShowAll(true)}
-            className="mt-3 w-full text-center text-xs text-text-muted active:scale-[0.97]"
+            className="mt-3 w-full text-center text-xs text-text-muted tap-sm"
           >
             More stores ↓
           </button>
         )}
         <button
           onClick={onClose}
-          className="mt-4 w-full rounded-xl bg-[var(--color-surface-2)] py-2.5 text-sm font-semibold text-text-primary hover:bg-[var(--color-surface-3)] active:scale-[0.97]"
+          className="mt-4 w-full rounded-xl bg-[var(--color-surface-2)] py-2.5 text-sm font-semibold text-text-primary hover:bg-[var(--color-surface-3)] tap-sm"
         >
           Cancel
         </button>

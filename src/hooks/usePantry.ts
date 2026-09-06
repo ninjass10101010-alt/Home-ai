@@ -1,5 +1,4 @@
-/* eslint-disable react-hooks/set-state-in-effect */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { db } from "@/db";
 import { GroceryItem, PantryItem } from "@/types/meals";
 
@@ -17,7 +16,7 @@ export function usePantry(showToast: (msg: string) => void, groceryItems: Grocer
   const [pantryItems, setPantryItems] = useState<PantryItem[]>([]);
   const [loaded, setLoaded] = useState(false);
 
-  useEffect(() => {
+  const pullPantry = useCallback(() => {
     const local = loadJSON<PantryItem[]>(PANTRY_KEY, []);
     db.selectPantry().then((pbRaw: any) => {
       const pbData = pbRaw.filter((p: any) => p.name || p.item).map((p: any) => ({ id: p.id, item: p.name || p.item, status: p.status, quantity: p.quantity, unit: p.unit }));
@@ -40,6 +39,19 @@ export function usePantry(showToast: (msg: string) => void, groceryItems: Grocer
       setLoaded(true);
     });
   }, []);
+
+  useEffect(() => {
+    pullPantry();
+  }, [pullPantry]);
+
+  // Cross-device sync: re-pull when the global refresher finishes a cycle
+  // (60s tick, tab-wake, post-login) so another device's changes merge
+  // without a manual reload. Same pattern as useMeals/useRecipes/useGrocery.
+  useEffect(() => {
+    const onRefreshed = () => pullPantry();
+    window.addEventListener("consuela-data-refreshed", onRefreshed);
+    return () => window.removeEventListener("consuela-data-refreshed", onRefreshed);
+  }, [pullPantry]);
 
   useEffect(() => {
     if (!loaded) return;

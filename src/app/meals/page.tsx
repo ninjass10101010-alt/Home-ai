@@ -151,7 +151,7 @@ function MealHubContent() {
       );
       showToast(saved
         ? `✅ "${updated.name}" updated!`
-        : `⚠️ "${updated.name}" saved on this device — will sync automatically`);
+        : `⚠️ "${updated.name}" saved on this device. It will sync automatically.`);
     } else {
       const newMeal: Meal = {
         ...recipe,
@@ -179,7 +179,7 @@ function MealHubContent() {
       setActiveDay(newMeal.time);
       showToast(saved
         ? `✅ "${newMeal.name}" added to ${newMeal.time}!`
-        : `⚠️ "${newMeal.name}" saved on this device — will sync automatically`);
+        : `⚠️ "${newMeal.name}" saved on this device. It will sync automatically.`);
     }
     setShowRecipeModal(false);
     setEditingMealId(null);
@@ -289,7 +289,7 @@ function MealHubContent() {
     if (!copied) return;
     showToast(allSaved
       ? `📋 ${countNote}`
-      : `⚠️ ${countNote} — saved on this device — will sync automatically`);
+      : `⚠️ ${countNote}, saved on this device. It will sync automatically.`);
     setActiveDay(toDay);
   };
 

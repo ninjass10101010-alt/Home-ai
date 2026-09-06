@@ -21,7 +21,10 @@ const sizeMap: Record<IconButtonSize, string> = {
 const variantMap: Record<IconButtonVariant, string> = {
   glass: "bg-[var(--color-surface-0)]/35 text-text-primary border border-white/10 backdrop-blur-xl",
   accent: "bg-[var(--color-accent-selected)]/15 text-[var(--color-accent-selected)] border border-[var(--color-accent-selected)]/25",
-  danger: "bg-rose-500 text-white border border-rose-300/20",
+  // Token-driven danger (same light-safe recipe as SoftButton's danger:
+  // color-mix darkens the theme-aware rose so white glyphs keep AA contrast
+  // in both themes — raw bg-rose-500 ignored the light-theme token).
+  danger: "bg-[color-mix(in_srgb,var(--color-accent-rose),#000_25%)] text-white border border-[var(--color-accent-rose)]/20",
   ghost: "bg-transparent text-text-secondary border border-transparent",
 };
 

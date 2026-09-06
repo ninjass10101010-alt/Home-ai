@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef, useSyncExternalStore, type CSSProperties } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback, useSyncExternalStore, type CSSProperties } from "react";
 import PageShell from "@/components/ui/PageShell";
 import TopBar from "@/components/ui/TopBar";
 import WidgetCard from "@/components/patterns/WidgetCard";
@@ -77,6 +77,12 @@ interface CalEvent {
   day: number;
   month?: number;
   year?: number;
+  // Google-synced rows only (multi-calendar Fix-C): the raw ids ride along
+  // so startEditEvent never parses the composite id, and colorHex carries the
+  // owning calendar's Google color for the event frosting.
+  googleId?: string;
+  calendarId?: string;
+  colorHex?: string;
 }
 
 type ScheduleColor =
@@ -131,6 +137,12 @@ const eventColorValues: Record<CalEvent["color"], string> = {
   rose: "var(--color-accent-rose)",
 };
 
+// Google-synced events paint in their own calendar's color (colorHex from
+// the sync-state map, e.g. "#616161"); everything else keeps the named tone.
+function eventColorOf(ev: CalEvent): string {
+  return ev.colorHex || eventColorValues[ev.color] || eventColorValues.cyan;
+}
+
 const scheduleColorValues: Record<ScheduleColor, string> = {
   green: "var(--color-accent-selected)",
   amber: "var(--color-accent-amber)",
@@ -178,10 +190,10 @@ const dayLabels: Record<string, string> = {
 };
 
 const scheduleCategories = {
-  morning: { label: "Morning", gradient: "from-amber-500/80 to-orange-500/80", hexFrom: "#f59e0b", hexTo: "#f97316", emoji: "\uD83C\uDF05", range: "00:00 \u2013 11:59" },
-  afternoon: { label: "Afternoon", gradient: "from-sky-500/80 to-blue-500/80", hexFrom: "#0ea5e9", hexTo: "#3b82f6", emoji: "\u2600\uFE0F", range: "12:00 \u2013 16:59" },
-  evening: { label: "Evening", gradient: "from-orange-500/80 to-rose-500/80", hexFrom: "#f97316", hexTo: "#f43f5e", emoji: "\uD83C\uDF06", range: "17:00 \u2013 19:59" },
-  night: { label: "Night", gradient: "from-indigo-500/80 to-violet-500/80", hexFrom: "#6366f1", hexTo: "#8b5cf6", emoji: "\uD83C\uDF19", range: "20:00+" },
+  morning: { label: "Morning", hexFrom: "#f59e0b", hexTo: "#f97316", emoji: "\uD83C\uDF05", range: "00:00 \u2013 11:59" },
+  afternoon: { label: "Afternoon", hexFrom: "#0ea5e9", hexTo: "#3b82f6", emoji: "\u2600\uFE0F", range: "12:00 \u2013 16:59" },
+  evening: { label: "Evening", hexFrom: "#f97316", hexTo: "#f43f5e", emoji: "\uD83C\uDF06", range: "17:00 \u2013 19:59" },
+  night: { label: "Night", hexFrom: "var(--color-accent-selected)", hexTo: "color-mix(in srgb, var(--color-accent-selected) 70%, #000)", emoji: "\uD83C\uDF19", range: "20:00+" },
 } as const;
 
 type ScheduleCategory = keyof typeof scheduleCategories;
@@ -259,10 +271,15 @@ function getShortWeekday(year: number, month: number, day: number) {
 
 export default function CalendarPage() {
   const today = new Date();
+  // Fix-B: arg 2 is the CLIENT snapshot (read post-hydration + after every
+  // subscribe/event), arg 3 the deterministic SERVER fallback (SSR +
+  // hydration only). With these swapped the store was pinned to the
+  // hardcoded DEFAULT list forever — no dispatch or priming could ever
+  // reach the chips, mounted or not.
   const members = useSyncExternalStore(
     subscribeMembersSnapshot,
-    getServerMembersSnapshot,
-    getClientMembersSnapshot
+    getClientMembersSnapshot,
+    getServerMembersSnapshot
   );
   const { accentRgb } = useAtmosphericTheme();
   const [year, setYear] = useState(today.getFullYear());
@@ -321,6 +338,17 @@ export default function CalendarPage() {
   useEffect(() => {
     localStorage.setItem(SCHEDULES_STORAGE_KEY, JSON.stringify(schedules));
   }, [schedules]);
+
+  // Keep the strip's selected day visible when the strip overflows — the
+  // strip's own horizontal axis only, only on the calendar tab, and instant
+  // (behavior "auto") under reduced motion.
+  useEffect(() => {
+    if (activeTab !== "calendar") return;
+    const btn = document.querySelector(".calendar-strip-day.is-selected");
+    if (!btn || typeof btn.scrollIntoView !== "function") return;
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    btn.scrollIntoView({ block: "nearest", inline: "center", behavior: reduce ? "auto" : "smooth" });
+  }, [selectedDay, month, year, activeTab]);
 
   const sortedSchedules = useMemo(() => {
     return [...renderSchedules].sort((a, b) => {
@@ -422,11 +450,14 @@ export default function CalendarPage() {
   };
   const startEditEvent = (ev: CalEvent) => {
     if (ev.member === "Google") {
-      if (ev.id && typeof ev.id === "string" && ev.id.startsWith("g_")) {
-        const googleId = ev.id.split("_")[1];
-        if (googleId) {
-          window.open(`https://calendar.google.com/calendar/event?eid=${googleId}`, "_blank", "noopener,noreferrer");
-        }
+      // The mapped row carries the raw Google id; the split("_")[1] parse is
+      // only the fallback for legacy localStorage rows written before the
+      // googleId field existed (multi-calendar ids embed a calendar token).
+      const googleId =
+        ev.googleId ||
+        (ev.id && typeof ev.id === "string" && ev.id.startsWith("g_") ? ev.id.split("_")[1] : "");
+      if (googleId) {
+        window.open(`https://calendar.google.com/calendar/event?eid=${googleId}`, "_blank", "noopener,noreferrer");
       }
       return;
     }
@@ -529,8 +560,11 @@ export default function CalendarPage() {
         if (!silent) showToast("Connect Google in Settings → Integrations");
         return;
       }
+      const colorMap = (data.calendar_colors && typeof data.calendar_colors === "object")
+        ? (data.calendar_colors as Record<string, string>)
+        : null;
       const mappedList = (data.events || [])
-        .map((ge: any) => mapGoogleEvent(ge))
+        .map((ge: any) => mapGoogleEvent(ge, colorMap))
         .filter(Boolean);
       // Always replace the Google rows (even with an empty result) so
       // deleted/moved-out events don't linger from an old cache.
@@ -573,10 +607,11 @@ export default function CalendarPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Pull family-added events from PocketBase on mount so events created on
-  // one device appear on every other device (they used to live only in the
-  // creating browser's localStorage).
-  useEffect(() => {
+  // Pull family-added events from PocketBase so events created on one
+  // device appear on every other device (they used to live only in the
+  // creating browser's localStorage). Shared by the mount load and the
+  // cross-device refresh listener below.
+  const pullFamilyEvents = useCallback(() => {
     let cancelled = false;
     gatewayList("events")
       .then((rows) => {
@@ -613,6 +648,24 @@ export default function CalendarPage() {
       cancelled = true;
     };
   }, []);
+
+  // Pull family-added events from PocketBase on mount so events created on
+  // one device appear on every other device (they used to live only in the
+  // creating browser's localStorage).
+  useEffect(() => {
+    const cancel = pullFamilyEvents();
+    return cancel;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Cross-device sync: re-pull when the global refresher finishes a cycle
+  // (60s tick, tab-wake, post-login) so another device's event appears
+  // without a manual reload.
+  useEffect(() => {
+    const onRefreshed = () => pullFamilyEvents();
+    window.addEventListener("consuela-data-refreshed", onRefreshed);
+    return () => window.removeEventListener("consuela-data-refreshed", onRefreshed);
+  }, [pullFamilyEvents]);
 
   const isSelectedToday = selectedDay === today.getDate() && month === today.getMonth() && year === today.getFullYear();
   const selectedDateLabel = isSelectedToday ? "Today" : `${MONTHS[month].slice(0, 3)} ${selectedDay}`;
@@ -658,7 +711,8 @@ export default function CalendarPage() {
           <div className="calendar-hero-content">
             <div>
               <p className="calendar-hero-kicker">{weekdayName} &middot; {selectedEvents.length} event{selectedEvents.length !== 1 ? "s" : ""}</p>
-              <h1 className="calendar-hero-title" suppressHydrationWarning>{getGreeting()}</h1>
+              {/* h2, not h1 — the TopBar "Calendar" is the page's single h1. */}
+              <h2 className="calendar-hero-title" suppressHydrationWarning>{getGreeting()}</h2>
               <p className="calendar-hero-copy">
                 {isSelectedToday ? "Here\u2019s your day at a glance" : `What\u2019s on for ${weekdayName} ${MONTHS[month].slice(0, 3)} ${selectedDay}`}
               </p>
@@ -720,7 +774,7 @@ export default function CalendarPage() {
           <div key="calendar" className="panel-swap space-y-4">
             <WidgetCard tone="#3b82f6" className="calendar-grid-card">
               <div className="calendar-panel-header calendar-grid-header">
-                <h2 className="calendar-month-title">
+                <h2 key={`${year}-${month}`} className="calendar-month-title is-animating">
                   {MONTHS[month]} <span className="calendar-month-year">{year}</span>
                 </h2>
                 <div className="calendar-month-nav">
@@ -731,6 +785,29 @@ export default function CalendarPage() {
                   <button onClick={nextMonth} className="calendar-icon-btn" aria-label="Next month">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" /></svg>
                   </button>
+                </div>
+              </div>
+              <div className="calendar-day-strip-wrap">
+                <div className="calendar-day-strip" role="group" aria-label="Jump to day">
+                  {Array.from({ length: daysInMonth }, (_, i) => {
+                    const d = i + 1;
+                    const isT = d === today.getDate() && month === today.getMonth() && year === today.getFullYear();
+                    const sel = d === selectedDay;
+                    const weekday = new Date(year, month, d).getDay();
+                    return (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => setSelectedDay(d)}
+                        aria-label={`${MONTHS[month]} ${d}`}
+                        aria-pressed={sel}
+                        className={`calendar-strip-day${sel ? " is-selected" : ""}${isT ? " is-today" : ""}`}
+                      >
+                        <span className="wd">{DAYS[weekday].charAt(0)}</span>
+                        <span className="num">{d}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
               <div className="calendar-weekday-row">
@@ -760,7 +837,7 @@ export default function CalendarPage() {
                             <span
                               key={di}
                               className="calendar-day-dot"
-                              style={{ background: isSelected ? "rgba(255,255,255,0.85)" : eventColorValues[ev.color] }}
+                              style={{ background: isSelected ? "rgba(255,255,255,0.85)" : eventColorOf(ev) }}
                             />
                           ))}
                         </div>
@@ -797,12 +874,12 @@ export default function CalendarPage() {
                       <div
                         className="calendar-event-card flex-1 calendar-fade-in-up"
                         style={{
-                          "--event-color": eventColorValues[ev.color],
+                          "--event-color": eventColorOf(ev),
                           animationDelay: `${idx * 60}ms`,
                         } as CSSProperties}
                       >
                         <div className="calendar-event-time-col">
-                          <span className="calendar-event-dot" style={{ background: eventColorValues[ev.color] }} />
+                          <span className="calendar-event-dot" style={{ background: eventColorOf(ev) }} />
                           <span className="calendar-event-time">{ev.time}</span>
                           <span className="calendar-event-divider" />
                         </div>
@@ -899,7 +976,7 @@ export default function CalendarPage() {
                         <div className="calendar-upcoming-events">
                           {card.events.slice(0, 3).map((ev) => (
                             <div key={ev.id} className="calendar-upcoming-event">
-                              <span className="calendar-upcoming-dot" style={{ background: eventColorValues[ev.color] }} />
+                              <span className="calendar-upcoming-dot" style={{ background: eventColorOf(ev) }} />
                               <span className="calendar-upcoming-event-title">{ev.title}</span>
                             </div>
                           ))}

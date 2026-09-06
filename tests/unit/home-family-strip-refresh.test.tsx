@@ -19,6 +19,10 @@ vi.mock("next/dynamic", () => {
 const mockAuth = vi.hoisted(() => ({ currentUser: null as null | any, isLoggedIn: false }));
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => mockAuth }));
 
+vi.mock("@/hooks/useDashboardMode", () => ({
+  useDashboardMode: () => ({ mode: "family", isBedtime: false, isWeekend: false, currentHour: 12, currentDay: 3, previousMode: null }),
+}));
+
 const rosterMock = vi.hoisted(() => ({ members: [] as any[] }));
 vi.mock("@/db", () => ({
   db: {
@@ -27,6 +31,7 @@ vi.mock("@/db", () => ({
     selectPendingTasks: () => [],
     selectTodaysSchedules: () => [],
     selectMeals: async () => [],
+    gatewayReadStatus: async () => ({ items: [], blocked: false }),
     mealsStore: [] as any[],
   },
 }));

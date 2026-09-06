@@ -15,14 +15,14 @@ export default function CookWithWhatYouHave({ recipes, pantryItems, onAddMissing
 
   if (cookable.length === 0) {
     return (
-      <SectionCard title="Cook with what you have" icon="🍳" description="Based on your pantry">
-        <p className="text-sm text-text-muted">No recipes with ingredients yet — add some in the Recipe box on the Plan tab.</p>
+      <SectionCard title="Cook with what you have" icon="🍳" description="Based on your pantry" tone="#10b981">
+        <p className="text-sm text-text-muted">No recipes with ingredients yet. Add some in the Recipe box on the Plan tab.</p>
       </SectionCard>
     );
   }
 
   return (
-    <SectionCard title="Cook with what you have" icon="🍳" description="Ranked by pantry readiness">
+    <SectionCard title="Cook with what you have" icon="🍳" description="Ranked by pantry readiness" tone="#10b981">
       <div className="space-y-3">
         {cookable.map(({ recipe, readiness }) => (
           <div key={recipe.id} className="rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/30 p-4">

@@ -4,7 +4,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import PageShell from "@/components/ui/PageShell";
 import Avatar, { type AvatarSize } from "@/components/ui/Avatar";
 import WeatherWidget from "@/components/ui/WeatherWidget";
@@ -43,8 +43,14 @@ import { useMorningBriefing, briefingSectionsEmpty } from "@/components/briefing
 import ProfileSheet from "@/components/profile/ProfileSheet";
 import { useHomeEvents } from "@/hooks/useHomeEvents";
 import { normalizeAvatarSize } from "@/lib/avatar-size";
+import { loadTasks } from "@/lib/task-utils";
+import { todayMondayISO } from "@/lib/meals-week-utils";
+import { useDashboardMode } from "@/hooks/useDashboardMode";
 
 const FogBackground = dynamic(() => import("@/components/ui/FogBackground"), { ssr: false });
+// KidHome reads localStorage-backed stores and animates on mount — client-only,
+// same dynamic/ssr:false recipe FogBackground uses inside KidHome itself.
+const KidHome = dynamic(() => import("@/modes/kid/KidHome"), { ssr: false });
 
 function memberMatchesName(member: any, name: string) {
   const firstName = name.split(" ")[0];
@@ -64,6 +70,22 @@ const QUICK_PROMPTS = [
   "Any calendar conflicts?",
   "What chores are pending?",
 ];
+
+/**
+ * Honest "Week · Days planned" count: distinct weekdays in the given week
+ * that carry at least one planned meal. Meals without a `weekOf` predate the
+ * week-scoped planner and belong to the current week (same rule useMeals
+ * applies). `null` meal data means the read was unavailable (e.g. a guest's
+ * blocked gateway read) — the tile renders "—", never a fabricated number.
+ */
+export function plannedDaysThisWeek(meals: any[] | null, weekOf: string): number | null {
+  if (meals === null) return null;
+  const days = new Set<string>();
+  for (const m of meals) {
+    if ((m?.weekOf || weekOf) === weekOf && typeof m?.time === "string" && m.time) days.add(m.time);
+  }
+  return days.size;
+}
 
 /**
  * Morning briefing grid slot. Owns the briefing hook so the widget and the
@@ -109,6 +131,7 @@ export default function HomePage() {
 
   const router = useRouter();
   const { currentUser, isLoggedIn, isParent, logout, sessionRemainingMs, sessionWarning, extendSession } = useAuth();
+  const { mode } = useDashboardMode();
   const { visibleWidgets, orientation, mounted: layoutMounted } = useHomeLayout();
   const { upcomingImportant } = useHomeEvents();
   const gridClass = layoutMounted ? homeGridClass(orientation) : HOME_GRID_FALLBACK;
@@ -140,21 +163,6 @@ export default function HomePage() {
 
     try {
       setTodayEvents(db.selectTodaysEvents());
-      const storedTasks = typeof window !== "undefined" ? localStorage.getItem("consuela-tasks") : null;
-      if (storedTasks) {
-        try {
-          const parsed = JSON.parse(storedTasks);
-          const pending = Array.isArray(parsed) ? parsed.filter((t: any) => !t.completed).slice(0, 3).map((t: any) => ({
-            id: t.id, title: t.title, assigned: t.assignee, due: t.due,
-            points: t.points, priority: t.priority, category: t.category,
-          })) : [];
-          setPendingTasks(pending);
-        } catch {
-          setPendingTasks(db.selectPendingTasks());
-        }
-      } else {
-        setPendingTasks(db.selectPendingTasks());
-      }
 
       const today = new Date();
       const hour = today.getHours();
@@ -168,28 +176,74 @@ export default function HomePage() {
         dayOfWeek: today.toLocaleDateString("en-US", { weekday: "short" }),
         dayMonth: today.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
       });
-
-      const stored = typeof window !== "undefined" ? localStorage.getItem("consuela-schedules") : null;
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed)) {
-          setHomeScheduleItems(parsed.map((s: any) => ({
-            id: s.id,
-            title: s.title,
-            time: s.time,
-            emoji: s.icon,
-            type: s.type,
-            color: s.color || "green",
-            member: s.member,
-            memberColor: s.memberColor,
-          })));
-        }
-      } else {
-        setHomeScheduleItems(db.selectTodaysSchedules());
-      }
-    } catch (error) {
+    } catch {
       setHomeError("Consuela could not load your family dashboard.");
     }
+  }, []);
+
+  // Tasks + Daily Schedule: the same refresh contract the Week tile uses —
+  // re-pull on the 60s `consuela-data-refreshed` pulse so the widgets stop
+  // freezing until a manual reload. db.refreshCaches now feeds the tasks
+  // snapshot pull into the stores loadTasks() reads, and schedules land in
+  // the db cache the same cycle.
+  const taskDataLoadedRef = useRef(false);
+  useEffect(() => {
+    const read = () => {
+      try {
+        // One task truth: the Tasks page's own store layer (loadTasks — parse,
+        // due-date migration, recurring regen, fallback). The old raw
+        // localStorage read made Home and /tasks disagree, and the load-time
+        // slice(0,3) capped the Tasks stat tile at 3.
+        const pending = loadTasks()
+          .filter((t: any) => !t.completed)
+          .map((t: any) => ({
+            id: t.id, title: t.title, assigned: t.assignee, due: t.due,
+            points: t.points, priority: t.priority, category: t.category,
+          }));
+        setPendingTasks(pending);
+
+        // Same pattern as tasks: the Daily Schedule widget is visible, so it
+        // reads the db store layer (PB-backed cache with fallback + 60s
+        // refresh) instead of a raw per-device localStorage key.
+        setHomeScheduleItems(db.selectTodaysSchedules());
+        taskDataLoadedRef.current = true;
+      } catch {
+        // A refresh failure keeps whatever the widgets already show — only
+        // the very first read can fail the dashboard into the error state.
+        if (!taskDataLoadedRef.current) {
+          setHomeError("Consuela could not load your family dashboard.");
+        }
+      }
+    };
+    read();
+    window.addEventListener("consuela-data-refreshed", read);
+    return () => window.removeEventListener("consuela-data-refreshed", read);
+  }, []);
+
+  // Honest "Week · Days planned" count — the same sessioned read layer the
+  // Meals page uses (gatewayReadStatus reports BLOCKED separately from
+  // genuinely-empty, so a guest's hidden data renders "—", not "0").
+  const [weekPlannedDays, setWeekPlannedDays] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const read = () => {
+      db.gatewayReadStatus("meal_plan_entries")
+        .then(({ items, blocked }) => {
+          if (cancelled) return;
+          setWeekPlannedDays(
+            blocked && items.length === 0 ? null : plannedDaysThisWeek(items, todayMondayISO())
+          );
+        })
+        .catch(() => {
+          if (!cancelled) setWeekPlannedDays(null);
+        });
+    };
+    read();
+    window.addEventListener("consuela-data-refreshed", read);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("consuela-data-refreshed", read);
+    };
   }, []);
 
   // Family strip roster read — its own effect so the roster re-reads when the
@@ -258,6 +312,12 @@ export default function HomePage() {
       };
     });
   }, [mounted]);
+
+  // Kid mode (child/pet signed in) gets the gamified KidHome instead of the
+  // family bento. Family/adult rendering below is untouched.
+  if (mode === "kid") {
+    return <KidHome />;
+  }
 
   if (homeError) {
     return (
@@ -354,7 +414,17 @@ export default function HomePage() {
                   <Avatar name={member.name} color={member.color} emoji={member.emoji} size={normalizeAvatarSize(member.avatarSize)} variant="emoji" glow={member.glow} />
                 </button>
               ))}
-              {!isLoggedIn && <Chip tone="accent" tabIndex={-1} className="h-12 w-12 !px-0 text-lg">＋</Chip>}
+              {!isLoggedIn && (
+                <Chip
+                  tone="accent"
+                  className="h-12 w-12 !px-0 text-lg"
+                  aria-label="Add a family member"
+                  title="Add a family member"
+                  onClick={() => router.push("/settings")}
+                >
+                  ＋
+                </Chip>
+              )}
             </div>
           </div>
 
@@ -362,7 +432,7 @@ export default function HomePage() {
             <div className="grid grid-cols-3 gap-3">
               <StatTile label={todayEvents.length === 1 ? "Event" : "Events"} value={todayEvents.length} detail="Today" icon="📅" tone={todayEvents.length > 0 ? "warning" : "accent"} compact progress={dayFraction} />
               <StatTile label="Tasks" value={pendingTasks.length} detail="Pending" icon="✅" tone={pendingTasks.length > 0 ? "danger" : "success"} compact />
-              <StatTile label="Week" value="7" detail="Days planned" icon="🍽️" tone="accent" compact progress={weekFraction} />
+              <StatTile label="Week" value={weekPlannedDays === null ? "—" : weekPlannedDays} detail="Days planned" icon="🍽️" tone="accent" compact progress={weekPlannedDays === null ? null : weekPlannedDays / 7} />
             </div>
 
             <div className={gridClass}>
@@ -398,7 +468,7 @@ export default function HomePage() {
                   const upcoming = Array.isArray(upcomingImportant) ? upcomingImportant.slice(0, 2) : [];
                   return (
                     <div key="todayEvents" className={span}>
-                      <SectionCard title="Today" description={`${todayEvents.length} ${todayEvents.length === 1 ? "event" : "events"} on the family calendar`} icon="📅" tone="#3b82f6" compact centeredHeader className="h-full"
+                      <SectionCard title="Today" description={`${todayEvents.length} ${todayEvents.length === 1 ? "event" : "events"} on the family calendar`} icon="📅" tone="#3b82f6" compact centeredHeader headingLevel="h2" className="h-full"
                         footer={
                           hiddenEvents > 0 ? (
                             <Link href="/calendar" className="tap-sm text-xs font-semibold widget-accent-text">+{hiddenEvents} more · See all →</Link>
@@ -501,7 +571,7 @@ export default function HomePage() {
                   const hiddenTasks = pendingTasks.length - visibleTasks.length;
                   return (
                     <div key="tasks" className={span}>
-                      <SectionCard title="Tasks" description={`${pendingTasks.length} pending for the family`} icon="✅" tone="#f43f5e" compact centeredHeader className="h-full"
+                      <SectionCard title="Tasks" description={`${pendingTasks.length} pending for the family`} icon="✅" tone="#f43f5e" compact centeredHeader headingLevel="h2" className="h-full"
                         footer={
                           hiddenTasks > 0 ? (
                             <Link href="/tasks" className="tap-sm text-xs font-semibold widget-accent-text">+{hiddenTasks} more · See all →</Link>
@@ -595,7 +665,7 @@ export default function HomePage() {
             </div>
 
             <div className="mt-6">
-              <SectionCard title="This Week" description="Meal and family rhythm at a glance" icon="🗓️" tone="#10b981" compact>
+              <SectionCard title="This Week" description="Meal and family rhythm at a glance" icon="🗓️" tone="#10b981" compact headingLevel="h2">
                 <DayStrip value="today" onChange={(dayId) => router.push(`/meals?day=${dayId}`)} days={weekDays} compact />
                 <DayLine className="mt-3" mode="week" tone="#10b981" progress={weekFraction} markers={weekDayBoundaries} />
               </SectionCard>

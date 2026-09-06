@@ -101,7 +101,7 @@ export default function MealsArchivePage() {
         {!loading && loadError && (
           <ErrorState
             title="Couldn't load your archived weeks"
-            description="Consuela couldn't reach the meal archive. Your saved weeks are safe — try again."
+            description="Consuela couldn't reach the meal archive. Your saved weeks are safe. Try again."
             retryLabel="Retry"
             onRetry={loadArchives}
           />
@@ -137,7 +137,7 @@ export default function MealsArchivePage() {
                   {entry.count} meal{entry.count !== 1 ? "s" : ""} · archived{" "}
                   {entry.archivedAt
                     ? new Date(entry.archivedAt).toLocaleDateString()
-                    : "—"}
+                    : "date unknown"}
                 </div>
               </div>
               <button

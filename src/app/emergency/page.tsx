@@ -141,9 +141,11 @@ export default function EmergencyPage() {
           </section>
         ) : (
            <>
-            {usingFallback && (
+            {/* One honest sentence per state: offline-with-contacts says so;
+                genuinely-empty falls through to the empty state below. */}
+            {usingFallback && contacts.length > 0 && (
               <p className="text-xs text-text-secondary text-center -mb-2">
-                Using offline fallback — sign in to see live contacts
+                Showing this device&apos;s saved contacts — sign in to see the live list.
               </p>
             )}
 

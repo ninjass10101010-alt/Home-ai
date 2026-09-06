@@ -6,6 +6,7 @@ import Chip from "@/components/ui/Chip";
 import TextField from "@/components/ui/TextField";
 import ListRow from "@/components/ui/ListRow";
 import SectionCard from "@/components/patterns/SectionCard";
+import WidgetCard from "@/components/patterns/WidgetCard";
 import KitchenFlowCard from "@/components/meals/KitchenFlowCard";
 import SyncPreviewSheet from "@/components/meals/SyncPreviewSheet";
 import StorePill from "@/components/meals/StorePill";
@@ -83,8 +84,8 @@ export default function ShopTab({
     const p = mealSyncService.previewMealPlanToGrocery((meals || []) as Meal[], pantryItems || [], groceryItems);
     if (p.items.length === 0) {
       flashNote(p.alreadyOnList > 0
-        ? `Nothing to add — ${p.alreadyOnList} item${p.alreadyOnList === 1 ? "" : "s"} already on your list ✓`
-        : "Nothing to add — your plan is fully stocked ✓");
+        ? `Nothing to add, ${p.alreadyOnList} item${p.alreadyOnList === 1 ? "" : "s"} already on your list ✓`
+        : "Nothing to add, your plan is fully stocked ✓");
       return;
     }
     setPreview(p);
@@ -105,7 +106,7 @@ export default function ShopTab({
       flashNote(`Added ${added} · ${already} were already on list`);
     } catch {
       setPreview(null);
-      flashNote("Couldn't reach the database — items not added");
+      flashNote("Couldn't reach the database, items not added");
     } finally {
       setSyncBusy(false);
     }
@@ -139,13 +140,13 @@ export default function ShopTab({
       if (!inPantry) {
         const saved: any = await addPantryItem(item.name, "plenty", { quantity: quantityValue, unit, silent: true });
         if (!saved) {
-          showToast(`❌ Couldn't add ${item.name} to pantry — it stays on your list`);
+          showToast(`❌ Couldn't add ${item.name} to pantry, it stays on your list`);
           return;
         }
         pushUndo({ pantryIds: [saved.id], items: [item], added: 1 });
       }
       await deleteGroceryItem(item.id);
-      showToast(inPantry ? `🥫 ${item.name} was already stocked — removed from your list` : `🥫 Sent ${item.name} to pantry`);
+      showToast(inPantry ? `🥫 ${item.name} was already stocked, removed from your list` : `🥫 Sent ${item.name} to pantry`);
     } finally {
       setSending(false);
     }
@@ -185,7 +186,7 @@ export default function ShopTab({
           ? `🥫 Sent ${added} item${added === 1 ? "" : "s"} to pantry`
           : `🥫 Sent ${added} of ${added + already} to pantry (${already} already stocked)`);
       } else {
-        showToast(`🥫 Sent ${added} to pantry (${already} already stocked, ${failed} failed — kept on list)`);
+        showToast(`🥫 Sent ${added} to pantry (${already} already stocked, ${failed} failed, kept on list)`);
       }
     } finally {
       setSending(false);
@@ -253,7 +254,7 @@ export default function ShopTab({
       if (data.url) window.open(data.url, "_blank", "noopener,noreferrer");
       else if (data.error) showToast(`❌ ${data.error}`);
     } catch {
-      showToast("❌ Couldn't create Instacart list — check connection");
+      showToast("❌ Couldn't create Instacart list, check connection");
     } finally {
       setOrdering(false);
       setOrderingStore(null);
@@ -291,7 +292,7 @@ export default function ShopTab({
         showToast(`❌ ${data.error}`);
       }
     } catch {
-      showToast("❌ Couldn't create Instacart lists — check connection");
+      showToast("❌ Couldn't create Instacart lists, check connection");
     } finally {
       setOrdering(false);
       setOrderingStore(null);
@@ -336,7 +337,8 @@ export default function ShopTab({
                 value={newGroceryItem}
                 onChange={e => setNewGroceryItem(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && handleAdd()}
-                placeholder='Add an item — e.g. "2 bananas" or "milk"'
+                aria-label="Add grocery item"
+                placeholder='Add an item, e.g. "2 bananas" or "milk"'
                 className="flex-1 min-w-0"
               />
               <SoftButton variant="primary" size="md" onClick={handleAdd} disabled={!newGroceryItem.trim()}>Add</SoftButton>
@@ -370,18 +372,23 @@ export default function ShopTab({
             )}
           </div>
 
-          <div className="glass rounded-2xl p-4">
-            <SoftButton variant="primary" size="md" onClick={openMealSync} disabled={syncBusy} className="w-full">
-              🍽️ {syncBusy ? "Adding…" : "Add missing from meal plan"}
-            </SoftButton>
-            <SoftButton variant="ghost" size="md" onClick={() => setOrderSheetOpen(true)} className="mt-2 w-full">
-              📤 Order from Instacart
-            </SoftButton>
-            <SoftButton variant="ghost" size="md" onClick={() => setCompareOpen(true)} className="mt-2 w-full">
-              💰 Compare Prices
-            </SoftButton>
-            {syncNote && <p role="status" className="mt-2 text-center text-xs font-semibold text-text-secondary">{syncNote}</p>}
-          </div>
+          <WidgetCard tone="#3b82f6" icon="🛒">
+            <div className="border-b border-white/10 p-4 pl-[72px]">
+              <h3 className="text-base font-bold text-text-primary">Sync and order</h3>
+            </div>
+            <div className="space-y-2 p-4">
+              <SoftButton variant="primary" size="md" onClick={openMealSync} disabled={syncBusy} className="w-full">
+                🍽️ {syncBusy ? "Adding…" : "Add missing from meal plan"}
+              </SoftButton>
+              <SoftButton variant="ghost" size="md" onClick={() => setOrderSheetOpen(true)} className="w-full">
+                📤 Order from Instacart
+              </SoftButton>
+              <SoftButton variant="ghost" size="md" onClick={() => setCompareOpen(true)} className="w-full">
+                💰 Compare Prices
+              </SoftButton>
+              {syncNote && <p role="status" className="text-center text-xs font-semibold text-text-secondary">{syncNote}</p>}
+            </div>
+          </WidgetCard>
 
           {/* ── Undo banner ── */}
           {undo && (
@@ -532,7 +539,7 @@ export default function ShopTab({
                             <button
                               onClick={(e) => { e.stopPropagation(); toggleManualOverride?.(item.id); }}
                               aria-label={item.manualOverride ? `unlock ${item.name} for auto-sync` : `lock ${item.name} from auto-sync`}
-                              title={item.manualOverride ? "Locked from auto-sync — tap to unlock" : "Lock from auto-sync"}
+                              title={item.manualOverride ? "Locked from auto-sync, tap to unlock" : "Lock from auto-sync"}
                               className={`flex h-11 w-11 items-center justify-center rounded-xl tap-sm ${
                                 item.manualOverride
                                   ? "text-[var(--color-accent-amber)] bg-[var(--color-accent-amber)]/10"
@@ -590,7 +597,7 @@ export default function ShopTab({
 
         {/* ── Right rail (desktop) ── */}
         <div className="space-y-5 min-w-0 xl:order-2 order-first xl:order-none">
-          <SectionCard title="Shopping progress" icon="🛒">
+          <SectionCard title="Shopping progress" icon="🛒" tone="#10b981">
             <div className="space-y-4">
               <div className="flex items-end justify-between">
                 <span className="text-3xl font-black text-text-primary display-numeral">{pct}%</span>
@@ -600,15 +607,12 @@ export default function ShopTab({
               </div>
               <div className="h-3 overflow-hidden rounded-full bg-[var(--color-surface-2)]">
                 <div
-                  className="h-full rounded-full transition-all duration-500"
-                  style={{
-                    width: `${pct}%`,
-                    background: `linear-gradient(90deg, var(--color-accent-mint, #34d399), var(--color-accent-amber, #fbbf24))`,
-                  }}
+                  className="h-full rounded-full bg-[var(--color-accent-mint)] transition-all duration-500"
+                  style={{ width: `${pct}%` }}
                 />
               </div>
               {pickedUp > 0 && (
-                <SoftButton variant="ghost" size="md" onClick={clearCompleted} className="w-full text-emerald-400">
+                <SoftButton variant="ghost" size="md" onClick={clearCompleted} className="w-full text-[var(--color-accent-mint)]">
                   ✨ Clear {pickedUp} checked item{pickedUp > 1 ? "s" : ""}
                 </SoftButton>
               )}

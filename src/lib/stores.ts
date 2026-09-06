@@ -50,6 +50,28 @@ export const ALL_STORES: StoreDef[] = [
   { id: "save-a-lot", label: "Save A Lot", pinned: false },
 ];
 
+export const STORE_COLORS: Record<StoreId, string> = {
+  aldi: "#3b82f6",
+  meijer: "#10b981",
+  walmart: "#f59e0b",
+  "target-corp": "#f43f5e",
+  "family-fare-supermarkets": "#8b5cf6",
+  costco: "#22d3ee",
+  "d-w-fresh-market": "#14b8a6",
+  "fresh-thyme-farmers-market": "#84cc16",
+  "forest-hills": "#f97316",
+  "martins-super-markets": "#a855f7",
+  gfs: "#64748b",
+  "ada-fresh-market": "#ec4899",
+  "bridge-street-market": "#0ea5e9",
+  "rogers-foodland": "#22c55e",
+  "leppinks-food-center": "#eab308",
+  "leppinks-marketplace": "#d946ef",
+  "hardings-market": "#ef4444",
+  "save-a-lot": "#b45309",
+  any: "#94a3b8",
+};
+
 export const STORE_LABELS: Record<string, string> = Object.fromEntries(
   ALL_STORES.map((s) => [s.id, s.label])
 );

@@ -92,6 +92,7 @@ export default function RecipeBox({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search recipes, tags…"
+              aria-label="Search recipes"
               className="w-full rounded-2xl border border-[var(--color-surface-3)] bg-[var(--color-surface-0)]/50 py-2.5 pl-11 pr-4 text-sm font-semibold text-text-primary placeholder:text-text-muted/50 outline-none transition focus:border-[var(--color-accent-selected)]/50 focus:bg-[var(--color-surface-0)]/80 focus:ring-2 focus:ring-[var(--color-accent-selected)]/20"
             />
           </div>
@@ -197,7 +198,7 @@ export default function RecipeBox({
 
                 {/* Action buttons */}
                 <div className="mt-3 flex gap-1.5">
-                  {/* Add to Meal Plan — with day dropdown on hover */}
+                  {/* Add to Meal Plan, with day dropdown on hover */}
                   <div className="relative group flex-1">
                     <button
                       onClick={() => addToPlan(recipe)}
@@ -207,7 +208,7 @@ export default function RecipeBox({
                           : "bg-[var(--color-accent-selected)] text-white hover:opacity-90"
                       }`}
                     >
-                      {isAdded ? "✓ Added!" : `＋ Add to ${activeDay}`}
+                      {isAdded ? "Added ✓" : `＋ Add to ${activeDay}`}
                     </button>
                     <div className="absolute bottom-full left-0 mb-1 hidden group-hover:grid grid-cols-4 gap-0.5 bg-[var(--color-surface-0)] border border-[var(--color-surface-3)] rounded-2xl shadow-xl p-1 z-50 min-w-[180px]">
                       {weekDays.map(day => (

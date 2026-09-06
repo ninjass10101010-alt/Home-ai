@@ -16,8 +16,8 @@ const variantMap: Record<SoftButtonVariant, string> = {
   primary: "bg-[var(--color-accent-button)] text-white border border-[var(--color-accent-selected)]/20 shadow-[0_12px_24px_rgba(0,0,0,0.16)]",
   secondary: "bg-[var(--color-surface-2)] text-[var(--color-accent-button)] border border-[var(--color-accent-selected)]/25",
   ghost: "bg-transparent text-text-secondary hover:text-text-primary border border-transparent",
-  danger: "bg-rose-500 text-white border border-rose-300/20 shadow-[0_12px_24px_rgba(244,63,94,0.18)]",
-  success: "bg-emerald-500 text-white border border-emerald-300/20 shadow-[0_12px_24px_rgba(16,185,129,0.18)]",
+  danger: "bg-[color-mix(in_srgb,var(--color-accent-rose),#000_25%)] text-white border border-[var(--color-accent-rose)]/20 shadow-[0_12px_24px_color-mix(in_srgb,var(--color-accent-rose)_18%,transparent)]",
+  success: "bg-[color-mix(in_srgb,var(--color-accent-mint),#000_45%)] text-white border border-[var(--color-accent-mint)]/20 shadow-[0_12px_24px_color-mix(in_srgb,var(--color-accent-mint)_18%,transparent)]",
 };
 
 const sizeMap: Record<SoftButtonSize, string> = {

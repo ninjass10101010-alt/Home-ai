@@ -479,6 +479,11 @@ export default function SettingsPage() {
         }
         showToast(`✅ Added ${memberForm.name.trim()}`);
       }
+      // Re-pull the client roster cache (dispatches consuela-members-updated
+      // on success, so the Calendar chips + Home strip swap too) BEFORE the
+      // re-read — selectMembersDetailed() otherwise re-renders the stale
+      // cache and the dispatch is lost for unmounted surfaces.
+      await db.refreshMembersCache();
       setMembers(db.selectMembersDetailed());
       setMemberModalOpen(false);
     } finally {
@@ -505,6 +510,9 @@ export default function SettingsPage() {
         return;
       }
       showToast(`🗑️ Removed ${member.name}`);
+      // Same contract as saveMember: refresh the cache (and dispatch) before
+      // re-reading, so the deleted member actually leaves the roster.
+      await db.refreshMembersCache();
       setMembers(db.selectMembersDetailed());
     } finally {
       setDeleting(false);
@@ -646,7 +654,7 @@ export default function SettingsPage() {
         />
 
         <div className="px-4 space-y-6 pb-8">
-          <SectionCard title="Profile" description="Who is using Consuela right now?" icon="👤">
+          <SectionCard title="Profile" description="Who is using Consuela right now?" icon="👤" headingLevel="h2">
             <div className="flex items-center gap-4">
               <Avatar name={profileMember?.name || "Family"} color={profileMember?.color || "green"} emoji={profileMember?.emoji || "😊"} size={normalizeAvatarSize(profileMember?.avatarSize)} variant="emoji" glow={Boolean(profileMember?.glow)} />
               <div className="min-w-0 flex-1">
@@ -657,7 +665,7 @@ export default function SettingsPage() {
             </div>
           </SectionCard>
 
-          <SectionCard title="Appearance" description="Theme, accent, and contrast controls" icon="🎨">
+          <SectionCard title="Appearance" description="Theme, accent, and contrast controls" icon="🎨" headingLevel="h2">
             <div className="space-y-5">
               <SegmentedControl
                 aria-label="Display mode"
@@ -729,7 +737,7 @@ export default function SettingsPage() {
             </div>
           </SectionCard>
 
-          <SectionCard title="Cloud Background" description="Fog and particle effects behind the Home dashboard" icon="☁️">
+          <SectionCard title="Cloud Background" description="Fog and particle effects behind the Home dashboard" icon="☁️" headingLevel="h2">
             <div className="space-y-4">
               <Toggle
                 checked={fog.config.enabled}
@@ -813,7 +821,7 @@ export default function SettingsPage() {
             </div>
           </SectionCard>
 
-          <SectionCard title="Family members" description="People, pets, and roles" icon="👨‍👩‍👧‍👦">
+          <SectionCard title="Family members" description="People, pets, and roles" icon="👨‍👩‍👧‍👦" headingLevel="h2">
             <div className="space-y-3">
               {members.map((member: any) => (
                 <ListRow
@@ -825,7 +833,7 @@ export default function SettingsPage() {
                   trailing={
                     <div className="flex items-center gap-1">
                       <IconButton size="sm" variant="ghost" aria-label="Edit member" onClick={() => openMemberModal(member)}>✎</IconButton>
-                      <IconButton size="sm" variant="danger" aria-label={`Remove ${member.name}`} onClick={() => setConfirmDelete({ kind: "member", item: member })}>×</IconButton>
+                      <IconButton size="sm" variant="danger" aria-label={`Remove ${member.name}`} className="relative before:absolute before:-inset-1 before:content-['']" onClick={() => setConfirmDelete({ kind: "member", item: member })}>×</IconButton>
                     </div>
                   }
                 />
@@ -838,7 +846,7 @@ export default function SettingsPage() {
             </div>
           </SectionCard>
 
-          <SectionCard title="Emergency contacts" description="Who gets serious alerts from the home FAB." icon="🛡️">
+          <SectionCard title="Emergency contacts" description="Who gets serious alerts from the home FAB." icon="🛡️" headingLevel="h2">
             <div className="space-y-3">
               {contacts.map((contact: any) => (
                 <ListRow
@@ -850,7 +858,7 @@ export default function SettingsPage() {
                   trailing={
                     <div className="flex items-center gap-1">
                       <IconButton size="sm" variant="ghost" aria-label="Edit contact" onClick={() => openContactModal(contact)}>✎</IconButton>
-                      <IconButton size="sm" variant="danger" aria-label={`Remove ${contact.name}`} onClick={() => setConfirmDelete({ kind: "contact", item: contact })}>×</IconButton>
+                      <IconButton size="sm" variant="danger" aria-label={`Remove ${contact.name}`} className="relative before:absolute before:-inset-1 before:content-['']" onClick={() => setConfirmDelete({ kind: "contact", item: contact })}>×</IconButton>
                     </div>
                   }
                 />
@@ -895,11 +903,12 @@ export default function SettingsPage() {
             </div>
           </SectionCard>
 
-          <SectionCard title="Emergency" description="Call cards, common situations, and 911 reference." icon="🛡️" tone="#f43f5e">
+          <SectionCard title="Emergency" description="Call cards, common situations, and 911 reference." icon="🛡️" tone="#f43f5e" headingLevel="h2">
             <MoreMenuItem icon="🛡️" title="Open emergency reference" description="Contacts, common situations, and 911" href="/emergency" />
           </SectionCard>
 
           <SectionCard
+            headingLevel="h2"
             title="Integrations"
             description="Connect external accounts to sync calendar events, tasks, and reminders."
             icon="🔗"
@@ -909,7 +918,7 @@ export default function SettingsPage() {
             <HaNotificationsCard />
           </SectionCard>
 
-          <SectionCard title="Layout & display" description="Show, hide, and reorder Home widgets." icon="🧩">
+          <SectionCard title="Layout & display" description="Show, hide, and reorder Home widgets." icon="🧩" headingLevel="h2">
             <div className="space-y-3">
               <SegmentedControl
                 options={[
@@ -987,7 +996,7 @@ export default function SettingsPage() {
             </div>
           </SectionCard>
 
-          <SectionCard title="Data & sync" description="Export settings or push local data to cloud." icon="📦">
+          <SectionCard title="Data & sync" description="Export settings or push local data to cloud." icon="📦" headingLevel="h2">
             <div className="grid gap-3 sm:grid-cols-1">
               <Surface variant="glass-subtle" radius="xl" padding="sm">
                 <div className="text-sm font-bold text-text-primary">Local settings</div>
@@ -1011,7 +1020,7 @@ export default function SettingsPage() {
             </div>
           </SectionCard>
 
-          <SectionCard title="Updates" description="Dashboard version and one-click deploy" icon="🔄">
+          <SectionCard title="Updates" description="Dashboard version and one-click deploy" icon="🔄" headingLevel="h2">
             <VersionCard />
           </SectionCard>
         </div>
