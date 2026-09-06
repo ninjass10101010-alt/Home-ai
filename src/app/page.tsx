@@ -108,6 +108,7 @@ export default function HomePage() {
   const [familyMembers, setFamilyMembers] = useState<any[]>([]);
   const [todayEvents, setTodayEvents] = useState<any[]>([]);
   const [pendingTasks, setPendingTasks] = useState<any[]>([]);
+  const [pendingApprovalCount, setPendingApprovalCount] = useState(0);
   const [homeScheduleItems, setHomeScheduleItems] = useState<any[]>([]);
   const [timeOfDay, setTimeOfDay] = useState<string>("morning");
   const [season, setSeason] = useState<{ name: string; emoji: string }>({ name: "Spring", emoji: "🌸" });
@@ -201,6 +202,7 @@ export default function HomePage() {
             points: t.points, priority: t.priority, category: t.category,
           }));
         setPendingTasks(pending);
+        setPendingApprovalCount(loadTasks().filter((t: any) => t.completed && t.pendingApproval).length);
 
         // Same pattern as tasks: the Daily Schedule widget is visible, so it
         // reads the db store layer (PB-backed cache with fallback + 60s
@@ -573,7 +575,9 @@ export default function HomePage() {
                     <div key="tasks" className={span}>
                       <SectionCard title="Tasks" description={`${pendingTasks.length} pending for the family`} icon="✅" tone="#f43f5e" compact centeredHeader headingLevel="h2" className="h-full"
                         footer={
-                          hiddenTasks > 0 ? (
+                          isParent && pendingApprovalCount > 0 ? (
+                            <Link href="/tasks" className="tap-sm text-xs font-semibold widget-accent-text">{pendingApprovalCount} need approval →</Link>
+                          ) : hiddenTasks > 0 ? (
                             <Link href="/tasks" className="tap-sm text-xs font-semibold widget-accent-text">+{hiddenTasks} more · See all →</Link>
                           ) : undefined
                         }>
