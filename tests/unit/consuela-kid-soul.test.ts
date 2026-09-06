@@ -1,6 +1,7 @@
 // @vitest-environment node
 // Kid soul contract — a child session must get the kid voice AND the kid
 // tool surface; parents keep the adult soul untouched.
+import { describe, it, expect } from "vitest";
 import {
   KID_SYSTEM_PROMPT,
   SYSTEM_PROMPT,
