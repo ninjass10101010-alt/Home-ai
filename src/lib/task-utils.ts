@@ -41,6 +41,83 @@ export function isSnatchable(task: Task, today: string = localTodayISO()): boole
   return !!task.stealable && !task.completed && !!task.due && task.due < today;
 }
 
+// Tap-to-complete with pending parent approval: a kid's tap marks the task
+// done immediately but writes NO earn transaction — points land only when a
+// parent approves (approvePendingCompletion) and vanish on send-back.
+export function isPendingApproval(task: Task): boolean {
+  return !!task.completed && !!task.pendingApproval;
+}
+
+export function pendingApprovals(tasks: Task[]): Task[] {
+  return (tasks || []).filter(isPendingApproval);
+}
+
+export function pendingPointsFor(memberName: string, tasks: Task[]): number {
+  return pendingApprovals(tasks)
+    .filter((t) => t.pendingApproval!.byName === memberName)
+    .reduce((sum, t) => sum + (t.pendingApproval!.points || 0), 0);
+}
+
+// The single decision seam for PIN-less completion: child role, open task,
+// assigned (never universal), never snatchable (claims stay server-side).
+export function shouldUsePendingTap(role: string | undefined, task: Task): boolean {
+  return role === "child" && !task.completed && !task.universal && !isSnatchable(task);
+}
+
+export function tapCompletePending(task: Task, byName: string, nowISO: string, week: string): Task {
+  return {
+    ...task,
+    completed: true,
+    completedBy: byName,
+    completedAt: nowISO,
+    completedInWeek: week,
+    pendingApproval: { byName, at: nowISO, points: task.points },
+  };
+}
+
+export function approvePendingCompletion(
+  tasks: Task[],
+  weekData: WeekData,
+  taskId: number
+): { tasks: Task[]; weekData: WeekData } {
+  const task = tasks.find((t) => t.id === taskId);
+  if (!task || !isPendingApproval(task)) return { tasks, weekData };
+  const cleared = tasks.map((t) =>
+    t.id === taskId ? { ...t, pendingApproval: undefined } : t
+  );
+  // Idempotency: another device already paid this tap — clear without re-paying.
+  const alreadyPaid = weekData.history.some(
+    (tx) => tx.type === "earn" && tx.taskId === taskId
+  );
+  if (alreadyPaid) return { tasks: cleared, weekData };
+  const owner = task.pendingApproval!.byName;
+  const sameWeek = task.completedInWeek === weekData.weekStart;
+  const pointsMsg = task.points > 0 ? ` (+${task.points}pts)` : "";
+  const withPoints = {
+    ...weekData,
+    points: { ...weekData.points, [owner]: (weekData.points[owner] || 0) + task.points },
+  };
+  const next = addTransaction(
+    withPoints,
+    "earn",
+    task.points,
+    `${sameWeek ? "Completed" : "Approved"}: ${task.title}${pointsMsg}`,
+    owner,
+    task.id
+  );
+  return { tasks: cleared, weekData: next };
+}
+
+export function sendBackPendingCompletion(tasks: Task[], taskId: number): Task[] {
+  const task = tasks.find((t) => t.id === taskId);
+  if (!task || !isPendingApproval(task)) return tasks;
+  return tasks.map((t) =>
+    t.id === taskId
+      ? { ...t, completed: false, completedBy: undefined, completedAt: undefined, completedInWeek: undefined, pendingApproval: undefined }
+      : t
+  );
+}
+
 export function emptyWeekData(startISO?: string): WeekData {
   return {
     weekStart: startISO || todayMondayISO(),

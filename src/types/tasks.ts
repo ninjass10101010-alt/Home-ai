@@ -14,6 +14,13 @@ export interface Task {
   completedInWeek?: string;
   universal?: boolean;
   stealable?: boolean;
+  pendingApproval?: PendingApproval;
+}
+
+export interface PendingApproval {
+  byName: string;
+  at: string;
+  points: number;
 }
 
 export interface Transaction {
