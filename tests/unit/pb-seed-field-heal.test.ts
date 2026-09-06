@@ -122,4 +122,11 @@ describe("members.emoji text-field max", () => {
     expect(f).toBeDefined();
     expect(f!.type).toBe("json");
   });
+
+  it("tasks collection carries the sentBackAt text field", () => {
+    const tasksDef = COLLECTIONS.find((c) => c.name === "tasks")!;
+    const f = tasksDef.schema.find((s: any) => s.name === "sentBackAt");
+    expect(f).toBeDefined();
+    expect(f!.type).toBe("text");
+  });
 });

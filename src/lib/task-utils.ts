@@ -72,6 +72,8 @@ export function tapCompletePending(task: Task, byName: string, nowISO: string, w
     completedAt: nowISO,
     completedInWeek: week,
     pendingApproval: { byName, at: nowISO, points: task.points },
+    // A fresh tap supersedes any earlier send-back proof.
+    sentBackAt: undefined,
   };
 }
 
@@ -83,7 +85,7 @@ export function approvePendingCompletion(
   const task = tasks.find((t) => t.id === taskId);
   if (!task || !isPendingApproval(task)) return { tasks, weekData };
   const cleared = tasks.map((t) =>
-    t.id === taskId ? { ...t, pendingApproval: undefined } : t
+    t.id === taskId ? { ...t, pendingApproval: undefined, sentBackAt: undefined } : t
   );
   // Idempotency: another device already paid this tap — clear without re-paying.
   const alreadyPaid = weekData.history.some(
@@ -113,7 +115,10 @@ export function sendBackPendingCompletion(tasks: Task[], taskId: number): Task[]
   if (!task || !isPendingApproval(task)) return tasks;
   return tasks.map((t) =>
     t.id === taskId
-      ? { ...t, completed: false, completedBy: undefined, completedAt: undefined, completedInWeek: undefined, pendingApproval: undefined }
+      // sentBackAt is the durable cross-device proof that this tap was
+      // REJECTED (no earn tx exists for a send-back) — the snapshot merge
+      // uses it to let the clear win over a kid device's stale pending row.
+      ? { ...t, completed: false, completedBy: undefined, completedAt: undefined, completedInWeek: undefined, pendingApproval: undefined, sentBackAt: new Date().toISOString() }
       : t
   );
 }
@@ -352,6 +357,7 @@ export function mergeTasksSnapshot(
       completedAt: t.completedAt ?? undefined,
       completedInWeek: t.completedInWeek ?? undefined,
       pendingApproval: (t as any).pendingApproval ?? undefined,
+      sentBackAt: (t as any).sentBackAt ?? undefined,
     }));
     const fresh = restored.filter(
       (t: any) => !currentTasks.some((p: any) => p.id === t.id || p.title === t.title)
@@ -364,9 +370,12 @@ export function mergeTasksSnapshot(
 
   // Adopt completion/pending field changes on KNOWN rows: a kid's tap on the
   // kitchen phone must land on a parent's device even though the row id
-  // already exists locally. A remote clear only wins when the snapshot's
-  // weekData carries the earn tx (approval happened elsewhere) — otherwise a
-  // stale snapshot would wipe a fresh local tap.
+  // already exists locally. A remote clear only wins when it carries PROOF —
+  // the snapshot's weekData carries the earn tx (approval happened elsewhere),
+  // or the snapshot row is stamped sentBackAt (send-back happened elsewhere) —
+  // otherwise a stale snapshot would wipe a fresh local tap. The rule covers
+  // any locally completed row: pending taps AND classic PIN-completed (paid)
+  // completions, whose earn lives only on the paying device.
   const byId = new Map(restored.map((t: any) => [t.id, t]));
   let merged = tasks;
   for (const snapRow of byId.values()) {
@@ -382,11 +391,15 @@ export function mergeTasksSnapshot(
       (snapRow.completedAt ?? undefined) !== (local.completedAt ?? undefined) ||
       (snapRow.completedInWeek ?? undefined) !== (local.completedInWeek ?? undefined);
     if (!pendingDiffers && !completionDiffers) continue;
-    if (localPending && !snapshotPending) {
+    const localDone = !!local.completed || !!localPending;
+    const remoteClearsPending = !!localPending && !snapshotPending;
+    const remoteReopens = !!local.completed && !snapRow.completed;
+    if (localDone && (remoteClearsPending || remoteReopens)) {
       const paidElsewhere = (snapshot.weekData?.history || []).some(
         (tx: any) => tx.type === "earn" && tx.taskId === snapRow.id
       );
-      if (!paidElsewhere) continue;
+      const sentBackElsewhere = !!(snapRow as any).sentBackAt;
+      if (!paidElsewhere && !sentBackElsewhere) continue;
     }
     merged = merged.map((p: any) =>
       p.id === snapRow.id
@@ -397,6 +410,7 @@ export function mergeTasksSnapshot(
             completedAt: snapRow.completedAt ?? undefined,
             completedInWeek: snapRow.completedInWeek ?? undefined,
             pendingApproval: snapshotPending,
+            sentBackAt: (snapRow as any).sentBackAt ?? undefined,
           }
         : p
     );
@@ -635,6 +649,7 @@ export async function syncTasksToPB(tasks: Task[]): Promise<void> {
       universal: task.universal || false,
       stealable: task.stealable || false,
       pendingApproval: task.pendingApproval ?? null,
+      sentBackAt: task.sentBackAt ?? null,
       completedInWeek: task.completedInWeek ?? null,
       completedAt: task.completedAt ?? null,
     }).catch(() => {});

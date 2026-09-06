@@ -158,6 +158,7 @@ export const COLLECTIONS = [
       { name: "universal", type: "bool" },
       { name: "stealable", type: "bool" },
       { name: "pendingApproval", type: "json" },
+      { name: "sentBackAt", type: "text" },
       { name: "createdAt", type: "text" },
       { name: "status", type: "select", options: { values: ["pending", "done"] } },
       { name: "completedInWeek", type: "text" },

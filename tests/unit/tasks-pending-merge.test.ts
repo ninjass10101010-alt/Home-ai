@@ -66,4 +66,42 @@ describe("mergeTasksSnapshot pendingApproval adoption", () => {
     expect(out.tasksChanged).toBe(false);
     expect(out.tasks).toBe(local);
   });
+
+  it("adopts a remote send-back (cleared row with sentBackAt, no earn) over a locally-pending row", () => {
+    const local = [t({ completed: true, pendingApproval: { byName: "Megan", at: NOW, points: 5 } })];
+    // Sent back on another device: reopened, no earn tx, durable sentBackAt proof.
+    const remote = [t({ sentBackAt: NOW })];
+    const out = mergeTasksSnapshot(local as Task[], wk(), snap(remote, wk()));
+    expect(out.tasksChanged).toBe(true);
+    expect(out.tasks[0].completed).toBe(false);
+    expect((out.tasks[0] as any).pendingApproval).toBeUndefined();
+    expect((out.tasks[0] as any).sentBackAt).toBe(NOW);
+  });
+
+  it("remote clear with NEITHER sentBackAt NOR earn still does not wipe a locally-pending row (fresh-tap protection)", () => {
+    const local = [t({ completed: true, pendingApproval: { byName: "Megan", at: NOW, points: 5 } })];
+    const remote = [t({})];
+    const out = mergeTasksSnapshot(local as Task[], wk(), snap(remote, wk()));
+    expect((out.tasks[0] as any).pendingApproval).toEqual({ byName: "Megan", at: NOW, points: 5 });
+    expect(out.tasks[0].completed).toBe(true);
+  });
+
+  it("locally paid completion (completed, no pending) is not reverted by a stale open snapshot", () => {
+    const local = [t({ completed: true, completedBy: "Megan", completedAt: NOW, completedInWeek: "2026-09-01" })];
+    const remote = [t({})];
+    const out = mergeTasksSnapshot(local as Task[], wk(), snap(remote, wk()));
+    expect(out.tasks[0].completed).toBe(true);
+    expect(out.tasks[0].completedBy).toBe("Megan");
+    expect(out.tasksChanged).toBe(false);
+  });
+
+  it("locally paid completion is adopted when the snapshot carries proof (earn tx)", () => {
+    const local = [t({ completed: true, completedBy: "Megan", completedAt: NOW, completedInWeek: "2026-09-01" })];
+    const remote = [t({})];
+    const paid = wk({ history: [{ id: 7, timestamp: NOW, member: "Megan", type: "earn", amount: 5, description: "Completed: Make bed", taskId: 1 }] });
+    const out = mergeTasksSnapshot(local as Task[], wk(), snap(remote, paid));
+    expect(out.tasksChanged).toBe(true);
+    expect(out.tasks[0].completed).toBe(false);
+    expect(out.tasks[0].completedBy).toBeUndefined();
+  });
 });

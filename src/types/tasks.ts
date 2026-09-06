@@ -15,6 +15,10 @@ export interface Task {
   universal?: boolean;
   stealable?: boolean;
   pendingApproval?: PendingApproval;
+  // Durable send-back proof: set when a parent sends a pending tap back, so
+  // cross-device snapshot merge can distinguish "rejected elsewhere" from a
+  // stale snapshot that simply predates the tap. Cleared by the next tap.
+  sentBackAt?: string;
 }
 
 export interface PendingApproval {
