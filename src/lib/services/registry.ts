@@ -116,6 +116,17 @@ export const SERVICES_REGISTRY: ServiceDef[] = [
     ],
   },
   {
+    id: "ai_fallback",
+    displayName: "AI Fallback Models",
+    description: "Backup brain when the Hermes gateway is down — comma-separated model list, tried in order",
+    testFnId: "ai_fallback",
+    fields: [
+      { key: "FALLBACK_API_URL", label: "API base URL", secret: false, required: true, helpText: "OpenAI-compatible endpoint", placeholder: "https://api.b.ai/v1" },
+      { key: "FALLBACK_API_KEY", label: "API key", secret: true, required: false, helpText: "Leave empty if the endpoint needs no key" },
+      { key: "FALLBACK_MODELS", label: "Models (comma-separated, tried in order)", secret: false, required: true, helpText: "e.g. glm-5.3-flash,qwen3.8-flash — each tried in order if Hermes is unreachable", placeholder: "glm-5.3-flash,qwen3.8-flash" },
+    ],
+  },
+  {
     id: "greenlight",
     displayName: "Greenlight",
     description: "Points→allowance transfers (widget)",

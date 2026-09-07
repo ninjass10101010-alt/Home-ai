@@ -187,6 +187,34 @@ async function testComposio(): Promise<ServiceTestResult> {
   }
 }
 
+async function testAiFallback(): Promise<ServiceTestResult> {
+  const t = timed();
+  const url = await getServiceConfig("ai_fallback", "FALLBACK_API_URL");
+  const key = await getServiceConfig("ai_fallback", "FALLBACK_API_KEY");
+  const models = (await getServiceConfig("ai_fallback", "FALLBACK_MODELS"))?.split(",").map((m) => m.trim()).filter(Boolean) || [];
+  if (!url || models.length === 0) return { ok: false, detail: "not_configured", ms: t.done() };
+  const base = url.replace(/\/+$/, "");
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (key) headers.Authorization = `Bearer ${key}`;
+  for (const model of models) {
+    try {
+      const { res, body } = await fetchJson(`${base}/chat/completions`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ model, messages: [{ role: "user", content: "Say OK" }], max_tokens: 10 }),
+      });
+      if (res.ok && body?.choices?.[0]?.message) {
+        return { ok: true, detail: `${model} responded`, ms: t.done() };
+      }
+      const msg = (body as any)?.error?.message || `HTTP ${res.status}`;
+      console.warn(`[ai_fallback test] ${model}: ${msg}`);
+    } catch (err) {
+      console.warn(`[ai_fallback test] ${model}:`, errDetail(err));
+    }
+  }
+  return { ok: false, detail: `all ${models.length} model(s) failed`, ms: t.done() };
+}
+
 /** Registry-driven entry point. */
 export async function runServiceTest(service: string): Promise<ServiceTestResult> {
   switch (service) {
@@ -198,6 +226,7 @@ export async function runServiceTest(service: string): Promise<ServiceTestResult
     case "instacart": return testInstacart();
     case "themealdb": return testThemealdb();
     case "composio": return testComposio();
+    case "ai_fallback": return testAiFallback();
     case "greenlight":
     case "khanacademy": {
       // Stored-only integrations: report configuration state honestly.

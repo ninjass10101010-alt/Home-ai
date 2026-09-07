@@ -12,6 +12,7 @@ describe("services registry", () => {
   it("contains exactly the approved services", () => {
     expect(SERVICES_REGISTRY.map((s) => s.id).sort()).toEqual(
       [
+        "ai_fallback",
         "composio",
         "gmail_emergency",
         "greenlight",

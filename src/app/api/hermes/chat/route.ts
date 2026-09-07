@@ -4,6 +4,7 @@ import { getServiceConfig } from "@/lib/services/config";
 import { db } from "@/db";
 import { verifySession, SESSION_COOKIE } from "@/lib/session";
 import { buildClemSystemPrompt, buildConsuelaSystemPrompt, buildKidSystemPrompt, HOUSE_CONTROL_PROMPT_ADDENDUM } from "@/lib/consuela-prompts";
+import { buildFallbackTargets, resetFallbackChainCacheForTests } from "@/lib/ai-fallback";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +49,7 @@ let hermesStreamingSupported = true;
 
 /** Test-only: clears the module-scope caches between vitest cases. */
 export function resetHermesChatForTests() {
+  resetFallbackChainCacheForTests();
   hermesConfigCache = null;
   hermesStreamingSupported = true;
 }
@@ -102,7 +104,7 @@ function parseToolArgs(raw: string | undefined): Record<string, any> {
 
 async function callHermes(
   messages: ChatMessage[],
-  opts: { maxTokens?: number; tools?: ReturnType<typeof buildToolsForOpenAI>; toolChoice?: "auto" | "none"; hermes?: { url: string; key: string | null } } = {},
+  opts: { maxTokens?: number; tools?: ReturnType<typeof buildToolsForOpenAI>; toolChoice?: "auto" | "none"; hermes?: { url: string; key: string | null }; model?: string } = {},
 ): Promise<{ content: string; tool_calls?: ToolCall[] }> {
   const hermes = opts.hermes ?? (await resolveHermes());
   const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -112,7 +114,7 @@ async function callHermes(
     headers,
     signal: AbortSignal.timeout(HERMES_TIMEOUT_MS),
     body: JSON.stringify({
-      model: HERMES_MODEL,
+      model: opts.model ?? HERMES_MODEL,
       messages,
       temperature: 0.7,
       max_tokens: opts.maxTokens ?? 1024,
@@ -177,18 +179,19 @@ function toolStatusLabel(name?: string): string {
  */
 async function callHermesStream(
   messages: ChatMessage[],
-  opts: { tools?: ReturnType<typeof buildToolsForOpenAI>; hermes: { url: string; key: string | null } },
+  opts: { tools?: ReturnType<typeof buildToolsForOpenAI>; hermes: { url: string; key: string | null; fallback?: boolean }; model?: string },
   write: (frame: string) => void,
 ): Promise<{ content: string; tool_calls?: ToolCall[] }> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (opts.hermes.key) headers.Authorization = `Bearer ${opts.hermes.key}`;
-  const wantStream = hermesStreamingSupported;
+  // Fallback providers stream buffered (their SSE dialects vary); Hermes streams.
+  const wantStream = hermesStreamingSupported && !opts.hermes.fallback;
   const res = await fetch(`${opts.hermes.url}/v1/chat/completions`, {
     method: "POST",
     headers,
     signal: AbortSignal.timeout(HERMES_TIMEOUT_MS),
     body: JSON.stringify({
-      model: HERMES_MODEL,
+      model: opts.model ?? HERMES_MODEL,
       messages,
       temperature: 0.7,
       max_tokens: 1024,
@@ -343,8 +346,33 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
     try {
       const { message, isClem, hermes, tools, messages } = await buildChatContext(request, body);
       let finalContent = "";
+      type ChatTarget = { url: string; key: string | null; model: string; fallback?: boolean };
+      let targets: ChatTarget[] = [{ url: hermes.url, key: hermes.key, model: HERMES_MODEL }];
       for (let round = 0; round < MAX_ROUNDS; round++) {
-        const { content, tool_calls } = await callHermesStream(messages, { tools, hermes }, write);
+        let content = "";
+        let tool_calls: ToolCall[] | undefined;
+        let lastErr: unknown = null;
+        for (const target of targets) {
+          try {
+            ({ content, tool_calls } = await callHermesStream(messages, { tools, hermes: target, model: target.model }, write));
+            lastErr = null;
+            break;
+          } catch (err) {
+            lastErr = err;
+            console.warn(`[hermes] stream target ${target.model} failed: ${(err as Error).message}`);
+          }
+        }
+        if (lastErr) {
+          if (targets.length === 1) {
+            const fb = await buildFallbackTargets();
+            if (fb.length) {
+              targets = [...targets.slice(1), ...fb.map((t) => ({ ...t, fallback: true as const }))];
+              round--; // retry this round against the expanded chain
+              continue;
+            }
+          }
+          throw lastErr;
+        }
         if (!tool_calls || tool_calls.length === 0) {
           finalContent = content;
           break;
@@ -402,8 +430,46 @@ export async function POST(request: NextRequest) {
     const { isClem, hermes, tools, messages, role } = await buildChatContext(request, body);
     console.log(`[hermes] agent=${body.agent || "consuela"} isClem=${isClem} url=${hermes.url} model=${HERMES_MODEL} role=${role}`);
 
+    // Dashboard-owned fallback chain (Settings-editable): primary Hermes,
+    // then each configured fallback model in order.
+    // Lazy fallback: zero extra config reads while Hermes is healthy. On the
+    // first failure the Settings-configured chain is resolved once and joined.
+    type ChatTarget = { url: string; key: string | null; model: string; fallback?: boolean };
+    let targets: ChatTarget[] = [{ url: hermes.url, key: hermes.key, model: HERMES_MODEL }];
+
+    let lastErr: unknown = null;
     for (let round = 0; round < MAX_ROUNDS; round++) {
-      const { content, tool_calls } = await callHermes(messages, { tools, toolChoice: "auto", hermes });
+      let content = "";
+      let tool_calls: ToolCall[] | undefined;
+      for (const target of targets) {
+        try {
+          ({ content, tool_calls } = await callHermes(messages, {
+            tools,
+            toolChoice: "auto",
+            hermes: target,
+            model: target.model,
+          }));
+          lastErr = null;
+          break;
+        } catch (err) {
+          lastErr = err;
+          console.warn(`[hermes] target ${target.model} failed: ${(err as Error).message}`);
+        }
+      }
+      if (lastErr) {
+        if (targets.length === 1) {
+          const fb = await buildFallbackTargets();
+          if (fb.length) {
+            // Drop the target that just failed this round — a dead primary
+            // isn't retried every round; the chain takes over immediately.
+            targets = [...targets.slice(1), ...fb.map((t) => ({ ...t, fallback: true as const }))];
+            console.warn(`[hermes] falling back to ${fb.map((t) => t.model).join(", ")}`);
+            round--; // retry this round against the expanded chain
+            continue;
+          }
+        }
+        throw lastErr;
+      }
 
       if (!tool_calls || tool_calls.length === 0) {
         if (!isClem) await persistChatPair(request, message, content);
