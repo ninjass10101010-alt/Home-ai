@@ -1,6 +1,6 @@
 // @vitest-environment node
 // AI fallback chain — resolution + route-level failover contract.
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 
 const mocks = vi.hoisted(() => ({
