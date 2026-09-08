@@ -71,7 +71,7 @@
 
 ### Task 8: Consumer migrations
 
-**Files:** Modify src/lib/ha/config.ts (+mqtt/client.ts passthrough), src/lib/free-communication.ts (sendTelegramMessage token + gmail transport build), src/lib/telegram/get-updates.ts, src/app/api/hermes/chat/route.ts (HERMES_URL/KEY resolve; DELETE hardcoded "consuela-api-key-2026" default), src/lib/instacart.ts, src/lib/themealdb.ts, WeatherWidget/FogBackground/AdultHome lat-lon literals → fetch `/api/services/runtime` once (small hook `useRuntimeConfig` in hooks dir).
+**Files:** Modify src/lib/ha/config.ts (+mqtt/client.ts passthrough), src/lib/free-communication.ts (sendTelegramMessage token + gmail transport build), src/lib/telegram/get-updates.ts, src/app/api/hermes/chat/route.ts (HERMES_URL/KEY resolve; DELETE hardcoded "<REDACTED-HERMES-KEY>" default), src/lib/instacart.ts, src/lib/themealdb.ts, WeatherWidget/FogBackground/AdultHome lat-lon literals → fetch `/api/services/runtime` once (small hook `useRuntimeConfig` in hooks dir).
 - [ ] Each consumer: replace direct process.env read with `await getServiceConfig(...)` keeping exact fallback order (env stays fallback so existing deployments unchanged). Make previously-sync reads async where required by callers (check each call site; hermes route already async; free-communication functions already async).
 - [ ] Update affected unit tests (ha-config, themealdb, etc.) to stub the resolver OR keep env-fallback behavior tests valid (resolver reads env when DB empty — most existing env-stub tests remain valid IF getServiceConfig is called with env fallback; where tests assert module-level consts, adapt minimally).
 - [ ] Grep proof in report: zero remaining direct reads for migrated keys outside resolver.

@@ -1292,7 +1292,7 @@ In `Home-ai/docker-compose.yml` delete:
 
 ```yaml
       - HERMES_API_URL=http://hermes-agent-2:8643
-      - HERMES_API_KEY=${HERMES_API_KEY:-consuela-api-key-2026}
+      - HERMES_API_KEY=${HERMES_API_KEY:-<REDACTED-HERMES-KEY>}
 ```
 
 Same two lines in the outer `Dashboard/docker-compose.yml` (lines 41, 45). In `Home-ai/.env.example` replace lines 26-27 (`HERMES_API_URL=…`, `HERMES_API_KEY=…`) with:

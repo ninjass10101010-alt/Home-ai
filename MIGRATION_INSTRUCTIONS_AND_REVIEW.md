@@ -22,7 +22,7 @@ The Consuela dashboard has **two distinct database layers** that must be migrate
 1. **PocketBase must be running** at `http://192.168.0.28:8090` (or set `NEXT_PUBLIC_PB_URL`)
 2. Admin credentials configured in environment:
    - `PB_ADMIN_EMAIL` (default: `admin@consuela.app`)
-   - `PB_ADMIN_PASS` (default: `26649_alan`)
+   - `PB_ADMIN_PASS` (default: `<REDACTED-NAS-PW>`)
 3. Node.js 18+ with `tsx` installed (`npx tsx` available)
 
 ### Step-by-Step Execution
@@ -406,7 +406,7 @@ All 6 previously-conflicted files have been cleaned:
 `scripts/pb-seed.mjs` has hardcoded credentials:
 ```javascript
 const ADMIN_EMAIL = process.env.PB_ADMIN_EMAIL || "admin@consuela.app";
-const ADMIN_PASS = process.env.PB_ADMIN_PASS || "26649_alan";
+const ADMIN_PASS = process.env.PB_ADMIN_PASS || "<REDACTED-NAS-PW>";
 ```
 
 **Recommendation:** Remove default values and require environment variables. Add `.env.example` with placeholders.

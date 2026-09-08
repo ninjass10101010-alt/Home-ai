@@ -6,7 +6,7 @@ set -e
 
 PB_URL="http://192.168.0.28:8090"
 EMAIL="admin@consuela.app"
-PASS="26649_alan"
+PASS="<REDACTED-NAS-PW>"
 
 echo "=== Authenticating ==="
 AUTH=$(curl -s -X POST "$PB_URL/api/collections/_superusers/auth-with-password" \

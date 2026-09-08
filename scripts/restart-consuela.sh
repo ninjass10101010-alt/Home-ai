@@ -13,7 +13,7 @@ docker run -d \
   -e "PB_ADMIN_EMAIL=admin@family.local" \
   -e "PB_ADMIN_PASSWORD=" \
   -e HERMES_API_URL=http://hermes-agent-2:8643 \
-  -e "HERMES_API_KEY=consuela-api-key-2026" \
+  -e "HERMES_API_KEY=<REDACTED-HERMES-KEY>" \
   -e "TELEGRAM_BOT_TOKEN=8509642029:AAE3eBxRQbgayiX-FXLxpIeXr3gVH2MWSHc" \
   -e "OPENROUTER_API_KEY=" \
   --network familydashboard_consuela-net \
