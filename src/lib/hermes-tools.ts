@@ -7,6 +7,7 @@ import { getHAWebSocketClient } from "@/lib/ha/websocket-client";
 import { calculateCheapestSplit, formatStoreTotal, PINNED_STORES } from "@/lib/stores";
 import { localTodayISO, localWeekdayShort, familyTimeZone, weekdayOfISO } from "@/lib/local-date";
 import { weekStartForDate, isoDateForWeekday } from "@/lib/meals-week-utils";
+import { storeMemory, queryMemories, deleteMemory, incrementMemoryUsage, type MemoryCategory } from "@/lib/family-memory";
 
 export interface ToolDefinition {
   name: string;
@@ -38,6 +39,15 @@ function formatTime(iso?: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return String(iso);
   return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
+}
+
+const MEMORY_FAMILY_ID = "demo-family";
+const MEMORY_USER_ID = "consuela";
+const MEMORY_CATEGORIES: MemoryCategory[] = ["preference", "allergy", "routine", "location", "schedule", "personality", "restriction", "contact", "note"];
+
+function memoryKey(person: string | undefined, content: string): string {
+  const raw = `${person?.trim() ?? ""} ${content}`.trim().toLowerCase();
+  return raw.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").substring(0, 50) || "memory";
 }
 
 // === Admin-backed persistence helpers ===
@@ -905,6 +915,91 @@ const TOOLS: Tool[] = [
       }
       await db.updateSuggestion(args.id, { status: "actioned" });
       return JSON.stringify({ ok: true, tool: payload.tool, args: payload.args || {}, result: parsed });
+    },
+  },
+  {
+    definition: {
+      name: "remember_fact",
+      description:
+        "Store a durable family fact in your memory bank (preferences, allergies, routines, people). CONFIRM with the user before storing. Categories: preference, allergy, routine, location, schedule, personality, restriction, contact, note.",
+      parameters: {
+        type: "object",
+        properties: {
+          content: { type: "string", description: "The fact in one natural sentence" },
+          category: { type: "string", description: "One of: preference, allergy, routine, location, schedule, personality, restriction, contact, note", enum: MEMORY_CATEGORIES },
+          person: { type: "string", description: "Who this is about (optional)" },
+        },
+        required: ["content"],
+      },
+    },
+    handler: async (args) => {
+      const content = String(args.content ?? "").trim();
+      if (!content) return JSON.stringify({ error: "content is required" });
+      const category = (MEMORY_CATEGORIES as string[]).includes(args.category) ? (args.category as MemoryCategory) : "note";
+      const person = typeof args.person === "string" && args.person.trim() ? args.person.trim() : undefined;
+      const tags = person ? [person] : [];
+      const memory = await storeMemory(MEMORY_USER_ID, MEMORY_FAMILY_ID, category, memoryKey(person, content), content, tags, 0.9);
+      if (!memory) return JSON.stringify({ error: "memory store is unavailable right now — try again later" });
+      return JSON.stringify({ ok: true, id: memory.id, key: memory.key, stored: content });
+    },
+  },
+  {
+    definition: {
+      name: "recall_memories",
+      description:
+        "Search your memory bank for family facts. Use BEFORE answering questions about people, preferences, allergies, or routines — never guess what you may know.",
+      parameters: {
+        type: "object",
+        properties: {
+          search: { type: "string", description: "Keyword search" },
+          person: { type: "string", description: "Restrict to one person" },
+          category: { type: "string", description: "One of the memory categories", enum: MEMORY_CATEGORIES },
+        },
+      },
+    },
+    handler: async (args) => {
+      let memories;
+      try {
+        memories = await queryMemories({
+          familyId: MEMORY_FAMILY_ID,
+          search: args.person ? String(args.person) : args.search ? String(args.search) : undefined,
+          category: (MEMORY_CATEGORIES as string[]).includes(args.category) ? (args.category as MemoryCategory) : undefined,
+          limit: 10,
+        });
+      } catch (err) {
+        return JSON.stringify({ error: "memory is unavailable right now — answer without it and say so" });
+      }
+      await Promise.allSettled(memories.filter((m) => m.id).map((m) => incrementMemoryUsage(m.id)));
+      return JSON.stringify({
+        memories: memories.map((m) => ({
+          id: m.id,
+          category: m.category,
+          key: m.key,
+          content: m.content,
+          person: (() => { try { const t = typeof m.tags === "string" ? JSON.parse(m.tags) : m.tags; return Array.isArray(t) && t.length ? t[0] : null; } catch { return null; } })(),
+          updated: m.updatedAt,
+        })),
+      });
+    },
+  },
+  {
+    definition: {
+      name: "forget_memory",
+      description:
+        "Delete one memory by id. Get the id from recall_memories first. CONFIRM with the user before forgetting.",
+      parameters: {
+        type: "object",
+        properties: {
+          memoryId: { type: "string", description: "The memory id from recall_memories" },
+        },
+        required: ["memoryId"],
+      },
+    },
+    handler: async (args) => {
+      const id = String(args.memoryId ?? "").trim();
+      if (!id) return JSON.stringify({ error: "memoryId is required — recall_memories first" });
+      const ok = await deleteMemory(id);
+      return ok ? JSON.stringify({ ok: true, forgotten: id }) : JSON.stringify({ error: `couldn't forget ${id}` });
     },
   },
   {
