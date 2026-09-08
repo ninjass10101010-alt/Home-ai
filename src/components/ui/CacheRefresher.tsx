@@ -1,15 +1,20 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { usePathname } from 'next/navigation';
 import { db } from '@/db';
 import { flushPendingWrites } from '@/lib/pending-writes';
 
 const REFRESH_INTERVAL_MS = 60_000;
 
 export function CacheRefresher({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
   const mounted = useRef(false);
 
   useEffect(() => {
+    // The ambient wall display (/screensaver) is a signed-out read-only board
+    // that polls its own exempt endpoint — gateway polling there is 401 spam.
+    if (pathname.startsWith('/screensaver')) return;
     if (mounted.current) return;
     mounted.current = true;
 
@@ -32,7 +37,7 @@ export function CacheRefresher({ children }: { children: React.ReactNode }) {
       clearInterval(interval);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, []);
+  }, [pathname]);
 
   return <>{children}</>;
 }
