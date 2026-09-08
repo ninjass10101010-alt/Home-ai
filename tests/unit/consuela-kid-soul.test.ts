@@ -53,13 +53,14 @@ describe("kid soul prompt", () => {
     expect(adult).toContain("add_meal tool");
   });
 
-  it("locks the kid scope: dashboard Q&A + summaries + learning, nothing else", () => {
-    expect(KID_SYSTEM_PROMPT).toMatch(/friendl|kind|fun/i);
+  it("locks the kid scope: safety, privacy, permissions, honesty, read-only chat", () => {
+    expect(KID_SYSTEM_PROMPT).toMatch(/friendly|warm|kind/i);
     expect(KID_SYSTEM_PROMPT).toMatch(/dashboard/i);
-    expect(KID_SYSTEM_PROMPT).toMatch(/learn/i);
-    expect(KID_SYSTEM_PROMPT).toMatch(/ask a parent|parents/i);
-    expect(KID_SYSTEM_PROMPT).toMatch(/no swearing|never swear/i);
-    expect(KID_SYSTEM_PROMPT).toMatch(/internet/i);
+    expect(KID_SYSTEM_PROMPT).toMatch(/keep children safe|safety/i);
+    expect(KID_SYSTEM_PROMPT).toMatch(/privacy|private/i);
+    expect(KID_SYSTEM_PROMPT).toMatch(/permission/i);
+    expect(KID_SYSTEM_PROMPT).toMatch(/parent|adult/i);
+    expect(KID_SYSTEM_PROMPT).toMatch(/read-only/i);
     expect(KID_SYSTEM_PROMPT).toMatch(/PIN|password|address/i);
   });
 
