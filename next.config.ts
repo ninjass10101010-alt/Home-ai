@@ -14,6 +14,10 @@ const FINANCE_DASHBOARD_URL =
 
 const nextConfig: NextConfig = {
   allowedDevOrigins: ["127.0.0.1", "localhost"],
+  // The Next.js dev-tools indicator ("N" badge) renders bottom-left and
+  // covers the CapsuleNav Home button on phone widths — hide it (dev-only,
+  // zero production effect).
+  devIndicators: false,
   async redirects() {
     return [
       {

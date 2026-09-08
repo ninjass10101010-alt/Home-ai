@@ -1,7 +1,7 @@
 {
-  "hash": "d69e056c89f56e4e8cf0f7d4b55ad3b98e883400",
-  "short": "d69e056",
-  "message": "docs(tasks): AGENTS.md — Share/avatar overlap fix",
-  "date": "2026-09-05 22:44:04 -0400",
+  "hash": "37873e1c37b6d43696076fef76b64c5b7ce0e062",
+  "short": "37873e1",
+  "message": "fix(ai): final-review wave — seed index quoting, keyed probe, cache coherence, picker chips, tool allowlist",
+  "date": "2026-09-08 00:06:06 -0400",
   "author": "GarciaFam"
 }

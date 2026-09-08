@@ -11,6 +11,7 @@
 - **Motion:** CSS animations only (no framer-motion); state-driven, never decorative infinite loops; pause when tab hidden; every animation has a `prefers-reduced-motion` fallback.
 - **Emoji as iconography:** liberal, lightweight, consistent with family-member emoji avatars.
 - **Emergency + dialogs:** the floating emergency shield is locked to `--color-accent-rose` (rose means alarm only — never decoration); the shared `Modal` carries real dialog semantics (`role="dialog"`, `aria-modal`, `aria-labelledby`, focus trap, focus-return to the trigger) for every consumer.
+- **Calendar day strip + glass-month title (2026-09-04):** the `/calendar` month-grid card carries a horizontal day strip (weekday letter over a numeral circle; selected = solid `--color-accent-button` gradient pill with white numeral, today = accent ring) sharing ONE `selectedDay` state with the grid; the month title replays a 240ms `calendarMonthSettle` rise per month change via key-remount. Both themes mirror; reduced-motion zeroes it.
 
 ## Weather card world — "(Not Boring), Consuela-style" (replacement world, 2026-08-27)
 
