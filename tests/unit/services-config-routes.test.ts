@@ -80,16 +80,22 @@ describe("GET /api/services/config", () => {
 
   it("returns manifest with masked secrets and no raw values", async () => {
     const { pb } = pbForRows([
-      { service: "hermes", key: "HERMES_API_URL", value: "http://h:8642", is_secret: false },
+      { service: "themealdb", key: "MEALDB_KEY", value: "1", is_secret: false },
     ]);
-    process.env.HERMES_API_KEY = "abcd";
     mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
 
     const res = await GET(req("GET", undefined, { cookie: await sessionCookie() }));
     expect(res.status).toBe(200);
-    const raw = JSON.stringify(await res.json());
+    const body = await res.json();
+    const raw = JSON.stringify(body);
     expect(raw).not.toContain('"value"');
-    expect(raw).not.toContain("http://h:8642"); // non-secret config values also not echoed
+    // The stored non-secret value is read into status but never echoed raw.
+    const mealdb = body.services.find((s: any) => s.id === "themealdb");
+    expect(mealdb.status.find((f: any) => f.key === "MEALDB_KEY")).toMatchObject({
+      source: "db",
+      set: true,
+    });
+    expect(mealdb.status.find((f: any) => f.key === "MEALDB_KEY").value).toBeUndefined();
   });
 
   it("includes every registry service for a signed-in adult", async () => {

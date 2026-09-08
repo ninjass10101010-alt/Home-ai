@@ -76,17 +76,16 @@ describe("getServiceConfig", () => {
 
 describe("getServiceStatus", () => {
   it("reports db/env/unset sources and a 2-char secret preview", async () => {
-    const { encryptSecret } = await import("@/lib/secret-box");
     mocks.withAdmin.mockImplementation((fn: any) =>
-      fn(pbForRows([{ service: "hermes", key: "HERMES_API_URL", value: "http://h:8642", is_secret: false }]))
+      fn(pbForRows([{ service: "telegram_alert", key: "TELEGRAM_ALERT_CHAT_ID", value: "-100123", is_secret: false }]))
     );
-    process.env.HERMES_API_KEY = "abcd";
-    const status = await getServiceStatus("hermes");
-    const url = status.find((f) => f.key === "HERMES_API_URL")!;
-    expect(url).toMatchObject({ source: "db", set: true });
-    const key = status.find((f) => f.key === "HERMES_API_KEY")!;
-    expect(key).toMatchObject({ source: "env", set: true, preview: "cd" });
-    delete process.env.HERMES_API_KEY;
+    process.env.TELEGRAM_BOT_TOKEN = "abcd";
+    const status = await getServiceStatus("telegram_alert");
+    const chatId = status.find((f) => f.key === "TELEGRAM_ALERT_CHAT_ID")!;
+    expect(chatId).toMatchObject({ source: "db", set: true });
+    const token = status.find((f) => f.key === "TELEGRAM_BOT_TOKEN")!;
+    expect(token).toMatchObject({ source: "env", set: true, preview: "cd" });
+    delete process.env.TELEGRAM_BOT_TOKEN;
   });
 
   it("reports secret fields as unreadable when the stored ciphertext cannot be decrypted", async () => {

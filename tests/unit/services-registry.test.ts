@@ -12,11 +12,9 @@ describe("services registry", () => {
   it("contains exactly the approved services", () => {
     expect(SERVICES_REGISTRY.map((s) => s.id).sort()).toEqual(
       [
-        "ai_fallback",
         "composio",
         "gmail_emergency",
         "greenlight",
-        "hermes",
         "home_assistant",
         "instacart",
         "khanacademy",
@@ -35,7 +33,6 @@ describe("services registry", () => {
       ["telegram_alert", "TELEGRAM_BOT_TOKEN"],
       ["telegram_mirror", "TELEGRAM_MIRROR_BOT_TOKEN"],
       ["gmail_emergency", "GMAIL_APP_PASSWORD"],
-      ["hermes", "HERMES_API_KEY"],
       ["instacart", "INSTACART_API_KEY"],
       ["composio", "COMPOSIO_API_KEY"],
       ["greenlight", "GREENLIGHT_API_KEY"],

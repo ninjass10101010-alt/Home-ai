@@ -69,16 +69,6 @@ export const SERVICES_REGISTRY: ServiceDef[] = [
     ],
   },
   {
-    id: "hermes",
-    displayName: "Hermes AI",
-    description: "Ask Consuela intelligence + recipe parsing",
-    testFnId: "hermes",
-    fields: [
-      { key: "HERMES_API_URL", label: "Hermes URL", secret: false, required: true, helpText: "OpenAI-compatible endpoint base", placeholder: "http://hermes-agent-2:8643" },
-      { key: "HERMES_API_KEY", label: "API key", secret: true, required: false, helpText: "Leave empty if Hermes runs without a key" },
-    ],
-  },
-  {
     id: "instacart",
     displayName: "Instacart",
     description: "Meal plan → shoppable carts",
@@ -113,17 +103,6 @@ export const SERVICES_REGISTRY: ServiceDef[] = [
     testFnId: "composio",
     fields: [
       { key: "COMPOSIO_API_KEY", label: "Composio API key", secret: true, required: true, helpText: "From composio.dev dashboard" },
-    ],
-  },
-  {
-    id: "ai_fallback",
-    displayName: "AI Fallback Models",
-    description: "Backup brain when the Hermes gateway is down — comma-separated model list, tried in order",
-    testFnId: "ai_fallback",
-    fields: [
-      { key: "FALLBACK_API_URL", label: "API base URL", secret: false, required: true, helpText: "OpenAI-compatible endpoint", placeholder: "https://api.b.ai/v1" },
-      { key: "FALLBACK_API_KEY", label: "API key", secret: true, required: false, helpText: "Leave empty if the endpoint needs no key" },
-      { key: "FALLBACK_MODELS", label: "Models (comma-separated, tried in order)", secret: false, required: true, helpText: "e.g. glm-5.3-flash,qwen3.8-flash — each tried in order if Hermes is unreachable", placeholder: "glm-5.3-flash,qwen3.8-flash" },
     ],
   },
   {
