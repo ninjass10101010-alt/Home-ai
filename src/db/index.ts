@@ -226,19 +226,6 @@ async function refreshCache(name: string, fetcher: () => Promise<any[]>, cache: 
 
 const membersFallback = memberFallbacks;
 
-const scheduleData = [
-  { id: 1, title: "Wake up / Morning routine", time: "07:00", days: "weekdays", type: "routine", icon: "⏰", color: "amber" },
-  { id: 2, title: "Breakfast", time: "07:30", days: "all", type: "routine", icon: "🥞", color: "green" },
-  { id: 3, title: "School / Learning time", time: "08:30", days: "weekdays", type: "routine", icon: "📚", color: "cyan" },
-  { id: 4, title: "Lunch", time: "12:00", days: "all", type: "routine", icon: "🍽️", color: "amber" },
-  { id: 5, title: "Screen time", time: "15:30", days: "weekdays", type: "routine", icon: "📱", color: "violet" },
-  { id: 6, title: "Dinner", time: "18:00", days: "all", type: "routine", icon: "🍝", color: "green" },
-  { id: 7, title: "Bedtime routine", time: "20:30", days: "all", type: "routine", icon: "🛁", color: "violet" },
-  { id: 8, title: "Lights out", time: "21:00", days: "all", type: "routine", icon: "🌙", color: "rose" },
-  { id: 9, title: "Family movie night", time: "19:00", days: "friday", type: "routine", icon: "🎬", color: "cyan" },
-  { id: 10, title: "Take medication", time: "08:00", days: "all", memberId: 1, type: "reminder", icon: "💊", color: "rose" },
-];
-
 // Dual-mode cache fetchers: browser → sessioned gateway, server → pb-db.
 // Used by the module-level hydrate and refreshCaches.
 const dualFetch = {
@@ -459,16 +446,11 @@ export const db = {
 
   selectTodaysSchedulesRaw: () => {
     if (schedulesCache.length > 0) return schedulesCache;
-    const now = new Date();
-    const today = now.toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
-    const todayIdx = now.getDay();
-    return scheduleData
-      .filter((s: any) => scheduleCoversWeekday(s.days, today, todayIdx))
-      .sort((a: any, b: any) => (scheduleTimeMinutes(a.time) ?? 0) - (scheduleTimeMinutes(b.time) ?? 0))
-      .map((s: any) => {
-        const member = s.memberId ? membersFallback.find(m => m.id === s.memberId) : null;
-        return { id: s.id, title: s.title, time: s.time, emoji: s.icon, type: s.type, color: s.color, member: member?.name, memberColor: cacheMemberColor(member, member?.id ?? 0) };
-      });
+    // No demo fallback — an empty family schedule renders the widget's
+    // honest empty state (the hardcoded Wake up/Breakfast/Dinner demo list
+    // used to masquerade as real data until the family added their own
+    // routines).
+    return [];
   },
 
   selectTodaysSchedules: () => {
