@@ -1156,6 +1156,9 @@ Consuela has a mirror bot (user-created via **@BotFather** with a new bot token 
 **"How does the wall display show the family board when idle?"**  
 Fully Kiosk's Screensaver is pointed at `<dashboard-url>/screensaver` with a low screensaver brightness. After 5 minutes of nobody touching it, the ambient board fades in (clock, weather, tonight's dinner, what's next, chore progress, Consuela's digest). A tap — or the front-camera motion detection — wakes straight back to the live dashboard. Everything on the ambient board is read-only; chores, meals and alerts still need a signed-in member and their PIN.
 
+**"How do I change Consuela's brain?"**  
+Go to **Settings → AI Models**. Tap **+ Add provider**, paste your provider's API base URL (e.g. `https://api.b.ai/v1`) and key, tap **Load models** to fetch the live list, keep the model you want in the chain (the first one answers), then **Save provider**. The chip at the top always shows the model currently answering. If a provider dies mid-chat, Consuela automatically falls to the next model in the chain.
+
 ---
 
 ## 2. Integration Workflows (Step-by-Step Agent Procedures)
@@ -1461,7 +1464,7 @@ Unauthorized requests (missing/wrong bearer) get a 401 `{error:"unauthorized"}`.
 "Let me check PocketBase's health and the container status. I'll let you know what I find."
 
 **"Consuela, what tools do you have?"**  
-Full explanation of all 19 tools available (14 daily-life + 5 admin). Read-only, no shell access.
+Full explanation of all 35 tools available (12 reads, 9 writes, 3 event-logistics, 1 shopping-intelligence, 3 memory, 2 house-control, 5 admin). Memory is adults-only; kids get the read-only allowlist. Read-only, no shell access.
 
 ---
 
