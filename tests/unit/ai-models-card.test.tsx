@@ -142,4 +142,55 @@ describe("AiModelsCard", () => {
     expect(el.textContent).toContain("No brain configured");
     expect(el.textContent).toContain("Add provider");
   });
+
+  it("after Load models, fetched ids render as toggle chips and tapping adds to the chain", async () => {
+    const el = render(<AiModelsCard />);
+    await settle();
+
+    // open the draft editor
+    act(() => {
+      el.querySelectorAll("button").forEach((b) => {
+        if (b.textContent?.includes("Add provider")) b.click();
+      });
+    });
+    await settle();
+
+    // fill the base URL so Load models is enabled
+    const inputs = el.querySelectorAll("input");
+    const baseUrlInput = inputs[1] as HTMLInputElement;
+    setInputValue(el, baseUrlInput, "https://api.b.ai/v1");
+
+    await settle();
+    act(() => {
+      el.querySelectorAll("button").forEach((b) => {
+        if (b.textContent?.includes("Load models")) b.click();
+      });
+    });
+    await settle();
+
+    // the fetched ids appear as toggle chips
+    expect(el.textContent).toContain("2 models available");
+    const chipFor = (id: string) =>
+      [...el.querySelectorAll("button")].find((b) => b.textContent?.trim() === id);
+    expect(chipFor("glm-5.3-flash")).toBeTruthy();
+    expect(chipFor("qwen3.8-flash")).toBeTruthy();
+
+    // qwen was NOT in the auto-selected chain; tapping adds it to Models field
+    const modelsInput = [...el.querySelectorAll("input")].find(
+      (i) => i.value.includes("glm-5.3-flash")
+    ) as HTMLInputElement;
+    expect(modelsInput).toBeTruthy();
+    expect(modelsInput.value).toBe("glm-5.3-flash");
+
+    act(() => {
+      chipFor("qwen3.8-flash")!.click();
+    });
+    await settle();
+
+    const modelsInputAfter = [...el.querySelectorAll("input")].find(
+      (i) => i.value.includes("qwen3.8-flash")
+    ) as HTMLInputElement;
+    expect(modelsInputAfter).toBeTruthy();
+    expect(modelsInputAfter.value).toBe("glm-5.3-flash, qwen3.8-flash");
+  });
 });

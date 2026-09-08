@@ -84,6 +84,10 @@ describe("hermes chat — streaming mode", () => {
   it("runs a tool round: status event, handler, then streams the final answer", async () => {
     const handler = vi.fn(async () => '{"ok":true}');
     mocks.getTool.mockReturnValue({ handler });
+    // The route only executes tools in the session allowlist — declare it.
+    mocks.buildToolsForOpenAI.mockReturnValue([
+      { type: "function", function: { name: "get_pantry", parameters: {} } },
+    ] as any);
     vi.stubGlobal("fetch", vi.fn()
       .mockImplementationOnce(async () => sseResponse([toolCallRound("c1", "get_pantry", "{}")]))
       .mockImplementationOnce(async () => sseResponse([token("Pantry looks stocked."), DONE])));
@@ -111,6 +115,11 @@ describe("hermes chat — streaming mode", () => {
     const handlerB = vi.fn(async () => { bStarted = true; return '{"ok":"b"}'; });
     mocks.getTool.mockImplementation((name: string) =>
       name === "get_pantry" ? { handler: handlerA } : name === "get_grocery_list" ? { handler: handlerB } : undefined);
+    // The route only executes tools in the session allowlist — declare both.
+    mocks.buildToolsForOpenAI.mockReturnValue([
+      { type: "function", function: { name: "get_pantry", parameters: {} } },
+      { type: "function", function: { name: "get_grocery_list", parameters: {} } },
+    ] as any);
     const round =
       `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [
         { index: 0, id: "c1", function: { name: "get_pantry", arguments: "{}" } },
@@ -132,6 +141,9 @@ describe("hermes chat — streaming mode", () => {
     // final answer. The synthesized fallback must reach the client as a token
     // frame (not just the DB) so the live view matches the persisted thread.
     mocks.getTool.mockReturnValue({ handler: vi.fn(async () => '{"ok":true}') });
+    mocks.buildToolsForOpenAI.mockReturnValue([
+      { type: "function", function: { name: "get_pantry", parameters: {} } },
+    ] as any);
     vi.stubGlobal("fetch", vi.fn(async () => sseResponse([toolCallRound("c1", "get_pantry", "{}")])));
     const res = await post({ message: "keep going", stream: true });
     const body = await res.text();

@@ -141,5 +141,10 @@ describe("members.emoji text-field max", () => {
     expect(req.displayName).toBe(true);
     expect(req.baseUrl).toBe(true);
     expect(req.apiKey).toBe(false); // key optional at seed level; upsert layer enforces
+    // `order` is a SQLite reserved word — PocketBase runs this index SQL on
+    // collection save, so an unquoted column aborts the whole seed run.
+    const idxSql = col!.indexes?.[0] ?? "";
+    expect(idxSql).toContain('("order")');
+    expect(idxSql).not.toMatch(/\(\s*order\s*\)/);
   });
 });

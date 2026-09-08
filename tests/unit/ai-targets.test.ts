@@ -12,7 +12,7 @@ vi.mock("@/lib/ai/providers", () => ({ listAiProviders: mocks.listAiProviders })
 vi.mock("@/lib/pb-auth", () => ({ withAdmin: mocks.withAdmin }));
 vi.mock("@/lib/secret-box", () => ({ decryptSecret: mocks.decryptSecret }));
 
-import { resolveChatTargets, resetAiTargetsForTests } from "@/lib/ai/targets";
+import { resolveChatTargets, resetAiTargetsForTests, resetAiTargetsCache } from "@/lib/ai/targets";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -95,5 +95,36 @@ describe("resolveChatTargets", () => {
 
   it("empty when nothing is configured", async () => {
     expect(await resolveChatTargets()).toEqual([]);
+  });
+
+  it("resetAiTargetsCache invalidates the chain (the save/delete coherence seam)", async () => {
+    mocks.listAiProviders.mockResolvedValue([
+      { id: "1", displayName: "b.ai", baseUrl: "https://api.b.ai", apiKey: "k", models: ["m"], enabled: true, order: 0 },
+    ]);
+    await resolveChatTargets();
+    await resolveChatTargets();
+    expect(mocks.listAiProviders).toHaveBeenCalledTimes(1);
+    resetAiTargetsCache();
+    await resolveChatTargets();
+    expect(mocks.listAiProviders).toHaveBeenCalledTimes(2);
+  });
+
+  it("an EMPTY chain is cached for 30 seconds, not the full 10-minute TTL", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.listAiProviders.mockResolvedValue([]);
+      await resolveChatTargets();
+      expect(mocks.listAiProviders).toHaveBeenCalledTimes(1);
+      // still inside the 30s empty window
+      vi.advanceTimersByTime(29_000);
+      await resolveChatTargets();
+      expect(mocks.listAiProviders).toHaveBeenCalledTimes(1);
+      // past it — a just-configured brain must not stay invisible
+      vi.advanceTimersByTime(2_000);
+      await resolveChatTargets();
+      expect(mocks.listAiProviders).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

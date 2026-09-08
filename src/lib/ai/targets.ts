@@ -22,7 +22,16 @@ export interface AiTarget {
 }
 
 const CHAIN_TTL_MS = 10 * 60 * 1000;
+// An EMPTY result isn't a stable config — it's usually a PB blip. Don't pin
+// "no brain" for 10 minutes or a just-configured provider stays invisible.
+const EMPTY_TTL_MS = 30_000;
 let cached: { targets: AiTarget[]; at: number } | null = null;
+
+/** Production cache invalidation — call after a provider is saved/deleted so
+ *  chat picks the new chain up immediately (distinct from the test seam). */
+export function resetAiTargetsCache(): void {
+  cached = null;
+}
 
 export function resetAiTargetsForTests(): void {
   cached = null;
@@ -114,7 +123,9 @@ async function resolveUncached(): Promise<AiTarget[]> {
 }
 
 export async function resolveChatTargets(): Promise<AiTarget[]> {
-  if (cached && Date.now() - cached.at < CHAIN_TTL_MS) return cached.targets;
+  if (cached && Date.now() - cached.at < (cached.targets.length === 0 ? EMPTY_TTL_MS : CHAIN_TTL_MS)) {
+    return cached.targets;
+  }
   const targets = await resolveUncached();
   cached = { targets, at: Date.now() };
   return targets;

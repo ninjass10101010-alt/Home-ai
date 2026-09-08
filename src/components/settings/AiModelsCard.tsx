@@ -48,6 +48,7 @@ export default function AiModelsCard() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [fetchedIds, setFetchedIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [listing, setListing] = useState(false);
@@ -84,6 +85,7 @@ export default function AiModelsCard() {
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || `status ${res.status}`);
       setNotice(`Saved ${draft.displayName}.`);
+      setFetchedIds([]);
       setDraft(null);
       await load();
     } catch (err) {
@@ -114,7 +116,8 @@ export default function AiModelsCard() {
       const ids: string[] = (body.models ?? []).map((m: { id: string }) => m.id);
       if (ids.length === 0) throw new Error("provider listed no models — enter names manually");
       setDraft((d) => (d ? { ...d, models: d.models.length ? d.models : [ids[0]] } : d));
-      setNotice(`${ids.length} models available — toggle the ones you want, order with the arrows.`);
+      setFetchedIds(ids);
+      setNotice(`${ids.length} models available — tap the ones you want; the first one in the chain answers.`);
     } catch (err) {
       setNotice(`${(err as Error).message}`);
     } finally {
@@ -170,7 +173,7 @@ export default function AiModelsCard() {
                   size="md"
                   variant="ghost"
                   aria-label={`Edit ${p.displayName}`}
-                  onClick={() => setDraft({ id: p.id, displayName: p.displayName, baseUrl: p.baseUrl, apiKey: "", models: p.models, enabled: p.enabled, order: p.order })}
+                  onClick={() => { setFetchedIds([]); setDraft({ id: p.id, displayName: p.displayName, baseUrl: p.baseUrl, apiKey: "", models: p.models, enabled: p.enabled, order: p.order }); }}
                 >
                   ✎
                 </IconButton>
@@ -182,7 +185,7 @@ export default function AiModelsCard() {
           ))}
 
           {!draft && (
-            <SoftButton size="sm" onClick={() => setDraft({ ...EMPTY_DRAFT, order: providers.length })}>+ Add provider</SoftButton>
+            <SoftButton size="sm" onClick={() => { setFetchedIds([]); setDraft({ ...EMPTY_DRAFT, order: providers.length }); }}>+ Add provider</SoftButton>
           )}
 
           {draft && (
@@ -212,6 +215,34 @@ export default function AiModelsCard() {
                 </SoftButton>
                 <span className="text-[11px] text-text-muted">or type names below</span>
               </div>
+              {fetchedIds.length > 0 && (
+                <div className="flex flex-wrap gap-1.5" role="group" aria-label="Fetched models — tap to toggle">
+                  {fetchedIds.map((id) => {
+                    const included = draft.models.includes(id);
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        aria-pressed={included}
+                        onClick={() =>
+                          setDraft((d) =>
+                            d
+                              ? { ...d, models: included ? d.models.filter((m) => m !== id) : [...d.models, id] }
+                              : d
+                          )
+                        }
+                        className={
+                          included
+                            ? "rounded-full bg-[var(--color-accent-button)] px-2.5 py-1 text-[11px] font-semibold text-white"
+                            : "rounded-full border border-white/10 bg-[var(--color-surface-0)] px-2.5 py-1 text-[11px] font-semibold text-text-secondary"
+                        }
+                      >
+                        {id}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
               <TextField
                 label="Models (comma-separated, first = in use)"
                 value={draft.models.join(", ")}
@@ -225,7 +256,7 @@ export default function AiModelsCard() {
                   label="Enabled"
                 />
                 <div className="flex gap-2">
-                  <SoftButton size="sm" variant="ghost" onClick={() => setDraft(null)}>Cancel</SoftButton>
+                  <SoftButton size="sm" variant="ghost" onClick={() => { setFetchedIds([]); setDraft(null); }}>Cancel</SoftButton>
                   <SoftButton
                     size="sm"
                     loading={saving}

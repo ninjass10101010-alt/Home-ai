@@ -68,6 +68,24 @@ describe("GET /api/ai/providers", () => {
     const body = await res.json();
     expect(body.providers[0].status).toBe("unreachable");
   });
+
+  it("sends the provider's key on the status probe so keyed providers don't read unreachable", async () => {
+    mocks.listAiProviders.mockResolvedValue([
+      { id: "1", displayName: "keyed", baseUrl: "https://api.b.ai", apiKey: "sk-key-42", models: ["m"], enabled: true, order: 0 },
+    ]);
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(JSON.stringify({ data: [{ id: "m" }] }), { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await providersGET(req("http://localhost/api/ai/providers"));
+    const body = await res.json();
+    expect(body.providers[0].status).toBe("ok");
+    const probeCall = fetchMock.mock.calls.find((c: any[]) =>
+      String(c[0]).endsWith("/v1/models")
+    );
+    expect(probeCall).toBeTruthy();
+    expect((probeCall![1] as any).headers.Authorization).toBe("Bearer sk-key-42");
+  });
 });
 
 describe("PUT /api/ai/providers", () => {

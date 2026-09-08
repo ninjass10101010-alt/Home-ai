@@ -248,7 +248,10 @@ async function runToolCalls(
 ): Promise<string[]> {
   return Promise.all(toolCalls.map(async (tc) => {
     const name = tc.function?.name;
-    const tool = name ? getTool(name) : undefined;
+    // Allowlist first: the model only ever sees the session's `tools`, but a
+    // prompt injection could name any registry tool. getTool searching the
+    // FULL registry must never let a call outside the allowlist execute.
+    const tool = name && tools.some((t) => t.function.name === name) ? getTool(name) : undefined;
     if (!name || !tool) {
       const available = tools.map((t) => t.function.name).join(", ");
       return JSON.stringify({ error: `Unknown tool: ${name ?? "<missing name>"}. Available: ${available}` });

@@ -2,13 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { authorizeAdminRequest } from "@/lib/admin-auth";
 import { verifySession, SESSION_COOKIE } from "@/lib/session";
 import { listAiProviders, upsertAiProvider, deleteAiProvider } from "@/lib/ai/providers";
+import { resetAiTargetsCache } from "@/lib/ai/targets";
 
 export const dynamic = "force-dynamic";
 
-/** One cheap probe per enabled provider — powers the settings status dot. */
-async function probe(baseUrl: string): Promise<"ok" | "unreachable" | "unknown"> {
+/** One cheap probe per enabled provider — powers the settings status dot.
+ *  Keyed providers 401 an unauthenticated /v1/models, so send the key. */
+async function probe(baseUrl: string, key?: string | null): Promise<"ok" | "unreachable" | "unknown"> {
   try {
-    const res = await fetch(`${baseUrl}/v1/models`, { signal: AbortSignal.timeout(4000) });
+    const headers: Record<string, string> = {};
+    if (key) headers.Authorization = `Bearer ${key}`;
+    const res = await fetch(`${baseUrl}/v1/models`, { headers, signal: AbortSignal.timeout(4000) });
     return res.ok ? "ok" : "unreachable";
   } catch {
     return "unreachable";
@@ -49,7 +53,7 @@ export async function GET(request: NextRequest) {
         ...p,
         keyPreview: p.apiKey ? p.apiKey.slice(-2) : null,
         apiKey: undefined, // decrypted key NEVER leaves the server
-        status: p.enabled ? await probe(p.baseUrl) : "unknown",
+        status: p.enabled ? await probe(p.baseUrl, p.apiKey) : "unknown",
       }))
     );
     const first = withStatus.find((p) => p.enabled && p.models.length > 0);
@@ -78,6 +82,8 @@ export async function PUT(request: NextRequest) {
       enabled: body.enabled,
       order: typeof body.order === "number" ? body.order : undefined,
     });
+    // Drop the 10-min resolver cache so chat serves the new chain immediately.
+    resetAiTargetsCache();
     return NextResponse.json({ provider: { ...provider, apiKey: undefined } });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 400 });
@@ -90,5 +96,6 @@ export async function DELETE(request: NextRequest) {
   const id = new URL(request.url).searchParams.get("id");
   if (!id) return NextResponse.json({ error: "id is required" }, { status: 400 });
   const ok = await deleteAiProvider(id);
+  if (ok) resetAiTargetsCache();
   return NextResponse.json({ ok }, { status: ok ? 200 : 404 });
 }

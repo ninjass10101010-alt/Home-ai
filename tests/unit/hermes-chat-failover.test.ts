@@ -129,4 +129,52 @@ describe("hermes chat — route-level failover", () => {
     expect(mocks.insertChatMessage).not.toHaveBeenCalled();
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
+
+  it("a tool call outside the session's allowlist is rejected WITHOUT executing the handler", async () => {
+    // Earlier tests in this file set mockResolvedValue([]); restore the chain.
+    mocks.resolveChatTargets.mockResolvedValue([
+      { url: "http://brain.local", key: "k1", model: "brain-model", provider: "brain", fallback: false },
+    ]);
+    // Kid-injection scenario: the model emits a tool name that exists in the
+    // full registry but was never in this session's allowlist. The route must
+    // refuse to run it even though getTool would happily return a handler.
+    const handler = vi.fn(async () => JSON.stringify({ ok: true, value: "SECRET" }));
+    mocks.getTool.mockReturnValue({ handler });
+    mocks.buildToolsForOpenAI.mockReturnValue([
+      { type: "function", function: { name: "get_weather", parameters: {} } },
+    ] as any);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockImplementationOnce(async () =>
+          new Response(
+            JSON.stringify({
+              choices: [{
+                message: {
+                  role: "assistant",
+                  content: "",
+                  tool_calls: [{ id: "t1", function: { name: "remember_fact", arguments: "{}" } }],
+                },
+              }],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } }
+          )
+        )
+        .mockImplementationOnce(async () => buffered200("done")),
+    );
+    const res = await post({ message: "hi" });
+    const data = await res.json();
+    expect(data.content).toBe("done");
+    expect(handler).not.toHaveBeenCalled();
+
+    const calls = (globalThis.fetch as any).mock.calls as [string, any][];
+    expect(calls).toHaveLength(2);
+    const secondBody = JSON.parse(String(calls[1][1].body));
+    const toolMsg = secondBody.messages.find(
+      (m: any) => m.role === "tool" && m.tool_call_id === "t1"
+    );
+    expect(toolMsg).toBeTruthy();
+    expect(toolMsg.content).toContain("Unknown tool");
+    expect(toolMsg.content).toContain("remember_fact");
+  });
 });

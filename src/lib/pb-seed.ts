@@ -580,7 +580,7 @@ export const COLLECTIONS = [
       { name: "order", type: "number" },
     ],
     indexes: [
-      "CREATE INDEX idx_ai_providers_order ON consuela_ai_providers (order)",
+      "CREATE INDEX idx_ai_providers_order ON consuela_ai_providers (\"order\")",
     ],
   },
   // Money Mountain (src/lib/money-mountain.ts) — text userId, no relation to users.
