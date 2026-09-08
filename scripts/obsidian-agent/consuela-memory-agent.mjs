@@ -6,7 +6,7 @@
 // a stale note just stays until a future cleanup pass).
 //
 // Config: ~/.config/consuela/memory-agent.json
-//   { "dashboardUrl": "http://192.168.0.28:3000",
+//   { "dashboardUrl": "http://<dashboard-host>:3000",
 //     "cronSecret": "<CRON_SECRET value>",
 //     "vaultDir": "/Users/garciafam/Library/CloudStorage/GoogleDrive-<you>@gmail.com/My Drive/Obsidian Vault/Brain" }
 // NEVER commit this file or the secret. chmod 600 the config.
@@ -66,21 +66,27 @@ async function main() {
   let written = 0;
   const byCategory = new Map();
   for (const memory of memories) {
-    const rel = notePath(memory);
-    const abs = join(root, rel);
-    mkdirSync(dirname(abs), { recursive: true });
-    writeFileSync(abs, renderNote(memory), "utf8");
-    written += 1;
-    const cat = String(memory.category || "note");
-    if (!byCategory.has(cat)) byCategory.set(cat, []);
-    byCategory.get(cat).push(memory);
+    try {
+      const rel = notePath(memory);
+      const abs = join(root, rel);
+      mkdirSync(dirname(abs), { recursive: true });
+      writeFileSync(abs, renderNote(memory), "utf8");
+      written += 1;
+      const cat = String(memory.category || "note");
+      if (!byCategory.has(cat)) byCategory.set(cat, []);
+      byCategory.get(cat).push(memory);
+    } catch (err) {
+      // One bad memory (bad id, unwritable path, …) must not sink the run.
+      console.error(`[consuela-memory-agent] warning: skipped memory ${memory?.id ?? "?"} — ${err?.message || err}`);
+      continue;
+    }
   }
   for (const [cat, list] of byCategory) {
     const abs = join(root, cat, "_index.md");
     mkdirSync(dirname(abs), { recursive: true });
     writeFileSync(abs, renderIndex(cat, list), "utf8");
   }
-  console.log(`[consuela-memory-agent] ${new Date().toISOString()} — exported ${body.count ?? memories.length} memories, wrote ${written} notes to ${root}`);
+  console.log(`[consuela-memory-agent] ${new Date().toISOString()} — exported ${body.count ?? memories.length} memories, wrote ${written} of ${memories.length} notes to ${root}`);
 }
 
 main().catch((err) => {

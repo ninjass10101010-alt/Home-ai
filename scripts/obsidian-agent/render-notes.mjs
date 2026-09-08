@@ -1,12 +1,22 @@
 // Pure renderer for the Consuela memory → Obsidian mirror (zero deps).
 // Shared by consuela-memory-agent.mjs and tests/unit/obsidian-render-notes.test.ts.
 
-export function slugify(text) {
-  const slug = String(text)
+function rawSlug(text) {
+  return String(text)
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
-  return slug.slice(0, 60) || "memory";
+}
+
+export function slugify(text) {
+  return rawSlug(text).slice(0, 60) || "memory";
+}
+
+// Filesystem-safe single path segment: same slug pipeline as slugify but the
+// empty fallback is "General". Kills "/", "\\", and traversal (".." collapses
+// to nothing → fallback) before they reach a write path.
+export function sanitizeSegment(raw) {
+  return rawSlug(raw).slice(0, 60) || "General";
 }
 
 export function personOf(memory) {
@@ -41,9 +51,18 @@ export function renderNote(memory) {
   return frontmatter;
 }
 
+// Single source of truth for note filenames so notePath and renderIndex can
+// never drift. Id-stable: `${content-slug(40)}-${sanitized-id(12)}.md` — a
+// re-run with edited content produces the SAME filename (overwrite, no orphan).
+export function noteFilename(memory) {
+  return `${slugify(memory.content).slice(0, 40)}-${sanitizeSegment(String(memory.id)).slice(0, 12)}.md`;
+}
+
 export function notePath(memory) {
-  // {category}/{person-or-General}/{slug}.md — relative to the vault mirror root.
-  return [String(memory.category || "note"), personOf(memory), `${slugify(memory.content)}.md`].join("/");
+  // {category}/{person-or-General}/{filename}.md — relative to the vault
+  // mirror root. Both segments sanitized (a "/" in a tag must not nest a
+  // folder; ".." must not escape the mirror root).
+  return [sanitizeSegment(String(memory.category || "note")), sanitizeSegment(personOf(memory)), noteFilename(memory)].join("/");
 }
 
 export function renderIndex(category, memories) {
@@ -52,7 +71,7 @@ export function renderIndex(category, memories) {
     "",
     `Auto-mirrored from the Consuela dashboard. ${memories.length} memor${memories.length === 1 ? "y" : "ies"}.`,
     "",
-    ...memories.map((m) => `- [[${slugify(m.content)}.md]] — ${m.content.slice(0, 80)}`),
+    ...memories.map((m) => `- [[${noteFilename(m)}]] — ${m.content.slice(0, 80)}`),
     "",
   ];
   return lines.join("\n");

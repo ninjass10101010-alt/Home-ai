@@ -1,20 +1,13 @@
 # Consuela → Obsidian memory agent (Mac)
 
-Zero-dependency Node script that pulls the family's Consuela memories every
-15 minutes and renders them as markdown notes into the Obsidian vault.
-One-way mirror: PocketBase (the dashboard's DB) is the source of truth.
+Zero-dependency Node script that pulls the family's Consuela memories every 15
+minutes into the Obsidian vault as markdown notes — a one-way mirror; PocketBase
+(the dashboard's DB) is the source of truth.
 
 ## Install
 
-1. Create the config file (never commit it — it holds the CRON_SECRET):
-
-   ```
-   mkdir -p ~/.config/consuela
-   $EDITOR ~/.config/consuela/memory-agent.json
-   chmod 600 ~/.config/consuela/memory-agent.json
-   ```
-
-   Shape (placeholder values only):
+1. Create `~/.config/consuela/memory-agent.json` (mkdir -p the dir, chmod 600
+   the file — it holds the CRON_SECRET, never commit it):
 
    ```json
    { "dashboardUrl": "http://<dashboard-host>:3000",
@@ -22,9 +15,8 @@ One-way mirror: PocketBase (the dashboard's DB) is the source of truth.
      "vaultDir": "<absolute path to the Obsidian vault folder>" }
    ```
 
-2. Fix the two paths inside the plist: the absolute node path (`which node`)
-   and the absolute path to `consuela-memory-agent.mjs` in this repo
-   (replacing `REPLACE_WITH_REPO_ABS_PATH`).
+2. Fix the plist's two paths (absolute node path via `which node`, and the
+   script's absolute path replacing `REPLACE_WITH_REPO_ABS_PATH`), then:
 
    ```
    cp scripts/obsidian-agent/com.garcia.consuela-memory-agent.plist ~/Library/LaunchAgents/
@@ -41,8 +33,7 @@ tail -5 /tmp/consuela-memory-agent.log
 
 ## One-way contract
 
-- Same memory id → same filename → safe overwrite (idempotent re-runs).
-- Deletions in the dashboard are NOT propagated: a deleted memory leaves a
-  stale note until a future cleanup pass.
-- Edits made inside Obsidian are never synced back — edit memories in the
-  dashboard (Consuela chat, or /memory).
+- Same memory id → same filename → safe overwrite (idempotent re-runs); filenames
+  are `{content-slug ≤40}-{id ≤12}.md`, so content edits update in place.
+- Deletions are NOT propagated (stale notes stay until a cleanup pass); edits
+  inside Obsidian never sync back — manage memories in the dashboard (/memory).
