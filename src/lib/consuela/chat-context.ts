@@ -40,7 +40,7 @@ export function dinnerForToday(
 }
 
 /** "4:00 PM" / "16:30" → minutes since midnight. Null when unparseable. */
-function parseMinutes(time: string): number | null {
+export function parseMinutes(time: string): number | null {
   const ampm = /^\s*(\d{1,2}):(\d{2})\s*(AM|PM)\s*$/i.exec(time);
   if (ampm) {
     let h = parseInt(ampm[1], 10) % 12;
