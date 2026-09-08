@@ -5,17 +5,23 @@ const mocks = vi.hoisted(() => ({
   buildToolsForOpenAI: vi.fn(() => []),
   getTool: vi.fn(() => undefined),
   insertChatMessage: vi.fn(async () => ({})),
-  getServiceConfig: vi.fn(async (..._args: unknown[]) => null as string | null),
+  resolveChatTargets: vi.fn(async () => [
+    { url: "http://brain.local", key: "test-key", model: "test-model", provider: "test", fallback: false },
+  ]),
+  resetAiTargetsForTests: vi.fn(),
 }));
 
 vi.mock("@/lib/hermes-tools", () => ({
   buildToolsForOpenAI: mocks.buildToolsForOpenAI,
   getTool: mocks.getTool,
 }));
-vi.mock("@/lib/services/config", () => ({ getServiceConfig: mocks.getServiceConfig }));
+vi.mock("@/lib/ai/targets", () => ({
+  resolveChatTargets: mocks.resolveChatTargets,
+  resetAiTargetsForTests: mocks.resetAiTargetsForTests,
+}));
 vi.mock("@/db", () => ({ db: { insertChatMessage: mocks.insertChatMessage } }));
 
-import { POST, resetHermesChatForTests } from "@/app/api/hermes/chat/route";
+import { POST, resetAiChatForTests } from "@/app/api/hermes/chat/route";
 
 function hermesReply(content = "ok") {
   return new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content } }] }), { status: 200 });
@@ -33,10 +39,8 @@ async function post(message: string) {
 
 beforeEach(() => {
   vi.stubEnv("SESSION_SECRET", "test-secret-0123456789");
-  vi.stubEnv("HERMES_API_URL", "");
-  vi.stubEnv("HERMES_API_KEY", "");
-  resetHermesChatForTests();
-  mocks.getServiceConfig.mockReset().mockResolvedValue(null);
+  resetAiChatForTests();
+  mocks.resolveChatTargets.mockClear();
   mocks.insertChatMessage.mockClear();
   vi.stubGlobal("fetch", vi.fn(async () => hermesReply()));
 });
@@ -46,23 +50,26 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("hermes chat — config cache + resilience", () => {
-  it("reads service config once across two messages (URL + KEY)", async () => {
+describe("hermes chat — target resolution + resilience", () => {
+  it("calls resolveChatTargets exactly once per message — the resolver owns cross-message caching", async () => {
+    // The 10-minute TTL cache lives inside resolveChatTargets (covered in
+    // ai-targets.test.ts); the route resolves the chain once per request and
+    // never re-reads per tool round or fallback attempt.
     await post("one");
     await post("two");
-    expect(mocks.getServiceConfig).toHaveBeenCalledTimes(2);
+    expect(mocks.resolveChatTargets).toHaveBeenCalledTimes(2);
   });
 
-  it("re-reads config after the 10-minute TTL expires", async () => {
+  it("still resolves on every message after the old 10-minute TTL window — no route-level cache remains to go stale", async () => {
     await post("one");
     vi.useFakeTimers();
     vi.setSystemTime(Date.now() + 11 * 60 * 1000);
     await post("two");
     vi.useRealTimers();
-    expect(mocks.getServiceConfig).toHaveBeenCalledTimes(4);
+    expect(mocks.resolveChatTargets).toHaveBeenCalledTimes(2);
   });
 
-  it("sends an AbortSignal timeout on every Hermes call", async () => {
+  it("sends an AbortSignal timeout on every AI call", async () => {
     await post("hi");
     const opts = (globalThis.fetch as any).mock.calls[0][1];
     expect(opts.signal).toBeInstanceOf(AbortSignal);

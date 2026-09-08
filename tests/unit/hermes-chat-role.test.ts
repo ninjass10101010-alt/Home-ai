@@ -8,9 +8,8 @@ const mocks = vi.hoisted(() => ({
   buildToolsForOpenAI: vi.fn(() => []),
   getTool: vi.fn(() => undefined),
   insertChatMessage: vi.fn(async () => ({})),
-  getServiceConfig: vi.fn(
-    async (..._args: unknown[]) => null as string | null
-  ),
+  resolveChatTargets: vi.fn(async () => [testTarget()]),
+  resetAiTargetsForTests: vi.fn(),
 }));
 
 vi.mock("@/lib/hermes-tools", () => ({
@@ -18,16 +17,27 @@ vi.mock("@/lib/hermes-tools", () => ({
   getTool: mocks.getTool,
 }));
 
-vi.mock("@/lib/services/config", () => ({
-  getServiceConfig: mocks.getServiceConfig,
+vi.mock("@/lib/ai/targets", () => ({
+  resolveChatTargets: mocks.resolveChatTargets,
+  resetAiTargetsForTests: mocks.resetAiTargetsForTests,
 }));
 
 vi.mock("@/db", () => ({
   db: { insertChatMessage: mocks.insertChatMessage },
 }));
 
-import { POST, resetHermesChatForTests } from "@/app/api/hermes/chat/route";
+import { POST, resetAiChatForTests } from "@/app/api/hermes/chat/route";
+import type { AiTarget } from "@/lib/ai/targets";
 import { signSession, SESSION_COOKIE } from "@/lib/session";
+
+const testTarget = (over: Partial<AiTarget> = {}): AiTarget => ({
+  url: "http://brain.local",
+  key: "test-key",
+  model: "test-model",
+  provider: "test",
+  fallback: false,
+  ...over,
+});
 
 function hermesReply() {
   return new Response(
@@ -50,16 +60,13 @@ async function post(body: Record<string, unknown>, cookie?: string) {
 }
 
 beforeEach(() => {
-  resetHermesChatForTests();
+  resetAiChatForTests();
   vi.stubEnv("SESSION_SECRET", "test-secret-0123456789");
-  // Empty (not unset) so the no-auth case is deterministic even if the host
-  // shell exports HERMES_API_KEY — "" is falsy → no Authorization header.
-  vi.stubEnv("HERMES_API_KEY", "");
   vi.stubGlobal("fetch", vi.fn(async () => hermesReply()));
   mocks.buildToolsForOpenAI.mockClear();
   mocks.getTool.mockClear();
   mocks.insertChatMessage.mockClear();
-  mocks.getServiceConfig.mockReset().mockImplementation(async () => null);
+  mocks.resolveChatTargets.mockReset().mockImplementation(async () => [testTarget()]);
 });
 
 afterEach(() => {
@@ -135,11 +142,8 @@ describe("hermes chat — kid soul for child sessions (2026-09-06)", () => {
 });
 
 describe("hermes chat — resolved auth header is actually sent", () => {
-  it("registry-resolved HERMES_API_KEY goes out as Authorization: Bearer", async () => {
-    mocks.getServiceConfig.mockImplementation(
-      async (service: unknown, key: unknown) =>
-        service === "hermes" && key === "HERMES_API_KEY" ? "registry-key-456" : null
-    );
+  it("resolver-provided target key goes out as Authorization: Bearer", async () => {
+    mocks.resolveChatTargets.mockImplementation(async () => [testTarget({ key: "registry-key-456" })]);
     await post({ message: "hi" });
 
     const init = (globalThis.fetch as any).mock.calls[0][1];
@@ -147,8 +151,8 @@ describe("hermes chat — resolved auth header is actually sent", () => {
     expect(init.headers["Content-Type"]).toBe("application/json");
   });
 
-  it("null config (and no env fallback) sends NO Authorization header", async () => {
-    mocks.getServiceConfig.mockImplementation(async () => null);
+  it("target with a null key sends NO Authorization header", async () => {
+    mocks.resolveChatTargets.mockImplementation(async () => [testTarget({ key: null })]);
     await post({ message: "hi" });
 
     const init = (globalThis.fetch as any).mock.calls[0][1];

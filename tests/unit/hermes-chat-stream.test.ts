@@ -7,17 +7,23 @@ const mocks = vi.hoisted(() => ({
     (_name: string): { handler: (args: Record<string, any>) => Promise<string> } | undefined => undefined,
   ),
   insertChatMessage: vi.fn(async () => ({})),
-  getServiceConfig: vi.fn(async (..._args: unknown[]) => null as string | null),
+  resolveChatTargets: vi.fn(async () => [
+    { url: "http://brain.local", key: "test-key", model: "test-model", provider: "test", fallback: false },
+  ]),
+  resetAiTargetsForTests: vi.fn(),
 }));
 
 vi.mock("@/lib/hermes-tools", () => ({
   buildToolsForOpenAI: mocks.buildToolsForOpenAI,
   getTool: mocks.getTool,
 }));
-vi.mock("@/lib/services/config", () => ({ getServiceConfig: mocks.getServiceConfig }));
+vi.mock("@/lib/ai/targets", () => ({
+  resolveChatTargets: mocks.resolveChatTargets,
+  resetAiTargetsForTests: mocks.resetAiTargetsForTests,
+}));
 vi.mock("@/db", () => ({ db: { insertChatMessage: mocks.insertChatMessage } }));
 
-import { POST, resetHermesChatForTests } from "@/app/api/hermes/chat/route";
+import { POST, resetAiChatForTests } from "@/app/api/hermes/chat/route";
 
 function sseResponse(chunks: string[]) {
   const stream = new ReadableStream<Uint8Array>({
@@ -51,10 +57,8 @@ async function post(body: Record<string, unknown>) {
 
 beforeEach(() => {
   vi.stubEnv("SESSION_SECRET", "test-secret-0123456789");
-  vi.stubEnv("HERMES_API_URL", "");
-  vi.stubEnv("HERMES_API_KEY", "");
-  resetHermesChatForTests();
-  mocks.getServiceConfig.mockReset().mockResolvedValue(null);
+  resetAiChatForTests();
+  mocks.resolveChatTargets.mockClear();
   mocks.insertChatMessage.mockClear();
   mocks.getTool.mockReset().mockReturnValue(undefined);
   mocks.buildToolsForOpenAI.mockReset().mockReturnValue([]);

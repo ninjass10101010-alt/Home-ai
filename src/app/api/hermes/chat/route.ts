@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildToolsForOpenAI, getTool } from "@/lib/hermes-tools";
-import { getServiceConfig } from "@/lib/services/config";
 import { db } from "@/db";
 import { verifySession, SESSION_COOKIE } from "@/lib/session";
 import { buildClemSystemPrompt, buildConsuelaSystemPrompt, buildKidSystemPrompt, HOUSE_CONTROL_PROMPT_ADDENDUM } from "@/lib/consuela-prompts";
-import { buildFallbackTargets, resetFallbackChainCacheForTests } from "@/lib/ai-fallback";
+import { resolveChatTargets, resetAiTargetsForTests, type AiTarget } from "@/lib/ai/targets";
 
 export const dynamic = "force-dynamic";
 
@@ -33,41 +32,18 @@ async function persistChatPair(request: NextRequest, userMessage: string, assist
   }
 }
 
-// Registry override → env → code fallback. The resolved endpoint is cached
-// in-process for 10 minutes — it changes rarely, and two PB reads per chat
-// message were pure latency. Settings → Services "Test" reads fresh config
-// independently, so a key edit is verified immediately even while cached.
-const HERMES_CONFIG_TTL_MS = 10 * 60 * 1000;
-const HERMES_TIMEOUT_MS = 60_000;
+const AI_TIMEOUT_MS = 60_000;
 
-let hermesConfigCache: { value: { url: string; key: string | null }; expiresAt: number } | null = null;
-
-// Flipped to false the first time Hermes answers a stream:true request with a
-// buffered JSON payload — the endpoint doesn't do SSE, so stop paying the
-// failed attempt on every round until the process restarts.
-let hermesStreamingSupported = true;
+// Flipped to false the first time the active provider answers a stream:true
+// request with a buffered JSON payload — stop paying the failed attempt on
+// every round until the process restarts.
+let aiStreamingSupported = true;
 
 /** Test-only: clears the module-scope caches between vitest cases. */
-export function resetHermesChatForTests() {
-  resetFallbackChainCacheForTests();
-  hermesConfigCache = null;
-  hermesStreamingSupported = true;
+export function resetAiChatForTests() {
+  resetAiTargetsForTests();
+  aiStreamingSupported = true;
 }
-
-async function resolveHermes(): Promise<{ url: string; key: string | null }> {
-  if (hermesConfigCache && hermesConfigCache.expiresAt > Date.now()) return hermesConfigCache.value;
-  const [storedUrl, storedKey] = await Promise.all([
-    getServiceConfig("hermes", "HERMES_API_URL"),
-    getServiceConfig("hermes", "HERMES_API_KEY"),
-  ]);
-  const value = {
-    url: storedUrl || process.env.HERMES_API_URL || "http://hermes-agent-2:8643",
-    key: storedKey ?? process.env.HERMES_API_KEY ?? null,
-  };
-  hermesConfigCache = { value, expiresAt: Date.now() + HERMES_CONFIG_TTL_MS };
-  return value;
-}
-const HERMES_MODEL = "consuela";
 
 const CLEM_TOOLS = [
   "get_grocery_list",
@@ -79,6 +55,10 @@ const CLEM_TOOLS = [
   "compare_grocery_prices",
 ];
 const MAX_ROUNDS = 4;
+
+/** The dashboard-owned chain shape (Task 3): first entry is the brain, the
+ *  rest are fallbacks tried in order. */
+type ChatTarget = AiTarget;
 
 interface ToolCall {
   id?: string;
@@ -102,19 +82,19 @@ function parseToolArgs(raw: string | undefined): Record<string, any> {
   }
 }
 
-async function callHermes(
+async function callAi(
   messages: ChatMessage[],
-  opts: { maxTokens?: number; tools?: ReturnType<typeof buildToolsForOpenAI>; toolChoice?: "auto" | "none"; hermes?: { url: string; key: string | null }; model?: string } = {},
+  opts: { maxTokens?: number; tools?: ReturnType<typeof buildToolsForOpenAI>; toolChoice?: "auto" | "none"; target: AiTarget },
 ): Promise<{ content: string; tool_calls?: ToolCall[] }> {
-  const hermes = opts.hermes ?? (await resolveHermes());
+  const target = opts.target;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (hermes.key) headers.Authorization = `Bearer ${hermes.key}`;
-  const res = await fetch(`${hermes.url}/v1/chat/completions`, {
+  if (target.key) headers.Authorization = `Bearer ${target.key}`;
+  const res = await fetch(`${target.url}/v1/chat/completions`, {
     method: "POST",
     headers,
-    signal: AbortSignal.timeout(HERMES_TIMEOUT_MS),
+    signal: AbortSignal.timeout(AI_TIMEOUT_MS),
     body: JSON.stringify({
-      model: opts.model ?? HERMES_MODEL,
+      model: target.model,
       messages,
       temperature: 0.7,
       max_tokens: opts.maxTokens ?? 1024,
@@ -125,7 +105,7 @@ async function callHermes(
 
   if (!res.ok) {
     const err = await res.text().catch(() => "");
-    throw new Error(`Hermes ${res.status}: ${err || res.statusText}`);
+    throw new Error(`AI ${target.model} ${res.status}: ${err || res.statusText}`);
   }
 
   const data = await res.json();
@@ -166,32 +146,36 @@ const TOOL_STATUS_LABELS: Record<string, string> = {
   get_container_status: "Checking the containers…",
   restart_container: "Restarting that container…",
   check_pocketbase: "Checking the database…",
+  remember_fact: "Committing that to memory…",
+  recall_memories: "Checking my memory…",
+  forget_memory: "Letting that memory go…",
 };
 function toolStatusLabel(name?: string): string {
   return (name && TOOL_STATUS_LABELS[name]) || "Working on it…";
 }
 
 /**
- * One streaming Hermes round. Content deltas are forwarded to `write` live;
+ * One streaming AI round. Content deltas are forwarded to `write` live;
  * tool-call deltas are accumulated and returned for the loop to execute.
- * Falls back to a buffered read when Hermes doesn't honor stream:true
+ * Falls back to a buffered read when the provider doesn't honor stream:true
  * (and remembers, so later rounds skip the attempt until process restart).
  */
-async function callHermesStream(
+async function callAiStream(
   messages: ChatMessage[],
-  opts: { tools?: ReturnType<typeof buildToolsForOpenAI>; hermes: { url: string; key: string | null; fallback?: boolean }; model?: string },
+  opts: { tools?: ReturnType<typeof buildToolsForOpenAI>; target: AiTarget },
   write: (frame: string) => void,
 ): Promise<{ content: string; tool_calls?: ToolCall[] }> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (opts.hermes.key) headers.Authorization = `Bearer ${opts.hermes.key}`;
-  // Fallback providers stream buffered (their SSE dialects vary); Hermes streams.
-  const wantStream = hermesStreamingSupported && !opts.hermes.fallback;
-  const res = await fetch(`${opts.hermes.url}/v1/chat/completions`, {
+  if (opts.target.key) headers.Authorization = `Bearer ${opts.target.key}`;
+  // Fallback providers stream buffered (their SSE dialects vary); the brain
+  // streams when it can.
+  const wantStream = aiStreamingSupported && !opts.target.fallback;
+  const res = await fetch(`${opts.target.url}/v1/chat/completions`, {
     method: "POST",
     headers,
-    signal: AbortSignal.timeout(HERMES_TIMEOUT_MS),
+    signal: AbortSignal.timeout(AI_TIMEOUT_MS),
     body: JSON.stringify({
-      model: opts.model ?? HERMES_MODEL,
+      model: opts.target.model,
       messages,
       temperature: 0.7,
       max_tokens: 1024,
@@ -202,12 +186,12 @@ async function callHermesStream(
   });
   if (!res.ok) {
     const err = await res.text().catch(() => "");
-    throw new Error(`Hermes ${res.status}: ${err || res.statusText}`);
+    throw new Error(`AI ${opts.target.model} ${res.status}: ${err || res.statusText}`);
   }
 
   const ctype = res.headers.get("content-type") || "";
   if (!wantStream || !ctype.includes("text/event-stream") || !res.body) {
-    if (wantStream && !ctype.includes("text/event-stream")) hermesStreamingSupported = false;
+    if (wantStream && !ctype.includes("text/event-stream")) aiStreamingSupported = false;
     const data = await res.json();
     const content = data.choices?.[0]?.message?.content || "";
     // Buffered answer — surface it downstream as one token frame so the
@@ -300,11 +284,9 @@ async function buildChatContext(request: NextRequest, body: ChatRequestBody) {
   const role = session?.role ?? "child";
   const houseControl = role !== "child";
   const isClem = agent === "clem";
-  // Clem must always hit the Consuela gateway at 8643 — never finance (8642 is Alex).
-  // Hardcode to avoid any PB/env override that might point Clem at finance.
-  const hermes = isClem
-    ? { url: "http://hermes-agent-2:8643", key: (await resolveHermes()).key }
-    : await resolveHermes();
+  // Clem used to hardcode a gateway URL — now every agent rides the same
+  // dashboard-owned chain (Task 4 of the 2026-09-07 brain cutover).
+  const targets = await resolveChatTargets();
   const tools = isClem
     ? buildToolsForOpenAI({ houseControl: false }).filter((t) => CLEM_TOOLS.includes(t.function.name))
     : buildToolsForOpenAI({ houseControl, role });
@@ -333,7 +315,7 @@ async function buildChatContext(request: NextRequest, body: ChatRequestBody) {
     ...recentHistory,
     { role: "user", content: message },
   ];
-  return { message, isClem, hermes, tools, messages, role };
+  return { message, isClem, targets, tools, messages, role };
 }
 
 async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): Promise<Response> {
@@ -344,17 +326,19 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
 
   (async () => {
     try {
-      const { message, isClem, hermes, tools, messages } = await buildChatContext(request, body);
+      const { message, isClem, targets, tools, messages } = await buildChatContext(request, body);
       let finalContent = "";
-      type ChatTarget = { url: string; key: string | null; model: string; fallback?: boolean };
-      let targets: ChatTarget[] = [{ url: hermes.url, key: hermes.key, model: HERMES_MODEL }];
+      if (targets.length === 0) {
+        write(sseFrame(JSON.stringify({ message: "My brain isn't configured yet — add a provider in Settings → AI Models." }), "error"));
+        return;
+      }
       for (let round = 0; round < MAX_ROUNDS; round++) {
         let content = "";
         let tool_calls: ToolCall[] | undefined;
         let lastErr: unknown = null;
         for (const target of targets) {
           try {
-            ({ content, tool_calls } = await callHermesStream(messages, { tools, hermes: target, model: target.model }, write));
+            ({ content, tool_calls } = await callAiStream(messages, { tools, target }, write));
             lastErr = null;
             break;
           } catch (err) {
@@ -363,14 +347,6 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
           }
         }
         if (lastErr) {
-          if (targets.length === 1) {
-            const fb = await buildFallbackTargets();
-            if (fb.length) {
-              targets = [...targets.slice(1), ...fb.map((t) => ({ ...t, fallback: true as const }))];
-              round--; // retry this round against the expanded chain
-              continue;
-            }
-          }
           throw lastErr;
         }
         if (!tool_calls || tool_calls.length === 0) {
@@ -427,15 +403,12 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { isClem, hermes, tools, messages, role } = await buildChatContext(request, body);
-    console.log(`[hermes] agent=${body.agent || "consuela"} isClem=${isClem} url=${hermes.url} model=${HERMES_MODEL} role=${role}`);
+    const { isClem, targets, tools, messages, role } = await buildChatContext(request, body);
+    console.log(`[ai] agent=${body.agent || "consuela"} isClem=${isClem} brain=${targets[0]?.provider}/${targets[0]?.model} role=${role}`);
 
-    // Dashboard-owned fallback chain (Settings-editable): primary Hermes,
-    // then each configured fallback model in order.
-    // Lazy fallback: zero extra config reads while Hermes is healthy. On the
-    // first failure the Settings-configured chain is resolved once and joined.
-    type ChatTarget = { url: string; key: string | null; model: string; fallback?: boolean };
-    let targets: ChatTarget[] = [{ url: hermes.url, key: hermes.key, model: HERMES_MODEL }];
+    if (targets.length === 0) {
+      return NextResponse.json({ content: "My brain isn't configured yet — add a provider in Settings → AI Models." });
+    }
 
     let lastErr: unknown = null;
     for (let round = 0; round < MAX_ROUNDS; round++) {
@@ -443,11 +416,10 @@ export async function POST(request: NextRequest) {
       let tool_calls: ToolCall[] | undefined;
       for (const target of targets) {
         try {
-          ({ content, tool_calls } = await callHermes(messages, {
+          ({ content, tool_calls } = await callAi(messages, {
             tools,
             toolChoice: "auto",
-            hermes: target,
-            model: target.model,
+            target,
           }));
           lastErr = null;
           break;
@@ -457,17 +429,6 @@ export async function POST(request: NextRequest) {
         }
       }
       if (lastErr) {
-        if (targets.length === 1) {
-          const fb = await buildFallbackTargets();
-          if (fb.length) {
-            // Drop the target that just failed this round — a dead primary
-            // isn't retried every round; the chain takes over immediately.
-            targets = [...targets.slice(1), ...fb.map((t) => ({ ...t, fallback: true as const }))];
-            console.warn(`[hermes] falling back to ${fb.map((t) => t.model).join(", ")}`);
-            round--; // retry this round against the expanded chain
-            continue;
-          }
-        }
         throw lastErr;
       }
 

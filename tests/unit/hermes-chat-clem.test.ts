@@ -5,7 +5,10 @@ const mocks = vi.hoisted(() => ({
   buildToolsForOpenAI: vi.fn(() => []),
   getTool: vi.fn(() => undefined),
   insertChatMessage: vi.fn(async () => ({})),
-  getServiceConfig: vi.fn(async (..._args: unknown[]) => null as string | null),
+  resolveChatTargets: vi.fn(async () => [
+    { url: "http://brain.local", key: "test-key", model: "test-model", provider: "test", fallback: false },
+  ]),
+  resetAiTargetsForTests: vi.fn(),
 }));
 
 vi.mock("@/lib/hermes-tools", () => ({
@@ -13,15 +16,16 @@ vi.mock("@/lib/hermes-tools", () => ({
   getTool: mocks.getTool,
 }));
 
-vi.mock("@/lib/services/config", () => ({
-  getServiceConfig: mocks.getServiceConfig,
+vi.mock("@/lib/ai/targets", () => ({
+  resolveChatTargets: mocks.resolveChatTargets,
+  resetAiTargetsForTests: mocks.resetAiTargetsForTests,
 }));
 
 vi.mock("@/db", () => ({
   db: { insertChatMessage: mocks.insertChatMessage },
 }));
 
-import { POST, resetHermesChatForTests } from "@/app/api/hermes/chat/route";
+import { POST, resetAiChatForTests } from "@/app/api/hermes/chat/route";
 
 function hermesReply(content = "ok") {
   return new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content } }] }), { status: 200 });
@@ -41,18 +45,15 @@ async function post(body: Record<string, unknown>, cookie?: string) {
 }
 
 beforeEach(() => {
-  resetHermesChatForTests();
+  resetAiChatForTests();
   vi.stubEnv("SESSION_SECRET", "test-secret-0123456789");
-  vi.stubEnv("HERMES_API_KEY", "");
-  // Ensure env fallback doesn't interfere with 8643 fallback check
-  vi.stubEnv("HERMES_API_URL", "");
-  // @ts-ignore
-  delete process.env.HERMES_URL;
   vi.stubGlobal("fetch", vi.fn(async () => hermesReply()));
   mocks.buildToolsForOpenAI.mockClear();
   mocks.getTool.mockClear();
   mocks.insertChatMessage.mockClear();
-  mocks.getServiceConfig.mockReset().mockImplementation(async () => null);
+  mocks.resolveChatTargets.mockReset().mockImplementation(async () => [
+    { url: "http://brain.local", key: "test-key", model: "test-model", provider: "test", fallback: false },
+  ]);
   // Default tools: include both clem and non-clem to verify filtering
   mocks.buildToolsForOpenAI.mockImplementation(() => [
     { type: "function", function: { name: "get_grocery_list", description: "", parameters: { type: "object", properties: {} } } },
@@ -148,36 +149,27 @@ describe("hermes chat — Clem persona", () => {
     expect(mocks.insertChatMessage).toHaveBeenCalledTimes(2);
   });
 
-  it("fallback URL is :8643 when no registry or env", async () => {
-    await post({ message: "hi" });
-    const fetchUrl = (globalThis.fetch as any).mock.calls[0][0] as string;
-    expect(fetchUrl).toContain("http://hermes-agent-2:8643");
-    expect(fetchUrl).not.toContain("8642");
-  });
-
-  it("clem hardcodes the Consuela gateway :8643 regardless of registry/env", async () => {
-    mocks.getServiceConfig.mockImplementation(async (service: unknown, key: unknown) =>
-      service === "hermes" && key === "HERMES_API_URL" ? "http://finance:8642" : null
-    );
+  it("clem rides the same resolved chain — fetches the mocked target URL", async () => {
+    mocks.resolveChatTargets.mockImplementation(async () => [
+      { url: "http://clem-brain.local", key: "test-key", model: "test-model", provider: "test", fallback: false },
+    ]);
     await post({ message: "hi", agent: "clem" });
     const fetchUrl = (globalThis.fetch as any).mock.calls[0][0] as string;
-    expect(fetchUrl).toContain("http://hermes-agent-2:8643");
-    expect(fetchUrl).not.toContain("8642");
+    expect(fetchUrl).toContain("http://clem-brain.local");
   });
 
-  it("registry HERMES_API_URL takes precedence over fallback", async () => {
-    mocks.getServiceConfig.mockImplementation(async (service: unknown, key: unknown) =>
-      service === "hermes" && key === "HERMES_API_URL" ? "http://custom:9999" : null
-    );
+  it("default agent rides the same resolved chain — identical URL as clem", async () => {
+    mocks.resolveChatTargets.mockImplementation(async () => [
+      { url: "http://clem-brain.local", key: "test-key", model: "test-model", provider: "test", fallback: false },
+    ]);
     await post({ message: "hi" });
-    const fetchUrl = (globalThis.fetch as any).mock.calls[0][0] as string;
-    expect(fetchUrl).toContain("http://custom:9999");
-  });
+    const consuelaUrl = (globalThis.fetch as any).mock.calls[0][0] as string;
+    expect(consuelaUrl).toContain("http://clem-brain.local");
 
-  it("env HERMES_API_URL used when registry null", async () => {
-    vi.stubEnv("HERMES_API_URL", "http://env-host:8642");
-    await post({ message: "hi" });
-    const fetchUrl = (globalThis.fetch as any).mock.calls[0][0] as string;
-    expect(fetchUrl).toContain("http://env-host:8642");
+    await post({ message: "hi", agent: "clem" });
+    const clemUrl = (globalThis.fetch as any).mock.calls[1][0] as string;
+    expect(clemUrl).toContain("http://clem-brain.local");
+    // Same chain for both agents — the resolver never branches on agent.
+    expect(clemUrl).toBe(consuelaUrl);
   });
 });
