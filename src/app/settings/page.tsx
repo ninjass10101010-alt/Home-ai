@@ -28,6 +28,7 @@ import SettingsErrorBoundary from "@/components/ui/SettingsErrorBoundary";
 import GoogleConnectCard from "@/components/settings/GoogleConnectCard";
 import HaNotificationsCard from "@/components/settings/HaNotificationsCard";
 import ServicesKeysCard from "@/components/settings/ServicesKeysCard";
+import AiModelsCard from "@/components/settings/AiModelsCard";
 import AvatarPicker from "@/components/profile/AvatarPicker";
 import { warmGlassAccentOptions } from "@/lib/design-tokens";
 import { defaultAccentHex, type AccentTarget } from "@/lib/theme-config";
@@ -913,6 +914,7 @@ export default function SettingsPage() {
             description="Connect external accounts to sync calendar events, tasks, and reminders."
             icon="🔗"
           >
+            <AiModelsCard />
             <ServicesKeysCard />
             <GoogleConnectCard />
             <HaNotificationsCard />
