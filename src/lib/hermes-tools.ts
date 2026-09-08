@@ -8,6 +8,7 @@ import { calculateCheapestSplit, formatStoreTotal, PINNED_STORES } from "@/lib/s
 import { localTodayISO, localWeekdayShort, familyTimeZone, weekdayOfISO } from "@/lib/local-date";
 import { weekStartForDate, isoDateForWeekday } from "@/lib/meals-week-utils";
 import { storeMemory, queryMemories, deleteMemory, incrementMemoryUsage, type MemoryCategory } from "@/lib/family-memory";
+import { MEMORY_USER_ID, MEMORY_FAMILY_ID } from "@/lib/memory-ids";
 
 export interface ToolDefinition {
   name: string;
@@ -41,8 +42,6 @@ function formatTime(iso?: string): string {
   return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
 }
 
-const MEMORY_FAMILY_ID = "demo-family";
-const MEMORY_USER_ID = "consuela";
 const MEMORY_CATEGORIES: MemoryCategory[] = ["preference", "allergy", "routine", "location", "schedule", "personality", "restriction", "contact", "note"];
 
 function memoryKey(person: string | undefined, content: string): string {

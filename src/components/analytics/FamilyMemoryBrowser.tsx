@@ -12,6 +12,7 @@ import Skeleton from '@/components/ui/Skeleton';
 import EmptyState from '@/components/ui/EmptyState';
 import FormField from '@/components/patterns/FormField';
 import type { FamilyMemory, MemoryCategory } from '@/lib/family-memory';
+import { MEMORY_USER_ID } from '@/lib/memory-ids';
 
 interface FamilyMemoryBrowserProps {
   familyId: string;
@@ -494,7 +495,7 @@ function AddMemoryModal({ familyId, onSave, onCancel }: {
 
     onSave({
       familyId,
-      userId: 'demo-user',
+      userId: MEMORY_USER_ID,
       category,
       key: key || content.toLowerCase().replace(/[^a-z0-9]+/g, '_').substring(0, 50),
       content,

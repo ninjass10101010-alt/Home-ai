@@ -602,6 +602,10 @@ export const COLLECTIONS = [
     ],
     indexes: [
       "CREATE INDEX idx_family_memories_user ON consuela_family_memories (userId)",
+      // F6.1 — storeMemory upserts by (userId, key); enforce it at the DB so
+      // concurrent writers can never fork a duplicate. `key` is not a SQL
+      // keyword (plain like the other (key) indexes — no "order" quoting).
+      "CREATE UNIQUE INDEX idx_family_memories_user_key ON consuela_family_memories (userId, key)",
     ],
   },
   // Dashboard-owned LLM provider registry (2026-09-07) — src/lib/ai/providers.ts.

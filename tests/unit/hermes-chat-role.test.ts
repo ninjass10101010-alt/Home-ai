@@ -10,11 +10,18 @@ const mocks = vi.hoisted(() => ({
   insertChatMessage: vi.fn(async () => ({})),
   resolveChatTargets: vi.fn(async () => [testTarget()]),
   resetAiTargetsForTests: vi.fn(),
+  buildMemoryContext: vi.fn(async () => ""),
 }));
 
 vi.mock("@/lib/hermes-tools", () => ({
   buildToolsForOpenAI: mocks.buildToolsForOpenAI,
   getTool: mocks.getTool,
+}));
+
+// F4 — the route now pulls the memory-bank context into adult prompts; the
+// real module would reach for PocketBase, so pin it to the hoisted stub.
+vi.mock("@/lib/family-memory", () => ({
+  buildMemoryContext: mocks.buildMemoryContext,
 }));
 
 vi.mock("@/lib/ai/targets", () => ({
@@ -66,6 +73,7 @@ beforeEach(() => {
   mocks.buildToolsForOpenAI.mockClear();
   mocks.getTool.mockClear();
   mocks.insertChatMessage.mockClear();
+  mocks.buildMemoryContext.mockClear();
   mocks.resolveChatTargets.mockReset().mockImplementation(async () => [testTarget()]);
 });
 
@@ -158,5 +166,59 @@ describe("hermes chat — resolved auth header is actually sent", () => {
     const init = (globalThis.fetch as any).mock.calls[0][1];
     expect(init.headers.Authorization).toBeUndefined();
     expect(Object.keys(init.headers)).not.toContain("Authorization");
+  });
+});
+
+describe("hermes chat — attribution follows the signed-in member (F1)", () => {
+  it("parent session: user row carries the session name, assistant row stays consuela", async () => {
+    const token = await signSession({ memberId: "m1", name: "Rebecca", role: "parent" });
+    const res = await post({ message: "hello" }, `${SESSION_COOKIE}=${token}`);
+    expect(res.status).toBe(200);
+    const rows = mocks.insertChatMessage.mock.calls.map((c: any[]) => c[0]);
+    const userRow = rows.find((r) => r.role === "user");
+    const assistantRow = rows.find((r) => r.role === "assistant");
+    expect(userRow).toBeTruthy();
+    expect(userRow.userId).toBe("Rebecca");
+    expect(assistantRow.userId).toBe("consuela");
+  });
+
+  it("no session: user row is honestly 'guest'", async () => {
+    await post({ message: "hello" });
+    const rows = mocks.insertChatMessage.mock.calls.map((c: any[]) => c[0]);
+    const userRow = rows.find((r) => r.role === "user");
+    expect(userRow.userId).toBe("guest");
+  });
+});
+
+describe("hermes chat — pet sessions get the kid surface (F3)", () => {
+  it("signed PET session → kid soul + child-normalized tool role, no house control", async () => {
+    const token = await signSession({ memberId: "p1", name: "Rocco", role: "pet" });
+    const res = await post({ message: "treat please" }, `${SESSION_COOKIE}=${token}`);
+    expect(res.status).toBe(200);
+    expect(mocks.buildToolsForOpenAI).toHaveBeenCalledWith({ houseControl: false, role: "child" });
+    const sent = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
+    expect(sent.messages[0].content).toContain("Kid Soul (child sessions ONLY)");
+    expect(sent.messages[0].content).not.toContain("Dashboard Agent");
+    expect(mocks.buildMemoryContext).not.toHaveBeenCalled();
+  });
+});
+
+describe("hermes chat — adult prompts auto-carry the memory bank (F4)", () => {
+  it("parent session appends the Family Context block to the system prompt", async () => {
+    mocks.buildMemoryContext.mockResolvedValue("\nFamily Context:\n- test memory");
+    const token = await signSession({ memberId: "m1", name: "Rebecca", role: "parent" });
+    await post({ message: "what's for dinner" }, `${SESSION_COOKIE}=${token}`);
+    expect(mocks.buildMemoryContext).toHaveBeenCalledWith("consuela", "demo-family", "what's for dinner");
+    const sent = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
+    expect(sent.messages[0].content).toContain("Family Context:");
+  });
+
+  it("child session NEVER gets the Family Context block", async () => {
+    mocks.buildMemoryContext.mockResolvedValue("\nFamily Context:\n- test memory");
+    const token = await signSession({ memberId: "m2", name: "Caspian", role: "child" });
+    await post({ message: "hi" }, `${SESSION_COOKIE}=${token}`);
+    expect(mocks.buildMemoryContext).not.toHaveBeenCalled();
+    const sent = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
+    expect(sent.messages[0].content).not.toContain("Family Context:");
   });
 });

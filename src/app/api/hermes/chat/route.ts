@@ -3,6 +3,8 @@ import { buildToolsForOpenAI, getTool } from "@/lib/hermes-tools";
 import { db } from "@/db";
 import { verifySession, SESSION_COOKIE } from "@/lib/session";
 import { buildClemSystemPrompt, buildConsuelaSystemPrompt, buildKidSystemPrompt, HOUSE_CONTROL_PROMPT_ADDENDUM } from "@/lib/consuela-prompts";
+import { buildMemoryContext } from "@/lib/family-memory";
+import { MEMORY_USER_ID, MEMORY_FAMILY_ID } from "@/lib/memory-ids";
 import { resolveChatTargets, resetAiTargetsForTests, type AiTarget } from "@/lib/ai/targets";
 
 export const dynamic = "force-dynamic";
@@ -11,20 +13,23 @@ function todayISO(): string {
   return new Date().toISOString().split("T")[0];
 }
 
-async function persistChatPair(request: NextRequest, userMessage: string, assistantReply: string) {
+async function persistChatPair(request: NextRequest, userMessage: string, assistantReply: string, userId: string) {
   try {
     // I1 — don't persist empty/fallback replies: they're thread spam and give
     // the daily thread nothing useful for later rounds.
     const reply = String(assistantReply || "").trim();
     if (!reply || reply === "I processed that.") return;
-    const userId = request.cookies.get("x-consuela-user")?.value || "guest";
+    // F1 — the caller threads the signed-in session's name through; there is
+    // no client cookie to read (the old x-consuela-user cookie was set by
+    // nobody, so every row saved as "guest"). Signed-out stays "guest" — honestly.
+    const attributedUserId = userId || "guest";
     const threadId = todayISO();
     // Explicit createdAt keeps the user row strictly before the assistant row
     // in the createdAt-ascending thread sort even when both land in the same ms.
     const userAt = new Date();
     const assistantAt = new Date(userAt.getTime() + 1);
     await Promise.all([
-      db.insertChatMessage({ userId, role: "user", content: userMessage, source: "dashboard", threadId, createdAt: userAt.toISOString() }),
+      db.insertChatMessage({ userId: attributedUserId, role: "user", content: userMessage, source: "dashboard", threadId, createdAt: userAt.toISOString() }),
       db.insertChatMessage({ userId: "consuela", role: "assistant", content: reply, source: "dashboard", threadId, createdAt: assistantAt.toISOString() }),
     ]);
   } catch (e: any) {
@@ -279,9 +284,14 @@ async function buildChatContext(request: NextRequest, body: ChatRequestBody) {
   // MF-3 — role comes from the signed session cookie only; body.role is
   // ignored entirely (any kid could otherwise post role:"parent"). No valid
   // session → child-role default: no house-control tools.
+  // F3 — PARENT ALLOWLIST (the Ledger-gate idiom): the roster's third role
+  // "pet" (Rocco/Rico, default PIN 0000) is NOT an adult. Everything that
+  // isn't a parent session — child, pet, guest — gets the kid soul and the
+  // kid tool surface exactly as child sessions do today.
   const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
-  const role = session?.role ?? "child";
-  const houseControl = role !== "child";
+  const isAdult = session?.role === "parent";
+  const role = isAdult ? "parent" : "child";
+  const houseControl = isAdult;
   const isClem = agent === "clem";
   // Clem used to hardcode a gateway URL — now every agent rides the same
   // dashboard-owned chain (Task 4 of the 2026-09-07 brain cutover).
@@ -297,12 +307,20 @@ async function buildChatContext(request: NextRequest, body: ChatRequestBody) {
       content: h.content,
     }));
   // Kid soul (2026-09-06): child sessions get the kid-friendly voice and the
-  // read-only tool surface — never the adult soul. Parents are unchanged.
-  const baseSystem = isClem
+  // read-only tool surface — never the adult soul. F3: the normalized `role`
+  // routes child/pet/guest ALL down this path. Parents are unchanged.
+  let baseSystem = isClem
     ? buildClemSystemPrompt()
     : role === "child"
       ? buildKidSystemPrompt(undefined, session?.name)
       : buildConsuelaSystemPrompt() + (houseControl ? HOUSE_CONTROL_PROMPT_ADDENDUM : "");
+  // F4 — adult continuity: the memory bank rides along in every parent prompt
+  // (self-formats as "Family Context: …"). Never for child/pet/guest/Clem,
+  // and a dead memory store must never break chat — degrade to no context.
+  if (isAdult && !isClem) {
+    const memCtx = await buildMemoryContext(MEMORY_USER_ID, MEMORY_FAMILY_ID, message).catch(() => "");
+    if (memCtx) baseSystem += memCtx;
+  }
   let addendum: string | null = null;
   if (typeof system === "string") {
     const trimmed = system.trim();
@@ -314,7 +332,7 @@ async function buildChatContext(request: NextRequest, body: ChatRequestBody) {
     ...recentHistory,
     { role: "user", content: message },
   ];
-  return { message, isClem, targets, tools, messages, role };
+  return { message, isClem, targets, tools, messages, role, sessionName: session?.name };
 }
 
 async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): Promise<Response> {
@@ -325,7 +343,7 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
 
   (async () => {
     try {
-      const { message, isClem, targets, tools, messages } = await buildChatContext(request, body);
+      const { message, isClem, targets, tools, messages, sessionName } = await buildChatContext(request, body);
       let finalContent = "";
       if (targets.length === 0) {
         write(sseFrame(JSON.stringify({ message: "My brain isn't configured yet — add a provider in Settings → AI Models." }), "error"));
@@ -365,7 +383,7 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
         // Streamed clients must see exactly what gets persisted.
         write(sseFrame(JSON.stringify({ t: finalContent })));
       }
-      if (!isClem) await persistChatPair(request, message, finalContent);
+      if (!isClem) await persistChatPair(request, message, finalContent, sessionName || "");
       write(sseFrame("[DONE]"));
     } catch (error: any) {
       console.error("Consuela stream error:", error?.message || error);
@@ -402,7 +420,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { isClem, targets, tools, messages, role } = await buildChatContext(request, body);
+    const { isClem, targets, tools, messages, role, sessionName } = await buildChatContext(request, body);
     console.log(`[ai] agent=${body.agent || "consuela"} isClem=${isClem} brain=${targets[0]?.provider}/${targets[0]?.model} role=${role}`);
 
     if (targets.length === 0) {
@@ -432,7 +450,7 @@ export async function POST(request: NextRequest) {
       }
 
       if (!tool_calls || tool_calls.length === 0) {
-        if (!isClem) await persistChatPair(request, message, content);
+        if (!isClem) await persistChatPair(request, message, content, sessionName || "");
         return NextResponse.json({ content });
       }
 

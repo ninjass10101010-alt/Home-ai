@@ -52,8 +52,10 @@ export function renderNote(memory) {
 }
 
 // Single source of truth for note filenames so notePath and renderIndex can
-// never drift. Id-stable: `${content-slug(40)}-${sanitized-id(12)}.md` — a
-// re-run with edited content produces the SAME filename (overwrite, no orphan).
+// never drift. `${content-slug(40)}-${sanitized-id(12)}.md`: the id suffix
+// pins identity, but the content prefix means an EDITED memory lands in a
+// NEW file and the old note orphans (one-way v1 does not propagate renames
+// or deletes; re-runs are otherwise idempotent).
 export function noteFilename(memory) {
   return `${slugify(memory.content).slice(0, 40)}-${sanitizeSegment(String(memory.id)).slice(0, 12)}.md`;
 }

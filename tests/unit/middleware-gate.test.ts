@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { NextRequest } from "next/server";
-import { middleware } from "../../src/middleware";
+import { middleware, config } from "../../src/middleware";
 import { signSession, SESSION_COOKIE } from "../../src/lib/session";
 
 function req(path: string, cookie?: string): NextRequest {
@@ -99,5 +99,37 @@ describe("middleware /api gate", () => {
     // Preserved legacy behavior: /_design-system is rewritten to /design-system.
     const rewritten = await middleware(req("/_design-system"));
     expect(rewritten.headers.get("x-middleware-rewrite")).toContain("/design-system");
+  });
+});
+
+describe("middleware /memory gate (F2 — memory browser is parent-gated like /ledger)", () => {
+  it("matcher covers /memory", () => {
+    expect(config.matcher).toContain("/memory/:path*");
+  });
+
+  it("redirects a child from /memory to Home", async () => {
+    const token = await signSession({ memberId: "m2", name: "C", role: "child" });
+    const res = await middleware(req("/memory", `${SESSION_COOKIE}=${token}`));
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toMatch(/\/$/);
+  });
+
+  it("redirects a pet from /memory to Home", async () => {
+    const token = await signSession({ memberId: "p1", name: "Rocco", role: "pet" });
+    const res = await middleware(req("/memory", `${SESSION_COOKIE}=${token}`));
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toMatch(/\/$/);
+  });
+
+  it("redirects a guest (no cookie) from /memory to Home", async () => {
+    const res = await middleware(req("/memory"));
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toMatch(/\/$/);
+  });
+
+  it("lets a parent session through to /memory", async () => {
+    const token = await signSession({ memberId: "m1", name: "R", role: "parent" });
+    const res = await middleware(req("/memory", `${SESSION_COOKIE}=${token}`));
+    expect(res.headers.get("x-middleware-next")).toBe("1");
   });
 });

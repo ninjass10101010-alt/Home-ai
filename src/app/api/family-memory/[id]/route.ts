@@ -4,13 +4,27 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { authorizeAdminRequest } from '@/lib/admin-auth';
 import { updateMemory, deleteMemory, incrementMemoryUsage } from '@/lib/family-memory';
+
+// F2 — the whole memory bank is adults-only; middleware only gates /api/**
+// by session, so every handler here parent-gates itself (401/403 like the
+// services routes). A signed-in child (or pet) must never edit/wipe memories.
+async function gate(request: NextRequest): Promise<NextResponse | null> {
+  const auth = await authorizeAdminRequest(request);
+  if (!auth.ok) {
+    return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
+  }
+  return null;
+}
 
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const denied = await gate(request);
+    if (denied) return denied;
     const { id } = await params;
     const body = await request.json();
     const { content, tags, confidence } = body;
@@ -51,6 +65,8 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const denied = await gate(request);
+    if (denied) return denied;
     const { id } = await params;
     const success = await deleteMemory(id);
 
@@ -84,6 +100,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const denied = await gate(request);
+    if (denied) return denied;
     const { id } = await params;
     await incrementMemoryUsage(id);
 

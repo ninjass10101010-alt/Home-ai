@@ -42,6 +42,8 @@ describe("POST /api/cron/consuela/memory-export", () => {
     expect(body.count).toBe(1);
     expect(body.exportedAt).toBeTruthy();
     expect(body.memories[0].tags).toEqual(["Bailey"]);
-    expect(mocks.queryMemories).toHaveBeenCalledWith(expect.objectContaining({ limit: 1000 }));
+    // F6.3 — the export is family-scoped: without familyId it would sweep
+    // every namespace in the collection.
+    expect(mocks.queryMemories).toHaveBeenCalledWith({ familyId: "demo-family", limit: 1000 });
   });
 });

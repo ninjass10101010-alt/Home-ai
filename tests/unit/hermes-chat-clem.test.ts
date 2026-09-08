@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
     { url: "http://brain.local", key: "test-key", model: "test-model", provider: "test", fallback: false },
   ]),
   resetAiTargetsForTests: vi.fn(),
+  buildMemoryContext: vi.fn(async () => ""),
 }));
 
 vi.mock("@/lib/hermes-tools", () => ({
@@ -19,6 +20,12 @@ vi.mock("@/lib/hermes-tools", () => ({
 vi.mock("@/lib/ai/targets", () => ({
   resolveChatTargets: mocks.resolveChatTargets,
   resetAiTargetsForTests: mocks.resetAiTargetsForTests,
+}));
+
+// F4 — the route pulls memory-bank context into adult prompts; pin the seam
+// so the fetch mock isn't consumed by a real PocketBase read.
+vi.mock("@/lib/family-memory", () => ({
+  buildMemoryContext: mocks.buildMemoryContext,
 }));
 
 vi.mock("@/db", () => ({

@@ -36,8 +36,11 @@ export function isExempt(pathname: string): boolean {
 // to Home; asset/api paths 403. Role comes from the HMAC-signed session.
 // /ledger-app is the iframe root (a machine path, like /assets) — it 403s
 // rather than redirecting, so a child's iframe never loads Home.
-const ADULT_ONLY_PREFIXES = ["/ledger", "/ledger-app", "/assets", "/api/data", "/api/ofx"];
-const ADULT_ONLY_PAGE_PREFIXES = ["/ledger"];
+// F2 — /memory (the family memory bank browser) joined the adult allowlist:
+// the bank carries allergies/preferences/addresses; a signed-in child or a
+// pet session must never read or edit it. Page path → redirect to Home.
+const ADULT_ONLY_PREFIXES = ["/ledger", "/ledger-app", "/assets", "/api/data", "/api/ofx", "/memory"];
+const ADULT_ONLY_PAGE_PREFIXES = ["/ledger", "/memory"];
 
 export function isAdultOnlyPath(pathname: string): boolean {
   return ADULT_ONLY_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + "/"));
@@ -86,5 +89,5 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   // note: "/ledger/:path*" with zero-or-more semantics matches "/ledger" itself
-  matcher: ["/api/:path*", "/_design-system", "/ledger/:path*", "/ledger-app/:path*", "/assets/:path*"],
+  matcher: ["/api/:path*", "/_design-system", "/ledger/:path*", "/ledger-app/:path*", "/assets/:path*", "/memory/:path*"],
 };

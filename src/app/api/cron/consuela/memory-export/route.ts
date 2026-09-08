@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isCronAuthorized } from "@/lib/cron-auth";
 import { queryMemories } from "@/lib/family-memory";
+import { MEMORY_FAMILY_ID } from "@/lib/memory-ids";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +11,8 @@ export async function POST(request: NextRequest) {
   if (!isCronAuthorized(request)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
-  const rows = await queryMemories({ limit: 1000 });
+  // F6.3 — family-scoped (not a whole-collection sweep).
+  const rows = await queryMemories({ familyId: MEMORY_FAMILY_ID, limit: 1000 });
   const memories = rows.map((m) => {
     let tags: string[] = [];
     try {

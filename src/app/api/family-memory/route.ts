@@ -4,15 +4,34 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { authorizeAdminRequest } from '@/lib/admin-auth';
+import { MEMORY_USER_ID, MEMORY_FAMILY_ID } from '@/lib/memory-ids';
 import { queryMemories, getFamilyMemories, getMemoryStats } from '@/lib/family-memory';
 import type { MemoryCategory, MemoryQuery } from '@/lib/family-memory';
 
+// Same [^a-z0-9]+ → _ rule the storeMemory callers use (hermes-tools
+// memoryKey + parseRememberCommand) — a client-supplied key is slugged
+// server-side so every writer lands in one namespace grammar.
+function slugKey(raw: string): string {
+  return raw.toLowerCase().replace(/[^a-z0-9]+/g, '_').substring(0, 50);
+}
+
 export async function GET(request: NextRequest) {
   try {
+    // F2 — the memory bank is adults-only: middleware gates /api/** by
+    // session only, so the route must parent-gate itself (401/403 like the
+    // services routes).
+    const auth = await authorizeAdminRequest(request);
+    if (!auth.ok) {
+      return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
+    }
+
     const { searchParams } = new URL(request.url);
     
-    const userId = searchParams.get('userId') || 'demo-user';
-    const familyId = searchParams.get('familyId') || 'demo-family';
+    // F5 — no 'demo-user' default: without an explicit userId the browser
+    // sees the WHOLE family namespace (the agent writes under "consuela").
+    const userId = searchParams.get('userId') || undefined;
+    const familyId = searchParams.get('familyId') || MEMORY_FAMILY_ID;
     const category = searchParams.get('category') as MemoryCategory | null;
     const search = searchParams.get('search') || undefined;
     const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit')!) : undefined;
@@ -29,9 +48,9 @@ export async function GET(request: NextRequest) {
 
     // Build query
     const query: MemoryQuery = {
-      userId,
       familyId,
     };
+    if (userId) query.userId = userId;
 
     if (category) query.category = category;
     if (search) query.search = search;
@@ -60,6 +79,12 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    // F2 — adults-only gate (same 401/403 shape as the services routes).
+    const auth = await authorizeAdminRequest(request);
+    if (!auth.ok) {
+      return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
+    }
+
     const body = await request.json();
     const { userId, familyId, category, key, content, tags = [], confidence = 0.8 } = body;
 
@@ -73,10 +98,13 @@ export async function POST(request: NextRequest) {
     const { storeMemory } = await import('@/lib/family-memory');
     
     const memory = await storeMemory(
-      userId || 'demo-user',
-      familyId || 'demo-family',
+      // F5 — unqualified adds land in the agent's namespace (the browser's
+      // canonical id), not a phantom 'demo-user' row set.
+      userId || MEMORY_USER_ID,
+      familyId || MEMORY_FAMILY_ID,
       category || 'note',
-      key || content.toLowerCase().replace(/[^a-z0-9]+/g, '_').substring(0, 50),
+      // F6.2 — slug client-supplied keys server-side before filtering/storing.
+      slugKey(key || content),
       content,
       tags,
       confidence
