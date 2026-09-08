@@ -1,6 +1,7 @@
 "use client";
 
 import { getLevel, LEVELS } from "@/types/tasks";
+import { EmojiText } from "@/components/ui/EmojiText";
 
 interface TreasurePathProps {
   allTimePoints: number;
@@ -46,7 +47,7 @@ export default function TreasurePath({ allTimePoints, memberEmoji, memberColor }
                     className="absolute -bottom-4 text-xs animate-badge-sparkle"
                     style={{ color: memberColor }}
                   >
-                    {memberEmoji}
+                    <EmojiText emoji={memberEmoji} alt="You" />
                   </span>
                 )}
                 <span className="text-[9px] text-text-muted mt-1">{level.title.split(" ").pop()}</span>

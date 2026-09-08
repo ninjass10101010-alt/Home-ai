@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Modal from "@/components/ui/Modal";
 import SoftButton from "@/components/ui/SoftButton";
+import { EmojiText, textEmojiOrFallback } from "@/components/ui/EmojiText";
 
 interface ShareCardProps {
   open: boolean;
@@ -15,7 +16,9 @@ interface ShareCardProps {
 
 export default function ShareCard({ open, memberName, memberEmoji, rank, points, onClose }: ShareCardProps) {
   const firstName = memberName.split(" ")[0];
-  const shareText = `${memberEmoji} ${firstName} is #${rank} this week with ${points} pts! 👑`;
+  // Photo avatars become 👤 in the share TEXT — a 100KB base64 string must
+  // never reach the clipboard (the display below renders the real photo).
+  const shareText = `${textEmojiOrFallback(memberEmoji)} ${firstName} is #${rank} this week with ${points} pts! 👑`;
 
   const handleCopy = () => {
     if (typeof navigator !== "undefined" && navigator.clipboard) {
@@ -37,7 +40,7 @@ export default function ShareCard({ open, memberName, memberEmoji, rank, points,
       }
     >
       <div className="text-center py-6">
-        <div className="text-6xl mb-4 animate-crown-glow">{memberEmoji}</div>
+        <div className="text-6xl mb-4 animate-crown-glow"><EmojiText emoji={memberEmoji} alt={memberName} className="w-16 h-16" /></div>
         <p className="text-2xl font-bold text-text-primary">
           #{rank}
         </p>

@@ -5,6 +5,7 @@ import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
 import Card from "@/components/ui/Card";
 import WidgetCard from "@/components/patterns/WidgetCard";
 import Avatar from "@/components/ui/Avatar";
+import { EmojiText } from "@/components/ui/EmojiText";
 import Badge from "@/components/ui/Badge";
 import SoftButton from "@/components/ui/SoftButton";
 import { weekDays, mealIdeas, mealPresets, slotMeta, CALORIE_GOAL, PROTEIN_GOAL, CARBS_GOAL, FAT_GOAL } from "@/data/meals";
@@ -753,7 +754,7 @@ export default function PlanTab({
                       }}
                       className="flex items-center gap-2 rounded-full border border-dashed border-[var(--color-surface-4)] px-3 py-1.5 text-xs font-semibold text-text-muted hover:text-text-primary hover:border-[var(--color-accent-selected)]/40 transition-all active:scale-90"
                     >
-                      <span>{member.emoji}</span>
+                      <EmojiText emoji={member.emoji} alt={member.name} />
                       <span>＋ {member.name}</span>
                     </button>
                   ))}

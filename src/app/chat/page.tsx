@@ -4,7 +4,7 @@
 import { useState, useRef, useEffect, useMemo, Suspense } from "react";
 import CapsuleNav from "@/components/ui/CapsuleNav";
 import Avatar from "@/components/ui/Avatar";
-import SigmaImage from "@/components/ui/SigmaImage";
+import { EmojiText } from "@/components/ui/EmojiText";
 import SyncStatusBanner from "@/components/ui/SyncStatusBanner";
 import Modal from "@/components/ui/Modal";
 import { Icon3D } from "@/components/3d";
@@ -35,15 +35,11 @@ interface Message {
 const CHAT_STORAGE_KEY = "consuela-chat-messages";
 const SPEAKER_STORAGE_KEY = "consuela-chat-speaker";
 
+// Photo data-URL speakers render as a real <img> (SigmaImage) via the shared
+// EmojiText; plain emoji stay text. Never render the raw string — member
+// photos are 100KB+ base64 data URLs (the "letterings" bug class).
 function EmojiSpan({ emoji, alt = "" }: { emoji: string; alt?: string }) {
-  if (emoji && (emoji.startsWith("data:") || emoji.startsWith("http"))) {
-    return (
-      <span className="inline-block w-4 h-4 rounded-full overflow-hidden shrink-0">
-        <SigmaImage src={emoji} alt={alt} shape="circle" />
-      </span>
-    );
-  }
-  return <span>{emoji}</span>;
+  return <EmojiText emoji={emoji} alt={alt} />;
 }
 
 function loadChatHistory(): Message[] {

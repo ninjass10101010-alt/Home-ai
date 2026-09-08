@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { db } from "@/db";
 import { dinnerForToday, nextEventToday, eventCountdown } from "@/lib/consuela/chat-context";
 import { localWeekStartISO, localWeekdayShort } from "@/lib/local-date";
+import { EmojiText } from "@/components/ui/EmojiText";
 
 interface FamilyBriefProps {
   speaker: { name: string; emoji: string; color: string };
@@ -99,7 +100,7 @@ export function FamilyBrief({ speaker, onDraft, onSpeakerTap, compact = false, s
     if (parts.length === 0) return null;
     return (
       <div className="w-full px-3 py-2 rounded-2xl glass-subtle text-[11px] text-text-secondary flex items-center gap-2 overflow-hidden" role="status" aria-label="Today at a glance">
-        <span className="shrink-0 font-semibold text-text-primary">{speaker.emoji} {speaker.name.split(" ")[0]}</span>
+        <span className="shrink-0 font-semibold text-text-primary flex items-center gap-1"><EmojiText emoji={speaker.emoji} alt={speaker.name} /> {speaker.name.split(" ")[0]}</span>
         <span className="truncate min-w-0">{parts.join("  ·  ")}</span>
         {!signedIn && (
           <button
@@ -153,7 +154,7 @@ export function FamilyBrief({ speaker, onDraft, onSpeakerTap, compact = false, s
           style={{ background: "linear-gradient(135deg, color-mix(in srgb, var(--color-accent-selected) 14%, transparent) 0%, color-mix(in srgb, var(--color-accent-selected) 5%, transparent) 100%)" }}
           aria-label={`You're signed in as ${speaker.name}`}
         >
-          <span className="text-2xl shrink-0" aria-hidden>{speaker.emoji}</span>
+          <span className="shrink-0" aria-hidden><EmojiText emoji={speaker.emoji} alt={speaker.name} className="w-8 h-8 text-2xl" /></span>
           <span className="min-w-0">
             <span className="block text-[11px] uppercase tracking-wider text-text-secondary">Speaking as</span>
             <span className="block text-sm font-semibold text-text-primary truncate">
@@ -168,7 +169,7 @@ export function FamilyBrief({ speaker, onDraft, onSpeakerTap, compact = false, s
           className="liquid-glass flex items-center gap-3 px-4 py-3.5 text-left rounded-2xl"
           style={{ background: "linear-gradient(135deg, color-mix(in srgb, var(--color-accent-selected) 14%, transparent) 0%, color-mix(in srgb, var(--color-accent-selected) 5%, transparent) 100%)" }}
         >
-          <span className="text-2xl shrink-0" aria-hidden>{speaker.emoji}</span>
+          <span className="shrink-0" aria-hidden><EmojiText emoji={speaker.emoji} alt={speaker.name} className="w-8 h-8 text-2xl" /></span>
           <span className="min-w-0">
             <span className="block text-[11px] uppercase tracking-wider text-text-secondary">Speaking as</span>
             <span className="block text-sm font-semibold text-text-primary truncate">
