@@ -51,10 +51,11 @@ try {
     "payload has the six zones",
     !!body && body.ok === true && Array.isArray(body.events) && "dinner" in body && !!body.tasks && Array.isArray(body.briefing)
   );
-  const keys = body ? keysOf(body).map((k) => k.toLowerCase()) : [];
+  const SENSITIVE = ["pin", "secret", "password", "token", "ledger", "contact", "assignee"];
+  const keys = body ? keysOf(body) : [];
   check(
     "payload carries no sensitive keys",
-    !!body && !["pin", "secret", "password", "ledger", "assignee"].some((k) => keys.includes(k))
+    !!body && !keys.some((k) => SENSITIVE.some((s) => k.toLowerCase().includes(s)))
   );
   const post = await ctx.request.post(`${BASE}/api/consuela/screensaver`, { data: {} });
   check("POST → 405", post.status() === 405);
