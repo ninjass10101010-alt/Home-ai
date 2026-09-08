@@ -18,6 +18,7 @@ import Toggle from "@/components/ui/Toggle";
 import StatTile from "@/components/patterns/StatTile";
 import ProgressRing from "@/components/ui/ProgressRing";
 import Avatar from "@/components/ui/Avatar";
+import { textEmojiOrFallback } from "@/components/ui/EmojiText";
 import { db } from "@/db";
 import { useAuth } from "@/hooks/useAuth";
 import type { Task, LeaderboardEntry, Reward, Penalty, WeekData } from "@/types/tasks";
@@ -36,6 +37,7 @@ import {
   archiveAndResetWeek, archiveWeekWinner, saveCurrentWeekRanksForNextWeek,
   pickDefaultClaimMember, isSnatchable, isPendingApproval, shouldUsePendingTap,
   tapCompletePending, sendBackPendingCompletion, approvePendingCompletion, resolveMemberName,
+  mergeTasksSnapshot,
 } from "@/lib/task-utils";
 import {
   readRewardsStamp, touchRewardsStamp, writeRewardsStamp,
@@ -139,7 +141,9 @@ function migrateDueToISO(tasks: Task[]): Task[] {
 // distinction, same contract the kid lanes shipped).
 
 function safeDisplayEmoji(emoji: any): string {
-  return typeof emoji === "string" && emoji.startsWith("data:") ? "👤" : emoji || "👤";
+  // Delegates to the shared text-safe helper: photo data-URLs never belong
+  // in a text string (share text, toasts, descriptions, select options).
+  return textEmojiOrFallback(emoji);
 }
 
 function memberOptionLabel(member: any): string {
@@ -457,12 +461,23 @@ export default function TasksPage() {
   // sessioned gateway, so an empty list here means "hidden", not "done".
   const [guestSyncBlocked, setGuestSyncBlocked] = useState(false);
   // Restore tasks state from a PocketBase snapshot (bridges container restarts
-  // and merges another device's changes). Guards adopt richer/longer server
-  // state only, so a no-change refresh leaves state untouched (and never
-  // triggers the debounced push-back below). The REWARDS leg is the exception:
-  // "longer wins" is delete-blind (a parent's Settings delete is a SHORTER,
-  // NEWER list), so rewards merge by last-write-wins on the kid-store stamp —
-  // a stale snapshot can never resurrect a deleted reward.
+  // and merges another device's changes) via the SHARED pure merge — the same
+  // guards the 60s refresh loop applies to the stores: adopt new tasks,
+  // adopt field changes on known rows only with proof (pending tap / send-back
+  // / richer week history), never clobber a fresh local tap. The old inline
+  // version was ADD-ONLY on known rows, so a kid's tap on another device
+  // never reached this page's Needs-approval queue (and an approval elsewhere
+  // never cleared the stale "On the way" row here). The REWARDS leg is the
+  // exception: "longer wins" is delete-blind (a parent's Settings delete is a
+  // SHORTER, NEWER list), so rewards merge by last-write-wins on the
+  // kid-store stamp — a stale snapshot can never resurrect a deleted reward.
+  // Latest-state mirrors for the async snapshot restore: the fetch resolves
+  // long after commit, and these effects re-sync before any merge runs, so
+  // mergeTasksSnapshot always sees the CURRENT state (never a stale closure).
+  const tasksRef = useRef<Task[]>(tasks);
+  const weekDataRef = useRef<WeekData>(weekData);
+  useEffect(() => { tasksRef.current = tasks; }, [tasks]);
+  useEffect(() => { weekDataRef.current = weekData; }, [weekData]);
   const restoreFromSnapshot = useCallback((data: any) => {
     if (!data?.snapshot) return;
     const snap = data.snapshot;
@@ -474,35 +489,18 @@ export default function TasksPage() {
       }
     }
     if (snap.penalties?.length) setPenalties((prev: any) => snap.penalties.length > prev.length ? snap.penalties : prev);
-    if (snap.weekData?.weekStart) {
-      const localWk = loadWeekData();
-      if (localWk.weekStart !== snap.weekData.weekStart) {
-        setWeekData((prev: any) => ({ ...prev, ...snap.weekData }));
-      } else if ((snap.weekData.history?.length || 0) > (localWk.history?.length || 0)) {
-        // Same week, but another device recorded more transactions —
-        // adopt the richer weekData so cross-device points aren't lost.
-        setWeekData((prev: any) => ({ ...prev, ...snap.weekData }));
-      }
+    const { tasks: nextTasks, weekData: nextWeek, tasksChanged, weekChanged } = mergeTasksSnapshot(
+      tasksRef.current,
+      weekDataRef.current,
+      snap
+    );
+    if (tasksChanged) {
+      tasksRef.current = nextTasks;
+      setTasks(nextTasks);
     }
-    if (snap.tasks?.length) {
-      setTasks((prev: any) => {
-        const restored = snap.tasks.map((t: any) => ({
-          ...t,
-          // Preserve the real numeric id and completion attribution —
-          // regenerating ids here broke swipe/edit/undo targeting and
-          // wiped who completed what.
-          id: typeof t.id === "number" ? t.id : Number(t.id) || Date.now() + Math.floor(Math.random() * 100000),
-          assignee: t.assignee || t.assigned || "All",
-          assigneeEmoji: t.assigneeEmoji || "👤",
-          completed: t.completed || false,
-          completedBy: t.completedBy ?? undefined,
-          completedAt: t.completedAt ?? undefined,
-          completedInWeek: t.completedInWeek ?? undefined,
-          pendingApproval: t.pendingApproval ?? undefined,
-        }));
-        const fresh = restored.filter((t: any) => !prev.find((p: any) => p.id === t.id || p.title === t.title));
-        return fresh.length ? [...prev, ...fresh] : prev;
-      });
+    if (weekChanged) {
+      weekDataRef.current = nextWeek;
+      setWeekData(nextWeek);
     }
   }, []);
 
@@ -1805,7 +1803,7 @@ export default function TasksPage() {
             {isLoggedIn && currentUser && (() => {
               const myAllTime = getMemberAllTimePoints(currentUser.name, weekData);
               return (
-                <SectionCard title="Your Journey" description={`${currentUser.emoji} Level progress & badges`}>
+                <SectionCard title="Your Journey" description={`${textEmojiOrFallback(currentUser.emoji)} Level progress & badges`}>
                   <TreasurePath
                     allTimePoints={myAllTime}
                     memberEmoji={currentUser.emoji || "🌱"}

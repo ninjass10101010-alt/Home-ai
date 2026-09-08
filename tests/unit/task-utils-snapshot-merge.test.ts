@@ -78,10 +78,14 @@ describe("mergeTasksSnapshot (pure restore guards — same contract as the Tasks
     expect(res.tasks).toBe(local);
   });
 
-  it("adopts a different week and a richer same-week history, ignores a poorer one", () => {
+  it("adopts a NEWER week and a richer same-week history, ignores a poorer or OLDER week", () => {
     const local = emptyWeekData(); // current week, empty history
-    const otherWeek = { ...emptyWeekData("2020-01-06"), points: { Alex: 10 } };
-    expect(mergeTasksSnapshot([], local, { weekData: otherWeek }).weekChanged).toBe(true);
+    // Older snapshot week: a device that missed the Monday rollover. Adopting
+    // it would resurrect last week's points into the fresh week — refused.
+    const olderWeek = { ...emptyWeekData("2020-01-06"), points: { Alex: 10 } };
+    const olderRes = mergeTasksSnapshot([], local, { weekData: olderWeek });
+    expect(olderRes.weekChanged).toBe(false);
+    expect(olderRes.weekData).toBe(local);
 
     const richer = { ...local, history: [{ id: 1, timestamp: "t", member: "Alex", type: "earn", amount: 5, description: "x" }] } as any;
     const richRes = mergeTasksSnapshot([], local, { weekData: richer });

@@ -87,11 +87,25 @@ export function approvePendingCompletion(
   const cleared = tasks.map((t) =>
     t.id === taskId ? { ...t, pendingApproval: undefined, sentBackAt: undefined } : t
   );
-  // Idempotency: another device already paid this tap — clear without re-paying.
-  const alreadyPaid = weekData.history.some(
+  // Idempotency: another device already paid this tap — clear without
+  // re-paying. A REVERSED earn (an undo) released the task though, so a
+  // re-tap must be payable again — the same distinction the server claim
+  // route makes. Reversal-blindness here silently swallowed the second
+  // approval ("Approved! +5pts" toast, zero points moved).
+  const earns = weekData.history.filter(
     (tx) => tx.type === "earn" && tx.taskId === taskId
   );
-  if (alreadyPaid) return { tasks: cleared, weekData };
+  const latestEarn = earns[earns.length - 1];
+  if (latestEarn) {
+    const reversed = weekData.history.some(
+      (tx) =>
+        tx.taskId === taskId &&
+        tx.type === "adjust" &&
+        tx.amount < 0 &&
+        tx.timestamp >= latestEarn.timestamp
+    );
+    if (!reversed) return { tasks: cleared, weekData };
+  }
   const owner = task.pendingApproval!.byName;
   const sameWeek = task.completedInWeek === weekData.weekStart;
   const pointsMsg = task.points > 0 ? ` (+${task.points}pts)` : "";
@@ -421,8 +435,15 @@ export function mergeTasksSnapshot(
   if (snapshot.weekData?.weekStart) {
     const snapWk = snapshot.weekData;
     if (currentWeekData.weekStart !== snapWk.weekStart) {
-      weekData = { ...currentWeekData, ...snapWk };
-      weekChanged = true;
+      // A different week is adopted ONLY when the snapshot is at least as new
+      // as the local one (ISO dates compare lexically). A snapshot week OLDER
+      // than the local week is stale — no device has synced since the Monday
+      // rollover — and adopting it resurrects last week's points into the
+      // fresh week (which the week-reset interval then archives and wipes).
+      if (String(snapWk.weekStart) >= String(currentWeekData.weekStart)) {
+        weekData = { ...currentWeekData, ...snapWk };
+        weekChanged = true;
+      }
     } else if ((snapWk.history?.length || 0) > (currentWeekData.history?.length || 0)) {
       // Same week, but another device recorded more transactions — adopt the
       // richer weekData so cross-device points aren't lost.
