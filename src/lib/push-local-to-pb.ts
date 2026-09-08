@@ -115,15 +115,32 @@ export async function pushLocalToPB(): Promise<{ collection: string; pushed: num
   }
   results.push({ collection: "events", pushed, errors });
 
-  // Schedules (insert — no dedup check; runs once for initial migration)
+  // Schedules (dedupe by title+time+days so re-pushing a device's cache
+  // after a partial sync doesn't duplicate rows the server already holds —
+  // the push button is safe to tap more than once)
   const schedules = loadJSON<any[]>("consuela-schedules", []);
   pushed = 0; errors = 0;
   if (schedules.length) {
-    const outcomes = await Promise.all(
-      schedules.map((sch: any) => pushItem(() => db.insertSchedule(sch)))
+    let existingSchedules: any[] = [];
+    try {
+      existingSchedules = await db.selectSchedules();
+    } catch { existingSchedules = []; }
+    const existingKeys = new Set(
+      existingSchedules.map((sch: any) =>
+        `${String(sch.title || "").toLowerCase()}|${String(sch.time || "")}|${String(sch.days || "").toLowerCase()}`
+      )
     );
-    pushed = outcomes.filter(Boolean).length;
-    errors = outcomes.length - pushed;
+    const outcomes = await Promise.all(
+      schedules.map((sch: any) => {
+        const key = `${String(sch.title || "").toLowerCase()}|${String(sch.time || "")}|${String(sch.days || "").toLowerCase()}`;
+        if (existingKeys.has(key)) return Promise.resolve(null);
+        return pushItem(() => db.insertSchedule(sch)).then((ok) => (ok ? "pushed" : "error"));
+      })
+    );
+    for (const outcome of outcomes) {
+      if (outcome === "pushed") pushed++;
+      else if (outcome === "error") errors++;
+    }
   }
   results.push({ collection: "schedules", pushed, errors });
 

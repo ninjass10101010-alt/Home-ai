@@ -49,7 +49,9 @@ export const COLLECTIONS = [
       { name: "name", type: "text", required: true },
       { name: "userId", type: "text", required: false },
       { name: "emoji", type: "text" },
-      { name: "time", type: "text" },
+      // required: false — legacy live rows demand `time`, which blocks any
+      // meal insert that omits the slot clock time.
+      { name: "time", type: "text", required: false },
       { name: "mealType", type: "text" },
       { name: "prepTime", type: "text" },
       { name: "tags", type: "json" },
@@ -105,6 +107,10 @@ export const COLLECTIONS = [
       { name: "icon", type: "text" },
       { name: "color", type: "text" },
       { name: "member", type: "text" },
+      // Optional: legacy live field was required — Calendar-page event
+      // writes never send userId, so family-added events only landed via
+      // the chat tool path (which hardcodes "demo").
+      { name: "userId", type: "text", required: false },
       { name: "importanceScore", type: "number", required: false, options: { min: 0, max: 100 } },
       { name: "importanceReason", type: "text", required: false },
       { name: "importanceUpdatedAt", type: "date", required: false },
@@ -118,6 +124,8 @@ export const COLLECTIONS = [
       { name: "email", type: "text" },
       { name: "carrier", type: "text" },
       { name: "isPrimary", type: "bool" },
+      // Optional: legacy live field was required — contact saves never sent it.
+      { name: "userId", type: "text", required: false },
     ],
   },
   {
@@ -130,6 +138,12 @@ export const COLLECTIONS = [
       { name: "icon", type: "text" },
       { name: "color", type: "text" },
       { name: "member", type: "text" },
+      // Optional: the legacy live field was required, which silently 400'd
+      // every app write (none sends userId) — schedules never reached PB.
+      { name: "userId", type: "text", required: false },
+      // The Calendar form's meal-type picker never persisted (field missing
+      // from the collection) — PB silently dropped it on every write.
+      { name: "mealType", type: "text", required: false },
     ],
   },
   {
@@ -174,6 +188,8 @@ export const COLLECTIONS = [
       { name: "streak", type: "json" },
       { name: "lastActive", type: "json" },
       { name: "history", type: "json" },
+      // Optional: legacy live field was required — weekData sync never sent it.
+      { name: "userId", type: "text", required: false },
     ],
   },
   {
@@ -184,6 +200,8 @@ export const COLLECTIONS = [
       { name: "points", type: "json" },
       { name: "streak", type: "json" },
       { name: "history", type: "json" },
+      // Optional: legacy live field was required.
+      { name: "userId", type: "text", required: false },
     ],
   },
   {
@@ -233,7 +251,12 @@ export const COLLECTIONS = [
     schema: [
       { name: "userId", type: "text", required: true },
       { name: "role", type: "select", options: { values: ["user", "assistant", "system"] } },
+      // content only — the legacy live `message` required field blocked every
+      // dashboard/Telegram persist (the routes send content, never message),
+      // so the daily chat thread never reached PB. Declared optional here so
+      // the seed's required-drift heal demotes it on live instances.
       { name: "content", type: "text", required: true },
+      { name: "message", type: "text", required: false },
       { name: "source", type: "select", options: { values: ["telegram", "dashboard", "api"] } },
       { name: "threadId", type: "text", required: true },
       { name: "createdAt", type: "date" },
@@ -271,6 +294,10 @@ export const COLLECTIONS = [
       { name: "name", type: "text", required: true },
       { name: "emoji", type: "text" },
       { name: "cost", type: "number" },
+      // Optional: legacy live `points` was required (the field is `cost` in
+      // the app) — reward catalog writes never reached PB.
+      { name: "points", type: "number", required: false },
+      { name: "userId", type: "text", required: false },
     ],
   },
   {
@@ -278,7 +305,10 @@ export const COLLECTIONS = [
     schema: [
       { name: "name", type: "text", required: true },
       { name: "emoji", type: "text" },
-      { name: "points", type: "number" },
+      // required: false — legacy live rows demand `points` on every write.
+      { name: "points", type: "number", required: false },
+      // Optional: legacy live userId was required.
+      { name: "userId", type: "text", required: false },
     ],
   },
   {
@@ -290,6 +320,10 @@ export const COLLECTIONS = [
       { name: "reward", type: "text" },
       { name: "weekStart", type: "text" },
       { name: "active", type: "bool" },
+      // Optional: legacy live `name`/`target` were required (the app writes
+      // title/targetPoints) — goal sync never reached PB.
+      { name: "name", type: "text", required: false },
+      { name: "target", type: "number", required: false },
     ],
   },
   {
@@ -300,6 +334,10 @@ export const COLLECTIONS = [
       { name: "weekStart", type: "text", required: true },
       { name: "points", type: "number" },
       { name: "rank", type: "number" },
+      // Optional: legacy live `memberId`/`title` were required (the app
+      // writes member/weekStart) — rollover enshrinement never reached PB.
+      { name: "memberId", type: "number", required: false },
+      { name: "title", type: "text", required: false },
     ],
   },
   {
@@ -806,10 +844,16 @@ export async function seedCollections() {
           .map((s: any) => {
             const liveField = (live.fields || []).find((f: any) => f.name === s.name);
             if (!liveField) return null;
+            // Required drift heals for ANY field type: a legacy live field
+            // marked required that the seed defines optional blocks every
+            // app write that omits it (schedules.userId was the worst case —
+            // the Calendar's schedule saves silently 400'd for months).
+            if (s.required !== undefined && !!liveField.required !== !!s.required) {
+              return { schemaField: s, liveField };
+            }
             if (s.type === "text" && (s.options?.max !== undefined || s.required !== undefined)) {
               const maxDrift = s.options?.max !== undefined && liveField.max !== s.options.max;
-              const requiredDrift = s.required !== undefined && !!liveField.required !== !!s.required;
-              return maxDrift || requiredDrift ? { schemaField: s, liveField } : null;
+              return maxDrift ? { schemaField: s, liveField } : null;
             }
             if (s.type === "select" && s.options?.values) {
               const seedValues = s.options.values;

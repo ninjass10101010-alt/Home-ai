@@ -147,4 +147,87 @@ describe("members.emoji text-field max", () => {
     expect(idxSql).toContain('("order")');
     expect(idxSql).not.toMatch(/\(\s*order\s*\)/);
   });
+  it("schedules collection carries an optional userId + mealType (legacy required userId blocked every app write)", () => {
+    const col = COLLECTIONS.find((c) => c.name === "schedules")!;
+    const userId = col.schema.find((f: any) => f.name === "userId");
+    expect(userId).toBeDefined();
+    expect((userId as any).required).toBe(false);
+    const mealType = col.schema.find((f: any) => f.name === "mealType");
+    expect(mealType).toBeDefined();
+  });
+
+  it("events collection carries an optional userId (Calendar-page event writes never send one)", () => {
+    const col = COLLECTIONS.find((c) => c.name === "events")!;
+    const userId = col.schema.find((f: any) => f.name === "userId");
+    expect(userId).toBeDefined();
+    expect((userId as any).required).toBe(false);
+  });
+
+  it("chat_messages declares the legacy message field optional so the heal demotes it on live", () => {
+    const col = COLLECTIONS.find((c) => c.name === "chat_messages")!;
+    const message = col.schema.find((f: any) => f.name === "message");
+    expect(message).toBeDefined();
+    expect((message as any).required).toBe(false);
+    const content = col.schema.find((f: any) => f.name === "content");
+    expect((content as any).required).toBe(true);
+  });
+
+  it("demotes a legacy required field the seed defines optional (schedules.userId live required:true)", async () => {
+    const schedDef = COLLECTIONS.find((c) => c.name === "schedules")!;
+    const schema = [...schedDef.schema, { name: "created" }, { name: "updated" }];
+    const live = {
+      id: "sch_live_1",
+      name: "schedules",
+      fields: schema.map((s: any) => ({
+        name: s.name,
+        type: s.type || "text",
+        required: s.name === "userId" ? true : !!s.required,
+      })),
+      indexes: [],
+      ...LOCKED,
+    };
+    const pb = makePb([live]);
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    await seedCollections();
+
+    const updateCall = (pb.collections.update as any).mock.calls.find(
+      (c: any[]) => c[0] === "sch_live_1"
+    );
+    expect(updateCall).toBeDefined();
+    const fields = updateCall[1].fields as any[];
+    const userId = fields.find((f: any) => f.name === "userId");
+    expect(userId.required).toBe(false);
+    // title must stay required — the heal only relaxes seed-declared optionals
+    const title = fields.find((f: any) => f.name === "title");
+    expect(title.required).toBe(true);
+  });
+
+  it("demotes required drift on number fields too (rewards.points legacy required)", async () => {
+    const rewDef = COLLECTIONS.find((c) => c.name === "rewards")!;
+    const schema = [...rewDef.schema, { name: "created" }, { name: "updated" }];
+    const live = {
+      id: "rew_live_1",
+      name: "rewards",
+      fields: schema.map((s: any) => ({
+        name: s.name,
+        type: s.type || (s.name === "points" || s.name === "cost" ? "number" : "text"),
+        required: s.name === "points" ? true : !!s.required,
+      })),
+      indexes: [],
+      ...LOCKED,
+    };
+    const pb = makePb([live]);
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    await seedCollections();
+
+    const updateCall = (pb.collections.update as any).mock.calls.find(
+      (c: any[]) => c[0] === "rew_live_1"
+    );
+    expect(updateCall).toBeDefined();
+    const fields = updateCall[1].fields as any[];
+    const points = fields.find((f: any) => f.name === "points");
+    expect(points.required).toBe(false);
+  });
 });

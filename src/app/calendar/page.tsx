@@ -7,7 +7,7 @@ import WidgetCard from "@/components/patterns/WidgetCard";
 import Badge from "@/components/ui/Badge";
 import Avatar from "@/components/ui/Avatar";
 import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
-import { mapGoogleEvent, eventInMonth, dbEventToCalEvent } from "@/lib/calendar/google-mapping";
+import { mapGoogleEvent, eventInMonth, dbEventToCalEvent, dbScheduleToScheduleItem } from "@/lib/calendar/google-mapping";
 import { db } from "@/db";
 import { gatewayList } from "@/db/gateway-client";
 import { saveOrQueue, type PendingWrite } from "@/lib/pending-writes";
@@ -129,6 +129,50 @@ function eventDeleteWrite(id: string): PendingWrite {
   };
 }
 
+// Schedule writes ride the same pending-writes queue as events/meals — a
+// failed gateway write must queue for automatic replay instead of vanishing
+// into `.catch(() => {})` (the old fire-and-forget meant a 401/502 silently
+// kept the schedule device-local; it never appeared on other devices or the
+// Home Daily Schedule widget).
+function scheduleCreateWrite(s: ScheduleItem): PendingWrite {
+  return {
+    key: `schedule:create:${s.title}|${s.time}|${s.days}`,
+    collection: "schedules",
+    op: "create",
+    payload: {
+      title: s.title, time: s.time, icon: s.icon, type: s.type,
+      color: s.color, days: s.days, member: (s as any).member || "",
+      mealType: s.mealType || "none",
+    },
+    queuedAt: new Date().toISOString(),
+  };
+}
+
+function scheduleUpdateWrite(id: string | number, s: ScheduleItem): PendingWrite {
+  return {
+    key: `schedule:update:${id}`,
+    collection: "schedules",
+    op: "update",
+    id,
+    payload: {
+      title: s.title, time: s.time, icon: s.icon, type: s.type,
+      color: s.color, days: s.days, member: (s as any).member || "",
+      mealType: s.mealType || "none",
+    },
+    queuedAt: new Date().toISOString(),
+  };
+}
+
+function scheduleDeleteWrite(id: string | number): PendingWrite {
+  return {
+    key: `schedule:delete:${id}`,
+    collection: "schedules",
+    op: "delete",
+    id,
+    queuedAt: new Date().toISOString(),
+  };
+}
+
 const eventColorValues: Record<CalEvent["color"], string> = {
   green: "var(--color-accent-selected)",
   violet: "var(--color-accent-violet)",
@@ -173,7 +217,7 @@ function getMemberColor(member: { color?: string }): string {
 }
 
 interface ScheduleItem {
-  id: number;
+  id: number | string;
   title: string;
   time: string;
   days: string;
@@ -318,7 +362,7 @@ export default function CalendarPage() {
     }
     return getInitialSchedules();
   });
-  const [editingSchedId, setEditingSchedId] = useState<number | null>(null);
+  const [editingSchedId, setEditingSchedId] = useState<number | string | null>(null);
   const [schedForm, setSchedForm] = useState<ScheduleItem>(emptySchedule());
   const [isAddingSched, setIsAddingSched] = useState(false);
   const [schedFormSession, setSchedFormSession] = useState(0);
@@ -516,38 +560,41 @@ export default function CalendarPage() {
     setSchedFormSession((v) => v + 1);
   };
   const cancelSchedEdit = () => { setEditingSchedId(null); setIsAddingSched(false); };
-  const saveSched = () => {
+  const saveSched = async () => {
     if (!schedForm.title.trim()) return;
     if (isAddingSched) {
       const newSched = { ...schedForm, id: Date.now() };
       setSchedules((prev) => [...prev, newSched]);
-      db.insertSchedule({
-        title: newSched.title,
-        time: newSched.time,
-        icon: newSched.icon,
-        type: newSched.type,
-        color: newSched.color,
-        days: newSched.days,
-        member: (newSched as any).member || "",
-      }).catch(() => {});
+      const landed = await saveOrQueue(
+        scheduleCreateWrite(newSched),
+        async () => {
+          const saved = await db.insertSchedule(scheduleCreateWrite(newSched).payload);
+          if (saved?.id) {
+            // Adopt the server id so later edits/deletes target the PB row.
+            setSchedules((prev) => prev.map((s) => (s.id === newSched.id ? { ...s, id: saved.id } : s)));
+          }
+          return saved;
+        }
+      );
+      showToast(landed ? "✅ Routine added" : "⚠️ Routine saved on this device — will sync automatically");
     } else {
       setSchedules((prev) => prev.map((s) => s.id === editingSchedId ? { ...schedForm } : s));
-      if (editingSchedId) {
-        db.updateSchedule(editingSchedId, {
-          title: schedForm.title,
-          time: schedForm.time,
-          icon: schedForm.icon,
-          type: schedForm.type,
-          color: schedForm.color,
-          days: schedForm.days,
-        }).catch(() => {});
+      if (editingSchedId != null) {
+        const landed = await saveOrQueue(
+          scheduleUpdateWrite(editingSchedId, schedForm),
+          () => db.updateSchedule(editingSchedId, scheduleUpdateWrite(editingSchedId, schedForm).payload)
+        );
+        showToast(landed ? "✅ Routine updated" : "⚠️ Update saved on this device — will sync automatically");
       }
     }
     cancelSchedEdit();
   };
-  const deleteSched = (id: number) => {
+  const deleteSched = async (id: number | string) => {
     setSchedules((prev) => prev.filter((s) => s.id !== id));
-    db.deleteSchedule(id).catch(() => {});
+    if (typeof id === "string") {
+      const landed = await saveOrQueue(scheduleDeleteWrite(id), () => db.deleteSchedule(id));
+      if (!landed) showToast("⚠️ Delete saved on this device — will sync automatically");
+    }
     cancelSchedEdit();
   };
 
@@ -666,6 +713,56 @@ export default function CalendarPage() {
     window.addEventListener("consuela-data-refreshed", onRefreshed);
     return () => window.removeEventListener("consuela-data-refreshed", onRefreshed);
   }, [pullFamilyEvents]);
+
+  // Pull family routines from PocketBase — the schedule tab was localStorage
+  // only, so a routine added on one device never appeared on another (and a
+  // failed PB write vanished silently). Same merge contract as events: adopt
+  // server ids for local rows, drop Google-style dupes by title+time+days.
+  const pullFamilySchedules = useCallback(() => {
+    let cancelled = false;
+    gatewayList("schedules")
+      .then((rows) => {
+        if (cancelled || !Array.isArray(rows)) return;
+        const mapped = rows
+          .map(dbScheduleToScheduleItem)
+          .filter(Boolean) as ScheduleItem[];
+        setSchedules((prev) => {
+          const out = [...prev];
+          for (const ms of mapped) {
+            const dupe = out.find(
+              (s) =>
+                String(s.id) === String(ms.id) ||
+                (s.title === ms.title && s.time === ms.time && s.days === ms.days)
+            );
+            if (dupe) {
+              if (typeof dupe.id === "number" && typeof ms.id === "string") {
+                const idx = out.indexOf(dupe);
+                out[idx] = { ...dupe, id: ms.id };
+              }
+            } else {
+              out.push(ms);
+            }
+          }
+          return out;
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Pull on mount + on every cross-device refresh pulse.
+  useEffect(() => {
+    const cancel = pullFamilySchedules();
+    return cancel;
+  }, [pullFamilySchedules]);
+
+  useEffect(() => {
+    const onRefreshed = () => pullFamilySchedules();
+    window.addEventListener("consuela-data-refreshed", onRefreshed);
+    return () => window.removeEventListener("consuela-data-refreshed", onRefreshed);
+  }, [pullFamilySchedules]);
 
   const isSelectedToday = selectedDay === today.getDate() && month === today.getMonth() && year === today.getFullYear();
   const selectedDateLabel = isSelectedToday ? "Today" : `${MONTHS[month].slice(0, 3)} ${selectedDay}`;

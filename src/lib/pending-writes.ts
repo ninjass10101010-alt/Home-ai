@@ -10,7 +10,7 @@ export const PENDING_WRITES_KEY = "consuela-pending-writes";
 
 export interface PendingWrite {
   key: string;
-  collection: "meal_plan_entries" | "recipes" | "events";
+  collection: "meal_plan_entries" | "recipes" | "events" | "schedules";
   op: "create" | "update" | "delete";
   payload?: any;
   id?: string | number;
@@ -68,6 +68,11 @@ async function dbWriteRunner(w: PendingWrite): Promise<boolean> {
       if (w.op === "create") return !!(await db.insertEvent(w.payload));
       if (w.op === "update") return !!(await db.updateEvent(String(w.id), w.payload));
       return !!(await db.deleteEvent(String(w.id)));
+    }
+    if (w.collection === "schedules") {
+      if (w.op === "create") return !!(await db.insertSchedule(w.payload));
+      if (w.op === "update") return !!(await db.updateSchedule(String(w.id), w.payload));
+      return !!(await db.deleteSchedule(String(w.id)));
     }
     return false;
   } catch {

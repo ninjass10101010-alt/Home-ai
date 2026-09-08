@@ -3,6 +3,7 @@ import { getPB } from "@/lib/pb";
 import { withAdmin } from "@/lib/pb-auth";
 import { idempotencyHashOf } from "@/lib/consuela/hash";
 import type { NewSuggestion, ProactiveSuggestion, SuggestionStatus } from "@/lib/consuela/types";
+import { scheduleCoversWeekday, scheduleTimeMinutes, formatScheduleTime12h } from "@/lib/schedule-time";
 import { memberFallbacks as membersFallback } from "@/lib/member-fallback";
 import { mapMealRows } from "@/lib/meal-rows";
 
@@ -230,11 +231,13 @@ export const db = {
 
   async selectTodaysSchedulesRaw() {
     const records = await safeList<any>("schedules", schedulesFallback);
-    const today = new Date().toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
+    const now = new Date();
+    const today = now.toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
+    const todayIdx = now.getDay();
     const members = await this.selectMembers();
     return records
-      .filter((s: any) => s.days === 'all' || s.days?.includes(today))
-      .sort((a: any, b: any) => a.time.localeCompare(b.time))
+      .filter((s: any) => scheduleCoversWeekday(s.days, today, todayIdx))
+      .sort((a: any, b: any) => (scheduleTimeMinutes(a.time) ?? 0) - (scheduleTimeMinutes(b.time) ?? 0))
       .map((s: any) => {
         const member = s.member ? members.find((m: any) => m.fullName === s.member || m.name === s.member) : null;
         return { id: s.id, title: s.title, time: s.time, emoji: s.icon, type: s.type, color: s.color, member: member?.fullName, memberColor: member?.color || 'amber' };
@@ -245,9 +248,10 @@ export const db = {
     const raw = await this.selectTodaysSchedulesRaw();
     return raw.map((s: any) => ({
       ...s,
-      time: new Date(`2000-01-01T${s.time}`).toLocaleTimeString('en-US', {
-        hour: 'numeric', minute: '2-digit', hour12: true,
-      }),
+      // Legacy rows store "08:00"; new rows store "8:00 AM". The old
+      // new Date("2000-01-01T" + time) parse produced Invalid Date for every
+      // 12-hour value.
+      time: formatScheduleTime12h(s.time),
     }));
   },
 

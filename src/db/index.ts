@@ -5,6 +5,7 @@ import { memberPinMatches } from "@/lib/member-pins";
 import { memberFallbacks, mergeMemberFallbacks } from "@/lib/member-fallback";
 import { mapMealRows, mapRecipeRows } from "@/lib/meal-rows";
 import { applyTasksSnapshotToStores } from "@/lib/task-utils";
+import { scheduleCoversWeekday, scheduleTimeMinutes, formatScheduleTime12h } from "@/lib/schedule-time";
 
 function isServer() {
   return typeof window === "undefined";
@@ -132,11 +133,13 @@ async function clientSelectPendingTasks(): Promise<any[]> {
 
 async function clientSelectTodaysSchedulesRaw(): Promise<any[]> {
   const rows = await gatewayList("schedules");
-  const today = new Date().toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
+  const now = new Date();
+  const today = now.toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
+  const todayIdx = now.getDay();
   const members = memberJoinList();
   return rows
-    .filter((s: any) => s.days === 'all' || s.days?.includes(today))
-    .sort((a: any, b: any) => a.time.localeCompare(b.time))
+    .filter((s: any) => scheduleCoversWeekday(s.days, today, todayIdx))
+    .sort((a: any, b: any) => (scheduleTimeMinutes(a.time) ?? 0) - (scheduleTimeMinutes(b.time) ?? 0))
     .map((s: any) => {
       const member = s.member ? findJoinMember(members, s.member) : null;
       return { id: s.id, title: s.title, time: s.time, emoji: s.icon, type: s.type, color: s.color, member: member?.fullName, memberColor: member?.color || 'amber' };
@@ -456,10 +459,12 @@ export const db = {
 
   selectTodaysSchedulesRaw: () => {
     if (schedulesCache.length > 0) return schedulesCache;
-    const today = new Date().toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
+    const now = new Date();
+    const today = now.toLocaleDateString('en-US', { weekday: 'short' }).toLowerCase();
+    const todayIdx = now.getDay();
     return scheduleData
-      .filter((s: any) => s.days === 'all' || s.days?.includes(today))
-      .sort((a: any, b: any) => a.time.localeCompare(b.time))
+      .filter((s: any) => scheduleCoversWeekday(s.days, today, todayIdx))
+      .sort((a: any, b: any) => (scheduleTimeMinutes(a.time) ?? 0) - (scheduleTimeMinutes(b.time) ?? 0))
       .map((s: any) => {
         const member = s.memberId ? membersFallback.find(m => m.id === s.memberId) : null;
         return { id: s.id, title: s.title, time: s.time, emoji: s.icon, type: s.type, color: s.color, member: member?.name, memberColor: cacheMemberColor(member, member?.id ?? 0) };
@@ -470,9 +475,10 @@ export const db = {
     const raw = db.selectTodaysSchedulesRaw();
     return raw.map((s: any) => ({
       ...s,
-      time: new Date(`2000-01-01T${s.time}`).toLocaleTimeString('en-US', {
-        hour: 'numeric', minute: '2-digit', hour12: true,
-      }),
+      // 12-hour ("8:00 AM") and 24-hour ("08:00") both normalize here — the
+      // old new Date("2000-01-01T" + time) parse rendered Invalid Date for
+      // every 12-hour row on the Home Daily Schedule widget.
+      time: formatScheduleTime12h(s.time),
     }));
   },
 

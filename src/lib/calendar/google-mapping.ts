@@ -137,3 +137,51 @@ export function dbEventToCalEvent(row: DbEventRow | null | undefined): MappedDbE
     year: y,
   };
 }
+
+export interface DbScheduleRow {
+  id: string;
+  title?: string;
+  time?: string;
+  days?: string;
+  type?: string;
+  icon?: string;
+  color?: string;
+  member?: string;
+  mealType?: string;
+}
+
+export interface MappedDbSchedule {
+  id: string;
+  title: string;
+  time: string;
+  days: string;
+  type: "routine" | "reminder";
+  icon: string;
+  color: string;
+  mealType: "breakfast" | "lunch" | "dinner" | "snack" | "none";
+  member?: string;
+}
+
+const MEAL_TYPES = ["breakfast", "lunch", "dinner", "snack"] as const;
+
+// Maps a PocketBase `schedules` row to the Calendar page's ScheduleItem
+// shape. Legacy rows may lack mealType/days (the DB gateway returns whatever
+// the row holds); anything unmapped falls back to the form's defaults so a
+// row never crashes the tab.
+export function dbScheduleToScheduleItem(row: DbScheduleRow | null | undefined): MappedDbSchedule | null {
+  if (!row?.title || !row.time) return null;
+  const mealType = MEAL_TYPES.includes(row.mealType as any)
+    ? (row.mealType as MappedDbSchedule["mealType"])
+    : "none";
+  return {
+    id: row.id,
+    title: row.title,
+    time: row.time,
+    days: row.days || "all",
+    type: row.type === "reminder" ? "reminder" : "routine",
+    icon: row.icon || "⏰",
+    color: row.color || "green",
+    mealType,
+    member: row.member || "",
+  };
+}
