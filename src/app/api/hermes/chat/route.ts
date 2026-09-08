@@ -56,10 +56,6 @@ const CLEM_TOOLS = [
 ];
 const MAX_ROUNDS = 4;
 
-/** The dashboard-owned chain shape (Task 3): first entry is the brain, the
- *  rest are fallbacks tried in order. */
-type ChatTarget = AiTarget;
-
 interface ToolCall {
   id?: string;
   function?: { name?: string; arguments?: string };
@@ -343,7 +339,7 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
             break;
           } catch (err) {
             lastErr = err;
-            console.warn(`[hermes] stream target ${target.model} failed: ${(err as Error).message}`);
+            console.warn(`[ai] stream target ${target.model} failed: ${(err as Error).message}`);
           }
         }
         if (lastErr) {
@@ -425,7 +421,7 @@ export async function POST(request: NextRequest) {
           break;
         } catch (err) {
           lastErr = err;
-          console.warn(`[hermes] target ${target.model} failed: ${(err as Error).message}`);
+          console.warn(`[ai] target ${target.model} failed: ${(err as Error).message}`);
         }
       }
       if (lastErr) {
