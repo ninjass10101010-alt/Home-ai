@@ -20,4 +20,10 @@ describe("AI endpoints exempt from session auth", () => {
   it("still gates /api/db", () => {
     expect(isExempt("/api/db/members")).toBe(false);
   });
+  it("/api/consuela/screensaver is exempt (guest wall display)", () => {
+    expect(isExempt("/api/consuela/screensaver")).toBe(true);
+  });
+  it("screensaver lookalike siblings stay gated", () => {
+    expect(isExempt("/api/consuela/screensaver-admin")).toBe(false);
+  });
 });
