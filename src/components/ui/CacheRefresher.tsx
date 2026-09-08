@@ -15,12 +15,12 @@ export function CacheRefresher({ children }: { children: React.ReactNode }) {
     // The ambient wall display (/screensaver) is a signed-out read-only board
     // that polls its own exempt endpoint — gateway polling there is 401 spam.
     if (pathname.startsWith('/screensaver')) return;
-    if (mounted.current) return;
-    mounted.current = true;
-
-    // Replay queued meal/recipe writes first so the subsequent cache
-    // refresh reads back everything the server now holds.
-    flushPendingWrites().then(() => db.refreshCaches());
+    if (!mounted.current) {
+      mounted.current = true;
+      // Replay queued meal/recipe writes first so the subsequent cache
+      // refresh reads back everything the server now holds.
+      flushPendingWrites().then(() => db.refreshCaches());
+    }
 
     const interval = setInterval(() => {
       flushPendingWrites().then(() => db.refreshCaches());
