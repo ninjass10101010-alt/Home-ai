@@ -566,6 +566,23 @@ export const COLLECTIONS = [
       "CREATE INDEX idx_family_memories_user ON consuela_family_memories (userId)",
     ],
   },
+  // Dashboard-owned LLM provider registry (2026-09-07) — src/lib/ai/providers.ts.
+  // apiKey stores encryptSecret() ciphertext; models is a JSON string[] in
+  // chain order (index 0 = the active model).
+  {
+    name: "consuela_ai_providers",
+    schema: [
+      { name: "displayName", type: "text", required: true },
+      { name: "baseUrl", type: "text", required: true },
+      { name: "apiKey", type: "text" },
+      { name: "models", type: "text", required: true },
+      { name: "enabled", type: "bool" },
+      { name: "order", type: "number" },
+    ],
+    indexes: [
+      "CREATE INDEX idx_ai_providers_order ON consuela_ai_providers (order)",
+    ],
+  },
   // Money Mountain (src/lib/money-mountain.ts) — text userId, no relation to users.
   {
     name: "money_mountains",

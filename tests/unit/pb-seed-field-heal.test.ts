@@ -129,4 +129,17 @@ describe("members.emoji text-field max", () => {
     expect(f).toBeDefined();
     expect(f!.type).toBe("text");
   });
+
+  it("seeds consuela_ai_providers with the provider schema", () => {
+    const col = COLLECTIONS.find((c) => c.name === "consuela_ai_providers");
+    expect(col).toBeDefined();
+    const names = col!.schema.map((f) => f.name);
+    for (const f of ["displayName", "baseUrl", "apiKey", "models", "enabled", "order"]) {
+      expect(names).toContain(f);
+    }
+    const req = Object.fromEntries(col!.schema.map((f) => [f.name, !!f.required]));
+    expect(req.displayName).toBe(true);
+    expect(req.baseUrl).toBe(true);
+    expect(req.apiKey).toBe(false); // key optional at seed level; upsert layer enforces
+  });
 });
