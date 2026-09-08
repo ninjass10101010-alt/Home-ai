@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { it, expect, vi, beforeEach } from "vitest";
 import { weekKey } from "@/lib/task-utils";
 
 const getFullList = vi.fn();
@@ -76,6 +76,36 @@ it("weather failure degrades to null, rest intact", async () => {
   const p = await composeScreensaverPayload(now);
   expect(p.weather).toBeNull();
   expect(p.events.length).toBeGreaterThan(0);
+});
+
+it("missing daily high/low is a weather failure — null zone, wxCache not poisoned", async () => {
+  collection.mockImplementation((name: string) => ({
+    getFullList: async () => pbRowsFor(name),
+  }));
+  // current present, daily absent → the old code cached {hiF: NaN, loF: NaN}
+  // for 15 min and the board rendered "H null°".
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ current: { temperature_2m: 72.4, weather_code: 1 } }),
+    }))
+  );
+  const p = await composeScreensaverPayload(now);
+  expect(p.weather).toBeNull();
+  // Past the 45s payload TTL the next compose must REFETCH weather (a broken
+  // object must never sit in wxCache for 15 minutes).
+  const goodFetch = vi.fn(async () => ({
+    ok: true,
+    json: async () => ({
+      current: { temperature_2m: 70, weather_code: 0 },
+      daily: { temperature_2m_max: [75], temperature_2m_min: [60] },
+    }),
+  }));
+  vi.stubGlobal("fetch", goodFetch);
+  const p2 = await composeScreensaverPayload(new Date(now.getTime() + 46_000));
+  expect(goodFetch).toHaveBeenCalledTimes(1);
+  expect(p2.weather).toEqual({ tempF: 70, hiF: 75, loF: 60, condition: "Clear" });
 });
 
 it("PB failure propagates (route maps to 503)", async () => {

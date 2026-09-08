@@ -50,7 +50,11 @@ export function selectTodayEvents(
     if (min === null) {
       rows.push({ title: e.title, time: "All day", allDay: true, color: e.color, min: -1 });
     } else if (min >= nowMin) {
-      rows.push({ title: e.title, time: e.time ?? "", allDay: false, color: e.color, min });
+      // Legacy rows may still store 24h "16:30"; Google rows already go
+      // through hm24to12 — normalize so both render in the same voice.
+      const raw = e.time ?? "";
+      const display = /^\d{1,2}:\d{2}$/.test(raw) ? hm24to12(raw) : raw;
+      rows.push({ title: e.title, time: display, allDay: false, color: e.color, min });
     }
   }
   for (const g of google) {

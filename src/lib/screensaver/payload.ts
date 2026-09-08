@@ -41,7 +41,7 @@ async function fetchWeather(now: Date): Promise<ScreensaverPayload["weather"]> {
   const lat = (await getServiceConfig("weather_location", "LAT")) || "42.7875";
   const lon = (await getServiceConfig("weather_location", "LON")) || "-86.1089";
   const url =
-    `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
+    `https://api.open-meteo.com/v1/forecast?latitude=${encodeURIComponent(lat)}&longitude=${encodeURIComponent(lon)}` +
     `&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min` +
     `&temperature_unit=fahrenheit&timezone=auto&forecast_days=1`;
   const res = await fetch(url, { signal: AbortSignal.timeout(12_000) });
@@ -52,10 +52,19 @@ async function fetchWeather(now: Date): Promise<ScreensaverPayload["weather"]> {
   };
   const temp = j.current?.temperature_2m;
   if (typeof temp !== "number") throw new Error("open-meteo: missing current temp");
+  // A missing/NaN daily high/low is a weather FAILURE, not a null temp: the
+  // old `?? NaN` passed the number type, JSON-serialized to null ("H null°"),
+  // AND cached the broken object for 15 min. Throw → caller degrades to null
+  // and nothing lands in wxCache.
+  const hi = j.daily?.temperature_2m_max?.[0];
+  const lo = j.daily?.temperature_2m_min?.[0];
+  if (typeof hi !== "number" || !Number.isFinite(hi) || typeof lo !== "number" || !Number.isFinite(lo)) {
+    throw new Error("open-meteo: missing daily max/min");
+  }
   const wx = {
     tempF: Math.round(temp),
-    hiF: Math.round(j.daily?.temperature_2m_max?.[0] ?? NaN),
-    loF: Math.round(j.daily?.temperature_2m_min?.[0] ?? NaN),
+    hiF: Math.round(hi),
+    loF: Math.round(lo),
     condition: wxConditionLabel(j.current?.weather_code ?? -1),
   };
   wxCache = { at: now.getTime(), wx };

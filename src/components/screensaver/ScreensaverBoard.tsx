@@ -30,6 +30,8 @@ export function ScreensaverBoard({ initial }: { initial: ScreensaverPayload | nu
         if (!res.ok) return;
         const json = (await res.json()) as ScreensaverPayload;
         if (dead || json?.ok !== true) return;
+        // Malformed ok:true payloads are ignored — keep the last-good board.
+        if (!Array.isArray(json.events) || !json.tasks || !Array.isArray(json.briefing)) return;
         setData(json);
         setLastOk(Date.now());
       } catch {
@@ -63,8 +65,16 @@ export function ScreensaverBoard({ initial }: { initial: ScreensaverPayload | nu
     >
       <header className="flex items-end justify-between">
         <div data-testid="ss-clock">
-          <div className="text-[14vh] font-black leading-none tracking-tight tabular-nums">{clock}</div>
-          <div className="mt-[1vh] text-[4vh] font-medium text-white/70">{dateLine}</div>
+          {/* Wall-clock strings differ between SSR HTML and the client's first
+              render (minute flip / NAS-vs-tablet skew) — the same precedent as
+              the calendar hero greeting. suppressHydrationWarning keeps the
+              clock rendering immediately with no "…" flash. */}
+          <div className="text-[14vh] font-black leading-none tracking-tight tabular-nums" suppressHydrationWarning>
+            {clock}
+          </div>
+          <div className="mt-[1vh] text-[4vh] font-medium text-white/70" suppressHydrationWarning>
+            {dateLine}
+          </div>
         </div>
         {data?.weather && (
           <div data-testid="ss-weather" className="text-right text-[4vh] font-semibold text-white/85">
@@ -78,9 +88,11 @@ export function ScreensaverBoard({ initial }: { initial: ScreensaverPayload | nu
         {stale && (
           <span
             data-testid="ss-stale"
-            aria-label="Data may be out of date"
+            role="status"
             className="absolute right-[4vh] top-[4vh] h-[1.6vh] w-[1.6vh] rounded-full bg-amber-400/80"
-          />
+          >
+            <span className="sr-only">Data may be out of date</span>
+          </span>
         )}
       </header>
 

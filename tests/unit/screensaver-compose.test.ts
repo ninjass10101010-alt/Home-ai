@@ -36,6 +36,22 @@ describe("selectTodayEvents", () => {
     const out = selectTodayEvents([], [{ summary: "Quiet day", start_iso: "2026-09-07", all_day: true }], "2026-09-07", at(23, 0));
     expect(out).toHaveLength(1);
   });
+
+  it("normalizes legacy 24h family times, leaves 12h strings as-is", () => {
+    const out = selectTodayEvents(
+      [
+        { title: "Legacy", date: "2026-09-07", time: "16:30" },
+        { title: "Modern", date: "2026-09-07", time: "4:45 PM" },
+      ],
+      [],
+      "2026-09-07",
+      at(15, 0)
+    );
+    expect(out.map((e) => [e.title, e.time])).toEqual([
+      ["Legacy", "4:30 PM"],
+      ["Modern", "4:45 PM"],
+    ]);
+  });
 });
 
 describe("choreProgress", () => {

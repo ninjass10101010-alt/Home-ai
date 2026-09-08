@@ -79,4 +79,55 @@ describe("ScreensaverBoard", () => {
     render(<ScreensaverBoard initial={{ ...payload, dinner: null }} />);
     expect(byTestId("ss-dinner")!.textContent).toContain("Nothing planned yet");
   });
+
+  it("announces staleness as a status with screen-reader text after 5 min of failed polls", () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline"); }));
+      render(<ScreensaverBoard initial={payload} />);
+      act(() => {
+        vi.advanceTimersByTime(330_000); // 11 clock ticks > 5 min stale threshold
+      });
+      const dot = byTestId("ss-stale");
+      expect(dot).toBeTruthy();
+      expect(dot!.getAttribute("role")).toBe("status");
+      expect(dot!.textContent).toContain("Data may be out of date");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ignores a malformed ok:true poll payload and keeps last-good data", async () => {
+    render(<ScreensaverBoard initial={payload} />);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ ok: true, generatedAt: "x", date: "2026-09-08", tasks: { done: 0, total: 0 } }),
+      }))
+    );
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(byTestId("ss-events")!.textContent).toContain("Soccer");
+    expect(byTestId("ss-dinner")!.textContent).toContain("Tacos");
+  });
+
+  it("applies a well-formed poll payload", async () => {
+    render(<ScreensaverBoard initial={payload} />);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          ...payload,
+          events: [{ title: "Piano", time: "5:00 PM", allDay: false }],
+        }),
+      }))
+    );
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(byTestId("ss-events")!.textContent).toContain("Piano");
+  });
 });
