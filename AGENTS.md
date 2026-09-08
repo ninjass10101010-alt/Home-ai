@@ -1255,6 +1255,8 @@ Go to **Settings → AI Models**. Tap **+ Add provider**, paste your provider's 
 | "I added a meal but grocery didn't update"     | Read 2.1 troubleshooting tree. Never guess at the service logic.                        |
 | "I just pushed a new floating animation"       | Update the UI Change Record + 1.3 + any affected journey in this file before replying.  |
 | Any question about "the dashboard"             | Open this file first. Only fall back to reading raw source if this doc is insufficient. |
+| Any completed code update (committed, gates green) | **Always ask the human partner: "Deploy to NAS now?"** before calling the work done (runbook `DEPLOY_NAS_LOCAL.md`, local-only). Pushing to GitHub is NEVER a deploy. |
+| Any push to GitHub (either repo)               | Run `bash scripts/security/push-safe.sh` FIRST (`--nas` to also cross-check NAS secrets) — the remotes are public-ish; a hit means redact + commit + re-run, and if the value ever reached a pushed commit, advise rotation. Flow + rules: `PUSH_GITHUB.md`. |
 
 ### 3.3 Expected Outcomes & Verification Checklists
 
@@ -1347,6 +1349,21 @@ One-sentence goal from the human user's perspective.
 **Agent Notes**
 - Parent-side edits for other members remain client-side (Settings → Family Members); parents are trusted admins.
 - Photo storage is inline base64 in the `members.emoji` field (capped at 256px so PB rows stay small).
+
+#### SOP-005: Safe GitHub Push + Deploy Prompt (Rollout)
+**Purpose** Ship committed work to the public-ish GitHub remotes WITHOUT leaking credentials, and never leave the human guessing whether the NAS is current.
+
+**Prerequisites** Code committed on `warm-glass-v2` with gates green (`tsc` + vitest + build). `PUSH_GITHUB.md` has the full flow + where real secrets legitimately live.
+
+**Step-by-Step**
+1. `bash scripts/security/push-safe.sh` from each repo root (add `--nas` for the strict check) — prints only key NAMES on hits, exits 1 on any live value in the push range, staged diff, or worktree.
+2. If it flags: replace the value with `<REDACTED-NAME>` in tracked files, commit the redaction, re-run. If the value EVER reached a pushed commit → treat as burned: advise rotation (NAS admin password / provider key / PB pass) — history rewrite is human-decision only (force-push forbidden otherwise).
+3. `git push origin warm-glass-v2` (Home-ai) → outer repo: stage ONLY the `Home-ai` gitlink (+ own named files), commit `chore(submodule): …`, scan, `git push origin main`. Never `git add .`.
+4. ALWAYS end the turn by asking: **"Deploy to NAS now?"** — the push does not change the running container; only deploy via `DEPLOY_NAS_LOCAL.md` (rename-swap + `npm run pb:seed` after) does.
+
+**Expected Results:** push-safe prints `CLEAN`, both remotes updated, human gets the deploy question.
+**Rollback:** pushing a redaction commit forward only; never force-push.
+**Agent Notes:** `.env.docker` is TRACKED (gitignore won't protect it) — placeholder values only there.
 
 #### SOP-002: Daily Morning Dashboard Check (Daily)
 **Purpose:** Quick overview of the day using the motion-rich Home screen.
@@ -1479,6 +1496,7 @@ Full explanation of all 35 tools available (12 reads, 9 writes, 3 event-logistic
 - `UI_DESIGN_VISUAL_REFERENCE.md` + `DESIGN_INDEX.md` — Visual comps and component inventory
 - `SETTINGS_PAGE_DESIGN.md` — Theme + family + emergency contact UI details
 - `QUICK_REFERENCE_CARD.md` — One-page cheat sheet for humans
+- `PUSH_GITHUB.md` — GitHub push runbook + secrets policy (committed — contains NO secrets) · `scripts/security/push-safe.sh` — pre-push secret gate
 - `src/components/3d/Icon3D.tsx` and `src/components/ui/AnimatedEmoji.tsx` — the actual motion source
 - `src/components/ui/WeatherWidget.tsx` — immersive weather visuals, season/holiday backdrops, particle system
 - `src/hooks/useWidgetTheme.ts` — shared theme hook for weather and other widgets
