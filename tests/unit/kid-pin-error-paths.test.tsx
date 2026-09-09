@@ -70,8 +70,8 @@ vi.mock("@/lib/task-utils", () => ({
   syncWeekDataToPB: store.syncWeekDataToPB,
   // The REAL age predicates (mirrored): under-10 + child + open + assigned +
   // never snatchable completes PIN-free; every child completion lands
-  // pending after the gate. shouldUsePendingTap is gone from KidHome — the
-  // mock no longer carries it.
+  // pending after the gate. The deprecated pre-age seam is gone from KidHome —
+  // the mock no longer carries it.
   completesWithoutPin: (role: string | undefined, age: number | undefined, task: any) =>
     role === "child" &&
     typeof age === "number" &&

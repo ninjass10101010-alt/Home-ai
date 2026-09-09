@@ -251,7 +251,7 @@ export default function SettingsPage() {
   const [contactModalOpen, setContactModalOpen] = useState(false);
   const [editingMember, setEditingMember] = useState<any | null>(null);
   const [editingContact, setEditingContact] = useState<any | null>(null);
-  const [memberForm, setMemberForm] = useState<any>({ name: "", emoji: "😊", role: "child", pin: "", avatarSize: "md", glow: false, imageUrl: "" });
+  const [memberForm, setMemberForm] = useState<any>({ name: "", emoji: "😊", role: "child", pin: "", age: "", avatarSize: "md", glow: false, imageUrl: "" });
   const [contactForm, setContactForm] = useState<any>({ name: "", phone: "", email: "", relationship: "parent", isPrimary: false, emoji: "👤" });
   const [mounted, setMounted] = useState(false);
   const [members, setMembers] = useState<any[]>([]);
@@ -260,7 +260,7 @@ export default function SettingsPage() {
   const [dropTargetId, setDropTargetId] = useState<WidgetId | null>(null);
   const [editingOrientation, setEditingOrientation] = useState<LayoutMode>(orientation);
   const [savingMember, setSavingMember] = useState(false);
-  const [memberErrors, setMemberErrors] = useState<{ name?: string; pin?: string }>({});
+  const [memberErrors, setMemberErrors] = useState<{ name?: string; pin?: string; age?: string }>({});
   const [contactErrors, setContactErrors] = useState<{ name?: string; phone?: string; email?: string }>({});
   const [confirmDelete, setConfirmDelete] = useState<{ kind: "member" | "contact"; item: any } | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -404,21 +404,24 @@ export default function SettingsPage() {
       emoji: hasCustomImage ? "😊" : currentEmoji,
       role: member.role || "child",
       pin: member.pin || "",
+      age: member.age ?? "",
       avatarSize: selectableAvatarSize(member.avatarSize),
       glow: member.glow || false,
       imageUrl: hasCustomImage ? currentEmoji : "",
-    } : { name: "", emoji: "😊", role: "child", pin: "", avatarSize: "md", glow: false, imageUrl: "" });
+    } : { name: "", emoji: "😊", role: "child", pin: "", age: "", avatarSize: "md", glow: false, imageUrl: "" });
     setMemberErrors({});
     setMemberModalOpen(true);
   };
 
   const validateMember = () => {
-    const errors: { name?: string; pin?: string } = {};
+    const errors: { name?: string; pin?: string; age?: string } = {};
     if (!memberForm.name.trim()) errors.name = "Enter a name so tasks and avatars know who this is.";
     if (memberForm.pin && !/^\d{4}$/.test(memberForm.pin))
       errors.pin = editingMember
         ? "PIN must be exactly 4 digits — or leave it blank to keep the current PIN."
         : "PIN must be exactly 4 digits.";
+    if (memberForm.age !== "" && (!/^\d{1,3}$/.test(String(memberForm.age)) || +memberForm.age < 1 || +memberForm.age > 120))
+      errors.age = "Age must be 1–120 (or blank).";
     setMemberErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -431,6 +434,10 @@ export default function SettingsPage() {
         ...memberForm,
         name: memberForm.name.trim(),
         emoji: memberForm.imageUrl?.trim() || memberForm.emoji,
+        // Blank age = "leave unset/unchanged" (the same blank-means-no-write
+        // grammar as the PIN field above): `undefined` drops the key from the
+        // JSON body so PATCH never coerces the number field to 0.
+        age: memberForm.age === "" ? undefined : Number(memberForm.age),
       };
       // A blank PIN field means "leave the stored PIN unchanged" — never wipe
       // an existing PocketBase pin just because the form prefilled empty.
@@ -1065,6 +1072,9 @@ export default function SettingsPage() {
                 <option value="child">Child</option>
                 <option value="pet">Pet</option>
               </select>
+            </FormField>
+            <FormField label="Age" helperText="Under 10 signs in with one tap" errorText={memberErrors.age}>
+              <input type="number" inputMode="numeric" min={1} max={120} aria-label="Age" value={memberForm.age} onChange={(e) => { setMemberForm((prev: any) => ({ ...prev, age: e.target.value })); setMemberErrors((prev) => ({ ...prev, age: undefined })); }} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none placeholder:text-text-secondary" placeholder="Age" />
             </FormField>
             <FormField label="PIN" helperText={editingMember ? "Leave blank to keep the current PIN." : "4 digits — used to sign in and approve things."} errorText={memberErrors.pin}>
               <input type="password" inputMode="numeric" autoComplete="one-time-code" maxLength={4} value={memberForm.pin} onChange={(e) => { setMemberForm((prev: any) => ({ ...prev, pin: e.target.value.replace(/[^0-9]/g, "") })); setMemberErrors((prev) => ({ ...prev, pin: undefined })); }} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-secondary" placeholder="0000" />

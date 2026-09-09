@@ -58,13 +58,6 @@ export function pendingPointsFor(memberName: string, tasks: Task[]): number {
     .reduce((sum, t) => sum + (t.pendingApproval!.points || 0), 0);
 }
 
-// The single decision seam for PIN-less completion: child role, open task,
-// assigned (never universal), never snatchable (claims stay server-side).
-/** @deprecated migrate to completesWithoutPin (Tasks 5/7); deleted in Task 8. */
-export function shouldUsePendingTap(role: string | undefined, task: Task): boolean {
-  return role === "child" && !task.completed && !task.universal && !isSnatchable(task);
-}
-
 // Age ceiling for PIN-free kid actions (sign-in eligibility re-checks the
 // same bound server-side in /api/auth/quick-login — single source here).
 export const PIN_FREE_MAX_AGE = 10;

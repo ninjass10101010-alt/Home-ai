@@ -4,7 +4,7 @@ import type { Task, WeekData } from "@/types/tasks";
 vi.mock("@/db", () => ({ db: { upsertTask: vi.fn(async () => ({})) } }));
 
 import {
-  isPendingApproval, pendingApprovals, pendingPointsFor, shouldUsePendingTap,
+  isPendingApproval, pendingApprovals, pendingPointsFor, completesWithoutPin,
   tapCompletePending, approvePendingCompletion, sendBackPendingCompletion,
 } from "@/lib/task-utils";
 
@@ -45,14 +45,17 @@ describe("pendingPointsFor", () => {
   });
 });
 
-describe("shouldUsePendingTap", () => {
+// Re-pointed Task 8: the deprecated age-blind pending-tap seam is gone; the
+// under-10 PIN-free behavior it pinned now lives in completesWithoutPin, so
+// every assertion below runs with age 7 (strictly under PIN_FREE_MAX_AGE).
+describe("completesWithoutPin (under-10 — re-pointed from the deleted pre-age seam)", () => {
   it("true only for child role on open assigned non-universal tasks", () => {
-    expect(shouldUsePendingTap("child", t({}))).toBe(true);
-    expect(shouldUsePendingTap("parent", t({}))).toBe(false);
-    expect(shouldUsePendingTap(undefined, t({}))).toBe(false);
-    expect(shouldUsePendingTap("child", t({ completed: true }))).toBe(false);
-    expect(shouldUsePendingTap("child", t({ universal: true }))).toBe(false);
-    expect(shouldUsePendingTap("child", t({ stealable: true, due: "2026-09-01" }))).toBe(false);
+    expect(completesWithoutPin("child", 7, t({}))).toBe(true);
+    expect(completesWithoutPin("parent", 7, t({}))).toBe(false);
+    expect(completesWithoutPin(undefined, 7, t({}))).toBe(false);
+    expect(completesWithoutPin("child", 7, t({ completed: true }))).toBe(false);
+    expect(completesWithoutPin("child", 7, t({ universal: true }))).toBe(false);
+    expect(completesWithoutPin("child", 7, t({ stealable: true, due: "2026-09-01" }))).toBe(false);
   });
 });
 

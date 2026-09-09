@@ -58,8 +58,8 @@ vi.mock("@/lib/task-utils", () => ({
   calculateRealStreak: () => 0,
   syncTasksToPB: store.syncTasksToPB,
   syncWeekDataToPB: store.syncWeekDataToPB,
-  // The REAL age predicates (mirrored here the way the old seam mirror
-  // mirrored shouldUsePendingTap): under-10 + child + open + assigned + never
+  // The REAL age predicates (mirrored here the way the old pre-age seam
+  // mirror did): under-10 + child + open + assigned + never
   // snatchable completes PIN-free; every child completion still lands
   // pending-approval after the PIN gate.
   completesWithoutPin: (role: string | undefined, age: number | undefined, task: any) =>
