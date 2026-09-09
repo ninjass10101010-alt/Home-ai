@@ -21,6 +21,8 @@ import Avatar from "@/components/ui/Avatar";
 import { textEmojiOrFallback } from "@/components/ui/EmojiText";
 import { db } from "@/db";
 import { useAuth } from "@/hooks/useAuth";
+import { useWallMode } from "@/hooks/useWallMode";
+import { useWallConfirm } from "@/hooks/useWallConfirm";
 import type { Task, LeaderboardEntry, Reward, Penalty, WeekData } from "@/types/tasks";
 import { getLevel, BADGES } from "@/types/tasks";
 import {
@@ -364,6 +366,14 @@ export default function TasksPage() {
   }, [isLoggedIn]);
 
   const [activeTab, setActiveTab] = useState<"tasks" | "leaderboard">("tasks");
+  const { wall } = useWallMode();
+  // Wall 2-step chore confirm (wall-only UI gate on the row-tap ENTRY point;
+  // every downstream path — PIN-free, PIN-gated, undo — is unchanged). The
+  // armed row resets whenever the filter member or the tab changes.
+  const { confirmId: wallConfirmId, armOrConfirm: wallConfirm } = useWallConfirm(
+    wall,
+    `${filterMember}|${activeTab}`
+  );
   const [showCompleted, setShowCompleted] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<Task>(() => emptyTask(membersData.find((m: any) => m.role !== "pet")));
@@ -1528,11 +1538,11 @@ export default function TasksPage() {
                         role="button"
                         tabIndex={0}
                         aria-label={`Complete ${task.title}`}
-                        onClick={() => openPinEntry(task.id)}
+                        onClick={() => wallConfirm(task.id, () => openPinEntry(task.id))}
                         onKeyDown={(e) => {
                           if (e.key === "Enter" || e.key === " ") {
                             e.preventDefault();
-                            openPinEntry(task.id);
+                            wallConfirm(task.id, () => openPinEntry(task.id));
                           }
                         }}
                         className="schedule-row liquid-glass flex cursor-pointer items-center gap-3 px-3 py-2.5 animate-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-selected)]"
@@ -1559,6 +1569,15 @@ export default function TasksPage() {
                           +{task.points}pts
                         </span>
                       </div>
+                      {wall && wallConfirmId === task.id && (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); wallConfirm(task.id, () => openPinEntry(task.id)); }}
+                          className="tap mt-2 h-12 w-full rounded-full bg-[var(--color-accent-mint)] px-5 text-base font-bold text-white"
+                        >
+                          ✓ Complete — tap to confirm
+                        </button>
+                      )}
                     </SwipeableRow>
                     );
                   })}
