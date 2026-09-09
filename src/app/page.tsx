@@ -16,7 +16,8 @@ import CurrentMealWidget from "@/components/meals/CurrentMealWidget";
 import { AtmosphericProvider } from "@/hooks/useAtmosphericTheme";
 import AtmosphericBridge from "@/components/ui/AtmosphericBridge";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
-import { WIDGET_SPANS, homeGridClass, widgetSpanClass, tabletSpan, tabletSpanFor, HOME_GRID_FALLBACK } from "@/lib/layout-config";
+import { useWallMode } from "@/hooks/useWallMode";
+import { WIDGET_SPANS, homeGridClass, widgetSpanClass, tabletSpan, tabletSpanFor, HOME_GRID_FALLBACK, WALL_GRID_CLASS } from "@/lib/layout-config";
 import { useAuth, type AuthUser } from "@/hooks/useAuth";
 import PinModal from "@/components/auth/PinModal";
 import MemberPickerModal from "@/components/auth/MemberPickerModal";
@@ -134,8 +135,13 @@ export default function HomePage() {
   const { currentUser, isLoggedIn, isParent, logout, sessionRemainingMs, sessionWarning, extendSession, quickLogin } = useAuth();
   const { mode } = useDashboardMode();
   const { visibleWidgets, orientation, mounted: layoutMounted } = useHomeLayout();
+  const { wall, mounted: wallMounted } = useWallMode();
   const { upcomingImportant } = useHomeEvents();
-  const gridClass = layoutMounted ? homeGridClass(orientation) : HOME_GRID_FALLBACK;
+  const gridClass = wallMounted && wall
+    ? WALL_GRID_CLASS
+    : layoutMounted
+      ? homeGridClass(orientation)
+      : HOME_GRID_FALLBACK;
   // The Ledger is parents-only — filtered out entirely (not a hollow cell).
   const homeWidgets = isParent ? visibleWidgets : visibleWidgets.filter((w) => w.id !== "financeLedger");
 

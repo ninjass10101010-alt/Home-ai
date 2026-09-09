@@ -46,6 +46,14 @@ function syncAttr(wall: boolean) {
   else document.documentElement.removeAttribute("data-wall");
 }
 
+// Ref-count of live hook instances: page.tsx and the root WallModeSync BOTH
+// consume this hook, so one consumer's cleanup must never strip the shared
+// <html data-wall> attribute while another instance is still mounted
+// (Home→other-page→Home navigation would silently turn wall CSS off).
+// Each mount's update() re-writes the attribute to current truth, so the
+// last-unmount removal below is always correct.
+let instanceCount = 0;
+
 /** Resolves the wall display profile (SSR-safe: defaults false) and mirrors
  *  it onto <html data-wall> so every surface — including portaled modals —
  *  can style from CSS. */
@@ -54,6 +62,7 @@ export function useWallMode(): { wall: boolean; mounted: boolean } {
   const [wall, setWall] = useState(false);
 
   useEffect(() => {
+    instanceCount += 1;
     setMounted(true);
     const update = () => {
       const next = computeWall();
@@ -72,7 +81,8 @@ export function useWallMode(): { wall: boolean; mounted: boolean } {
       coarseMql.removeEventListener("change", update);
       window.removeEventListener("resize", update);
       window.removeEventListener(WALL_MODE_EVENT, update);
-      syncAttr(false);
+      instanceCount -= 1;
+      if (instanceCount === 0) syncAttr(false);
     };
   }, []);
 

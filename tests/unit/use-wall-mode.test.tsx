@@ -26,6 +26,30 @@ function renderHook<T>(use: () => T): { result: { current: T } } {
   return { result };
 }
 
+// Self-contained mount for tests that need MULTIPLE simultaneous consumers
+// (each root unmounts itself via the returned handle, not the shared activeRoot).
+function mountHook<T>(use: () => T): { result: { current: T }; unmount: () => void } {
+  const result = { current: undefined as T };
+  function Probe() {
+    result.current = use();
+    return null;
+  }
+  const el = document.createElement("div");
+  document.body.appendChild(el);
+  const root = createRoot(el);
+  act(() => {
+    root.render(createElement(Probe));
+  });
+  return {
+    result,
+    unmount: () => {
+      act(() => {
+        root.unmount();
+      });
+    },
+  };
+}
+
 function setViewport(width: number, height: number, portrait = true, coarse = true) {
   Object.defineProperty(window, "innerWidth", { value: width, configurable: true });
   Object.defineProperty(window, "innerHeight", { value: height, configurable: true });
@@ -84,5 +108,24 @@ describe("useWallMode", () => {
     window.history.replaceState(null, "", "/?wall=1");
     const { result } = renderHook(() => useWallMode());
     expect(result.current.wall).toBe(true);
+  });
+
+  it("unmounting one of two consumers keeps data-wall while the other is mounted (ref-count)", () => {
+    setViewport(1080, 1920);
+    const first = mountHook(() => useWallMode());
+    const second = mountHook(() => useWallMode());
+    expect(document.documentElement.dataset.wall).toBe("true");
+    expect(first.result.current.wall).toBe(true);
+    expect(second.result.current.wall).toBe(true);
+
+    first.unmount();
+    // Home→other-page→Home nav: the remaining root instance still resolves
+    // wall=true, so the attribute must survive the first cleanup.
+    expect(document.documentElement.dataset.wall).toBe("true");
+    expect(second.result.current.wall).toBe(true);
+
+    second.unmount();
+    // Last consumer gone → the attribute is removed.
+    expect(document.documentElement.dataset.wall).toBeUndefined();
   });
 });
