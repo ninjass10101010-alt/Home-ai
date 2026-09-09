@@ -9,6 +9,7 @@ import { DashboardModeProvider } from "@/hooks/useDashboardMode";
 import { LayoutProvider } from "@/hooks/useHomeLayout";
 import { FogProvider } from "@/hooks/useFogConfig";
 import { CacheRefresher } from "@/components/ui/CacheRefresher";
+import WallModeSync from "@/components/ui/WallModeSync";
 import "./globals.css";
 import "@/modes/modes.css";
 
@@ -100,6 +101,7 @@ export default function RootLayout({
                 <AtmosphericProvider>
                   <FogProvider>
                     <LayoutProvider>
+                      <WallModeSync />
                       <CacheRefresher>
                         {children}
                       </CacheRefresher>
