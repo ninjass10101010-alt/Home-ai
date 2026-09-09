@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
+import { useWallMode } from "@/hooks/useWallMode";
 import SyncInit from "./SyncInit";
 
 const navItems = [
@@ -135,6 +136,7 @@ export default function CapsuleNav() {
   const pathname = usePathname();
   const router = useRouter();
   const { currentUser } = useAuth();
+  const { wall } = useWallMode();
   const [isLight, setIsLight] = useState(false);
 
   useEffect(() => {
@@ -185,11 +187,19 @@ export default function CapsuleNav() {
                   aria-current={isActive ? "page" : undefined}
                   onClick={() => router.push(item.href)}
                   onPointerEnter={() => router.prefetch(item.href)}
-                  className={`capsule-item group relative grid h-14 grid-flow-col items-center rounded-full border tap-sm ${
+                  className={`capsule-item group relative grid ${
+                    wall ? "h-[72px]" : "h-14"
+                  } grid-flow-col items-center rounded-full border tap-sm ${
                     isActive ? "border-[rgba(120,240,90,0.38)]" : "border-transparent"
                   }`}
                   style={{
-                    gridTemplateColumns: isActive ? "56px 1fr" : "56px 0fr",
+                    // Wall: labels are always visible, so both states keep the
+                    // label column — the active item's lime styling is the focus.
+                    gridTemplateColumns: wall
+                      ? "72px 1fr"
+                      : isActive
+                        ? "56px 1fr"
+                        : "56px 0fr",
                     background: isActive
                       ? "linear-gradient(135deg, rgba(120,240,90,0.20), rgba(120,240,90,0.06))"
                       : "transparent",
@@ -200,7 +210,9 @@ export default function CapsuleNav() {
                   }}
                 >
                   <span
-                    className={`grid h-14 w-14 place-items-center rounded-full transition-all duration-300 ${
+                    className={`grid place-items-center rounded-full transition-all duration-300 ${
+                      wall ? "h-[72px] w-[72px]" : "h-14 w-14"
+                    } ${
                       isActive
                         ? "bg-[var(--capsule-accent)] border border-transparent"
                         : "bg-white/[0.06] border border-white/10"
@@ -212,7 +224,9 @@ export default function CapsuleNav() {
                     }}
                   >
                     <span
-                      className={`grid h-6 w-6 place-items-center transition-colors duration-300 ${
+                      className={`grid place-items-center transition-colors duration-300 ${
+                        wall ? "h-8 w-8" : "h-6 w-6"
+                      } ${
                         isActive ? "text-white drop-shadow-sm" : "text-white/55 group-hover:text-white/90"
                       }`}
                     >
@@ -221,8 +235,14 @@ export default function CapsuleNav() {
                   </span>
                   <span className="capsule-label min-w-0 overflow-hidden">
                     <span
-                      className={`capsule-label-text block whitespace-nowrap pl-1 pr-4 text-sm font-semibold tracking-tight transition-all duration-300 ${
-                        isActive ? "translate-x-0 opacity-100 text-white/95" : "-translate-x-3 opacity-0"
+                      className={`capsule-label-text block whitespace-nowrap pl-1 pr-4 ${
+                        wall ? "text-base" : "text-sm"
+                      } font-semibold tracking-tight transition-all duration-300 ${
+                        isActive
+                          ? "translate-x-0 opacity-100 text-white/95"
+                          : wall
+                            ? "translate-x-0 opacity-100"
+                            : "-translate-x-3 opacity-0"
                       }`}
                       style={{
                         transitionTimingFunction: LABEL_EASE,

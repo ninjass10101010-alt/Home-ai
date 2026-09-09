@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Modal from "@/components/ui/Modal";
+import { useWallMode } from "@/hooks/useWallMode";
 
 interface EmergencyButtonProps {
   className?: string;
@@ -15,6 +16,7 @@ const emergencyTypes = [
 ];
 
 export default function EmergencyButton({ className = "" }: EmergencyButtonProps) {
+  const { wall } = useWallMode();
   const [showModal, setShowModal] = useState(false);
   const [selectedType, setSelectedType] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
@@ -89,7 +91,7 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
           alarm semantics), never the seasonal accent, and ≥44px. */}
       <button
         onClick={() => setShowModal(true)}
-        className={`fixed top-4 right-4 z-50 flex h-11 w-11 items-center justify-center rounded-full bg-[var(--color-accent-rose)] text-white hover:opacity-90 tap ${className}`}
+        className={`fixed top-4 right-4 z-50 flex ${wall ? "h-16 w-16" : "h-11 w-11"} items-center justify-center rounded-full bg-[var(--color-accent-rose)] text-white hover:opacity-90 tap ${className}`}
         style={{ boxShadow: "0 0 24px color-mix(in srgb, var(--color-accent-rose) 35%, transparent)" }}
         aria-label="Emergency"
       >

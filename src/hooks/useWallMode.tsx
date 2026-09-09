@@ -24,6 +24,9 @@ function readUrlParam(): string | null {
 }
 
 function computeWall(): boolean {
+  // matchMedia is absent in some test environments (jsdom) — treat the wall
+  // profile as off there, same posture as useAnimationBudget's guard.
+  if (typeof window.matchMedia !== "function") return false;
   const portrait = window.matchMedia(PORTRAIT_MQL).matches;
   const coarse = window.matchMedia(COARSE_MQL).matches;
   // Auto-detect only fires on portrait canvases >=1000x>=1600, which always
@@ -70,15 +73,16 @@ export function useWallMode(): { wall: boolean; mounted: boolean } {
       syncAttr(next);
     };
     update();
-    const portraitMql = window.matchMedia(PORTRAIT_MQL);
-    const coarseMql = window.matchMedia(COARSE_MQL);
-    portraitMql.addEventListener("change", update);
-    coarseMql.addEventListener("change", update);
+    const hasMql = typeof window.matchMedia === "function";
+    const portraitMql = hasMql ? window.matchMedia(PORTRAIT_MQL) : null;
+    const coarseMql = hasMql ? window.matchMedia(COARSE_MQL) : null;
+    if (portraitMql) portraitMql.addEventListener("change", update);
+    if (coarseMql) coarseMql.addEventListener("change", update);
     window.addEventListener("resize", update);
     window.addEventListener(WALL_MODE_EVENT, update);
     return () => {
-      portraitMql.removeEventListener("change", update);
-      coarseMql.removeEventListener("change", update);
+      if (portraitMql) portraitMql.removeEventListener("change", update);
+      if (coarseMql) coarseMql.removeEventListener("change", update);
       window.removeEventListener("resize", update);
       window.removeEventListener(WALL_MODE_EVENT, update);
       instanceCount -= 1;
