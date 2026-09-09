@@ -16,6 +16,14 @@
 //      auto-detect cannot fire on this wall-shaped canvas): data-wall unset,
 //      no wall grid pair.
 //   3. Phone control — 390×844 without the param: data-wall unset.
+//   4. Kid-wall block (spec §6 amendment) — still on the 1080×1920 ?wall=1
+//      guest run: walk the rail tiles until an under-10 child quick-logs in
+//      with NO pad (a pad opening means 10+/parent/pet — close it, next tile),
+//      then assert KidHome renders (data-mode=kid + avatar-hero), data-wall is
+//      STILL true, the wall-only "Switch member" control exists, quest cards
+//      are ≥64px (modes.css wall rule — CSSOM fallback when the kid has no
+//      pending quests), and Switch member returns the family view (rail back,
+//      data-wall still true). Read-only: no quest is completed.
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -53,6 +61,21 @@ async function resolveServer() {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Poll until the page either enters kid mode (under-10 quick-login) or a
+// WallPinPad dialog opens (10+/parent/pet tile) — whichever happens first.
+async function waitForKidModeOrPad(page, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const state = await page.evaluate(() => ({
+      kid: document.documentElement.getAttribute("data-mode") === "kid",
+      pad: !!document.querySelector('[role="dialog"][aria-label^="Sign in as"]'),
+    }));
+    if (state.kid || state.pad) return state;
+    await sleep(250);
+  }
+  return { kid: false, pad: false };
+}
 
 async function waitForReady(deadlineMs = 240_000) {
   const deadline = Date.now() + deadlineMs;
@@ -209,6 +232,118 @@ async function probeWall(browser) {
     heroFs !== null && heroFs >= 90,
     heroFs === null ? "weather widget not reachable (hidden/reordered?)" : `fs=${heroFs}px`
   );
+
+  // ── KID MODE ON THE WALL (spec §6 amendment) — under-10 quick-login walk ──
+  // Still guest: walk the rail tiles in order. An under-10 child tile signs in
+  // with NO pad (quickLogin); a pad opening means the tile was 10+/parent/pet
+  // — close it and try the next tile (same walk the pad check above uses).
+  // After quick-login: KidHome must render with data-wall STILL true, the
+  // wall-only Switch-member control, and wall-scaled quest cards. Read-only:
+  // no quest is completed. Switch member must return the family view.
+  let kidTile = -1;
+  const kidRailTiles = await page.$$('[data-testid="wall-member-rail"] button');
+  for (let i = 0; i < kidRailTiles.length; i++) {
+    try {
+      await kidRailTiles[i].tap();
+    } catch {
+      await kidRailTiles[i].click();
+    }
+    const state = await waitForKidModeOrPad(page, 6000);
+    if (state.kid) { kidTile = i; break; }
+    if (state.pad) {
+      const cancel = await page.$('[role="dialog"][aria-label^="Sign in as"] button:has-text("Cancel")');
+      if (cancel) await cancel.click();
+      await sleep(400);
+    }
+  }
+  const kidTileLabel = kidTile >= 0 ? await kidRailTiles[kidTile].getAttribute("aria-label") : null;
+  check(
+    "kid-wall: under-10 rail tile quick-logs in (no pad)",
+    kidTile >= 0,
+    kidTile === 0 ? "first tile" : kidTile > 0
+      ? `tile #${kidTile + 1} — ${kidTileLabel} (earlier tiles were 10+/parent/pet — pads closed)`
+      : "no tile quick-logged in (all tiles opened the pad — under-10 ages missing from the live roster?)"
+  );
+
+  if (kidTile >= 0) {
+    await sleep(1500); // let KidHome + its data settle
+
+    const kidHome = await page.evaluate(() => ({
+      mode: document.documentElement.getAttribute("data-mode"),
+      bedtime: document.documentElement.getAttribute("data-bedtime"),
+      hero: !!document.querySelector(".avatar-hero"),
+      wall: document.documentElement.dataset.wall,
+    }));
+    check(
+      "kid-wall: KidHome renders (data-mode=kid + avatar-hero)",
+      kidHome.mode === "kid" && kidHome.hero,
+      `mode=${kidHome.mode} hero=${kidHome.hero}`
+    );
+    check("kid-wall: data-wall still true in kid mode", kidHome.wall === "true", `dataset.wall=${String(kidHome.wall)}`);
+
+    const switcher = await page.$('button[aria-label="Switch member"]');
+    check(
+      "kid-wall: Switch member control present",
+      !!switcher,
+      switcher ? "found" : `absent${kidHome.bedtime === "true" ? " — bedtime surface hides it by design" : ""}`
+    );
+
+    // Quest cards: the modes.css wall block pins the ≥64px touch floor. If the
+    // kid has no pending quests (the empty state renders, no cards), fall back
+    // to verifying the wall rule itself landed in the stylesheet (CSSOM scan).
+    const quest = await page.evaluate(() => {
+      const cards = [...document.querySelectorAll(".quest-card")];
+      const heights = cards.map((c) => parseFloat(getComputedStyle(c).height));
+      let wallMin = null;
+      for (const sheet of document.styleSheets) {
+        let rules;
+        try { rules = sheet.cssRules; } catch { continue; }
+        for (const r of rules) {
+          if (
+            r.selectorText && r.style &&
+            r.selectorText.includes('data-wall="true"') &&
+            r.selectorText.includes('[data-mode="kid"]') &&
+            r.selectorText.includes(".quest-card")
+          ) {
+            wallMin = parseFloat(r.style.minHeight);
+            break;
+          }
+        }
+        if (wallMin !== null && !Number.isNaN(wallMin)) break;
+      }
+      return { count: cards.length, min: heights.length ? Math.min(...heights) : null, wallMin };
+    });
+    check(
+      "kid-wall: quest cards ≥64px (modes.css wall rule)",
+      quest.count === 0 ? quest.wallMin !== null && !Number.isNaN(quest.wallMin) && quest.wallMin >= 64 : quest.min >= 64,
+      quest.count === 0
+        ? `no pending quests (empty state) — wall rule min-height=${quest.wallMin}px`
+        : `cards=${quest.count} minH=${quest.min}px wallRule=${quest.wallMin}px`
+    );
+
+    // Switch member → back to the family view (rail visible, data-wall true).
+    if (switcher) {
+      await switcher.tap().catch(() => switcher.click());
+      let back = { rail: false, wall: null };
+      const deadline = Date.now() + 8000;
+      while (Date.now() < deadline) {
+        back = await page.evaluate(() => {
+          const rail = document.querySelector('[data-testid="wall-member-rail"]');
+          return {
+            rail: !!rail && rail.offsetParent !== null,
+            wall: document.documentElement.dataset.wall,
+          };
+        });
+        if (back.rail) break;
+        await sleep(250);
+      }
+      check(
+        "kid-wall: Switch member returns to family view (rail back, data-wall true)",
+        back.rail && back.wall === "true",
+        `rail=${back.rail} dataset.wall=${String(back.wall)}`
+      );
+    }
+  }
 
   check("wall: no page errors", errors.length === 0, errors.slice(0, 2).join(" | "));
   await context.close();
