@@ -43,6 +43,29 @@ export function computeLayoutMode(isPortrait: boolean, width: number): LayoutMod
   return "desktop";
 }
 
+/** Wall display profile (ApoloSign 15.6" Digital Calendar, portrait 1080×1920).
+ *  Resolution order: URL param → manual localStorage toggle → auto-detect.
+ *  Auto-detect = portrait + ≥1000×≥1600 + coarse pointer (matches the rotated
+ *  wall panel; a touchscreen laptop with a fine pointer never qualifies). */
+export function computeWallMode(input: {
+  isPortrait: boolean;
+  width: number;
+  height: number;
+  coarsePointer: boolean;
+  manual?: boolean | null;
+  urlParam?: string | null;
+}): boolean {
+  if (input.urlParam === "1") return true;
+  if (input.urlParam === "0") return false;
+  if (input.manual === true) return true;
+  if (input.manual === false) return false;
+  return input.isPortrait && input.width >= 1000 && input.height >= 1600 && input.coarsePointer;
+}
+
+/** Home grid for the wall profile: the tablet bucket's 2-col pairing at wall
+ *  scale — taller rows so ~3 rows fill the 1920px-tall canvas. */
+export const WALL_GRID_CLASS = "grid grid-cols-2 gap-6 grid-flow-dense auto-rows-[440px]";
+
 export interface WidgetDef {
   id: WidgetId;
   label: string;
