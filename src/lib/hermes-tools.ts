@@ -5,10 +5,186 @@ import { weekKey } from "@/lib/task-utils";
 import type { Transaction, WeekData } from "@/types/tasks";
 import { getHAWebSocketClient } from "@/lib/ha/websocket-client";
 import { calculateCheapestSplit, formatStoreTotal, PINNED_STORES } from "@/lib/stores";
-import { localTodayISO, localWeekdayShort, familyTimeZone, weekdayOfISO } from "@/lib/local-date";
+import { localTodayISO, localWeekdayShort, familyTimeZone, weekdayOfISO, localWeekStartISO } from "@/lib/local-date";
 import { weekStartForDate, isoDateForWeekday } from "@/lib/meals-week-utils";
 import { storeMemory, queryMemories, deleteMemory, incrementMemoryUsage, type MemoryCategory } from "@/lib/family-memory";
 import { MEMORY_USER_ID, MEMORY_FAMILY_ID } from "@/lib/memory-ids";
+import { mergeTodaysEvents, googleEventTime } from "@/lib/consuela/todays-events";
+
+// === Live reads for tool handlers (2026-09-09) ===
+// The chat tools used to read db.selectTodaysEvents()/selectPendingTasks()/
+// selectTodaysSchedulesRaw() — PROCESS-START caches (src/db/index.ts warms
+// them once at module load; only the BROWSER refreshCaches() updates them).
+// Server-side handlers therefore answered from a snapshot taken when the
+// container started, and the events read never saw the Google-synced rows
+// (a separate PB collection only the Calendar page merges). Tool handlers
+// must read PB live at call time instead.
+
+/** Family events for `dayISO` (default today), read live. Degrades to [] when
+ *  PB is unreachable. */
+async function liveEvents(dayISO = localTodayISO()): Promise<any[]> {
+  try {
+    const rows = await withAdmin(async (pb) => {
+      const evts = await pb.collection("events").getFullList({
+        filter: `date="${dayISO}"`,
+        requestKey: null,
+      });
+      const members = await pb.collection("members").getFullList({ requestKey: null });
+      return evts
+        .sort((a: any, b: any) => (a.time || "").localeCompare(b.time || ""))
+        .map((event: any) => {
+          const member = members.find((m: any) => m.fullName === event.member || m.name === event.member);
+          return {
+            id: event.id,
+            title: event.title,
+            time: event.time ? formatEventTime(event.time) : undefined,
+            member: member?.fullName || event.member || "Unknown",
+            emoji: textEmoji(member?.emoji),
+            color: member?.color || "amber",
+            icon: event.icon || "📅",
+          };
+        });
+    });
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Google-synced calendar rows for `dayISO`, read live. Degrades to [] when
+ *  the collection is unreachable — a dead Google sync must not blank the
+ *  family's own events. */
+async function liveGoogleEvents(dayISO = localTodayISO()): Promise<any[]> {
+  try {
+    const rows = await withAdmin(async (pb) => {
+      return pb.collection("consuela_google_calendar_events").getFullList({
+        fields: "summary,start_iso,calendar_id",
+        requestKey: null,
+      });
+    });
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Member emoji for TOOL OUTPUT — photo avatars are 100KB+ base64 data URLs;
+ *  one is bad, seven stacked in a tool result blows the provider's request
+ *  limit (verified live: events+tasks+leaderboard = "snag connecting to my
+ *  brain"). The LLM only needs a text glyph — data URLs become 👤. */
+function textEmoji(emoji?: string | null): string {
+  if (typeof emoji === "string" && emoji.length > 0 && !emoji.startsWith("data:") && !emoji.startsWith("http")) {
+    return emoji;
+  }
+  return "👤";
+}
+
+/** "18:30" → "6:30 PM" (the db layer's display format). */
+function formatEventTime(time: string): string {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(time.trim());
+  if (!m) return time;
+  const h24 = Number(m[1]);
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  return `${h12}:${m[2]} ${h24 < 12 ? "AM" : "PM"}`;
+}
+
+/** Today's events merged from the family collection + the Google calendar. */
+async function mergedTodaysEvents(dayISO = localTodayISO()) {
+  const [family, google] = await Promise.all([liveEvents(dayISO), liveGoogleEvents(dayISO)]);
+  return mergeTodaysEvents(family, google, dayISO);
+}
+
+/** Pending tasks, read live. Unlike the pbDb listing (capped at 3 for the
+ *  Home widget) the chat tool returns every pending row. Degrades to [] when
+ *  PB is unreachable — an outage must not break get_dashboard_summary. */
+async function livePendingTasks(): Promise<any[]> {
+  try {
+    const rows = await withAdmin(async (pb) => {
+      const [taskRows, members] = await Promise.all([
+        pb.collection("tasks").getFullList({ requestKey: null }),
+        pb.collection("members").getFullList({ requestKey: null }),
+      ]);
+      return taskRows
+        .filter((t: any) => t.status === "pending" || (!t.status && !t.done))
+        .map((task: any) => {
+          const member = members.find((m: any) => m.fullName === task.assigned || m.name === task.assigned);
+          const due = task.due === localTodayISO() ? "Today"
+            : task.due === localTodayISO(new Date(Date.now() + 86400000)) ? "Tomorrow"
+            : task.due || "Later";
+          return {
+            id: task.id,
+            title: task.title,
+            assigned: member?.fullName || task.assigned || "Unassigned",
+            due,
+            points: task.priority === "high" ? 20 : task.priority === "medium" ? 15 : task.points || 10,
+          };
+        });
+    });
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Today's routine schedule, read live. Degrades to [] when PB is down. */
+async function liveSchedules(): Promise<any[]> {
+  try {
+    const rows = await withAdmin(async (pb) => {
+      const [schedRows, members] = await Promise.all([
+        pb.collection("schedules").getFullList({ requestKey: null }),
+        pb.collection("members").getFullList({ requestKey: null }),
+      ]);
+      const now = new Date();
+      const weekdayShort = localWeekdayShort();
+      const todayIdx = now.getDay();
+      return schedRows
+        .filter((s: any) => scheduleCoversDay(s.days, weekdayShort, todayIdx))
+        .sort((a: any, b: any) => (scheduleTimeMinutes(a.time) ?? 0) - (scheduleTimeMinutes(b.time) ?? 0))
+        .map((s: any) => {
+          const member = s.member ? members.find((m: any) => m.fullName === s.member || m.name === s.member) : null;
+          return {
+            id: s.id, title: s.title, time: s.time, emoji: s.icon, type: s.type,
+            member: member?.fullName,
+          };
+        });
+    });
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Weekday coverage mirror of schedule-time.ts (kept local to avoid a client
+ *  import chain; same semantics: "weekdays"/"weekends" keywords + SMTWTFS). */
+function scheduleCoversDay(days: unknown, weekdayShort: string, todayIdx: number): boolean {
+  if (!days) return true;
+  if (typeof days === "string") {
+    const d = days.toLowerCase();
+    if (d === "weekdays") return todayIdx >= 1 && todayIdx <= 5;
+    if (d === "weekends") return todayIdx === 0 || todayIdx === 6;
+    if (d === "daily" || d === "everyday") return true;
+    const letters = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+    return d.includes(letters[todayIdx]);
+  }
+  if (Array.isArray(days)) {
+    const letters = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+    return days.some((d) => String(d).toLowerCase().startsWith(letters[todayIdx].slice(0, 3)) || String(d).toLowerCase() === weekdayShort);
+  }
+  return true;
+}
+
+function scheduleTimeMinutes(time?: string): number | null {
+  if (!time) return null;
+  const m24 = /^(\d{1,2}):(\d{2})$/.exec(time.trim());
+  if (m24) return Number(m24[1]) * 60 + Number(m24[2]);
+  const m12 = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(time.trim());
+  if (m12) {
+    let h = Number(m12[1]) % 12;
+    if (m12[3].toUpperCase() === "PM") h += 12;
+    return h * 60 + Number(m12[2]);
+  }
+  return null;
+}
 
 export interface ToolDefinition {
   name: string;
@@ -172,23 +348,24 @@ const TOOLS: Tool[] = [
     },
     handler: async () => {
       const members = db.selectMembers();
-      return summarize(members.map((m: any) => ({ name: m.fullName || m.name, role: m.role, emoji: m.emoji })));
+      return summarize(members.map((m: any) => ({ name: m.fullName || m.name, role: m.role, emoji: textEmoji(m.emoji) })));
     },
   },
   {
     definition: {
       name: "get_todays_events",
-      description: "Get all calendar events scheduled for today. Returns event titles, times, and who they're for.",
+      description: "Get all calendar events scheduled for today — family events AND synced Google Calendar events. Returns event titles, times, and who they're for.",
       parameters: { type: "object", properties: {} },
     },
     handler: async () => {
-      const events = db.selectTodaysEvents();
-      return summarize(events.map((e: any) => ({
+      const events = await mergedTodaysEvents();
+      return summarize(events.map((e) => ({
         title: e.title,
         time: e.time,
         member: e.member,
         emoji: e.emoji,
         color: e.color,
+        source: e.source,
       })));
     },
   },
@@ -283,7 +460,7 @@ const TOOLS: Tool[] = [
       parameters: { type: "object", properties: {} },
     },
     handler: async () => {
-      const sched = db.selectTodaysSchedulesRaw();
+      const sched = await liveSchedules();
       return summarize(sched.map((s: any) => ({
         title: s.title,
         time: s.time,
@@ -305,8 +482,8 @@ const TOOLS: Tool[] = [
       },
     },
     handler: async (args) => {
-      const tasks = db.selectPendingTasks();
-      let filtered = tasks.filter((t: any) => t.status === "pending" || !t.done);
+      const tasks = await livePendingTasks();
+      let filtered = tasks;
       if (args.member) {
         const m = String(args.member).toLowerCase();
         filtered = filtered.filter((t: any) => {
@@ -319,7 +496,6 @@ const TOOLS: Tool[] = [
         assigned: t.assigned || t.assignee,
         points: t.points,
         due: t.due,
-        priority: t.priority,
       })));
     },
   },
@@ -695,16 +871,39 @@ const TOOLS: Tool[] = [
       parameters: { type: "object", properties: {} },
     },
     handler: async () => {
-      const members = db.selectMembers();
-      return summarize({
-        note: "The leaderboard is updated in real-time on the Tasks tab. Points reset every Monday. Here are the current family members who participate:",
-        members: members.map((m: any) => ({
+      // Real standings (2026-09-09): the old handler returned a static
+      // "how it works" blurb with member names and NO points — kids asking
+      // "who's winning?" got nothing answerable. Read week_data live and
+      // rank the actual weekly points.
+      const weekStart = localWeekStartISO();
+      let members: any[] = [];
+      let week: any = null;
+      try {
+        [members, week] = await Promise.all([
+          withAdmin(async (pb) => pb.collection("members").getFullList({ requestKey: null })),
+          withAdmin(async (pb) =>
+            pb.collection("week_data").getFullList({ filter: `weekStart="${weekStart}"`, requestKey: null })),
+        ]);
+      } catch {
+        members = [];
+        week = null;
+      }
+      const points = (week?.[0]?.points ?? {}) as Record<string, number>;
+      const entries = (members || [])
+        .filter((m: any) => m.role !== "pet")
+        .map((m: any) => ({
           name: m.fullName || m.name,
           role: m.role,
-          emoji: m.emoji,
-        })),
-        how_it_works:
-          "Each completed task earns points. Weekly champion gets a crown badge. Points reset every Monday at midnight.",
+          emoji: textEmoji(m.emoji),
+          points: points[m.fullName] ?? points[m.name] ?? 0,
+        }))
+        .sort((a, b) => b.points - a.points);
+      const leader = entries[0] && entries[0].points > 0 ? entries[0] : null;
+      return summarize({
+        week_start: weekStart,
+        note: "Points reset every Monday. The weekly champion gets the crown.",
+        leaderboard: entries,
+        champion: leader ? { name: leader.name, points: leader.points } : null,
       });
     },
   },
@@ -815,8 +1014,8 @@ const TOOLS: Tool[] = [
       parameters: { type: "object", properties: {} },
     },
     handler: async () => {
-      const events = db.selectTodaysEvents();
-      const tasks = db.selectPendingTasks();
+      const events = await mergedTodaysEvents();
+      const tasks = await livePendingTasks();
       const meals = await db.selectMeals();
       const today = localTodayISO();
       const todayWeekday = localWeekdayShort();
@@ -828,8 +1027,8 @@ const TOOLS: Tool[] = [
         date: today,
         today_weekday: todayWeekday,
         family_timezone: familyTimeZone(),
-        events: events.map((e: any) => ({ title: e.title, time: e.time, member: e.member })),
-        pending_tasks: tasks.filter((t: any) => t.status === "pending" || !t.done).map((t: any) => ({
+        events: events.map((e) => ({ title: e.title, time: e.time, member: e.member, source: e.source })),
+        pending_tasks: tasks.map((t: any) => ({
           title: t.title,
           assigned: t.assigned || t.assignee,
           points: t.points,
