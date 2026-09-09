@@ -29,6 +29,7 @@ import GoogleConnectCard from "@/components/settings/GoogleConnectCard";
 import HaNotificationsCard from "@/components/settings/HaNotificationsCard";
 import ServicesKeysCard from "@/components/settings/ServicesKeysCard";
 import AiModelsCard from "@/components/settings/AiModelsCard";
+import WallDisplayToggle from "@/components/settings/WallDisplayToggle";
 import AvatarPicker from "@/components/profile/AvatarPicker";
 import { warmGlassAccentOptions } from "@/lib/design-tokens";
 import { defaultAccentHex, type AccentTarget } from "@/lib/theme-config";
@@ -937,6 +938,7 @@ export default function SettingsPage() {
                   ? "You're editing the layout your device is using right now."
                   : `Your device is in ${orientation} — the ${orientation} layout applies automatically.`}
               </p>
+              <WallDisplayToggle />
               <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.18em] text-text-muted">
                 <span>All widgets</span>
                 <span>{visibleCount} on Home</span>
