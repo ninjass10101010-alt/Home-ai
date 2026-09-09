@@ -1,7 +1,7 @@
 {
-  "hash": "e9648b16ab7585b04957cf73fb5b7f31a757cd64",
-  "short": "e9648b1",
-  "message": "feat(chat): conversation steering — /new + /restart commands and New-conversation button with LLM context cutoff",
-  "date": "2026-09-08 21:56:43 -0400",
+  "hash": "df12c381aed41394e702af9c65e999fde4ae786f",
+  "short": "df12c38",
+  "message": "fix(ai): reasoning-model token exhaustion — empty rounds fail over instead of 'ran out of steps'",
+  "date": "2026-09-09 13:36:02 -0400",
   "author": "GarciaFam"
 }
