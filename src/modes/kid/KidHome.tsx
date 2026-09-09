@@ -33,6 +33,8 @@ import SoftButton from "@/components/ui/SoftButton";
 import { AtmosphericProvider } from "@/hooks/useAtmosphericTheme";
 import { useAuth } from "@/hooks/useAuth";
 import { useDashboardMode } from "@/hooks/useDashboardMode";
+import { useWallMode } from "@/hooks/useWallMode";
+import WallPinPad from "@/components/wall/WallPinPad";
 import Surface from "@/components/ui/Surface";
 import Link from "next/link";
 import { db } from "@/db";
@@ -227,8 +229,13 @@ export default function KidHome() {
   // refreshes) so quests, points, and the leaderboard stay honest.
   const [dataVersion, setDataVersion] = useState(0);
 
-  const { currentUser } = useAuth();
+  const { currentUser, logout } = useAuth();
   const { isBedtime, isWeekend } = useDashboardMode();
+  // Wall profile (spec §6 amendment): on the wall the quest PIN gate renders
+  // the WallPinPad keypad instead of the shared typed-input Modal, and the
+  // hero gains a kid-visible Switch-member control. Bedtime keeps its calm
+  // surface — no switcher.
+  const { wall } = useWallMode();
 
   useEffect(() => {
     const onMembersUpdated = () => setMembersVersion(v => v + 1);
@@ -302,6 +309,20 @@ export default function KidHome() {
   const firstName = user?.name?.split(" ")[0] || "Buddy";
   const level = Math.floor(points / POINTS_PER_LEVEL) + 1;
 
+  // Wall pad identity (spec §6 amendment): the pad header shows the quest's
+  // assignee (or the signed-in kid) with their roster emoji/color — never the
+  // hardcoded green. Resolved from the live roster snapshot.
+  const padMember = (() => {
+    const rawName = questPinTask?.assignee || user?.name || "Buddy";
+    const first = (v: string) => v.split(" ")[0].toLowerCase();
+    const roster = members.find((m) => first(m.name) === first(rawName));
+    return {
+      name: roster?.name || rawName,
+      emoji: roster?.emoji || user?.emoji || "😊",
+      color: roster?.color || user?.color || "green",
+    };
+  })();
+
   // Display-only celebration (same precedent as the Tasks page): reads the
   // before-snapshot points to decide the level-up flourish — it never posts
   // anything. `pending` marks a done-but-UNPAID completion: the copy says
@@ -357,125 +378,152 @@ export default function KidHome() {
     setQuestPinError("");
   }, []);
 
+  // The ONE quest-completion body, parameterized by the typed PIN — shared by
+  // the non-wall Modal path (submitQuestPin) and the wall WallPinPad path
+  // (runQuestCompletion's onVerify wrapper). No duplicated claim/verify
+  // branches: wrong-PIN / claim-lost / unreachable outcomes surface as the
+  // same strings on both surfaces.
+  const runQuestCompletion = useCallback(
+    async (questPin: string): Promise<{ ok: boolean; error?: string }> => {
+      if (!questPinTask || !user) return { ok: false, error: "Couldn't complete it — try again." };
+      // Double-completion guard (same as the Tasks page): a stale local cache
+      // row already completed this week must never re-POST or re-award points.
+      if (questPinTask.completedInWeek === weekKey()) {
+        setQuestPinTask(null);
+        setQuestPin("");
+        setQuestPinError("");
+        return { ok: true };
+      }
+      setQuestPinBusy(true);
+      const task = questPinTask;
+      try {
+        // Competitive completions (universal claims AND stealable-late snatches)
+        // keep the server-authoritative claim route — the same branch the Tasks
+        // page uses, so both surfaces agree for every task shape.
+        if (task.universal || isSnatchable(task)) {
+          // Server-authoritative claim (same route the Tasks page uses):
+          // exactly one family member wins the race, points land on the server.
+          const before = currentWeekPoints(user.name).points;
+          const claimNow = new Date().toISOString();
+          const res = await fetch("/api/tasks/claim", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              taskId: task.id,
+              claimantName: user.name,
+              claimantPin: questPin,
+              completedAt: claimNow,
+              title: task.title,
+              points: task.points,
+            }),
+          });
+          const data = await res.json().catch(() => null);
+          if (!res.ok || !data?.success) {
+            const err =
+              res.status === 401 ? "Wrong PIN. Try again."
+                : res.status === 409 && data?.claimedBy ? `🤝 ${String(data.claimedBy).split(" ")[0]} already grabbed that one!`
+                : res.status === 409 ? "That task was already claimed."
+                : "Couldn't claim it — try again.";
+            setQuestPinError(err);
+            setQuestPin("");
+            return { ok: false, error: err };
+          }
+          if (data?.weekData?.weekStart === weekKey()) saveWeekData(data.weekData);
+          // Mirror the claim route's server-side completion fields on the local
+          // row — syncTasksToPB writes completedInWeek/completedAt as-is, so a
+          // bare { completed: true } would WIPE the server's completion fields.
+          const claimantIsChild = user?.role === "child";
+          const tasks = loadTasks().map((t: any) =>
+            t.id === task.id
+              // claimedBy is the server-normalized FULL name (same as the
+              // non-universal branch's verified.name) — a first name here
+              // would split the ledger key. A kid claimant mirrors the route's
+              // pendingApproval answer: done-but-unpaid, NO local earn tx (the
+              // route never touched week_data); points land on parent approval.
+              ? claimantIsChild
+                ? tapCompletePending(t, data?.claimedBy || user.name, claimNow, weekKey())
+                : { ...t, completed: true, completedBy: data?.claimedBy || user.name, completedAt: claimNow, completedInWeek: weekKey() }
+              : t
+          );
+          saveTasks(tasks);
+          void syncTasksToPB(tasks);
+          // A kid claim is done-but-UNPAID (the route held the earn for parent
+          // approval) — the celebration copy must say "on the way".
+          celebrate(task.points || 0, before, { pending: claimantIsChild });
+        } else if (completesWithPendingApproval(user?.role, task)) {
+          // 10+ kids (and age-unknown sessions, which fail closed to this gate):
+          // the typed PIN is verified server-side FIRST — a wrong or unreachable
+          // PIN lands nothing. A verified child's success then completes
+          // immediately as done-but-unpaid (same shape as the under-10 tap):
+          // points move only on parent approval. The ledger key is the
+          // roster-resolved FULL name of the VERIFIED member (db.selectMembers
+          // maps name → first name + fullName), the same key approve credits —
+          // a raw session first name would split the ledger.
+          const result = await verifyPinRemote(task.assignee || user.name, questPin);
+          if (result.status !== "ok") {
+            const err = result.status === "unreachable" ? unreachableCopy() : "Wrong PIN. Try again.";
+            setQuestPinError(err);
+            setQuestPin("");
+            return { ok: false, error: err };
+          }
+          if (result.member?.role !== "child") {
+            // KidHome is the child surface — a non-child verified record here
+            // means the shapes disagree; say so instead of faking success.
+            const err = "Couldn't complete it — try again.";
+            setQuestPinError(err);
+            setQuestPin("");
+            return { ok: false, error: err };
+          }
+          const now = new Date().toISOString();
+          const currentWeek = weekKey();
+          const myName = resolveMemberName(db.selectMembers(), result.member?.name || user.name);
+          const week = loadWeekData();
+          const before = pointsFor(week.points, myName);
+          const tasks = loadTasks().map((t: any) =>
+            t.id === task.id ? tapCompletePending(t, myName, now, currentWeek) : t
+          );
+          saveTasks(tasks);
+          void syncTasksToPB(tasks);
+          celebrate(task.points || 0, before, { pending: true });
+        } else {
+          // Neither branch owns this shape (a non-child session somehow reached
+          // the kid gate) — say so instead of faking a success cleanup.
+          const err = "Couldn't complete it — try again.";
+          setQuestPinError(err);
+          setQuestPin("");
+          return { ok: false, error: err };
+        }
+        setQuestPinTask(null);
+        setQuestPin("");
+        setDataVersion(v => v + 1);
+        return { ok: true };
+      } catch {
+        // Network rejection (offline / NAS asleep) escaped the onClick before:
+        // the spinner stopped and the kid got NO feedback with the typed PIN
+        // still in state. Honest copy + clear the PIN.
+        const err = unreachableCopy();
+        setQuestPinError(err);
+        setQuestPin("");
+        return { ok: false, error: err };
+      } finally {
+        setQuestPinBusy(false);
+      }
+    },
+    [questPinTask, user, celebrate]
+  );
+
   const submitQuestPin = async () => {
     if (!questPinTask || !user || questPinBusy || questPin.length < 4) return;
-    // Double-completion guard (same as the Tasks page): a stale local cache
-    // row already completed this week must never re-POST or re-award points.
-    if (questPinTask.completedInWeek === weekKey()) {
-      setQuestPinTask(null);
-      setQuestPin("");
-      setQuestPinError("");
-      return;
-    }
-    setQuestPinBusy(true);
-    const task = questPinTask;
-    try {
-      // Competitive completions (universal claims AND stealable-late snatches)
-      // keep the server-authoritative claim route — the same branch the Tasks
-      // page uses, so both surfaces agree for every task shape.
-      if (task.universal || isSnatchable(task)) {
-        // Server-authoritative claim (same route the Tasks page uses):
-        // exactly one family member wins the race, points land on the server.
-        const before = currentWeekPoints(user.name).points;
-        const claimNow = new Date().toISOString();
-        const res = await fetch("/api/tasks/claim", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            taskId: task.id,
-            claimantName: user.name,
-            claimantPin: questPin,
-            completedAt: claimNow,
-            title: task.title,
-            points: task.points,
-          }),
-        });
-        const data = await res.json().catch(() => null);
-        if (!res.ok || !data?.success) {
-          setQuestPinError(
-            res.status === 401 ? "Wrong PIN. Try again."
-              : res.status === 409 && data?.claimedBy ? `🤝 ${String(data.claimedBy).split(" ")[0]} already grabbed that one!`
-              : res.status === 409 ? "That task was already claimed."
-              : "Couldn't claim it — try again."
-          );
-          setQuestPin("");
-          return;
-        }
-        if (data?.weekData?.weekStart === weekKey()) saveWeekData(data.weekData);
-        // Mirror the claim route's server-side completion fields on the local
-        // row — syncTasksToPB writes completedInWeek/completedAt as-is, so a
-        // bare { completed: true } would WIPE the server's completion fields.
-        const claimantIsChild = user?.role === "child";
-        const tasks = loadTasks().map((t: any) =>
-          t.id === task.id
-            // claimedBy is the server-normalized FULL name (same as the
-            // non-universal branch's verified.name) — a first name here
-            // would split the ledger key. A kid claimant mirrors the route's
-            // pendingApproval answer: done-but-unpaid, NO local earn tx (the
-            // route never touched week_data); points land on parent approval.
-            ? claimantIsChild
-              ? tapCompletePending(t, data?.claimedBy || user.name, claimNow, weekKey())
-              : { ...t, completed: true, completedBy: data?.claimedBy || user.name, completedAt: claimNow, completedInWeek: weekKey() }
-            : t
-        );
-        saveTasks(tasks);
-        void syncTasksToPB(tasks);
-        // A kid claim is done-but-UNPAID (the route held the earn for parent
-        // approval) — the celebration copy must say "on the way".
-        celebrate(task.points || 0, before, { pending: claimantIsChild });
-      } else if (completesWithPendingApproval(user?.role, task)) {
-        // 10+ kids (and age-unknown sessions, which fail closed to this gate):
-        // the typed PIN is verified server-side FIRST — a wrong or unreachable
-        // PIN lands nothing. A verified child's success then completes
-        // immediately as done-but-unpaid (same shape as the under-10 tap):
-        // points move only on parent approval. The ledger key is the
-        // roster-resolved FULL name of the VERIFIED member (db.selectMembers
-        // maps name → first name + fullName), the same key approve credits —
-        // a raw session first name would split the ledger.
-        const result = await verifyPinRemote(task.assignee || user.name, questPin);
-        if (result.status !== "ok") {
-          setQuestPinError(result.status === "unreachable" ? unreachableCopy() : "Wrong PIN. Try again.");
-          setQuestPin("");
-          return;
-        }
-        if (result.member?.role !== "child") {
-          // KidHome is the child surface — a non-child verified record here
-          // means the shapes disagree; say so instead of faking success.
-          setQuestPinError("Couldn't complete it — try again.");
-          setQuestPin("");
-          return;
-        }
-        const now = new Date().toISOString();
-        const currentWeek = weekKey();
-        const myName = resolveMemberName(db.selectMembers(), result.member?.name || user.name);
-        const week = loadWeekData();
-        const before = pointsFor(week.points, myName);
-        const tasks = loadTasks().map((t: any) =>
-          t.id === task.id ? tapCompletePending(t, myName, now, currentWeek) : t
-        );
-        saveTasks(tasks);
-        void syncTasksToPB(tasks);
-        celebrate(task.points || 0, before, { pending: true });
-      } else {
-        // Neither branch owns this shape (a non-child session somehow reached
-        // the kid gate) — say so instead of faking a success cleanup.
-        setQuestPinError("Couldn't complete it — try again.");
-        setQuestPin("");
-        return;
-      }
-      setQuestPinTask(null);
-      setQuestPin("");
-      setDataVersion(v => v + 1);
-    } catch {
-      // Network rejection (offline / NAS asleep) escaped the onClick before:
-      // the spinner stopped and the kid got NO feedback with the typed PIN
-      // still in state. Honest copy + clear the PIN.
-      setQuestPinError(unreachableCopy());
-      setQuestPin("");
-    } finally {
-      setQuestPinBusy(false);
-    }
+    await runQuestCompletion(questPin);
   };
+
+  // Wall pad wrapper: the WallPinPad's onVerify seam feeds the typed code
+  // into the SAME completion body. The pad owns dot-clearing; the busy/cancel
+  // Modal wiring is not needed here.
+  const questPadVerify = useCallback(
+    (pin: string) => runQuestCompletion(pin),
+    [runQuestCompletion]
+  );
 
   // Greeting based on mode
   const greeting = isBedtime
@@ -618,10 +666,21 @@ export default function KidHome() {
             </div>
           )}
 
-          {/* Profile hint */}
-          <p className="mt-3 text-[11px] text-text-muted">
-            Tap the ⚙️ in settings to switch profiles
-          </p>
+          {/* Profile hint / wall Switch-member (spec §6 amendment) */}
+          {wall ? (
+            <button
+              type="button"
+              onClick={logout}
+              aria-label="Switch member"
+              className="tap mt-4 flex min-h-[56px] items-center gap-2 rounded-full border border-white/10 bg-[var(--color-surface-0)]/35 px-6 text-base font-semibold text-text-secondary hover:bg-[var(--color-surface-0)]/55 hover:text-text-primary"
+            >
+              🔄 Switch member
+            </button>
+          ) : (
+            <p className="mt-3 text-[11px] text-text-muted">
+              Tap the ⚙️ in settings to switch profiles
+            </p>
+          )}
         </div>
 
         {/* ── Content ── */}
@@ -793,7 +852,18 @@ export default function KidHome() {
           </div>
         </div>
 
-        {questPinModal}
+        {/* Wall (spec §6 amendment): the 10+ quest PIN moves to the WallPinPad
+            keypad via the onVerify seam — the pad never signs the member in.
+            The shared typed-input Modal stays the non-wall surface. */}
+        {!wall && questPinModal}
+        {wall && questPinTask && (
+          <WallPinPad
+            member={padMember}
+            onClose={closeQuestPin}
+            onSuccess={closeQuestPin}
+            onVerify={questPadVerify}
+          />
+        )}
       </PageShell>
     </AtmosphericProvider>
   );

@@ -14,15 +14,24 @@ const UNREACHABLE_COPY = "Couldn't reach Consuela — check the connection and t
  *  Network-failure note: useAuth().login RESOLVES `{ success: false, error: "Network error" }`
  *  on a failed fetch (src/hooks/useAuth.tsx:296) — it does not reject. Both the
  *  resolved "Network error" shape and a genuine promise rejection surface the
- *  honest unreachable copy. */
+ *  honest unreachable copy.
+ *
+ *  onVerify seam (spec §6 amendment, "Kid mode on the wall"): when provided,
+ *  the pad does NOT sign in — the caller (e.g. KidHome's quest gate) owns the
+ *  verification and receives the typed code. Outcomes: ok → onSuccess;
+ *  !ok → the caller's error string verbatim (or WRONG_PIN_COPY when absent);
+ *  a literal "Network error" or a thrown rejection → the honest unreachable
+ *  copy. Input clears on every failure. */
 export default function WallPinPad({
   member,
   onClose,
   onSuccess,
+  onVerify,
 }: {
-  member: { name: string; emoji: string };
+  member: { name: string; emoji: string; color?: string };
   onClose: () => void;
   onSuccess: () => void;
+  onVerify?: (pin: string) => Promise<{ ok: boolean; error?: string }>;
 }) {
   const { login } = useAuth();
   const [pin, setPin] = useState("");
@@ -33,6 +42,17 @@ export default function WallPinPad({
     setBusy(true);
     setError(null);
     try {
+      if (onVerify) {
+        const res = await onVerify(code);
+        if (res.ok) {
+          setPin("");
+          onSuccess();
+          return;
+        }
+        setError(res.error === "Network error" ? UNREACHABLE_COPY : res.error ?? WRONG_PIN_COPY);
+        setPin("");
+        return;
+      }
       const res = await login(member.name, code);
       if (res.success) {
         setPin("");
@@ -76,7 +96,7 @@ export default function WallPinPad({
         className="material-thick w-full max-w-xl rounded-[2rem] border border-white/12 p-8 shadow-2xl"
       >
         <div className="flex flex-col items-center gap-3">
-          <Avatar name={member.name} color="green" emoji={member.emoji} size="lg" variant="emoji" />
+          <Avatar name={member.name} color={member.color || "green"} emoji={member.emoji} size="lg" variant="emoji" />
           <p className="text-2xl font-bold tracking-tight text-text-primary">Hi {member.name.split(" ")[0]} 👋</p>
           <p className="text-base text-text-secondary">Enter your 4-digit PIN</p>
           <div className="flex gap-3 py-2 text-3xl tracking-[0.5em] text-text-primary" aria-label={`${pin.length} of 4 digits entered`}>

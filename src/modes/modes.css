@@ -146,3 +146,39 @@
     animation: none !important;
   }
 }
+
+/* ═══ KID MODE ON THE WALL (spec §6 amendment, 2026-09-09) ═══
+   Spec: docs/superpowers/specs/2026-09-09-apolosign-wall-mode-design.md,
+   §6 "Kid mode on the wall" amendment — KidHome is the kid's wall surface:
+   wall-scaled hero/quest cards, a wall-only Switch-member control, the
+   WallPinPad keypad for 10+ quest PINs, and under-10 stays PIN-free.
+   Scoped under html[data-wall="true"] + kid selectors ONLY — phones and
+   laptops never match these rules, and non-kid wall surfaces are untouched.
+   Size/layout only: NO new keyframes (the existing reduced-motion kill
+   blocks above and in globals.css cover all motion on these elements). */
+
+/* Hero avatar scaled ~1.4× for 3–10 ft viewing distance */
+html[data-wall="true"] [data-mode="kid"] .avatar-hero {
+  width: 140px;
+  height: 140px;
+}
+
+/* Quest cards pin the wall ≥64px touch floor explicitly (base kid 72px
+   already clears it — pinned so a future base reduction can never fall
+   under the wall floor; zero visual delta today) */
+html[data-wall="true"] [data-mode="kid"] .quest-card {
+  min-height: 72px;
+}
+
+/* Kid text floors 10/11px → 14px on the wall (mirrors the globals.css
+   wall block values, scoped to kid surfaces) */
+html[data-wall="true"] [data-mode="kid"] .text-\[10px\],
+html[data-wall="true"] [data-mode="kid"] .text-\[11px\] {
+  font-size: 14px;
+}
+
+/* Switch-member control ≥56px tall (wall touch floor) */
+html[data-wall="true"] [data-mode="kid"] button[aria-label="Switch member"] {
+  min-height: 56px;
+  font-size: 18px;
+}

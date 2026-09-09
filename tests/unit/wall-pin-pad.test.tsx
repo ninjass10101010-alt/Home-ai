@@ -97,4 +97,74 @@ describe("WallPinPad", () => {
     await act(async () => {});
     expect(el.textContent).toContain("Couldn't reach Consuela — check the connection and try again.");
   });
+
+  // ── onVerify seam (kid quest gate, spec §6 amendment) ──
+
+  it("onVerify: 4 digits call onVerify with the code, success calls onSuccess, and login is NEVER called", async () => {
+    const onVerify = vi.fn(async (pin: string) => ({ ok: true }));
+    const onSuccess = vi.fn();
+    const el = render(
+      <WallPinPad member={member} onClose={vi.fn()} onSuccess={onSuccess} onVerify={onVerify} />
+    );
+    for (const d of ["1", "2", "3", "4"]) act(() => buttonByLabel(el, d).click());
+    await act(async () => {});
+    expect(onVerify).toHaveBeenCalledWith("1234");
+    expect(onSuccess).toHaveBeenCalled();
+    expect(loginMock).not.toHaveBeenCalled();
+  });
+
+  it("onVerify: a caller error string is shown verbatim and the dots clear", async () => {
+    const onVerify = vi.fn(async () => ({ ok: false, error: "Wrong PIN. Try again." }));
+    const el = render(
+      <WallPinPad member={member} onClose={vi.fn()} onSuccess={vi.fn()} onVerify={onVerify} />
+    );
+    for (const d of ["9", "9", "9", "9"]) act(() => buttonByLabel(el, d).click());
+    await act(async () => {});
+    expect(el.textContent).toContain("Wrong PIN. Try again.");
+    const dots = el.querySelector('[aria-label="0 of 4 digits entered"]');
+    expect(dots).toBeTruthy();
+    expect(dots!.textContent).not.toContain("●");
+  });
+
+  it("onVerify: an undefined error falls back to the pad's Wrong PIN copy", async () => {
+    const onVerify = vi.fn(async () => ({ ok: false }));
+    const el = render(
+      <WallPinPad member={member} onClose={vi.fn()} onSuccess={vi.fn()} onVerify={onVerify} />
+    );
+    for (const d of ["9", "9", "9", "9"]) act(() => buttonByLabel(el, d).click());
+    await act(async () => {});
+    expect(el.textContent).toContain("Wrong PIN — try again.");
+  });
+
+  it("onVerify: a returned 'Network error' maps to the honest unreachable copy", async () => {
+    const onVerify = vi.fn(async () => ({ ok: false, error: "Network error" }));
+    const el = render(
+      <WallPinPad member={member} onClose={vi.fn()} onSuccess={vi.fn()} onVerify={onVerify} />
+    );
+    for (const d of ["1", "2", "3", "4"]) act(() => buttonByLabel(el, d).click());
+    await act(async () => {});
+    expect(el.textContent).toContain("Couldn't reach Consuela — check the connection and try again.");
+  });
+
+  it("onVerify: a rejection maps to the honest unreachable copy", async () => {
+    const onVerify = vi.fn(async () => {
+      throw new Error("offline");
+    });
+    const el = render(
+      <WallPinPad member={member} onClose={vi.fn()} onSuccess={vi.fn()} onVerify={onVerify} />
+    );
+    for (const d of ["1", "2", "3", "4"]) act(() => buttonByLabel(el, d).click());
+    await act(async () => {});
+    expect(el.textContent).toContain("Couldn't reach Consuela — check the connection and try again.");
+  });
+
+  it("member.color threads to the Avatar (and defaults to green)", () => {
+    const el = render(<WallPinPad member={{ ...member, color: "violet" }} onClose={vi.fn()} onSuccess={vi.fn()} />);
+    const avatar = el.querySelector('[class*="bg-[var(--color-accent-violet)]"]');
+    expect(avatar).not.toBeNull();
+
+    const elDefault = render(<WallPinPad member={member} onClose={vi.fn()} onSuccess={vi.fn()} />);
+    const avatarGreen = elDefault.querySelector('[class*="bg-[var(--color-accent-mint)]"]');
+    expect(avatarGreen).not.toBeNull();
+  });
 });
