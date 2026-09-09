@@ -20,6 +20,8 @@ import { useWallMode } from "@/hooks/useWallMode";
 import { WIDGET_SPANS, homeGridClass, widgetSpanClass, tabletSpan, tabletSpanFor, HOME_GRID_FALLBACK, WALL_GRID_CLASS } from "@/lib/layout-config";
 import { useAuth, type AuthUser } from "@/hooks/useAuth";
 import PinModal from "@/components/auth/PinModal";
+import WallPinPad from "@/components/wall/WallPinPad";
+import WallMemberRail from "@/components/wall/WallMemberRail";
 import MemberPickerModal from "@/components/auth/MemberPickerModal";
 import SoftButton from "@/components/ui/SoftButton";
 import Chip from "@/components/ui/Chip";
@@ -396,7 +398,16 @@ export default function HomePage() {
                 </h1>
                 <p className="mt-1 text-sm text-text-secondary">{season.emoji} {season.name} · {dateInfo.dayOfWeek}, {dateInfo.dayMonth} · {timeStr}</p>
               </div>
-              {isLoggedIn && dashboardCurrentUser ? (
+              {wall ? (
+                <WallMemberRail
+                  members={familyMembers}
+                  currentUser={dashboardCurrentUser}
+                  isLoggedIn={isLoggedIn}
+                  onPick={handleSignInPick}
+                  onSelfProfile={() => setProfileOpen(true)}
+                  onSignOut={logout}
+                />
+              ) : isLoggedIn && dashboardCurrentUser ? (
                 <div className="flex shrink-0 items-center gap-2">
                   {showSessionPill && (
                     <span
@@ -445,7 +456,8 @@ export default function HomePage() {
               )}
             </div>
 
-            <div className="mt-6 flex gap-3 overflow-x-auto pb-1">
+            {!wall && (
+              <div className="mt-6 flex gap-3 overflow-x-auto pb-1">
               {familyMembers.map((member) => (
                 <button
                   key={member.name}
@@ -478,7 +490,8 @@ export default function HomePage() {
                   ＋
                 </Chip>
               )}
-            </div>
+              </div>
+            )}
           </div>
 
           <div className="px-4 space-y-6 relative z-10">
@@ -743,7 +756,13 @@ export default function HomePage() {
             onSelect={handleSignInPick}
           />
 
-          {pinningMember && (
+          {wall && pinningMember ? (
+            <WallPinPad
+              member={{ name: pinningMember.name, emoji: pinningMember.emoji }}
+              onClose={() => setPinningMember(null)}
+              onSuccess={() => setPinningMember(null)}
+            />
+          ) : pinningMember ? (
             <PinModal
               memberName={pinningMember.name}
               memberEmoji={pinningMember.emoji}
@@ -751,7 +770,7 @@ export default function HomePage() {
               onClose={() => setPinningMember(null)}
               onSuccess={() => setPinningMember(null)}
             />
-          )}
+          ) : null}
 
           {isLoggedIn && dashboardCurrentUser && (
             <ProfileSheet
