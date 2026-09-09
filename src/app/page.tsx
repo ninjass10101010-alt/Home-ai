@@ -43,7 +43,7 @@ import { useMorningBriefing, briefingSectionsEmpty } from "@/components/briefing
 import ProfileSheet from "@/components/profile/ProfileSheet";
 import { useHomeEvents } from "@/hooks/useHomeEvents";
 import { normalizeAvatarSize } from "@/lib/avatar-size";
-import { loadTasks, isPendingApproval } from "@/lib/task-utils";
+import { loadTasks, isPendingApproval, PIN_FREE_MAX_AGE } from "@/lib/task-utils";
 import { todayMondayISO } from "@/lib/meals-week-utils";
 import { useDashboardMode } from "@/hooks/useDashboardMode";
 
@@ -131,7 +131,7 @@ export default function HomePage() {
   }, []);
 
   const router = useRouter();
-  const { currentUser, isLoggedIn, isParent, logout, sessionRemainingMs, sessionWarning, extendSession } = useAuth();
+  const { currentUser, isLoggedIn, isParent, logout, sessionRemainingMs, sessionWarning, extendSession, quickLogin } = useAuth();
   const { mode } = useDashboardMode();
   const { visibleWidgets, orientation, mounted: layoutMounted } = useHomeLayout();
   const { upcomingImportant } = useHomeEvents();
@@ -157,6 +157,44 @@ export default function HomePage() {
       glow: Boolean(member.glow),
     };
   }, [currentUser]);
+
+  // Quiet sign-in feedback toast (PIN-fallback copy) — same 3s auto-dismiss
+  // pattern the Meals/Calendar pages use; the session-warning Toast below is
+  // an independent open condition.
+  const [notification, setNotification] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showToast = (msg: string) => {
+    setNotification(msg);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setNotification(null), 3000);
+  };
+  useEffect(
+    () => () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    },
+    []
+  );
+
+  // Under-10 kids: one tap signs in (server still re-verifies; a 403 means
+  // the roster was stale and we fall back to the PIN modal — fail safe).
+  const isPinFreeChild = (member: { role?: string; age?: number }) =>
+    member.role === "child" &&
+    typeof member.age === "number" &&
+    member.age > 0 &&
+    member.age < PIN_FREE_MAX_AGE; // imported from "@/lib/task-utils" — single source
+
+  const handleSignInPick = async (member: any) => {
+    setPickerOpen(false);
+    if (isPinFreeChild(member)) {
+      const r = await quickLogin(member.name);
+      if (!r.success) {
+        setPinningMember({ name: member.name, emoji: member.emoji || "😊", color: member.color || "green", avatarSize: normalizeAvatarSize(member.avatarSize), glow: member.glow || false });
+        showToast("Tap your PIN to sign in.");
+      }
+      return;
+    }
+    setPinningMember({ name: member.name, emoji: member.emoji || "😊", color: member.color || "green", avatarSize: normalizeAvatarSize(member.avatarSize), glow: member.glow || false });
+  };
 
   useEffect(() => {
     setMounted(true);
@@ -260,6 +298,12 @@ export default function HomePage() {
         emoji: member.emoji,
         avatarSize: normalizeAvatarSize(member.avatarSize),
         glow: member.glow || false,
+        // Sign-in branching inputs (isPinFreeChild). The detailed roster
+        // capitalizes roles on the fallback path and carries age as a string
+        // (or ""), so normalize here — a missing/unparseable age stays
+        // undefined and fails closed to the PIN path.
+        role: String(member.role || "").toLowerCase() || undefined,
+        age: member.age != null && member.age !== "" && Number.isFinite(Number(member.age)) ? Number(member.age) : undefined,
       }));
       setFamilyMembers(members);
     } catch {
@@ -409,7 +453,7 @@ export default function HomePage() {
                     if (isLoggedIn && dashboardCurrentUser && memberMatchesName(member, dashboardCurrentUser.name)) {
                       setProfileOpen(true);
                     } else {
-                      setPinningMember({ name: member.name, emoji: member.emoji || "😊", color: member.color || "green", avatarSize: normalizeAvatarSize(member.avatarSize), glow: member.glow || false });
+                      handleSignInPick(member);
                     }
                   }}
                   className="active:scale-90 transition-transform"
@@ -690,10 +734,7 @@ export default function HomePage() {
             open={pickerOpen}
             members={familyMembers}
             onClose={() => setPickerOpen(false)}
-            onSelect={(member) => {
-              setPickerOpen(false);
-              setPinningMember({ name: member.name, emoji: member.emoji || "😊", color: member.color || "green", avatarSize: normalizeAvatarSize(member.avatarSize), glow: member.glow || false });
-            }}
+            onSelect={handleSignInPick}
           />
 
           {pinningMember && (
@@ -767,6 +808,10 @@ export default function HomePage() {
             >
               <span>You’ll be signed out in {sessionSecondsRemaining}s — tap to stay</span>
             </button>
+          </Toast>
+
+          <Toast open={Boolean(notification)} tone="neutral">
+            {notification}
           </Toast>
         </PageShell>
       </AtmosphericProvider>

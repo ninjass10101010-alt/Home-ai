@@ -48,6 +48,7 @@ interface AuthContextValue {
   isLoggedIn: boolean;
   isParent: boolean;
   login: (memberName: string, pin: string) => Promise<{ success: boolean; error?: string }>;
+  quickLogin: (memberName: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   sessionRemainingMs: number;
   sessionWarning: boolean;
@@ -229,30 +230,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     };
   }, [handleActivity, clearTimers, logout]);
 
-  const login = useCallback(async (memberName: string, pin: string): Promise<{ success: boolean; error?: string }> => {
-    // PIN verification happens server-side (POST /api/auth/login verifies
-    // against PocketBase and sets an httpOnly session cookie). The client
-    // never sees a pin — only the sanitized member record.
-    let res: Response;
-    try {
-      res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ memberName, pin }),
-      });
-    } catch {
-      return { success: false, error: 'Network error' };
-    }
-    if (!res.ok) return { success: false, error: 'Incorrect PIN' };
-
-    let member: any;
-    try {
-      ({ member } = await res.json());
-    } catch {
-      return { success: false, error: 'Login failed' };
-    }
-    if (!member?.name) return { success: false, error: 'Login failed' };
-
+  // Shared post-success flow for both sign-in paths (PIN login + quick login).
+  // Factored verbatim out of login's original success block — same fields
+  // stored, same session/flush side effects — so the two paths can never drift.
+  const finishLogin = useCallback((member: any): { success: boolean; error?: string } => {
     const authUser: AuthUser = {
       id: Number(member.id) || 0,
       name: member.name,
@@ -300,6 +281,53 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return { success: true };
   }, []);
 
+  const login = useCallback(async (memberName: string, pin: string): Promise<{ success: boolean; error?: string }> => {
+    // PIN verification happens server-side (POST /api/auth/login verifies
+    // against PocketBase and sets an httpOnly session cookie). The client
+    // never sees a pin — only the sanitized member record.
+    let res: Response;
+    try {
+      res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ memberName, pin }),
+      });
+    } catch {
+      return { success: false, error: 'Network error' };
+    }
+    if (!res.ok) return { success: false, error: 'Incorrect PIN' };
+
+    let member: any;
+    try {
+      ({ member } = await res.json());
+    } catch {
+      return { success: false, error: 'Login failed' };
+    }
+    if (!member?.name) return { success: false, error: 'Login failed' };
+
+    return finishLogin(member);
+  }, [finishLogin]);
+
+  const quickLogin = useCallback(async (memberName: string): Promise<{ success: boolean; error?: string }> => {
+    // Server decides eligibility (role/age against PB); any non-200 falls
+    // back to the normal PIN path. We never learn a PIN — there isn't one.
+    let res: Response;
+    try {
+      res = await fetch("/api/auth/quick-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ memberName }),
+      });
+    } catch {
+      return { success: false, error: "Network error" };
+    }
+    if (!res.ok) return { success: false, error: "PIN required" };
+    let member: any;
+    try { ({ member } = await res.json()); } catch { return { success: false, error: "Sign-in failed" }; }
+    if (!member?.name) return { success: false, error: "Sign-in failed" };
+    return finishLogin(member);
+  }, [finishLogin]);
+
   const isLoggedIn = currentUser !== null;
   const isParent = isLoggedIn && currentUser.role === 'parent';
 
@@ -310,6 +338,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         isLoggedIn,
         isParent,
         login,
+        quickLogin,
         logout,
         sessionRemainingMs,
         sessionWarning,

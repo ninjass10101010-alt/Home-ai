@@ -12,6 +12,7 @@ export interface PickerMember {
   avatarSize?: string;
   glow?: boolean;
   role?: string;
+  age?: number;
 }
 
 interface MemberPickerModalProps {
@@ -23,7 +24,7 @@ interface MemberPickerModalProps {
 
 export default function MemberPickerModal({ open, members, onSelect, onClose }: MemberPickerModalProps) {
   return (
-    <Modal open={open} onClose={onClose} title="Who&apos;s signing in?" description="Pick a family member, then enter their PIN.">
+    <Modal open={open} onClose={onClose} title="Who&apos;s signing in?" description="Pick your face — little kids sign right in. Others enter their PIN.">
       <div className="grid max-h-[55vh] grid-cols-3 gap-2 overflow-y-auto pb-1 sm:grid-cols-4">
         {members.map((member) => (
           <button
