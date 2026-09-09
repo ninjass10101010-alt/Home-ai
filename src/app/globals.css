@@ -2616,3 +2616,38 @@ body {
   .dayline-now { animation: none !important; }
   .session-pill-warning { animation: none !important; }
 }
+
+/* ─── Wall display profile (ApoloSign 15.6" portrait 1080×1920) ───
+   Spec: docs/superpowers/specs/2026-09-09-apolosign-wall-mode-design.md
+   Size/layout only — no keyframes, no zoom; `useWallMode` (Task 2) mirrors
+   the resolved profile onto <html data-wall="true">. Distance-viewing rules:
+   compact type floor 10/11px → 14px, hit-44 expands further, list rows and
+   the weather hero scale up. Phones/laptops never match these selectors. */
+html[data-wall="true"] .text-\[10px\],
+html[data-wall="true"] .text-\[11px\] {
+  font-size: 14px;
+}
+html[data-wall="true"] .hit-44::before {
+  inset: -12px;
+}
+html[data-wall="true"] .schedule-row {
+  min-height: 56px;
+}
+html[data-wall="true"] [data-testid="wx-hero-temp"] {
+  font-size: 96px;
+}
+/* Stat-tile values + card numerals (leaderboard rings/counts) → text-3xl scale.
+   Scoped to .display-numeral so non-numeric titles never jump. */
+html[data-wall="true"] .display-numeral {
+  font-size: 1.875rem;
+}
+/* Card titles text-sm → text-lg scale inside widget cards (Home + Calendar
+   share .widget-card). Descriptions already covered by the 14px floor. */
+html[data-wall="true"] .widget-card .text-sm {
+  font-size: 1.125rem;
+}
+html[data-wall="true"] .session-pill,
+html[data-wall="true"] .session-pill-warning {
+  font-size: 14px;
+  padding: 0.5rem 1rem;
+}
