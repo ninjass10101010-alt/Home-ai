@@ -381,35 +381,40 @@ describe("chat page read-aloud orb", () => {
   });
 });
 
-describe("chat page clear conversation", () => {
+describe("chat page new-conversation (trash button)", () => {
   it("asks for confirmation and is honest about its scope", async () => {
-    // Seed a thread so the clear button has something to clear.
+    // Seed a thread so the new-conversation button has something to steer.
     localStorage.setItem("consuela-chat-messages", JSON.stringify([
       { id: 1, role: "assistant", content: "greeting", timestamp: "Now" },
       { id: 2, role: "user", content: "my real message", timestamp: "Just now" },
     ]));
     const el = render(<ChatPage />);
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
-    const trash = el.querySelector("button[aria-label='Clear conversation']")!;
-    // First tap opens the confirm modal — nothing is cleared yet.
+    const trash = el.querySelector("button[aria-label='Start a new conversation']")!;
+    // First tap opens the confirm modal — nothing changes yet.
     act(() => { trash.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
-    const modal = Array.from(document.body.querySelectorAll("h3")).find((h) => h.textContent?.includes("Clear"));
+    const modal = Array.from(document.body.querySelectorAll("h3")).find((h) => h.textContent?.includes("new conversation"));
     expect(modal).toBeDefined();
-    // The scope is honest: this-device-only, family thread survives.
-    expect(document.body.textContent).toContain("this device only");
-    expect(document.body.textContent).toContain("family thread");
+    // The scope is honest: steering, not deletion — history stays in the thread.
+    expect(document.body.textContent).toContain("Consuela starts fresh");
+    expect(document.body.textContent).toContain("Nothing is deleted");
     expect(JSON.parse(localStorage.getItem("consuela-chat-messages")!).length).toBe(2);
     // Cancel keeps everything.
     const cancel = Array.from(document.body.querySelectorAll("button")).find((b) => b.textContent === "Cancel")!;
     act(() => { cancel.click(); });
     expect(JSON.parse(localStorage.getItem("consuela-chat-messages")!).length).toBe(2);
-    // Confirm clears the local view only.
+    // Confirm starts a fresh conversation: the local view resets to the
+    // greeting + a system divider, and a reset marker POSTs to PB.
     act(() => { trash.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
-    const clearBtn = Array.from(document.body.querySelectorAll("button")).find((b) => b.textContent?.includes("Clear conversation"))!;
-    act(() => { clearBtn.click(); });
+    const confirmBtn = Array.from(document.body.querySelectorAll("button")).find((b) => b.textContent === "Start new conversation")!;
+    act(() => { confirmBtn.click(); });
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
     const stored = JSON.parse(localStorage.getItem("consuela-chat-messages")!);
-    expect(stored.length).toBe(1);
-    expect(stored[0].role).toBe("assistant");
+    const globalFetch = (globalThis as any).fetch as ReturnType<typeof vi.fn>;
+    const resetPosted = globalFetch.mock.calls.some(
+      ([u, init]) => String(u).includes("/api/chat/messages") && (init as any)?.method === "POST"
+    );
+    expect(resetPosted).toBe(true);
+    expect(stored.some((m: any) => m.role === "system" && m.content === "New conversation")).toBe(true);
   });
 });

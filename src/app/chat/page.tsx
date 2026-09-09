@@ -22,7 +22,7 @@ import { usePendingChatQuery } from "@/hooks/usePendingChatQuery";
 
 interface Message {
   id: number;
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   content: string;
   timestamp: string;
   speaker?: string;
@@ -78,7 +78,7 @@ async function fetchPBThread(sinceISO?: string): Promise<{ messages: Message[]; 
       if (m.createdAt && (!latest || String(m.createdAt) > latest)) latest = String(m.createdAt);
       return {
         id: pbSyntheticIdCounter++,
-        role: m.role === "user" ? ("user" as const) : ("assistant" as const),
+        role: m.role === "user" ? ("user" as const) : m.role === "system" ? ("system" as const) : ("assistant" as const),
         content: m.content || "",
         timestamp: new Date(m.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
         ...(m.role === "user" && m.userId ? { speaker: m.userId } : {}),
@@ -276,6 +276,8 @@ function ChatContent() {
   const queryParam = searchParams.get("q");
 
   // Hero state: visible when fresh (no user messages yet) OR first reply is pending (orb animation plays while thinking)
+  // System reset markers don't count as conversation messages — a fresh
+  // /new conversation still shows the hero + chips.
   const userMessageCount = messages.filter(m => m.role === "user").length;
   const showHero = userMessageCount === 0 || (userMessageCount === 1 && isTyping);
 
@@ -367,9 +369,40 @@ function ChatContent() {
     abortRef.current?.abort();
   };
 
+  // Conversation steering (2026-09-09): /new + /restart start a fresh
+  // conversation — Telegram/opencode-style. The reset marker (a system row in
+  // the daily PB thread) is both the visible "New conversation" divider and
+  // the LLM context cutoff: history sent to the model starts AFTER the newest
+  // marker, so the brain forgets the old conversation while the family keeps
+  // it in the thread. Guests keep a local-only marker (the POST 401s — the
+  // divider still shows on this device, honestly).
+  const startNewConversation = async () => {
+    msgCounter.current += 1;
+    const marker: Message = {
+      id: msgCounter.current,
+      role: "system",
+      content: "New conversation",
+      timestamp: "Just now",
+    };
+    setMessages(prev => [...prev, marker]);
+    try {
+      await fetch("/api/chat/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "reset" }),
+      });
+    } catch { /* offline — local divider only */ }
+  };
+
+  const isResetCommand = (text: string) => /^\/(new|restart)$/i.test(text.trim());
+
   const sendMessage = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || isTyping || streamInFlightRef.current) return;
+    if (isResetCommand(trimmed)) {
+      await startNewConversation();
+      return;
+    }
     streamInFlightRef.current = true;
     setComposerLocked(true);
     const controller = new AbortController();
@@ -398,14 +431,22 @@ function ChatContent() {
 
     try {
       const t0 = Date.now();
+      // Context steering: the model only sees messages AFTER the newest
+      // reset marker — a /new conversation starts with a clean brain while
+      // the full day stays readable in the thread above.
+      const lastResetIdx = messagesRef.current.map(m => m.role).lastIndexOf("system");
+      const modelHistory = (lastResetIdx >= 0
+        ? messagesRef.current.slice(lastResetIdx + 1)
+        : messagesRef.current
+      ).slice(-12).map(m => ({
+        role: m.role,
+        content: m.role === "assistant"
+          ? m.content.replace(/\n\n✅[\s\S]*$/, "").trim()
+          : m.content,
+      }));
       const { content, streamed } = await streamConsuelaChat({
         message: trimmed,
-        history: messagesRef.current.slice(-12).map(m => ({
-          role: m.role,
-          content: m.role === "assistant"
-            ? m.content.replace(/\n\n✅[\s\S]*$/, "").trim()
-            : m.content,
-        })),
+        history: modelHistory,
         signal: controller.signal,
         onStatus: (label) => setStatusLine(label),
         onToken: (full) => {
@@ -494,10 +535,9 @@ function ChatContent() {
     draftSeq.current += 1;
     setDraft({ text, seq: draftSeq.current });
   };
-  const clearChat = () => {
-    setMessages([initialGreeting]);
-    saveChatHistory([initialGreeting]);
+  const clearChat = async () => {
     setConfirmClearOpen(false);
+    await startNewConversation();
   };
 
   // Deep-link query: /chat?q=... fires the query exactly once, after the
@@ -583,12 +623,14 @@ function ChatContent() {
 
         <button
           onClick={() => setConfirmClearOpen(true)}
-          aria-label="Clear conversation"
-          title="Clear chat"
+          aria-label="Start a new conversation"
+          title="New conversation (/new)"
           className="relative w-8 h-8 flex items-center justify-center rounded-2xl glass-subtle text-text-secondary hover:text-text-primary transition-colors shrink-0 after:absolute after:-inset-1.5 after:content-['']"
         >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" className="w-4 h-4">
-            <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6M5 6l1 14a2 2 0 002 2h8a2 2 0 002-2l1-14" />
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+            <path d="M21 12a9 9 0 1 1-9-9" />
+            <path d="M21 3v6h-6" />
+            <path d="M12 8v8M8 12h8" className="hidden" aria-hidden />
           </svg>
         </button>
       </div>
@@ -742,7 +784,17 @@ function ChatContent() {
         )}
 
         {/* Conversation messages */}
-        {!showHero && messages.map((msg) => (
+        {!showHero && messages.map((msg) => {
+          if (msg.role === "system") {
+            return (
+              <div key={msg.id} className="flex items-center gap-3 py-1" role="separator" aria-label="New conversation">
+                <span className="h-px flex-1 bg-white/10" />
+                <span className="text-[11px] uppercase tracking-wider text-text-secondary whitespace-nowrap">✨ New conversation</span>
+                <span className="h-px flex-1 bg-white/10" />
+              </div>
+            );
+          }
+          return (
           <div
             key={msg.id}
             className={`flex gap-2.5 ${msg.role === "user" ? "flex-row-reverse" : "flex-row"}`}
@@ -806,7 +858,8 @@ function ChatContent() {
               <span className="text-[11px] text-text-secondary px-1">{msg.timestamp}</span>
             </div>
           </div>
-        ))}
+          );
+        })}
 
         {isTyping && (
           <div role="status" aria-live="polite" className="flex gap-2.5">
@@ -860,12 +913,12 @@ function ChatContent() {
         />
       </div>
 
-      {/* ─── Clear-conversation confirmation — destructive action, honest scope ─── */}
+      {/* ─── New-conversation confirm — steering, not deletion: honest scope ─── */}
       <Modal
         open={confirmClearOpen}
         onClose={() => setConfirmClearOpen(false)}
-        title="Clear this conversation?"
-        description="This clears the chat on this device only. The family thread is kept on the home server and comes back next time the day's messages load."
+        title="Start a new conversation?"
+        description="Consuela starts fresh — she won't remember this conversation. Nothing is deleted: your messages stay in today's family thread, with a ✨ New conversation marker showing where the fresh start began."
         footer={
           <>
             <button
@@ -876,15 +929,15 @@ function ChatContent() {
             </button>
             <button
               onClick={clearChat}
-              className="flex-1 rounded-full bg-[var(--color-accent-rose)] px-4 py-3 text-sm font-semibold text-white tap-sm"
+              className="flex-1 rounded-full bg-[var(--color-accent-button,var(--color-accent-selected))] px-4 py-3 text-sm font-semibold text-white tap-sm"
             >
-              Clear conversation
+              Start new conversation
             </button>
           </>
         }
       >
         <div className="flex flex-col gap-2 text-sm text-text-secondary">
-          <span>Messages shared to the family thread (including from Telegram) are not deleted.</span>
+          <span>Tip: you can also type <strong>/new</strong> or <strong>/restart</strong> in the message box — same effect, no confirmation.</span>
         </div>
       </Modal>
 

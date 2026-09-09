@@ -117,7 +117,7 @@ export function UnifiedInput({
         {/* Help Text — a first-run hint, not a permanent resident */}
         {showTip && (
           <div className="mt-2 text-xs text-text-secondary text-center">
-            💡 Tip: Say “Add dentist appointment tomorrow at 3pm” or snap a photo of a flyer
+            💡 Tip: Say “Add dentist appointment tomorrow at 3pm” or snap a photo of a flyer · type <strong>/new</strong> to start a fresh conversation
           </div>
         )}
       </div>
