@@ -1533,7 +1533,7 @@ export default function TasksPage() {
                   {pending.map((task, idx) => {
                     const rowColor = priorityColor(task.priority);
                     return (
-                    <SwipeableRow key={task.id} leftAction={<span className="text-sm font-bold">✓</span>} rightAction={<span className="text-sm font-bold">×</span>} onSwipeRight={() => openPinEntry(task.id)} onSwipeLeft={() => startEdit(task)}>
+                    <SwipeableRow key={task.id} leftAction={<span className="text-sm font-bold">✓</span>} rightAction={<span className="text-sm font-bold">×</span>} onSwipeRight={() => wallConfirm(task.id, () => openPinEntry(task.id))} onSwipeLeft={() => startEdit(task)}>
                       <div
                         role="button"
                         tabIndex={0}

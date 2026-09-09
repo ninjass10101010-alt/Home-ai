@@ -325,6 +325,48 @@ describe("Tasks page wall chore 2-step confirm (wiring)", () => {
     await settle(1800);
   });
 
+  it("wall on: swipe-right goes through the SAME 2-step seam as tap — first swipe arms (pill, no downstream), second swipe completes", async () => {
+    // SwipeableRow uses raw pointer events, so its swipe-right IS reachable on
+    // touch — it must route through armOrConfirm like the row tap does.
+    wallState.wall = true;
+    stubGuestFetches();
+    mockAuth.currentUser = { name: "Caspian", role: "child", age: 5 };
+    mockAuth.isLoggedIn = true;
+    seed([FEED_CASP]);
+    const el = await renderAsync(<TasksPage />);
+    await settle();
+
+    const row = el.querySelector('[aria-label="Complete Feed the dog"]') as HTMLElement;
+    expect(row).not.toBeNull();
+    // Real PointerEvents bubble from the row div to SwipeableRow's drag
+    // wrapper; 60px > the 48px threshold fires onSwipeRight.
+    const swipe = () => {
+      act(() => {
+        row.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, clientX: 100 }));
+        row.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, clientX: 160 }));
+      });
+    };
+
+    // First swipe: armed only. No instant completion, no dialog, no verify.
+    swipe();
+    await settle();
+    expect(storedTasks()[0].completed).toBe(false);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(pillIn(el)).toBeTruthy();
+    expect(verifyCalls()).not.toContain("/api/members/verify");
+
+    // Second swipe gesture on the armed row: the confirm fires — the same
+    // PIN-free downstream a tap would drive (done-but-unpaid).
+    swipe();
+    await settle();
+    const saved = storedTasks();
+    expect(saved[0].completed).toBe(true);
+    expect(saved[0].pendingApproval).toEqual({ byName: "Caspian Garcia", at: expect.any(String), points: 5 });
+    expect(storedHistory()).toHaveLength(0);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    await settle(1800);
+  });
+
   it("wall off: single tap goes straight to the completion path (regression guard)", async () => {
     wallState.wall = false;
     stubVerifyMember({ name: "Jasmine Rose", fullName: "Jasmine Rose", role: "child" });
