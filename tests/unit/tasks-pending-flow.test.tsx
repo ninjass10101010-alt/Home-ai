@@ -26,11 +26,11 @@ vi.mock("@/db", () => ({
     refreshMembersCache: vi.fn(async () => {}),
     selectMembers: () => [
       { id: 1, name: "Rebecca", fullName: "Rebecca (Mom)", role: "parent", emoji: "👩", color: "violet" },
-      { id: 2, name: "Jasmine", fullName: "Jasmine Rose", role: "child", emoji: "👧", color: "rose" },
+      { id: 2, name: "Jasmine", fullName: "Jasmine Rose", role: "child", age: 10, emoji: "👧", color: "rose" },
     ],
     selectMembersFallback: () => [
       { id: 1, name: "Rebecca", fullName: "Rebecca (Mom)", role: "parent", emoji: "👩", color: "violet" },
-      { id: 2, name: "Jasmine", fullName: "Jasmine Rose", role: "child", emoji: "👧", color: "rose" },
+      { id: 2, name: "Jasmine", fullName: "Jasmine Rose", role: "child", age: 10, emoji: "👧", color: "rose" },
     ],
   },
 }));
@@ -84,9 +84,17 @@ beforeEach(() => {
 });
 
 describe("kid tap-to-complete", () => {
-  it("child tap marks done with pending record, zero earn tx, zero PIN traffic", async () => {
-    stubGuestFetches();
-    mockAuth.currentUser = { name: "Jasmine", role: "child" };
+  it("child (10) tap opens the PIN step; a verified PIN lands done with pending record, zero earn tx", async () => {
+    // Jasmine is 10 — PIN-free taps are for under-10 only. Identity is still
+    // proved by PIN, but a verified CHILD completion lands done-but-unpaid:
+    // the parent verifies the work before points move.
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes("/api/members/verify")) {
+        return { ok: true, status: 200, json: async () => ({ member: { name: "Jasmine Rose", fullName: "Jasmine Rose", role: "child" } }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ snapshot: null }) };
+    }));
+    mockAuth.currentUser = { name: "Jasmine", role: "child", age: 10 };
     mockAuth.isLoggedIn = true;
     seed([OPEN]);
     const el = await renderAsync(<TasksPage />);
@@ -103,6 +111,9 @@ describe("kid tap-to-complete", () => {
     expect(row).not.toBeNull();
     await act(async () => { row.click(); });
     await settle();
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+
+    await typeAndSubmit("4-digit PIN", "Submit");
 
     const saved = storedTasks();
     expect(saved[0].completed).toBe(true);
@@ -114,8 +125,12 @@ describe("kid tap-to-complete", () => {
     expect(pendingPointsFor("Jasmine Rose", saved)).toBe(5);
     expect(pendingPointsFor("Jasmine", saved)).toBe(0);
     expect(storedHistory()).toHaveLength(0);
-    expect(verifyCalls()).not.toContain("/api/members/verify");
-    expect(el.textContent || "").toContain("on the way");
+    expect(verifyCalls()).toContain("/api/members/verify");
+    expect(document.body.textContent || "").toContain("on the way");
+    // Flush the success-copy auto-close (1500ms + exit) so the portaled
+    // dialog unmounts inside this test, not after the next teardown wipes
+    // the body out from under the portal.
+    await settle(1800);
   });
 
   it("adult tap still opens a real dialog and writes no pending record", async () => {
@@ -154,7 +169,7 @@ describe("kid tap-to-complete", () => {
 
   it("pending rows show On the way and the owner can self-cancel PIN-free", async () => {
     stubGuestFetches();
-    mockAuth.currentUser = { name: "Jasmine", role: "child" };
+    mockAuth.currentUser = { name: "Jasmine", role: "child", age: 10 };
     mockAuth.isLoggedIn = true;
     seed([{ ...OPEN, completed: true, completedBy: "Jasmine Rose", completedAt: new Date().toISOString(), completedInWeek: weekKey(), pendingApproval: { byName: "Jasmine Rose", at: new Date().toISOString(), points: 5 } }]);
     const el = await renderAsync(<TasksPage />);
@@ -228,7 +243,7 @@ async function typeAndSubmit(placeholder: string, buttonText: string, pin = "123
 describe("needs approval queue", () => {
   it("hidden for kids, shown for parents", async () => {
     stubGuestFetches();
-    mockAuth.currentUser = { name: "Jasmine", role: "child" };
+    mockAuth.currentUser = { name: "Jasmine", role: "child", age: 10 };
     mockAuth.isLoggedIn = true;
     seed(pendingSeed());
     await renderAsync(<TasksPage />);

@@ -35,7 +35,8 @@ import {
   getPreviousWeekRanks, loadHallOfFame,
   syncAllTasksToPB, syncWeekDataToPB,
   archiveAndResetWeek, archiveWeekWinner, saveCurrentWeekRanksForNextWeek,
-  pickDefaultClaimMember, isSnatchable, isPendingApproval, shouldUsePendingTap,
+  pickDefaultClaimMember, isSnatchable, isPendingApproval,
+  completesWithoutPin, completesWithPendingApproval,
   tapCompletePending, sendBackPendingCompletion, approvePendingCompletion, resolveMemberName,
   mergeTasksSnapshot,
 } from "@/lib/task-utils";
@@ -704,11 +705,12 @@ export default function TasksPage() {
       setUndoError("");
       return;
     }
-    if (shouldUsePendingTap(currentUser?.role, task)) {
-      // Trust-but-verify: a kid's tap lands immediately as done-but-unpaid —
-      // no PIN round trip. Points move only on parent approval. The pending
-      // record's byName is the roster-resolved FULL name (the same ledger key
-      // the classic PIN path credits) so approve posts the earn to the right
+    if (completesWithoutPin(currentUser?.role, currentUser?.age, task)) {
+      // Trust-but-verify, junior edition: an under-10 kid's tap on their OWN
+      // assigned chore lands immediately as done-but-unpaid — no PIN round
+      // trip. Points move only on parent approval. The pending record's
+      // byName is the roster-resolved FULL name (the same ledger key the
+      // classic PIN path credits) so approve posts the earn to the right
       // ledger entry instead of stranding points on a first-name key.
       if (task.completedInWeek === weekKey()) return;
       const now = new Date().toISOString();
@@ -718,6 +720,9 @@ export default function TasksPage() {
       showToast(`Done! +${task.points}pts on the way — a parent approves.`);
       return;
     }
+    // 10+ kids and anyone else hit a PIN step; child rows then wait for
+    // approval (decided in submitPin from the VERIFIED member record, not
+    // the session).
     setPinTaskId(taskId);
     setPinReward(null);
     setPinPenalty(null);
@@ -1062,6 +1067,15 @@ export default function TasksPage() {
     if (result.status === "ok") {
       const verified = result.member;
       const normalizedName = normalizeName((verified as any).name);
+      if (completesWithPendingApproval((verified as any).role, task)) {
+        // Identity verified by PIN; the parent verifies the work. Points wait.
+        setTasks((prev) => prev.map((t) => (t.id === pinTaskId ? tapCompletePending(t, normalizedName, now, currentWeek) : t)));
+        triggerConfetti();
+        setPinInput("");
+        setPinSuccess(`⏳ ${normalizedName.split(" ")[0]} — done! +${task.points}pts on the way.`);
+        setTimeout(() => { setPinTaskId(null); setPinSuccess(""); }, 1500);
+        return;
+      }
       setTasks(prev => prev.map(t => t.id === pinTaskId ? { ...t, completed: true, completedBy: normalizedName, completedAt: now, completedInWeek: currentWeek } : t));
       const pointsMsg = task.points > 0 ? `+${task.points}pts` : "";
       setWeekData(prev => {
