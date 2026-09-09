@@ -180,12 +180,13 @@ cd /Users/garciafam/Documents/Dashboard/Home-ai && git add -A && git commit -m "
 
 **Files:**
 - Modify: `src/lib/task-utils.ts` (~lines 61-65)
-- Modify: `tests/unit/tasks-pending-approval.test.ts` (imports `shouldUsePendingTap` — re-point)
 - Create: `tests/unit/task-utils-pin-free.test.ts`
+
+(Task 2 is additive only — `shouldUsePendingTap` and its direct tests stay untouched until Task 8 deletes them.)
 
 **Interfaces:**
 - Consumes: `isSnatchable(task)`, `Task`.
-- Produces: `PIN_FREE_MAX_AGE = 10`; `completesWithoutPin(role, age, task): boolean`; `completesWithPendingApproval(role, task): boolean`. `shouldUsePendingTap` is DELETED.
+- Produces: `PIN_FREE_MAX_AGE = 10`; `completesWithoutPin(role, age, task): boolean`; `completesWithPendingApproval(role, task): boolean`. `shouldUsePendingTap` is **kept but @deprecated** (Tasks 5/7 migrate its call sites; Task 8 deletes it + its direct tests) — deleting it here would break the Tasks page/KidHome imports mid-plan and regress shipped kid taps in the interim commits.
 
 - [ ] **Step 1: Write the failing predicate tests**
 
@@ -244,9 +245,9 @@ describe("completesWithPendingApproval (every child completion waits)", () => {
 Run: `npx vitest run tests/unit/task-utils-pin-free.test.ts`
 Expected: FAIL — "completesWithoutPin is not exported".
 
-- [ ] **Step 3: Implement + delete the old seam**
+- [ ] **Step 3: Implement the two predicates (additive)**
 
-In `src/lib/task-utils.ts`, replace the `shouldUsePendingTap` block (lines 61-65) with:
+In `src/lib/task-utils.ts`, keep the existing `shouldUsePendingTap` block (lines 61-65) untouched except add above it: `/** @deprecated migrate to completesWithoutPin (Tasks 5/7); deleted in Task 8. */`. Then insert after it:
 
 ```ts
 // Age ceiling for PIN-free kid actions (sign-in eligibility re-checks the
@@ -280,11 +281,9 @@ export function completesWithPendingApproval(role: string | undefined, task: Tas
 }
 ```
 
-- [ ] **Step 4: Run to verify GREEN + fix direct importers**
+- [ ] **Step 4: Run to verify GREEN**
 
-Run: `npx vitest run tests/unit/task-utils-pin-free.test.ts` → PASS.
-
-`grep -rn "shouldUsePendingTap" src tests` — update every reference: in `tests/unit/tasks-pending-approval.test.ts` switch `shouldUsePendingTap(role, t)` calls to `completesWithoutPin(role, 7, t)` (preserve the old behavior the test pins: any child, under-10 age). In `src/app/tasks/page.tsx` and `src/modes/kid/KidHome.tsx` the imports get replaced in Tasks 5/7 — temporarily keep them compiling by leaving the call sites alone ONLY if the suite otherwise fails to compile; if `tsc` breaks, apply the Task 5/7 renames now (same edits, see those tasks).
+Run: `npx vitest run tests/unit/task-utils-pin-free.test.ts tests/unit/tasks-pending-approval.test.ts` → PASS both (the old predicate's direct tests stay green because `shouldUsePendingTap` is untouched; Task 8 re-points them when it deletes the old seam). No src call-site changes in this task.
 
 - [ ] **Step 5: Typecheck + commit**
 
@@ -537,7 +536,10 @@ Run: `npx vitest run tests/unit/use-auth-quick-login.test.ts tests/unit/use-auth
   // Under-10 kids: one tap signs in (server still re-verifies; a 403 means
   // the roster was stale and we fall back to the PIN modal — fail safe).
   const isPinFreeChild = (member: { role?: string; age?: number }) =>
-    member.role === "child" && typeof member.age === "number" && member.age > 0 && member.age < 10;
+    member.role === "child" &&
+    typeof member.age === "number" &&
+    member.age > 0 &&
+    member.age < PIN_FREE_MAX_AGE; // imported from "@/lib/task-utils" — single source
 
   const handleSignInPick = async (member: any) => {
     setPickerOpen(false);
@@ -830,6 +832,8 @@ npm run typecheck && git add src/modes/kid/KidHome.tsx tests/unit/kid-home-quest
 
 **Files:**
 - Modify: `src/app/settings/page.tsx` (`memberForm` init ~253, edit-open ~401, save ~416-481, modal form ~1044)
+- Modify: `src/lib/task-utils.ts` (delete the deprecated `shouldUsePendingTap` — call sites were migrated in Tasks 5/7)
+- Modify: `tests/unit/tasks-pending-approval.test.ts` (re-point imports/calls to `completesWithoutPin(role, 7, task)` — preserves the pinned behavior for an under-10 age)
 - Modify: `AGENTS.md` (snapshot + UI Change Record + contracts)
 - Test: `tests/unit/settings-member-age.test.tsx` (new, render the modal + assert the input posts `age`)
 
@@ -845,25 +849,35 @@ npm run typecheck && git add src/modes/kid/KidHome.tsx tests/unit/kid-home-quest
 
 `memberForm` init + edit-open carry `age: (member as any).age ?? ""`. In the modal (after the role/avatar fields, same `settings-control-panel` row grammar as the PIN field), add a number `TextField`/input labeled "Age" with `inputMode="numeric"`, helper "Under 10 signs in with one tap", validation in the existing `errors` block: `if (memberForm.age !== "" && (!/^\d{1,3}$/.test(String(memberForm.age)) || +memberForm.age < 1 || +memberForm.age > 120)) errors.age = "Age must be 1–120 (or blank).";`. Include `age: memberForm.age === "" ? undefined : Number(memberForm.age)` in the POST/PATCH bodies.
 
-- [ ] **Step 3: Verify + run the whole kid/tasks surface once more**
+- [ ] **Step 3: Delete the deprecated predicate (call sites migrated in Tasks 5/7)**
 
-Run: `npx vitest run tests/unit/settings-member-age.test.tsx tests/unit/task-utils-pin-free.test.ts tests/unit/auth-quick-login-route.test.ts tests/unit/use-auth-quick-login.test.ts tests/unit/tasks-pin-free-flow.test.tsx tests/unit/task-claim.test.ts tests/unit/kid-home-quest-pin-safety.test.tsx` → PASS.
+`grep -rn "shouldUsePendingTap" src tests` must return only: the definition in `task-utils.ts`, and `tests/unit/tasks-pending-approval.test.ts`. Delete the `shouldUsePendingTap` block from `task-utils.ts`; re-point the test file's imports/calls to `completesWithoutPin(role, 7, task)` (preserving the under-10 behavior it pins). If any `src/` reference remains, a migration was missed — fix that call site per its owning task before proceeding.
 
-- [ ] **Step 4: Full gates**
+- [ ] **Step 4: Verify + run the whole kid/tasks surface once more**
+
+Run: `npx vitest run tests/unit/settings-member-age.test.tsx tests/unit/task-utils-pin-free.test.ts tests/unit/tasks-pending-approval.test.ts tests/unit/auth-quick-login-route.test.ts tests/unit/use-auth-quick-login.test.ts tests/unit/tasks-pin-free-flow.test.tsx tests/unit/task-claim.test.ts tests/unit/kid-home-quest-pin-safety.test.tsx` → PASS.
+
+- [ ] **Step 5: Full gates**
 
 ```bash
 npm run typecheck && npx eslint src/app/settings/page.tsx src/app/tasks/page.tsx src/app/api/auth/quick-login/route.ts src/hooks/useAuth.tsx src/lib/task-utils.ts src/app/api/tasks/claim/route.ts src/modes/kid/KidHome.tsx src/components/auth/MemberPickerModal.tsx && npx vitest run && npm run build
 ```
 Expected: typecheck clean, eslint clean on touched files, suite green (the 1-4 weather-strip failures from concurrent workstreams may show — confirm red on the base commit if any, per the established convention).
 
-- [ ] **Step 5: AGENTS.md (mandatory same-session doc update)**
+- [ ] **Step 6: AGENTS.md (mandatory same-session doc update)**
 
-Add a **Last Updated** snapshot entry + a **UI Change Record** (2026-09-09 — "Under-10 kids: one-tap sign-in + PIN-free chore taps; all kid completions wait for parent approval") describing: the `quick-login` fail-closed contract (`PIN_FREE_MAX_AGE` single source; server is the only decider), the predicates as the only kid-action seams (`shouldUsePendingTap` gone), the kid-claim pending contract on the claim route (no week_data touch; `pendingApproval` on the task row; approve reuses the existing idempotent flow), roster `age` as parent-edited data, and the Jasmine-at-10 boundary. Then commit.
+Commit the code first:
+
+```bash
+git add src/app/settings/page.tsx src/lib/task-utils.ts tests/unit/settings-member-age.test.tsx tests/unit/tasks-pending-approval.test.ts && git commit -m "feat(settings): member age control; delete deprecated shouldUsePendingTap seam"
+```
+
+Then docs: add a **Last Updated** snapshot entry + a **UI Change Record** (2026-09-09 — "Under-10 kids: one-tap sign-in + PIN-free chore taps; all kid completions wait for parent approval") describing: the `quick-login` fail-closed contract (`PIN_FREE_MAX_AGE` single source; server is the only decider), the predicates as the only kid-action seams (`shouldUsePendingTap` gone), the kid-claim pending contract on the claim route (no week_data touch; `pendingApproval` on the task row; approve reuses the existing idempotent flow), roster `age` as parent-edited data, and the Jasmine-at-10 boundary. Then commit.
 
 ```bash
 git add AGENTS.md docs/superpowers/plans/2026-09-09-age-based-pin-free-tasks.md && git commit -m "docs(agents): under-10 PIN-free task flow contracts"
 ```
 
-- [ ] **Step 6: Deploy prompt (SOP-005)**
+- [ ] **Step 7: Deploy prompt (SOP-005)**
 
 Ask the human: "Deploy to NAS now?" If yes: push both remotes (run `bash scripts/security/push-safe.sh` first), then `DEPLOY_NAS_LOCAL.md`: tar-sync → `docker build` → rename-swap → **`npm run pb:seed` (adds members.age) → `node scripts/consuela/set-member-ages.mjs` once** → smoke (`/api/auth/quick-login` with Caspian → 200 cookie; with Jasmine → 403).
