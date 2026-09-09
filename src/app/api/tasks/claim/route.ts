@@ -115,6 +115,28 @@ export async function POST(request: NextRequest) {
       const now = new Date().toISOString();
       const amount = Number(task.points) || 0;
       const isSnatch = !universalOk && stealableLate;
+
+      // Under the age rule, kid claims are pending-approval too (spec 3.4):
+      // the PIN verified the claimant's identity, but points wait for a
+      // parent. No week_data is touched; the approve flow (keyed by taskId,
+      // reversal-aware) awards the earn later. A second claim hits the
+      // completed-row guard above, so races stay single-winner.
+      const claimantIsChild = claimant.role === "child";
+      if (claimantIsChild) {
+        await pb.collection("tasks").update(task.id, {
+          assignee: normalizedName,
+          assigned: normalizedName,
+          assigneeEmoji: assigneeEmoji || claimant.emoji || "",
+          completed: true,
+          status: "done",
+          completedBy: normalizedName,
+          completedAt: now,
+          completedInWeek: currentWeek,
+          pendingApproval: { byName: normalizedName, at: now, points: amount },
+        });
+        return { ok: true, pending: true, claimedBy: normalizedName } as const;
+      }
+
       const tx: Transaction = {
         id: Date.now() + Math.floor(Math.random() * 1000),
         timestamp: now,

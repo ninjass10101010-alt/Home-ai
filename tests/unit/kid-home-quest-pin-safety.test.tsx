@@ -299,12 +299,15 @@ describe("KidHome quest completion (pending approval, PIN-free for kid quests)",
     await act(async () => { completeBtn.click(); });
     await settle();
 
-    // Claim POST happened, and the row is claimed (no pendingApproval anywhere).
+    // Claim POST happened. Since Task 6 (server-authoritative claims →
+    // pending for kids), a CHILD claimant mirrors the route's pendingApproval
+    // answer: the row is claimed done-but-unpaid, still with NO earn tx
+    // (routing parity with the Tasks page claim modal is unchanged).
     expect(claimFetch).toHaveBeenCalledWith(expect.stringContaining("/api/tasks/claim"), expect.objectContaining({ method: "POST" }));
     const saved = store.saveTasks.mock.calls.at(-1)![0];
     const row = saved.find((t: any) => t.id === 11);
     expect(row.completed).toBe(true);
-    expect(row.pendingApproval).toBeUndefined();
+    expect(row.pendingApproval).toEqual({ byName: "Caspian Garcia", at: expect.any(String), points: 8 });
     expect(store.week.history).toHaveLength(0);
   });
 

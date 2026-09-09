@@ -998,14 +998,27 @@ export default function TasksPage() {
         const normalizedName = normalizeName((verified as any).name);
         const claimantEmoji = (membersData.find((m: any) => m.fullName === normalizedName)?.emoji) || task.assigneeEmoji;
         claimSnapshotRef.current = { tasks, weekData };
-        setTasks(prev => prev.map(t => t.id === pinTaskId ? { ...t, completed: true, completedBy: normalizedName, completedAt: now, completedInWeek: currentWeek, assignee: normalizedName, assigneeEmoji: claimantEmoji } : t));
+        // The kid branch is keyed on the CLAIMANT's role from the verified
+        // record — the same record the server routes on — never on age
+        // (claims are always PIN-gated) and never on the session user (a
+        // parent claiming for a kid must mirror the server's pending answer).
+        const kidClaim = (verified as any).role === "child";
+        setTasks(prev => prev.map(t => t.id === pinTaskId
+          ? (kidClaim
+            ? { ...tapCompletePending({ ...t, assignee: normalizedName, assigneeEmoji: claimantEmoji }, normalizedName, now, currentWeek), completedBy: normalizedName }
+            : { ...t, completed: true, completedBy: normalizedName, completedAt: now, completedInWeek: currentWeek, assignee: normalizedName, assigneeEmoji: claimantEmoji })
+          : t));
         const pointsMsg = task.points > 0 ? `+${task.points}pts` : "";
-        setWeekData(prev => {
-          const updated = { ...prev, points: { ...prev.points, [normalizedName]: (prev.points[normalizedName] || 0) + task.points } };
-          return addTransaction(updated, "earn", task.points, `${wasSnatch ? "Snatched" : "Completed"}: ${task.title}${pointsMsg ? ` (${pointsMsg})` : ""}`, normalizedName, task.id);
-        });
+        if (!kidClaim) {
+          setWeekData(prev => {
+            const updated = { ...prev, points: { ...prev.points, [normalizedName]: (prev.points[normalizedName] || 0) + task.points } };
+            return addTransaction(updated, "earn", task.points, `${wasSnatch ? "Snatched" : "Completed"}: ${task.title}${pointsMsg ? ` (${pointsMsg})` : ""}`, normalizedName, task.id);
+          });
+        }
         setPinInput("");
-        setPinSuccess(`🎯 ${normalizedName.split(" ")[0]} ${wasSnatch ? "snatched" : "completed"} ${task.title}! ${pointsMsg}`);
+        setPinSuccess(kidClaim
+          ? `🎯 ${normalizedName.split(" ")[0]} — grabbed! +${task.points}pts on the way (parent approves).`
+          : `🎯 ${normalizedName.split(" ")[0]} ${wasSnatch ? "snatched" : "completed"} ${task.title}! ${pointsMsg}`);
         triggerConfetti();
         setTimeout(() => { setPinTaskId(null); setPinSuccess(""); setSnatchForMember(""); }, 1500);
 
@@ -1050,6 +1063,10 @@ export default function TasksPage() {
             setWeekData((prev) =>
               (data.weekData.history?.length || 0) >= (prev.history?.length || 0) ? data.weekData : prev
             );
+            claimSnapshotRef.current = null;
+          } else if (data?.pending) {
+            // Kid claim confirmed pending server-side (no weekData exists to
+            // adopt — none was written) — the optimistic pending row stands.
             claimSnapshotRef.current = null;
           }
         }).catch(() => {

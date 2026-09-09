@@ -51,8 +51,10 @@ function makePb(opts?: {
     { id: "task-row-1", taskId: 42, title: "Dishes", points: opts?.taskPoints ?? 5, ...(opts?.taskRow || {}) },
   ];
   const taskRow = taskRowBase;
+  const updateCalls: { tasks: any[]; week_data?: any[] } = { tasks: [] };
   let written: any = null;
   return {
+    updateCalls,
     weekUpdates: () => written,
     pb: {
       collection: (name: string) => {
@@ -61,11 +63,13 @@ function makePb(opts?: {
             getFullList: async () => [weekRow],
             update: async (_id: string, payload: any) => {
               written = payload;
+              (updateCalls.week_data ??= []).push(payload);
               Object.assign(weekRow, payload);
               return weekRow;
             },
             create: async (payload: any) => {
               written = payload;
+              (updateCalls.week_data ??= []).push(payload);
               Object.assign(weekRow, payload);
               return weekRow;
             },
@@ -77,7 +81,10 @@ function makePb(opts?: {
         }
         return {
           getFullList: async () => taskRow,
-          update: async () => ({ id: "task-row-1" }),
+          update: async (_id: string, payload: any) => {
+            updateCalls.tasks.push(payload);
+            return { id: "task-row-1" };
+          },
         };
       },
     },
@@ -87,7 +94,10 @@ function makePb(opts?: {
 beforeEach(() => {
   mocks.withAdmin.mockReset();
   mocks.verifyPinFromPB.mockReset();
-  mocks.verifyPinFromPB.mockResolvedValue({ name: "Alex", role: "child", emoji: "🦊" });
+  // The default claimant is an ADULT — the instant-earn contract. Kid
+  // claimants opt into the pendingApproval branch by overriding this mock
+  // with role: "child" per test.
+  mocks.verifyPinFromPB.mockResolvedValue({ name: "Alex", role: "parent", emoji: "🦊" });
 });
 
 describe("POST /api/tasks/claim", () => {
@@ -180,5 +190,52 @@ describe("POST /api/tasks/claim", () => {
 
     expect(res.status).toBe(400);
     expect((await res.json()).reason).toBe("not_universal");
+  });
+
+  it("child claimant → pendingApproval on the task row, no week_data earn", async () => {
+    mocks.verifyPinFromPB.mockResolvedValue({ id: "k", name: "Caspian Garcia", role: "child", emoji: "🧒" });
+    const { pb, updateCalls } = makePb({ taskPoints: 5 });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ taskId: 42, claimantName: "Caspian", claimantPin: "1010" }));
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({ success: true, pending: true, claimedBy: "Caspian Garcia" });
+    expect(body.weekData).toBeUndefined();
+    expect(updateCalls.week_data).toBeUndefined(); // no earn written
+    const taskPatch = updateCalls.tasks.find((p: any) => p.pendingApproval);
+    expect(taskPatch).toBeTruthy();
+    expect(taskPatch.pendingApproval).toMatchObject({ byName: "Caspian Garcia", points: 5 });
+    // The claim still lands as a real completion (race-safe single-winner).
+    expect(taskPatch).toMatchObject({ completed: true, status: "done", assignee: "Caspian Garcia", completedBy: "Caspian Garcia" });
+  });
+
+  it("a second claim on the kid's pending row is still rejected", async () => {
+    mocks.verifyPinFromPB.mockResolvedValue({ id: "k", name: "Caspian Garcia", role: "child", emoji: "🧒" });
+    const { pb } = makePb({
+      taskPoints: 5,
+      taskRow: { completed: true, status: "done", pendingApproval: { byName: "Caspian Garcia", points: 5 } },
+    });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ taskId: 42, claimantName: "Caspian", claimantPin: "1010" }));
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ success: false, reason: "already_completed" });
+  });
+
+  it("adult claim keeps the immediate-earn contract and never sets pending", async () => {
+    const { pb, updateCalls } = makePb({ taskPoints: 5 });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ taskId: 42, claimantName: "Alex", claimantPin: "1234" }));
+
+    const body = await res.json();
+    expect(body).toMatchObject({ success: true });
+    expect(body.pending).toBeUndefined();
+    expect(body.weekData).toBeTruthy();
+    // Adults never write pendingApproval on the task row.
+    expect(updateCalls.tasks.some((p: any) => p.pendingApproval)).toBe(false);
   });
 });

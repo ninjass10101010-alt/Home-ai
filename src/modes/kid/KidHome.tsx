@@ -371,12 +371,17 @@ export default function KidHome() {
         // Mirror the claim route's server-side completion fields on the local
         // row — syncTasksToPB writes completedInWeek/completedAt as-is, so a
         // bare { completed: true } would WIPE the server's completion fields.
+        const claimantIsChild = user?.role === "child";
         const tasks = loadTasks().map((t: any) =>
           t.id === task.id
             // claimedBy is the server-normalized FULL name (same as the
             // non-universal branch's verified.name) — a first name here
-            // would split the ledger key.
-            ? { ...t, completed: true, completedBy: data?.claimedBy || user.name, completedAt: claimNow, completedInWeek: weekKey() }
+            // would split the ledger key. A kid claimant mirrors the route's
+            // pendingApproval answer: done-but-unpaid, NO local earn tx (the
+            // route never touched week_data); points land on parent approval.
+            ? claimantIsChild
+              ? tapCompletePending(t, data?.claimedBy || user.name, claimNow, weekKey())
+              : { ...t, completed: true, completedBy: data?.claimedBy || user.name, completedAt: claimNow, completedInWeek: weekKey() }
             : t
         );
         saveTasks(tasks);
