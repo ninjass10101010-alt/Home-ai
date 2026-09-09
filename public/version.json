@@ -1,7 +1,7 @@
 {
-  "hash": "12694cddc92fee08915c343f63ff3acb468ebd0f",
-  "short": "12694cd",
-  "message": "docs(ai): change-log entry for the adult soul rewrite",
-  "date": "2026-09-08 19:05:16 -0400",
+  "hash": "e9648b16ab7585b04957cf73fb5b7f31a757cd64",
+  "short": "e9648b1",
+  "message": "feat(chat): conversation steering — /new + /restart commands and New-conversation button with LLM context cutoff",
+  "date": "2026-09-08 21:56:43 -0400",
   "author": "GarciaFam"
 }
