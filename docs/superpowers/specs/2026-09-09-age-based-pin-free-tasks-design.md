@@ -117,7 +117,7 @@ Emily taps universal task → claim modal → PIN (hers)
 |---|---|
 | `quick-login` on a 10+ kid / pet / adult | 403 `pin_required` → client falls back to the normal PIN modal (stale-roster safe) |
 | `quick-login` on unknown member | 404 → PIN modal |
-| PB unreachable at quick-login | 503 → client shows the existing "Couldn't reach Consuela" pattern, offers PIN modal retry |
+| PB unreachable at quick-login | 403 `pin_required` → client shows the PIN modal — **shipped behavior, deviates from the designed 503 + "Couldn't reach Consuela"**: a 403 cannot be confused with an outage by the UI and never signs anyone in |
 | Member's `age` missing on live PB (seed not run) | Server treats as ineligible → 403 → PIN modal; **ops note:** run `npm run pb:seed` + data-fix after deploy |
 | Kid's session roster stale (age changed on another device) | Server re-verifies per request; a 403 just routes to PIN |
 | Claim modal PIN verified but write fails offline | Existing optimistic + snapshot-rollback path unchanged |
@@ -133,7 +133,7 @@ Emily taps universal task → claim modal → PIN (hers)
 ## 7. Ops / rollout
 
 1. Deploy → run `npm run pb:seed` (adds `members.age`, self-heal).
-2. Run the age data-fix script once (fills live roster ages).
+2. Run the age data-fix script once — `npx tsx scripts/consuela/set-member-ages.mjs` (fills live roster ages).
 3. Settings → Family Members: age input visible; parents can correct.
 4. AGENTS.md snapshot + UI Change Record updated in the same session as implementation.
 

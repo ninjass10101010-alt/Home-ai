@@ -133,10 +133,12 @@ export async function POST(request: NextRequest) {
           completedAt: now,
           completedInWeek: currentWeek,
           pendingApproval: { byName: normalizedName, at: now, points: amount },
-          // Clear any stale send-back stamp: mergeTasksSnapshot treats a
-          // snapshot sentBackAt as PROOF a pending row was legitimately
-          // reopened, so an old stamp arriving via the 60s pull would wipe
-          // the kid's optimistic pending row and re-open the claimed task.
+          // Clear the stale send-back proof ON THE tasks COLLECTION row so no
+          // later snapshot pushed from server state can resurface it as proof
+          // against future taps. (Protecting THIS claim's optimistic pending
+          // row from an in-flight snapshot blob is the timestamp gate in
+          // mergeTasksSnapshot: a snapshot sentBackAt only counts as proof
+          // when it does not pre-date the local pendingApproval.at.)
           sentBackAt: null,
         });
         return { ok: true, pending: true, claimedBy: normalizedName } as const;

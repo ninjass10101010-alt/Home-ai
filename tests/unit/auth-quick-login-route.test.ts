@@ -2,10 +2,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-const members = vi.hoisted(() => ({ rows: [] as any[] }));
+const members = vi.hoisted(() => ({ rows: [] as any[], failLookup: false }));
 vi.mock("@/lib/server-auth", () => ({
-  findMemberByName: async (name: string) =>
-    members.rows.find((m: any) => m.name === name) || null,
+  findMemberByName: async (name: string) => {
+    if (members.failLookup) throw new Error("PocketBase unreachable");
+    return members.rows.find((m: any) => m.name === name) || null;
+  },
   sanitizeMember: (m: any) => ({ ...m, pin: undefined }),
 }));
 vi.mock("@/lib/session", () => ({
@@ -25,6 +27,7 @@ function req(body: any) {
 
 beforeEach(() => {
   vi.stubEnv("SESSION_SECRET", "test-secret-0123456789");
+  members.failLookup = false;
   members.rows = [
     { id: "a", name: "Caspian", role: "child", age: 5, pin: "1010" },
     { id: "b", name: "Jasmine", role: "child", age: 10, pin: "0402" },
@@ -56,5 +59,12 @@ describe("POST /api/auth/quick-login", () => {
   it("404 unknown member, 400 missing name", async () => {
     expect((await POST(req({ memberName: "Nobody" }))).status).toBe(404);
     expect((await POST(req({}))).status).toBe(400);
+  });
+  it("fail-closes to 403 pin_required with NO cookie when the PB lookup rejects", async () => {
+    members.failLookup = true;
+    const res = await POST(req({ memberName: "Caspian" }));
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe("pin_required");
+    expect(res.cookies.get("consuela_session")).toBeUndefined();
   });
 });

@@ -86,6 +86,20 @@ describe("mergeTasksSnapshot pendingApproval adoption", () => {
     expect(out.tasks[0].completed).toBe(true);
   });
 
+  it("a STALE sentBackAt (pre-dates a fresher local pending re-claim) must not wipe the fresh row", () => {
+    // Sequence: tap → send-back (stamp 11:00) → kid re-claims (11:30). The
+    // 60s pull lands inside the claimant's ~2s push window carrying the
+    // pre-re-claim stamp — timestamp-blind, it would orphan the fresh tap.
+    const BACK_AT = "2026-09-06T11:00:00.000Z";
+    const CLAIM_AT = "2026-09-06T11:30:00.000Z";
+    const local = [t({ completed: true, completedAt: CLAIM_AT, completedInWeek: "2026-09-01", pendingApproval: { byName: "Megan", at: CLAIM_AT, points: 5 } })];
+    const remote = [t({ sentBackAt: BACK_AT })];
+    const out = mergeTasksSnapshot(local as Task[], wk(), snap(remote, wk()));
+    expect(out.tasksChanged).toBe(false);
+    expect(out.tasks[0].completed).toBe(true);
+    expect((out.tasks[0] as any).pendingApproval).toEqual({ byName: "Megan", at: CLAIM_AT, points: 5 });
+  });
+
   it("locally paid completion (completed, no pending) is not reverted by a stale open snapshot", () => {
     const local = [t({ completed: true, completedBy: "Megan", completedAt: NOW, completedInWeek: "2026-09-01" })];
     const remote = [t({})];

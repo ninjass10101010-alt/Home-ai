@@ -60,8 +60,11 @@ export default function CelebrationBurst({
     };
   }, [onComplete]);
 
-  // Generate confetti particles
-  const confetti = Array.from({ length: 12 }, (_, i) => {
+  // Generate confetti particles — ONCE per celebration, via a lazy state
+  // initializer (the purity-approved one-shot: useMemo's cache can be
+  // discarded, and Math.random() in render would re-roll the particle set on
+  // every phase change, teleporting confetti mid-burst).
+  const [confetti] = useState(() => Array.from({ length: 12 }, (_, i) => {
     const angle = (i / 12) * Math.PI * 2;
     const distance = 40 + Math.random() * 60;
     const x = Math.cos(angle) * distance;
@@ -72,7 +75,7 @@ export default function CelebrationBurst({
     const isCircle = i % 3 === 0;
 
     return { x, y, color, size, delay, isCircle, id: i };
-  });
+  }));
 
   return (
     <div

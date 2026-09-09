@@ -410,7 +410,8 @@ export function mergeTasksSnapshot(
   // kitchen phone must land on a parent's device even though the row id
   // already exists locally. A remote clear only wins when it carries PROOF —
   // the snapshot's weekData carries the earn tx (approval happened elsewhere),
-  // or the snapshot row is stamped sentBackAt (send-back happened elsewhere) —
+  // or the snapshot row is stamped sentBackAt that post-dates the local row's
+  // own completion stamp (a send-back happened elsewhere, AFTER this tap) —
   // otherwise a stale snapshot would wipe a fresh local tap. The rule covers
   // any locally completed row: pending taps AND classic PIN-completed (paid)
   // completions, whose earn lives only on the paying device.
@@ -436,7 +437,21 @@ export function mergeTasksSnapshot(
       const paidElsewhere = (snapshot.weekData?.history || []).some(
         (tx: any) => tx.type === "earn" && tx.taskId === snapRow.id
       );
-      const sentBackElsewhere = !!(snapRow as any).sentBackAt;
+      // Timestamp gate: a send-back stamp only proves the reopen when it does
+      // NOT pre-date the local row's own completion stamp — `pendingApproval.at`
+      // for a pending tap (a legit send-back always happens AFTER the tap that
+      // made it pending; the kid's fresh re-claim post-dates the send-back and
+      // a pre-re-claim stamp is stale proof), falling back to `completedAt`
+      // for classic paid rows; a local row carrying neither stamp keeps the
+      // old accept-the-stamp behavior. Without this gate a send-back → kid
+      // re-claim sequence landing inside the claimant's push window let a
+      // stale stamp wipe the fresh row, and the pushed wipe then 409'd every
+      // later re-claim against the server's completed:true row.
+      const sentBackAt = (snapRow as any).sentBackAt;
+      const localDoneAt = Date.parse((local as any).pendingApproval?.at ?? local.completedAt ?? "");
+      const sentBackElsewhere =
+        !!sentBackAt &&
+        (Number.isNaN(localDoneAt) || Date.parse(String(sentBackAt)) >= localDoneAt);
       if (!paidElsewhere && !sentBackElsewhere) continue;
     }
     merged = merged.map((p: any) =>

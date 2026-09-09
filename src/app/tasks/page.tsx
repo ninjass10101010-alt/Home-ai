@@ -1100,7 +1100,7 @@ export default function TasksPage() {
         triggerConfetti();
         setPinInput("");
         setPinSuccess(`⏳ ${normalizedName.split(" ")[0]} — done! +${task.points}pts on the way.`);
-        setTimeout(() => { setPinTaskId(null); setPinSuccess(""); }, 1500);
+        setTimeout(() => { setPinTaskId(null); setPinSuccess(""); setSnatchForMember(""); }, 1500);
         return;
       }
       setTasks(prev => prev.map(t => t.id === pinTaskId ? { ...t, completed: true, completedBy: normalizedName, completedAt: now, completedInWeek: currentWeek } : t));

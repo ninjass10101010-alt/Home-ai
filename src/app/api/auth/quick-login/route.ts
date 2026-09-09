@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
     });
     return res;
   } catch (err) {
-    console.error("[auth/quick-login] failed:", err);
+    console.error("[auth/quick-login] failed:", err instanceof Error ? err.message : String(err));
     // A PB read failure or bad body never signs anyone in — the client falls
     // back to the PIN modal. 403 (not 500) so the UI reason stays "PIN".
     return NextResponse.json({ error: "pin_required" }, { status: 403 });
