@@ -38,6 +38,14 @@ async function persistChatPair(request: NextRequest, userMessage: string, assist
 }
 
 const AI_TIMEOUT_MS = 60_000;
+// Reasoning models (e.g. glm-5.3-flash) spend the token budget on hidden
+// `reasoning_content` BEFORE any visible content — a 1024 cap gets eaten by
+// thinking alone (verified live: finish_reason=length with zero content).
+// 3072 leaves room for reasoning + a full answer; tool args stay small.
+const AI_MAX_TOKENS = 3072;
+// Status line shown when a streamed round produces reasoning but no content
+// and no tool calls — the model is thinking, not dead.
+const REASONING_STATUS = "Thinking deeply… this one needs a long think";
 
 // Flipped to false the first time the active provider answers a stream:true
 // request with a buffered JSON payload — stop paying the failed attempt on
@@ -98,7 +106,7 @@ async function callAi(
       model: target.model,
       messages,
       temperature: 0.7,
-      max_tokens: opts.maxTokens ?? 1024,
+      max_tokens: opts.maxTokens ?? AI_MAX_TOKENS,
       tools: opts.tools,
       tool_choice: opts.toolChoice ?? "auto",
     }),
@@ -165,12 +173,13 @@ async function callAiStream(
   messages: ChatMessage[],
   opts: { tools?: ReturnType<typeof buildToolsForOpenAI>; target: AiTarget },
   write: (frame: string) => void,
-): Promise<{ content: string; tool_calls?: ToolCall[] }> {
+): Promise<{ content: string; tool_calls?: ToolCall[]; reasoningOnly?: boolean }> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (opts.target.key) headers.Authorization = `Bearer ${opts.target.key}`;
   // Fallback providers stream buffered (their SSE dialects vary); the brain
   // streams when it can.
   const wantStream = aiStreamingSupported && !opts.target.fallback;
+  let reasoningAnnounced = false;
   const res = await fetch(`${opts.target.url}/v1/chat/completions`, {
     method: "POST",
     headers,
@@ -179,7 +188,7 @@ async function callAiStream(
       model: opts.target.model,
       messages,
       temperature: 0.7,
-      max_tokens: 1024,
+      max_tokens: AI_MAX_TOKENS,
       tools: opts.tools,
       tool_choice: "auto",
       ...(wantStream ? { stream: true } : {}),
@@ -201,6 +210,7 @@ async function callAiStream(
     return {
       content,
       tool_calls: data.choices?.[0]?.message?.tool_calls,
+      reasoningOnly: !content && !data.choices?.[0]?.message?.tool_calls,
     };
   }
 
@@ -208,6 +218,7 @@ async function callAiStream(
   const decoder = new TextDecoder();
   let buffer = "";
   let content = "";
+  let reasoningChars = 0;
   const toolCalls: ToolCall[] = [];
   for (;;) {
     const { done, value } = await reader.read();
@@ -228,6 +239,15 @@ async function callAiStream(
       try { parsed = JSON.parse(payload); } catch { continue; }
       const delta = parsed.choices?.[0]?.delta;
       if (!delta) continue;
+      // Reasoning models think out loud before answering. Announce once so
+      // the client's status line replaces the dead typing dots.
+      if (typeof delta.reasoning_content === "string" && delta.reasoning_content.length > 0) {
+        reasoningChars += delta.reasoning_content.length;
+        if (!reasoningAnnounced) {
+          reasoningAnnounced = true;
+          write(sseFrame(JSON.stringify({ label: REASONING_STATUS }), "status"));
+        }
+      }
       if (typeof delta.content === "string" && delta.content.length > 0) {
         content += delta.content;
         write(sseFrame(JSON.stringify({ t: delta.content })));
@@ -243,7 +263,11 @@ async function callAiStream(
       }
     }
   }
-  return { content, tool_calls: toolCalls.length > 0 ? toolCalls : undefined };
+  // finish_reason=length with reasoning only → the token budget was consumed
+  // by thinking. An EMPTY round is not an answer: report it so the caller can
+  // fail over to the next target instead of emitting nothing.
+  const reasoningOnly = content.length === 0 && toolCalls.length === 0 && reasoningChars > 0;
+  return { content, tool_calls: toolCalls.length > 0 ? toolCalls : undefined, reasoningOnly };
 }
 
 /** Execute one round's tool calls concurrently; results keep call order. */
@@ -356,6 +380,15 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
         for (const target of targets) {
           try {
             ({ content, tool_calls } = await callAiStream(messages, { tools, target }, write));
+            // An EMPTY round (reasoning consumed the budget, no content, no
+            // tool calls) is not an answer — fail over to the next target.
+            // callAiStream already announced "Thinking deeply…" if reasoning
+            // was streamed, so the client saw progress, not dead dots.
+            if (!content && (!tool_calls || tool_calls.length === 0)) {
+              lastErr = new Error(`empty round from ${target.model}`);
+              console.warn(`[ai] stream target ${target.model}: empty round (reasoning budget?) — trying next target`);
+              continue;
+            }
             lastErr = null;
             break;
           } catch (err) {
@@ -438,6 +471,11 @@ export async function POST(request: NextRequest) {
             toolChoice: "auto",
             target,
           }));
+          if (!content && (!tool_calls || tool_calls.length === 0)) {
+            lastErr = new Error(`empty round from ${target.model}`);
+            console.warn(`[ai] target ${target.model}: empty round (reasoning budget?) — trying next target`);
+            continue;
+          }
           lastErr = null;
           break;
         } catch (err) {

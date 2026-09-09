@@ -37,6 +37,7 @@ function sseResponse(chunks: string[]) {
 }
 
 const token = (t: string) => `data: ${JSON.stringify({ choices: [{ delta: { content: t } }] })}\n\n`;
+const reasoningToken = (t: string) => `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: t } }] })}\n\n`;
 const DONE = "data: [DONE]\n\n";
 const toolCallRound = (id: string, name: string, args: string, index = 0) => [
   `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index, id, function: { name, arguments: "" } }] } }] })}\n\n`,
@@ -155,6 +156,58 @@ describe("hermes chat — streaming mode", () => {
       .map((c: any[]) => c[0])
       .find((r: any) => r.role === "assistant");
     expect(assistantRow?.content).toBe(exhaustion);
+  });
+
+  // Reasoning models (glm-5.3-flash) stream `reasoning_content` deltas BEFORE
+  // any content. With a tight token budget the reasoning can consume the whole
+  // round → zero content, zero tool_calls. That empty round must (a) announce
+  // "Thinking deeply…" as a status frame so the client isn't showing dead
+  // dots, (b) NOT be treated as a completed answer (the old bug surfaced the
+  // misleading "ran out of steps" text), and (c) fail over to the next target.
+  it("announces reasoning as a status frame and fails over when a round answers empty", async () => {
+    mocks.resolveChatTargets.mockResolvedValue([
+      { url: "http://brain.local", key: "k1", model: "reasoner", provider: "p1", fallback: false },
+      { url: "http://backup.local", key: "k2", model: "backup", provider: "p2", fallback: true },
+    ]);
+    const reasoningOnlyRound = [
+      reasoningToken("The"), reasoningToken(" user"), reasoningToken(" wants"),
+      `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "length" }] })}\n\n`,
+      DONE,
+    ].join("");
+    vi.stubGlobal("fetch", vi.fn()
+      .mockImplementationOnce(async () => sseResponse([reasoningOnlyRound]))
+      // fallback targets stream BUFFERED (JSON, not SSE) — emulate the real shape
+      .mockImplementationOnce(async () => new Response(
+        JSON.stringify({ choices: [{ message: { content: "Here's the story." } }] }),
+        { status: 200, headers: { "content-type": "application/json" } })));
+    const res = await post({ message: "write a story", stream: true });
+    const body = await res.text();
+    expect(body).toContain("event: status");
+    expect(body).toContain("Thinking deeply");
+    expect(body).toContain('data: {"t":"Here\'s the story."}');
+    expect(body).not.toContain("ran out of steps");
+    // the fallback target actually got tried
+    expect((globalThis.fetch as any).mock.calls[1][0]).toContain("backup.local");
+  });
+
+  it("emits the honest snag error when every target answers empty", async () => {
+    const reasoningOnlyRound = [
+      reasoningToken("Hmm"), `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "length" }] })}\n\n`, DONE,
+    ].join("");
+    vi.stubGlobal("fetch", vi.fn(async () => sseResponse([reasoningOnlyRound])));
+    const res = await post({ message: "write a story", stream: true });
+    const body = await res.text();
+    expect(body).toContain("event: error");
+    expect(body).not.toContain("ran out of steps");
+    expect(mocks.insertChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("gives reasoning models a workable token budget", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => sseResponse([token("ok"), DONE])));
+    const res = await post({ message: "hi", stream: true });
+    await res.text();
+    const providerBody = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
+    expect(providerBody.max_tokens).toBeGreaterThanOrEqual(3000);
   });
 
   it("falls back to buffered when Hermes ignores stream:true, and stops asking next time", async () => {
