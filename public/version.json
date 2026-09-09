@@ -1,7 +1,7 @@
 {
-  "hash": "df12c381aed41394e702af9c65e999fde4ae786f",
-  "short": "df12c38",
-  "message": "fix(ai): reasoning-model token exhaustion — empty rounds fail over instead of 'ran out of steps'",
-  "date": "2026-09-09 13:36:02 -0400",
+  "hash": "306e26191c716a19fad40d8f9428cc25dd626112",
+  "short": "306e261",
+  "message": "fix(ai): chat tools read the dashboard live — Google Calendar merged into event answers; base64 tool-result leak fixed",
+  "date": "2026-09-09 15:06:32 -0400",
   "author": "GarciaFam"
 }
