@@ -7,10 +7,12 @@
  * Features:
  *   - Hero avatar (large, animated, center-stage)
  *   - Level bar with XP progress + level-up celebrations
- *   - Tasks as "Quests" — tapping one completes it immediately as
- *     done-but-unpaid (pending parent approval, no PIN round trip); points
- *     land only when a parent approves on the Tasks page. Universal quests
- *     keep the server-side claim gate (/api/tasks/claim).
+ *   - Tasks as "Quests" — an under-10 kid's tap on an ASSIGNED quest
+ *     completes it PIN-free as done-but-unpaid (pending parent approval);
+ *     a 10+ kid confirms with their PIN first, and the verified completion
+ *     still lands pending — points never post locally. Points land only when
+ *     a parent approves on the Tasks page. Universal/stealable quests keep
+ *     the server-side claim gate (/api/tasks/claim) for every age.
  *   - Positive leaderboard framing ("YOU'RE #1!")
  *   - Bedtime mode (no quests, sweet dreams)
  *   - Weekend mode (bonus quests)
@@ -46,7 +48,8 @@ import {
   calculateRealStreak,
   syncTasksToPB,
   syncWeekDataToPB,
-  shouldUsePendingTap,
+  completesWithoutPin,
+  completesWithPendingApproval,
   tapCompletePending,
   isSnatchable,
   resolveMemberName,
@@ -54,7 +57,7 @@ import {
 import QuestCard from "./QuestCard";
 import LevelBar from "./LevelBar";
 import CelebrationBurst from "./CelebrationBurst";
-import { ledgerKey, pointsFor, currentWeekPoints, unreachableCopy } from "./kid-store";
+import { ledgerKey, pointsFor, currentWeekPoints, unreachableCopy, verifyPinRemote } from "./kid-store";
 import SpotifyWidget from "@/components/integrations/SpotifyWidget";
 import AllowanceWidget from "@/components/integrations/AllowanceWidget";
 import LearningWidget from "@/components/integrations/LearningWidget";
@@ -210,7 +213,7 @@ export default function KidHome() {
   const [pointsToday, setPointsToday] = useState(0);
   const [streak, setStreak] = useState(0);
   const [tonightMeal, setTonightMeal] = useState<any>(null);
-  const [celebration, setCelebration] = useState<{ points: number; leveledUp: boolean; newLevel: number } | null>(null);
+  const [celebration, setCelebration] = useState<{ points: number; leveledUp: boolean; newLevel: number; pending?: boolean } | null>(null);
   // Quest PIN gate — the typed PIN lives in this component's state only and
   // is cleared after every attempt (never persisted).
   const [questPinTask, setQuestPinTask] = useState<any | null>(null);
@@ -299,28 +302,59 @@ export default function KidHome() {
   const firstName = user?.name?.split(" ")[0] || "Buddy";
   const level = Math.floor(points / POINTS_PER_LEVEL) + 1;
 
-  // Tap a quest → open the shared server-verified PIN gate. Nothing is
-  // completed or celebrated until the PIN succeeds.
+  // Display-only celebration (same precedent as the Tasks page): reads the
+  // before-snapshot points to decide the level-up flourish — it never posts
+  // anything. `pending` marks a done-but-UNPAID completion: the copy says
+  // "on the way" and no level-up fires, because until a parent approves the
+  // points were never earned.
+  const celebrate = useCallback((earned: number, before: number, options?: { pending?: boolean }) => {
+    const pending = options?.pending === true;
+    const after = before + earned;
+    const oldLevel = Math.floor(before / POINTS_PER_LEVEL) + 1;
+    const newLevel = Math.floor(after / POINTS_PER_LEVEL) + 1;
+    const leveledUp = !pending && newLevel > oldLevel;
+    setCelebration({ points: earned, leveledUp, newLevel: leveledUp ? newLevel : 0, pending });
+    setTimeout(() => setCelebration(null), 1500);
+  }, []);
+
+  // Tap a quest. Under-10 kids skip the gate entirely on ASSIGNED quests
+  // (one tap → pending approval, same shape as the Tasks page); everyone else
+  // opens the shared server-verified PIN gate. Nothing is completed until the
+  // PIN succeeds (or the PIN-free tap lands its pending row).
   const openQuestPin = useCallback((task: any) => {
     if (!user) return;
+    // Under-10 kids: one tap on an assigned quest completes it PIN-free —
+    // pending approval, same shape as the Tasks page (no PIN modal, no round trip).
+    if (completesWithoutPin(user?.role, user?.age, task) && !task.universal && !isSnatchable(task)) {
+      // Stale-cache double-tap guard (same trap-proof order as the Tasks
+      // page): a row already completed this week lands nothing, not even a
+      // second pending stamp.
+      if (task.completedInWeek === weekKey()) return;
+      const now = new Date().toISOString();
+      const myName = resolveMemberName(db.selectMembers(), user!.name);
+      const week = loadWeekData();
+      const before = pointsFor(week.points, myName);
+      const tasks = loadTasks().map((t: any) => (t.id === task.id ? tapCompletePending(t, myName, now, weekKey()) : t));
+      saveTasks(tasks);
+      void syncTasksToPB(tasks);
+      celebrate(task.points || 0, before, { pending: true });
+      setDataVersion((v) => v + 1);
+      return;
+    }
+    // 10+ kids (and age-unknown sessions — completesWithoutPin fails closed)
+    // keep the PIN modal; submitQuestPin verifies the PIN (predicate:
+    // completesWithPendingApproval) and lands PENDING, never a local earn.
+    // Universal/snatchable claims of any age land here too — claims are
+    // always PIN-gated (server-authoritative route).
     setQuestPinTask(task);
     setQuestPin("");
     setQuestPinError("");
-  }, [user]);
+  }, [user, celebrate]);
 
   const closeQuestPin = useCallback(() => {
     setQuestPinTask(null);
     setQuestPin("");
     setQuestPinError("");
-  }, []);
-
-  const celebrate = useCallback((earned: number, before: number) => {
-    const after = before + earned;
-    const oldLevel = Math.floor(before / POINTS_PER_LEVEL) + 1;
-    const newLevel = Math.floor(after / POINTS_PER_LEVEL) + 1;
-    const leveledUp = newLevel > oldLevel;
-    setCelebration({ points: earned, leveledUp, newLevel: leveledUp ? newLevel : 0 });
-    setTimeout(() => setCelebration(null), 1500);
   }, []);
 
   const submitQuestPin = async () => {
@@ -386,16 +420,34 @@ export default function KidHome() {
         );
         saveTasks(tasks);
         void syncTasksToPB(tasks);
-        celebrate(task.points || 0, before);
-      } else if (shouldUsePendingTap(user?.role, task)) {
-        // Trust-but-verify: kid quests land immediately as done-but-unpaid —
-        // no PIN round trip. Points move only on parent approval. The ledger
-        // key is the roster-resolved FULL name (db.selectMembers maps name →
-        // first name + fullName), the same key approve credits — a raw
-        // session first name would split the ledger.
+        // A kid claim is done-but-UNPAID (the route held the earn for parent
+        // approval) — the celebration copy must say "on the way".
+        celebrate(task.points || 0, before, { pending: claimantIsChild });
+      } else if (completesWithPendingApproval(user?.role, task)) {
+        // 10+ kids (and age-unknown sessions, which fail closed to this gate):
+        // the typed PIN is verified server-side FIRST — a wrong or unreachable
+        // PIN lands nothing. A verified child's success then completes
+        // immediately as done-but-unpaid (same shape as the under-10 tap):
+        // points move only on parent approval. The ledger key is the
+        // roster-resolved FULL name of the VERIFIED member (db.selectMembers
+        // maps name → first name + fullName), the same key approve credits —
+        // a raw session first name would split the ledger.
+        const result = await verifyPinRemote(task.assignee || user.name, questPin);
+        if (result.status !== "ok") {
+          setQuestPinError(result.status === "unreachable" ? unreachableCopy() : "Wrong PIN. Try again.");
+          setQuestPin("");
+          return;
+        }
+        if (result.member?.role !== "child") {
+          // KidHome is the child surface — a non-child verified record here
+          // means the shapes disagree; say so instead of faking success.
+          setQuestPinError("Couldn't complete it — try again.");
+          setQuestPin("");
+          return;
+        }
         const now = new Date().toISOString();
         const currentWeek = weekKey();
-        const myName = resolveMemberName(db.selectMembers(), user.name);
+        const myName = resolveMemberName(db.selectMembers(), result.member?.name || user.name);
         const week = loadWeekData();
         const before = pointsFor(week.points, myName);
         const tasks = loadTasks().map((t: any) =>
@@ -403,7 +455,7 @@ export default function KidHome() {
         );
         saveTasks(tasks);
         void syncTasksToPB(tasks);
-        celebrate(task.points || 0, before);
+        celebrate(task.points || 0, before, { pending: true });
       } else {
         // Neither branch owns this shape (a non-child session somehow reached
         // the kid gate) — say so instead of faking a success cleanup.
@@ -522,6 +574,7 @@ export default function KidHome() {
             points={celebration.points}
             leveledUp={celebration.leveledUp}
             newLevel={celebration.newLevel}
+            pending={celebration.pending}
             onComplete={() => setCelebration(null)}
           />
         )}

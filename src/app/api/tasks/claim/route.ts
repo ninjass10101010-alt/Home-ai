@@ -133,6 +133,11 @@ export async function POST(request: NextRequest) {
           completedAt: now,
           completedInWeek: currentWeek,
           pendingApproval: { byName: normalizedName, at: now, points: amount },
+          // Clear any stale send-back stamp: mergeTasksSnapshot treats a
+          // snapshot sentBackAt as PROOF a pending row was legitimately
+          // reopened, so an old stamp arriving via the 60s pull would wipe
+          // the kid's optimistic pending row and re-open the claimed task.
+          sentBackAt: null,
         });
         return { ok: true, pending: true, claimedBy: normalizedName } as const;
       }

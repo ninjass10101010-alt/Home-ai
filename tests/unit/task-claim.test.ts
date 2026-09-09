@@ -209,6 +209,12 @@ describe("POST /api/tasks/claim", () => {
     expect(taskPatch.pendingApproval).toMatchObject({ byName: "Caspian Garcia", points: 5 });
     // The claim still lands as a real completion (race-safe single-winner).
     expect(taskPatch).toMatchObject({ completed: true, status: "done", assignee: "Caspian Garcia", completedBy: "Caspian Garcia" });
+    // A fresh claim supersedes any earlier send-back: the stale stamp MUST be
+    // cleared, or the 60s snapshot pull delivers sentBackAt as "proof" the
+    // pending row was reopened (mergeTasksSnapshot's sentBackElsewhere gate),
+    // wiping the kid's optimistic pending row and clobbering the claim back
+    // to unclaimed.
+    expect(taskPatch.sentBackAt).toBeNull();
   });
 
   it("a second claim on the kid's pending row is still rejected", async () => {

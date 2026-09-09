@@ -20,6 +20,9 @@ interface CelebrationBurstProps {
   leveledUp?: boolean;
   /** New level (if leveled up) */
   newLevel?: number;
+  /** Done-but-UNPAID completion (pending parent approval): the copy says the
+   *  points are on the way instead of earned. Default false — pure display. */
+  pending?: boolean;
   /** Callback when celebration finishes */
   onComplete?: () => void;
 }
@@ -39,6 +42,7 @@ export default function CelebrationBurst({
   points,
   leveledUp = false,
   newLevel,
+  pending = false,
   onComplete,
 }: CelebrationBurstProps) {
   const [phase, setPhase] = useState<"enter" | "peak" | "exit">("enter");
@@ -77,7 +81,9 @@ export default function CelebrationBurst({
         animation: "celebFade 1.5s ease-out forwards",
       }}
       aria-live="polite"
-      aria-label={`Congratulations! You earned ${points} points!`}
+      aria-label={pending
+        ? `Congratulations! ${points} points are on the way — a parent approves!`
+        : `Congratulations! You earned ${points} points!`}
     >
       {/* Golden screen flash */}
       <div
@@ -133,7 +139,7 @@ export default function CelebrationBurst({
           className="text-sm font-bold text-amber-300 mt-1"
           style={{ textShadow: "0 2px 4px rgba(0,0,0,0.3)" }}
         >
-          pts
+          {pending ? "pts · on the way" : "pts"}
         </span>
       </div>
 

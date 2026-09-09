@@ -20,7 +20,7 @@ vi.mock("next/dynamic", () => {
   return { default: () => Noop };
 });
 
-const mockAuth = vi.hoisted(() => ({ currentUser: { name: "Caspian", role: "child" } as any }));
+const mockAuth = vi.hoisted(() => ({ currentUser: { name: "Caspian", role: "child", age: 5 } as any }));
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => mockAuth }));
 
 const modeMock = vi.hoisted(() => ({ isBedtime: false }));
@@ -68,10 +68,21 @@ vi.mock("@/lib/task-utils", () => ({
   calculateRealStreak: () => 0,
   syncTasksToPB: store.syncTasksToPB,
   syncWeekDataToPB: store.syncWeekDataToPB,
-  // Trust-but-verify: the REAL single decision seam (child + open + assigned
-  // + never snatchable) + the roster-resolved ledger key, mirroring task-utils.
-  shouldUsePendingTap: (role: string | undefined, task: any) =>
-    role === "child" && !task.completed && !task.universal && !(task.stealable && !!task.due && task.due < "2026-09-04"),
+  // The REAL age predicates (mirrored): under-10 + child + open + assigned +
+  // never snatchable completes PIN-free; every child completion lands
+  // pending after the gate. shouldUsePendingTap is gone from KidHome — the
+  // mock no longer carries it.
+  completesWithoutPin: (role: string | undefined, age: number | undefined, task: any) =>
+    role === "child" &&
+    typeof age === "number" &&
+    Number.isFinite(age) &&
+    age > 0 &&
+    age < 10 &&
+    !task.completed &&
+    !task.universal &&
+    !(task.stealable && !!task.due && task.due < "2026-09-04"),
+  completesWithPendingApproval: (role: string | undefined, task: any) =>
+    role === "child" && !task.completed,
   isSnatchable: (task: any, today: string = "2026-09-04") =>
     !!task.stealable && !task.completed && !!task.due && task.due < today,
   resolveMemberName: (members: any[], rawName?: string | null) => {
@@ -152,11 +163,20 @@ async function completeQuestWithPin(el: HTMLElement, questTitle: string, pin: st
   await settle();
 }
 
+// Under-10 assigned quests: the tap IS the whole gate — no modal, no PIN.
+async function tapQuest(el: HTMLElement, questTitle: string) {
+  const card = el.querySelector(`[aria-label^="Complete quest: ${questTitle}"]`) as HTMLElement;
+  expect(card).not.toBeNull();
+  await act(async () => { card.click(); });
+  await settle();
+}
+
 describe("KidHome — honest error paths on the quest PIN gate", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
     localStorage.clear();
     modeMock.isBedtime = false;
+    mockAuth.currentUser = { name: "Caspian", role: "child", age: 5 };
     store.tasks = [{ ...QUEST }];
     store.week = { weekStart: "2026-09-01", points: { Caspian: 20 }, streak: {}, lastActive: {}, history: [] };
     store.saveTasks.mockReset();
@@ -179,15 +199,16 @@ describe("KidHome — honest error paths on the quest PIN gate", () => {
     vi.unstubAllGlobals();
   });
 
-  it("a SERVER ERROR (500) no longer blocks a kid quest — it lands pending with zero verify traffic", async () => {
+  it("a SERVER ERROR (500) no longer blocks an under-10 kid quest — the tap lands pending with zero verify traffic", async () => {
     const spyFetch = vi.fn(async (..._args: any[]) => ({ ok: false, status: 500, json: async () => ({}) }));
     vi.stubGlobal("fetch", spyFetch);
     const el = await renderAsync(<KidHome />);
     await settle();
-    await completeQuestWithPin(el, "Feed the dog", "1234");
+    await tapQuest(el, "Feed the dog");
 
-    // Pending contract: done-but-unpaid even when the server errors — the kid
-    // path performs no verify round trip, so the 500 is never even observed.
+    // Pending contract: done-but-unpaid even when the server errors — the
+    // under-10 path performs no network round trip at all (syncTasksToPB is
+    // the mocked store seam), so the 500 is never even observed.
     expect(store.saveTasks).toHaveBeenCalled();
     const saved = store.saveTasks.mock.calls[0][0];
     expect(saved.find((t: any) => t.id === 7)?.pendingApproval).toMatchObject({ byName: "Caspian", points: 10 });
@@ -197,12 +218,12 @@ describe("KidHome — honest error paths on the quest PIN gate", () => {
     expect(document.querySelector('[aria-label^="Congratulations"]')).not.toBeNull();
   });
 
-  it("a NETWORK REJECTION no longer blocks a kid quest — it lands pending, not unreachable", async () => {
+  it("a NETWORK REJECTION no longer blocks an under-10 kid quest — it lands pending, not unreachable", async () => {
     const spyFetch = vi.fn(async (..._args: any[]) => { throw new TypeError("Failed to fetch"); });
     vi.stubGlobal("fetch", spyFetch);
     const el = await renderAsync(<KidHome />);
     await settle();
-    await completeQuestWithPin(el, "Feed the dog", "1234");
+    await tapQuest(el, "Feed the dog");
 
     expect(store.saveTasks).toHaveBeenCalled();
     const saved = store.saveTasks.mock.calls[0][0];
@@ -213,21 +234,23 @@ describe("KidHome — honest error paths on the quest PIN gate", () => {
     expect(document.querySelector('[aria-label^="Congratulations"]')).not.toBeNull();
   });
 
-  it("ANY pin completes a kid quest as pending — no verify call, no earn, points unchanged", async () => {
+  it("a 10-year-old's WRONG PIN is honestly refused — no pending row, no celebration", async () => {
+    // The gate verifies now: the old "any PIN lands pending" seam was the
+    // no-verify bridge for all ages — under-10 kids skip the PIN entirely,
+    // 10+ kids must verify before the pending row lands.
+    mockAuth.currentUser = { name: "Caspian", role: "child", age: 10 };
     const spyFetch = vi.fn(async (..._args: any[]) => ({ ok: false, status: 401, json: async () => ({}) }));
     vi.stubGlobal("fetch", spyFetch);
     const el = await renderAsync(<KidHome />);
     await settle();
     await completeQuestWithPin(el, "Feed the dog", "9999");
 
-    // Even a "wrong" PIN lands pending: the kid gate no longer verifies.
-    expect(store.saveTasks).toHaveBeenCalled();
-    const saved = store.saveTasks.mock.calls[0][0];
-    expect(saved.find((t: any) => t.id === 7)?.pendingApproval).toMatchObject({ byName: "Caspian", points: 10 });
-    expect(spyFetch.mock.calls.filter((call) => String(call[0]).includes("/api/members/verify"))).toHaveLength(0);
-    expect(store.saveWeekData).not.toHaveBeenCalled();
+    expect(spyFetch.mock.calls.some((call) => String(call[0]).includes("/api/members/verify"))).toBe(true);
+    expect(document.body.textContent || "").toContain("Wrong PIN");
+    expect(store.saveTasks).not.toHaveBeenCalled();
+    expect(store.syncTasksToPB).not.toHaveBeenCalled();
     expect(store.week.history).toHaveLength(0);
-    expect(document.querySelector('[aria-label^="Congratulations"]')).not.toBeNull();
+    expect(document.querySelector('[aria-label^="Congratulations"]')).toBeNull();
   });
 
   it("an OFFLINE kid quest still lands pending locally (syncs when the connection returns)", async () => {
@@ -236,7 +259,7 @@ describe("KidHome — honest error paths on the quest PIN gate", () => {
     vi.stubGlobal("fetch", spyFetch);
     const el = await renderAsync(<KidHome />);
     await settle();
-    await completeQuestWithPin(el, "Feed the dog", "1234");
+    await tapQuest(el, "Feed the dog");
 
     // Local-first pending write: no network needed, no verify, no earn.
     expect(store.saveTasks).toHaveBeenCalled();
