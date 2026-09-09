@@ -96,12 +96,12 @@ export const db = {
     if (records.length === 0) return membersFallback.map(m => ({
       id: m.id, name: m.name.split(' ')[0], fullName: m.name,
       role: m.role, color: memberColor(m.id - 1), emoji: m.emoji || "😊",
-      skinColor: m.skinColor, hairColor: m.hairColor,
+      skinColor: m.skinColor, hairColor: m.hairColor, age: m.age,
     }));
     return records.map((r: any, i: number) => ({
       id: r.id, name: r.name.split(' ')[0], fullName: r.name,
       role: r.role || "member", color: memberColor(i), emoji: r.emoji || "😊",
-      pin: r.pin,
+      pin: r.pin, age: (r as any).age ?? undefined,
     }));
   },
 
@@ -116,7 +116,7 @@ export const db = {
     }));
     return records.map((r: any, i: number) => ({
       name: r.name, role: r.role || "member", emoji: r.emoji || "😊",
-      color: memberColor(i), age: r.age || "", joined: r.created || "",
+      color: memberColor(i), age: r.age ?? "", joined: r.created || "",
       skinColor: r.skinColor, hairColor: r.hairColor, pin: r.pin || "",
       avatarSize: r.avatarSize || "md", glow: r.glow || false,
     }));

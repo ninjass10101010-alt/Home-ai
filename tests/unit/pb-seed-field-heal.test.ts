@@ -231,3 +231,13 @@ describe("members.emoji text-field max", () => {
     expect(points.required).toBe(false);
   });
 });
+
+describe("members.age (pin-free kids)", () => {
+  it("members schema declares an optional number age", () => {
+    const members = COLLECTIONS.find((c: any) => c.name === "members") as any;
+    const age = members.schema.find((f: any) => f.name === "age");
+    expect(age).toBeDefined();
+    expect(age.type).toBe("number");
+    expect(age.required).toBeFalsy();
+  });
+});

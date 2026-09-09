@@ -35,6 +35,10 @@ export const COLLECTIONS = [
       { name: "emoji", type: "text", options: { max: 400000 } },
       { name: "color", type: "text" },
       { name: "role", type: "text" },
+      // Age powers the under-10 PIN-free sign-in + task-completion rule
+      // (PIN_FREE_MAX_AGE in task-utils). Optional: missing age fails closed
+      // to the PIN path. Kept in lockstep with the outer pb_migrations file.
+      { name: "age", type: "number", required: false },
       { name: "avatarSize", type: "text" },
       { name: "glow", type: "bool" },
       { name: "pin", type: "text" },

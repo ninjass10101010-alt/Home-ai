@@ -11,6 +11,7 @@ export interface ServerMember {
   color: string;
   avatarSize?: string;
   glow?: boolean;
+  age?: number;
   phone?: string;
   email?: string;
 }

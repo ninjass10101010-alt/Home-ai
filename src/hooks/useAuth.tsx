@@ -40,6 +40,7 @@ export interface AuthUser {
   color: string;
   avatarSize: string;
   glow: boolean;
+  age?: number;
 }
 
 interface AuthContextValue {
@@ -123,6 +124,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             color: parsed.color || 'amber',
             avatarSize: member.avatarSize || parsed.avatarSize || "md",
             glow: Boolean(member.glow ?? parsed.glow),
+            age: Number.isFinite(Number((member as any).age)) && (member as any).age != null && (member as any).age !== ""
+              ? Number((member as any).age)
+              : parsed.age,
           };
           // eslint-disable-next-line react-hooks/set-state-in-effect
           setCurrentUser(hydrated);
@@ -146,6 +150,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 color: (member as any).color || 'amber',
                 avatarSize: (member as any).avatarSize || 'md',
                 glow: Boolean((member as any).glow),
+                age: Number.isFinite(Number((member as any).age)) && (member as any).age != null && (member as any).age !== ""
+                  ? Number((member as any).age)
+                  : undefined,
               };
               setCurrentUser(restored);
               currentUserRef.current = restored;
@@ -176,6 +183,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         color: member.color || activeUser.color,
         avatarSize: member.avatarSize || activeUser.avatarSize || "md",
         glow: Boolean(member.glow ?? activeUser.glow),
+        // "" fails closed to the previous value — Number("") is 0, which must
+        // never masquerade as a real age (under-10 PIN-free path).
+        age: member.age != null && member.age !== "" && Number.isFinite(Number(member.age))
+          ? Number(member.age)
+          : activeUser.age,
       };
       setCurrentUser(updatedUser);
       currentUserRef.current = updatedUser;
@@ -187,6 +199,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       color: updatedUser.color,
       avatarSize: updatedUser.avatarSize,
       glow: updatedUser.glow,
+      age: updatedUser.age,
     }));
     };
     events.forEach((event) => window.addEventListener(event, handleActivity));
@@ -248,6 +261,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       color: member.color || 'amber',
       avatarSize: member.avatarSize || "md",
       glow: Boolean(member.glow),
+      age: Number.isFinite(Number((member as any).age)) && (member as any).age != null && (member as any).age !== ""
+        ? Number((member as any).age)
+        : undefined,
     };
 
     setCurrentUser(authUser);
@@ -264,6 +280,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       color: authUser.color,
       avatarSize: authUser.avatarSize,
       glow: authUser.glow,
+      age: authUser.age,
     };
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(stored));
 
