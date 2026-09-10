@@ -205,9 +205,11 @@ export default function HomeLeaderboardWidget({ className = "" }: { className?: 
         </div>
 
         {entries.length > 4 && (
-          <p className="mt-2 text-center text-xs text-text-muted">
-            +{entries.length - 4} more · Tap to see full leaderboard
-          </p>
+          <div className="mt-3 border-t border-white/10 pt-3">
+            <p className="text-xs font-semibold widget-accent-text">
+              +{entries.length - 4} more · See all →
+            </p>
+          </div>
         )}
       </SectionCard>
     </Link>
