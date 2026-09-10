@@ -4,12 +4,15 @@ import { useState, useEffect } from "react";
 import WidgetCard from "@/components/patterns/WidgetCard";
 import DayLine from "@/components/patterns/DayLine";
 import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
+import { localWeekStartISO } from "@/lib/local-date";
 
 const SCHEDULES_STORAGE_KEY = "consuela-schedules";
 const MEALS_KEY = "consuela-meals";
 
-function parseTimeToMinutes(timeStr: string): number {
-  if (!timeStr) return 0;
+// null = unparseable (excluded from current-meal selection entirely — a 0-minute
+// sentinel would otherwise always count as "passed" and hijack the early morning).
+function parseTimeToMinutes(timeStr: string): number | null {
+  if (!timeStr) return null;
   const raw = timeStr.match(/^(\d{1,2}):(\d{2})$/);
   if (raw) return parseInt(raw[1]) * 60 + parseInt(raw[2]);
   const ampm = timeStr.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
@@ -21,12 +24,12 @@ function parseTimeToMinutes(timeStr: string): number {
     if (period === "AM" && h === 12) h = 0;
     return h * 60 + m;
   }
-  return 0;
+  return null;
 }
 
 function formatTime(t: string): string {
   const mins = parseTimeToMinutes(t);
-  if (!mins && (t.includes("AM") || t.includes("PM"))) return t;
+  if (mins === null) return t;
   const h = Math.floor(mins / 60);
   const m = mins % 60;
   const period = h >= 12 ? "PM" : "AM";
@@ -90,6 +93,7 @@ export default function CurrentMealWidget({ className = "" }: { className?: stri
       const mealSchedules = schedules
         .filter((s: any) => s.mealType && s.mealType !== "none")
         .map((s: any) => ({ ...s, minutes: parseTimeToMinutes(s.time) }))
+        .filter((s: any) => s.minutes !== null)
         .sort((a: any, b: any) => a.minutes - b.minutes);
 
       const activeMealSchedules = mealSchedules.length > 0 ? mealSchedules : schedules
@@ -102,7 +106,7 @@ export default function CurrentMealWidget({ className = "" }: { className?: stri
           else if (t.includes("snack")) mealType = "snack";
           return mealType ? { ...s, mealType, minutes: parseTimeToMinutes(s.time) } : null;
         })
-        .filter(Boolean)
+        .filter((s: any) => s && s.minutes !== null)
         .sort((a: any, b: any) => a.minutes - b.minutes);
 
       setMealMarkers(activeMealSchedules.map((m: any) => m.minutes).filter((m: number) => m > 0));
@@ -110,6 +114,13 @@ export default function CurrentMealWidget({ className = "" }: { className?: stri
       let current = activeMealSchedules[0];
       for (const meal of activeMealSchedules) {
         if (meal.minutes <= nowMinutes) current = meal;
+      }
+      // A meal that started >60m ago is over — roll forward to the next upcoming
+      // meal so the header doesn't read "Lunch Time" all afternoon. After the
+      // last meal of the day (no next) the started meal stays current.
+      if (current && nowMinutes - current.minutes > 60) {
+        const next = activeMealSchedules.find((m: any) => m.minutes > nowMinutes);
+        if (next) current = next;
       }
 
       if (current) {
@@ -131,9 +142,20 @@ export default function CurrentMealWidget({ className = "" }: { className?: stri
       try {
         const mealsRaw = localStorage.getItem(MEALS_KEY);
         const meals: any[] = mealsRaw ? JSON.parse(mealsRaw) : [];
-        const meal = meals.find(
+        // Only this week's plan is eligible — the PB cache holds every week, and
+        // an unfiltered weekday match can surface a different week's dish.
+        // Meals without weekOf count as the current week (the useMeals/PlanTab
+        // convention), so legacy rows aren't orphaned.
+        const currentWeekMonday = localWeekStartISO(now);
+        const weekMeals = meals.filter(
+          (m: any) => (m.weekOf || currentWeekMonday) === currentWeekMonday
+        );
+        const meal = weekMeals.find(
           (m: any) => m.time === todayShort && m.mealType === (current?.mealType || "dinner")
-        ) || meals.find((m: any) => m.time === todayShort);
+        );
+        // No cross-mealType fallback: showing today's dinner under a "Lunch Time"
+        // header is exactly the wrong-meal bug. The honest empty state renders
+        // "Plan lunch in the Kitchen tab" instead.
         setActiveMealData(meal || null);
       } catch { setActiveMealData(null); }
     };

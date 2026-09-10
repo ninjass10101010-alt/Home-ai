@@ -126,3 +126,80 @@ describe("CurrentMealWidget", () => {
     expect(el.textContent).not.toContain("one-pot");
   });
 });
+
+describe("CurrentMealWidget meal selection correctness", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ now: THURSDAY_5PM });
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    localStorage.clear();
+    document.body.innerHTML = "";
+  });
+
+  // Thu 2026-08-27 sits in the week of Mon 2026-08-24; 2026-08-31 is next week.
+  it("ignores meals from other weeks when matching today's meal", () => {
+    seedSchedule("6:30 PM");
+    localStorage.setItem(
+      "consuela-meals",
+      JSON.stringify([
+        { time: "Thu", mealType: "dinner", name: "Next Week Pizza", weekOf: "2026-08-31" },
+        { time: "Thu", mealType: "dinner", name: "This Week Tacos", weekOf: "2026-08-24" },
+      ])
+    );
+    const el = render(<CurrentMealWidget />);
+    expect(el.textContent).toContain("This Week Tacos");
+    expect(el.textContent).not.toContain("Next Week Pizza");
+  });
+
+  it("treats meals without weekOf as belonging to the current week", () => {
+    seedSchedule("6:30 PM");
+    localStorage.setItem(
+      "consuela-meals",
+      JSON.stringify([{ time: "Thu", mealType: "dinner", name: "Legacy Tacos" }])
+    );
+    const el = render(<CurrentMealWidget />);
+    expect(el.textContent).toContain("Legacy Tacos");
+  });
+
+  it("does not show a different meal type under the lunch header", () => {
+    seedSchedule("12:00 PM", "lunch"); // last passed, no next meal — stays lunch
+    localStorage.setItem(
+      "consuela-meals",
+      JSON.stringify([{ time: "Thu", mealType: "dinner", name: "Steak", weekOf: "2026-08-24" }])
+    );
+    const el = render(<CurrentMealWidget />);
+    expect(el.textContent).toContain("Lunch Time");
+    expect(el.textContent).toContain("No meal planned yet");
+    expect(el.textContent).not.toContain("Steak");
+  });
+
+  it("rolls the header to the next meal after the started meal's 60m window ends", () => {
+    localStorage.setItem(
+      "consuela-schedules",
+      JSON.stringify([
+        { title: "breakfast", mealType: "breakfast", time: "8:00 AM" },
+        { title: "lunch", mealType: "lunch", time: "12:00 PM" },
+        { title: "dinner", mealType: "dinner", time: "6:30 PM" },
+      ])
+    );
+    const el = render(<CurrentMealWidget />);
+    expect(el.textContent).toContain("Dinner Time");
+    expect(el.textContent).toContain("In 1h 30m · at 6:30 PM");
+  });
+
+  it("ignores schedules with unparseable times instead of hijacking the early morning", () => {
+    vi.setSystemTime(new Date(2026, 7, 27, 7, 0, 0)); // Thu 7:00 AM
+    localStorage.setItem(
+      "consuela-schedules",
+      JSON.stringify([
+        { title: "dinner", mealType: "dinner", time: "in the evening" }, // unparseable
+        { title: "breakfast", mealType: "breakfast", time: "8:00 AM" },
+      ])
+    );
+    const el = render(<CurrentMealWidget />);
+    expect(el.textContent).toContain("Breakfast Time");
+  });
+});
