@@ -47,7 +47,9 @@ export async function POST(request: NextRequest) {
       actor = await withAdmin(async (pb) => {
         const record = await pb.collection("members").getOne(session.memberId).catch(() => null);
         if (!record) return null;
-        if (record.id !== session.memberId) return null; // belt: session id IS the PB id
+        // Belt: always true after getOne(session.memberId) — the REAL
+        // cross-member seam is findOrCreateMemberRecord's name resolution.
+        if (record.id !== session.memberId) return null;
         return { ...record, name: session.name };
       });
       if (!actor) {
