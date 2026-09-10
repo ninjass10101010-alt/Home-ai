@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withAdmin } from "@/lib/pb-auth";
 import { verifyPinFromPB, sanitizeMember, findOrCreateMemberRecord } from "@/lib/server-auth";
+import { verifySession, SESSION_COOKIE } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -15,16 +16,43 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { actorName, actorPin, patch } = body || {};
 
-    if (!actorName || !actorPin) {
-      return NextResponse.json({ error: "actorName and actorPin are required" }, { status: 400 });
-    }
     if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
       return NextResponse.json({ error: "patch must be an object" }, { status: 400 });
     }
 
-    const actor = await verifyPinFromPB(actorName, actorPin);
-    if (!actor) {
-      return NextResponse.json({ error: "Invalid PIN" }, { status: 401 });
+    let actor: any = null;
+
+    if (actorName && actorPin) {
+      actor = await verifyPinFromPB(actorName, actorPin);
+      if (!actor) {
+        return NextResponse.json({ error: "Invalid PIN" }, { status: 401 });
+      }
+    } else {
+      // Child-session avatar-only path (spec 2026-09-09): no PIN, but the
+      // session itself must be a child, the target record must be the session's
+      // own member, and the patch may touch ONLY avatar vocab fields.
+      const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
+      if (!session || session.role !== "child") {
+        return NextResponse.json({ error: "Invalid PIN" }, { status: 401 });
+      }
+      const nonAvatarKeys = Object.keys(patch).filter(
+        (k) => !["emoji", "avatarSize", "glow"].includes(k),
+      );
+      if (nonAvatarKeys.length > 0) {
+        return NextResponse.json(
+          { error: "Avatar fields only on a child session" },
+          { status: 401 },
+        );
+      }
+      actor = await withAdmin(async (pb) => {
+        const record = await pb.collection("members").getOne(session.memberId).catch(() => null);
+        if (!record) return null;
+        if (record.id !== session.memberId) return null; // belt: session id IS the PB id
+        return { ...record, name: session.name };
+      });
+      if (!actor) {
+        return NextResponse.json({ error: "Invalid session" }, { status: 401 });
+      }
     }
 
     const clean: Record<string, unknown> = {};
