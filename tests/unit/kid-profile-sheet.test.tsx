@@ -19,6 +19,14 @@ vi.mock("@/hooks/useAuth", () => ({
   }),
 }));
 
+// KidProfileSheet calls db.refreshCaches() after a successful save (hero-refresh
+// parity with the adult ProfileSheet) — mock @/db so the real module's
+// client-side hydrate doesn't pollute the fetchMock call counts in jsdom.
+const { refreshCachesMock } = vi.hoisted(() => ({ refreshCachesMock: vi.fn() }));
+vi.mock("@/db", () => ({
+  db: { refreshCaches: refreshCachesMock },
+}));
+
 import KidProfileSheet from "@/components/modes/kid/KidProfileSheet";
 
 const member = { name: "Aurora Rivera", color: "violet", emoji: "🌈", avatarSize: "md", glow: false };
@@ -76,6 +84,8 @@ function lastPostBody(): Record<string, unknown> {
 beforeEach(() => {
   document.body.innerHTML = "";
   logoutMock.mockReset();
+  refreshCachesMock.mockReset();
+  refreshCachesMock.mockResolvedValue(undefined);
   fetchMock.mockReset();
   fetchMock.mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
   vi.stubGlobal("fetch", fetchMock);
@@ -195,5 +205,6 @@ describe("KidProfileSheet", () => {
     act(() => emojiCell("🥳").click());
     await act(async () => {});
     expect(dialog().textContent).toContain("Saved!");
+    expect(refreshCachesMock).toHaveBeenCalledTimes(1);
   });
 });

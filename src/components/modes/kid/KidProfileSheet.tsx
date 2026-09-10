@@ -8,6 +8,7 @@ import SoftButton from "@/components/ui/SoftButton";
 import Toggle from "@/components/ui/Toggle";
 import { useAuth } from "@/hooks/useAuth";
 import { normalizeAvatarSize, AVATAR_SIZE_OPTIONS } from "@/lib/avatar-size";
+import { db } from "@/db";
 
 export default function KidProfileSheet({ open, onClose, member, points }: {
   open: boolean;
@@ -39,6 +40,7 @@ export default function KidProfileSheet({ open, onClose, member, points }: {
         revert();
         return;
       }
+      void db.refreshCaches();
       setSavedMsg(true);
     } catch {
       setSaveError("Couldn't reach Consuela — check the connection and try again.");
