@@ -326,6 +326,103 @@ describe("KidHome on the wall (spec §6 amendment)", () => {
   });
 });
 
+describe("KidHome hero avatar → KidProfileSheet (kid-profile-sheet Task 3 wiring)", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    localStorage.clear();
+    modeMock.isBedtime = false;
+    wallMock.wall = false;
+    mockAuth.currentUser = { name: "Caspian", role: "child", age: 10 };
+    mockAuth.logout.mockReset();
+    store.tasks = [];
+    store.week = { weekStart: "2026-09-01", points: { Caspian: 20 }, streak: {}, lastActive: {}, history: [] };
+    vi.stubGlobal("matchMedia", vi.fn(() => ({
+      matches: false,
+      addEventListener: () => {}, removeEventListener: () => {},
+      addListener: () => {}, removeListener: () => {},
+    })));
+    vi.stubGlobal("fetch", verifyFetch(true));
+  });
+
+  afterEach(() => {
+    act(() => { activeRoot?.unmount(); });
+    activeRoot = null;
+    document.body.innerHTML = "";
+    vi.unstubAllGlobals();
+  });
+
+  function heroAvatar(el: HTMLElement): HTMLButtonElement {
+    const btn = el.querySelector('button[aria-label="Open your profile"]') as HTMLButtonElement | null;
+    if (!btn) throw new Error('hero avatar is not a button[aria-label="Open your profile"]');
+    return btn;
+  }
+
+  function sheetDialog(): HTMLElement | null {
+    return document.body.querySelector('[role="dialog"]');
+  }
+
+  it("the hero avatar is a button with aria-label 'Open your profile'", async () => {
+    const el = await renderAsync(<KidHome />);
+    await settle();
+    expect(heroAvatar(el)).toBeTruthy();
+  });
+
+  it("tapping the hero avatar opens the sheet (dialog with the kid's first name in document.body)", async () => {
+    const el = await renderAsync(<KidHome />);
+    await settle();
+    expect(sheetDialog()).toBeNull();
+    await act(async () => { heroAvatar(el).click(); });
+    await settle();
+    const dialog = sheetDialog();
+    expect(dialog).not.toBeNull();
+    expect(dialog!.textContent).toContain("Caspian");
+  });
+
+  it("the stale hint 'Tap the ⚙️ in settings to switch profiles' appears NOWHERE in any KidHome render", async () => {
+    for (const cfg of [
+      { wall: false, bedtime: false },
+      { wall: true, bedtime: false },
+      { wall: false, bedtime: true },
+    ]) {
+      wallMock.wall = cfg.wall;
+      modeMock.isBedtime = cfg.bedtime;
+      const el = await renderAsync(<KidHome />);
+      await settle();
+      expect(el.textContent).not.toContain("settings to switch profiles");
+      expect(document.body.textContent).not.toContain("settings to switch profiles");
+      await act(async () => { activeRoot?.unmount(); });
+      document.body.innerHTML = "";
+      activeRoot = null;
+    }
+  });
+
+  it("non-wall non-bedtime renders the new hint 'Tap your picture to make it yours'", async () => {
+    const el = await renderAsync(<KidHome />);
+    await settle();
+    expect(el.textContent).toContain("Tap your picture to make it yours");
+  });
+
+  it("wall mode: 'Switch member' still renders AND the avatar tap opens the sheet", async () => {
+    wallMock.wall = true;
+    const el = await renderAsync(<KidHome />);
+    await settle();
+    expect(el.querySelector('button[aria-label="Switch member"]')).not.toBeNull();
+    await act(async () => { heroAvatar(el).click(); });
+    await settle();
+    expect(sheetDialog()).not.toBeNull();
+    expect(mockAuth.logout).not.toHaveBeenCalled();
+  });
+
+  it("bedtime mode: the hero avatar tap still opens the sheet", async () => {
+    modeMock.isBedtime = true;
+    const el = await renderAsync(<KidHome />);
+    await settle();
+    await act(async () => { heroAvatar(el).click(); });
+    await settle();
+    expect(sheetDialog()).not.toBeNull();
+  });
+});
+
 describe("kid-mode wall CSS contract (modes.css, spec §6 amendment)", () => {
   const { readFileSync } = require("node:fs");
   const { resolve } = require("node:path");

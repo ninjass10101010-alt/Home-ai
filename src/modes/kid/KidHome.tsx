@@ -59,6 +59,7 @@ import {
 import QuestCard from "./QuestCard";
 import LevelBar from "./LevelBar";
 import CelebrationBurst from "./CelebrationBurst";
+import KidProfileSheet from "@/components/modes/kid/KidProfileSheet";
 import { ledgerKey, pointsFor, currentWeekPoints, unreachableCopy, verifyPinRemote } from "./kid-store";
 import SpotifyWidget from "@/components/integrations/SpotifyWidget";
 import AllowanceWidget from "@/components/integrations/AllowanceWidget";
@@ -228,6 +229,8 @@ export default function KidHome() {
   // Re-read the task/points store after a completion (and on cross-device
   // refreshes) so quests, points, and the leaderboard stay honest.
   const [dataVersion, setDataVersion] = useState(0);
+  // Kid profile sheet (tap the hero avatar) — shared by bedtime + normal flows.
+  const [profileSheetOpen, setProfileSheetOpen] = useState(false);
 
   const { currentUser, logout } = useAuth();
   const { isBedtime, isWeekend } = useDashboardMode();
@@ -590,7 +593,12 @@ export default function KidHome() {
 
           {/* Hero (bedtime) */}
           <div className="relative z-10 px-4 pt-8 pb-2 flex flex-col items-center text-center">
-            <div className="avatar-hero mb-3">
+            <button
+              type="button"
+              onClick={() => setProfileSheetOpen(true)}
+              aria-label="Open your profile"
+              className="avatar-hero mb-3 tap"
+            >
               <Avatar
                 name={user?.name || "Buddy"}
                 color={user?.color || "green"}
@@ -599,12 +607,24 @@ export default function KidHome() {
                 variant="emoji"
                 glow
               />
-            </div>
+            </button>
             <h1 className="text-xl font-bold text-text-primary">{greeting}</h1>
           </div>
 
           <BedtimeView firstName={firstName} pointsToday={pointsToday} />
         </PageShell>
+        <KidProfileSheet
+          open={profileSheetOpen}
+          onClose={() => setProfileSheetOpen(false)}
+          member={{
+            name: user?.name || "Buddy",
+            color: user?.color || "green",
+            emoji: user?.emoji || "😊",
+            avatarSize: user?.avatarSize,
+            glow: user?.glow,
+          }}
+          points={points}
+        />
       </AtmosphericProvider>
     );
   }
@@ -629,8 +649,13 @@ export default function KidHome() {
 
         {/* ── Hero Section ── */}
         <div className="relative z-10 px-4 pt-8 pb-4 flex flex-col items-center text-center">
-          {/* Big animated avatar */}
-          <div className="avatar-hero mb-3">
+          {/* Big animated avatar — tap opens the kid profile sheet */}
+          <button
+            type="button"
+            onClick={() => setProfileSheetOpen(true)}
+            aria-label="Open your profile"
+            className="avatar-hero mb-3 tap"
+          >
             <Avatar
               name={user?.name || "Buddy"}
               color={user?.color || "green"}
@@ -639,7 +664,7 @@ export default function KidHome() {
               variant="emoji"
               glow
             />
-          </div>
+          </button>
 
           {/* Greeting */}
           <h1 className="text-xl font-bold text-text-primary">{greeting}</h1>
@@ -678,7 +703,7 @@ export default function KidHome() {
             </button>
           ) : (
             <p className="mt-3 text-[11px] text-text-muted">
-              Tap the ⚙️ in settings to switch profiles
+              Tap your picture to make it yours
             </p>
           )}
         </div>
@@ -864,6 +889,20 @@ export default function KidHome() {
             onVerify={questPadVerify}
           />
         )}
+
+        {/* Kid profile sheet — the hero avatar tap target (bedtime renders its own). */}
+        <KidProfileSheet
+          open={profileSheetOpen}
+          onClose={() => setProfileSheetOpen(false)}
+          member={{
+            name: user?.name || "Buddy",
+            color: user?.color || "green",
+            emoji: user?.emoji || "😊",
+            avatarSize: user?.avatarSize,
+            glow: user?.glow,
+          }}
+          points={points}
+        />
       </PageShell>
     </AtmosphericProvider>
   );
