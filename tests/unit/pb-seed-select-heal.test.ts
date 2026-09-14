@@ -68,6 +68,7 @@ describe("proactive_suggestions.kind select values heal", () => {
       "stale_data",
       "custom",
       "grocery_store_optimization",
+      "routine_due",
     ]);
   });
 

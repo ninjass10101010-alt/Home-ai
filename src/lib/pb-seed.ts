@@ -867,6 +867,13 @@ export async function seedNotifyPrefs(
   }
 }
 
+/** Row-seeding entrypoint for the seed script (runs AFTER seedCollections so
+ * ha_notify_prefs exists). Kept out of seedCollections() so the collections-only
+ * seed path stays pure (and unit tests that mock only pb.collections are safe). */
+export async function seedNotifyPrefsAdmin(): Promise<void> {
+  await withAdmin(async (pb) => seedNotifyPrefs(pb as unknown as Parameters<typeof seedNotifyPrefs>[0]));
+}
+
 export async function seedCollections() {
   const result = await withAdmin(async (pb) => {
     const existing = (await pb.collections.getFullList()).map((c: any) => c.name);
@@ -986,9 +993,6 @@ export async function seedCollections() {
       });
       created.push(col.name);
     }
-
-    // Collections are ensured first so ha_notify_prefs exists before we seed rows.
-    await seedNotifyPrefs(pb);
 
     return created;
   });
