@@ -121,16 +121,12 @@ const NIGHT_ACCENTS: { test: (code: number) => boolean; accent: string }[] = [
 ];
 
 // Severity reaches beyond thunderstorms: heavy snow is the family's other
-// school-closing, boots-by-the-door event.
-export const HEAVY_SNOW_CODES = new Set([73, 75, 85, 86]);
-
-export type SevereKind = "storm" | "snow";
-
-export function severeFamily(code: number): SevereKind | null {
-  if (code >= 95) return "storm";
-  if (HEAVY_SNOW_CODES.has(code)) return "snow";
-  return null;
-}
+// school-closing, boots-by-the-door event. The classifier is the shared pure
+// module (src/lib/weather-severity.ts); re-exported here so existing
+// `import { severeFamily } from "./WeatherSkins"` call sites keep working.
+import { severeFamily, HEAVY_SNOW_CODES } from "@/lib/weather-severity";
+export { severeFamily, HEAVY_SNOW_CODES };
+export type { SevereKind } from "@/lib/weather-severity";
 
 // Severity owns the card: a storm or heavy snow never borrows the holiday's
 // party accent — the state accent wins until the severe weather passes.
