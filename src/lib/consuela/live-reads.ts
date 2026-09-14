@@ -122,32 +122,48 @@ export async function mergedTodaysEvents(dayISO = localTodayISO()) {
 /** Pending tasks, read live. Unlike the pbDb listing (capped at 3 for the
  *  Home widget) the chat tool returns every pending row. Degrades to [] when
  *  PB is unreachable — an outage must not break get_dashboard_summary. */
+async function pendingTaskRows(): Promise<any[]> {
+  const rows = await withAdmin(async (pb) => {
+    const [taskRows, members] = await Promise.all([
+      pb.collection("tasks").getFullList({ requestKey: null }),
+      pb.collection("members").getFullList({ requestKey: null }),
+    ]);
+    return taskRows
+      .filter((t: any) => t.status === "pending" || (!t.status && !t.done))
+      .map((task: any) => {
+        const member = members.find((m: any) => m.fullName === task.assigned || m.name === task.assigned);
+        const due = task.due === localTodayISO() ? "Today"
+          : task.due === localTodayISO(new Date(Date.now() + 86400000)) ? "Tomorrow"
+          : task.due || "Later";
+        return {
+          id: task.id,
+          title: task.title,
+          assigned: member?.fullName || task.assigned || "Unassigned",
+          due,
+          points: task.priority === "high" ? 20 : task.priority === "medium" ? 15 : task.points || 10,
+        };
+      });
+  });
+  return Array.isArray(rows) ? rows : [];
+}
+
 export async function livePendingTasks(): Promise<any[]> {
   try {
-    const rows = await withAdmin(async (pb) => {
-      const [taskRows, members] = await Promise.all([
-        pb.collection("tasks").getFullList({ requestKey: null }),
-        pb.collection("members").getFullList({ requestKey: null }),
-      ]);
-      return taskRows
-        .filter((t: any) => t.status === "pending" || (!t.status && !t.done))
-        .map((task: any) => {
-          const member = members.find((m: any) => m.fullName === task.assigned || m.name === task.assigned);
-          const due = task.due === localTodayISO() ? "Today"
-            : task.due === localTodayISO(new Date(Date.now() + 86400000)) ? "Tomorrow"
-            : task.due || "Later";
-          return {
-            id: task.id,
-            title: task.title,
-            assigned: member?.fullName || task.assigned || "Unassigned",
-            due,
-            points: task.priority === "high" ? 20 : task.priority === "medium" ? 15 : task.points || 10,
-          };
-        });
-    });
-    return Array.isArray(rows) ? rows : [];
+    return await pendingTaskRows();
   } catch {
     return [];
+  }
+}
+
+/** Pack-only sibling of livePendingTasks (assistant-context tasks zone). Null =
+ *  the read FAILED so the context pack can emit an honest unavailable signal —
+ *  [] because the family truly has nothing pending stays []. The tool surface
+ *  (get_pending_tasks / get_dashboard_summary) keeps the [] degradation above. */
+export async function livePendingTasksForPack(): Promise<any[] | null> {
+  try {
+    return await pendingTaskRows();
+  } catch {
+    return null;
   }
 }
 

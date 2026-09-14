@@ -14,7 +14,7 @@ import {
   liveMealRows,
   livePantry,
   liveGrocery,
-  livePendingTasks,
+  livePendingTasksForPack,
   liveRewards,
   liveWeekArchive,
   liveSchedulesAll,
@@ -69,7 +69,11 @@ export function composeContextPrompt(pack: ContextPack): string {
   const lines: string[] = [];
   const t = pack.today;
   lines.push(`Consuela live context pack — Today is ${t.weekday} ${t.iso} (${t.tz}). Yesterday was ${weekdayOf(t.yesterdayIso)} ${t.yesterdayIso}. This week's Monday is ${t.weekStartISO}.`);
-  lines.push(`Roster: ${pack.roster.map((m) => `${m.name} (${m.role}${typeof m.age === "number" ? `, ${m.age}` : ""})`).join("; ") || "no members loaded"}.`);
+  // When the roster read FAILED the "roster: unavailable" line below carries
+  // the truth; printing "Roster: no members loaded." too would contradict it.
+  if (!pack.unavailable.includes("roster")) {
+    lines.push(`Roster: ${pack.roster.map((m) => `${m.name} (${m.role}${typeof m.age === "number" ? `, ${m.age}` : ""})`).join("; ") || "no members loaded"}.`);
+  }
 
   if (pack.calendar) {
     const days = Object.keys(pack.calendar).sort().slice(0, MAX_CALENDAR_DAYS);
@@ -143,7 +147,10 @@ const MEAL_SLOTS_PER_WEEK = 28;
  * Read the live zones for a scope and compose a ContextPack. Impure (PB +
  * Open-Meteo); failures never throw — a dead zone pushes its name onto
  * `pack.unavailable` so the composed prompt tells the model the truth.
- * Not unit-covered here by design (Task 9's route tests cover it).
+ * Independent reads run concurrently (Promise.all); every reader already
+ * degrades to a null/unavailable signal internally, so per-zone semantics are
+ * unchanged. Zone wiring is unit-covered in tests/unit/assistant-context.
+ * test.ts; Task 9's route tests cover it end-to-end.
  */
 export async function loadContextPack(scope: PackScope): Promise<ContextPack> {
   const iso = localTodayISO();
@@ -159,7 +166,21 @@ export async function loadContextPack(scope: PackScope): Promise<ContextPack> {
     unavailable: [],
   };
 
-  const members = await liveMembers();
+  const wantsCalendar = scope === "meal" || scope === "schedule";
+  const wantsWeather = wantsCalendar;
+  const [members, merged, mealRows, pantry, grocery, tasks, rewards, archived, routines, weather] = await Promise.all([
+    liveMembers(),
+    wantsCalendar ? liveEventsRange(iso, addDaysISO(iso, CALENDAR_WINDOW_DAYS - 1)) : Promise.resolve(null),
+    scope === "meal" ? liveMealRows() : Promise.resolve(null),
+    scope === "meal" ? livePantry() : Promise.resolve(null),
+    scope === "meal" ? liveGrocery() : Promise.resolve(null),
+    scope === "task" ? livePendingTasksForPack() : Promise.resolve(null),
+    scope === "task" ? liveRewards() : Promise.resolve(null),
+    scope === "task" ? liveWeekArchive() : Promise.resolve(null),
+    scope === "schedule" ? liveSchedulesAll() : Promise.resolve(null),
+    wantsWeather ? fetchLiveWeather() : Promise.resolve(null),
+  ]);
+
   if (members === null) {
     pack.unavailable.push("roster");
   } else {
@@ -172,26 +193,22 @@ export async function loadContextPack(scope: PackScope): Promise<ContextPack> {
       .filter((m) => m.name);
   }
 
-  const wantsCalendar = scope === "meal" || scope === "schedule";
   if (wantsCalendar) {
-    const merged = await liveEventsRange(iso, addDaysISO(iso, CALENDAR_WINDOW_DAYS - 1));
     if (merged === null) pack.unavailable.push("calendar");
     else pack.calendar = merged.days;
   }
 
   if (scope === "meal") {
-    const rows = await liveMealRows();
-    if (rows === null) {
+    if (mealRows === null) {
       pack.unavailable.push("meals");
     } else {
-      const week = mealsForWeek(rows, pack.today.weekStartISO);
+      const week = mealsForWeek(mealRows, pack.today.weekStartISO);
       pack.meals = {
         weekOf: pack.today.weekStartISO,
         filled: week.map((m: any) => `${m.time || m.day || "?"} ${m.mealType || "meal"}: ${m.name || "unnamed"}`),
         emptySlots: Math.max(0, MEAL_SLOTS_PER_WEEK - week.length),
       };
     }
-    const pantry = await livePantry();
     if (pantry === null) {
       pack.unavailable.push("pantry");
     } else {
@@ -201,28 +218,28 @@ export async function loadContextPack(scope: PackScope): Promise<ContextPack> {
         out: pantry.filter((i: any) => i.status === "out").map(nameOf).filter(Boolean),
       };
     }
-    const grocery = await liveGrocery();
     if (grocery === null) pack.unavailable.push("grocery");
     else pack.grocery = grocery.filter((i: any) => i.needed !== false).length;
   }
 
   if (scope === "task") {
-    const tasks = await livePendingTasks();
-    const byMember = new Map<string, { pending: number; overdue: number }>();
-    for (const t of tasks) {
-      const member = String(t.assigned || t.assignee || "Unassigned");
-      const g = byMember.get(member) || { pending: 0, overdue: 0 };
-      g.pending += 1;
-      if (/^\d{4}-\d{2}-\d{2}$/.test(String(t.due || "")) && String(t.due) < iso) g.overdue += 1;
-      byMember.set(member, g);
+    if (tasks === null) {
+      pack.unavailable.push("tasks");
+    } else {
+      const byMember = new Map<string, { pending: number; overdue: number }>();
+      for (const t of tasks) {
+        const member = String(t.assigned || t.assignee || "Unassigned");
+        const g = byMember.get(member) || { pending: 0, overdue: 0 };
+        g.pending += 1;
+        if (/^\d{4}-\d{2}-\d{2}$/.test(String(t.due || "")) && String(t.due) < iso) g.overdue += 1;
+        byMember.set(member, g);
+      }
+      pack.tasks = [...byMember.entries()].map(([member, g]) => ({ member, ...g }));
     }
-    pack.tasks = [...byMember.entries()].map(([member, g]) => ({ member, ...g }));
 
-    const rewards = await liveRewards();
     if (rewards === null) pack.unavailable.push("rewards");
     else pack.rewards = rewards.map((r: any) => ({ title: String(r.title || r.name || "Reward"), cost: r.cost ?? r.points ?? 0 }));
 
-    const archived = await liveWeekArchive();
     if (archived === null) {
       pack.unavailable.push("lastWeek");
     } else {
@@ -238,16 +255,14 @@ export async function loadContextPack(scope: PackScope): Promise<ContextPack> {
   }
 
   if (scope === "schedule") {
-    const routines = await liveSchedulesAll();
     if (routines === null) pack.unavailable.push("routines");
     else pack.routines = routines.map((s: any) => ({
       title: s.title, time: s.time, days: s.days || "daily", type: s.type, icon: s.icon, member: s.member,
     }));
   }
 
-  if (scope === "meal" || scope === "schedule") {
-    const weather = await fetchLiveWeather();
-    if (weather.ok) pack.weather = { condition: weather.data.condition, precipProb: weather.data.precipProb };
+  if (wantsWeather) {
+    if (weather && weather.ok) pack.weather = { condition: weather.data.condition, precipProb: weather.data.precipProb };
     else {
       pack.weather = null;
       pack.unavailable.push("weather");
