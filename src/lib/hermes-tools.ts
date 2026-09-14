@@ -405,7 +405,11 @@ async function updateTaskCore(args: any) {
       if (row.status === "done") return { ok: false, error: "task is completed — mark it pending in the UI first" };
       const patch: Record<string, unknown> = {};
       if (args.newTitle) patch.title = String(args.newTitle).trim();
-      if (args.points !== undefined) patch.points = Math.max(1, Math.min(100, Number(args.points)));
+      if (args.points !== undefined) {
+        const p = Number(args.points);
+        if (!Number.isFinite(p)) return { ok: false, error: "points must be a number between 1 and 100" };
+        patch.points = Math.max(1, Math.min(100, p));
+      }
       if (args.due && /^\d{4}-\d{2}-\d{2}$/.test(args.due)) patch.due = args.due;
       if (args.priority) patch.priority = args.priority;
       if (args.recurring) patch.recurring = ["none", "daily", "weekly"].includes(args.recurring) ? args.recurring : "none";

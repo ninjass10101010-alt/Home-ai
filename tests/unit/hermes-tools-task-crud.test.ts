@@ -54,6 +54,13 @@ it("update_task refuses completed rows", async () => {
   expect(out.error).toContain("pending");
 });
 
+it("update_task rejects non-numeric points without writing", async () => {
+  const out = JSON.parse(await getTool("update_task")!.handler({ taskId: 101, points: "abc" }));
+  expect(out.ok).toBe(false);
+  expect(out.error).toContain("number");
+  expect(writes).toHaveLength(0);
+});
+
 it("delete_task removes and echoes", async () => {
   const out = JSON.parse(await getTool("delete_task")!.handler({ taskId: 101 }));
   expect(out.ok).toBe(true);
