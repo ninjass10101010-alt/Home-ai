@@ -4,7 +4,7 @@ import { withAdmin } from "@/lib/pb-auth";
 import { weekKey } from "@/lib/task-utils";
 import type { WeekData } from "@/types/tasks";
 import { getHAWebSocketClient } from "@/lib/ha/websocket-client";
-import { calculateCheapestSplit, formatStoreTotal, PINNED_STORES } from "@/lib/stores";
+import { getStoreLabel, groupByStore } from "@/lib/stores";
 import { localTodayISO, localWeekdayShort, familyTimeZone, weekdayOfISO, localWeekStartISO } from "@/lib/local-date";
 import { fetchLiveWeather } from "@/lib/weather-live";
 import { weekStartForDate, isoDateForWeekday } from "@/lib/meals-week-utils";
@@ -218,6 +218,52 @@ async function liveMembers(): Promise<any[] | null> {
   }
 }
 
+/** Pantry rows, read live. Null = read failed — callers must emit an honest
+ *  unavailable signal containing "do not guess". */
+async function livePantry(): Promise<any[] | null> {
+  try {
+    const rows = await withAdmin(async (pb) =>
+      pb.collection("pantry_items").getFullList({ requestKey: null }));
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return null;
+  }
+}
+
+/** EVERY schedule row (weekly view, unfiltered by day), read live.
+ *  Null = read failed — callers must emit an honest unavailable signal. */
+async function liveSchedulesAll(): Promise<any[] | null> {
+  try {
+    const rows = await withAdmin(async (pb) =>
+      pb.collection("schedules").getFullList({ requestKey: null }));
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return null;
+  }
+}
+
+/** Archived weeks (`week_archive`), read live. Null = read failed. */
+async function liveWeekArchive(): Promise<any[] | null> {
+  try {
+    const rows = await withAdmin(async (pb) =>
+      pb.collection("week_archive").getFullList({ requestKey: null }));
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return null;
+  }
+}
+
+/** The reward shop catalog, read live. Null = read failed. */
+async function liveRewards(): Promise<any[] | null> {
+  try {
+    const rows = await withAdmin(async (pb) =>
+      pb.collection("rewards").getFullList({ requestKey: null }));
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return null;
+  }
+}
+
 /** Week convention shared with useMeals/PlanTab/CurrentMealWidget: legacy
  *  weekless rows count as the current week. */
 function mealsForWeek(rows: any[], weekOf: string): any[] {
@@ -312,6 +358,10 @@ function parseJSON<T>(value: unknown, fallback: T): T {
 
 function normalizeGroceryName(name: string): string {
   return name.toLowerCase().replace(/[^\w\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function normalizePantryName(name: unknown): string {
+  return String(name ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
 async function adminUpsertTask(task: Record<string, unknown>): Promise<any | null> {
@@ -1835,39 +1885,308 @@ const TOOLS: Tool[] = [
   {
     definition: {
       name: "compare_grocery_prices",
-      description: "Compare grocery item prices across stores. Given a list of item names, estimates prices at each pinned store and finds the cheapest option. Use when the user asks 'where should I shop?' or 'which store is cheapest?'",
+      description: "Report the current grocery list's store assignment split. No live price feed exists — never state prices with this tool.",
+      parameters: { type: "object", properties: {} },
+    },
+    handler: async () => {
+      let items: any[] = [];
+      try {
+        items = (await withAdmin(async (pb) => pb.collection("grocery_list_items").getFullList({ requestKey: null })))
+          .filter((g: any) => g.needed !== false);
+      } catch { return summarize({ error: "grocery data unavailable — do not guess prices" }); }
+      const split = groupByStore(items.map((g: any) => ({ store: g.store })));
+      const stores = Object.entries(split)
+        .filter(([id]) => id !== "any")
+        .map(([id, list]) => ({ id, label: getStoreLabel(id), item_count: (list as any[]).length }));
+      const unassigned = (split["any"] || []).length;
+      return summarize({
+        stores, unassigned,
+        walmart_note: "Walmart items are bought in-store (not on Instacart).",
+        message: "There is no live feed of store costs yet — this is where your list is assigned, not a comparison.",
+      });
+    },
+  },
+  {
+    definition: {
+      name: "add_pantry_item",
+      description: "Add or update a pantry item (upserts by name). Setting a quantity is how stock is decremented after cooking — pass the NEW amount, not the amount used.",
       parameters: {
         type: "object",
         properties: {
-          items: { type: "string", description: "Item names separated by commas (e.g. 'milk, eggs, bread, chicken breast')" },
+          name: { type: "string", description: "Item name (e.g. 'Milk', 'Rice')" },
+          status: { type: "string", description: "Stock level", enum: ["plenty", "low", "out"] },
+          quantity: { type: "number", description: "Optional: current quantity (set the new total after use)" },
+          unit: { type: "string", description: "Optional: unit for the quantity (e.g. 'gal', 'box')" },
+          category: { type: "string", description: "Optional: pantry category (e.g. 'condiments')" },
         },
-        required: ["items"],
+        required: ["name"],
       },
     },
-    handler: async (args) => {
-      const names = String(args.items ?? "").split(",").map((s: string) => s.trim()).filter(Boolean);
-      if (names.length === 0) return summarize({ error: "No item names provided" });
-
-      // Get store IDs for comparison (exclude walmart — not on Instacart in Holland)
-      const storesForCompare = PINNED_STORES
-        .filter((s) => s.id !== "walmart" && s.id !== "any")
-        .map((s) => s.id);
-
-      // For each item, we need price data. Since we don't have live prices yet,
-      // return a structured result that the UI can populate from history/Composio.
-      const items = names.map((name) => ({
-        name,
-        note: `Prices for "${name}" can be checked via Composio INSTACART_GET_ITEM_PRICE or from price history.`,
-      }));
-
+    handler: async (args: any) => {
+      const name = String(args.name ?? "").trim();
+      if (!name) return summarize({ ok: false, error: "no item name provided" });
+      const status = ["plenty", "low", "out"].includes(args.status) ? args.status : null;
+      const quantity = args.quantity !== undefined && Number.isFinite(Number(args.quantity)) ? Number(args.quantity) : undefined;
+      const unit = args.unit !== undefined ? String(args.unit) : undefined;
+      const category = args.category !== undefined ? String(args.category) : undefined;
+      const pantry = await livePantry();
+      if (pantry === null) {
+        return summarize({ ok: false, error: "pantry data unavailable — do not guess inventory, retry later" });
+      }
+      const norm = normalizePantryName(name);
+      const existing = pantry.find((r: any) => normalizePantryName(r.name || r.item) === norm);
+      try {
+        const result = await withAdmin(async (pb) => {
+          if (existing) {
+            const patch: Record<string, unknown> = {};
+            if (status) patch.status = status;
+            if (quantity !== undefined) patch.quantity = quantity;
+            if (unit !== undefined) patch.unit = unit;
+            if (category !== undefined) patch.category = category;
+            if (Object.keys(patch).length === 0) patch.status = status || "plenty";
+            const updated = await pb.collection("pantry_items").update(existing.id, patch);
+            return { ok: true, created: false, ...patch, ...(updated || {}), id: existing.id, name: existing.name || existing.item || name };
+          }
+          const created = await pb.collection("pantry_items").create({
+            name,
+            item: name,
+            status: status || "plenty",
+            ...(quantity !== undefined ? { quantity } : {}),
+            ...(unit !== undefined ? { unit } : {}),
+            ...(category !== undefined ? { category } : {}),
+          });
+          return { ok: true, created: true, id: created?.id ?? null, name, status: status || "plenty" };
+        });
+        return summarize(result);
+      } catch (e: any) {
+        return summarize({ ok: false, error: `add_pantry_item failed: ${e?.message}` });
+      }
+    },
+  },
+  {
+    definition: {
+      name: "remove_pantry_item",
+      description: "Remove a pantry item by name (exact match, case-insensitive). Refuses honestly when nothing matches.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Exact pantry item name to remove" },
+        },
+        required: ["name"],
+      },
+    },
+    handler: async (args: any) => {
+      const name = String(args.name ?? "").trim();
+      if (!name) return summarize({ ok: false, error: "no item name provided" });
+      const pantry = await livePantry();
+      if (pantry === null) {
+        return summarize({ ok: false, error: "pantry data unavailable — do not guess inventory, retry later" });
+      }
+      const norm = normalizePantryName(name);
+      const existing = pantry.find((r: any) => normalizePantryName(r.name || r.item) === norm);
+      if (!existing) {
+        return summarize({ ok: false, error: `"${name}" is not in the pantry — call get_pantry to see what's there` });
+      }
+      try {
+        await withAdmin(async (pb) => pb.collection("pantry_items").delete(existing.id));
+        return summarize({ ok: true, name: existing.name || existing.item, deleted: true });
+      } catch (e: any) {
+        return summarize({ ok: false, error: `remove_pantry_item failed: ${e?.message}` });
+      }
+    },
+  },
+  {
+    definition: {
+      name: "get_family_routines",
+      description: "Get the family's FULL weekly routine schedule — every routine with the days it covers (weekdays/weekends/daily/day letters), not filtered to today.",
+      parameters: { type: "object", properties: {} },
+    },
+    handler: async () => {
+      const rows = await liveSchedulesAll();
+      if (rows === null) {
+        return summarize({ error: "schedule data unavailable — do not guess routines", routines: [] });
+      }
       return summarize({
-        items,
-        stores: storesForCompare.map((id) => ({
-          id,
-          label: PINNED_STORES.find((s) => s.id === id)?.label ?? id,
+        count: rows.length,
+        routines: rows.map((s: any) => ({
+          title: s.title,
+          time: s.time,
+          days: s.days || "daily",
+          type: s.type,
+          icon: s.icon,
+          member: s.member,
+          mealType: s.mealType || null,
         })),
-        message: `Compared ${names.length} item(s) across ${storesForCompare.length} stores. For live prices, check each store's Instacart page or use the price comparison sheet in the Grocery tab.`,
-        hint: "Open the Grocery tab, tap 'Compare prices' to see a full price comparison across all stores.",
+      });
+    },
+  },
+  {
+    definition: {
+      name: "add_schedule_item",
+      description: "Add a family routine to the weekly schedule. days is 'weekdays', 'weekends', 'daily', or day letters (e.g. 'mon,wed,fri').",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Routine title (e.g. 'Homework')" },
+          time: { type: "string", description: "12-hour time as shown on the dashboard (e.g. '5:30 PM')" },
+          days: { type: "string", description: "Day scope: weekdays | weekends | daily | comma day letters" },
+          type: { type: "string", description: "Optional: routine category (e.g. 'routine', 'meal')" },
+          icon: { type: "string", description: "Optional: emoji icon" },
+          member: { type: "string", description: "Optional: family member the routine belongs to" },
+        },
+        required: ["title", "time", "days"],
+      },
+    },
+    handler: async (args: any) => {
+      const title = String(args.title ?? "").trim();
+      const time = String(args.time ?? "").trim();
+      const days = String(args.days ?? "").trim();
+      if (!title || !time || !days) return summarize({ ok: false, error: "title, time and days are all required" });
+      try {
+        const created = await withAdmin(async (pb) => pb.collection("schedules").create({
+          title,
+          time,
+          days,
+          type: args.type || "routine",
+          icon: args.icon || null,
+          member: args.member || null,
+          mealType: null,
+        }));
+        return summarize({ ok: true, id: created?.id ?? null, title, time, days });
+      } catch (e: any) {
+        return summarize({ ok: false, error: `add_schedule_item failed: ${e?.message}` });
+      }
+    },
+  },
+  {
+    definition: {
+      name: "update_schedule_item",
+      description: "Update a family routine by exact title (case-insensitive) — patches time/days/type/icon/member and echoes before/after. Ambiguous or missing titles are refused.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Exact routine title to find (e.g. 'Bedtime')" },
+          time: { type: "string", description: "New 12-hour time (e.g. '8:30 PM')" },
+          days: { type: "string", description: "New day scope: weekdays | weekends | daily | comma day letters" },
+          type: { type: "string", description: "New routine category" },
+          icon: { type: "string", description: "New emoji icon" },
+          member: { type: "string", description: "New owning member" },
+        },
+        required: ["title"],
+      },
+    },
+    handler: async (args: any) => {
+      const title = String(args.title ?? "").trim().toLowerCase();
+      if (!title) return summarize({ ok: false, error: "no routine title provided" });
+      const patch: Record<string, unknown> = {};
+      for (const field of ["time", "days", "type", "icon", "member"] as const) {
+        if (args[field] !== undefined && String(args[field]).trim() !== "") patch[field] = String(args[field]).trim();
+      }
+      if (Object.keys(patch).length === 0) return summarize({ ok: false, error: "nothing to update — pass time/days/type/icon/member" });
+      const rows = await liveSchedulesAll();
+      if (rows === null) return summarize({ ok: false, error: "schedule data unavailable — do not guess routines, retry later" });
+      const matches = rows.filter((s: any) => String(s.title ?? "").trim().toLowerCase() === title);
+      if (matches.length === 0) return summarize({ ok: false, error: `no routine titled "${args.title}" — call get_family_routines to see the real titles` });
+      if (matches.length > 1) return summarize({ ok: false, error: `${matches.length} routines share the title "${args.title}" — remove one in the Calendar UI first` });
+      const row = matches[0];
+      const before = { title: row.title, time: row.time, days: row.days, type: row.type, icon: row.icon, member: row.member };
+      try {
+        await withAdmin(async (pb) => pb.collection("schedules").update(row.id, patch));
+        return summarize({ ok: true, id: row.id, before, after: { ...before, ...patch } });
+      } catch (e: any) {
+        return summarize({ ok: false, error: `update_schedule_item failed: ${e?.message}` });
+      }
+    },
+  },
+  {
+    definition: {
+      name: "delete_schedule_item",
+      description: "Delete a family routine by exact title (case-insensitive). Ambiguous or missing titles are refused.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Exact routine title to delete" },
+        },
+        required: ["title"],
+      },
+    },
+    handler: async (args: any) => {
+      const title = String(args.title ?? "").trim().toLowerCase();
+      if (!title) return summarize({ ok: false, error: "no routine title provided" });
+      const rows = await liveSchedulesAll();
+      if (rows === null) return summarize({ ok: false, error: "schedule data unavailable — do not guess routines, retry later" });
+      const matches = rows.filter((s: any) => String(s.title ?? "").trim().toLowerCase() === title);
+      if (matches.length === 0) return summarize({ ok: false, error: `no routine titled "${args.title}" — call get_family_routines to see the real titles` });
+      if (matches.length > 1) return summarize({ ok: false, error: `${matches.length} routines share the title "${args.title}" — delete one in the Calendar UI first` });
+      try {
+        await withAdmin(async (pb) => pb.collection("schedules").delete(matches[0].id));
+        return summarize({ ok: true, title: matches[0].title, deleted: true });
+      } catch (e: any) {
+        return summarize({ ok: false, error: `delete_schedule_item failed: ${e?.message}` });
+      }
+    },
+  },
+  {
+    definition: {
+      name: "get_past_weeks",
+      description: "Get archived past leaderboard weeks (newest first, max 12): each week's champion and top-3 point standings.",
+      parameters: {
+        type: "object",
+        properties: {
+          limit: { type: "number", description: "How many weeks to return (1-12, default 12)" },
+        },
+      },
+    },
+    handler: async (args: any) => {
+      const limit = Math.max(1, Math.min(12, Number(args.limit) || 12));
+      const archived = await liveWeekArchive();
+      if (archived === null) {
+        return summarize({ error: "archive data unavailable — do not guess past results", weeks: [] });
+      }
+      // Pets are best-effort filtered from standings when the roster read works;
+      // a roster failure still reports the standings honestly.
+      const members = await liveMembers();
+      const petNames = new Set<string>((members || [])
+        .filter((m: any) => m.role === "pet")
+        .map((m: any) => String(m.fullName || m.name || "").toLowerCase()));
+      const weeks = [...archived]
+        .sort((a: any, b: any) => String(b.weekStart || "").localeCompare(String(a.weekStart || "")))
+        .slice(0, limit)
+        .map((row: any) => {
+          const points = parseJSON<Record<string, number>>(row.points, {});
+          const standings = Object.entries(points)
+            .filter(([name]) => !petNames.has(String(name).toLowerCase()))
+            .sort((a, b) => (Number(b[1]) || 0) - (Number(a[1]) || 0));
+          return {
+            weekStart: row.weekStart,
+            archivedAt: row.archivedAt,
+            champion: standings[0]?.[0] ?? null,
+            champion_points: standings[0] ? Number(standings[0][1]) || 0 : null,
+            top3: standings.slice(0, 3).map(([name, pts]) => ({ name, points: Number(pts) || 0 })),
+          };
+        });
+      return summarize({ weeks });
+    },
+  },
+  {
+    definition: {
+      name: "get_rewards",
+      description: "Get the kids' reward shop catalog: every redeemable reward with its point cost.",
+      parameters: { type: "object", properties: {} },
+    },
+    handler: async () => {
+      const rewards = await liveRewards();
+      if (rewards === null) {
+        return summarize({ error: "reward data unavailable — do not guess the shop", rewards: [] });
+      }
+      return summarize({
+        count: rewards.length,
+        rewards: rewards.map((r: any) => ({
+          title: r.title || r.name,
+          cost: r.cost ?? r.points ?? 0,
+          emoji: r.emoji,
+          description: r.description || null,
+        })),
       });
     },
   },
@@ -1932,4 +2251,7 @@ const KID_TOOL_NAMES: ReadonlySet<string> = new Set([
   "get_leaderboard",
   "get_dashboard_summary",
   "get_proactive_suggestions",
+  "get_family_routines",
+  "get_past_weeks",
+  "get_rewards",
 ]);

@@ -273,6 +273,6 @@ they spend more time chatting.
 
 ## Kid Toolset (the only tools a child session receives)
 
-`get_dashboard_summary`, `get_family_members`, `get_todays_events`, `get_calendar_range`, `get_todays_schedule`, `get_pending_tasks`, `get_completed_tasks`, `get_weekly_meals`, `get_recipes`, `get_grocery_list`, `get_pantry`, `get_leaderboard`, `get_weather`, `get_proactive_suggestions`
+`get_dashboard_summary`, `get_family_members`, `get_todays_events`, `get_calendar_range`, `get_todays_schedule`, `get_pending_tasks`, `get_completed_tasks`, `get_weekly_meals`, `get_recipes`, `get_grocery_list`, `get_pantry`, `get_leaderboard`, `get_weather`, `get_proactive_suggestions`, `get_family_routines`, `get_past_weeks`, `get_rewards`
 
 Reads and summaries only — every write, admin, logistics, and house-control tool is excluded for kids.
