@@ -40,6 +40,16 @@ export const mealDeleteWrite = (id: number | string): PendingWrite => ({
   queuedAt: new Date().toISOString(),
 });
 
+// The planner route answers failures with {ok:false, reason} — the strings
+// below mirror handlePlanner in src/app/api/hermes/chat/route.ts exactly, so
+// the meal-ideas error pill says what actually went wrong.
+const PLANNER_MEAL_ERROR_COPY: Record<string, string> = {
+  provider_unavailable: "Consuela couldn't reach the kitchen brain — try again in a bit.",
+  invalid_model_output: "No ideas returned — try again",
+  no_provider: "My brain isn't configured yet — add a provider in Settings → AI Models.",
+  unauthorized: "Sign in as a parent to ask Consuela for suggestions.",
+};
+
 export function useMeals() {
   const [meals, setMeals] = useState<Meal[]>([]);
   const [activeDay, setActiveDay] = useState(new Date().toLocaleDateString('en-US', { weekday: 'short' }));
@@ -106,9 +116,15 @@ export function useMeals() {
         body: JSON.stringify({ agent: "planner", intent: "meal_ideas" }),
       });
       const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error("Failed to get suggestions");
-      // Planner-validated actions: {type:"meal", title, detail?, emoji?}
+      if (data && data.ok === false) {
+        throw new Error(PLANNER_MEAL_ERROR_COPY[String(data.reason)] || "Failed to get suggestions");
+      }
+      if (!res.ok) throw new Error("Failed to get suggestions");
+      // Planner-validated actions: {type:"meal", title, detail?, emoji?}.
+      // validateActions accepts task|reward|meal rows for the shared intents —
+      // a stray task-typed reply must not render as a meal card.
       const ideas = (data.result?.actions || [])
+        .filter((a: any) => a.type === "meal")
         .map((a: any) => ({
           name: a.title || a.name,
           emoji: a.emoji || "🍽️",

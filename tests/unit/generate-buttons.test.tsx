@@ -52,6 +52,9 @@ function Harness() {
 
 let fetchCalls: Array<{ url: string; body: any }>;
 let plannerResponse: () => any;
+// The 401 unauthorized failure the planner route returns is a NON-ok HTTP
+// response carrying JSON — let tests drive both shapes.
+let plannerHttpOk: boolean;
 
 async function mount() {
   const el = document.createElement("div");
@@ -69,10 +72,11 @@ beforeEach(async () => {
   mealsResult = null;
   fetchCalls = [];
   plannerResponse = () => ({ ok: true, result: { meal_plan: [] } });
+  plannerHttpOk = true;
   localStorage.clear();
   vi.stubGlobal("fetch", async (url: string, init: any) => {
     fetchCalls.push({ url: String(url), body: JSON.parse(init.body) });
-    return { ok: true, json: async () => plannerResponse() };
+    return { ok: plannerHttpOk, status: plannerHttpOk ? 200 : 401, json: async () => plannerResponse() };
   });
   await mount();
 });
@@ -166,6 +170,62 @@ describe("generateAiMeals posts a meal_ideas intent and maps result.actions", ()
     });
     expect(mealsResult.aiMealIdeas).toEqual([]);
     expect(mealsResult.aiMealError).toBeTruthy();
+  });
+
+  it("keeps the type filter — only type:'meal' rows render as meal ideas", async () => {
+    // validateActions accepts task|reward|meal rows (shared intent shape); a
+    // stray task-typed reply must not render as a meal card.
+    plannerResponse = () => ({
+      ok: true,
+      result: {
+        actions: [
+          { type: "meal", title: "Sheet-pan gnocchi", detail: "One pan · 25 min", emoji: "🍝" },
+          { type: "task", title: "Fold laundry", detail: "After the wash is dry", emoji: "🧺" },
+        ],
+      },
+    });
+    await act(async () => {
+      await mealsResult.generateAiMeals();
+    });
+    expect(mealsResult.aiMealIdeas).toEqual([
+      { name: "Sheet-pan gnocchi", emoji: "🍝", tags: ["One pan", "25 min"] },
+    ]);
+    expect(mealsResult.aiMealError).toBeNull();
+  });
+
+  it("provider_unavailable says Consuela couldn't reach the kitchen brain", async () => {
+    plannerResponse = () => ({ ok: false, reason: "provider_unavailable" });
+    await act(async () => {
+      await mealsResult.generateAiMeals();
+    });
+    expect(mealsResult.aiMealIdeas).toEqual([]);
+    expect(mealsResult.aiMealError).toBe("Consuela couldn't reach the kitchen brain — try again in a bit.");
+  });
+
+  it("invalid_model_output keeps the existing no-ideas copy", async () => {
+    plannerResponse = () => ({ ok: false, reason: "invalid_model_output" });
+    await act(async () => {
+      await mealsResult.generateAiMeals();
+    });
+    expect(mealsResult.aiMealError).toBe("No ideas returned — try again");
+  });
+
+  it("no_provider points at Settings → AI Models", async () => {
+    plannerResponse = () => ({ ok: false, reason: "no_provider" });
+    await act(async () => {
+      await mealsResult.generateAiMeals();
+    });
+    expect(mealsResult.aiMealError).toBe("My brain isn't configured yet — add a provider in Settings → AI Models.");
+  });
+
+  it("401 unauthorized (the route's real HTTP shape) maps to honest sign-in copy", async () => {
+    plannerHttpOk = false;
+    plannerResponse = () => ({ ok: false, reason: "unauthorized" });
+    await act(async () => {
+      await mealsResult.generateAiMeals();
+    });
+    expect(mealsResult.aiMealIdeas).toEqual([]);
+    expect(mealsResult.aiMealError).toBe("Sign in as a parent to ask Consuela for suggestions.");
   });
 });
 
