@@ -88,6 +88,14 @@ it("complete_task still refuses double-completion", async () => {
   expect(out.ok).toBe(false);
 });
 
+it("complete_task answers an already-queued row with the honest approval refusal", async () => {
+  rows.tasks = [{ id: "t3", taskId: 103, title: "Queued", assignee: "Emily G", status: "done", completed: true, pendingApproval: { byName: "Emily G", at: "2026-09-10T10:00:00Z", points: 5 }, sentBackAt: null }];
+  const out = JSON.parse(await getTool("complete_task")!.handler({ taskId: 103 }));
+  expect(out.ok).toBe(false);
+  expect(out.error).toContain("approval");
+  expect(writes).toHaveLength(0);
+});
+
 it("reopen_task reopens a row still waiting for approval", async () => {
   rows.tasks = [{ id: "t3", taskId: 103, title: "Queued", assignee: "Emily G", status: "done", pendingApproval: { byName: "Emily G", at: "2026-09-10T10:00:00Z", points: 5 }, sentBackAt: null }];
   const out = JSON.parse(await getTool("reopen_task")!.handler({ taskId: 103 }));

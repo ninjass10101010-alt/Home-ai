@@ -8,8 +8,10 @@
 // What it verifies (C9):
 //   1. add_grocery_item persists rows to grocery_list_items (and dedupes on re-add)
 //   2. add_task persists a row to the tasks collection
-//   3. complete_task appends an earn transaction to week_data and awards points;
-//      double-completing the same task is rejected
+//   3. complete_task queues the completion for parent approval (status done +
+//      pendingApproval + sentBackAt:null) and NEVER touches week_data; a
+//      second call answers "Already completed — waiting for parent approval";
+//      a done row with no live queue marker reports not-found
 //   4. add_event persists a row to events
 //   5. remove_event deletes the row (and reports "not found" on a second call)
 //   6. complete_grocery_item flips needed -> false
@@ -127,7 +129,7 @@ async function main() {
   const token = await adminToken();
   const weekStart = weekStartISO();
 
-  // Snapshot week_data so we can restore it exactly (cleans up the earn tx).
+  // Snapshot week_data as a restore safety net — chat tools never write it.
   const weekRowsBefore = await listAll(token, "week_data", `weekStart="${weekStart}"`);
   weekRowBefore = weekRowsBefore[0] || null;
 
@@ -168,27 +170,27 @@ async function main() {
   });
 
   // ---- 3. complete_task ----
-  await step("complete_task appends earn tx to week_data and awards points", async () => {
+  await step("complete_task queues for parent approval and never touches week_data", async () => {
     assert.ok(createdTaskId, "need taskId from add_task step");
     const tool = getTool("complete_task");
     assert.ok(tool, "complete_task tool exists");
     const res = parseResult(await tool.handler({ taskId: createdTaskId }));
     assert.equal(res.ok, true, JSON.stringify(res));
-    assert.equal(res.pointsEarned, 5);
-    const rows = await listAll(token, "week_data", `weekStart="${weekStart}"`);
-    assert.equal(rows.length, 1, "week_data row should exist for this week");
-    const history = jsonValue(rows[0].history, []);
-    const tx = history.find((h) => h.taskId === createdTaskId && h.type === "earn");
-    assert.ok(tx, `earn tx for taskId ${createdTaskId} not found in ${JSON.stringify(history)}`);
-    assert.equal(tx.amount, 5);
-    assert.match(String(tx.member), /Caspian/i);
-    const points = jsonValue(rows[0].points, {});
-    const pointsBefore = jsonValue(weekRowBefore?.points, {});
-    const memberKey = Object.keys(points).find((k) => /caspian/i.test(k));
-    assert.ok(memberKey, "points should include the member");
-    const memberKeyBefore = Object.keys(pointsBefore).find((k) => /caspian/i.test(k));
-    const expectedPoints = (memberKeyBefore ? pointsBefore[memberKeyBefore] : 0) + 5;
-    assert.equal(points[memberKey], expectedPoints, "points should grow by 5");
+    assert.equal(res.queuedForApproval, true);
+    assert.equal(res.points, 5);
+    const rows = await listAll(token, "tasks", `taskId=${createdTaskId}`);
+    assert.equal(rows.length, 1, `expected 1 task row, got ${rows.length}`);
+    const pa = jsonValue(rows[0].pendingApproval, null);
+    assert.ok(pa, `pendingApproval marker should be set, got ${JSON.stringify(rows[0].pendingApproval)}`);
+    assert.match(String(pa.byName), /Caspian/i);
+    assert.equal(pa.points, 5);
+    assert.equal(rows[0].sentBackAt, null, "sentBackAt should be cleared to null");
+    const weekRows = await listAll(token, "week_data", `weekStart="${weekStart}"`);
+    const history = jsonValue(weekRows[0]?.history ?? [], []);
+    assert.ok(
+      !history.some((h) => h.taskId === createdTaskId && h.type === "earn"),
+      "chat completion must not append an earn tx"
+    );
   });
 
   await step("complete_task marks the tasks row done + completedInWeek (F3)", async () => {
@@ -200,18 +202,20 @@ async function main() {
     assert.ok(rows[0].completedAt, "completedAt should be set");
   });
 
-  await step("complete_task rejects double-completion", async () => {
+  await step("complete_task refuses an already-queued row with the approval copy", async () => {
     const tool = getTool("complete_task");
     const res = parseResult(await tool.handler({ taskId: createdTaskId }));
     assert.equal(res.ok, false, "second completion should fail");
-    assert.match(String(res.error), /already completed/i);
+    assert.match(String(res.error), /already completed — waiting for parent approval/i);
+    const rows = await listAll(token, "tasks", `taskId=${createdTaskId}`);
+    assert.ok(jsonValue(rows[0].pendingApproval, null), "the queue marker must survive the refusal");
     const weekRows = await listAll(token, "week_data", `weekStart="${weekStart}"`);
-    const history = jsonValue(weekRows[0].history, []);
+    const history = jsonValue(weekRows[0]?.history ?? [], []);
     const earnTxs = history.filter((h) => h.taskId === createdTaskId && h.type === "earn");
-    assert.equal(earnTxs.length, 1, "double-complete must not add a second earn tx");
+    assert.equal(earnTxs.length, 0, "double-complete must not earn anything");
   });
 
-  await step("complete_task refuses a done row from a previous week (I4)", async () => {
+  await step("complete_task reports not-found for a done row with no live queue marker", async () => {
     const tool = getTool("complete_task");
     const prevWeek = new Date(Date.parse(`${weekStart}T00:00:00Z`) - 7 * 86400000)
       .toISOString()
@@ -231,10 +235,10 @@ async function main() {
     });
     const res = parseResult(await tool.handler({ taskId: lastWeekId }));
     assert.equal(res.ok, false, `cross-week complete must fail, got ${JSON.stringify(res)}`);
-    assert.equal(
+    assert.match(
       String(res.error),
-      "Task was already completed (earlier this week or previously). Mark it as pending first if you want to recomplete.",
-      `exact I4/M-A error string expected, got: ${res.error}`
+      /no pending task found/i,
+      `approved/paid/legacy done rows answer the honest not-found, got: ${res.error}`
     );
     const weekRows = await listAll(token, "week_data", `weekStart="${weekStart}"`);
     const history = jsonValue(weekRows[0]?.history ?? [], []);

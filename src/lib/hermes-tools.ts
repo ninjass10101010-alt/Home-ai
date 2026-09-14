@@ -888,20 +888,33 @@ const TOOLS: Tool[] = [
           // Chat never moves points: only pending rows are completable, and a
           // completion lands as a done-but-UNPAID row for the parent queue —
           // the exact shape the claim route + tapCompletePending write.
-          // A done row (approved, paid, or previously completed) simply isn't
-          // in `pending` and falls to the honest not-found below.
           const pending = records.filter((r: any) => r.status !== "done");
-          let task: any = taskId !== undefined ? pending.find((r: any) => Number(r.taskId) === taskId) : undefined;
-          if (!task && title) {
-            const t = title.toLowerCase();
-            task = pending.find((r: any) => String(r.title).trim().toLowerCase() === t);
-            if (!task) task = pending.find((r: any) => String(r.title).trim().toLowerCase().includes(t));
-            if (task && assignee && !String(task.assignee || "").toLowerCase().includes(assignee)) {
-              const alt = pending.find((r: any) => String(r.title).trim().toLowerCase() === t && String(r.assignee || "").toLowerCase().includes(assignee));
-              if (alt) task = alt;
+          const findIn = (pool: any[]): any => {
+            let task: any = taskId !== undefined ? pool.find((r: any) => Number(r.taskId) === taskId) : undefined;
+            if (!task && title) {
+              const t = title.toLowerCase();
+              task = pool.find((r: any) => String(r.title).trim().toLowerCase() === t);
+              if (!task) task = pool.find((r: any) => String(r.title).trim().toLowerCase().includes(t));
+              if (task && assignee && !String(task.assignee || "").toLowerCase().includes(assignee)) {
+                const alt = pool.find((r: any) => String(r.title).trim().toLowerCase() === t && String(r.assignee || "").toLowerCase().includes(assignee));
+                if (alt) task = alt;
+              }
             }
+            return task;
+          };
+          const task = findIn(pending);
+          if (!task) {
+            // A queued row is status "done", so the pending-only lookup can
+            // never see it — re-match against ALL records and answer an
+            // already-queued completion with the honest queue refusal instead
+            // of the generic not-found. Approved/paid/legacy done rows carry
+            // no live pendingApproval and still fall to not-found.
+            const queued = findIn(records);
+            if (queued?.pendingApproval && !queued.sentBackAt) {
+              return { ok: false, error: "Already completed — waiting for parent approval" };
+            }
+            return { ok: false, error: `No pending task found${title ? ` matching "${title}"` : ""}${taskId !== undefined ? ` (taskId ${taskId})` : ""}` };
           }
-          if (!task) return { ok: false, error: `No pending task found${title ? ` matching "${title}"` : ""}${taskId !== undefined ? ` (taskId ${taskId})` : ""}` };
           if (task.pendingApproval && !task.sentBackAt) return { ok: false, error: "Already completed — waiting for parent approval" };
           const amount = Number(task.points) || 0;
           const now = new Date().toISOString();
