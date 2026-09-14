@@ -4,6 +4,8 @@ import { useState, useEffect, useMemo, useRef, useCallback, useSyncExternalStore
 import PageShell from "@/components/ui/PageShell";
 import TopBar from "@/components/ui/TopBar";
 import WidgetCard from "@/components/patterns/WidgetCard";
+import ConsuelaWeekCard from "@/components/calendar/ConsuelaWeekCard";
+import { useAuth } from "@/hooks/useAuth";
 import Badge from "@/components/ui/Badge";
 import Avatar from "@/components/ui/Avatar";
 import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
@@ -326,6 +328,7 @@ export default function CalendarPage() {
     getServerMembersSnapshot
   );
   const { accentRgb } = useAtmosphericTheme();
+  const { currentUser } = useAuth();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
   const [selectedDay, setSelectedDay] = useState(today.getDate());
@@ -944,6 +947,8 @@ export default function CalendarPage() {
                 })}
               </div>
             </WidgetCard>
+
+            {currentUser?.role === "parent" && <ConsuelaWeekCard />}
 
             <section className="calendar-panel widget-card" style={{ "--widget-tone": "#22d3ee" } as CSSProperties}>
               <div className="calendar-panel-header">
