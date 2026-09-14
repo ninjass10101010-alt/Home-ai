@@ -154,6 +154,46 @@ async function liveSchedules(): Promise<any[]> {
   }
 }
 
+/** meal_plan_entries rows, read live. Null = the read FAILED (callers must
+ *  emit an honest unavailable signal — [] because PB is empty stays []). */
+async function liveMealRows(): Promise<any[] | null> {
+  try {
+    const rows = await withAdmin(async (pb) =>
+      pb.collection("meal_plan_entries").getFullList({ requestKey: null }));
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return null;
+  }
+}
+
+/** The real recipe catalog (`recipes` collection), read live. Null = read failed. */
+async function liveRecipes(): Promise<any[] | null> {
+  try {
+    const rows = await withAdmin(async (pb) =>
+      pb.collection("recipes").getFullList({ requestKey: null }));
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return null;
+  }
+}
+
+/** Full roster, read live. Null = read failed — callers must handle empty. */
+async function liveMembers(): Promise<any[] | null> {
+  try {
+    const rows = await withAdmin(async (pb) =>
+      pb.collection("members").getFullList({ requestKey: null }));
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return null;
+  }
+}
+
+/** Week convention shared with useMeals/PlanTab/CurrentMealWidget: legacy
+ *  weekless rows count as the current week. */
+function mealsForWeek(rows: any[], weekOf: string): any[] {
+  return (rows || []).filter((m: any) => (m.weekOf || weekOf) === weekOf);
+}
+
 /** Weekday coverage mirror of schedule-time.ts (kept local to avoid a client
  *  import chain; same semantics: "weekdays"/"weekends" keywords + SMTWTFS). */
 function scheduleCoversDay(days: unknown, weekdayShort: string, todayIdx: number): boolean {
@@ -347,8 +387,9 @@ const TOOLS: Tool[] = [
       parameters: { type: "object", properties: {} },
     },
     handler: async () => {
-      const members = db.selectMembers();
-      return summarize(members.map((m: any) => ({ name: m.fullName || m.name, role: m.role, emoji: textEmoji(m.emoji) })));
+      const members = await liveMembers();
+      if (members === null) return summarize({ error: "member data unavailable", members: [] });
+      return summarize({ members: members.map((m: any) => ({ name: m.fullName || m.name, role: m.role, age: m.age, emoji: textEmoji(m.emoji) })) });
     },
   },
   {
@@ -687,10 +728,13 @@ const TOOLS: Tool[] = [
       parameters: { type: "object", properties: {} },
     },
     handler: async () => {
-      const meals = await db.selectMeals();
-      let data = meals.length > 0 ? meals : [];
+      const weekOf = localWeekStartISO();
+      const raw = await liveMealRows();
+      if (raw === null) {
+        return summarize({ today: `${localWeekdayShort()} (${localTodayISO()})`, current_week_monday: weekOf, days: {}, error: "meal data unavailable — do not guess meals" });
+      }
       const byDay: Record<string, any[]> = {};
-      for (const m of data) {
+      for (const m of mealsForWeek(raw, weekOf)) {
         const day = m.time || m.day || "unscheduled";
         if (!byDay[day]) byDay[day] = [];
         byDay[day].push({
@@ -700,14 +744,14 @@ const TOOLS: Tool[] = [
           prepTime: m.prepTime,
           calories: m.calories,
           servings: m.servings,
-          tags: m.tags,
+          tags: parseJSON(m.tags, []),
           weekOf: m.weekOf,
           date: m.date,
         });
       }
       return summarize({
         today: `${localWeekdayShort()} (${localTodayISO()})`,
-        current_week_monday: weekStartForDate(localTodayISO()),
+        current_week_monday: weekOf,
         days: byDay,
       });
     },
@@ -774,7 +818,7 @@ const TOOLS: Tool[] = [
   {
     definition: {
       name: "get_recipes",
-      description: "Get the recipe catalog. Use this to suggest recipes or answer questions about what's available. Returns recipe names, prep times, calories, tags, and ingredients.",
+      description: "Get the family recipe catalog (saved recipes) plus ingredient-bearing planned meals. Returns names, tags, ingredients.",
       parameters: {
         type: "object",
         properties: {
@@ -783,25 +827,30 @@ const TOOLS: Tool[] = [
       },
     },
     handler: async (args) => {
-      const meals = await db.selectMeals();
-      let recipes = meals.length > 0 ? meals.filter((m: any) => m.name && m.ingredients) : [];
+      const catalogRaw = await liveRecipes();
+      const mealRaw = await liveMealRows();
+      if (catalogRaw === null && mealRaw === null) {
+        return summarize({ error: "recipe data unavailable — do not guess recipes", recipes: [] });
+      }
+      const catalog = (catalogRaw || []).map((r: any) => ({
+        name: r.name, emoji: r.emoji || "🍽️", prepTime: r.prepTime, calories: r.calories,
+        protein: r.protein, carbs: r.carbs, fat: r.fat, tags: parseJSON(r.tags, []),
+        servings: r.servings, ingredients: parseJSON(r.ingredients, []), source: "catalog",
+      }));
+      const seen = new Set(catalog.map((r) => String(r.name).toLowerCase()));
+      const planned = (mealRaw || [])
+        .filter((m: any) => m.name && !seen.has(String(m.name).toLowerCase()) && parseJSON<any[]>(m.ingredients, []).length > 0)
+        .map((m: any) => ({
+          name: m.name, emoji: m.emoji || "🍽️", prepTime: m.prepTime, calories: m.calories,
+          tags: parseJSON(m.tags, []), servings: m.servings, ingredients: parseJSON(m.ingredients, []),
+          day: m.time || m.day, source: "planned",
+        }));
+      let recipes = [...catalog, ...planned];
       if (args.tag) {
         const tag = String(args.tag).toLowerCase();
-        recipes = recipes.filter((r: any) => (r.tags || []).some((t: string) => t.toLowerCase().includes(tag)));
+        recipes = recipes.filter((r: any) => (r.tags || []).some((t: string) => String(t).toLowerCase().includes(tag)));
       }
-      return summarize(recipes.map((r: any) => ({
-        name: r.name,
-        emoji: r.emoji || "🍽️",
-        prepTime: r.prepTime,
-        calories: r.calories,
-        protein: r.protein,
-        carbs: r.carbs,
-        fat: r.fat,
-        tags: r.tags,
-        servings: r.servings,
-        ingredients: r.ingredients,
-        day: r.time || r.day,
-      })));
+      return summarize({ recipes });
     },
   },
   {
@@ -841,25 +890,18 @@ const TOOLS: Tool[] = [
       parameters: { type: "object", properties: {} },
     },
     handler: async () => {
-      let items = await db.selectPantry();
-      if (items.length === 0) {
-        items = [
-          { id: 101, name: "Olive oil", status: "plenty" },
-          { id: 102, name: "Rice", status: "plenty" },
-          { id: 103, name: "Pasta", status: "low" },
-          { id: 104, name: "Canned tomatoes", status: "plenty" },
-          { id: 105, name: "Chicken broth", status: "plenty" },
-          { id: 106, name: "Flour", status: "plenty" },
-          { id: 107, name: "Sugar", status: "plenty" },
-          { id: 108, name: "Salt", status: "plenty" },
-          { id: 109, name: "Black pepper", status: "low" },
-        ];
+      let items: any[] | null = null;
+      try {
+        items = await withAdmin(async (pb) => pb.collection("pantry_items").getFullList({ requestKey: null }));
+      } catch { items = null; }
+      if (!Array.isArray(items)) {
+        return summarize({ error: "pantry data unavailable — do not guess inventory", total: 0, by_status: { plenty: [], low: [], out: [] } });
       }
       const byStatus: Record<string, any[]> = { plenty: [], low: [], out: [] };
       for (const i of items) {
         const status = i.status || "plenty";
         if (!byStatus[status]) byStatus[status] = [];
-        byStatus[status].push({ name: i.name || i.item, category: i.category });
+        byStatus[status].push({ name: i.name || i.item, category: i.category, quantity: i.quantity, unit: i.unit });
       }
       return summarize({ total: items.length, by_status: byStatus });
     },
@@ -1016,7 +1058,8 @@ const TOOLS: Tool[] = [
     handler: async () => {
       const events = await mergedTodaysEvents();
       const tasks = await livePendingTasks();
-      const meals = await db.selectMeals();
+      const mealRows = await liveMealRows();
+      const meals = mealsForWeek(mealRows ?? [], localWeekStartISO());
       const today = localTodayISO();
       const todayWeekday = localWeekdayShort();
       const todayMeals = meals.filter((m: any) => {
@@ -1027,6 +1070,7 @@ const TOOLS: Tool[] = [
         date: today,
         today_weekday: todayWeekday,
         family_timezone: familyTimeZone(),
+        ...(mealRows === null ? { meals_error: "meal data unavailable — do not guess" } : {}),
         events: events.map((e) => ({ title: e.title, time: e.time, member: e.member, source: e.source })),
         pending_tasks: tasks.map((t: any) => ({
           title: t.title,
