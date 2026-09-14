@@ -19,6 +19,14 @@ interface NotifyTargetsPayload {
   warning?: string;
 }
 
+type Prefs = { briefing: boolean; weather: boolean; calendar: boolean };
+
+const PREF_ROWS: Array<{ key: keyof Prefs; label: string; hint: string }> = [
+  { key: "briefing", label: "Morning briefing", hint: "The 7am digest of your day." },
+  { key: "weather", label: "Severe weather", hint: "Storms and big snow — pushed once per episode." },
+  { key: "calendar", label: "Important calendar events", hint: "A heads-up about an hour before an important event." },
+];
+
 function friendlyLabel(target: string): string {
   const cleaned = target.replace(/^notify\./, "").replace(/^mobile_app_/, "");
   return cleaned
@@ -35,6 +43,8 @@ export default function HaNotificationsCard() {
   const [loadFailed, setLoadFailed] = useState(false);
   const [busyTarget, setBusyTarget] = useState<string | null>(null);
   const [testedTarget, setTestedTarget] = useState<string | null>(null);
+  const [prefs, setPrefs] = useState<Prefs>({ briefing: false, weather: false, calendar: false });
+  const [busyPref, setBusyPref] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -46,6 +56,13 @@ export default function HaNotificationsCard() {
       }
       setPayload(data);
       setLoadFailed(false);
+      try {
+        const pr = await fetch("/api/ha/notify-prefs");
+        const pd = (await pr.json().catch(() => null)) as { ok?: boolean; prefs?: Prefs } | null;
+        if (pr.ok && pd?.ok && pd.prefs) setPrefs(pd.prefs);
+      } catch {
+        /* prefs keep their last-known value */
+      }
     } catch {
       setLoadFailed(true);
     }
@@ -100,6 +117,20 @@ export default function HaNotificationsCard() {
     }
   };
 
+  const setPref = async (key: keyof Prefs, enabled: boolean) => {
+    setBusyPref(key);
+    setPrefs((p) => ({ ...p, [key]: enabled }));
+    try {
+      await fetch("/api/ha/notify-prefs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key, enabled }),
+      });
+    } finally {
+      setBusyPref(null);
+    }
+  };
+
   return (
     <SectionCard
       title="Notifications"
@@ -114,44 +145,64 @@ export default function HaNotificationsCard() {
       ) : !payload ? (
         <p className="text-sm text-text-secondary">Loading notification targets…</p>
       ) : (
-        <div className="space-y-2">
-          {rows.map((row) => (
-            <div
-              key={row.target}
-              className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/30 px-4 py-3"
-            >
-              <div className="min-w-0 flex-1">
+        <>
+          <div className="space-y-2">
+            {rows.map((row) => (
+              <div
+                key={row.target}
+                className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/30 px-4 py-3"
+              >
+                <div className="min-w-0 flex-1">
+                  <Toggle
+                    checked={row.enabled}
+                    disabled={busyTarget === row.target}
+                    onCheckedChange={(checked) => setEnabled(row, checked)}
+                    label={`${friendlyLabel(row.target)}${row.channel === "telegram" ? " (Telegram)" : ""}`}
+                  />
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  {testedTarget === row.target && <Chip size="sm" tone="success">Sent ✓</Chip>}
+                  <SoftButton
+                    size="sm"
+                    variant="secondary"
+                    className="tap-sm"
+                    disabled={busyTarget === row.target}
+                    onClick={() => sendTest(row)}
+                    aria-label={`Send test notification to ${friendlyLabel(row.target)}`}
+                  >
+                    Test
+                  </SoftButton>
+                </div>
+              </div>
+            ))}
+            {rows.length === 0 && (
+              <p className="text-sm text-text-secondary">
+                No HA companion devices found yet — install the Home Assistant app on a phone and it will appear here.
+              </p>
+            )}
+            {payload.warning && (
+              <p className="pt-1 text-xs text-text-muted">{payload.warning}</p>
+            )}
+          </div>
+
+          <div className="mt-5 space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wider text-text-secondary">What to send</p>
+            {PREF_ROWS.map((row) => (
+              <div
+                key={row.key}
+                className="rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/30 px-4 py-3"
+              >
                 <Toggle
-                  checked={row.enabled}
-                  disabled={busyTarget === row.target}
-                  onCheckedChange={(checked) => setEnabled(row, checked)}
-                  label={`${friendlyLabel(row.target)}${row.channel === "telegram" ? " (Telegram)" : ""}`}
+                  checked={prefs[row.key]}
+                  disabled={busyPref === row.key}
+                  onCheckedChange={(checked) => setPref(row.key, checked)}
+                  label={row.label}
                 />
+                <p className="mt-1 text-xs text-text-muted">{row.hint}</p>
               </div>
-              <div className="flex shrink-0 items-center gap-2">
-                {testedTarget === row.target && <Chip size="sm" tone="success">Sent ✓</Chip>}
-                <SoftButton
-                  size="sm"
-                  variant="secondary"
-                  className="tap-sm"
-                  disabled={busyTarget === row.target}
-                  onClick={() => sendTest(row)}
-                  aria-label={`Send test notification to ${friendlyLabel(row.target)}`}
-                >
-                  Test
-                </SoftButton>
-              </div>
-            </div>
-          ))}
-          {rows.length === 0 && (
-            <p className="text-sm text-text-secondary">
-              No HA companion devices found yet — install the Home Assistant app on a phone and it will appear here.
-            </p>
-          )}
-          {payload.warning && (
-            <p className="pt-1 text-xs text-text-muted">{payload.warning}</p>
-          )}
-        </div>
+            ))}
+          </div>
+        </>
       )}
     </SectionCard>
   );

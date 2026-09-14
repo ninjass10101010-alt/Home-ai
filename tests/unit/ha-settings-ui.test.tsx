@@ -12,7 +12,16 @@ interface CallRecord {
   body?: unknown;
 }
 
-function stubFetch(payload: unknown | null, opts: { fail?: boolean } = {}) {
+interface PrefsPayload {
+  briefing: boolean;
+  weather: boolean;
+  calendar: boolean;
+}
+
+function stubFetch(
+  payload: unknown | null,
+  opts: { fail?: boolean; prefs?: PrefsPayload } = {}
+) {
   const calls: CallRecord[] = [];
   const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
     const u = String(url);
@@ -20,6 +29,13 @@ function stubFetch(payload: unknown | null, opts: { fail?: boolean } = {}) {
     if (opts.fail) return { ok: false, status: 503, json: async () => ({ ok: false }) };
     if (u.endsWith("/api/ha/notify-targets")) {
       return { ok: true, status: 200, json: async () => payload };
+    }
+    if (u.endsWith("/api/ha/notify-prefs") && (init?.method ?? "GET").toUpperCase() === "GET") {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, prefs: opts.prefs ?? { briefing: false, weather: false, calendar: false } }),
+      };
     }
     return { ok: true, status: 200, json: async () => ({ ok: true }) };
   });
@@ -118,5 +134,27 @@ describe("HaNotificationsCard", () => {
     await settle();
 
     expect(el.textContent).toContain("unavailable right now");
+  });
+
+  it("renders the three prefs toggles and POSTs when one is flipped", async () => {
+    const { calls } = stubFetch(
+      { ok: true, telegramAvailable: false, targets: [] },
+      { prefs: { briefing: false, weather: false, calendar: false } }
+    );
+    const el = render(<HaNotificationsCard />);
+    await settle();
+
+    const weatherToggle = el.querySelector('input[aria-label*="Severe weather"]') as HTMLInputElement;
+    expect(weatherToggle).toBeTruthy();
+    expect(el.querySelector('input[aria-label*="Morning briefing"]')).toBeTruthy();
+    expect(el.querySelector('input[aria-label*="Important calendar events"]')).toBeTruthy();
+
+    act(() => {
+      weatherToggle.click();
+    });
+    await settle();
+
+    const prefCall = calls.find((c) => c.url.endsWith("/api/ha/notify-prefs") && c.body);
+    expect(prefCall?.body).toEqual({ key: "weather", enabled: true });
   });
 });
