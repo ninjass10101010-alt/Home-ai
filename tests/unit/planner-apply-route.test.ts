@@ -60,6 +60,24 @@ describe("POST /api/consuela/planner/apply — PIN-gated buffer apply", () => {
     expect(mocks.getTool).not.toHaveBeenCalled();
   });
 
+  it("child PIN → 401 adult_only (valid PIN, wrong role), tool never dispatched", async () => {
+    mocks.verifyPinAgainstAnyMember.mockResolvedValue({ id: "m2", name: "Caspian", role: "child" });
+    const res = await post({ tool: "add_event", args: VALID_ARGS }, { pin: "1234" });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "adult_only" });
+    expect(mocks.getTool).not.toHaveBeenCalled();
+    expect(mocks.handler).not.toHaveBeenCalled();
+  });
+
+  it("pet PIN (0000) → 401 adult_only, tool never dispatched", async () => {
+    mocks.verifyPinAgainstAnyMember.mockResolvedValue({ id: "m3", name: "Bailey", role: "pet" });
+    const res = await post({ tool: "add_event", args: VALID_ARGS }, { pin: "0000" });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "adult_only" });
+    expect(mocks.verifyPinAgainstAnyMember).toHaveBeenCalledWith("0000");
+    expect(mocks.getTool).not.toHaveBeenCalled();
+  });
+
   it("PIN from the cookie is honored like the header (act-route parity)", async () => {
     mocks.verifyPinAgainstAnyMember.mockResolvedValue({ id: "m1", name: "Rebecca", role: "parent" });
     mocks.handler.mockResolvedValue(JSON.stringify({ ok: true, event: { id: "e1", ...VALID_ARGS } }));
@@ -69,7 +87,10 @@ describe("POST /api/consuela/planner/apply — PIN-gated buffer apply", () => {
   });
 
   it("tool outside the add_event allowlist → 400, getTool never reached", async () => {
-    mocks.verifyPinAgainstAnyMember.mockResolvedValue({ id: "m1" });
+    mocks.verifyPinAgainstAnyMember.mockResolvedValue({
+      id: "m1",
+      role: "parent",
+    });
     const res = await post({ tool: "remove_event", args: { title: "X" } }, { pin: "1234" });
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ ok: false, error: "tool not allowed" });
@@ -78,7 +99,10 @@ describe("POST /api/consuela/planner/apply — PIN-gated buffer apply", () => {
   });
 
   it("empty title → 400", async () => {
-    mocks.verifyPinAgainstAnyMember.mockResolvedValue({ id: "m1" });
+    mocks.verifyPinAgainstAnyMember.mockResolvedValue({
+      id: "m1",
+      role: "parent",
+    });
     const res = await post({ tool: "add_event", args: { title: "   ", date: "2026-09-11" } }, { pin: "1234" });
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/title/i);
@@ -86,7 +110,10 @@ describe("POST /api/consuela/planner/apply — PIN-gated buffer apply", () => {
   });
 
   it("bad date → 400", async () => {
-    mocks.verifyPinAgainstAnyMember.mockResolvedValue({ id: "m1" });
+    mocks.verifyPinAgainstAnyMember.mockResolvedValue({
+      id: "m1",
+      role: "parent",
+    });
     const res = await post({ tool: "add_event", args: { title: "Buffer", date: "11/09/2026" } }, { pin: "1234" });
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/date/i);
@@ -94,15 +121,59 @@ describe("POST /api/consuela/planner/apply — PIN-gated buffer apply", () => {
   });
 
   it("bad time → 400", async () => {
-    mocks.verifyPinAgainstAnyMember.mockResolvedValue({ id: "m1" });
+    mocks.verifyPinAgainstAnyMember.mockResolvedValue({
+      id: "m1",
+      role: "parent",
+    });
     const res = await post({ tool: "add_event", args: { ...VALID_ARGS, time: "half past two" } }, { pin: "1234" });
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/time/i);
     expect(mocks.handler).not.toHaveBeenCalled();
   });
 
+  it("date must be a REAL calendar date — 2026-13-45 → 400", async () => {
+    mocks.verifyPinAgainstAnyMember.mockResolvedValue({
+      id: "m1",
+      role: "parent",
+    });
+    const res = await post({ tool: "add_event", args: { ...VALID_ARGS, date: "2026-13-45" } }, { pin: "1234" });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/date/i);
+    expect(mocks.handler).not.toHaveBeenCalled();
+  });
+
+  it("time parts must be real — hour 24 or minute 60+ → 400", async () => {
+    mocks.verifyPinAgainstAnyMember.mockResolvedValue({
+      id: "m1",
+      role: "parent",
+    });
+    for (const time of ["24:00", "12:61"]) {
+      const res = await post({ tool: "add_event", args: { ...VALID_ARGS, time } }, { pin: "1234" });
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toMatch(/time/i);
+    }
+    expect(mocks.handler).not.toHaveBeenCalled();
+  });
+
+  it("title over 120 chars → 400", async () => {
+    mocks.verifyPinAgainstAnyMember.mockResolvedValue({
+      id: "m1",
+      role: "parent",
+    });
+    const res = await post(
+      { tool: "add_event", args: { ...VALID_ARGS, title: "x".repeat(121) } },
+      { pin: "1234" }
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/title/i);
+    expect(mocks.handler).not.toHaveBeenCalled();
+  });
+
   it("24-hour AND 12-hour times are accepted", async () => {
-    mocks.verifyPinAgainstAnyMember.mockResolvedValue({ id: "m1" });
+    mocks.verifyPinAgainstAnyMember.mockResolvedValue({
+      id: "m1",
+      role: "parent",
+    });
     mocks.handler.mockResolvedValue(JSON.stringify({ ok: true, event: { id: "e1" } }));
     for (const time of ["14:30", "2:30 PM", "2:30PM"]) {
       const res = await post({ tool: "add_event", args: { ...VALID_ARGS, time } }, { pin: "1234" });
@@ -125,7 +196,10 @@ describe("POST /api/consuela/planner/apply — PIN-gated buffer apply", () => {
   });
 
   it("handler reports failure (ok:false + error) → 400 with the handler's message", async () => {
-    mocks.verifyPinAgainstAnyMember.mockResolvedValue({ id: "m1" });
+    mocks.verifyPinAgainstAnyMember.mockResolvedValue({
+      id: "m1",
+      role: "parent",
+    });
     mocks.handler.mockResolvedValue(JSON.stringify({ ok: false, error: "Could not create event" }));
 
     const res = await post({ tool: "add_event", args: VALID_ARGS }, { pin: "1234" });
@@ -135,7 +209,10 @@ describe("POST /api/consuela/planner/apply — PIN-gated buffer apply", () => {
   });
 
   it("handler throws → 400 with the message, never a raw 500", async () => {
-    mocks.verifyPinAgainstAnyMember.mockResolvedValue({ id: "m1" });
+    mocks.verifyPinAgainstAnyMember.mockResolvedValue({
+      id: "m1",
+      role: "parent",
+    });
     mocks.handler.mockRejectedValue(new Error("PB is down"));
 
     const res = await post({ tool: "add_event", args: VALID_ARGS }, { pin: "1234" });

@@ -205,6 +205,44 @@ describe("ConsuelaWeekCard — result rows + deep links", () => {
     expect(el.textContent).toContain("Soccer vs. dinner");
     expect(calls.filter((c) => c.url.includes("/api/hermes/chat")).length).toBe(2);
   });
+
+  it("invalid_model_output gets the honest planner copy, NOT connectivity blame", async () => {
+    stubFetch({
+      chat: () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: false, reason: "invalid_model_output" }),
+      }),
+    });
+    const el = render(<ConsuelaWeekCard />);
+    await act(async () => {
+      findButton(el, /Review the week/i).click();
+    });
+    await settle(0);
+    expect(el.textContent).toContain(
+      "Consuela couldn't come up with ideas right now — try again in a bit."
+    );
+    expect(el.textContent).not.toMatch(/check the connection/i);
+  });
+
+  it("other planner reasons keep the existing connectivity copy", async () => {
+    stubFetch({
+      chat: () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: false, reason: "provider_unavailable" }),
+      }),
+    });
+    const el = render(<ConsuelaWeekCard />);
+    await act(async () => {
+      findButton(el, /Review the week/i).click();
+    });
+    await settle(0);
+    expect(el.textContent).toContain(
+      "Couldn't reach Consuela's planner — check the connection and try again."
+    );
+    expect(el.textContent).not.toMatch(/couldn't come up with ideas/i);
+  });
 });
 
 describe("ConsuelaWeekCard — PIN-gated apply", () => {
@@ -300,6 +338,17 @@ describe("ConsuelaWeekCard — PIN-gated apply", () => {
     expect(pinInput().value).toBe("");
     // still nothing sent but the planner call
     expect(calls.length).toBe(1);
+  });
+});
+
+describe("ConsuelaWeekCard — violet-forms chrome", () => {
+  it("no protruding icon on the WidgetCard; the panel header carries the glyph", async () => {
+    const el = render(<ConsuelaWeekCard />);
+    // The 🧠 protruding-slot icon breaks the violet-forms idiom (the calendar
+    // Add/Edit form cards pass tone only — the .calendar-panel-icon heading
+    // already wears 🗓️). Pin: 🗓️ present, 🧠 gone.
+    expect(el.textContent).toContain("\uD83D\uDDD3\uFE0F");
+    expect(el.textContent).not.toContain("\uD83E\uDDE0");
   });
 });
 

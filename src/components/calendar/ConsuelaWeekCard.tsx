@@ -99,7 +99,14 @@ export default function ConsuelaWeekCard() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.ok) {
         setStatus("error");
-        setErrorMsg("Couldn't reach Consuela's planner — check the connection and try again.");
+        // Honest split: the planner REACHED a provider but the model output
+        // was unusable (never blame the family's connection for that); every
+        // other failure keeps the connectivity copy.
+        setErrorMsg(
+          res.ok && data?.reason === "invalid_model_output"
+            ? "Consuela couldn't come up with ideas right now — try again in a bit."
+            : "Couldn't reach Consuela's planner — check the connection and try again."
+        );
         return;
       }
       const r = data.result ?? {};
@@ -183,7 +190,7 @@ export default function ConsuelaWeekCard() {
   const askHref = (question: string) => `/chat?q=${encodeURIComponent(question)}`;
 
   return (
-    <WidgetCard tone="#8b5cf6" icon={<span aria-hidden="true">{`\uD83E\uDDE0`}</span>}>
+    <WidgetCard tone="#8b5cf6">
       <div className="calendar-panel-header">
         <div className="calendar-panel-heading">
           <div className="calendar-panel-icon">{`\uD83D\uDDD3\uFE0F`}</div>
