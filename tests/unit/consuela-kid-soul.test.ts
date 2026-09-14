@@ -78,6 +78,7 @@ describe("kid tool surface", () => {
   it("reads + summaries only — every write, admin, and logistics tool is gone", () => {
     const names = kidToolNames();
     expect(names).toEqual([
+      "get_calendar_range",
       "get_dashboard_summary",
       "get_family_members",
       "get_grocery_list",

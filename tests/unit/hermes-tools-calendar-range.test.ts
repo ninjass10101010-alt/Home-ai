@@ -30,14 +30,28 @@ describe("get_calendar_range", () => {
     expect(out.error).toBeTruthy();
   });
   it("merges family + google per day with one read each", async () => {
-    rows.events = [{ id: "e1", title: "Dentist", date: "2026-09-12", time: "15:00", member: "Aurora" }];
+    rows.events = [
+      { id: "e1", title: "Dentist", date: "2026-09-12", time: "15:00", member: "Aurora" },
+      { id: "e2", title: "Soccer", date: "2026-09-12", time: "17:00", member: "Rebecca" },
+    ];
     rows.consuela_google_calendar_events = [{ summary: "Field Trip", start_iso: "2026-09-11T09:00:00-04:00" }];
-    rows.members = [{ name: "Aurora", fullName: "Aurora", emoji: "🧚" }];
+    rows.members = [
+      { name: "Aurora", fullName: "Aurora", emoji: "🧚" },
+      { name: "Rebecca", fullName: "Rebecca", emoji: "data:image/webp;base64,AAAA" },
+    ];
     const out = JSON.parse(await getTool("get_calendar_range")!.handler({ start: "2026-09-11", end: "2026-09-12" }));
     expect(out.days["2026-09-11"][0].title).toBe("Field Trip");
     expect(out.days["2026-09-12"][0].title).toBe("Dentist");
+    // Members join parity with liveEvents: text emojis survive as glyphs,
+    // photo avatars (base64) sanitize to 👤, member names resolve to fullName.
+    expect(out.days["2026-09-12"][0].member).toBe("Aurora");
+    expect(out.days["2026-09-12"][0].emoji).toBe("🧚");
+    expect(out.days["2026-09-12"][1].member).toBe("Rebecca");
+    expect(out.days["2026-09-12"][1].emoji).toBe("👤");
+    expect(out.days["2026-09-12"][1].color).toBe("amber");
     expect(listCalls.filter((c) => c.collection === "events")).toHaveLength(1);
     expect(listCalls.filter((c) => c.collection === "consuela_google_calendar_events")).toHaveLength(1);
+    expect(listCalls.filter((c) => c.collection === "members")).toHaveLength(1);
   });
   it("caps the window at 30 days", async () => {
     const out = JSON.parse(await getTool("get_calendar_range")!.handler({ start: "2026-09-10", end: "2026-12-31" }));
@@ -51,6 +65,16 @@ describe("check_conflicts — family events included", () => {
     rows.consuela_google_calendar_events = [];
     const out = JSON.parse(await getTool("check_conflicts")!.handler({
       summary: "Soccer", start: "2026-09-11T15:30:00", end: "2026-09-11T16:30:00",
+    }));
+    expect(out.hasConflict).toBe(true);
+  });
+  it("flags an overlap with a family event whose +1h end wraps past midnight", async () => {
+    // 23:30 + 1h used to roll over to "00:30" on the SAME date string
+    // (end < start) — late-night conflicts were invisible. Regression pin.
+    rows.events = [{ id: "e1", title: "Night Shift", date: "2026-09-11", time: "23:30", member: "Jeffery" }];
+    rows.consuela_google_calendar_events = [];
+    const out = JSON.parse(await getTool("check_conflicts")!.handler({
+      summary: "Movie", start: "2026-09-11T23:00:00", end: "2026-09-11T23:50:00",
     }));
     expect(out.hasConflict).toBe(true);
   });

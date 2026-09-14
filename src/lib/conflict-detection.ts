@@ -194,9 +194,10 @@ export function detectConflicts(input: ConflictCheckInput): Conflict[] {
 }
 
 /** Family `events` row (liveEvents shape: {title, date, time?: "4:00 PM"}) →
- *  the conflict engine's event shape. Timed rows get a 1-hour span; rows
- *  without a parsable time become all-day rows centered at 12:00 with a 0
- *  duration, which only ever conflict on date equality. */
+ *  the conflict engine's event shape. Timed rows get a 1-hour span (clamped at
+ *  23:59 — never wrapping past midnight into an end-before-start row); rows
+ *  without a parsable time become all-day rows centered at 12:00 with a
+ *  one-minute duration, which only ever conflict on date equality. */
 export function familyRowToConflictEvent(e: { id?: string | number; title: string; date: string; time?: string }): GoogleCalendarEvent {
   const m12 = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(String(e.time || "").trim());
   const m24 = /^(\d{1,2}):(\d{2})$/.exec(String(e.time || "").trim());
@@ -209,7 +210,10 @@ export function familyRowToConflictEvent(e: { id?: string | number; title: strin
   }
   const startH = String(h).padStart(2, "0"), startM = String(min).padStart(2, "0");
   const endTotal = h * 60 + min + 60;
-  const endH = String(Math.floor(endTotal / 60) % 24).padStart(2, "0"), endM = String(endTotal % 60).padStart(2, "0");
+  // Clamp at 23:59 — a `% 24` wrap would put the end at 00:30 on the SAME
+  // date string (end < start), so late-night events never conflicted.
+  const endClamped = Math.min(endTotal, 23 * 60 + 59);
+  const endH = String(Math.floor(endClamped / 60)).padStart(2, "0"), endM = String(endClamped % 60).padStart(2, "0");
   return {
     id: `family_${e.id ?? e.title}`, summary: e.title,
     start: { dateTime: `${e.date}T${startH}:${startM}:00` },

@@ -69,23 +69,32 @@ async function liveGoogleEvents(dayISO = localTodayISO()): Promise<any[]> {
 }
 
 /** Family + Google events for an inclusive [start,end] ISO-day range.
- *  Returns null when BOTH live reads failed (unavailable signal). */
+ *  Returns null when BOTH live reads failed (unavailable signal). The members
+ *  read joins once alongside the two event reads — same fullName/emoji/color
+ *  parity as liveEvents (range rows must not leak photo base64 either). */
 async function liveEventsRange(startISO: string, endISO: string): Promise<{ days: Record<string, any[]> } | null> {
-  let family: any[] | null = null;
-  let google: any[] | null = null;
-  try {
-    family = await withAdmin(async (pb) => pb.collection("events").getFullList({
+  const [family, google, members] = await Promise.all([
+    withAdmin(async (pb) => pb.collection("events").getFullList({
       filter: `date>="${startISO}" && date<="${endISO}"`, requestKey: null,
-    }));
-    family = family.map((e: any) => ({ ...e, time: e.time ? formatEventTime(e.time) : undefined }));
-  } catch { family = null; }
-  try {
-    google = await withAdmin(async (pb) => pb.collection("consuela_google_calendar_events").getFullList({
+    })).catch(() => null),
+    withAdmin(async (pb) => pb.collection("consuela_google_calendar_events").getFullList({
       fields: "summary,start_iso,calendar_id", requestKey: null,
-    }));
-  } catch { google = null; }
+    })).catch(() => null),
+    withAdmin(async (pb) => pb.collection("members").getFullList({ requestKey: null })).catch(() => []),
+  ]);
   if (family === null && google === null) return null;
-  return { days: mergeEventsRange(family ?? [], google ?? [], startISO, endISO) };
+  const familyRows = (family ?? []).map((e: any) => {
+    const member = (members ?? []).find((m: any) => m.fullName === e.member || m.name === e.member);
+    return {
+      ...e,
+      time: e.time ? formatEventTime(e.time) : undefined,
+      member: member?.fullName || e.member || "Unknown",
+      emoji: textEmoji(member?.emoji),
+      color: member?.color || "amber",
+      icon: e.icon || "📅",
+    };
+  });
+  return { days: mergeEventsRange(familyRows, google ?? [], startISO, endISO) };
 }
 
 /** Member emoji for TOOL OUTPUT — photo avatars are 100KB+ base64 data URLs;
@@ -1810,6 +1819,7 @@ const KID_TOOL_NAMES: ReadonlySet<string> = new Set([
   "get_weather",
   "get_family_members",
   "get_todays_events",
+  "get_calendar_range",
   "get_todays_schedule",
   "get_pending_tasks",
   "get_weekly_meals",
