@@ -1,5 +1,17 @@
 import { describe, it, expect } from "vitest";
-import { validatePlannerOutput, isPlannerIntent, plannerMaxTokens } from "@/lib/consuela/planner";
+import {
+  validatePlannerOutput,
+  isPlannerIntent,
+  plannerMaxTokens,
+  plannerSystemPrompt,
+} from "@/lib/consuela/planner";
+import type { ContextPack } from "@/lib/consuela/assistant-context";
+
+const MINIMAL_PACK = {
+  roster: [{ name: "Test Family", role: "parent" }],
+  today: { iso: "2026-09-14", weekday: "Mon", yesterdayIso: "2026-09-13", weekStartISO: "2026-09-14", tz: "America/Detroit" },
+  unavailable: [],
+} as unknown as ContextPack;
 
 describe("validatePlannerOutput", () => {
   it("accepts a clean meal_week plan", () => {
@@ -91,6 +103,70 @@ describe("validatePlannerOutput", () => {
       ],
     }));
     expect(r.ok && r.result.buffers.map((b: any) => b.title)).toEqual(["Good"]);
+  });
+
+  // --- Task 10 fold-ins (planner review fixes) -----------------------------
+
+  it("meal_week dedupes repeated (day,mealType) slots FIRST-WINS", () => {
+    const r = validatePlannerOutput("meal_week", JSON.stringify({
+      meal_plan: [
+        { day: "Mon", mealType: "dinner", name: "Winner" },
+        { day: "Mon", mealType: "dinner", name: "Loser duplicate" },
+        { day: "mon", mealType: "Dinner", name: "Loser case-variant duplicate" },
+        { day: "Tue", mealType: "dinner", name: "Other" },
+      ],
+    }));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.result.meal_plan.map((m: any) => m.name)).toEqual(["Winner", "Other"]);
+    }
+  });
+
+  it("isoParseable is a real ISO shape check, not new Date leniency", () => {
+    const r = validatePlannerOutput("schedule_week", JSON.stringify({
+      buffers: [
+        { title: "Real ISO", start: "2026-09-11T14:30", end: "2026-09-11T15:00" },
+        { title: "Space ISO", start: "2026-09-11 14:30", end: "2026-09-11 15:00" },
+        // new Date("14:30") / new Date("2026-09-11") parse fine — the model
+        // must still give a real local ISO TIME for the buffer to land.
+        { title: "Clock only", start: "14:30", end: "15:00" },
+        { title: "Date only", start: "2026-09-11", end: "2026-09-11" },
+      ],
+    }));
+    expect(r.ok && r.result.buffers.map((b: any) => b.title)).toEqual(["Real ISO", "Space ISO"]);
+  });
+
+  it("schedule_week keeps conflicts only as {title,message} objects, cleaned", () => {
+    const r = validatePlannerOutput("schedule_week", JSON.stringify({
+      conflicts: [
+        { title: "Soccer vs. dinner", message: "Overlap 6:00–6:30 PM" },
+        { title: "Missing message" },
+        { title: "  ", message: "Blank title is junk" },
+        "just a string",
+        42,
+      ],
+    }));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.result.conflicts).toEqual([{ title: "Soccer vs. dinner", message: "Overlap 6:00–6:30 PM" }]);
+    }
+  });
+
+  it("schedule_week fails only when the whole payload is junk (empty conflicts stay ok)", () => {
+    const r = validatePlannerOutput("schedule_week", '{"conflicts":[]}');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.result.conflicts).toEqual([]);
+  });
+
+  it("system prompts carry generic placeholders — no real family names, no concrete dates", () => {
+    const task = plannerSystemPrompt("task_ideas", MINIMAL_PACK);
+    const reward = plannerSystemPrompt("reward_ideas", MINIMAL_PACK);
+    const schedule = plannerSystemPrompt("schedule_week", MINIMAL_PACK);
+    expect(task).not.toMatch(/"assignee":"Emily"/);
+    expect(task).toMatch(/"assignee":"<roster member>"/);
+    expect(reward).not.toMatch(/"assignee":"Caspian"/);
+    expect(reward).toMatch(/"assignee":"<roster member>"/);
+    expect(schedule).not.toMatch(/2026-09-11/);
   });
 });
 

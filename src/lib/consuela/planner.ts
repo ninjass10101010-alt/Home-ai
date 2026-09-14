@@ -48,13 +48,13 @@ const PLANNER_SYSTEM: Record<PlannerIntent, string> = {
     'Respond with ONLY a JSON object: {"actions":[{"type":"meal","title":"Sheet-pan gnocchi","detail":"One pan, ready in 25 min","emoji":"🍝"}]}.',
   task_ideas:
     "You are Consuela, the family dashboard's task coach. Suggest age-appropriate chores for the REAL kids in the roster below with fair point values — assignees must be roster members. " +
-    'Respond with ONLY a JSON object: {"actions":[{"type":"task","title":"Fold laundry","detail":"After the wash is dry","assignee":"Emily","points":8,"emoji":"🧺"}]} — points are 1..100.',
+    'Respond with ONLY a JSON object: {"actions":[{"type":"task","title":"Fold laundry","detail":"After the wash is dry","assignee":"<roster member>","points":8,"emoji":"🧺"}]} — points are 1..100.',
   reward_ideas:
     "You are Consuela, the family dashboard's reward coach. Suggest rewards the kids on the roster are actually saving toward, priced against the shop catalog below. " +
-    'Respond with ONLY a JSON object: {"actions":[{"type":"reward","title":"Extra screen time","detail":"30 minutes on a weekend day","assignee":"Caspian","points":60,"emoji":"📱"}]} — points are 1..100.',
+    'Respond with ONLY a JSON object: {"actions":[{"type":"reward","title":"Extra screen time","detail":"30 minutes on a weekend day","assignee":"<roster member>","points":60,"emoji":"📱"}]} — points are 1..100.',
   schedule_week:
     "You are Consuela, the family dashboard's scheduling agent. Read the calendar digest below: flag real overlaps, propose buffers worth protecting, then 2–3 plain-language planning lines. " +
-    'Respond with ONLY a JSON object: {"conflicts":[{"title":"Soccer vs. dinner","detail":"…"}],"buffers":[{"title":"Drive to soccer","start":"2026-09-11T14:30","end":"2026-09-11T15:00"}],"suggestions":["Quiet Fri eve"]} — buffer start/end are local ISO times.',
+    'Respond with ONLY a JSON object: {"conflicts":[{"title":"Soccer vs. dinner","message":"Overlaps pickup by 30 min"}],"buffers":[{"title":"Drive to soccer","start":"<ISO start>","end":"<ISO end>"}],"suggestions":["Quiet Fri eve"]} — buffer start/end are local ISO times (YYYY-MM-DDTHH:MM).',
 };
 
 export function plannerSystemPrompt(intent: PlannerIntent, pack: ContextPack): string {
@@ -171,19 +171,27 @@ function cleanStringArray(v: unknown): string[] {
 
 function isoParseable(v: unknown): v is string {
   const s = trimmedString(v);
-  return !!s && !Number.isNaN(new Date(s).getTime());
+  // A real local ISO TIME ("YYYY-MM-DDTHH:MM", space separator tolerated) —
+  // NOT new Date() leniency, which parses "14:30" and bare dates alike.
+  return /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(s);
 }
 
 function validateMealWeek(obj: Record<string, any>): PlannerValidation {
   const entries = obj.meal_plan;
   if (!Array.isArray(entries)) return fail();
   const kept: Record<string, any>[] = [];
+  // FIRST-WINS per (day,mealType): the 28-slot consumer must never have to
+  // pick a winner between two rows for the same slot.
+  const slots = new Set<string>();
   for (const raw of entries) {
     if (!raw || typeof raw !== "object") continue;
     const day = matchEnum(raw.day, WEEKDAYS);
     const mealType = matchEnum(raw.mealType, MEAL_TYPES);
     const name = trimmedString(raw.name);
     if (!day || !mealType || !name) continue;
+    const slot = `${day}-${mealType}`;
+    if (slots.has(slot)) continue;
+    slots.add(slot);
     const entry: Record<string, any> = { day, mealType, name };
     const emoji = trimmedString(raw.emoji);
     if (emoji) entry.emoji = emoji;
@@ -234,7 +242,19 @@ function validateSchedule(obj: Record<string, any>): PlannerValidation {
   // At least one expected array must be present — an unrelated object is the
   // wrong shape (e.g. the model answering a schedule_week with meal_plan).
   if (!keys.some((k) => Array.isArray(obj[k]))) return fail();
-  const conflicts = Array.isArray(obj.conflicts) ? obj.conflicts : [];
+  // Conflicts are consumer-rendered rows: validate them as objects with
+  // string title/message fields and pass the CLEANED shape, never raw model
+  // junk (strings, numbers, missing fields).
+  const conflicts: Record<string, any>[] = [];
+  if (Array.isArray(obj.conflicts)) {
+    for (const raw of obj.conflicts) {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+      const title = trimmedString(raw.title);
+      const message = trimmedString(raw.message);
+      if (!title || !message) continue;
+      conflicts.push({ title, message });
+    }
+  }
   const suggestions = cleanStringArray(obj.suggestions);
   const buffers: Record<string, any>[] = [];
   if (Array.isArray(obj.buffers)) {

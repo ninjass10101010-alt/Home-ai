@@ -44,11 +44,11 @@ async function mount() {
 }
 
 let lastBody: any = null;
-function stubFetch(content: string) {
+function stubFetch(result: any) {
   lastBody = null;
   vi.stubGlobal("fetch", vi.fn(async (_url: any, opts: any) => {
     lastBody = JSON.parse(opts.body);
-    return { ok: true, json: async () => ({ content }) };
+    return { ok: true, json: async () => ({ ok: true, intent: "meal_week", result }) };
   }));
 }
 
@@ -67,37 +67,41 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-describe("generateWeeklyPlan day scope", () => {
-  it("day scope: prompts for the single day and inserts only that day's meals", async () => {
+describe("generateWeeklyPlan day scope (planner contract)", () => {
+  it("day scope: posts {agent,intent,options:{weekOf,days}} and inserts only that day's meals", async () => {
     await mount();
-    stubFetch(JSON.stringify({
+    stubFetch({
       meal_plan: [entry("Wed", "breakfast", "Oats"), entry("Thu", "dinner", "Tacos"), entry("Fri", "lunch", "Subs")],
-    }));
+    });
     await act(async () => { await result.generateWeeklyPlan("2026-09-01", false, ["Wed"]); });
-    expect(lastBody.message).toContain("Wednesday only");
-    expect(lastBody.message).not.toContain("complete week");
+    expect(lastBody).toEqual({
+      agent: "planner",
+      intent: "meal_week",
+      options: { weekOf: "2026-09-01", days: ["Wed"] },
+    });
+    expect(lastBody.message).toBeUndefined();
     const names = h.meals.map((m) => m.name);
     expect(names).toEqual(["Oats"]);
     expect(h.meals[0].time).toBe("Wed");
     expect(h.meals[0].weekOf).toBe("2026-09-01");
   });
 
-  it("week mode unchanged: prompts for the full week and inserts every returned day", async () => {
+  it("week mode: options carry no days scope and every returned day is inserted", async () => {
     await mount();
-    stubFetch(JSON.stringify({
+    stubFetch({
       meal_plan: [entry("Wed", "dinner", "Tacos"), entry("Thu", "dinner", "Curry")],
-    }));
+    });
     await act(async () => { await result.generateWeeklyPlan("2026-09-01", false); });
-    expect(lastBody.message).toContain("complete week");
+    expect(lastBody).toEqual({ agent: "planner", intent: "meal_week", options: { weekOf: "2026-09-01" } });
     expect(h.meals.map((m) => m.name).sort()).toEqual(["Curry", "Tacos"]);
   });
 
   it("day scope still skips slots already planned that day", async () => {
     h.meals.push({ id: 99, name: "Planned Dinner", time: "Wed", mealType: "dinner", weekOf: "2026-09-01" });
     await mount();
-    stubFetch(JSON.stringify({
+    stubFetch({
       meal_plan: [entry("Wed", "dinner", "AI Dinner"), entry("Wed", "breakfast", "Pancakes")],
-    }));
+    });
     await act(async () => { await result.generateWeeklyPlan("2026-09-01", false, ["Wed"]); });
     const names = h.meals.map((m) => m.name);
     expect(names).toContain("Planned Dinner");

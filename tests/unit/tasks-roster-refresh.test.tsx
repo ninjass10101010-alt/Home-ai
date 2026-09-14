@@ -45,10 +45,13 @@ async function settle(ms = 120) {
   await act(async () => { await new Promise((r) => setTimeout(r, ms)); });
 }
 
-function stubFetch(aiContent?: string) {
-  vi.stubGlobal("fetch", vi.fn(async (input: any) => {
-    if (String(input).includes("/api/hermes/chat") && aiContent !== undefined) {
-      return { ok: true, status: 200, json: async () => ({ content: aiContent }) };
+let lastHermesBody: any = null;
+function stubFetch(plannerResponse?: any) {
+  lastHermesBody = null;
+  vi.stubGlobal("fetch", vi.fn(async (input: any, opts?: any) => {
+    if (String(input).includes("/api/hermes/chat")) {
+      lastHermesBody = opts?.body ? JSON.parse(opts.body) : null;
+      return { ok: true, status: 200, json: async () => plannerResponse ?? { ok: false, reason: "provider_unavailable" } };
     }
     return { ok: true, status: 200, json: async () => ({ ok: true, snapshot: null }) };
   }));
@@ -97,8 +100,17 @@ describe("Tasks page live roster (consuela-members-updated)", () => {
     expect(img!.getAttribute("src")).toBe(PHOTO);
   });
 
-  it("AI suggestions with a photo assignee render through Avatar (an <img>), never raw base64 text", async () => {
-    stubFetch('{"actions":[{"type":"task","title":"Walk the dog","detail":"Emily · 5pts","emoji":""}]}');
+  it("AI suggestions post a planner intent, render photo assignees through Avatar, and drop unknown assignees", async () => {
+    stubFetch({
+      ok: true,
+      intent: "task_ideas",
+      result: {
+        actions: [
+          { type: "task", title: "Walk the dog", assignee: "Emily", points: 5 },
+          { type: "task", title: "Phantom kid chore", assignee: "Nobody Real", points: 5 },
+        ],
+      },
+    });
     rosterMock.members = [
       { id: 1, name: "Rebecca", fullName: "Rebecca (Mom)", role: "parent", emoji: "👩", color: "violet" },
       { id: 3, name: "Emily", fullName: "Emily", role: "child", emoji: PHOTO, color: "rose" },
@@ -113,8 +125,14 @@ describe("Tasks page live roster (consuela-members-updated)", () => {
     });
     await settle(300);
 
+    // Real request body: planner intent only — no handcrafted prompt, no Caspian.
+    expect(lastHermesBody).toEqual({ agent: "planner", intent: "task_ideas" });
+    expect(lastHermesBody.message).toBeUndefined();
+
     const card = Array.from(el.querySelectorAll("div")).find((n) => n.textContent?.includes("Walk the dog"));
     expect(card).toBeTruthy();
+    // Off-roster assignee is dropped outright (never defaulted onto a named kid).
+    expect(el.textContent).not.toContain("Phantom kid chore");
     // Photo assignee must render as a real <img> (Avatar → SigmaImage)…
     const img = card!.querySelector("img");
     expect(img).not.toBeNull();

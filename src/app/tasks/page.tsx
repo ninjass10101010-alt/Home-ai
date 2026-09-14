@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef, type CSSProperties } from "react";
-import { extractActions } from "@/lib/ai-response";
+import { mapTaskIdeas, mapRewardIdeas } from "@/lib/ai-suggestions";
 import PageShell from "@/components/ui/PageShell";
 import PageHeader from "@/components/patterns/PageHeader";
 import SectionCard from "@/components/patterns/SectionCard";
@@ -178,7 +178,7 @@ function emptyTask(firstMember?: { name?: string; emoji?: string }): Task {
   return {
     id: Date.now(),
     title: "",
-    assignee: firstMember?.name || "Caspian",
+    assignee: firstMember?.name || "",
     assigneeEmoji: firstMember?.emoji || "🧒",
     due: todayISO(),
     points: 5,
@@ -625,34 +625,18 @@ export default function TasksPage() {
 
   const generateAiTasks = async () => {
     setAiSuggesting(true);
-    const familyList = membersData.filter((m: any) => m.role !== "pet").map((m: any) => `${m.name} (${(m as any).age || "?"}yo)`).join(", ");
     try {
       const res = await fetch('/api/hermes/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: `Suggest 4 age-appropriate chores for the Garcia family: ${familyList}. Adults can handle harder tasks (15-25pts). Kids get easier tasks based on their age (5-15pts). Return as JSON: {"actions":[{"type":"task","title":"...","detail":"AssigneeName · Xpts","emoji":"..."}]}. Make them varied (chores, pets, school, helping, errands).`
-        }),
+        body: JSON.stringify({ agent: "planner", intent: "task_ideas" }),
       });
       const data = await res.json();
-      const actions = extractActions(data.content || "");
-      const suggestions: Task[] = actions.filter((a: any) => a.type === "task").map((a: any) => {
-        const assignee = a.detail?.split("·")?.[0]?.trim() || "Caspian";
-        const points = parseInt(a.detail?.match(/(\d+)\s*pts?/)?.[1] || "8");
-        const member = membersData.find((m: any) => m.fullName.startsWith(assignee) || m.name.startsWith(assignee) || assignee.startsWith(m.name));
-        return {
-          id: uid(),
-          title: a.title,
-          assignee: member?.fullName || assignee,
-          assigneeEmoji: member?.emoji || "🧒",
-          due: getISO.today,
-          points,
-          recurring: null,
-          category: "AI Suggested",
-          completed: false,
-          priority: points >= 15 ? "high" : points >= 10 ? "medium" : "low",
-        } as Task;
-      });
+      // Validated planner rows only; an assignee that isn't on the live
+      // roster drops the suggestion (never defaulted onto a named family member).
+      const suggestions = data.ok
+        ? mapTaskIdeas(data.result?.actions, membersData, { nextId: uid, today: getISO.today })
+        : [];
       if (suggestions.length > 0) {
         setAiSuggestions(suggestions);
       } else {
@@ -1152,18 +1136,11 @@ export default function TasksPage() {
       const res = await fetch('/api/hermes/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: `Suggest 4 fun rewards for the Garcia family. Mix small (10-30pts), medium (40-75pts), and big (80-200pts) rewards. Return as JSON: {"actions":[{"type":"reward","title":"Reward Name","detail":"Cost pts","emoji":"🎁"}]}. Make them exciting for kids!`
-        }),
+        body: JSON.stringify({ agent: "planner", intent: "reward_ideas" }),
       });
       const data = await res.json();
-      const actions = extractActions(data.content || "");
-      const ideas: Reward[] = actions.filter((a: any) => a.type === "reward" || a.type === "task").map((a: any, i: number) => ({
-        id: Date.now() + i,
-        name: a.title,
-        emoji: a.emoji || "🎁",
-        cost: parseInt(a.detail?.match(/(\d+)/)?.[1] || "50"),
-      }));
+      // Priced from validated points — the old "Cost pts" detail regex is gone.
+      const ideas = data.ok ? mapRewardIdeas(data.result?.actions) : [];
       if (ideas.length > 0) {
         setAiRewards(ideas);
       } else {

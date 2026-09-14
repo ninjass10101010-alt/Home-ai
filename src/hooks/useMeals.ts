@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from "react";
 import { db } from "@/db";
 import { Meal } from "@/types/meals";
 import { todayMondayISO, shiftWeek } from "@/lib/meals-week-utils";
-import { extractActions } from "@/lib/ai-response";
 import { saveOrQueue, type PendingWrite } from "@/lib/pending-writes";
 
 const MEALS_KEY = "consuela-meals";
@@ -101,19 +100,15 @@ export function useMeals() {
     setShowAiSuggestions(true);
     setAiMealError(null);
     try {
-      const pantry = (await db.selectPantry()).map((p: any) => p.name || p.item).join(", ");
       const res = await fetch('/api/hermes/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: `Suggest 4 meal ideas for a family of 7 (kids ages 5-14). Pantry has: ${pantry || "basic ingredients"}. Return as JSON: {"actions":[{"type":"meal","title":"Meal Name","detail":"Prep time · Kid-friendly tags","emoji":"🍝"}]}. Make them varied, practical, and family-friendly.`,
-        }),
+        body: JSON.stringify({ agent: "planner", intent: "meal_ideas" }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to get suggestions");
-      const actions = extractActions(data.content || "");
-      const ideas = actions
-        .filter((a: any) => a.type === "meal")
+      if (!res.ok || !data.ok) throw new Error("Failed to get suggestions");
+      // Planner-validated actions: {type:"meal", title, detail?, emoji?}
+      const ideas = (data.result?.actions || [])
         .map((a: any) => ({
           name: a.title || a.name,
           emoji: a.emoji || "🍽️",
@@ -132,38 +127,22 @@ export function useMeals() {
     setWeeklyPlanLoading(true);
     setWeeklyPlanError(null);
     try {
-      const pantry = (await db.selectPantry()).map((p: any) => p.name || p.item).join(", ");
-      const dayList = days?.join(", ") || "Mon, Tue, Wed, Thu, Fri, Sat, Sun";
-      const coverage = days?.length
-        ? `Cover breakfast, lunch, snack, and dinner for ${dayList} only (${days.length * 4} entries).`
-        : "Cover breakfast, lunch, snack, and dinner for Mon, Tue, Wed, Thu, Fri, Sat, Sun.";
-      const FULL_DAYS: Record<string, string> = { Mon: "Monday", Tue: "Tuesday", Wed: "Wednesday", Thu: "Thursday", Fri: "Friday", Sat: "Saturday", Sun: "Sunday" };
-      const dayPhrase = days?.length ? `${days.map((d) => FULL_DAYS[d] || d).join(", ")} only — a day of meals` : "a complete week of meals";
       const res = await fetch('/api/hermes/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: `Generate ${dayPhrase} for a family of 7 (kids ages 5-14). Daily targets: 2000 kcal, 150g protein, 300g carbs, 65g fat. Pantry has: ${pantry || "basic ingredients"}. Return ONLY JSON as {"meal_plan":[ ... ${days?.length ? days.length * 4 : 28} entries ... ]} — each entry: {"day":"Mon","mealType":"breakfast","name":"Meal Name","emoji":"🍳","tags":["Kid-friendly","Quick"],"prepTime":"30 min"}. ${coverage} No prose, just the JSON.`,
-          persist: false,
+          agent: "planner",
+          intent: "meal_week",
+          options: days?.length ? { weekOf, days } : { weekOf },
         }),
       });
       if (!res.ok) throw new Error("Failed to generate plan");
       const data = await res.json();
+      // The route's honest failure ({ok:false, reason}) surfaces in the
+      // existing weeklyPlanError pill — Consuela never invents a plan.
+      if (!data.ok) throw new Error("Failed to generate plan");
 
-      let planItems: any[] = [];
-      try {
-        planItems = extractActions(data.content || "");
-      } catch {
-        planItems = [];
-      }
-      if (!planItems.length) {
-        try {
-          const parsed = JSON.parse(data.content || "{}");
-          planItems = parsed.meal_plan || parsed.meals || parsed.actions || [];
-        } catch {
-          planItems = [];
-        }
-      }
+      let planItems: any[] = Array.isArray(data.result?.meal_plan) ? data.result.meal_plan : [];
 
       if (days?.length) {
         const scope = new Set(days.map((d) => d.toLowerCase()));
