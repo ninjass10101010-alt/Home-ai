@@ -6,6 +6,7 @@ import type { WeekData } from "@/types/tasks";
 import { getHAWebSocketClient } from "@/lib/ha/websocket-client";
 import { calculateCheapestSplit, formatStoreTotal, PINNED_STORES } from "@/lib/stores";
 import { localTodayISO, localWeekdayShort, familyTimeZone, weekdayOfISO, localWeekStartISO } from "@/lib/local-date";
+import { fetchLiveWeather } from "@/lib/weather-live";
 import { weekStartForDate, isoDateForWeekday } from "@/lib/meals-week-utils";
 import { storeMemory, queryMemories, deleteMemory, incrementMemoryUsage, type MemoryCategory } from "@/lib/family-memory";
 import { MEMORY_USER_ID, MEMORY_FAMILY_ID } from "@/lib/memory-ids";
@@ -436,30 +437,13 @@ const TOOLS: Tool[] = [
   {
     definition: {
       name: "get_weather",
-      description: "Get today's weather summary for the family. This is a simulated weather report based on the current season. Returns temperature, condition, and a brief forecast.",
+      description: "Get today's REAL live weather for the family (Open-Meteo, Fahrenheit). Returns current temperature, feels-like, high/low, condition, and precipitation chance. Never invent weather — if this tool reports an error, say the weather data is unavailable.",
       parameters: { type: "object", properties: {}, required: [] },
     },
     handler: async () => {
-      const now = new Date();
-      const month = now.getMonth();
-      const hour = now.getHours();
-      const season = month < 2 || month === 11 ? "winter" : month < 5 ? "spring" : month < 8 ? "summer" : "autumn";
-      const temps: Record<string, { high: number; low: number; condition: string }> = {
-        spring: { high: 65, low: 45, condition: "Partly cloudy with light showers possible" },
-        summer: { high: 85, low: 65, condition: "Warm and sunny" },
-        autumn: { high: 58, low: 40, condition: "Cool with scattered clouds" },
-        winter: { high: 35, low: 22, condition: "Cold with possible snow flurries" },
-      };
-      const t = temps[season];
-      const timeLabel = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
-      return summarize({
-        season,
-        current_temp: timeLabel === "afternoon" ? t.high : timeLabel === "evening" ? t.low + 10 : t.low + 5,
-        high: t.high,
-        low: t.low,
-        condition: t.condition,
-        time_of_day: timeLabel,
-      });
+      const w = await fetchLiveWeather();
+      if (!w.ok) return summarize({ error: "weather data unavailable — do not guess the weather" });
+      return summarize({ today: localTodayISO(), current_temp: w.data.tempF, feels_like: w.data.feelsLikeF, high: w.data.highF, low: w.data.lowF, condition: w.data.condition, precip_chance: `${w.data.precipProb}%`, units: "Fahrenheit" });
     },
   },
   {
