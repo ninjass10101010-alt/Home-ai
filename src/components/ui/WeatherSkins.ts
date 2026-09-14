@@ -124,7 +124,7 @@ const NIGHT_ACCENTS: { test: (code: number) => boolean; accent: string }[] = [
 // school-closing, boots-by-the-door event. The classifier is the shared pure
 // module (src/lib/weather-severity.ts); re-exported here so existing
 // `import { severeFamily } from "./WeatherSkins"` call sites keep working.
-import { severeFamily, HEAVY_SNOW_CODES } from "@/lib/weather-severity";
+import { severeFamily, HEAVY_SNOW_CODES, type SevereKind } from "@/lib/weather-severity";
 export { severeFamily, HEAVY_SNOW_CODES };
 export type { SevereKind } from "@/lib/weather-severity";
 

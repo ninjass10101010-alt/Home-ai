@@ -36,6 +36,7 @@ const KIND_LABELS: Record<SuggestionKind, string> = {
   calendar_conflict: "📅 Calendar",
   stale_data: "🍽️ Meals",
   grocery_store_optimization: "🛒 Grocery",
+  routine_due: "🕐 Routines",
   custom: "✨ Custom",
 };
 
