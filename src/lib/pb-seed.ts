@@ -223,7 +223,7 @@ export const COLLECTIONS = [
     name: "proactive_suggestions",
     schema: [
       { name: "idempotencyHash", type: "text", required: true },
-      { name: "kind", type: "select", options: { values: ["pantry_low","task_penalty_streak","calendar_conflict","stale_data","custom","grocery_store_optimization"] } },
+      { name: "kind", type: "select", options: { values: ["pantry_low","task_penalty_streak","calendar_conflict","stale_data","custom","grocery_store_optimization","routine_due"] } },
       { name: "severity", type: "select", options: { values: ["info","warn","alert"] } },
       { name: "title", type: "text", required: true },
       { name: "body", type: "text" },

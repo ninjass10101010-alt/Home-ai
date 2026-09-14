@@ -1,4 +1,4 @@
-export type SuggestionKind = "pantry_low" | "task_penalty_streak" | "calendar_conflict" | "stale_data" | "grocery_store_optimization" | "custom";
+export type SuggestionKind = "pantry_low" | "task_penalty_streak" | "calendar_conflict" | "stale_data" | "grocery_store_optimization" | "routine_due" | "custom";
 export type SuggestionSeverity = "info" | "warn" | "alert";
 export type SuggestionStatus = "pending" | "dismissed" | "actioned" | "snoozed";
 

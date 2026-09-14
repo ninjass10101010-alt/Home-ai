@@ -3,6 +3,8 @@ import { withAdmin } from "@/lib/pb-auth";
 import { weekStartForDate } from "@/lib/meals-week-utils";
 import { weekKey } from "@/lib/task-utils";
 import { localTodayISO, localPreviousDayISO } from "@/lib/local-date";
+import { scheduleCoversWeekday, scheduleTimeMinutes, formatScheduleTime12h } from "@/lib/schedule-time";
+import { ROUTINE_LEAD_MS } from "@/lib/ha/alerts";
 import type { NewSuggestion } from "./types";
 import { conditionKey } from "./suggestion-key";
 
@@ -203,6 +205,48 @@ export async function scanStaleData(scopeDate: string): Promise<NewSuggestion[]>
   return [];
 }
 
+// Routines due soon — the in-app "schedule" tier. Today's Family Routines
+// (the `schedules` collection, weekday-matched) that start within ~30 min
+// surface as a routine_due suggestion (never pushed to phones). expiresAt is
+// the routine's start time, so the "due soon" chip vanishes once it's due and
+// (with the fetchExistingConditionKeys expiry filter) the routine can re-surface
+// the next day.
+export async function scanRoutinesDue(scopeDate: string, now: Date = new Date()): Promise<NewSuggestion[]> {
+  const schedules = await withAdmin(async (pb) =>
+    pb.collection("schedules").getFullList({ requestKey: null }) as unknown as Array<{
+      id: string; title?: string; time?: string; days?: string; icon?: string;
+    }>
+  );
+  const weekdayShort = now.toLocaleString("en-US", { weekday: "short" }); // "Wed"
+  const wdIndex = (["sun", "mon", "tue", "wed", "thu", "fri", "sat"].indexOf(weekdayShort.toLowerCase()) + 7) % 7;
+  const nowM = now.getHours() * 60 + now.getMinutes();
+  const leadMin = ROUTINE_LEAD_MS / 60000;
+
+  const out: NewSuggestion[] = [];
+  for (const s of schedules) {
+    if (!scheduleCoversWeekday(s.days, weekdayShort, wdIndex)) continue;
+    const mins = scheduleTimeMinutes(s.time);
+    if (mins == null) continue;
+    const delta = mins - nowM;
+    if (delta <= 0 || delta > leadMin) continue;
+    const startISO = new Date(
+      now.getFullYear(), now.getMonth(), now.getDate(), Math.floor(mins / 60), mins % 60
+    ).toISOString();
+    out.push({
+      kind: "routine_due",
+      severity: "info",
+      title: `${s.title || "Routine"} · at ${formatScheduleTime12h(s.time)}`,
+      body: `Starting in about ${Math.round(delta)} min.`,
+      emoji: s.icon || "🕐",
+      actionLabel: "View calendar",
+      actionPayload: { tool: "open_calendar", args: { date: scopeDate } },
+      scopeDate,
+      expiresAt: startISO,
+    });
+  }
+  return out;
+}
+
 // C1 — engine-level condition dedup: keep exactly ONE pending row per
 // condition (kind + normalized title), regardless of scopeDate or snooze
 // state. Without this, a persistent condition (pantry low, no-meals-this-week,
@@ -214,9 +258,13 @@ export async function scanStaleData(scopeDate: string): Promise<NewSuggestion[]>
 // on — intended.
 // Condition identity for dedup lives in ./suggestion-key (pure, unit-tested).
 async function fetchExistingConditionKeys(): Promise<Set<string>> {
+  const nowISO = new Date().toISOString();
   return withAdmin(async (pb) => {
     const rows = await pb.collection("proactive_suggestions").getFullList({
-      filter: 'status="pending"',
+      // Ignore expired rows so a transient notice (e.g. routine_due) that has
+      // passed its start time stops blocking the next day's re-fire. Unset
+      // expiresAt is stored as "" in PB and must stay in the dedupe set.
+      filter: `status="pending" && (expiresAt = "" || expiresAt > "${nowISO}")`,
       requestKey: null,
     }) as unknown as Array<{ kind?: string; title?: string }>;
     return new Set(rows.map((r) => conditionKey(r.kind, r.title)));
@@ -224,7 +272,7 @@ async function fetchExistingConditionKeys(): Promise<Set<string>> {
 }
 
 export async function runEngine({ scopeDate }: { scopeDate: string }): Promise<{ scanned: number; inserted: number; rejected: number }> {
-  const scanners = [scanPantryLow, scanTaskPenaltyStreak, scanCalendarConflicts, scanStaleData, scanGroceryStoreOptimization];
+  const scanners = [scanPantryLow, scanTaskPenaltyStreak, scanCalendarConflicts, scanStaleData, scanGroceryStoreOptimization, scanRoutinesDue];
   const results = await Promise.all(scanners.map(async (s) => {
     try {
       return await s(scopeDate);
