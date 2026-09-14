@@ -17,14 +17,20 @@ export interface StreamConsuelaChatOptions {
   signal?: AbortSignal;
   /** Called per token with the full content so far and the new delta. */
   onToken?: (fullContent: string, delta: string) => void;
-  /** Called per tool-status event with a friendly label. */
-  onStatus?: (label: string) => void;
+  /** Called per tool-status event with a friendly label and the parsed frame
+   *  payload (a propose_point_adjustment status carries `proposal` — the
+   *  chat page renders the parent-PIN confirm chip from it). The second
+   *  argument is optional, so existing (label) callers keep compiling. */
+  onStatus?: (label: string, data?: Record<string, unknown>) => void;
 }
 
 export interface StreamConsuelaChatResult {
   content: string;
   /** false = the route answered buffered (Hermes streaming unavailable). */
   streamed: boolean;
+  /** Buffered-path sibling of a streamed proposal status frame (Task 15):
+   *  inert point-adjustment proposals awaiting a parent's PIN in the UI. */
+  proposals?: unknown[];
 }
 
 export interface SSEFrame {
@@ -95,7 +101,11 @@ export async function streamConsuelaChat(opts: StreamConsuelaChatOptions): Promi
     // emitting the whole reply early would let callers render before their
     // thinking-floor/animation beat. The caller sets the final content after
     // the await (gated on `streamed: false`).
-    return { content, streamed: false };
+    return {
+      content,
+      streamed: false,
+      proposals: Array.isArray(data.proposals) ? data.proposals : undefined,
+    };
   }
 
   const reader = res.body.getReader();
@@ -137,7 +147,7 @@ export async function streamConsuelaChat(opts: StreamConsuelaChatOptions): Promi
         if (frame.event === "status") {
           try {
             const p = JSON.parse(frame.data);
-            if (p.label) opts.onStatus?.(String(p.label));
+            if (p.label) opts.onStatus?.(String(p.label), p);
           } catch { /* malformed status frame — ignore */ }
         } else if (frame.event === "error") {
           try {

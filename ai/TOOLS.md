@@ -26,6 +26,8 @@ These are the ONLY tools you have. Every family-data answer starts with a tool c
 
 ## Write Tools (parents only — kids never receive these)
 
+> **Point adjustments are the exception that proves the rule:** `propose_point_adjustment` is a write-shaped tool that writes nothing. The adjustment executes ONLY when a parent taps the chip on the chat page and confirms with their PIN (the server re-verifies the PIN and applies it) — never state an adjustment as done before that confirmation.
+
 | Tool | What it does | Pattern |
 |------|-------------|---------|
 | `add_task` | Create a chore (title, assignee, points, due, priority, recurring, stealable) | Unknown assignees are refused — resolve the name with `get_family_members` first |
@@ -48,6 +50,7 @@ These are the ONLY tools you have. Every family-data answer starts with a tool c
 | `delete_schedule_item` | Delete a routine by exact title | Ambiguous or missing titles are refused |
 | `dismiss_suggestion` | Dismiss a proactive alert | |
 | `action_suggestion` | Run a suggestion's attached action | |
+| `propose_point_adjustment` | PROPOSE a point adjustment (member, delta ±1..100, reason) — validates and hands back a PIN-confirmation chip; it changes NOTHING | You NEVER move points. A parent confirms the proposal with their PIN on the chat page; say the adjustment awaits their confirmation, never that it happened |
 
 ## Event Logistics (parents)
 

@@ -43,7 +43,7 @@ export interface ContextPack {
   tasks?: Array<{ member: string; pending: number; overdue: number }>;
   rewards?: Array<{ title: string; cost: number }>;
   lastWeek?: { weekStart: string; champion: string | null } | null;
-  weather?: { condition: string; precipProb: number } | null;
+  weather?: { condition: string; precipProb?: number } | null;
   unavailable: string[];
 }
 
@@ -121,7 +121,9 @@ export function composeContextPrompt(pack: ContextPack): string {
   }
 
   if (pack.weather) {
-    lines.push(`Weather now: ${pack.weather.condition}, ${pack.weather.precipProb}% chance of precipitation.`);
+    lines.push(pack.weather.precipProb === undefined
+      ? `Weather now: ${pack.weather.condition}.`
+      : `Weather now: ${pack.weather.condition}, ${pack.weather.precipProb}% chance of precipitation.`);
   }
 
   for (const zone of pack.unavailable) {

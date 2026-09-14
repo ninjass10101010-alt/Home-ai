@@ -247,7 +247,8 @@ const TOOLS: Tool[] = [
     handler: async () => {
       const w = await fetchLiveWeather();
       if (!w.ok) return summarize({ error: "weather data unavailable — do not guess the weather" });
-      return summarize({ today: localTodayISO(), current_temp: w.data.tempF, feels_like: w.data.feelsLikeF, high: w.data.highF, low: w.data.lowF, condition: w.data.condition, precip_chance: `${w.data.precipProb}%`, units: "Fahrenheit" });
+      const precip = w.data.precipProb;
+      return summarize({ today: localTodayISO(), current_temp: w.data.tempF, feels_like: w.data.feelsLikeF, high: w.data.highF, low: w.data.lowF, condition: w.data.condition, precip_chance: precip === undefined ? undefined : `${precip}%`, units: "Fahrenheit" });
     },
   },
   {
@@ -2112,6 +2113,68 @@ const TOOLS: Tool[] = [
           emoji: r.emoji,
           description: r.description || null,
         })),
+      });
+    },
+  },
+  {
+    definition: {
+      name: "propose_point_adjustment",
+      description:
+        "PROPOSE a one-off point adjustment (+/-1..100 with a reason) for one family member. " +
+        "This NEVER moves points by itself — it only validates and returns an inert proposal " +
+        "that a parent must confirm with their PIN on the chat screen. Use when a parent asks to " +
+        "add/give/deduct points as a reward or correction (e.g. 'add 10 points to Emily for " +
+        "carrying groceries'). Say the proposal awaits the parent's confirmation — never claim " +
+        "the points changed.",
+      parameters: {
+        type: "object",
+        properties: {
+          member: { type: "string", description: "Family member — exact or start of their name" },
+          delta: { type: "number", description: "Points to add (positive) or remove (negative), whole number, -100..100, never 0" },
+          reason: { type: "string", description: "Why, shown verbatim on the confirm chip (max 200 chars)" },
+        },
+        required: ["member", "delta", "reason"],
+      },
+    },
+    handler: async (args: any) => {
+      // VALIDATE ONLY — nothing is written here. The chat page turns the
+      // proposal into a PIN chip; /api/consuela/planner/apply is the ONLY
+      // path that moves points, and only behind an adult PIN.
+      const raw = String(args.member ?? "").trim();
+      const delta = Number(args.delta);
+      const reason = String(args.reason ?? "").trim();
+      if (!raw) {
+        return summarize({ ok: false, error: "a family member name is required — call get_family_members to see the roster" });
+      }
+      if (!Number.isInteger(delta) || delta === 0 || delta < -100 || delta > 100) {
+        return summarize({ ok: false, error: "delta must be a whole number of points between -100 and 100, never 0" });
+      }
+      if (!reason) {
+        return summarize({ ok: false, error: "a reason is required (e.g. 'helping carry groceries')" });
+      }
+      if (reason.length > 200) {
+        return summarize({ ok: false, error: "reason must be 200 characters or fewer" });
+      }
+      const members = await liveMembers();
+      if (members === null) {
+        return summarize({ ok: false, error: "member data unavailable — call get_family_members first" });
+      }
+      const search = raw.toLowerCase();
+      const match = members.find((m: any) => {
+        const name = String(m.fullName || m.name || "").toLowerCase();
+        return name === search || name.startsWith(search);
+      });
+      if (!match) {
+        return summarize({
+          ok: false,
+          error: `unknown member "${raw}" — call get_family_members to see the roster, then retry`,
+        });
+      }
+      const member = String(match.fullName || match.name);
+      return summarize({
+        ok: true,
+        proposal: { tool: "adjust_points", args: { member, delta, reason } },
+        message: `Ask the parent to confirm this adjustment with their PIN on the chat screen (${delta > 0 ? "+" : ""}${delta} pts to ${member}). Points have NOT moved yet — never state the adjustment as done.`,
       });
     },
   },

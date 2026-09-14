@@ -2,7 +2,7 @@ import { getServiceConfig } from "@/lib/services/config";
 
 export interface LiveWeatherSummary {
   tempF: number; feelsLikeF?: number; highF?: number; lowF?: number;
-  condition: string; precipProb: number;
+  condition: string; precipProb?: number;
 }
 
 const WMO: Record<number, string> = {
@@ -39,8 +39,9 @@ export async function fetchLiveWeather(): Promise<{ ok: true; data: LiveWeatherS
     const data: LiveWeatherSummary = {
       tempF: Math.round(temp),
       condition: WMO[Number(c.weather_code)] ?? `Conditions code ${c.weather_code}`,
-      precipProb: Number(d.precipitation_probability_max?.[0] ?? 0),
     };
+    const precip = toFinite(d.precipitation_probability_max?.[0]);
+    if (precip !== null) data.precipProb = Math.round(precip);
     const feelsLike = toFinite(c.apparent_temperature);
     if (feelsLike !== null) data.feelsLikeF = Math.round(feelsLike);
     const high = toFinite(d.temperature_2m_max?.[0]);

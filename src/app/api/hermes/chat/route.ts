@@ -172,9 +172,27 @@ const TOOL_STATUS_LABELS: Record<string, string> = {
   remember_fact: "Committing that to memory…",
   recall_memories: "Checking my memory…",
   forget_memory: "Letting that memory go…",
+  propose_point_adjustment: "Preparing that point adjustment…",
 };
 function toolStatusLabel(name?: string): string {
   return (name && TOOL_STATUS_LABELS[name]) || "Working on it…";
+}
+
+// Task 15 — chat never moves points. A successful propose_point_adjustment
+// round yields an INERT proposal ({tool:"adjust_points", args}); the loop
+// surfaces it to the client (streamed: extra `status` frame; buffered:
+// top-level `proposals` array) so the chat page can render the parent-PIN
+// confirm chip. Refusals (ok:false / no proposal) surface nothing extra.
+const PROPOSAL_TOOL = "propose_point_adjustment";
+function extractPointProposal(name: string | undefined, result: string): unknown | null {
+  if (name !== PROPOSAL_TOOL) return null;
+  try {
+    const p = JSON.parse(result);
+    if (p?.ok === true && p.proposal?.tool === "adjust_points" && p.proposal.args) {
+      return p.proposal;
+    }
+  } catch { /* malformed tool result — nothing to surface */ }
+  return null;
 }
 
 /**
@@ -423,8 +441,13 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
           write(sseFrame(JSON.stringify({ label: toolStatusLabel(tc.function?.name) }), "status"));
         }
         const results = await runToolCalls(tool_calls, tools);
-        results.forEach((result, i) =>
-          messages.push({ role: "tool", tool_call_id: tool_calls[i].id || "", content: result }));
+        results.forEach((result, i) => {
+          messages.push({ role: "tool", tool_call_id: tool_calls[i].id || "", content: result });
+          const proposal = extractPointProposal(tool_calls[i].function?.name, result);
+          if (proposal) {
+            write(sseFrame(JSON.stringify({ label: "Waiting for a parent's PIN to confirm…", proposal }), "status"));
+          }
+        });
       }
       if (!finalContent) {
         finalContent = "I kept needing to look things up and ran out of steps — give me a moment and try again! 🔧";
@@ -541,6 +564,7 @@ export async function POST(request: NextRequest) {
     }
 
     let lastErr: unknown = null;
+    const proposals: unknown[] = [];
     for (let round = 0; round < MAX_ROUNDS; round++) {
       let content = "";
       let tool_calls: ToolCall[] | undefined;
@@ -569,14 +593,18 @@ export async function POST(request: NextRequest) {
 
       if (!tool_calls || tool_calls.length === 0) {
         if (!isClem) await persistChatPair(request, message, content, sessionName || "");
-        return NextResponse.json({ content });
+        return NextResponse.json(proposals.length ? { content, proposals } : { content });
       }
 
       messages.push({ role: "assistant", content, tool_calls });
 
       const results = await runToolCalls(tool_calls, tools);
-      results.forEach((result, i) =>
-        messages.push({ role: "tool", tool_call_id: tool_calls[i].id || "", content: result }));
+      results.forEach((result, i) => {
+        messages.push({ role: "tool", tool_call_id: tool_calls[i].id || "", content: result });
+        // Buffered sibling of the streamed proposal status frame (Task 15).
+        const proposal = extractPointProposal(tool_calls[i].function?.name, result);
+        if (proposal) proposals.push(proposal);
+      });
     }
 
     return NextResponse.json({

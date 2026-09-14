@@ -4,8 +4,10 @@
 // and the pre-fix adminUpsertMeal duplicated them instead of updating them.
 //
 // 1. Every row without `weekOf` gets `weekOf = date ? weekStartForDate(date)
-//    : localWeekStartISO()` — the same derivation the dashboard uses, so the
-//    row stays visible in exactly the week it was displayed in before.
+//    : localWeekStartISO()` — the same derivation the dashboard uses. Note the
+//    display change this causes: a weekless row was treated as CURRENT-week by
+//    every reader, so healing MOVES it to the week its `date` truly belongs to.
+//    Correcting that display convention IS the point of the heal.
 // 2. Within each (effective weekOf, time, mealType) group, the newest row
 //    (by `updated`, falling back to `created`) is kept and the duplicates are
 //    deleted — the pile-up the old upsert key created.

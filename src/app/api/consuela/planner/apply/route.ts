@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTool } from "@/lib/hermes-tools";
 import { verifyPinAgainstAnyMember } from "@/lib/server-auth";
+import { withAdmin } from "@/lib/pb-auth";
+import { weekKey } from "@/lib/task-utils";
+import { liveMembers, parseJSON } from "@/lib/consuela/live-reads";
+import type { Transaction } from "@/types/tasks";
 
 export const dynamic = "force-dynamic";
 
@@ -25,10 +29,103 @@ async function authorizePin(request: NextRequest): Promise<PinAuth> {
   return "ok";
 }
 
-// Tighter than the act route's allowlist on purpose: the planner card may
-// ONLY ever create a calendar event. Admin tools, completions, removals and
-// read tools stay excluded.
-const ALLOWED_TOOLS = new Set(["add_event"]);
+// Tighter than the act route's allowlist on purpose: the planner surface may
+// ONLY ever create a calendar event or apply a PIN-confirmed point adjustment.
+// Admin tools, completions, removals and read tools stay excluded.
+const ALLOWED_TOOLS = new Set(["add_event", "adjust_points"]);
+
+// ─── Task 15: adjust_points — the ONLY path on which points move ───────────
+// Chat never adjusts points; a propose_point_adjustment tool result is an
+// inert proposal, and this executor runs ONLY after a parent's PIN passed the
+// adult gate above (the chat page's confirm chip presents it — mirroring the
+// Task 11 buffer-apply seam). It is week_data surgery, NOT a getTool call:
+// live-read the CURRENT week's row, find-or-create it, append one earn-shaped
+// adjust tx (the exact Transaction shape the Tasks-page manual adjust writes),
+// and move the balance. A same (member, amount, description) replay inside
+// 60s is a double-tap, not a second adjustment — refused honestly, one tx.
+const MAX_ADJUST_DELTA = 100;
+const MAX_ADJUST_REASON_CHARS = 200;
+const ADJUST_DEDUPE_WINDOW_MS = 60_000;
+
+function adjustError(error: string, status = 400) {
+  return NextResponse.json({ ok: false, error }, { status });
+}
+
+async function applyPointAdjustment(a: Record<string, unknown>): Promise<NextResponse> {
+  const member = typeof a.member === "string" ? a.member.trim() : "";
+  const delta = Number(a.delta);
+  const reason = typeof a.reason === "string" ? a.reason.trim() : "";
+  if (!member) return adjustError("member required");
+  if (!Number.isInteger(delta) || delta === 0 || delta < -MAX_ADJUST_DELTA || delta > MAX_ADJUST_DELTA) {
+    return adjustError(`delta must be a whole number of points between -${MAX_ADJUST_DELTA} and ${MAX_ADJUST_DELTA}, never 0`);
+  }
+  if (!reason) return adjustError("reason required");
+  if (reason.length > MAX_ADJUST_REASON_CHARS) {
+    return adjustError(`reason must be ${MAX_ADJUST_REASON_CHARS} characters or fewer`);
+  }
+
+  const members = await liveMembers();
+  if (members === null) return adjustError("family roster unavailable — try again in a moment", 503);
+  const search = member.toLowerCase();
+  const match = members.find((m: any) => {
+    const name = String(m.fullName || m.name || "").toLowerCase();
+    return name === search || name.startsWith(search);
+  });
+  if (!match) return adjustError(`unknown member "${member}" — adjust points for a family member on the roster`);
+  const memberName = String(match.fullName || match.name);
+  const wk = weekKey();
+
+  try {
+    const result = await withAdmin(async (pb) => {
+      const rows = (await pb.collection("week_data").getFullList({ requestKey: null })) as any[];
+      const existing = rows.find((r: any) => r.weekStart === wk) || null;
+      const points = parseJSON<Record<string, number>>(existing?.points, {});
+      const history = parseJSON<Transaction[]>(existing?.history, []);
+      const nowMs = Date.now();
+      const dupe = history.find((tx) => {
+        const at = Date.parse(tx.timestamp);
+        return (
+          tx.type === "adjust" &&
+          tx.member === memberName &&
+          Number(tx.amount) === delta &&
+          tx.description === reason &&
+          Number.isFinite(at) &&
+          nowMs - at < ADJUST_DEDUPE_WINDOW_MS &&
+          at <= nowMs
+        );
+      });
+      if (dupe) return { deduped: true, newTotal: points[memberName] || 0 } as const;
+      const tx: Transaction = {
+        id: nowMs + Math.floor(Math.random() * 1000),
+        timestamp: new Date(nowMs).toISOString(),
+        member: memberName,
+        type: "adjust",
+        amount: delta,
+        description: reason,
+      };
+      const updatedPoints = { ...points, [memberName]: (points[memberName] || 0) + delta };
+      const week = {
+        weekStart: wk,
+        points: updatedPoints,
+        streak: parseJSON<Record<string, number>>(existing?.streak, {}),
+        lastActive: parseJSON<Record<string, string>>(existing?.lastActive, {}),
+        history: [...history, tx],
+      };
+      if (existing) await pb.collection("week_data").update(existing.id, week);
+      else await pb.collection("week_data").create(week);
+      return { deduped: false, newTotal: updatedPoints[memberName] } as const;
+    });
+    if (result.deduped) {
+      return NextResponse.json(
+        { ok: false, error: "That adjustment was already applied moments ago — points moved once.", member: memberName, delta },
+        { status: 409 }
+      );
+    }
+    return NextResponse.json({ ok: true, member: memberName, delta, newTotal: result.newTotal });
+  } catch (e: any) {
+    return adjustError(e?.message || "Could not adjust points", 502);
+  }
+}
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // Accepts 24-hour ("14:30") AND 12-hour ("2:30 PM" / "2:30PM") — the calendar
@@ -58,6 +155,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "tool not allowed" }, { status: 400 });
   }
   const a = (args && typeof args === "object" ? args : {}) as Record<string, unknown>;
+  // adjust_points is a dedicated server-side executor (never a getTool call).
+  if (String(tool) === "adjust_points") {
+    return applyPointAdjustment(a);
+  }
   const title = typeof a.title === "string" ? a.title.trim() : "";
   if (!title) {
     return NextResponse.json({ ok: false, error: "title required" }, { status: 400 });

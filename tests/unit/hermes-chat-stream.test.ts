@@ -250,3 +250,87 @@ describe("hermes chat — streaming mode", () => {
     expect((await res.json()).content).toBe("plain");
   });
 });
+
+// Task 15 — the chat route must surface a propose_point_adjustment RESULT as
+// an extra `event: status` frame carrying {label, proposal} (streamed) and a
+// top-level `proposals:[…]` array (buffered), so the chat page can render the
+// parent-PIN confirm chip on BOTH paths. The handler itself is inert.
+describe("hermes chat — point-proposal surfacing", () => {
+  const PROPOSAL_JSON = JSON.stringify({
+    ok: true,
+    proposal: { tool: "adjust_points", args: { member: "Emily G", delta: 10, reason: "helped" } },
+    message: "Ask the parent to confirm with their PIN.",
+  });
+
+  it("streams an extra status frame with the proposal after the tool round", async () => {
+    mocks.getTool.mockImplementation((name: string) =>
+      name === "propose_point_adjustment" ? { handler: vi.fn(async () => PROPOSAL_JSON) } : undefined);
+    mocks.buildToolsForOpenAI.mockReturnValue([
+      { type: "function", function: { name: "propose_point_adjustment", parameters: {} } },
+    ] as any);
+    vi.stubGlobal("fetch", vi.fn()
+      .mockImplementationOnce(async () => sseResponse([toolCallRound("c1", "propose_point_adjustment", '{"member":"Emily","delta":10,"reason":"helped"}')]))
+      .mockImplementationOnce(async () => sseResponse([token("Tap Confirm below."), DONE])));
+    const res = await post({ message: "add 10 points to Emily", stream: true });
+    const body = await res.text();
+    const proposalFrames = body
+      .split("event: status")
+      .slice(1)
+      .filter((chunk) => chunk.includes('"proposal"'));
+    expect(proposalFrames.length).toBe(1);
+    const frameData = /data: (\{[^\n]*\})/.exec(proposalFrames[0])![1];
+    expect(JSON.parse(frameData).proposal).toEqual({
+      tool: "adjust_points",
+      args: { member: "Emily G", delta: 10, reason: "helped" },
+    });
+  });
+
+  it("refusals (ok:false / no proposal) never grow a proposal frame", async () => {
+    mocks.getTool.mockImplementation((name: string) =>
+      name === "propose_point_adjustment" ? { handler: vi.fn(async () => '{"ok":false,"error":"unknown member"}') } : undefined);
+    mocks.buildToolsForOpenAI.mockReturnValue([
+      { type: "function", function: { name: "propose_point_adjustment", parameters: {} } },
+    ] as any);
+    vi.stubGlobal("fetch", vi.fn()
+      .mockImplementationOnce(async () => sseResponse([toolCallRound("c1", "propose_point_adjustment", "{}")]))
+      .mockImplementationOnce(async () => sseResponse([token("Nope."), DONE])));
+    const res = await post({ message: "add points to Zoe", stream: true });
+    const body = await res.text();
+    expect(body).not.toContain('"proposal"');
+  });
+
+  it("buffered mode includes a top-level proposals array", async () => {
+    mocks.getTool.mockImplementation((name: string) =>
+      name === "propose_point_adjustment" ? { handler: vi.fn(async () => PROPOSAL_JSON) } : undefined);
+    mocks.buildToolsForOpenAI.mockReturnValue([
+      { type: "function", function: { name: "propose_point_adjustment", parameters: {} } },
+    ] as any);
+    vi.stubGlobal("fetch", vi.fn()
+      .mockImplementationOnce(async () => new Response(
+        JSON.stringify({
+          choices: [{ message: { role: "assistant", content: "", tool_calls: [
+            { id: "c1", type: "function", function: { name: "propose_point_adjustment", arguments: '{"member":"Emily"}' } },
+          ] } }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }))
+      .mockImplementationOnce(async () => new Response(
+        JSON.stringify({ choices: [{ message: { role: "assistant", content: "A parent can confirm below." } }] }),
+        { status: 200, headers: { "content-type": "application/json" } })));
+    const res = await post({ message: "add 10 points to Emily" });
+    const json = await res.json();
+    expect(json.content).toBe("A parent can confirm below.");
+    expect(json.proposals).toEqual([
+      { tool: "adjust_points", args: { member: "Emily G", delta: 10, reason: "helped" } },
+    ]);
+  });
+
+  it("buffered mode without proposals keeps the plain {content} shape", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ choices: [{ message: { role: "assistant", content: "plain" } }] }),
+      { status: 200, headers: { "content-type": "application/json" } })));
+    const res = await post({ message: "hi" });
+    const json = await res.json();
+    expect(json.content).toBe("plain");
+    expect("proposals" in json).toBe(false);
+  });
+});

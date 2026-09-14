@@ -9,6 +9,10 @@ import SyncStatusBanner from "@/components/ui/SyncStatusBanner";
 import Modal from "@/components/ui/Modal";
 import { Icon3D } from "@/components/3d";
 import { UnifiedInput } from "@/components/chat/UnifiedInput";
+import AdjustPointsChip, {
+  isPointAdjustmentProposal,
+  type PointAdjustmentProposal,
+} from "@/components/chat/AdjustPointsChip";
 import { streamConsuelaChat } from "@/lib/chat-stream";
 import { FamilyBrief } from "./FamilyBrief";
 import { OpenLoopChips } from "./OpenLoopChips";
@@ -30,6 +34,10 @@ interface Message {
   errorFor?: string;
   /** Telegram-mirrored row — wears an origin badge in the thread. */
   source?: "telegram";
+  /** Task 15 — inert point-adjustment proposals surfaced by a tool status
+   *  frame during this assistant turn. Points move ONLY when a parent taps
+   *  the chip and enters their PIN (see AdjustPointsChip). Never sent to PB. */
+  proposals?: PointAdjustmentProposal[];
 }
 
 const CHAT_STORAGE_KEY = "consuela-chat-messages";
@@ -428,6 +436,20 @@ function ChatContent() {
     let bubbleOpen = false;
     // Whatever streamed before a stop/failure — a stopped reply keeps its words.
     let streamedSoFar = "";
+    // Task 15 — point-adjustment proposals surfaced during THIS turn. They
+    // stay inert: nothing here writes; only the chip's parent-PIN flow POSTs.
+    const turnProposals: PointAdjustmentProposal[] = [];
+    const attachProposal = (value: unknown) => {
+      if (!isPointAdjustmentProposal(value)) return;
+      const dupe = turnProposals.some(
+        (p) => p.args.member === value.args.member && p.args.delta === value.args.delta && p.args.reason === value.args.reason,
+      );
+      if (dupe) return;
+      turnProposals.push(value);
+      setMessages(prev => prev.some(m => m.id === streamId)
+        ? prev.map(m => (m.id === streamId ? { ...m, proposals: [...turnProposals] } : m))
+        : prev);
+    };
 
     try {
       const t0 = Date.now();
@@ -444,19 +466,29 @@ function ChatContent() {
           ? m.content.replace(/\n\n✅[\s\S]*$/, "").trim()
           : m.content,
       }));
-      const { content, streamed } = await streamConsuelaChat({
+      const result = await streamConsuelaChat({
         message: trimmed,
         history: modelHistory,
         signal: controller.signal,
-        onStatus: (label) => setStatusLine(label),
+        onStatus: (label, data) => {
+          setStatusLine(label);
+          attachProposal((data as { proposal?: unknown } | undefined)?.proposal);
+        },
         onToken: (full) => {
           streamedSoFar = full;
           if (!bubbleOpen) { bubbleOpen = true; setIsTyping(false); }
           setMessages(prev => prev.some(m => m.id === streamId)
             ? prev.map(m => (m.id === streamId ? { ...m, content: full } : m))
-            : [...prev, { id: streamId, role: "assistant" as const, content: full, timestamp: "Just now" }]);
+            : [...prev, {
+                id: streamId, role: "assistant" as const, content: full, timestamp: "Just now",
+                ...(turnProposals.length ? { proposals: [...turnProposals] } : {}),
+              }]);
         },
       });
+      // Buffered (non-streamed) path: the route surfaces proposals as a
+      // top-level array instead of status frames — same chip, same PIN.
+      for (const p of Array.isArray(result.proposals) ? result.proposals : []) attachProposal(p);
+      const { content, streamed } = result;
 
       // Buffered fallback keeps a short beat so the orb doesn't flash;
       // streamed replies already rendered live.
@@ -471,8 +503,11 @@ function ChatContent() {
 
       const finalContent = content || "I processed that.";
       setMessages(prev => prev.some(m => m.id === streamId)
-        ? prev.map(m => (m.id === streamId ? { ...m, content: finalContent } : m))
-        : [...prev, { id: streamId, role: "assistant" as const, content: finalContent, timestamp: "Just now" }]);
+        ? prev.map(m => (m.id === streamId ? { ...m, content: finalContent, proposals: m.proposals ?? (turnProposals.length ? [...turnProposals] : undefined) } : m))
+        : [...prev, {
+            id: streamId, role: "assistant" as const, content: finalContent, timestamp: "Just now",
+            ...(turnProposals.length ? { proposals: [...turnProposals] } : {}),
+          }]);
 
       // Reconcile against PB (picks up anything that arrived on other devices) —
       // incremental: only rows newer than the last watermark we've seen.
@@ -493,8 +528,11 @@ function ChatContent() {
         // did, say so plainly instead of dropping a silent hole in the thread.
         const stoppedContent = streamedSoFar.trim() || "Stopped.";
         setMessages(prev => prev.some(m => m.id === streamId)
-          ? prev.map(m => (m.id === streamId ? { ...m, content: stoppedContent } : m))
-          : [...prev, { id: streamId, role: "assistant" as const, content: stoppedContent, timestamp: "Just now" }]);
+          ? prev.map(m => (m.id === streamId ? { ...m, content: stoppedContent, proposals: m.proposals ?? (turnProposals.length ? [...turnProposals] : undefined) } : m))
+          : [...prev, {
+              id: streamId, role: "assistant" as const, content: stoppedContent, timestamp: "Just now",
+              ...(turnProposals.length ? { proposals: [...turnProposals] } : {}),
+            }]);
       } else {
         // Honest failure: name the problem (offline vs server) and the recovery.
         const offline = typeof navigator !== "undefined" && !navigator.onLine;
@@ -853,6 +891,19 @@ function ChatContent() {
                   </svg>
                   Try again
                 </button>
+              )}
+
+              {/* Task 15 — point adjustments move ONLY behind a parent's PIN. */}
+              {msg.role === "assistant" && msg.proposals && msg.proposals.length > 0 && (
+                <div className="flex flex-wrap gap-2 self-start" data-testid="point-proposals">
+                  {msg.proposals.map((p, i) => (
+                    <AdjustPointsChip
+                      key={`${p.args.member}|${p.args.delta}|${p.args.reason}|${i}`}
+                      proposal={p}
+                      actorName={currentUser?.name ?? null}
+                    />
+                  ))}
+                </div>
               )}
 
               <span className="text-[11px] text-text-secondary px-1">{msg.timestamp}</span>
