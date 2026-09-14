@@ -23,6 +23,7 @@ import {
   liveRecipes,
   liveMembers,
   livePantry,
+  liveGrocery,
   liveSchedulesAll,
   liveWeekArchive,
   liveRewards,
@@ -42,6 +43,7 @@ export {
   liveRecipes,
   liveMembers,
   livePantry,
+  liveGrocery,
   liveSchedulesAll,
   liveWeekArchive,
   liveRewards,
@@ -103,6 +105,13 @@ function normalizeGroceryName(name: string): string {
 
 function normalizePantryName(name: unknown): string {
   return String(name ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/** Comma-lists in, trimmed non-empty strings out (arrays pass through the
+ *  same trim/filter so callers can hand either shape). */
+function splitTrimList(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map((v) => String(v).trim()).filter(Boolean);
+  return String(value ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 }
 
 async function adminUpsertTask(task: Record<string, unknown>): Promise<any | null> {
@@ -846,6 +855,161 @@ const TOOLS: Tool[] = [
   },
   {
     definition: {
+      name: "add_recipe",
+      description: "Save a recipe to the family recipe box.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Recipe name (e.g. 'Baked Ziti')" },
+          ingredients: { type: "string", description: "Ingredient names separated by commas (e.g. 'ziti, marinara, mozzarella')" },
+          tags: { type: "string", description: "Optional: comma-separated tags (e.g. 'Kid-friendly, Quick')" },
+          emoji: { type: "string", description: "Optional: dish emoji" },
+          prepTime: { type: "string", description: "Optional: prep time (e.g. '15 min')" },
+          cookTime: { type: "string", description: "Optional: cook time (e.g. '30 min')" },
+          servings: { type: "number", description: "Optional: number of servings" },
+          calories: { type: "number", description: "Optional: calories per serving" },
+          instructions: { type: "string", description: "Optional: cooking instructions" },
+          source: { type: "string", description: "Optional: where the recipe came from (e.g. 'grandma')" },
+        },
+        required: ["name", "ingredients"],
+      },
+    },
+    handler: async (args: any) => {
+      const name = String(args.name ?? "").trim();
+      if (!name) return summarize({ ok: false, error: "no recipe name provided" });
+      const ingredients = splitTrimList(args.ingredients);
+      if (ingredients.length === 0) return summarize({ ok: false, error: "no ingredients provided — pass a comma-separated list" });
+      // Storage contract (2026-08-31 audit): the recipes collection stores
+      // ingredients/tags as JSON-STRINGIFIED arrays — the UI path
+      // (db.upsertRecipe) stringifies before the gateway, so this write must
+      // too, or the Recipe Box renders garbage.
+      const row: Record<string, unknown> = {
+        name,
+        emoji: typeof args.emoji === "string" && args.emoji ? args.emoji : "🍽️",
+        ingredients: JSON.stringify(ingredients),
+        tags: JSON.stringify(splitTrimList(args.tags)),
+      };
+      for (const f of ["prepTime", "cookTime", "instructions", "source"] as const) {
+        if (args[f] !== undefined && String(args[f]).trim() !== "") row[f] = String(args[f]).trim();
+      }
+      for (const f of ["servings", "calories"] as const) {
+        if (args[f] !== undefined && Number.isFinite(Number(args[f]))) row[f] = Number(args[f]);
+      }
+      try {
+        const created = await withAdmin(async (pb) => pb.collection("recipes").create(row));
+        return summarize({
+          ok: true,
+          id: created?.id ?? null,
+          name,
+          ingredient_count: ingredients.length,
+          note: `Saved "${name}" to the recipe box. Check the Recipes section in the dashboard.`,
+        });
+      } catch (e: any) {
+        return summarize({ ok: false, error: `add_recipe failed: ${e?.message}` });
+      }
+    },
+  },
+  {
+    definition: {
+      name: "recipe_ingredients_to_grocery",
+      description: "Add a recipe's missing ingredients to the grocery list — anything already in the pantry or on the list is skipped. Pass the exact recipe name (see get_recipes).",
+      parameters: {
+        type: "object",
+        properties: {
+          recipe: { type: "string", description: "Exact recipe name from the catalog (case-insensitive)" },
+        },
+        required: ["recipe"],
+      },
+    },
+    handler: async (args: any) => {
+      const want = String(args.recipe ?? "").trim().toLowerCase();
+      if (!want) return summarize({ ok: false, error: "no recipe name provided" });
+      const recipes = await liveRecipes();
+      if (recipes === null) {
+        return summarize({ ok: false, error: "recipe data unavailable — do not guess ingredients, retry later" });
+      }
+      const recipe = recipes.find((r: any) => String(r.name ?? "").trim().toLowerCase() === want);
+      if (!recipe) {
+        return summarize({ ok: false, error: `recipe "${args.recipe}" not found — call get_recipes to see the real catalog` });
+      }
+      const ingredients = parseJSON<any[]>(recipe.ingredients, []).map((i) => String(i).trim()).filter(Boolean);
+      if (ingredients.length === 0) {
+        return summarize({ ok: false, error: `"${recipe.name}" has no ingredients on file — nothing to add` });
+      }
+      const pantry = await livePantry();
+      const grocery = await liveGrocery();
+      const have = new Set<string>();
+      for (const p of pantry ?? []) {
+        const n = normalizeGroceryName(String(p.name ?? p.item ?? ""));
+        if (n) have.add(n);
+      }
+      for (const g of grocery ?? []) {
+        const n = normalizeGroceryName(String(g.name ?? ""));
+        if (n) have.add(n);
+      }
+      const missing = ingredients.filter((i) => !have.has(normalizeGroceryName(i)));
+      const skipped = ingredients.length - missing.length;
+      if (missing.length === 0) {
+        return summarize({
+          ok: true, recipe: recipe.name, inserted: 0, skipped_in_pantry_or_list: skipped, items: [],
+          note: "every ingredient is already stocked or on the list",
+        });
+      }
+      try {
+        // Single-read dedupe, same idiom as add_grocery_item: byNorm is
+        // in-call so one run can't double-add, and rows wear the exact same
+        // shape (userId demo, category pantry, priority medium, source chat).
+        const catDef = groceryCategories.find((c) => c.id === "pantry");
+        const emoji = catDef?.emoji || "📦";
+        const aisle = catDef?.aisles?.[0]?.split("-")[0] || "1";
+        const items = await withAdmin(async (pb) => {
+          const records = await pb.collection("grocery_list_items").getFullList({ requestKey: null });
+          const byNorm = new Map<string, any>();
+          for (const g of records as any[]) {
+            if (g.name) byNorm.set(normalizeGroceryName(g.name), g);
+          }
+          const out: string[] = [];
+          for (const name of missing) {
+            const trimmed = name.trim();
+            const existing = byNorm.get(normalizeGroceryName(trimmed));
+            if (existing) {
+              await pb.collection("grocery_list_items").update(existing.id, {
+                needed: true,
+                source: existing.source || "chat",
+              });
+            } else {
+              await pb.collection("grocery_list_items").create({
+                userId: "demo",
+                name: trimmed,
+                emoji,
+                category: "pantry",
+                aisle,
+                quantity: "",
+                priority: "medium",
+                needed: true,
+                source: "chat",
+              });
+            }
+            byNorm.set(normalizeGroceryName(trimmed), { id: "in-call", name: trimmed });
+            out.push(trimmed);
+          }
+          return out;
+        });
+        return summarize({
+          ok: true,
+          recipe: recipe.name,
+          inserted: items.length,
+          skipped_in_pantry_or_list: skipped,
+          items,
+          note: `${items.length} missing ingredient(s) added to the grocery list for ${recipe.name}.`,
+        });
+      } catch (e: any) {
+        return summarize({ ok: false, error: `recipe_ingredients_to_grocery failed: ${e?.message}` });
+      }
+    },
+  },
+  {
+    definition: {
       name: "get_grocery_list",
       description: "Get the grocery shopping list. Returns items that need to be bought, organized by category and priority.",
       parameters: {
@@ -900,7 +1064,7 @@ const TOOLS: Tool[] = [
   {
     definition: {
       name: "get_leaderboard",
-      description: "Get the family task leaderboard. Returns weekly points, streaks, levels, and rankings for all family members.",
+      description: "Get the family task leaderboard. Returns this week's REAL points per member, ranked, plus the current champion. Points only — no streaks or levels in this data.",
       parameters: { type: "object", properties: {} },
     },
     handler: async () => {
