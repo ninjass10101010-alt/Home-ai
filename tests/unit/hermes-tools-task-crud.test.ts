@@ -72,6 +72,22 @@ it("get_completed_tasks lists done rows", async () => {
   expect(out.completed.map((t: any) => t.title)).toEqual(["Done Chore"]);
 });
 
+it("complete_task queues a PENDING APPROVAL instead of earning points", async () => {
+  const out = JSON.parse(await getTool("complete_task")!.handler({ taskId: 101 }));
+  expect(out.ok).toBe(true);
+  expect(out.queuedForApproval).toBe(true);
+  const up = writes.filter((w) => w.op === "update" && w.collection === "tasks");
+  expect(up.some((w) => w.data.status === "done" && w.data.pendingApproval && w.data.sentBackAt === null)).toBe(true);
+  const pa = up.find((w) => w.data.pendingApproval)!.data.pendingApproval;
+  expect(typeof pa.byName).toBe("string");
+  expect(typeof pa.points).toBe("number");
+  expect(writes.some((w) => w.collection === "week_data")).toBe(false);
+});
+it("complete_task still refuses double-completion", async () => {
+  const out = JSON.parse(await getTool("complete_task")!.handler({ taskId: 102 }));
+  expect(out.ok).toBe(false);
+});
+
 it("reopen_task reopens a row still waiting for approval", async () => {
   rows.tasks = [{ id: "t3", taskId: 103, title: "Queued", assignee: "Emily G", status: "done", pendingApproval: { byName: "Emily G", at: "2026-09-10T10:00:00Z", points: 5 }, sentBackAt: null }];
   const out = JSON.parse(await getTool("reopen_task")!.handler({ taskId: 103 }));

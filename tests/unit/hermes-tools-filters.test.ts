@@ -38,13 +38,13 @@ beforeEach(() => {
 });
 
 describe("hermes-tools — PB-side filters + batching", () => {
-  it("complete_task reads week_data filtered to the current week", async () => {
+  it("complete_task never touches week_data — completions queue for parent approval", async () => {
     rows.tasks = [{ id: "t1", taskId: 7, title: "Walk Rocco", status: "pending", points: 10, assignee: "Emily" }];
-    rows.week_data = [];
     const tool = getTool("complete_task")!;
-    await tool.handler({ taskId: 7 });
-    const weekCall = calls.find((c) => c.collection === "week_data");
-    expect(weekCall?.filter).toContain("weekStart=");
+    const out = JSON.parse(await tool.handler({ taskId: 7 }));
+    expect(out.ok).toBe(true);
+    expect(out.queuedForApproval).toBe(true);
+    expect(calls.some((c) => c.collection === "week_data")).toBe(false);
   });
 
   it("add_grocery_item reads the grocery list ONCE for multiple items", async () => {

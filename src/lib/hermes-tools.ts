@@ -2,7 +2,7 @@ import { db } from "@/db";
 import { groceryCategories } from "@/data/meals";
 import { withAdmin } from "@/lib/pb-auth";
 import { weekKey } from "@/lib/task-utils";
-import type { Transaction, WeekData } from "@/types/tasks";
+import type { WeekData } from "@/types/tasks";
 import { getHAWebSocketClient } from "@/lib/ha/websocket-client";
 import { calculateCheapestSplit, formatStoreTotal, PINNED_STORES } from "@/lib/stores";
 import { localTodayISO, localWeekdayShort, familyTimeZone, weekdayOfISO, localWeekStartISO } from "@/lib/local-date";
@@ -867,7 +867,7 @@ const TOOLS: Tool[] = [
   {
     definition: {
       name: "complete_task",
-      description: "Mark a pending chore as completed for the week. The task's points are awarded to its assigned family member. Find the task by title or taskId.",
+      description: "Mark a chore as done — it lands in the parent approval queue (points only move when a parent approves). Find by title or taskId.",
       parameters: {
         type: "object",
         properties: {
@@ -877,118 +877,51 @@ const TOOLS: Tool[] = [
         },
       },
     },
-    handler: async (args) => {
+    handler: async (args: any) => {
       const taskId = args.taskId !== undefined ? Number(args.taskId) : undefined;
       const title = args.title ? String(args.title).trim() : undefined;
       const assignee = args.assignee ? String(args.assignee).trim().toLowerCase() : undefined;
-      let result: Record<string, any>;
-      if (!taskId && !title) {
-        return summarize({ ok: false, error: "Provide a title or taskId of the task to complete" });
-      }
+      if (!taskId && !title) return summarize({ ok: false, error: "Provide a title or taskId of the task to complete" });
       try {
-        result = await withAdmin(async (pb) => {
+        const result: Record<string, any> = await withAdmin(async (pb) => {
           const records = await pb.collection("tasks").getFullList({ requestKey: null });
-          // I4 — only pending rows can be completed. A `done` row (completed in
-          // a previous week) must not silently re-earn points.
+          // Chat never moves points: only pending rows are completable, and a
+          // completion lands as a done-but-UNPAID row for the parent queue —
+          // the exact shape the claim route + tapCompletePending write.
+          // A done row (approved, paid, or previously completed) simply isn't
+          // in `pending` and falls to the honest not-found below.
           const pending = records.filter((r: any) => r.status !== "done");
-          const done = records.filter((r: any) => r.status === "done");
-          let task: any = taskId !== undefined ? pending.find((r: any) => r.taskId === taskId) : undefined;
+          let task: any = taskId !== undefined ? pending.find((r: any) => Number(r.taskId) === taskId) : undefined;
           if (!task && title) {
-            task = pending.find((r: any) => String(r.title).trim().toLowerCase() === title.toLowerCase());
-            if (!task) task = pending.find((r: any) => String(r.title).trim().toLowerCase().includes(title.toLowerCase()));
-            if (task && assignee) {
-              const t = String(task.assignee || "").toLowerCase();
-              if (!t.includes(assignee) && !t.startsWith(assignee)) {
-                const alt = pending.find(
-                  (r: any) => String(r.title).trim().toLowerCase() === title.toLowerCase() &&
-                    String(r.assignee || "").toLowerCase().includes(assignee)
-                );
-                if (alt) task = alt;
-              }
+            const t = title.toLowerCase();
+            task = pending.find((r: any) => String(r.title).trim().toLowerCase() === t);
+            if (!task) task = pending.find((r: any) => String(r.title).trim().toLowerCase().includes(t));
+            if (task && assignee && !String(task.assignee || "").toLowerCase().includes(assignee)) {
+              const alt = pending.find((r: any) => String(r.title).trim().toLowerCase() === t && String(r.assignee || "").toLowerCase().includes(assignee));
+              if (alt) task = alt;
             }
           }
-          if (!task) {
-            // I4 — distinguish "already completed (previous week)" from "not found".
-            const completedMatch = taskId !== undefined
-              ? done.find((r: any) => r.taskId === taskId)
-              : title
-                ? done.find((r: any) => String(r.title).trim().toLowerCase() === title.toLowerCase())
-                : undefined;
-            if (completedMatch) {
-              // M-A — a `done` row may have been completed this week OR in a
-              // previous week (F3 flips status to "done" on completion), so
-              // "(last week)" was wrong for same-week repeats. Generic copy.
-              return {
-                ok: false,
-                error: "Task was already completed (earlier this week or previously). Mark it as pending first if you want to recomplete.",
-              };
-            }
-            return {
-              ok: false,
-              error: `No pending task found${title ? ` matching "${title}"` : ""}${taskId !== undefined ? ` (taskId ${taskId})` : ""}`,
-            };
-          }
-
-          const currentWeek = weekKey();
-          const weekRecords = await pb.collection("week_data").getFullList({
-            filter: `weekStart="${currentWeek}"`,
-            requestKey: null,
-          });
-          const week = weekRecords.find((r: any) => r.weekStart === currentWeek) || null;
-          const points = parseJSON<Record<string, number>>(week?.points, {});
-          const history = parseJSON<Transaction[]>(week?.history, []);
-          const existingTx = history.find((tx: any) => tx.taskId === Number(task.taskId) && tx.type === "earn");
-          if (existingTx) {
-            return {
-              ok: false,
-              error: `Task "${task.title}" was already completed this week by ${existingTx.member}`,
-              completedBy: existingTx.member,
-            };
-          }
-
-          const memberName = task.assignee || "Unknown";
+          if (!task) return { ok: false, error: `No pending task found${title ? ` matching "${title}"` : ""}${taskId !== undefined ? ` (taskId ${taskId})` : ""}` };
+          if (task.pendingApproval && !task.sentBackAt) return { ok: false, error: "Already completed — waiting for parent approval" };
           const amount = Number(task.points) || 0;
-          const tx: Transaction = {
-            id: Date.now() + Math.floor(Math.random() * 1000),
-            timestamp: new Date().toISOString(),
-            member: memberName,
-            type: "earn",
-            amount,
-            description: `Completed: ${task.title}${amount > 0 ? ` (+${amount}pts)` : ""}`,
-            taskId: Number(task.taskId),
-          };
-          const updatedWeek: WeekData = {
-            weekStart: currentWeek,
-            points: { ...points, [memberName]: (points[memberName] || 0) + amount },
-            streak: parseJSON<Record<string, number>>(week?.streak, {}),
-            lastActive: parseJSON<Record<string, string>>(week?.lastActive, {}),
-            history: [...history, tx],
-          };
-          if (week) {
-            await pb.collection("week_data").update(week.id, updatedWeek as any);
-          } else {
-            await pb.collection("week_data").create(updatedWeek as any);
-          }
-
+          const now = new Date().toISOString();
           await pb.collection("tasks").update(task.id, {
+            completed: true,
             status: "done",
-            completedInWeek: currentWeek,
-            completedAt: new Date().toISOString(),
+            completedBy: task.assignee || "Unknown",
+            completedInWeek: weekKey(),
+            completedAt: now,
+            assigned: task.assignee ?? null,
+            pendingApproval: { byName: task.assignee || "Unknown", at: now, points: amount },
+            sentBackAt: null,
           });
-
-          return {
-            ok: true,
-            taskId: Number(task.taskId),
-            title: task.title,
-            assignee: memberName,
-            pointsEarned: amount,
-            completedInWeek: currentWeek,
-          };
+          return { ok: true, taskId: Number(task.taskId), title: task.title, assignee: task.assignee, points: amount, queuedForApproval: true };
         });
+        if (result.ok) result.note = "A parent approves it in the Tasks queue — points only move on approval.";
+        return summarize(result);
       } catch (e: any) {
-        result = { ok: false, error: `complete_task failed: ${e?.message}` };
+        return summarize({ ok: false, error: `complete_task failed: ${e?.message}` });
       }
-      return summarize(result);
     },
   },
   {
