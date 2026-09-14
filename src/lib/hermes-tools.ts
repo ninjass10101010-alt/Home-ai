@@ -893,7 +893,10 @@ const TOOLS: Tool[] = [
         if (args[f] !== undefined && String(args[f]).trim() !== "") row[f] = String(args[f]).trim();
       }
       for (const f of ["servings", "calories"] as const) {
-        if (args[f] !== undefined && Number.isFinite(Number(args[f]))) row[f] = Number(args[f]);
+        const raw = args[f];
+        if (raw === undefined || raw === null || String(raw).trim() === "") continue;
+        const n = Number(raw);
+        if (Number.isFinite(n) && n > 0) row[f] = n;
       }
       try {
         const created = await withAdmin(async (pb) => pb.collection("recipes").create(row));
@@ -912,7 +915,7 @@ const TOOLS: Tool[] = [
   {
     definition: {
       name: "recipe_ingredients_to_grocery",
-      description: "Add a recipe's missing ingredients to the grocery list — anything already in the pantry or on the list is skipped. Pass the exact recipe name (see get_recipes).",
+      description: "Add a recipe's missing ingredients to the grocery list — anything stocked (plenty/low) in the pantry or already on the list is skipped (out-of-stock pantry items don't count as stocked). Pass the exact recipe name (see get_recipes).",
       parameters: {
         type: "object",
         properties: {
@@ -938,17 +941,30 @@ const TOOLS: Tool[] = [
       }
       const pantry = await livePantry();
       const grocery = await liveGrocery();
+      if (pantry === null || grocery === null) {
+        return summarize({ ok: false, error: "pantry or grocery data unavailable — retry in a moment (do not guess what's stocked)" });
+      }
       const have = new Set<string>();
-      for (const p of pantry ?? []) {
+      for (const p of pantry) {
+        if (String(p.status ?? "").toLowerCase() === "out") continue;
         const n = normalizeGroceryName(String(p.name ?? p.item ?? ""));
         if (n) have.add(n);
       }
-      for (const g of grocery ?? []) {
+      for (const g of grocery) {
         const n = normalizeGroceryName(String(g.name ?? ""));
         if (n) have.add(n);
       }
-      const missing = ingredients.filter((i) => !have.has(normalizeGroceryName(i)));
-      const skipped = ingredients.length - missing.length;
+      // Dedupe by normalized name BEFORE the write loop (first wins): a recipe
+      // listing "Milk" and "milk!" is one shopping row — otherwise the second
+      // hit finds the synthetic {id:"in-call"} row and real PB update() 404s
+      // mid-run, leaving a partial write.
+      const unique = new Map<string, string>();
+      for (const i of ingredients) {
+        const n = normalizeGroceryName(i);
+        if (n && !unique.has(n)) unique.set(n, i.trim());
+      }
+      const missing = [...unique.entries()].filter(([n]) => !have.has(n)).map(([, name]) => name);
+      const skipped = unique.size - missing.length;
       if (missing.length === 0) {
         return summarize({
           ok: true, recipe: recipe.name, inserted: 0, skipped_in_pantry_or_list: skipped, items: [],

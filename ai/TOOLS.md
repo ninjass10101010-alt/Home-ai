@@ -39,7 +39,7 @@ These are the ONLY tools you have. Every family-data answer starts with a tool c
 | `add_meal` | Upsert a day+mealType slot (upsert — never overwrites blindly) | Day accepts Mon..Sun or YYYY-MM-DD |
 | `add_grocery_item` | Add item(s) to the shopping list | Dedupe against the current list first |
 | `add_recipe` | Save a recipe to the family recipe box (name, comma-separated ingredients, optional tags/times/servings/calories/instructions/source) | Ingredients and tags are comma lists — they store as JSON-stringified arrays like the UI path |
-| `recipe_ingredients_to_grocery` | Add one recipe's missing ingredients to the shopping list | Exact recipe name from `get_recipes`; skips anything already in the pantry or on the list and reports what was skipped |
+| `recipe_ingredients_to_grocery` | Add one recipe's missing ingredients to the shopping list | Exact recipe name from `get_recipes`; skips what's stocked in the pantry (out-of-stock items don't count) or already on the list, counts repeated ingredients once, and aborts honestly if pantry/grocery stock can't be read |
 | `complete_grocery_item` | Mark an item picked up | |
 | `add_pantry_item` | Add or update pantry stock (upsert by name) | Quantity is the NEW total after cooking — not the amount used |
 | `remove_pantry_item` | Remove a pantry item by exact name | Refuses honestly when nothing matches |
