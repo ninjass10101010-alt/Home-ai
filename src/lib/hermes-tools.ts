@@ -103,8 +103,11 @@ function normalizeGroceryName(name: string): string {
   return name.toLowerCase().replace(/[^\w\s]/g, " ").replace(/\s+/g, " ").trim();
 }
 
-function normalizePantryName(name: unknown): string {
-  return String(name ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+// Mirrors usePantry's normalizeName (src/hooks/usePantry.ts) EXACTLY — the chat
+// matcher and the UI loader must agree, or "Soy sauce!" never matches the
+// stored "soy sauce" and every write duplicates the row.
+export function normalizePantryName(name: unknown): string {
+  return String(name ?? "").toLowerCase().replace(/[^\w\s]/g, " ").replace(/\s+/g, " ").trim();
 }
 
 /** Comma-lists in, trimmed non-empty strings out (arrays pass through the
@@ -143,11 +146,12 @@ async function adminUpsertMeal(meal: Record<string, unknown>): Promise<{ row: an
   try {
     return await withAdmin(async (pb) => {
       const records = await pb.collection("meal_plan_entries").getFullList({ requestKey: null });
+      const weekOf = String(meal.weekOf || "");
       const existing = records.find(
         (r: any) =>
           r.time === meal.time &&
           (r.mealType || "dinner") === (meal.mealType || "dinner") &&
-          (r.weekOf || "") === (meal.weekOf || "")
+          (r.weekOf || weekOf) === weekOf // legacy weekless rows count as the writing week — no duplicate pile-up
       );
       if (existing) {
         const row = await pb.collection("meal_plan_entries").update(existing.id, meal);

@@ -130,6 +130,33 @@ describe("members.emoji text-field max", () => {
     expect(f!.type).toBe("text");
   });
 
+  // 2026-09-08 audit class: the claim route + Task 4 chat writes persist these
+  // on the tasks row — a fresh instance without the seed fields silently DROPS
+  // them. All optional (legacy rows never carried them).
+  it("tasks collection carries the optional completed bool field", () => {
+    const tasksDef = COLLECTIONS.find((c) => c.name === "tasks")!;
+    const f = tasksDef.schema.find((s: any) => s.name === "completed");
+    expect(f).toBeDefined();
+    expect(f!.type).toBe("bool");
+    expect((f as any).required).toBeUndefined();
+  });
+
+  it("tasks collection carries the optional completedBy text field", () => {
+    const tasksDef = COLLECTIONS.find((c) => c.name === "tasks")!;
+    const f = tasksDef.schema.find((s: any) => s.name === "completedBy");
+    expect(f).toBeDefined();
+    expect(f!.type).toBe("text");
+    expect((f as any).required).toBeUndefined();
+  });
+
+  it("tasks collection carries the optional assigned text field", () => {
+    const tasksDef = COLLECTIONS.find((c) => c.name === "tasks")!;
+    const f = tasksDef.schema.find((s: any) => s.name === "assigned");
+    expect(f).toBeDefined();
+    expect(f!.type).toBe("text");
+    expect((f as any).required).toBeUndefined();
+  });
+
   it("seeds consuela_ai_providers with the provider schema", () => {
     const col = COLLECTIONS.find((c) => c.name === "consuela_ai_providers");
     expect(col).toBeDefined();

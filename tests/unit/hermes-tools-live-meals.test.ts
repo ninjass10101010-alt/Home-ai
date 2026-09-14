@@ -6,14 +6,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const rows: Record<string, any[]> = {};
+const writes: Array<{ op: "update" | "create" | "delete"; collection: string; id?: string; data?: any }> = [];
 vi.mock("@/lib/pb-auth", () => ({
   withAdmin: vi.fn(async (fn: any) => fn({
     collection: (name: string) => ({
       getFullList: async () => rows[name] ?? [],
       getFirstListItem: async () => { throw new Error("404"); },
-      update: async (_id: string, d: any) => ({ id: _id, ...d }),
-      create: async (d: any) => ({ id: "n1", ...d }),
-      delete: async () => true,
+      update: async (id: string, d: any) => { writes.push({ op: "update", collection: name, id, data: d }); return { id, ...d }; },
+      create: async (d: any) => { writes.push({ op: "create", collection: name, data: d }); return { id: "n1", ...d }; },
+      delete: async (id: string) => { writes.push({ op: "delete", collection: name, id }); return true; },
     }),
   })),
 }));
@@ -36,6 +37,7 @@ import { getTool } from "@/lib/hermes-tools";
 
 beforeEach(() => {
   for (const k of Object.keys(rows)) delete rows[k];
+  writes.length = 0;
   vi.useFakeTimers({ now: new Date("2026-09-10T12:00:00") }); // Thu, week of 2026-09-07
 });
 afterEach(() => vi.useRealTimers());
@@ -108,5 +110,22 @@ describe("get_family_members — live roster", () => {
     const out = JSON.parse(await getTool("get_family_members")!.handler({}));
     expect(JSON.stringify(out)).toContain("New Kid");
     expect(JSON.stringify(out)).not.toContain("base64");
+  });
+});
+
+describe("add_meal — weekOf-aware upsert", () => {
+  it("add_meal upserts a LEGACY weekless row instead of duplicating", async () => {
+    rows.meal_plan_entries = [{ id: "m1", name: "Old Pizza", time: "Thu", mealType: "dinner", tags: "[]" }]; // no weekOf = current week by convention
+    const out = JSON.parse(await getTool("add_meal")!.handler({ name: "Tacos", day: "Thu", mealType: "dinner" }));
+    expect(out.replaced).toBe(true);
+    expect(writes.some((w) => w.op === "update" && w.id === "m1")).toBe(true);
+    expect(writes.some((w) => w.op === "create" && w.collection === "meal_plan_entries")).toBe(false);
+  });
+  it("add_meal does NOT touch another week's row", async () => {
+    rows.meal_plan_entries = [{ id: "m1", name: "Old Pizza", time: "Thu", mealType: "dinner", weekOf: "2026-08-31", tags: "[]" }];
+    const out = JSON.parse(await getTool("add_meal")!.handler({ name: "Tacos", day: "Thu", mealType: "dinner" }));
+    expect(out.replaced).toBe(false);
+    expect(writes.some((w) => w.op === "update" && w.id === "m1")).toBe(false);
+    expect(writes.some((w) => w.op === "create" && w.collection === "meal_plan_entries")).toBe(true);
   });
 });

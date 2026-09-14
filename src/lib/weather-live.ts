@@ -1,7 +1,7 @@
 import { getServiceConfig } from "@/lib/services/config";
 
 export interface LiveWeatherSummary {
-  tempF: number; feelsLikeF: number; highF: number; lowF: number;
+  tempF: number; feelsLikeF?: number; highF?: number; lowF?: number;
   condition: string; precipProb: number;
 }
 
@@ -28,17 +28,26 @@ export async function fetchLiveWeather(): Promise<{ ok: true; data: LiveWeatherS
     const j: any = await res.json();
     const c = j?.current, d = j?.daily;
     if (!c || !d) return { ok: false, error: "weather service malformed" };
-    return {
-      ok: true,
-      data: {
-        tempF: Math.round(Number(c.temperature_2m)),
-        feelsLikeF: Math.round(Number(c.apparent_temperature)),
-        highF: Math.round(Number(d.temperature_2m_max?.[0])),
-        lowF: Math.round(Number(d.temperature_2m_min?.[0])),
-        condition: WMO[Number(c.weather_code)] ?? `Conditions code ${c.weather_code}`,
-        precipProb: Number(d.precipitation_probability_max?.[0] ?? 0),
-      },
+    // Provider nulls must NOT coerce through Number() (Number(null) === 0 —
+    // a fabricated 0° reading). Only finite numbers count.
+    const toFinite = (v: unknown): number | null => {
+      const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN;
+      return Number.isFinite(n) ? n : null;
     };
+    const temp = toFinite(c.temperature_2m);
+    if (temp === null) return { ok: false, error: "weather service malformed" }; // a reading with no temperature is not a reading
+    const data: LiveWeatherSummary = {
+      tempF: Math.round(temp),
+      condition: WMO[Number(c.weather_code)] ?? `Conditions code ${c.weather_code}`,
+      precipProb: Number(d.precipitation_probability_max?.[0] ?? 0),
+    };
+    const feelsLike = toFinite(c.apparent_temperature);
+    if (feelsLike !== null) data.feelsLikeF = Math.round(feelsLike);
+    const high = toFinite(d.temperature_2m_max?.[0]);
+    if (high !== null) data.highF = Math.round(high);
+    const low = toFinite(d.temperature_2m_min?.[0]);
+    if (low !== null) data.lowF = Math.round(low);
+    return { ok: true, data };
   } catch (e: any) {
     return { ok: false, error: `weather unavailable (${e?.message || "fetch failed"})` };
   }

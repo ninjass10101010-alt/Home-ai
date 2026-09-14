@@ -179,8 +179,11 @@ export const COLLECTIONS = [
       { name: "sentBackAt", type: "text" },
       { name: "createdAt", type: "text" },
       { name: "status", type: "select", options: { values: ["pending", "done"] } },
+      { name: "completed", type: "bool" },
       { name: "completedInWeek", type: "text" },
+      { name: "completedBy", type: "text" },
       { name: "completedAt", type: "text" },
+      { name: "assigned", type: "text" },
     ],
   },
   {
