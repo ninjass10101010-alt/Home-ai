@@ -451,6 +451,18 @@ export const COLLECTIONS = [
       "CREATE UNIQUE INDEX idx_ha_mirror_state_key ON ha_mirror_state (key)",
     ],
   },
+  {
+    // Dedupe state for the push-alert crons (weather episode + calendar lead),
+    // persisted so a container restart never double-alerts or forgets an episode.
+    name: "ha_alert_state",
+    schema: [
+      { name: "key", type: "text", required: true },
+      { name: "value", type: "json" },
+    ],
+    indexes: [
+      "CREATE UNIQUE INDEX idx_ha_alert_state_key ON ha_alert_state (key)",
+    ],
+  },
   // Services & Keys registry overrides (src/lib/services/*). Secrets stored
   // AES-256-GCM encrypted; absence of a row = .env fallback.
   {
@@ -824,6 +836,37 @@ function rulesMatch(live: any): boolean {
   );
 }
 
+export const NOTIFY_PREF_DEFAULTS: Array<{ key: string; enabled: boolean }> = [
+  { key: "briefing", enabled: false },
+  { key: "weather", enabled: false },
+  { key: "calendar", enabled: false },
+];
+
+/** Ensure the opt-in notify prefs exist without ever flipping a family's choice.
+ * Create-if-absent only: an existing row (enabled true OR false) is left alone,
+ * so re-seeding a live instance never resets what the family set in Settings. */
+export async function seedNotifyPrefs(
+  pb: {
+    collection: (name: string) => {
+      getFirstListItem: (filter: string) => Promise<unknown>;
+      create: (data: Record<string, unknown>) => Promise<unknown>;
+    };
+  }
+): Promise<void> {
+  const collection = pb.collection("ha_notify_prefs");
+  for (const pref of NOTIFY_PREF_DEFAULTS) {
+    try {
+      await collection.getFirstListItem(`key="${pref.key}"`);
+    } catch (err) {
+      if ((err as { status?: number })?.status === 404) {
+        await collection.create(pref);
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 export async function seedCollections() {
   const result = await withAdmin(async (pb) => {
     const existing = (await pb.collections.getFullList()).map((c: any) => c.name);
@@ -943,6 +986,9 @@ export async function seedCollections() {
       });
       created.push(col.name);
     }
+
+    // Collections are ensured first so ha_notify_prefs exists before we seed rows.
+    await seedNotifyPrefs(pb);
 
     return created;
   });
