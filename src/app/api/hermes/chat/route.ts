@@ -6,6 +6,14 @@ import { buildClemSystemPrompt, buildConsuelaSystemPrompt, buildKidSystemPrompt,
 import { buildMemoryContext } from "@/lib/family-memory";
 import { MEMORY_USER_ID, MEMORY_FAMILY_ID } from "@/lib/memory-ids";
 import { resolveChatTargets, resetAiTargetsForTests, type AiTarget } from "@/lib/ai/targets";
+import { loadContextPack, type PackScope } from "@/lib/consuela/assistant-context";
+import {
+  isPlannerIntent,
+  plannerMaxTokens,
+  plannerSystemPrompt,
+  plannerUserPrompt,
+  validatePlannerOutput,
+} from "@/lib/consuela/planner";
 
 export const dynamic = "force-dynamic";
 
@@ -98,18 +106,24 @@ async function callAi(
   const target = opts.target;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (target.key) headers.Authorization = `Bearer ${target.key}`;
+  const payload: Record<string, unknown> = {
+    model: target.model,
+    messages,
+    temperature: 0.7,
+    max_tokens: opts.maxTokens ?? AI_MAX_TOKENS,
+  };
+  // A planner call arms ZERO tools — and some providers 400 on a tool_choice
+  // that names no tool set, so BOTH keys are dropped together when no tools
+  // were passed. Chat always passes tools, so its body stays byte-identical.
+  if (opts.tools !== undefined) {
+    payload.tools = opts.tools;
+    payload.tool_choice = opts.toolChoice ?? "auto";
+  }
   const res = await fetch(`${target.url}/v1/chat/completions`, {
     method: "POST",
     headers,
     signal: AbortSignal.timeout(AI_TIMEOUT_MS),
-    body: JSON.stringify({
-      model: target.model,
-      messages,
-      temperature: 0.7,
-      max_tokens: opts.maxTokens ?? AI_MAX_TOKENS,
-      tools: opts.tools,
-      tool_choice: opts.toolChoice ?? "auto",
-    }),
+    body: JSON.stringify(payload),
   });
 
   if (!res.ok) {
@@ -295,6 +309,7 @@ async function runToolCalls(
 
 interface ChatRequestBody {
   message?: string; history?: any[]; role?: string; system?: string; agent?: string; stream?: boolean;
+  intent?: string; options?: any;
 }
 
 /**
@@ -435,6 +450,65 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
   });
 }
 
+/**
+ * Planner mode — grounded JSON generation for the dashboard's ✨ Generate
+ * buttons. Parent sessions only (buttons are adult UI); ZERO tools armed so a
+ * generation can never carry a write side-effect; the daily thread is never
+ * touched. Single round per attempt, target-chain fail-over inside an
+ * attempt, exactly ONE repair retry when the model ignores the JSON contract,
+ * then an honest {ok:false, reason}.
+ */
+async function handlePlanner(request: NextRequest, body: ChatRequestBody) {
+  const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
+  if (session?.role !== "parent") {
+    return NextResponse.json({ ok: false, reason: "unauthorized" }, { status: 401 });
+  }
+  const intent = String(body.intent || "");
+  if (!isPlannerIntent(intent)) {
+    return NextResponse.json({ ok: false, reason: "unknown_intent" }, { status: 400 });
+  }
+  const targets = await resolveChatTargets();
+  if (targets.length === 0) {
+    return NextResponse.json({ ok: false, reason: "no_provider" });
+  }
+  const scope: PackScope = intent.startsWith("meal")
+    ? "meal"
+    : intent.startsWith("task") || intent.startsWith("reward") ? "task" : "schedule";
+  const pack = await loadContextPack(scope);
+  const messages: ChatMessage[] = [
+    { role: "system", content: plannerSystemPrompt(intent, pack) },
+    { role: "user", content: plannerUserPrompt(intent, body.options || {}) },
+  ];
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    for (const target of targets) {
+      try {
+        // No tools passed → callAi drops `tools` AND `tool_choice` from the
+        // request body entirely (providers 400 on tool_choice with no set).
+        const { content } = await callAi(messages, { target, maxTokens: plannerMaxTokens(intent) });
+        const v = validatePlannerOutput(intent, content);
+        if (v.ok) return NextResponse.json({ ok: true, intent, result: v.result });
+        lastErr = new Error("invalid_model_output");
+        if (attempt === 0) {
+          messages.push({ role: "assistant", content });
+          messages.push({ role: "user", content: "That reply was not valid JSON in the requested shape. Reply with ONLY valid JSON matching the schema. No prose." });
+          break; // repair retry restarts the target chain
+        }
+      } catch (e) {
+        // Provider errors never consume the repair attempt — the inner loop
+        // just fails over to the next target.
+        lastErr = e;
+      }
+    }
+  }
+  return NextResponse.json({
+    ok: false,
+    reason: lastErr instanceof Error && lastErr.message === "invalid_model_output"
+      ? "invalid_model_output"
+      : "provider_unavailable",
+  });
+}
+
 export async function POST(request: NextRequest) {
   let body: ChatRequestBody;
   try {
@@ -442,6 +516,12 @@ export async function POST(request: NextRequest) {
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
+
+  // Planner rides none of the chat machinery: dispatched BEFORE the
+  // empty-message guard (it sends no `message`), before buildChatContext (it
+  // has no chat tools), before the stream branch (it never streams) and it
+  // never reaches persistChatPair.
+  if (body.agent === "planner") return handlePlanner(request, body);
 
   const { message } = body;
   if (!message || !message.trim()) {
