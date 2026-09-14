@@ -93,3 +93,27 @@ export function mergeTodaysEvents(
 
   return [...family, ...google].sort((a, b) => a.sortMinutes - b.sortMinutes);
 }
+
+/** Merge family + Google rows across an inclusive date range into per-day
+ *  sorted lists. Pure. Caps at 30 days (guard against a runaway model arg). */
+export function mergeEventsRange(
+  familyEvents: Array<Record<string, any>>,
+  googleRows: Array<Record<string, any>>,
+  startISO: string,
+  endISO: string,
+): Record<string, ToolEvent[]> {
+  const out: Record<string, ToolEvent[]> = {};
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startISO) || !/^\d{4}-\d{2}-\d{2}$/.test(endISO)) return out;
+  let cur = new Date(`${startISO}T12:00:00Z`);
+  const end = new Date(`${endISO}T12:00:00Z`);
+  for (let i = 0; i < 30 && cur <= end; i++) {
+    const dayISO = cur.toISOString().slice(0, 10);
+    out[dayISO] = mergeTodaysEvents(
+      (familyEvents || []).filter((e) => String(e.date || "") === dayISO),
+      googleRows || [],
+      dayISO,
+    );
+    cur = new Date(cur.getTime() + 86400000);
+  }
+  return out;
+}

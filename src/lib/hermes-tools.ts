@@ -9,7 +9,7 @@ import { localTodayISO, localWeekdayShort, familyTimeZone, weekdayOfISO, localWe
 import { weekStartForDate, isoDateForWeekday } from "@/lib/meals-week-utils";
 import { storeMemory, queryMemories, deleteMemory, incrementMemoryUsage, type MemoryCategory } from "@/lib/family-memory";
 import { MEMORY_USER_ID, MEMORY_FAMILY_ID } from "@/lib/memory-ids";
-import { mergeTodaysEvents, googleEventTime } from "@/lib/consuela/todays-events";
+import { mergeTodaysEvents, mergeEventsRange, googleEventTime } from "@/lib/consuela/todays-events";
 
 // === Live reads for tool handlers (2026-09-09) ===
 // The chat tools used to read db.selectTodaysEvents()/selectPendingTasks()/
@@ -66,6 +66,26 @@ async function liveGoogleEvents(dayISO = localTodayISO()): Promise<any[]> {
   } catch {
     return [];
   }
+}
+
+/** Family + Google events for an inclusive [start,end] ISO-day range.
+ *  Returns null when BOTH live reads failed (unavailable signal). */
+async function liveEventsRange(startISO: string, endISO: string): Promise<{ days: Record<string, any[]> } | null> {
+  let family: any[] | null = null;
+  let google: any[] | null = null;
+  try {
+    family = await withAdmin(async (pb) => pb.collection("events").getFullList({
+      filter: `date>="${startISO}" && date<="${endISO}"`, requestKey: null,
+    }));
+    family = family.map((e: any) => ({ ...e, time: e.time ? formatEventTime(e.time) : undefined }));
+  } catch { family = null; }
+  try {
+    google = await withAdmin(async (pb) => pb.collection("consuela_google_calendar_events").getFullList({
+      fields: "summary,start_iso,calendar_id", requestKey: null,
+    }));
+  } catch { google = null; }
+  if (family === null && google === null) return null;
+  return { days: mergeEventsRange(family ?? [], google ?? [], startISO, endISO) };
 }
 
 /** Member emoji for TOOL OUTPUT — photo avatars are 100KB+ base64 data URLs;
@@ -412,6 +432,31 @@ const TOOLS: Tool[] = [
   },
   {
     definition: {
+      name: "get_calendar_range",
+      description: "Get calendar events for a date range (family + Google, merged). Use for 'what's on Thursday?', 'this week', 'next week'. Max 30 days.",
+      parameters: {
+        type: "object",
+        properties: {
+          start: { type: "string", description: "YYYY-MM-DD (default: today)" },
+          end: { type: "string", description: "YYYY-MM-DD inclusive (default: today)" },
+        },
+      },
+    },
+    handler: async (args: any) => {
+      const start = String(args.start || localTodayISO());
+      const end = String(args.end || start);
+      const isDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+      if (!isDate(start) || !isDate(end)) return summarize({ error: "start/end must be YYYY-MM-DD" });
+      if (end < start) return summarize({ error: "end is before start" });
+      const daysBetween = (Date.parse(`${end}T12:00:00Z`) - Date.parse(`${start}T12:00:00Z`)) / 86400000;
+      if (daysBetween > 29) return summarize({ error: "range capped at 30 days — narrow it" });
+      const merged = await liveEventsRange(start, end);
+      if (merged === null) return summarize({ error: "calendar data unavailable — do not guess events", days: {} });
+      return summarize({ start, end, days: merged.days });
+    },
+  },
+  {
+    definition: {
       name: "add_event",
       description: "Add a new event to the family calendar. Use this when the user asks to create or schedule an event.",
       parameters: {
@@ -492,6 +537,50 @@ const TOOLS: Tool[] = [
         result = { removed: false, reason: `error: ${e?.message}` };
       }
       return summarize(result);
+    },
+  },
+  {
+    definition: {
+      name: "update_event",
+      description: "Move or edit a family calendar event: date, time, title, member. Find by title (+date when ambiguous). Does not edit Google-synced events.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Current event title to find" },
+          date: { type: "string", description: "New date YYYY-MM-DD" },
+          time: { type: "string", description: "New time HH:MM 24-hour" },
+          newTitle: { type: "string", description: "New title to rename the event to" },
+          member: { type: "string", description: "New member the event is for" },
+          findDate: { type: "string", description: "Current date of the event (disambiguates repeats)" },
+        },
+        required: ["title"],
+      },
+    },
+    handler: async (args: any) => {
+      const title = String(args.title || "").trim().toLowerCase();
+      const findDate = args.findDate && /^\d{4}-\d{2}-\d{2}$/.test(args.findDate) ? args.findDate : undefined;
+      const patch: Record<string, unknown> = {};
+      if (args.date && /^\d{4}-\d{2}-\d{2}$/.test(String(args.date))) patch.date = args.date;
+      if (args.time && /^(\d{1,2}):(\d{2})$/.test(String(args.time))) patch.time = args.time;
+      if (args.newTitle) patch.title = String(args.newTitle).trim();
+      if (args.member) patch.member = String(args.member).trim();
+      if (Object.keys(patch).length === 0) return summarize({ ok: false, error: "nothing to update — pass date/time/newTitle/member" });
+      try {
+        const result = await withAdmin(async (pb) => {
+          const records = await pb.collection("events").getFullList({ requestKey: null });
+          const matches = records.filter((e: any) =>
+            String(e.title).trim().toLowerCase() === title && (!findDate || e.date === findDate));
+          if (matches.length === 0) return { ok: false, error: `no family event titled "${args.title}" (Google events are edited on Google's side)` };
+          if (matches.length > 1 && !findDate) return { ok: false, error: "multiple events share that title — pass the event's current date as findDate to pick one" };
+          const row = matches[0];
+          const before = { title: row.title, date: row.date, time: row.time, member: row.member };
+          const updated = await pb.collection("events").update(row.id, patch);
+          return { ok: true, id: row.id, before, after: { title: updated.title ?? before.title, date: updated.date ?? before.date, time: updated.time ?? before.time, member: updated.member ?? before.member } };
+        });
+        return summarize(result);
+      } catch (e: any) {
+        return summarize({ ok: false, error: `update_event failed: ${e?.message}` });
+      }
     },
   },
   {
@@ -1410,7 +1499,14 @@ const TOOLS: Tool[] = [
     },
     handler: async (args: any) => {
       try {
-        const { wouldConflict } = await import("./conflict-detection");
+        const { wouldConflict, familyRowToConflictEvent } = await import("./conflict-detection");
+        // Conflicts must see the family's own events too, not just the Google
+        // cache. The family row's OWN time drives its span (never the new
+        // event's start) — pinned by hermes-tools-calendar-range tests.
+        const dayISO = String(args.start || "").slice(0, 10) || localTodayISO();
+        const family = await liveEvents(dayISO);
+        const mapped = family.map((e: any) =>
+          familyRowToConflictEvent({ id: e.id, title: e.title, date: dayISO, time: e.time }));
         const result = await wouldConflict({
           newEvent: {
             summary: args.summary,
@@ -1420,7 +1516,7 @@ const TOOLS: Tool[] = [
             attendees: args.attendees,
           },
           travelTimeMinutes: 15,
-        });
+        }, mapped);
         return JSON.stringify({
           hasConflict: result.hasConflict,
           conflictCount: result.conflicts.length,

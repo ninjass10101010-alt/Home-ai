@@ -45,7 +45,8 @@ Current date — use this for "today", "yesterday", "tomorrow" (do NOT guess fro
 Today is ${ctx.todayWeekday}, ${ctx.todayISO} (${ctx.tz}).
 Yesterday was ${ctx.yesterdayWeekday}, ${ctx.yesterdayISO}.
 The week runs Monday–Sunday; this week's Monday is ${ctx.weekStartISO}.
-${mealLine}`;
+${mealLine}
+${opts?.kid ? "" : "For any day beyond today (Thursday? next week? the weekend?), call get_calendar_range — never guess other days."}`;
 }
 
 export function buildConsuelaSystemPrompt(now?: Date): string {

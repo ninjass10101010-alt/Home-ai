@@ -193,10 +193,34 @@ export function detectConflicts(input: ConflictCheckInput): Conflict[] {
   return conflicts;
 }
 
+/** Family `events` row (liveEvents shape: {title, date, time?: "4:00 PM"}) →
+ *  the conflict engine's event shape. Timed rows get a 1-hour span; rows
+ *  without a parsable time become all-day rows centered at 12:00 with a 0
+ *  duration, which only ever conflict on date equality. */
+export function familyRowToConflictEvent(e: { id?: string | number; title: string; date: string; time?: string }): GoogleCalendarEvent {
+  const m12 = /^(\d{1,2}):(\d{2})\s*(AM|PM)$/i.exec(String(e.time || "").trim());
+  const m24 = /^(\d{1,2}):(\d{2})$/.exec(String(e.time || "").trim());
+  let h: number | null = null;
+  let min = 0;
+  if (m12) { h = Number(m12[1]) % 12; min = Number(m12[2]); if (m12[3].toUpperCase() === "PM") h += 12; }
+  else if (m24) { h = Number(m24[1]); min = Number(m24[2]); }
+  if (h === null) {
+    return { id: `family_${e.id ?? e.title}`, summary: e.title, start: { dateTime: `${e.date}T12:00:00` }, end: { dateTime: `${e.date}T12:01:00` } } as unknown as GoogleCalendarEvent;
+  }
+  const startH = String(h).padStart(2, "0"), startM = String(min).padStart(2, "0");
+  const endTotal = h * 60 + min + 60;
+  const endH = String(Math.floor(endTotal / 60) % 24).padStart(2, "0"), endM = String(endTotal % 60).padStart(2, "0");
+  return {
+    id: `family_${e.id ?? e.title}`, summary: e.title,
+    start: { dateTime: `${e.date}T${startH}:${startM}:00` },
+    end: { dateTime: `${e.date}T${endH}:${endM}:00` },
+  } as unknown as GoogleCalendarEvent;
+}
+
 /**
  * Check if adding an event would create conflicts
  */
-export async function wouldConflict(input: Omit<ConflictCheckInput, 'existingEvents'>): Promise<{
+export async function wouldConflict(input: Omit<ConflictCheckInput, 'existingEvents'>, extraFamilyEvents: GoogleCalendarEvent[] = []): Promise<{
   hasConflict: boolean;
   conflicts: Conflict[];
   summary: string;
@@ -206,14 +230,17 @@ export async function wouldConflict(input: Omit<ConflictCheckInput, 'existingEve
   const cachedEvents = await readCachedEvents();
 
   // Convert cached events to GoogleCalendarEvent format
-  const existingEvents: GoogleCalendarEvent[] = cachedEvents.map((e: any) => ({
-    id: e.google_id,
-    summary: e.summary,
-    start: { dateTime: e.start_iso },
-    end: { dateTime: e.end_iso },
-    location: e.location,
-    attendees: e.raw?.attendees || [],
-  }));
+  const existingEvents: GoogleCalendarEvent[] = [
+    ...cachedEvents.map((e: any) => ({
+      id: e.google_id,
+      summary: e.summary,
+      start: { dateTime: e.start_iso },
+      end: { dateTime: e.end_iso },
+      location: e.location,
+      attendees: e.raw?.attendees || [],
+    })),
+    ...extraFamilyEvents,
+  ];
 
   const conflicts = detectConflicts({
     ...input,
