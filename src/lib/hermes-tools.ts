@@ -379,6 +379,55 @@ async function adminUpsertWeekData(data: WeekData): Promise<any | null> {
   }
 }
 
+/** Shared task lookup for update_task/delete_task/reopen_task — mirrors
+ *  complete_task's resolution: numeric taskId first, then exact title
+ *  (case-insensitive, optional assignee disambiguation). */
+async function findTaskRow(pb: any, args: { taskId?: number; title?: string; assignee?: string }): Promise<any | null> {
+  const records = await pb.collection("tasks").getFullList({ requestKey: null });
+  if (args.taskId !== undefined) {
+    return records.find((r: any) => Number(r.taskId) === Number(args.taskId)) || null;
+  }
+  if (args.title) {
+    const t = String(args.title).trim().toLowerCase();
+    const a = args.assignee ? String(args.assignee).toLowerCase() : undefined;
+    return records.find((r: any) =>
+      String(r.title).trim().toLowerCase() === t &&
+      (!a || String(r.assignee || "").toLowerCase().includes(a))) || null;
+  }
+  return null;
+}
+
+async function updateTaskCore(args: any) {
+  try {
+    return await withAdmin(async (pb) => {
+      const row = await findTaskRow(pb, args);
+      if (!row) return { ok: false, error: "task not found — call get_pending_tasks first" };
+      if (row.status === "done") return { ok: false, error: "task is completed — mark it pending in the UI first" };
+      const patch: Record<string, unknown> = {};
+      if (args.newTitle) patch.title = String(args.newTitle).trim();
+      if (args.points !== undefined) patch.points = Math.max(1, Math.min(100, Number(args.points)));
+      if (args.due && /^\d{4}-\d{2}-\d{2}$/.test(args.due)) patch.due = args.due;
+      if (args.priority) patch.priority = args.priority;
+      if (args.recurring) patch.recurring = ["none", "daily", "weekly"].includes(args.recurring) ? args.recurring : "none";
+      if (args.stealable !== undefined) patch.stealable = args.stealable === true;
+      if (args.newAssignee) {
+        const members = await liveMembers();
+        const m = (members || []).find((x: any) => String(x.fullName || x.name || "").toLowerCase().includes(String(args.newAssignee).toLowerCase()));
+        if (!m) return { ok: false, error: `unknown member "${args.newAssignee}" — call get_family_members first` };
+        patch.assignee = m.fullName || m.name;
+        patch.assigneeEmoji = m.emoji; // raw value into storage (UI renders via Avatar); textEmoji() is for OUTPUT only
+      }
+      if (Object.keys(patch).length === 0) return { ok: false, error: "no valid fields to update" };
+      const before = { title: row.title, assignee: row.assignee, points: row.points, due: row.due, priority: row.priority, recurring: row.recurring, stealable: row.stealable };
+      const updated = await pb.collection("tasks").update(row.id, patch);
+      const after = { title: updated.title ?? before.title, assignee: updated.assignee ?? before.assignee, points: updated.points ?? before.points, due: updated.due ?? before.due, priority: updated.priority ?? before.priority, recurring: updated.recurring ?? before.recurring, stealable: updated.stealable ?? before.stealable };
+      return { ok: true, taskId: Number(row.taskId), before, after };
+    });
+  } catch (e: any) {
+    return { ok: false, error: `update_task failed: ${e?.message}` };
+  }
+}
+
 const TOOLS: Tool[] = [
   {
     definition: {
@@ -641,7 +690,7 @@ const TOOLS: Tool[] = [
   {
     definition: {
       name: "add_task",
-      description: "Add a new chore or task for a family member. Use this when the user asks to create a new task.",
+      description: "Add a new chore or task for a family member. Unknown member names are refused — resolve them with get_family_members first.",
       parameters: {
         type: "object",
         properties: {
@@ -650,29 +699,41 @@ const TOOLS: Tool[] = [
           points: { type: "number", description: "Points for completing this task (5-20 range)" },
           due: { type: "string", description: "Due date in YYYY-MM-DD format. Defaults to today if not provided." },
           priority: { type: "string", description: "Priority level", enum: ["low", "medium", "high"] },
+          recurring: { type: "string", description: "Repeat cadence", enum: ["none", "daily", "weekly"] },
+          stealable: { type: "boolean", description: "Up for grabs by anyone once the due date passes" },
         },
         required: ["title", "assigned_to"],
       },
     },
     handler: async (args) => {
       const due = args.due || todayISO();
-      const points = Number(args.points) || 10;
+      const points = Math.max(1, Math.min(100, Number(args.points) || 10));
       const priority = args.priority || "medium";
-      const members = db.selectMembers();
+      const members = await liveMembers();
+      if (members === null) {
+        return summarize({ ok: false, error: "member data unavailable — call get_family_members first" });
+      }
       const match = members.find((m: any) => {
         const name = (m.fullName || m.name || "").toLowerCase();
         const search = String(args.assigned_to).toLowerCase();
         return name.includes(search) || name.startsWith(search);
       });
+      if (!match) {
+        return summarize({
+          ok: false,
+          error: `unknown member "${args.assigned_to}" — call get_family_members to see the roster, then retry`,
+        });
+      }
       const task: Record<string, unknown> = {
         taskId: Date.now(),
         title: String(args.title).trim(),
-        assignee: match ? (match.fullName || match.name) : String(args.assigned_to).trim(),
-        assigneeEmoji: match?.emoji || "✅",
+        assignee: match.fullName || match.name,
+        assigneeEmoji: match.emoji,
         due,
         points,
         priority,
-        recurring: "none",
+        recurring: ["none", "daily", "weekly"].includes(args.recurring) ? args.recurring : "none",
+        stealable: args.stealable === true,
         category: "chore",
         universal: false,
         createdAt: new Date().toISOString(),
@@ -685,11 +746,118 @@ const TOOLS: Tool[] = [
         id: row.id,
         title: row.title,
         assignee: row.assignee,
-        assigneeEmoji: row.assigneeEmoji,
+        assigneeEmoji: textEmoji(match.emoji),
         points: row.points,
         due: row.due,
         priority: row.priority,
       });
+    },
+  },
+  {
+    definition: {
+      name: "update_task",
+      description: "Update a pending task: title, assignee, points, due, priority, recurring, or stealable. Find by taskId or exact title.",
+      parameters: {
+        type: "object",
+        properties: {
+          taskId: { type: "number", description: "Numeric task id from get_pending_tasks" },
+          title: { type: "string", description: "Exact title if taskId not known" },
+          assignee: { type: "string", description: "Disambiguate by assignee when searching by title" },
+          newTitle: { type: "string", description: "Replacement title" },
+          newAssignee: { type: "string", description: "New assignee name" },
+          points: { type: "number", description: "New point value" },
+          due: { type: "string", description: "YYYY-MM-DD" },
+          priority: { type: "string", description: "New priority", enum: ["low", "medium", "high"] },
+          recurring: { type: "string", description: "New repeat cadence", enum: ["none", "daily", "weekly"] },
+          stealable: { type: "boolean", description: "Up for grabs when late" },
+        },
+      },
+    },
+    handler: async (args: any) => summarize(await updateTaskCore(args)),
+  },
+  {
+    definition: {
+      name: "delete_task",
+      description: "Delete a task by taskId or exact title. The row is removed permanently — completed tasks must be undone in the Tasks UI instead.",
+      parameters: {
+        type: "object",
+        properties: {
+          taskId: { type: "number", description: "Numeric task id from get_pending_tasks" },
+          title: { type: "string", description: "Exact title if taskId not known" },
+          assignee: { type: "string", description: "Disambiguate by assignee when searching by title" },
+        },
+      },
+    },
+    handler: async (args: any) => {
+      try {
+        const result = await withAdmin(async (pb) => {
+          const row = await findTaskRow(pb, args);
+          if (!row) return { ok: false, error: "task not found — call get_pending_tasks first" };
+          if (row.status === "done") return { ok: false, error: "task is completed — undo it in the Tasks UI (parent PIN) instead of deleting" };
+          await pb.collection("tasks").delete(row.id);
+          return { ok: true, taskId: Number(row.taskId), title: row.title, assignee: row.assignee, deleted: true };
+        });
+        return summarize(result);
+      } catch (e: any) {
+        return summarize({ ok: false, error: `delete_task failed: ${e?.message}` });
+      }
+    },
+  },
+  {
+    definition: {
+      name: "reopen_task",
+      description: "Reopen a completed task that is still waiting in the parent approval queue (no points moved yet). Already-paid completions must be undone in the Tasks UI.",
+      parameters: {
+        type: "object",
+        properties: {
+          taskId: { type: "number", description: "Numeric task id" },
+          title: { type: "string", description: "Exact title if taskId not known" },
+          assignee: { type: "string", description: "Disambiguate by assignee when searching by title" },
+        },
+      },
+    },
+    handler: async (args: any) => {
+      try {
+        const result = await withAdmin(async (pb) => {
+          const row = await findTaskRow(pb, args);
+          if (!row) return { ok: false, error: "task not found — call get_pending_tasks or get_completed_tasks first" };
+          if (row.status !== "done") return { ok: false, error: "task is already pending" };
+          if (!row.pendingApproval || row.sentBackAt) {
+            return { ok: false, error: "this task's points were already awarded — undo it in the Tasks UI (parent PIN)" };
+          }
+          await pb.collection("tasks").update(row.id, { status: "pending", completedInWeek: null, completedAt: null, pendingApproval: null, sentBackAt: null });
+          return { ok: true, taskId: Number(row.taskId), title: row.title, reopened: true };
+        });
+        return summarize(result);
+      } catch (e: any) {
+        return summarize({ ok: false, error: `reopen_task failed: ${e?.message}` });
+      }
+    },
+  },
+  {
+    definition: {
+      name: "get_completed_tasks",
+      description: "List recently completed chores (default last 7 days, max 30). Returns title, who did it, and when.",
+      parameters: { type: "object", properties: { days: { type: "number", description: "How far back to look (1-30, default 7)" } } },
+    },
+    handler: async (args: any) => {
+      const days = Math.max(1, Math.min(30, Number(args.days) || 7));
+      const cutoff = new Date(Date.now() - days * 86400000).toISOString();
+      try {
+        const done = await withAdmin(async (pb) => {
+          const records = await pb.collection("tasks").getFullList({ requestKey: null });
+          return records.filter((r: any) => {
+            if (r.status !== "done") return false;
+            const stamp = String(r.completedAt || r.updated || "");
+            // Legacy rows carry no completion timestamp — include them (they
+            // predate the field) rather than hiding finished chores.
+            return !stamp || stamp >= cutoff;
+          });
+        });
+        return summarize({ days, completed: (done || []).map((t: any) => ({ title: t.title, assignee: t.assignee, completedBy: t.completedBy || t.assignee, completedAt: t.completedAt, week: t.completedInWeek })) });
+      } catch (e: any) {
+        return summarize({ error: `completed-task read failed: ${e?.message}`, completed: [] });
+      }
     },
   },
   {
@@ -1822,6 +1990,7 @@ const KID_TOOL_NAMES: ReadonlySet<string> = new Set([
   "get_calendar_range",
   "get_todays_schedule",
   "get_pending_tasks",
+  "get_completed_tasks",
   "get_weekly_meals",
   "get_recipes",
   "get_grocery_list",

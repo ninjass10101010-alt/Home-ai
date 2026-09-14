@@ -79,6 +79,7 @@ describe("kid tool surface", () => {
     const names = kidToolNames();
     expect(names).toEqual([
       "get_calendar_range",
+      "get_completed_tasks",
       "get_dashboard_summary",
       "get_family_members",
       "get_grocery_list",

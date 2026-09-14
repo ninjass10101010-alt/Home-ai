@@ -81,6 +81,7 @@ describe("hermes-tools — PB-side filters + batching", () => {
   });
 
   it("add_task upserts with a taskId filter (no full tasks scan)", async () => {
+    rows.members = [{ name: "Emily", fullName: "Emily" }];
     rows.tasks = [];
     const tool = getTool("add_task")!;
     await tool.handler({ title: "Test chore", assigned_to: "Emily", points: 5 });
