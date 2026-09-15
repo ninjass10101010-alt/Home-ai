@@ -63,11 +63,20 @@ export interface HallOfFameEntry {
   weekStart: string;
   points: number;
   rank: number;
+  prize?: string;
+  celebrated?: boolean;
 }
 
 export interface WeekGraphPoint {
   day: string;
   points: number;
+}
+
+export interface WeeklyPrize {
+  id: string;
+  rank: 1 | 2 | 3;
+  emoji: string;
+  text: string;
 }
 
 export interface LeaderboardEntry {
@@ -83,6 +92,8 @@ export interface LeaderboardEntry {
   progressToNext: number;
   badges: string[];
   completedInWeek: number;
+  allTimePoints: number;
+  allTimeCompletions: number;
 }
 
 export interface Reward {

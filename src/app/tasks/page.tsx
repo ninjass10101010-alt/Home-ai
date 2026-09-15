@@ -1260,6 +1260,8 @@ export default function TasksPage() {
           levelEmoji: emoji,
           progressToNext: progress,
           badges: earnedBadges,
+          allTimePoints,
+          allTimeCompletions: allTimeComps,
           completedInWeek,
         };
       })

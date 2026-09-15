@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { localTodayISO } from "@/lib/local-date";
-import type { Task, WeekData, Transaction, WeekArchive, FamilyGoal, HallOfFameEntry, Reward, Penalty } from "@/types/tasks";
+import type { Task, WeekData, Transaction, WeekArchive, FamilyGoal, HallOfFameEntry, Reward, Penalty, WeeklyPrize } from "@/types/tasks";
 
 export const TASKS_STORAGE_KEY = "consuela-tasks";
 export const WEEK_DATA_KEY = "consuela-week-data";
@@ -528,6 +528,35 @@ export function loadPenalties<T>(fallback: T): T {
 
 export function savePenalties<T>(penalties: T): void {
   saveJSON(PENALTIES_KEY, penalties);
+}
+
+// ─── Weekly prizes — the top-3 finishers' rewards for the week race ────────
+// Same localStorage + last-write-wins-stamp idiom as the rewards catalog
+// (mirrors kid-store's touchRewardsStamp/readRewardsStamp on this module's
+// private loadJSON/saveJSON helpers).
+export const WEEKLY_PRIZES_KEY = "consuela-weekly-prizes";
+const WEEKLY_PRIZES_STAMP_KEY = "consuela-weekly-prizes-stamp";
+
+export const DEFAULT_WEEKLY_PRIZES: WeeklyPrize[] = [
+  { id: "prize-1", rank: 1, emoji: "🥇", text: "Picks Friday's family movie" },
+  { id: "prize-2", rank: 2, emoji: "🥈", text: "Chooses the dessert night" },
+  { id: "prize-3", rank: 3, emoji: "🥉", text: "+$2 allowance" },
+];
+
+export function loadWeeklyPrizes(): WeeklyPrize[] {
+  return loadJSON<WeeklyPrize[]>(WEEKLY_PRIZES_KEY, DEFAULT_WEEKLY_PRIZES);
+}
+export function saveWeeklyPrizes(prizes: WeeklyPrize[]): void {
+  saveJSON(WEEKLY_PRIZES_KEY, prizes);
+}
+export function prizeForRank(prizes: WeeklyPrize[], rank: number): WeeklyPrize | undefined {
+  return prizes.find((p) => p.rank === rank);
+}
+export function touchWeeklyPrizesStamp(): void {
+  saveJSON(WEEKLY_PRIZES_STAMP_KEY, new Date().toISOString());
+}
+export function readWeeklyPrizesStamp(): string {
+  return loadJSON<string>(WEEKLY_PRIZES_STAMP_KEY, "");
 }
 
 export function getArchivedWeeks(): WeekArchive {

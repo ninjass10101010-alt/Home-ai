@@ -77,6 +77,8 @@ export function useLeaderboardData() {
           levelEmoji: emoji,
           progressToNext: progress,
           badges: earnedBadges,
+          allTimePoints,
+          allTimeCompletions: allTimeComps,
           completedInWeek: tasks.filter(
             t => t.completed && t.completedBy === name && (
               t.completedInWeek === currentMonday ||
