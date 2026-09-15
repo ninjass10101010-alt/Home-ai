@@ -9,7 +9,7 @@ import { useAuth } from "@/hooks/useAuth";
 import Badge from "@/components/ui/Badge";
 import Avatar from "@/components/ui/Avatar";
 import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
-import { mapGoogleEvent, eventInMonth, dbEventToCalEvent, dbScheduleToScheduleItem } from "@/lib/calendar/google-mapping";
+import { expandGoogleEvent, eventInMonth, dbEventToCalEvent, dbScheduleToScheduleItem } from "@/lib/calendar/google-mapping";
 import { db } from "@/db";
 import { gatewayList } from "@/db/gateway-client";
 import { saveOrQueue, type PendingWrite } from "@/lib/pending-writes";
@@ -613,9 +613,7 @@ export default function CalendarPage() {
       const colorMap = (data.calendar_colors && typeof data.calendar_colors === "object")
         ? (data.calendar_colors as Record<string, string>)
         : null;
-      const mappedList = (data.events || [])
-        .map((ge: any) => mapGoogleEvent(ge, colorMap))
-        .filter(Boolean);
+      const mappedList = (data.events || []).flatMap((ge: any) => expandGoogleEvent(ge, colorMap));
       // Always replace the Google rows (even with an empty result) so
       // deleted/moved-out events don't linger from an old cache.
       setCalEvents((prev) => {
@@ -624,11 +622,11 @@ export default function CalendarPage() {
           if (
             !filtered.find(
               (e: any) =>
-                e.title === mapped!.title &&
-                e.day === mapped!.day &&
-                e.month === mapped!.month &&
-                e.year === mapped!.year &&
-                e.time === mapped!.time
+                e.title === mapped.title &&
+                e.day === mapped.day &&
+                e.month === mapped.month &&
+                e.year === mapped.year &&
+                e.time === mapped.time
             )
           ) {
             filtered.push(mapped as CalEvent);

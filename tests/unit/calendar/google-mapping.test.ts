@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseGoogleStart, mapGoogleEvent, eventInMonth } from "@/lib/calendar/google-mapping";
+import { parseGoogleStart, mapGoogleEvent, eventInMonth, expandGoogleEvent, googleEventCoveredDays, googleEventCoversDay } from "@/lib/calendar/google-mapping";
 
 describe("parseGoogleStart", () => {
   it("parses all-day date-only strings as local calendar dates (no UTC shift)", () => {
@@ -203,5 +203,68 @@ describe("mapGoogleEvent — multi-calendar (Fix-C)", () => {
       { primary: "#0b804b" },
     )!;
     expect("colorHex" in unknownCal).toBe(false);
+  });
+});
+
+describe("multi-day coverage", () => {
+  const weekend = {
+    google_id: "wk1",
+    summary: "Bailey & Emily at home",
+    start_iso: "2026-10-30",
+    end_iso: "2026-11-02",
+    all_day: true,
+  };
+  it("all-day span covers every day, exclusive end", () => {
+    expect(googleEventCoveredDays(weekend)).toEqual([
+      "2026-10-30",
+      "2026-10-31",
+      "2026-11-01",
+    ]);
+    const rows = expandGoogleEvent(weekend);
+    expect(rows.map((r) => [r.day, r.month, r.year])).toEqual([
+      [30, 9, 2026],
+      [31, 9, 2026],
+      [1, 10, 2026],
+    ]);
+    expect(new Set(rows.map((r) => r.id)).size).toBe(3);
+    expect(rows.every((r) => r.time === "All day")).toBe(true);
+    expect(googleEventCoversDay(weekend, "2026-11-01")).toBe(true);
+    expect(googleEventCoversDay(weekend, "2026-11-02")).toBe(false);
+  });
+  it("single-day row keeps the legacy id byte-identical", () => {
+    const one = {
+      google_id: "a1",
+      summary: "X",
+      start_iso: "2026-10-30",
+      end_iso: "2026-10-31",
+      all_day: true,
+    };
+    expect(expandGoogleEvent(one).length).toBe(1);
+    expect(mapGoogleEvent(one)!.id).toBe(expandGoogleEvent(one)[0].id);
+  });
+  it("cross-midnight timed event covers both days; exact-midnight end does not", () => {
+    const span = {
+      google_id: "t1",
+      summary: "T",
+      start_iso: "2026-10-30T23:00:00-04:00",
+      end_iso: "2026-10-31T01:00:00-04:00",
+    };
+    expect(googleEventCoveredDays(span).length).toBe(2);
+    const midnightEnd = { ...span, end_iso: "2026-10-31T00:00:00-04:00" };
+    expect(googleEventCoveredDays(midnightEnd).length).toBe(1);
+  });
+  it("missing/invalid end_iso and end<=start degrade to the start day only", () => {
+    expect(
+      googleEventCoveredDays({ google_id: "g", start_iso: "2026-10-30", all_day: true }),
+    ).toEqual(["2026-10-30"]);
+    expect(
+      googleEventCoveredDays({
+        google_id: "g",
+        start_iso: "2026-10-30",
+        end_iso: "2026-10-30",
+        all_day: true,
+      }),
+    ).toEqual(["2026-10-30"]);
+    expect(googleEventCoveredDays({ google_id: "g", start_iso: "" })).toEqual([]);
   });
 });
