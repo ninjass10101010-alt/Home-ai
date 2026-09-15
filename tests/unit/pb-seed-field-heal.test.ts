@@ -293,7 +293,7 @@ describe("dead HA seed collections removed (F8c)", () => {
     }
   });
 
-  it("collection count is 45 (43 + the two MUSE collections)", () => {
-    expect(COLLECTIONS.length).toBe(45);
+  it("collection count is 46 (45 + weekly_prizes)", () => {
+    expect(COLLECTIONS.length).toBe(46);
   });
 });

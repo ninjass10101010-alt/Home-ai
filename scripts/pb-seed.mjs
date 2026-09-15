@@ -37,7 +37,7 @@ if (missing.length > 0) {
 }
 
 // Import AFTER env resolution — pb.ts/pb-auth.ts capture env at module load.
-const { seedCollections, seedNotifyPrefsAdmin } = await import("../src/lib/pb-seed.ts");
+const { seedCollections, seedNotifyPrefsAdmin, seedWeeklyPrizesAdmin } = await import("../src/lib/pb-seed.ts");
 
 console.log(`Seeding PocketBase at ${process.env.NEXT_PUBLIC_PB_URL} …`);
 try {
@@ -45,6 +45,8 @@ try {
   console.log(`\nDone! ${created.length} collections ready.`);
   await seedNotifyPrefsAdmin();
   console.log("Notify prefs ready (briefing/weather/calendar, default OFF).");
+  await seedWeeklyPrizesAdmin();
+  console.log("Weekly prizes ready (ranks 1–3, create-if-absent).");
 } catch (err) {
   console.error("Seed failed:", err?.message ?? err);
   if (err?.response?.data) console.error("Details:", JSON.stringify(err.response.data, null, 2));

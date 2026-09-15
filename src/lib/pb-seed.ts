@@ -1,4 +1,5 @@
 import { withAdmin } from "./pb-auth";
+import { DEFAULT_WEEKLY_PRIZES } from "@/lib/task-utils";
 
 // SERVER ONLY — the default family PINs, kept here (seed-side truth) so they
 // never enter the browser bundle. They are used when a member's PocketBase
@@ -342,10 +343,22 @@ export const COLLECTIONS = [
       { name: "weekStart", type: "text", required: true },
       { name: "points", type: "number" },
       { name: "rank", type: "number" },
+      // Weekly Prize Race: the frozen prize text for the rank and whether the
+      // winner has celebrated it. Optional — existing rows need no migration.
+      { name: "prize", type: "text", required: false },
+      { name: "celebrated", type: "bool", required: false },
       // Optional: legacy live `memberId`/`title` were required (the app
       // writes member/weekStart) — rollover enshrinement never reached PB.
       { name: "memberId", type: "number", required: false },
       { name: "title", type: "text", required: false },
+    ],
+  },
+  {
+    name: "weekly_prizes",
+    schema: [
+      { name: "rank", type: "number", required: true },
+      { name: "emoji", type: "text" },
+      { name: "text", type: "text" },
     ],
   },
   {
@@ -879,6 +892,38 @@ export async function seedNotifyPrefs(
  * seed path stays pure (and unit tests that mock only pb.collections are safe). */
 export async function seedNotifyPrefsAdmin(): Promise<void> {
   await withAdmin(async (pb) => seedNotifyPrefs(pb as unknown as Parameters<typeof seedNotifyPrefs>[0]));
+}
+
+/** Ensure the 3 default weekly prize rows exist without ever overwriting a
+ * family's edits. Create-if-absent only (keyed by `rank`): an existing row is
+ * left untouched, so re-seeding a live instance never resets prizes a parent
+ * customized. Mirrors seedNotifyPrefs exactly. */
+export async function seedWeeklyPrizes(
+  pb: {
+    collection: (name: string) => {
+      getFirstListItem: (filter: string) => Promise<unknown>;
+      create: (data: Record<string, unknown>) => Promise<unknown>;
+    };
+  }
+): Promise<void> {
+  const collection = pb.collection("weekly_prizes");
+  for (const prize of DEFAULT_WEEKLY_PRIZES) {
+    try {
+      await collection.getFirstListItem(`rank=${prize.rank}`);
+    } catch (err) {
+      if ((err as { status?: number })?.status === 404) {
+        await collection.create({ rank: prize.rank, emoji: prize.emoji, text: prize.text });
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+/** Row-seeding entrypoint for the seed script (runs AFTER seedCollections so
+ * weekly_prizes exists). Same kept-pure contract as seedNotifyPrefsAdmin. */
+export async function seedWeeklyPrizesAdmin(): Promise<void> {
+  await withAdmin(async (pb) => seedWeeklyPrizes(pb as unknown as Parameters<typeof seedWeeklyPrizes>[0]));
 }
 
 export async function seedCollections() {
