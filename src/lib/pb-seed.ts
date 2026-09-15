@@ -744,6 +744,41 @@ export const COLLECTIONS = [
       { name: "settings", type: "json" },
     ],
   },
+  // MUSE inbound API identity (singleton row created by the settings route).
+  // keyHash stores the HMAC of the issued key (never the key itself);
+  // version rotation revokes every outstanding token, enabled is the master
+  // on/off, adminEnabled gates admin-capable tools.
+  {
+    name: "consuela_muse",
+    schema: [
+      { name: "label", type: "text", required: false },
+      { name: "keyHash", type: "text", required: false },
+      { name: "keyPrefix", type: "text", required: false },
+      { name: "version", type: "number", required: false },
+      { name: "enabled", type: "bool", required: false },
+      { name: "adminEnabled", type: "bool", required: false },
+      { name: "rateLimitPerMin", type: "number", required: false },
+      { name: "createdAt", type: "text", required: false },
+      { name: "rotatedAt", type: "text", required: false },
+      { name: "lastUsedAt", type: "text", required: false },
+      { name: "lastUsedIp", type: "text", required: false },
+    ],
+  },
+  // Append-only MUSE tool-call audit log (every request writes one row).
+  {
+    name: "consuela_muse_log",
+    schema: [
+      { name: "at", type: "text", required: false },
+      { name: "kind", type: "text", required: false },
+      { name: "keyPrefix", type: "text", required: false },
+      { name: "tool", type: "text", required: false },
+      { name: "ok", type: "bool", required: false },
+      { name: "ms", type: "number", required: false },
+      { name: "ip", type: "text", required: false },
+      { name: "detail", type: "text", required: false },
+      { name: "tokenAdmin", type: "bool", required: false },
+    ],
+  },
 ];
 
 // All browser data traffic now flows through the sessioned /api/db/* gateway
