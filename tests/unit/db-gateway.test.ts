@@ -62,6 +62,16 @@ describe("db gateway", () => {
     expect(res.status).toBe(404);
   });
 
+  // Weekly Prize Race — weekly_prizes is parent-managed catalog data (same
+  // tier as rewards/penalties): a sessioned read must pass the allowlist so
+  // the leaderboard/ceremony surfaces can load the prizes.
+  it("lists weekly_prizes for a sessioned caller (read allowlist)", async () => {
+    const res = await listGET(await withSession(sessionReq("http://x/api/db/weekly_prizes")), { params: Promise.resolve({ collection: "weekly_prizes" }) } as any);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.items[0].id).toBe("r1");
+  });
+
   it("creates a row (sanitized)", async () => {
     const res = await createPOST(
       await withSession(sessionReq("http://x/api/db/grocery_list_items", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Eggs", pinField: "hack" }) })),

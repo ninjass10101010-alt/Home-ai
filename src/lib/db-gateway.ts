@@ -1,7 +1,7 @@
 export const DB_GATEWAY_COLLECTIONS: ReadonlySet<string> = new Set([
   "grocery_list_items", "pantry_items", "meal_plan_entries", "meal_week_archive",
   "recipes", "events", "schedules", "tasks", "week_data", "week_archive",
-  "rewards", "penalties", "family_goals", "hall_of_fame",
+  "rewards", "penalties", "family_goals", "hall_of_fame", "weekly_prizes",
   "chat_messages", "morning_briefing", "proactive_suggestions", "consuela_state",
   "emergency_contacts",
 ]);
@@ -61,7 +61,7 @@ export const MAX_LIST_LIMIT = 500;
 // allowlisted collection); a missing session is still 401 at middleware.
 export const WRITE_POLICY: Record<string, "parent" | "session"> = {
   week_data: "parent", week_archive: "parent", rewards: "parent", penalties: "parent",
-  hall_of_fame: "parent", family_goals: "parent", emergency_contacts: "parent",
+  hall_of_fame: "parent", weekly_prizes: "parent", family_goals: "parent", emergency_contacts: "parent",
   chat_messages: "parent", morning_briefing: "parent", proactive_suggestions: "parent",
   consuela_state: "parent", events: "parent", schedules: "parent",
   meal_plan_entries: "parent", recipes: "parent", meal_week_archive: "parent",

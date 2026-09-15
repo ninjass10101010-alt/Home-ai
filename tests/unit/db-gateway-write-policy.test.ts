@@ -17,7 +17,7 @@ import { GET as listGET } from "@/app/api/db/[collection]/route";
 
 const SESSION = ["parent", "child", "pet"];
 it("parent-only collections reject children and pets", () => {
-  for (const c of ["week_data", "rewards", "penalties", "hall_of_fame", "family_goals", "emergency_contacts", "events", "schedules", "meal_plan_entries", "recipes", "meal_week_archive", "chat_messages", "morning_briefing", "proactive_suggestions", "consuela_state", "week_archive"]) {
+  for (const c of ["week_data", "rewards", "penalties", "hall_of_fame", "weekly_prizes", "family_goals", "emergency_contacts", "events", "schedules", "meal_plan_entries", "recipes", "meal_week_archive", "chat_messages", "morning_briefing", "proactive_suggestions", "consuela_state", "week_archive"]) {
     expect(WRITE_POLICY[c]).toBe("parent");
     expect(canWrite(c, "parent")).toBe(true);
     expect(canWrite(c, "child")).toBe(false);
@@ -118,6 +118,24 @@ describe("db gateway role enforcement", () => {
     const res = await createPOST(await req("http://x/api/db/week_data", "parent", jsonInit("POST", { weekStart: "2026-09-14", points: 5 })), ctx("week_data"));
     expect(res.status).toBe(200);
     expect(col.create).toHaveBeenCalled();
+  });
+
+  // Weekly Prize Race — weekly_prizes mirrors rewards/penalties (parent-managed
+  // catalog): a child/pet/guest write must 403/401 without touching PB, a
+  // parent write must pass.
+  it("weekly_prizes: child POST → 403 adult_only, PB untouched", async () => {
+    const res = await createPOST(await req("http://x/api/db/weekly_prizes", "child", jsonInit("POST", { rank: 1, emoji: "🏆", text: "Movie night" })), ctx("weekly_prizes"));
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe("adult_only");
+    expect(mocks.withAdmin).not.toHaveBeenCalled();
+  });
+
+  it("weekly_prizes: parent POST/PATCH → 200", async () => {
+    const res = await createPOST(await req("http://x/api/db/weekly_prizes", "parent", jsonInit("POST", { rank: 1, emoji: "🏆", text: "Movie night" })), ctx("weekly_prizes"));
+    expect(res.status).toBe(200);
+    expect(col.create).toHaveBeenCalled();
+    const p = ctx("weekly_prizes", "r1");
+    expect((await patchOne(await req("http://x/api/db/weekly_prizes/r1", "parent", jsonInit("PATCH", { text: "Pizza night" })), p)).status).toBe(200);
   });
 
   it("guest PATCH/DELETE → 401, PB untouched", async () => {
