@@ -97,12 +97,16 @@ it("complete_task answers an already-queued row with the honest approval refusal
 });
 
 it("reopen_task reopens a row still waiting for approval", async () => {
-  rows.tasks = [{ id: "t3", taskId: 103, title: "Queued", assignee: "Emily G", status: "done", pendingApproval: { byName: "Emily G", at: "2026-09-10T10:00:00Z", points: 5 }, sentBackAt: null }];
+  rows.tasks = [{ id: "t3", taskId: 103, title: "Queued", assignee: "Emily G", status: "done", completed: true, completedBy: "Emily G", pendingApproval: { byName: "Emily G", at: "2026-09-10T10:00:00Z", points: 5 }, sentBackAt: null }];
   const out = JSON.parse(await getTool("reopen_task")!.handler({ taskId: 103 }));
   expect(out.ok).toBe(true);
   const w = writes.find((x) => x.op === "update" && x.collection === "tasks")!;
   expect(w.data.status).toBe("pending");
   expect(w.data.pendingApproval).toBeNull();
+  // Every client consumer keys `completed` (task-utils) — a reopened row must
+  // clear it + completedBy or it stays a zombie-done row, invisible to the kid.
+  expect(w.data.completed).toBe(false);
+  expect(w.data.completedBy).toBeNull();
   expect(writes.some((x) => x.collection === "week_data")).toBe(false);
 });
 

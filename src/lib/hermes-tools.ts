@@ -2,7 +2,6 @@ import { db } from "@/db";
 import { groceryCategories } from "@/data/meals";
 import { withAdmin } from "@/lib/pb-auth";
 import { weekKey } from "@/lib/task-utils";
-import type { WeekData } from "@/types/tasks";
 import { getHAWebSocketClient } from "@/lib/ha/websocket-client";
 import { getStoreLabel, groupByStore } from "@/lib/stores";
 import { localTodayISO, localWeekdayShort, familyTimeZone, weekdayOfISO, localWeekStartISO } from "@/lib/local-date";
@@ -163,24 +162,6 @@ async function adminUpsertMeal(meal: Record<string, unknown>): Promise<{ row: an
   } catch (e: any) {
     console.error("[hermes-tools] upsertMeal failed:", e?.message);
     return { row: null, replaced: false };
-  }
-}
-
-async function adminUpsertWeekData(data: WeekData): Promise<any | null> {
-  try {
-    return await withAdmin(async (pb) => {
-      const records = await pb.collection("week_data").getFullList({
-        filter: `weekStart="${data.weekStart}"`,
-        requestKey: null,
-      });
-      const existing = records.find((r: any) => r.weekStart === data.weekStart);
-      return existing
-        ? pb.collection("week_data").update(existing.id, data as any)
-        : pb.collection("week_data").create(data as any);
-    });
-  } catch (e: any) {
-    console.error("[hermes-tools] upsertWeekData failed:", e?.message);
-    return null;
   }
 }
 
@@ -618,7 +599,7 @@ const TOOLS: Tool[] = [
           if (!row.pendingApproval || row.sentBackAt) {
             return { ok: false, error: "this task's points were already awarded — undo it in the Tasks UI (parent PIN)" };
           }
-          await pb.collection("tasks").update(row.id, { status: "pending", completedInWeek: null, completedAt: null, pendingApproval: null, sentBackAt: null });
+          await pb.collection("tasks").update(row.id, { status: "pending", completed: false, completedBy: null, completedInWeek: null, completedAt: null, pendingApproval: null, sentBackAt: null });
           return { ok: true, taskId: Number(row.taskId), title: row.title, reopened: true };
         });
         return summarize(result);
