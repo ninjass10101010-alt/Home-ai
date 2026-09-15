@@ -70,6 +70,8 @@ vi.mock("@/db", () => ({
 import { GET as toolsGET } from "@/app/api/muse/tools/route";
 import { POST as toolPOST } from "@/app/api/muse/tool/route";
 import { GET as whoamiGET } from "@/app/api/muse/whoami/route";
+import { GET as contextGET } from "@/app/api/muse/context/route";
+import { GET as docsGET } from "@/app/api/muse/docs/route";
 import { ADMIN_TOOLS } from "@/lib/muse/execute";
 import { signMuseToken } from "@/lib/muse/token";
 import { generateKey } from "@/lib/muse/store";
@@ -369,41 +371,77 @@ describe("POST /api/muse/tool — deep redaction + truthful audit + scrub (revie
 // prefix, so each route must self-gate. Family-data routes 401 without a
 // bearer; the route inventory is pinned so a newly added route must be
 // explicitly classified (and gated) before this suite goes green again.
+// Fold-in (Task 8 review, extended by Tasks 10 + 11): the middleware exempts
+// the whole `/api/muse/` prefix, so each route must self-gate. Every route is
+// explicitly classified here; a newly added route (or one whose gate is
+// removed) fails this suite.
+//
+//   bearer — a MUSE token: tools, tool, whoami, context
+//   admin  — the parent allowlist: settings, settings/rotate,
+//            settings/revoke-tokens, log
+//   public — no family data: auth/logout (stateless no-op), docs
+//   self   — authenticates with the key: auth/login
+type RouteKind = "bearer" | "admin" | "public" | "self";
+
+const ROUTE_INVENTORY: Record<string, RouteKind> = {
+  "auth/login/route.ts": "self",
+  "auth/logout/route.ts": "public",
+  "tools/route.ts": "bearer",
+  "tool/route.ts": "bearer",
+  "whoami/route.ts": "bearer",
+  "context/route.ts": "bearer",
+  "docs/route.ts": "public",
+};
+
+function walkMuseRoutes(): string[] {
+  const root = path.join(process.cwd(), "src/app/api/muse");
+  const found: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name === "route.ts")
+        found.push(path.relative(root, full).split(path.sep).join("/"));
+    }
+  };
+  walk(root);
+  return found;
+}
+
 describe("muse route self-gating under the middleware exemption", () => {
-  it("family-data routes 401 without a bearer token", async () => {
+  it("bearer routes 401 without a bearer token", async () => {
     makeRow();
     const toolsRes = await toolsGET(museReq("/api/muse/tools"));
     const toolRes = await toolPOST(
       museReq("/api/muse/tool", { method: "POST", body: { name: "get_weather", args: {} } })
     );
     const whoamiRes = await whoamiGET(museReq("/api/muse/whoami"));
+    const contextRes = await contextGET(museReq("/api/muse/context"));
     expect(toolsRes.status).toBe(401);
     expect(toolRes.status).toBe(401);
     expect(whoamiRes.status).toBe(401);
+    expect(contextRes.status).toBe(401);
   });
 
-  it("has an explicitly classified route inventory", () => {
+  it("docs serves markdown publicly with no auth", async () => {
+    const res = await docsGET();
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/markdown");
+  });
+
+  it("has an explicitly classified route inventory whose gates match", () => {
     const root = path.join(process.cwd(), "src/app/api/muse");
-    const found: string[] = [];
-    const walk = (dir: string) => {
-      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        const full = path.join(dir, entry.name);
-        if (entry.isDirectory()) walk(full);
-        else if (entry.name === "route.ts")
-          found.push(path.relative(root, full).split(path.sep).join("/"));
+    expect(new Set(walkMuseRoutes())).toEqual(new Set(Object.keys(ROUTE_INVENTORY)));
+    for (const [rel, kind] of Object.entries(ROUTE_INVENTORY)) {
+      const src = fs.readFileSync(path.join(root, rel), "utf8");
+      if (kind === "bearer") {
+        expect(src, `${rel} must gate on authorizeMuseRequest`).toContain("authorizeMuseRequest");
+      } else if (kind === "admin") {
+        expect(src, `${rel} must gate on authorizeAdminRequest`).toContain("authorizeAdminRequest");
+      } else {
+        expect(src, `${rel} must not gate on a MUSE/admin credential`).not.toContain("authorizeMuseRequest");
+        expect(src, `${rel} must not gate on a MUSE/admin credential`).not.toContain("authorizeAdminRequest");
       }
-    };
-    walk(root);
-    // login/logout self-authenticate; tools/tool/whoami assert a MUSE bearer.
-    // Task 10 (context/docs) and Task 11 (settings/log) MUST extend this list.
-    expect(new Set(found)).toEqual(
-      new Set([
-        "auth/login/route.ts",
-        "auth/logout/route.ts",
-        "tools/route.ts",
-        "tool/route.ts",
-        "whoami/route.ts",
-      ])
-    );
+    }
   });
 });
