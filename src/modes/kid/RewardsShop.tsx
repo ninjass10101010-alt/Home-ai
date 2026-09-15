@@ -20,7 +20,7 @@ import IconButton from "@/components/ui/IconButton";
 import { useAuth } from "@/hooks/useAuth";
 import { useRouter } from "next/navigation";
 import { db } from "@/db";
-import { loadWeekData, loadRewards, saveWeekData, addTransaction, syncWeekDataToPB } from "@/lib/task-utils";
+import { loadWeekData, loadRewards, saveWeekData } from "@/lib/task-utils";
 import { currentWeekPoints, verifyPinRemote, unreachableCopy } from "./kid-store";
 
 // ─── Reward catalog ────────────────────────────────────────────────────────
@@ -329,6 +329,10 @@ export default function RewardsShop() {
     setPinBusy(true);
     const reward = pinReward;
     try {
+      // Client-side verify is the UX gate only; the route re-verifies the PIN
+      // server-side and owns the authoritative cost + ledger write (F2: the
+      // gateway rejects child week_data writes, so the old local-then-sync
+      // path 403'd silently and could be reverted by the next snapshot).
       const result = await verifyPinRemote(currentUser.name, pin);
       if (result.status === "wrongPin") {
         setPinError("Wrong PIN. Try again.");
@@ -336,31 +340,59 @@ export default function RewardsShop() {
         return;
       }
       if (result.status === "unreachable") {
-        // Network/5xx is not a wrong PIN — give the honest offline-vs-server
-        // copy and clear the typed PIN.
         setPinError(unreachableCopy());
         setPin("");
         return;
       }
-      const week = loadWeekData();
-      const { points: nowPoints, key } = currentWeekPoints(currentUser.name);
-      if (nowPoints < reward.cost) {
-        setPinError(`Not enough points — ${reward.name} costs ${reward.cost}pts, you have ${nowPoints}pts.`);
+      const memberName = (result.member as any)?.name || currentUser.name;
+
+      let res: Response;
+      try {
+        res = await fetch("/api/rewards/redeem", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            rewardId: String(reward.id),
+            rewardName: reward.name,
+            memberName,
+            pin,
+          }),
+        });
+      } catch {
+        // Network rejection — honest offline-vs-server copy, PIN cleared.
+        setPinError(unreachableCopy());
         setPin("");
         return;
       }
-      const updated = addTransaction(
-        { ...week, points: { ...week.points, [key]: nowPoints - reward.cost } },
-        "redeem",
-        -reward.cost,
-        `Redeemed: ${reward.name} (-${reward.cost}pts)`,
-        key
-      );
-      saveWeekData(updated);
-      void syncWeekDataToPB(updated);
+      const data = await res.json().catch(() => null);
+      if (res.status === 401) {
+        setPinError("Wrong PIN. Try again.");
+        setPin("");
+        return;
+      }
+      if (res.status === 400 || res.status === 404 || res.status === 409) {
+        // Server-authoritative verdicts: insufficient points / unknown reward /
+        // duplicate redeem — show the honest server copy, never celebrate.
+        setPinError(
+          data?.error ||
+            (res.status === 400
+              ? "Not enough points for that reward."
+              : res.status === 404
+                ? "That reward isn't available anymore."
+                : "That redemption just went through — check your points.")
+        );
+        setPin("");
+        return;
+      }
+      if (!res.ok || !data?.ok || !data.weekData) {
+        setPinError(unreachableCopy());
+        setPin("");
+        return;
+      }
+      // Server is authoritative: adopt its ledger, then celebrate.
+      saveWeekData(data.weekData);
       setPinReward(null);
       setPin("");
-      setPoints(nowPoints - reward.cost);
       refresh();
       setPurchasing(reward);
     } finally {

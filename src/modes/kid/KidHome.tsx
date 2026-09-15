@@ -49,7 +49,6 @@ import {
   getThisWeeksCompletedDates,
   calculateRealStreak,
   syncTasksToPB,
-  syncWeekDataToPB,
   completesWithoutPin,
   completesWithPendingApproval,
   tapCompletePending,

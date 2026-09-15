@@ -57,6 +57,20 @@ vi.mock("@/components/ui/SyncInit", () => ({ default: () => null }));
 
 import RewardsShop from "@/modes/kid/RewardsShop";
 
+// The route's authoritative week ledger after a 150pt "Movie night" redeem.
+const REDEEMED_WEEK = {
+  weekStart: "2026-09-01",
+  points: { Caspian: 50 },
+  streak: {},
+  lastActive: {},
+  history: [
+    { id: 9, timestamp: "2026-09-04T12:00:00.000Z", member: "Caspian", type: "redeem", amount: -150, description: "Redeemed: Movie night (-150pts)" },
+  ],
+};
+
+// The redeem-route response, overridable per test.
+let redeemResult: { status: number; body: any } = { status: 200, body: { ok: true, weekData: REDEEMED_WEEK } };
+
 // Parent PIN "0000" verifies for parents only; kid PIN "1234" for Caspian.
 function fetchHandler() {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -70,6 +84,9 @@ function fetchHandler() {
       return ok
         ? { ok: true, json: async () => ({ member: { name: body.memberName } }) }
         : { ok: false, status: 401, json: async () => ({}) };
+    }
+    if (url.includes("/api/rewards/redeem")) {
+      return { ok: redeemResult.status < 400, status: redeemResult.status, json: async () => redeemResult.body };
     }
     return { ok: true, status: 200, json: async () => ({}) };
   });
@@ -114,6 +131,7 @@ describe("RewardsShop parent approval gate (>100pt rewards)", () => {
     store.week = { weekStart: "2026-09-01", points: { Caspian: 200 }, streak: {}, lastActive: {}, history: [] };
     store.saveWeekData.mockReset();
     store.syncWeekDataToPB.mockClear();
+    redeemResult = { status: 200, body: { ok: true, weekData: REDEEMED_WEEK } };
     vi.stubGlobal("matchMedia", vi.fn(() => ({
       matches: false,
       addEventListener: () => {}, removeEventListener: () => {},
@@ -188,11 +206,15 @@ describe("RewardsShop parent approval gate (>100pt rewards)", () => {
     await act(async () => { buttonByText("Redeem")!.click(); });
     await settle();
 
+    // The server's returned weekData is adopted verbatim — the old
+    // local-then-fire-and-forget sync (syncWeekDataToPB) is gone: the gateway
+    // now rejects a child's week_data write, so it would 403 and be reverted.
     expect(store.saveWeekData).toHaveBeenCalled();
     const week = store.saveWeekData.mock.calls.at(-1)![0];
     expect(week.points.Caspian).toBe(50);
     expect(week.history.some((tx: any) => tx.type === "redeem" && tx.amount === -150)).toBe(true);
-    expect(store.syncWeekDataToPB).toHaveBeenCalled();
+    expect(store.syncWeekDataToPB).not.toHaveBeenCalled();
+    expect(document.body.textContent || "").toContain("Redeemed!");
   });
 
   it("a ≤100pt reward skips parent approval (kid PIN only, as before)", async () => {
@@ -206,5 +228,52 @@ describe("RewardsShop parent approval gate (>100pt rewards)", () => {
 
     expect(document.body.textContent || "").not.toContain("Parent Approval Required");
     expect(document.body.textContent || "").toContain("Redeem with your PIN");
+  });
+
+  it("a failed redeem (duplicate 409) shows the honest error and does NOT celebrate", async () => {
+    vi.stubGlobal("fetch", fetchHandler());
+    redeemResult = {
+      status: 409,
+      body: { ok: false, reason: "duplicate", error: "That redemption just went through — check your points." },
+    };
+    const el = await renderAsync(<RewardsShop />);
+    await settle();
+    const card = el.querySelector('[aria-label^="Ice cream trip — 40 points"]') as HTMLElement;
+    await act(async () => { card.click(); });
+    await settle();
+
+    const input = document.querySelector('input[aria-label="Your 4-digit PIN"]') as HTMLInputElement;
+    await act(async () => { setInputValue(input, "1234"); });
+    await act(async () => { buttonByText("Redeem")!.click(); });
+    await settle();
+
+    const text = document.body.textContent || "";
+    expect(text).toContain("That redemption just went through");
+    expect(text).not.toContain("Redeemed!");
+    expect(store.saveWeekData).not.toHaveBeenCalled();
+    expect((document.querySelector('input[aria-label="Your 4-digit PIN"]') as HTMLInputElement).value).toBe("");
+  });
+
+  it("an insufficient-points 400 surfaces the server's 'needs N more pts' copy (no celebration)", async () => {
+    vi.stubGlobal("fetch", fetchHandler());
+    redeemResult = {
+      status: 400,
+      body: { ok: false, reason: "insufficient", error: "Caspian needs 10 more pts for 🍦 Ice cream trip" },
+    };
+    const el = await renderAsync(<RewardsShop />);
+    await settle();
+    const card = el.querySelector('[aria-label^="Ice cream trip — 40 points"]') as HTMLElement;
+    await act(async () => { card.click(); });
+    await settle();
+
+    const input = document.querySelector('input[aria-label="Your 4-digit PIN"]') as HTMLInputElement;
+    await act(async () => { setInputValue(input, "1234"); });
+    await act(async () => { buttonByText("Redeem")!.click(); });
+    await settle();
+
+    const text = document.body.textContent || "";
+    expect(text).toContain("needs 10 more pts");
+    expect(text).not.toContain("Redeemed!");
+    expect(store.saveWeekData).not.toHaveBeenCalled();
   });
 });
