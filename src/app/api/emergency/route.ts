@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
+import { liveEmergencyContacts } from "@/lib/consuela/live-reads";
 import { sendSMSViaEmail, sendEmailAlert } from "@/lib/free-communication";
 import { broadcastHouseAlert } from "@/lib/ha/notify";
 import { verifyPinAgainstAnyMember } from "@/lib/server-auth";
@@ -40,14 +41,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid PIN" }, { status: 401 });
     }
 
-    // Fetch emergency contacts from database
-    const contacts = db.selectEmergencyContacts();
+    // Fetch emergency contacts LIVE from PocketBase (F1): a contact corrected
+    // after container start used to be invisible to a real alert because the
+    // process-start cache was read here. Fall back to that cache only when the
+    // live read fails, and flag the source honestly in every response.
+    const live = await liveEmergencyContacts();
+    const contacts = live ?? db.selectEmergencyContacts();
+    const contactsSource = live === null ? "cache" : "live";
     const primaryContacts = contacts.filter(c => c.isPrimary);
 
     if (primaryContacts.length === 0) {
       console.error("No primary emergency contacts configured");
       return NextResponse.json({
-        error: "No emergency contacts configured. Please set up emergency contacts in settings."
+        error: "No emergency contacts configured. Please set up emergency contacts in settings.",
+        contactsSource,
       }, { status: 500 });
     }
 
@@ -134,17 +141,20 @@ export async function POST(request: NextRequest) {
 
     if (successfulContacts === 0) {
       return NextResponse.json({
-        error: "Failed to send emergency alert to any contacts via SMS or email"
+        error: "Failed to send emergency alert to any contacts via SMS or email",
+        contactsSource,
       }, { status: 500 });
     }
 
     return NextResponse.json({
       success: true,
       message: `Emergency alert sent to ${successfulContacts} contact${successfulContacts > 1 ? 's' : ''} via SMS and/or email`,
+      contactsSource,
       details: {
         total: primaryContacts.length,
         successful: successfulContacts,
         failed: failedContacts,
+        contactsSource,
         results: notificationResults,
         ...(houseAlert
           ? { houseAlert: { sent: houseAlert.sent, failed: houseAlert.failed, notes: houseAlert.notes } }

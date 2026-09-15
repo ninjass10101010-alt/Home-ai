@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/db";
-import { db as pbDb } from "@/db/pb-db";
+import { liveEmergencyContacts } from "@/lib/consuela/live-reads";
 
 export const dynamic = "force-dynamic";
 
@@ -19,15 +19,18 @@ function sanitizeContact(contact: any, index: number) {
 
 export async function GET() {
   try {
-    let contacts = db.selectEmergencyContacts();
-    if (!contacts || contacts.length === 0) {
-      contacts = await pbDb.selectEmergencyContacts();
-    }
+    // Read live from PocketBase (F1): the process-start cache missed contacts
+    // added/corrected/removed after container start. Fall back to the cache
+    // only when the live read fails, and tell the caller which source answered.
+    const live = await liveEmergencyContacts();
+    const contacts = live ?? db.selectEmergencyContacts();
+    const contactsSource = live === null ? "cache" : "live";
     return NextResponse.json({
       contacts: (contacts || []).map(sanitizeContact),
+      contactsSource,
     });
   } catch (error) {
     console.error("Emergency contacts API error:", error);
-    return NextResponse.json({ contacts: [] }, { status: 500 });
+    return NextResponse.json({ contacts: [], contactsSource: "cache" }, { status: 500 });
   }
 }

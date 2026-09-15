@@ -229,6 +229,21 @@ export async function liveMembers(): Promise<any[] | null> {
   }
 }
 
+/** Emergency contacts, read live. Null = the read FAILED so the alert path can
+ *  fall back to the process-start cache and flag it honestly (contactsSource).
+ *  The cache is warmed once at module load and only the browser refreshCaches()
+ *  updates it, so a contact added/corrected/removed after container start was
+ *  invisible to a real emergency until restart (F1). */
+export async function liveEmergencyContacts(): Promise<any[] | null> {
+  try {
+    const rows = await withAdmin(async (pb) =>
+      pb.collection("emergency_contacts").getFullList({ requestKey: null }));
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return null;
+  }
+}
+
 /** Pantry rows, read live. Null = read failed — callers must emit an honest
  *  unavailable signal containing "do not guess". */
 export async function livePantry(): Promise<any[] | null> {
