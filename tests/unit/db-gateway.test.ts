@@ -18,8 +18,14 @@ function sessionReq(url: string, init?: RequestInit): NextRequest {
 
 async function withSession(r: NextRequest): Promise<NextRequest> {
   const token = await signSession({ memberId: "m1", name: "R", role: "parent" });
-  r.headers.set("cookie", `${SESSION_COOKIE}=${token}`);
-  return r;
+  // Cookies must be present at construction — NextRequest.cookies is parsed
+  // from the initial headers; a later headers.set() does not update it, which
+  // is why the route's in-route verifySession would otherwise 401.
+  const headers = new Headers(r.headers);
+  headers.set("cookie", `${SESSION_COOKIE}=${token}`);
+  const init: RequestInit = { method: r.method, headers };
+  if (r.method !== "GET" && r.method !== "HEAD") init.body = await r.text();
+  return new NextRequest(r.url, init as any) as NextRequest;
 }
 
 // One stable mock instance per test: `collection(anyName)` always hands routes

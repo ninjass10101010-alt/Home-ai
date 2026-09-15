@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withAdmin } from "@/lib/pb-auth";
-import { isGatewayCollection, isSafeFilter, sanitizeClientRow, MAX_LIST_LIMIT } from "@/lib/db-gateway";
+import { verifySession, SESSION_COOKIE } from "@/lib/session";
+import { isGatewayCollection, isSafeFilter, sanitizeClientRow, canWrite, isValidSort, MAX_LIST_LIMIT } from "@/lib/db-gateway";
 
 export const dynamic = "force-dynamic";
 
@@ -25,12 +26,16 @@ export async function GET(request: NextRequest, ctx: any) {
   if (!isSafeFilter(filter)) {
     return NextResponse.json({ error: "invalid_filter" }, { status: 400 });
   }
+  const sort = url.searchParams.get("sort");
+  if (!isValidSort(sort)) {
+    return NextResponse.json({ error: "invalid_sort" }, { status: 400 });
+  }
   const limit = Math.min(Number(url.searchParams.get("limit")) || MAX_LIST_LIMIT, MAX_LIST_LIMIT);
   try {
     const items = await withAdmin(async (pb) =>
       pb.collection(collection).getFullList({
         requestKey: null,
-        sort: url.searchParams.get("sort") || "-created",
+        sort: sort || "-created",
         filter: filter || undefined,
       })
     );
@@ -44,6 +49,13 @@ export async function POST(request: NextRequest, ctx: any) {
   const { collection } = await ctx.params;
   if (!isGatewayCollection(collection)) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+  // Middleware already 401s guests, but authorization must also live in the
+  // route: writes are role-gated per collection (F2).
+  const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!canWrite(collection, session.role)) {
+    return NextResponse.json({ error: "adult_only" }, { status: 403 });
   }
   let parsed: Record<string, unknown>;
   try {

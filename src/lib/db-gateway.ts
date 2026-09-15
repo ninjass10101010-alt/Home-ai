@@ -53,3 +53,31 @@ export function sanitizeClientRow(row: Record<string, unknown>): Record<string, 
 }
 
 export const MAX_LIST_LIMIT = 500;
+
+// F2 — writes are role-gated per collection. Collections carrying points,
+// ledger, roster, or household configuration are parent-only; the shared
+// household surfaces kids already toggle in the UI (tasks, grocery, pantry)
+// accept any signed-in session. Reads stay session-level (any role may read an
+// allowlisted collection); a missing session is still 401 at middleware.
+export const WRITE_POLICY: Record<string, "parent" | "session"> = {
+  week_data: "parent", week_archive: "parent", rewards: "parent", penalties: "parent",
+  hall_of_fame: "parent", family_goals: "parent", emergency_contacts: "parent",
+  chat_messages: "parent", morning_briefing: "parent", proactive_suggestions: "parent",
+  consuela_state: "parent", events: "parent", schedules: "parent",
+  meal_plan_entries: "parent", recipes: "parent", meal_week_archive: "parent",
+  tasks: "session", grocery_list_items: "session", pantry_items: "session",
+};
+
+export function canWrite(collection: string, role: string | undefined | null): boolean {
+  const policy = WRITE_POLICY[collection];
+  if (!policy) return false;
+  if (policy === "parent") return role === "parent";
+  return role === "parent" || role === "child" || role === "pet";
+}
+
+// F8 — the gateway `sort` param was forwarded to a superuser getFullList
+// verbatim. Only plain field lists (optionally `-` prefixed to descend) pass.
+const SORT_RE = /^-?[A-Za-z_][A-Za-z0-9_]*(,-?[A-Za-z_][A-Za-z0-9_]*)*$/;
+export function isValidSort(sort: string | null): boolean {
+  return sort === null || SORT_RE.test(sort);
+}

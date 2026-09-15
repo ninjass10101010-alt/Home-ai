@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withAdmin } from "@/lib/pb-auth";
-import { isGatewayCollection, sanitizeClientRow } from "@/lib/db-gateway";
+import { verifySession, SESSION_COOKIE } from "@/lib/session";
+import { isGatewayCollection, sanitizeClientRow, canWrite } from "@/lib/db-gateway";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,13 @@ export async function PATCH(request: NextRequest, ctx: Ctx) {
   if (!isGatewayCollection(collection)) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
+  // Middleware already 401s guests, but authorization must also live in the
+  // route: writes are role-gated per collection (F2).
+  const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!canWrite(collection, session.role)) {
+    return NextResponse.json({ error: "adult_only" }, { status: 403 });
+  }
   let parsed: Record<string, unknown>;
   try {
     parsed = await request.json();
@@ -45,10 +53,15 @@ export async function PATCH(request: NextRequest, ctx: Ctx) {
   }
 }
 
-export async function DELETE(_request: NextRequest, ctx: Ctx) {
+export async function DELETE(request: NextRequest, ctx: Ctx) {
   const { collection, id } = await ctx.params;
   if (!isGatewayCollection(collection)) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+  const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
+  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!canWrite(collection, session.role)) {
+    return NextResponse.json({ error: "adult_only" }, { status: 403 });
   }
   try {
     await withAdmin(async (pb) => pb.collection(collection).delete(id, { requestKey: null }));
