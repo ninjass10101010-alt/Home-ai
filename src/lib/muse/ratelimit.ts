@@ -29,6 +29,19 @@ const LOGIN_LIMIT_PER_MIN = 5;
 const LOCK_AFTER_FAILURES = 10;
 const LOCK_MS = 15 * 60_000;
 
+// Hard cap per map so a client-forgeable key (XFF is advisory on the direct
+// deployment) cannot grow the in-process state without bound. A Map preserves
+// insertion order, so the first key is always the oldest.
+const MAX_ENTRIES = 10_000;
+
+function evictToCap<K, V>(map: Map<K, V>): void {
+  while (map.size > MAX_ENTRIES) {
+    const oldest = map.keys().next().value;
+    if (oldest === undefined) return;
+    map.delete(oldest);
+  }
+}
+
 function take(bucket: Bucket, now: number): boolean {
   const elapsedSec = Math.max(0, (now - bucket.updated) / 1000);
   bucket.tokens = Math.min(bucket.capacity, bucket.tokens + elapsedSec * bucket.refillPerSec);
@@ -51,6 +64,7 @@ function check(
   if (!bucket || bucket.capacity !== capacity) {
     bucket = { tokens: capacity, updated: now, capacity, refillPerSec: rate / 60 };
     store.set(key, bucket);
+    evictToCap(store);
   }
   return take(bucket, now);
 }
@@ -72,6 +86,7 @@ export function registerLoginFailure(ip: string): void {
   rec.count += 1;
   if (rec.count >= LOCK_AFTER_FAILURES) rec.lockedUntil = Date.now() + LOCK_MS;
   loginFailures.set(key, rec);
+  evictToCap(loginFailures);
 }
 
 export function clearLoginFailures(ip: string): void {

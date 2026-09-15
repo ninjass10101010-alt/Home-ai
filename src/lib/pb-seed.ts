@@ -745,7 +745,7 @@ export const COLLECTIONS = [
     ],
   },
   // MUSE inbound API identity (singleton row created by the settings route).
-  // keyHash stores the HMAC of the issued key (never the key itself);
+  // keyHash stores the plain SHA-256 hex digest of the issued key (never the key itself);
   // version rotation revokes every outstanding token, enabled is the master
   // on/off, adminEnabled gates admin-capable tools.
   {

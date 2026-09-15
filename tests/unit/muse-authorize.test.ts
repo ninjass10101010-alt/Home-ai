@@ -18,10 +18,12 @@ vi.mock("@/lib/muse/store", async (importOriginal) => {
 import { authorizeMuseRequest } from "@/lib/muse/auth";
 import { signMuseToken } from "@/lib/muse/token";
 import { generateKey } from "@/lib/muse/store";
+import { __resetMuseLimits } from "@/lib/muse/ratelimit";
 
 const SECRET = "test-secret-0123456789";
 beforeEach(() => {
   vi.stubEnv("SESSION_SECRET", SECRET);
+  __resetMuseLimits();
   mocks.readMuseRow.mockReset();
   mocks.touchMuseUsage.mockReset();
   mocks.touchMuseUsage.mockResolvedValue(undefined);
@@ -105,6 +107,22 @@ describe("authorizeMuseRequest", () => {
     const { token } = signMuseToken({ ver: 1, adm: false });
     expect(await authorizeMuseRequest(req(token, "5.6.7.8"))).toEqual({ ok: true, adm: false });
     expect(mocks.touchMuseUsage).toHaveBeenCalledWith("5.6.7.8");
+  });
+
+  it("429s rate_limited once the per-key budget is spent (no usage touch)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.readMuseRow.mockResolvedValue(row({ rateLimitPerMin: 10 }));
+    const { token } = signMuseToken({ ver: 1, adm: false });
+    const cap = 10 + Math.max(5, Math.floor(10 / 4));
+    for (let i = 0; i < cap; i++) {
+      expect(await authorizeMuseRequest(req(token))).toEqual({ ok: true, adm: false });
+    }
+    const out = await authorizeMuseRequest(req(token));
+    expect(out).toEqual({ ok: false, status: 429, error: "rate_limited" });
+    // The rejected request must not stamp usage or write an audit row.
+    expect(mocks.touchMuseUsage).toHaveBeenCalledTimes(cap);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it("requires BOTH the token admin claim and row.adminEnabled for adm", async () => {

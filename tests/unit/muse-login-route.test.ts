@@ -113,27 +113,60 @@ describe("POST /api/muse/auth/login", () => {
     }
   });
 
-  it("429s rate_limited on the 6th attempt in a minute", async () => {
+  it("429s rate_limited with NO PB write and a bounded ip+keyPrefix warn", async () => {
     const { row, key } = makeRow();
     mocks.readMuseRow.mockResolvedValue(row);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const ip = "9.9.9.9";
     for (let i = 0; i < 5; i++) {
       expect((await POST(loginReq({ key }, ip))).status).toBe(200);
     }
+    mocks.writeMuseLog.mockClear();
     const res = await POST(loginReq({ key }, ip));
     expect(res.status).toBe(429);
-    expect((await res.json()).error).toBe("rate_limited");
-    expect(mocks.writeMuseLog).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "rate_limited", ok: false })
-    );
+    expect(await res.json()).toEqual({ error: "rate_limited" });
+    // An unauthenticated 429 must never amplify PB (create + 500-row read + prune).
+    expect(mocks.writeMuseLog).not.toHaveBeenCalled();
+    const warned = JSON.stringify(warn.mock.calls);
+    expect(warn).toHaveBeenCalled();
+    expect(warned).toContain(ip);
+    expect(warned).toContain(key.slice(0, 8));
+    expect(warned).not.toContain(key);
+    warn.mockRestore();
   });
 
-  it("429s locked after 10 consecutive failures", async () => {
+  it("429s locked with NO PB write and a bounded ip+keyPrefix warn", async () => {
     mocks.readMuseRow.mockResolvedValue(makeRow().row);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const ip = "5.5.5.5";
     for (let i = 0; i < 10; i++) registerLoginFailure(ip);
+    mocks.writeMuseLog.mockClear();
     const res = await POST(loginReq({ key: "muse_whatever000000" }, ip));
     expect(res.status).toBe(429);
-    expect((await res.json()).error).toBe("locked");
+    expect(await res.json()).toEqual({ error: "locked" });
+    expect(mocks.writeMuseLog).not.toHaveBeenCalled();
+    const warned = JSON.stringify(warn.mock.calls);
+    expect(warn).toHaveBeenCalled();
+    expect(warned).toContain(ip);
+    warn.mockRestore();
+  });
+
+  it("both 429 bodies are uniform in shape", async () => {
+    const { row, key } = makeRow();
+    mocks.readMuseRow.mockResolvedValue(row);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const lockedIp = "6.6.6.6";
+    for (let i = 0; i < 10; i++) registerLoginFailure(lockedIp);
+    const lockedRes = await POST(loginReq({ key }, lockedIp));
+    const rlIp = "7.7.7.7";
+    for (let i = 0; i < 5; i++) await POST(loginReq({ key }, rlIp));
+    const rlRes = await POST(loginReq({ key }, rlIp));
+    expect(lockedRes.status).toBe(429);
+    expect(rlRes.status).toBe(429);
+    const lockedBody = await lockedRes.json();
+    const rlBody = await rlRes.json();
+    expect(Object.keys(lockedBody)).toEqual(Object.keys(rlBody));
+    expect(Object.keys(lockedBody)).toEqual(["error"]);
+    warn.mockRestore();
   });
 });

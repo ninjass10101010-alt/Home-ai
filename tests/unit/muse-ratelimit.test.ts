@@ -72,6 +72,35 @@ describe("checkLoginLimit — 5 attempts/min per IP", () => {
   });
 });
 
+describe("bounded memory under forged-key churn", () => {
+  it("evicts the oldest key bucket once the map exceeds the cap", () => {
+    const rate = 10;
+    const cap = keyCapacity(rate);
+    for (let i = 0; i < cap; i++) checkKeyLimit("oldest", rate);
+    expect(checkKeyLimit("oldest", rate)).toBe(false);
+    // Push the map past its 10_000-entry cap with fresh forged prefixes.
+    for (let i = 0; i < 10_000; i++) checkKeyLimit(`churn-${i}`, rate);
+    // The oldest bucket was evicted, so it starts fresh with a full burst.
+    expect(checkKeyLimit("oldest", rate)).toBe(true);
+  });
+
+  it("evicts the oldest login-failure record once the map exceeds the cap", () => {
+    const ip = "victim";
+    for (let i = 0; i < 10; i++) registerLoginFailure(ip);
+    expect(isLoginLocked(ip)).toBe(true);
+    for (let i = 0; i < 10_000; i++) registerLoginFailure(`churn-${i}`);
+    expect(isLoginLocked(ip)).toBe(false);
+  });
+
+  it("evicts the oldest login bucket once the map exceeds the cap", () => {
+    const ip = "victim";
+    for (let i = 0; i < 5; i++) checkLoginLimit(ip);
+    expect(checkLoginLimit(ip)).toBe(false);
+    for (let i = 0; i < 10_000; i++) checkLoginLimit(`churn-${i}`);
+    expect(checkLoginLimit(ip)).toBe(true);
+  });
+});
+
 describe("login failure lockout", () => {
   it("locks after 10 consecutive failures for 15 minutes", () => {
     vi.useFakeTimers();

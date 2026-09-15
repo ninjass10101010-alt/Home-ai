@@ -10,12 +10,24 @@
 import type { NextRequest } from "next/server";
 import { verifyMuseToken } from "./token";
 import { readMuseRow, touchMuseUsage } from "./store";
+import { checkKeyLimit } from "./ratelimit";
 
 export type MuseAuthResult =
   | { ok: true; adm: boolean }
   | { ok: false; status: number; error: string };
 
-/** Best-effort client IP for rate limiting + usage stamps. */
+/**
+ * Best-effort client IP for rate limiting + usage stamps.
+ *
+ * Trust model: `x-forwarded-for` is only authoritative when the dashboard sits
+ * behind a reverse proxy that overwrites/strips it. The direct deployment is
+ * exposed as `http://<nas>:3000` to any LAN client, where a caller can forge
+ * XFF freely — so it is ADVISORY there, not authoritative. That is acceptable
+ * because this is DoS control, not brute-force control: MUSE keys are 256-bit
+ * random and the in-process maps are hard-capped (see ./ratelimit.ts), so
+ * forged-IP churn cannot grow memory without bound. We keep XFF as the source
+ * rather than pretending it is trustworthy.
+ */
 export function clientIp(request: NextRequest): string {
   const fwd = request.headers.get("x-forwarded-for");
   if (fwd) {
@@ -58,6 +70,17 @@ export async function authorizeMuseRequest(request: NextRequest): Promise<MuseAu
 
   // Both the token claim AND the live row toggle must be true.
   const adm = result.adm && row.adminEnabled;
+
+  // Per-key budget AFTER verification, keyed by the row's key prefix and rate.
+  // A 429 here is console-only — never a PocketBase write.
+  if (!checkKeyLimit(row.keyPrefix, row.rateLimitPerMin)) {
+    console.warn("[muse/auth] rate_limited", {
+      ip: clientIp(request),
+      keyPrefix: row.keyPrefix,
+    });
+    return { ok: false, status: 429, error: "rate_limited" };
+  }
+
   void touchMuseUsage(clientIp(request));
   return { ok: true, adm };
 }
