@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserCapsules, createCapsule, checkAndUnlockCapsules } from '@/lib/time-capsule';
 import type { CreateCapsuleRequest } from '@/db/features/time-capsule';
-import { getUserId } from '@/lib/auth';
+import { getUserId, requireSession } from '@/lib/auth';
 
 /**
  * GET /api/time-capsules
@@ -28,6 +28,11 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
+    const session = await requireSession(request);
+    if (!session) {
+      return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+    }
+
     const userId = await getUserId(request);
     const data: CreateCapsuleRequest = await request.json();
     

@@ -1,5 +1,5 @@
 import { getAuthedPB } from '@/lib/pb-auth';
-import { DEMO_USER_ID } from '@/lib/auth';
+import { DEMO_USER_ID, sanitizeUserId } from '@/lib/auth';
 import type {
   SkillTreeProfile,
   SkillBranch,
@@ -14,41 +14,76 @@ import {
   XP_REWARDS,
 } from '@/db/features/skill-tree';
 
+function newProfileData(userId: string) {
+  return {
+    userId,
+    totalXP: 0,
+    level: 1,
+    xpToNextLevel: 100,
+    unlockedBranches: [] as string[],
+    completedQuests: [] as string[],
+    activeQuests: [] as string[],
+    achievementCount: 0,
+    currentStreak: 0,
+    longestStreak: 0,
+    lastActivityDate: new Date().toISOString(),
+  };
+}
+
 /**
- * Get or create a skill tree profile for a user.
+ * Get a skill tree profile for a user (read path).
+ *
+ * Resolution order is deterministic:
+ *   1. the member's EXACT `userId` row,
+ *   2. the legacy `demo-user` row as a READ-ONLY fallback (so pre-migration
+ *      progress still displays),
+ *   3. a freshly created per-member profile for a brand-new member.
+ *
+ * A legacy row is never returned in preference to the member's own row, and
+ * this read path never mutates anything.
  */
 export async function getSkillTreeProfile(userId: string): Promise<SkillTreeProfile | null> {
   const pb = await getAuthedPB();
+  const memberId = sanitizeUserId(userId);
   
   try {
-    // F8a — include the legacy demo-user profile if the member has no
-    // per-member profile yet; otherwise create one under the session name.
-    const profiles = await pb.collection('skill_tree_profiles').getList<SkillTreeProfile>(1, 1, {
-      filter: `userId = "${userId}" || userId = "${DEMO_USER_ID}"`,
+    const exact = await pb.collection('skill_tree_profiles').getList<SkillTreeProfile>(1, 1, {
+      filter: `userId = "${memberId}"`,
     });
-    
-    if (profiles.items.length > 0) {
-      return profiles.items[0];
-    }
-    
-    // Create new profile with defaults
-    const profile = await pb.collection('skill_tree_profiles').create<SkillTreeProfile>({
-      userId,
-      totalXP: 0,
-      level: 1,
-      xpToNextLevel: 100,
-      unlockedBranches: [],
-      completedQuests: [],
-      activeQuests: [],
-      achievementCount: 0,
-      currentStreak: 0,
-      longestStreak: 0,
-      lastActivityDate: new Date().toISOString(),
+    if (exact.items.length > 0) return exact.items[0];
+
+    const legacy = await pb.collection('skill_tree_profiles').getList<SkillTreeProfile>(1, 1, {
+      filter: `userId = "${DEMO_USER_ID}"`,
     });
-    
-    return profile;
+    if (legacy.items.length > 0) return legacy.items[0];
+
+    return await pb.collection('skill_tree_profiles').create<SkillTreeProfile>(newProfileData(memberId));
   } catch (error) {
     console.error('Failed to get skill tree profile:', error);
+    return null;
+  }
+}
+
+/**
+ * Get-or-create the member's OWN profile for a WRITE.
+ *
+ * Unlike {@link getSkillTreeProfile}, this never returns a legacy `demo-user`
+ * row — writers must create and mutate a per-member profile instead of sharing
+ * (and misattributing XP against) the legacy row.
+ */
+export async function getSkillTreeProfileForWrite(userId: string): Promise<SkillTreeProfile | null> {
+  const pb = await getAuthedPB();
+  const memberId = sanitizeUserId(userId);
+  
+  try {
+    const exact = await pb.collection('skill_tree_profiles').getList<SkillTreeProfile>(1, 1, {
+      filter: `userId = "${memberId}"`,
+    });
+    if (exact.items.length > 0) return exact.items[0];
+
+    return await pb.collection('skill_tree_profiles').create<SkillTreeProfile>(newProfileData(memberId));
+  } catch (error) {
+    console.error('Failed to get skill tree profile for write:', error);
     return null;
   }
 }
@@ -146,8 +181,8 @@ export async function completeQuest(
     // Calculate XP earned
     const xpEarned = XP_REWARDS[quest.type]?.[quest.difficulty] || quest.xpReward;
     
-    // Update user profile
-    const profile = await getSkillTreeProfile(userId);
+    // Update user profile (per-member; never the legacy shared row)
+    const profile = await getSkillTreeProfileForWrite(userId);
     if (!profile) {
       return { success: false, xpEarned: 0 };
     }
@@ -222,8 +257,8 @@ export async function startQuest(questId: string, userId: string): Promise<boole
       status: 'in_progress',
     });
     
-    // Add to user's active quests
-    const profile = await getSkillTreeProfile(userId);
+    // Add to user's active quests (per-member; never the legacy shared row)
+    const profile = await getSkillTreeProfileForWrite(userId);
     if (!profile) return false;
     
     const activeQuests = [...(profile.activeQuests || []), questId];
@@ -264,7 +299,7 @@ export async function getUserAchievements(userId: string): Promise<UserAchieveme
   
   try {
     const userAchievements = await pb.collection('user_achievements').getFullList<UserAchievement>({
-      filter: `userId = "${userId}" || userId = "${DEMO_USER_ID}"`,
+      filter: `userId = "${sanitizeUserId(userId)}" || userId = "${DEMO_USER_ID}"`,
       sort: '-earnedAt',
     });
     
@@ -324,8 +359,8 @@ async function checkAndAwardAchievements(
           xpAtTime: totalXP,
         });
         
-        // Update profile achievement count
-        const profile = await getSkillTreeProfile(userId);
+        // Update profile achievement count (per-member; never the legacy row)
+        const profile = await getSkillTreeProfileForWrite(userId);
         if (profile) {
           await pb.collection('skill_tree_profiles').update(profile.id, {
             achievementCount: (profile.achievementCount || 0) + 1,
@@ -346,7 +381,7 @@ export async function unlockBranch(branchId: string, userId: string): Promise<bo
   
   try {
     const branch = await pb.collection('skill_branches').getOne<SkillBranch>(branchId);
-    const profile = await getSkillTreeProfile(userId);
+    const profile = await getSkillTreeProfileForWrite(userId);
     
     if (!profile) return false;
     

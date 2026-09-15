@@ -1,4 +1,4 @@
-import { getUserId, isLegacyOwner } from '@/lib/auth';
+import { getUserId, isLegacyOwner, requireSession } from '@/lib/auth';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   getMountain,
@@ -56,6 +56,10 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
+    const session = await requireSession(request);
+    if (!session) {
+      return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+    }
     const userId = await getUserId(request);
     // Check ownership
     const existing = await getMountain(id);
@@ -96,6 +100,10 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
+    const session = await requireSession(request);
+    if (!session) {
+      return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+    }
     const userId = await getUserId(request);
     // Check ownership
     const existing = await getMountain(id);
@@ -135,6 +143,10 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
+    const session = await requireSession(request);
+    if (!session) {
+      return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+    }
     const userId = await getUserId(request);
     // Check ownership
     const existing = await getMountain(id);

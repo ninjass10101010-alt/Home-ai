@@ -1,4 +1,4 @@
-import { getUserId, isLegacyOwner } from '@/lib/auth';
+import { getUserId, isLegacyOwner, requireSession } from '@/lib/auth';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   getCapsule,
@@ -75,6 +75,10 @@ export async function PATCH(
 ) {
   try {
     const { id: capsuleId } = await params;
+    const session = await requireSession(request);
+    if (!session) {
+      return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+    }
     const userId = await getUserId(request);
     // Check if user owns this capsule
     const existing = await getCapsule(capsuleId);
@@ -115,6 +119,10 @@ export async function DELETE(
 ) {
   try {
     const { id: capsuleId } = await params;
+    const session = await requireSession(request);
+    if (!session) {
+      return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+    }
     const userId = await getUserId(request);
     // Check if user owns this capsule
     const existing = await getCapsule(capsuleId);
@@ -154,6 +162,10 @@ export async function POST(
 ) {
   try {
     const { id: capsuleId } = await params;
+    const session = await requireSession(request);
+    if (!session) {
+      return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+    }
     const userId = await getUserId(request);
     // Check if user can add to this capsule
     const existing = await getCapsule(capsuleId);

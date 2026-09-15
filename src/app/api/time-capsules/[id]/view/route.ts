@@ -1,4 +1,4 @@
-import { getUserId } from '@/lib/auth';
+import { getUserId, requireSession } from '@/lib/auth';
 import { NextRequest, NextResponse } from 'next/server';
 import { markCapsuleViewed } from '@/lib/time-capsule';
 
@@ -12,6 +12,10 @@ export async function POST(
 ) {
   try {
     const { id: capsuleId } = await params;
+    const session = await requireSession(request);
+    if (!session) {
+      return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+    }
     const userId = await getUserId(request);
     await markCapsuleViewed(capsuleId, userId);
     

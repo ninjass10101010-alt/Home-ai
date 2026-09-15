@@ -10,9 +10,12 @@ import * as pb from '@/lib/pb';
 // Mock auth utility
 vi.mock('@/lib/auth', () => ({
   getUserId: vi.fn(),
+  requireSession: vi.fn(async () => ({ memberId: 'm1', name: 'user-1', role: 'parent', exp: 9999999999 })),
   unauthorizedResponse: vi.fn(() => new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 })),
   requireAuth: vi.fn(),
   isDemoUser: vi.fn(() => false),
+  DEMO_USER_ID: 'demo-user',
+  sanitizeUserId: vi.fn((v: string | null | undefined) => (v ?? '') || 'demo-user'),
   AuthError: class AuthError extends Error {},
   forbiddenResponse: vi.fn(() => new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403 })),
 }));

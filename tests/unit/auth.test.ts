@@ -6,9 +6,30 @@
  * remaining helpers.
  */
 import { describe, it, expect } from 'vitest';
-import { isValidUserId, AuthError, unauthorizedResponse } from '@/lib/auth';
+import { isValidUserId, sanitizeUserId, AuthError, unauthorizedResponse } from '@/lib/auth';
 
 describe('Auth Utility', () => {
+  describe('sanitizeUserId', () => {
+    it('strips double quotes that would corrupt a PB filter', () => {
+      expect(sanitizeUserId('Reb"ecca')).toBe('Rebecca');
+    });
+
+    it('trims surrounding whitespace', () => {
+      expect(sanitizeUserId('  Rebecca  ')).toBe('Rebecca');
+    });
+
+    it('falls back to demo-user when the sanitized value is empty', () => {
+      expect(sanitizeUserId('')).toBe('demo-user');
+      expect(sanitizeUserId('"  "')).toBe('demo-user');
+      expect(sanitizeUserId(null)).toBe('demo-user');
+      expect(sanitizeUserId(undefined)).toBe('demo-user');
+    });
+
+    it('leaves ordinary member names unchanged', () => {
+      expect(sanitizeUserId('Aurora')).toBe('Aurora');
+    });
+  });
+
   describe('isValidUserId', () => {
     it('accepts alphanumeric ids with hyphens and underscores', () => {
       expect(isValidUserId('user_123-abc')).toBe(true);

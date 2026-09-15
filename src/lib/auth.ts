@@ -36,14 +36,38 @@ const DEMO_USER_IDS = new Set([
 ]);
 
 /**
+ * Sanitize a session-derived identity before it is interpolated into a
+ * PocketBase filter string. A member name containing a double quote would
+ * otherwise break out of the `userId = "..."` literal and corrupt the query.
+ * Whitespace is trimmed (a blank id would produce `userId = ""`, which matches
+ * nothing useful); a value that sanitizes to empty falls back to the legacy
+ * `demo-user` namespace.
+ */
+export function sanitizeUserId(raw: string | null | undefined): string {
+  const cleaned = (raw ?? '').replace(/"/g, '').trim();
+  return cleaned.length > 0 ? cleaned : DEMO_USER_ID;
+}
+
+/**
  * Extract the caller's identity from the signed session cookie.
  *
- * @returns The session member's name, or the legacy `demo-user` namespace when
- *          there is no valid session.
+ * @returns The session member's sanitized name, or the legacy `demo-user`
+ *          namespace when there is no valid session.
  */
 export async function getUserId(request: NextRequest): Promise<string> {
   const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
-  return session?.name || DEMO_USER_ID;
+  return sanitizeUserId(session?.name);
+}
+
+/**
+ * Resolve the signed session for a request, or `null` when the request carries
+ * no valid session. WRITE handlers call this so an unauthenticated request is
+ * rejected in-route (401) instead of silently degrading to the shared
+ * `demo-user` namespace via {@link getUserId}. Middleware still gates every
+ * route; this is defense-in-depth for the gamified write surfaces.
+ */
+export async function requireSession(request: NextRequest) {
+  return verifySession(request.cookies.get(SESSION_COOKIE)?.value);
 }
 
 /**
@@ -62,23 +86,6 @@ export function isLegacyOwner(ownerId: string | null | undefined): boolean {
 export function isValidUserId(userId: string): boolean {
   // Must be non-empty, alphanumeric with hyphens/underscores, max 64 chars
   return /^[a-zA-Z0-9_-]{1,64}$/.test(userId);
-}
-
-/**
- * Require user authentication.
- * Returns user ID or throws 401 error.
- *
- * Usage in API routes:
- * ```ts
- * const userId = await requireAuth(request);
- * ```
- */
-export async function requireAuth(request: NextRequest): Promise<string> {
-  const userId = await getUserId(request);
-  if (!userId) {
-    throw new AuthError('Authentication required', 401);
-  }
-  return userId;
 }
 
 /**

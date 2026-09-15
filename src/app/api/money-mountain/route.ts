@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserMountains, createMountain } from '@/lib/money-mountain';
-import { getUserId } from '@/lib/auth';
+import { getUserId, requireSession } from '@/lib/auth';
 
 /**
  * GET /api/money-mountain
@@ -27,6 +27,11 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
+    const session = await requireSession(request);
+    if (!session) {
+      return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+    }
+
     const userId = await getUserId(request);
     const data = await request.json();
     
