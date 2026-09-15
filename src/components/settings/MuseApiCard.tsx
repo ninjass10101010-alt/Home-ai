@@ -94,6 +94,7 @@ export default function MuseApiCard() {
   const [revokeOpen, setRevokeOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [rateDraft, setRateDraft] = useState(String(DEFAULT_RATE));
+  const [rateError, setRateError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const origin = useSyncExternalStore(subscribeNoop, clientOrigin, serverOrigin);
 
@@ -102,6 +103,7 @@ export default function MuseApiCard() {
   const applySettings = useCallback((body: MuseSettings) => {
     setSettings(body);
     setRateDraft(String(body.rateLimitPerMin ?? DEFAULT_RATE));
+    setRateError(null);
   }, []);
 
   // A fresh server read can never contain the plaintext key, so every load
@@ -159,6 +161,7 @@ export default function MuseApiCard() {
       });
       const body = await res.json().catch(() => null);
       if (!res.ok || !body) setNotice("Couldn't save that change.");
+      else setRevealedKey(null);
       await load();
     } catch {
       setNotice("Couldn't save that change.");
@@ -193,11 +196,12 @@ export default function MuseApiCard() {
     try {
       const res = await fetch("/api/muse/settings/revoke-tokens", { method: "POST" });
       const body = await res.json().catch(() => null);
-      setNotice(
-        res.ok && body
-          ? "All connected agents were signed out. The key is unchanged."
-          : "Couldn't revoke tokens."
-      );
+      if (res.ok && body) {
+        setNotice("All connected agents were signed out. The key is unchanged.");
+        setRevealedKey(null);
+      } else {
+        setNotice("Couldn't revoke tokens.");
+      }
       setRevokeOpen(false);
       await load();
     } catch {
@@ -209,11 +213,13 @@ export default function MuseApiCard() {
   };
 
   const saveRate = async () => {
-    const value = Number(rateDraft);
-    if (!Number.isFinite(value)) {
-      setNotice(`Enter a number between ${MIN_RATE} and ${MAX_RATE}.`);
+    const raw = rateDraft.trim();
+    const value = Number(raw);
+    if (raw === "" || !Number.isFinite(value) || value < MIN_RATE || value > MAX_RATE) {
+      setRateError(`Enter a number between ${MIN_RATE} and ${MAX_RATE}.`);
       return;
     }
+    setRateError(null);
     setBusy("rate");
     setNotice(null);
     try {
@@ -228,6 +234,7 @@ export default function MuseApiCard() {
         return;
       }
       applySettings(body as MuseSettings);
+      setRevealedKey(null);
       setNotice(`Rate limit set to ${(body as MuseSettings).rateLimitPerMin} per minute.`);
     } catch {
       setNotice("Couldn't save the rate limit.");
@@ -254,6 +261,25 @@ export default function MuseApiCard() {
   const shown = entries.slice(0, VISIBLE_LOG_ROWS);
   const failures = failureCopy(shown);
 
+  const revealedKeyBlock = revealedKey ? (
+    <div className="space-y-2 rounded-2xl border border-[var(--color-accent-amber)]/40 bg-[color-mix(in_srgb,var(--color-accent-amber),transparent_88%)] p-3">
+      <p className="text-[11px] font-semibold text-[var(--color-accent-amber)]">
+        Save this now — it will not be shown again.
+      </p>
+      <code className="block break-all rounded-xl bg-black/30 px-3 py-2 text-xs text-text-primary">
+        {revealedKey}
+      </code>
+      <SoftButton
+        size="sm"
+        variant="secondary"
+        className="hit-44"
+        onClick={() => void copy(revealedKey, "key")}
+      >
+        {copied === "key" ? "Copied ✓" : "Copy key"}
+      </SoftButton>
+    </div>
+  ) : null;
+
   return (
     <SectionCard
       title="MUSE API"
@@ -266,9 +292,10 @@ export default function MuseApiCard() {
       ) : loadError ? (
         <div className="space-y-2">
           <p className="text-sm text-[var(--color-accent-rose)]">{loadError}</p>
-          <SoftButton size="sm" onClick={() => void load()}>
+          <SoftButton size="sm" className="hit-44" onClick={() => void load()}>
             Try again
           </SoftButton>
+          {revealedKeyBlock}
         </div>
       ) : settings ? (
         <div className="space-y-4">
@@ -313,24 +340,13 @@ export default function MuseApiCard() {
             )}
           </div>
 
-          {revealedKey && (
-            <div className="space-y-2 rounded-2xl border border-[var(--color-accent-amber)]/40 bg-[color-mix(in_srgb,var(--color-accent-amber),transparent_88%)] p-3">
-              <p className="text-[11px] font-semibold text-[var(--color-accent-amber)]">
-                Save this now — it will not be shown again.
-              </p>
-              <code className="block break-all rounded-xl bg-black/30 px-3 py-2 text-xs text-text-primary">
-                {revealedKey}
-              </code>
-              <SoftButton size="sm" variant="secondary" onClick={() => void copy(revealedKey, "key")}>
-                {copied === "key" ? "Copied ✓" : "Copy key"}
-              </SoftButton>
-            </div>
-          )}
+          {revealedKeyBlock}
 
           <div className="space-y-2">
             <div className="flex flex-wrap gap-2">
               <SoftButton
                 size="sm"
+                className="hit-44"
                 loading={busy === "rotate"}
                 disabled={busy !== null && busy !== "rotate"}
                 onClick={() => void rotateKey()}
@@ -341,6 +357,7 @@ export default function MuseApiCard() {
               <SoftButton
                 size="sm"
                 variant="secondary"
+                className="hit-44"
                 disabled={!settings.hasKey || busy !== null}
                 onClick={() => setRevokeOpen(true)}
                 aria-label="Revoke MUSE tokens"
@@ -369,12 +386,17 @@ export default function MuseApiCard() {
                 max={MAX_RATE}
                 inputMode="numeric"
                 value={rateDraft}
-                onChange={(e) => setRateDraft(e.target.value)}
+                onChange={(e) => {
+                  setRateDraft(e.target.value);
+                  if (rateError) setRateError(null);
+                }}
+                aria-invalid={rateError ? true : undefined}
                 className="w-24 rounded-xl border border-white/10 bg-surface-2 px-3 py-2 text-sm text-text-primary outline-none focus:border-accent-selected/50"
               />
               <SoftButton
                 size="sm"
                 variant="secondary"
+                className="hit-44"
                 loading={busy === "rate"}
                 disabled={busy !== null && busy !== "rate"}
                 onClick={() => void saveRate()}
@@ -382,6 +404,11 @@ export default function MuseApiCard() {
                 Save limit
               </SoftButton>
             </div>
+            {rateError && (
+              <p role="alert" className="text-[11px] text-[var(--color-accent-rose)]">
+                {rateError}
+              </p>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -432,7 +459,12 @@ export default function MuseApiCard() {
             <pre className="overflow-x-auto rounded-xl bg-black/30 px-3 py-2 text-[11px] text-text-secondary">
               {loginCurl}
             </pre>
-            <SoftButton size="sm" variant="secondary" onClick={() => void copy(loginCurl, "curl")}>
+            <SoftButton
+              size="sm"
+              variant="secondary"
+              className="hit-44"
+              onClick={() => void copy(loginCurl, "curl")}
+            >
               {copied === "curl" ? "Copied ✓" : "Copy login example"}
             </SoftButton>
           </div>
@@ -451,7 +483,7 @@ export default function MuseApiCard() {
             <SoftButton
               size="sm"
               variant="ghost"
-              className="flex-1"
+              className="hit-44 flex-1"
               onClick={() => setRevokeOpen(false)}
             >
               Cancel
@@ -459,7 +491,7 @@ export default function MuseApiCard() {
             <SoftButton
               size="sm"
               variant="danger"
-              className="flex-1"
+              className="hit-44 flex-1"
               loading={busy === "revoke"}
               onClick={() => void revokeTokens()}
             >

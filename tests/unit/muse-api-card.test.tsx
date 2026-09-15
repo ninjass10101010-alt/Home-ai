@@ -62,6 +62,27 @@ function checkbox(el: HTMLElement, label: string): HTMLInputElement {
   return input;
 }
 
+/** Controlled-input write via the native setter + React's `input` listener. */
+function setInputValue(input: HTMLInputElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+  act(() => {
+    setter.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+function rateInput(el: HTMLElement): HTMLInputElement {
+  const input = el.querySelector("#muse-rate") as HTMLInputElement | null;
+  if (!input) throw new Error("no #muse-rate input");
+  return input;
+}
+
+function ratePuts(): Call[] {
+  return calls.filter(
+    (c) => c.init?.method === "PUT" && String(c.init.body ?? "").includes("rateLimitPerMin")
+  );
+}
+
 /** Stateful fetch stub: rotate flips hasKey, PUT merges the patch. */
 function makeHandler(opts: { settings?: Partial<typeof BASE_SETTINGS>; entries?: any[] } = {}) {
   const state = {
@@ -256,5 +277,91 @@ describe("MuseApiCard", () => {
 
     expect(el.textContent).toContain("Couldn't reach the MUSE settings");
     expect(el.textContent).toContain("Try again");
+  });
+
+  it("blank rate does not POST and shows an inline validation message", async () => {
+    stub(makeHandler({ settings: { hasKey: true, keyPrefix: "muse_sec", version: 1 } }).handler);
+    const el = render(<MuseApiCard />);
+    await settle();
+
+    setInputValue(rateInput(el), "");
+    clickByText(el, "Save limit");
+    await settle();
+
+    expect(ratePuts()).toHaveLength(0);
+    expect(el.textContent).toContain("Enter a number between 10 and 600");
+  });
+
+  it("out-of-range rate does not POST and shows range feedback", async () => {
+    stub(makeHandler({ settings: { hasKey: true, keyPrefix: "muse_sec", version: 1 } }).handler);
+    const el = render(<MuseApiCard />);
+    await settle();
+
+    setInputValue(rateInput(el), "5");
+    clickByText(el, "Save limit");
+    await settle();
+
+    expect(ratePuts()).toHaveLength(0);
+    expect(el.textContent).toContain("Enter a number between 10 and 600");
+  });
+
+  it("still renders the revealed key when the post-rotate refetch fails", async () => {
+    let rotated = false;
+    stub((url, init) => {
+      const method = init?.method ?? "GET";
+      if (url.includes("/settings/rotate") && method === "POST") {
+        rotated = true;
+        return jsonRes({ ok: true, key: "muse_orphan_key", keyPrefix: "muse_orph" });
+      }
+      if (url.includes("/api/muse/log")) return jsonRes({ ok: true, entries: [] });
+      if (url.includes("/api/muse/settings") && rotated) {
+        return jsonRes({ ok: false, error: "boom" }, false, 500);
+      }
+      if (url.includes("/api/muse/settings")) {
+        return jsonRes({ ...BASE_SETTINGS, hasKey: true, keyPrefix: "muse_sec", version: 1 });
+      }
+      return jsonRes({ ok: true });
+    });
+    const el = render(<MuseApiCard />);
+    await settle();
+
+    clickByText(el, "Rotate key");
+    await settle();
+
+    expect(el.textContent).toContain("Couldn't reach the MUSE settings");
+    expect(el.textContent).toContain("muse_orphan_key");
+    expect(el.textContent).toContain("Save this now — it will not be shown again.");
+  });
+
+  it("clears a previously revealed key on a successful settings mutation", async () => {
+    stub(makeHandler({ settings: { hasKey: true, keyPrefix: "muse_sec", version: 1 } }).handler);
+    const el = render(<MuseApiCard />);
+    await settle();
+
+    clickByText(el, "Rotate key");
+    await settle();
+    expect(el.textContent).toContain("muse_secretkey_value");
+
+    act(() => checkbox(el, "Enabled").click());
+    await settle();
+
+    expect(el.textContent).not.toContain("muse_secretkey_value");
+  });
+
+  it("clears a previously revealed key when a rate save succeeds", async () => {
+    stub(makeHandler({ settings: { hasKey: true, keyPrefix: "muse_sec", version: 1 } }).handler);
+    const el = render(<MuseApiCard />);
+    await settle();
+
+    clickByText(el, "Rotate key");
+    await settle();
+    expect(el.textContent).toContain("muse_secretkey_value");
+
+    setInputValue(rateInput(el), "200");
+    clickByText(el, "Save limit");
+    await settle();
+
+    expect(ratePuts()).toHaveLength(1);
+    expect(el.textContent).not.toContain("muse_secretkey_value");
   });
 });
