@@ -32,6 +32,7 @@ If you are asked to document or debug something that touches credentials, descri
 ---
 
 **Current Dashboard Snapshot** (maintain on every relevant change)  
+- **Last Updated:** 2026-09-15 | **PocketBase routing audit closed (all 8 findings) + MUSE inbound API identity shipped.** **Part A — routing cleanup (Home-ai):** (F1) the emergency path read a process-start contact cache — new `liveEmergencyContacts()` reads PB live and both `/api/emergency` + `GET /api/emergency-contacts` report `contactsSource: "live"|"cache"` (cache only as an honest fallback); (F2) `/api/db/*` is now **per-collection write-gated** (`WRITE_POLICY`/`canWrite` — `week_data`/`week_archive`/`rewards`/`penalties`/`hall_of_fame`/`family_goals`/`emergency_contacts`/`events`/`schedules`/`meal_plan_entries`/`recipes`/`meal_week_archive`/`chat_messages`/`morning_briefing`/`proactive_suggestions`/`consuela_state` = **parent-only** → 403 `adult_only`; `tasks`/`grocery_list_items`/`pantry_items` = any signed-in session) and `POST /api/tasks/sync` for a non-parent syncs the tasks leg only (`ignoredLegs: ["weekData","rewards","penalties"]`); the follow-on regression — kid reward redemptions were writing `week_data` through that now-parent-only gateway — is fixed by the new **server-authoritative `POST /api/rewards/redeem`** (server reads the cost, validates the balance, appends the redeem tx; 60s dedupe → 409, unknown reward → 404, insufficient → 400, wrong/missing PIN → 401); (F7) `authorizeAdminRequest` is a **parent allowlist** (child/pet → 403 `adult_only`); (F3/F4) `/api/consuela/briefing` requires a session (PATCH stamps `acknowledgedBy`) and the mutating HA routes (`call-service`/`notify-config`/`notify-prefs`/`notify-test`) require a parent session — the stale "unauthenticated by design" comments in `ha/sync` + `ha/notify-targets` corrected to "session-level"; (F5) the dead browser-direct `auth_sessions` path is gone from `useAuth`/`pb-db.ts` (localStorage is the device-session store; grep-guard pinned); (F6) `/api/recurring-patterns` uses `getAuthedPB()`; (F8) money-mountain/skill-tree/time-capsules identity is **session-derived** (the client `x-user-id` is ignored), `/api/recipes/ingest` requires a session (only `/api/recipes/search` stays public), the week-rollover archive now writes an idempotent `week_archive` row per `weekStart` (so `get_past_weeks` is live), the 3 dead HA seed collections were dropped from `pb-seed.ts`, `/api/google/webhook` was deleted (the 5-min cron is the sync path), and the gateway `sort` param is whitelisted (400 `invalid_sort`). **Part B — MUSE inbound API identity (`/api/muse/*`, LAN/Tailscale-only, middleware-exempt but self-gated):** an operator generates a key in **Settings → MUSE** (SHA-256 hash stored; plaintext shown exactly once), an agent exchanges it at `POST /api/muse/auth/login` for a **24-hour HMAC bearer token** (distinct `muse-token-v1:` context; rotate/revoke bump the identity version and kill live tokens instantly), then uses `GET /api/muse/tools` (the **full adult 47-tool catalog; the 5 admin tools appear only when the admin toggle is on — off by default**), `POST /api/muse/tool` (allowlist-first dispatch via `executeMuseTool`; an admin tool on a non-admin token is 403 `tool not allowed`; redacted-args audit + per-key rate limit), `GET /api/muse/context?scope=meal|task|schedule|all` (grounded snapshot + prompt), and `GET /api/muse/docs` (public markdown reference). `/api/muse/settings*` + `/api/muse/log` are **adult-session gated** (never the bearer token). The **propose-only invariant holds**: MUSE can `propose_point_adjustment` but cannot apply it (a parent's PIN-confirmed chip executes it), and task approvals stay in the UI. **Ops on deploy: `npm run pb:seed`** (creates `consuela_muse` + `consuela_muse_log`, and carries the briefing `acknowledgedBy` field) before/at deploy. Verified: live probe `scripts/consuela/verify-muse-api.mjs` **12/12 ALL CHECKS PASSED** (parent-session settings envelope → generate a key **only when `hasKey:false`** → login `scopes:["tools"] admin:false` → whoami `admin:false` → 47-tool catalog with all 5 admin tools ABSENT → `get_weather` returns a result → `trigger_update` 403 → no-token 401 → re-rotate kills the old token → revoke+disable leaves MUSE inert; **no family-data writes**, never clobbers an existing operator key), tsc clean, eslint 0 new, full suite + `next build` green. Spec/plan: `docs/superpowers/specs|plans/2026-09-15-pocketbase-routing-cleanup-and-muse-api*` (outer repo). Contracts in §2.3 + §5.6.
 - **Last Updated:** 2026-09-15 | **Google events now appear on every day they cover — multi-day coverage fixed end-to-end (data correctness, no visual change).** A Google Calendar event spanning several days (e.g. "Bailey & Emily at home" Oct 30 → Nov 1) previously rendered ONLY on its start day everywhere day-membership was computed. Fixed surfaces: calendar page month-grid dots / Today / Upcoming (`src/app/calendar/page.tsx` via new `expandGoogleEvent` flatMap), chat tools `get_todays_events`/`get_calendar_range`/`get_dashboard_summary` (`src/lib/consuela/todays-events.ts` merges by covered day; `live-reads.ts` selects `end_iso,all_day`), the planner / "Consuela's week" context window (`assistant-context.ts`), and the `/screensaver` board (`compose.ts`/`payload.ts` — unfiltered read behind the 45s cache). Root cause: start-date-only day membership (`start_iso` prefix/`~`-contains compares); the single source of truth is now `googleEventCoversDay`/`googleEventCoveredDays` in `src/lib/calendar/google-mapping.ts` (all-day `end_iso` EXCLUSIVE, timed end at local midnight excluded, date-only strings parsed as LOCAL all-day regardless of the `all_day` flag). **Sync backend already stored `end_iso` — no ops steps needed.** Verified: focused suites green (12 files/99 tests) + full suite 1905/1905 (272 files), tsc clean. Contracts in the 2026-09-15 UI Change Record.
 - **Last Updated:** 2026-09-10 | **Consuela assistant-tools upgrade shipped — 52 live tools, planner agent mode, PIN-confirmed week card; chat can never fake family data.** The tool surface in `src/lib/hermes-tools.ts` grew 35 → **52** (re-derived from `getAllTools()`; kids' read-only allowlist is 17). Live reads killed process-start-cache blindness: meals/recipes/members/pantry read PocketBase live and `get_pantry` reports an empty pantry honestly (no fabricated fallbacks); NEW `get_calendar_range` (any date range ≤30 days, family + Google merged) + `update_event` (move/edit family events); task CRUD — `update_task`/`delete_task` (pending rows)/`reopen_task` (approval-queued) + `add_task` validation — and `complete_task` now QUEUES a pending parent approval: chat never moves points; real `get_weather` via live Open-Meteo (no seasonal fabrication); `compare_grocery_prices` made honest (store-split of the list, never invented prices); pantry + routine writes (`add_pantry_item`/`remove_pantry_item`, `add/update/delete_schedule_item`, weekly `get_family_routines`); history + shop reads (`get_past_weeks` from week_archive, `get_rewards`); `add_recipe` + `recipe_ingredients_to_grocery` (skips what's stocked, dedupes, aborts honestly on unreadable stock); `propose_point_adjustment` — an inert PIN-confirmation chip whose adjustment executes ONLY through the adult-gated `adjust_points` executor in `/api/consuela/planner/apply` (≤±100, 60s replay dedupe). NEW **planner agent mode**: `POST /api/hermes/chat {agent:"planner",intent}` — zero tools, grounded context pack, validated JSON (`{ok:true,result.actions}`), single repair-retry, NEVER persists to the family thread — powering the meal/task/reward suggestion buttons and the new **"Consuela's week"** Calendar card (`src/components/calendar/ConsuelaWeekCard.tsx`: parent-only render, conflicts/buffers/suggestions, PIN-gated "Add to calendar" through planner/apply's `add_event` allowlist). Also `add_meal` made weekOf-aware + one-time `scripts/consuela/heal-meal-weekof.mjs`; pb-seed `tasks` fields ride the wave. **Ops: run `node scripts/consuela/heal-meal-weekof.mjs` (dry-run) → `--apply`, plus `npm run pb:seed`, on deploy.** §5.3/§5.4/§5.5 rewritten to the shipped surface (they agree with `ai/TOOLS.md`, parity-guarded by `write-ai-boot.mjs`). Verified: tsc clean, eslint 0 new on touched files, build clean, full suite 1732 passing, live probe `scripts/consuela/verify-assistant-tools.mjs` **13/13 ALL CHECKS PASSED** (adult chat answer + one live planner generation + child/guest 401 surfaces + screensaver smoke + guest /calendar walk at 390+1440 with the card hidden — the probe performs NO family-data writes).
 - **Last Updated:** 2026-09-14 | **Tiered house-alert notifications — severe weather + important calendar events now push to phones/Telegram; routines surface in-app; per-category opt-in toggles (default OFF).** Two new `*/15` cron routes (`src/app/api/cron/consuela/weather-alert`, `calendar-alert`) each call a pure decision core in `src/lib/ha/alerts.ts` (`withinQuietHours` 9pm–7am America/Detroit, `weatherEpisodeDecision`, `calendarLeadDecisions`) and fan out via the existing `broadcastHouseAlert()`; a push is recorded as alerted only when `sent > 0` so a dead channel retries. Weather = current-hour storm (`code ≥ 95`) or heavy-snow (`73/75/85/86`) with episode-start dedupe until it clears; calendar = `importanceScore ≥ 50` event 0–60 min out, one push per `event+date`. In-app tier: `scanRoutinesDue` in `engine.ts` surfaces today's `schedules` routines starting ≤30 min as a `routine_due` suggestion (with `expiresAt` = start time, and `fetchExistingConditionKeys` now ignores expired pending rows so a routine re-fires the next day). Opt-in prefs generalize `ha_notify_prefs` to rows `key ∈ {briefing, weather, calendar}` (default OFF — finally gives the previously-dead briefing pref a write path), served by new `/api/ha/notify-prefs` GET/POST (create-on-404, mirrors `notify-config`) and a **"What to send"** block in `HaNotificationsCard`. New `ha_alert_state` collection (key+json) holds episode/event dedupe state across runs and restarts; severity WMO sets extracted to pure `src/lib/weather-severity.ts` (imported by both `WeatherSkins.ts` and the server, re-exported from skins so `WeatherWidget` imports are unchanged). Ops: `npm run pb:seed` (creates `ha_alert_state`, seeds the 3 default prefs, adds `routine_due` to the kind select) + add the two `*/15` lines to the host crontab. Tests +new suites: weather-severity, ha-alerts, ha-notify-prefs-route, ha-weather-alert-route, ha-calendar-alert-route, engine-routine-due, pb-seed-notify-prefs, + card prefs toggle. Spec/plan: `docs/superpowers/specs|plans/2026-09-14-tiered-house-alert-notifications*` (outer repo).
@@ -1303,6 +1304,33 @@ Go to **Settings → AI Models**. Tap **+ Add provider**, paste your provider's 
 
 **Agent rule:** Emergency questions are high priority. Never guess. Always say: "First let me read the live Emergency section in AGENTS.md, then we'll follow the exact configuration steps together."
 
+### 2.3 API route surface & access gates (2026-09-15)
+
+The middleware default is **session-required for every `/api/**` path**, minus the
+exempt prefixes that carry their own gate (`/api/auth/`, `/api/cron/` (CRON_SECRET),
+`/api/admin/`, `/api/ha/alarm`, `/api/emergency`, `/api/recipes/search`,
+`/api/hermes/`, `/api/consuela/suggestions`, `/api/consuela/screensaver`,
+`/api/muse/`). `/api/muse/` is exempt *from the session gate* because it
+self-authenticates with its own bearer token — its settings/log routes still
+require an adult dashboard session (or the server-only `ADMIN_SECRET`, or a
+parent PIN). Non-gateway routes with meaningfully different gates:
+
+| Route | Method | Gate |
+| --- | --- | --- |
+| `/api/muse/auth/login` | POST | Key-authenticated (constant-time SHA-256) + per-IP throttle; public surface |
+| `/api/muse/auth/logout` | POST | Bearer (stateless no-op) |
+| `/api/muse/whoami` | GET | MUSE bearer |
+| `/api/muse/tools` | GET | MUSE bearer (admin tools only when the token is admin) |
+| `/api/muse/tool` | POST | MUSE bearer + per-key rate limit + redacted audit |
+| `/api/muse/context` | GET | MUSE bearer (`?scope=meal\|task\|schedule\|all`) |
+| `/api/muse/docs` | GET | Public (protocol docs only, no family data) |
+| `/api/muse/settings`, `settings/rotate`, `settings/revoke-tokens`, `/api/muse/log` | GET/PUT/POST | Parent session **or** `ADMIN_SECRET` **or** parent `x-admin-pin` — never the bearer |
+| `/api/rewards/redeem` | POST | Session + member PIN; server-authoritative (reads cost, checks balance, writes the redeem tx) |
+| `/api/db/[collection]`, `/api/db/[collection]/[id]` | POST/PATCH/DELETE | Session + per-collection write policy (parent-only vs session) — see §5.6 |
+| `/api/tasks/sync` | POST | Session; non-parents sync the tasks leg only (`ignoredLegs`) |
+| `/api/consuela/briefing` | GET/PATCH | Session (no longer middleware-exempt); PATCH stamps `acknowledgedBy` |
+| `/api/ha/call-service`, `notify-config`, `notify-prefs`, `notify-test` | POST | Parent session (`authorizeAdminRequest`); HA reads stay session-level |
+
 ---
 
 ## 3. Operational Clarity — Agent Role Definition
@@ -1566,6 +1594,59 @@ Chat history is persisted as user + final assistant content only — tool-call t
 
 **"Consuela, what tools do you have?"**  
 Full explanation of all 52 tools available (reads incl. calendar ranges/routines/history, task CRUD, pantry/routine/recipe writes, memory, house control, admin; point adjustments only via PIN-confirmed proposals). Memory is adults-only; kids get the read-only allowlist (the 17 `get_*` tools). No shell access.
+
+### 5.6 Routing & access-control truths (2026-09-15)
+
+**Per-collection gateway write policy.** The single sessioned gateway
+`/api/db/[collection]` is role-gated per collection (`WRITE_POLICY`/`canWrite` in
+`src/lib/db-gateway.ts`). Reads are unchanged (any session); a missing session is
+still 401 at middleware, and a wrong role is 403 `adult_only`.
+
+- **Parent-only writes** (`role === "parent"`): `week_data`, `week_archive`,
+  `rewards`, `penalties`, `hall_of_fame`, `family_goals`, `emergency_contacts`,
+  `events`, `schedules`, `meal_plan_entries`, `recipes`, `meal_week_archive`,
+  `chat_messages`, `morning_briefing`, `proactive_suggestions`, `consuela_state`.
+  Points, the family calendar, the emergency roster and the shared thread are
+  adult-controlled.
+- **Shared session writes** (`parent | child | pet`): `tasks`,
+  `grocery_list_items`, `pantry_items` — what the household already toggles in
+  the UI. The gateway `sort` param is whitelisted (field lists only; else 400
+  `invalid_sort`).
+- `POST /api/tasks/sync` from a non-parent syncs the **tasks leg only**
+  (`ignoredLegs: ["weekData","rewards","penalties"]`), so a child can never
+  overwrite the shared points snapshot.
+- Kid reward redemption is **not** a gateway write: `POST /api/rewards/redeem` is
+  server-authoritative (server-read cost + balance, appends the redeem tx, 60s
+  dedupe → 409, unknown → 404, insufficient → 400, wrong/missing PIN → 401).
+
+**Parent-only admin auth (pets denied).** `authorizeAdminRequest`
+(`src/lib/admin-auth.ts`) is an **allowlist on `role === "parent"`**: a valid
+session that is child or pet is 403 `adult_only`, and a valid PIN belonging to a
+child/pet is likewise 403 (the roster's third role `pet` has default PIN `0000`,
+so a `!== "child"` denylist would leak). Credentials, in order: `Authorization:
+Bearer $ADMIN_SECRET` (server-only, internal callers) → parent session cookie →
+parent `x-admin-pin`. It guards the `/api/admin/*` routes, members admin,
+services-config/ai-provider writes, the family memory bank, the HA mutating
+routes, and the MUSE settings/log routes.
+
+**MUSE surface + admin toggle + propose-only invariant.** MUSE is a distinct
+inbound identity, not a config toggle: key (SHA-256 stored) → 24-hour HMAC bearer
+token (`SESSION_SECRET`, context `muse-token-v1:`). Rotating or revoking bumps
+the identity `version`, so every live token dies instantly. The tool catalog is
+the full adult set (47 in v1); the 5 destructive admin tools
+(`check_for_update`, `trigger_update`, `get_container_status`,
+`restart_container`, `check_pocketbase`) are included **only** when the token
+was minted admin **and** the live admin toggle is on — the toggle defaults **off**
+and is operator-controlled in Settings → MUSE. Invariants: MUSE may **propose**
+point adjustments (an inert chip a parent must PIN-confirm) but can never apply
+them; task approvals stay in the Tasks UI; the memory tools act on the shared
+family bank; no base64 avatars (all member emoji go through `textEmoji()`); and
+rotate/revoke are **not** written to the MUSE audit log (known v1 gap — the
+`rotatedAt` stamp is the operator record). Full protocol reference:
+`GET /api/muse/docs` (also `docs/muse-api.md`).
+
+> **Ops on deploy:** `npm run pb:seed` creates `consuela_muse` +
+> `consuela_muse_log` and carries the briefing `acknowledgedBy` field.
 
 ---
 

@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { fetchHADeviceStates } from "@/lib/ha/rest-client";
 
-// NOTE (accepted risk): unauthenticated by design — LAN-only app, HA state is
-// non-sensitive within the home. See call-service/route.ts for the fuller note.
+// NOTE: session-level — middleware gates every /api/ha/* route on a valid
+// consuela_session cookie (HA state is non-sensitive within the home), so any
+// signed-in session passes but no adult role is required. See
+// call-service/route.ts for the fuller note.
 
 export async function POST() {
   try {

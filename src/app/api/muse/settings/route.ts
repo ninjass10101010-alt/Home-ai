@@ -21,7 +21,12 @@ function view(row: MuseRow) {
     rotatedAt: row.rotatedAt ?? null,
     lastUsedAt: row.lastUsedAt ?? null,
     rateLimitPerMin: row.rateLimitPerMin,
-    hasKey: true,
+    // `hasKey` means "a usable key has been generated", not merely "the
+    // singleton row exists": the row is created disabled + unkeyed by
+    // ensureMuseRow() the first time any settings/login path touches it. A row
+    // with an empty keyHash is honest as hasKey:false (the Settings card then
+    // offers "Generate key" instead of a misleading empty prefix).
+    hasKey: !!row.keyHash,
   };
 }
 

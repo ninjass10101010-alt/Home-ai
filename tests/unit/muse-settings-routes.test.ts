@@ -184,7 +184,10 @@ describe("GET/PUT /api/muse/settings", () => {
       ok: true,
       enabled: true,
       adminEnabled: true,
-      hasKey: true,
+      // The singleton row now exists but no key has been generated yet, so
+      // hasKey honestly reports false (it tracks a usable keyHash, not the
+      // row's mere existence).
+      hasKey: false,
       rateLimitPerMin: 10, // clamped up to MIN_RATE
       version: 1,
     });
@@ -192,6 +195,12 @@ describe("GET/PUT /api/muse/settings", () => {
 
     const get = await settingsGET(adminReq("GET", undefined, PIN));
     expect(await get.json()).toMatchObject({ enabled: true, adminEnabled: true, rateLimitPerMin: 10 });
+
+    // Generating a key flips hasKey true on the next read.
+    const rot = await rotatePOST(adminReq("POST", undefined, PIN));
+    expect(rot.status).toBe(200);
+    const after = await settingsGET(adminReq("GET", undefined, PIN));
+    expect(await after.json()).toMatchObject({ hasKey: true });
   });
 
   it("PUT rejects a non-object body", async () => {

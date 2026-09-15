@@ -9,9 +9,25 @@ then reads family context and calls the guarded assistant tools over HTTP.
 > Tailscale device. Do not port-forward the dashboard.
 
 - **Base URL (examples):** `http://<dashboard-host>:3000`
-- **Auth scheme:** `Authorization: Bearer <token>` on every non-login request
+- **Auth scheme:** most routes take `Authorization: Bearer <token>` — the tool
+  surface (`/api/muse/whoami`, `/api/muse/tools`, `/api/muse/tool`,
+  `/api/muse/context`) and the no-op `POST /api/muse/auth/logout`. This is **not**
+  universal: the operator routes (`/api/muse/settings*`, `/api/muse/log`) are
+  **not** bearer-authenticated (see the gate table below), and
+  `GET /api/muse/docs` is public.
 - **Content type:** requests with a body are `application/json`; responses are
   JSON except `GET /api/muse/docs` (markdown)
+
+### Endpoint gates
+
+| Endpoint | Gate |
+| --- | --- |
+| `POST /api/muse/auth/login` | Public-surface, key-authenticated + rate limited |
+| `POST /api/muse/auth/logout` | Bearer (no-op) |
+| `GET /api/muse/whoami` / `tools` / `tool` / `context` | Bearer |
+| `GET /api/muse/docs` | Public (protocol docs only, no family data) |
+| `/api/muse/settings`, `settings/rotate`, `settings/revoke-tokens`, `log` | **Adult dashboard session** (parent), the server-only `ADMIN_SECRET`, or a parent PIN via `x-admin-pin` — never the MUSE bearer token |
+
 
 ---
 
@@ -70,9 +86,19 @@ curl -sS http://<dashboard-host>:3000/api/muse/whoami \
   live tokens fail with `muse_disabled`.
 - **Logout** is client-side: tokens are stateless, so logging out is discarding
   the token. Use revoke-tokens to kill all outstanding tokens at once.
+- **`hasKey`** — the settings envelope returned to the dashboard reports `true`
+  only once a key has actually been generated. Creating the singleton row (which
+  happens the first time any settings/login path touches the identity) is not a
+  key: an unkeyed row honestly reports `hasKey: false`.
 
 > Rotate / revoke are **operator actions** in the dashboard UI (adults only) —
 > they are not reachable through the MUSE bearer token itself.
+
+**Known gaps (v1).** Rotate and revoke-tokens are operator actions in the
+dashboard settings surface and are **not** written to the MUSE audit log —
+`consuela_muse_log` records login attempts, tool calls, auth failures and
+rate-limit rejections only. The dashboard's `rotatedAt` timestamp (visible in
+Settings → MUSE) is the operator-side record of the last rotation.
 
 ---
 
@@ -200,16 +226,30 @@ curl -sS http://<dashboard-host>:3000/api/muse/docs
 | 400  | `invalid_body`      | Malformed JSON or a payload missing/invalid fields                 |
 | 400  | `invalid_scope`     | `GET /api/muse/context` got a scope other than meal/task/schedule/all |
 | 400  | `payload_too_large` | `POST /api/muse/tool` body exceeded the 16 KiB limit               |
+| 400  | `unknown tool`      | `POST /api/muse/tool` named a tool that is not in the catalog at all |
 | 401  | `unauthorized`      | Missing / malformed / expired / revoked bearer token               |
 | 401  | `invalid_key`       | `auth/login` key did not match (or no identity exists)             |
 | 403  | `muse_disabled`     | The MUSE identity is switched off                                   |
-| 403  | `tool not allowed`  | Admin tool requested on a non-admin token                          |
+| 403  | `tool not allowed`  | A tool that exists but is not permitted for this token (admin tool on a non-admin token) |
 | 429  | `rate_limited`      | Login or per-key request budget exceeded                           |
 | 429  | `locked`            | Login temporarily locked after repeated failures from this IP      |
 | 500  | `server_error`      | Unexpected server failure (details are never leaked)               |
 
+`400 unknown tool` and `403 tool not allowed` are distinct on purpose: the
+allowlist is checked before the tool registry, so naming an admin tool on a
+non-admin token can never reach its handler.
+
+A tool whose handler itself throws returns HTTP `500` with an honest shape that
+carries the (host-scrubbed) handler message rather than a generic failure:
+
+```json
+{ "ok": false, "error": "connect ECONNREFUSED [internal]" }
+```
+
 Credentials and internal service hostnames are never echoed back; error text is
-scrubbed of internal hosts.
+scrubbed of internal hosts (`localhost`, the known internal containers, and any
+`192.168.x.x` address become `[internal]`).
+
 
 ---
 

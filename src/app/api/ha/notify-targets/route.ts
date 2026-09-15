@@ -3,8 +3,9 @@ import { fetchHADeviceStates } from "@/lib/ha/rest-client";
 import { listHANotifyTargets } from "@/lib/ha/notify";
 import { withAdmin } from "@/lib/pb-auth";
 
-// NOTE (accepted risk): unauthenticated by design — LAN-only app, see
-// call-service/route.ts for the fuller note.
+// NOTE: session-level — middleware gates every /api/ha/* route on a valid
+// consuela_session cookie, so a signed-in session is required but this read
+// route needs no adult role. See call-service/route.ts for the fuller note.
 
 interface NotifyConfigRow {
   target: string;
