@@ -389,35 +389,6 @@ export const COLLECTIONS = [
     ],
   },
   {
-    name: "ha_areas",
-    schema: [
-      { name: "area_id", type: "text", required: true },
-      { name: "name", type: "text" },
-      { name: "icon", type: "text" },
-    ],
-    indexes: [],
-  },
-  {
-    name: "ha_devices",
-    schema: [
-      { name: "device_id", type: "text", required: true },
-      { name: "name", type: "text" },
-      { name: "manufacturer", type: "text" },
-      { name: "area_id", type: "text" },
-    ],
-    indexes: [],
-  },
-  {
-    name: "ha_automations",
-    schema: [
-      { name: "automation_id", type: "text", required: true },
-      { name: "name", type: "text" },
-      { name: "state", type: "text" },
-      { name: "last_triggered", type: "text" },
-    ],
-    indexes: [],
-  },
-  {
     name: "ha_notify_config",
     schema: [
       { name: "target", type: "text", required: true },

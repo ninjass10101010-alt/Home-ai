@@ -770,13 +770,50 @@ export async function syncWeekDataToPB(data: WeekData): Promise<void> {
   await db.upsertWeekData(data).catch(() => {});
 }
 
-export async function syncArchiveToPB(archive: WeekArchive): Promise<void> {
-  for (const [weekStart, weekData] of Object.entries(archive)) {
-    await db.upsertWeekData({
-      ...weekData,
-      weekStart,
+/**
+ * Persist a finished week into PocketBase's `week_archive` collection exactly
+ * once. The archive step used to write only `week_data`, so `week_archive`
+ * stayed empty and the assistant's `get_past_weeks` always returned nothing.
+ * Idempotent per `weekStart` — a second rollover (or the 5s structured sync
+ * re-running) never duplicates the row. Never throws: a PB failure degrades
+ * silently so the rollover/sync loop can't crash (the next cycle retries).
+ *
+ * `existingWeekStarts` lets a batch caller (syncArchiveToPB) share one read;
+ * when omitted the helper reads the archive itself.
+ */
+export async function archiveWeekIfMissing(
+  weekData: WeekData,
+  existingWeekStarts?: Set<string>
+): Promise<boolean> {
+  if (!weekData?.weekStart) return false;
+  try {
+    const existing =
+      existingWeekStarts ??
+      new Set(
+        ((await db.listArchivedWeeks()) || []).map((r: any) => String(r?.weekStart))
+      );
+    if (existing.has(weekData.weekStart)) return false;
+    await db.archiveWeek({
+      weekStart: weekData.weekStart,
       archivedAt: new Date().toISOString(),
-    }).catch(() => {});
+      points: weekData.points,
+      streak: weekData.streak,
+      history: weekData.history,
+    });
+    existing.add(weekData.weekStart);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function syncArchiveToPB(archive: WeekArchive): Promise<void> {
+  const existing = await db.listArchivedWeeks().catch(() => [] as any[]);
+  const existingStarts = new Set((existing || []).map((r: any) => String(r?.weekStart)));
+  for (const [weekStart, weekData] of Object.entries(archive)) {
+    if (existingStarts.has(weekStart)) continue;
+    const wrote = await archiveWeekIfMissing({ ...weekData, weekStart }, existingStarts);
+    if (wrote) existingStarts.add(weekStart);
   }
 }
 

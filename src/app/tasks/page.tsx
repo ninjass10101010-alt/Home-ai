@@ -37,6 +37,7 @@ import {
   getPreviousWeekRanks, loadHallOfFame,
   syncAllTasksToPB, syncWeekDataToPB,
   archiveAndResetWeek, archiveWeekWinner, saveCurrentWeekRanksForNextWeek,
+  archiveWeekIfMissing,
   pickDefaultClaimMember, isSnatchable, isPendingApproval,
   completesWithoutPin, completesWithPendingApproval,
   tapCompletePending, sendBackPendingCompletion, approvePendingCompletion, resolveMemberName,
@@ -554,6 +555,11 @@ export default function TasksPage() {
     const weeks = Object.keys(archive).sort();
     if (!weeks.length) return;
     const latest = weeks[weeks.length - 1];
+    // Make sure the finished week lands in PB's week_archive (idempotent).
+    // The reload path archives to localStorage only, so without this the
+    // assistant's get_past_weeks never sees weeks that rolled over while the
+    // page was closed. Fire-and-forget: a PB failure must not block the rest.
+    void archiveWeekIfMissing(archive[latest]);
     if (loadHallOfFame().some((h) => h.weekStart === latest)) return;
     const entries = rankedEntriesFromWeek(archive[latest], memberEmojis);
     if (!entries.length) return;

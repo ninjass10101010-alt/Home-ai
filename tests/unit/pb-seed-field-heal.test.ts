@@ -268,3 +268,32 @@ describe("members.age (pin-free kids)", () => {
     expect(age.required).toBeFalsy();
   });
 });
+
+describe("dead HA seed collections removed (F8c)", () => {
+  // ha_areas / ha_devices / ha_automations had zero references in src/ and
+  // scripts/ — the seed simply stops maintaining them (no destructive live
+  // migration; the live PB collections are left in place).
+  it("no longer maintains ha_areas/ha_devices/ha_automations", () => {
+    const names = COLLECTIONS.map((c) => c.name);
+    expect(names).not.toContain("ha_areas");
+    expect(names).not.toContain("ha_devices");
+    expect(names).not.toContain("ha_automations");
+  });
+
+  it("still carries the LIVE HA collections (entities + notify glue)", () => {
+    const names = COLLECTIONS.map((c) => c.name);
+    for (const n of [
+      "ha_entities",
+      "ha_notify_config",
+      "ha_notify_prefs",
+      "ha_mirror_state",
+      "ha_alert_state",
+    ]) {
+      expect(names).toContain(n);
+    }
+  });
+
+  it("collection count is 43 (was 46 before the three dead HA collections were dropped)", () => {
+    expect(COLLECTIONS.length).toBe(43);
+  });
+});
