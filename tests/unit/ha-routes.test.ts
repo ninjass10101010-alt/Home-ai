@@ -7,6 +7,13 @@ const mocks = vi.hoisted(() => ({
   getHABridgeStatus: vi.fn(),
 }));
 
+// F4 — call-service now runs the parent gate. This suite exercises the
+// validation/forwarding contract, so the gate is stubbed open here; the
+// child/pet/parent matrix lives in tests/unit/ha-role-gate.test.ts.
+vi.mock("@/lib/admin-auth", () => ({
+  authorizeAdminRequest: vi.fn(async () => ({ ok: true })),
+}));
+
 vi.mock("../../src/lib/ha/websocket-client", () => ({
   getHAWebSocketClient: mocks.getHAWebSocketClient,
 }));

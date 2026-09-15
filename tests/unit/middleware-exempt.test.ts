@@ -8,8 +8,8 @@ describe("AI endpoints exempt from session auth", () => {
   it("exempts /api/consuela/suggestions", () => {
     expect(isExempt("/api/consuela/suggestions")).toBe(true);
   });
-  it("exempts /api/consuela/briefing", () => {
-    expect(isExempt("/api/consuela/briefing")).toBe(true);
+  it("gates /api/consuela/briefing (F3 — session required on GET/PATCH)", () => {
+    expect(isExempt("/api/consuela/briefing")).toBe(false);
   });
   it("still gates /api/emergency-contacts (lookalike sibling of /api/emergency)", () => {
     expect(isExempt("/api/emergency-contacts")).toBe(false);

@@ -608,9 +608,12 @@ export const db = {
     });
   },
 
-  async ackMorningBriefing(id: string): Promise<any> {
+  async ackMorningBriefing(id: string, acknowledgedBy?: string): Promise<any> {
     return withAdmin(async (pb) => {
-      return pb.collection("morning_briefing").update(id, { acknowledged: true });
+      return pb.collection("morning_briefing").update(id, {
+        acknowledged: true,
+        ...(acknowledgedBy ? { acknowledgedBy } : {}),
+      });
     });
   },
 

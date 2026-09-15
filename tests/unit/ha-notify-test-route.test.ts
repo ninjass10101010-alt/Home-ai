@@ -13,6 +13,13 @@ vi.mock("@/lib/ha/notify", () => ({
   sendHANotification: mocks.sendHANotification,
 }));
 
+// F4 — POST is parent-gated. This suite covers the send-result honesty
+// contract, so the gate is stubbed open; the role matrix lives in
+// tests/unit/ha-role-gate.test.ts.
+vi.mock("@/lib/admin-auth", () => ({
+  authorizeAdminRequest: vi.fn(async () => ({ ok: true })),
+}));
+
 import { POST } from "@/app/api/ha/notify-test/route";
 
 function req(body: unknown): Request {

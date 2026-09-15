@@ -1,22 +1,28 @@
 import { NextResponse } from "next/server";
 import { getHAWebSocketClient } from "@/lib/ha/websocket-client";
 import { isHAServiceAllowed } from "@/lib/ha/service-allowlist";
+import { authorizeAdminRequest } from "@/lib/admin-auth";
 
-// NOTE (accepted risk): this route is intentionally UNAUTHENTICATED. The
-// dashboard is LAN-only and the product decision is that HA controls are not
-// PIN-gated for family convenience. Do not expose this app to the internet.
-// If remote access is ever added, add a bearer/PIN gate here first.
+// SESSION + PARENT gated: middleware requires a signed-in session on /api/**,
+// and this route additionally runs authorizeAdminRequest (the parent allowlist
+// shared with the admin routes / planner-apply). A child OR pet session is 403
+// adult_only, so kids and pets cannot control devices.
 //
-// Unauthenticated does NOT mean unrestricted: only an explicit allowlist of
-// domain/service pairs (the ones the House tab UI uses) is forwarded to Home
-// Assistant — see src/lib/ha/service-allowlist.ts. Everything else, including
-// locks, scripts, automations, shell_command and alarm arm_away/trigger,
-// is rejected with 403.
+// Defense in depth: only an explicit allowlist of domain/service pairs (the
+// ones the House tab UI uses) is forwarded to Home Assistant — see
+// src/lib/ha/service-allowlist.ts. Everything else, including locks, scripts,
+// automations, shell_command and alarm arm_away/trigger, is rejected with 403.
+// (Alarm arm/disarm has its own human PIN gate at /api/ha/alarm.)
 
 const NAME_PATTERN = /^[a-z0-9_]+$/;
 const MAX_NAME_LENGTH = 64;
 
 export async function POST(req: Request) {
+  const auth = await authorizeAdminRequest(req);
+  if (!auth.ok) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+
   try {
     const body = await req.json();
     const { domain, service, serviceData } = body ?? {};

@@ -7,6 +7,12 @@ vi.mock("@/lib/pb-auth", () => ({
   withAdmin: async (fn: (pb: unknown) => Promise<unknown>) => fn(currentHandle),
 }));
 
+// F4 — POST is parent-gated. This suite covers storage behavior, so the gate
+// is stubbed open; the role matrix lives in tests/unit/ha-role-gate.test.ts.
+vi.mock("@/lib/admin-auth", () => ({
+  authorizeAdminRequest: vi.fn(async () => ({ ok: true })),
+}));
+
 import { GET, POST } from "@/app/api/ha/notify-prefs/route";
 
 function pbWith(rows: Array<{ key: string; enabled: boolean }>) {

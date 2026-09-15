@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { withAdmin } from "@/lib/pb-auth";
+import { authorizeAdminRequest } from "@/lib/admin-auth";
 
-// NOTE (accepted risk): unauthenticated by design — LAN-only app, see
-// notify-config/route.ts for the fuller note.
+// GET is session-level (read-only, middleware-gated). POST is SESSION + PARENT
+// gated: it flips which alert categories fire, so authorizeAdminRequest
+// rejects child/pet sessions with 403 adult_only.
 
 const KEYS = ["briefing", "weather", "calendar"] as const;
 type PrefKey = (typeof KEYS)[number];
@@ -24,6 +26,11 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const auth = await authorizeAdminRequest(req);
+  if (!auth.ok) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+
   let body: unknown;
   try {
     body = await req.json();

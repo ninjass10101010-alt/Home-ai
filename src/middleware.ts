@@ -16,7 +16,6 @@ const API_EXEMPT = [
   "/api/recipes/",
   "/api/hermes/",
   "/api/consuela/suggestions",
-  "/api/consuela/briefing",
   "/api/consuela/screensaver",
 ];
 

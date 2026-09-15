@@ -912,10 +912,13 @@ export const db = {
     }
     return pbDb.selectMorningBriefing(scopeDate);
   },
-  ackMorningBriefing: async (id: string) =>
+  ackMorningBriefing: async (id: string, acknowledgedBy?: string) =>
     isServer()
-      ? pbDb.ackMorningBriefing(id)
-      : gatewayUpdate("morning_briefing", id, { acknowledged: true }),
+      ? pbDb.ackMorningBriefing(id, acknowledgedBy)
+      : gatewayUpdate("morning_briefing", id, {
+          acknowledged: true,
+          ...(acknowledgedBy ? { acknowledgedBy } : {}),
+        }),
 
   insertChatMessage: async (msg: any) => {
     if (isServer()) return pbDb.insertChatMessage(msg);

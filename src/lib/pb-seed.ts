@@ -248,6 +248,7 @@ export const COLLECTIONS = [
       { name: "summary", type: "json" },
       { name: "generatedAt", type: "date" },
       { name: "acknowledged", type: "bool" },
+      { name: "acknowledgedBy", type: "text" },
     ],
     indexes: [
       "CREATE UNIQUE INDEX idx_scope_unique ON morning_briefing (scopeDate)",

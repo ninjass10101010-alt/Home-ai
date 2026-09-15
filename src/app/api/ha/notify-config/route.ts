@@ -1,10 +1,17 @@
 import { NextResponse } from "next/server";
 import { withAdmin } from "@/lib/pb-auth";
+import { authorizeAdminRequest } from "@/lib/admin-auth";
 
-// NOTE (accepted risk): unauthenticated by design — LAN-only app, see
-// call-service/route.ts for the fuller note.
+// SESSION + PARENT gated: middleware requires a session on /api/**, and this
+// route runs authorizeAdminRequest so only a parent can change which phones
+// receive house alerts. Child/pet sessions get 403 adult_only.
 
 export async function POST(req: Request) {
+  const auth = await authorizeAdminRequest(req);
+  if (!auth.ok) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+
   let body: unknown;
   try {
     body = await req.json();
