@@ -11,6 +11,8 @@ export default defineConfig({
     env: {
       PB_ADMIN_EMAIL: 'test-admin@example.test',
       PB_ADMIN_PASS: 'test-password',
+      // Coverage tests pin family-local (America/Detroit) day semantics.
+      TZ: 'America/Detroit',
     },
   },
   resolve: {

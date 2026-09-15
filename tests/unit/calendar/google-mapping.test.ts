@@ -290,4 +290,14 @@ describe("multi-day coverage", () => {
     ).toEqual(["2026-10-30"]);
     expect(googleEventCoveredDays({ google_id: "g", start_iso: "" })).toEqual([]);
   });
+  it("caps expansion at 366 days", () => {
+    const row = {
+      google_id: "cap1",
+      summary: "Endless",
+      start_iso: "2020-01-01",
+      end_iso: "2022-01-01",
+      all_day: true,
+    };
+    expect(googleEventCoveredDays(row)).toHaveLength(366);
+  });
 });
