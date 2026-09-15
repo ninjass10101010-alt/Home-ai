@@ -72,6 +72,10 @@ import { POST as toolPOST } from "@/app/api/muse/tool/route";
 import { GET as whoamiGET } from "@/app/api/muse/whoami/route";
 import { GET as contextGET } from "@/app/api/muse/context/route";
 import { GET as docsGET } from "@/app/api/muse/docs/route";
+import { GET as settingsGET, PUT as settingsPUT } from "@/app/api/muse/settings/route";
+import { POST as rotatePOST } from "@/app/api/muse/settings/rotate/route";
+import { POST as revokePOST } from "@/app/api/muse/settings/revoke-tokens/route";
+import { GET as logGET } from "@/app/api/muse/log/route";
 import { ADMIN_TOOLS } from "@/lib/muse/execute";
 import { signMuseToken } from "@/lib/muse/token";
 import { generateKey } from "@/lib/muse/store";
@@ -391,6 +395,10 @@ const ROUTE_INVENTORY: Record<string, RouteKind> = {
   "whoami/route.ts": "bearer",
   "context/route.ts": "bearer",
   "docs/route.ts": "public",
+  "settings/route.ts": "admin",
+  "settings/rotate/route.ts": "admin",
+  "settings/revoke-tokens/route.ts": "admin",
+  "log/route.ts": "admin",
 };
 
 function walkMuseRoutes(): string[] {
@@ -427,6 +435,23 @@ describe("muse route self-gating under the middleware exemption", () => {
     const res = await docsGET();
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/markdown");
+  });
+
+  it("admin-gated routes 401 without any adult credential", async () => {
+    makeRow();
+    const settingsGet = await settingsGET(museReq("/api/muse/settings"));
+    const settingsPut = await settingsPUT(
+      museReq("/api/muse/settings", { method: "PUT", body: { enabled: true } })
+    );
+    const rotate = await rotatePOST(museReq("/api/muse/settings/rotate", { method: "POST" }));
+    const revoke = await revokePOST(
+      museReq("/api/muse/settings/revoke-tokens", { method: "POST" })
+    );
+    const log = await logGET(museReq("/api/muse/log"));
+    for (const res of [settingsGet, settingsPut, rotate, revoke, log]) {
+      expect(res.status).toBe(401);
+      expect((await res.json()).ok).toBe(false);
+    }
   });
 
   it("has an explicitly classified route inventory whose gates match", () => {
