@@ -72,11 +72,7 @@ export default function SkillTreePage() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch('/api/skill-tree', {
-        headers: {
-          'x-user-id': 'demo-user',
-        },
-      });
+      const response = await fetch('/api/skill-tree');
 
       if (response.ok) {
         const skillTreeData = await response.json();
@@ -96,9 +92,6 @@ export default function SkillTreePage() {
     try {
       const response = await fetch(`/api/skill-tree/quests/${questId}/start`, {
         method: 'POST',
-        headers: {
-          'x-user-id': 'demo-user',
-        },
       });
 
       if (response.ok) {
@@ -119,7 +112,6 @@ export default function SkillTreePage() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-user-id': 'demo-user',
         },
         body: JSON.stringify({ proof }),
       });
@@ -146,9 +138,6 @@ export default function SkillTreePage() {
     try {
       const response = await fetch(`/api/skill-tree/branches/${branchId}/unlock`, {
         method: 'POST',
-        headers: {
-          'x-user-id': 'demo-user',
-        },
       });
 
       if (response.ok) {

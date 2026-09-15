@@ -53,9 +53,7 @@ export default function MoneyMountainPage() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch('/api/money-mountain', {
-        headers: { 'x-user-id': 'demo-user' },
-      });
+      const response = await fetch('/api/money-mountain');
 
       if (response.ok) {
         const data = await response.json();
@@ -78,9 +76,7 @@ export default function MoneyMountainPage() {
 
   const selectMountain = async (id: string) => {
     try {
-      const response = await fetch(`/api/money-mountain/${id}`, {
-        headers: { 'x-user-id': 'demo-user' },
-      });
+      const response = await fetch(`/api/money-mountain/${id}`);
 
       if (response.ok) {
         const data = await response.json();
@@ -96,7 +92,6 @@ export default function MoneyMountainPage() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-user-id': 'demo-user',
       },
       body: JSON.stringify(data),
     });
@@ -116,7 +111,6 @@ export default function MoneyMountainPage() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-user-id': 'demo-user',
       },
       body: JSON.stringify({ type, ...data }),
     });

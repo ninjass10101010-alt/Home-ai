@@ -1,4 +1,4 @@
-import { getUserId } from '@/lib/auth';
+import { getUserId, isLegacyOwner } from '@/lib/auth';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   getMountain,
@@ -18,15 +18,7 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const userId = getUserId(request);
-    
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'User ID is required' },
-        { status: 401 }
-      );
-    }
-    
+    const userId = await getUserId(request);
     const result = await getMountain(id);
     
     if (!result) {
@@ -36,8 +28,8 @@ export async function GET(
       );
     }
     
-    // Check ownership
-    if (result.mountain.userId !== userId) {
+    // Check ownership (legacy demo-user rows stay accessible per F8a continuity)
+    if (result.mountain.userId !== userId && !isLegacyOwner(result.mountain.userId)) {
       return NextResponse.json(
         { error: 'Access denied' },
         { status: 403 }
@@ -64,18 +56,10 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
-    const userId = getUserId(request);
-    
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'User ID is required' },
-        { status: 401 }
-      );
-    }
-    
+    const userId = await getUserId(request);
     // Check ownership
     const existing = await getMountain(id);
-    if (!existing || existing.mountain.userId !== userId) {
+    if (!existing || (existing.mountain.userId !== userId && !isLegacyOwner(existing.mountain.userId))) {
       return NextResponse.json(
         { error: 'Access denied' },
         { status: 403 }
@@ -112,18 +96,10 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    const userId = getUserId(request);
-    
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'User ID is required' },
-        { status: 401 }
-      );
-    }
-    
+    const userId = await getUserId(request);
     // Check ownership
     const existing = await getMountain(id);
-    if (!existing || existing.mountain.userId !== userId) {
+    if (!existing || (existing.mountain.userId !== userId && !isLegacyOwner(existing.mountain.userId))) {
       return NextResponse.json(
         { error: 'Access denied' },
         { status: 403 }
@@ -159,18 +135,10 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
-    const userId = getUserId(request);
-    
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'User ID is required' },
-        { status: 401 }
-      );
-    }
-    
+    const userId = await getUserId(request);
     // Check ownership
     const existing = await getMountain(id);
-    if (!existing || existing.mountain.userId !== userId) {
+    if (!existing || (existing.mountain.userId !== userId && !isLegacyOwner(existing.mountain.userId))) {
       return NextResponse.json(
         { error: 'Access denied' },
         { status: 403 }

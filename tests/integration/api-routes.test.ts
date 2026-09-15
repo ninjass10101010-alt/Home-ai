@@ -65,20 +65,10 @@ describe('Money Mountain API Routes', () => {
   });
 
   describe('GET /api/money-mountain', () => {
-    it('returns 401 when no user ID provided', async () => {
-      vi.mocked(auth.getUserId).mockReturnValue(null);
-      
-      const { GET } = await import('@/app/api/money-mountain/route');
-      const request = new NextRequest('http://localhost:3000/api/money-mountain');
-      const response = await GET(request);
-      
-      expect(response.status).toBe(401);
-      const body = await response.json();
-      expect(body.error).toBe('Unauthorized');
-    });
-
+    // Session gating moved to middleware (tests/unit/middleware-gate.test.ts);
+    // getUserId is session-derived and no longer returns null (F8a).
     it('returns 200 with mountains when authenticated', async () => {
-      vi.mocked(auth.getUserId).mockReturnValue('user-1');
+      vi.mocked(auth.getUserId).mockResolvedValue('user-1');
       
       const { GET } = await import('@/app/api/money-mountain/route');
       const request = new NextRequest('http://localhost:3000/api/money-mountain');
@@ -92,21 +82,8 @@ describe('Money Mountain API Routes', () => {
   });
 
   describe('POST /api/money-mountain', () => {
-    it('returns 401 when no user ID provided', async () => {
-      vi.mocked(auth.getUserId).mockReturnValue(null);
-      
-      const { POST } = await import('@/app/api/money-mountain/route');
-      const request = new NextRequest('http://localhost:3000/api/money-mountain', {
-        method: 'POST',
-        body: JSON.stringify({ name: 'Test Mountain', targetAmount: 100 }),
-      });
-      const response = await POST(request);
-      
-      expect(response.status).toBe(401);
-    });
-
     it('returns 400 when name is missing', async () => {
-      vi.mocked(auth.getUserId).mockReturnValue('user-1');
+      vi.mocked(auth.getUserId).mockResolvedValue('user-1');
       
       const { POST } = await import('@/app/api/money-mountain/route');
       const request = new NextRequest('http://localhost:3000/api/money-mountain', {
@@ -121,7 +98,7 @@ describe('Money Mountain API Routes', () => {
     });
 
     it('returns 400 when targetAmount is missing', async () => {
-      vi.mocked(auth.getUserId).mockReturnValue('user-1');
+      vi.mocked(auth.getUserId).mockResolvedValue('user-1');
       
       const { POST } = await import('@/app/api/money-mountain/route');
       const request = new NextRequest('http://localhost:3000/api/money-mountain', {
@@ -136,7 +113,7 @@ describe('Money Mountain API Routes', () => {
     });
 
     it('returns 201 when mountain is created successfully', async () => {
-      vi.mocked(auth.getUserId).mockReturnValue('user-1');
+      vi.mocked(auth.getUserId).mockResolvedValue('user-1');
       
       const { POST } = await import('@/app/api/money-mountain/route');
       const request = new NextRequest('http://localhost:3000/api/money-mountain', {
@@ -158,18 +135,8 @@ describe('Time Capsules API Routes', () => {
   });
 
   describe('GET /api/time-capsules', () => {
-    it('returns 401 when no user ID provided', async () => {
-      vi.mocked(auth.getUserId).mockReturnValue(null);
-      
-      const { GET } = await import('@/app/api/time-capsules/route');
-      const request = new NextRequest('http://localhost:3000/api/time-capsules');
-      const response = await GET(request);
-      
-      expect(response.status).toBe(401);
-    });
-
     it('returns 200 with capsules when authenticated', async () => {
-      vi.mocked(auth.getUserId).mockReturnValue('user-1');
+      vi.mocked(auth.getUserId).mockResolvedValue('user-1');
       
       const { GET } = await import('@/app/api/time-capsules/route');
       const request = new NextRequest('http://localhost:3000/api/time-capsules');
@@ -183,24 +150,8 @@ describe('Time Capsules API Routes', () => {
   });
 
   describe('POST /api/time-capsules', () => {
-    it('returns 401 when no user ID provided', async () => {
-      vi.mocked(auth.getUserId).mockReturnValue(null);
-      
-      const { POST } = await import('@/app/api/time-capsules/route');
-      const request = new NextRequest('http://localhost:3000/api/time-capsules', {
-        method: 'POST',
-        body: JSON.stringify({
-          title: 'Test Capsule',
-          unlockDate: new Date(Date.now() + 86400000).toISOString(),
-        }),
-      });
-      const response = await POST(request);
-      
-      expect(response.status).toBe(401);
-    });
-
     it('returns 400 when title is missing', async () => {
-      vi.mocked(auth.getUserId).mockReturnValue('user-1');
+      vi.mocked(auth.getUserId).mockResolvedValue('user-1');
       
       const { POST } = await import('@/app/api/time-capsules/route');
       const request = new NextRequest('http://localhost:3000/api/time-capsules', {
@@ -217,7 +168,7 @@ describe('Time Capsules API Routes', () => {
     });
 
     it('returns 400 when unlock date is missing', async () => {
-      vi.mocked(auth.getUserId).mockReturnValue('user-1');
+      vi.mocked(auth.getUserId).mockResolvedValue('user-1');
       
       const { POST } = await import('@/app/api/time-capsules/route');
       const request = new NextRequest('http://localhost:3000/api/time-capsules', {
@@ -234,7 +185,7 @@ describe('Time Capsules API Routes', () => {
     });
 
     it('returns 400 when unlock date is in the past', async () => {
-      vi.mocked(auth.getUserId).mockReturnValue('user-1');
+      vi.mocked(auth.getUserId).mockResolvedValue('user-1');
       
       const { POST } = await import('@/app/api/time-capsules/route');
       const request = new NextRequest('http://localhost:3000/api/time-capsules', {
@@ -252,7 +203,7 @@ describe('Time Capsules API Routes', () => {
     });
 
     it('returns 201 when capsule is created successfully', async () => {
-      vi.mocked(auth.getUserId).mockReturnValue('user-1');
+      vi.mocked(auth.getUserId).mockResolvedValue('user-1');
       
       const { POST } = await import('@/app/api/time-capsules/route');
       const request = new NextRequest('http://localhost:3000/api/time-capsules', {
@@ -277,18 +228,8 @@ describe('Skill Tree API Routes', () => {
   });
 
   describe('GET /api/skill-tree', () => {
-    it('returns 401 when no user ID provided', async () => {
-      vi.mocked(auth.getUserId).mockReturnValue(null);
-      
-      const { GET } = await import('@/app/api/skill-tree/route');
-      const request = new NextRequest('http://localhost:3000/api/skill-tree');
-      const response = await GET(request);
-      
-      expect(response.status).toBe(401);
-    });
-
     it('returns 200 with skill tree data when authenticated', async () => {
-      vi.mocked(auth.getUserId).mockReturnValue('user-1');
+      vi.mocked(auth.getUserId).mockResolvedValue('user-1');
       
       const { GET } = await import('@/app/api/skill-tree/route');
       const request = new NextRequest('http://localhost:3000/api/skill-tree');
@@ -301,7 +242,7 @@ describe('Skill Tree API Routes', () => {
     });
 
     it('returns 500 when skill tree data cannot be loaded', async () => {
-      vi.mocked(auth.getUserId).mockReturnValue('user-1');
+      vi.mocked(auth.getUserId).mockResolvedValue('user-1');
       
       // Mock the skill tree lib to throw an error
       const { getSkillTreeVisualization } = await import('@/lib/skill-tree');
@@ -318,20 +259,8 @@ describe('Skill Tree API Routes', () => {
   });
 
   describe('POST /api/skill-tree/quests/[id]/start', () => {
-    it('returns 401 when no user ID provided', async () => {
-      vi.mocked(auth.getUserId).mockReturnValue(null);
-      
-      const { POST } = await import('@/app/api/skill-tree/quests/[id]/start/route');
-      const request = new NextRequest('http://localhost:3000/api/skill-tree/quests/quest-1/start', {
-        method: 'POST',
-      });
-      const response = await POST(request, { params: Promise.resolve({ id: 'quest-1' }) });
-      
-      expect(response.status).toBe(401);
-    });
-
     it('returns 200 when quest is started successfully', async () => {
-      vi.mocked(auth.getUserId).mockReturnValue('user-1');
+      vi.mocked(auth.getUserId).mockResolvedValue('user-1');
       
       const { POST } = await import('@/app/api/skill-tree/quests/[id]/start/route');
       const request = new NextRequest('http://localhost:3000/api/skill-tree/quests/quest-1/start', {
@@ -344,21 +273,8 @@ describe('Skill Tree API Routes', () => {
   });
 
   describe('POST /api/skill-tree/quests/[id]/complete', () => {
-    it('returns 401 when no user ID provided', async () => {
-      vi.mocked(auth.getUserId).mockReturnValue(null);
-      
-      const { POST } = await import('@/app/api/skill-tree/quests/[id]/complete/route');
-      const request = new NextRequest('http://localhost:3000/api/skill-tree/quests/quest-1/complete', {
-        method: 'POST',
-        body: JSON.stringify({ proof: 'Completed the quest' }),
-      });
-      const response = await POST(request, { params: Promise.resolve({ id: 'quest-1' }) });
-      
-      expect(response.status).toBe(401);
-    });
-
     it('returns 200 when quest is completed successfully', async () => {
-      vi.mocked(auth.getUserId).mockReturnValue('user-1');
+      vi.mocked(auth.getUserId).mockResolvedValue('user-1');
       
       const { POST } = await import('@/app/api/skill-tree/quests/[id]/complete/route');
       const request = new NextRequest('http://localhost:3000/api/skill-tree/quests/quest-1/complete', {
@@ -375,20 +291,8 @@ describe('Skill Tree API Routes', () => {
   });
 
   describe('POST /api/skill-tree/branches/[id]/unlock', () => {
-    it('returns 401 when no user ID provided', async () => {
-      vi.mocked(auth.getUserId).mockReturnValue(null);
-      
-      const { POST } = await import('@/app/api/skill-tree/branches/[id]/unlock/route');
-      const request = new NextRequest('http://localhost:3000/api/skill-tree/branches/branch-1/unlock', {
-        method: 'POST',
-      });
-      const response = await POST(request, { params: Promise.resolve({ id: 'branch-1' }) });
-      
-      expect(response.status).toBe(401);
-    });
-
     it('returns 200 when branch is unlocked successfully', async () => {
-      vi.mocked(auth.getUserId).mockReturnValue('user-1');
+      vi.mocked(auth.getUserId).mockResolvedValue('user-1');
       
       const { POST } = await import('@/app/api/skill-tree/branches/[id]/unlock/route');
       const request = new NextRequest('http://localhost:3000/api/skill-tree/branches/branch-1/unlock', {
@@ -434,7 +338,7 @@ describe('Consuela Chat API Routes', () => {
     });
 
     it('returns 400 when id or status missing', async () => {
-      vi.mocked(auth.getUserId).mockReturnValue('user-1');
+      vi.mocked(auth.getUserId).mockResolvedValue('user-1');
       const { PATCH } = await import('@/app/api/consuela/suggestions/route');
       const request = new NextRequest('http://localhost:3000/api/consuela/suggestions', {
         method: 'PATCH',

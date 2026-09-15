@@ -12,15 +12,7 @@ export async function POST(
 ) {
   try {
     const { id: questId } = await params;
-    const userId = getUserId(request);
-    
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'User ID is required' },
-        { status: 401 }
-      );
-    }
-    
+    const userId = await getUserId(request);
     const success = await startQuest(questId, userId);
     
     if (!success) {

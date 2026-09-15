@@ -5,15 +5,17 @@ import { verifySession, SESSION_COOKIE } from "@/lib/session";
 // pin/secret, alarm PIN, emergency PIN). /api/auth/* is exempt so an
 // expired-cookie user can still POST /api/auth/logout and clear the
 // httpOnly cookie; login/whoami enforce their own 401s at route level.
-// /api/recipes/* is a public TheMealDB catalog lookup (no family data),
-// so guests can search recipes without a session.
+// /api/recipes/search is a public TheMealDB catalog lookup (no family data),
+// so guests can search recipes without a session. F8e narrowed this from the
+// whole /api/recipes/ prefix: /api/recipes/ingest performs a server-side fetch
+// of an arbitrary URL and must require a session.
 const API_EXEMPT = [
   "/api/auth/",
   "/api/cron/",
   "/api/admin/",
   "/api/ha/alarm",
   "/api/emergency",
-  "/api/recipes/",
+  "/api/recipes/search",
   "/api/hermes/",
   "/api/consuela/suggestions",
   "/api/consuela/screensaver",

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserCapsules, createCapsule, checkAndUnlockCapsules } from '@/lib/time-capsule';
 import type { CreateCapsuleRequest } from '@/db/features/time-capsule';
-import { getUserId, unauthorizedResponse } from '@/lib/auth';
+import { getUserId } from '@/lib/auth';
 
 /**
  * GET /api/time-capsules
@@ -9,12 +9,7 @@ import { getUserId, unauthorizedResponse } from '@/lib/auth';
  */
 export async function GET(request: NextRequest) {
   try {
-    const userId = getUserId(request);
-    
-    if (!userId) {
-      return unauthorizedResponse();
-    }
-    
+    const userId = await getUserId(request);
     const capsules = await getUserCapsules(userId);
     
     return NextResponse.json({ capsules });
@@ -33,12 +28,7 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const userId = getUserId(request);
-    
-    if (!userId) {
-      return unauthorizedResponse();
-    }
-    
+    const userId = await getUserId(request);
     const data: CreateCapsuleRequest = await request.json();
     
     // Validation

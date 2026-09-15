@@ -31,11 +31,7 @@ export default function TimeCapsulePage() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch('/api/time-capsules', {
-        headers: {
-          'x-user-id': 'demo-user',
-        },
-      });
+      const response = await fetch('/api/time-capsules');
 
       if (response.ok) {
         const data = await response.json();
@@ -60,7 +56,6 @@ export default function TimeCapsulePage() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-user-id': 'demo-user',
       },
       body: JSON.stringify(data),
     });

@@ -12,15 +12,7 @@ export async function POST(
 ) {
   try {
     const { id: capsuleId } = await params;
-    const userId = getUserId(request);
-    
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'User ID is required' },
-        { status: 401 }
-      );
-    }
-    
+    const userId = await getUserId(request);
     await markCapsuleViewed(capsuleId, userId);
     
     return NextResponse.json({ success: true });

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getUserMountains, createMountain } from '@/lib/money-mountain';
-import { getUserId, unauthorizedResponse } from '@/lib/auth';
+import { getUserId } from '@/lib/auth';
 
 /**
  * GET /api/money-mountain
@@ -8,12 +8,7 @@ import { getUserId, unauthorizedResponse } from '@/lib/auth';
  */
 export async function GET(request: NextRequest) {
   try {
-    const userId = getUserId(request);
-    
-    if (!userId) {
-      return unauthorizedResponse();
-    }
-    
+    const userId = await getUserId(request);
     const mountains = await getUserMountains(userId);
     
     return NextResponse.json({ mountains });
@@ -32,12 +27,7 @@ export async function GET(request: NextRequest) {
  */
 export async function POST(request: NextRequest) {
   try {
-    const userId = getUserId(request);
-    
-    if (!userId) {
-      return unauthorizedResponse();
-    }
-    
+    const userId = await getUserId(request);
     const data = await request.json();
     
     // Validation

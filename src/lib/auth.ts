@@ -1,16 +1,21 @@
 /**
  * API Authentication Utility
- * 
- * Provides secure user identification from incoming requests.
- * Currently uses PIN-based member auth (demo mode).
- * 
- * In production, this should integrate with:
- * - PocketBase auth tokens
- * - JWT/session cookies
- * - OAuth providers
+ *
+ * Identity is derived from the HMAC-signed `consuela_session` cookie. The
+ * client-supplied `x-user-id` header is NOT trusted (F8a) — it previously let
+ * any session spoof any member id and forced every caller onto one shared
+ * namespace.
  */
 
 import { NextRequest } from 'next/server';
+import { verifySession, SESSION_COOKIE } from '@/lib/session';
+
+/**
+ * Legacy namespace every pre-migration row was written under. New writes stamp
+ * the signed-session member name, but reads (and ownership checks) must keep
+ * including this id so existing demo-user rows stay visible to the family.
+ */
+export const DEMO_USER_ID = 'demo-user';
 
 /**
  * Known demo user IDs for development.
@@ -31,40 +36,23 @@ const DEMO_USER_IDS = new Set([
 ]);
 
 /**
- * Extract and validate user ID from request.
- * 
- * Priority order:
- * 1. x-user-id header (current demo mode)
- * 2. Authorization header (future: Bearer token)
- * 3. Cookie session (future: session-based auth)
- * 
- * @param request - Next.js request object
- * @returns User ID string or null if not authenticated
+ * Extract the caller's identity from the signed session cookie.
+ *
+ * @returns The session member's name, or the legacy `demo-user` namespace when
+ *          there is no valid session.
  */
-export function getUserId(request: NextRequest): string | null {
-  // 1. Check x-user-id header (demo mode)
-  const headerUserId = request.headers.get('x-user-id');
-  if (headerUserId && isValidUserId(headerUserId)) {
-    return headerUserId;
-  }
+export async function getUserId(request: NextRequest): Promise<string> {
+  const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
+  return session?.name || DEMO_USER_ID;
+}
 
-  // 2. Check Authorization header (future)
-  const authHeader = request.headers.get('authorization');
-  if (authHeader?.startsWith('Bearer ')) {
-    const token = authHeader.slice(7);
-    // TODO: Validate JWT/token and extract user ID
-    // const decoded = verifyToken(token);
-    // return decoded?.userId || null;
-  }
-
-  // 3. Check cookies (future)
-  // const sessionCookie = request.cookies.get('session');
-  // if (sessionCookie) {
-  //   const session = verifySession(sessionCookie.value);
-  //   return session?.userId || null;
-  // }
-
-  return null;
+/**
+ * Whether a stored owner id is the legacy shared namespace. Used by the
+ * gamified routes' ownership checks so a member can still open/modify rows
+ * created before the per-member identity migration.
+ */
+export function isLegacyOwner(ownerId: string | null | undefined): boolean {
+  return ownerId === DEMO_USER_ID;
 }
 
 /**
@@ -79,14 +67,14 @@ export function isValidUserId(userId: string): boolean {
 /**
  * Require user authentication.
  * Returns user ID or throws 401 error.
- * 
+ *
  * Usage in API routes:
  * ```ts
- * const userId = requireAuth(request);
+ * const userId = await requireAuth(request);
  * ```
  */
-export function requireAuth(request: NextRequest): string {
-  const userId = getUserId(request);
+export async function requireAuth(request: NextRequest): Promise<string> {
+  const userId = await getUserId(request);
   if (!userId) {
     throw new AuthError('Authentication required', 401);
   }

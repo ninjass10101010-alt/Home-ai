@@ -1,4 +1,4 @@
-import { getUserId } from '@/lib/auth';
+import { getUserId, isLegacyOwner } from '@/lib/auth';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   getCapsule,
@@ -19,15 +19,7 @@ export async function GET(
 ) {
   try {
     const { id: capsuleId } = await params;
-    const userId = getUserId(request);
-    
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'User ID is required' },
-        { status: 401 }
-      );
-    }
-    
+    const userId = await getUserId(request);
     const result = await getCapsule(capsuleId);
     
     if (!result) {
@@ -37,12 +29,11 @@ export async function GET(
       );
     }
     
-    // Check if user can view this capsule
+    // Check if user can view this capsule. Legacy demo-user rows stay
+    // accessible (F8a continuity).
     const { capsule } = result;
-    const canView =
-      capsule.createdBy === userId ||
-      capsule.recipients.includes(userId) ||
-      capsule.isFamilyWide;
+    const owns = (ownerId: string) => ownerId === userId || isLegacyOwner(ownerId);
+    const canView = owns(capsule.createdBy) || capsule.recipients.some(owns) || capsule.isFamilyWide;
     
     if (!canView) {
       return NextResponse.json(
@@ -53,7 +44,7 @@ export async function GET(
     
     // Check if capsule is unlocked or user is the creator
     const isUnlocked = capsule.status === 'unlocked' || capsule.status === 'archived';
-    const isCreator = capsule.createdBy === userId;
+    const isCreator = owns(capsule.createdBy);
     
     // Only show contents if unlocked or creator viewing early
     if (!isUnlocked && !isCreator) {
@@ -84,18 +75,10 @@ export async function PATCH(
 ) {
   try {
     const { id: capsuleId } = await params;
-    const userId = getUserId(request);
-    
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'User ID is required' },
-        { status: 401 }
-      );
-    }
-    
+    const userId = await getUserId(request);
     // Check if user owns this capsule
     const existing = await getCapsule(capsuleId);
-    if (!existing || existing.capsule.createdBy !== userId) {
+    if (!existing || (existing.capsule.createdBy !== userId && !isLegacyOwner(existing.capsule.createdBy))) {
       return NextResponse.json(
         { error: 'You do not have permission to update this capsule' },
         { status: 403 }
@@ -132,18 +115,10 @@ export async function DELETE(
 ) {
   try {
     const { id: capsuleId } = await params;
-    const userId = getUserId(request);
-    
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'User ID is required' },
-        { status: 401 }
-      );
-    }
-    
+    const userId = await getUserId(request);
     // Check if user owns this capsule
     const existing = await getCapsule(capsuleId);
-    if (!existing || existing.capsule.createdBy !== userId) {
+    if (!existing || (existing.capsule.createdBy !== userId && !isLegacyOwner(existing.capsule.createdBy))) {
       return NextResponse.json(
         { error: 'You do not have permission to delete this capsule' },
         { status: 403 }
@@ -179,15 +154,7 @@ export async function POST(
 ) {
   try {
     const { id: capsuleId } = await params;
-    const userId = getUserId(request);
-    
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'User ID is required' },
-        { status: 401 }
-      );
-    }
-    
+    const userId = await getUserId(request);
     // Check if user can add to this capsule
     const existing = await getCapsule(capsuleId);
     if (!existing) {
@@ -198,10 +165,8 @@ export async function POST(
     }
     
     const { capsule } = existing;
-    const canAdd =
-      capsule.createdBy === userId ||
-      capsule.recipients.includes(userId) ||
-      capsule.isFamilyWide;
+    const owns = (ownerId: string) => ownerId === userId || isLegacyOwner(ownerId);
+    const canAdd = owns(capsule.createdBy) || capsule.recipients.some(owns) || capsule.isFamilyWide;
     
     if (!canAdd) {
       return NextResponse.json(

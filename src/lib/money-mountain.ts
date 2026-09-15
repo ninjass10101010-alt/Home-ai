@@ -1,4 +1,5 @@
 import { getAuthedPB } from '@/lib/pb-auth';
+import { DEMO_USER_ID } from '@/lib/auth';
 import type {
   MoneyMountain,
   MountainTransaction,
@@ -21,8 +22,10 @@ export async function getUserMountains(userId: string): Promise<MoneyMountain[]>
   const pb = await getAuthedPB();
   
   try {
+    // F8a — reads keep including the legacy demo-user namespace so rows
+    // created before the per-member identity migration stay visible.
     const mountains = await pb.collection('money_mountains').getFullList<MoneyMountain>({
-      filter: `userId = "${userId}"`,
+      filter: `userId = "${userId}" || userId = "${DEMO_USER_ID}"`,
       sort: '-created',
     });
     

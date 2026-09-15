@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSkillTreeVisualization } from '@/lib/skill-tree';
-import { getUserId, unauthorizedResponse } from '@/lib/auth';
+import { getUserId } from '@/lib/auth';
 
 /**
  * GET /api/skill-tree
@@ -8,12 +8,7 @@ import { getUserId, unauthorizedResponse } from '@/lib/auth';
  */
 export async function GET(request: NextRequest) {
   try {
-    const userId = getUserId(request);
-    
-    if (!userId) {
-      return unauthorizedResponse();
-    }
-    
+    const userId = await getUserId(request);
     const data = await getSkillTreeVisualization(userId);
     
     if (!data) {

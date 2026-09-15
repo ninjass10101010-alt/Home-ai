@@ -1,4 +1,5 @@
 import { getAuthedPB } from '@/lib/pb-auth';
+import { DEMO_USER_ID } from '@/lib/auth';
 import type {
   TimeCapsule,
   CapsuleContent,
@@ -16,8 +17,10 @@ export async function getUserCapsules(userId: string): Promise<TimeCapsule[]> {
   const pb = await getAuthedPB();
   
   try {
+    // F8a — a member sees capsules they created/were sent under their session
+    // name AND any legacy demo-user capsules (creator or recipient).
     const records = await pb.collection('time_capsules').getFullList<TimeCapsule>({
-      filter: `createdBy = "${userId}" || recipients ?~ "${userId}" || isFamilyWide = true`,
+      filter: `(createdBy = "${userId}" || createdBy = "${DEMO_USER_ID}") || (recipients ?~ "${userId}" || recipients ?~ "${DEMO_USER_ID}") || isFamilyWide = true`,
       sort: '-created',
     });
     

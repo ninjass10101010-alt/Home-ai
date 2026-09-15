@@ -1,4 +1,5 @@
 import { getAuthedPB } from '@/lib/pb-auth';
+import { DEMO_USER_ID } from '@/lib/auth';
 import type {
   SkillTreeProfile,
   SkillBranch,
@@ -20,8 +21,10 @@ export async function getSkillTreeProfile(userId: string): Promise<SkillTreeProf
   const pb = await getAuthedPB();
   
   try {
+    // F8a — include the legacy demo-user profile if the member has no
+    // per-member profile yet; otherwise create one under the session name.
     const profiles = await pb.collection('skill_tree_profiles').getList<SkillTreeProfile>(1, 1, {
-      filter: `userId = "${userId}"`,
+      filter: `userId = "${userId}" || userId = "${DEMO_USER_ID}"`,
     });
     
     if (profiles.items.length > 0) {
@@ -261,7 +264,7 @@ export async function getUserAchievements(userId: string): Promise<UserAchieveme
   
   try {
     const userAchievements = await pb.collection('user_achievements').getFullList<UserAchievement>({
-      filter: `userId = "${userId}"`,
+      filter: `userId = "${userId}" || userId = "${DEMO_USER_ID}"`,
       sort: '-earnedAt',
     });
     
