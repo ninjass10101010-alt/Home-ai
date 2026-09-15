@@ -80,10 +80,14 @@ export async function composeScreensaverPayload(now: Date = new Date()): Promise
   const weekEnd = addDaysISO(weekStart, 6);
 
   // One admin session, five reads. A throw here means PB is down → caller 503s.
+  // The Google read is unfiltered on purpose: the collection is
+  // sync-window-bounded (~30d back / 90d fwd) so the list stays small, and a
+  // `start_iso~"today"` contains-match could never express multi-day coverage
+  // — `selectTodayEvents` filters by covered day via `googleEventCoversDay`.
   const [familyEvents, googleEvents, tasks, meals, briefingRows] = await withAdmin(async (pb) =>
     Promise.all([
       pb.collection("events").getFullList({ filter: `date="${today}"`, requestKey: null }),
-      pb.collection("consuela_google_calendar_events").getFullList({ filter: `start_iso~"${today}"`, requestKey: null }),
+      pb.collection("consuela_google_calendar_events").getFullList({ requestKey: null }),
       pb.collection("tasks").getFullList({ requestKey: null }),
       pb.collection("meal_plan_entries").getFullList({ filter: `weekOf="${weekStart}"`, requestKey: null }),
       pb.collection("morning_briefing").getFullList({ filter: `scopeDate="${today}"`, requestKey: null }),

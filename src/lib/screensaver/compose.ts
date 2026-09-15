@@ -4,6 +4,7 @@
  * Data in, decisions out — no PB, no fetch, no React.
  */
 import { parseMinutes } from "@/lib/consuela/chat-context";
+import { googleEventCoversDay } from "@/lib/calendar/google-mapping";
 
 export interface ScreensaverEvent {
   title: string;
@@ -38,7 +39,7 @@ function hm24to12(hm: string): string {
  */
 export function selectTodayEvents(
   family: Array<{ title?: string; date?: string; time?: string; color?: string }>,
-  google: Array<{ summary?: string; start_iso?: string; all_day?: boolean }>,
+  google: Array<{ summary?: string; start_iso?: string; end_iso?: string; all_day?: boolean }>,
   todayISO: string,
   now: Date = new Date()
 ): ScreensaverEvent[] {
@@ -59,7 +60,7 @@ export function selectTodayEvents(
   }
   for (const g of google) {
     const iso = g.start_iso ?? "";
-    if (!g.summary || !iso.startsWith(todayISO)) continue;
+    if (!g.summary || !googleEventCoversDay(g, todayISO)) continue;
     if (g.all_day) {
       rows.push({ title: g.summary, time: "All day", allDay: true, min: -1 });
     } else {

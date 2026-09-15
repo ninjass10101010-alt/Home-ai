@@ -52,6 +52,15 @@ describe("selectTodayEvents", () => {
       ["Modern", "4:45 PM"],
     ]);
   });
+
+  it("keeps a spanning all-day event on the board through its last day", () => {
+    const out = selectTodayEvents(
+      [],
+      [{ summary: "At home", start_iso: "2026-10-30", end_iso: "2026-11-02", all_day: true }],
+      "2026-10-31",
+    );
+    expect(out).toEqual([{ title: "At home", time: "All day", allDay: true }]);
+  });
 });
 
 describe("choreProgress", () => {
