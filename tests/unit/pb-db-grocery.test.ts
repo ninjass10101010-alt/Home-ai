@@ -142,13 +142,4 @@ describe("pb-db lockdown routing (server path uses admin client)", () => {
     expect(contacts.length).toBeGreaterThan(0);
     expect((contacts[0] as any).phone).toBe("+15551234567");
   });
-
-  it("auth-session helpers keep a working path server-side too", async () => {
-    h.state.records.push({ id: "s1", token: "dev_123", memberName: "Caspian" });
-    const session = await db.findAuthSession("dev_123");
-
-    expect(h.adminFlags.used).toBe(true);
-    expect(h.publicCalls).toEqual([]);
-    expect(session?.memberName).toBe("Caspian");
-  });
 });

@@ -341,19 +341,6 @@ export const db = {
   },
 
   // === Auth Sessions ===
-  async createAuthSession(data: any): Promise<any> {
-    return safeCreate("auth_sessions", data);
-  },
-  async findAuthSession(token: string): Promise<any | null> {
-    const records = await safeList<any>("auth_sessions", []);
-    return records.find((r: any) => r.token === token) || null;
-  },
-  async deleteAuthSession(token: string): Promise<boolean> {
-    const records = await safeList<any>("auth_sessions", []);
-    const session = records.find((r: any) => r.token === token);
-    if (!session) return false;
-    return safeDelete("auth_sessions", session.id);
-  },
   async deleteExpiredAuthSessions(maxAgeDays = 30): Promise<void> {
     try {
       const client = await pbClient();

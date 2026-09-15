@@ -9,16 +9,6 @@ import type { ReactElement } from "react";
 
 // Task 9 — login must go through POST /api/auth/login and persist the
 // sanitized server member WITHOUT any pin field in localStorage.
-const pbDbMocks = vi.hoisted(() => ({
-  findAuthSession: vi.fn(),
-  createAuthSession: vi.fn(),
-  deleteAuthSession: vi.fn(),
-}));
-
-vi.mock("@/db/pb-db", () => ({
-  db: pbDbMocks,
-}));
-
 vi.mock("@/db", () => ({
   db: {
     selectMembers: vi.fn(() => []),
@@ -60,9 +50,6 @@ describe("useAuth.login — server-side authentication", () => {
   beforeEach(() => {
     localStorage.clear();
     ctxRef.current = null;
-    pbDbMocks.findAuthSession.mockReset().mockResolvedValue(null);
-    pbDbMocks.createAuthSession.mockReset().mockResolvedValue(null);
-    pbDbMocks.deleteAuthSession.mockReset().mockResolvedValue(null);
   });
 
   it("POSTs to /api/auth/login and persists the identity WITHOUT a pin", async () => {

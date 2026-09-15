@@ -9,7 +9,7 @@ import {
   getFamilyPatterns,
   suggestPatterns,
 } from '@/lib/recurring-patterns';
-import { getPB } from '@/lib/pb';
+import { getAuthedPB } from '@/lib/pb-auth';
 
 export async function GET(request: NextRequest) {
   try {
@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
 
     if (type === 'suggest') {
       // Suggest patterns from recent events
-      const pb = getPB();
+      const pb = await getAuthedPB();
       const recentEvents = await pb.collection('events').getFullList({
         sort: '-date',
         requestKey: null,

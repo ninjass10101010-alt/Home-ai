@@ -11,16 +11,6 @@ import type { ReactElement } from "react";
 // ever sent) and share login's post-success flow: same localStorage shape
 // (now carrying age), same session/flush side effects. Any non-200 fails
 // closed WITHOUT signing in (the UI falls back to the PIN modal).
-const pbDbMocks = vi.hoisted(() => ({
-  findAuthSession: vi.fn(),
-  createAuthSession: vi.fn(),
-  deleteAuthSession: vi.fn(),
-}));
-
-vi.mock("@/db/pb-db", () => ({
-  db: pbDbMocks,
-}));
-
 vi.mock("@/db", () => ({
   db: {
     selectMembers: vi.fn(() => []),
@@ -54,9 +44,6 @@ describe("useAuth.quickLogin — PIN-free sign-in for under-10 kids", () => {
   beforeEach(() => {
     localStorage.clear();
     ctxRef.current = null;
-    pbDbMocks.findAuthSession.mockReset().mockResolvedValue(null);
-    pbDbMocks.createAuthSession.mockReset().mockResolvedValue(null);
-    pbDbMocks.deleteAuthSession.mockReset().mockResolvedValue(null);
   });
 
   it("quickLogin signs in via /api/auth/quick-login and stores the auth user", async () => {

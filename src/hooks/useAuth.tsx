@@ -2,24 +2,12 @@
 
 import { useState, useEffect, useCallback, createContext, useContext, ReactNode, useRef } from 'react';
 import { db } from '@/db';
-import { db as pbDb } from '@/db/pb-db';
 import { flushPendingWrites } from '@/lib/pending-writes';
 
 const AUTH_STORAGE_KEY = 'consuela-auth-user';
-const DEVICE_KEY = 'consuela-device-id';
 const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;
 const SESSION_WARN_MS = 30 * 1000;
 const SESSION_TICK_MS = 1 * 1000;
-
-function getDeviceId(): string {
-  if (typeof window === 'undefined') return 'server';
-  let id = localStorage.getItem(DEVICE_KEY);
-  if (!id) {
-    id = 'dev_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-    localStorage.setItem(DEVICE_KEY, id);
-  }
-  return id;
-}
 
 function memberMatchesName(member: any, name: string) {
   const firstName = name.split(" ")[0];
@@ -96,9 +84,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     localStorage.removeItem(AUTH_STORAGE_KEY);
     setSessionWarning(false);
     setSessionRemainingMs(INACTIVITY_TIMEOUT_MS);
-
-    // Remove PB session
-    pbDb.deleteAuthSession(getDeviceId()).catch(() => {});
   }, []);
 
   const extendSession = useCallback(() => {
@@ -135,32 +120,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         } else {
           localStorage.removeItem(AUTH_STORAGE_KEY);
         }
-      } else {
-        // Try PB restore
-        pbDb.findAuthSession(getDeviceId()).then((session: any) => {
-          if (session?.memberName) {
-            const member = db.selectMembersDetailed().find((m: any) => memberMatchesName(m, session.memberName));
-            if (member) {
-              // selectMembers carries the numeric cache ids used by the UI.
-              const cached = db.selectMembers().find((x: any) => memberMatchesName(x, session.memberName));
-              const restored: AuthUser = {
-                id: Number(cached?.id) || 0,
-                name: session.memberName,
-                role: (member as any).role || 'child',
-                emoji: (member as any).emoji || '👤',
-                color: (member as any).color || 'amber',
-                avatarSize: (member as any).avatarSize || 'md',
-                glow: Boolean((member as any).glow),
-                age: Number.isFinite(Number((member as any).age)) && (member as any).age != null && (member as any).age !== ""
-                  ? Number((member as any).age)
-                  : undefined,
-              };
-              setCurrentUser(restored);
-              currentUserRef.current = restored;
-              localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(restored));
-            }
-          }
-        }).catch(() => {});
       }
     } catch {
       localStorage.removeItem(AUTH_STORAGE_KEY);
@@ -219,7 +178,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setSessionRemainingMs(0);
         setSessionWarning(false);
         localStorage.removeItem(AUTH_STORAGE_KEY);
-        pbDb.deleteAuthSession(getDeviceId()).catch(() => {});
       }
     }, SESSION_TICK_MS);
 
@@ -264,15 +222,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       age: authUser.age,
     };
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(stored));
-
-    // Persist session to PB for cross-device awareness
-    pbDb.createAuthSession({
-      token: getDeviceId(),
-      memberName: authUser.name,
-      deviceName: navigator.platform || 'unknown',
-      createdAt: new Date().toISOString(),
-      lastActiveAt: new Date().toISOString(),
-    }).catch(() => {});
 
     // Session is now valid: replay any queued meal/recipe writes and pull
     // fresh server data so other devices' changes appear without a reload.
