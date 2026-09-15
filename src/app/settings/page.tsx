@@ -29,6 +29,7 @@ import GoogleConnectCard from "@/components/settings/GoogleConnectCard";
 import HaNotificationsCard from "@/components/settings/HaNotificationsCard";
 import ServicesKeysCard from "@/components/settings/ServicesKeysCard";
 import AiModelsCard from "@/components/settings/AiModelsCard";
+import MuseApiCard from "@/components/settings/MuseApiCard";
 import WallDisplayToggle from "@/components/settings/WallDisplayToggle";
 import AvatarPicker from "@/components/profile/AvatarPicker";
 import { warmGlassAccentOptions } from "@/lib/design-tokens";
@@ -924,6 +925,7 @@ export default function SettingsPage() {
           >
             <AiModelsCard />
             <ServicesKeysCard />
+            <MuseApiCard />
             <GoogleConnectCard />
             <HaNotificationsCard />
           </SectionCard>
