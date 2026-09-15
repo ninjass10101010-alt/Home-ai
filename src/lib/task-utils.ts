@@ -794,6 +794,43 @@ export function archiveWeekWinner(
   saveHallOfFame(trimmed);
 }
 
+/**
+ * The ceremony check: does this member have a top-3 week win with a prize
+ * that hasn't been celebrated yet? Returns the entry to celebrate, or null.
+ * Exact full-name match (`member` stores full names), rank ≤ 3, a non-empty
+ * string prize, and `celebrated !== true`. If the member stacked wins across
+ * weeks (nobody claimed the ceremony), the NEWEST weekStart wins — ISO dates
+ * compare lexically.
+ */
+export function uncelebratedWinFor(
+  hall: HallOfFameEntry[],
+  memberName: string,
+): HallOfFameEntry | null {
+  let best: HallOfFameEntry | null = null;
+  for (const entry of hall) {
+    if (entry.member !== memberName) continue;
+    if (entry.rank > 3) continue;
+    if (typeof entry.prize !== "string" || entry.prize.length === 0) continue;
+    if (entry.celebrated === true) continue;
+    if (best === null || entry.weekStart > best.weekStart) best = entry;
+  }
+  return best;
+}
+
+/**
+ * The ceremony claim: mark one member's win entry (`member + weekStart`) as
+ * celebrated and persist. Re-reads the hall so a concurrent enshrinement on
+ * another device isn't clobbered. Silently no-ops when the entry is absent
+ * (already trimmed away, or never won that week).
+ */
+export function markWinCelebrated(memberName: string, weekStart: string): void {
+  const hall = loadHallOfFame();
+  const match = hall.find((h) => h.member === memberName && h.weekStart === weekStart);
+  if (!match) return;
+  match.celebrated = true;
+  saveHallOfFame(hall);
+}
+
 // === PocketBase sync helpers ===
 
 export async function syncTasksToPB(tasks: Task[]): Promise<void> {
