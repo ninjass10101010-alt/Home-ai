@@ -13,6 +13,47 @@
 
 import { buildToolsForOpenAI, getTool } from "@/lib/hermes-tools";
 
+// Internal service hostnames that must never reach an external MUSE caller.
+// `localhost` + the RFC-1918 `192.168.` block are matched as patterns; the
+// configured PB host is added at call time (env can change between calls).
+const INTERNAL_HOST_LITERALS: readonly string[] = [
+  "pocketbase:8090",
+  "hermes-agent-2",
+  "finance-dashboard",
+  "localhost",
+];
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Replace internal service hostnames in caller-facing text with `[internal]`.
+ * Covers the known internal containers plus `localhost`, any `192.168.x.x`
+ * address, and the host of the configured `NEXT_PUBLIC_PB_URL` (when set).
+ */
+export function scrubInternal(text: string): string {
+  if (!text) return text;
+  let out = text;
+
+  const literals = new Set(INTERNAL_HOST_LITERALS);
+  const pbUrl = process.env.NEXT_PUBLIC_PB_URL;
+  if (pbUrl) {
+    try {
+      const host = new URL(pbUrl).host;
+      if (host) literals.add(host);
+    } catch {
+      // A malformed env value is not worth failing a tool call over.
+    }
+  }
+  // Longest first so a full host:port wins over its bare hostname prefix.
+  for (const literal of [...literals].sort((a, b) => b.length - a.length)) {
+    out = out.replace(new RegExp(escapeRegExp(literal), "gi"), "[internal]");
+  }
+  out = out.replace(/192\.168(?:\.[0-9]{1,3}){0,2}(?::[0-9]+)?/g, "[internal]");
+  return out;
+}
+
 /** Destructive dashboard-management tools — admin tokens only. */
 export const ADMIN_TOOLS: ReadonlySet<string> = new Set([
   "check_for_update",

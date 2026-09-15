@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   readMuseRow: vi.fn(),
   touchMuseUsage: vi.fn().mockResolvedValue(undefined),
   writeMuseLog: vi.fn().mockResolvedValue(undefined),
+  getTool: vi.fn(),
 }));
 
 const rows: Record<string, any[]> = {};
@@ -26,6 +27,16 @@ vi.mock("@/lib/muse/store", async (importOriginal) => {
   };
 });
 vi.mock("@/lib/muse/log", () => ({ writeMuseLog: mocks.writeMuseLog }));
+
+// Partial mock: keep the REAL registry but expose the getTool seam so a test
+// can hand back a self-reporting handler result (an `{error}` object or
+// `{ok:false}`) without inventing a live dependency. Default delegates to the
+// real getTool so the existing route tests exercise real handlers.
+vi.mock("@/lib/hermes-tools", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/hermes-tools")>();
+  mocks.getTool.mockImplementation(actual.getTool as any);
+  return { ...actual, getTool: mocks.getTool };
+});
 
 vi.mock("@/lib/pb-auth", () => ({
   withAdmin: vi.fn(async (fn: any) =>
@@ -74,10 +85,17 @@ beforeEach(() => {
   mocks.touchMuseUsage.mockResolvedValue(undefined);
   mocks.writeMuseLog.mockReset();
   mocks.writeMuseLog.mockResolvedValue(undefined);
+  mocks.getTool.mockClear();
+  // The route intentionally console.warns on rejections; keep test output
+  // pristine while still allowing assertions against the spy.
+  vi.spyOn(console, "warn").mockImplementation(() => {});
   for (const k of Object.keys(rows)) delete rows[k];
 });
 
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+});
 
 /** Install a mock MUSE row AND register it on the store mock; returns it. */
 function makeRow(overrides: Record<string, unknown> = {}) {
@@ -235,6 +253,115 @@ describe("POST /api/muse/tool", () => {
     const logged = JSON.stringify(mocks.writeMuseLog.mock.calls);
     expect(logged).not.toContain("1234");
     expect(logged).toContain("[redacted]");
+  });
+});
+
+// Fix round (Task 9 review I1/I2): the audit preview must recurse, and the
+// audit + caller payload must be truthful + scrubbed.
+describe("POST /api/muse/tool — deep redaction + truthful audit + scrub (review I1/I2)", () => {
+  it("redacts credential-shaped keys nested in objects and arrays", async () => {
+    makeRow();
+    const { token } = signMuseToken({ ver: 1, adm: false });
+    const res = await toolPOST(
+      museReq("/api/muse/tool", {
+        token,
+        method: "POST",
+        body: {
+          name: "get_family_members",
+          args: { outer: { pin: "1234" }, items: [{ pin: "5678" }] },
+        },
+      })
+    );
+    expect(res.status).toBe(200);
+    const logged = JSON.stringify(mocks.writeMuseLog.mock.calls);
+    expect(logged).not.toContain("1234");
+    expect(logged).not.toContain("5678");
+    expect(logged).toContain("[redacted]");
+  });
+
+  it("caps nesting depth and never logs a value below the cap", async () => {
+    makeRow();
+    const { token } = signMuseToken({ ver: 1, adm: false });
+    await toolPOST(
+      museReq("/api/muse/tool", {
+        token,
+        method: "POST",
+        body: {
+          name: "get_family_members",
+          args: { a: { b: { c: { d: { e: "deep-secret-value" } } } } },
+        },
+      })
+    );
+    const logged = JSON.stringify(mocks.writeMuseLog.mock.calls);
+    expect(logged).not.toContain("deep-secret-value");
+    expect(logged).toContain("[deep]");
+  });
+
+  it("scrubs internal hosts from a self-reported error and audits ok:false", async () => {
+    makeRow();
+    const { token } = signMuseToken({ ver: 1, adm: false });
+    mocks.getTool.mockImplementationOnce(() => ({
+      definition: { name: "get_weather", description: "", parameters: { type: "object", properties: {} } },
+      handler: async () => JSON.stringify({ error: "connect http://pocketbase:8090/_/ failed" }),
+    }));
+    const res = await toolPOST(
+      museReq("/api/muse/tool", {
+        token,
+        method: "POST",
+        body: { name: "get_weather", args: {} },
+      })
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.error).toContain("[internal]");
+    expect(JSON.stringify(body)).not.toContain("pocketbase:8090");
+    expect(mocks.writeMuseLog).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "tool", tool: "get_weather", ok: false })
+    );
+  });
+
+  it("scrubs internal hosts from a thrown-handler 500", async () => {
+    makeRow();
+    const { token } = signMuseToken({ ver: 1, adm: false });
+    mocks.getTool.mockImplementationOnce(() => ({
+      definition: { name: "get_weather", description: "", parameters: { type: "object", properties: {} } },
+      handler: async () => {
+        throw new Error("marshall http://hermes-agent-2:8642 failed");
+      },
+    }));
+    const res = await toolPOST(
+      museReq("/api/muse/tool", {
+        token,
+        method: "POST",
+        body: { name: "get_weather", args: {} },
+      })
+    );
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toContain("[internal]");
+    expect(JSON.stringify(body)).not.toContain("hermes-agent-2");
+  });
+
+  it("console.warns on auth + validation rejections without writing PocketBase (Task 8 rule)", async () => {
+    makeRow();
+    // auth-time rejection (no bearer)
+    await toolPOST(
+      museReq("/api/muse/tool", { method: "POST", body: { name: "get_weather", args: {} } })
+    );
+    const { token } = signMuseToken({ ver: 1, adm: false });
+    // invalid body
+    await toolPOST(museReq("/api/muse/tool", { token, method: "POST", body: {} }));
+    // oversized body
+    await toolPOST(
+      museReq("/api/muse/tool", {
+        token,
+        method: "POST",
+        body: { name: "get_family_members", args: { q: "x".repeat(20_000) } },
+      })
+    );
+    expect(console.warn).toHaveBeenCalled();
+    expect(mocks.writeMuseLog).not.toHaveBeenCalled();
   });
 });
 

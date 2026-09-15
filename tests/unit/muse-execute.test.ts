@@ -48,7 +48,7 @@ vi.mock("@/lib/hermes-tools", async (importOriginal) => {
   return { ...actual, getTool: mocks.getTool };
 });
 
-import { ADMIN_TOOLS, museToolCatalog, executeMuseTool } from "@/lib/muse/execute";
+import { ADMIN_TOOLS, museToolCatalog, executeMuseTool, scrubInternal } from "@/lib/muse/execute";
 
 beforeEach(() => {
   mocks.getTool.mockClear();
@@ -56,6 +56,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 function openMeteoResponse() {
@@ -99,6 +100,29 @@ describe("museToolCatalog", () => {
       expect(typeof t.function.description).toBe("string");
       expect(t.function.parameters).toBeTruthy();
     }
+  });
+});
+
+describe("scrubInternal", () => {
+  it("replaces every covered internal host with [internal]", () => {
+    const text =
+      "pb=http://pocketbase:8090 hermes=http://hermes-agent-2:8642 fin=http://finance-dashboard:9080 " +
+      "local=http://localhost:3000 lan=http://192.168.0.28:8090";
+    const out = scrubInternal(text);
+    expect(out).not.toMatch(/pocketbase:8090|hermes-agent-2|finance-dashboard|localhost:3000|192\.168/);
+    expect(out).toContain("[internal]");
+  });
+
+  it("also scrubs the configured NEXT_PUBLIC_PB_URL host", () => {
+    vi.stubEnv("NEXT_PUBLIC_PB_URL", "http://pocketbase.internal.example:9999");
+    const out = scrubInternal("failed to reach http://pocketbase.internal.example:9999/_/");
+    expect(out).not.toContain("pocketbase.internal.example");
+    expect(out).toContain("[internal]");
+  });
+
+  it("leaves text without internal hosts untouched", () => {
+    expect(scrubInternal("invalid_body")).toBe("invalid_body");
+    expect(scrubInternal("")).toBe("");
   });
 });
 
