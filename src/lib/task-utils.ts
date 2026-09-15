@@ -559,6 +559,33 @@ export function readWeeklyPrizesStamp(): string {
   return loadJSON<string>(WEEKLY_PRIZES_STAMP_KEY, "");
 }
 
+// ─── Race gap — "You're 45 pts from 🥉" podium-gap math (pure) ─────────────
+export interface RaceGap {
+  rank: number | null;
+  onPodium: boolean;
+  gapToPodium: number | null;
+  leader: { name: string; points: number } | null;
+}
+export function raceGap(memberName: string, pointsMap: Record<string, number>, maxPrizeRank = 3): RaceGap {
+  const entries = Object.entries(pointsMap).map(([name, points]) => ({ name, points: points || 0 }));
+  const sorted = entries.sort((a, b) => b.points - a.points);
+  const ntp = sorted.filter((e) => e.points > 0);
+  const leader = ntp[0] || null;
+  const mine = entries.find((e) => e.name === memberName);
+  const myPoints = mine?.points || 0;
+  if (ntp.length === 0 || myPoints === 0)
+    return { rank: null, onPodium: false, gapToPodium: ntp.length ? ntp[Math.min(maxPrizeRank, ntp.length) - 1].points - myPoints : null, leader };
+  // competition rank: 1 + count of members with strictly more points
+  const rank = 1 + ntp.filter((e) => e.points > myPoints).length;
+  const cutoffRank = Math.min(maxPrizeRank, ntp.length);
+  const podiumThresholdHolder = ntp.filter((e, i) => (1 + ntp.filter((o) => o.points > e.points).length) === cutoffRank)[0];
+  const onPodium = rank <= maxPrizeRank;
+  return {
+    rank, onPodium, leader,
+    gapToPodium: onPodium ? null : (podiumThresholdHolder ? podiumThresholdHolder.points - myPoints : null),
+  };
+}
+
 export function getArchivedWeeks(): WeekArchive {
   return loadJSON<WeekArchive>(ARCHIVE_KEY, {});
 }
