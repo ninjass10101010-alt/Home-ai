@@ -28,7 +28,7 @@ export function isSafeFilter(filter: string | null): boolean {
 // carve-out preserves them while still stripping exact pin/pins, camelCase or
 // separator-bounded pin compounds (pinCode, pinField, pin_code, member_pin),
 // keys ending in pin (memberPin), and secret/password/token fields.
-function isCredentialKey(key: string): boolean {
+export function isCredentialKey(key: string): boolean {
   return (
     /^(pin|pins)$/.test(key) ||
     /^pin[A-Z]/.test(key) ||
