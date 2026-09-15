@@ -558,6 +558,12 @@ export function touchWeeklyPrizesStamp(): void {
 export function readWeeklyPrizesStamp(): string {
   return loadJSON<string>(WEEKLY_PRIZES_STAMP_KEY, "");
 }
+// Carry an adopted snapshot's stamp through as the local stamp (the list is
+// now this device's truth AS OF that stamp — re-stamping "now" would make a
+// no-op refresh look like a fresh local edit and block newer server state).
+export function writeWeeklyPrizesStamp(stamp: string): void {
+  saveJSON(WEEKLY_PRIZES_STAMP_KEY, stamp);
+}
 
 // ─── Race gap — "You're 45 pts from 🥉" podium-gap math (pure) ─────────────
 export interface RaceGap {
@@ -929,6 +935,16 @@ export async function syncRewardsToPB(rewards: Reward[]): Promise<void> {
   }
 }
 
+export async function syncWeeklyPrizesToPB(prizes: WeeklyPrize[]): Promise<void> {
+  for (const p of prizes) {
+    await db.upsertWeeklyPrize({
+      rank: p.rank,
+      emoji: p.emoji,
+      text: p.text,
+    }).catch(() => {});
+  }
+}
+
 export async function syncPenaltiesToPB(penalties: Penalty[]): Promise<void> {
   for (const p of penalties) {
     await db.upsertPenalty({
@@ -977,7 +993,8 @@ export async function syncAllTasksToPB(
   archive: WeekArchive,
   rewards: Reward[],
   penalties: Penalty[],
-  hallOfFame: HallOfFameEntry[]
+  hallOfFame: HallOfFameEntry[],
+  weeklyPrizes: WeeklyPrize[] = []
 ): Promise<void> {
   await Promise.allSettled([
     syncTasksToPB(tasks),
@@ -986,6 +1003,7 @@ export async function syncAllTasksToPB(
     syncRewardsToPB(rewards),
     syncPenaltiesToPB(penalties),
     syncHallOfFameToPB(hallOfFame),
+    syncWeeklyPrizesToPB(weeklyPrizes),
   ]);
 }
 

@@ -772,6 +772,25 @@ export const db = {
       ? pbDb.insertHallOfFameEntry(data)
       : safeGatewayRow(() => gatewayCreate("hall_of_fame", data)),
   selectHallOfFame: async () => isServer() ? pbDb.selectHallOfFame() : clientListOrEmpty("hall_of_fame"),
+  updateHallOfFameEntry: async (id: string, patch: { celebrated: boolean }) =>
+    isServer()
+      ? pbDb.updateHallOfFameEntry(id, patch)
+      : safeGatewayRow(() => gatewayUpdate("hall_of_fame", id, patch)),
+
+  selectWeeklyPrizes: async () => isServer() ? pbDb.selectWeeklyPrizes() : clientListOrEmpty("weekly_prizes"),
+  upsertWeeklyPrize: async (data: { rank: number; emoji: string; text: string }) => {
+    if (!isServer()) {
+      try {
+        const records = await gatewayList("weekly_prizes");
+        const existing = records.find((r: any) => r.rank === data.rank);
+        if (existing) return await gatewayUpdate("weekly_prizes", existing.id, data);
+        return await gatewayCreate("weekly_prizes", data);
+      } catch {
+        return null;
+      }
+    }
+    return pbDb.upsertWeeklyPrize(data);
+  },
 
   selectRecipes: async () => isServer() ? pbDb.selectRecipes() : clientListOrEmpty("recipes"),
 

@@ -3,6 +3,7 @@ import { getPB } from "@/lib/pb";
 import { withAdmin } from "@/lib/pb-auth";
 import { idempotencyHashOf } from "@/lib/consuela/hash";
 import type { NewSuggestion, ProactiveSuggestion, SuggestionStatus } from "@/lib/consuela/types";
+import type { WeeklyPrize } from "@/types/tasks";
 import { scheduleCoversWeekday, scheduleTimeMinutes, formatScheduleTime12h } from "@/lib/schedule-time";
 import { memberFallbacks as membersFallback } from "@/lib/member-fallback";
 import { mapMealRows } from "@/lib/meal-rows";
@@ -461,6 +462,22 @@ export const db = {
   },
   async selectHallOfFame(): Promise<any[]> {
     return safeList<any>("hall_of_fame", []);
+  },
+  async updateHallOfFameEntry(id: string, patch: { celebrated: boolean }): Promise<any | null> {
+    return safeUpdate("hall_of_fame", id, patch);
+  },
+
+  // === Weekly Prizes ===
+  // The race's prize catalog — `rank` is the natural key (one row per podium
+  // slot). Mirrors selectRewards/upsertReward.
+  async selectWeeklyPrizes(): Promise<WeeklyPrize[]> {
+    return safeList<WeeklyPrize>("weekly_prizes", []);
+  },
+  async upsertWeeklyPrize(data: { rank: number; emoji: string; text: string }): Promise<any | null> {
+    const records = await safeList<any>("weekly_prizes", []);
+    const existing = records.find((r: any) => r.rank === data.rank);
+    if (existing) return safeUpdate("weekly_prizes", existing.id, data);
+    return safeCreate("weekly_prizes", data);
   },
 
   // === Recipes ===

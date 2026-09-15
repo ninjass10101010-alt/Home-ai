@@ -37,7 +37,8 @@ import {
   getPreviousWeekRanks, loadHallOfFame,
   syncAllTasksToPB, syncWeekDataToPB,
   archiveAndResetWeek, archiveWeekWinner, saveCurrentWeekRanksForNextWeek,
-  archiveWeekIfMissing, loadWeeklyPrizes,
+  archiveWeekIfMissing, loadWeeklyPrizes, saveWeeklyPrizes,
+  readWeeklyPrizesStamp, writeWeeklyPrizesStamp,
   pickDefaultClaimMember, isSnatchable, isPendingApproval,
   completesWithoutPin, completesWithPendingApproval,
   tapCompletePending, sendBackPendingCompletion, approvePendingCompletion, resolveMemberName,
@@ -443,8 +444,12 @@ export default function TasksPage() {
         headers: { "Content-Type": "application/json" },
         // The rewards catalog rides the snapshot WITH its last-write-wins
         // stamp (kid-store) so a Settings delete (newer stamp) is never
-        // overwritten by a stale snapshot on the next restore.
-        body: JSON.stringify({ tasks, weekData, rewards, rewardsUpdatedAt: readRewardsStamp() }),
+        // overwritten by a stale snapshot on the next restore. The weekly
+        // prizes ride the same contract (task-utils stamp key).
+        body: JSON.stringify({
+          tasks, weekData, rewards, rewardsUpdatedAt: readRewardsStamp(),
+          weeklyPrizes: loadWeeklyPrizes(), weeklyPrizesStamp: readWeeklyPrizesStamp(),
+        }),
       })
         .then((res) => {
           if (!res.ok) console.warn(`Tasks snapshot sync failed (${res.status}) — will retry on next change`);
@@ -499,6 +504,19 @@ export default function TasksPage() {
         writeRewardsStamp(snapStamp);
         setRewards(snap.rewards);
       }
+    }
+    // Weekly prizes: same last-write-wins stamp contract as rewards — adopt a
+    // strictly-NEWER snapshot's prizes and carry ITS stamp through verbatim
+    // (writeWeeklyPrizesStamp, not a touch: re-stamping "now" would make a
+    // no-op refresh block the next real server edit). Missing stamps or a
+    // non-array prizes leg never win.
+    if (
+      typeof snap.weeklyPrizesStamp === "string" &&
+      snap.weeklyPrizesStamp > readWeeklyPrizesStamp() &&
+      Array.isArray(snap.weeklyPrizes)
+    ) {
+      saveWeeklyPrizes(snap.weeklyPrizes);
+      writeWeeklyPrizesStamp(snap.weeklyPrizesStamp);
     }
     if (snap.penalties?.length) setPenalties((prev: any) => snap.penalties.length > prev.length ? snap.penalties : prev);
     const { tasks: nextTasks, weekData: nextWeek, tasksChanged, weekChanged } = mergeTasksSnapshot(
