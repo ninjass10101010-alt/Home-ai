@@ -107,6 +107,26 @@ describe("db/index client mode (browser)", () => {
     expect(meals[0].tags).toEqual(["dinner"]);
   });
 
+  it("archiveWeek upserts by weekStart in browser mode (updates, never duplicates)", async () => {
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (String(url).startsWith("/api/db/week_archive?") && !init) {
+        return { ok: true, json: async () => ({ items: [{ id: "wa1", weekStart: "2026-08-31" }] }) };
+      }
+      return { ok: true, json: async () => ({ id: "wa1", weekStart: "2026-08-31" }) };
+    });
+    const { mod } = await loadDb();
+    await mod.archiveWeek({ weekStart: "2026-08-31", points: { A: 42 } });
+
+    const patched = fetchMock.mock.calls.some(
+      ([u, i]: any[]) => String(u) === "/api/db/week_archive/wa1" && i?.method === "PATCH"
+    );
+    const posted = fetchMock.mock.calls.some(
+      ([u, i]: any[]) => String(u) === "/api/db/week_archive" && i?.method === "POST"
+    );
+    expect(patched).toBe(true);
+    expect(posted).toBe(false);
+  });
+
   it("upsertTask updates an existing row by taskId instead of duplicating", async () => {
     fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
       if (!init) {

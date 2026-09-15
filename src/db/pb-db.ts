@@ -388,8 +388,28 @@ export const db = {
   },
 
   // === Week Archive ===
+  // Idempotent upsert by weekStart — the REAL guarantee that a finished week
+  // lands exactly once. The pre-read in archiveWeekIfMissing is only a fast
+  // path: the safe* read helpers resolve [] on a transient failure (they never
+  // reject), so a failed pre-read used to be followed by a blind create that
+  // duplicated the row. A genuine read failure here degrades to null (never
+  // creates blind) so the next sync cycle retries instead of double-writing.
   async archiveWeek(data: any): Promise<any | null> {
-    return safeCreate("week_archive", data);
+    try {
+      const client = await pbClient();
+      if (!client) return null;
+      const records = (await client
+        .collection("week_archive")
+        .getFullList({ requestKey: null })) as any[];
+      const existing = records.find((r: any) => r.weekStart === data.weekStart);
+      if (existing) {
+        return (await client.collection("week_archive").update(existing.id, data)) as any;
+      }
+      return (await client.collection("week_archive").create(data)) as any;
+    } catch {
+      localFallback = true;
+      return null;
+    }
   },
   async listArchivedWeeks(): Promise<any[]> {
     return safeList<any>("week_archive", []);

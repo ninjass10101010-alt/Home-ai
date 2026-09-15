@@ -696,10 +696,18 @@ export const db = {
     }
     return pbDb.upsertWeekData(data);
   },
-  archiveWeek: async (data: any) =>
-    isServer()
-      ? pbDb.archiveWeek(data)
-      : safeGatewayRow(() => gatewayCreate("week_archive", data)),
+  // Upsert by weekStart (mirrors pb-db) — the browser pre-read fast path can
+  // falsely see [] when the gateway read fails, so the write itself must not
+  // blind-create. A genuine read failure here degrades to null (no create).
+  archiveWeek: async (data: any) => {
+    if (isServer()) return pbDb.archiveWeek(data);
+    return safeGatewayRow(async () => {
+      const records = await gatewayList("week_archive", filterQuery(`weekStart="${data.weekStart}"`));
+      const existing = records.find((r: any) => r.weekStart === data.weekStart);
+      if (existing) return await gatewayUpdate("week_archive", existing.id, data);
+      return await gatewayCreate("week_archive", data);
+    });
+  },
   listArchivedWeeks: async () => isServer() ? pbDb.listArchivedWeeks() : clientListOrEmpty("week_archive"),
 
   selectRewards: async () => isServer() ? pbDb.selectRewards() : clientListOrEmpty("rewards"),

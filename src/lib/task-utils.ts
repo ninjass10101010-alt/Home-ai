@@ -778,6 +778,14 @@ export async function syncWeekDataToPB(data: WeekData): Promise<void> {
  * re-running) never duplicates the row. Never throws: a PB failure degrades
  * silently so the rollover/sync loop can't crash (the next cycle retries).
  *
+ * The `listArchivedWeeks` pre-read below is only a cheap fast path (it avoids
+ * a write round trip in the common case). It is NOT the duplicate guarantee:
+ * production read adapters resolve `[]` on failure rather than rejecting, so
+ * the real guarantee lives in `db.archiveWeek`, which upserts by `weekStart`.
+ *
+ * Returns whether a row was written. A write that silently fails (adapters
+ * return `null`) reports `false` — never a false "wrote it".
+ *
  * `existingWeekStarts` lets a batch caller (syncArchiveToPB) share one read;
  * when omitted the helper reads the archive itself.
  */
@@ -793,13 +801,14 @@ export async function archiveWeekIfMissing(
         ((await db.listArchivedWeeks()) || []).map((r: any) => String(r?.weekStart))
       );
     if (existing.has(weekData.weekStart)) return false;
-    await db.archiveWeek({
+    const row = await db.archiveWeek({
       weekStart: weekData.weekStart,
       archivedAt: new Date().toISOString(),
       points: weekData.points,
       streak: weekData.streak,
       history: weekData.history,
     });
+    if (!row) return false;
     existing.add(weekData.weekStart);
     return true;
   } catch {
