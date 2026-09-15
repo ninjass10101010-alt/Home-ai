@@ -57,3 +57,26 @@ describe("mergeTodaysEvents", () => {
     expect(merged).toHaveLength(1);
   });
 });
+
+describe("multi-day Google spans", () => {
+  const weekend = {
+    summary: "At home",
+    start_iso: "2026-10-30",
+    end_iso: "2026-11-02",
+    all_day: true,
+  };
+  it("appears on each covered day, not past the exclusive end", () => {
+    expect(mergeTodaysEvents([], [weekend], "2026-10-30").map((e) => e.title)).toContain("At home");
+    expect(mergeTodaysEvents([], [weekend], "2026-10-31").map((e) => e.title)).toContain("At home");
+    expect(mergeTodaysEvents([], [weekend], "2026-11-01").length).toBe(1);
+    expect(mergeTodaysEvents([], [weekend], "2026-11-02").length).toBe(0);
+  });
+  it("cross-midnight timed event is in on its end day too", () => {
+    const timed = {
+      summary: "Late drive",
+      start_iso: "2026-10-30T23:00:00-04:00",
+      end_iso: "2026-10-31T01:00:00-04:00",
+    };
+    expect(mergeTodaysEvents([], [timed], "2026-10-31").map((e) => e.title)).toContain("Late drive");
+  });
+});

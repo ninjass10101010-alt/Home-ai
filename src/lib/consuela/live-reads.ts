@@ -54,7 +54,7 @@ export async function liveGoogleEvents(dayISO = localTodayISO()): Promise<any[]>
   try {
     const rows = await withAdmin(async (pb) => {
       return pb.collection("consuela_google_calendar_events").getFullList({
-        fields: "summary,start_iso,calendar_id",
+        fields: "summary,start_iso,end_iso,all_day,calendar_id",
         requestKey: null,
       });
     });
@@ -74,7 +74,7 @@ export async function liveEventsRange(startISO: string, endISO: string): Promise
       filter: `date>="${startISO}" && date<="${endISO}"`, requestKey: null,
     })).catch(() => null),
     withAdmin(async (pb) => pb.collection("consuela_google_calendar_events").getFullList({
-      fields: "summary,start_iso,calendar_id", requestKey: null,
+      fields: "summary,start_iso,end_iso,all_day,calendar_id", requestKey: null,
     })).catch(() => null),
     withAdmin(async (pb) => pb.collection("members").getFullList({ requestKey: null })).catch(() => []),
   ]);

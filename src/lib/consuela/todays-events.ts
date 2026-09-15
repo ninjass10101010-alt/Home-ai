@@ -6,6 +6,8 @@
 // sources into one day-accurate, time-sorted list. No PB access here — the
 // tool handlers fetch rows and call mergeTodaysEvents.
 
+import { googleEventCoversDay } from "@/lib/calendar/google-mapping";
+
 export interface ToolEvent {
   title: string;
   /** Preformatted 12-hour time ("6:30 PM") or undefined for all-day rows. */
@@ -51,7 +53,8 @@ export function googleEventTime(startIso: string | undefined | null): string | u
 
 /**
  * Merge family + Google events for ONE day. Pure: no clock reads, no I/O.
- * - Google rows outside `dayISO` are dropped (start_iso prefix match).
+ * - A Google row lands on EVERY day it covers (all-day end is exclusive;
+ *   timed rows use local day boundaries).
  * - All-day rows sort first, then family/Google interleaved by time.
  */
 export function mergeTodaysEvents(
@@ -74,7 +77,7 @@ export function mergeTodaysEvents(
   });
 
   const google: ToolEvent[] = (googleRows || [])
-    .filter((r) => typeof r?.start_iso === "string" && r.start_iso.slice(0, 10) === dayISO)
+    .filter((r) => typeof r?.start_iso === "string" && googleEventCoversDay(r, dayISO))
     .map((r) => {
       const time = googleEventTime(r.start_iso);
       const isAllDay = time === "All day";

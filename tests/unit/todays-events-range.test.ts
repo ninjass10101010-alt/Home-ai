@@ -14,4 +14,15 @@ describe("mergeEventsRange", () => {
     const byDay = mergeEventsRange([], [], "2026-01-01", "2026-03-01");
     expect(Object.keys(byDay)).toHaveLength(30);
   });
+  it("range mode includes a spanning all-day event on every covered day", () => {
+    const out = mergeEventsRange(
+      [],
+      [{ summary: "At home", start_iso: "2026-10-30", end_iso: "2026-11-02", all_day: true }],
+      "2026-10-30",
+      "2026-11-02",
+    );
+    expect(out["2026-10-31"].some((e) => e.title === "At home")).toBe(true);
+    expect(out["2026-11-01"].some((e) => e.title === "At home")).toBe(true);
+    expect(out["2026-11-02"].length).toBe(0);
+  });
 });
