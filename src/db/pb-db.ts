@@ -6,6 +6,7 @@ import type { NewSuggestion, ProactiveSuggestion, SuggestionStatus } from "@/lib
 import { scheduleCoversWeekday, scheduleTimeMinutes, formatScheduleTime12h } from "@/lib/schedule-time";
 import { memberFallbacks as membersFallback } from "@/lib/member-fallback";
 import { mapMealRows } from "@/lib/meal-rows";
+import { localTodayISO } from "@/lib/local-date";
 
 let localFallback = false;
 
@@ -158,7 +159,7 @@ export const db = {
 
   async selectTodaysEvents() {
     const records = await safeList<any>("events", eventsFallback);
-    const today = new Date().toISOString().split('T')[0];
+    const today = localTodayISO();
     const members = await this.selectMembers();
     return records
       .filter((e: any) => e.date === today)
@@ -217,8 +218,8 @@ export const db = {
       .map((task: any) => {
         const member = members.find((m: any) => m.fullName === task.assigned || m.name === task.assigned);
         const d = task.due;
-        const isToday = d === new Date().toISOString().split('T')[0];
-        const isTomorrow = d === new Date(Date.now() + 86400000).toISOString().split('T')[0];
+        const isToday = d === localTodayISO();
+        const isTomorrow = d === localTodayISO(new Date(Date.now() + 86400000));
         return {
           id: task.id, title: task.title,
           assigned: member?.fullName || task.assigned || 'Unassigned',

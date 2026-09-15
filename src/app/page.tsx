@@ -208,8 +208,12 @@ export default function HomePage() {
     setMounted(true);
     setNow(new Date());
 
+    const refreshTodayEvents = () => {
+      try { setTodayEvents(db.selectTodaysEvents()); } catch {}
+    };
+
     try {
-      setTodayEvents(db.selectTodaysEvents());
+      refreshTodayEvents();
 
       const today = new Date();
       const hour = today.getHours();
@@ -226,6 +230,8 @@ export default function HomePage() {
     } catch {
       setHomeError("Consuela could not load your family dashboard.");
     }
+    window.addEventListener("consuela-data-refreshed", refreshTodayEvents);
+    return () => window.removeEventListener("consuela-data-refreshed", refreshTodayEvents);
   }, []);
 
   // Tasks + Daily Schedule: the same refresh contract the Week tile uses —

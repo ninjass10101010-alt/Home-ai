@@ -1,7 +1,7 @@
 {
-  "hash": "306e26191c716a19fad40d8f9428cc25dd626112",
-  "short": "306e261",
-  "message": "fix(ai): chat tools read the dashboard live — Google Calendar merged into event answers; base64 tool-result leak fixed",
-  "date": "2026-09-09 15:06:32 -0400",
+  "hash": "072b0b3f118f5807009ec615c9d185ff424092bd",
+  "short": "072b0b3",
+  "message": "docs(cron,agents): wire weather/calendar alert crons; fix SevereKind import + routine_due label",
+  "date": "2026-09-14 19:28:11 -0400",
   "author": "GarciaFam"
 }

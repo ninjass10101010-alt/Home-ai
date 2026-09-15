@@ -6,6 +6,7 @@ import { memberFallbacks, mergeMemberFallbacks } from "@/lib/member-fallback";
 import { mapMealRows, mapRecipeRows } from "@/lib/meal-rows";
 import { applyTasksSnapshotToStores } from "@/lib/task-utils";
 import { scheduleCoversWeekday, scheduleTimeMinutes, formatScheduleTime12h } from "@/lib/schedule-time";
+import { localTodayISO } from "@/lib/local-date";
 
 function isServer() {
   return typeof window === "undefined";
@@ -92,7 +93,7 @@ function filterQuery(filter: string, sort?: string): string {
 
 async function clientSelectTodaysEvents(): Promise<any[]> {
   const rows = await gatewayList("events");
-  const today = new Date().toISOString().split('T')[0];
+  const today = localTodayISO();
   const members = memberJoinList();
   return rows
     .filter((e: any) => e.date === today)
@@ -119,8 +120,8 @@ async function clientSelectPendingTasks(): Promise<any[]> {
     .map((task: any) => {
       const member = findJoinMember(members, task.assigned);
       const d = task.due;
-      const isToday = d === new Date().toISOString().split('T')[0];
-      const isTomorrow = d === new Date(Date.now() + 86400000).toISOString().split('T')[0];
+      const isToday = d === localTodayISO();
+      const isTomorrow = d === localTodayISO(new Date(Date.now() + 86400000));
       return {
         id: task.id, title: task.title,
         assigned: member?.fullName || task.assigned || 'Unassigned',
@@ -211,7 +212,7 @@ async function refreshTasksSnapshot() {
 async function refreshCache(name: string, fetcher: () => Promise<any[]>, cache: any[], fallback?: any[]) {
   try {
     const fresh = await fetcher();
-    if (fresh && fresh.length > 0) {
+    if (fresh) {
       cache.length = 0;
       cache.push(...fresh);
     }
@@ -385,8 +386,8 @@ export const db = {
   },
 
   selectTodaysEvents: () => {
-    if (eventsCache.length > 0) return eventsCache;
-    const today = new Date().toISOString().split('T')[0];
+    const today = localTodayISO();
+    if (eventsCache.length > 0) return eventsCache.filter((e: any) => e.date === today);
     return [];
   },
 
