@@ -253,6 +253,29 @@ describe("multi-day coverage", () => {
     const midnightEnd = { ...span, end_iso: "2026-10-31T00:00:00-04:00" };
     expect(googleEventCoveredDays(midnightEnd).length).toBe(1);
   });
+  it("unflagged date-only start_iso is still a local all-day value (no TZ day-shift)", () => {
+    const u = {
+      google_id: "u1",
+      summary: "U",
+      start_iso: "2026-09-10",
+      end_iso: "2026-09-11",
+    };
+    expect(googleEventCoveredDays(u)).toEqual(["2026-09-10"]);
+    expect(expandGoogleEvent(u)[0].time).toBe("All day");
+  });
+  it("unflagged multi-day date-only span covers every day, exclusive end", () => {
+    const m = {
+      google_id: "u2",
+      summary: "M",
+      start_iso: "2026-10-30",
+      end_iso: "2026-11-02",
+    };
+    expect(googleEventCoveredDays(m)).toEqual([
+      "2026-10-30",
+      "2026-10-31",
+      "2026-11-01",
+    ]);
+  });
   it("missing/invalid end_iso and end<=start degrade to the start day only", () => {
     expect(
       googleEventCoveredDays({ google_id: "g", start_iso: "2026-10-30", all_day: true }),

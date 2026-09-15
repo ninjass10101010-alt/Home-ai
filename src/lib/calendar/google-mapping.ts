@@ -79,15 +79,18 @@ function isLocalMidnight(d: Date): boolean {
 // Every LOCAL day the event covers. All-day end dates are EXCLUSIVE (Google
 // spec); a timed end exactly at local midnight belongs to the start day only.
 // Missing/invalid end degrades to the start day. Capped at 366 days.
+// A date-only `start_iso` is ALWAYS a local all-day value — the `all_day`
+// flag is advisory; never let a bare "YYYY-MM-DD" hit `new Date()` (UTC
+// midnight shifts the day back one hour on US hosts).
 export function googleEventCoveredDays(row: GoogleDayRow): string[] {
   const startIso = row.start_iso || "";
-  const allDay = !!row.all_day && /^\d{4}-\d{2}-\d{2}$/.test(startIso);
-  const start = parseGoogleStart(startIso, allDay);
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(startIso);
+  const start = parseGoogleStart(startIso, dateOnly);
   if (!start) return [];
   const first = localMidnight(start);
 
   let last: Date;
-  if (allDay) {
+  if (dateOnly) {
     const end =
       /^\d{4}-\d{2}-\d{2}$/.test(row.end_iso || "")
         ? parseGoogleStart(row.end_iso as string, true)
@@ -127,9 +130,11 @@ export function expandGoogleEvent(
 ): MappedGoogleEvent[] {
   const days = googleEventCoveredDays(ge);
   if (days.length === 0) return [];
-  const startDate = parseGoogleStart(ge.start_iso || "", !!ge.all_day);
+  const startIso = ge.start_iso || "";
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(startIso);
+  const startDate = parseGoogleStart(startIso, dateOnly);
   if (!startDate) return [];
-  const time = ge.all_day
+  const time = ge.all_day || dateOnly
     ? "All day"
     : startDate.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true });
   const calendarId = ge.calendar_id || "primary";
