@@ -327,6 +327,33 @@ describe("POST /api/muse/tool — deep redaction + truthful audit + scrub (revie
     );
   });
 
+  it("scrubs internal hosts inside a self-reported {ok:false, result} payload", async () => {
+    makeRow();
+    const { token } = signMuseToken({ ver: 1, adm: false });
+    mocks.getTool.mockImplementationOnce(() => ({
+      definition: { name: "get_weather", description: "", parameters: { type: "object", properties: {} } },
+      handler: async () =>
+        JSON.stringify({ ok: false, result: { note: "http://pocketbase:8090/x" } }),
+    }));
+    const res = await toolPOST(
+      museReq("/api/muse/tool", {
+        token,
+        method: "POST",
+        body: { name: "get_weather", args: {} },
+      })
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    // The JSON shape stays consumable, but internal hosts are scrubbed.
+    expect(body.result).toBeTypeOf("object");
+    expect(JSON.stringify(body)).toContain("[internal]");
+    expect(JSON.stringify(body)).not.toContain("pocketbase:8090");
+    expect(mocks.writeMuseLog).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "tool", tool: "get_weather", ok: false })
+    );
+  });
+
   it("scrubs internal hosts from a thrown-handler 500", async () => {
     makeRow();
     const { token } = signMuseToken({ ver: 1, adm: false });

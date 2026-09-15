@@ -5,14 +5,20 @@ const mocks = vi.hoisted(() => ({
   readMuseRow: vi.fn(),
   touchMuseUsage: vi.fn().mockResolvedValue(undefined),
   writeMuseLog: vi.fn().mockResolvedValue(undefined),
+  hashMuseKey: vi.fn(),
 }));
 
 vi.mock("@/lib/muse/store", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/muse/store")>();
+  // hashMuseKey is spied (delegating to the real digest) so a test can prove
+  // the digest compare is ALWAYS reached — including the no-row and disabled
+  // paths that must not short-circuit the timing-safe comparison.
+  mocks.hashMuseKey.mockImplementation(actual.hashMuseKey);
   return {
     ...actual,
     readMuseRow: mocks.readMuseRow,
     touchMuseUsage: mocks.touchMuseUsage,
+    hashMuseKey: mocks.hashMuseKey,
   };
 });
 vi.mock("@/lib/muse/log", () => ({ writeMuseLog: mocks.writeMuseLog }));
@@ -30,6 +36,7 @@ beforeEach(() => {
   mocks.touchMuseUsage.mockResolvedValue(undefined);
   mocks.writeMuseLog.mockReset();
   mocks.writeMuseLog.mockResolvedValue(undefined);
+  mocks.hashMuseKey.mockClear();
 });
 afterEach(() => vi.unstubAllEnvs());
 
@@ -168,5 +175,27 @@ describe("POST /api/muse/auth/login", () => {
     expect(Object.keys(lockedBody)).toEqual(Object.keys(rlBody));
     expect(Object.keys(lockedBody)).toEqual(["error"]);
     warn.mockRestore();
+  });
+
+  // Timing-short-circuit guard: the no-row and disabled paths must still run
+  // the digest compare (against DUMMY_HASH) so their response timing is uniform
+  // with a wrong-key rejection. If the compare is skipped, these fail.
+  it("runs the key digest compare on the no-row path (never short-circuits)", async () => {
+    mocks.readMuseRow.mockResolvedValue(null);
+    mocks.hashMuseKey.mockClear();
+    const res = await POST(loginReq({ key: "muse_whatever" }));
+    expect(res.status).toBe(401);
+    expect(mocks.hashMuseKey).toHaveBeenCalled();
+    expect(mocks.hashMuseKey).toHaveBeenCalledWith("muse_whatever");
+  });
+
+  it("runs the key digest compare on the disabled path (never short-circuits)", async () => {
+    const { row, key } = makeRow({ enabled: false });
+    mocks.readMuseRow.mockResolvedValue(row);
+    mocks.hashMuseKey.mockClear();
+    const res = await POST(loginReq({ key }));
+    expect(res.status).toBe(401);
+    expect(mocks.hashMuseKey).toHaveBeenCalled();
+    expect(mocks.hashMuseKey).toHaveBeenCalledWith(key);
   });
 });

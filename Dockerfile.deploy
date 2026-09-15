@@ -1,3 +1,10 @@
+FROM node:20-alpine AS builder
+WORKDIR /app
+# Only the on-disk API reference is needed from the build context. Kept as its
+# own stage so the runner can pull it with COPY --from (which is not affected by
+# .dockerignore), letting docs/muse-api.md survive the `*.md` ignore rule.
+COPY . .
+
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
@@ -6,6 +13,8 @@ COPY .next ./.next
 COPY public ./public
 COPY package.json ./package.json
 COPY next.config.ts ./next.config.ts
+# Read at request time by /api/muse/docs (public markdown reference).
+COPY --from=builder /app/docs ./docs
 EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"

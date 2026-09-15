@@ -67,10 +67,16 @@ export async function POST(request: NextRequest) {
 
   try {
     const row = await readMuseRow();
+    // Resolve the stored hash FIRST — DUMMY_HASH whenever the row is missing or
+    // carries an unusable hash — and ALWAYS run the digest compare. The compare
+    // must not be short-circuited by the row/enabled checks, or the no-row and
+    // disabled paths would skip it entirely and become timing-distinguishable
+    // from a wrong-key rejection.
+    const storedHash = row?.keyHash && row.keyHash.length > 0 ? row.keyHash : DUMMY_HASH;
+    const keyOk = keyMatches(key, storedHash);
     // Unknown row, disabled identity, and wrong key all collapse to the same
-    // 401 so a caller can never tell whether the key exists. The comparison is
-    // unconditional (DUMMY_HASH when there is no row) for uniform timing.
-    if (!row || !row.enabled || !keyMatches(key, row.keyHash ?? DUMMY_HASH)) {
+    // 401 so a caller can never tell whether the key exists.
+    if (!row || !row.enabled || !keyOk) {
       registerLoginFailure(ip);
       await writeMuseLog({
         kind: "auth_fail",

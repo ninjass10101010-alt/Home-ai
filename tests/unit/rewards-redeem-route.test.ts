@@ -60,18 +60,21 @@ function makePb(opts?: {
         if (name === "rewards") {
           return { getFullList: async () => rewardRows };
         }
-        return {
-          getFullList: async () => [weekRow],
-          update: async (_id: string, payload: any) => {
-            writes.push(payload);
-            Object.assign(weekRow, payload);
-            return weekRow;
-          },
-          create: async (payload: any) => {
-            writes.push(payload);
-            return payload;
-          },
-        };
+      return {
+        getFullList: async () => [weekRow],
+        update: async (_id: string, payload: any) => {
+          writes.push(payload);
+          Object.assign(weekRow, payload);
+          return weekRow;
+        },
+        create: async (payload: any) => {
+          writes.push(payload);
+          Object.assign(weekRow, payload);
+          return weekRow;
+        },
+        // Post-write verification read (lost-update detection, mirrors claim).
+        getOne: async () => weekRow,
+      };
       },
     },
   };
@@ -217,5 +220,95 @@ describe("POST /api/rewards/redeem", () => {
 
     expect(res.status).toBe(200);
     expect(writes[0].history).toHaveLength(2);
+  });
+
+  // Lost-update race (mirrors tests/unit/task-claim.test.ts): two concurrent
+  // redeems of different rewards by the SAME member must not clobber one
+  // deduction. PocketBase has no conditional update, so the route re-reads the
+  // week row after each write and retries once when its own tx is gone.
+  function makeClobberingPb(opts: { clobberEveryWrite: boolean }) {
+    const weekStart = currentWeekKey();
+    // The concurrent writer's deduction (a different reward, same member).
+    const otherTx = {
+      id: 999_001,
+      timestamp: new Date().toISOString(),
+      member: "Caspian Garcia",
+      type: "redeem",
+      amount: -50,
+      description: "Redeemed: Sticker pack (-50pts)",
+    };
+    let stored: any = {
+      id: "w1",
+      weekStart,
+      points: JSON.stringify({ "Caspian Garcia": 200 }),
+      streak: "{}",
+      lastActive: "{}",
+      history: JSON.stringify([]),
+    };
+    let updates = 0;
+    const pb = {
+      collection: (name: string) => {
+        if (name === "rewards") {
+          return { getFullList: async () => [{ id: "r1", name: "Movie night", emoji: "🎬", cost: 150 }] };
+        }
+        return {
+          getFullList: async () => [stored],
+          getOne: async () => stored,
+          update: async (_id: string, payload: any) => {
+            updates += 1;
+            const clobber = opts.clobberEveryWrite || updates === 1;
+            // Our write lands, then the concurrent writer overwrites the row
+            // with its own deduction (our tx is no longer present).
+            stored = clobber
+              ? {
+                  ...stored,
+                  points: JSON.stringify({ "Caspian Garcia": 150 }),
+                  history: JSON.stringify([otherTx]),
+                }
+              : { ...payload, id: stored.id, weekStart };
+            return stored;
+          },
+          create: async (payload: any) => {
+            stored = { ...payload, id: "w1", weekStart };
+            return stored;
+          },
+        };
+      },
+    };
+    return { pb, updates: () => updates, stored: () => stored, otherTx };
+  }
+
+  it("retries once when a concurrent redeem clobbers the first write, ending with BOTH deductions", async () => {
+    const { pb, updates, stored } = makeClobberingPb({ clobberEveryWrite: false });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ rewardId: "r1", memberName: "Caspian", pin: "1010" }));
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).ok).toBe(true);
+    expect(updates()).toBe(2); // one clobbered attempt + one retry
+    const raw = stored();
+    const finalHistory = Array.isArray(raw.history) ? raw.history : JSON.parse(raw.history);
+    const amounts = finalHistory.map((t: any) => t.amount);
+    expect(amounts).toContain(-50); // the concurrent writer's deduction
+    expect(amounts).toContain(-150); // ours
+    const finalPoints = typeof raw.points === "string" ? JSON.parse(raw.points) : raw.points;
+    expect(finalPoints["Caspian Garcia"]).toBe(0);
+  });
+
+  it("returns 409 conflict without a false success when every write is clobbered", async () => {
+    const { pb, updates } = makeClobberingPb({ clobberEveryWrite: true });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ rewardId: "r1", memberName: "Caspian", pin: "1010" }));
+
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.reason).toBe("conflict");
+    expect(typeof body.error).toBe("string");
+    expect(body.error.length).toBeGreaterThan(0);
+    expect(body.weekData).toBeUndefined();
+    expect(updates()).toBe(2); // retried once, then gave up honestly
   });
 });

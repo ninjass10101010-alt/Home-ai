@@ -69,64 +69,93 @@ export async function POST(request: NextRequest) {
       const title = reward.name || "reward";
       const description = `Redeemed: ${title} (-${cost}pts)`;
 
-      const weekRecords = await pb.collection("week_data").getFullList({ requestKey: null });
-      const week = weekRecords.find((r: any) => r.weekStart === currentWeek) || null;
+      // One read-modify-write attempt, followed by a post-write verification
+      // read. PocketBase has no conditional update, so two concurrent redeems
+      // by the same member can both pass the balance guard and clobber one
+      // deduction. Mirrors the claim route's lost-update re-read: re-read the
+      // week row and confirm OUR transaction landed; if not, report `conflict`
+      // (the caller retries once).
+      const attemptRedeem = async () => {
+        const weekRecords = await pb.collection("week_data").getFullList({ requestKey: null });
+        const week = weekRecords.find((r: any) => r.weekStart === currentWeek) || null;
 
-      const points = parseJSON<Record<string, number>>(week?.points, {});
-      const history = parseJSON<Transaction[]>(week?.history, []);
+        const points = parseJSON<Record<string, number>>(week?.points, {});
+        const history = parseJSON<Transaction[]>(week?.history, []);
 
-      const nowMs = Date.now();
-      const dupe = history.find((tx) => {
-        const at = Date.parse(tx.timestamp);
-        return (
-          tx.type === "redeem" &&
-          tx.member === normalizedName &&
-          Number(tx.amount) === -cost &&
-          tx.description === description &&
-          Number.isFinite(at) &&
-          nowMs - at < REDEEM_DEDUPE_WINDOW_MS &&
-          at <= nowMs
-        );
-      });
-      if (dupe) {
-        return { ok: false, reason: "duplicate" } as const;
-      }
+        const nowMs = Date.now();
+        const dupe = history.find((tx) => {
+          const at = Date.parse(tx.timestamp);
+          return (
+            tx.type === "redeem" &&
+            tx.member === normalizedName &&
+            Number(tx.amount) === -cost &&
+            tx.description === description &&
+            Number.isFinite(at) &&
+            nowMs - at < REDEEM_DEDUPE_WINDOW_MS &&
+            at <= nowMs
+          );
+        });
+        if (dupe) {
+          return { ok: false, reason: "duplicate" } as const;
+        }
 
-      const balance = points[normalizedName] || 0;
-      if (balance < cost) {
-        const firstName = normalizedName.split(" ")[0];
-        const emoji = reward.emoji || "🎁";
-        return {
-          ok: false,
-          reason: "insufficient",
-          error: `${firstName} needs ${cost - balance} more pts for ${emoji} ${title}`,
-        } as const;
-      }
+        const balance = points[normalizedName] || 0;
+        if (balance < cost) {
+          const firstName = normalizedName.split(" ")[0];
+          const emoji = reward.emoji || "🎁";
+          return {
+            ok: false,
+            reason: "insufficient",
+            error: `${firstName} needs ${cost - balance} more pts for ${emoji} ${title}`,
+          } as const;
+        }
 
-      const tx: Transaction = {
-        id: nowMs + Math.floor(Math.random() * 1000),
-        timestamp: new Date(nowMs).toISOString(),
-        member: normalizedName,
-        type: "redeem",
-        amount: -cost,
-        description,
+        const tx: Transaction = {
+          id: nowMs + Math.floor(Math.random() * 1000),
+          timestamp: new Date(nowMs).toISOString(),
+          member: normalizedName,
+          type: "redeem",
+          amount: -cost,
+          description,
+        };
+
+        const updatedWeek: WeekData = {
+          weekStart: currentWeek,
+          points: { ...points, [normalizedName]: balance - cost },
+          streak: parseJSON<Record<string, number>>(week?.streak, {}),
+          lastActive: parseJSON<Record<string, string>>(week?.lastActive, {}),
+          history: [...history, tx],
+        };
+
+        if (week) {
+          await pb.collection("week_data").update(week.id, updatedWeek);
+        } else {
+          await pb.collection("week_data").create(updatedWeek);
+        }
+
+        const verifyRow: any = week
+          ? await pb.collection("week_data").getOne(week.id, { requestKey: null })
+          : (await pb.collection("week_data").getFullList({ requestKey: null })).find(
+              (r: any) => r.weekStart === currentWeek
+            );
+        const verifiedHistory = parseJSON<Transaction[]>(verifyRow?.history, []);
+        if (!verifiedHistory.some((t) => t.id === tx.id)) {
+          return {
+            ok: false,
+            reason: "conflict",
+            error: "That reward couldn't be saved — the points changed at the same time. Please try again.",
+          } as const;
+        }
+
+        return { ok: true, weekData: updatedWeek } as const;
       };
 
-      const updatedWeek: WeekData = {
-        weekStart: currentWeek,
-        points: { ...points, [normalizedName]: balance - cost },
-        streak: parseJSON<Record<string, number>>(week?.streak, {}),
-        lastActive: parseJSON<Record<string, string>>(week?.lastActive, {}),
-        history: [...history, tx],
-      };
-
-      if (week) {
-        await pb.collection("week_data").update(week.id, updatedWeek);
-      } else {
-        await pb.collection("week_data").create(updatedWeek);
+      // Retry the read-modify-write ONCE when a concurrent write clobbered it.
+      let outcome = await attemptRedeem();
+      if (!outcome.ok && outcome.reason === "conflict") {
+        outcome = await attemptRedeem();
       }
-
-      return { ok: true, weekData: updatedWeek } as const;
+      return outcome;
     });
 
     if (!result.ok) {

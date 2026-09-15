@@ -162,7 +162,7 @@ async function api(method, url, { body, cookie, headers = {}, timeoutMs = 60_000
   } catch {
     /* non-JSON response */
   }
-  return { status: res.status, json, text };
+  return { status: res.status, json, text, headers: res.headers };
 }
 
 function bearer(token) {
@@ -201,6 +201,23 @@ async function run() {
     `status=${settings.status} hasKey=${settings.json?.hasKey}`
   );
   if (!envelopeOk) return;
+
+  // 1b. Public API reference. The runtime image must ship docs/muse-api.md (the
+  //     Dockerfiles COPY docs into the runner) — otherwise this 500s in the
+  //     packaged deploy even though it works in dev.
+  try {
+    const docs = await api("GET", `${BASE}/api/muse/docs`);
+    const docsCt = docs.headers?.get("content-type") || "";
+    check(
+      "GET /api/muse/docs (public) → 200 markdown with a known string",
+      docs.status === 200 &&
+        docsCt.includes("text/markdown") &&
+        docs.text.includes("POST /api/muse/auth/login"),
+      `status=${docs.status} contentType=${docsCt}`
+    );
+  } catch (e) {
+    check("GET /api/muse/docs (public)", false, e.message);
+  }
 
   // 2. Key-flow safety. Only generate when there is no key; never clobber a
   //    real operator key.

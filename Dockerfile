@@ -24,6 +24,10 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/deploy.sh ./deploy.sh
 COPY --from=builder /app/docker-compose.yml ./docker-compose.yml
+# The on-disk MUSE API reference is read at request time by /api/muse/docs.
+# It is in the builder (COPY . . includes it) and COPY --from is not affected
+# by .dockerignore, so docs/muse-api.md survives the `*.md` ignore rule.
+COPY --from=builder /app/docs ./docs
 
 EXPOSE 3000
 ENV PORT=3000

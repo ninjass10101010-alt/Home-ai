@@ -155,7 +155,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: scrubInternal(resultValue.error) }, { status: 200 });
   }
   if (isPlainObject(resultValue) && resultValue.ok === false) {
-    return NextResponse.json({ ok: false, result: resultValue }, { status: 200 });
+    // A self-reported `{ok:false, result:{…}}` still carries handler output to
+    // the caller, so it gets the same internal-host scrub as every other
+    // caller-facing payload. Scrubbing the serialized form keeps the JSON shape
+    // a caller can consume (`result` stays an object) rather than flattening it
+    // to a string.
+    let scrubbedResult: unknown = resultValue;
+    try {
+      scrubbedResult = JSON.parse(scrubInternal(JSON.stringify(resultValue)));
+    } catch {
+      scrubbedResult = scrubInternal(JSON.stringify(resultValue));
+    }
+    return NextResponse.json({ ok: false, result: scrubbedResult }, { status: 200 });
   }
   return NextResponse.json({ ok: true, result: resultValue });
 }
