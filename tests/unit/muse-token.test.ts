@@ -4,6 +4,7 @@ import {
   signMuseToken,
   verifyMuseToken,
 } from "../../src/lib/muse/token";
+import { signSession, verifySession } from "../../src/lib/session";
 
 beforeEach(() => vi.stubEnv("SESSION_SECRET", "test-secret-0123456789"));
 afterEach(() => vi.unstubAllEnvs());
@@ -70,6 +71,19 @@ describe("muse tokens", () => {
         expect(["malformed", "bad_signature"]).toContain(out.reason);
       }
     }
+  });
+});
+
+describe("context separation from dashboard sessions (fold-in, Task 7 review)", () => {
+  it("rejects a REAL session token minted by signSession", async () => {
+    const session = await signSession({ memberId: "m1", name: "Rebecca", role: "parent" });
+    expect(session.startsWith("v1.")).toBe(true);
+    expect(verifyMuseToken(session, OK_CTX).ok).toBe(false);
+  });
+
+  it("the inverse holds: verifySession rejects a MUSE token", async () => {
+    const { token } = signMuseToken({ ver: 1, adm: true });
+    expect(await verifySession(token)).toBeNull();
   });
 });
 

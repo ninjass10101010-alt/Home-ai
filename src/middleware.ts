@@ -19,6 +19,10 @@ const API_EXEMPT = [
   "/api/hermes/",
   "/api/consuela/suggestions",
   "/api/consuela/screensaver",
+  // MUSE inbound identity — the surface self-authenticates with a bearer
+  // token minted by /api/muse/auth/login (key → expiring token). The settings
+  // routes added in Task 11 gate themselves on a session and are NOT covered.
+  "/api/muse/",
 ];
 
 // MF-5 — exact-match OR trailing-slash semantics. Plain startsWith(p) made

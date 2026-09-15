@@ -26,4 +26,12 @@ describe("AI endpoints exempt from session auth", () => {
   it("screensaver lookalike siblings stay gated", () => {
     expect(isExempt("/api/consuela/screensaver-admin")).toBe(false);
   });
+  it("MUSE surface self-authenticates (exempt from session auth)", () => {
+    expect(isExempt("/api/muse/auth/login")).toBe(true);
+    expect(isExempt("/api/muse/auth/logout")).toBe(true);
+    expect(isExempt("/api/muse/whoami")).toBe(true);
+  });
+  it("MUSE lookalike siblings stay gated", () => {
+    expect(isExempt("/api/musebox")).toBe(false);
+  });
 });
