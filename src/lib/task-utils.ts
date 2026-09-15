@@ -750,18 +750,47 @@ export function saveHallOfFame(entries: HallOfFameEntry[]): void {
   saveJSON(HALL_OF_FAME_KEY, entries);
 }
 
-export function archiveWeekWinner(entries: { name: string; emoji: string; points: number; rank: number }[], weekStart: string): void {
+/**
+ * Enshrine a finished week's podium (rank ≤ 3) in the Hall of Fame, freezing
+ * each finisher's prize text at rollover time (`prizeForRank(prizes, rank)` —
+ * prizes is defaulted so legacy 2-arg callers keep working; omit the `prize`
+ * key entirely when no prize matches the rank).
+ *
+ * Idempotent per `member + weekStart`: a re-run (the 60s interval and the
+ * mount backfill can both fire for the same week) never duplicates and never
+ * overwrites — the first enshrinement stays.
+ *
+ * The hall keeps the latest 12 DISTINCT weekStarts (a week can hold up to 3
+ * entries — 36 rows max), dropping the oldest weeks first, in ascending
+ * weekStart append order.
+ */
+export function archiveWeekWinner(
+  entries: { name: string; emoji: string; points: number; rank: number }[],
+  weekStart: string,
+  prizes: WeeklyPrize[] = loadWeeklyPrizes(),
+): void {
   if (entries.length === 0) return;
   const hall = loadHallOfFame();
-  const winner = entries[0];
-  hall.push({
-    member: winner.name,
-    emoji: winner.emoji,
-    weekStart,
-    points: winner.points,
-    rank: winner.rank,
-  });
-  const trimmed = hall.slice(-12);
+  for (const entry of entries) {
+    if (entry.rank > 3) continue;
+    if (hall.some((h) => h.member === entry.name && h.weekStart === weekStart)) continue;
+    const record: HallOfFameEntry = {
+      member: entry.name,
+      emoji: entry.emoji,
+      weekStart,
+      points: entry.points,
+      rank: entry.rank,
+    };
+    const prize = prizeForRank(prizes, entry.rank)?.text;
+    if (prize !== undefined) record.prize = prize;
+    hall.push(record);
+  }
+  // Trim to the latest 12 distinct weekStarts (never a raw 12-entry slice —
+  // that would mangle weeks). weekStarts are ISO dates, so lexicographic
+  // sort is chronological; filtering preserves the per-week append order.
+  const distinctWeeks = [...new Set(hall.map((h) => h.weekStart))].sort();
+  const keptWeeks = new Set(distinctWeeks.slice(-12));
+  const trimmed = hall.filter((h) => keptWeeks.has(h.weekStart));
   saveHallOfFame(trimmed);
 }
 

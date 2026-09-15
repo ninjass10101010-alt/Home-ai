@@ -37,7 +37,7 @@ import {
   getPreviousWeekRanks, loadHallOfFame,
   syncAllTasksToPB, syncWeekDataToPB,
   archiveAndResetWeek, archiveWeekWinner, saveCurrentWeekRanksForNextWeek,
-  archiveWeekIfMissing,
+  archiveWeekIfMissing, loadWeeklyPrizes,
   pickDefaultClaimMember, isSnatchable, isPendingApproval,
   completesWithoutPin, completesWithPendingApproval,
   tapCompletePending, sendBackPendingCompletion, approvePendingCompletion, resolveMemberName,
@@ -344,7 +344,7 @@ export default function TasksPage() {
         // the fresh empty week, so the saveWeekData effect can't clobber it.)
         const entries = rankedEntriesFromWeek(weekData, memberEmojis);
         if (entries.length) {
-          archiveWeekWinner(entries, weekData.weekStart);
+          archiveWeekWinner(entries, weekData.weekStart, loadWeeklyPrizes());
           saveCurrentWeekRanksForNextWeek(entries);
         }
         archiveAndResetWeek(weekData, current);
@@ -563,7 +563,7 @@ export default function TasksPage() {
     if (loadHallOfFame().some((h) => h.weekStart === latest)) return;
     const entries = rankedEntriesFromWeek(archive[latest], memberEmojis);
     if (!entries.length) return;
-    archiveWeekWinner(entries, latest);
+    archiveWeekWinner(entries, latest, loadWeeklyPrizes());
     saveCurrentWeekRanksForNextWeek(entries);
     setRanksVersion((v) => v + 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
