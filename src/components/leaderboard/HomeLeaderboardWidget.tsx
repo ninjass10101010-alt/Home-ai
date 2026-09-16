@@ -2,12 +2,69 @@
 
 import Link from "next/link";
 import { useLeaderboardData } from "./hooks/useLeaderboardData";
+import { useWeeklyPrizes } from "./hooks/useWeeklyPrizes";
 import { useAuth } from "@/hooks/useAuth";
+import { db } from "@/db";
 import SectionCard from "@/components/patterns/SectionCard";
 import Avatar from "@/components/ui/Avatar";
 import EmptyState from "@/components/ui/EmptyState";
 import RankArrow from "./RankArrow";
-import { getGapMessage } from "@/lib/task-utils";
+import { getGapMessage, raceGap, resolveMemberName, prizeForRank } from "@/lib/task-utils";
+import type { LeaderboardEntry, WeeklyPrize } from "@/types/tasks";
+
+// Prize copy is one compact line — long prize text from Settings gets a hard
+// ~30-char clip plus the CSS line-clamp so the footer never wraps.
+const PRIZE_TEXT_MAX = 30;
+function clipPrizeText(text: string): string {
+  return text.length > PRIZE_TEXT_MAX ? `${text.slice(0, PRIZE_TEXT_MAX)}…` : text;
+}
+
+// One compact race line for the bottom slot of the card (no row borders):
+// signed out → medals + "prizes this week"; on podium → "you're holding it!";
+// off podium → the points gap to the lowest podium prize.
+function PrizeRaceLine({
+  prizes,
+  entries,
+  myName,
+}: {
+  prizes: WeeklyPrize[];
+  entries: LeaderboardEntry[];
+  myName: string | null;
+}) {
+  if (prizes.length === 0) return null;
+  const ordered = [...prizes].sort((a, b) => a.rank - b.rank);
+  if (!myName) {
+    return (
+      <p data-testid="prize-race-line" className="mt-3 text-xs text-text-secondary">
+        {ordered.map((p) => p.emoji).join(" ")} prizes this week
+      </p>
+    );
+  }
+  const gap = raceGap(
+    myName,
+    Object.fromEntries(entries.map((e) => [e.name, e.points])),
+    ordered.length
+  );
+  if (gap.onPodium && gap.rank) {
+    const prize = prizeForRank(ordered, gap.rank);
+    if (prize) {
+      return (
+        <p data-testid="prize-race-line" className="mt-3 text-xs text-text-secondary">
+          {prize.emoji} <span className="line-clamp-1">{clipPrizeText(prize.text)}</span> — you&apos;re holding it!
+        </p>
+      );
+    }
+  }
+  const chase = ordered[ordered.length - 1];
+  if (gap.gapToPodium !== null && gap.gapToPodium > 0) {
+    return (
+      <p data-testid="prize-race-line" className="mt-3 text-xs text-text-secondary">
+        {gap.gapToPodium} pts to {chase.emoji} — {clipPrizeText(chase.text)}
+      </p>
+    );
+  }
+  return null;
+}
 
 function PodiumRow({
   entry,
@@ -109,6 +166,7 @@ function OtherRow({
 export default function HomeLeaderboardWidget({ className = "" }: { className?: string }) {
   const { data, mounted } = useLeaderboardData();
   const { currentUser, isLoggedIn } = useAuth();
+  const prizes = useWeeklyPrizes();
 
   if (!mounted) {
     return (
@@ -125,6 +183,7 @@ export default function HomeLeaderboardWidget({ className = "" }: { className?: 
   const { entries, daysUntilReset, previousRanks } = data;
 
   if (entries.length === 0 || entries.every(e => e.points === 0)) {
+    const prizeEmojis = [...prizes].sort((a, b) => a.rank - b.rank).map((p) => p.emoji).join("");
     return (
       <Link href="/tasks" className="block h-full active:scale-[0.99] transition-transform">
         <SectionCard title="This Week's Leaderboard" icon="🏆" tone="#f59e0b" centeredHeader className={className}>
@@ -134,6 +193,11 @@ export default function HomeLeaderboardWidget({ className = "" }: { className?: 
             icon="👑"
             flat
           />
+          {prizes.length > 0 && (
+            <p data-testid="prize-race-line" className="mt-3 text-xs text-text-secondary">
+              New week — prizes up for grabs {prizeEmojis}
+            </p>
+          )}
         </SectionCard>
       </Link>
     );
@@ -143,6 +207,11 @@ export default function HomeLeaderboardWidget({ className = "" }: { className?: 
   const others = entries.slice(3, 4);
   const myEntry = isLoggedIn && currentUser
     ? entries.find((e: any) => e.name === currentUser.name || e.name.startsWith(currentUser.name))
+    : null;
+  // weekData ledger keys are FULL names — resolve the session name through the
+  // roster before calling raceGap (matches the widget's myEntry matching above).
+  const myName = myEntry
+    ? resolveMemberName(db.selectMembers(), currentUser!.name)
     : null;
 
   return (
@@ -203,6 +272,9 @@ export default function HomeLeaderboardWidget({ className = "" }: { className?: 
             />
           ))}
         </div>
+
+        {/* Weekly prize race line — bottom slot, just above the "+N more" footer */}
+        <PrizeRaceLine prizes={prizes} entries={entries} myName={myName} />
 
         {entries.length > 4 && (
           <div className="mt-3 border-t border-white/10 pt-3">

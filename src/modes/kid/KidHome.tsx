@@ -55,7 +55,10 @@ import {
   tapCompletePending,
   isSnatchable,
   resolveMemberName,
+  raceGap,
+  prizeForRank,
 } from "@/lib/task-utils";
+import { useWeeklyPrizes } from "@/components/leaderboard/hooks/useWeeklyPrizes";
 import QuestCard from "./QuestCard";
 import LevelBar from "./LevelBar";
 import CelebrationBurst from "./CelebrationBurst";
@@ -74,11 +77,31 @@ const POINTS_PER_LEVEL = 50;
 
 function KidLeaderboard({ members }: { members: { name: string; color: string; emoji: string; points: number; streak: number }[] }) {
   const { currentUser } = useAuth();
+  const prizes = useWeeklyPrizes();
   const myFirstName = currentUser?.name?.split(" ")[0] || "";
 
   const sorted = [...members].sort((a, b) => (b.points || 0) - (a.points || 0));
   const myRank = sorted.findIndex((m) => m.name?.split(" ")[0] === myFirstName) + 1;
   const medals = ["🥇", "🥈", "🥉"];
+
+  // Weekly prize race line — positive framing only (never "losing"). The
+  // points map is keyed by the SAME names the leaderboard entries carry
+  // (full names from the roster), matching raceGap's keyspace.
+  let prizeLine: string | null = null;
+  if (prizes.length > 0) {
+    const ordered = [...prizes].sort((a, b) => a.rank - b.rank);
+    const pointsMap = Object.fromEntries(members.map((m) => [m.name, m.points || 0]));
+    const myRaceName = members.find((m) => m.name?.split(" ")[0] === myFirstName)?.name || currentUser?.name || "";
+    const gap = raceGap(myRaceName, pointsMap, ordered.length);
+    const heldPrize = gap.onPodium && gap.rank ? prizeForRank(ordered, gap.rank) : undefined;
+    if (heldPrize) {
+      prizeLine = `🎉 You're winning ${heldPrize.text}!`;
+    } else if (gap.gapToPodium !== null && gap.gapToPodium > 0) {
+      prizeLine = `${gap.gapToPodium} more points to win ${ordered[ordered.length - 1].text}!`;
+    } else {
+      prizeLine = "Earn points to win this week's prize!";
+    }
+  }
 
   return (
     <Surface variant="warm" radius="2xl" padding="none" aria-live="polite" aria-label="Family leaderboard">
@@ -149,8 +172,13 @@ function KidLeaderboard({ members }: { members: { name: string; color: string; e
             <p className="text-xs text-text-secondary">
               You&apos;re #{myRank} — <span className="text-[var(--color-accent-selected)] font-semibold">you can do it!</span>
             </p>
-          ) : (
+          )           : (
             <p className="text-xs text-text-muted">Complete quests to climb the ranks!</p>
+          )}
+          {prizeLine && (
+            <p data-testid="kid-prize-race-line" className="mt-1 text-xs text-text-secondary">
+              {prizeLine}
+            </p>
           )}
         </div>
       </div>
