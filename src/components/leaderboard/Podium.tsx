@@ -3,6 +3,8 @@
 import Avatar from "@/components/ui/Avatar";
 import IconButton from "@/components/ui/IconButton";
 import RankArrow from "./RankArrow";
+import { prizeForRank } from "@/lib/task-utils";
+import type { WeeklyPrize } from "@/types/tasks";
 
 interface PodiumSlotProps {
   entry: any;
@@ -16,12 +18,18 @@ interface PodiumSlotProps {
   onClick: () => void;
   onAdjust: () => void;
   isAdmin: boolean;
+  prizes: WeeklyPrize[];
 }
 
 function PodiumSlot({
   entry, rank, heightClass, medalEmoji, bgClass, isYou, color, previousRank,
-  onClick, onAdjust, isAdmin,
+  onClick, onAdjust, isAdmin, prizes,
 }: PodiumSlotProps) {
+  // Weekly-prize ribbon: a zero-point fresh week shows no ribbons (the "crown
+  // is up for grabs" zero-state keeps owning that moment).
+  const prize = entry.points > 0 ? prizeForRank(prizes, entry.rank) : undefined;
+  // A brand-new member's all-time equals the week — the duplicate reads as clutter.
+  const showAllTime = entry.allTimePoints !== entry.points;
   return (
     <div className={`flex min-w-0 flex-1 flex-col items-center ${heightClass}`}>
       <div
@@ -54,6 +62,14 @@ function PodiumSlot({
             <span className="text-base font-bold text-text-primary display-numeral">{entry.points}</span>
             <span className="text-[10px] text-text-muted">pts</span>
           </div>
+          {prize && (
+            <div className="text-[10px] text-text-muted truncate max-w-full" title={prize.text}>
+              🎁 {prize.text}
+            </div>
+          )}
+          {showAllTime && (
+            <div className="text-[10px] text-text-muted">{entry.allTimePoints} all-time</div>
+          )}
           <div className="flex items-center gap-1.5">
             {entry.streak > 0 && <span className="text-xs text-amber-400 font-semibold">🔥{entry.streak}d</span>}
             <span className="text-xs text-text-muted">{entry.levelEmoji} {entry.levelTitle}</span>
@@ -79,6 +95,7 @@ function PodiumSlot({
 
 interface PodiumProps {
   entries: any[];
+  prizes: WeeklyPrize[];
   previousRanks: Record<string, number>;
   isYou: (name: string) => boolean;
   getMemberColor: (name: string) => string;
@@ -88,7 +105,7 @@ interface PodiumProps {
 }
 
 export default function Podium({
-  entries, previousRanks, isYou, getMemberColor,
+  entries, prizes, previousRanks, isYou, getMemberColor,
   onOpenSheet, onAdjust, isAdmin,
 }: PodiumProps) {
   if (entries.length === 0) return null;
@@ -111,6 +128,7 @@ export default function Podium({
           onClick={() => onOpenSheet(second.name)}
           onAdjust={() => onAdjust(second.name)}
           isAdmin={isAdmin}
+          prizes={prizes}
         />
       )}
       <PodiumSlot
@@ -121,6 +139,7 @@ export default function Podium({
         onClick={() => onOpenSheet(first.name)}
         onAdjust={() => onAdjust(first.name)}
         isAdmin={isAdmin}
+        prizes={prizes}
       />
       {third && (
         <PodiumSlot
@@ -131,6 +150,7 @@ export default function Podium({
           onClick={() => onOpenSheet(third.name)}
           onAdjust={() => onAdjust(third.name)}
           isAdmin={isAdmin}
+          prizes={prizes}
         />
       )}
     </div>

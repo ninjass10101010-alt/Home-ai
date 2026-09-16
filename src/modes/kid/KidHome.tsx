@@ -48,6 +48,7 @@ import {
   getThisWeeksCompletedTasks,
   getThisWeeksCompletedDates,
   calculateRealStreak,
+  getMemberAllTimePoints,
   syncTasksToPB,
   completesWithoutPin,
   completesWithPendingApproval,
@@ -214,6 +215,8 @@ export default function KidHome() {
   const [points, setPoints] = useState(0);
   const [pointsToday, setPointsToday] = useState(0);
   const [streak, setStreak] = useState(0);
+  // All-time total for the hero caption beneath the weekly points figure.
+  const [allTimePoints, setAllTimePoints] = useState(0);
   const [tonightMeal, setTonightMeal] = useState<any>(null);
   const [celebration, setCelebration] = useState<{ points: number; leveledUp: boolean; newLevel: number; pending?: boolean } | null>(null);
   // Quest PIN gate — the typed PIN lives in this component's state only and
@@ -287,6 +290,8 @@ export default function KidHome() {
       setPoints(pointsFor(week.points, currentUser.name));
       const key = ledgerKey(week.points, currentUser.name) || currentUser.name;
       setStreak(calculateRealStreak(key, week, getThisWeeksCompletedDates(tasks, key)));
+      // All-time reads the same ledger key as the weekly figure right above it.
+      setAllTimePoints(getMemberAllTimePoints(key, week));
     } catch {}
   }, [currentUser, dataVersion, membersVersion]);
 
@@ -673,6 +678,7 @@ export default function KidHome() {
           <div className="w-full max-w-xs mt-4">
             <LevelBar points={points} pointsPerLevel={POINTS_PER_LEVEL} />
           </div>
+          <p className="mt-1.5 text-[11px] text-text-muted tabular-nums">{allTimePoints} all-time</p>
 
           {/* Streak */}
           {streak > 0 && (

@@ -1339,6 +1339,11 @@ export default function TasksPage() {
   }, [filterMember, scopedMember, thisWeeksCompleted, thisWeeksCompletedCount]);
 
   const scopedEarned = scopedMember ? scopedMember.points : weeklyEarned;
+  // Earned tile detail: all-time context next to the weekly number — the
+  // member filter scopes it (a member's own total, family sum under "All").
+  const scopedAllTimeEarned = scopedMember
+    ? scopedMember.allTimePoints
+    : dynamicLeaderboard.reduce((sum, e) => sum + e.allTimePoints, 0);
   const previousRanks = useMemo(() => getPreviousWeekRanks(), [weekData, ranksVersion]); // eslint-disable-line react-hooks/exhaustive-deps
   const sheetEntry = sheetMember ? dynamicLeaderboard.find(e => e.name === sheetMember) : null;
 
@@ -1408,7 +1413,7 @@ export default function TasksPage() {
         <div className="grid gap-3 sm:grid-cols-3">
           <StatTile label="Pending" value={pending.length} detail="Open tasks" icon="📋" tone="warning" compact />
           <StatTile label="Completed" value={scopedCompletedCount} detail="This week" icon="🎉" tone="success" compact />
-          <StatTile label="Earned" value={scopedEarned} detail="This week's points" icon="🏆" tone="accent" compact />
+          <StatTile label="Earned this week" value={scopedEarned} detail={`${scopedAllTimeEarned} pts all-time`} icon="🏆" tone="accent" compact />
         </div>
 
         <SegmentedControl
@@ -1832,6 +1837,7 @@ export default function TasksPage() {
             <SectionCard title="Leaderboard" description="This week's family points &amp; streaks" icon="🏆">
               <Podium
                 entries={dynamicLeaderboard.slice(0, 3)}
+                prizes={weeklyPrizes}
                 previousRanks={previousRanks}
                 isYou={(name: string) => !!(isLoggedIn && currentUser && (name === currentUser.name || name.startsWith(currentUser.name)))}
                 getMemberColor={(name: string) => memberColors[name] || "green"}
