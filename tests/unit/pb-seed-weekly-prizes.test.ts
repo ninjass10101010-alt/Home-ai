@@ -20,6 +20,14 @@ describe("weekly_prizes collection declaration", () => {
     expect(fields.updated).toBeUndefined();
   });
 
+  it("pins one prize row per rank via a UNIQUE index (rank-keyed upserts never leave dupes)", () => {
+    const col = COLLECTIONS.find((c) => c.name === "weekly_prizes");
+    expect(col).toBeDefined();
+    expect((col as { indexes?: string[] }).indexes).toContain(
+      "CREATE UNIQUE INDEX idx_weekly_prizes_rank ON weekly_prizes (rank)"
+    );
+  });
+
   it("hall_of_fame carries the optional prize + celebrated fields", () => {
     const hall = COLLECTIONS.find((c) => c.name === "hall_of_fame");
     expect(hall).toBeDefined();

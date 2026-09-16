@@ -142,6 +142,23 @@ describe("PrizeRaceCard", () => {
       );
     });
 
+    it("with only two prizes, the off-podium gap targets rank #2's points", () => {
+      // Bailey (rank 4, 10 pts) chases the LAST pod spot — rank #2 Emily at 60,
+      // so the gap is 50. A rank-3 Caspian (40) target would read 30 instead.
+      const el = render(
+        <PrizeRaceCard
+          prizes={PRIZES.slice(0, 2)}
+          entries={[entry("Rebecca", 70), entry("Emily", 60), entry("Caspian", 40), entry("Bailey", 10)]}
+          daysUntilReset={4}
+          myName="Bailey"
+        />
+      );
+      const line = el.querySelector("[aria-live='polite']");
+      expect(line).not.toBeNull();
+      expect(line!.textContent).toContain("You're 50 pts from a prize — keep going!");
+      expect(line!.textContent).not.toContain("30 pts");
+    });
+
     it("invites a zero-point member into the race when others have points", () => {
       const el = render(
         <PrizeRaceCard

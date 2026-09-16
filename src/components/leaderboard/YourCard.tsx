@@ -29,8 +29,7 @@ export default function YourCard({ entry, aheadEntry, getMemberColor }: YourCard
             <span className="text-lg font-bold text-text-primary">#{entry.rank}</span>
             <span className="text-sm text-text-secondary">—</span>
             <span className="font-bold text-[var(--color-accent-selected)]">{entry.points} pts</span>
-            {" "}
-            <span className="text-[10px] text-text-muted">· {entry.allTimePoints} all-time</span>
+            <span className="text-xs text-text-muted">· {entry.allTimePoints} all-time</span>
             <span className="text-xs text-text-muted">{entry.levelEmoji} {entry.levelTitle}</span>
           </div>
           <div className="mt-1 text-xs">

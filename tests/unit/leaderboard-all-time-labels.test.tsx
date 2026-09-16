@@ -201,6 +201,21 @@ describe("Podium prize ribbon", () => {
     const rebecca = el.querySelector('[aria-label^="Rebecca:"]');
     expect(rebecca!.textContent).not.toContain("🎁");
   });
+
+  it("two members tied on points (both competition rank 1) both wear the rank-1 prize pill", async () => {
+    const el = await renderPodium(
+      [lbEntry("Rebecca", 30, 1, 130), lbEntry("Caspian", 30, 1, 130)],
+      [MOVIE_PRIZE]
+    );
+    // Ties share the rank — nobody is demoted to second, so the 🎁 ribbon and
+    // the 🥇 medal appear on BOTH slots.
+    const rebecca = el.querySelector('[aria-label^="Rebecca:"]');
+    const caspian = el.querySelector('[aria-label^="Caspian:"]');
+    expect(rebecca!.textContent).toContain("🎁 Picks the movie");
+    expect(caspian!.textContent).toContain("🎁 Picks the movie");
+    expect(rebecca!.textContent).toContain("🥇");
+    expect(caspian!.textContent).toContain("🥇");
+  });
 });
 
 describe("Podium all-time line", () => {

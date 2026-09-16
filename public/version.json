@@ -1,7 +1,7 @@
 {
-  "hash": "072b0b3f118f5807009ec615c9d185ff424092bd",
-  "short": "072b0b3",
-  "message": "docs(cron,agents): wire weather/calendar alert crons; fix SevereKind import + routine_due label",
-  "date": "2026-09-14 19:28:11 -0400",
+  "hash": "66bde4adae0cf96a820e063388c24aed51613bda",
+  "short": "66bde4a",
+  "message": "fix(leaderboard): home widget race line single-line clamp",
+  "date": "2026-09-16 05:35:08 -0400",
   "author": "GarciaFam"
 }

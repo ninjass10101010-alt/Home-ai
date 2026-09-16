@@ -1285,7 +1285,7 @@ export default function TasksPage() {
       })
       .sort((a, b) => b.points - a.points);
 
-      // Tied points share a rank (standard competition ranking) so equal scores
+    // Tied points share a rank (standard competition ranking) so equal scores
     // don't read as 1st vs 2nd or flicker between the two on every recompute.
     return entries.map((e, i) => ({
       ...e,

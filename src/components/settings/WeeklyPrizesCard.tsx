@@ -139,7 +139,7 @@ export default function WeeklyPrizesCard({ showToast }: WeeklyPrizesCardProps) {
           {saving ? "Saving…" : "Save prizes"}
         </SoftButton>
       </div>
-      <p className="mt-3 text-xs text-text-muted">Winners lock in when the week resets Monday.</p>
+      <p className="mt-3 text-xs text-text-muted">Winners are locked in when the week resets Monday.</p>
     </SectionCard>
   );
 }

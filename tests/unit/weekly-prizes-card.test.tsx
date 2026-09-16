@@ -59,6 +59,14 @@ function seedPrizes(prizes: any[]) {
   localStorage.setItem(WEEKLY_PRIZES_KEY, JSON.stringify(prizes));
 }
 
+// Controlled React inputs ignore plain .value assignment — go through the
+// native setter + a bubbling "input" event so onChange fires.
+function typeInto(el: HTMLInputElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+  setter.call(el, value);
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
 beforeEach(() => {
   localStorage.clear();
   mockAuth.currentUser = null;
@@ -160,6 +168,22 @@ describe("WeeklyPrizesCard", () => {
     expect(upsertSpy).toHaveBeenNthCalledWith(2, { rank: 2, emoji: "🥈", text: "Chooses the dessert night" });
     expect(upsertSpy).toHaveBeenNthCalledWith(3, { rank: 3, emoji: "🥉", text: "+$2 allowance" });
     expect(showToast).toHaveBeenCalledWith("🏆 Weekly prizes saved");
+  });
+
+  it("edit round-trip: typing into a text field and saving persists the new text", async () => {
+    mockAuth.currentUser = { name: "Rebecca", role: "parent" };
+    const el = mount();
+
+    const first = textInputs(el)[0];
+    expect(first.value).toBe("Picks Friday's family movie");
+    act(() => { typeInto(first, "Picks the weekend road trip"); });
+
+    await act(async () => { buttonByText(el, "Save prizes")!.click(); });
+
+    expect(loadWeeklyPrizes()[0].text).toBe("Picks the weekend road trip");
+    expect(loadWeeklyPrizes()[1].text).toBe("Chooses the dessert night");
+    // The server push carried the edited text too (rank-keyed upsert per row).
+    expect(upsertSpy).toHaveBeenNthCalledWith(1, { rank: 1, emoji: "🥇", text: "Picks the weekend road trip" });
   });
 
   it("shows the calm empty state when the prizes list is empty", () => {

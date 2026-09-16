@@ -360,6 +360,11 @@ export const COLLECTIONS = [
       { name: "emoji", type: "text" },
       { name: "text", type: "text" },
     ],
+    // One prize row per rank — the rank-keyed upsert path beats leftover
+    // duplicates, and cross-device conflicting edits must never leave two.
+    indexes: [
+      "CREATE UNIQUE INDEX idx_weekly_prizes_rank ON weekly_prizes (rank)",
+    ],
   },
   {
     name: "recipes",
