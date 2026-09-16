@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { db } from "@/db";
-import type { LeaderboardEntry, WeekData, Task } from "@/types/tasks";
+import type { LeaderboardEntry, WeekData, Task, HallOfFameEntry } from "@/types/tasks";
 import { getLevel, BADGES } from "@/types/tasks";
 import {
   loadWeekData,
@@ -14,6 +14,7 @@ import {
   getPreviousWeekRanks,
   getMemberAllTimePoints,
   getMemberAllTimeCompletions,
+  loadHallOfFame,
   todayMondayISO,
 } from "@/lib/task-utils";
 
@@ -23,6 +24,7 @@ export interface LeaderboardData {
   tasks: Task[];
   daysUntilReset: number;
   previousRanks: Record<string, number>;
+  hall: HallOfFameEntry[];
 }
 
 export function useLeaderboardData() {
@@ -51,6 +53,11 @@ export function useLeaderboardData() {
     return getPreviousWeekRanks();
   }, [mounted]);
 
+  const hall = useMemo(() => {
+    if (!mounted) return [] as HallOfFameEntry[];
+    return loadHallOfFame();
+  }, [mounted]);
+
   const entries = useMemo<LeaderboardEntry[]>(() => {
     if (!mounted || !weekData) return [];
     const members = db.selectMembers();
@@ -65,6 +72,10 @@ export function useLeaderboardData() {
         const streak = calculateRealStreak(name, weekData, completedDates);
         const { level, title, emoji, progress } = getLevel(allTimePoints);
         const earnedBadges = BADGES.filter(b => b.condition(allTimePoints, streak, allTimeComps)).map(b => b.emoji);
+        // Weekly Champ history is out-of-band (BADGES.week_champ condition stays
+        // false): a rank-1 Hall of Fame entry earns the 🥇 career badge.
+        const hasWeeklyChamp = hall.some(h => h.member === name && h.rank === 1);
+        if (hasWeeklyChamp && !earnedBadges.includes("🥇")) earnedBadges.push("🥇");
         return {
           name,
           emoji: m.emoji,
@@ -89,7 +100,7 @@ export function useLeaderboardData() {
       })
       .sort((a, b) => b.points - a.points || a.name.localeCompare(b.name))
       .map((e, i) => ({ ...e, rank: i + 1 }));
-  }, [weekData, tasks, completedDates, mounted]);
+  }, [weekData, tasks, completedDates, hall, mounted]);
 
   return {
     data: {
@@ -98,6 +109,7 @@ export function useLeaderboardData() {
       tasks,
       daysUntilReset,
       previousRanks,
+      hall,
     } as LeaderboardData,
     mounted,
   };

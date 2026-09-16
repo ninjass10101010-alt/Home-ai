@@ -8,7 +8,7 @@ import Podium from "@/components/leaderboard/Podium";
 import YourCard from "@/components/leaderboard/YourCard";
 import TasksPage from "@/app/tasks/page";
 import KidHome from "@/modes/kid/KidHome";
-import { getMemberAllTimePoints } from "@/lib/task-utils";
+import { getMemberAllTimePoints, HALL_OF_FAME_KEY, WEEK_DATA_KEY } from "@/lib/task-utils";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -297,6 +297,61 @@ describe("Tasks page Earned tile", () => {
     expect(text).toContain("115 all-time");
     expect(text).toContain("55 all-time");
     expect(text).not.toContain("0 all-time");
+  });
+});
+
+// ─── Tasks page: weekly champ badge from the Hall of Fame ───────────────────
+describe("Tasks page weekly champ badge (hall of fame)", () => {
+  function seedChampWeek() {
+    localStorage.setItem(WEEK_DATA_KEY, JSON.stringify({
+      weekStart: thisMondayISO(),
+      points: { Rebecca: 15, Emily: 5 },
+      streak: {}, lastActive: {}, history: [],
+    }));
+  }
+
+  function seedHall(entries: Array<{ member: string; rank: number }>) {
+    localStorage.setItem(HALL_OF_FAME_KEY, JSON.stringify(
+      entries.map((e) => ({ member: e.member, emoji: "🏅", weekStart: "2026-09-07", points: 40, rank: e.rank }))
+    ));
+  }
+
+  async function renderLeaderboardTab(): Promise<HTMLElement> {
+    const el = await renderAsync(<TasksPage />);
+    await settle();
+    const lb = [...el.querySelectorAll('button, [role="radio"]')].find(
+      (b) => (b.textContent || "").trim() === "Leaderboard"
+    );
+    (lb as HTMLButtonElement).click();
+    await settle();
+    return el;
+  }
+
+  function badgeSparkles(el: HTMLElement): string[] {
+    return Array.from(el.querySelectorAll(".animate-badge-sparkle")).map((s) => (s.textContent || "").trim());
+  }
+
+  it("a rank-1 hall win puts the 🥇 champ badge in the champion's trophy strip", async () => {
+    seedChampWeek();
+    seedHall([{ member: "Rebecca", rank: 1 }]);
+    const el = await renderLeaderboardTab();
+
+    expect(badgeSparkles(el)).toContain("🥇");
+  });
+
+  it("no hall entry → the 🥇 champ badge never appears", async () => {
+    seedChampWeek();
+    const el = await renderLeaderboardTab();
+
+    expect(badgeSparkles(el)).not.toContain("🥇");
+  });
+
+  it("a rank-2 hall entry earns no champ badge (only the winner gets it)", async () => {
+    seedChampWeek();
+    seedHall([{ member: "Rebecca", rank: 2 }]);
+    const el = await renderLeaderboardTab();
+
+    expect(badgeSparkles(el)).not.toContain("🥇");
   });
 });
 

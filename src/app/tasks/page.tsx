@@ -1236,6 +1236,11 @@ export default function TasksPage() {
   const thisWeeksCompleted = getThisWeeksCompletedTasks(tasks);
   const thisWeeksCompletedCount = thisWeeksCompleted.length;
 
+  // Hall of Fame drives the out-of-band 🥇 Weekly Champ badge on the entries.
+  // Re-read when the week or the enshrinement version bumps (rollover path),
+  // mirroring the previousRanks memo below.
+  const hallOfFame = useMemo(() => loadHallOfFame(), [weekData, ranksVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const dynamicLeaderboard: LeaderboardEntry[] = useMemo(() => {
     const entries = membersData
       .filter((m: any) => m.role !== "pet")
@@ -1249,6 +1254,11 @@ export default function TasksPage() {
         const streak = calculateRealStreak(name, weekData, getThisWeeksCompletedDates(tasks, name));
         const { level, title, emoji, progress } = getLevel(allTimePoints);
         const earnedBadges = BADGES.filter(b => b.condition(allTimePoints, streak, allTimeComps)).map(b => b.emoji);
+        // Weekly Champ history is out-of-band (BADGES.week_champ condition
+        // stays false): a rank-1 Hall of Fame entry earns the 🥇 career badge.
+        if (hallOfFame.some(h => h.member === name && h.rank === 1) && !earnedBadges.includes("🥇")) {
+          earnedBadges.push("🥇");
+        }
         const currentMonday = weekData.weekStart;
         const completedInWeek = tasks.filter(
           t => t.completed && t.completedBy === name && (
@@ -1275,13 +1285,13 @@ export default function TasksPage() {
       })
       .sort((a, b) => b.points - a.points);
 
-    // Tied points share a rank (standard competition ranking) so equal scores
+      // Tied points share a rank (standard competition ranking) so equal scores
     // don't read as 1st vs 2nd or flicker between the two on every recompute.
     return entries.map((e, i) => ({
       ...e,
       rank: i > 0 && e.points === entries[i - 1].points ? entries[i - 1].rank : i + 1,
     }));
-  }, [weekData, membersData, tasks]);
+  }, [weekData, membersData, tasks, hallOfFame]);
 
   const topScorer = dynamicLeaderboard[0];
   const familyTotal = dynamicLeaderboard.reduce((sum, entry) => sum + entry.points, 0);
