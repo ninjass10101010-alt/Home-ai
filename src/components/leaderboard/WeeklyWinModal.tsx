@@ -1,11 +1,10 @@
-/* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
 import { useEffect, useState } from "react";
 import Modal from "@/components/ui/Modal";
 import SoftButton from "@/components/ui/SoftButton";
 import ConfettiBurst from "@/components/ui/ConfettiBurst";
-import { loadHallOfFame, markWinCelebrated, uncelebratedWinFor } from "@/lib/task-utils";
+import { loadHallOfFameMerged, markWinCelebrated, uncelebratedWinFor } from "@/lib/task-utils";
 import type { HallOfFameEntry } from "@/types/tasks";
 
 const MEDALS: Record<number, string> = { 1: "🏆", 2: "🥈", 3: "🥉" };
@@ -13,15 +12,15 @@ const MEDALS: Record<number, string> = { 1: "🏆", 2: "🥈", 3: "🥉" };
 /**
  * The Monday ceremony: when the signed-in member has a top-3 week win with a
  * prize they haven't celebrated yet, this opens a small celebration modal
- * with a confetti burst. Single-fire is guaranteed by the celebrated flag on
- * the local hall entry — BOTH buttons (and scrim/Esc dismiss) claim it, so
- * the kid never sees it nine times.
+ * with a confetti burst. Single-fire is guaranteed cross-device: the gate
+ * reads the MERGED hall (local + PB downlink — a PB row's `celebrated` flag
+ * always wins), and BOTH buttons (plus scrim/Esc dismiss) claim it, so the
+ * kid never sees it nine times on any device.
  *
  * The server claim is best-effort: hall_of_fame gateway writes are
  * parent-policy, so the browser goes through /api/hall-of-fame/celebrate
- * (kid sessions may claim their OWN win there). The local flag is the
- * primary record; a failed POST just means the next cross-device sync still
- * sees the entry un-celebrated on the server.
+ * (kid sessions may claim their OWN win there). The local flag flips first;
+ * a failed POST just means the server's copy lags until the next claim.
  *
  * Guests render nothing. Reduced-motion skips the confetti (same guard as
  * the tasks page's triggerConfetti).
@@ -33,22 +32,34 @@ export default function WeeklyWinModal({ memberName }: { memberName?: string | n
 
   useEffect(() => {
     if (!memberName) return;
-    const found = uncelebratedWinFor(loadHallOfFame(), memberName);
-    if (!found) return;
-    setWin(found);
-    setOpen(true);
-    // Confetti on open, honoring reduced-motion — mirrors triggerConfetti in
-    // src/app/tasks/page.tsx.
-    if (
-      typeof window !== "undefined" &&
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches
-    ) {
-      return;
-    }
-    setConfetti(true);
-    const t = setTimeout(() => setConfetti(false), 1800);
-    return () => clearTimeout(t);
+    let alive = true;
+    let confettiTimer: ReturnType<typeof setTimeout> | null = null;
+    // Await the merged hall BEFORE opening — a win celebrated on another
+    // device (celebrated: true on the PB row) must not re-fire here.
+    loadHallOfFameMerged()
+      .then((hall) => {
+        if (!alive) return;
+        const found = uncelebratedWinFor(hall, memberName);
+        if (!found) return;
+        setWin(found);
+        setOpen(true);
+        // Confetti on open, honoring reduced-motion — mirrors triggerConfetti
+        // in src/app/tasks/page.tsx.
+        if (
+          typeof window !== "undefined" &&
+          typeof window.matchMedia === "function" &&
+          window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ) {
+          return;
+        }
+        setConfetti(true);
+        confettiTimer = setTimeout(() => setConfetti(false), 1800);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+      if (confettiTimer) clearTimeout(confettiTimer);
+    };
   }, [memberName]);
 
   const claim = () => {

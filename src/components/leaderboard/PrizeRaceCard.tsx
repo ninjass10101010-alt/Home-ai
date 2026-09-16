@@ -1,6 +1,7 @@
 "use client";
 
 import SectionCard from "@/components/patterns/SectionCard";
+import Avatar from "@/components/ui/Avatar";
 import { raceGap } from "@/lib/task-utils";
 import type { LeaderboardEntry, WeeklyPrize } from "@/types/tasks";
 
@@ -19,10 +20,8 @@ export default function PrizeRaceCard({ prizes, entries, daysUntilReset, myName 
   // members with strictly more points) equals the prize rank — recomputed here
   // from points (entry.rank is not trusted). Ties share a rank, so a rank can
   // have two holders and the next rank can be empty ("Up for grabs").
-  const holdersForRank = (rank: number): string[] =>
-    entries
-      .filter((e) => e.points > 0 && 1 + entries.filter((o) => o.points > e.points).length === rank)
-      .map((e) => e.name.split(" ")[0]);
+  const holdersForRank = (rank: number): LeaderboardEntry[] =>
+    entries.filter((e) => e.points > 0 && 1 + entries.filter((o) => o.points > e.points).length === rank);
 
   const weekHasPoints = entries.some((e) => e.points > 0);
 
@@ -65,8 +64,13 @@ export default function PrizeRaceCard({ prizes, entries, daysUntilReset, myName 
               <span aria-hidden="true" className="text-base leading-none">{prize.emoji}</span>
               <span className="min-w-0 flex-1 text-sm text-text-primary">{prize.text}</span>
               {holders.length > 0 ? (
-                <span className="shrink-0 text-xs font-semibold text-[var(--color-accent-amber)]">
-                  {holders.join(" & ")}
+                <span className="flex shrink-0 items-center gap-1.5 text-xs font-semibold text-[var(--color-accent-amber)]">
+                  {holders.map((h) => (
+                    <span key={h.name} className="inline-flex items-center gap-1">
+                      <Avatar name={h.name} color={h.color} emoji={h.emoji} size="xs" variant="emoji" />
+                      {h.name.split(" ")[0]}
+                    </span>
+                  ))}
                 </span>
               ) : (
                 <span className="shrink-0 text-xs text-text-muted">Up for grabs</span>
@@ -75,10 +79,16 @@ export default function PrizeRaceCard({ prizes, entries, daysUntilReset, myName 
           );
         })}
       </ul>
-      {personalLine && (
-        <p aria-live="polite" className="mt-3 text-sm text-text-secondary">
-          {personalLine}
+      {!weekHasPoints ? (
+        <p className="mt-3 text-sm text-text-secondary">
+          New race started — prizes reset Monday to Monday.
         </p>
+      ) : (
+        personalLine && (
+          <p aria-live="polite" className="mt-3 text-sm text-text-secondary">
+            {personalLine}
+          </p>
+        )
       )}
     </SectionCard>
   );

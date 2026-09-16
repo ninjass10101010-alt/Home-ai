@@ -54,6 +54,8 @@ const POISONED = {
   rewards: [{ id: "evil-reward" }],
   penalties: [{ id: "evil-penalty" }],
   rewardsUpdatedAt: "2026-09-15T00:00:00.000Z",
+  weeklyPrizes: [{ rank: 1, emoji: "🥇", text: "evil prize" }],
+  weeklyPrizesStamp: "2026-09-15T00:00:00.000Z",
 };
 
 const EXISTING = {
@@ -78,7 +80,11 @@ describe("tasks/sync leg gating", () => {
     db.rows = [{ id: "row1", data: EXISTING }];
     const res = await post(POISONED, "child");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, saved: true, ignoredLegs: ["weekData", "rewards", "penalties"] });
+    expect(await res.json()).toEqual({
+      ok: true,
+      saved: true,
+      ignoredLegs: ["weekData", "rewards", "penalties", "weeklyPrizes", "weeklyPrizesStamp"],
+    });
 
     expect(db.updates).toHaveLength(1);
     const stored = db.updates[0].payload.data;
@@ -88,13 +94,21 @@ describe("tasks/sync leg gating", () => {
     expect(stored.rewards).toEqual(EXISTING.rewards);
     expect(stored.penalties).toEqual(EXISTING.penalties);
     expect(stored.rewardsUpdatedAt).toBe(EXISTING.rewardsUpdatedAt);
+    // Weekly prize legs are not applied from a non-parent body either.
+    expect(stored.weeklyPrizes).toBeUndefined();
+    expect(stored.weeklyPrizesStamp).toBeUndefined();
   });
 
   it("pet POST with no prior snapshot stores the tasks leg only", async () => {
     const res = await post(POISONED, "pet");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, saved: true, ignoredLegs: ["weekData", "rewards", "penalties"] });
+    expect(await res.json()).toEqual({
+      ok: true,
+      saved: true,
+      ignoredLegs: ["weekData", "rewards", "penalties", "weeklyPrizes", "weeklyPrizesStamp"],
+    });
     expect(db.creates).toHaveLength(1);
+    // Non-tasks legs — including weekly prizes — are never written.
     expect(db.creates[0].data).toEqual({ tasks: POISONED.tasks });
   });
 

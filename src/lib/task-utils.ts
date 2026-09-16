@@ -1002,8 +1002,71 @@ export async function syncHallOfFameToPB(entries: HallOfFameEntry[]): Promise<vo
       weekStart: e.weekStart,
       points: e.points,
       rank: e.rank,
+      // Prize + celebration state ride the row — without them the server can
+      // never host the win ceremony (the celebrate route 404'd on every call).
+      prize: e.prize ?? null,
+      celebrated: e.celebrated ?? false,
     }).catch(() => {});
   }
+}
+
+/**
+ * The PB→local hall downlink: read the local hall plus PocketBase's
+ * hall_of_fame rows (best-effort — a PB failure degrades to local only) and
+ * merge them keyed by `member + weekStart`. Local entries win
+ * points/emoji/rank/prize (the rollover device froze them); a PB row's
+ * `celebrated === true` ALWAYS wins over the local flag (server authority for
+ * the ceremony gate — the /api/hall-of-fame/celebrate claim lives
+ * server-side, so a win claimed on one device must not re-fire elsewhere);
+ * PB rows unknown to local are adopted (cross-device enshrinement). The
+ * merged list is persisted with saveHallOfFame() and returned.
+ */
+export async function loadHallOfFameMerged(): Promise<HallOfFameEntry[]> {
+  const local = loadHallOfFame();
+  let remote: any[] = [];
+  try {
+    const rows = await db.selectHallOfFame();
+    if (Array.isArray(rows)) remote = rows;
+  } catch {
+    remote = [];
+  }
+  const keyOf = (e: { member?: unknown; weekStart?: unknown }) =>
+    `${typeof e.member === "string" ? e.member : ""}::${typeof e.weekStart === "string" ? e.weekStart : ""}`;
+  const byKey = new Map<string, HallOfFameEntry>();
+  for (const e of local) byKey.set(keyOf(e), { ...e });
+  const adopted: HallOfFameEntry[] = [];
+  for (const r of remote) {
+    if (!r || typeof r.member !== "string" || r.member.length === 0) continue;
+    if (typeof r.weekStart !== "string" || r.weekStart.length === 0) continue;
+    const key = keyOf(r);
+    const existing = byKey.get(key);
+    if (existing) {
+      if (r.celebrated === true) existing.celebrated = true;
+      continue;
+    }
+    const entryDraft: HallOfFameEntry = {
+      member: r.member,
+      emoji: typeof r.emoji === "string" ? r.emoji : "🏅",
+      weekStart: r.weekStart,
+      points: typeof r.points === "number" ? r.points : 0,
+      rank: typeof r.rank === "number" ? r.rank : 1,
+    };
+    if (typeof r.prize === "string" && r.prize.length > 0) entryDraft.prize = r.prize;
+    if (r.celebrated === true) entryDraft.celebrated = true;
+    byKey.set(key, entryDraft);
+    adopted.push(entryDraft);
+  }
+  const merged: HallOfFameEntry[] = [];
+  const seen = new Set<string>();
+  for (const e of local) {
+    const key = keyOf(e);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(byKey.get(key)!);
+  }
+  merged.push(...adopted);
+  saveHallOfFame(merged);
+  return merged;
 }
 
 export async function syncAllTasksToPB(

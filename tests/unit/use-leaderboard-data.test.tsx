@@ -20,7 +20,9 @@ import type { HallOfFameEntry } from "@/types/tasks";
 // Harness note: this repo has no @testing-library/react — tests use the
 // established createRoot + React-act renderHook shim (see
 // tests/unit/use-wall-mode.test.tsx). The hook reads localStorage-backed
-// task-utils for real; only `@/db` is mocked for a deterministic roster.
+// task-utils for real; only `@/db` is mocked for a deterministic roster
+// (+ a controllable PB hall feed for the merged-downlink tests).
+const pbHall = vi.hoisted(() => ({ rows: [] as any[] }));
 vi.mock("@/db", () => ({
   db: {
     selectMembers: () => [
@@ -28,6 +30,7 @@ vi.mock("@/db", () => ({
       { id: 2, name: "Emily", fullName: "Emily", role: "child", emoji: "👧", color: "mint" },
       { id: 3, name: "Fido", fullName: "Fido", role: "pet", emoji: "🐶", color: "amber" },
     ],
+    selectHallOfFame: async () => pbHall.rows,
   },
 }));
 
@@ -82,6 +85,7 @@ function seedHall(entries: Array<{ member: string; rank: number }>) {
 beforeEach(() => {
   document.body.innerHTML = "";
   localStorage.clear();
+  pbHall.rows = [];
 });
 
 afterEach(() => {
@@ -229,5 +233,50 @@ describe("useLeaderboardData — weekly champ badge from hall of fame", () => {
     const rebecca = result.current.data.entries.find((e) => e.name === "Rebecca")!;
 
     expect(rebecca.badges.filter((b) => b === "🥇")).toHaveLength(1);
+  });
+});
+
+describe("useLeaderboardData — hall downlink (PB merge)", () => {
+  // The hook reads the LOCAL hall synchronously for the first render, then
+  // replaces it with the PB-merged list once the downlink resolves.
+
+  async function settle(ms = 20) {
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, ms));
+    });
+  }
+
+  it("first render uses the local hall synchronously, then adopts PB-only rows", async () => {
+    seedWeek({ Rebecca: 15, Emily: 5 });
+    pbHall.rows = [
+      { member: "Rebecca", emoji: "👩", weekStart: "2026-09-07", points: 40, rank: 1, prize: "Movie pick", celebrated: false },
+    ];
+
+    const { result } = renderHook(() => useLeaderboardData());
+    // Local hall is empty at first render — nothing adopted yet.
+    expect(result.current.data.hall).toHaveLength(0);
+    expect(result.current.data.entries.find((e) => e.name === "Rebecca")!.badges).not.toContain("🥇");
+
+    await settle();
+
+    // The PB-only rank-1 row is adopted into the exposed hall…
+    expect(result.current.data.hall).toHaveLength(1);
+    expect(result.current.data.hall[0]).toMatchObject({ member: "Rebecca", rank: 1 });
+    // …and the champ badge follows the merged hall.
+    expect(result.current.data.entries.find((e) => e.name === "Rebecca")!.badges).toContain("🥇");
+  });
+
+  it("a PB celebrated=true flag wins over the local (un-claimed) copy", async () => {
+    seedWeek({ Rebecca: 15, Emily: 5 });
+    seedHall([{ member: "Rebecca", rank: 1 }]); // local copy: not celebrated
+    pbHall.rows = [
+      { member: "Rebecca", emoji: "🏅", weekStart: "2026-09-07", points: 40, rank: 1, celebrated: true },
+    ];
+
+    const { result } = renderHook(() => useLeaderboardData());
+
+    await settle();
+
+    expect(result.current.data.hall[0].celebrated).toBe(true);
   });
 });

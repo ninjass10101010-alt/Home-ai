@@ -195,4 +195,53 @@ describe("WeeklyPrizesCard", () => {
     expect(textInputs(el)).toHaveLength(0);
     expect(buttonByText(el, "Add prize")).toBeTruthy();
   });
+
+  it("a data-refreshed pulse does NOT clobber in-progress edits (dirty guard)", () => {
+    mockAuth.currentUser = { name: "Rebecca", role: "parent" };
+    const el = mount();
+
+    const first = textInputs(el)[0];
+    act(() => {
+      typeInto(first, "Typed but unsaved");
+    });
+
+    // A peer device's save landed in the store; the 60s pulse fires.
+    seedPrizes([{ id: "x", rank: 1, emoji: "🥇", text: "Pancake day" }]);
+    act(() => {
+      window.dispatchEvent(new CustomEvent("consuela-data-refreshed"));
+    });
+
+    expect(textInputs(el)[0].value).toBe("Typed but unsaved");
+  });
+
+  it("still re-reads on the pulse when the card has no unsaved edits", () => {
+    mockAuth.currentUser = { name: "Rebecca", role: "parent" };
+    const el = mount();
+
+    seedPrizes([{ id: "x", rank: 1, emoji: "🥇", text: "Pancake day" }]);
+    act(() => {
+      window.dispatchEvent(new CustomEvent("consuela-data-refreshed"));
+    });
+
+    expect(textInputs(el).map((i) => i.value)).toEqual(["Pancake day"]);
+  });
+
+  it("a pulse applies again after a save clears the dirty flag", async () => {
+    mockAuth.currentUser = { name: "Rebecca", role: "parent" };
+    const el = mount();
+
+    act(() => {
+      typeInto(textInputs(el)[0], "Typed but unsaved");
+    });
+    await act(async () => {
+      buttonByText(el, "Save prizes")!.click();
+    });
+
+    seedPrizes([{ id: "x", rank: 1, emoji: "🥇", text: "Pancake day" }]);
+    act(() => {
+      window.dispatchEvent(new CustomEvent("consuela-data-refreshed"));
+    });
+
+    expect(textInputs(el).map((i) => i.value)).toEqual(["Pancake day"]);
+  });
 });

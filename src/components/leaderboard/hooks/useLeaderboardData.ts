@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { db } from "@/db";
 import type { LeaderboardEntry, WeekData, Task, HallOfFameEntry } from "@/types/tasks";
 import { getLevel, BADGES } from "@/types/tasks";
@@ -15,8 +15,27 @@ import {
   getMemberAllTimePoints,
   getMemberAllTimeCompletions,
   loadHallOfFame,
+  loadHallOfFameMerged,
   todayMondayISO,
 } from "@/lib/task-utils";
+
+// Same list, same content → keep the previous reference (no re-render when
+// the async downlink confirms what the synchronous local read already showed).
+function sameHall(a: HallOfFameEntry[], b: HallOfFameEntry[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((e, i) => {
+    const o = b[i];
+    return (
+      e.member === o.member &&
+      e.weekStart === o.weekStart &&
+      e.rank === o.rank &&
+      e.points === o.points &&
+      e.emoji === o.emoji &&
+      e.prize === o.prize &&
+      e.celebrated === o.celebrated
+    );
+  });
+}
 
 export interface LeaderboardData {
   entries: LeaderboardEntry[];
@@ -31,6 +50,15 @@ export function useLeaderboardData() {
   const [mounted, setMounted] = useState(false);
   const [weekData, setWeekData] = useState<WeekData | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
+  // The hall is async-aware: the local copy renders synchronously for the
+  // first frame, then the PB-merged list (loadHallOfFameMerged — celebrated
+  // is server-truth, PB-only rows adopt) replaces it when the downlink
+  // resolves, so a win claimed on another device never re-fires here and a
+  // champ enshrined on another device still earns the 🥇 badge.
+  const [hall, setHall] = useState<HallOfFameEntry[]>([]);
+  // Mirror of what was last applied so the async downlink can skip scheduling
+  // a state update entirely when the merged hall matches (the common case).
+  const hallRef = useRef<HallOfFameEntry[]>([]);
 
   // The Home leaderboard stays mounted on the always-on kitchen display while
   // tasks get completed elsewhere. The 60s CacheRefresher merges another
@@ -54,8 +82,28 @@ export function useLeaderboardData() {
   useEffect(() => {
     setWeekData(loadWeekData());
     setTasks(loadTasks());
+    hallRef.current = loadHallOfFame();
+    setHall(hallRef.current);
     setMounted(true);
   }, [refreshVersion]);
+
+  // PB→local downlink for the hall: replace the synchronous local read with
+  // the merged list once it resolves (mounted-gated like the rest; never
+  // throws — a PB failure leaves the local hall in place).
+  useEffect(() => {
+    if (!mounted) return;
+    let alive = true;
+    loadHallOfFameMerged()
+      .then((merged) => {
+        if (!alive || sameHall(hallRef.current, merged)) return;
+        hallRef.current = merged;
+        setHall(merged);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [mounted, refreshVersion]);
 
   const daysUntilReset = useMemo(() => {
     if (!mounted) return 7;
@@ -65,11 +113,6 @@ export function useLeaderboardData() {
   const previousRanks = useMemo(() => {
     if (!mounted) return {};
     return getPreviousWeekRanks();
-  }, [mounted]);
-
-  const hall = useMemo(() => {
-    if (!mounted) return [] as HallOfFameEntry[];
-    return loadHallOfFame();
   }, [mounted]);
 
   const entries = useMemo<LeaderboardEntry[]>(() => {

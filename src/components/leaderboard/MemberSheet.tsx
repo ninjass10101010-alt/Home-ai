@@ -19,6 +19,10 @@ interface MemberSheetProps {
   weekGraph: { day: string; points: number }[];
   onClose: () => void;
   getMemberColor: (name: string) => string;
+  // The caller computes this from the Hall of Fame (a rank-1 entry earns the
+  // Weekly Champ 🥇) — the BADGES.week_champ condition itself is a
+  // deliberately dead placeholder.
+  hasWeeklyChamp?: boolean;
 }
 
 export default function MemberSheet({
@@ -32,11 +36,15 @@ export default function MemberSheet({
   weekGraph,
   onClose,
   getMemberColor,
+  hasWeeklyChamp = false,
 }: MemberSheetProps) {
   if (!entry) return null;
   const color = getMemberColor(entry.name);
-  const earnedBadgeObjects = BADGES.filter(b => b.condition(allTimePoints, entry.streak, allTimeComps));
-  const lockedBadges = BADGES.filter(b => !b.condition(allTimePoints, entry.streak, allTimeComps));
+  const isEarned = (b: (typeof BADGES)[number]) =>
+    b.condition(allTimePoints, entry.streak, allTimeComps) ||
+    (b.id === "week_champ" && hasWeeklyChamp);
+  const earnedBadgeObjects = BADGES.filter(isEarned);
+  const lockedBadges = BADGES.filter((b) => !isEarned(b));
   const levelInfo = getLevel(allTimePoints);
   const maxGraphPoints = Math.max(1, ...weekGraph.map(d => d.points));
 

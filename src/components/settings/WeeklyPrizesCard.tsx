@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import SectionCard from "@/components/patterns/SectionCard";
 import SoftButton from "@/components/ui/SoftButton";
@@ -25,10 +25,17 @@ export default function WeeklyPrizesCard({ showToast }: WeeklyPrizesCardProps) {
   const { currentUser } = useAuth();
   const [prizes, setPrizes] = useState<WeeklyPrize[]>(() => loadWeeklyPrizes());
   const [saving, setSaving] = useState(false);
+  // Dirty seam: while the parent has unsaved in-field edits, the 60s pulse
+  // must NOT re-read over them (a peer's edit would wipe mid-typing state).
+  const dirtyRef = useRef(false);
 
-  // Re-read on the 60s CacheRefresher pulse so another device's prize edits land.
+  // Re-read on the 60s CacheRefresher pulse so another device's prize edits
+  // land — but only when the card is clean (no unsaved edits in flight).
   useEffect(() => {
-    const onRefreshed = () => setPrizes(loadWeeklyPrizes());
+    const onRefreshed = () => {
+      if (dirtyRef.current) return;
+      setPrizes(loadWeeklyPrizes());
+    };
     window.addEventListener("consuela-data-refreshed", onRefreshed);
     return () => window.removeEventListener("consuela-data-refreshed", onRefreshed);
   }, []);
@@ -37,6 +44,7 @@ export default function WeeklyPrizesCard({ showToast }: WeeklyPrizesCardProps) {
   if (currentUser?.role !== "parent") return null;
 
   const updateRow = (id: string, patch: Partial<WeeklyPrize>) => {
+    dirtyRef.current = true;
     setPrizes((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
   };
 
@@ -44,12 +52,14 @@ export default function WeeklyPrizesCard({ showToast }: WeeklyPrizesCardProps) {
   // up so a save never leaves a hole (PB rows are rank-keyed and there is no
   // delete API, so a compact ladder is what keeps the two stores aligned).
   const removeRow = (id: string) => {
+    dirtyRef.current = true;
     setPrizes((prev) =>
       prev.filter((p) => p.id !== id).map((p, i) => ({ ...p, rank: (i + 1) as 1 | 2 | 3 }))
     );
   };
 
   const addRow = () => {
+    dirtyRef.current = true;
     setPrizes((prev) => {
       if (prev.length >= MAX_PRIZES) return prev;
       const nextRank = (prev.length + 1) as 1 | 2 | 3;
@@ -80,6 +90,9 @@ export default function WeeklyPrizesCard({ showToast }: WeeklyPrizesCardProps) {
           // One row's failure never blocks the rest — the next push retries.
         }
       }
+      // Save landed — the card is clean again, so the next refresh pulse may
+      // re-read (a peer's newer edit can land after this point).
+      dirtyRef.current = false;
       showToast("🏆 Weekly prizes saved");
     } finally {
       setSaving(false);

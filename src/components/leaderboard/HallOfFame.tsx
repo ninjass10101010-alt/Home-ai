@@ -3,10 +3,20 @@
 
 import Avatar from "@/components/ui/Avatar";
 import { loadHallOfFame } from "@/lib/task-utils";
+import type { HallOfFameEntry } from "@/types/tasks";
 import { useState, useEffect } from "react";
 
+const MEDALS: Record<number, string> = { 1: "🥇", 2: "🥈", 3: "🥉" };
+
+// "2026-09-07" → "Sep 7" (noon parse keeps the date stable across timezones).
+function weekLabel(weekStart: string): string {
+  const d = new Date(`${weekStart}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return weekStart;
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
 export default function HallOfFame() {
-  const [hall, setHall] = useState<any[]>([]);
+  const [hall, setHall] = useState<HallOfFameEntry[]>([]);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -26,6 +36,12 @@ export default function HallOfFame() {
     return acc;
   }, []).sort((a: any, b: any) => b.wins - a.wins || b.points - a.points);
 
+  // Recent week entries, latest week first — each row keeps the prize text
+  // frozen at rollover (spec §4.3), so a later prize edit never rewrites it.
+  const weekEntries = [...hall].sort(
+    (a, b) => b.weekStart.localeCompare(a.weekStart) || a.rank - b.rank
+  );
+
   return (
     <div>
       <p className="text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary mb-2">Hall of Fame</p>
@@ -40,6 +56,22 @@ export default function HallOfFame() {
           </div>
         ))}
       </div>
+      <ul className="mt-3 space-y-1.5">
+        {weekEntries.map((entry) => (
+          <li
+            key={`${entry.member}-${entry.weekStart}-${entry.rank}`}
+            className="flex items-center gap-2 text-xs"
+          >
+            <span className="shrink-0 text-text-muted">Week of {weekLabel(entry.weekStart)}</span>
+            <span aria-hidden="true">{MEDALS[entry.rank] ?? "🏅"}</span>
+            <span className="font-medium text-text-primary">{entry.member.split(" ")[0]}</span>
+            <span className="text-text-muted">{entry.points} pts</span>
+            {typeof entry.prize === "string" && entry.prize.length > 0 && (
+              <span className="ml-auto truncate text-text-secondary">🎁 {entry.prize}</span>
+            )}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

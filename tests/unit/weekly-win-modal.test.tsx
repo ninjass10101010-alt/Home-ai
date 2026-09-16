@@ -10,9 +10,18 @@ import type { ReactElement } from "react";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
-// task-utils pulls @/db at module scope — the modal only needs the pure
-// localStorage helpers, so the db import is stubbed (same as prize-race-card).
-vi.mock("@/db", () => ({ db: {} }));
+// task-utils pulls @/db at module scope — the modal needs the pure local
+// helpers plus the (controllable) PB hall read for the merged downlink.
+// `pbHall.rows === null` mimics an unreachable PB (merged = local only).
+const pbHall = vi.hoisted(() => ({ rows: null as any[] | null }));
+vi.mock("@/db", () => ({
+  db: {
+    selectHallOfFame: () => {
+      if (pbHall.rows === null) return Promise.reject(new Error("pb unreachable"));
+      return Promise.resolve(pbHall.rows);
+    },
+  },
+}));
 
 // The wall gate lives at the Home-page mount site (page.tsx renders
 // `{!wall && <WeeklyWinModal …/>}`); the wrapper below mirrors that mount
@@ -120,6 +129,7 @@ beforeEach(() => {
   fetchMock.mockClear();
   wallState.wall = false;
   motionState.reduced = false;
+  pbHall.rows = null;
 });
 
 afterEach(async () => {
@@ -224,6 +234,24 @@ describe("WeeklyWinModal", () => {
     await mount(<WeeklyWinModal memberName={MEMBER} />);
     expect(dialog()).not.toBeNull();
     expect(confettiCount()).toBe(0);
+  });
+
+  it("a PB-celebrated flag suppresses a locally un-celebrated win (cross-device single-fire)", async () => {
+    // The kid claimed the ceremony on the tablet; this phone's local hall copy
+    // never got the flag. The merged downlink must hide the modal here.
+    saveHallOfFame([winEntry()]);
+    pbHall.rows = [{ ...winEntry(), id: "pb-1", celebrated: true }];
+
+    await mount(<WeeklyWinModal memberName={MEMBER} />);
+    // Give the merged downlink a beat to resolve before asserting it closed.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    expect(dialog()).toBeNull();
+    // The merged flag persisted locally, so a remount stays quiet too.
+    expect(loadHallOfFame()[0].celebrated).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("is not mounted on the wall display's family view (Home-page gate)", async () => {

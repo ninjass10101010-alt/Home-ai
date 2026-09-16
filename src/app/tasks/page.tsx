@@ -324,9 +324,10 @@ export default function TasksPage() {
       const current = weekKey();
       if (current !== weekData.weekStart) {
         // Record the finished week BEFORE resetting: archive it, enshrine the
-        // winner in the Hall of Fame, and keep the ranks for next week's
-        // movement arrows. (archiveAndResetWeek also persists the archive +
-        // the fresh empty week, so the saveWeekData effect can't clobber it.)
+        // top 3 with their weekly prizes in the Hall of Fame, and keep the
+        // ranks for next week's movement arrows. (archiveAndResetWeek also
+        // persists the archive + the fresh empty week, so the saveWeekData
+        // effect can't clobber it.)
         const entries = rankedEntriesFromWeek(weekData, memberEmojis);
         if (entries.length) {
           archiveWeekWinner(entries, weekData.weekStart, loadWeeklyPrizes());
@@ -450,7 +451,7 @@ export default function TasksPage() {
     if (pbSyncPendingRef.current) return;
     pbSyncPendingRef.current = true;
     const t = setTimeout(() => {
-      syncAllTasksToPB(tasks, weekData, getArchivedWeeks(), rewards, penalties, loadHallOfFame());
+      syncAllTasksToPB(tasks, weekData, getArchivedWeeks(), rewards, penalties, loadHallOfFame(), loadWeeklyPrizes());
       pbSyncPendingRef.current = false;
     }, 5000);
     return () => { clearTimeout(t); pbSyncPendingRef.current = false; };
@@ -1819,7 +1820,7 @@ export default function TasksPage() {
               myName={raceName}
             />
 
-            <SectionCard title="Leaderboard" description="This week's family points &amp; streaks" icon="🏆">
+            <SectionCard title="Leaderboard" description="This week's race — resets Monday" icon="🏆">
               <Podium
                 entries={dynamicLeaderboard.slice(0, 3)}
                 prizes={weeklyPrizes}
@@ -1851,6 +1852,7 @@ export default function TasksPage() {
               <MemberSheet
                 open={!!sheetMember}
                 entry={sheetEntry}
+                hasWeeklyChamp={hallOfFame.some(h => h.member === sheetEntry.name && h.rank === 1)}
                 allTimePoints={getMemberAllTimePoints(sheetEntry.name, weekData)}
                 allTimeComps={getMemberAllTimeCompletions(sheetEntry.name, tasks, weekData)}
                 weeklyPoints={sheetEntry.points}

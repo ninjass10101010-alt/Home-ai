@@ -98,6 +98,39 @@ describe("PrizeRaceCard", () => {
     expect(el.querySelector("[aria-live]")).toBeNull();
   });
 
+  it("zero-point week shows the fresh-week line instead of the personal gap line", () => {
+    const el = render(
+      <PrizeRaceCard
+        prizes={PRIZES}
+        entries={[entry("Rebecca", 0), entry("Emily", 0)]}
+        daysUntilReset={4}
+        myName="Rebecca"
+      />
+    );
+    expect(el.textContent).toContain("New race started — prizes reset Monday to Monday.");
+    expect(el.textContent).not.toContain("pts from a prize");
+    expect(el.textContent).not.toContain("keep it up!");
+  });
+
+  it("a zero-point week shows the fresh-week line even when nobody is signed in", () => {
+    const el = render(
+      <PrizeRaceCard prizes={PRIZES} entries={[entry("Rebecca", 0)]} daysUntilReset={4} />
+    );
+    expect(el.textContent).toContain("New race started — prizes reset Monday to Monday.");
+  });
+
+  it("holder slots carry the member's small Avatar before their name", () => {
+    const el = render(
+      <PrizeRaceCard prizes={PRIZES} entries={[entry("Rebecca", 10)]} daysUntilReset={4} />
+    );
+    const gold = prizeRow(el, "Picks the movie")!;
+    const avatar = gold.querySelector(".rounded-full.w-7.h-7");
+    expect(avatar).not.toBeNull();
+    // The avatar chip's row names the holder and leads with the avatar.
+    const holderChip = avatar!.closest("span")!;
+    expect(holderChip.textContent).toContain("Rebecca");
+  });
+
   describe("personal gap line", () => {
     it("celebrates the week leader", () => {
       const el = render(

@@ -80,6 +80,7 @@ import {
   readWeeklyPrizesStamp,
   emptyWeekData,
   syncAllTasksToPB,
+  syncHallOfFameToPB,
 } from "@/lib/task-utils";
 // New Task-6 exports may be absent pre-implementation; access via the module
 // namespace so RED failures land as per-test Errors, not an import-time crash.
@@ -390,4 +391,71 @@ describe("syncAllTasksToPB — weekly prizes leg", () => {
     await expect(syncWeeklyPrizesToPB!(three as any)).resolves.toBeUndefined();
     expect(callsTo("/api/db/weekly_prizes", "POST")).toHaveLength(3);
   });
+});
+
+describe("syncHallOfFameToPB — prize + celebrated payload", () => {
+  // The previous insert payload stripped `prize`/`celebrated`, so no PB row
+  // ever carried a prize and the celebrate route always 404'd (dead code) —
+  // the hall insert must carry both fields so the ceremony gate can live
+  // server-side.
+  it("carries prize + celebrated on the insert", async () => {
+    await syncHallOfFameToPB([
+      {
+        member: "Rebecca",
+        emoji: "👩",
+        weekStart: "2026-09-07",
+        points: 42,
+        rank: 1,
+        prize: "Picks the movie",
+        celebrated: true,
+      },
+    ]);
+    const creates = callsTo("/api/db/hall_of_fame", "POST");
+    expect(creates).toHaveLength(1);
+    expect(callBody(creates[0])).toEqual({
+      member: "Rebecca",
+      emoji: "👩",
+      weekStart: "2026-09-07",
+      points: 42,
+      rank: 1,
+      prize: "Picks the movie",
+      celebrated: true,
+    });
+  });
+
+  it("defaults missing prize/celebrated to null/false (never undefined keys)", async () => {
+    await syncHallOfFameToPB([
+      { member: "Emily", emoji: "👧", weekStart: "2026-09-07", points: 5, rank: 2 },
+    ]);
+    const creates = callsTo("/api/db/hall_of_fame", "POST");
+    expect(creates).toHaveLength(1);
+    const body = callBody(creates[0]);
+    expect(body.prize).toBeNull();
+    expect(body.celebrated).toBe(false);
+  });
+});
+
+describe("tasks page — structured sync carries weekly prizes (7th arg live)", () => {
+  // Task 6's seam existed but the page never passed the prizes — the
+  // structured 5s sync (syncAllTasksToPB) must push the weekly_prizes leg so
+  // a fresh PB gains the prize rows even without a snapshot post.
+  it(
+    "after the 5s structured sync, weekly prizes reach the gateway",
+    { timeout: 12000 },
+    async () => {
+      seedLocalPrizes(PRIZES_SNAP, T_NEW);
+      server.snapshot = { tasks: [], weekData: null };
+
+      await renderTasksPage();
+      // Past the 5s structured-sync debounce.
+      await settle(5600);
+
+      const creates = callsTo("/api/db/weekly_prizes", "POST");
+      // Expect one rank-keyed create per seeded prize (the endpoint upserts by
+      // rank server-side; duplicates from a re-trigger are harmless but the
+      // first pass must include both ranks).
+      const postedRanks = new Set(creates.map((c) => callBody(c).rank));
+      for (const prize of PRIZES_SNAP) expect(postedRanks.has(prize.rank)).toBe(true);
+    }
+  );
 });

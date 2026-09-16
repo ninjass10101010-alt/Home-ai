@@ -8,8 +8,9 @@ const KEY = "tasks-snapshot";
 const COLLECTION = "consuela_data_snapshots";
 // The snapshot's non-tasks legs carry family points/ledger state. A child or
 // pet session may sync the tasks leg only; the rest are ignored (never merged)
-// and reported honestly in the response (F2).
-const NON_PARENT_IGNORED_LEGS = ["weekData", "rewards", "penalties"];
+// and reported honestly in the response (F2) — the weekly prize legs are
+// parent-owned the same way and are not applied from non-parent posts.
+const NON_PARENT_IGNORED_LEGS = ["weekData", "rewards", "penalties", "weeklyPrizes", "weeklyPrizesStamp"];
 
 export async function GET() {
   try {
