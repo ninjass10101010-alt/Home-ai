@@ -258,19 +258,25 @@ export function calculateRealStreak(
   allCompletionsThisWeek: string[]
 ): number {
   const today = todayISO();
-  const monday = mondayOf(new Date(today));
-
+  // Compare DATE STRINGS, not Date instants. Deriving `monday` via
+  // mondayOf() yields local-midnight → toISOString, which on any zone behind
+  // UTC lands at e.g. 04:00Z while the cursor walks at 00:00Z — the Monday
+  // cursor then compares strictly less-than and the loop exits one day early,
+  // undercounting the streak (the family NAS runs TZ=America/Detroit). Date
+  // parts compare lexically and are immune to the offset.
+  const monday = mondayOf(new Date(today)).toISOString().split("T")[0];
   let streak = 0;
-  const check = new Date(today);
+  let cursor = today;
 
-  while (check >= monday) {
-    const checkISO = check.toISOString().split("T")[0];
+  while (cursor >= monday) {
     const hasCompletion = allCompletionsThisWeek.some(
-      (d) => d.split("T")[0] === checkISO
+      (d) => d.split("T")[0] === cursor
     );
     if (!hasCompletion) break;
     streak++;
-    check.setDate(check.getDate() - 1);
+    const prev = new Date(`${cursor}T00:00:00.000Z`);
+    prev.setUTCDate(prev.getUTCDate() - 1);
+    cursor = prev.toISOString().slice(0, 10);
   }
 
   return streak;

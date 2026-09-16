@@ -32,16 +32,30 @@ export function useLeaderboardData() {
   const [weekData, setWeekData] = useState<WeekData | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
 
+  // The Home leaderboard stays mounted on the always-on kitchen display while
+  // tasks get completed elsewhere. The 60s CacheRefresher merges another
+  // device's snapshot into these stores (applyTasksSnapshotToStores) and
+  // dispatches `consuela-data-refreshed`; a roster edit dispatches
+  // `consuela-members-updated`. Re-read on both — the same contract every
+  // other Home data source follows (useWeeklyPrizes/useMeals/usePantry,
+  // KidHome, the Tasks page). Without this the widget froze at its mount-time
+  // points and members' earned points never appeared without a reload.
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  useEffect(() => {
+    const bump = () => setRefreshVersion((v) => v + 1);
+    window.addEventListener("consuela-data-refreshed", bump);
+    window.addEventListener("consuela-members-updated", bump);
+    return () => {
+      window.removeEventListener("consuela-data-refreshed", bump);
+      window.removeEventListener("consuela-members-updated", bump);
+    };
+  }, []);
+
   useEffect(() => {
     setWeekData(loadWeekData());
     setTasks(loadTasks());
     setMounted(true);
-  }, []);
-
-  const completedDates = useMemo(() => {
-    if (!mounted || tasks.length === 0) return [];
-    return getThisWeeksCompletedDates(tasks);
-  }, [tasks, mounted]);
+  }, [refreshVersion]);
 
   const daysUntilReset = useMemo(() => {
     if (!mounted) return 7;
@@ -69,7 +83,10 @@ export function useLeaderboardData() {
         const weeklyPoints = weekData.points[name] || 0;
         const allTimePoints = getMemberAllTimePoints(name, weekData);
         const allTimeComps = getMemberAllTimeCompletions(name, tasks, weekData);
-        const streak = calculateRealStreak(name, weekData, completedDates);
+        // Streaks are per-member: filter this week's completion dates to THIS
+        // member before scoring (calculateRealStreak's documented contract —
+        // an aggregate would hand every member the family's combined streak).
+        const streak = calculateRealStreak(name, weekData, getThisWeeksCompletedDates(tasks, name));
         const { level, title, emoji, progress } = getLevel(allTimePoints);
         const earnedBadges = BADGES.filter(b => b.condition(allTimePoints, streak, allTimeComps)).map(b => b.emoji);
         // Weekly Champ history is out-of-band (BADGES.week_champ condition stays
@@ -100,7 +117,7 @@ export function useLeaderboardData() {
       })
       .sort((a, b) => b.points - a.points || a.name.localeCompare(b.name))
       .map((e, i) => ({ ...e, rank: i + 1 }));
-  }, [weekData, tasks, completedDates, hall, mounted]);
+  }, [weekData, tasks, hall, mounted]);
 
   return {
     data: {
