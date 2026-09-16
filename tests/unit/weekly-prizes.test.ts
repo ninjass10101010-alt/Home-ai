@@ -4,6 +4,7 @@ import {
   loadWeeklyPrizes, saveWeeklyPrizes, prizeForRank,
   DEFAULT_WEEKLY_PRIZES, WEEKLY_PRIZES_KEY,
   raceGap,
+  applyTasksSnapshotToStores, readWeeklyPrizesStamp, writeWeeklyPrizesStamp,
 } from "@/lib/task-utils";
 
 beforeEach(() => localStorage.clear());
@@ -54,5 +55,35 @@ describe("raceGap", () => {
   it("respects maxPrizeRank when fewer prizes are configured", () => {
     // only 2 prizes: #3 is no longer a podium spot — C is chasing #2 (60 pts)
     expect(raceGap("Caspian", board, 2)).toEqual({ rank: 4, onPodium: false, gapToPodium: 50, leader: { name: "Rebecca", points: 120 } });
+  });
+});
+
+describe("applyTasksSnapshotToStores — weekly prizes leg (CacheRefresher)", () => {
+  const FRESHER = [
+    { id: "p1", rank: 1 as const, emoji: "🥇", text: "Pancakes for dinner" },
+    { id: "p2", rank: 2 as const, emoji: "🥈", text: "Picks the movie" },
+  ];
+
+  it("adopts a NEWER-stamped snapshot; an OLDER stamp is ignored entirely", () => {
+    saveWeeklyPrizes([{ id: "p1", rank: 1, emoji: "🥇", text: "Local old pick" }]);
+    writeWeeklyPrizesStamp("2026-09-01T00:00:00.000Z");
+
+    const adopted = applyTasksSnapshotToStores({
+      tasks: [], weekData: null,
+      weeklyPrizes: FRESHER, weeklyPrizesStamp: "2026-09-08T00:00:00.000Z",
+    });
+    expect(adopted).toBe(true);
+    expect(loadWeeklyPrizes()).toEqual(FRESHER);
+    // The snapshot's stamp is carried through verbatim — never re-stamped "now".
+    expect(readWeeklyPrizesStamp()).toBe("2026-09-08T00:00:00.000Z");
+
+    const staleChanged = applyTasksSnapshotToStores({
+      tasks: [], weekData: null,
+      weeklyPrizes: [{ id: "p1", rank: 1, emoji: "🥇", text: "Stale" }],
+      weeklyPrizesStamp: "2026-09-01T00:00:00.000Z",
+    });
+    expect(staleChanged).toBe(false);
+    expect(loadWeeklyPrizes()).toEqual(FRESHER);
+    expect(readWeeklyPrizesStamp()).toBe("2026-09-08T00:00:00.000Z");
   });
 });

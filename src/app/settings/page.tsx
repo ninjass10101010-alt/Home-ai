@@ -31,6 +31,7 @@ import ServicesKeysCard from "@/components/settings/ServicesKeysCard";
 import AiModelsCard from "@/components/settings/AiModelsCard";
 import MuseApiCard from "@/components/settings/MuseApiCard";
 import WallDisplayToggle from "@/components/settings/WallDisplayToggle";
+import WeeklyPrizesCard from "@/components/settings/WeeklyPrizesCard";
 import AvatarPicker from "@/components/profile/AvatarPicker";
 import { warmGlassAccentOptions } from "@/lib/design-tokens";
 import { defaultAccentHex, type AccentTarget } from "@/lib/theme-config";
@@ -855,6 +856,8 @@ export default function SettingsPage() {
               <SoftButton variant="secondary" onClick={inviteMember} className="flex-1">Invite</SoftButton>
             </div>
           </SectionCard>
+
+          <WeeklyPrizesCard showToast={showToast} />
 
           <SectionCard title="Emergency contacts" description="Who gets serious alerts from the home FAB." icon="🛡️" headingLevel="h2">
             <div className="space-y-3">

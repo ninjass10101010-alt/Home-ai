@@ -511,7 +511,20 @@ export function applyTasksSnapshotToStores(snapshot: any): boolean {
   );
   if (tasksChanged) saveTasks(tasks);
   if (weekChanged) saveWeekData(weekData);
-  return tasksChanged || weekChanged;
+  let changed = tasksChanged || weekChanged;
+  // Weekly-prizes leg (same last-write-wins contract the tasks page restore
+  // already uses): only a strictly-newer stamp wins, and the snapshot's stamp
+  // is carried through verbatim so this device stops looking "edited".
+  if (
+    Array.isArray(snapshot.weeklyPrizes) &&
+    typeof snapshot.weeklyPrizesStamp === "string" &&
+    snapshot.weeklyPrizesStamp > readWeeklyPrizesStamp()
+  ) {
+    writeWeeklyPrizesStamp(snapshot.weeklyPrizesStamp);
+    saveWeeklyPrizes(snapshot.weeklyPrizes);
+    changed = true;
+  }
+  return changed;
 }
 
 export function loadRewards<T>(fallback: T): T {
