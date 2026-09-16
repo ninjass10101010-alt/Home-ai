@@ -46,7 +46,8 @@ import { useMorningBriefing, briefingSectionsEmpty } from "@/components/briefing
 import ProfileSheet from "@/components/profile/ProfileSheet";
 import { useHomeEvents } from "@/hooks/useHomeEvents";
 import { normalizeAvatarSize } from "@/lib/avatar-size";
-import { loadTasks, isPendingApproval, PIN_FREE_MAX_AGE } from "@/lib/task-utils";
+import { loadTasks, isPendingApproval, PIN_FREE_MAX_AGE, resolveMemberName } from "@/lib/task-utils";
+import WeeklyWinModal from "@/components/leaderboard/WeeklyWinModal";
 import { todayMondayISO } from "@/lib/meals-week-utils";
 import { useDashboardMode } from "@/hooks/useDashboardMode";
 
@@ -165,6 +166,14 @@ export default function HomePage() {
       glow: Boolean(member.glow),
     };
   }, [currentUser]);
+
+  // Roster-resolved FULL name for the weekly-win ceremony — hall entries are
+  // keyed by full name and the auth name can be a first name (same idiom as
+  // the tasks page's raceName). Null for guests: the modal renders nothing.
+  const weeklyWinName = useMemo(
+    () => (isLoggedIn && currentUser ? resolveMemberName(db.selectMembers(), currentUser.name) : null),
+    [isLoggedIn, currentUser]
+  );
 
   // Quiet sign-in feedback toast (PIN-fallback copy) — same 3s auto-dismiss
   // pattern the Meals/Calendar pages use; the session-warning Toast below is
@@ -785,6 +794,10 @@ export default function HomePage() {
               member={dashboardCurrentUser}
             />
           )}
+
+          {/* Weekly-win ceremony. On the wall display the family view stays
+              ceremony-free — only kid mode mounts it there (KidHome). */}
+          {!wall && <WeeklyWinModal memberName={weeklyWinName} />}
 
           {isLoggedIn && (
             <Modal

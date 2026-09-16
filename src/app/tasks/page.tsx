@@ -63,6 +63,8 @@ import AchievementWall from "@/components/leaderboard/AchievementWall";
 import HallOfFame from "@/components/leaderboard/HallOfFame";
 import TrophyCase from "@/components/leaderboard/TrophyCase";
 import ShareCard from "@/components/leaderboard/ShareCard";
+import WeeklyWinModal from "@/components/leaderboard/WeeklyWinModal";
+import ConfettiBurst from "@/components/ui/ConfettiBurst";
 import RemindersSection from "@/components/tasks/RemindersSection";
 
 function isoOffset(days: number): string {
@@ -236,38 +238,8 @@ function loadFromStorage<T>(key: string, fallback: T): T {
   } catch { return fallback; }
 }
 
-function ConfettiBurst({ active }: { active: boolean }) {
-  if (!active) return null;
-  const particles = Array.from({ length: 20 }, (_, i) => ({
-    id: i,
-    left: `${Math.random() * 100}%`,
-    delay: `${Math.random() * 0.5}s`,
-    size: `${6 + Math.random() * 8}px`,
-    color: ["#f59e0b","#ef4444","#22c55e","#3b82f6","#a855f7","#ec4899","#14b8a6"][i % 7],
-    x: `${(Math.random() - 0.5) * 120}px`,
-    y: `${-80 - Math.random() * 80}px`,
-  }));
-  return (
-    <div className="pointer-events-none fixed inset-0 z-[100] overflow-hidden">
-      {particles.map((p) => (
-        <span
-          key={p.id}
-          className="absolute animate-confetti-fall rounded-full"
-          style={{
-            left: p.left,
-            top: "50%",
-            width: p.size,
-            height: p.size,
-            backgroundColor: p.color,
-            animationDelay: p.delay,
-            "--confetti-x": p.x,
-            "--confetti-y": p.y,
-          } as React.CSSProperties}
-        />
-      ))}
-    </div>
-  );
-}
+// ConfettiBurst now lives in src/components/ui/ConfettiBurst.tsx (extracted
+// verbatim so the tasks page and the WeeklyWinModal share one component).
 
 export default function TasksPage() {
   const [mounted, setMounted] = useState(false);
@@ -1395,6 +1367,9 @@ export default function TasksPage() {
   return (
     <PageShell>
       <ConfettiBurst active={confettiActive} />
+      {/* Weekly prize ceremony — raceName is the roster-resolved FULL name
+          (hall entries are keyed by full name); null for guests = no render. */}
+      <WeeklyWinModal memberName={raceName} />
       <Toast open={Boolean(toast)} tone={toast?.includes("Failed") ? "error" : toast?.includes("grabbed") || toast?.includes("not connected") || toast?.includes("not granted") ? "neutral" : "success"}>{toast}</Toast>
 
       <div className="mx-auto w-full lg:max-w-3xl">

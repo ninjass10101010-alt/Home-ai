@@ -46,6 +46,7 @@ vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ ...mockAuth, logout: vi.fn
 
 vi.mock("@/db", () => ({
   db: {
+    selectMembers: () => [],
     selectMembersDetailed: () => [],
     selectTodaysEvents: () => [],
     selectPendingTasks: () => [],

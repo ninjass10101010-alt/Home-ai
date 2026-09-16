@@ -111,6 +111,9 @@ vi.mock("@/components/integrations/AllowanceWidget", () => ({ default: () => nul
 vi.mock("@/components/integrations/LearningWidget", () => ({ default: () => null }));
 vi.mock("@/components/ui/EmergencyButton", () => ({ default: () => <div data-testid="emergency-button" /> }));
 vi.mock("@/components/ui/SyncInit", () => ({ default: () => null }));
+// KidHome mounts the weekly-win ceremony (Task 10) — stubbed out here; the
+// task-utils mock above doesn't carry the hall-of-fame helpers it reads.
+vi.mock("@/components/leaderboard/WeeklyWinModal", () => ({ default: () => null }));
 vi.mock("@/hooks/useAtmosphericTheme", () => ({
   AtmosphericProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   useAtmosphericTheme: () => ({

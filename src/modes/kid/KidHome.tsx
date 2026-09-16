@@ -60,6 +60,7 @@ import QuestCard from "./QuestCard";
 import LevelBar from "./LevelBar";
 import CelebrationBurst from "./CelebrationBurst";
 import KidProfileSheet from "@/components/modes/kid/KidProfileSheet";
+import WeeklyWinModal from "@/components/leaderboard/WeeklyWinModal";
 import { ledgerKey, pointsFor, currentWeekPoints, unreachableCopy, verifyPinRemote } from "./kid-store";
 import SpotifyWidget from "@/components/integrations/SpotifyWidget";
 import AllowanceWidget from "@/components/integrations/AllowanceWidget";
@@ -587,6 +588,10 @@ export default function KidHome() {
     </Modal>
   );
 
+  // Roster-resolved FULL name for the weekly-win ceremony (hall entries are
+  // keyed by full name; the auth name can be a first name).
+  const weeklyWinName = user ? resolveMemberName(db.selectMembers(), user.name) : null;
+
   // ── BEDTIME MODE ──
   if (isBedtime) {
     return (
@@ -894,6 +899,11 @@ export default function KidHome() {
             onVerify={questPadVerify}
           />
         )}
+
+        {/* Weekly-win ceremony — the kid's own prize celebration. Mounted on
+            the normal/weekend surface only (bedtime stays calm); on the wall
+            display this is the ONLY mount (the family view skips it). */}
+        <WeeklyWinModal memberName={weeklyWinName} />
 
         {/* Kid profile sheet — the hero avatar tap target (bedtime renders its own). */}
         <KidProfileSheet
