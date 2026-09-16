@@ -42,13 +42,14 @@ import {
   pickDefaultClaimMember, isSnatchable, isPendingApproval,
   completesWithoutPin, completesWithPendingApproval,
   tapCompletePending, sendBackPendingCompletion, approvePendingCompletion, resolveMemberName,
-  mergeTasksSnapshot,
+  mergeTasksSnapshot, getDaysUntilWeekReset,
 } from "@/lib/task-utils";
 import {
   readRewardsStamp, touchRewardsStamp, writeRewardsStamp,
   verifyPinRemote, unreachableCopy,
 } from "@/modes/kid/kid-store";
 import Podium from "@/components/leaderboard/Podium";
+import PrizeRaceCard from "@/components/leaderboard/PrizeRaceCard";
 import YourCard from "@/components/leaderboard/YourCard";
 import MemberSheet from "@/components/leaderboard/MemberSheet";
 import LeaderboardRow from "@/components/leaderboard/LeaderboardRow";
@@ -288,6 +289,17 @@ export default function TasksPage() {
   // consuela-members-updated listener above) so the roster memos recompute —
   // deliberate recompute trigger, same pattern as PlanTab's familyMembers.
   const membersData = useMemo(() => db.selectMembers(), [membersVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Weekly prizes: re-read whenever the cross-device refresh lands — a fresher
+  // snapshot may have adopted a new prize catalog (restoreFromSnapshot below).
+  // Same listener-and-version pattern as membersVersion above.
+  const [prizesVersion, setPrizesVersion] = useState(0);
+  useEffect(() => {
+    const onDataRefreshed = () => setPrizesVersion(v => v + 1);
+    window.addEventListener("consuela-data-refreshed", onDataRefreshed);
+    return () => window.removeEventListener("consuela-data-refreshed", onDataRefreshed);
+  }, []);
+  const weeklyPrizes = useMemo(() => loadWeeklyPrizes(), [prizesVersion]); // eslint-disable-line react-hooks/exhaustive-deps
   const { currentUser, isLoggedIn } = useAuth();
   const allMembers = useMemo(() => {
     // Pets are never assignees — a task handed to 🐶 would strand its points
@@ -1303,6 +1315,7 @@ export default function TasksPage() {
   const familyTotal = dynamicLeaderboard.reduce((sum, entry) => sum + entry.points, 0);
   const championShare = familyTotal > 0 ? topScorer.points / familyTotal : 0;
   const weeklyEarned = Object.values(weekData.points).reduce((a, b) => a + b, 0);
+  const daysUntilReset = getDaysUntilWeekReset();
 
   // The three StatTiles all follow the member filter: a parent tapping a kid's
   // tile reads that kid's open chores / this-week completions / this week's
@@ -1359,6 +1372,9 @@ export default function TasksPage() {
   const myEntry = isLoggedIn && currentUser ? dynamicLeaderboard.find(e => e.name === currentUser.name || e.name.startsWith(currentUser.name)) : null;
   const aheadEntry = myEntry && myEntry.rank > 1 ? dynamicLeaderboard[myEntry.rank - 2] : undefined;
   const behindEntry = myEntry && myEntry.rank < dynamicLeaderboard.length ? dynamicLeaderboard[myEntry.rank] : undefined;
+  // Roster-resolved FULL name for the prize-race personal line — raceGap
+  // matches exact weekData keys and currentUser.name can be a first name.
+  const raceName = isLoggedIn && currentUser ? resolveMemberName(membersData, currentUser.name) : null;
 
   if (!mounted) {
     return (
@@ -1805,6 +1821,13 @@ export default function TasksPage() {
                 onGoToTasks={() => setActiveTab("tasks")}
               />
             )}
+
+            <PrizeRaceCard
+              prizes={weeklyPrizes}
+              entries={dynamicLeaderboard}
+              daysUntilReset={daysUntilReset}
+              myName={raceName}
+            />
 
             <SectionCard title="Leaderboard" description="This week's family points &amp; streaks" icon="🏆">
               <Podium
