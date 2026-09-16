@@ -2,9 +2,12 @@
 // HomeLeaderboardWidget weekly-prize race line (Task 12).
 // One compact footer line inside the leaderboard card:
 //   zero week   → "New week — prizes up for grabs 🥇🥈🥉"
-//   on podium   → "🥇 {prize} — you're holding it!" (prize clamped ~30 chars)
+//   on podium   → "🥇 {prize} — you're holding it!" (prize clipped ~30 chars)
 //   off podium  → "{gap} pts to {medal} — {prize}"
 //   signed out  → "🥇 🥈 🥉 prizes this week"
+// All variants render as ONE text flow: the wrapper <p> carries line-clamp-1;
+// no inline child carries a clamp class (line-clamp-* on an inline span forces
+// display:-webkit-box and splits the line in real browsers).
 // Harness: createRoot + act (no @testing-library/react in this repo — see
 // tests/unit/use-leaderboard-data.test.tsx). The leaderboard-data hook and
 // auth are mocked; the roster (`@/db`) is mocked; task-utils stays REAL so
@@ -85,6 +88,18 @@ async function renderWidget(): Promise<HTMLElement> {
   return el;
 }
 
+// One shared structural pin for every race-line variant: the clamp lives on
+// the wrapper <p> itself; the line is a single text flow with no child
+// elements carrying a clamp class (a `line-clamp-1` inline span forces
+// display:-webkit-box and breaks the one-line flow in a real browser).
+function expectSingleFlowLine(line: Element | null) {
+  expect(line).not.toBeNull();
+  expect(line!.tagName).toBe("P");
+  expect(line!.className).toContain("line-clamp-1");
+  expect(line!.querySelector(".line-clamp-1, .truncate")).toBeNull();
+  expect(line!.children.length).toBe(0);
+}
+
 describe("HomeLeaderboardWidget — weekly prize race line", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
@@ -124,6 +139,7 @@ describe("HomeLeaderboardWidget — weekly prize race line", () => {
     ]);
     const el = await renderWidget();
     expect(el.textContent).toContain("New week — prizes up for grabs 🥇🥈🥉");
+    expectSingleFlowLine(el.querySelector('[data-testid="prize-race-line"]'));
   });
 
   it("signed in + on podium (resolved full name): '🥇 Movie pick — you're holding it!'", async () => {
@@ -147,6 +163,7 @@ describe("HomeLeaderboardWidget — weekly prize race line", () => {
     // Default board: Caspian 10 at rank 4, podium cut-off is Bailey at 30.
     const el = await renderWidget();
     expect(el.textContent).toContain("20 pts to 🥉 — Two dollars");
+    expectSingleFlowLine(el.querySelector('[data-testid="prize-race-line"]'));
   });
 
   it("signed out: '🥇 🥈 🥉 prizes this week'", async () => {
@@ -155,9 +172,10 @@ describe("HomeLeaderboardWidget — weekly prize race line", () => {
     authMock.isLoggedIn = false;
     const el = await renderWidget();
     expect(el.textContent).toContain("🥇 🥈 🥉 prizes this week");
+    expectSingleFlowLine(el.querySelector('[data-testid="prize-race-line"]'));
   });
 
-  it("holding a long-named prize clamps the text at ~30 chars with a line-clamp class", async () => {
+  it("holding a long-named prize clips the text at ~30 chars and renders as one clamped flow line", async () => {
     seedPrizes([
       { id: "p1", rank: 1, emoji: "🥇", text: "Picks the Friday night family movie" }, // 36 chars
       { id: "p2", rank: 2, emoji: "🥈", text: "Dessert choice" },
@@ -172,12 +190,10 @@ describe("HomeLeaderboardWidget — weekly prize race line", () => {
     authMock.isLoggedIn = true;
     const el = await renderWidget();
     const line = el.querySelector('[data-testid="prize-race-line"]');
-    expect(line).not.toBeNull();
+    expectSingleFlowLine(line);
     expect(line!.textContent).toContain("you're holding it!");
     expect(line!.textContent).toContain("Picks the Friday night family");
-    // Clamped: the tail of the 36-char text never renders.
+    // Clipped: the tail of the 36-char text never renders.
     expect(line!.textContent).not.toContain("family movie");
-    // And the clamp element carries a real CSS clamp/truncate class.
-    expect(line!.querySelector(".line-clamp-1, .truncate")).not.toBeNull();
   });
 });

@@ -13,7 +13,9 @@ import { getGapMessage, raceGap, resolveMemberName, prizeForRank } from "@/lib/t
 import type { LeaderboardEntry, WeeklyPrize } from "@/types/tasks";
 
 // Prize copy is one compact line — long prize text from Settings gets a hard
-// ~30-char clip plus the CSS line-clamp so the footer never wraps.
+// ~30-char clip, and the line wrapper itself carries line-clamp-1 (never an
+// inline child: a clamped inline span forces display:-webkit-box, which would
+// split the line in a real browser).
 const PRIZE_TEXT_MAX = 30;
 function clipPrizeText(text: string): string {
   return text.length > PRIZE_TEXT_MAX ? `${text.slice(0, PRIZE_TEXT_MAX)}…` : text;
@@ -35,7 +37,7 @@ function PrizeRaceLine({
   const ordered = [...prizes].sort((a, b) => a.rank - b.rank);
   if (!myName) {
     return (
-      <p data-testid="prize-race-line" className="mt-3 text-xs text-text-secondary">
+      <p data-testid="prize-race-line" className="mt-3 text-xs text-text-secondary line-clamp-1">
         {ordered.map((p) => p.emoji).join(" ")} prizes this week
       </p>
     );
@@ -49,8 +51,8 @@ function PrizeRaceLine({
     const prize = prizeForRank(ordered, gap.rank);
     if (prize) {
       return (
-        <p data-testid="prize-race-line" className="mt-3 text-xs text-text-secondary">
-          {prize.emoji} <span className="line-clamp-1">{clipPrizeText(prize.text)}</span> — you&apos;re holding it!
+        <p data-testid="prize-race-line" className="mt-3 text-xs text-text-secondary line-clamp-1">
+          {prize.emoji} {clipPrizeText(prize.text)} — you&apos;re holding it!
         </p>
       );
     }
@@ -58,7 +60,7 @@ function PrizeRaceLine({
   const chase = ordered[ordered.length - 1];
   if (gap.gapToPodium !== null && gap.gapToPodium > 0) {
     return (
-      <p data-testid="prize-race-line" className="mt-3 text-xs text-text-secondary">
+      <p data-testid="prize-race-line" className="mt-3 text-xs text-text-secondary line-clamp-1">
         {gap.gapToPodium} pts to {chase.emoji} — {clipPrizeText(chase.text)}
       </p>
     );
@@ -194,7 +196,7 @@ export default function HomeLeaderboardWidget({ className = "" }: { className?: 
             flat
           />
           {prizes.length > 0 && (
-            <p data-testid="prize-race-line" className="mt-3 text-xs text-text-secondary">
+            <p data-testid="prize-race-line" className="mt-3 text-xs text-text-secondary line-clamp-1">
               New week — prizes up for grabs {prizeEmojis}
             </p>
           )}

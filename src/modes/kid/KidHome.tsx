@@ -172,7 +172,7 @@ function KidLeaderboard({ members }: { members: { name: string; color: string; e
             <p className="text-xs text-text-secondary">
               You&apos;re #{myRank} — <span className="text-[var(--color-accent-selected)] font-semibold">you can do it!</span>
             </p>
-          )           : (
+          ) : (
             <p className="text-xs text-text-muted">Complete quests to climb the ranks!</p>
           )}
           {prizeLine && (
