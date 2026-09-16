@@ -6,6 +6,7 @@ import { buildClemSystemPrompt, buildConsuelaSystemPrompt, buildKidSystemPrompt,
 import { buildMemoryContext } from "@/lib/family-memory";
 import { MEMORY_USER_ID, MEMORY_FAMILY_ID } from "@/lib/memory-ids";
 import { resolveChatTargets, resetAiTargetsForTests, type AiTarget } from "@/lib/ai/targets";
+import { recordChatOutcome } from "@/lib/ai/health";
 import { loadContextPack, type PackScope } from "@/lib/consuela/assistant-context";
 import {
   isPlannerIntent,
@@ -75,7 +76,13 @@ const CLEM_TOOLS = [
   "get_recipes",
   "compare_grocery_prices",
 ];
-const MAX_ROUNDS = 4;
+const MAX_ROUNDS = 6;
+// The FINAL round of the loop is a forced tool-free "wrap-up": the model must
+// answer with what it already gathered instead of chaining yet another lookup
+// (fresh /new conversations love multi-tool read chains — this stops the bare
+// "ran out of steps" fallback from being the common answer).
+const WRAPUP_NOTE =
+  "You have used all your research steps. Answer the user's question now using the information you already gathered — do not attempt any more lookups.";
 
 interface ToolCall {
   id?: string;
@@ -221,8 +228,9 @@ async function callAiStream(
       messages,
       temperature: 0.7,
       max_tokens: AI_MAX_TOKENS,
-      tools: opts.tools,
-      tool_choice: "auto",
+      // tool_choice: auto only when tools exist (wrap-up sends neither —
+      // providers that validate tool_choice against tools would 400).
+      ...(opts.tools !== undefined ? { tools: opts.tools, tool_choice: "auto" } : {}),
       ...(wantStream ? { stream: true } : {}),
     }),
   });
@@ -396,44 +404,74 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
   const writer = writable.getWriter();
   const enc = new TextEncoder();
-  const write = (frame: string) => { writer.write(enc.encode(frame)).catch(() => { /* client gone */ }); };
+  let clientGone = false;
+  const write = (frame: string) => {
+    writer.write(enc.encode(frame)).catch(() => {
+      // The requester disconnected mid-stream (tab closed / stopped / the 5-min
+      // client watchdog fired). Server-side this is a distinct outcome from an
+      // LLM failure — flag it so the health log says so.
+      clientGone = true;
+    });
+  };
+  const startedAt = Date.now();
 
   (async () => {
+    // Health-recorder context hoisted so the catch path records rounds/brain too.
+    const ctx = { agent: body.agent || "consuela", rounds: 0, brain: null as string | null, targets: 0 };
     try {
       const { message, isClem, targets, tools, messages, sessionName } = await buildChatContext(request, body);
+      ctx.brain = targets.length ? `${targets[0].provider}/${targets[0].model}` : null;
+      ctx.targets = targets.length;
       let finalContent = "";
+      let answeredBy = "ok" as "ok" | "wrapup" | "exhausted";
       if (targets.length === 0) {
+        recordChatOutcome({ outcome: "unconfigured", agent: ctx.agent, rounds: 0, ms: Date.now() - startedAt, brain: null, targets: 0 });
         write(sseFrame(JSON.stringify({ message: "My brain isn't configured yet — add a provider in Settings → AI Models." }), "error"));
         return;
       }
       for (let round = 0; round < MAX_ROUNDS; round++) {
+        ctx.rounds = round + 1;
+        // Final round = forced tool-free wrap-up: no tools are offered, so the
+        // model must produce content from what it already gathered.
+        const wrapup = round === MAX_ROUNDS - 1;
         let content = "";
         let tool_calls: ToolCall[] | undefined;
         let lastErr: unknown = null;
         for (const target of targets) {
+          const callStarted = Date.now();
           try {
-            ({ content, tool_calls } = await callAiStream(messages, { tools, target }, write));
+            ({ content, tool_calls } = await callAiStream(
+              wrapup ? [...messages, { role: "system", content: WRAPUP_NOTE }] : messages,
+              wrapup ? { target } : { tools, target },
+              write,
+            ));
+            if (wrapup) tool_calls = undefined; // a wrap-up round never executes tools
             // An EMPTY round (reasoning consumed the budget, no content, no
             // tool calls) is not an answer — fail over to the next target.
             // callAiStream already announced "Thinking deeply…" if reasoning
             // was streamed, so the client saw progress, not dead dots.
             if (!content && (!tool_calls || tool_calls.length === 0)) {
               lastErr = new Error(`empty round from ${target.model}`);
-              console.warn(`[ai] stream target ${target.model}: empty round (reasoning budget?) — trying next target`);
+              console.warn(`[ai] stream target ${target.model}: empty round (reasoning budget?) (${Date.now() - callStarted}ms) — trying next target`);
               continue;
             }
             lastErr = null;
             break;
           } catch (err) {
             lastErr = err;
-            console.warn(`[ai] stream target ${target.model} failed: ${(err as Error).message}`);
+            console.warn(`[ai] stream target ${target.model} failed: ${(err as Error).message} (${Date.now() - callStarted}ms)`);
           }
         }
         if (lastErr) {
+          // A failed wrap-up is NOT a brain snag — fall through to the honest
+          // exhaustion message below (the model did the research; it just
+          // couldn't render the final summary this time).
+          if (wrapup) break;
           throw lastErr;
         }
         if (!tool_calls || tool_calls.length === 0) {
           finalContent = content;
+          answeredBy = wrapup ? "wrapup" : "ok";
           break;
         }
         messages.push({ role: "assistant", content, tool_calls });
@@ -450,14 +488,34 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
         });
       }
       if (!finalContent) {
+        answeredBy = "exhausted";
         finalContent = "I kept needing to look things up and ran out of steps — give me a moment and try again! 🔧";
         // Streamed clients must see exactly what gets persisted.
         write(sseFrame(JSON.stringify({ t: finalContent })));
       }
+      recordChatOutcome({
+        outcome: clientGone ? "client_gone" : answeredBy,
+        agent: ctx.agent,
+        rounds: ctx.rounds,
+        ms: Date.now() - startedAt,
+        brain: ctx.brain,
+        targets: ctx.targets,
+      });
       if (!isClem) await persistChatPair(request, message, finalContent, sessionName || "");
       write(sseFrame("[DONE]"));
     } catch (error: any) {
       console.error("Consuela stream error:", error?.message || error);
+      try {
+        recordChatOutcome({
+          outcome: clientGone ? "client_gone" : "snag",
+          agent: ctx.agent,
+          rounds: ctx.rounds,
+          ms: Date.now() - startedAt,
+          brain: ctx.brain,
+          targets: ctx.targets,
+          reason: String(error?.message || error).slice(0, 200),
+        });
+      } catch { /* health recording must never break the stream */ }
       write(sseFrame(JSON.stringify({ message: "Hey, I hit a snag connecting to my brain right now. Give me a moment and try again! 🔧" }), "error"));
     } finally {
       writer.close().catch(() => {});
@@ -555,44 +613,64 @@ export async function POST(request: NextRequest) {
     return handleStreamedChat(request, body);
   }
 
+  const bufferedStartedAt = Date.now();
+  // Health-recorder context hoisted so failures before/inside the loop still
+  // carry the REAL rounds/brain/agent instead of zeroed placeholders.
+  const ctx = { agent: body.agent || "consuela", rounds: 0, brain: null as string | null, targets: 0 };
   try {
     const { isClem, targets, tools, messages, role, sessionName } = await buildChatContext(request, body);
+    ctx.brain = targets.length ? `${targets[0].provider}/${targets[0].model}` : null;
+    ctx.targets = targets.length;
     console.log(`[ai] agent=${body.agent || "consuela"} isClem=${isClem} brain=${targets[0]?.provider}/${targets[0]?.model} role=${role}`);
 
     if (targets.length === 0) {
+      recordChatOutcome({ outcome: "unconfigured", agent: ctx.agent, rounds: 0, ms: Date.now() - bufferedStartedAt, brain: null, targets: 0 });
       return NextResponse.json({ content: "My brain isn't configured yet — add a provider in Settings → AI Models." });
     }
 
     let lastErr: unknown = null;
     const proposals: unknown[] = [];
     for (let round = 0; round < MAX_ROUNDS; round++) {
+      ctx.rounds = round + 1;
+      // Final round = forced tool-free wrap-up (mirrors the streamed path).
+      const wrapup = round === MAX_ROUNDS - 1;
       let content = "";
       let tool_calls: ToolCall[] | undefined;
       for (const target of targets) {
+        const callStarted = Date.now();
         try {
-          ({ content, tool_calls } = await callAi(messages, {
-            tools,
-            toolChoice: "auto",
-            target,
-          }));
+          ({ content, tool_calls } = await callAi(
+            wrapup ? [...messages, { role: "system", content: WRAPUP_NOTE }] : messages,
+            wrapup ? { target } : { tools, toolChoice: "auto", target },
+          ));
+          if (wrapup) tool_calls = undefined; // a wrap-up round never executes tools
           if (!content && (!tool_calls || tool_calls.length === 0)) {
             lastErr = new Error(`empty round from ${target.model}`);
-            console.warn(`[ai] target ${target.model}: empty round (reasoning budget?) — trying next target`);
+            console.warn(`[ai] target ${target.model}: empty round (reasoning budget?) (${Date.now() - callStarted}ms) — trying next target`);
             continue;
           }
           lastErr = null;
           break;
         } catch (err) {
           lastErr = err;
-          console.warn(`[ai] target ${target.model} failed: ${(err as Error).message}`);
+          console.warn(`[ai] target ${target.model} failed: ${(err as Error).message} (${Date.now() - callStarted}ms)`);
         }
       }
       if (lastErr) {
+        if (wrapup) break; // failed wrap-up → honest exhaustion JSON below
         throw lastErr;
       }
 
       if (!tool_calls || tool_calls.length === 0) {
         if (!isClem) await persistChatPair(request, message, content, sessionName || "");
+        recordChatOutcome({
+          outcome: wrapup ? "wrapup" : "ok",
+          agent: ctx.agent,
+          rounds: ctx.rounds,
+          ms: Date.now() - bufferedStartedAt,
+          brain: ctx.brain,
+          targets: ctx.targets,
+        });
         return NextResponse.json(proposals.length ? { content, proposals } : { content });
       }
 
@@ -607,12 +685,29 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    recordChatOutcome({
+      outcome: "exhausted",
+      agent: ctx.agent,
+      rounds: MAX_ROUNDS,
+      ms: Date.now() - bufferedStartedAt,
+      brain: ctx.brain,
+      targets: ctx.targets,
+    });
     return NextResponse.json({
       content:
         "I kept needing to look things up and ran out of steps — give me a moment and try again! 🔧",
     });
   } catch (error: any) {
     console.error("Consuela agent error:", error?.message || error);
+    recordChatOutcome({
+      outcome: "snag",
+      agent: ctx.agent,
+      rounds: ctx.rounds,
+      ms: Date.now() - bufferedStartedAt,
+      brain: ctx.brain,
+      targets: ctx.targets,
+      reason: String(error?.message || error).slice(0, 200),
+    });
     return NextResponse.json({
       content:
         "Hey, I hit a snag connecting to my brain right now. Give me a moment and try again! 🔧",

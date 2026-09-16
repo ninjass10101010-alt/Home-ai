@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
     { url: "http://brain.local", key: "test-key", model: "test-model", provider: "test", fallback: false },
   ]),
   resetAiTargetsForTests: vi.fn(),
+  recordChatOutcome: vi.fn(),
 }));
 
 vi.mock("@/lib/hermes-tools", () => ({
@@ -22,6 +23,7 @@ vi.mock("@/lib/ai/targets", () => ({
   resetAiTargetsForTests: mocks.resetAiTargetsForTests,
 }));
 vi.mock("@/db", () => ({ db: { insertChatMessage: mocks.insertChatMessage } }));
+vi.mock("@/lib/ai/health", () => ({ recordChatOutcome: mocks.recordChatOutcome }));
 
 import { POST, resetAiChatForTests } from "@/app/api/hermes/chat/route";
 
@@ -59,8 +61,11 @@ async function post(body: Record<string, unknown>) {
 beforeEach(() => {
   vi.stubEnv("SESSION_SECRET", "test-secret-0123456789");
   resetAiChatForTests();
-  mocks.resolveChatTargets.mockClear();
+  mocks.resolveChatTargets.mockReset().mockResolvedValue([
+    { url: "http://brain.local", key: "test-key", model: "test-model", provider: "test", fallback: false },
+  ]);
   mocks.insertChatMessage.mockClear();
+  mocks.recordChatOutcome.mockClear();
   mocks.getTool.mockReset().mockReturnValue(undefined);
   mocks.buildToolsForOpenAI.mockReset().mockReturnValue([]);
 });
@@ -137,21 +142,69 @@ describe("hermes chat — streaming mode", () => {
     expect(aYieldedEarly).toBe(true);
   });
 
-  it("streams the exhaustion message when it runs out of rounds", async () => {
-    // EVERY Hermes round answers with a tool call → MAX_ROUNDS exhausts with no
-    // final answer. The synthesized fallback must reach the client as a token
-    // frame (not just the DB) so the live view matches the persisted thread.
+  // Wrap-up contract (2026-09-16): MAX_ROUNDS is 6 and the FINAL round is a
+  // forced tool-free "answer now" call — a model that keeps tool-chaining must
+  // be forced to summarize what it already gathered instead of the family
+  // seeing the bare "ran out of steps" fallback on every broad question.
+  it("forces a tool-free wrap-up answer on the final round", async () => {
     mocks.getTool.mockReturnValue({ handler: vi.fn(async () => '{"ok":true}') });
     mocks.buildToolsForOpenAI.mockReturnValue([
       { type: "function", function: { name: "get_pantry", parameters: {} } },
     ] as any);
-    vi.stubGlobal("fetch", vi.fn(async () => sseResponse([toolCallRound("c1", "get_pantry", "{}")])));
+    const fetchMock = vi.fn();
+    // Rounds 0-4: the model keeps demanding a tool lookup.
+    for (let i = 0; i < 5; i++) {
+      fetchMock.mockImplementationOnce(async () => sseResponse([toolCallRound("c1", "get_pantry", "{}")]));
+    }
+    // Round 5 (the wrap-up): the model finally answers.
+    fetchMock.mockImplementationOnce(async () => sseResponse([token("Here's the final rundown."), DONE]));
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await post({ message: "dig into everything", stream: true });
+    const body = await res.text();
+    expect(body).toContain('data: {"t":"Here\'s the final rundown."}');
+    expect(body).not.toContain("ran out of steps");
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+    // The wrap-up call must NOT offer tools (forces a content answer) and must
+    // carry the "answer now" system note.
+    const wrapupBody = JSON.parse(fetchMock.mock.calls[5][1].body);
+    expect("tools" in wrapupBody).toBe(false);
+    expect("tool_choice" in wrapupBody).toBe(false);
+    expect(
+      wrapupBody.messages.some((m: any) => m.role === "system" && /all your research steps/.test(m.content))
+    ).toBe(true);
+    // The wrap-up answer — not the exhaustion text — is what persists.
+    const assistantRow = mocks.insertChatMessage.mock.calls
+      .map((c: any[]) => c[0])
+      .find((r: any) => r.role === "assistant");
+    expect(assistantRow?.content).toBe("Here's the final rundown.");
+  });
+
+  it("streams the exhaustion message ONLY when even the wrap-up round fails", async () => {
+    // Every round — including the tool-free wrap-up — comes back with no
+    // content. The synthesized fallback must reach the client as a token frame
+    // (not just the DB) so the live view matches the persisted thread.
+    const handler = vi.fn(async () => '{"ok":true}');
+    mocks.getTool.mockReturnValue({ handler });
+    mocks.buildToolsForOpenAI.mockReturnValue([
+      { type: "function", function: { name: "get_pantry", parameters: {} } },
+    ] as any);
+    const fetchMock = vi.fn(async () => sseResponse([toolCallRound("c1", "get_pantry", "{}")]));
+    vi.stubGlobal("fetch", fetchMock);
     const res = await post({ message: "keep going", stream: true });
     const body = await res.text();
     const exhaustion = "I kept needing to look things up and ran out of steps — give me a moment and try again! 🔧";
     const frame = `data: ${JSON.stringify({ t: exhaustion })}`;
     expect(body).toContain(frame);
     expect(body.indexOf(frame)).toBeLessThan(body.indexOf("data: [DONE]"));
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+    // 5 tool rounds ran the handler; round 6's tool_calls must NOT execute —
+    // the wrap-up offered no tools, so it must never run them either.
+    expect(handler).toHaveBeenCalledTimes(5);
+    const wrapupBody = JSON.parse(((fetchMock.mock.calls as any[])[5] as any[])[1].body as string);
+    expect("tools" in wrapupBody).toBe(false);
+    expect(
+      wrapupBody.messages.some((m: any) => m.role === "system" && /all your research steps/.test(m.content))
+    ).toBe(true);
     const assistantRow = mocks.insertChatMessage.mock.calls
       .map((c: any[]) => c[0])
       .find((r: any) => r.role === "assistant");
@@ -249,8 +302,142 @@ describe("hermes chat — streaming mode", () => {
     expect(res.headers.get("content-type")).toContain("application/json");
     expect((await res.json()).content).toBe("plain");
   });
+
+  it("buffered mode forces the same tool-free wrap-up on the final round", async () => {
+    mocks.getTool.mockReturnValue({ handler: vi.fn(async () => '{"ok":true}') });
+    mocks.buildToolsForOpenAI.mockReturnValue([
+      { type: "function", function: { name: "get_pantry", parameters: {} } },
+    ] as any);
+    const bufferedToolRound = () => new Response(
+      JSON.stringify({
+        choices: [{ message: { role: "assistant", content: "", tool_calls: [
+          { id: "c1", type: "function", function: { name: "get_pantry", arguments: "{}" } },
+        ] } }],
+      }),
+      { status: 200, headers: { "content-type": "application/json" } });
+    const fetchMock = vi.fn();
+    for (let i = 0; i < 5; i++) fetchMock.mockImplementationOnce(async () => bufferedToolRound());
+    fetchMock.mockImplementationOnce(async () => new Response(
+      JSON.stringify({ choices: [{ message: { role: "assistant", content: "Buffered final answer." } }] }),
+      { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await post({ message: "dig into everything" });
+    const json = await res.json();
+    expect(json.content).toBe("Buffered final answer.");
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+    const wrapupBody = JSON.parse(fetchMock.mock.calls[5][1].body);
+    expect("tools" in wrapupBody).toBe(false);
+    expect("tool_choice" in wrapupBody).toBe(false);
+    expect(
+      wrapupBody.messages.some((m: any) => m.role === "system" && /all your research steps/.test(m.content))
+    ).toBe(true);
+  });
 });
 
+// AI Health wiring (2026-09-16): every chat request records ONE structured
+// outcome (metadata only — never message content) so Settings → AI Models can
+// tell "step exhaustion" apart from "LLM timeout" apart from "client gone".
+describe("hermes chat — health outcome recording", () => {
+  it("records outcome=ok with rounds + brain for a clean streamed answer", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => sseResponse([token("ok"), DONE])));
+    await (await post({ message: "hi", stream: true })).text();
+    expect(mocks.recordChatOutcome).toHaveBeenCalledTimes(1);
+    const rec = mocks.recordChatOutcome.mock.calls[0][0];
+    expect(rec.outcome).toBe("ok");
+    expect(rec.rounds).toBe(1);
+    expect(rec.brain).toBe("test/test-model");
+    expect(rec.targets).toBe(1);
+    expect(typeof rec.ms).toBe("number");
+    expect(rec.message).toBeUndefined(); // never message content
+  });
+
+  it("records outcome=wrapup when the forced final round saves the answer", async () => {
+    mocks.getTool.mockReturnValue({ handler: vi.fn(async () => '{"ok":true}') });
+    mocks.buildToolsForOpenAI.mockReturnValue([
+      { type: "function", function: { name: "get_pantry", parameters: {} } },
+    ] as any);
+    const fetchMock = vi.fn();
+    for (let i = 0; i < 5; i++) {
+      fetchMock.mockImplementationOnce(async () => sseResponse([toolCallRound("c1", "get_pantry", "{}")]));
+    }
+    fetchMock.mockImplementationOnce(async () => sseResponse([token("Wrapped up."), DONE]));
+    vi.stubGlobal("fetch", fetchMock);
+    await (await post({ message: "dig", stream: true })).text();
+    const rec = mocks.recordChatOutcome.mock.calls[0][0];
+    expect(rec.outcome).toBe("wrapup");
+    expect(rec.rounds).toBe(6);
+  });
+
+  it("records outcome=exhausted when even the wrap-up round fails", async () => {
+    mocks.getTool.mockReturnValue({ handler: vi.fn(async () => '{"ok":true}') });
+    mocks.buildToolsForOpenAI.mockReturnValue([
+      { type: "function", function: { name: "get_pantry", parameters: {} } },
+    ] as any);
+    vi.stubGlobal("fetch", vi.fn(async () => sseResponse([toolCallRound("c1", "get_pantry", "{}")])));
+    await (await post({ message: "keep going", stream: true })).text();
+    const rec = mocks.recordChatOutcome.mock.calls[0][0];
+    expect(rec.outcome).toBe("exhausted");
+    expect(rec.rounds).toBe(6);
+  });
+
+  it("records outcome=snag with the failure reason when every target fails", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw Object.assign(new Error("aborted"), { name: "TimeoutError" }); }));
+    await (await post({ message: "hi", stream: true })).text();
+    const rec = mocks.recordChatOutcome.mock.calls[0][0];
+    expect(rec.outcome).toBe("snag");
+    expect(rec.reason).toBeTruthy();
+  });
+
+  it("records outcome=unconfigured when the target chain is empty", async () => {
+    mocks.resolveChatTargets.mockResolvedValue([]);
+    await (await post({ message: "hi", stream: true })).text();
+    const rec = mocks.recordChatOutcome.mock.calls[0][0];
+    expect(rec.outcome).toBe("unconfigured");
+    expect(rec.targets).toBe(0);
+  });
+
+  it("records outcome=client_gone when the client drops the stream mid-flight", async () => {
+    // Hand-controlled LLM stream: emit one token, wait for the client to drop
+    // the response, then emit another token + DONE — the route's write() of
+    // that second token rejects, which is exactly the client_gone signal.
+    let emitNext: ((c: string) => void) | null = null;
+    let resolveDone: (() => void) | null = null;
+    const llmStream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const enc = new TextEncoder();
+        emitNext = (s) => controller.enqueue(enc.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: s } }] })}\n\n`));
+        resolveDone = () => { controller.enqueue(enc.encode("data: [DONE]\n\n")); controller.close(); };
+      },
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(llmStream, { status: 200, headers: { "content-type": "text/event-stream" } })));
+    const res = await post({ message: "hi", stream: true });
+    const reader = res.body!.getReader();
+    const firstFrame = (async () => {
+      emitNext!("Hel");
+      const { value } = await reader.read();
+      return new TextDecoder().decode(value);
+    })();
+    expect(await firstFrame).toContain('"t":"Hel"');
+    await reader.cancel(); // client is gone
+    // Route now tries to write the next token to a dead channel, then finishes.
+    emitNext!("lo");
+    resolveDone!();
+    // Let the route's microtask queue drain so the outcome has been recorded.
+    await new Promise((r) => setTimeout(r, 60));
+    expect(mocks.recordChatOutcome).toHaveBeenCalledTimes(1);
+    expect(mocks.recordChatOutcome.mock.calls[0][0].outcome).toBe("client_gone");
+  });
+
+  it("buffered path records outcome=ok", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ choices: [{ message: { role: "assistant", content: "plain" } }] }),
+      { status: 200, headers: { "content-type": "application/json" } })));
+    await post({ message: "hi" });
+    const rec = mocks.recordChatOutcome.mock.calls[0][0];
+    expect(rec.outcome).toBe("ok");
+    expect(rec.rounds).toBe(1);
+  });
+});
 // Task 15 — the chat route must surface a propose_point_adjustment RESULT as
 // an extra `event: status` frame carrying {label, proposal} (streamed) and a
 // top-level `proposals:[…]` array (buffered), so the chat page can render the

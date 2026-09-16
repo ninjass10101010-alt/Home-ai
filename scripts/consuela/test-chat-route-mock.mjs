@@ -242,14 +242,24 @@ await step("unknown tool: error fed back so the model can recover", async () => 
   assert.match(String(toolMsg.content), /Unknown tool/, "mentions the unknown tool");
 });
 
-await step("MAX_ROUNDS cap: model that never stops calling tools is cut off at 4", async () => {
+await step("MAX_ROUNDS cap: tool-looping model is wrapped up tool-free on round 6, then cut off", async () => {
   fetchCalls = [];
   mockFetch(() => cannedCompletion(completion({ tool_calls: [toolCall("call_loop", "get_family_members", "{}")] })));
 
   const res = await post("keep going");
   const json = await res.json();
 
-  assert.equal(fetchCalls.length, 4, "capped at MAX_ROUNDS=4");
+  assert.equal(fetchCalls.length, 6, "capped at MAX_ROUNDS=6");
+  // The final round is the forced wrap-up: no tools, and the "answer now" note.
+  const wrapup = bodyOf(fetchCalls[5]);
+  assert.equal(wrapup.tools, undefined, "wrap-up round offers no tools");
+  assert.equal(wrapup.tool_choice, undefined, "wrap-up round sets no tool_choice");
+  assert.ok(
+    wrapup.messages.some((m) => m.role === "system" && /answer/i.test(m.content)),
+    "wrap-up note present"
+  );
+  // Here even the wrap-up call came back with tool_calls/no content, so the
+  // honest exhaustion fallback is the final answer.
   assert.match(json.content, /ran out of steps/, "friendly fallback content");
 });
 

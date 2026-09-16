@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { authorizeAdminRequest } from "@/lib/admin-auth";
 import { verifySession, SESSION_COOKIE } from "@/lib/session";
 import { listAiProviders, upsertAiProvider, deleteAiProvider } from "@/lib/ai/providers";
-import { resetAiTargetsCache } from "@/lib/ai/targets";
+import { resetAiTargetsCache, resolveChatTargets } from "@/lib/ai/targets";
 
 export const dynamic = "force-dynamic";
 
@@ -56,10 +56,45 @@ export async function GET(request: NextRequest) {
         status: p.enabled ? await probe(p.baseUrl, p.apiKey) : "unknown",
       }))
     );
-    const first = withStatus.find((p) => p.enabled && p.models.length > 0);
+    // The brain shown in Settings must be the chain CHAT actually resolves —
+    // this file's old PB-table-only derivation lied whenever the live chain
+    // was the legacy FALLBACK_* / AI_PROVIDER_* env chain ("No brain
+    // configured" while chat answered fine).
+    const targets = await resolveChatTargets();
+    const pbUrls = new Set(providers.filter((p) => p.enabled).map((p) => p.baseUrl));
+    const envTargets = targets.filter((t) => !pbUrls.has(t.url));
+    let envProviders: Array<{
+      provider: string;
+      baseUrl: string;
+      models: string[];
+      keyPreview: string | null;
+      readOnly: true;
+    }> | undefined;
+    if (envTargets.length > 0) {
+      // Group env-chain targets by provider+url so each shows as ONE
+      // read-only pseudo-provider ("fallback" group, "env" group).
+      const groups = new Map<string, { baseUrl: string; models: string[]; keyPreview: string | null }>();
+      for (const t of envTargets) {
+        const key = `${t.provider}::${t.url}`;
+        const g = groups.get(key) ?? { baseUrl: t.url, models: [], keyPreview: t.key ? t.key.slice(-2) : null };
+        if (!g.models.includes(t.model)) g.models.push(t.model);
+        groups.set(key, g);
+      }
+      envProviders = [...groups.entries()].map(([k, g]) => {
+        const [provider] = k.split("::");
+        return {
+          provider,
+          baseUrl: g.baseUrl,
+          models: g.models,
+          keyPreview: g.keyPreview,
+          readOnly: true as const,
+        };
+      });
+    }
     return NextResponse.json({
       providers: withStatus.map(({ apiKey: _drop, ...rest }) => mask(rest)),
-      active: first ? { provider: first.displayName, model: first.models[0] } : null,
+      active: targets.length ? { provider: targets[0].provider, model: targets[0].model } : null,
+      ...(envProviders ? { envProviders } : {}),
     });
   } catch (err) {
     console.error("[ai/providers] GET failed:", err);
