@@ -34,7 +34,7 @@ export default function YourCard({ entry, aheadEntry, getMemberColor }: YourCard
           </div>
           <div className="mt-1 text-xs">
             {entry.rank === 1 ? (
-              <span className="text-amber-400 font-semibold">👑 You&apos;re in the lead!</span>
+              <span className="text-[var(--color-accent-amber)] font-semibold">👑 You&apos;re in the lead!</span>
             ) : gap > 0 ? (
               <span className="text-text-secondary">
                 {gap} pts behind {aheadEntry?.name?.split(" ")[0]} — you can catch up!
@@ -43,7 +43,7 @@ export default function YourCard({ entry, aheadEntry, getMemberColor }: YourCard
               <span className="text-text-muted">Complete tasks to climb the board!</span>
             )}
             {entry.streak > 0 && (
-              <span className="ml-2 text-amber-400 font-semibold">🔥{entry.streak}d streak</span>
+              <span className="ml-2 text-[var(--color-accent-amber)] font-semibold">🔥{entry.streak}d streak</span>
             )}
           </div>
         </div>

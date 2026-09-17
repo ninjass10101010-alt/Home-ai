@@ -166,11 +166,11 @@ export default function GmailImportWidget() {
                       {event.location && (
                         <p className="text-[10px] text-text-muted mt-0.5">📍 {event.location}</p>
                       )}
-                      <p className="text-[9px] text-text-muted mt-0.5">From: {event.source}</p>
+                      <p className="text-[11px] text-text-muted mt-0.5">From: {event.source}</p>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
                       {isApproved ? (
-                        <span className="text-emerald-400 text-xs font-bold">✅ Added</span>
+                        <span className="text-[var(--color-accent-mint)] text-xs font-bold">✅ Added</span>
                       ) : (
                         <>
                           <button

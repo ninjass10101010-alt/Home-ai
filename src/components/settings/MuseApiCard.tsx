@@ -428,7 +428,7 @@ export default function MuseApiCard() {
                     >
                       <span
                         className={`h-2 w-2 shrink-0 rounded-full ${
-                          entry.ok ? "bg-emerald-400" : "bg-rose-400"
+                          entry.ok ? "bg-[var(--color-accent-mint)]" : "bg-[var(--color-accent-rose)]"
                         }`}
                         aria-hidden
                       />

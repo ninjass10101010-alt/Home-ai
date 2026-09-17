@@ -53,7 +53,7 @@ export default function SecurityPanel({ states, onRefresh }: SecurityPanelProps)
       {alarm && (
         <div className="rounded-3xl border border-white/10 bg-[var(--color-surface-0)]/30 p-5 backdrop-blur-xl">
           <p className="text-[11px] uppercase tracking-wide text-text-muted">Alarm system</p>
-          <p className={`mt-1 text-3xl font-bold ${armed ? "text-rose-400" : "text-emerald-400"}`}>{alarmLabel(alarm.state)}</p>
+          <p className={`mt-1 text-3xl font-bold ${armed ? "text-[var(--color-accent-rose)]" : "text-[var(--color-accent-mint)]"}`}>{alarmLabel(alarm.state)}</p>
           <p className="mt-1 text-xs text-text-secondary">{entityFriendlyName(alarm)}</p>
           {!readOnly &&
             (armed ? (

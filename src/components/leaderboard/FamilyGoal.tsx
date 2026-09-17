@@ -92,13 +92,13 @@ export default function FamilyGoalCard({ weekData, isParent }: FamilyGoalProps) 
       <div className="space-y-3">
         <div className="h-4 w-full overflow-hidden rounded-full bg-white/5">
           <div
-            className={`h-full rounded-full transition-all duration-700 ease-out ${isComplete ? "bg-gradient-to-r from-emerald-500 to-emerald-400" : "bg-gradient-to-r from-[var(--color-accent-selected)]/50 to-[var(--color-accent-selected)]"}`}
+            className={`h-full rounded-full transition-all duration-700 ease-out ${isComplete ? "bg-gradient-to-r from-[var(--color-accent-mint)] to-[var(--color-accent-mint)]" : "bg-gradient-to-r from-[var(--color-accent-selected)]/50 to-[var(--color-accent-selected)]"}`}
             style={{ width: `${Math.min(100, progress)}%` }}
           />
         </div>
         <div className="flex items-center justify-between text-xs">
           <span className="text-text-muted">{totalEarned} pts earned</span>
-          <span className={`font-semibold ${isComplete ? "text-emerald-400" : "text-text-secondary"}`}>
+          <span className={`font-semibold ${isComplete ? "text-[var(--color-accent-mint)]" : "text-text-secondary"}`}>
             {isComplete ? "✨ Complete!" : `${progress}%`}
           </span>
         </div>

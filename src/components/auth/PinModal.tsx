@@ -98,7 +98,7 @@ export default function PinModal({ memberName, memberEmoji, memberColor, onClose
         />
 
         {pinError && (
-          <p className="text-rose-400 text-xs text-center mt-2 animate-in">{pinError}</p>
+          <p className="text-[var(--color-accent-rose)] text-xs text-center mt-2 animate-in">{pinError}</p>
         )}
 
         <div className="flex gap-2 mt-4">

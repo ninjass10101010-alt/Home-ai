@@ -33,12 +33,12 @@ interface TestResult {
 
 function dotTone(svc: ServiceEntry, tested: TestResult | null): { cls: string; label: string } {
   const hasUnreadable = svc.status.some((f) => f.unreadable && f.required);
-  if (hasUnreadable) return { cls: "bg-rose-400", label: "Saved — unreadable (re-enter)" };
+  if (hasUnreadable) return { cls: "bg-[var(--color-accent-rose)]", label: "Saved — unreadable (re-enter)" };
   const requiredSet = svc.status.filter((f) => f.required).every((f) => f.set);
-  if (!requiredSet) return { cls: "bg-rose-400", label: "Not configured" };
-  if (tested?.ok) return { cls: "bg-emerald-400", label: tested.detail || "Test passed" };
-  if (tested && !tested.ok) return { cls: "bg-rose-400", label: "Test failed" };
-  return { cls: "bg-amber-300", label: "Configured — untested" };
+  if (!requiredSet) return { cls: "bg-[var(--color-accent-rose)]", label: "Not configured" };
+  if (tested?.ok) return { cls: "bg-[var(--color-accent-mint)]", label: tested.detail || "Test passed" };
+  if (tested && !tested.ok) return { cls: "bg-[var(--color-accent-rose)]", label: "Test failed" };
+  return { cls: "bg-[var(--color-accent-amber)]", label: "Configured — untested" };
 }
 
 export default function ServicesKeysCard() {
@@ -312,7 +312,7 @@ export default function ServicesKeysCard() {
                       <div key={f.key} className="space-y-1">
                         <label className="block text-xs font-semibold text-text-secondary">
                           {f.label}
-                          {f.required && <span className="ml-1 text-rose-400">*</span>}
+                          {f.required && <span className="ml-1 text-[var(--color-accent-rose)]">*</span>}
                           {f.secret && f.set && f.preview && (
                             <span className="ml-2 text-text-muted">•••{f.preview}</span>
                           )}
@@ -350,7 +350,7 @@ export default function ServicesKeysCard() {
                         </div>
                         {f.helpText && <p className="text-[11px] text-text-muted">{f.helpText}</p>}
                         {f.unreadable && (
-                          <p className="text-[11px] text-rose-400">
+                          <p className="text-[11px] text-[var(--color-accent-rose)]">
                             Saved but unreadable — the server&apos;s encryption key has changed since this was saved. Re-enter the value below.
                           </p>
                         )}

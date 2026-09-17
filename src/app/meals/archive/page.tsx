@@ -118,7 +118,7 @@ export default function MealsArchivePage() {
         )}
 
         {!loading && restoreError && (
-          <div role="alert" className="rounded-2xl border border-rose-300/20 bg-rose-500/10 px-4 py-3 text-sm text-text-primary">
+          <div role="alert" className="rounded-2xl border border-[var(--color-accent-rose)]/20 bg-[var(--color-accent-rose)]/10 px-4 py-3 text-sm text-text-primary">
             ⚠️ {restoreError}
           </div>
         )}

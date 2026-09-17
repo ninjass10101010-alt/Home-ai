@@ -22,7 +22,7 @@ export default function AchievementWall({ allTimePoints, streak, completions }: 
             {earned.map(b => (
               <div key={b.id} className="flex flex-col items-center gap-1 rounded-xl bg-white/5 p-2">
                 <span className="text-lg animate-badge-sparkle">{b.emoji}</span>
-                <span className="text-[9px] text-text-secondary text-center leading-tight">{b.name}</span>
+                <span className="text-[11px] text-text-secondary text-center leading-tight">{b.name}</span>
               </div>
             ))}
           </div>
@@ -35,7 +35,7 @@ export default function AchievementWall({ allTimePoints, streak, completions }: 
             {locked.slice(0, 8).map(b => (
               <div key={b.id} className="flex flex-col items-center gap-1 rounded-xl bg-white/3 p-2 opacity-40">
                 <span className="text-lg grayscale">❓</span>
-                <span className="text-[9px] text-text-muted text-center leading-tight">{b.name}</span>
+                <span className="text-[11px] text-text-muted text-center leading-tight">{b.name}</span>
               </div>
             ))}
           </div>

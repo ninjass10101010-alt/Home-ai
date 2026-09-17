@@ -88,7 +88,7 @@ export default function SidebarNav() {
         <div className="px-3 pb-6 pt-2 border-t border-white/[0.06]">
           <Link
             href="/emergency"
-            className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-rose-400 hover:bg-rose-500/[0.08] transition-colors"
+            className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-[var(--color-accent-rose)] hover:bg-[var(--color-accent-rose)]/[0.08] transition-colors"
           >
             <span className="text-base w-6 text-center">🛡️</span>
             <span className="text-sm font-medium">Emergency</span>

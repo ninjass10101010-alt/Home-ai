@@ -193,7 +193,7 @@ export function MountainVisualization({
         </div>
         <div className="text-center">
           <div className="text-xs text-muted-foreground">Matched</div>
-          <div className="text-sm font-semibold text-green-500">
+          <div className="text-sm font-semibold text-[var(--color-accent-mint)]">
             {formatCurrency(mountain.matchedAmount, mountain.currency as any)}
           </div>
         </div>

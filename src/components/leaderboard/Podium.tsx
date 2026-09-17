@@ -53,7 +53,7 @@ function PodiumSlot({
             {entry.name.split(" ")[0]}
           </span>
           {isYou && (
-            <span className="rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider"
+            <span className="rounded-md px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wider"
               style={{ background: `${color}25`, color }}>
               You
             </span>
@@ -71,7 +71,7 @@ function PodiumSlot({
             <div className="text-[10px] text-text-muted">{entry.allTimePoints} all-time</div>
           )}
           <div className="flex items-center gap-1.5">
-            {entry.streak > 0 && <span className="text-xs text-amber-400 font-semibold">🔥{entry.streak}d</span>}
+            {entry.streak > 0 && <span className="text-xs text-[var(--color-accent-amber)] font-semibold">🔥{entry.streak}d</span>}
             <span className="text-xs text-text-muted">{entry.levelEmoji} {entry.levelTitle}</span>
             <RankArrow currentRank={rank} previousRank={previousRank} />
           </div>
@@ -122,7 +122,7 @@ export default function Podium({
       {second && (
         <PodiumSlot
           entry={second} rank={rankOf(second.points)} heightClass="h-[170px]" medalEmoji={rankOf(second.points) === 1 ? "🥇" : rankOf(second.points) === 2 ? "🥈" : "🥉"}
-          bgClass="bg-slate-300/10 border-slate-300/15"
+          bgClass="bg-white/10 border-white/15"
           isYou={isYou(second.name)} color={getMemberColor(second.name)}
           previousRank={previousRanks[second.name]}
           onClick={() => onOpenSheet(second.name)}
@@ -133,7 +133,7 @@ export default function Podium({
       )}
       <PodiumSlot
         entry={first} rank={rankOf(first.points)} heightClass="h-[200px]" medalEmoji={rankOf(first.points) === 1 ? "🥇" : rankOf(first.points) === 2 ? "🥈" : "🥉"}
-        bgClass="bg-amber-400/15 border-amber-400/25 animate-rank-pulse"
+        bgClass="bg-[var(--color-accent-amber)]/15 border-[var(--color-accent-amber)]/25 animate-rank-pulse"
         isYou={isYou(first.name)} color={getMemberColor(first.name)}
         previousRank={previousRanks[first.name]}
         onClick={() => onOpenSheet(first.name)}
@@ -144,7 +144,7 @@ export default function Podium({
       {third && (
         <PodiumSlot
           entry={third} rank={rankOf(third.points)} heightClass="h-[150px]" medalEmoji={rankOf(third.points) === 1 ? "🥇" : rankOf(third.points) === 2 ? "🥈" : "🥉"}
-          bgClass="bg-amber-700/10 border-amber-700/15"
+          bgClass="bg-[var(--color-accent-amber)]/10 border-[var(--color-accent-amber)]/20"
           isYou={isYou(third.name)} color={getMemberColor(third.name)}
           previousRank={previousRanks[third.name]}
           onClick={() => onOpenSheet(third.name)}

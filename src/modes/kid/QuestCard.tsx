@@ -90,7 +90,7 @@ export default function QuestCard({ task, onComplete, disabled = false }: QuestC
           opacity: 0.6,
         }}
       >
-        <div className="w-12 h-12 rounded-2xl grid place-items-center text-xl shrink-0 bg-emerald-500/15">
+        <div className="w-12 h-12 rounded-2xl grid place-items-center text-xl shrink-0 bg-[var(--color-accent-mint)]/15">
           ✅
         </div>
         <div className="flex-1 min-w-0">

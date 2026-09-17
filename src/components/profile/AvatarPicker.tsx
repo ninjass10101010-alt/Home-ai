@@ -210,7 +210,7 @@ export default function AvatarPicker({ value, onChange, fallbackEmoji, previewSi
         className="hidden"
         onChange={(e) => handleFile(e.target.files?.[0])}
       />
-      {uploadError && <p className="text-xs font-medium text-rose-300">{uploadError}</p>}
+      {uploadError && <p className="text-xs font-medium text-[var(--color-accent-rose)]">{uploadError}</p>}
 
       {editorSrc && (
         <PhotoCropEditor

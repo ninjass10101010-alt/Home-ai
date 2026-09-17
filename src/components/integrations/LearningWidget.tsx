@@ -115,7 +115,7 @@ export default function LearningWidget() {
           {streak > 0 && (
             <div className="flex items-center gap-1 px-2 py-0.5 rounded-full" style={{ background: "rgba(251, 191, 36, 0.1)", border: "1px solid rgba(251, 191, 36, 0.2)" }}>
               <span className="text-xs">🔥</span>
-              <span className="text-[10px] font-bold text-amber-400">{streak} day streak!</span>
+              <span className="text-[10px] font-bold text-[var(--color-accent-amber)]">{streak} day streak!</span>
             </div>
           )}
         </div>
@@ -154,7 +154,7 @@ export default function LearningWidget() {
                 <div className="flex items-center justify-between mb-1">
                   <div className="flex items-center gap-1.5">
                     <span className="text-sm">{subject.emoji}</span>
-                    <span className={`text-xs font-semibold ${isComplete ? "text-emerald-400" : "text-text-primary"}`}>
+                    <span className={`text-xs font-semibold ${isComplete ? "text-[var(--color-accent-mint)]" : "text-text-primary"}`}>
                       {goal.subject}
                     </span>
                     {isComplete && <span className="text-xs">✅</span>}

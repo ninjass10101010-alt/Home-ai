@@ -102,8 +102,8 @@ export default function HomeAssistantWidget() {
             <h3 className="text-sm font-bold text-text-primary">Home</h3>
           </div>
           <div className="flex items-center gap-1">
-            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-[9px] font-semibold text-emerald-400 uppercase tracking-wider">Online</span>
+            <div className="w-2 h-2 rounded-full bg-[var(--color-accent-mint)] animate-pulse" />
+            <span className="text-[11px] font-semibold text-[var(--color-accent-mint)] uppercase tracking-wider">Online</span>
           </div>
         </div>
 
@@ -152,7 +152,7 @@ export default function HomeAssistantWidget() {
                 aria-label={`Activate ${scene.label} scene`}
               >
                 <span className="text-xl">{scene.emoji}</span>
-                <span className="text-[9px] font-bold text-text-secondary">{scene.label}</span>
+                <span className="text-[11px] font-bold text-text-secondary">{scene.label}</span>
               </button>
             ))}
           </div>
@@ -174,10 +174,10 @@ function StatusTile({ icon, label, value, alert = false }: {
       }}
     >
       <span className="text-base">{icon}</span>
-      <span className={`text-xs font-bold tabular-nums ${alert ? "text-rose-400" : "text-text-primary"}`}>
+      <span className={`text-xs font-bold tabular-nums ${alert ? "text-[var(--color-accent-rose)]" : "text-text-primary"}`}>
         {value}
       </span>
-      <span className="text-[8px] text-text-muted">{label}</span>
+      <span className="text-[11px] text-text-muted">{label}</span>
     </div>
   );
 }

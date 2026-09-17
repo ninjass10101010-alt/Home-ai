@@ -59,12 +59,12 @@ export default function TopBar({ title, subtitle, right, back, variant = "defaul
         )}
         <div className="flex-1 min-w-0">
           {title && (
-            <h1 className={`text-base font-semibold truncate leading-tight ${isEmergency ? "text-rose-400" : "text-text-primary"}`}>
+            <h1 className={`text-base font-semibold truncate leading-tight ${isEmergency ? "text-[var(--color-accent-rose)]" : "text-text-primary"}`}>
               {title}
             </h1>
           )}
           {subtitle && (
-            <p className={`text-xs truncate leading-tight ${isEmergency ? "text-rose-300/70" : "text-text-secondary"}`}>{subtitle}</p>
+            <p className={`text-xs truncate leading-tight ${isEmergency ? "text-[var(--color-accent-rose)]/70" : "text-text-secondary"}`}>{subtitle}</p>
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">

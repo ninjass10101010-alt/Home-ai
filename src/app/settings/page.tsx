@@ -157,20 +157,20 @@ function VersionCard() {
           )}
         </div>
         {data.update_available && (
-          <span className="shrink-0 rounded-full bg-amber-500/15 px-2.5 py-1 text-[11px] font-bold text-amber-400">
+          <span className="shrink-0 rounded-full bg-[var(--color-accent-amber)]/15 px-2.5 py-1 text-[11px] font-bold text-[var(--color-accent-amber)]">
             {data.commits_behind} behind
           </span>
         )}
         {!data.update_available && data.ok && (
-          <span className="shrink-0 rounded-full bg-emerald-500/15 px-2.5 py-1 text-[11px] font-bold text-emerald-400">
+          <span className="shrink-0 rounded-full bg-[var(--color-accent-mint)]/15 px-2.5 py-1 text-[11px] font-bold text-[var(--color-accent-mint)]">
             Up to date
           </span>
         )}
       </div>
 
       {remote && data.update_available && (
-        <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-3 py-2">
-          <p className="text-[11px] font-semibold text-amber-300">
+        <div className="rounded-xl border border-[var(--color-accent-amber)]/20 bg-[var(--color-accent-amber)]/5 px-3 py-2">
+          <p className="text-[11px] font-semibold text-[var(--color-accent-amber)]">
             Latest: {remote.short} — {remote.message || "—"}
           </p>
           <p className="mt-1 text-[10px] text-text-muted">
@@ -221,7 +221,7 @@ function VersionCard() {
               <div
                 key={i}
                 className={`flex items-start gap-2 text-[11px] ${
-                  log.status === "error" ? "text-rose-300" : log.status === "ok" ? "text-emerald-300" : "text-text-muted"
+                  log.status === "error" ? "text-[var(--color-accent-rose)]" : log.status === "ok" ? "text-[var(--color-accent-mint)]" : "text-text-muted"
                 }`}
               >
                 <span className="shrink-0">
@@ -232,7 +232,7 @@ function VersionCard() {
             ))}
           </div>
           {updateDone && (
-            <p className="mt-2 text-[11px] font-semibold text-emerald-300">
+            <p className="mt-2 text-[11px] font-semibold text-[var(--color-accent-mint)]">
               ✅ Update complete — page will reload in a few seconds...
             </p>
           )}

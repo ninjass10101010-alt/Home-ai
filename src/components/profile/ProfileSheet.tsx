@@ -171,7 +171,7 @@ export default function ProfileSheet({ open, onClose, member }: ProfileSheetProp
               {savingAvatar ? "Saving…" : avatarSaved ? "Saved ✓" : "Save avatar"}
             </SoftButton>
           </div>
-          {avatarError && <p className="mt-2 text-xs font-medium text-rose-300">{avatarError}</p>}
+          {avatarError && <p className="mt-2 text-xs font-medium text-[var(--color-accent-rose)]">{avatarError}</p>}
         </div>
 
         <div className="rounded-3xl border border-white/10 bg-[var(--color-surface-0)]/50 p-4">
@@ -190,8 +190,8 @@ export default function ProfileSheet({ open, onClose, member }: ProfileSheetProp
               <input type="password" inputMode="numeric" maxLength={4} value={currentPin} onChange={(e) => setCurrentPin(e.target.value.replace(/[^0-9]/g, ""))} className={pinInputClass} placeholder="Current PIN" />
               <input type="password" inputMode="numeric" maxLength={4} value={newPin} onChange={(e) => setNewPin(e.target.value.replace(/[^0-9]/g, ""))} className={pinInputClass} placeholder="New PIN" />
               <input type="password" inputMode="numeric" maxLength={4} value={confirmPin} onChange={(e) => setConfirmPin(e.target.value.replace(/[^0-9]/g, ""))} className={pinInputClass} placeholder="Confirm new PIN" />
-              {pinError && <p className="text-xs font-medium text-rose-300">{pinError}</p>}
-              {pinSuccess && <p className="text-xs font-semibold text-emerald-300">PIN updated ✓</p>}
+              {pinError && <p className="text-xs font-medium text-[var(--color-accent-rose)]">{pinError}</p>}
+              {pinSuccess && <p className="text-xs font-semibold text-[var(--color-accent-mint)]">PIN updated ✓</p>}
               <div className="flex gap-2">
                 <SoftButton onClick={savePin} disabled={pinSaving} className="flex-1">
                   {pinSaving ? "Saving…" : "Save PIN"}
@@ -215,7 +215,7 @@ export default function ProfileSheet({ open, onClose, member }: ProfileSheetProp
                 logout();
                 onClose();
               }}
-              className="tap flex w-full items-center justify-between rounded-2xl bg-[var(--color-surface-2)] px-4 py-3 text-sm font-semibold text-rose-300"
+              className="tap flex w-full items-center justify-between rounded-2xl bg-[var(--color-surface-2)] px-4 py-3 text-sm font-semibold text-[var(--color-accent-rose)]"
             >
               <span>🚪 Sign out</span>
               <span className="text-text-muted">›</span>

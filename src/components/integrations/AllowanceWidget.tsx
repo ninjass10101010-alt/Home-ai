@@ -121,7 +121,7 @@ export default function AllowanceWidget() {
               {isKid ? "My Allowance" : "Allowance & Cash-Out"}
             </h3>
           </div>
-          <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">
+          <span className="text-[10px] font-bold text-[var(--color-accent-mint)] uppercase tracking-wider">
             Greenlight
           </span>
         </div>
@@ -141,7 +141,7 @@ export default function AllowanceWidget() {
             </div>
             <div className="text-right">
               <p className="text-[10px] text-text-muted uppercase tracking-wider">Cash Value</p>
-              <p className="text-2xl font-black text-emerald-400 tabular-nums">${cashValue.toFixed(2)}</p>
+              <p className="text-2xl font-black text-[var(--color-accent-mint)] tabular-nums">${cashValue.toFixed(2)}</p>
             </div>
           </div>
           <p className="text-[10px] text-text-muted mt-2">
@@ -186,7 +186,7 @@ export default function AllowanceWidget() {
             </div>
             <div className="flex items-center justify-between text-xs">
               <span className="text-text-secondary">Requires Approval</span>
-              <span className="font-bold text-emerald-400">Yes</span>
+              <span className="font-bold text-[var(--color-accent-mint)]">Yes</span>
             </div>
             <div className="flex items-center justify-between text-xs">
               <span className="text-text-secondary">Auto-Deposit</span>
@@ -207,13 +207,13 @@ export default function AllowanceWidget() {
                   <span className="text-sm">{txn.type === "deposit" ? "💰" : "💸"}</span>
                   <div className="flex-1 min-w-0">
                     <p className="text-[11px] text-text-primary truncate">{txn.description}</p>
-                    <p className="text-[9px] text-text-muted">
+                    <p className="text-[11px] text-text-muted">
                       {new Date(txn.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                       {" · "}{txn.points} pts
                     </p>
                   </div>
                   <span className={`text-xs font-bold tabular-nums ${
-                    txn.type === "deposit" ? "text-emerald-400" : "text-amber-400"
+                    txn.type === "deposit" ? "text-[var(--color-accent-mint)]" : "text-[var(--color-accent-amber)]"
                   }`}>
                     {txn.type === "deposit" ? "+" : "-"}${txn.amount.toFixed(2)}
                   </span>

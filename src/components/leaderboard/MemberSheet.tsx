@@ -62,7 +62,7 @@ export default function MemberSheet({
           <div>
             <div className="text-2xl font-bold text-text-primary display-numeral">{weeklyPoints} <span className="text-sm text-text-muted font-normal">pts this week</span></div>
             <div className="text-sm text-text-secondary">{allTimePoints} all-time · {allTimeComps} tasks completed</div>
-            {entry.streak > 0 && <div className="mt-1 text-amber-400 text-sm font-semibold">🔥 {entry.streak}-day streak</div>}
+            {entry.streak > 0 && <div className="mt-1 text-[var(--color-accent-amber)] text-sm font-semibold">🔥 {entry.streak}-day streak</div>}
           </div>
         </div>
 
@@ -75,7 +75,7 @@ export default function MemberSheet({
                   className="w-full rounded-t-md bg-gradient-to-t from-[var(--color-accent-selected)]/40 to-[var(--color-accent-selected)] transition-all duration-500"
                   style={{ height: `${Math.max(2, (d.points / maxGraphPoints) * 56)}px` }}
                 />
-                <span className="text-[9px] text-text-muted">{d.day}</span>
+                <span className="text-[11px] text-text-muted">{d.day}</span>
               </div>
             ))}
           </div>
@@ -88,7 +88,7 @@ export default function MemberSheet({
               {earnedBadgeObjects.map((b) => (
                 <div key={b.id} className="flex flex-col items-center gap-0.5 rounded-xl bg-white/5 p-2">
                   <span className="text-lg animate-badge-sparkle">{b.emoji}</span>
-                  <span className="text-[9px] text-text-secondary text-center leading-tight">{b.name}</span>
+                  <span className="text-[11px] text-text-secondary text-center leading-tight">{b.name}</span>
                 </div>
               ))}
             </div>
@@ -102,7 +102,7 @@ export default function MemberSheet({
               {lockedBadges.slice(0, 8).map((b) => (
                 <div key={b.id} className="flex flex-col items-center gap-0.5 rounded-xl bg-white/3 p-2 opacity-40">
                   <span className="text-lg">❓</span>
-                  <span className="text-[9px] text-text-muted text-center leading-tight">{b.name}</span>
+                  <span className="text-[11px] text-text-muted text-center leading-tight">{b.name}</span>
                 </div>
               ))}
             </div>

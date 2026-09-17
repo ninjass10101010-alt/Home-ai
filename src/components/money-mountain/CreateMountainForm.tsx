@@ -127,7 +127,7 @@ export function CreateMountainForm({ onClose, onSubmit }: CreateMountainFormProp
           {/* Goal Name */}
           <div>
             <label className="mb-2 block text-sm font-medium text-foreground">
-              Goal Name <span className="text-red-500">*</span>
+              Goal Name <span className="text-[var(--color-accent-rose)]">*</span>
             </label>
             <input
               type="text"
@@ -158,7 +158,7 @@ export function CreateMountainForm({ onClose, onSubmit }: CreateMountainFormProp
           {/* Target Amount */}
           <div>
             <label className="mb-2 block text-sm font-medium text-foreground">
-              Target Amount <span className="text-red-500">*</span>
+              Target Amount <span className="text-[var(--color-accent-rose)]">*</span>
             </label>
             <div className="flex gap-2">
               <select
@@ -285,7 +285,7 @@ export function CreateMountainForm({ onClose, onSubmit }: CreateMountainFormProp
           
           {/* Error */}
           {error && (
-            <div className="rounded-lg bg-red-500/10 border border-red-500/20 p-3 text-sm text-red-600">
+            <div className="rounded-lg bg-[var(--color-accent-rose)]/10 border border-[var(--color-accent-rose)]/20 p-3 text-sm text-[var(--color-accent-rose)]">
               {error}
             </div>
           )}

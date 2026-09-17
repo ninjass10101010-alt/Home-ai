@@ -26,7 +26,7 @@ export function MountainCard({ mountain, onClick }: MountainCardProps) {
       onClick={onClick}
       className={`group relative overflow-hidden rounded-2xl border-2 cursor-pointer transition-all duration-200 ${
         isComplete
-          ? 'border-green-500/50 bg-gradient-to-br from-green-500/10 to-emerald-500/10'
+          ? 'border-[var(--color-accent-mint)]/50 bg-gradient-to-br from-[var(--color-accent-mint)]/10 to-[var(--color-accent-mint)]/10'
           : 'border-white/10 bg-[var(--color-surface-2)]/50 backdrop-blur-xl hover:border-white/20'
       }`}
     >
@@ -59,7 +59,7 @@ export function MountainCard({ mountain, onClick }: MountainCardProps) {
           </div>
           
           {isComplete && (
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-green-500 text-white">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--color-accent-mint)] text-white">
               <Trophy className="h-4 w-4" />
             </div>
           )}
@@ -90,7 +90,7 @@ export function MountainCard({ mountain, onClick }: MountainCardProps) {
         <div className="flex items-center gap-4 text-xs text-muted-foreground">
           <span>{mountain.transactionCount} transactions</span>
           {mountain.matchEnabled && mountain.matchedAmount > 0 && (
-            <span className="text-green-500 font-medium">
+            <span className="text-[var(--color-accent-mint)] font-medium">
               +{formatCurrency(mountain.matchedAmount, mountain.currency as any)} matched
             </span>
           )}

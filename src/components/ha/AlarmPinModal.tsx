@@ -75,7 +75,7 @@ export default function AlarmPinModal({ action, onSubmit, onClose }: AlarmPinMod
         />
 
         {error && (
-          <p className="mt-2 animate-in text-center text-xs text-rose-400">{error}</p>
+          <p className="mt-2 animate-in text-center text-xs text-[var(--color-accent-rose)]">{error}</p>
         )}
 
         <div className="mt-4 flex gap-2">
@@ -92,7 +92,7 @@ export default function AlarmPinModal({ action, onSubmit, onClose }: AlarmPinMod
             onClick={() => void handleSubmit()}
             disabled={pin.length < 4 || loading}
             className={`flex-1 rounded-2xl py-2.5 text-sm font-semibold text-white transition-colors disabled:opacity-40 ${
-              action === "disarm" ? "bg-rose-500 hover:bg-rose-400" : "bg-nori-500 hover:bg-nori-400"
+              action === "disarm" ? "bg-[var(--color-accent-rose)] hover:bg-[var(--color-accent-rose)]" : "bg-nori-500 hover:bg-nori-400"
             }`}
           >
             {loading ? "Verifying…" : `Confirm ${label}`}

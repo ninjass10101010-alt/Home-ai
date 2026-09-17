@@ -1770,7 +1770,7 @@ export default function TasksPage() {
                     </div>
                   </div>
                   <div className="relative">
-                    <span className="absolute -inset-1 animate-crown-glow rounded-full bg-amber-400/20 blur-md" />
+                    <span className="absolute -inset-1 animate-crown-glow rounded-full bg-[var(--color-accent-amber)]/20 blur-md" />
                     <Avatar name={topScorer.name} color={memberColors[topScorer.name] || "green"} emoji={topScorer.emoji} size="lg" variant="emoji" glow />
                   </div>
                 </div>

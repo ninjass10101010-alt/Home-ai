@@ -118,8 +118,8 @@ export default function PhotoMemoriesWidget() {
                   <div className="p-2">
                     <h4 className="text-[11px] font-bold text-text-primary truncate">{memory.title}</h4>
                     <div className="flex items-center justify-between mt-0.5">
-                      <span className="text-[9px] text-text-muted">{memory.year} · {memory.date}</span>
-                      <span className="text-[9px] text-text-muted">{memory.photoCount} 📷</span>
+                      <span className="text-[11px] text-text-muted">{memory.year} · {memory.date}</span>
+                      <span className="text-[11px] text-text-muted">{memory.photoCount} 📷</span>
                     </div>
                   </div>
                 </button>
@@ -149,7 +149,7 @@ export default function PhotoMemoriesWidget() {
                 <span className="text-xl">{album.emoji}</span>
                 <div className="flex-1 min-w-0">
                   <h4 className="text-[11px] font-semibold text-text-primary truncate">{album.name}</h4>
-                  <span className="text-[9px] text-text-muted">{album.count} photos</span>
+                  <span className="text-[11px] text-text-muted">{album.count} photos</span>
                 </div>
               </a>
             ))}

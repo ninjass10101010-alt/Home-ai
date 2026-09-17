@@ -32,7 +32,7 @@ export function MilestoneBadge({ milestone, currentPercentage }: MilestoneBadgeP
         transition={{ duration: 0.5 }}
         className={`relative flex h-14 w-14 items-center justify-center rounded-full text-2xl transition-all duration-200 ${
           isReached
-            ? 'bg-green-500/20 ring-2 ring-green-500 shadow-lg shadow-green-500/20'
+            ? 'bg-[var(--color-accent-mint)]/20 ring-2 ring-[var(--color-accent-mint)] shadow-lg shadow-[var(--color-accent-mint)]/20'
             : 'bg-[var(--color-surface-3)]/50 backdrop-blur-xl ring-1 ring-white/10'
         }`}
       >
@@ -43,7 +43,7 @@ export function MilestoneBadge({ milestone, currentPercentage }: MilestoneBadgeP
             initial={{ scale: 0, rotate: -180 }}
             animate={{ scale: 1, rotate: 0 }}
             transition={{ type: 'spring', stiffness: 500, damping: 20 }}
-            className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-green-500 text-white text-xs shadow-lg"
+            className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-[var(--color-accent-mint)] text-white text-xs shadow-lg"
           >
             ✓
           </motion.div>

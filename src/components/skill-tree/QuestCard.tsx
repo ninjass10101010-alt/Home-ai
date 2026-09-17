@@ -16,15 +16,15 @@ export function QuestCard({ quest, isCompleted, isActive, onClick }: QuestCardPr
   const xpReward = XP_REWARDS[quest.type]?.[quest.difficulty] || quest.xpReward;
   
   const difficultyColors = {
-    easy: 'text-green-500',
-    medium: 'text-yellow-500',
-    hard: 'text-red-500',
+    easy: 'text-[var(--color-accent-mint)]',
+    medium: 'text-[var(--color-accent-amber)]',
+    hard: 'text-[var(--color-accent-rose)]',
   };
   
   const difficultyBgColors = {
-    easy: 'bg-green-500/10',
-    medium: 'bg-yellow-500/10',
-    hard: 'bg-red-500/10',
+    easy: 'bg-[var(--color-accent-mint)]/10',
+    medium: 'bg-[var(--color-accent-amber)]/10',
+    hard: 'bg-[var(--color-accent-rose)]/10',
   };
   
   return (
@@ -35,7 +35,7 @@ export function QuestCard({ quest, isCompleted, isActive, onClick }: QuestCardPr
       onClick={onClick}
       className={`group flex items-center gap-3 rounded-lg border p-3 cursor-pointer transition-all duration-200 ${
         isCompleted
-          ? 'border-green-500/30 bg-green-500/5'
+          ? 'border-[var(--color-accent-mint)]/30 bg-[var(--color-accent-mint)]/5'
           : isActive
           ? 'border-[var(--color-accent-selected)]/30 bg-[var(--color-accent-selected)]/5'
           : 'border-white/10 bg-[var(--color-surface-2)]/50 backdrop-blur-xl hover:border-white/20 hover:bg-[var(--color-surface-2)]/70'
@@ -53,7 +53,7 @@ export function QuestCard({ quest, isCompleted, isActive, onClick }: QuestCardPr
         transition={{ duration: 0.3 }}
       >
         {isCompleted ? (
-          <CheckCircle className="h-6 w-6 text-green-500" />
+          <CheckCircle className="h-6 w-6 text-[var(--color-accent-mint)]" />
         ) : isActive ? (
           <PlayCircle className="h-6 w-6 text-[var(--color-accent-selected)]" />
         ) : (

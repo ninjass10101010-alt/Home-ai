@@ -214,15 +214,15 @@ export default function EmergencyPage() {
         </Link>
 
         {/* 911 */}
-        <Card className="bg-rose-500/10" style={alarmGlow}>
+        <Card className="bg-[var(--color-accent-rose)]/10" style={alarmGlow}>
           <div className="text-center">
             <span className="text-3xl">🚨</span>
-            <h3 className="text-rose-400 font-semibold mt-2">Life-Threatening Emergency</h3>
+            <h3 className="text-[var(--color-accent-rose)] font-semibold mt-2">Life-Threatening Emergency</h3>
             <p className="text-text-secondary text-xs mt-1">Call 911 immediately</p>
             <a
               href="tel:911"
               aria-label="Call 911"
-              className="inline-flex min-h-[48px] items-center justify-center transition-all duration-150 bg-rose-500/15 text-rose-400 hover:bg-rose-500/25 border border-rose-500/20 px-6 py-3.5 text-base rounded-2xl gap-2.5 mt-3 w-full cursor-pointer font-semibold no-underline"
+              className="inline-flex min-h-[48px] items-center justify-center transition-all duration-150 bg-[var(--color-accent-rose)]/15 text-[var(--color-accent-rose)] hover:bg-[var(--color-accent-rose)]/25 border border-[var(--color-accent-rose)]/20 px-6 py-3.5 text-base rounded-2xl gap-2.5 mt-3 w-full cursor-pointer font-semibold no-underline"
             >
               Call 911
             </a>

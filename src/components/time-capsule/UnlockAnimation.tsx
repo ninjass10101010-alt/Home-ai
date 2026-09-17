@@ -59,7 +59,7 @@ export function UnlockAnimation({ onComplete, title }: UnlockAnimationProps) {
                 }}
                 className="absolute"
               >
-                <Sparkles className="h-6 w-6 text-yellow-400" />
+                <Sparkles className="h-6 w-6 text-[var(--color-accent-amber)]" />
               </motion.div>
             ))}
           </>
@@ -78,7 +78,7 @@ export function UnlockAnimation({ onComplete, title }: UnlockAnimationProps) {
           }}
           className={`relative flex h-32 w-32 items-center justify-center rounded-full ${
             phase === 'unlocked'
-              ? 'bg-gradient-to-br from-green-500 to-emerald-600'
+              ? 'bg-gradient-to-br from-[var(--color-accent-mint)] to-[var(--color-accent-mint)]'
               : 'bg-gradient-to-br from-primary to-primary/70'
           }`}
         >
@@ -108,7 +108,7 @@ export function UnlockAnimation({ onComplete, title }: UnlockAnimationProps) {
                 repeat: Infinity,
                 ease: 'easeInOut',
               }}
-              className="absolute inset-0 rounded-full bg-green-500/30 blur-xl"
+              className="absolute inset-0 rounded-full bg-[var(--color-accent-mint)]/30 blur-xl"
             />
           )}
         </motion.div>
@@ -137,7 +137,7 @@ export function UnlockAnimation({ onComplete, title }: UnlockAnimationProps) {
             initial={{ width: '0%' }}
             animate={{ width: '100%' }}
             transition={{ duration: 3, ease: 'linear' }}
-            className="h-full rounded-full bg-gradient-to-r from-primary via-primary to-green-500"
+            className="h-full rounded-full bg-gradient-to-r from-primary via-primary to-[var(--color-accent-mint)]"
           />
         </motion.div>
       </div>

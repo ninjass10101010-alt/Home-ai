@@ -13,7 +13,7 @@ interface IconButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const sizeMap: Record<IconButtonSize, string> = {
-  sm: "h-9 w-9 [&>svg]:h-4 [&>svg]:w-4",
+  sm: "h-9 w-9 hit-44 [&>svg]:h-4 [&>svg]:w-4",
   md: "h-11 w-11 [&>svg]:h-5 [&>svg]:w-5",
   lg: "h-12 w-12 [&>svg]:h-6 [&>svg]:w-6",
 };
@@ -23,7 +23,7 @@ const variantMap: Record<IconButtonVariant, string> = {
   accent: "bg-[var(--color-accent-selected)]/15 text-[var(--color-accent-selected)] border border-[var(--color-accent-selected)]/25",
   // Token-driven danger (same light-safe recipe as SoftButton's danger:
   // color-mix darkens the theme-aware rose so white glyphs keep AA contrast
-  // in both themes — raw bg-rose-500 ignored the light-theme token).
+  // in both themes — raw bg-[var(--color-accent-rose)] ignored the light-theme token).
   danger: "bg-[color-mix(in_srgb,var(--color-accent-rose),#000_25%)] text-white border border-[var(--color-accent-rose)]/20",
   ghost: "bg-transparent text-text-secondary border border-transparent",
 };

@@ -91,10 +91,10 @@ export default function ProductSearchWidget({ items = [] }: ProductSearchWidgetP
           <h3 className="text-sm font-bold text-text-primary">Compare Prices</h3>
           <div className="flex items-center gap-1 ml-auto">
             {amazonEnabled && (
-              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400">Amazon</span>
+              <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-full bg-[var(--color-accent-amber)]/15 text-[var(--color-accent-amber)]">Amazon</span>
             )}
             {walmartEnabled && (
-              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-400">Walmart</span>
+              <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-full bg-[var(--color-accent-nori)]/15 text-[var(--color-accent-nori)]">Walmart</span>
             )}
           </div>
         </div>
@@ -170,10 +170,10 @@ export default function ProductSearchWidget({ items = [] }: ProductSearchWidgetP
                   <div className="flex items-center gap-2 mt-0.5">
                     <span className="text-xs font-bold text-text-primary tabular-nums">{product.price}</span>
                     {product.rating && (
-                      <span className="text-[10px] text-amber-400">⭐ {product.rating}</span>
+                      <span className="text-[10px] text-[var(--color-accent-amber)]">⭐ {product.rating}</span>
                     )}
                     {product.prime && (
-                      <span className="text-[9px] font-bold text-blue-400">Prime</span>
+                      <span className="text-[11px] font-bold text-[var(--color-accent-nori)]">Prime</span>
                     )}
                   </div>
                 </div>

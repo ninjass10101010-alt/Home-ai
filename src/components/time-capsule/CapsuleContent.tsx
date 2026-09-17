@@ -12,13 +12,13 @@ export function CapsuleContent({ content }: CapsuleContentProps) {
   const getTypeIcon = () => {
     switch (content.type) {
       case 'text':
-        return <FileText className="h-5 w-5 text-blue-500" />;
+        return <FileText className="h-5 w-5 text-[var(--color-accent-nori)]" />;
       case 'photo':
-        return <Image className="h-5 w-5 text-green-500" />;
+        return <Image className="h-5 w-5 text-[var(--color-accent-mint)]" />;
       case 'voice':
-        return <Mic className="h-5 w-5 text-purple-500" />;
+        return <Mic className="h-5 w-5 text-[var(--color-accent-violet)]" />;
       case 'video':
-        return <Video className="h-5 w-5 text-red-500" />;
+        return <Video className="h-5 w-5 text-[var(--color-accent-rose)]" />;
     }
   };
   

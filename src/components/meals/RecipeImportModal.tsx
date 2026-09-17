@@ -493,7 +493,7 @@ export default function RecipeImportModal({
                             setDraft((d) => ({ ...d, ingredients: d.ingredients.filter((_, i) => i !== idx) }))
                           }
                           aria-label="Remove ingredient"
-                          className="p-1.5 text-text-muted hover:text-rose-400 transition-colors cursor-pointer"
+                          className="p-1.5 text-text-muted hover:text-[var(--color-accent-rose)] transition-colors cursor-pointer"
                         >
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4">
                             <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />

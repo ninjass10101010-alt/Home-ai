@@ -98,13 +98,13 @@ export function TransactionLogger({
           <div className="flex items-center gap-3">
             <div
               className={`flex h-10 w-10 items-center justify-center rounded-full ${
-                isDeposit ? 'bg-green-500/20' : 'bg-red-500/20'
+                isDeposit ? 'bg-[var(--color-accent-mint)]/20' : 'bg-[var(--color-accent-rose)]/20'
               }`}
             >
               {isDeposit ? (
-                <Plus className="h-5 w-5 text-green-500" />
+                <Plus className="h-5 w-5 text-[var(--color-accent-mint)]" />
               ) : (
-                <Minus className="h-5 w-5 text-red-500" />
+                <Minus className="h-5 w-5 text-[var(--color-accent-rose)]" />
               )}
             </div>
             <div>
@@ -209,7 +209,7 @@ export function TransactionLogger({
           
           {/* Error */}
           {error && (
-            <div className="rounded-lg bg-red-500/10 border border-red-500/20 p-3 text-sm text-red-600">
+            <div className="rounded-lg bg-[var(--color-accent-rose)]/10 border border-[var(--color-accent-rose)]/20 p-3 text-sm text-[var(--color-accent-rose)]">
               {error}
             </div>
           )}
@@ -228,8 +228,8 @@ export function TransactionLogger({
               disabled={loading}
               className={`flex-1 rounded-lg px-4 py-2.5 text-sm font-medium text-white transition-colors disabled:opacity-50 ${
                 isDeposit
-                  ? 'bg-green-500 hover:bg-green-600'
-                  : 'bg-red-500 hover:bg-red-600'
+                  ? 'bg-[var(--color-accent-mint)] hover:bg-[var(--color-accent-mint)]'
+                  : 'bg-[var(--color-accent-rose)] hover:bg-[var(--color-accent-rose)]'
               }`}
             >
               {loading ? 'Processing...' : `Confirm ${isDeposit ? 'Deposit' : 'Withdrawal'}`}

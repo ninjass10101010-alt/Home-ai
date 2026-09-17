@@ -72,7 +72,7 @@ export function SkillBranchNode({
           
           {/* Lock/Unlock Icon */}
           {isUnlocked ? (
-            <Unlock className="h-5 w-5 text-green-500" />
+            <Unlock className="h-5 w-5 text-[var(--color-accent-mint)]" />
           ) : canUnlock ? (
             <motion.div
               animate={{ scale: [1, 1.1, 1] }}

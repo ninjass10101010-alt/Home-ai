@@ -15,7 +15,7 @@ class SettingsErrorBoundary extends React.Component<{children: React.ReactNode},
   }
   render() {
     if (this.state.hasError) {
-      return <div className="p-4 text-red-500">Error: {String(this.state.error)}</div>;
+      return <div className="p-4 text-[var(--color-accent-rose)]">Error: {String(this.state.error)}</div>;
     }
     return this.props.children;
   }

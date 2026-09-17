@@ -169,7 +169,7 @@ export default function RemindersSection() {
       }
     >
       {error && (
-        <div className="mb-3 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+        <div className="mb-3 rounded-xl border border-[var(--color-accent-rose)]/30 bg-[var(--color-accent-rose)]/10 px-3 py-2 text-xs text-[var(--color-accent-rose)]">
           {error}
         </div>
       )}
@@ -182,7 +182,7 @@ export default function RemindersSection() {
         <div className="space-y-3">
           {buckets.overdue.length > 0 && (
             <div>
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-rose-300/90">
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--color-accent-rose)]/90">
                 Overdue · {buckets.overdue.length}
               </p>
               <div className="space-y-1.5">

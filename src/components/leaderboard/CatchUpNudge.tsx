@@ -25,7 +25,7 @@ export default function CatchUpNudge({ myEntry, aheadEntry, behindEntry }: Catch
   if (!message) return null;
 
   return (
-    <div className="flex items-center gap-2 rounded-2xl bg-amber-400/8 border border-amber-400/15 px-3 py-2">
+    <div className="flex items-center gap-2 rounded-2xl bg-[var(--color-accent-amber)]/8 border border-[var(--color-accent-amber)]/15 px-3 py-2">
       <span className="text-base">💨</span>
       <p className="text-xs text-text-secondary flex-1">{message}</p>
     </div>

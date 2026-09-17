@@ -427,7 +427,7 @@ export default function HomePage() {
                   {showSessionPill && (
                     <span
                       className={`rounded-full border border-white/10 bg-[var(--color-surface-0)]/35 px-2.5 py-1 text-[10px] font-semibold tabular-nums text-text-secondary backdrop-blur-xl ${
-                        sessionWarning ? "session-pill-warning border-amber-300/30 bg-amber-500/10 text-amber-200" : ""
+                        sessionWarning ? "session-pill-warning border-[var(--color-accent-amber)]/30 bg-[var(--color-accent-amber)]/10 text-[var(--color-accent-amber)]" : ""
                       }`}
                       aria-label={`Auto sign-out in ${sessionPillMM}:${sessionPillSS}`}
                       title="Time until auto sign-out"

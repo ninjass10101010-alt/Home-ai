@@ -47,15 +47,15 @@ function TransactionRow({
   const isWithdrawal = transaction.type === 'withdrawal';
   
   const icons = {
-    deposit: <TrendingUp className="h-4 w-4 text-green-500" />,
-    withdrawal: <TrendingDown className="h-4 w-4 text-red-500" />,
-    match: <Gift className="h-4 w-4 text-purple-500" />,
+    deposit: <TrendingUp className="h-4 w-4 text-[var(--color-accent-mint)]" />,
+    withdrawal: <TrendingDown className="h-4 w-4 text-[var(--color-accent-rose)]" />,
+    match: <Gift className="h-4 w-4 text-[var(--color-accent-violet)]" />,
   };
   
   const colors = {
-    deposit: 'text-green-500',
-    withdrawal: 'text-red-500',
-    match: 'text-purple-500',
+    deposit: 'text-[var(--color-accent-mint)]',
+    withdrawal: 'text-[var(--color-accent-rose)]',
+    match: 'text-[var(--color-accent-violet)]',
   };
   
   const labels = {
@@ -89,7 +89,7 @@ function TransactionRow({
             {transaction.description}
           </span>
           {transaction.isMatch && (
-            <span className="text-[10px] font-medium text-purple-500 bg-purple-500/10 px-1.5 py-0.5 rounded">
+            <span className="text-[10px] font-medium text-[var(--color-accent-violet)] bg-[var(--color-accent-violet)]/10 px-1.5 py-0.5 rounded">
               MATCH
             </span>
           )}

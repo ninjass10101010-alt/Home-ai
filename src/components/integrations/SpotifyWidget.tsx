@@ -107,7 +107,7 @@ export default function SpotifyWidget() {
               </>
             )}
           </div>
-          <div className="shrink-0 text-[10px] font-bold text-emerald-400 uppercase tracking-wider">
+          <div className="shrink-0 text-[10px] font-bold text-[var(--color-accent-mint)] uppercase tracking-wider">
             {isPlaying ? "▶ Playing" : "⏸ Paused"}
           </div>
         </div>
@@ -126,8 +126,8 @@ export default function SpotifyWidget() {
             />
           </div>
           <div className="flex justify-between mt-1">
-            <span className="text-[9px] text-text-muted tabular-nums">{formatTime(progress)}</span>
-            <span className="text-[9px] text-text-muted tabular-nums">{formatTime(currentTrack.duration_ms)}</span>
+            <span className="text-[11px] text-text-muted tabular-nums">{formatTime(progress)}</span>
+            <span className="text-[11px] text-text-muted tabular-nums">{formatTime(currentTrack.duration_ms)}</span>
           </div>
         </div>
       )}

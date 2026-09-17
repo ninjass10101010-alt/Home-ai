@@ -71,16 +71,16 @@ const EMPTY_DRAFT: Draft = { displayName: "", baseUrl: "", apiKey: "", models: [
 
 // Matches ServicesKeysCard's dot idiom (emerald/rose/amber semantic dots).
 function statusDot(status: ProviderRow["status"]): string {
-  if (status === "ok") return "bg-emerald-400";
-  if (status === "unreachable") return "bg-rose-400";
-  return "bg-amber-300";
+  if (status === "ok") return "bg-[var(--color-accent-mint)]";
+  if (status === "unreachable") return "bg-[var(--color-accent-rose)]";
+  return "bg-[var(--color-accent-amber)]";
 }
 
 function outcomeDot(outcome: HealthOutcome["outcome"]): string {
-  if (outcome === "ok") return "bg-emerald-400";
-  if (outcome === "wrapup") return "bg-sky-300";
-  if (outcome === "exhausted") return "bg-amber-300";
-  return "bg-rose-400"; // snag / client_gone / unconfigured
+  if (outcome === "ok") return "bg-[var(--color-accent-mint)]";
+  if (outcome === "wrapup") return "bg-[var(--color-accent-cyan)]";
+  if (outcome === "exhausted") return "bg-[var(--color-accent-amber)]";
+  return "bg-[var(--color-accent-rose)]"; // snag / client_gone / unconfigured
 }
 
 function outcomeLabel(outcome: HealthOutcome["outcome"]): string {
@@ -417,7 +417,7 @@ export default function AiModelsCard() {
           {envProviders.map((g) => (
             <div key={`${g.provider}::${g.baseUrl}`} className="rounded-2xl border border-dashed border-white/15 bg-[var(--color-surface-2)]/60 px-4 py-3">
               <div className="flex items-center gap-2">
-                <span className="h-2 w-2 shrink-0 rounded-full bg-amber-300" aria-hidden />
+                <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--color-accent-amber)]" aria-hidden />
                 <span className="truncate text-sm font-semibold text-text-primary">{g.provider}</span>
                 <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] font-semibold text-text-muted">read-only · env</span>
               </div>

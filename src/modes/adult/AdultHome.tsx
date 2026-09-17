@@ -77,7 +77,7 @@ function OverviewBar({
           <span className="text-xs">🍽️</span>
           <span className="text-xs font-semibold text-text-primary truncate max-w-[80px]">{mealName || "—"}</span>
         </div>
-        {streak > 0 && <><Dot /><Stat label="streak" value={`${streak}d`} icon="🔥" accent="text-amber-400" /></>}
+        {streak > 0 && <><Dot /><Stat label="streak" value={`${streak}d`} icon="🔥" accent="text-[var(--color-accent-amber)]" /></>}
         {groceryCount > 0 && <><Dot /><Stat label="grocery" value={groceryCount} icon="🛒" /></>}
         <div className="ml-auto shrink-0">
           <span className="text-xs font-semibold text-text-secondary tabular-nums">{timeStr}</span>
@@ -161,7 +161,7 @@ function CompactWeather() {
         <div className="flex gap-1 pt-2 border-t border-white/[0.06]">
           {forecast.map((d) => (
             <div key={d.day} className="flex-1 flex flex-col items-center gap-0.5 py-1">
-              <span className="text-[9px] font-semibold text-text-muted">{d.day}</span>
+              <span className="text-[11px] font-semibold text-text-muted">{d.day}</span>
               <span className="text-sm">{d.emoji}</span>
               <span className="text-[10px] font-bold text-text-secondary tabular-nums">{d.high}°</span>
             </div>
@@ -210,7 +210,7 @@ function MealPlanGrid({ meals }: { meals: any[] }) {
                   border: isToday ? "1px solid rgba(var(--color-accent-selected-rgb, 59,130,246), 0.2)" : "1px solid transparent",
                 }}
               >
-                <span className={`text-[9px] font-bold ${isToday ? "text-[var(--color-accent-selected)]" : "text-text-muted"}`}>
+                <span className={`text-[11px] font-bold ${isToday ? "text-[var(--color-accent-selected)]" : "text-text-muted"}`}>
                   {day}
                 </span>
                 {dayMeals.length > 0 ? (
@@ -221,7 +221,7 @@ function MealPlanGrid({ meals }: { meals: any[] }) {
                   <span className="text-[10px] text-text-dim">—</span>
                 )}
                 {dayMeals.length > 0 && (
-                  <span className="text-[8px] text-text-muted truncate max-w-full px-0.5 text-center leading-tight">
+                  <span className="text-[11px] text-text-muted truncate max-w-full px-0.5 text-center leading-tight">
                     {dayMeals[0].name?.split(" ")[0] || ""}
                   </span>
                 )}
@@ -239,7 +239,7 @@ function MealPlanGrid({ meals }: { meals: any[] }) {
                 <span className="text-sm">{meal.emoji || "🍽️"}</span>
                 <span className="text-xs text-text-primary flex-1 truncate">{meal.name}</span>
                 {meal.mealType && (
-                  <span className="text-[9px] font-semibold text-text-muted uppercase">{meal.mealType}</span>
+                  <span className="text-[11px] font-semibold text-text-muted uppercase">{meal.mealType}</span>
                 )}
                 {meal.ingredients && meal.ingredients.length > 0 && (
                   <InstacartButton
@@ -366,7 +366,7 @@ export default function AdultHome() {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-lg font-bold text-text-primary">{dateStr}</h1>
-              <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">🌙 Evening</span>
+              <span className="text-[10px] font-bold text-[var(--color-accent-violet)] uppercase tracking-wider">🌙 Evening</span>
             </div>
             {user && (
               <Avatar name={user.name} color={user.color || "green"} emoji={user.emoji || "😊"} size="sm" variant="emoji" />
@@ -453,7 +453,7 @@ export default function AdultHome() {
         <div>
           <h1 className="text-lg font-bold text-text-primary tracking-tight">{dateStr}</h1>
           {isWeekend && (
-            <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider weekend-badge">
+            <span className="text-[10px] font-bold text-[var(--color-accent-amber)] uppercase tracking-wider weekend-badge">
               🏖️ Weekend
             </span>
           )}

@@ -188,7 +188,7 @@ export function ContentUploader({ onUpload, onClose }: ContentUploaderProps) {
           
           {/* Error */}
           {error && (
-            <div className="rounded-lg bg-red-500/10 border border-red-500/20 p-3 text-sm text-red-600">
+            <div className="rounded-lg bg-[var(--color-accent-rose)]/10 border border-[var(--color-accent-rose)]/20 p-3 text-sm text-[var(--color-accent-rose)]">
               {error}
             </div>
           )}

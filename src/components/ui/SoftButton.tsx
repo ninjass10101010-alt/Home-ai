@@ -21,7 +21,7 @@ const variantMap: Record<SoftButtonVariant, string> = {
 };
 
 const sizeMap: Record<SoftButtonSize, string> = {
-  sm: "h-9 px-3.5 text-xs rounded-xl gap-1.5",
+  sm: "h-9 px-3.5 text-xs rounded-xl gap-1.5 hit-44",
   md: "h-11 px-4 text-sm rounded-2xl gap-2",
   lg: "h-12 px-5 text-sm font-semibold rounded-2xl gap-2",
   icon: "h-11 w-11 px-0 text-sm rounded-2xl",

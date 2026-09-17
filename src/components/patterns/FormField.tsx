@@ -16,7 +16,7 @@ export default function FormField({ label, children, helperText, errorText, clas
       <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">{label}</span>
       {children}
       {(helperText || errorText) && (
-        <span className={`mt-1 block text-xs ${errorText ? "text-rose-300" : "text-text-muted"}`}>
+        <span className={`mt-1 block text-xs ${errorText ? "text-[var(--color-accent-rose)]" : "text-text-muted"}`}>
           {errorText || helperText}
         </span>
       )}

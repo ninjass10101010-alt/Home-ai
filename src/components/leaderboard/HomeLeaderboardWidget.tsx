@@ -83,10 +83,10 @@ function PodiumRow({
 }) {
   const bgClass =
     rank === 1
-      ? "bg-amber-400/15 border-amber-400/25"
+      ? "bg-[var(--color-accent-amber)]/15 border-[var(--color-accent-amber)]/25"
       : rank === 2
-      ? "bg-slate-300/10 border-slate-300/15"
-      : "bg-amber-700/10 border-amber-700/15";
+      ? "bg-white/10 border-white/15"
+      : "bg-[var(--color-accent-amber)]/10 border-[var(--color-accent-amber)]/20";
 
   return (
     <div
@@ -116,7 +116,7 @@ function PodiumRow({
             </span>
           )}
           {entry.streak > 0 && (
-            <span className="text-xs text-amber-400 font-semibold">
+            <span className="text-xs text-[var(--color-accent-amber)] font-semibold">
               🔥{entry.streak}d
             </span>
           )}
@@ -247,7 +247,7 @@ export default function HomeLeaderboardWidget({ className = "" }: { className?: 
                 </span>
               )}
               {myEntry.rank === 1 && (
-                <span className="text-amber-400 text-xs ml-1.5 font-semibold">👑 Leading!</span>
+                <span className="text-[var(--color-accent-amber)] text-xs ml-1.5 font-semibold">👑 Leading!</span>
               )}
             </div>
           </div>

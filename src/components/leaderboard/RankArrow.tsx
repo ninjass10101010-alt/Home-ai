@@ -11,13 +11,13 @@ export default function RankArrow({ currentRank, previousRank }: RankArrowProps)
   }
   if (previousRank > currentRank) {
     return (
-      <span className="inline-flex items-center text-emerald-400 text-xs font-bold animate-rank-arrow-bounce">
+      <span className="inline-flex items-center text-[var(--color-accent-mint)] text-xs font-bold animate-rank-arrow-bounce">
         ↑
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center text-rose-400 text-xs font-bold">
+    <span className="inline-flex items-center text-[var(--color-accent-rose)] text-xs font-bold">
       ↓
     </span>
   );

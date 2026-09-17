@@ -25,9 +25,9 @@ export function QuestDetail({
   const xpReward = XP_REWARDS[quest.type]?.[quest.difficulty] || quest.xpReward;
   
   const difficultyColors = {
-    easy: 'text-green-500 bg-green-500/10',
-    medium: 'text-yellow-500 bg-yellow-500/10',
-    hard: 'text-red-500 bg-red-500/10',
+    easy: 'text-[var(--color-accent-mint)] bg-[var(--color-accent-mint)]/10',
+    medium: 'text-[var(--color-accent-amber)] bg-[var(--color-accent-amber)]/10',
+    hard: 'text-[var(--color-accent-rose)] bg-[var(--color-accent-rose)]/10',
   };
   
   return (
@@ -76,10 +76,10 @@ export function QuestDetail({
           
           {/* Status */}
           {isCompleted && (
-            <div className="flex items-center gap-2 rounded-lg bg-green-500/10 border border-green-500/20 p-3">
-              <CheckCircle className="h-5 w-5 text-green-500" />
+            <div className="flex items-center gap-2 rounded-lg bg-[var(--color-accent-mint)]/10 border border-[var(--color-accent-mint)]/20 p-3">
+              <CheckCircle className="h-5 w-5 text-[var(--color-accent-mint)]" />
               <div>
-                <div className="text-sm font-medium text-green-600">Completed!</div>
+                <div className="text-sm font-medium text-[var(--color-accent-mint)]">Completed!</div>
                 <div className="text-xs text-muted-foreground">
                   {new Date(quest.completedAt!).toLocaleDateString('en-US', {
                     month: 'short',

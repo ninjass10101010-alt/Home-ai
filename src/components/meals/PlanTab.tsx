@@ -519,7 +519,7 @@ export default function PlanTab({
                                 <p className="text-text-muted text-[10px] mt-0.5">{idea.prepTime}</p>
                                 <div className="flex gap-1 flex-wrap mt-1">
                                   {idea.tags.slice(0, 2).map((t: string) => (
-                                    <span key={t} className="px-1.5 py-0.5 rounded-md bg-[var(--color-surface-2)] text-text-secondary text-[9px] font-medium">
+                                    <span key={t} className="px-1.5 py-0.5 rounded-md bg-[var(--color-surface-2)] text-text-secondary text-[11px] font-medium">
                                       {t}
                                     </span>
                                   ))}

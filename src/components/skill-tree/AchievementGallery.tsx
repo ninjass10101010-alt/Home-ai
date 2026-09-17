@@ -35,7 +35,7 @@ export function AchievementGallery({
       <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="rounded-2xl border border-border bg-gradient-to-br from-yellow-500/10 to-orange-500/10 p-6"
+        className="rounded-2xl border border-border bg-gradient-to-br from-[var(--color-accent-amber)]/10 to-[var(--color-accent-amber)]/10 p-6"
       >
         <div className="flex items-center justify-between mb-4">
           <div>
@@ -59,7 +59,7 @@ export function AchievementGallery({
             initial={{ width: 0 }}
             animate={{ width: `${progress}%` }}
             transition={{ duration: 0.8 }}
-            className="h-full rounded-full bg-gradient-to-r from-yellow-400 to-orange-500"
+            className="h-full rounded-full bg-gradient-to-r from-[var(--color-accent-amber)] to-[var(--color-accent-amber)]"
           />
         </div>
       </motion.div>

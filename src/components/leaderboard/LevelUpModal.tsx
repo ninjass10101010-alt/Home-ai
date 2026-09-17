@@ -21,7 +21,7 @@ export default function LevelUpModal({ open, memberName, memberEmoji, oldLevel, 
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="relative mx-4 max-w-sm w-full rounded-3xl border border-amber-400/30 bg-[var(--color-surface-2)] p-8 text-center animate-level-up-pop"
+        className="relative mx-4 max-w-sm w-full rounded-3xl border border-[var(--color-accent-amber)]/30 bg-[var(--color-surface-2)] p-8 text-center animate-level-up-pop"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="absolute -top-6 left-1/2 -translate-x-1/2">
@@ -29,11 +29,11 @@ export default function LevelUpModal({ open, memberName, memberEmoji, oldLevel, 
         </div>
 
         <div className="mt-8">
-          <p className="text-xs font-semibold uppercase tracking-[0.15em] text-amber-400 mb-2">Level Up!</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.15em] text-[var(--color-accent-amber)] mb-2">Level Up!</p>
           <h2 className="text-2xl font-bold text-text-primary">
             {firstName} became a
           </h2>
-          <h2 className="text-2xl font-bold text-amber-400 mt-1">
+          <h2 className="text-2xl font-bold text-[var(--color-accent-amber)] mt-1">
             {levelInfo.title}!
           </h2>
           <p className="mt-4 text-sm text-text-secondary">

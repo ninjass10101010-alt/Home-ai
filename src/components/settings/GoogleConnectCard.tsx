@@ -215,7 +215,7 @@ export default function GoogleConnectCard() {
     return (
       <div className="space-y-4">
         <div className="flex items-start gap-3">
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-emerald-500/20 text-xl">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-[var(--color-accent-mint)]/20 text-xl">
             ✓
           </span>
           <div className="min-w-0 flex-1">
@@ -389,7 +389,7 @@ export default function GoogleConnectCard() {
       </div>
 
       {errorMessage && (
-        <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+        <div className="rounded-xl border border-[var(--color-accent-rose)]/30 bg-[var(--color-accent-rose)]/10 px-3 py-2 text-xs text-[var(--color-accent-rose)]">
           {errorMessage}
         </div>
       )}

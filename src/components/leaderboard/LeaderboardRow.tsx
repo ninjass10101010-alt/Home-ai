@@ -42,11 +42,11 @@ export default function LeaderboardRow({
           <div
             className={`grid h-10 w-10 place-items-center rounded-2xl text-sm font-bold ${
               index === 0
-                ? "bg-amber-400/20 text-amber-400 animate-rank-pulse"
+                ? "bg-[var(--color-accent-amber)]/20 text-[var(--color-accent-amber)] animate-rank-pulse"
                 : index === 1
-                ? "bg-slate-300/15 text-slate-300"
+                ? "bg-white/10 text-text-secondary"
                 : index === 2
-                ? "bg-amber-700/15 text-amber-600"
+                ? "bg-[var(--color-accent-amber)]/15 text-[var(--color-accent-amber)]"
                 : "bg-[var(--color-accent-selected)]/10 text-text-secondary"
             }`}
           >
@@ -59,7 +59,7 @@ export default function LeaderboardRow({
             <span className="truncate text-sm font-semibold text-text-primary">{entry.name.split(" ")[0]}</span>
             {isYou && (
               <span
-                className="rounded-md px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider"
+                className="rounded-md px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wider"
                 style={{ background: `${color}25`, color }}
               >
                 You
@@ -78,7 +78,7 @@ export default function LeaderboardRow({
           </div>
           <div className="mt-1 flex items-center gap-2">
             {entry.streak > 0 && (
-              <span className="text-xs text-amber-400 font-semibold">🔥{entry.streak}d streak</span>
+              <span className="text-xs text-[var(--color-accent-amber)] font-semibold">🔥{entry.streak}d streak</span>
             )}
             {entry.streak === 0 && entry.points > 0 && (
               <span className="text-xs text-text-muted">Complete a task today!</span>

@@ -53,11 +53,11 @@ export function LevelUpAnimation({ newLevel, onComplete }: LevelUpAnimationProps
                 className="absolute"
               >
                 {i % 3 === 0 ? (
-                  <Star className="h-6 w-6 text-yellow-400 fill-yellow-400" />
+                  <Star className="h-6 w-6 text-[var(--color-accent-amber)] fill-[var(--color-accent-amber)]" />
                 ) : i % 3 === 1 ? (
-                  <Sparkles className="h-6 w-6 text-yellow-400" />
+                  <Sparkles className="h-6 w-6 text-[var(--color-accent-amber)]" />
                 ) : (
-                  <Trophy className="h-6 w-6 text-yellow-400" />
+                  <Trophy className="h-6 w-6 text-[var(--color-accent-amber)]" />
                 )}
               </motion.div>
             ))}
@@ -76,7 +76,7 @@ export function LevelUpAnimation({ newLevel, onComplete }: LevelUpAnimationProps
             type: 'spring',
             stiffness: 200,
           }}
-          className="relative flex h-40 w-40 items-center justify-center rounded-full bg-gradient-to-br from-yellow-400 via-yellow-500 to-orange-500"
+          className="relative flex h-40 w-40 items-center justify-center rounded-full bg-gradient-to-br from-[var(--color-accent-amber)] via-[var(--color-accent-amber)] to-[var(--color-accent-amber)]"
           style={{
             boxShadow: '0 0 60px rgba(251, 191, 36, 0.5)',
           }}
@@ -111,7 +111,7 @@ export function LevelUpAnimation({ newLevel, onComplete }: LevelUpAnimationProps
               repeat: Infinity,
               ease: 'easeInOut',
             }}
-            className="absolute inset-0 rounded-full bg-yellow-400/30 blur-xl"
+            className="absolute inset-0 rounded-full bg-[var(--color-accent-amber)]/30 blur-xl"
           />
         </motion.div>
         

@@ -25,7 +25,7 @@ export function TimeCapsuleCard({ capsule, onClick }: TimeCapsuleCardProps) {
       onClick={onClick}
       className={`group relative overflow-hidden rounded-2xl border-2 cursor-pointer transition-all duration-200 ${
         isUnlocked
-          ? 'border-green-500/50 bg-gradient-to-br from-green-500/10 to-emerald-500/10'
+          ? 'border-[var(--color-accent-mint)]/50 bg-gradient-to-br from-[var(--color-accent-mint)]/10 to-[var(--color-accent-mint)]/10'
           : 'border-white/10 bg-[var(--color-surface-2)]/50 backdrop-blur-xl hover:border-white/20'
       }`}
     >
@@ -40,11 +40,11 @@ export function TimeCapsuleCard({ capsule, onClick }: TimeCapsuleCardProps) {
           <div className="flex items-center gap-3">
             <div
               className={`flex h-12 w-12 items-center justify-center rounded-full ${
-                isUnlocked ? 'bg-green-500/20' : 'bg-primary/10'
+                isUnlocked ? 'bg-[var(--color-accent-mint)]/20' : 'bg-primary/10'
               }`}
             >
               {isUnlocked ? (
-                <Unlock className="h-6 w-6 text-green-500" />
+                <Unlock className="h-6 w-6 text-[var(--color-accent-mint)]" />
               ) : (
                 <Lock className="h-6 w-6 text-primary" />
               )}
@@ -57,7 +57,7 @@ export function TimeCapsuleCard({ capsule, onClick }: TimeCapsuleCardProps) {
             </div>
           </div>
           {isUnlocked && (
-            <div className="rounded-full bg-green-500/20 px-3 py-1 text-xs font-medium text-green-600">
+            <div className="rounded-full bg-[var(--color-accent-mint)]/20 px-3 py-1 text-xs font-medium text-[var(--color-accent-mint)]">
               Ready to Open
             </div>
           )}
@@ -135,7 +135,7 @@ export function TimeCapsuleCard({ capsule, onClick }: TimeCapsuleCardProps) {
       
       {/* Decorative gradient */}
       {isUnlocked && (
-        <div className="absolute inset-0 -z-10 bg-gradient-to-br from-green-500/5 to-emerald-500/5" />
+        <div className="absolute inset-0 -z-10 bg-gradient-to-br from-[var(--color-accent-mint)]/5 to-[var(--color-accent-mint)]/5" />
       )}
     </motion.div>
   );

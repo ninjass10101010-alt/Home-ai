@@ -127,7 +127,7 @@ export default function MemberModal({ isOpen, onClose, member, onSave, onDelete 
                 className="w-full px-3 py-2 bg-surface-2 border border-surface-3 rounded-lg text-text-primary placeholder-text-muted focus:border-nori-500 focus:outline-none"
                 placeholder="Enter full name"
               />
-              {errors.name && <p className="text-red-400 text-xs mt-1">{errors.name}</p>}
+              {errors.name && <p className="text-[var(--color-accent-rose)] text-xs mt-1">{errors.name}</p>}
             </div>
 
             {/* Role */}
@@ -166,7 +166,7 @@ export default function MemberModal({ isOpen, onClose, member, onSave, onDelete 
                 min="0"
                 max="120"
               />
-              {errors.age && <p className="text-red-400 text-xs mt-1">{errors.age}</p>}
+              {errors.age && <p className="text-[var(--color-accent-rose)] text-xs mt-1">{errors.age}</p>}
             </div>
 
             {/* Color */}
@@ -189,9 +189,9 @@ export default function MemberModal({ isOpen, onClose, member, onSave, onDelete 
                       <div
                         className={`w-6 h-6 rounded-full mx-auto mb-1 ${
                           color.value === "green" ? "bg-nori-400" :
-                          color.value === "cyan" ? "bg-cyan-400" :
-                          color.value === "violet" ? "bg-violet-400" :
-                          "bg-amber-400"
+                          color.value === "cyan" ? "bg-[var(--color-accent-cyan)]" :
+                          color.value === "violet" ? "bg-[var(--color-accent-violet)]" :
+                          "bg-[var(--color-accent-amber)]"
                         }`}
                       />
                       <span className="text-xs text-text-primary">{color.name}</span>

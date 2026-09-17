@@ -137,7 +137,7 @@ export function CreateCapsuleForm({
           {/* Title */}
           <div>
             <label htmlFor="title" className="mb-2 block text-sm font-medium text-foreground">
-              Title <span className="text-red-500">*</span>
+              Title <span className="text-[var(--color-accent-rose)]">*</span>
             </label>
             <input
               id="title"
@@ -171,7 +171,7 @@ export function CreateCapsuleForm({
           <div>
             <label htmlFor="unlockDate" className="mb-2 flex items-center gap-2 text-sm font-medium text-foreground">
               <Calendar className="h-4 w-4" />
-              Unlock Date <span className="text-red-500">*</span>
+              Unlock Date <span className="text-[var(--color-accent-rose)]">*</span>
             </label>
             <input
               id="unlockDate"
@@ -313,7 +313,7 @@ export function CreateCapsuleForm({
           
           {/* Error */}
           {error && (
-            <div className="rounded-lg bg-red-500/10 border border-red-500/20 p-3 text-sm text-red-600">
+            <div className="rounded-lg bg-[var(--color-accent-rose)]/10 border border-[var(--color-accent-rose)]/20 p-3 text-sm text-[var(--color-accent-rose)]">
               {error}
             </div>
           )}

@@ -39,8 +39,8 @@ export default function Toast({ open, children, tone = "neutral" }: ToastProps) 
 
   const toneMap = {
     neutral: "border-white/10 bg-[var(--color-surface-0)]/80 text-text-primary",
-    success: "border-emerald-300/20 bg-emerald-500/15 text-emerald-200",
-    error: "border-rose-300/20 bg-rose-500/15 text-rose-200",
+    success: "border-[var(--color-accent-mint)]/20 bg-[var(--color-accent-mint)]/15 text-[var(--color-accent-mint)]",
+    error: "border-[var(--color-accent-rose)]/20 bg-[var(--color-accent-rose)]/15 text-[var(--color-accent-rose)]",
   };
 
   return (

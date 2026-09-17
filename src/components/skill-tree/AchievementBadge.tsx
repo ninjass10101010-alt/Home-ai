@@ -11,19 +11,19 @@ interface AchievementBadgeProps {
 }
 
 const rarityColors = {
-  common: 'from-gray-400 to-gray-500',
-  uncommon: 'from-green-400 to-green-500',
-  rare: 'from-blue-400 to-blue-500',
-  epic: 'from-purple-400 to-purple-500',
-  legendary: 'from-yellow-400 to-orange-500',
+  common: 'from-[#94a3b8] to-[#64748b]',
+  uncommon: 'from-[var(--color-accent-mint)] to-[var(--color-accent-mint)]',
+  rare: 'from-[var(--color-accent-nori)] to-[var(--color-accent-nori)]',
+  epic: 'from-[var(--color-accent-violet)] to-[var(--color-accent-violet)]',
+  legendary: 'from-[var(--color-accent-amber)] to-[var(--color-accent-amber)]',
 };
 
 const rarityBorders = {
-  common: 'border-gray-400',
-  uncommon: 'border-green-400',
-  rare: 'border-blue-400',
-  epic: 'border-purple-400',
-  legendary: 'border-yellow-400',
+  common: 'border-[#94a3b8]',
+  uncommon: 'border-[var(--color-accent-mint)]',
+  rare: 'border-[var(--color-accent-nori)]',
+  epic: 'border-[var(--color-accent-violet)]',
+  legendary: 'border-[var(--color-accent-amber)]',
 };
 
 export function AchievementBadge({
@@ -84,7 +84,7 @@ export function AchievementBadge({
           initial={{ scale: 0, rotate: -180 }}
           animate={{ scale: 1, rotate: 0 }}
           transition={{ type: 'spring', stiffness: 500, damping: 20 }}
-          className="absolute -top-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full bg-green-500 text-white shadow-lg"
+          className="absolute -top-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--color-accent-mint)] text-white shadow-lg"
         >
           ✓
         </motion.div>

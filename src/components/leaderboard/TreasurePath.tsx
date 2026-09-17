@@ -50,7 +50,7 @@ export default function TreasurePath({ allTimePoints, memberEmoji, memberColor }
                     <EmojiText emoji={memberEmoji} alt="You" />
                   </span>
                 )}
-                <span className="text-[9px] text-text-muted mt-1">{level.title.split(" ").pop()}</span>
+                <span className="text-[11px] text-text-muted mt-1">{level.title.split(" ").pop()}</span>
               </div>
             );
           })}

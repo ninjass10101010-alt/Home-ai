@@ -72,7 +72,7 @@ export default function LightsGrid({ states, onRefresh }: LightsGridProps) {
                 </span>
                 <span
                   className={`inline-flex h-7 shrink-0 items-center rounded-full border px-2.5 text-[11px] font-semibold ${
-                    isOn ? "border-emerald-300/25 text-emerald-400" : "border-white/10 text-text-secondary"
+                    isOn ? "border-[var(--color-accent-mint)]/25 text-[var(--color-accent-mint)]" : "border-white/10 text-text-secondary"
                   }`}
                 >
                   {isOn ? "On" : "Off"}

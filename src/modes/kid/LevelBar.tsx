@@ -60,7 +60,7 @@ export default function LevelBar({
           </span>
           {animating && (
             <span
-              className="text-xs font-bold text-amber-400"
+              className="text-xs font-bold text-[var(--color-accent-amber)]"
               style={{ animation: "levelBadgePop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)" }}
             >
               LEVEL UP!

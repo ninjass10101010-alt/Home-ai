@@ -51,7 +51,7 @@ export function CountdownTimer({ unlockDate, compact = false }: CountdownTimerPr
   
   if (timeLeft.total <= 0) {
     return (
-      <div className="flex items-center gap-2 text-sm font-medium text-green-600">
+      <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-accent-mint)]">
         <Clock className="h-4 w-4" />
         <span>Ready to unlock!</span>
       </div>

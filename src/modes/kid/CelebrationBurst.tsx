@@ -139,7 +139,7 @@ export default function CelebrationBurst({
           +{points}
         </span>
         <span
-          className="text-sm font-bold text-amber-300 mt-1"
+          className="text-sm font-bold text-[var(--color-accent-amber)] mt-1"
           style={{ textShadow: "0 2px 4px rgba(0,0,0,0.3)" }}
         >
           {pending ? "pts · on the way" : "pts"}
@@ -166,7 +166,7 @@ export default function CelebrationBurst({
               Level {newLevel}!
             </span>
             <span
-              className="text-sm font-bold text-amber-300 mt-1"
+              className="text-sm font-bold text-[var(--color-accent-amber)] mt-1"
               style={{ animation: "celebSlideUp 0.5s ease-out 0.9s both" }}
             >
               You&apos;re amazing! 🎉
