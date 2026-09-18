@@ -11,6 +11,7 @@ vi.mock("@/lib/pb-auth", () => ({ withAdmin: (fn: (pb: unknown) => Promise<unkno
 vi.mock("@/lib/ha/notify", () => ({ broadcastHouseAlert: mocks.broadcastHouseAlert }));
 
 import { POST } from "@/app/api/cron/consuela/calendar-alert/route";
+import { __resetKeyedLockForTests } from "@/lib/keyed-lock";
 
 function req() {
   return new NextRequest("http://localhost/api/cron/consuela/calendar-alert", {
@@ -58,6 +59,7 @@ beforeEach(() => {
   events = [];
   prefs = [];
   stateStore = {};
+  __resetKeyedLockForTests();
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -110,4 +112,15 @@ it("does NOT persist an alerted ref when the broadcast sends nothing", async () 
   mocks.broadcastHouseAlert.mockResolvedValue({ sent: 0, failed: 1, notes: ["dead"] });
   await POST(req());
   expect(JSON.parse(stateStore["calendar-alert"].value).alerted).not.toContainEqual({ id: "a", date: "2026-01-05" });
+});
+
+it("two overlapping runs deliver the event alert exactly ONCE (no double push)", async () => {
+  prefs = [{ key: "calendar", enabled: true }];
+  events = [ev("a", "3:45 PM", 80)];
+  const [r1, r2] = await Promise.all([POST(req()), POST(req())]);
+  const fired = (await r1.json()).fired + (await r2.json()).fired;
+  expect(fired).toBe(1);
+  expect(mocks.broadcastHouseAlert).toHaveBeenCalledTimes(1);
+  // The winner's delivered ref survives — a lost update can't resurrect the push.
+  expect(JSON.parse(stateStore["calendar-alert"].value).alerted).toContainEqual({ id: "a", date: "2026-01-05" });
 });

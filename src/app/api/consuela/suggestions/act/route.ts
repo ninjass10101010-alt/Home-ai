@@ -10,12 +10,37 @@ const PIN_HEADER = "x-consuela-pin";
 // C3 — this route performs write actions, so it requires a family-member PIN
 // verified server-side against PocketBase (mirrors /api/tasks/claim +
 // /api/emergency). The client forwards the active session PIN from useAuth.
-async function isAuthorized(request: NextRequest): Promise<boolean> {
+// Role gate: verified PINs resolve to the member's real PB role — a child/pet
+// PIN previously authorized ALL write tools here (kids could add/complete
+// tasks, events, groceries straight from the suggestions feed). The list of
+// adult-only tools matches the kid surface contract in AGENTS.md §5.3.
+const ADULT_ONLY_TOOLS = new Set([
+  "add_grocery_item",
+  "add_task",
+  "complete_task",
+  "complete_grocery_item",
+  "add_event",
+  "remove_event",
+  "dismiss_suggestion",
+]);
+
+// Read-only lookups stay kid-allowed (get_grocery_list).
+const CHILD_ALLOWED_TOOLS = new Set(["get_grocery_list"]);
+
+function toolAllowedForRole(tool: string, role: string): boolean {
+  if (tool === "dismiss_suggestion") return true; // kid-filterable feed action
+  if (CHILD_ALLOWED_TOOLS.has(tool)) return true;
+  return role === "parent" && ADULT_ONLY_TOOLS.has(tool);
+}
+
+async function isAuthorized(
+  request: NextRequest,
+): Promise<{ ok: boolean; role?: string }> {
   const pin =
     request.headers.get(PIN_HEADER) || request.cookies.get(PIN_HEADER)?.value || "";
-  if (!pin) return false;
+  if (!pin) return { ok: false };
   const member = await verifyPinAgainstAnyMember(pin);
-  return member !== null;
+  return member !== null ? { ok: true, role: member.role } : { ok: false };
 }
 
 // R2 — allowlist of tools the act route may dispatch. Only safe, non-admin,
@@ -33,7 +58,8 @@ const ALLOWED_TOOLS = new Set([
 ]);
 
 export async function POST(request: NextRequest) {
-  if (!(await isAuthorized(request))) {
+  const auth = await isAuthorized(request);
+  if (!auth.ok) {
     return NextResponse.json({ error: "pin required" }, { status: 401 });
   }
   const { id } = await request.json().catch(() => ({}));
@@ -50,6 +76,9 @@ export async function POST(request: NextRequest) {
     }
     if (!ALLOWED_TOOLS.has(payload.tool)) {
       return NextResponse.json({ ok: false, error: "tool not allowed" }, { status: 400 });
+    }
+    if (!toolAllowedForRole(payload.tool, auth.role || "")) {
+      return NextResponse.json({ ok: false, error: "adult_only" }, { status: 403 });
     }
     const tool = getTool(payload.tool);
     if (!tool) {

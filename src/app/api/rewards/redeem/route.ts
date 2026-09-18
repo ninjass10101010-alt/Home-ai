@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withAdmin } from "@/lib/pb-auth";
 import { verifyPinFromPB } from "@/lib/server-auth";
+import { withWeekLedgerLock } from "@/lib/week-ledger-lock";
 import type { Transaction, WeekData } from "@/types/tasks";
 
 export const dynamic = "force-dynamic";
@@ -51,7 +52,13 @@ export async function POST(request: NextRequest) {
     const currentWeek = currentWeekKey();
     const normalizedName = member.name || memberName;
 
-    const result = await withAdmin(async (pb) => {
+    // Serialize the redeem against every other week-ledger writer in-process
+    // (claims, approvals, other redeems) — same rationale as the claim route:
+    // without the lock, overlapping writers each append to a stale snapshot of
+    // the week_data history and the second write silently erases the first's
+    // transaction while both clients were told "success".
+    const result = await withWeekLedgerLock(currentWeek, () =>
+      withAdmin(async (pb) => {
       // Server-authoritative reward lookup FIRST: the stored row decides the
       // real cost/title. The request body is never trusted for cost — a forged
       // body could otherwise buy a 150-point reward for 1 point.
@@ -156,7 +163,8 @@ export async function POST(request: NextRequest) {
         outcome = await attemptRedeem();
       }
       return outcome;
-    });
+      })
+    );
 
     if (!result.ok) {
       const status = result.reason === "unknown-reward" ? 404 : result.reason === "insufficient" ? 400 : 409;

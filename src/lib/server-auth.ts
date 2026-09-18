@@ -58,11 +58,70 @@ export async function listMembersSanitized(): Promise<any[]> {
   });
 }
 
+// --- PIN attempt throttling (brute-force protection) ---
+// Repeated failed verifications from the same source lock that source out
+// (5 consecutive failures → 30s lockout, extending on further attempts). A
+// successful verification resets the counter. In-memory by design: a restart
+// clears state, which is acceptable protection for a LAN dashboard.
+const PIN_MAX_FAILURES = 5;
+const PIN_LOCKOUT_MS = 30_000;
+
+interface PinThrottleEntry {
+  failures: number;
+  lockedUntil: number;
+}
+
+const pinThrottle = new Map<string, PinThrottleEntry>();
+
+function pinThrottleKey(source: string | undefined, name?: string): string {
+  return `${source || "unknown"}|${(name || "").toLowerCase()}`;
+}
+
+function checkPinThrottle(key: string): boolean {
+  const entry = pinThrottle.get(key);
+  if (!entry) return true;
+  if (entry.lockedUntil > Date.now()) {
+    // A rejected attempt during lockout extends the window (escalation), so a
+    // persistent attacker can never wait out the lock.
+    entry.lockedUntil = Date.now() + PIN_LOCKOUT_MS;
+    pinThrottle.set(key, entry);
+    return false;
+  }
+  return true;
+}
+
+function recordPinFailure(key: string): void {
+  const entry = pinThrottle.get(key) || { failures: 0, lockedUntil: 0 };
+  entry.failures += 1;
+  if (entry.failures >= PIN_MAX_FAILURES) {
+    entry.lockedUntil = Date.now() + PIN_LOCKOUT_MS;
+  }
+  pinThrottle.set(key, entry);
+}
+
+function recordPinSuccess(key: string): void {
+  pinThrottle.delete(key);
+}
+
+// Test seam — clears all throttle state between tests.
+export function __resetPinThrottleForTests(): void {
+  pinThrottle.clear();
+}
+
 export async function verifyPinFromPB(name: string, pin: string): Promise<any | null> {
   if (!name || !pin) return null;
+  const key = pinThrottleKey(undefined, String(name));
+  if (!checkPinThrottle(key)) return null;
   const member = await findMemberByName(name);
-  if (!member) return null;
-  if (!memberPinMatches(member, pin)) return null;
+  if (!member) {
+    recordPinFailure(key);
+    return null;
+  }
+  if (!memberPinMatches(member, pin)) {
+    recordPinFailure(key);
+    return null;
+  }
+  recordPinSuccess(key);
   return member;
 }
 
@@ -72,11 +131,18 @@ export async function verifyPinFromPB(name: string, pin: string): Promise<any | 
 // the built-in fallbacks so pin-less / empty PB instances still verify.
 export async function verifyPinAgainstAnyMember(pin: string): Promise<any | null> {
   if (!pin) return null;
+  const key = pinThrottleKey(undefined);
+  if (!checkPinThrottle(key)) return null;
   return withAdmin(async (pb) => {
     const records = await pb.collection("members").getFullList({ requestKey: null });
     const merged = withResolvedPins(mergeMemberFallbacks(records));
     const member = merged.find((r: any) => memberPinMatches(r, pin));
-    return member || null;
+    if (!member) {
+      recordPinFailure(key);
+      return null;
+    }
+    recordPinSuccess(key);
+    return member;
   });
 }
 

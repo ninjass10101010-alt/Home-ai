@@ -78,6 +78,32 @@ describe("mergeTasksSnapshot (pure restore guards — same contract as the Tasks
     expect(res.tasks).toBe(local);
   });
 
+  it("dedupes WITHIN the snapshot — two id-less rows sharing a title land once", () => {
+    const local = [makeTask({ id: 1, title: "Dishes" })];
+    const res = mergeTasksSnapshot(local, emptyWeekData(), {
+      tasks: [
+        { id: "a1", title: "Water the plants", assigned: "Aurora" },
+        { id: "a2", title: "Water the plants", assigned: "Aurora" },
+      ],
+    });
+    const landed = res.tasks.filter((t: any) => t.title === "Water the plants");
+    expect(landed).toHaveLength(1);
+  });
+
+  it("dedupes WITHIN the snapshot — the same id never lands twice (React keys stay unique)", () => {
+    const local = [makeTask({ id: 1, title: "Dishes" })];
+    const res = mergeTasksSnapshot(local, emptyWeekData(), {
+      tasks: [
+        { id: 55, title: "Tidy the playroom", assigned: "Bailey" },
+        { id: 55, title: "Tidy the playroom (renamed elsewhere)", assigned: "Bailey" },
+      ],
+    });
+    const landed = res.tasks.filter((t: any) => t.id === 55);
+    expect(landed).toHaveLength(1);
+    // First row wins — the append order is preserved.
+    expect(landed[0].title).toBe("Tidy the playroom");
+  });
+
   it("adopts a NEWER week and a richer same-week history, ignores a poorer or OLDER week", () => {
     const local = emptyWeekData(); // current week, empty history
     // Older snapshot week: a device that missed the Monday rollover. Adopting

@@ -458,6 +458,20 @@ export const db = {
 
   // === Hall of Fame ===
   async insertHallOfFameEntry(data: any): Promise<any | null> {
+    // UPSERT by (member, weekStart) — the natural key of a win. The old blind
+    // create let two devices that both passed syncHallOfFameToPB's
+    // client-side dedupe land duplicate rows for the same enshrinement (the
+    // pb-seed UNIQUE index is the second net). Mirrors upsertWeeklyPrize, and
+    // a celebration is never lost: an existing celebrated:true always
+    // survives an incoming false (server authority for the win ceremony).
+    const records = await safeList<any>("hall_of_fame", []);
+    const existing = records.find((r: any) => r.member === data.member && r.weekStart === data.weekStart);
+    if (existing) {
+      return safeUpdate("hall_of_fame", existing.id, {
+        ...data,
+        celebrated: existing.celebrated === true || data.celebrated === true,
+      });
+    }
     return safeCreate("hall_of_fame", data);
   },
   async selectHallOfFame(): Promise<any[]> {

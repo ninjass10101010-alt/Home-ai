@@ -403,9 +403,19 @@ export function mergeTasksSnapshot(
       pendingApproval: (t as any).pendingApproval ?? undefined,
       sentBackAt: (t as any).sentBackAt ?? undefined,
     }));
-    const fresh = restored.filter(
-      (t: any) => !currentTasks.some((p: any) => p.id === t.id || p.title === t.title)
-    );
+    // Fresh = rows that match NOTHING known: not by id against local, not by
+    // title against local, and not against a row already accepted from THIS
+    // snapshot. The within-snapshot guard matters because a blob can carry
+    // the same logical row twice (an id-less row gets a regenerated id at
+    // :396, so two copies never share an id to collide on) — without it both
+    // copies land and the receiving device shows duplicate chores with
+    // colliding React keys.
+    const fresh: any[] = [];
+    for (const t of restored) {
+      const matchesLocal = currentTasks.some((p: any) => p.id === t.id || p.title === t.title);
+      const matchesAccepted = fresh.some((f: any) => f.id === t.id || f.title === t.title);
+      if (!matchesLocal && !matchesAccepted) fresh.push(t);
+    }
     if (fresh.length) {
       tasks = [...currentTasks, ...fresh];
       tasksChanged = true;

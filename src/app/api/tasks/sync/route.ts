@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withAdmin } from "@/lib/pb-auth";
 import { verifySession, SESSION_COOKIE } from "@/lib/session";
+import { withKeyedLock } from "@/lib/keyed-lock";
 
 export const dynamic = "force-dynamic";
 
@@ -57,28 +58,36 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    await withAdmin(async (pb) => {
-      const rows = await pb.collection(COLLECTION).getFullList({
-        requestKey: null,
-        filter: `key = "${KEY}"`,
-      });
-      // Parent writes the full body verbatim (unchanged). A non-parent writes
-      // only the tasks leg, preserving the stored parent-owned legs so a kid
-      // sync can never move points or wipe the ledger.
-      const data = isParent
-        ? body
-        : { ...((rows[0] as any)?.data ?? {}), tasks: body.tasks };
-      const payload = {
-        key: KEY,
-        data,
-        updated_at: new Date().toISOString(),
-      };
-      if (rows.length > 0) {
-        await pb.collection(COLLECTION).update(rows[0].id, payload, { requestKey: null });
-      } else {
-        await pb.collection(COLLECTION).create(payload, { requestKey: null });
-      }
-    });
+    // Serialize the snapshot read-modify-write (in-process keyed lock). The
+    // non-parent path re-reads the stored parent-owned legs and writes them
+    // back with the tasks leg — interleaved with a parent's full-body write,
+    // that stale merge used to resurrect the parent's JUST-REPLACED points/
+    // rewards on the shared snapshot. Under the lock the second writer always
+    // re-reads fresh.
+    await withKeyedLock(`snapshot:${KEY}`, () =>
+      withAdmin(async (pb) => {
+        const rows = await pb.collection(COLLECTION).getFullList({
+          requestKey: null,
+          filter: `key = "${KEY}"`,
+        });
+        // Parent writes the full body verbatim (unchanged). A non-parent writes
+        // only the tasks leg, preserving the stored parent-owned legs so a kid
+        // sync can never move points or wipe the ledger.
+        const data = isParent
+          ? body
+          : { ...((rows[0] as any)?.data ?? {}), tasks: body.tasks };
+        const payload = {
+          key: KEY,
+          data,
+          updated_at: new Date().toISOString(),
+        };
+        if (rows.length > 0) {
+          await pb.collection(COLLECTION).update(rows[0].id, payload, { requestKey: null });
+        } else {
+          await pb.collection(COLLECTION).create(payload, { requestKey: null });
+        }
+      })
+    );
     if (isParent) return NextResponse.json({ ok: true, saved: true });
     return NextResponse.json({ ok: true, saved: true, ignoredLegs: NON_PARENT_IGNORED_LEGS });
   } catch (e: any) {

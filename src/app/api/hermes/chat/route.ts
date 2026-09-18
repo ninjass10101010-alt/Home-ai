@@ -362,7 +362,7 @@ async function buildChatContext(request: NextRequest, body: ChatRequestBody) {
   // dashboard-owned chain (Task 4 of the 2026-09-07 brain cutover).
   const targets = await resolveChatTargets();
   const tools = isClem
-    ? buildToolsForOpenAI({ houseControl: false }).filter((t) => CLEM_TOOLS.includes(t.function.name))
+    ? buildToolsForOpenAI({ houseControl: false, role }).filter((t) => CLEM_TOOLS.includes(t.function.name))
     : buildToolsForOpenAI({ houseControl, role });
   const recentHistory = (history || [])
     .slice(-6)

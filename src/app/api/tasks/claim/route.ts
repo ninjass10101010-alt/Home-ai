@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withAdmin } from "@/lib/pb-auth";
 import { verifyPinFromPB } from "@/lib/server-auth";
+import { withWeekLedgerLock } from "@/lib/week-ledger-lock";
 import type { Transaction, WeekData } from "@/types/tasks";
 
 export const dynamic = "force-dynamic";
@@ -53,7 +54,15 @@ export async function POST(request: NextRequest) {
     const currentWeek = currentWeekKey();
     const normalizedName = normalizeMemberName(claimant);
 
-    const result = await withAdmin(async (pb) => {
+    // Serialize the ENTIRE claim flow (task-row guard + ledger write) against
+    // every other week-ledger writer in-process — a request that waits here
+    // re-reads the row fresh and sees the winner's transaction (or the
+    // completed task row) before deciding anything. Without this, two
+    // overlapping claims both pass the guard, each appends to its own stale
+    // snapshot of week_data, and the second write silently erases the
+    // first's earn while both clients were told "success".
+    const result = await withWeekLedgerLock(currentWeek, () =>
+      withAdmin(async (pb) => {
       // Server-authoritative task lookup FIRST: the stored row decides the
       // points value. The request body is never trusted for scoring — a
       // forged body could otherwise mint arbitrary points.
@@ -216,7 +225,8 @@ export async function POST(request: NextRequest) {
       }).catch(() => {});
 
       return { ok: true, claimedBy: normalizedName, weekData: updatedWeek };
-    });
+      })
+    );
 
     if (!result.ok) {
       const status =

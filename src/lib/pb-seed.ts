@@ -352,6 +352,13 @@ export const COLLECTIONS = [
       { name: "memberId", type: "number", required: false },
       { name: "title", type: "text", required: false },
     ],
+    // One enshrinement per member+week — the natural key of a win. Two
+    // devices that both passed syncHallOfFameToPB's client-side dedupe could
+    // land duplicate rows for the same win; the index refuses the second
+    // create at the PocketBase level.
+    indexes: [
+      "CREATE UNIQUE INDEX idx_hall_of_fame_member_week ON hall_of_fame (member, weekStart)",
+    ],
   },
   {
     name: "weekly_prizes",
@@ -931,6 +938,46 @@ export async function seedWeeklyPrizesAdmin(): Promise<void> {
   await withAdmin(async (pb) => seedWeeklyPrizes(pb as unknown as Parameters<typeof seedWeeklyPrizes>[0]));
 }
 
+/** One-time heal: PocketBase can't build the hall_of_fame UNIQUE
+ * (member, weekStart) index while live rows already violate it — legacy
+ * duplicate wins (two devices passing the client-side sync dedupe at once,
+ * back when the write was a blind create). Groups rows by the natural key
+ * and deletes the extras: keep the celebrated row if any, else the earliest
+ * created. Returns how many rows were removed. */
+export async function dedupeHallOfFameRows(
+  pb: {
+    collection: (name: string) => {
+      getFullList: (args?: unknown) => Promise<Array<Record<string, unknown>>>;
+      delete: (id: string) => Promise<unknown>;
+    };
+  }
+): Promise<number> {
+  const collection = pb.collection("hall_of_fame");
+  const rows = (await collection.getFullList({ requestKey: null })) as Array<{
+    id: string; member?: unknown; weekStart?: unknown; celebrated?: boolean; created?: string;
+  }>;
+  const groups = new Map<string, typeof rows>();
+  for (const r of rows) {
+    const key = `${String(r.member ?? "")}::${String(r.weekStart ?? "")}`;
+    const list = groups.get(key) ?? [];
+    list.push(r);
+    groups.set(key, list);
+  }
+  let removed = 0;
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    const keep =
+      group.find((r) => r.celebrated === true) ??
+      [...group].sort((a, b) => String(a.created ?? "").localeCompare(String(b.created ?? "")))[0];
+    for (const r of group) {
+      if (r === keep) continue;
+      await collection.delete(r.id).catch(() => {});
+      removed++;
+    }
+  }
+  return removed;
+}
+
 export async function seedCollections() {
   const result = await withAdmin(async (pb) => {
     const existing = (await pb.collections.getFullList()).map((c: any) => c.name);
@@ -1028,6 +1075,18 @@ export async function seedCollections() {
             }
           }
           if (missingIndexes.length) {
+            // A UNIQUE index can't be built over rows that already violate
+            // it — heal hall_of_fame's legacy duplicate wins first (the only
+            // seed collection whose writer used to blind-create a
+            // natural-keyed row).
+            if (col.name === "hall_of_fame") {
+              try {
+                const removed = await dedupeHallOfFameRows(pb as unknown as Parameters<typeof dedupeHallOfFameRows>[0]);
+                if (removed > 0) parts.push(`(deduped ${removed} hall rows)`);
+              } catch {
+                // A failed heal surfaces when the index patch below fails.
+              }
+            }
             await pb.collections.update(live.id, { indexes: [...(live.indexes || []), ...missingIndexes] });
             parts.push(`+${missingIndexes.length} indexes: ${missingIndexes.map((i: any) => typeof i === "string" ? ((i.match(/INDEX\s+(\S+)\s+ON/i) || [])[1] || i) : i.name).join(", ")}`);
           }

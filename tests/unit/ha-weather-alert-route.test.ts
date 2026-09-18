@@ -14,6 +14,7 @@ vi.mock("@/lib/ha/notify", () => ({ broadcastHouseAlert: mocks.broadcastHouseAle
 vi.mock("@/lib/ha/weather-alert-fetch", () => ({ readSevereWeather: mocks.readSevereWeather }));
 
 import { POST } from "@/app/api/cron/consuela/weather-alert/route";
+import { __resetKeyedLockForTests } from "@/lib/keyed-lock";
 
 function req() {
   return new NextRequest("http://localhost/api/cron/consuela/weather-alert", {
@@ -60,6 +61,7 @@ beforeEach(() => {
   mocks.readSevereWeather.mockReset();
   stateStore = {};
   prefsRows = [];
+  __resetKeyedLockForTests();
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -110,4 +112,17 @@ it("degrades to ok:false (200) when the weather read throws", async () => {
   const res = await POST(req());
   expect(res.status).toBe(200);
   expect(await res.json()).toMatchObject({ ok: false, reason: "open-meteo 503" });
+});
+
+it("two overlapping runs fire the episode alert exactly ONCE (no double push)", async () => {
+  prefsRows = [{ key: "weather", enabled: true }];
+  stateStore["weather-alert"] = { key: "weather-alert", value: CLOSED };
+  mocks.readSevereWeather.mockResolvedValue({ code: 96, severeEndISO: null });
+  const [r1, r2] = await Promise.all([POST(req()), POST(req())]);
+  const bodies = [await r1.json(), await r2.json()];
+  const firedCount = bodies.filter((b: any) => b.fired === true).length;
+  expect(firedCount).toBe(1);
+  expect(mocks.broadcastHouseAlert).toHaveBeenCalledTimes(1);
+  // The persisted state is the winner's — an alerted stamp that sticks.
+  expect(JSON.parse(stateStore["weather-alert"].value).alertedAtISO).toBeTruthy();
 });

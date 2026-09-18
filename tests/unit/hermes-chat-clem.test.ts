@@ -61,8 +61,11 @@ beforeEach(() => {
   mocks.resolveChatTargets.mockReset().mockImplementation(async () => [
     { url: "http://brain.local", key: "test-key", model: "test-model", provider: "test", fallback: false },
   ]);
-  // Default tools: include both clem and non-clem to verify filtering
-  mocks.buildToolsForOpenAI.mockImplementation(() => [
+  // Default tools: include both clem and non-clem to verify filtering.
+  // Role-aware (mirrors the real contract): role "child" → KID_TOOL_NAMES
+  // reads only; otherwise the full adult surface minus nothing (houseControl
+  // is handled by the caller's mock arg, not emulated here beyond kid-filter).
+  const ALL_TOOLS = [
     { type: "function", function: { name: "get_grocery_list", description: "", parameters: { type: "object", properties: {} } } },
     { type: "function", function: { name: "get_pantry", description: "", parameters: { type: "object", properties: {} } } },
     { type: "function", function: { name: "add_grocery_item", description: "", parameters: { type: "object", properties: {} } } },
@@ -73,7 +76,13 @@ beforeEach(() => {
     { type: "function", function: { name: "check_for_update", description: "", parameters: { type: "object", properties: {} } } },
     { type: "function", function: { name: "ha_control_device", description: "", parameters: { type: "object", properties: {} } } },
     { type: "function", function: { name: "get_proactive_suggestions", description: "", parameters: { type: "object", properties: {} } } },
-  ] as any);
+  ] as any;
+  const MOCK_KID_TOOLS = ALL_TOOLS.filter(
+    (t: any) => !["add_grocery_item", "complete_grocery_item", "compare_grocery_prices", "check_for_update", "ha_control_device"].includes(t.function.name)
+  );
+  mocks.buildToolsForOpenAI.mockImplementation((opts?: { role?: string }) =>
+    opts?.role === "child" ? MOCK_KID_TOOLS : ALL_TOOLS
+  );
 });
 
 afterEach(() => {
@@ -101,8 +110,9 @@ describe("hermes chat — Clem persona", () => {
     expect(toolNames).not.toContain("check_for_update");
     expect(toolNames).not.toContain("ha_control_device");
     expect(toolNames).not.toContain("get_proactive_suggestions");
-    // buildToolsForOpenAI called with houseControl:false for Clem
-    expect(mocks.buildToolsForOpenAI).toHaveBeenCalledWith({ houseControl: false });
+    // buildToolsForOpenAI called with houseControl:false + the session-derived
+    // role for Clem (no cookie here → child default → kid read-only surface)
+    expect(mocks.buildToolsForOpenAI).toHaveBeenCalledWith({ houseControl: false, role: "child" });
   });
 
   it("non-clem parent session still gets full tools and Consuela prompt", async () => {
@@ -178,5 +188,41 @@ describe("hermes chat — Clem persona", () => {
     expect(clemUrl).toContain("http://clem-brain.local");
     // Same chain for both agents — the resolver never branches on agent.
     expect(clemUrl).toBe(consuelaUrl);
+  });
+});
+
+describe("Clem role gate — child/pet/guest sessions get read-only grocery tools", () => {
+  it("guest clem session (no cookie → child default) arms NO write tools", async () => {
+    await post({ message: "add milk to the list", agent: "clem" });
+    const sent = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
+    const toolNames: string[] = (sent.tools || []).map((t: any) => t.function.name);
+    expect(toolNames).not.toContain("add_grocery_item");
+    expect(toolNames).not.toContain("complete_grocery_item");
+    expect(toolNames).toContain("get_grocery_list");
+  });
+
+  it("child clem session arms NO write tools", async () => {
+    const { signSession, SESSION_COOKIE } = await import("@/lib/session");
+    process.env.SESSION_SECRET = "test-secret-0123456789";
+    const token = await signSession({ memberId: "m2", name: "Caspian", role: "child" });
+    await post({ message: "add milk to the list", agent: "clem" }, `${SESSION_COOKIE}=${token}`);
+    const sent = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
+    const toolNames: string[] = (sent.tools || []).map((t: any) => t.function.name);
+    expect(toolNames).not.toContain("add_grocery_item");
+    expect(toolNames).not.toContain("complete_grocery_item");
+    expect(toolNames).toContain("get_pantry");
+  });
+
+  it("parent clem session keeps the full 7-tool grocery surface incl. writes", async () => {
+    const { signSession, SESSION_COOKIE } = await import("@/lib/session");
+    process.env.SESSION_SECRET = "test-secret-0123456789";
+    const token = await signSession({ memberId: "m1", name: "Rebecca", role: "parent" });
+    await post({ message: "add milk to the list", agent: "clem" }, `${SESSION_COOKIE}=${token}`);
+    const sent = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
+    const toolNames: string[] = (sent.tools || []).map((t: any) => t.function.name);
+    expect(toolNames).toContain("add_grocery_item");
+    expect(toolNames).toContain("complete_grocery_item");
+    expect(toolNames).toContain("compare_grocery_prices");
+    expect(toolNames).toHaveLength(7);
   });
 });
