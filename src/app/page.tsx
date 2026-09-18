@@ -45,6 +45,8 @@ import LedgerWidget from "@/components/finance/LedgerWidget";
 import { useMorningBriefing, briefingSectionsEmpty } from "@/components/briefing/hooks/useMorningBriefing";
 import ProfileSheet from "@/components/profile/ProfileSheet";
 import { useHomeEvents } from "@/hooks/useHomeEvents";
+import { googleEventCoversDay, mapGoogleEvent } from "@/lib/calendar/google-mapping";
+import { localTodayISO } from "@/lib/local-date";
 import { normalizeAvatarSize } from "@/lib/avatar-size";
 import { loadTasks, isPendingApproval, PIN_FREE_MAX_AGE, resolveMemberName } from "@/lib/task-utils";
 import WeeklyWinModal from "@/components/leaderboard/WeeklyWinModal";
@@ -217,8 +219,36 @@ export default function HomePage() {
     setMounted(true);
     setNow(new Date());
 
-    const refreshTodayEvents = () => {
-      try { setTodayEvents(db.selectTodaysEvents()); } catch {}
+    const refreshTodayEvents = async () => {
+      let family: any[] = [];
+      try { family = db.selectTodaysEvents(); } catch {}
+      // Google Calendar rows live in a separate PB collection
+      // (consuela_google_calendar_events) and only the Calendar page merged
+      // them — Home's Today widget never saw Google-only events (e.g. the
+      // all-day "Bailey & Emily at home!" that starts today). Merge the rows
+      // covering TODAY via the shared googleEventCoversDay contract (all-day
+      // end dates exclusive), in the events' own calendar colors.
+      let googleToday: any[] = [];
+      try {
+        const res = await fetch("/api/google-calendar", { cache: "no-store" });
+        if (res.ok) {
+          const data = await res.json().catch(() => null);
+          const colorMap = data?.calendar_colors || null;
+          const todayISO = localTodayISO();
+          googleToday = (Array.isArray(data?.events) ? data.events : [])
+            .filter((r: any) => googleEventCoversDay(r, todayISO))
+            .map((r: any) => mapGoogleEvent(r, colorMap))
+            .filter(Boolean);
+        }
+      } catch {
+        // Google unreachable or signed out — family rows stand alone.
+      }
+      setTodayEvents(
+        [...family, ...googleToday].sort((a: any, b: any) =>
+          (a.time === "All day" ? -1 : parseTimeToMinutes(a.time || "")) -
+          (b.time === "All day" ? -1 : parseTimeToMinutes(b.time || ""))
+        )
+      );
     };
 
     try {
@@ -355,12 +385,13 @@ export default function HomePage() {
     []
   );
   const eventLineColor = (event: any): string =>
-    event?.color === "green" ? "var(--color-accent-mint)"
+    event?.colorHex ||
+    (event?.color === "green" ? "var(--color-accent-mint)"
     : event?.color === "violet" ? "var(--color-accent-violet)"
     : event?.color === "amber" ? "var(--color-accent-amber)"
     : event?.color === "cyan" ? "var(--color-accent-cyan)"
     : event?.color === "rose" ? "var(--color-accent-rose)"
-    : "var(--color-accent-nori)";
+    : "var(--color-accent-nori)");
 
   const weekDays = useMemo(() => {
     if (!mounted) {
