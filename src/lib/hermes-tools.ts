@@ -1472,7 +1472,15 @@ const TOOLS: Tool[] = [
           headers: { authorization: `Bearer ${process.env.ADMIN_SECRET || ""}` },
           signal: AbortSignal.timeout(10000),
         });
-        if (!res.ok) return summarize({ error: `Container check returned ${res.status}` });
+        if (!res.ok) {
+          // Relay the route's honest error (the MUSE layer scrubs internal
+          // hosts from it) so a container-check failure is diagnosable instead
+          // of a bare status code.
+          const detail = await res.json().catch(() => null);
+          return summarize({
+            error: detail?.error || `Container check returned ${res.status}`,
+          });
+        }
         const data = await res.json();
         return summarize({
           containers: data.containers || [],
