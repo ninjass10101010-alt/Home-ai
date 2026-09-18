@@ -3,8 +3,9 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 // MUSE inbound identity tokens (Task 7 / B1, B2-token). Deliberately
 // separate from src/lib/session.ts: a distinct HMAC context means a session
 // token can never be replayed as a MUSE token and vice versa, and the token
-// additionally carries the identity version + admin flag so a key rotation
-// (version bump) revokes every outstanding token.
+// additionally carries the identity version so a key rotation (version bump)
+// revokes every outstanding token. The `adm` claim is a mint-time snapshot
+// kept for diagnostics only — authorization reads the LIVE admin toggle.
 export const MUSE_TOKEN_TTL_SECONDS = 86400;
 
 const CONTEXT = "muse-token-v1:";

@@ -165,6 +165,27 @@ describe("GET /api/muse/tools", () => {
     const names = new Set<string>(body.tools.map((t: any) => t.function.name));
     for (const n of ADMIN_TOOLS) expect(names.has(n)).toBe(true);
   });
+
+  it("includes admin tools for a token minted BEFORE the toggle was turned on (live admin)", async () => {
+    // 2026-09-18: admin is the live operator toggle, so an agent that logged
+    // in while admin was off must gain the admin tools the moment it is on —
+    // no re-login, no key rotation.
+    makeRow({ adminEnabled: true });
+    const { token } = signMuseToken({ ver: 1, adm: false });
+    const res = await toolsGET(museReq("/api/muse/tools", { token }));
+    const body = await res.json();
+    const names = new Set<string>(body.tools.map((t: any) => t.function.name));
+    for (const n of ADMIN_TOOLS) expect(names.has(n)).toBe(true);
+  });
+
+  it("omits admin tools when the live toggle is off even for an admin-claim token", async () => {
+    makeRow({ adminEnabled: false });
+    const { token } = signMuseToken({ ver: 1, adm: true });
+    const res = await toolsGET(museReq("/api/muse/tools", { token }));
+    const body = await res.json();
+    const names = new Set<string>(body.tools.map((t: any) => t.function.name));
+    for (const n of ADMIN_TOOLS) expect(names.has(n)).toBe(false);
+  });
 });
 
 describe("POST /api/muse/tool", () => {
@@ -352,6 +373,38 @@ describe("POST /api/muse/tool — deep redaction + truthful audit + scrub (revie
     expect(mocks.writeMuseLog).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "tool", tool: "get_weather", ok: false })
     );
+  });
+
+  it("scrubs internal hosts from a SUCCESS result (the ok:true path)", async () => {
+    // A self-reporting failure was scrubbed, but a successful payload also
+    // carries caller-facing text: the admin container/host tools echo service
+    // URLs and container names, which must never reach a MUSE caller.
+    makeRow();
+    const { token } = signMuseToken({ ver: 1, adm: false });
+    mocks.getTool.mockImplementationOnce(() => ({
+      definition: { name: "get_weather", description: "", parameters: { type: "object", properties: {} } },
+      handler: async () =>
+        JSON.stringify({
+          ok: true,
+          url: "http://pocketbase:8090/_/",
+          container: "consuela-dashboard",
+        }),
+    }));
+    const res = await toolPOST(
+      museReq("/api/muse/tool", {
+        token,
+        method: "POST",
+        body: { name: "get_weather", args: {} },
+      })
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.result).toBeTypeOf("object");
+    const text = JSON.stringify(body);
+    expect(text).toContain("[internal]");
+    expect(text).not.toContain("pocketbase:8090");
+    expect(text).not.toContain("consuela-dashboard");
   });
 
   it("scrubs internal hosts from a thrown-handler 500", async () => {

@@ -147,8 +147,10 @@ Response:
 
 The tool catalog. This is the authority for what the token may call — always
 fetch it rather than hard-coding tool names. Admin tools appear **only** when
-the token is admin (the intersection of the token's `adm` claim and the live
-row's settings toggle).
+the operator's live "Allow admin operations" toggle is on. The toggle takes
+effect immediately for agents that are already connected: turning it on adds
+the admin tools to the catalog (and to `whoami`'s `admin` field) with **no
+re-login**, and turning it off removes them just as fast.
 
 ```bash
 curl -sS http://<dashboard-host>:3000/api/muse/tools \
@@ -275,8 +277,11 @@ These hold regardless of what the tool catalog appears to allow:
 - **Memory tools share the family memory bank.** Reads and writes go to the
   same PocketBase-backed memory the family sees. MUSE has no private memory
   store.
-- **Admin tools require the settings toggle.** The admin tools are available
-  only when the operator has enabled the MUSE admin toggle *and* the token was
-  minted while it was on.
+- **Admin tools require the live settings toggle.** The admin tools are
+  available only while the operator's MUSE admin toggle is **on**. The toggle
+  is evaluated per request against the live row, so it applies immediately to
+  agents already connected (no re-login) and reverts immediately when switched
+  off. The token's `adm` claim is a mint-time snapshot kept for diagnostics
+  only and does not gate admin access.
 - **LAN / Tailscale only.** The dashboard is a private network service; do not
   expose it to the internet.

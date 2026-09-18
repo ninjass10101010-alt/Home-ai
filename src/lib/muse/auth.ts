@@ -3,9 +3,10 @@
 // A MUSE caller proves identity with `Authorization: Bearer <muse-token>`
 // (minted by /api/muse/auth/login). The token is checked against the LIVE
 // singleton row, so disabling the identity or bumping its version revokes
-// outstanding tokens. Admin is the intersection of the token's `adm` claim
-// and the row's current `adminEnabled` — a token minted with admin rights
-// stops being admin the moment the toggle is switched off.
+// outstanding tokens. Admin is the row's CURRENT `adminEnabled` toggle — the
+// token's `adm` claim (a mint-time snapshot, kept for diagnostics) does not
+// gate it, so turning the operator toggle on grants admin to agents that are
+// already connected and turning it off revokes admin immediately.
 
 import type { NextRequest } from "next/server";
 import { verifyMuseToken } from "./token";
@@ -68,8 +69,10 @@ export async function authorizeMuseRequest(request: NextRequest): Promise<MuseAu
     return { ok: false, status: 401, error: "unauthorized" };
   }
 
-  // Both the token claim AND the live row toggle must be true.
-  const adm = result.adm && row.adminEnabled;
+  // Admin is the LIVE operator toggle, not a token capability (2026-09-18):
+  // an agent that connected while admin was off gains the admin tools the
+  // moment the toggle is switched on, with no re-login or key rotation.
+  const adm = row.adminEnabled;
 
   // Per-key budget AFTER verification, keyed by the row's key prefix and rate.
   // A 429 here is console-only — never a PocketBase write.

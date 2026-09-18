@@ -3,7 +3,7 @@
 // MUSE gets "full adult parity" with the dashboard assistant, but the tool
 // surface is session-agnostic: the catalog is exactly what the parent chat
 // surface exposes (`buildToolsForOpenAI({ houseControl: true, role: "parent" })`),
-// minus the five destructive/admin tools unless the caller's token is admin.
+// minus the five destructive/admin tools unless the live MUSE admin toggle is on.
 //
 // `executeMuseTool` mirrors the chat route's `runToolCalls` discipline: the
 // allowlist is checked FIRST, so a prompt-injected or crafted tool name can
@@ -16,8 +16,12 @@ import { buildToolsForOpenAI, getTool } from "@/lib/hermes-tools";
 // Internal service hostnames that must never reach an external MUSE caller.
 // `localhost` + the RFC-1918 `192.168.` block are matched as patterns; the
 // configured PB host is added at call time (env can change between calls).
+// The bare container names are included because the admin container tools echo
+// them in their payloads (`consuela-dashboard`, `pocketbase`, …).
 const INTERNAL_HOST_LITERALS: readonly string[] = [
   "pocketbase:8090",
+  "pocketbase",
+  "consuela-dashboard",
   "hermes-agent-2",
   "finance-dashboard",
   "localhost",

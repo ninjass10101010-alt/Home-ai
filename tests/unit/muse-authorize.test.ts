@@ -125,11 +125,14 @@ describe("authorizeMuseRequest", () => {
     warn.mockRestore();
   });
 
-  it("requires BOTH the token admin claim and row.adminEnabled for adm", async () => {
+  it("derives adm from the LIVE row.adminEnabled, ignoring the token's mint-time claim", async () => {
+    // Admin is an operator toggle, not a token capability: flipping
+    // "Allow admin operations" must take effect for agents that are already
+    // connected (2026-09-18). The token's `adm` claim is advisory only.
     const cases: Array<[boolean, boolean, boolean]> = [
       [true, true, true],
       [true, false, false],
-      [false, true, false],
+      [false, true, true],
       [false, false, false],
     ];
     for (const [claim, rowAdmin, expected] of cases) {

@@ -168,5 +168,14 @@ export async function POST(request: NextRequest) {
     }
     return NextResponse.json({ ok: false, result: scrubbedResult }, { status: 200 });
   }
-  return NextResponse.json({ ok: true, result: resultValue });
+  // A SUCCESS payload is caller-facing too: the admin container/host tools echo
+  // service URLs and container names, which must never reach a MUSE caller.
+  // Same serialized-form scrub so `result` stays a consumable object.
+  let scrubbedSuccess: unknown = resultValue;
+  try {
+    scrubbedSuccess = JSON.parse(scrubInternal(JSON.stringify(resultValue)));
+  } catch {
+    scrubbedSuccess = scrubInternal(JSON.stringify(resultValue));
+  }
+  return NextResponse.json({ ok: true, result: scrubbedSuccess });
 }
