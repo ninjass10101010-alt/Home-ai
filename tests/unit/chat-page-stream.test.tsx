@@ -310,6 +310,52 @@ describe("chat page quick actions", () => {
   });
 });
 
+describe("chat page hydration ordering", () => {
+  it("keeps a request sent before hydration resolved, with the reply below it", async () => {
+    const hydration = { resolve: null as null | ((r: Response) => void), started: false, delayed: false };
+    const json = (body: unknown) =>
+      new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    const fetchMock = vi.fn((url: string) => {
+      const u = String(url);
+      if (!u.includes("/api/chat/messages")) return Promise.resolve(json({ ok: true }));
+      if (u.includes("since=") || hydration.delayed) {
+        return Promise.resolve(json({ ok: true, messages: [] }));
+      }
+      hydration.delayed = true;
+      hydration.started = true;
+      return new Promise<Response>((res) => { hydration.resolve = res; });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    streamMock.fn.mockResolvedValue({ content: "the-reply", streamed: true });
+
+    const el = render(<ChatPage />);
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(hydration.started).toBe(true);
+
+    // Send BEFORE the initial hydration fetch resolves (the race that caused RC1).
+    await act(async () => { await inputProps.current!.onSendMessage("the-request"); });
+
+    // Hydration then lands with older history that does not include this turn.
+    await act(async () => {
+      hydration.resolve!(json({ ok: true, messages: [
+        { id: "old1", role: "user", content: "old-request", createdAt: "2026-09-02T09:00:00.000Z" },
+        { id: "old2", role: "assistant", content: "old-reply", createdAt: "2026-09-02T09:00:01.000Z" },
+      ] }));
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    const domTexts = Array.from(el.querySelectorAll("[role='log'] .rounded-2xl")).map((n) => n.textContent || "");
+    const reqIdx = domTexts.findIndex((t) => t.includes("the-request"));
+    const replyIdx = domTexts.findIndex((t) => t.includes("the-reply"));
+    // The optimistic request survived hydration...
+    expect(reqIdx).toBeGreaterThanOrEqual(0);
+    // ...and its reply renders BELOW it, never above.
+    expect(replyIdx).toBeGreaterThan(reqIdx);
+    // The stale history merged in too.
+    expect(domTexts.some((t) => t.includes("old-request"))).toBe(true);
+  });
+});
+
 describe("chat page stop control", () => {
   it("surfaces a stop control mid-stream and keeps the partial reply without an error bubble", async () => {
     let rejectStream: ((e: Error) => void) | null = null;
@@ -403,12 +449,15 @@ describe("chat page new-conversation (trash button)", () => {
     const cancel = Array.from(document.body.querySelectorAll("button")).find((b) => b.textContent === "Cancel")!;
     act(() => { cancel.click(); });
     expect(JSON.parse(localStorage.getItem("consuela-chat-messages")!).length).toBe(2);
-    // Confirm starts a fresh conversation: the local view resets to the
-    // greeting + a system divider, and a reset marker POSTs to PB.
+    // Confirm starts a fresh conversation: the visible thread is cleared to
+    // the divider (pre-marker messages hidden), full history is kept in
+    // localStorage, and a reset marker POSTs to PB.
     act(() => { trash.dispatchEvent(new MouseEvent("click", { bubbles: true })); });
     const confirmBtn = Array.from(document.body.querySelectorAll("button")).find((b) => b.textContent === "Start new conversation")!;
     act(() => { confirmBtn.click(); });
     await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    // The pre-reset message is gone from the visible thread.
+    expect(el.textContent).not.toContain("my real message");
     const stored = JSON.parse(localStorage.getItem("consuela-chat-messages")!);
     const globalFetch = (globalThis as any).fetch as ReturnType<typeof vi.fn>;
     const resetPosted = globalFetch.mock.calls.some(

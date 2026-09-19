@@ -18,6 +18,7 @@ import { FamilyBrief } from "./FamilyBrief";
 import { OpenLoopChips } from "./OpenLoopChips";
 import { messageOrigin, stripForSpeech } from "@/lib/consuela/chat-context";
 import { speak, stopSpeaking, isSpeaking, isSpeechSupported } from "@/lib/consuela/speech";
+import { mergeThread, sortThread, visibleThread, SEED_GREETING_ID } from "@/lib/chat-thread";
 
 import { db } from "@/db";
 import { useSearchParams } from "next/navigation";
@@ -29,6 +30,9 @@ interface Message {
   role: "user" | "assistant" | "system";
   content: string;
   timestamp: string;
+  /** Epoch ms — the deterministic sort key. PB rows derive it from createdAt;
+   *  optimistic rows use Date.now(); legacy/seeds default to 0. */
+  at: number;
   speaker?: string;
   speakerEmoji?: string;
   errorFor?: string;
@@ -54,7 +58,11 @@ function loadChatHistory(): Message[] {
   if (typeof window === "undefined") return [];
   try {
     const d = localStorage.getItem(CHAT_STORAGE_KEY);
-    return d ? JSON.parse(d) : [];
+    if (!d) return [];
+    const parsed = JSON.parse(d);
+    if (!Array.isArray(parsed)) return [];
+    // Normalize legacy rows written before `at` existed so ordering stays sane.
+    return parsed.map((m: any) => ({ ...m, at: typeof m.at === "number" ? m.at : 0 }));
   } catch { return []; }
 }
 
@@ -89,25 +97,13 @@ async function fetchPBThread(sinceISO?: string): Promise<{ messages: Message[]; 
         role: m.role === "user" ? ("user" as const) : m.role === "system" ? ("system" as const) : ("assistant" as const),
         content: m.content || "",
         timestamp: new Date(m.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
+        at: Date.parse(m.createdAt) || 0,
         ...(m.role === "user" && m.userId ? { speaker: m.userId } : {}),
         ...(m.source === "telegram" ? { source: "telegram" as const } : {}),
       };
     });
     return { messages, latest };
   } catch { return { messages: [], latest: null }; }
-}
-
-// Merge PB rows into the local list without duplicating rows already shown.
-// Keeps local rows (which may carry action cards) and appends anything new.
-function mergePBThread(prev: Message[], pbMsgs: Message[]): Message[] {
-  const keyOf = (m: Message) => `${m.role}:${m.speaker ?? ""}:${m.content}`;
-  const countIn = (arr: Message[], k: string) => arr.reduce((n, m) => n + (keyOf(m) === k ? 1 : 0), 0);
-  const merged = [...prev];
-  for (const pm of pbMsgs) {
-    const k = keyOf(pm);
-    if (countIn(merged, k) < countIn(pbMsgs, k)) merged.push(pm);
-  }
-  return merged;
 }
 
 // Synthetic ids for PB-hydrated rows must be unique ACROSS reconciles, not
@@ -123,6 +119,7 @@ const initialGreeting: Message = {
   // door (no double introduction once the thread starts).
   content: "What can I help you with today? 🏡",
   timestamp: "Now",
+  at: 0,
 };
 
 function escapeHtml(s: string) {
@@ -233,11 +230,12 @@ function ChatContent() {
 
   const [messages, setMessages] = useState<Message[]>([initialGreeting]);
 
-  // Hydrate saved messages after mount (client only, avoids SSR mismatch)
+  // Hydrate saved messages after mount (client only, avoids SSR mismatch).
+  // Merge (never replace) so this late pass can't drop an optimistic send.
   useEffect(() => {
     const saved = loadChatHistory();
     if (saved.length > 0) {
-      setMessages(saved);
+      setMessages(prev => mergeThread(prev, saved));
     }
   }, []);
 
@@ -256,12 +254,9 @@ function ChatContent() {
       const { messages: pbMsgs, latest } = await fetchPBThread();
       if (cancelled) return;
       if (latest) lastPBCreatedRef.current = latest;
-      if (pbMsgs.length > 0) {
-        setMessages(pbMsgs);
-      } else {
-        const saved = loadChatHistory();
-        if (saved.length > 0) setMessages(saved);
-      }
+      // MERGE, not replace: if the user sent before this fetch resolved, their
+      // optimistic message survives and ordering is restored by sortThread.
+      setMessages(prev => mergeThread(prev, pbMsgs.length > 0 ? pbMsgs : loadChatHistory()));
       hydratedRef.current = true;
       setHydrated(true);
     })();
@@ -269,7 +264,14 @@ function ChatContent() {
   }, []);
 
   useEffect(() => {
-    if (hydrated && messages.length > 0) saveChatHistory(messages);
+    if (hydrated && messages.length > 0) {
+      // Never persist the seed greeting — it is re-seeded on load, and keeping
+      // it would put a phantom row at the top of the stored thread. Match on
+      // content too so a legacy stored row that happens to share the id survives.
+      const isSeedGreeting = (m: Message) =>
+        m.id === SEED_GREETING_ID && m.role === "assistant" && m.content === initialGreeting.content;
+      saveChatHistory(messages.filter(m => !isSeedGreeting(m)));
+    }
   }, [messages, hydrated]);
 
   const [isTyping, setIsTyping] = useState(false);
@@ -286,20 +288,30 @@ function ChatContent() {
   // Hero state: visible when fresh (no user messages yet) OR first reply is pending (orb animation plays while thinking)
   // System reset markers don't count as conversation messages — a fresh
   // /new conversation still shows the hero + chips.
-  const userMessageCount = messages.filter(m => m.role === "user").length;
-  const showHero = userMessageCount === 0 || (userMessageCount === 1 && isTyping);
+  // Deterministic, conversation-scoped view: sorted by time and sliced at the
+  // newest reset marker, so order never depends on merge timing and a new
+  // conversation hides everything before its divider.
+  const visibleMessages = useMemo(() => visibleThread(sortThread(messages)), [messages]);
+  const userMessageCount = visibleMessages.filter(m => m.role === "user").length;
+  // The hero owns a truly empty conversation; any real message (a user row, or
+  // an assistant reply that is not the seed greeting) hands the view to the
+  // thread — otherwise a marker followed only by a reply would hide it.
+  const hasRealMessages = visibleMessages.some(
+    m => m.role === "user" || (m.role === "assistant" && m.id !== SEED_GREETING_ID),
+  );
+  const showHero = !hasRealMessages || (userMessageCount === 1 && isTyping);
 
   // Hide quick actions while Consuela is thinking — don't let them tap again
   const showQuickActions = userMessageCount === 0 && !isTyping;
 
   // ─── Read-aloud orb (pre-readers): the strip's mini orb speaks the last reply ───
   const lastAssistantReply = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i];
+    for (let i = visibleMessages.length - 1; i >= 0; i--) {
+      const m = visibleMessages[i];
       if (m.role === "assistant" && m.content.trim() && !m.errorFor) return m.content;
     }
     return null;
-  }, [messages]);
+  }, [visibleMessages]);
   const [speaking, setSpeaking] = useState(false);
   useEffect(() => {
     if (!speaking) return;
@@ -391,6 +403,7 @@ function ChatContent() {
       role: "system",
       content: "New conversation",
       timestamp: "Just now",
+      at: Date.now(),
     };
     setMessages(prev => [...prev, marker]);
     try {
@@ -417,11 +430,13 @@ function ChatContent() {
     abortRef.current = controller;
 
     msgCounter.current += 1;
+    const userAt = Date.now();
     const userMsg: Message = {
       id: msgCounter.current,
       role: "user",
       content: trimmed,
       timestamp: "Just now",
+      at: userAt,
       speaker: activeSpeaker.name,
       speakerEmoji: activeSpeaker.emoji,
     };
@@ -433,6 +448,8 @@ function ChatContent() {
 
     msgCounter.current += 1;
     const streamId = msgCounter.current;
+    // +1 so the reply sorts after its request even if both land in the same ms.
+    const streamAt = userAt + 1;
     let bubbleOpen = false;
     // Whatever streamed before a stop/failure — a stopped reply keeps its words.
     let streamedSoFar = "";
@@ -480,7 +497,7 @@ function ChatContent() {
           setMessages(prev => prev.some(m => m.id === streamId)
             ? prev.map(m => (m.id === streamId ? { ...m, content: full } : m))
             : [...prev, {
-                id: streamId, role: "assistant" as const, content: full, timestamp: "Just now",
+                id: streamId, role: "assistant" as const, content: full, timestamp: "Just now", at: streamAt,
                 ...(turnProposals.length ? { proposals: [...turnProposals] } : {}),
               }]);
         },
@@ -505,20 +522,20 @@ function ChatContent() {
       setMessages(prev => prev.some(m => m.id === streamId)
         ? prev.map(m => (m.id === streamId ? { ...m, content: finalContent, proposals: m.proposals ?? (turnProposals.length ? [...turnProposals] : undefined) } : m))
         : [...prev, {
-            id: streamId, role: "assistant" as const, content: finalContent, timestamp: "Just now",
+            id: streamId, role: "assistant" as const, content: finalContent, timestamp: "Just now", at: streamAt,
             ...(turnProposals.length ? { proposals: [...turnProposals] } : {}),
           }]);
 
       // Reconcile against PB (picks up anything that arrived on other devices) —
       // incremental: only rows newer than the last watermark we've seen.
       // Safety window: Telegram rows land with their real send time, which can
-      // predate the watermark — re-fetch 10 min back and let mergePBThread dedupe.
+      // predate the watermark — re-fetch 10 min back and let mergeThread dedupe.
       const since = lastPBCreatedRef.current
         ? new Date(Date.parse(lastPBCreatedRef.current) - 10 * 60 * 1000).toISOString()
         : undefined;
       const { messages: fresh, latest } = await fetchPBThread(since);
       if (latest) lastPBCreatedRef.current = latest;
-      if (fresh.length > 0) setMessages(prev => mergePBThread(prev, fresh));
+      if (fresh.length > 0) setMessages(prev => mergeThread(prev, fresh));
     } catch (error) {
       setIsTyping(false);
       setStatusLine(null);
@@ -530,7 +547,7 @@ function ChatContent() {
         setMessages(prev => prev.some(m => m.id === streamId)
           ? prev.map(m => (m.id === streamId ? { ...m, content: stoppedContent, proposals: m.proposals ?? (turnProposals.length ? [...turnProposals] : undefined) } : m))
           : [...prev, {
-              id: streamId, role: "assistant" as const, content: stoppedContent, timestamp: "Just now",
+              id: streamId, role: "assistant" as const, content: stoppedContent, timestamp: "Just now", at: streamAt,
               ...(turnProposals.length ? { proposals: [...turnProposals] } : {}),
             }]);
       } else {
@@ -545,6 +562,7 @@ function ChatContent() {
           role: "assistant",
           content: failedContent,
           timestamp: "Just now",
+          at: Date.now(),
           errorFor: trimmed,
         }]);
       }
@@ -822,7 +840,7 @@ function ChatContent() {
         )}
 
         {/* Conversation messages */}
-        {!showHero && messages.map((msg) => {
+        {!showHero && visibleMessages.map((msg) => {
           if (msg.role === "system") {
             return (
               <div key={msg.id} className="flex items-center gap-3 py-1" role="separator" aria-label="New conversation">
@@ -969,7 +987,7 @@ function ChatContent() {
         open={confirmClearOpen}
         onClose={() => setConfirmClearOpen(false)}
         title="Start a new conversation?"
-        description="Consuela starts fresh — she won't remember this conversation. Nothing is deleted: your messages stay in today's family thread, with a ✨ New conversation marker showing where the fresh start began."
+        description="Consuela starts fresh — she won't remember this conversation, and this screen clears to a clean thread with a ✨ New conversation marker. Nothing is deleted: the older messages stay in today's family thread on the server."
         footer={
           <>
             <button

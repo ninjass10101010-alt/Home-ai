@@ -706,7 +706,9 @@ export const db = {
         : `threadId="${threadId}"`;
       return pb.collection("chat_messages").getFullList({
         filter,
-        sort: "createdAt",
+        // `id` is the deterministic tiebreak when two rows share a createdAt
+        // (e.g. an optimistic user row and its reply persisted in the same ms).
+        sort: "createdAt,id",
         requestKey: null,
       });
     });
