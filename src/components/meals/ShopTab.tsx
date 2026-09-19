@@ -7,6 +7,7 @@ import TextField from "@/components/ui/TextField";
 import ListRow from "@/components/ui/ListRow";
 import SectionCard from "@/components/patterns/SectionCard";
 import WidgetCard from "@/components/patterns/WidgetCard";
+import GroceryItemActionsSheet from "@/components/meals/GroceryItemActionsSheet";
 import KitchenFlowCard from "@/components/meals/KitchenFlowCard";
 import SyncPreviewSheet from "@/components/meals/SyncPreviewSheet";
 import StorePill from "@/components/meals/StorePill";
@@ -55,6 +56,8 @@ export default function ShopTab({
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [storePickerOpen, setStorePickerOpen] = useState(false);
   const [storePickerItemId, setStorePickerItemId] = useState<number | string | null>(null);
+  const [actionsItemId, setActionsItemId] = useState<number | string | null>(null);
+  const [actionsSheetItem, setActionsSheetItem] = useState<any>(null);
   const [compareOpen, setCompareOpen] = useState(false);
   const [orderSheetOpen, setOrderSheetOpen] = useState(false);
   const [ordering, setOrdering] = useState(false);
@@ -521,6 +524,7 @@ export default function ShopTab({
                               store={item.store || "any"}
                               onClick={() => handleStoreChange(item)}
                             />
+                            <div className="hidden sm:flex items-center gap-1.5">
                             {!item.needed && (
                               <button
                                 onClick={(e) => { e.stopPropagation(); sendSingleToPantry(item); }}
@@ -568,6 +572,17 @@ export default function ShopTab({
                             >
                               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-3.5 w-3.5">
                                 <path d="M3 6h18M19 6l-1 14H6L5 6M8 6V4h8v2" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                            </button>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); setActionsSheetItem(item); setActionsItemId(item.id); }}
+                              aria-label={`More actions for ${item.name}`}
+                              className="sm:hidden flex h-11 w-11 items-center justify-center rounded-xl text-text-muted hover:bg-[var(--color-surface-2)] hover:text-text-primary tap-sm"
+                            >
+                              <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5" aria-hidden="true">
+                                <circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" />
                               </svg>
                             </button>
                           </div>
@@ -667,6 +682,17 @@ export default function ShopTab({
             : "any"
         }
         onSelect={handleStoreSelect}
+      />
+
+      <GroceryItemActionsSheet
+        open={actionsItemId !== null}
+        item={groceryItems.find((i: any) => i.id === actionsItemId) ?? actionsSheetItem}
+        onClose={() => setActionsItemId(null)}
+        onToggleLock={(it) => toggleManualOverride?.(it.id)}
+        onEdit={(it) => startEditing(it)}
+        onDelete={(it) => deleteGroceryItem(it.id)}
+        onSendToPantry={(it) => sendSingleToPantry(it)}
+        pantryBusy={sending}
       />
 
       <PriceCompareSheet
