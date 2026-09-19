@@ -283,6 +283,35 @@ describe("task/reward suggestion mappers (used by the Tasks page buttons)", () =
       ["Movie night", 50, "🎁"],
     ]);
   });
+
+  it("mapTaskIdeas maps an 'open' suggestion with no assignee + a 0–5 speed bonus", () => {
+    const out = mapTaskIdeas(
+      [{ type: "task", title: "Wash the car", mode: "open", points: 10, speedBonus: 9 }],
+      members,
+      { nextId: () => 1, today: "2026-09-14" },
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ title: "Wash the car", assignee: "Open", universal: true, speedBonus: 5, points: 10 });
+  });
+
+  it("mapTaskIdeas maps a 'crew' suggestion clamped to the roster size", () => {
+    const out = mapTaskIdeas(
+      [{ type: "task", title: "Big cleanup", mode: "crew", points: 15, crewSize: 9 }],
+      members,
+      { nextId: () => 1, today: "2026-09-14" },
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ title: "Big cleanup", assignee: "Crew", crewSize: 2, points: 15 });
+    expect(out[0].crew).toEqual({ members: [] });
+    // A larger roster allows a requested size 3 (still capped at 5).
+    const bigRoster = [...members, { name: "Bailey", fullName: "Bailey Garcia", emoji: "👧", role: "child" }, { name: "Emily", fullName: "Emily Garcia", emoji: "👧", role: "child" }];
+    const small = mapTaskIdeas(
+      [{ type: "task", title: "Small crew", mode: "crew", points: 5, crewSize: 3 }],
+      bigRoster,
+      { nextId: () => 2, today: "2026-09-14" },
+    );
+    expect(small[0].crewSize).toBe(3);
+  });
 });
 
 describe("source scan: handcrafted prompts are gone from the Tasks page", () => {

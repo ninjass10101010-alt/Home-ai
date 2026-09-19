@@ -15,6 +15,10 @@ interface ActionLike {
   emoji?: string;
   assignee?: string;
   points?: number;
+  // Open & crew suggestions (spec §4): mode "open" | "crew" | "assigned".
+  mode?: string;
+  crewSize?: number;
+  speedBonus?: number;
 }
 
 interface MemberLike {
@@ -35,18 +39,68 @@ export function matchMember(assignee: string | undefined, members: MemberLike[])
   ) || null;
 }
 
+function clampInt(value: unknown, min: number, max: number, fallback: number): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(n)));
+}
+
 export function mapTaskIdeas(
   actions: ActionLike[] | undefined,
   members: MemberLike[],
   ctx: { nextId: () => number; today: string },
 ): Task[] {
   const out: Task[] = [];
+  const humanCount = members.length;
   for (const a of actions || []) {
     if (!a || a.type !== "task" || !a.title) continue;
-    const member = matchMember(a.assignee, members) as any;
-    if (!member) continue;
+    const mode = a.mode === "open" || a.mode === "crew" ? a.mode : "assigned";
     const n = Number(a.points);
     const points = Number.isFinite(n) && n >= 1 ? Math.round(n) : 8;
+
+    if (mode === "open") {
+      // Open suggestions carry no assignee (nobody owns it yet) + a 0–5 bonus.
+      out.push({
+        id: ctx.nextId(),
+        title: a.title,
+        assignee: "Open",
+        assigneeEmoji: "🤝",
+        due: ctx.today,
+        points,
+        recurring: null,
+        category: "AI Suggested",
+        completed: false,
+        priority: points >= 15 ? "high" : points >= 10 ? "medium" : "low",
+        universal: true,
+        speedBonus: clampInt(a.speedBonus, 0, 5, 2),
+      } as Task);
+      continue;
+    }
+
+    if (mode === "crew") {
+      // Crew size never exceeds the non-pet roster (spec §4 guardrail).
+      const maxSize = Math.max(2, humanCount);
+      const crewSize = clampInt(a.crewSize, 2, Math.min(5, maxSize), 2);
+      out.push({
+        id: ctx.nextId(),
+        title: a.title,
+        assignee: "Crew",
+        assigneeEmoji: "🤝",
+        due: ctx.today,
+        points,
+        recurring: null,
+        category: "AI Suggested",
+        completed: false,
+        priority: points >= 15 ? "high" : points >= 10 ? "medium" : "low",
+        crewSize,
+        crew: { members: [] },
+      } as Task);
+      continue;
+    }
+
+    // Assigned: an unmatched assignee means DROP the suggestion (honesty seam).
+    const member = matchMember(a.assignee, members) as any;
+    if (!member) continue;
     out.push({
       id: ctx.nextId(),
       title: a.title,

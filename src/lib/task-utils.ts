@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { localTodayISO } from "@/lib/local-date";
-import type { Task, WeekData, Transaction, WeekArchive, FamilyGoal, HallOfFameEntry, Reward, Penalty, WeeklyPrize } from "@/types/tasks";
+import type { Task, WeekData, Transaction, WeekArchive, FamilyGoal, HallOfFameEntry, Reward, Penalty, WeeklyPrize, CrewMember } from "@/types/tasks";
 
 export const TASKS_STORAGE_KEY = "consuela-tasks";
 export const WEEK_DATA_KEY = "consuela-week-data";
@@ -53,9 +53,14 @@ export function pendingApprovals(tasks: Task[]): Task[] {
 }
 
 export function pendingPointsFor(memberName: string, tasks: Task[]): number {
-  return pendingApprovals(tasks)
-    .filter((t) => t.pendingApproval!.byName === memberName)
-    .reduce((sum, t) => sum + (t.pendingApproval!.points || 0), 0);
+  return pendingApprovals(tasks).reduce((sum, t) => {
+    const pa = t.pendingApproval!;
+    // Crew completions name the whole roster; each joined member is owed the
+    // full points ("+Npts on the way" must include an in-flight crew).
+    if (Array.isArray(pa.crew) && pa.crew.includes(memberName)) return sum + (pa.points || 0);
+    if (pa.byName === memberName) return sum + (pa.points || 0);
+    return sum;
+  }, 0);
 }
 
 // Age ceiling for PIN-free kid actions (sign-in eligibility re-checks the
@@ -101,6 +106,26 @@ export function tapCompletePending(task: Task, byName: string, nowISO: string, w
   };
 }
 
+// Reversal-aware per-member idempotency: has this member already been paid for
+// this task, with no later negative adjust undoing it? (The solo flow used a
+// taskId-only check; crew approval needs taskId + member.)
+function memberAlreadyPaid(history: Transaction[], taskId: number, member: string): boolean {
+  const earns = history.filter(
+    (tx) => tx.type === "earn" && tx.taskId === taskId && tx.member === member
+  );
+  const latest = earns[earns.length - 1];
+  if (!latest) return false;
+  const reversed = history.some(
+    (tx) =>
+      tx.taskId === taskId &&
+      tx.type === "adjust" &&
+      tx.amount < 0 &&
+      tx.member === member &&
+      tx.timestamp >= latest.timestamp
+  );
+  return !reversed;
+}
+
 export function approvePendingCompletion(
   tasks: Task[],
   weekData: WeekData,
@@ -111,40 +136,35 @@ export function approvePendingCompletion(
   const cleared = tasks.map((t) =>
     t.id === taskId ? { ...t, pendingApproval: undefined, sentBackAt: undefined } : t
   );
-  // Idempotency: another device already paid this tap — clear without
-  // re-paying. A REVERSED earn (an undo) released the task though, so a
-  // re-tap must be payable again — the same distinction the server claim
-  // route makes. Reversal-blindness here silently swallowed the second
-  // approval ("Approved! +5pts" toast, zero points moved).
-  const earns = weekData.history.filter(
-    (tx) => tx.type === "earn" && tx.taskId === taskId
-  );
-  const latestEarn = earns[earns.length - 1];
-  if (latestEarn) {
-    const reversed = weekData.history.some(
-      (tx) =>
-        tx.taskId === taskId &&
-        tx.type === "adjust" &&
-        tx.amount < 0 &&
-        tx.timestamp >= latestEarn.timestamp
-    );
-    if (!reversed) return { tasks: cleared, weekData };
-  }
-  const owner = task.pendingApproval!.byName;
+  const approval = task.pendingApproval!;
+  // Crew completions pay every joined member the FULL points, one earn each
+  // (idempotency keyed taskId + member). Solo taps pay the single tapper.
+  const crewRoster = Array.isArray(approval.crew) && approval.crew.length > 0 ? approval.crew : null;
+  const payees = (crewRoster ?? [approval.byName]).filter(Boolean);
+  const isCrew = !!crewRoster;
+
   const sameWeek = task.completedInWeek === weekData.weekStart;
   const pointsMsg = task.points > 0 ? ` (+${task.points}pts)` : "";
-  const withPoints = {
-    ...weekData,
-    points: { ...weekData.points, [owner]: (weekData.points[owner] || 0) + task.points },
-  };
-  const next = addTransaction(
-    withPoints,
-    "earn",
-    task.points,
-    `${sameWeek ? "Completed" : "Approved"}: ${task.title}${pointsMsg}`,
-    owner,
-    task.id
-  );
+  let next = weekData;
+  let paidAny = false;
+  for (const owner of payees) {
+    if (memberAlreadyPaid(next.history, taskId, owner)) continue;
+    next = {
+      ...next,
+      points: { ...next.points, [owner]: (next.points[owner] || 0) + task.points },
+    };
+    next = addTransaction(
+      next,
+      "earn",
+      task.points,
+      `${isCrew ? "Crew" : sameWeek ? "Completed" : "Approved"}: ${task.title}${pointsMsg}`,
+      owner,
+      task.id
+    );
+    paidAny = true;
+  }
+  // Nothing to pay (already paid elsewhere) → still clear the pending row.
+  if (!paidAny) return { tasks: cleared, weekData };
   return { tasks: cleared, weekData: next };
 }
 
@@ -156,7 +176,26 @@ export function sendBackPendingCompletion(tasks: Task[], taskId: number): Task[]
       // sentBackAt is the durable cross-device proof that this tap was
       // REJECTED (no earn tx exists for a send-back) — the snapshot merge
       // uses it to let the clear win over a kid device's stale pending row.
-      ? { ...t, completed: false, completedBy: undefined, completedAt: undefined, completedInWeek: undefined, pendingApproval: undefined, sentBackAt: new Date().toISOString() }
+      // A crew send-back also clears every check-in so the crew can redo it.
+      ? {
+          ...t,
+          completed: false,
+          completedBy: undefined,
+          completedAt: undefined,
+          completedInWeek: undefined,
+          pendingApproval: undefined,
+          sentBackAt: new Date().toISOString(),
+          crew:
+            isCrewTask(t) && t.crew
+              ? {
+                  members: t.crew.members.map((m) => ({
+                    name: m.name,
+                    emoji: m.emoji,
+                    joinedAt: m.joinedAt,
+                  })),
+                }
+              : t.crew,
+        }
       : t
   );
 }
@@ -323,6 +362,12 @@ export function regenerateRecurringTasks(tasks: Task[]): Task[] {
       completedBy: undefined,
       completedAt: undefined,
       completedInWeek: undefined,
+      // A regenerated clone starts clean — no stale approval/send-back state.
+      pendingApproval: undefined,
+      sentBackAt: undefined,
+      // Crew tasks come back with an empty crew (nobody joined this week yet),
+      // size + speed bonus preserved (spec §3).
+      crew: isCrewTask(t) ? { members: [] } : t.crew,
       // Universal recurring tasks come back unclaimed — no ghost assignee from last week
       assignee: t.universal ? "All" : t.assignee,
       assigneeEmoji: t.universal ? "🤝" : t.assigneeEmoji,
@@ -369,6 +414,127 @@ export function saveTasks(tasks: Task[]): void {
   saveJSON(TASKS_STORAGE_KEY, tasks);
 }
 
+// ─── Crew tasks (spec §1/§3) ──────────────────────────────────────────────
+// A crew task needs N helpers; every joined member earns the FULL points on
+// approval. All crew math lives here (pure) so the claim route, Tasks page,
+// KidHome and the snapshot merge share one source of truth.
+export function isCrewTask(task: Pick<Task, "crewSize"> | null | undefined): boolean {
+  return !!task && typeof task.crewSize === "number" && task.crewSize >= 2;
+}
+
+export function crewMembers(task: Pick<Task, "crew"> | null | undefined): CrewMember[] {
+  return task?.crew?.members ?? [];
+}
+
+export function crewMemberCount(task: Pick<Task, "crew">): number {
+  return crewMembers(task).length;
+}
+
+export function crewFull(task: Pick<Task, "crewSize" | "crew">): boolean {
+  return isCrewTask(task) && crewMembers(task).length >= (task.crewSize as number);
+}
+
+export function crewHasMember(task: Pick<Task, "crew">, memberName: string): boolean {
+  return crewMembers(task).some((m) => m.name === memberName);
+}
+
+export function canJoinCrew(
+  task: Pick<Task, "crewSize" | "crew" | "completed">,
+  memberName: string
+): boolean {
+  return (
+    !!task &&
+    !task.completed &&
+    isCrewTask(task) &&
+    !crewFull(task) &&
+    !crewHasMember(task, memberName)
+  );
+}
+
+export function crewMemberCheckedIn(task: Pick<Task, "crew">, memberName: string): boolean {
+  return crewMembers(task).some((m) => m.name === memberName && !!m.checkedInAt);
+}
+
+export function crewCheckinProgress(task: Pick<Task, "crewSize" | "crew">): {
+  checkedIn: number;
+  total: number;
+} {
+  const total = typeof task.crewSize === "number" ? task.crewSize : 0;
+  return {
+    checkedIn: crewMembers(task).filter((m) => !!m.checkedInAt).length,
+    total,
+  };
+}
+
+// True only when the crew is actually full AND every joined member has checked
+// in — the parent-approval trigger (spec §3).
+export function crewAllCheckedIn(task: Pick<Task, "crewSize" | "crew">): boolean {
+  const { checkedIn, total } = crewCheckinProgress(task);
+  return total >= 2 && crewMembers(task).length >= total && checkedIn >= total;
+}
+
+// Snapshot-merge normalizers. PocketBase coerces an unset number field to 0, so
+// a non-crew row returns crewSize:0 / speedBonus:0 while local rows carry
+// null/undefined. Without normalizing, EVERY row would look "changed" on every
+// sync and the merge would rewrite crew fields forever (spurious tasksChanged →
+// constant snapshot pushes). 0 is also semantically "no bonus".
+export function normalizeCrewSize(value: unknown): number | null {
+  return typeof value === "number" && value >= 2 ? value : null;
+}
+export function normalizeSpeedBonus(value: unknown): number {
+  return typeof value === "number" && value > 0 ? value : 0;
+}
+export function normalizeCrew(value: unknown): CrewMember[] {
+  const members = (value as { members?: unknown } | null | undefined)?.members;
+  if (!Array.isArray(members)) return [];
+  return members.filter(
+    (m): m is CrewMember =>
+      !!m && typeof (m as CrewMember).name === "string" && (m as CrewMember).name.length > 0
+  );
+}
+// Removed-member tombstones (see Crew.removed).
+export function normalizeCrewRemoved(value: unknown): string[] {
+  const removed = (value as { removed?: unknown } | null | undefined)?.removed;
+  if (!Array.isArray(removed)) return [];
+  return removed.filter((n): n is string => typeof n === "string" && n.length > 0);
+}
+// Order-independent membership + check-in fingerprint for cheap diffing.
+// Includes removed member names so a removal is seen as a real change.
+export function crewFingerprint(value: unknown): string {
+  const members = normalizeCrew(value)
+    .map((m) => `${m.name}:${m.checkedInAt ? 1 : 0}`)
+    .sort();
+  const removed = normalizeCrewRemoved(value).slice().sort().map((n) => `-${n}`);
+  return [...members, ...removed].join("|") || "\u0000empty";
+}
+// Union by member name: a join seen on either side survives (a cross-device
+// join race never drops a member) and check-ins are set-once. Removed members
+// (tombstoned by either side) are omitted.
+export function unionCrewMembers(a: CrewMember[], b: CrewMember[]): CrewMember[] {
+  const byName = new Map<string, CrewMember>();
+  for (const m of [...a, ...b]) {
+    if (!m?.name) continue;
+    const existing = byName.get(m.name);
+    if (!existing) {
+      byName.set(m.name, { ...m });
+      continue;
+    }
+    const joinedAt =
+      existing.joinedAt && m.joinedAt
+        ? existing.joinedAt <= m.joinedAt
+          ? existing.joinedAt
+          : m.joinedAt
+        : existing.joinedAt || m.joinedAt;
+    byName.set(m.name, {
+      name: m.name,
+      emoji: existing.emoji || m.emoji,
+      joinedAt,
+      checkedInAt: existing.checkedInAt || m.checkedInAt,
+    });
+  }
+  return [...byName.values()];
+}
+
 /**
  * Pure merge of a /api/tasks/sync snapshot into local task/week state — the
  * same guards the Tasks page's restoreFromSnapshot uses: adopt only richer/
@@ -402,6 +568,13 @@ export function mergeTasksSnapshot(
       completedInWeek: t.completedInWeek ?? undefined,
       pendingApproval: (t as any).pendingApproval ?? undefined,
       sentBackAt: (t as any).sentBackAt ?? undefined,
+      // Normalize crew fields on fresh rows too (PB returns 0 for unset
+      // numbers; 0 is not a valid crew size / speed bonus).
+      crewSize: normalizeCrewSize((t as any).crewSize),
+      crew: normalizeCrewSize((t as any).crewSize)
+        ? { members: normalizeCrew((t as any).crew), removed: normalizeCrewRemoved((t as any).crew) }
+        : null,
+      speedBonus: normalizeSpeedBonus((t as any).speedBonus) || undefined,
     }));
     // Fresh = rows that match NOTHING known: not by id against local, not by
     // title against local, and not against a row already accepted from THIS
@@ -446,13 +619,12 @@ export function mergeTasksSnapshot(
       (snapRow.completedAt ?? undefined) !== (local.completedAt ?? undefined) ||
       (snapRow.completedInWeek ?? undefined) !== (local.completedInWeek ?? undefined);
 
-    const snapCrewSize = (snapRow as any).crewSize ?? null;
-    const snapCrew = (snapRow as any).crew ?? null;
-    const snapSpeed = (snapRow as any).speedBonus ?? null;
+    const snapCrewSize = normalizeCrewSize((snapRow as any).crewSize);
+    const snapSpeed = normalizeSpeedBonus((snapRow as any).speedBonus);
     const crewDiffers =
-      snapCrewSize !== ((local as any).crewSize ?? null) ||
-      JSON.stringify(snapCrew) !== JSON.stringify((local as any).crew ?? null) ||
-      snapSpeed !== ((local as any).speedBonus ?? null);
+      snapCrewSize !== normalizeCrewSize((local as any).crewSize) ||
+      snapSpeed !== normalizeSpeedBonus((local as any).speedBonus) ||
+      crewFingerprint((snapRow as any).crew) !== crewFingerprint((local as any).crew);
 
     if (!pendingDiffers && !completionDiffers && !crewDiffers) continue;
     const localDone = !!local.completed || !!localPending;
@@ -484,8 +656,20 @@ export function mergeTasksSnapshot(
         ? {
             ...p,
             crewSize: snapCrewSize,
-            crew: snapCrew,
-            speedBonus: snapSpeed,
+            crew: snapCrewSize
+              ? (() => {
+                  const removed = [...new Set([
+                    ...normalizeCrewRemoved((p as any).crew),
+                    ...normalizeCrewRemoved((snapRow as any).crew),
+                  ])];
+                  const members = unionCrewMembers(
+                    normalizeCrew((p as any).crew),
+                    normalizeCrew((snapRow as any).crew)
+                  ).filter((m) => !removed.includes(m.name));
+                  return { members, ...(removed.length ? { removed } : {}) };
+                })()
+              : null,
+            speedBonus: snapSpeed > 0 ? snapSpeed : undefined,
             completed: snapRow.completed,
             completedBy: snapRow.completedBy ?? undefined,
             completedAt: snapRow.completedAt ?? undefined,
@@ -926,7 +1110,11 @@ export async function syncTasksToPB(tasks: Task[]): Promise<void> {
       crewSize: task.crewSize ?? null,
       crew: task.crew ?? null,
       speedBonus: task.speedBonus ?? null,
-    }).catch(() => {});
+    }).catch((e) => {
+      // Crew fields only exist once the pb-seed self-heal has run — surface it
+      // loudly instead of silently dropping joins/check-ins.
+      console.warn(`syncTasksToPB failed for "${task.title}" — run \`npm run pb:seed\` if the tasks schema is stale.`, e?.message);
+    });
   }
 }
 

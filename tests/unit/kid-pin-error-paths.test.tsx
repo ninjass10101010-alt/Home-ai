@@ -83,6 +83,20 @@ vi.mock("@/lib/task-utils", () => ({
     !(task.stealable && !!task.due && task.due < "2026-09-04"),
   completesWithPendingApproval: (role: string | undefined, task: any) =>
     role === "child" && !task.completed,
+  isCrewTask: (task: any) => !!task && typeof task.crewSize === "number" && task.crewSize >= 2,
+  crewFull: (task: any) => {
+    const members = Array.isArray(task?.crew?.members) ? task.crew.members.length : 0;
+    return !!task && typeof task.crewSize === "number" && task.crewSize >= 2 && members >= task.crewSize;
+  },
+  crewHasMember: (task: any, name: string) =>
+    !!task?.crew?.members?.some((m: any) => m.name === name),
+  crewMemberCount: (task: any) =>
+    Array.isArray(task?.crew?.members) ? task.crew.members.length : 0,
+  crewCheckinProgress: (task: any) => ({
+    checkedIn:
+      task?.crew?.members?.filter((m: any) => !!m.checkedInAt).length || 0,
+    total: typeof task?.crewSize === "number" ? task.crewSize : 0,
+  }),
   isSnatchable: (task: any, today: string = "2026-09-04") =>
     !!task.stealable && !task.completed && !!task.due && task.due < today,
   resolveMemberName: (members: any[], rawName?: string | null) => {

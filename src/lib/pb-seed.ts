@@ -186,6 +186,7 @@ export const COLLECTIONS = [
       { name: "completedAt", type: "text" },
       { name: "assigned", type: "text" },
       { name: "crewSize", type: "number" },
+      // crew = { members: [{ name, emoji, joinedAt, checkedInAt? }], removed?: string[] }
       { name: "crew", type: "json" },
       { name: "speedBonus", type: "number" },
     ],

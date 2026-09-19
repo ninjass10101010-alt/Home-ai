@@ -19,15 +19,37 @@ export interface Task {
   // cross-device snapshot merge can distinguish "rejected elsewhere" from a
   // stale snapshot that simply predates the tap. Cleared by the next tap.
   sentBackAt?: string;
+  // Crew tasks (spec §1): crewSize 2–5, presence implies a crew task. `crew`
+  // is the joined-member roster (empty/absent = nobody joined yet). `speedBonus`
+  // applies to open (universal) tasks — the first claimer earns points + bonus.
   crewSize?: number | null;
-  crew?: string[] | null;
+  crew?: Crew | null;
   speedBonus?: number;
+}
+
+export interface CrewMember {
+  name: string;
+  emoji: string;
+  joinedAt: string;
+  // Set-once ("done my part") — never unset except by a crew reset/send-back.
+  checkedInAt?: string;
+}
+
+export interface Crew {
+  members: CrewMember[];
+  // Names a parent removed from the crew. A tombstone so a stale device's
+  // union-merge can't resurrect a removed member cross-device. Cleared on
+  // regeneration (a fresh week's crew starts empty).
+  removed?: string[];
 }
 
 export interface PendingApproval {
   byName: string;
   at: string;
   points: number;
+  // Crew completions carry the payer roster so one approval can pay every
+  // checked-in member (full points each). Absent for solo pending taps.
+  crew?: string[];
 }
 
 export interface Transaction {

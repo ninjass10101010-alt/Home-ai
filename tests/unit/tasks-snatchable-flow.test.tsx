@@ -76,15 +76,15 @@ beforeEach(() => {
 });
 
 describe("stealable tasks surface", () => {
-  it("'Up for grabs' shows late stealable tasks, hides on-time stealable ones, and marks them 'was due'", async () => {
+  it("'Open' shows late stealable tasks, hides on-time stealable ones, and marks them 'was due'", async () => {
     stubGuestFetches();
     seedSnatchTasks();
     const el = await renderAsync(<TasksPage />);
     await settle();
 
-    const upBtn = [...el.querySelectorAll("button")].find((b) => (b.textContent || "").includes("Up for grabs"));
-    expect(upBtn).toBeTruthy();
-    upBtn!.click();
+    const openBtn = [...el.querySelectorAll(".member-tile")].find((t) => (t.querySelector(".member-tile-name")?.textContent || "").trim() === "Open");
+    expect(openBtn).toBeTruthy();
+    (openBtn as HTMLElement).click();
     await settle();
 
     const text = el.textContent || "";
@@ -128,7 +128,7 @@ describe("stealable tasks surface", () => {
 });
 
 describe("Add/Edit form: stealable toggle + pet exclusion", () => {
-  it("offers the 'Up for grabs when late' toggle and no pet assignees", async () => {
+  it("offers the 'Up for grabs when late' toggle (under Advanced) and no pet assignees", async () => {
     stubGuestFetches();
     const el = await renderAsync(<TasksPage />);
     await settle();
@@ -136,6 +136,9 @@ describe("Add/Edit form: stealable toggle + pet exclusion", () => {
     await settle();
 
     const modal = document.body;
+    // Stealable moved into the collapsible "Advanced" section (spec §2).
+    const advanced = [...modal.querySelectorAll("summary")].find((s) => (s.textContent || "").includes("Advanced"));
+    expect(advanced).toBeTruthy();
     expect(modal.textContent).toContain("Up for grabs when late");
 
     const selects = [...modal.querySelectorAll("select")];
@@ -153,6 +156,6 @@ describe("Add/Edit form: stealable toggle + pet exclusion", () => {
     const tiles = [...el.querySelectorAll(".member-tile")].map((t) => (t.textContent || "").trim());
     expect(tiles.some((t) => t.includes("Rocco"))).toBe(false);
     expect(tiles.some((t) => t.includes("Rebecca"))).toBe(true);
-    expect(tiles.length).toBe(5); // All + 3 human members + Up for grabs; pets excluded
+    expect(tiles.length).toBe(5); // All + 3 human members + Open; pets excluded
   });
 });

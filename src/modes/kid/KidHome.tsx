@@ -57,6 +57,11 @@ import {
   resolveMemberName,
   raceGap,
   prizeForRank,
+  isCrewTask,
+  crewFull,
+  crewHasMember,
+  crewMemberCount,
+  crewCheckinProgress,
 } from "@/lib/task-utils";
 import { useWeeklyPrizes } from "@/components/leaderboard/hooks/useWeeklyPrizes";
 import QuestCard from "./QuestCard";
@@ -251,6 +256,9 @@ export default function KidHome() {
   // Quest PIN gate — the typed PIN lives in this component's state only and
   // is cleared after every attempt (never persisted).
   const [questPinTask, setQuestPinTask] = useState<any | null>(null);
+  // When the tapped quest is a crew task, the PIN gate performs join/check-in
+  // instead of a completion (the server route owns membership).
+  const [questCrewAction, setQuestCrewAction] = useState<"crew-join" | "crew-checkin" | null>(null);
   const [questPin, setQuestPin] = useState("");
   const [questPinError, setQuestPinError] = useState("");
   const [questPinBusy, setQuestPinBusy] = useState(false);
@@ -308,7 +316,17 @@ export default function KidHome() {
         !!name && (name.toLowerCase() === currentUser.name.toLowerCase() || name.split(" ")[0].toLowerCase() === myFirst);
 
       const tasks = loadTasks();
-      setPendingTasks(tasks.filter((t: any) => !t.completed && (t.universal || isMine(t.assignee))));
+      // Quests this kid can act on: their own assigned chores, open (universal)
+      // tasks, and crew tasks they've joined (to check in) or can still join.
+      setPendingTasks(tasks.filter((t: any) => {
+        if (t.completed) return false;
+        if (t.universal) return true;
+        if (isCrewTask(t)) {
+          if (crewHasMember(t, currentUser.name)) return true;
+          return !crewFull(t);
+        }
+        return isMine(t.assignee);
+      }));
       const doneToday = getThisWeeksCompletedTasks(tasks).filter(
         (t: any) => t.completedAt?.slice(0, 10) === new Date().toISOString().slice(0, 10) && isMine(t.completedBy || t.assignee)
       );
@@ -374,12 +392,89 @@ export default function KidHome() {
     setTimeout(() => setCelebration(null), 1500);
   }, []);
 
+  // Crew join/check-in against the server-authoritative route. Under-10 kids
+  // pass an empty PIN (the route trusts the session-derived identity only for
+  // child+age<10, exactly like quick-login).
+  const runCrewAction = useCallback(
+    async (task: any, action: "crew-join" | "crew-checkin", pin: string) => {
+      if (!user) return;
+      setQuestPinBusy(true);
+      try {
+        const res = await fetch("/api/tasks/claim", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action, taskId: task.id, memberName: user.name, pin }),
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data?.success || !data?.task) {
+          const err =
+            res.status === 409 && data?.reason === "crew_full" ? "That crew just filled up!"
+              : res.status === 403 && data?.reason === "not_in_crew" ? "You're not on this crew yet."
+              : res.status === 401 ? "Wrong PIN. Try again."
+              : unreachableCopy();
+          setQuestPinError(err);
+          setQuestPin("");
+          return;
+        }
+        // Mirror the server's crew + approval state onto the local row.
+        const updated = data.task;
+        const tasks = loadTasks().map((t: any) =>
+          t.id === task.id
+            ? {
+                ...t,
+                crew: updated.crew ?? t.crew,
+                completed: !!updated.completed,
+                completedBy: updated.completedBy ?? t.completedBy,
+                completedAt: updated.completedAt ?? t.completedAt,
+                completedInWeek: updated.completedInWeek ?? t.completedInWeek,
+                pendingApproval: updated.pendingApproval ?? t.pendingApproval,
+              }
+            : t
+        );
+        saveTasks(tasks);
+        void syncTasksToPB(tasks);
+        setQuestPinTask(null);
+        setQuestCrewAction(null);
+        setQuestPin("");
+        setDataVersion((v) => v + 1);
+      } catch {
+        setQuestPinError(unreachableCopy());
+        setQuestPin("");
+      } finally {
+        setQuestPinBusy(false);
+      }
+    },
+    [user]
+  );
+
+
   // Tap a quest. Under-10 kids skip the gate entirely on ASSIGNED quests
   // (one tap → pending approval, same shape as the Tasks page); everyone else
   // opens the shared server-verified PIN gate. Nothing is completed until the
   // PIN succeeds (or the PIN-free tap lands its pending row).
   const openQuestPin = useCallback((task: any) => {
     if (!user) return;
+    // Crew tasks: join (if there's room) or check in if already joined. All
+    // ages ride the same server-authoritative crew-join/crew-checkin actions;
+    // under-10 kids check in PIN-free (session identity), matching their
+    // PIN-free assigned-chore path.
+    if (isCrewTask(task)) {
+      const me = resolveMemberName(db.selectMembers(), user.name);
+      const joined = crewHasMember(task, me);
+      const checkedIn = task.crew?.members?.some((m: any) => m.name === me && m.checkedInAt);
+      const action: "crew-join" | "crew-checkin" | null =
+        joined && !checkedIn ? "crew-checkin" : !joined && !crewFull(task) ? "crew-join" : null;
+      if (!action) return;
+      if (user.role === "child" && typeof user.age === "number" && user.age < 10) {
+        void runCrewAction(task, action, "");
+        return;
+      }
+      setQuestPinTask(task);
+      setQuestCrewAction(action);
+      setQuestPin("");
+      setQuestPinError("");
+      return;
+    }
     // Under-10 kids: one tap on an assigned quest completes it PIN-free —
     // pending approval, same shape as the Tasks page (no PIN modal, no round trip).
     if (completesWithoutPin(user?.role, user?.age, task) && !task.universal && !isSnatchable(task)) {
@@ -406,10 +501,11 @@ export default function KidHome() {
     setQuestPinTask(task);
     setQuestPin("");
     setQuestPinError("");
-  }, [user, celebrate]);
+  }, [user, celebrate, runCrewAction]);
 
   const closeQuestPin = useCallback(() => {
     setQuestPinTask(null);
+    setQuestCrewAction(null);
     setQuestPin("");
     setQuestPinError("");
   }, []);
@@ -422,6 +518,11 @@ export default function KidHome() {
   const runQuestCompletion = useCallback(
     async (questPin: string): Promise<{ ok: boolean; error?: string }> => {
       if (!questPinTask || !user) return { ok: false, error: "Couldn't complete it — try again." };
+      // Crew join/check-in rides the same PIN gate but a different server action.
+      if (questCrewAction) {
+        await runCrewAction(questPinTask, questCrewAction, questPin);
+        return { ok: true };
+      }
       // Double-completion guard (same as the Tasks page): a stale local cache
       // row already completed this week must never re-POST or re-award points.
       if (questPinTask.completedInWeek === weekKey()) {
@@ -545,11 +646,14 @@ export default function KidHome() {
         setQuestPinBusy(false);
       }
     },
-    [questPinTask, user, celebrate]
+    [questPinTask, questCrewAction, runCrewAction, user, celebrate]
   );
 
   const submitQuestPin = async () => {
-    if (!questPinTask || !user || questPinBusy || questPin.length < 4) return;
+    if (!questPinTask || !user || questPinBusy) return;
+    // Crew actions accept a session-only identity for under-10s (empty PIN);
+    // every other action requires a typed 4-digit PIN.
+    if (!questCrewAction && questPin.length < 4) return;
     await runQuestCompletion(questPin);
   };
 

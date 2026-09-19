@@ -244,4 +244,171 @@ describe("POST /api/tasks/claim", () => {
     // Adults never write pendingApproval on the task row.
     expect(updateCalls.tasks.some((p: any) => p.pendingApproval)).toBe(false);
   });
+
+  it("open task adult claim adds the speed bonus and labels it 'Fast grab'", async () => {
+    const { pb, weekUpdates } = makePb({ taskPoints: 5, taskRow: { universal: true, speedBonus: 2 } });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ taskId: 42, claimantName: "Alex", claimantPin: "1234" }));
+
+    expect(res.status).toBe(200);
+    const written = weekUpdates();
+    expect(written.history[0].amount).toBe(7);
+    expect(written.history[0].description).toMatch(/^Fast grab:/);
+    expect(written.points["Alex"]).toBe(7);
+  });
+
+  it("kid open claim lands pendingApproval WITH the speed bonus (no points moved)", async () => {
+    mocks.verifyPinFromPB.mockResolvedValue({ id: "k", name: "Caspian Garcia", role: "child", emoji: "🧒" });
+    const { pb, updateCalls, weekUpdates } = makePb({ taskPoints: 5, taskRow: { universal: true, speedBonus: 3 } });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ taskId: 42, claimantName: "Caspian", claimantPin: "1010" }));
+
+    expect(res.status).toBe(200);
+    expect(weekUpdates()).toBeNull();
+    const taskPatch = updateCalls.tasks.find((p: any) => p.pendingApproval);
+    expect(taskPatch.pendingApproval).toMatchObject({ byName: "Caspian Garcia", points: 8 });
+  });
+
+  it("rejects a single claim on a crew task", async () => {
+    const { pb } = makePb({ taskPoints: 5, taskRow: { universal: false, crewSize: 2, crew: null } });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ taskId: 42, claimantName: "Alex", claimantPin: "1234" }));
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ success: false, reason: "crew_task" });
+  });
+});
+
+describe("POST /api/tasks/claim — crew actions", () => {
+  const crewTaskRow = (overrides: Record<string, unknown> = {}) => ({
+    universal: false,
+    crewSize: 3,
+    crew: { members: [] },
+    ...overrides,
+  });
+
+  it("crew-join appends the member and is idempotent", async () => {
+    const { pb, updateCalls } = makePb({ taskPoints: 10, taskRow: crewTaskRow() });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ action: "crew-join", taskId: 42, memberName: "Alex", pin: "1234" }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.task.crew.members.map((m: any) => m.name)).toEqual(["Alex"]);
+    expect(updateCalls.tasks[0].crew.members).toHaveLength(1);
+
+    // A second join by the same person is a no-op 200.
+    const patch = updateCalls.tasks[0].crew.members[0];
+    const pb2 = makePb({ taskPoints: 10, taskRow: crewTaskRow({ crew: { members: [patch] } }) });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb2.pb));
+    const res2 = await POST(jsonReq({ action: "crew-join", taskId: 42, memberName: "Alex", pin: "1234" }));
+    expect(res2.status).toBe(200);
+    expect((await res2.json()).alreadyJoined).toBe(true);
+  });
+
+  it("crew-join returns 409 crew_full on the last slot", async () => {
+    const filled = crewTaskRow({
+      crewSize: 2,
+      crew: { members: [{ name: "Lily", emoji: "", joinedAt: "x" }, { name: "Bailey", emoji: "", joinedAt: "y" }] },
+    });
+    const { pb } = makePb({ taskPoints: 10, taskRow: filled });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ action: "crew-join", taskId: 42, memberName: "Alex", pin: "1234" }));
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ success: false, reason: "crew_full" });
+  });
+
+  it("crew-join rejects a non-crew task", async () => {
+    const { pb } = makePb({ taskPoints: 5, taskRow: { universal: true } });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ action: "crew-join", taskId: 42, memberName: "Alex", pin: "1234" }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ reason: "not_crew_task" });
+  });
+
+  it("crew-checkin sets checkedInAt once and flips needs-approval only when full", async () => {
+    const row = crewTaskRow({
+      crewSize: 2,
+      crew: { members: [{ name: "Alex", emoji: "", joinedAt: "x" }, { name: "Lily", emoji: "", joinedAt: "y" }] },
+    });
+    // Alex checks in first — no approval yet.
+    const first = makePb({ taskPoints: 12, taskRow: row });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(first.pb));
+    const res1 = await POST(jsonReq({ action: "crew-checkin", taskId: 42, memberName: "Alex", pin: "1234" }));
+    expect(res1.status).toBe(200);
+    expect(first.updateCalls.tasks[0].pendingApproval).toBeUndefined();
+    expect(first.updateCalls.tasks[0].crew.members.find((m: any) => m.name === "Alex").checkedInAt).toBeTruthy();
+
+    // Lily checks in last — the task flips to Crew pending with full points.
+    mocks.verifyPinFromPB.mockResolvedValue({ name: "Lily", role: "parent", emoji: "👧" });
+    const second = makePb({
+      taskPoints: 12,
+      taskRow: crewTaskRow({
+        crewSize: 2,
+        crew: {
+          members: [
+            { name: "Alex", emoji: "", joinedAt: "x", checkedInAt: "t" },
+            { name: "Lily", emoji: "", joinedAt: "y" },
+          ],
+        },
+      }),
+    });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(second.pb));
+    const res2 = await POST(jsonReq({ action: "crew-checkin", taskId: 42, memberName: "Lily", pin: "1234" }));
+    expect(res2.status).toBe(200);
+    const patch = second.updateCalls.tasks[0];
+    expect(patch.completed).toBe(true);
+    expect(patch.pendingApproval).toMatchObject({ byName: "Crew", points: 12, crew: ["Alex", "Lily"] });
+    expect(patch.sentBackAt).toBeNull();
+    // No points were moved by a check-in.
+    expect(second.weekUpdates()).toBeNull();
+  });
+
+  it("crew-checkin rejects a member not in the crew", async () => {
+    const row = crewTaskRow({ crew: { members: [{ name: "Lily", emoji: "", joinedAt: "x" }] } });
+    const { pb } = makePb({ taskPoints: 5, taskRow: row });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ action: "crew-checkin", taskId: 42, memberName: "Alex", pin: "1234" }));
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ reason: "not_in_crew" });
+  });
+
+  it("crew-remove is parent-gated and refuses a checked-in member", async () => {
+    // Non-parent caller is rejected.
+    mocks.verifyPinFromPB.mockResolvedValue({ name: "Caspian Garcia", role: "child", emoji: "🧒" });
+    const child = makePb({ taskPoints: 5, taskRow: crewTaskRow({ crew: { members: [] } }) });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(child.pb));
+    const res1 = await POST(jsonReq({ action: "crew-remove", taskId: 42, memberName: "Caspian", pin: "1010", targetName: "Lily" }));
+    expect(res1.status).toBe(403);
+    expect(await res1.json()).toMatchObject({ reason: "adult_only" });
+
+    // Parent can't remove someone who already checked in.
+    mocks.verifyPinFromPB.mockResolvedValue({ name: "Rebecca Garcia", role: "parent", emoji: "🐱" });
+    const parent = makePb({
+      taskPoints: 5,
+      taskRow: crewTaskRow({ crew: { members: [{ name: "Lily", emoji: "", joinedAt: "y", checkedInAt: "t" }] } }),
+    });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(parent.pb));
+    const res2 = await POST(jsonReq({ action: "crew-remove", taskId: 42, memberName: "Rebecca", pin: "1234", targetName: "Lily" }));
+    expect(res2.status).toBe(409);
+    expect(await res2.json()).toMatchObject({ reason: "member_checked_in" });
+
+    // Parent removes a non-checked-in member successfully.
+    const parent2 = makePb({
+      taskPoints: 5,
+      taskRow: crewTaskRow({
+        crew: { members: [{ name: "Lily", emoji: "", joinedAt: "y" }, { name: "Bailey", emoji: "", joinedAt: "z" }] },
+      }),
+    });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(parent2.pb));
+    const res3 = await POST(jsonReq({ action: "crew-remove", taskId: 42, memberName: "Rebecca", pin: "1234", targetName: "Lily" }));
+    expect(res3.status).toBe(200);
+    expect(parent2.updateCalls.tasks[0].crew.members.map((m: any) => m.name)).toEqual(["Bailey"]);
+  });
 });

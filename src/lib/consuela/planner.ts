@@ -47,8 +47,9 @@ const PLANNER_SYSTEM: Record<PlannerIntent, string> = {
     "You are Consuela, the family dashboard's meal planner. Suggest meals that fit what this family actually has and likes, per the context below. " +
     'Respond with ONLY a JSON object: {"actions":[{"type":"meal","title":"Sheet-pan gnocchi","detail":"One pan, ready in 25 min","emoji":"🍝"}]}.',
   task_ideas:
-    "You are Consuela, the family dashboard's task coach. Suggest age-appropriate chores for the REAL kids in the roster below with fair point values — assignees must be roster members. " +
-    'Respond with ONLY a JSON object: {"actions":[{"type":"task","title":"Fold laundry","detail":"After the wash is dry","assignee":"<roster member>","points":8,"emoji":"🧺"}]} — points are 1..100.',
+    "You are Consuela, the family dashboard's task coach. Suggest age-appropriate chores for the REAL kids in the roster below with fair point values. " +
+    'Mix assigned chores ("mode":"assigned", assignee MUST be a roster member) with a couple of OPEN tasks nobody owns yet ("mode":"open", no assignee, add "speedBonus" 0-5 for the first grab) and one CREW task needing several helpers ("mode":"crew", "crewSize" 2-5, points are PTS EACH). ' +
+    'Respond with ONLY a JSON object: {"actions":[{"type":"task","title":"Fold laundry","detail":"After the wash is dry","mode":"assigned","assignee":"<roster member>","points":8,"emoji":"🧺"},{"type":"task","title":"Wash the car","mode":"open","speedBonus":2,"points":10,"emoji":"🚗"}]} — points are 1..100.',
   reward_ideas:
     "You are Consuela, the family dashboard's reward coach. Suggest rewards the kids on the roster are actually saving toward, priced against the shop catalog below. " +
     'Respond with ONLY a JSON object: {"actions":[{"type":"reward","title":"Extra screen time","detail":"30 minutes on a weekend day","assignee":"<roster member>","points":60,"emoji":"📱"}]} — points are 1..100.',
@@ -231,6 +232,23 @@ function validateActions(obj: Record<string, any>): PlannerValidation {
     const assignee = trimmedString(raw.assignee);
     if (assignee) entry.assignee = assignee;
     if (points !== undefined) entry.points = points;
+    // Open/crew task modes (spec §4): pass the mode through with clamped
+    // numbers; an invalid mode degrades to "assigned".
+    if (type === "task") {
+      const mode = matchEnum(raw.mode, ["assigned", "open", "crew"]);
+      if (mode && mode !== "assigned") {
+        entry.mode = mode;
+        if (mode === "crew") {
+          const n = Number(raw.crewSize);
+          const size = Number.isFinite(n) ? Math.round(n) : 2;
+          entry.crewSize = Math.min(5, Math.max(2, size));
+        } else {
+          const n = Number(raw.speedBonus);
+          const bonus = Number.isFinite(n) ? Math.round(n) : 2;
+          entry.speedBonus = Math.min(5, Math.max(0, bonus));
+        }
+      }
+    }
     kept.push(entry);
   }
   if (kept.length === 0) return fail();

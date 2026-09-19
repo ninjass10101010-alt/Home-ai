@@ -118,7 +118,7 @@ describe("filter-aware stat tiles + scoped empty copy", () => {
     expect(last.style.animationDelay).toBe("0.4s"); // min(9, 8) * 0.05
   });
 
-  it("'Up for grabs' Completed tile only counts what the list can show (universal, not completed-stealable)", async () => {
+  it("'Open' Completed tile only counts what the list can show (universal, not completed-stealable)", async () => {
     localStorage.setItem("consuela-tasks", JSON.stringify([
       { id: 1, title: "Universal done this week", assignee: "Bailey", assigneeEmoji: "👧", due: TODAY, points: 5, recurring: null, category: "Chores", completed: true, completedBy: "Bailey", completedAt: new Date().toISOString(), completedInWeek: thisMondayISO(), priority: "low", universal: true },
       { id: 2, title: "Stolen-and-done this week", assignee: "Bailey", assigneeEmoji: "👧", due: TODAY, points: 9, recurring: null, category: "Chores", completed: true, completedBy: "Bailey", completedAt: new Date().toISOString(), completedInWeek: thisMondayISO(), priority: "low", stealable: true },
@@ -128,7 +128,7 @@ describe("filter-aware stat tiles + scoped empty copy", () => {
     const el = await renderAsync(<TasksPage />);
     await settle();
 
-    clickTile(el, "Up for grabs");
+    clickTile(el, "Open");
     await settle();
 
     const tileText = () => [...el.querySelectorAll(".grid.gap-3.sm\\:grid-cols-3 > *")].map((t) => (t.textContent || "")).join("|");

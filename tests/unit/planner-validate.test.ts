@@ -76,6 +76,21 @@ describe("validatePlannerOutput", () => {
     expect(validatePlannerOutput("meal_ideas", '{"meal_plan":[{"day":"Mon"}]}').ok).toBe(false);
     expect(validatePlannerOutput("reward_ideas", '{"actions":[{"type":"reward"}]}').ok).toBe(false);
   });
+  it("task_ideas passes open/crew modes through with clamped numbers", () => {
+    const r = validatePlannerOutput("task_ideas", JSON.stringify({
+      actions: [
+        { type: "task", title: "Wash the car", mode: "open", speedBonus: 9, points: 10 },
+        { type: "task", title: "Big cleanup", mode: "crew", crewSize: 9, points: 15 },
+        { type: "task", title: "Bogus mode", mode: "whatever", points: 5 },
+      ],
+    }));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.result.actions[0]).toMatchObject({ mode: "open", speedBonus: 5 });
+      expect(r.result.actions[1]).toMatchObject({ mode: "crew", crewSize: 5 });
+      expect(r.result.actions[2].mode).toBeUndefined();
+    }
+  });
   it("meal_ideas accepts meal-typed actions with detail", () => {
     const r = validatePlannerOutput("meal_ideas", JSON.stringify({ actions: [{ type: "meal", title: "Sheet-pan gnocchi", detail: "One pan, 25 min", emoji: "🍝" }] }));
     expect(r.ok && r.result.actions[0].type).toBe("meal");

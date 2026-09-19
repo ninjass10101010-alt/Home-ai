@@ -23,7 +23,7 @@ import { db } from "@/db";
 import { useAuth } from "@/hooks/useAuth";
 import { useWallMode } from "@/hooks/useWallMode";
 import { useWallConfirm } from "@/hooks/useWallConfirm";
-import type { Task, LeaderboardEntry, Reward, Penalty, WeekData } from "@/types/tasks";
+import type { Task, LeaderboardEntry, Reward, Penalty, WeekData, CrewMember } from "@/types/tasks";
 import { getLevel, BADGES } from "@/types/tasks";
 import {
   TASKS_STORAGE_KEY, REWARDS_KEY, PENALTIES_KEY,
@@ -43,6 +43,9 @@ import {
   completesWithoutPin, completesWithPendingApproval,
   tapCompletePending, sendBackPendingCompletion, approvePendingCompletion, resolveMemberName,
   mergeTasksSnapshot, getDaysUntilWeekReset,
+  isCrewTask, crewMembers, crewMemberCount, crewFull, crewHasMember,
+  crewMemberCheckedIn, crewCheckinProgress, crewAllCheckedIn, canJoinCrew,
+  normalizeSpeedBonus,
 } from "@/lib/task-utils";
 import {
   readRewardsStamp, touchRewardsStamp, writeRewardsStamp,
@@ -280,13 +283,13 @@ export default function TasksPage() {
     // Pets are never assignees — a task handed to 🐶 would strand its points
     // (leaderboard and claims exclude pets by design).
     const names = membersData.filter((m: any) => m.role !== "pet").map((m: any) => m.fullName);
-    return isLoggedIn ? ["My Tasks", ...names, "Up for grabs"] : ["All", ...names, "Up for grabs"];
+    return isLoggedIn ? ["My Tasks", ...names, "Open"] : ["All", ...names, "Open"];
   }, [membersData, isLoggedIn]);
 
   const memberEmojis: Record<string, string> = useMemo(() => ({
     All: "👨‍👩‍👧‍👦",
     "My Tasks": currentUser?.emoji || "👤",
-    "Up for grabs": "🤝",
+    "Open": "🫳",
     // Raw emoji here: every consumer renders it through <Avatar variant="emoji">,
     // which turns photo data URLs into real images. The 👤 sanitizing in
     // safeDisplayEmoji belongs ONLY in text contexts (memberOptionLabel).
@@ -369,6 +372,8 @@ export default function TasksPage() {
   const [editForm, setEditForm] = useState<Task>(() => emptyTask(membersData.find((m: any) => m.role !== "pet")));
   const [isAdding, setIsAdding] = useState(false);
   const [pinTaskId, setPinTaskId] = useState<number | null>(null);
+  // Crew join / check-in is a PIN-gated action like a claim (self-join only).
+  const [pinCrewAction, setPinCrewAction] = useState<{ taskId: number; action: "crew-join" | "crew-checkin" } | null>(null);
   const [pinReward, setPinReward] = useState<Reward | null>(null);
   const [pinPenalty, setPinPenalty] = useState<Penalty | null>(null);
   const [pinInput, setPinInput] = useState("");
@@ -414,6 +419,10 @@ export default function TasksPage() {
   const [approvalMode, setApprovalMode] = useState<"approve" | "sendback">("approve");
   const [approvalPin, setApprovalPin] = useState("");
   const [approvalError, setApprovalError] = useState("");
+  // Parent removes a non-checked-in crew member (spec §3 flake handling).
+  const [crewRemoveTarget, setCrewRemoveTarget] = useState<{ taskId: number; memberName: string } | null>(null);
+  const [crewRemovePin, setCrewRemovePin] = useState("");
+  const [crewRemoveError, setCrewRemoveError] = useState("");
 
   useEffect(() => { saveRewards(rewards); }, [rewards]);
   useEffect(() => { savePenalties(penalties); }, [penalties]);
@@ -609,10 +618,17 @@ export default function TasksPage() {
 
   const saveTask = () => {
     if (!editForm.title.trim()) return;
+    // Normalize mode fields so a stale value from a previous mode can't leak
+    // (e.g. switching Crew -> Assigned must drop crewSize/crew).
+    const normalized: Task = isCrewTask(editForm)
+      ? { ...editForm, universal: false, speedBonus: undefined, crew: { members: crewMembers(editForm) } }
+      : editForm.universal
+        ? { ...editForm, crewSize: null, crew: null, speedBonus: normalizeSpeedBonus(editForm.speedBonus) }
+        : { ...editForm, crewSize: null, crew: null, speedBonus: undefined, universal: false };
     if (isAdding) {
-      setTasks(prev => [...prev, { ...editForm, id: uid() }]);
+      setTasks(prev => [...prev, { ...normalized, id: uid() }]);
     } else {
-      setTasks(prev => prev.map(t => t.id === editingId ? { ...editForm } : t));
+      setTasks(prev => prev.map(t => t.id === editingId ? { ...normalized } : t));
     }
     setEditingId(null);
     setIsAdding(false);
@@ -632,6 +648,24 @@ export default function TasksPage() {
         if (member) updated.assigneeEmoji = member.emoji;
       }
       return updated;
+    });
+  };
+
+  // Assignee / Open / Crew mode is derived from the form fields (no parallel
+  // state): crewSize => crew, universal => open, otherwise assigned.
+  const formType: "assigned" | "open" | "crew" =
+    isCrewTask(editForm) ? "crew" : editForm.universal ? "open" : "assigned";
+  const setTaskType = (type: "assigned" | "open" | "crew") => {
+    setEditForm(prev => {
+      if (type === "open") {
+        return { ...prev, universal: true, crewSize: null, crew: null, stealable: false, speedBonus: prev.speedBonus ?? 2, assignee: "Open", assigneeEmoji: "🤝" };
+      }
+      if (type === "crew") {
+        const minSize = Math.max(2, crewMemberCount(prev));
+        const size = typeof prev.crewSize === "number" && prev.crewSize >= minSize ? prev.crewSize : minSize;
+        return { ...prev, universal: false, crewSize: size, crew: prev.crew ?? { members: [] }, stealable: false, speedBonus: undefined, assignee: "Crew", assigneeEmoji: "🤝" };
+      }
+      return { ...prev, universal: false, crewSize: null, crew: null, speedBonus: undefined, assignee: prev.assignee === "Open" || prev.assignee === "Crew" ? "" : prev.assignee };
     });
   };
 
@@ -709,6 +743,29 @@ export default function TasksPage() {
       setUndoTaskId(taskId);
       setUndoPin("");
       setUndoError("");
+      return;
+    }
+    // Crew tasks are joined + checked in, never single-completed. Decide the
+    // member's next step from live membership and open the PIN step (self-join).
+    if (isCrewTask(task)) {
+      const me = isLoggedIn && currentUser ? resolveMemberName(membersData, currentUser.name) : "";
+      const joined = me ? crewHasMember(task, me) : false;
+      const checkedIn = me ? crewMemberCheckedIn(task, me) : false;
+      const action: "crew-join" | "crew-checkin" | null =
+        joined && !checkedIn ? "crew-checkin" : !joined && !crewFull(task) ? "crew-join" : null;
+      if (!action) {
+        showToast(joined ? "You've already checked in — waiting on the rest of the crew." : "This crew is full.");
+        return;
+      }
+      setPinTaskId(taskId);
+      setPinCrewAction({ taskId, action });
+      setPinReward(null);
+      setPinPenalty(null);
+      setUndoTaskId(null);
+      setPinInput("");
+      setPinError("");
+      setPinSuccess("");
+      setSnatchForMember(pickDefaultClaimMember(membersData, currentUser?.name) || task.assignee);
       return;
     }
     if (completesWithoutPin(currentUser?.role, currentUser?.age, task)) {
@@ -832,14 +889,73 @@ export default function TasksPage() {
         const { tasks: nt, weekData: nw } = approvePendingCompletion(tasks, weekData, approvalTaskId);
         setTasks(nt);
         setWeekData(nw);
-        showToast(`Approved! +${target?.points ?? 0}pts for ${(target?.pendingApproval?.byName ?? "").split(" ")[0]}.`);
+        const crew = target?.pendingApproval?.crew;
+        showToast(
+          crew && crew.length > 0
+            ? `Approved! +${target?.points ?? 0}pts each for ${crew.map((n) => n.split(" ")[0]).join(", ")}.`
+            : `Approved! +${target?.points ?? 0}pts for ${(target?.pendingApproval?.byName ?? "").split(" ")[0]}.`
+        );
       } else {
         setTasks((prev) => sendBackPendingCompletion(prev, approvalTaskId));
-        showToast("Sent back — no points were given.");
+        const target = tasks.find((x) => x.id === approvalTaskId);
+        showToast(target && isCrewTask(target) ? "Sent back — the whole crew reopens, no points given." : "Sent back — no points were given.");
       }
       setApprovalTaskId(null);
       setApprovalPin("");
       setApprovalError("");
+    } finally {
+      setPinBusy(false);
+    }
+  };
+
+  // Parent removes a crew member (before approval). Parent-PIN gated.
+  const submitCrewRemove = async () => {
+    if (!crewRemoveTarget || !crewRemovePin || pinBusy) return;
+    setPinBusy(true);
+    try {
+      let parent: any = null;
+      let unreachable = false;
+      for (const m of membersData.filter((m: any) => m.role === "parent")) {
+        const result = await verifyPinRemote(m.fullName, crewRemovePin);
+        if (result.status === "ok") { parent = m; break; }
+        if (result.status === "unreachable") { unreachable = true; break; }
+      }
+      if (unreachable) {
+        setCrewRemoveError(unreachableCopy());
+        setCrewRemovePin("");
+        setTimeout(() => setCrewRemoveError(""), 2500);
+        return;
+      }
+      if (!parent) {
+        setCrewRemoveError("Parent PIN required.");
+        setCrewRemovePin("");
+        setTimeout(() => setCrewRemoveError(""), 2500);
+        return;
+      }
+      const res = await fetch("/api/tasks/claim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "crew-remove",
+          taskId: crewRemoveTarget.taskId,
+          memberName: parent.fullName,
+          pin: crewRemovePin,
+          targetName: crewRemoveTarget.memberName,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.success && data?.task) {
+        const updated = data.task;
+        setTasks(prev => prev.map(t => t.id === crewRemoveTarget.taskId ? { ...t, crew: updated.crew ?? t.crew } : t));
+        showToast(`${crewRemoveTarget.memberName.split(" ")[0]} removed from the crew.`);
+      } else if (res.status === 409) {
+        setCrewRemoveError("They already checked in — can't remove.");
+      } else {
+        setCrewRemoveError("Couldn't remove them — try again.");
+      }
+      setCrewRemoveTarget(null);
+      setCrewRemovePin("");
+      setCrewRemoveError("");
     } finally {
       setPinBusy(false);
     }
@@ -982,6 +1098,84 @@ export default function TasksPage() {
       return;
     }
 
+    if (pinCrewAction) {
+      const crewAction = pinCrewAction;
+      const memberName = snatchForMember;
+      if (!memberName) {
+        setPinError("Select who is joining.");
+        setPinInput("");
+        setTimeout(() => setPinError(""), 2000);
+        return;
+      }
+      const result = await verifyPinRemote(memberName, pinInput);
+      if (result.status === "ok") {
+        const verified = result.member;
+        const normalizedName = normalizeName((verified as any).name);
+        const claimantEmoji = membersData.find((m: any) => m.fullName === normalizedName)?.emoji;
+        const res = await fetch("/api/tasks/claim", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: crewAction.action,
+            taskId: crewAction.taskId,
+            memberName: normalizedName,
+            pin: pinInput,
+            assigneeEmoji: claimantEmoji,
+          }),
+        });
+        const data = await res.json().catch(() => null);
+        if (res.ok && data?.success && data?.task) {
+          const updated = data.task;
+          setTasks(prev => prev.map(x => x.id === crewAction.taskId ? {
+            ...x,
+            crew: updated.crew ?? null,
+            completed: !!updated.completed,
+            completedBy: updated.completedBy ?? x.completedBy,
+            completedAt: updated.completedAt ?? x.completedAt,
+            completedInWeek: updated.completedInWeek ?? x.completedInWeek,
+            pendingApproval: updated.pendingApproval ?? x.pendingApproval,
+          } : x));
+          const joinedCount = Array.isArray(updated.crew?.members) ? updated.crew.members.length : 0;
+          const first = normalizedName.split(" ")[0];
+          setPinInput("");
+          setPinSuccess(
+            crewAction.action === "crew-join"
+              ? `🤝 ${first} joined — ${joinedCount}/${updated.crewSize} on the crew.`
+              : updated.pendingApproval
+                ? `🎉 Crew all done! ${first} checked in — a parent approves next.`
+                : `✓ ${first} checked in.`
+          );
+          if (updated.pendingApproval) triggerConfetti();
+          setTimeout(() => { setPinTaskId(null); setPinCrewAction(null); setPinSuccess(""); setSnatchForMember(""); }, 1800);
+        } else if (res.status === 409 && data?.reason === "crew_full") {
+          setPinError("That crew just filled up — try another task.");
+          setPinInput("");
+          setTimeout(() => setPinError(""), 2500);
+        } else if (res.status === 403 && data?.reason === "not_in_crew") {
+          setPinError("You're not on this crew — join first.");
+          setPinInput("");
+          setTimeout(() => setPinError(""), 2500);
+        } else if (res.status === 400 && data?.reason === "not_crew_task") {
+          setPinError("This task isn't a crew task.");
+          setPinInput("");
+          setTimeout(() => setPinError(""), 2500);
+        } else if (res.status === 401) {
+          setPinError("PIN rejected by the server — try again.");
+          setPinInput("");
+          setTimeout(() => setPinError(""), 2000);
+        } else {
+          setPinError("Couldn't reach Consuela — try again.");
+          setPinInput("");
+          setTimeout(() => setPinError(""), 2500);
+        }
+      } else {
+        setPinError(result.status === "unreachable" ? unreachableCopy() : "Wrong code for selected member. Try again.");
+        setPinInput("");
+        setTimeout(() => setPinError(""), 2000);
+      }
+      return;
+    }
+
     if (pinTaskId === null) return;
     const task = tasks.find(t => t.id === pinTaskId);
     if (!task || task.completed) return;
@@ -1009,21 +1203,29 @@ export default function TasksPage() {
         // (claims are always PIN-gated) and never on the session user (a
         // parent claiming for a kid must mirror the server's pending answer).
         const kidClaim = (verified as any).role === "child";
+        // Open ("up for grabs") first claims carry a speed bonus; the server
+        // re-derives it authoritatively, but the optimistic UI must match.
+        const speedBonus = !wasSnatch ? normalizeSpeedBonus(task.speedBonus) : 0;
+        const earnAmount = task.points + speedBonus;
+        const claimLabel = wasSnatch ? "Snatched" : speedBonus > 0 ? "Fast grab" : "Completed";
         setTasks(prev => prev.map(t => t.id === pinTaskId
           ? (kidClaim
-            ? { ...tapCompletePending({ ...t, assignee: normalizedName, assigneeEmoji: claimantEmoji }, normalizedName, now, currentWeek), completedBy: normalizedName }
+            ? (() => {
+                const pending = tapCompletePending({ ...t, assignee: normalizedName, assigneeEmoji: claimantEmoji }, normalizedName, now, currentWeek);
+                return { ...pending, completedBy: normalizedName, pendingApproval: { ...pending.pendingApproval!, points: earnAmount } };
+              })()
             : { ...t, completed: true, completedBy: normalizedName, completedAt: now, completedInWeek: currentWeek, assignee: normalizedName, assigneeEmoji: claimantEmoji })
           : t));
-        const pointsMsg = task.points > 0 ? `+${task.points}pts` : "";
+        const pointsMsg = earnAmount > 0 ? `+${earnAmount}pts` : "";
         if (!kidClaim) {
           setWeekData(prev => {
-            const updated = { ...prev, points: { ...prev.points, [normalizedName]: (prev.points[normalizedName] || 0) + task.points } };
-            return addTransaction(updated, "earn", task.points, `${wasSnatch ? "Snatched" : "Completed"}: ${task.title}${pointsMsg ? ` (${pointsMsg})` : ""}`, normalizedName, task.id);
+            const updated = { ...prev, points: { ...prev.points, [normalizedName]: (prev.points[normalizedName] || 0) + earnAmount } };
+            return addTransaction(updated, "earn", earnAmount, `${claimLabel}: ${task.title}${pointsMsg ? ` (${pointsMsg})` : ""}`, normalizedName, task.id);
           });
         }
         setPinInput("");
         setPinSuccess(kidClaim
-          ? `🎯 ${normalizedName.split(" ")[0]} — grabbed! +${task.points}pts on the way (parent approves).`
+          ? `🎯 ${normalizedName.split(" ")[0]} — grabbed! +${earnAmount}pts on the way (parent approves).`
           : `🎯 ${normalizedName.split(" ")[0]} ${wasSnatch ? "snatched" : "completed"} ${task.title}! ${pointsMsg}`);
         triggerConfetti();
         setTimeout(() => { setPinTaskId(null); setPinSuccess(""); setSnatchForMember(""); }, 1500);
@@ -1033,6 +1235,7 @@ export default function TasksPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            action: "claim",
             taskId: task.id,
             claimantName: normalizedName,
             claimantPin: pinInput,
@@ -1219,14 +1422,15 @@ export default function TasksPage() {
   };
 
   const filtered = tasks.filter((t) => {
-    if (filterMember === "Up for grabs") {
-      return (t.universal || isSnatchable(t)) && (showCompleted ? true : !t.completed);
+    if (filterMember === "Open") {
+      // Open + late-stealable rows and crew tasks with space.
+      return ((t.universal || isSnatchable(t)) || (isCrewTask(t) && !crewFull(t))) && (showCompleted ? true : !t.completed);
     }
     if (filterMember === "My Tasks" && currentUser) {
       // Ownership in the resolved-ledger space: assignees are migrated to
       // roster fullNames at mount, while the session may carry a first name.
       const mine = resolveMemberName(membersData, t.assignee) === resolveMemberName(membersData, currentUser.name);
-      const claimable = (t.universal || isSnatchable(t)) && !t.completed;
+      const claimable = ((t.universal || isSnatchable(t)) || (isCrewTask(t) && !crewFull(t))) && !t.completed;
       return (mine || claimable) && (showCompleted ? true : !t.completed);
     }
     const memberMatch = filterMember === "All" || t.assignee === filterMember;
@@ -1236,6 +1440,25 @@ export default function TasksPage() {
 
   const pending = filtered.filter((t) => !t.completed);
   const pendingApprovals = useMemo(() => tasks.filter(isPendingApproval), [tasks]);
+  // The Open board: unclaimed "up for grabs" tasks (universal or late-stealable)
+  // PLUS crew tasks with space — shown only when the viewer isn't on a
+  // specific-member filter, sorted by points (biggest race first).
+  const openBoard = useMemo(() => {
+    if (filterMember !== "All" && filterMember !== "My Tasks" && filterMember !== "Open") return [];
+    const me = isLoggedIn && currentUser ? resolveMemberName(membersData, currentUser.name) : "";
+    return tasks
+      .filter((t) => {
+        if (t.completed) return false;
+        if ((t.universal || isSnatchable(t)) && !isCrewTask(t)) return true;
+        if (isCrewTask(t)) {
+          if (crewFull(t)) return false;
+          if (me && crewHasMember(t, me)) return false;
+          return true;
+        }
+        return false;
+      })
+      .sort((a, b) => b.points - a.points);
+  }, [tasks, filterMember, isLoggedIn, currentUser, membersData]);
   const completed = filtered.filter((t) => t.completed);
   const thisWeeksCompleted = getThisWeeksCompletedTasks(tasks);
   const thisWeeksCompletedCount = thisWeeksCompleted.length;
@@ -1305,9 +1528,9 @@ export default function TasksPage() {
 
   // The three StatTiles all follow the member filter: a parent tapping a kid's
   // tile reads that kid's open chores / this-week completions / this week's
-  // points. "All" and "Up for grabs" stay family-wide.
+  // points. "All" and "Open" stay family-wide.
   const scopedMember = useMemo(() => {
-    if (filterMember === "All" || filterMember === "Up for grabs") return null;
+    if (filterMember === "All" || filterMember === "Open") return null;
     const target = filterMember === "My Tasks" ? currentUser?.name : filterMember;
     if (!target) return null;
     return dynamicLeaderboard.find((e) => e.name === target || e.name.startsWith(target)) ?? null;
@@ -1316,7 +1539,7 @@ export default function TasksPage() {
   const scopedCompletedCount = useMemo(() => {
     // Only universal tasks survive the Up-for-grabs filter once completed
     // (isSnatchable turns false) — count what the list can actually show.
-    if (filterMember === "Up for grabs") return thisWeeksCompleted.filter((t) => t.universal).length;
+    if (filterMember === "Open") return thisWeeksCompleted.filter((t) => t.universal).length;
     if (!scopedMember) return thisWeeksCompletedCount;
     return thisWeeksCompleted.filter((t) =>
       t.completedBy === scopedMember.name || t.completedBy?.startsWith(scopedMember.name) ||
@@ -1430,7 +1653,7 @@ export default function TasksPage() {
                     style={{ "--chip-color": memberChipColor(memberColors[member]) } as CSSProperties}
                   >
                     <Avatar name={member} color={memberColors[member] || "green"} emoji={memberEmojis[member]} size="sm" variant="emoji" />
-                    <span className="member-tile-name">{["All", "My Tasks", "Up for grabs"].includes(member) ? member : member.split(" ")[0]}</span>
+                    <span className="member-tile-name">{["All", "My Tasks", "Open"].includes(member) ? member : member.split(" ")[0]}</span>
                   </button>
                 ))}
               </div>
@@ -1455,12 +1678,14 @@ export default function TasksPage() {
                     <input value={editForm.title} onChange={(e) => updateForm("title", e.target.value)} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none placeholder:text-text-muted" placeholder="Task title" autoFocus />
                   </label>
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <label className="block">
-                      <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Assignee</span>
-                      <select value={editForm.assignee} onChange={(e) => updateForm("assignee", e.target.value)} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none">
-                        {membersData.filter((m: any) => m.role !== "pet").map((m: any) => <option key={m.fullName} value={m.fullName}>{memberOptionLabel(m)}</option>)}
-                      </select>
-                    </label>
+                    {formType === "assigned" && (
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Assignee</span>
+                        <select value={editForm.assignee} onChange={(e) => updateForm("assignee", e.target.value)} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none">
+                          {membersData.filter((m: any) => m.role !== "pet").map((m: any) => <option key={m.fullName} value={m.fullName}>{memberOptionLabel(m)}</option>)}
+                        </select>
+                      </label>
+                    )}
                     <label className="block">
                       <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Due</span>
                       <select value={editForm.due} onChange={(e) => updateForm("due", e.target.value)} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none">
@@ -1492,8 +1717,59 @@ export default function TasksPage() {
                       <input value={editForm.recurring || ""} onChange={(e) => updateForm("recurring", e.target.value || null)} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none" placeholder="Daily" />
                     </label>
                   </div>
-                  <Toggle checked={!!editForm.universal} onCheckedChange={(checked) => updateForm("universal", checked)} label="Universal task" description="Any member can claim it." />
-                  <Toggle checked={!!editForm.stealable} onCheckedChange={(checked) => updateForm("stealable", checked)} label="⏰ Up for grabs when late" description="If it's not done after the due date, anyone can grab it for the points." />
+                  <div>
+                    <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Task type</span>
+                    <SegmentedControl
+                      aria-label="Task type"
+                      value={formType}
+                      onChange={(value) => setTaskType(value as "assigned" | "open" | "crew")}
+                      options={[
+                        { id: "assigned", label: "Assigned" },
+                        { id: "open", label: "Open" },
+                        { id: "crew", label: "Crew" },
+                      ]}
+                    />
+                    <p className="mt-2 text-xs text-text-secondary">
+                      {formType === "assigned"
+                        ? "One person is responsible for it."
+                        : formType === "open"
+                          ? "Nobody owns it yet — the family races to claim it."
+                          : `Needs ${editForm.crewSize || 2} helpers — everyone earns the full points.`}
+                    </p>
+                  </div>
+                  {formType === "open" && (
+                    <label className="block">
+                      <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">⚡ Speed bonus (first grab)</span>
+                      <input type="number" min={0} max={5} value={editForm.speedBonus ?? 2} onChange={(e) => updateForm("speedBonus", Math.max(0, Math.min(5, parseInt(e.target.value) || 0)))} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none" />
+                      <span className="mt-1 block text-[11px] text-text-muted">The first person to claim it earns this many extra points (0–5).</span>
+                    </label>
+                  )}
+                  {formType === "crew" && (() => {
+                    const minSize = Math.max(2, crewMemberCount(editForm));
+                    const size = editForm.crewSize ?? minSize;
+                    return (
+                      <div>
+                        <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Crew size</span>
+                        <div className="flex items-center gap-3">
+                          <button type="button" aria-label="Fewer helpers" disabled={size <= minSize} onClick={() => updateForm("crewSize", Math.max(minSize, size - 1))} className="tap-sm h-11 w-11 rounded-full glass-subtle text-lg text-text-primary disabled:opacity-40">−</button>
+                          <span className="text-lg font-bold tabular-nums text-text-primary">{size}</span>
+                          <button type="button" aria-label="More helpers" disabled={size >= 5} onClick={() => updateForm("crewSize", Math.min(5, size + 1))} className="tap-sm h-11 w-11 rounded-full glass-subtle text-lg text-text-primary disabled:opacity-40">+</button>
+                          <span className="text-xs text-text-secondary">helpers · +{editForm.points} pts each</span>
+                        </div>
+                        {crewMemberCount(editForm) > 0 && (
+                          <span className="mt-1 block text-[11px] text-text-muted">Can&apos;t go below {minSize} — {crewMemberCount(editForm)} already joined.</span>
+                        )}
+                      </div>
+                    );
+                  })()}
+                  {formType === "assigned" && (
+                    <details className="rounded-2xl border border-white/10 px-3 py-2">
+                      <summary className="cursor-pointer text-xs font-semibold text-text-secondary">Advanced</summary>
+                      <div className="mt-2">
+                        <Toggle checked={!!editForm.stealable} onCheckedChange={(checked) => updateForm("stealable", checked)} label="⏰ Up for grabs when late" description="If it's not done after the due date, anyone can grab it for the points." />
+                      </div>
+                    </details>
+                  )}
                 </div>
               </Modal>
             )}
@@ -1511,7 +1787,13 @@ export default function TasksPage() {
                         <Avatar name={suggestion.assignee} color={memberColors[suggestion.assignee] || "green"} emoji={suggestion.assigneeEmoji} size="sm" variant="emoji" />
                         <div className="min-w-0 flex-1">
                           <div className="text-sm font-semibold text-text-primary">{suggestion.title}</div>
-                          <div className="mt-1 text-xs text-text-muted">{suggestion.assignee} · +{suggestion.points}pts</div>
+                          <div className="mt-1 text-xs text-text-muted">
+                            {isCrewTask(suggestion)
+                              ? `🤝 Crew of ${suggestion.crewSize} · +${suggestion.points} pts each`
+                              : suggestion.universal
+                                ? `🫳 Open · +${suggestion.points} pts · first grab +${normalizeSpeedBonus(suggestion.speedBonus)}`
+                                : `${suggestion.assignee} · +${suggestion.points}pts`}
+                          </div>
                         </div>
                         <div className="flex gap-1">
                           <SoftButton size="sm" onClick={() => adoptSuggestion(suggestion)}>Add</SoftButton>
@@ -1528,11 +1810,89 @@ export default function TasksPage() {
 
             <RemindersSection />
 
+            {openBoard.length > 0 && (
+              <SectionCard title="🫳 Open" description="Nobody's claimed these — fastest fingers earn the bonus." icon="⚡">
+                <div className="space-y-2">
+                  {openBoard.map((task) => {
+                    const speed = normalizeSpeedBonus(task.speedBonus);
+                    const crew = isCrewTask(task);
+                    const joined = crewMemberCount(task);
+                    const full = crewFull(task);
+                    return (
+                      <div
+                        key={task.id}
+                        className="schedule-row liquid-glass flex items-center gap-3 px-3 py-2.5"
+                        style={{
+                          backgroundImage: `linear-gradient(135deg, color-mix(in srgb, var(--color-accent-cyan) 40%, transparent) 0%, color-mix(in srgb, var(--color-accent-cyan) 20%, transparent) 100%)`,
+                        }}
+                      >
+                        <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={crew ? "🤝" : "🫳"} size="sm" variant="emoji" />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm text-text-primary">{task.title}</div>
+                          <div className="truncate text-xs text-text-secondary">
+                            {crew
+                              ? `🤝 Crew ${joined}/${task.crewSize} joined${full ? " — full" : ""} · +${task.points} pts each`
+                              : `Open — nobody's yet${speed > 0 ? ` · first grab +${speed}` : ""}`}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          aria-label={crew ? `Join crew for ${task.title}` : `Claim ${task.title}`}
+                          disabled={crew && full}
+                          onClick={() => openPinEntry(task.id)}
+                          className="tap-sm min-h-[44px] shrink-0 rounded-full px-3 text-xs font-bold text-text-primary glass-subtle disabled:opacity-40"
+                        >
+                          {crew ? (full ? "Full" : "Join crew") : `🫳 Claim +${task.points + speed}`}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </SectionCard>
+            )}
+
+            {isLoggedIn && currentUser?.role === "parent" && (() => {
+              const crews = tasks.filter((t) => isCrewTask(t) && !t.completed && !t.pendingApproval);
+              if (crews.length === 0) return null;
+              return (
+                <SectionCard title="🤝 Crew tasks" description="Manage who's on each crew." icon="🤝">
+                  <div className="space-y-3">
+                    {crews.map((task) => (
+                      <div key={task.id} className="rounded-2xl glass-subtle p-3">
+                        <div className="text-sm font-semibold text-text-primary">{task.title}</div>
+                        <div className="mt-1 text-xs text-text-secondary">🤝 Crew of {task.crewSize} — {crewMemberCount(task)}/{task.crewSize} joined · +{task.points} pts each</div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {crewMembers(task).map((m) => (
+                            <span key={m.name} className="inline-flex items-center gap-1.5 rounded-full glass-subtle px-2 py-1 text-xs text-text-primary">
+                              {m.emoji || "👤"} {m.name.split(" ")[0]}
+                              {m.checkedInAt ? (
+                                <span className="text-[var(--color-accent-mint)]">✓ done</span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  aria-label={`Remove ${m.name.split(" ")[0]} from ${task.title}`}
+                                  onClick={() => { setCrewRemoveTarget({ taskId: task.id, memberName: m.name }); setCrewRemovePin(""); setCrewRemoveError(""); }}
+                                  className="text-text-muted hover:text-[var(--color-accent-rose)]"
+                                >
+                                  ✕
+                                </button>
+                              )}
+                            </span>
+                          ))}
+                          {crewMemberCount(task) === 0 && <span className="text-xs text-text-muted">Nobody has joined yet.</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </SectionCard>
+              );
+            })()}
+
             <SectionCard title="Pending" description={`${pending.length} open tasks`} icon="📋">
               {pending.length === 0 ? (
                 !isLoggedIn && guestSyncBlocked && tasks.length === 0 ? (
                   <EmptyState title="Tasks are synced to the family account" description="Sign in with your PIN to see everyone's tasks. Your chores aren't gone — they're waiting on the family server." icon="🔐" />
-                ) : filterMember === "Up for grabs" ? (
+                ) : filterMember === "Open" ? (
                   <EmptyState title="All quiet" description="Nothing is up for grabs right now." icon="🤝" />
                 ) : filterMember === "My Tasks" ? (
                   <EmptyState title="All caught up" description="Nothing on your plate right now." icon="🎉" />
@@ -1571,7 +1931,11 @@ export default function TasksPage() {
                         <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={task.assigneeEmoji} size="sm" variant="emoji" />
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-sm text-text-primary">{task.title}</div>
-                          <div className="truncate text-xs text-text-secondary">{task.assignee.split(" ")[0]} · {isSnatchable(task) ? `was due ${formatDueLabel(task.due)}` : formatDueLabel(task.due)} · {task.category}</div>
+                          <div className="truncate text-xs text-text-secondary">
+                            {isCrewTask(task)
+                              ? `🤝 Crew ${crewCheckinProgress(task).checkedIn}/${task.crewSize} checked in · ${crewMemberCount(task)} joined · +${task.points} pts each`
+                              : `${task.assignee.split(" ")[0]} · ${isSnatchable(task) ? `was due ${formatDueLabel(task.due)}` : formatDueLabel(task.due)} · ${task.category}`}
+                          </div>
                         </div>
                         <span
                           className="inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-xs font-semibold text-text-primary glass-subtle"
@@ -1601,7 +1965,10 @@ export default function TasksPage() {
             {isLoggedIn && currentUser?.role === "parent" && pendingApprovals.length > 0 && (
               <SectionCard title="Needs approval" description={`${pendingApprovals.length} tapped — review to award points`} icon="⏳">
                 <div className="space-y-2">
-                  {pendingApprovals.map((task) => (
+                  {pendingApprovals.map((task) => {
+                    const crew = task.pendingApproval!.crew ?? [];
+                    const isCrew = crew.length > 0;
+                    return (
                     <div
                       key={task.id}
                       className="schedule-row liquid-glass flex items-center gap-3 px-3 py-2.5"
@@ -1609,15 +1976,20 @@ export default function TasksPage() {
                         backgroundImage: `linear-gradient(135deg, color-mix(in srgb, var(--color-accent-amber) 40%, transparent) 0%, color-mix(in srgb, var(--color-accent-amber) 20%, transparent) 100%)`,
                       }}
                     >
-                      <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={task.assigneeEmoji} size="sm" variant="emoji" />
+                      <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={isCrew ? "🤝" : task.assigneeEmoji} size="sm" variant="emoji" />
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm text-text-primary">{task.title}</div>
-                        <div className="truncate text-xs text-text-secondary">{task.pendingApproval!.byName.split(" ")[0]} · tapped {task.pendingApproval!.at.split("T")[0]} · {task.points}pts</div>
+                        <div className="truncate text-xs text-text-secondary">
+                          {isCrew
+                            ? `🤝 Crew ${crew.length}/${task.crewSize ?? crew.length} · ${task.points}pts each · ${crew.map((n) => n.split(" ")[0]).join(", ")}`
+                            : `${task.pendingApproval!.byName.split(" ")[0]} · tapped ${task.pendingApproval!.at.split("T")[0]} · ${task.points}pts`}
+                        </div>
                       </div>
                       <button type="button" aria-label={`Approve ${task.title}`} onClick={() => { setApprovalTaskId(task.id); setApprovalMode("approve"); setApprovalPin(""); setApprovalError(""); }} className="tap-sm min-h-[44px] shrink-0 rounded-full px-3 text-xs font-bold text-text-primary glass-subtle">Approve</button>
                       <button type="button" aria-label={`Send back ${task.title}`} onClick={() => { setApprovalTaskId(task.id); setApprovalMode("sendback"); setApprovalPin(""); setApprovalError(""); }} className="tap-sm min-h-[44px] shrink-0 rounded-full px-3 text-xs font-semibold text-text-secondary">Send back</button>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </SectionCard>
             )}
@@ -2064,17 +2436,28 @@ export default function TasksPage() {
               ? `Redeem "${pinReward.name}" for ${pinReward.cost}pts`
               : pinPenalty
               ? `Apply "${pinPenalty.name}" penalty (-${pinPenalty.points}pts)`
+              : pinCrewAction
+              ? (pinCrewAction.action === "crew-join"
+                  ? `Join the crew for "${tasks.find(t => t.id === pinCrewAction.taskId)?.title ?? "this task"}"`
+                  : `Check in — done your part of "${tasks.find(t => t.id === pinCrewAction.taskId)?.title ?? "this task"}"`)
               : `Complete "${tasks.find(t => t.id === pinTaskId)?.title ?? "this task"}"`
           }
           footer={
             <>
               <SoftButton onClick={submitPin} loading={pinBusy} disabled={pinInput.length < 4 || pinBusy} className="flex-1">{pinPenalty ? "Deduct" : "Submit"}</SoftButton>
-              <SoftButton variant="secondary" onClick={() => { setPinTaskId(null); setPinReward(null); setPinPenalty(null); }} className="flex-1">Cancel</SoftButton>
+              <SoftButton variant="secondary" onClick={() => { setPinTaskId(null); setPinCrewAction(null); setPinReward(null); setPinPenalty(null); }} className="flex-1">Cancel</SoftButton>
             </>
           }
         >
           <div className="space-y-4">
-            {!pinReward && (() => { const t = pinTaskId !== null ? tasks.find((x) => x.id === pinTaskId) : undefined; return !!t && (t.universal || isSnatchable(t)); })() && (
+            {!pinReward && !pinPenalty && pinCrewAction && (
+              <div className="rounded-2xl glass-subtle px-4 py-3 text-sm text-text-secondary">
+                {pinCrewAction.action === "crew-join"
+                  ? "You're joining this crew — everyone earns the full points when a parent approves."
+                  : "Marking your part done. The task goes to a parent once the whole crew checks in."}
+              </div>
+            )}
+            {!pinReward && (() => { const t = pinTaskId !== null ? tasks.find((x) => x.id === pinTaskId) : undefined; return !!t && (t.universal || isSnatchable(t) || isCrewTask(t)); })() && (
               <label className="block">
                 <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Claim for</span>
                 <select value={snatchForMember} onChange={(e) => setSnatchForMember(e.target.value)} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none">
@@ -2245,6 +2628,37 @@ export default function TasksPage() {
               className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-4 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted"
             />
             {approvalError && <p className="text-center text-sm text-[var(--color-accent-rose)]">{approvalError}</p>}
+          </div>
+        </Modal>
+      )}
+
+      {crewRemoveTarget !== null && (
+        <Modal
+          open
+          onClose={() => { setCrewRemoveTarget(null); setCrewRemovePin(""); setCrewRemoveError(""); }}
+          title="Remove from crew"
+          description={`Remove ${crewRemoveTarget.memberName.split(" ")[0]} from the crew? Their spot frees up for someone else.`}
+          footer={
+            <>
+              <SoftButton variant="danger" onClick={submitCrewRemove} loading={pinBusy} disabled={!crewRemovePin || pinBusy} className="flex-1">Remove</SoftButton>
+              <SoftButton variant="secondary" onClick={() => { setCrewRemoveTarget(null); setCrewRemovePin(""); }} className="flex-1">Cancel</SoftButton>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-text-secondary">Enter a parent PIN to remove this member.</p>
+            <input
+              type="password"
+              inputMode="numeric"
+              maxLength={4}
+              value={crewRemovePin}
+              onChange={(e) => { setCrewRemovePin(e.target.value.replace(/[^0-9]/g, "")); setCrewRemoveError(""); }}
+              onKeyDown={(e) => { if (e.key === "Enter") submitCrewRemove(); }}
+              placeholder="Parent PIN"
+              autoFocus
+              className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-4 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted"
+            />
+            {crewRemoveError && <p className="text-center text-sm text-[var(--color-accent-rose)]">{crewRemoveError}</p>}
           </div>
         </Modal>
       )}
