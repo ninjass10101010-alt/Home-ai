@@ -191,8 +191,8 @@ async function probeMobile(browser, theme, tag) {
   // Sheet: open ⋯ on the spinach row
   const dialog = await openSheet(page, ITEMS[0]);
   const sheetTitle = ((await dialog.locator("h3").first().textContent()) || "").trim();
-  const sheetButtons = await dialog.evaluate(() =>
-    Array.from(document.querySelectorAll("button[aria-label]")).map((b) => b.getAttribute("aria-label"))
+  const sheetButtons = await dialog.evaluate((root) =>
+    Array.from(root.querySelectorAll("button[aria-label]")).map((b) => b.getAttribute("aria-label"))
   );
   check(
     `${tag}: ⋯ opens the sheet titled with the item name + Lock/Edit/Delete`,
