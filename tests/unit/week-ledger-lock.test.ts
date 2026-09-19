@@ -96,6 +96,15 @@ function makeRacyPb(initial?: { weekPoints?: Record<string, number> }) {
           getFullList: () => call("rewards.read", () => [{ id: "r1", name: "Movie night", cost: 5 }]),
         };
       }
+      if (name === "consuela_data_snapshots") {
+        // Best-effort snapshot mirror (not part of the race under test) —
+        // resolve immediately so it never stalls the orchestrated order.
+        return {
+          getFullList: async () => [],
+          update: async () => ({}),
+          create: async () => ({}),
+        };
+      }
       return {
         getFullList: () => call("week.read", () => [weekSnapshot()]),
         getOne: () => call("week.verify", weekSnapshot),

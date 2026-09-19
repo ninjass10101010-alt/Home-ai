@@ -137,7 +137,18 @@ export async function POST(request: NextRequest) {
           return { ok: false, reason: task.stealable === true ? "not_late_yet" : "not_universal" } as const;
         }
 
-        if (task.completed === true || task.status === "done") {
+        // Already done? `completed: true` always blocks. A bare `status:"done"`
+        // only blocks when it belongs to THIS week — the weekly rollover clears
+        // `completed` but leaves the stale `status` from last week on the PB row
+        // (syncTasksToPB never resets it), and trusting that string forever made
+        // every rolled-over task permanently unclaimable (the points-display
+        // bug's second half). The week_data history guard below catches a real
+        // duplicate claim within the current week.
+        const doneThisWeek =
+          task.completed === true ||
+          (task.status === "done" &&
+            (task.completedInWeek === undefined || task.completedInWeek === null || task.completedInWeek === "" || task.completedInWeek === currentWeek));
+        if (doneThisWeek) {
           return { ok: false, reason: "already_completed" } as const;
         }
 
@@ -174,6 +185,7 @@ export async function POST(request: NextRequest) {
         // pending record includes the speed bonus so approval pays the total.
         const claimantIsChild = claimant.role === "child";
         if (claimantIsChild) {
+          const pending = { byName: normalizedName, at: now, points: amount };
           await pb.collection("tasks").update(task.id, {
             assignee: normalizedName,
             assigned: normalizedName,
@@ -183,8 +195,18 @@ export async function POST(request: NextRequest) {
             completedBy: normalizedName,
             completedAt: now,
             completedInWeek: currentWeek,
-            pendingApproval: { byName: normalizedName, at: now, points: amount },
+            pendingApproval: pending,
             sentBackAt: null,
+          });
+          // Mirror the done-but-unpaid row into the snapshot (no ledger change —
+          // kid points land only on parent approval).
+          await persistSnapshotWeek(pb, null, {
+            id: Number(taskId),
+            completed: true,
+            completedBy: normalizedName,
+            completedAt: now,
+            completedInWeek: currentWeek,
+            pendingApproval: pending,
           });
           return { ok: true, pending: true, claimedBy: normalizedName } as const;
         }
@@ -252,6 +274,15 @@ export async function POST(request: NextRequest) {
           completedInWeek: currentWeek,
         }).catch(() => {});
 
+        // Mirror the earn + completion into the snapshot the UI reads.
+        await persistSnapshotWeek(pb, updatedWeek, {
+          id: Number(taskId),
+          completed: true,
+          completedBy: normalizedName,
+          completedAt: now,
+          completedInWeek: currentWeek,
+        });
+
         return { ok: true, claimedBy: normalizedName, weekData: updatedWeek } as const;
       })
     );
@@ -282,6 +313,93 @@ export async function POST(request: NextRequest) {
 
 type PB = ReturnType<typeof import("@/lib/pb").getAdminPB>;
 
+const SNAPSHOT_KEY = "tasks-snapshot";
+const SNAPSHOT_COLLECTION = "consuela_data_snapshots";
+
+/**
+ * The dashboard reads points from the snapshot blob (`/api/tasks/sync` →
+ * consuela_data_snapshots), NOT from the week_data collection. The claim route
+ * writes week_data, so without this the earn lived in a store the UI never
+ * reads — points showed only if a PARENT browser later pushed its own snapshot
+ * (and a kid session can never push the weekData leg — `/api/tasks/sync`
+ * ignores it for non-parents). Persist the ledger into the snapshot here, under
+ * the same week-ledger lock as the write that produced it.
+ *
+ * Union-merges by transaction id so a concurrent claim's tx is never dropped,
+ * and only adopts a week at least as new as what's stored (an older local blob
+ * must not resurrect last week's points).
+ */
+async function persistSnapshotWeek(
+  pb: PB,
+  weekData: WeekData | null,
+  taskRow?: { id: number; crew?: unknown; completed?: boolean; completedBy?: string; completedAt?: string; completedInWeek?: string; pendingApproval?: unknown }
+): Promise<void> {
+  try {
+    const rows = await pb.collection(SNAPSHOT_COLLECTION).getFullList({
+      requestKey: null,
+      filter: `key = "${SNAPSHOT_KEY}"`,
+    });
+    const row: any = rows[0];
+    const raw = row?.data;
+    let data: any = {};
+    if (typeof raw === "string") {
+      try { data = JSON.parse(raw) || {}; } catch { data = {}; }
+    } else if (raw && typeof raw === "object") {
+      data = raw;
+    }
+    if (weekData) {
+      const stored: any = data.weekData ?? {};
+      const storedStart = typeof stored.weekStart === "string" ? stored.weekStart : "";
+      // Only carry a week at least as new as the stored one.
+      let mergedWeek: WeekData = weekData;
+      if (storedStart && storedStart > weekData.weekStart) {
+        mergedWeek = stored;
+      } else if (storedStart === weekData.weekStart) {
+        const byId = new Map<number, Transaction>();
+        for (const t of Array.isArray(stored.history) ? stored.history : []) byId.set(t.id, t);
+        for (const t of weekData.history) byId.set(t.id, t);
+        const history = [...byId.values()].sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
+        // Recompute points from the merged history so a unioned tx can't be lost.
+        const points: Record<string, number> = {};
+        for (const t of history) {
+          if (t.type === "earn") points[t.member] = (points[t.member] || 0) + t.amount;
+          else if (t.type === "redeem" || t.type === "penalty" || (t.type === "adjust" && t.amount < 0)) {
+            points[t.member] = Math.max(0, (points[t.member] || 0) + t.amount);
+          } else if (t.type === "adjust") {
+            points[t.member] = (points[t.member] || 0) + t.amount;
+          }
+        }
+        mergedWeek = { ...weekData, history, points };
+      }
+      data.weekData = mergedWeek;
+    }
+    // Mirror a task-row change (crew join/check-in/remove, completion) into the
+    // snapshot's tasks leg so the UI sees it without waiting for a client push.
+    if (taskRow && Array.isArray(data.tasks)) {
+      data.tasks = data.tasks.map((t: any) =>
+        Number(t.id) === Number(taskRow.id)
+          ? {
+              ...t,
+              ...(taskRow.crew !== undefined ? { crew: taskRow.crew } : {}),
+              ...(taskRow.completed !== undefined ? { completed: taskRow.completed } : {}),
+              ...(taskRow.completedBy !== undefined ? { completedBy: taskRow.completedBy } : {}),
+              ...(taskRow.completedAt !== undefined ? { completedAt: taskRow.completedAt } : {}),
+              ...(taskRow.completedInWeek !== undefined ? { completedInWeek: taskRow.completedInWeek } : {}),
+              ...(taskRow.pendingApproval !== undefined ? { pendingApproval: taskRow.pendingApproval } : {}),
+            }
+          : t
+      );
+    }
+    const payload = { key: SNAPSHOT_KEY, data, updated_at: new Date().toISOString() };
+    if (row) await pb.collection(SNAPSHOT_COLLECTION).update(row.id, payload, { requestKey: null });
+    else await pb.collection(SNAPSHOT_COLLECTION).create(payload, { requestKey: null });
+  } catch (e: any) {
+    // Best-effort: the week_data ledger is still authoritative; the next
+    // parent client push also reconciles the snapshot.
+    console.warn("[tasks/claim] snapshot persist failed:", e?.message);
+  }
+}
+
 // Join a crew: append the caller (self-join only) if there's room. Idempotent
 // for an existing member; honest 409 crew_full on the last-slot race (the
 // whole route runs under the week-ledger keyed lock, so two racers serialize).
@@ -310,6 +428,7 @@ async function crewJoin(
     { name: normalizedName, emoji: claimant?.emoji || "", joinedAt: now },
   ];
   await pb.collection("tasks").update(task.id, { crew: { members: nextMembers } });
+  await persistSnapshotWeek(pb, null, { id: Number(task.taskId), crew: { members: nextMembers } });
   return { ok: true, task: { ...task, crew: { members: nextMembers } } };
 }
 
@@ -355,6 +474,17 @@ async function crewCheckin(
     patch.sentBackAt = null;
   }
   await pb.collection("tasks").update(task.id, patch);
+  await persistSnapshotWeek(pb, null, {
+    id: Number(task.taskId),
+    crew: { members: nextMembers },
+    ...(patch.completed ? {
+      completed: true,
+      completedBy: "Crew",
+      completedAt: now,
+      completedInWeek: currentWeek,
+      pendingApproval: patch.pendingApproval,
+    } : {}),
+  });
   return { ok: true, task: { ...nextTask, ...patch } };
 }
 
@@ -389,5 +519,6 @@ async function crewRemove(
   const nextMembers = members.filter((m) => m.name !== targetName);
   const removed = [...new Set([...(task.crew?.removed ?? []), targetName])];
   await pb.collection("tasks").update(task.id, { crew: { members: nextMembers, removed } });
+  await persistSnapshotWeek(pb, null, { id: Number(task.taskId), crew: { members: nextMembers, removed } });
   return { ok: true, task: { ...task, crew: { members: nextMembers, removed } } };
 }

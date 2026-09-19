@@ -53,11 +53,31 @@ function makePb(opts?: {
   const taskRow = taskRowBase;
   const updateCalls: { tasks: any[]; week_data?: any[] } = { tasks: [] };
   let written: any = null;
+  // The dashboard reads points from the snapshot blob, not week_data — the
+  // claim route must persist BOTH (points-display bug).
+  let snapshotRow: any = { id: "snap-1", key: "tasks-snapshot", data: JSON.stringify({ tasks: [{ id: 42, title: "Dishes", points: 5, completed: false }], weekData: { weekStart: mondayISO(), points: {}, streak: {}, lastActive: {}, history: [] } }) };
+  let snapshotWritten: any = null;
   return {
     updateCalls,
     weekUpdates: () => written,
+    snapshotUpdates: () => snapshotWritten,
     pb: {
       collection: (name: string) => {
+        if (name === "consuela_data_snapshots") {
+          return {
+            getFullList: async () => [snapshotRow],
+            update: async (_id: string, payload: any) => {
+              snapshotWritten = payload;
+              snapshotRow = { ...snapshotRow, ...payload };
+              return snapshotRow;
+            },
+            create: async (payload: any) => {
+              snapshotWritten = payload;
+              snapshotRow = { ...snapshotRow, ...payload };
+              return snapshotRow;
+            },
+          };
+        }
         if (name === "week_data") {
           return {
             getFullList: async () => [weekRow],
@@ -148,13 +168,61 @@ describe("POST /api/tasks/claim", () => {
   it("keeps the happy path: valid pin, unclaimed task, existing week row", async () => {
     const { pb } = makePb({ taskPoints: 7 });
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
-
     const res = await POST(jsonReq({ taskId: 42, claimantName: "Alex", claimantPin: "1234" }));
 
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.success).toBe(true);
     expect(body.weekData.history[0].amount).toBe(7);
+  });
+
+  it("also persists the earn into the SNAPSHOT the dashboard reads", async () => {
+    // Points-display bug: the dashboard reads consuela_data_snapshots' weekData
+    // leg, but the claim route only wrote week_data — so earned points never
+    // showed unless a PARENT browser later pushed its own snapshot.
+    const { pb, snapshotUpdates } = makePb({ taskPoints: 5 });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ taskId: 42, claimantName: "Alex", claimantPin: "1234" }));
+
+    expect(res.status).toBe(200);
+    const snap = snapshotUpdates();
+    expect(snap).toBeTruthy();
+    const data = typeof snap.data === "string" ? JSON.parse(snap.data) : snap.data;
+    expect(data.weekData.points["Alex"]).toBe(5);
+    expect(data.weekData.history.some((t: any) => t.taskId === 42 && t.type === "earn")).toBe(true);
+  });
+
+  it("writes a crew join into the snapshot's tasks leg too", async () => {
+    const { pb, snapshotUpdates } = makePb({
+      taskPoints: 10,
+      taskRow: { universal: false, crewSize: 3, crew: { members: [] } },
+    });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ action: "crew-join", taskId: 42, memberName: "Alex", pin: "1234" }));
+
+    expect(res.status).toBe(200);
+    const snap = snapshotUpdates();
+    expect(snap).toBeTruthy();
+    const data = typeof snap.data === "string" ? JSON.parse(snap.data) : snap.data;
+    const row = (data.tasks || []).find((t: any) => t.id === 42);
+    expect(row.crew.members.map((m: any) => m.name)).toEqual(["Alex"]);
+  });
+
+  it("treats a last-week status=done task as claimable again (not blocked)", async () => {
+    // Stale-row bug: the rollover clears `completed` but leaves `status:"done"`
+    // on the PB row; the guard blocked every such task forever.
+    const { pb, weekUpdates } = makePb({
+      taskPoints: 5,
+      taskRow: { universal: true, completed: false, status: "done", completedInWeek: "2026-09-07" },
+    });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ taskId: 42, claimantName: "Alex", claimantPin: "1234" }));
+
+    expect(res.status).toBe(200);
+    expect(weekUpdates().points["Alex"]).toBe(5);
   });
 
   it("accepts a stealable task whose due date passed (universal false)", async () => {
