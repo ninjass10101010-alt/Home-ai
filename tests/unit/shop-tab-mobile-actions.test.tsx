@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createRoot } from "react-dom/client";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { createRoot, type Root } from "react-dom/client";
 import { act } from "react";
 import ShopTab from "@/components/meals/ShopTab";
 
@@ -56,10 +56,13 @@ function makeProps(overrides: any = {}) {
   return { props, calls };
 }
 
+let reactRoot: Root | null = null;
+
 async function render(props: any) {
   const el = document.createElement("div");
   document.body.appendChild(el);
-  await act(async () => { createRoot(el).render(<ShopTab {...props} />); });
+  reactRoot = createRoot(el);
+  await act(async () => { reactRoot!.render(<ShopTab {...props} />); });
   return el;
 }
 
@@ -79,6 +82,12 @@ async function openSheet(root: HTMLElement, name: string) {
 
 describe("ShopTab mobile row actions", () => {
   beforeEach(() => { document.body.innerHTML = ""; });
+
+  afterEach(async () => {
+    await act(async () => { reactRoot?.unmount(); });
+    reactRoot = null;
+    document.body.innerHTML = "";
+  });
 
   it("renders the ⋯ overflow button and StorePill; desktop cluster still in DOM", async () => {
     const { props } = makeProps();

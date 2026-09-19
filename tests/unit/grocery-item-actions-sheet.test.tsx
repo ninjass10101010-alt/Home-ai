@@ -1,15 +1,18 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createRoot } from "react-dom/client";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { createRoot, type Root } from "react-dom/client";
 import { act } from "react";
 import GroceryItemActionsSheet from "@/components/meals/GroceryItemActionsSheet";
 
 const item = (over: any = {}) => ({ id: "g1", name: "Milk", emoji: "🥛", category: "dairy", priority: "medium", needed: true, ...over });
 
+let reactRoot: Root | null = null;
+
 async function render(props: any) {
   const el = document.createElement("div");
   document.body.appendChild(el);
-  await act(async () => { createRoot(el).render(<GroceryItemActionsSheet {...props} />); });
+  reactRoot = createRoot(el);
+  await act(async () => { reactRoot!.render(<GroceryItemActionsSheet {...props} />); });
   return el;
 }
 const sheetButtons = (root: HTMLElement) =>
@@ -21,6 +24,12 @@ const byLabel = (root: HTMLElement, re: RegExp) => {
 };
 
 beforeEach(() => { document.body.innerHTML = ""; });
+
+afterEach(async () => {
+  await act(async () => { reactRoot?.unmount(); });
+  reactRoot = null;
+  document.body.innerHTML = "";
+});
 
 describe("GroceryItemActionsSheet", () => {
   it("renders all actions for a needed item (no pantry action)", async () => {
