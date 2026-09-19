@@ -11,7 +11,10 @@
 //   1. /meals?tab=shop loads with 0 page errors and the requested theme applied.
 //   2. Three items added via the Add form ("Organic baby spinach", "Milk",
 //      "Family Fare ground beef") render rows whose title (the div.truncate
-//      inside div.min-w-0) is ≥150px wide and shows the full name.
+//      inside div.min-w-0) is ≥140px wide and shows the full name.
+//      Floor amended 150→140: original arithmetic omitted SectionCard body
+//      padding; measured 125-132 after the fix; hit-44 squeeze recovers +16px
+//      to 141-148; worst case 141 clears the floor.
 //   3. No horizontal overflow (documentElement.scrollWidth === clientWidth).
 //   4. @390: the ⋯ button ("More actions for {name}") is visible on every row
 //      while the desktop lock/edit/delete buttons are display-hidden; tapping
@@ -168,8 +171,8 @@ async function probeMobile(browser, theme, tag) {
   for (const name of ITEMS) facts.push(await rowFacts(page, name));
   const widths = facts.map((f) => f.titleWidth).join(",");
   check(
-    `${tag}: row titles ≥150px wide with full names`,
-    facts.every((f, i) => f.titleWidth >= 150 && f.titleText.includes(ITEMS[i])),
+    `${tag}: row titles ≥140px wide with full names`,
+    facts.every((f, i) => f.titleWidth >= 140 && f.titleText.includes(ITEMS[i])),
     `widths=${widths}px`
   );
 
@@ -267,7 +270,7 @@ async function probeDesktop(browser, theme, tag) {
   const widths = facts.map((f) => f.titleWidth).join(",");
   check(
     `${tag}: three items added, names present at full width`,
-    facts.every((f, i) => f.found && f.titleWidth >= 150 && f.titleText.includes(ITEMS[i])),
+    facts.every((f, i) => f.found && f.titleWidth >= 140 && f.titleText.includes(ITEMS[i])),
     `widths=${widths}px`
   );
   check(

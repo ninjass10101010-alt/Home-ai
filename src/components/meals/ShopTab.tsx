@@ -497,7 +497,7 @@ export default function ShopTab({
                           <button
                             onClick={(e) => { e.stopPropagation(); toggleGroceryNeeded(item.id); }}
                             aria-label={!item.needed ? `Uncheck ${item.name}` : `Check off ${item.name}`}
-                            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl tap-sm"
+                            className="hit-44 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl tap-sm"
                           >
                             <span className={`flex h-7 w-7 items-center justify-center rounded-xl border-2 ${
                               !item.needed
@@ -579,7 +579,7 @@ export default function ShopTab({
                               type="button"
                               onClick={(e) => { e.stopPropagation(); setActionsSheetItem(item); setActionsItemId(item.id); }}
                               aria-label={`More actions for ${item.name}`}
-                              className="sm:hidden flex h-11 w-11 items-center justify-center rounded-xl text-text-muted hover:bg-[var(--color-surface-2)] hover:text-text-primary tap-sm"
+                              className="hit-44 sm:hidden flex h-9 w-9 items-center justify-center rounded-xl text-text-muted hover:bg-[var(--color-surface-2)] hover:text-text-primary tap-sm"
                             >
                               <svg viewBox="0 0 24 24" fill="currentColor" className="h-5 w-5" aria-hidden="true">
                                 <circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" />
