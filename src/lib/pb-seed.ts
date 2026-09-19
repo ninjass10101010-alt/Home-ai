@@ -185,6 +185,9 @@ export const COLLECTIONS = [
       { name: "completedBy", type: "text" },
       { name: "completedAt", type: "text" },
       { name: "assigned", type: "text" },
+      { name: "crewSize", type: "number" },
+      { name: "crew", type: "json" },
+      { name: "speedBonus", type: "number" },
     ],
   },
   {

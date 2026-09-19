@@ -192,6 +192,9 @@ function emptyTask(firstMember?: { name?: string; emoji?: string }): Task {
     completed: false,
     priority: "medium",
     universal: false,
+    stealable: false,
+    crewSize: null,
+    crew: null,
   };
 }
 

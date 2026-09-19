@@ -445,7 +445,16 @@ export function mergeTasksSnapshot(
       (snapRow.completedBy ?? undefined) !== (local.completedBy ?? undefined) ||
       (snapRow.completedAt ?? undefined) !== (local.completedAt ?? undefined) ||
       (snapRow.completedInWeek ?? undefined) !== (local.completedInWeek ?? undefined);
-    if (!pendingDiffers && !completionDiffers) continue;
+
+    const snapCrewSize = (snapRow as any).crewSize ?? null;
+    const snapCrew = (snapRow as any).crew ?? null;
+    const snapSpeed = (snapRow as any).speedBonus ?? null;
+    const crewDiffers =
+      snapCrewSize !== ((local as any).crewSize ?? null) ||
+      JSON.stringify(snapCrew) !== JSON.stringify((local as any).crew ?? null) ||
+      snapSpeed !== ((local as any).speedBonus ?? null);
+
+    if (!pendingDiffers && !completionDiffers && !crewDiffers) continue;
     const localDone = !!local.completed || !!localPending;
     const remoteClearsPending = !!localPending && !snapshotPending;
     const remoteReopens = !!local.completed && !snapRow.completed;
@@ -474,6 +483,9 @@ export function mergeTasksSnapshot(
       p.id === snapRow.id
         ? {
             ...p,
+            crewSize: snapCrewSize,
+            crew: snapCrew,
+            speedBonus: snapSpeed,
             completed: snapRow.completed,
             completedBy: snapRow.completedBy ?? undefined,
             completedAt: snapRow.completedAt ?? undefined,
@@ -866,6 +878,27 @@ export function markWinCelebrated(memberName: string, weekStart: string): void {
   saveHallOfFame(hall);
 }
 
+// === emptyTask factory (exported for tasks page + tests) ===
+
+export function emptyTask(firstMember?: { name?: string; emoji?: string }): Task {
+  return {
+    id: Date.now(),
+    title: "",
+    assignee: firstMember?.name ?? "",
+    assigneeEmoji: firstMember?.emoji ?? "",
+    due: new Date().toISOString().split("T")[0],
+    points: 0,
+    recurring: null,
+    category: "chores",
+    completed: false,
+    priority: "medium",
+    universal: false,
+    stealable: false,
+    crewSize: null,
+    crew: null,
+  };
+}
+
 // === PocketBase sync helpers ===
 
 export async function syncTasksToPB(tasks: Task[]): Promise<void> {
@@ -890,6 +923,9 @@ export async function syncTasksToPB(tasks: Task[]): Promise<void> {
       sentBackAt: task.sentBackAt ?? null,
       completedInWeek: task.completedInWeek ?? null,
       completedAt: task.completedAt ?? null,
+      crewSize: task.crewSize ?? null,
+      crew: task.crew ?? null,
+      speedBonus: task.speedBonus ?? null,
     }).catch(() => {});
   }
 }

@@ -19,6 +19,9 @@ export interface Task {
   // cross-device snapshot merge can distinguish "rejected elsewhere" from a
   // stale snapshot that simply predates the tap. Cleared by the next tap.
   sentBackAt?: string;
+  crewSize?: number | null;
+  crew?: string[] | null;
+  speedBonus?: number;
 }
 
 export interface PendingApproval {
