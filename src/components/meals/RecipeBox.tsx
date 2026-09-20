@@ -1,5 +1,6 @@
 "use client";
 import { useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
 import { weekDays, RECIPE_TAGS } from "@/data/meals";
@@ -24,6 +25,11 @@ export default function RecipeBox({
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("All");
   const [addedId, setAddedId] = useState<number | null>(null);
+  const router = useRouter();
+
+  const openRecipe = (recipe: Recipe) => {
+    router.push(`/meals/recipes/${recipe.id}?from=recipes`);
+  };
 
   const visible = useMemo(() => {
     return recipes.filter((r: Recipe) => {
@@ -124,7 +130,17 @@ export default function RecipeBox({
           return (
             <article
               key={recipe.id}
-              className="liquid-glass group overflow-hidden rounded-2xl"
+              onClick={() => openRecipe(recipe)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  openRecipe(recipe);
+                }
+              }}
+              role="button"
+              tabIndex={0}
+              aria-label={`View ${recipe.name} recipe`}
+              className="liquid-glass group overflow-hidden rounded-2xl cursor-pointer"
             >
               {/* Image/emoji header */}
               <div className="relative h-44 overflow-hidden bg-[var(--color-surface-2)] flex items-center justify-center">
@@ -141,7 +157,7 @@ export default function RecipeBox({
                 )}
                 {/* Favorite button */}
                 <button
-                  onClick={() => toggleFav(recipe.id)}
+                  onClick={(e) => { e.stopPropagation(); toggleFav(recipe.id); }}
                   aria-label="favorite"
                   className={`absolute right-3 top-3 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full backdrop-blur-md tap-sm ${
                     recipe.favorite
@@ -201,7 +217,7 @@ export default function RecipeBox({
                   {/* Add to Meal Plan, with day dropdown on hover */}
                   <div className="relative group flex-1">
                     <button
-                      onClick={() => addToPlan(recipe)}
+                      onClick={(e) => { e.stopPropagation(); addToPlan(recipe); }}
                       className={`w-full cursor-pointer rounded-2xl py-2 text-xs font-bold tap-sm ${
                         isAdded
                           ? "bg-[var(--color-accent-mint)] text-white"
@@ -223,13 +239,13 @@ export default function RecipeBox({
                     </div>
                   </div>
                   <button
-                    onClick={() => addRecipeToGrocery(recipe)}
+                    onClick={(e) => { e.stopPropagation(); addRecipeToGrocery(recipe); }}
                     className="cursor-pointer rounded-2xl bg-[var(--color-accent-amber)]/15 px-3 py-2 text-xs font-bold text-[var(--color-accent-amber)] hover:bg-[var(--color-accent-amber)]/25 tap-sm"
                   >
                     🛒
                   </button>
                   <button
-                    onClick={() => startEditRecipe(recipe)}
+                    onClick={(e) => { e.stopPropagation(); startEditRecipe(recipe); }}
                     className="cursor-pointer rounded-2xl px-2.5 py-2 text-xs font-medium text-text-muted hover:text-text-primary tap-sm"
                   >
                     ✏️
