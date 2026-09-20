@@ -1683,7 +1683,9 @@ export default function TasksPage() {
       />
 
       <div className="px-4 space-y-6 pb-8">
-        <div className="grid gap-3 sm:grid-cols-3">
+        {/* One compact 3-up stat row at every width — on phones the stacked
+            tiles used to eat 405px of prime screen before the first chore. */}
+        <div className="grid grid-cols-3 gap-3">
           <StatTile label="Pending" value={pending.length} detail="Open tasks" icon="📋" tone="warning" compact />
           <StatTile label="Completed" value={scopedCompletedCount} detail="This week" icon="🎉" tone="success" compact />
           <StatTile label="Earned this week" value={scopedEarned} detail={`${scopedAllTimeEarned} pts all-time`} icon="🏆" tone="accent" compact />
@@ -1833,40 +1835,7 @@ export default function TasksPage() {
                   )}
                 </div>
               </Modal>
-            )}
-
-            <SectionCard title="Consuela suggests" description="Fresh ideas for the family." icon="✨">
-              <div className="flex gap-2">
-                <SoftButton variant="secondary" onClick={generateAiTasks} disabled={aiSuggesting} className="flex-1">{aiSuggesting ? "Thinking..." : "Generate"}</SoftButton>
-              </div>
-              {aiSuggestions.length > 0 ? (
-                <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  {aiSuggestions.map((suggestion) => (
-                    <Surface key={suggestion.title} variant="glass-subtle" radius="xl" padding="sm">
-                      <div className="flex items-start gap-3">
-                        <Avatar name={suggestion.assignee} color={memberColors[suggestion.assignee] || "green"} emoji={suggestion.assigneeEmoji} size="sm" variant="emoji" />
-                        <div className="min-w-0 flex-1">
-                          <div className="text-sm font-semibold text-text-primary">{suggestion.title}</div>
-                          <div className="mt-1 text-xs text-text-muted">
-                            {isCrewTask(suggestion)
-                              ? `🤝 Crew of ${suggestion.crewSize} · +${suggestion.points} pts each`
-                              : suggestion.universal
-                                ? `🫳 Open · +${suggestion.points} pts · first grab +${normalizeSpeedBonus(suggestion.speedBonus)}`
-                                : `${suggestion.assignee} · +${suggestion.points}pts`}
-                          </div>
-                        </div>
-                        <div className="flex gap-1">
-                          <SoftButton size="sm" onClick={() => adoptSuggestion(suggestion)}>Add</SoftButton>
-                          <IconButton size="sm" variant="ghost" aria-label="Dismiss" className="hit-44" onClick={() => dismissSuggestion(suggestion.title)}>×</IconButton>
-                        </div>
-                      </div>
-                    </Surface>
-                  ))}
-                </div>
-              ) : (
-                <EmptyState title="No suggestions yet" description="Generate AI ideas for fresh family chores." icon="🤖" />
-              )}
-            </SectionCard>
+             )}
 
             {openBoard.length > 0 && (
               <SectionCard title="🫳 Open" description="Nobody's claimed these — fastest fingers earn the bonus." icon="⚡">
@@ -2147,6 +2116,49 @@ export default function TasksPage() {
                 )}
               </SectionCard>
             )}
+
+            {/* AI chore ideas — parents-only and BELOW the chore lists. The
+                empty generator used to sit above Pending as a full card,
+                pushing the real list ~2 viewports down the phone. */}
+            {isParent && (aiSuggestions.length > 0 ? (
+              <SectionCard title="Consuela suggests" description="Fresh ideas for the family." icon="✨">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {aiSuggestions.map((suggestion) => (
+                    <Surface key={suggestion.title} variant="glass-subtle" radius="xl" padding="sm">
+                      <div className="flex items-start gap-3">
+                        <Avatar name={suggestion.assignee} color={memberColors[suggestion.assignee] || "green"} emoji={suggestion.assigneeEmoji} size="sm" variant="emoji" />
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-semibold text-text-primary">{suggestion.title}</div>
+                          <div className="mt-1 text-xs text-text-muted">
+                            {isCrewTask(suggestion)
+                              ? `🤝 Crew of ${suggestion.crewSize} · +${suggestion.points} pts each`
+                              : suggestion.universal
+                                ? `🫳 Open · +${suggestion.points} pts · first grab +${normalizeSpeedBonus(suggestion.speedBonus)}`
+                                : `${suggestion.assignee} · +${suggestion.points}pts`}
+                          </div>
+                        </div>
+                        <div className="flex gap-1">
+                          <SoftButton size="sm" onClick={() => adoptSuggestion(suggestion)}>Add</SoftButton>
+                          <IconButton size="sm" variant="ghost" aria-label="Dismiss" className="hit-44" onClick={() => dismissSuggestion(suggestion.title)}>×</IconButton>
+                        </div>
+                      </div>
+                    </Surface>
+                  ))}
+                </div>
+                <div className="mt-3">
+                  <SoftButton variant="ghost" size="sm" onClick={generateAiTasks} disabled={aiSuggesting} className="w-full">{aiSuggesting ? "Thinking..." : "✨ More ideas"}</SoftButton>
+                </div>
+              </SectionCard>
+            ) : (
+              <button
+                type="button"
+                onClick={generateAiTasks}
+                disabled={aiSuggesting}
+                className="tap-sm flex min-h-[44px] w-full items-center justify-center gap-2 rounded-full border border-white/10 text-xs font-semibold text-text-secondary hover:text-text-primary disabled:opacity-50"
+              >
+                {aiSuggesting ? "✨ Thinking…" : "✨ Get chore ideas from Consuela"}
+              </button>
+            ))}
           </>
           </div>
         )}
@@ -2221,38 +2233,8 @@ export default function TasksPage() {
               )}
             </Surface>
 
-            {isLoggedIn && currentUser && (() => {
-              const myEntry = dynamicLeaderboard.find(e => e.name === currentUser.name || e.name.startsWith(currentUser.name));
-              const myRank = myEntry?.rank ?? 0;
-              const aheadEntry = myRank > 1 ? dynamicLeaderboard[myRank - 2] : undefined;
-              return myEntry ? <YourCard entry={myEntry} aheadEntry={aheadEntry} getMemberColor={(n: string) => memberColors[n] || "green"} /> : null;
-            })()}
-
-            {needsStreakSave && (
-              <StreakSaverBanner
-                streak={myEntry?.streak ?? 0}
-                quickTask={myPendingQuests[0] || null}
-                onGoToTasks={() => setActiveTab("tasks")}
-              />
-            )}
-
-            <CatchUpNudge myEntry={myEntry ?? undefined} aheadEntry={aheadEntry} behindEntry={behindEntry} />
-
-            {myPendingQuests.length > 0 && activeTab === "leaderboard" && (
-              <DailyQuestCard
-                quests={myPendingQuests}
-                onAccept={(quest) => openPinEntry(quest.id)}
-                onGoToTasks={() => setActiveTab("tasks")}
-              />
-            )}
-
-            <PrizeRaceCard
-              prizes={weeklyPrizes}
-              entries={dynamicLeaderboard}
-              daysUntilReset={daysUntilReset}
-              myName={raceName}
-            />
-
+            {/* The tab leads with the live race — podium + prizes — so the
+                first screen IS the competition, not a wall of cards. */}
             <SectionCard title="Leaderboard" description="This week's race — resets Monday" icon="🏆">
               <Podium
                 entries={dynamicLeaderboard.slice(0, 3)}
@@ -2281,6 +2263,38 @@ export default function TasksPage() {
               </div>
             </SectionCard>
 
+            <PrizeRaceCard
+              prizes={weeklyPrizes}
+              entries={dynamicLeaderboard}
+              daysUntilReset={daysUntilReset}
+              myName={raceName}
+            />
+
+            {isLoggedIn && currentUser && (() => {
+              const myEntry = dynamicLeaderboard.find(e => e.name === currentUser.name || e.name.startsWith(currentUser.name));
+              const myRank = myEntry?.rank ?? 0;
+              const aheadEntry = myRank > 1 ? dynamicLeaderboard[myRank - 2] : undefined;
+              return myEntry ? <YourCard entry={myEntry} aheadEntry={aheadEntry} getMemberColor={(n: string) => memberColors[n] || "green"} /> : null;
+            })()}
+
+            {needsStreakSave && (
+              <StreakSaverBanner
+                streak={myEntry?.streak ?? 0}
+                quickTask={myPendingQuests[0] || null}
+                onGoToTasks={() => setActiveTab("tasks")}
+              />
+            )}
+
+            <CatchUpNudge myEntry={myEntry ?? undefined} aheadEntry={aheadEntry} behindEntry={behindEntry} />
+
+            {myPendingQuests.length > 0 && activeTab === "leaderboard" && (
+              <DailyQuestCard
+                quests={myPendingQuests}
+                onAccept={(quest) => openPinEntry(quest.id)}
+                onGoToTasks={() => setActiveTab("tasks")}
+              />
+            )}
+
             {sheetEntry && (
               <MemberSheet
                 open={!!sheetMember}
@@ -2302,29 +2316,37 @@ export default function TasksPage() {
               />
             )}
 
-            {isLoggedIn && currentUser && (() => {
-              const myAllTime = getMemberAllTimePoints(currentUser.name, weekData);
-              return (
-                <SectionCard title="Your Journey" description={`${textEmojiOrFallback(currentUser.emoji)} Level progress & badges`}>
-                  <TreasurePath
-                    allTimePoints={myAllTime}
-                    memberEmoji={currentUser.emoji || "🌱"}
-                    memberColor={memberColors[currentUser.name] || "green"}
-                  />
-                  <div className="mt-4">
-                    <AchievementWall
-                      allTimePoints={myAllTime}
-                      streak={dynamicLeaderboard.find(e => e.name === currentUser.name || e.name.startsWith(currentUser.name))?.streak ?? 0}
-                      completions={getMemberAllTimeCompletions(currentUser.name, tasks, weekData)}
-                    />
-                  </div>
-                </SectionCard>
-              );
-            })()}
+            {/* The deep archive folds behind one expander: journey, family
+                goal, and hall are history — the tab leads with the live race,
+                not its museum. */}
+            <details className="rounded-2xl border border-white/10 px-4 py-3">
+              <summary className="cursor-pointer text-sm font-semibold text-text-secondary">🏅 Trophies, journey & history</summary>
+              <div className="mt-4 space-y-6">
+                {isLoggedIn && currentUser && (() => {
+                  const myAllTime = getMemberAllTimePoints(currentUser.name, weekData);
+                  return (
+                    <SectionCard title="Your Journey" description={`${textEmojiOrFallback(currentUser.emoji)} Level progress & badges`}>
+                      <TreasurePath
+                        allTimePoints={myAllTime}
+                        memberEmoji={currentUser.emoji || "🌱"}
+                        memberColor={memberColors[currentUser.name] || "green"}
+                      />
+                      <div className="mt-4">
+                        <AchievementWall
+                          allTimePoints={myAllTime}
+                          streak={dynamicLeaderboard.find(e => e.name === currentUser.name || e.name.startsWith(currentUser.name))?.streak ?? 0}
+                          completions={getMemberAllTimeCompletions(currentUser.name, tasks, weekData)}
+                        />
+                      </div>
+                    </SectionCard>
+                  );
+                })()}
 
-            <FamilyGoal weekData={weekData} isParent={!!membersData.find((m: any) => m.role === "parent")} />
+                <FamilyGoal weekData={weekData} isParent={!!membersData.find((m: any) => m.role === "parent")} />
 
-            <HallOfFame />
+                <HallOfFame />
+              </div>
+            </details>
 
             {weekData.history.length > 0 && (
               <SectionCard title="Recent Activity" description="Latest point transactions" icon="📜">
@@ -2547,6 +2569,8 @@ export default function TasksPage() {
               onChange={(e) => { setPinInput(e.target.value.replace(/[^0-9]/g, "")); setPinError(""); }}
               onKeyDown={(e) => { if (e.key === "Enter") submitPin(); }}
               placeholder="4-digit PIN"
+
+              aria-label="Your 4-digit PIN"
               autoFocus
               className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-4 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted"
             />
@@ -2579,6 +2603,8 @@ export default function TasksPage() {
               onChange={(e) => { setUndoPin(e.target.value.replace(/[^0-9]/g, "")); setUndoError(""); }}
               onKeyDown={(e) => { if (e.key === "Enter") submitUndo(); }}
               placeholder="4-digit PIN"
+
+              aria-label="Your 4-digit PIN"
               autoFocus
               className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-4 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted"
             />
@@ -2646,6 +2672,8 @@ export default function TasksPage() {
               onChange={(e) => { setParentApprovalPin(e.target.value.replace(/[^0-9]/g, "")); setParentApprovalError(""); }}
               onKeyDown={(e) => { if (e.key === "Enter") approveParentReward(); }}
               placeholder="Parent PIN"
+
+              aria-label="Parent PIN"
               autoFocus
               className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-4 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted"
             />
@@ -2682,6 +2710,8 @@ export default function TasksPage() {
               onChange={(e) => { setApprovalPin(e.target.value.replace(/[^0-9]/g, "")); setApprovalError(""); }}
               onKeyDown={(e) => { if (e.key === "Enter") submitApproval(); }}
               placeholder="Parent PIN"
+
+              aria-label="Parent PIN"
               autoFocus
               className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-4 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted"
             />
@@ -2713,6 +2743,8 @@ export default function TasksPage() {
               onChange={(e) => { setCrewRemovePin(e.target.value.replace(/[^0-9]/g, "")); setCrewRemoveError(""); }}
               onKeyDown={(e) => { if (e.key === "Enter") submitCrewRemove(); }}
               placeholder="Parent PIN"
+
+              aria-label="Parent PIN"
               autoFocus
               className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-4 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted"
             />

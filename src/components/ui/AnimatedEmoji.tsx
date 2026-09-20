@@ -50,24 +50,6 @@ export default function AnimatedEmoji({ emoji, name, size = "md", className = ""
   if (emoji === "🐶" || name?.toLowerCase().includes("frenchie") || name?.toLowerCase().includes("buster") || name?.toLowerCase().includes("rocco")) {
     return (
       <svg width={s} height={s} viewBox="0 0 64 64" fill="none" className={className}>
-        <style>{`
-          @keyframes frenchieEarL {
-            0%, 100% { transform: rotate(0deg); }
-            5% { transform: rotate(-5deg); }
-            10% { transform: rotate(2deg); }
-            15% { transform: rotate(0deg); }
-          }
-          @keyframes frenchieEarR {
-            0%, 100% { transform: rotate(0deg); }
-            50% { transform: rotate(5deg); }
-            55% { transform: rotate(-2deg); }
-            60% { transform: rotate(0deg); }
-          }
-          @keyframes pant {
-            0%, 100% { transform: translateY(0) scaleY(1); }
-            50% { transform: translateY(1px) scaleY(1.1); }
-          }
-        `}</style>
         {/* Face */}
         <ellipse cx="32" cy="38" rx="22" ry="18" fill="#a3a3a3" />
         <path d="M14 38 Q32 58 50 38" fill="#737373" />
@@ -103,17 +85,6 @@ export default function AnimatedEmoji({ emoji, name, size = "md", className = ""
   if (emoji === "🐩" || name?.toLowerCase().includes("poodle") || name?.toLowerCase().includes("coco") || name?.toLowerCase().includes("rico")) {
     return (
       <svg width={s} height={s} viewBox="0 0 64 64" fill="none" className={className}>
-        <style>{`
-          @keyframes poodleBounce {
-            0%, 100% { transform: translateY(0); }
-            50% { transform: translateY(-2px); }
-          }
-          @keyframes wag {
-            0%, 100% { transform: rotate(0deg); }
-            25% { transform: rotate(-8deg); }
-            75% { transform: rotate(8deg); }
-          }
-        `}</style>
         <g style={{ animation: anim("poodleBounce 1s infinite ease-in-out") }}>
           {/* Muzzle */}
           <ellipse cx="32" cy="42" rx="14" ry="10" fill="#404040" />
@@ -143,21 +114,6 @@ export default function AnimatedEmoji({ emoji, name, size = "md", className = ""
   if (emoji === "🐟" || name?.toLowerCase().includes("fish") || name?.toLowerCase().includes("bubbles")) {
     return (
       <svg width={s} height={s} viewBox="0 0 64 64" fill="none" className={className}>
-        <style>{`
-          @keyframes swim {
-            0%, 100% { transform: translateY(0) translateX(0); }
-            50% { transform: translateY(-4px) translateX(2px); }
-          }
-          @keyframes tailFlip {
-            0%, 100% { transform: scaleX(1); }
-            50% { transform: scaleX(0.5); }
-          }
-          @keyframes bubbleUp {
-            0% { transform: translateY(0) scale(0.5); opacity: 0; }
-            50% { opacity: 1; }
-            100% { transform: translateY(-20px) scale(1.2); opacity: 0; }
-          }
-        `}</style>
         {/* Bubbles — hidden until the rise animation carries them; when motion
             is off, show them statically so the artwork doesn't lose elements. */}
         <circle cx="48" cy="30" r="3" fill="#67e8f9" opacity={doAnim ? 0 : 0.8} style={{ animation: anim("bubbleUp 2s infinite linear") }} />
@@ -189,13 +145,6 @@ export default function AnimatedEmoji({ emoji, name, size = "md", className = ""
   if (emoji === "⚽") {
     return (
       <svg width={s} height={s} viewBox="0 0 64 64" fill="none" className={className}>
-        <style>{`
-          @keyframes roll {
-            0% { transform: translateX(-4px) rotate(-15deg); }
-            50% { transform: translateX(4px) rotate(15deg); }
-            100% { transform: translateX(-4px) rotate(-15deg); }
-          }
-        `}</style>
         <g style={{ transformOrigin: "32px 32px", animation: anim("roll 2s infinite ease-in-out") }}>
           <circle cx="32" cy="32" r="20" fill="white" stroke="#262626" strokeWidth="2" />
           <path d="M32 18 L24 28 L28 40 L36 40 L40 28 Z" fill="#262626" />
@@ -211,12 +160,6 @@ export default function AnimatedEmoji({ emoji, name, size = "md", className = ""
   if (emoji === "🍽️") {
     return (
       <svg width={s} height={s} viewBox="0 0 64 64" fill="none" className={className}>
-        <style>{`
-          @keyframes clink {
-            0%, 100% { transform: rotate(0deg); }
-            50% { transform: rotate(15deg); }
-          }
-        `}</style>
         <circle cx="32" cy="32" r="18" fill="#e5e5e5" stroke="#a3a3a3" strokeWidth="2" />
         <circle cx="32" cy="32" r="12" fill="white" />
         <g style={{ transformOrigin: "16px 32px", animation: anim("clink 1.5s infinite ease-in-out alternate") }}>
@@ -239,16 +182,6 @@ export default function AnimatedEmoji({ emoji, name, size = "md", className = ""
         transformOrigin: "center bottom",
       }}
     >
-      <style>{`
-        @keyframes popBounce {
-          0%, 100% { transform: scale(1) translateY(0); }
-          10% { transform: scale(1.1, 0.9) translateY(2px); }
-          30% { transform: scale(0.9, 1.1) translateY(-6px); }
-          50% { transform: scale(1.05, 0.95) translateY(0); }
-          57% { transform: scale(1) translateY(-2px); }
-          64% { transform: scale(1) translateY(0); }
-        }
-      `}</style>
       {emoji}
     </div>
   );

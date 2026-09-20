@@ -81,7 +81,7 @@ describe("filter-aware stat tiles + scoped empty copy", () => {
     const el = await renderAsync(<TasksPage />);
     await settle();
 
-    const tileText = () => [...el.querySelectorAll(".grid.gap-3.sm\\:grid-cols-3 > *")].map((t) => (t.textContent || "")).join("|");
+    const tileText = () => [...el.querySelectorAll(".grid.grid-cols-3.gap-3 > *")].map((t) => (t.textContent || "")).join("|");
     expect(tileText()).toContain("27"); // Earned: 15 + 12 family total
     expect(tileText()).toContain("2"); // Pending family-wide
 
@@ -131,7 +131,7 @@ describe("filter-aware stat tiles + scoped empty copy", () => {
     clickTile(el, "Open");
     await settle();
 
-    const tileText = () => [...el.querySelectorAll(".grid.gap-3.sm\\:grid-cols-3 > *")].map((t) => (t.textContent || "")).join("|");
+    const tileText = () => [...el.querySelectorAll(".grid.grid-cols-3.gap-3 > *")].map((t) => (t.textContent || "")).join("|");
     // Completed tile = 1 (only the universal one; the completed stealable task
     // can never appear in this filter's list because isSnatchable turns false).
     expect(tileText()).toContain("Completed");

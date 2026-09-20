@@ -9,7 +9,7 @@ import TasksPage from "@/app/tasks/page";
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/tasks",
-  useRouter: () => ({ push: vi.fn(), prefetch: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
 }));
 
 const mockAuth = vi.hoisted(() => ({ currentUser: null as null | any, isLoggedIn: false }));
@@ -118,8 +118,14 @@ describe("Tasks page live roster (consuela-members-updated)", () => {
     const el = await renderAsync(<TasksPage />);
     await settle();
 
+    // Parent-only generator: sign in and use the quiet entry line.
+    mockAuth.currentUser = { name: "Rebecca (Mom)", role: "parent" };
+    mockAuth.isLoggedIn = true;
+    const el2 = await renderAsync(<TasksPage />);
+    await settle();
+
     await act(async () => {
-      const btn = Array.from(el.querySelectorAll("button")).find((b) => b.textContent === "Generate");
+      const btn = Array.from(el2.querySelectorAll("button")).find((b) => (b.textContent || "").includes("Get chore ideas"));
       expect(btn).toBeTruthy();
       btn!.click();
     });
@@ -129,10 +135,10 @@ describe("Tasks page live roster (consuela-members-updated)", () => {
     expect(lastHermesBody).toEqual({ agent: "planner", intent: "task_ideas" });
     expect(lastHermesBody.message).toBeUndefined();
 
-    const card = Array.from(el.querySelectorAll("div")).find((n) => n.textContent?.includes("Walk the dog"));
+    const card = Array.from(el2.querySelectorAll("div")).find((n) => n.textContent?.includes("Walk the dog"));
     expect(card).toBeTruthy();
     // Off-roster assignee is dropped outright (never defaulted onto a named kid).
-    expect(el.textContent).not.toContain("Phantom kid chore");
+    expect(el2.textContent).not.toContain("Phantom kid chore");
     // Photo assignee must render as a real <img> (Avatar → SigmaImage)…
     const img = card!.querySelector("img");
     expect(img).not.toBeNull();

@@ -62,23 +62,28 @@ describe("Consuela suggests honesty", () => {
     const el = await renderAsync(<TasksPage />);
     await settle();
 
-    const genBtn = [...el.querySelectorAll("button")].find((b) => (b.textContent || "").trim() === "Generate");
+    // The AI generator is parent-only now — sign in as the parent, then the
+    // quiet "Get chore ideas" line is the entry point.
+    mockAuth.currentUser = { name: "Rebecca (Mom)", role: "parent" };
+    mockAuth.isLoggedIn = true;
+    const el2 = await renderAsync(<TasksPage />);
+    await settle();
+    const genBtn = [...el2.querySelectorAll("button")].find((b) => (b.textContent || "").includes("Get chore ideas"));
     expect(genBtn).toBeTruthy();
     (genBtn as HTMLButtonElement).click();
     await settle(200);
 
     const text = document.body.textContent || "";
-    expect(text).toContain("No suggestions yet");
     expect(text).not.toContain("Make your bed"); // the old hardcoded fallback
     expect(text).toContain("couldn't come up with ideas");
   });
 
-  it("the sync button is labeled honestly", async () => {
+  it("the dead Google-Tasks sync button is gone (removed 2026-09-20)", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 401, json: async () => ({}) } as any)));
     const el = await renderAsync(<TasksPage />);
     await settle();
     const btns = [...el.querySelectorAll("button")].map((b) => (b.textContent || "").trim());
-    expect(btns).toContain("Sync Google Tasks");
+    expect(btns).not.toContain("Sync Google Tasks");
     expect(btns).not.toContain("Google");
   });
 });

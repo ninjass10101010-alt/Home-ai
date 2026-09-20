@@ -1962,7 +1962,7 @@ body {
   transition: all .25s ease; cursor: pointer;
 }
 .member-tile-name {
-  font-size: .68rem; font-weight: 600; line-height: 1;
+  font-size: .7rem; font-weight: 600; line-height: 1;
   max-width: 5rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .member-tile:hover { color: var(--color-text-primary); background: rgba(255,255,255,.1); }
@@ -2617,6 +2617,67 @@ body {
   .session-pill-warning { animation: none !important; }
 }
 
+/* ─── AnimatedEmoji keyframes (hoisted 2026-09-20) ─────────────────────────
+   These used to be injected as an inline <style> per emoji instance — the
+   Tasks member strip alone rendered ten duplicate popBounce blocks, and the
+   keyframe text polluted every button's textContent (a11y tree noise). One
+   global declaration per name now; AnimatedEmoji references them by name. */
+@keyframes popBounce {
+  0%, 100% { transform: scale(1) translateY(0); }
+  10% { transform: scale(1.1, 0.9) translateY(2px); }
+  30% { transform: scale(0.9, 1.1) translateY(-6px); }
+  50% { transform: scale(1.05, 0.95) translateY(0); }
+  57% { transform: scale(1) translateY(-2px); }
+  64% { transform: scale(1) translateY(0); }
+}
+@keyframes frenchieEarL {
+  0%, 100% { transform: rotate(0deg); }
+  5% { transform: rotate(-5deg); }
+  10% { transform: rotate(2deg); }
+  15% { transform: rotate(0deg); }
+}
+@keyframes frenchieEarR {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(5deg); }
+  55% { transform: rotate(-2deg); }
+  60% { transform: rotate(0deg); }
+}
+@keyframes pant {
+  0%, 100% { transform: translateY(0) scaleY(1); }
+  50% { transform: translateY(1px) scaleY(1.1); }
+}
+@keyframes poodleBounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+@keyframes wag {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-8deg); }
+  75% { transform: rotate(8deg); }
+}
+@keyframes swim {
+  0%, 100% { transform: translateY(0) translateX(0); }
+  50% { transform: translateY(-4px) translateX(2px); }
+}
+@keyframes tailFlip {
+  0%, 100% { transform: scaleX(1); }
+  50% { transform: scaleX(0.5); }
+}
+@keyframes bubbleUp {
+  0% { transform: translateY(0) scale(0.5); opacity: 0; }
+  50% { opacity: 1; }
+  100% { transform: translateY(-20px) scale(1.2); opacity: 0; }
+}
+@keyframes roll {
+  0% { transform: translateX(-4px) rotate(-15deg); }
+  50% { transform: translateX(4px) rotate(15deg); }
+  100% { transform: translateX(-4px) rotate(-15deg); }
+}
+@keyframes clink {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(15deg); }
+}
+
 /* ─── Wall display profile (ApoloSign 15.6" portrait 1080×1920) ───
    Spec: docs/superpowers/specs/2026-09-09-apolosign-wall-mode-design.md
    Size/layout only — no keyframes, no zoom; `useWallMode` (Task 2) mirrors
@@ -2650,3 +2711,4 @@ html[data-wall="true"] .session-pill-warning {
   font-size: 14px;
   padding: 0.5rem 1rem;
 }
+
