@@ -52,6 +52,10 @@ vi.mock("@/db", () => ({
 
 import { useMeals } from "@/hooks/useMeals";
 import { useRecipes } from "@/hooks/useRecipes";
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn() }),
+}));
+
 import PlanTab from "@/components/meals/PlanTab";
 import RecipeBox from "@/components/meals/RecipeBox";
 
