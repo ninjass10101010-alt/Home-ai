@@ -108,4 +108,13 @@ describe("RecipeBox navigation", () => {
     });
     expect(h.push).not.toHaveBeenCalled();
   });
+
+  it("does not navigate when Enter is pressed on a focused inner action", () => {
+    const el = render(<RecipeBox {...props} />);
+    const editBtn = Array.from(el.querySelectorAll("button")).find((b) => b.textContent === "✏️") as HTMLButtonElement;
+    act(() => {
+      editBtn.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    expect(h.push).not.toHaveBeenCalled();
+  });
 });

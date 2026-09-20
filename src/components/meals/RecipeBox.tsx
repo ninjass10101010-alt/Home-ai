@@ -132,6 +132,7 @@ export default function RecipeBox({
               key={recipe.id}
               onClick={() => openRecipe(recipe)}
               onKeyDown={(e) => {
+                if (e.target !== e.currentTarget) return;
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
                   openRecipe(recipe);
