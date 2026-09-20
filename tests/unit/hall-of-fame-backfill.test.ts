@@ -114,6 +114,21 @@ describe("ensureArchivedWeeksEnshrined", () => {
     expect(creates.every((c) => c.weekStart === "2026-09-07")).toBe(true);
   });
 
+  it("creates OLDER weeks pre-celebrated (no stale ceremonies); the newest week stays uncelebrated", async () => {
+    const { pb, creates } = makePb({
+      archive: [
+        { weekStart: "2026-06-15", points: JSON.stringify({ Emily: 65 }) },
+        { weekStart: "2026-09-07", points: JSON.stringify({ Aurora: 13 }) },
+      ],
+      prizes: [{ id: "p1", rank: 1, emoji: "🥇", text: "Picks Friday's family movie" }],
+    });
+    await ensureArchivedWeeksEnshrined(pb as any);
+    const old = creates.find((c) => c.weekStart === "2026-06-15");
+    const latest = creates.find((c) => c.weekStart === "2026-09-07");
+    expect(old.celebrated).toBe(true);
+    expect(latest.celebrated).toBeUndefined();
+  });
+
   it("is idempotent — already-enshrined weeks create nothing", async () => {
     const { pb, creates } = makePb({
       archive: [{ weekStart: "2026-09-07", points: JSON.stringify({ Aurora: 13 }) }],

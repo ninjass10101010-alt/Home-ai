@@ -343,7 +343,11 @@ export const COLLECTIONS = [
     name: "hall_of_fame",
     schema: [
       { name: "member", type: "text", required: true },
-      { name: "emoji", type: "text" },
+      // Photo avatars (base64 data URLs, 100-250KB) ride here like on
+      // members.emoji — PB's default 5000-char text cap silently rejected
+      // EVERY enshrinement for this photo-avatar family (the empty Hall of
+      // Fame). The option is self-healed by the seed's field-option drift pass.
+      { name: "emoji", type: "text", options: { max: 400000 } },
       { name: "weekStart", type: "text", required: true },
       { name: "points", type: "number" },
       { name: "rank", type: "number" },

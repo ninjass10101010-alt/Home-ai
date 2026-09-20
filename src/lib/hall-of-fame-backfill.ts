@@ -87,15 +87,28 @@ export async function ensureArchivedWeeksEnshrined(pb: PB): Promise<number> {
     (hallRows as any[]).map((h) => `${h.member}::${h.weekStart}`),
   );
 
+  // Only the NEWEST finished week gets a live win ceremony — older weeks are
+  // already history (their ceremony moment passed long ago), so their entries
+  // are created pre-celebrated and stay visible in the Hall of Fame list.
+  const archivedWeeks = (archiveRows as any[])
+    .map((r) => String(r?.weekStart || ""))
+    .filter(Boolean)
+    .sort();
+  const latestArchivedWeek = archivedWeeks[archivedWeeks.length - 1] ?? "";
+
   let created = 0;
   for (const row of archiveRows as any[]) {
     const weekStart = String(row?.weekStart || "");
     if (!weekStart) continue;
     const points = parseMaybeJSON<Record<string, number>>(row?.points, {});
     const entries = hallEntriesForWeek(points, weekStart, emojis, prizeCatalog);
+    const isHistory = weekStart !== latestArchivedWeek;
     for (const entry of entries) {
       if (enshrined.has(`${entry.member}::${entry.weekStart}`)) continue;
-      await pb.collection("hall_of_fame").create({ ...entry });
+      await pb.collection("hall_of_fame").create({
+        ...entry,
+        ...(isHistory ? { celebrated: true } : {}),
+      });
       enshrined.add(`${entry.member}::${entry.weekStart}`);
       created++;
     }
