@@ -46,7 +46,7 @@ function normalizeMemberName(member: any): string {
 }
 
 type RouteResult =
-  | { ok: true; task?: any; weekData?: WeekData; pending?: boolean; claimedBy?: string; alreadyJoined?: boolean }
+  | { ok: true; task?: any; weekData?: WeekData; pending?: boolean; claimedBy?: string; alreadyJoined?: boolean; reopened?: boolean }
   | { ok: false; reason: string; claimedBy?: string };
 
 export async function POST(request: NextRequest) {
@@ -61,7 +61,10 @@ export async function POST(request: NextRequest) {
     if (taskId === undefined || !memberName) {
       return NextResponse.json({ error: "taskId and memberName are required" }, { status: 400 });
     }
-    if (action !== "claim" && action !== "crew-join" && action !== "crew-checkin" && action !== "crew-remove") {
+    if (
+      action !== "claim" && action !== "crew-join" && action !== "crew-checkin" &&
+      action !== "crew-remove" && action !== "complete" && action !== "undo"
+    ) {
       return NextResponse.json({ error: "invalid action" }, { status: 400 });
     }
 
@@ -117,6 +120,12 @@ export async function POST(request: NextRequest) {
         }
         if (action === "crew-remove") {
           return crewRemove(pb, task, targetName, claimant);
+        }
+        if (action === "complete") {
+          return completeTask(pb, task, normalizedName, claimant, currentWeek, assigneeEmoji);
+        }
+        if (action === "undo") {
+          return undoTask(pb, task, normalizedName, currentWeek);
         }
 
         // action === "claim"
@@ -295,6 +304,7 @@ export async function POST(request: NextRequest) {
         result.reason === "not_late_yet" ||
         result.reason === "not_crew_task" ||
         result.reason === "crew_task" ||
+        result.reason === "not_assigned" ||
         result.reason === "target_required" ? 400 :
         409;
       return NextResponse.json({
@@ -398,6 +408,215 @@ async function persistSnapshotWeek(
     // parent client push also reconciles the snapshot.
     console.warn("[tasks/claim] snapshot persist failed:", e?.message);
   }
+}
+
+/**
+ * Server-authoritative completion of an ASSIGNED task (the non-universal,
+ * non-crew case). Assigned completions used to be client-only writes, so a
+ * GUEST device (the kitchen display auto-logs-out after 30 min — a correct
+ * PIN 401'd at the middleware) could never land a completion anywhere but its
+ * own localStorage, and no other device ever saw the points.
+ * Mirrors the claim flow's guards: done-this-week, week-history earn
+ * (taskId-keyed, reversal-aware). Child completions land pendingApproval
+ * (points move only on parent approval) — the kid rule holds server-side.
+ */
+async function completeTask(
+  pb: PB,
+  task: any,
+  normalizedName: string,
+  claimant: any,
+  currentWeek: string,
+  assigneeEmoji?: string
+): Promise<RouteResult> {
+  if (isCrewTask(task)) {
+    return { ok: false, reason: "crew_task" };
+  }
+  // Universal ("open") rows go through the claim action (speed bonus, race).
+  if (task.universal !== false) {
+    return { ok: false, reason: "not_assigned" };
+  }
+  const doneThisWeek =
+    task.completed === true ||
+    (task.status === "done" &&
+      (task.completedInWeek === undefined || task.completedInWeek === null ||
+        task.completedInWeek === "" || task.completedInWeek === currentWeek));
+  if (doneThisWeek) {
+    return { ok: false, reason: "already_completed" };
+  }
+
+  const weekRecords = await pb.collection("week_data").getFullList({ requestKey: null });
+  const week = weekRecords.find((r: any) => r.weekStart === currentWeek) || null;
+  const points = parseJSON<Record<string, number>>(week?.points, {});
+  const history = parseJSON<Transaction[]>(week?.history, []);
+  const existingTx = history.find((tx) => tx.taskId === Number(task.taskId) && tx.type === "earn");
+  if (existingTx) {
+    const reversed = history.some(
+      (tx) => tx.taskId === Number(task.taskId) && tx.type === "adjust" &&
+        tx.amount < 0 && tx.timestamp >= existingTx.timestamp
+    );
+    if (!reversed) {
+      return { ok: false, reason: "already-claimed", claimedBy: existingTx.member };
+    }
+  }
+
+  const now = new Date().toISOString();
+  const amount = Number(task.points) || 0;
+  const claimantIsChild = claimant.role === "child";
+  if (claimantIsChild) {
+    const pending = { byName: normalizedName, at: now, points: amount };
+    await pb.collection("tasks").update(task.id, {
+      completed: true,
+      status: "done",
+      completedBy: normalizedName,
+      completedAt: now,
+      completedInWeek: currentWeek,
+      pendingApproval: pending,
+      sentBackAt: null,
+    });
+    await persistSnapshotWeek(pb, null, {
+      id: Number(task.taskId),
+      completed: true,
+      completedBy: normalizedName,
+      completedAt: now,
+      completedInWeek: currentWeek,
+      pendingApproval: pending,
+    });
+    return { ok: true, pending: true, claimedBy: normalizedName };
+  }
+
+  const tx: Transaction = {
+    id: Date.now() + Math.floor(Math.random() * 1000),
+    timestamp: now,
+    member: normalizedName,
+    type: "earn",
+    amount,
+    description: `Completed: ${task.title || "task"}${amount > 0 ? ` (+${amount}pts)` : ""}`,
+    taskId: Number(task.taskId),
+  };
+  const updatedWeek: WeekData = {
+    weekStart: currentWeek,
+    points: { ...points, [normalizedName]: (points[normalizedName] || 0) + amount },
+    streak: parseJSON<Record<string, number>>(week?.streak, {}),
+    lastActive: parseJSON<Record<string, string>>(week?.lastActive, {}),
+    history: [...history, tx],
+  };
+  if (week) await pb.collection("week_data").update(week.id, updatedWeek);
+  else await pb.collection("week_data").create(updatedWeek);
+
+  await pb.collection("tasks").update(task.id, {
+    assignee: normalizedName,
+    assigned: normalizedName,
+    assigneeEmoji: assigneeEmoji || claimant.emoji || task.assigneeEmoji || "",
+    completed: true,
+    status: "done",
+    completedBy: normalizedName,
+    completedAt: now,
+    completedInWeek: currentWeek,
+  }).catch(() => {});
+
+  await persistSnapshotWeek(pb, updatedWeek, {
+    id: Number(task.taskId),
+    completed: true,
+    completedBy: normalizedName,
+    completedAt: now,
+    completedInWeek: currentWeek,
+  });
+  return { ok: true, claimedBy: normalizedName, weekData: updatedWeek };
+}
+
+/**
+ * Server-authoritative undo of a completion: appends the points-reversing
+ * adjust tx to week_data (so the claim guard releases the task for re-doing),
+ * reopens the task row, and mirrors both into the snapshot. A pending (unpaid)
+ * completion reopens with the durable sentBackAt proof instead — mirroring the
+ * client's send-back — with no ledger entry.
+ */
+async function undoTask(
+  pb: PB,
+  task: any,
+  normalizedName: string,
+  currentWeek: string
+): Promise<RouteResult> {
+  const weekRecords = await pb.collection("week_data").getFullList({ requestKey: null });
+  const week = weekRecords.find((r: any) => r.weekStart === currentWeek) || null;
+  const history = parseJSON<Transaction[]>(week?.history, []);
+
+  const earns = history.filter((tx) => tx.taskId === Number(task.taskId) && tx.type === "earn" && tx.member === normalizedName);
+  const latestEarn = earns[earns.length - 1];
+  const pendingUndo = !!task.pendingApproval && !latestEarn;
+
+  if (!latestEarn && !pendingUndo) {
+    return { ok: false, reason: "nothing_to_undo" };
+  }
+  if (latestEarn) {
+    const reversed = history.some(
+      (tx) => tx.taskId === Number(task.taskId) && tx.type === "adjust" &&
+        tx.amount < 0 && tx.timestamp >= latestEarn.timestamp
+    );
+    if (reversed) {
+      return { ok: false, reason: "already_undone" };
+    }
+  }
+
+  const now = new Date().toISOString();
+  if (pendingUndo) {
+    // Unpaid kid tap: reopen with the cross-device send-back proof.
+    await pb.collection("tasks").update(task.id, {
+      completed: false,
+      status: "pending",
+      completedBy: "",
+      completedAt: "",
+      completedInWeek: "",
+      pendingApproval: null,
+      sentBackAt: now,
+    });
+    await persistSnapshotWeek(pb, null, {
+      id: Number(task.taskId),
+      completed: false,
+      completedBy: "",
+      completedAt: "",
+      completedInWeek: "",
+      pendingApproval: null,
+    });
+    return { ok: true, reopened: true };
+  }
+
+  const points = parseJSON<Record<string, number>>(week?.points, {});
+  const tx: Transaction = {
+    id: Date.now() + Math.floor(Math.random() * 1000),
+    timestamp: now,
+    member: normalizedName,
+    type: "adjust",
+    amount: -latestEarn.amount,
+    description: `Undo: ${task.title || "task"} (-${latestEarn.amount}pts)`,
+    taskId: Number(task.taskId),
+  };
+  const updatedWeek: WeekData = {
+    weekStart: currentWeek,
+    points: { ...points, [normalizedName]: Math.max(0, (points[normalizedName] || 0) - latestEarn.amount) },
+    streak: parseJSON<Record<string, number>>(week?.streak, {}),
+    lastActive: parseJSON<Record<string, string>>(week?.lastActive, {}),
+    history: [...history, tx],
+  };
+  if (week) await pb.collection("week_data").update(week.id, updatedWeek);
+  else await pb.collection("week_data").create(updatedWeek);
+
+  await pb.collection("tasks").update(task.id, {
+    completed: false,
+    status: "pending",
+    completedBy: "",
+    completedAt: "",
+    completedInWeek: "",
+  }).catch(() => {});
+
+  await persistSnapshotWeek(pb, updatedWeek, {
+    id: Number(task.taskId),
+    completed: false,
+    completedBy: "",
+    completedAt: "",
+    completedInWeek: "",
+  });
+  return { ok: true, weekData: updatedWeek };
 }
 
 // Join a crew: append the caller (self-join only) if there's room. Idempotent

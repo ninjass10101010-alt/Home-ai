@@ -38,6 +38,7 @@ function makePb(opts?: {
   taskPoints?: number | null;
   weekHistoryAfterWrite?: string;
   taskRow?: Record<string, unknown>;
+  weekHistory?: string;
 }) {
   const weekRow = {
     id: "w1",
@@ -46,6 +47,7 @@ function makePb(opts?: {
     streak: "{}",
     lastActive: "{}",
     history: "[]",
+    ...(opts?.weekHistory !== undefined ? { history: opts.weekHistory } : {}),
   };
   const taskRowBase = opts?.taskPoints === null ? [] : [
     { id: "task-row-1", taskId: 42, title: "Dishes", points: opts?.taskPoints ?? 5, ...(opts?.taskRow || {}) },
@@ -478,5 +480,138 @@ describe("POST /api/tasks/claim — crew actions", () => {
     const res3 = await POST(jsonReq({ action: "crew-remove", taskId: 42, memberName: "Rebecca", pin: "1234", targetName: "Lily" }));
     expect(res3.status).toBe(200);
     expect(parent2.updateCalls.tasks[0].crew.members.map((m: any) => m.name)).toEqual(["Bailey"]);
+  });
+});
+
+describe("POST /api/tasks/claim — server-authoritative assigned completions", () => {
+  // The kitchen display is usually a GUEST (30-min auto-logout) — assigned-task
+  // completions must be server-authoritative like claims, or an earn lands on
+  // one device's localStorage and never propagates.
+  beforeEach(() => {
+    mocks.verifyPinFromPB.mockResolvedValue({ name: "Alex", role: "parent", emoji: "🦊" });
+  });
+
+  it("complete: adult earns instantly and BOTH stores are written (week_data + snapshot)", async () => {
+    const { pb, weekUpdates, snapshotUpdates, updateCalls } = makePb({
+      taskPoints: 8,
+      taskRow: { universal: false, completed: false, assignee: "Alex" },
+    });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ action: "complete", taskId: 42, memberName: "Alex", pin: "1234" }));
+
+    expect(res.status).toBe(200);
+    const written = weekUpdates();
+    expect(written.points["Alex"]).toBe(8);
+    expect(written.history[0]).toMatchObject({ type: "earn", amount: 8, taskId: 42 });
+    expect(written.history[0].description).toMatch(/^Completed:/);
+    // Task row flipped done.
+    expect(updateCalls.tasks.some((p: any) => p.completed === true)).toBe(true);
+    // The snapshot the dashboard READS carries the earn too.
+    const snap = snapshotUpdates();
+    const data = typeof snap.data === "string" ? JSON.parse(snap.data) : snap.data;
+    expect(data.weekData.points["Alex"]).toBe(8);
+  });
+
+  it("complete: child lands pendingApproval — no points move, snapshot mirrors the row", async () => {
+    mocks.verifyPinFromPB.mockResolvedValue({ name: "Caspian Garcia", role: "child", emoji: "🧒" });
+    const { pb, weekUpdates, snapshotUpdates, updateCalls } = makePb({
+      taskPoints: 6,
+      taskRow: { universal: false, completed: false, assignee: "Caspian Garcia" },
+    });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ action: "complete", taskId: 42, memberName: "Caspian", pin: "1010" }));
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).pending).toBe(true);
+    expect(weekUpdates()).toBeNull(); // zero points moved
+    const patch = updateCalls.tasks.find((p: any) => p.pendingApproval);
+    expect(patch.pendingApproval).toMatchObject({ byName: "Caspian Garcia", points: 6 });
+    const snap = snapshotUpdates();
+    const data = typeof snap.data === "string" ? JSON.parse(snap.data) : snap.data;
+    expect((data.tasks || []).find((t: any) => t.id === 42).pendingApproval).toMatchObject({ byName: "Caspian Garcia" });
+  });
+
+  it("complete rejects universal tasks (they go through claim) and crew tasks", async () => {
+    const uni = makePb({ taskPoints: 5, taskRow: { universal: true } });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(uni.pb));
+    const res1 = await POST(jsonReq({ action: "complete", taskId: 42, memberName: "Alex", pin: "1234" }));
+    expect(res1.status).toBe(400);
+    expect(await res1.json()).toMatchObject({ reason: "not_assigned" });
+
+    const crew = makePb({ taskPoints: 5, taskRow: { universal: false, crewSize: 2, crew: { members: [] } } });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(crew.pb));
+    const res2 = await POST(jsonReq({ action: "complete", taskId: 42, memberName: "Alex", pin: "1234" }));
+    expect(res2.status).toBe(400);
+    expect(await res2.json()).toMatchObject({ reason: "crew_task" });
+  });
+
+  it("complete is idempotent within the week: an existing unreversed earn → 409", async () => {
+    const monday = mondayISO();
+    const seededHistory = JSON.stringify([
+      { id: 1, timestamp: "2026-09-18T10:00:00.000Z", member: "Alex", type: "earn", amount: 5, description: "Completed: Dishes (+5pts)", taskId: 42 },
+    ]);
+    const { pb } = makePb({
+      taskPoints: 5,
+      taskRow: { universal: false, completed: true, completedInWeek: monday },
+      weekHistory: seededHistory,
+    });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ action: "complete", taskId: 42, memberName: "Alex", pin: "1234" }));
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(["already_completed", "already-claimed"]).toContain(body.reason);
+  });
+
+  it("undo: reverses the earn server-side (adjust -N, points reduced, row reopened, snapshot updated)", async () => {
+    const monday = mondayISO();
+    const seededHistory = JSON.stringify([
+      { id: 1, timestamp: "2026-09-18T10:00:00.000Z", member: "Alex", type: "earn", amount: 8, description: "Completed: Dishes (+8pts)", taskId: 42 },
+    ]);
+    const { pb, updateCalls, snapshotUpdates } = makePb({
+      taskPoints: 8,
+      taskRow: { universal: false, completed: true, completedBy: "Alex", completedAt: "2026-09-18T10:00:00.000Z", completedInWeek: monday, assignee: "Alex" },
+      weekHistory: seededHistory,
+    });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ action: "undo", taskId: 42, memberName: "Alex", pin: "1234" }));
+
+    expect(res.status).toBe(200);
+    // The week write carried the adjust tx and reduced points.
+    const weekWrite = updateCalls.week_data?.[0];
+    expect(weekWrite).toBeTruthy();
+    expect(weekWrite.points["Alex"]).toBe(0);
+    expect(weekWrite.history.some((t: any) => t.type === "adjust" && t.amount === -8)).toBe(true);
+    // The snapshot the UI reads shows the reversal too.
+    const snap = snapshotUpdates();
+    const data = typeof snap.data === "string" ? JSON.parse(snap.data) : snap.data;
+    const adj = (data.weekData.history || []).find((t: any) => t.type === "adjust" && t.amount === -8);
+    expect(adj).toBeTruthy();
+    expect(data.weekData.points["Alex"]).toBe(0);
+    // Task row reopened.
+    const reopenPatch = updateCalls.tasks.find((p: any) => p.completed === false);
+    expect(reopenPatch).toBeTruthy();
+  });
+
+  it("undo with nothing to undo → 409, and a reversed earn → 409 already_undone", async () => {
+    const monday = mondayISO();
+    const noEarn = makePb({ taskPoints: 5, taskRow: { universal: false, completed: true, completedBy: "Alex", completedInWeek: monday } });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(noEarn.pb));
+    const res1 = await POST(jsonReq({ action: "undo", taskId: 42, memberName: "Alex", pin: "1234" }));
+    expect(res1.status).toBe(409);
+    expect(await res1.json()).toMatchObject({ reason: "nothing_to_undo" });
+
+    const seededHistory = JSON.stringify([
+      { id: 1, timestamp: "2026-09-18T10:00:00.000Z", member: "Alex", type: "earn", amount: 5, description: "x", taskId: 42 },
+      { id: 2, timestamp: "2026-09-18T12:00:00.000Z", member: "Alex", type: "adjust", amount: -5, description: "Undo", taskId: 42 },
+    ]);
+    const undone = makePb({ taskPoints: 5, taskRow: { universal: false, completed: false }, weekHistory: seededHistory });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(undone.pb));
+    const res2 = await POST(jsonReq({ action: "undo", taskId: 42, memberName: "Alex", pin: "1234" }));
+    expect(res2.status).toBe(409);
+    expect(await res2.json()).toMatchObject({ reason: "already_undone" });
   });
 });

@@ -23,6 +23,15 @@ const API_EXEMPT = [
   // token minted by /api/muse/auth/login (key → expiring token). The settings
   // routes added in Task 11 gate themselves on a session and are NOT covered.
   "/api/muse/",
+  // PIN-gated task actions. Both routes self-authenticate: the member PIN is
+  // the credential (verified server-side against PB, throttled against brute
+  // force) — the same trust model as /api/auth/login. Without the exemption a
+  // GUEST device (the kitchen display auto-logs-out after 30 min) 401s at the
+  // middleware before the PIN is ever checked, so an assigned-chore completion
+  // or undo could never land server-side and points never propagated — the
+  // "family completes tasks but points don't show" bug.
+  "/api/tasks/claim",
+  "/api/members/verify",
 ];
 
 // MF-5 — exact-match OR trailing-slash semantics. Plain startsWith(p) made

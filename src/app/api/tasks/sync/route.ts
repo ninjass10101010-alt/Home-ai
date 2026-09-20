@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withAdmin } from "@/lib/pb-auth";
 import { verifySession, SESSION_COOKIE } from "@/lib/session";
 import { withKeyedLock } from "@/lib/keyed-lock";
+import { ensureArchivedWeeksEnshrined } from "@/lib/hall-of-fame-backfill";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,18 @@ export async function GET() {
         filter: `key = "${KEY}"`,
       });
       const row = rows[0] as any;
+      // Self-healing weekly-champion enshrinement: recompute any missing
+      // hall_of_fame rows from week_archive (idempotent; never touches existing
+      // rows). The client used to be the only writer and its PB push was
+      // parent-gateway-gated, so a kid/guest device being first across a Monday
+      // rollover left the champion unrecorded server-side forever. Fire on the
+      // 60s refresh path every signed-in device already performs; a failure
+      // must never break the snapshot read.
+      try {
+        await ensureArchivedWeeksEnshrined(pb);
+      } catch (e: any) {
+        console.warn("[tasks/sync] hall-of-fame backfill failed:", e?.message);
+      }
       return row?.data ?? null;
     });
     return NextResponse.json({ ok: true, snapshot: result });

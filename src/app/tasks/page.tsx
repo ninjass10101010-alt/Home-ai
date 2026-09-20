@@ -1006,8 +1006,15 @@ export default function TasksPage() {
         setUndoTaskId(null);
         setUndoPin("");
         showToast("Sent back — no points were given.");
+        // Server-authoritative reopen so other devices see it (guest-safe).
+        fetch("/api/tasks/claim", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "undo", taskId: task.id, memberName: normalizedName, pin: undoPin }),
+        }).catch(() => {});
         return;
       }
+      claimSnapshotRef.current = { tasks, weekData };
       setTasks(prev => prev.map(t => t.id === undoTaskId ? { ...t, completed: false, completedBy: undefined, completedAt: undefined, completedInWeek: undefined } : t));
       const current = (weekData.points[normalizedName] || 0) - task.points;
       const updated = { ...weekData, points: { ...weekData.points, [normalizedName]: Math.max(0, current) } };
@@ -1016,6 +1023,26 @@ export default function TasksPage() {
       // Push the reversal now (not on the 5s debounce) so the server-side claim
       // guard releases the task for re-claiming immediately.
       syncWeekDataToPB(nextWeek);
+      // Server-authoritative undo too (week_data + snapshot + task row) — a
+      // guest device's local undo must reach every device. Server refusals
+      // (nothing_to_undo / already_undone) mean the local-only earn is already
+      // reconciled; the local undo always stands.
+      fetch("/api/tasks/claim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "undo", taskId: task.id, memberName: normalizedName, pin: undoPin }),
+      }).then(async (res) => {
+        const data = await res.json().catch(() => null);
+        claimSnapshotRef.current = null;
+        if ((res.ok || res.status === 409) && data?.weekData?.weekStart === weekKey()) {
+          setWeekData((prev) =>
+            (data.weekData.history?.length || 0) >= (prev.history?.length || 0) ? data.weekData : prev
+          );
+        }
+      }).catch(() => {
+        // Offline: keep the local undo (sync reconciles later).
+        claimSnapshotRef.current = null;
+      });
       setUndoTaskId(null);
       setUndoPin("");
       showToast(`Undone: ${task.title}`);
@@ -1293,6 +1320,42 @@ export default function TasksPage() {
     if (result.status === "ok") {
       const verified = result.member;
       const normalizedName = normalizeName((verified as any).name);
+      // Pre-state for rollback if the server definitively refuses (409/400).
+      claimSnapshotRef.current = { tasks, weekData };
+      // Shared server-persist response handling for the optimistic completion:
+      // 409/400 = definitive refusal (another device completed it / wrong
+      // shape) → roll back; anything else (401/5xx/network) is transient → keep
+      // the optimistic row and let the normal syncs reconcile.
+      const handleCompleteResponse = async (res: Response) => {
+        const data = await res.json().catch(() => null);
+        const snap = claimSnapshotRef.current;
+        claimSnapshotRef.current = null;
+        if (!res.ok || !data?.success) {
+          if ((res.status === 409 || res.status === 400) && snap) {
+            setTasks(snap.tasks);
+            setWeekData(snap.weekData);
+            showToast(res.status === 409 ? "That task was already completed." : "That task couldn't be completed.");
+          }
+          return;
+        }
+        // The server ledger is authoritative — adopt it when at least as
+        // fresh (it may carry other devices' earns).
+        if (data?.weekData?.weekStart === weekKey()) {
+          setWeekData((prev) =>
+            (data.weekData.history?.length || 0) >= (prev.history?.length || 0) ? data.weekData : prev
+          );
+        }
+      };
+      const persistServerComplete = () => {
+        // A GUEST device (the kitchen display auto-logs-out after 30 min)
+        // cannot push the snapshot — without this server call the completion
+        // lives only in this browser's localStorage.
+        fetch("/api/tasks/claim", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "complete", taskId: task.id, memberName: normalizedName, pin: pinInput, assigneeEmoji: task.assigneeEmoji }),
+        }).then(handleCompleteResponse).catch(() => { claimSnapshotRef.current = null; });
+      };
       if (completesWithPendingApproval((verified as any).role, task)) {
         // Identity verified by PIN; the parent verifies the work. Points wait.
         setTasks((prev) => prev.map((t) => (t.id === pinTaskId ? tapCompletePending(t, normalizedName, now, currentWeek) : t)));
@@ -1300,6 +1363,7 @@ export default function TasksPage() {
         setPinInput("");
         setPinSuccess(`⏳ ${normalizedName.split(" ")[0]} — done! +${task.points}pts on the way.`);
         setTimeout(() => { setPinTaskId(null); setPinSuccess(""); setSnatchForMember(""); }, 1500);
+        persistServerComplete();
         return;
       }
       setTasks(prev => prev.map(t => t.id === pinTaskId ? { ...t, completed: true, completedBy: normalizedName, completedAt: now, completedInWeek: currentWeek } : t));
@@ -1312,6 +1376,7 @@ export default function TasksPage() {
       setPinSuccess(`${normalizedName.split(" ")[0]} completed ${task.title}! ${pointsMsg}`);
       triggerConfetti();
       setTimeout(() => { setPinTaskId(null); setPinSuccess(""); setSnatchForMember(""); }, 1500);
+      persistServerComplete();
     } else {
       setPinError(result.status === "unreachable" ? unreachableCopy() : "Wrong PIN. Try again.");
       setPinInput("");

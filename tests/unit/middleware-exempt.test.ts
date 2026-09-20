@@ -34,4 +34,14 @@ describe("AI endpoints exempt from session auth", () => {
   it("MUSE lookalike siblings stay gated", () => {
     expect(isExempt("/api/musebox")).toBe(false);
   });
+  it("PIN-gated task actions are exempt — the PIN is the credential (guest kitchen display)", () => {
+    expect(isExempt("/api/tasks/claim")).toBe(true);
+    expect(isExempt("/api/members/verify")).toBe(true);
+  });
+  it("their lookalike siblings stay gated", () => {
+    expect(isExempt("/api/tasks")).toBe(false);
+    expect(isExempt("/api/tasks/sync")).toBe(false);
+    expect(isExempt("/api/members")).toBe(false);
+    expect(isExempt("/api/members/admin")).toBe(false);
+  });
 });
