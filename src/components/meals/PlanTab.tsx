@@ -15,6 +15,7 @@ import { weekLabel } from "@/lib/meals-week-utils";
 import KitchenFlowCard from "@/components/meals/KitchenFlowCard";
 import RecipeBox from "@/components/meals/RecipeBox";
 import GenerateScopeSheet from "@/components/meals/GenerateScopeSheet";
+import { useRouter } from "next/navigation";
 
 const mealTypes = [
   { id: "breakfast", label: "Breakfast", icon: "🌅" },
@@ -97,6 +98,7 @@ export default function PlanTab({
   aiMealError, weeklyPlanLoading, weeklyPlanError, generateWeeklyPlan,
   syncBlocked,
 }: any) {
+  const router = useRouter();
 
   const { colors, accentRgb } = useAtmosphericTheme();
   const [presetPickerType, setPresetPickerType] = useState<string | null>(null);
@@ -462,11 +464,17 @@ export default function PlanTab({
                             ))}
                           </div>
                         </div>
-                        <button className="hidden sm:flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--color-surface-0)]/70 text-text-secondary shadow transition group-hover:flex hover:bg-[var(--color-accent-selected)] hover:text-white">
-                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                          </svg>
-                        </button>
+                        {mealForType.recipeId && (
+                          <button
+                            onClick={() => router.push(`/meals/recipes/${mealForType.recipeId}?from=plan`)}
+                            aria-label={`View ${display.name} recipe`}
+                            className="hidden sm:flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--color-surface-0)]/70 text-text-secondary shadow transition group-hover:flex hover:bg-[var(--color-accent-selected)] hover:text-white"
+                          >
+                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                            </svg>
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>

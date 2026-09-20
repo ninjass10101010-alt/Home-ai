@@ -50,6 +50,10 @@ vi.mock("@/hooks/useAtmosphericTheme", () => ({
   }),
 }));
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn() }),
+}));
+
 import { db } from "@/db";
 import PlanTab from "@/components/meals/PlanTab";
 

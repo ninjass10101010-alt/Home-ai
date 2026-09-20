@@ -21,6 +21,10 @@ vi.mock("@/db", () => ({
   },
 }));
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn() }),
+}));
+
 import PlanTab from "@/components/meals/PlanTab";
 
 vi.mock("@/hooks/useAtmosphericTheme", () => ({
