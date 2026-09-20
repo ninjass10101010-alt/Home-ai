@@ -339,7 +339,9 @@ describe("KidHome on the wall (spec §6 amendment)", () => {
     const input = document.querySelector('input[aria-label="Your 4-digit PIN"]') as HTMLInputElement;
     expect(input).not.toBeNull();
     expect(padDialog()).toBeNull();
-    expect(el.querySelector('button[aria-label="Switch member"]')).toBeNull();
+    // 2026-09-20 kid-session lift: the one-tap Switch member button now
+    // renders on non-wall kid surfaces too (it used to be wall-only).
+    expect(el.querySelector('button[aria-label="Switch member"]')).not.toBeNull();
   });
 });
 
@@ -413,10 +415,10 @@ describe("KidHome hero avatar → KidProfileSheet (kid-profile-sheet Task 3 wiri
     }
   });
 
-  it("non-wall non-bedtime renders the new hint 'Tap your picture to make it yours'", async () => {
+  it("non-wall non-bedtime now renders the one-tap 'Switch member' button (2026-09-20 lift)", async () => {
     const el = await renderAsync(<KidHome />);
     await settle();
-    expect(el.textContent).toContain("Tap your picture to make it yours");
+    expect(el.querySelector('button[aria-label="Switch member"]')).not.toBeNull();
   });
 
   it("wall mode: 'Switch member' still renders AND the avatar tap opens the sheet", async () => {

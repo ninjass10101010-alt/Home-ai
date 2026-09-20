@@ -271,7 +271,7 @@ export default function KidHome() {
   // Kid profile sheet (tap the hero avatar) — shared by bedtime + normal flows.
   const [profileSheetOpen, setProfileSheetOpen] = useState(false);
 
-  const { currentUser, logout } = useAuth();
+  const { currentUser, logout, sessionWarning, sessionRemainingMs } = useAuth();
   const { isBedtime, isWeekend } = useDashboardMode();
   // Wall profile (spec §6 amendment): on the wall the quest PIN gate renders
   // the WallPinPad keypad instead of the shared typed-input Modal, and the
@@ -833,25 +833,68 @@ export default function KidHome() {
             </div>
           )}
 
-          {/* Profile hint / wall Switch-member (spec §6 amendment) */}
-          {wall ? (
+          {/* Profile hint / Switch member — one tap on EVERY kid surface now
+              (was wall-only): kids hand the tablet back without hunting
+              through the profile sheet. Bedtime keeps the calm surface and
+              hides it. */}
+          {!isBedtime && (
             <button
               type="button"
               onClick={logout}
               aria-label="Switch member"
-              className="tap mt-4 flex min-h-[56px] items-center gap-2 rounded-full border border-white/10 bg-[var(--color-surface-0)]/35 px-6 text-base font-semibold text-text-secondary hover:bg-[var(--color-surface-0)]/55 hover:text-text-primary"
+              className={`tap mt-4 flex items-center gap-2 rounded-full border border-white/10 bg-[var(--color-surface-0)]/35 text-base font-semibold text-text-secondary hover:bg-[var(--color-surface-0)]/55 hover:text-text-primary ${
+                wall ? "min-h-[56px] px-6" : "min-h-[44px] px-5 text-sm hit-44"
+              }`}
             >
               🔄 Switch member
             </button>
-          ) : (
-            <p className="mt-3 text-[11px] text-text-muted">
-              Tap your picture to make it yours
-            </p>
+          )}
+
+          {/* Session countdown — the last 5 minutes say so in kid words, so
+              the flip back to the family screen never surprises anyone. Any
+              activity keeps the session (same rule as the adult Home). */}
+          {sessionWarning && !isBedtime && (
+            <div
+              className="mt-2 flex items-center gap-1.5 px-3 py-1.5 rounded-full"
+              role="status"
+              aria-label={`Signed in for ${Math.ceil(sessionRemainingMs / 60000)} more minutes`}
+              style={{ background: "color-mix(in srgb, var(--color-accent-amber) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--color-accent-amber) 20%, transparent)" }}
+            >
+              <span className="text-sm">⏳</span>
+              <span className="text-xs font-bold text-[var(--color-accent-amber)] tabular-nums">
+                {Math.ceil(sessionRemainingMs / 60000)} min left — tap anything to stay
+              </span>
+            </div>
           )}
         </div>
 
         {/* ── Content ── */}
         <div className="px-4 space-y-5 relative z-10 pb-8">
+          {/* Quests */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-base font-bold text-text-primary">
+                🎯 Your Quests
+              </h2>
+            </div>
+
+            {pendingTasks.length === 0 ? (
+              <Surface variant="warm" radius="2xl" padding="lg">
+                <div className="text-center py-4">
+                  <span className="text-4xl mb-3 block">🎉</span>
+                  <h3 className="text-base font-bold text-text-primary">All quests complete!</h3>
+                  <p className="text-sm text-text-secondary mt-1">You&apos;re a superstar! Check back later for new ones.</p>
+                </div>
+              </Surface>
+            ) : (
+              <div className="space-y-2.5">
+                {pendingTasks.map((task) => (
+                  <QuestCard key={task.id} task={task} onComplete={openQuestPin} />
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Weekend Bonus Quests */}
           {isWeekend && (
             <div>
@@ -893,34 +936,6 @@ export default function KidHome() {
               </Surface>
             </div>
           )}
-
-          {/* Quests */}
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-base font-bold text-text-primary">
-                🎯 Your Quests
-              </h2>
-              <Link href="/tasks" className="text-[11px] font-semibold text-[var(--color-accent-selected)]">
-                View all →
-              </Link>
-            </div>
-
-            {pendingTasks.length === 0 ? (
-              <Surface variant="warm" radius="2xl" padding="lg">
-                <div className="text-center py-4">
-                  <span className="text-4xl mb-3 block">🎉</span>
-                  <h3 className="text-base font-bold text-text-primary">All quests complete!</h3>
-                  <p className="text-sm text-text-secondary mt-1">You&apos;re a superstar! Check back later for new ones.</p>
-                </div>
-              </Surface>
-            ) : (
-              <div className="space-y-2.5">
-                {pendingTasks.map((task) => (
-                  <QuestCard key={task.id} task={task} onComplete={openQuestPin} />
-                ))}
-              </div>
-            )}
-          </div>
 
           {/* Completed today */}
           {completedToday.length > 0 && (

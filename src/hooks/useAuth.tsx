@@ -6,8 +6,17 @@ import { flushPendingWrites } from '@/lib/pending-writes';
 
 const AUTH_STORAGE_KEY = 'consuela-auth-user';
 const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;
+// Kid sessions are shorter (wall + shared tablets: the family screen should
+// come back quickly once a kid wanders off), and they warn for a full
+// 5 minutes instead of 30s so the flip never surprises a child.
+const KID_INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000;
 const SESSION_WARN_MS = 30 * 1000;
+const KID_SESSION_WARN_MS = 5 * 60 * 1000;
 const SESSION_TICK_MS = 1 * 1000;
+
+function isKidRole(role?: string) {
+  return role === 'child' || role === 'pet';
+}
 
 function memberMatchesName(member: any, name: string) {
   const firstName = name.split(" ")[0];
@@ -89,7 +98,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const extendSession = useCallback(() => {
     lastActivityRef.current = Date.now();
     setSessionWarning(false);
-    setSessionRemainingMs(INACTIVITY_TIMEOUT_MS);
+    setSessionRemainingMs(isKidRole(currentUserRef.current?.role) ? KID_INACTIVITY_TIMEOUT_MS : INACTIVITY_TIMEOUT_MS);
   }, []);
 
   // Load persisted session + start inactivity timer on mount
@@ -167,12 +176,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     intervalRef.current = setInterval(() => {
       const elapsed = Date.now() - lastActivityRef.current;
-      const remaining = Math.max(0, INACTIVITY_TIMEOUT_MS - elapsed);
+      // Role-aware timeout: kids/pets get the shorter window + the longer
+      // warning (kid-friendly countdown on KidHome; adults keep 30s/30min).
+      const role = currentUserRef.current?.role;
+      const timeout = isKidRole(role) ? KID_INACTIVITY_TIMEOUT_MS : INACTIVITY_TIMEOUT_MS;
+      const warnAt = isKidRole(role) ? KID_SESSION_WARN_MS : SESSION_WARN_MS;
+      const remaining = Math.max(0, timeout - elapsed);
       setSessionRemainingMs(remaining);
-      if (remaining <= SESSION_WARN_MS) {
+      if (remaining <= warnAt) {
         setSessionWarning(true);
       }
-      if (elapsed >= INACTIVITY_TIMEOUT_MS) {
+      if (elapsed >= timeout) {
         setCurrentUser(null);
         currentUserRef.current = null;
         setSessionRemainingMs(0);

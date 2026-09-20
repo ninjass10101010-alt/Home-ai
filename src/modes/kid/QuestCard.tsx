@@ -17,6 +17,8 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { kidDueLabel, dueTone, questWhoLabel } from "./quest-labels";
+import { localTodayISO } from "@/lib/local-date";
 
 interface QuestCardProps {
   task: {
@@ -143,18 +145,20 @@ export default function QuestCard({ task, onComplete, disabled = false }: QuestC
           <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: config.pointColor }}>
             {config.label}
           </span>
-          {task.assignee && (
-            <>
-              <span className="text-text-dim">·</span>
-              <span className="text-[11px] text-text-secondary">{task.assignee.split(" ")[0]}</span>
-            </>
-          )}
-          {task.due && (
-            <>
-              <span className="text-text-dim">·</span>
-              <span className="text-[11px] text-text-secondary">{task.due}</span>
-            </>
-          )}
+          <span className="text-text-dim">·</span>
+          {/* Who-line in kid language: "Up for grabs"/"Crew" never reads as
+              another kid's chore; an assigned quest shows the owner's name. */}
+          <span className="text-[11px] font-semibold text-text-secondary">{questWhoLabel(task)}</span>
+          {(() => {
+            const label = kidDueLabel(task.due, localTodayISO());
+            if (!label) return null;
+            return (
+              <>
+                <span className="text-text-dim">·</span>
+                <span className="text-[11px] font-bold" style={{ color: dueTone(label) }}>{label}</span>
+              </>
+            );
+          })()}
         </div>
       </div>
 

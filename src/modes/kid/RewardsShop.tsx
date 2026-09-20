@@ -243,6 +243,15 @@ export default function RewardsShop() {
 
   const POINTS_PER_LEVEL = 50;
   const level = Math.floor(points / POINTS_PER_LEVEL) + 1;
+
+  // Mode-end guarantee: if the kid's session ends while they're on this kid-only
+  // route (15-min idle, deleted member, anything), land them on the family
+  // main screen — never stranded on a non-kid explainer page.
+  useEffect(() => {
+    if (!currentUser) {
+      router.replace("/");
+    }
+  }, [currentUser, router]);
   const firstName = currentUser?.name?.split(" ")[0] || "Buddy";
 
   // One truth with the Tasks page: catalog from loadRewards, balance from
