@@ -16,6 +16,7 @@ import Modal from "@/components/ui/Modal";
 import Toast from "@/components/ui/Toast";
 import SegmentedControl from "@/components/ui/SegmentedControl";
 import Toggle from "@/components/ui/Toggle";
+import Stepper from "@/components/ui/Stepper";
 import StatTile from "@/components/patterns/StatTile";
 import ProgressRing from "@/components/ui/ProgressRing";
 import Avatar from "@/components/ui/Avatar";
@@ -426,7 +427,7 @@ export default function TasksPage() {
   const [parentApprovalPin, setParentApprovalPin] = useState("");
   const [parentApprovalError, setParentApprovalError] = useState("");
   const [approvalTaskId, setApprovalTaskId] = useState<number | null>(null);
-  const [approvalMode, setApprovalMode] = useState<"approve" | "sendback">("approve");
+  const [approvalMode, setApprovalMode] = useState<"approve" | "sendback" | "approve-all">("approve");
   // P0: deleting a family chore is destructive + cross-device — confirm first
   // (the shared-Modal rose pattern, like the AI-Models provider remove).
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
@@ -853,7 +854,7 @@ export default function TasksPage() {
   };
 
   const submitApproval = async () => {
-    if (approvalTaskId === null || !approvalPin || pinBusy) return;
+    if ((approvalTaskId === null && approvalMode !== "approve-all") || !approvalPin || pinBusy) return;
     setPinBusy(true);
     try {
       let parent: any = null;
@@ -875,7 +876,27 @@ export default function TasksPage() {
         setTimeout(() => setApprovalError(""), 2500);
         return;
       }
-      if (approvalMode === "approve") {
+      if (approvalMode === "approve-all") {
+        // One parent-PIN confirmation pays the WHOLE queue. Each row still
+        // runs the same idempotent, reversal-aware approvePendingCompletion —
+        // the per-member guards (taskId+member) make a double-tap safe, and a
+        // row paid on another device simply clears without re-paying.
+        const result = pendingApprovals.reduce(
+          (acc, pending) => {
+            const before = acc.weekData.history.length;
+            const next = approvePendingCompletion(acc.tasks, acc.weekData, pending.id);
+            return {
+              tasks: next.tasks,
+              weekData: next.weekData,
+              paid: acc.paid + (next.weekData.history.length > before ? 1 : 0),
+            };
+          },
+          { tasks, weekData, paid: 0 }
+        );
+        setTasks(result.tasks);
+        setWeekData(result.weekData);
+        showToast(result.paid > 0 ? `Approved! ${result.paid} tapped task${result.paid !== 1 ? "s" : ""} paid.` : "All tapped tasks were already paid.");
+      } else if (approvalMode === "approve" && approvalTaskId !== null) {
         const target = tasks.find((x) => x.id === approvalTaskId);
         const { tasks: nt, weekData: nw } = approvePendingCompletion(tasks, weekData, approvalTaskId);
         setTasks(nt);
@@ -886,12 +907,13 @@ export default function TasksPage() {
             ? `Approved! +${target?.points ?? 0}pts each for ${crew.map((n) => n.split(" ")[0]).join(", ")}.`
             : `Approved! +${target?.points ?? 0}pts for ${(target?.pendingApproval?.byName ?? "").split(" ")[0]}.`
         );
-      } else {
+      } else if (approvalTaskId !== null) {
         setTasks((prev) => sendBackPendingCompletion(prev, approvalTaskId));
         const target = tasks.find((x) => x.id === approvalTaskId);
         showToast(target && isCrewTask(target) ? "Sent back — the whole crew reopens, no points given." : "Sent back — no points were given.");
       }
       setApprovalTaskId(null);
+      setApprovalMode("approve");
       setApprovalPin("");
       setApprovalError("");
     } finally {
@@ -1495,12 +1517,14 @@ export default function TasksPage() {
   });
 
   const pending = filtered.filter((t) => !t.completed);
-  const pendingApprovals = useMemo(() => tasks.filter(isPendingApproval), [tasks]);
+  const pendingApprovals = tasks.filter(isPendingApproval);
   // The Open board: unclaimed "up for grabs" tasks (universal or late-stealable)
   // PLUS crew tasks with space — shown only when the viewer isn't on a
-  // specific-member filter, sorted by points (biggest race first).
-  const openBoard = useMemo(() => {
-    if (filterMember !== "All" && filterMember !== "My Tasks" && filterMember !== "Open") return [];
+  // specific-member filter, sorted by points (biggest race first). Plain
+  // computation (no useMemo): a filter+sort over the family's small task list
+  // is cheaper than the manual memo the compiler couldn't preserve.
+  const openBoard = (() => {
+    if (filterMember !== "All" && filterMember !== "My Tasks" && filterMember !== "Open") return [] as Task[];
     const me = isLoggedIn && currentUser ? resolveMemberName(membersData, currentUser.name) : "";
     return tasks
       .filter((t) => {
@@ -1514,7 +1538,7 @@ export default function TasksPage() {
         return false;
       })
       .sort((a, b) => b.points - a.points);
-  }, [tasks, filterMember, isLoggedIn, currentUser, membersData]);
+  })();
   const completed = filtered.filter((t) => t.completed);
   const thisWeeksCompleted = getThisWeeksCompletedTasks(tasks);
   const thisWeeksCompletedCount = thisWeeksCompleted.length;
@@ -1770,16 +1794,23 @@ export default function TasksPage() {
                       </select>
                     </label>
                   </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <label className="block">
-                      <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Points</span>
-                      <input type="number" value={editForm.points} onChange={(e) => updateForm("points", parseInt(e.target.value) || 0)} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none" />
-                    </label>
-                    <label className="block">
-                      <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Recurring</span>
-                      <input value={editForm.recurring || ""} onChange={(e) => updateForm("recurring", e.target.value || null)} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none" placeholder="Daily" />
-                    </label>
-                  </div>
+                   <div className="grid gap-3 sm:grid-cols-2">
+                     {/* Points stepper — kids' rewards live at 5/8/10/15, a
+                         stepper beats typing and can't produce NaN. */}
+                     <div>
+                       <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Points</span>
+                       <Stepper value={editForm.points} min={0} max={50} onChange={(v) => updateForm("points", v)} label="Points" />
+                     </div>
+                     <label className="block">
+                       <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Recurring</span>
+                       <select value={editForm.recurring || "None"} onChange={(e) => updateForm("recurring", e.target.value === "None" ? null : e.target.value)} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none">
+                         <option value="None">None</option>
+                         <option value="Daily">Daily</option>
+                         <option value="Weekdays">Weekdays</option>
+                         <option value="Weekly">Weekly</option>
+                       </select>
+                     </label>
+                   </div>
                   <div>
                     <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Task type</span>
                     <SegmentedControl
@@ -1991,6 +2022,13 @@ export default function TasksPage() {
 
             {isLoggedIn && currentUser?.role === "parent" && pendingApprovals.length > 0 && (
               <SectionCard title="Needs approval" description={`${pendingApprovals.length} tapped — review to award points`} icon="⏳">
+                {/* One PIN pays the whole queue — the per-row grind was the
+                    biggest parent complaint in the evaluation. */}
+                <div className="mb-3">
+                  <SoftButton onClick={() => { setApprovalTaskId(null); setApprovalMode("approve-all"); setApprovalPin(""); setApprovalError(""); }} className="w-full">
+                    ✓ Approve all ({pendingApprovals.length})
+                  </SoftButton>
+                </div>
                 <div className="space-y-2">
                   {pendingApprovals.map((task) => {
                     const crew = task.pendingApproval!.crew ?? [];
@@ -2682,12 +2720,15 @@ export default function TasksPage() {
         </Modal>
       )}
 
-      {approvalTaskId !== null && (
+      {(approvalTaskId !== null || approvalMode === "approve-all") && (
         <Modal
           open
-          onClose={() => { setApprovalTaskId(null); setApprovalPin(""); }}
-          title={approvalMode === "approve" ? "Approve points" : "Send back"}
+          onClose={() => { setApprovalTaskId(null); setApprovalMode("approve"); setApprovalPin(""); }}
+          title={approvalMode === "approve-all" ? "Approve all" : approvalMode === "approve" ? "Approve points" : "Send back"}
           description={(() => {
+            if (approvalMode === "approve-all") {
+              return `Pay all ${pendingApprovals.length} tapped task${pendingApprovals.length !== 1 ? "s" : ""} now? Rows already paid elsewhere just clear.`;
+            }
             const target = tasks.find((x) => x.id === approvalTaskId);
             return approvalMode === "approve"
               ? `"${target?.title}" tapped by ${target?.pendingApproval?.byName} — award +${target?.points ?? 0}pts?`
@@ -2695,8 +2736,8 @@ export default function TasksPage() {
           })()}
           footer={
             <>
-              <SoftButton onClick={submitApproval} loading={pinBusy} disabled={!approvalPin || pinBusy} className="flex-1">{approvalMode === "approve" ? "Approve" : "Send back"}</SoftButton>
-              <SoftButton variant="secondary" onClick={() => { setApprovalTaskId(null); setApprovalPin(""); }} className="flex-1">Cancel</SoftButton>
+              <SoftButton onClick={submitApproval} loading={pinBusy} disabled={!approvalPin || pinBusy} className="flex-1">{approvalMode === "approve-all" ? "Approve all" : approvalMode === "approve" ? "Approve" : "Send back"}</SoftButton>
+              <SoftButton variant="secondary" onClick={() => { setApprovalTaskId(null); setApprovalMode("approve"); setApprovalPin(""); }} className="flex-1">Cancel</SoftButton>
             </>
           }
         >
