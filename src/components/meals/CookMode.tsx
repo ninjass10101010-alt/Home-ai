@@ -88,7 +88,9 @@ export default function CookMode({ recipe, onExit }: { recipe: Recipe; onExit: (
             <p className="text-[11px] font-semibold text-text-muted">
               {stepsDone
                 ? "Finished!"
-                : `${checkedSteps.length} of ${steps.length} steps done`}
+                : steps.length > 0
+                  ? `${checkedSteps.length} of ${steps.length} steps done`
+                  : "No steps to check"}
             </p>
           </div>
         </div>
@@ -118,7 +120,7 @@ export default function CookMode({ recipe, onExit }: { recipe: Recipe; onExit: (
         <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-4 pb-8">
           <section aria-label="Gather ingredients">
             <p className="mb-2 text-[11px] font-extrabold uppercase tracking-wider text-text-muted">
-              🥕 Gather · {checkedIngredients.length} of {ingredients.length} ready
+              🥕 Gather · {ingredients.length > 0 ? `${checkedIngredients.length} of ${ingredients.length} ready` : "Nothing to gather"}
             </p>
             <div className="liquid-glass rounded-2xl p-2">
               {ingredients.length === 0 && (

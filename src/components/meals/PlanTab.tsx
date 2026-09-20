@@ -468,7 +468,7 @@ export default function PlanTab({
                           <button
                             onClick={() => router.push(`/meals/recipes/${mealForType.recipeId}?from=plan`)}
                             aria-label={`View ${display.name} recipe`}
-                            className="hidden sm:flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--color-surface-0)]/70 text-text-secondary shadow transition group-hover:flex hover:bg-[var(--color-accent-selected)] hover:text-white"
+                            className="hidden sm:flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--color-surface-0)]/70 text-text-secondary shadow transition group-hover:flex hover:bg-[var(--color-accent-selected)] hover:text-white hit-44"
                           >
                             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                               <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />

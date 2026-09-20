@@ -116,5 +116,7 @@ describe("CookMode", () => {
     render(<CookMode recipe={{ ...recipe, ingredients: [], instructions: "" }} onExit={() => {}} />);
     expect(document.body.textContent).toContain("No ingredients saved");
     expect(document.body.textContent).toContain("No steps saved");
+    expect(document.body.textContent).toContain("No steps to check");
+    expect(document.body.textContent).toContain("Nothing to gather");
   });
 });

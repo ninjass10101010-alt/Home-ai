@@ -1,4 +1,4 @@
-/* eslint-disable react-hooks/set-state-in-effect, react-hooks/purity */
+/* eslint-disable react-hooks/purity */
 "use client";
 
 import { Suspense, useEffect, useRef, useState } from "react";
@@ -75,20 +75,18 @@ function RecipeDetailContent() {
   const { meals, setMeals, activeWeek } = useMeals();
 
   const id = String(params.id ?? "");
+
+  const [settledByTimer, setSettledByTimer] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setSettledByTimer(true), 600);
+    return () => clearTimeout(t);
+  }, []);
+  const catalogSettled = recipes.length > 0 || syncBlocked || settledByTimer;
+
   const catalogRecipe = recipes.find((r) => String(r.id) === id) ?? null;
   const snapshotMeal = meals.find((m) => String(m.recipeId) === id) ?? null;
-  const snapshotMode = !catalogRecipe && !!snapshotMeal;
+  const snapshotMode = catalogSettled && !catalogRecipe && !!snapshotMeal;
   const recipe = catalogRecipe ?? (snapshotMeal ? snapshotAsRecipe(snapshotMeal) : null);
-
-  const [settled, setSettled] = useState(false);
-  useEffect(() => {
-    if (recipes.length > 0 || meals.length > 0 || syncBlocked) {
-      setSettled(true);
-      return;
-    }
-    const t = setTimeout(() => setSettled(true), 600);
-    return () => clearTimeout(t);
-  }, [recipes.length, meals.length, syncBlocked]);
 
   const [dayPickerOpen, setDayPickerOpen] = useState(false);
   const [planBusy, setPlanBusy] = useState(false);
@@ -189,7 +187,7 @@ function RecipeDetailContent() {
         <Toast open={Boolean(notification)} tone={notification?.includes("❌") ? "error" : "success"}>
           {notification}
         </Toast>
-        {!settled ? (
+        {!catalogSettled ? (
           <div className="kitchen-text mx-auto max-w-5xl space-y-4 px-4 py-8">
             <div className="h-10 w-44 rounded-2xl bg-[var(--color-surface-2)]" />
             <div className="h-64 rounded-3xl bg-[var(--color-surface-2)]" />

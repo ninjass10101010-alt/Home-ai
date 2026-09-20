@@ -11,6 +11,7 @@ const h = vi.hoisted(() => ({
   meals: [] as any[],
   deleteCalled: [] as number[],
   saveCalled: [] as any[],
+  push: vi.fn(),
   replace: vi.fn(),
   id: "1",
   from: "recipes",
@@ -19,7 +20,7 @@ const h = vi.hoisted(() => ({
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ id: h.id }),
-  useRouter: () => ({ push: vi.fn(), replace: h.replace, prefetch: vi.fn(), back: vi.fn() }),
+  useRouter: () => ({ push: h.push, replace: h.replace, prefetch: vi.fn(), back: vi.fn() }),
   useSearchParams: () => ({ get: (k: string) => (k === "from" ? h.from : null) }),
   usePathname: () => "/meals/recipes/1",
 }));
@@ -95,6 +96,7 @@ beforeEach(() => {
   h.deleteCalled = [];
   h.saveCalled = [];
   h.replace.mockClear();
+  h.push.mockClear();
   h.id = "1";
   h.from = "recipes";
   h.syncBlocked = false;
@@ -128,6 +130,19 @@ const catalogRecipe = {
   createdAt: "2026-09-19T00:00:00.000Z",
 };
 
+const unrelatedRecipe = {
+  id: 999,
+  name: "Other",
+  emoji: "🍞",
+  prepTime: "5 min",
+  tags: [],
+  ingredients: [],
+  instructions: "",
+  servings: 1,
+  calories: 0,
+  createdAt: "2026-09-19T00:00:00.000Z",
+};
+
 describe("Recipe detail page", () => {
   it("renders a catalog recipe with quantity-styled ingredients, numbered steps and source", () => {
     h.recipes = [catalogRecipe];
@@ -144,6 +159,7 @@ describe("Recipe detail page", () => {
   });
 
   it("falls back to the meal snapshot with a banner and no edit/delete when the recipe is gone", () => {
+    h.recipes = [unrelatedRecipe];
     h.meals = [
       {
         id: 9,
@@ -167,7 +183,7 @@ describe("Recipe detail page", () => {
   });
 
   it("shows a not-found state when neither the catalog nor a snapshot has the id", () => {
-    h.meals = [{ id: 8, name: "Unrelated", recipeId: "99", mealType: "dinner", time: "Tue" }];
+    h.recipes = [unrelatedRecipe];
     render(<RecipeDetailPage />);
     expect(document.body.textContent).toContain("Recipe not found");
   });
@@ -177,6 +193,19 @@ describe("Recipe detail page", () => {
     render(<RecipeDetailPage />);
     expect(document.body.textContent).toContain("Recipes are synced to the family account");
     expect(document.body.textContent).not.toContain("Recipe not found");
+  });
+
+  it("navigates back to /meals when opened from the plan", () => {
+    h.from = "plan";
+    h.recipes = [catalogRecipe];
+    render(<RecipeDetailPage />);
+    const backBtn = Array.from(document.body.querySelectorAll("button")).find(
+      (b) => b.textContent?.includes("Back to kitchen")
+    ) as HTMLButtonElement;
+    act(() => {
+      backBtn.click();
+    });
+    expect(h.push).toHaveBeenCalledWith("/meals");
   });
 
   it("confirms then deletes a recipe and returns to the recipe box", async () => {

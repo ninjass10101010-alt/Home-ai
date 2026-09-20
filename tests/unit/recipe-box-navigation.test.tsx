@@ -71,7 +71,7 @@ afterEach(() => {
 describe("RecipeBox navigation", () => {
   it("navigates to the recipe page when the card body is tapped", () => {
     const el = render(<RecipeBox {...props} />);
-    const card = el.querySelector("article[role='button']") as HTMLElement;
+    const card = el.querySelector("[role='button'][aria-label='View Taco Night recipe']") as HTMLElement;
     act(() => {
       card.click();
     });
@@ -80,9 +80,18 @@ describe("RecipeBox navigation", () => {
 
   it("supports Enter on the card for keyboard users", () => {
     const el = render(<RecipeBox {...props} />);
-    const card = el.querySelector("article[role='button']") as HTMLElement;
+    const card = el.querySelector("[role='button'][aria-label='View Taco Night recipe']") as HTMLElement;
     act(() => {
       card.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    expect(h.push).toHaveBeenCalledWith("/meals/recipes/5?from=recipes");
+  });
+
+  it("supports Space on the card for keyboard users", () => {
+    const el = render(<RecipeBox {...props} />);
+    const card = el.querySelector("[role='button'][aria-label='View Taco Night recipe']") as HTMLElement;
+    act(() => {
+      card.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
     });
     expect(h.push).toHaveBeenCalledWith("/meals/recipes/5?from=recipes");
   });

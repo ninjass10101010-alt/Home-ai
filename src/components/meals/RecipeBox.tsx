@@ -130,33 +130,59 @@ export default function RecipeBox({
           return (
             <article
               key={recipe.id}
-              onClick={() => openRecipe(recipe)}
-              onKeyDown={(e) => {
-                if (e.target !== e.currentTarget) return;
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  openRecipe(recipe);
-                }
-              }}
-              role="button"
-              tabIndex={0}
-              aria-label={`View ${recipe.name} recipe`}
-              className="liquid-glass group overflow-hidden rounded-2xl cursor-pointer"
+              className="liquid-glass group overflow-hidden rounded-2xl"
             >
-              {/* Image/emoji header */}
-              <div className="relative h-44 overflow-hidden bg-[var(--color-surface-2)] flex items-center justify-center">
-                {recipe.image ? (
-                  <img
-                    src={recipe.image}
-                    alt={recipe.name}
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <span className="text-7xl">
-                    {recipe.emoji || "🍽️"}
-                  </span>
-                )}
-                {/* Favorite button */}
+              <div className="relative">
+                <div
+                  onClick={() => openRecipe(recipe)}
+                  onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget) return;
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      openRecipe(recipe);
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`View ${recipe.name} recipe`}
+                  className="cursor-pointer"
+                >
+                  <div className="relative h-44 overflow-hidden bg-[var(--color-surface-2)] flex items-center justify-center">
+                    {recipe.image ? (
+                      <img src={recipe.image} alt={recipe.name} className="h-full w-full object-cover" />
+                    ) : (
+                      <span className="text-7xl">{recipe.emoji || "🍽️"}</span>
+                    )}
+                    <div className="absolute bottom-3 left-3 flex gap-1.5">
+                      {recipe.prepTime && (
+                        <span className="rounded-full bg-[var(--color-surface-0)]/70 px-2.5 py-1 text-[11px] font-extrabold text-text-primary backdrop-blur-md">⏱ {recipe.prepTime}</span>
+                      )}
+                      {recipe.calories > 0 && (
+                        <span className="rounded-full bg-[var(--color-surface-0)]/70 px-2.5 py-1 text-[11px] font-extrabold text-text-primary backdrop-blur-md">🔥 {recipe.calories} kcal</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="p-4 pb-0">
+                    <h3 className="text-base font-bold text-text-primary truncate">{recipe.name}</h3>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] font-bold text-text-muted">
+                      {recipe.servings > 0 && (<span>👨‍👩‍👧‍👦 serves {recipe.servings}</span>)}
+                      {recipe.servings > 0 && recipe.tags?.length > 0 && <span>·</span>}
+                      {recipe.tags?.slice(0, 3).map((t: string) => (
+                        <span key={t} className="glass-subtle rounded-full px-2 py-0.5 text-[10px] font-bold text-text-secondary">{t}</span>
+                      ))}
+                    </div>
+                    {recipe.difficulty && (
+                      <span className={`mt-2 inline-block rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                        recipe.difficulty === "Easy" ? "bg-[var(--color-accent-mint)]/20 text-[var(--color-accent-mint)]"
+                          : recipe.difficulty === "Medium" ? "bg-[var(--color-accent-amber)]/20 text-[var(--color-accent-amber)]"
+                          : "bg-[var(--color-accent-rose)]/20 text-[var(--color-accent-rose)]"
+                      }`}>{recipe.difficulty}</span>
+                    )}
+                    {recipe.rating && recipe.rating > 0 && (
+                      <span className="ml-1.5 text-[11px] font-bold text-text-muted">⭐ {recipe.rating.toFixed(1)}</span>
+                    )}
+                  </div>
+                </div>
                 <button
                   onClick={(e) => { e.stopPropagation(); toggleFav(recipe.id); }}
                   aria-label="favorite"
@@ -170,49 +196,9 @@ export default function RecipeBox({
                     <path strokeLinecap="round" strokeLinejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
                   </svg>
                 </button>
-                {/* Stats badges */}
-                <div className="absolute bottom-3 left-3 flex gap-1.5">
-                  {recipe.prepTime && (
-                    <span className="rounded-full bg-[var(--color-surface-0)]/70 px-2.5 py-1 text-[11px] font-extrabold text-text-primary backdrop-blur-md">
-                      ⏱ {recipe.prepTime}
-                    </span>
-                  )}
-                  {recipe.calories > 0 && (
-                    <span className="rounded-full bg-[var(--color-surface-0)]/70 px-2.5 py-1 text-[11px] font-extrabold text-text-primary backdrop-blur-md">
-                      🔥 {recipe.calories} kcal
-                    </span>
-                  )}
-                </div>
               </div>
 
-              <div className="p-4">
-                <h3 className="text-base font-bold text-text-primary truncate">{recipe.name}</h3>
-                <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] font-bold text-text-muted">
-                  {recipe.servings > 0 && (
-                    <span>👨‍👩‍👧‍👦 serves {recipe.servings}</span>
-                  )}
-                  {recipe.servings > 0 && recipe.tags?.length > 0 && <span>·</span>}
-                  {recipe.tags?.slice(0, 3).map((t: string) => (
-                    <span key={t} className="glass-subtle rounded-full px-2 py-0.5 text-[10px] font-bold text-text-secondary">
-                      {t}
-                    </span>
-                  ))}
-                </div>
-
-                {recipe.difficulty && (
-                  <span className={`mt-2 inline-block rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                    recipe.difficulty === "Easy" ? "bg-[var(--color-accent-mint)]/20 text-[var(--color-accent-mint)]"
-                      : recipe.difficulty === "Medium" ? "bg-[var(--color-accent-amber)]/20 text-[var(--color-accent-amber)]"
-                      : "bg-[var(--color-accent-rose)]/20 text-[var(--color-accent-rose)]"
-                  }`}>
-                    {recipe.difficulty}
-                  </span>
-                )}
-
-                {recipe.rating && recipe.rating > 0 && (
-                  <span className="ml-1.5 text-[11px] font-bold text-text-muted">⭐ {recipe.rating.toFixed(1)}</span>
-                )}
-
+              <div className="p-4 pt-3">
                 {/* Action buttons */}
                 <div className="mt-3 flex gap-1.5">
                   {/* Add to Meal Plan, with day dropdown on hover */}
