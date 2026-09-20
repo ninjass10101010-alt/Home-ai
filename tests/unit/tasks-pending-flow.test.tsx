@@ -10,7 +10,7 @@ import TasksPage from "@/app/tasks/page";
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/tasks",
-  useRouter: () => ({ push: vi.fn(), prefetch: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
 }));
 
 const mockAuth = vi.hoisted(() => ({ currentUser: null as null | any, isLoggedIn: false }));

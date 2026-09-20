@@ -130,6 +130,9 @@ describe("stealable tasks surface", () => {
 describe("Add/Edit form: stealable toggle + pet exclusion", () => {
   it("offers the 'Up for grabs when late' toggle (under Advanced) and no pet assignees", async () => {
     stubGuestFetches();
+    // P0 gate: Add/Edit is parent-only now — sign in as the parent.
+    mockAuth.currentUser = { name: "Rebecca", role: "parent" };
+    mockAuth.isLoggedIn = true;
     const el = await renderAsync(<TasksPage />);
     await settle();
     [...el.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Add task")!.click();

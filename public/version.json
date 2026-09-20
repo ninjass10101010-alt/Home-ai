@@ -1,7 +1,7 @@
 {
-  "hash": "443cd7179b074ae4efdee87080c823aef28d22aa",
-  "short": "443cd71",
-  "message": "docs(agents): weekly prize race final-review fix wave recorded",
-  "date": "2026-09-16 12:06:15 -0400",
+  "hash": "6462cc7be0f4b1f8f0c85b90ae666acfc6ff591f",
+  "short": "6462cc7",
+  "message": "test(meals): use-meals-sync-blocked harness gains the next/navigation mock (PlanTab now uses useRouter)",
+  "date": "2026-09-20 02:31:10 -0400",
   "author": "GarciaFam"
 }

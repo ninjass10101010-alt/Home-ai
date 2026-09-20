@@ -2,6 +2,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef, type CSSProperties } from "react";
+import { useRouter } from "next/navigation";
 import { mapTaskIdeas, mapRewardIdeas } from "@/lib/ai-suggestions";
 import PageShell from "@/components/ui/PageShell";
 import PageHeader from "@/components/patterns/PageHeader";
@@ -68,7 +69,6 @@ import TrophyCase from "@/components/leaderboard/TrophyCase";
 import ShareCard from "@/components/leaderboard/ShareCard";
 import WeeklyWinModal from "@/components/leaderboard/WeeklyWinModal";
 import ConfettiBurst from "@/components/ui/ConfettiBurst";
-import RemindersSection from "@/components/tasks/RemindersSection";
 
 function isoOffset(days: number): string {
   const d = new Date(Date.now() + days * 86400000);
@@ -279,6 +279,17 @@ export default function TasksPage() {
   }, []);
   const weeklyPrizes = useMemo(() => loadWeeklyPrizes(), [prizesVersion]); // eslint-disable-line react-hooks/exhaustive-deps
   const { currentUser, isLoggedIn } = useAuth();
+  const router = useRouter();
+  // P0 gate: creating, editing, and deleting family chores is parent-only.
+  const isParent = isLoggedIn && currentUser?.role === "parent";
+  // P0 redirect: a kid's task screen is their KidHome quest list — kids never
+  // see the (dense, adult) Tasks page. Catches every entry path (capsule nav,
+  // Home widget links, bookmarks). Pets ride the kid surface the same way.
+  useEffect(() => {
+    if (isLoggedIn && (currentUser?.role === "child" || currentUser?.role === "pet")) {
+      router.replace("/");
+    }
+  }, [isLoggedIn, currentUser, router]);
   const allMembers = useMemo(() => {
     // Pets are never assignees — a task handed to 🐶 would strand its points
     // (leaderboard and claims exclude pets by design).
@@ -384,7 +395,6 @@ export default function TasksPage() {
   const [redeemForMember, setRedeemForMember] = useState("");
   const [penaltyForMember, setPenaltyForMember] = useState("");
   const [aiSuggesting, setAiSuggesting] = useState(false);
-  const [googleSyncing, setGoogleSyncing] = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState<Task[]>([]);
   const [toast, setToast] = useState<string | null>(null);
   const [rewards, setRewards] = useState<Reward[]>(() => loadFromStorage(REWARDS_KEY, []));
@@ -417,6 +427,9 @@ export default function TasksPage() {
   const [parentApprovalError, setParentApprovalError] = useState("");
   const [approvalTaskId, setApprovalTaskId] = useState<number | null>(null);
   const [approvalMode, setApprovalMode] = useState<"approve" | "sendback">("approve");
+  // P0: deleting a family chore is destructive + cross-device — confirm first
+  // (the shared-Modal rose pattern, like the AI-Models provider remove).
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [approvalPin, setApprovalPin] = useState("");
   const [approvalError, setApprovalError] = useState("");
   // Parent removes a non-checked-in crew member (spec §3 flake handling).
@@ -596,12 +609,14 @@ export default function TasksPage() {
   };
 
   const startEdit = (task: Task) => {
+    if (!isParent) return; // P0 gate — kids/guests can never edit family chores
     setEditingId(task.id);
     setEditForm({ ...task });
     setIsAdding(false);
   };
 
   const startAdd = () => {
+    if (!isParent) return; // P0 gate
     setEditingId(null);
     const firstNonPet = membersData.find((m: any) => m.role !== "pet");
     const defaultMember = isLoggedIn && currentUser
@@ -692,30 +707,6 @@ export default function TasksPage() {
       showToast("Consuela couldn't come up with ideas right now — try again in a bit.");
     }
     setAiSuggesting(false);
-  };
-
-  const syncGoogleTasks = async () => {
-    setGoogleSyncing(true);
-    try {
-      const res = await fetch("/api/google/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ resource: "all" }),
-      });
-      const data = await res.json();
-      if (data.tasks?.skipped) {
-        showToast("Google Tasks scope not granted — see Settings → Integrations");
-      } else if (data.tasks?.tasks != null) {
-        showToast(`Synced ${data.tasks.tasks} Google tasks`);
-      } else if (!data.ok) {
-        showToast("Google not connected — check Settings → Integrations");
-      } else {
-        showToast("No Google tasks to sync");
-      }
-    } catch {
-      showToast("Failed to sync Google tasks");
-    }
-    setGoogleSyncing(false);
   };
 
   const adoptSuggestion = (suggestion: Task) => {
@@ -1679,9 +1670,14 @@ export default function TasksPage() {
         title="Tasks"
         subtitle={`${pending.length} pending`}
         action={
-          <IconButton aria-label="Add task" onClick={startAdd}>
-            <span>＋</span>
-          </IconButton>
+          // P0 safety gate: creating and editing family chores is a parent
+          // action — kids get their quest surface on KidHome, guests get the
+          // honest signed-out view.
+          isParent ? (
+            <IconButton aria-label="Add task" onClick={startAdd}>
+              <span>＋</span>
+            </IconButton>
+          ) : undefined
         }
         icon="✅"
       />
@@ -1732,7 +1728,7 @@ export default function TasksPage() {
                 footer={
                   <>
                     <SoftButton onClick={saveTask} disabled={!editForm.title.trim()} className="flex-1">Save</SoftButton>
-                    {!isAdding && <SoftButton variant="danger" onClick={() => deleteTask(editForm.id)} className="flex-1">Delete</SoftButton>}
+                    {!isAdding && <SoftButton variant="danger" onClick={() => setConfirmDeleteOpen(true)} className="flex-1">Delete</SoftButton>}
                     <SoftButton variant="secondary" onClick={cancelEdit} className="flex-1">Cancel</SoftButton>
                   </>
                 }
@@ -1842,7 +1838,6 @@ export default function TasksPage() {
             <SectionCard title="Consuela suggests" description="Fresh ideas for the family." icon="✨">
               <div className="flex gap-2">
                 <SoftButton variant="secondary" onClick={generateAiTasks} disabled={aiSuggesting} className="flex-1">{aiSuggesting ? "Thinking..." : "Generate"}</SoftButton>
-                <SoftButton variant="ghost" onClick={syncGoogleTasks} disabled={googleSyncing} className="flex-1">{googleSyncing ? "Syncing..." : "Sync Google Tasks"}</SoftButton>
               </div>
               {aiSuggestions.length > 0 ? (
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -1869,11 +1864,9 @@ export default function TasksPage() {
                   ))}
                 </div>
               ) : (
-                <EmptyState title="No suggestions yet" description="Generate AI ideas or sync Google Tasks to fill this space." icon="🤖" />
+                <EmptyState title="No suggestions yet" description="Generate AI ideas for fresh family chores." icon="🤖" />
               )}
             </SectionCard>
-
-            <RemindersSection />
 
             {openBoard.length > 0 && (
               <SectionCard title="🫳 Open" description="Nobody's claimed these — fastest fingers earn the bonus." icon="⚡">
@@ -1971,7 +1964,7 @@ export default function TasksPage() {
                   {pending.map((task, idx) => {
                     const rowColor = priorityColor(task.priority);
                     return (
-                    <SwipeableRow key={task.id} leftAction={<span className="text-sm font-bold">✓</span>} rightAction={<span className="text-sm font-bold">×</span>} onSwipeRight={() => wallConfirm(task.id, () => openPinEntry(task.id))} onSwipeLeft={() => startEdit(task)}>
+                    <SwipeableRow key={task.id} leftAction={<span className="text-sm font-bold">✓</span>} rightAction={<span className="text-sm font-bold">×</span>} onSwipeRight={() => wallConfirm(task.id, () => openPinEntry(task.id))} onSwipeLeft={isParent ? () => startEdit(task) : undefined}>
                       <div
                         role="button"
                         tabIndex={0}
@@ -2725,6 +2718,23 @@ export default function TasksPage() {
             />
             {crewRemoveError && <p className="text-center text-sm text-[var(--color-accent-rose)]">{crewRemoveError}</p>}
           </div>
+        </Modal>
+      )}
+
+      {confirmDeleteOpen && (
+        <Modal
+          open
+          onClose={() => setConfirmDeleteOpen(false)}
+          title="Delete this task?"
+          description={`"${editForm.title}" goes away for the whole family. This can't be undone.`}
+          footer={
+            <>
+              <SoftButton variant="danger" onClick={() => { deleteTask(editForm.id); setConfirmDeleteOpen(false); cancelEdit(); }} className="flex-1">Delete</SoftButton>
+              <SoftButton variant="secondary" onClick={() => setConfirmDeleteOpen(false)} className="flex-1">Cancel</SoftButton>
+            </>
+          }
+        >
+          <p className="text-sm text-text-secondary">The chore disappears from every device. Points already earned for it stay earned.</p>
         </Modal>
       )}
 
