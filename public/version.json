@@ -1,7 +1,7 @@
 {
-  "hash": "6462cc7be0f4b1f8f0c85b90ae666acfc6ff591f",
-  "short": "6462cc7",
-  "message": "test(meals): use-meals-sync-blocked harness gains the next/navigation mock (PlanTab now uses useRouter)",
-  "date": "2026-09-20 02:31:10 -0400",
+  "hash": "114481406d05d9706cd1cbaf51bd049375a97fd0",
+  "short": "1144814",
+  "message": "fix(chat): thread stays visible while thinking + survives tab navigation",
+  "date": "2026-09-20 21:31:12 -0400",
   "author": "GarciaFam"
 }
