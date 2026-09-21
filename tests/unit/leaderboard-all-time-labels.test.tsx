@@ -394,10 +394,10 @@ describe("KidHome hero all-time caption", () => {
     // The ledger key for a first-name session is the roster FULL name
     // (ledgerKey: exact key match, else first-word match over week points).
     expect(allTimeSpy).toHaveBeenCalledWith("Caspian Garcia", expect.anything());
-    const caption = Array.from(el.querySelectorAll("p")).find((p) =>
-      (p.textContent || "").includes("120 all-time")
-    );
-    expect(caption).toBeTruthy();
-    expect(caption!.className).toContain("text-text-muted");
+    // 2026-09-20 lift: the all-time figure lives in the labeled FOREVER card
+    // (was an 11px "{N} all-time" whisper under a weekly-fed level bar).
+    const foreverCard = el.querySelector('[data-testid="kid-forever-card"]');
+    expect(foreverCard).toBeTruthy();
+    expect(foreverCard!.textContent).toContain("120 pts · yours to keep");
   });
 });

@@ -62,7 +62,9 @@ import {
   crewHasMember,
   crewMemberCount,
   crewCheckinProgress,
+  getDaysUntilWeekReset,
 } from "@/lib/task-utils";
+import { kidRaceLine } from "./quest-labels";
 import { useWeeklyPrizes } from "@/components/leaderboard/hooks/useWeeklyPrizes";
 import QuestCard from "./QuestCard";
 import LevelBar from "./LevelBar";
@@ -362,6 +364,24 @@ export default function KidHome() {
   const user = currentUser;
   const firstName = user?.name?.split(" ")[0] || "Buddy";
   const level = Math.floor(points / POINTS_PER_LEVEL) + 1;
+
+  // ── Hero two-card math: the weekly race + the forever journey ──
+  // The hero's race line uses the SAME pure kidRaceLine as the leaderboard
+  // card, so the two surfaces can never drift apart.
+  const prizes = useWeeklyPrizes();
+  const heroRaceLine = (() => {
+    if (!prizes.length) return null;
+    const pointsMap = Object.fromEntries(members.map((m) => [m.name, m.points || 0]));
+    const myRaceName = members.find((m) => m.name?.split(" ")[0] === firstName)?.name || user?.name || "";
+    return kidRaceLine(myRaceName, pointsMap, prizes);
+  })();
+  // Reset countdown in kid words — the weekly number leaving must be as
+  // explicit as its arrival ("Resets tonight!" is the Sunday-night case).
+  const daysToReset = getDaysUntilWeekReset();
+  const resetLine =
+    daysToReset <= 0 ? "Resets tonight!" :
+    daysToReset === 1 ? "Resets tomorrow" :
+    `Resets in ${daysToReset} days`;
 
   // Wall pad identity (spec §6 amendment): the pad header shows the quest's
   // assignee (or the signed-in kid) with their roster emoji/color — never the
@@ -811,11 +831,61 @@ export default function KidHome() {
           <h1 className="text-xl font-bold text-text-primary">{greeting}</h1>
           <p className="text-sm text-text-secondary mt-1">{subtitle}</p>
 
-          {/* Level bar */}
-          <div className="w-full max-w-xs mt-4">
-            <LevelBar points={points} pointsPerLevel={POINTS_PER_LEVEL} />
+          {/* Two named point systems — kids must never wonder which number
+              they're looking at. THE RACE (this week, resets Monday, prizes)
+              and THE JOURNEY (forever, all-time level) each get a labeled,
+              color-coded card so they read as two different games, not one
+              confusing number. */}
+          <div className="w-full max-w-sm mt-4 grid grid-cols-2 gap-3">
+            {/* ── This Week: the competition ── */}
+            <div
+              data-testid="kid-week-card"
+              aria-label="This week's race points"
+              className="rounded-2xl px-3.5 py-3 text-left"
+              style={{
+                background: "linear-gradient(135deg, color-mix(in srgb, var(--color-accent-amber) 14%, transparent), color-mix(in srgb, var(--color-accent-amber) 6%, transparent))",
+                border: "1px solid color-mix(in srgb, var(--color-accent-amber) 28%, transparent)",
+              }}
+            >
+              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--color-accent-amber)]">
+                🏆 This Week
+              </p>
+              <p className="mt-1 flex items-baseline gap-1">
+                <span className="text-3xl font-black tabular-nums text-text-primary">{points}</span>
+                <span className="text-[11px] font-semibold text-text-muted">pts</span>
+              </p>
+              {heroRaceLine && (
+                <p className="mt-1 text-[11px] font-semibold leading-snug text-text-secondary">
+                  {heroRaceLine}
+                </p>
+              )}
+              <p className="mt-1.5 text-[11px] font-semibold text-text-muted">
+                {resetLine}
+              </p>
+            </div>
+
+            {/* ── Forever: the journey (level fed ALL-TIME points — parity
+                with the Tasks leaderboard, never resets Monday) ── */}
+            <div
+              data-testid="kid-forever-card"
+              aria-label="Your forever points"
+              className="rounded-2xl px-3.5 py-3 text-left"
+              style={{
+                background: "linear-gradient(135deg, color-mix(in srgb, var(--color-accent-violet) 14%, transparent), color-mix(in srgb, var(--color-accent-violet) 6%, transparent))",
+                border: "1px solid color-mix(in srgb, var(--color-accent-violet) 28%, transparent)",
+              }}
+            >
+              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--color-accent-violet)]">
+                ⭐ Forever
+              </p>
+              <div className="mt-1">
+                <LevelBar points={allTimePoints} pointsPerLevel={POINTS_PER_LEVEL} />
+              </div>
+              <p className="mt-1.5 text-[11px] font-semibold text-text-muted tabular-nums">
+                {allTimePoints} pts · yours to keep
+              </p>
+            </div>
           </div>
-          <p className="mt-1.5 text-[11px] text-text-muted tabular-nums">{allTimePoints} all-time</p>
 
           {/* Streak */}
           {streak > 0 && (

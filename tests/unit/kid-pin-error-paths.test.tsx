@@ -97,6 +97,7 @@ vi.mock("@/lib/task-utils", () => ({
       task?.crew?.members?.filter((m: any) => !!m.checkedInAt).length || 0,
     total: typeof task?.crewSize === "number" ? task.crewSize : 0,
   }),
+  getDaysUntilWeekReset: () => 3,
   isSnatchable: (task: any, today: string = "2026-09-04") =>
     !!task.stealable && !task.completed && !!task.due && task.due < today,
   resolveMemberName: (members: any[], rawName?: string | null) => {
