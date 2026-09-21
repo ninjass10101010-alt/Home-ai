@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { act } from "react";
 import type { ReactElement } from "react";
 import ChatPage from "@/app/chat/page";
+import { __resetChatStoreForTests } from "@/lib/chat-store";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -46,6 +47,7 @@ async function settle(ms = 120) {
 
 describe("Chat speaker picker live roster (consuela-members-updated)", () => {
   beforeEach(() => {
+    __resetChatStoreForTests();
     document.body.innerHTML = "";
     localStorage.clear();
     vi.unstubAllGlobals();

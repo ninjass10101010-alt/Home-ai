@@ -1,50 +1,35 @@
-/* eslint-disable react-hooks/set-state-in-effect, react-hooks/purity */
+/* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
-import { useState, useRef, useEffect, useMemo, Suspense } from "react";
+import { useState, useRef, useEffect, useMemo, Suspense, useSyncExternalStore } from "react";
 import CapsuleNav from "@/components/ui/CapsuleNav";
 import Avatar from "@/components/ui/Avatar";
 import { EmojiText } from "@/components/ui/EmojiText";
 import SyncStatusBanner from "@/components/ui/SyncStatusBanner";
 import Modal from "@/components/ui/Modal";
-import { Icon3D } from "@/components/3d";
 import { UnifiedInput } from "@/components/chat/UnifiedInput";
-import AdjustPointsChip, {
-  isPointAdjustmentProposal,
-  type PointAdjustmentProposal,
-} from "@/components/chat/AdjustPointsChip";
-import { streamConsuelaChat } from "@/lib/chat-stream";
+import AdjustPointsChip from "@/components/chat/AdjustPointsChip";
 import { FamilyBrief } from "./FamilyBrief";
 import { OpenLoopChips } from "./OpenLoopChips";
 import { messageOrigin, stripForSpeech } from "@/lib/consuela/chat-context";
 import { speak, stopSpeaking, isSpeaking, isSpeechSupported } from "@/lib/consuela/speech";
-import { mergeThread, sortThread, visibleThread, SEED_GREETING_ID } from "@/lib/chat-thread";
+import { sortThread, visibleThread, SEED_GREETING_ID } from "@/lib/chat-thread";
+import {
+  subscribe,
+  getSnapshot,
+  getServerSnapshot,
+  ensureHydrated,
+  send as sendChat,
+  stop as stopChat,
+  startNewConversation,
+  retry as retryChat,
+} from "@/lib/chat-store";
 
 import { db } from "@/db";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { usePendingChatQuery } from "@/hooks/usePendingChatQuery";
 
-interface Message {
-  id: number;
-  role: "user" | "assistant" | "system";
-  content: string;
-  timestamp: string;
-  /** Epoch ms — the deterministic sort key. PB rows derive it from createdAt;
-   *  optimistic rows use Date.now(); legacy/seeds default to 0. */
-  at: number;
-  speaker?: string;
-  speakerEmoji?: string;
-  errorFor?: string;
-  /** Telegram-mirrored row — wears an origin badge in the thread. */
-  source?: "telegram";
-  /** Task 15 — inert point-adjustment proposals surfaced by a tool status
-   *  frame during this assistant turn. Points move ONLY when a parent taps
-   *  the chip and enters their PIN (see AdjustPointsChip). Never sent to PB. */
-  proposals?: PointAdjustmentProposal[];
-}
-
-const CHAT_STORAGE_KEY = "consuela-chat-messages";
 const SPEAKER_STORAGE_KEY = "consuela-chat-speaker";
 
 // Photo data-URL speakers render as a real <img> (SigmaImage) via the shared
@@ -53,74 +38,6 @@ const SPEAKER_STORAGE_KEY = "consuela-chat-speaker";
 function EmojiSpan({ emoji, alt = "" }: { emoji: string; alt?: string }) {
   return <EmojiText emoji={emoji} alt={alt} />;
 }
-
-function loadChatHistory(): Message[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const d = localStorage.getItem(CHAT_STORAGE_KEY);
-    if (!d) return [];
-    const parsed = JSON.parse(d);
-    if (!Array.isArray(parsed)) return [];
-    // Normalize legacy rows written before `at` existed so ordering stays sane.
-    return parsed.map((m: any) => ({ ...m, at: typeof m.at === "number" ? m.at : 0 }));
-  } catch { return []; }
-}
-
-function saveChatHistory(msgs: Message[]) {
-  if (typeof window === "undefined") return;
-  try { localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(msgs)); } catch {}
-}
-
-function todayISO(): string {
-  return new Date().toISOString().split("T")[0];
-}
-
-// Short beat so the orb animation doesn't flash on instant buffered replies.
-const MIN_THINKING_DELAY = 400;
-
-// Read the daily PB thread (union of dashboard + telegram messages).
-// Returns [] on any failure so callers keep their localStorage state.
-// Pass sinceISO to fetch only rows newer than that createdAt (incremental reconcile).
-async function fetchPBThread(sinceISO?: string): Promise<{ messages: Message[]; latest: string | null }> {
-  try {
-    const params = new URLSearchParams({ threadId: todayISO() });
-    if (sinceISO) params.set("since", sinceISO);
-    const res = await fetch(`/api/chat/messages?${params.toString()}`, { cache: "no-store" });
-    if (!res.ok) return { messages: [], latest: null };
-    const json = await res.json();
-    if (!json.ok || !Array.isArray(json.messages)) return { messages: [], latest: null };
-    let latest: string | null = null;
-    const messages = json.messages.map((m: any) => {
-      if (m.createdAt && (!latest || String(m.createdAt) > latest)) latest = String(m.createdAt);
-      return {
-        id: pbSyntheticIdCounter++,
-        role: m.role === "user" ? ("user" as const) : m.role === "system" ? ("system" as const) : ("assistant" as const),
-        content: m.content || "",
-        timestamp: new Date(m.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
-        at: Date.parse(m.createdAt) || 0,
-        ...(m.role === "user" && m.userId ? { speaker: m.userId } : {}),
-        ...(m.source === "telegram" ? { source: "telegram" as const } : {}),
-      };
-    });
-    return { messages, latest };
-  } catch { return { messages: [], latest: null }; }
-}
-
-// Synthetic ids for PB-hydrated rows must be unique ACROSS reconciles, not
-// just within one fetch — a per-fetch index collides (fetch #2's row can get
-// the same id as fetch #1's) and duplicate React keys break list diffing.
-// Monotonic global counter, module-scoped so every fetch keeps counting up.
-let pbSyntheticIdCounter = 2_000_000;
-
-const initialGreeting: Message = {
-  id: 1,
-  role: "assistant",
-  // The hero already introduces Consuela; the seed message just opens the
-  // door (no double introduction once the thread starts).
-  content: "What can I help you with today? 🏡",
-  timestamp: "Now",
-  at: 0,
-};
 
 function escapeHtml(s: string) {
   return s
@@ -228,54 +145,15 @@ function ChatContent() {
     ? { name: currentUser.name, emoji: currentUser.emoji, color: currentUser.color }
     : currentSpeaker;
 
-  const [messages, setMessages] = useState<Message[]>([initialGreeting]);
+  const store = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const { messages, isTyping, statusLine, hydrated, streaming } = store;
 
-  // Hydrate saved messages after mount (client only, avoids SSR mismatch).
-  // Merge (never replace) so this late pass can't drop an optimistic send.
+  // Hydrate once per page load (localStorage + today's PocketBase thread).
+  // A remount re-attaches to the store; the store itself does a cheap
+  // incremental reconcile instead of a second full read.
   useEffect(() => {
-    const saved = loadChatHistory();
-    if (saved.length > 0) {
-      setMessages(prev => mergeThread(prev, saved));
-    }
+    void ensureHydrated();
   }, []);
-
-  const hydratedRef = useRef(false);
-  const [hydrated, setHydrated] = useState(false);
-  // Newest createdAt seen in the PB thread — post-send reconciles read only
-  // rows after this watermark instead of refetching the whole day.
-  const lastPBCreatedRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      // PB is the union of dashboard + telegram — it wins over the localStorage
-      // seed when it has anything; otherwise keep the local history as-is.
-      // Hydration stays a FULL read; only post-send reconciles go incremental.
-      const { messages: pbMsgs, latest } = await fetchPBThread();
-      if (cancelled) return;
-      if (latest) lastPBCreatedRef.current = latest;
-      // MERGE, not replace: if the user sent before this fetch resolved, their
-      // optimistic message survives and ordering is restored by sortThread.
-      setMessages(prev => mergeThread(prev, pbMsgs.length > 0 ? pbMsgs : loadChatHistory()));
-      hydratedRef.current = true;
-      setHydrated(true);
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  useEffect(() => {
-    if (hydrated && messages.length > 0) {
-      // Never persist the seed greeting — it is re-seeded on load, and keeping
-      // it would put a phantom row at the top of the stored thread. Match on
-      // content too so a legacy stored row that happens to share the id survives.
-      const isSeedGreeting = (m: Message) =>
-        m.id === SEED_GREETING_ID && m.role === "assistant" && m.content === initialGreeting.content;
-      saveChatHistory(messages.filter(m => !isSeedGreeting(m)));
-    }
-  }, [messages, hydrated]);
-
-  const [isTyping, setIsTyping] = useState(false);
-  const [statusLine, setStatusLine] = useState<string | null>(null);
   const [showSpeakerPicker, setShowSpeakerPicker] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -285,21 +163,22 @@ function ChatContent() {
   const searchParams = useSearchParams();
   const queryParam = searchParams.get("q");
 
-  // Hero state: visible when fresh (no user messages yet) OR first reply is pending (orb animation plays while thinking)
-  // System reset markers don't count as conversation messages — a fresh
-  // /new conversation still shows the hero + chips.
+  // Hero state: the hero owns a truly EMPTY conversation only. Any real
+  // message hands the view to the thread — including while Consuela is
+  // thinking (the typing bubble renders under the last message), because
+  // hiding the history during a reply was the reported bug.
   // Deterministic, conversation-scoped view: sorted by time and sliced at the
   // newest reset marker, so order never depends on merge timing and a new
   // conversation hides everything before its divider.
   const visibleMessages = useMemo(() => visibleThread(sortThread(messages)), [messages]);
   const userMessageCount = visibleMessages.filter(m => m.role === "user").length;
-  // The hero owns a truly empty conversation; any real message (a user row, or
-  // an assistant reply that is not the seed greeting) hands the view to the
-  // thread — otherwise a marker followed only by a reply would hide it.
+  // Any real message (a user row, or an assistant reply that is not the seed
+  // greeting) hands the view to the thread — otherwise a marker followed only
+  // by a reply would hide it.
   const hasRealMessages = visibleMessages.some(
     m => m.role === "user" || (m.role === "assistant" && m.id !== SEED_GREETING_ID),
   );
-  const showHero = !hasRealMessages || (userMessageCount === 1 && isTyping);
+  const showHero = !hasRealMessages;
 
   // Hide quick actions while Consuela is thinking — don't let them tap again
   const showQuickActions = userMessageCount === 0 && !isTyping;
@@ -373,212 +252,16 @@ function ChatContent() {
     };
   }, [showSpeakerPicker]);
 
-  const msgCounter = useRef(Math.max(100, ...messages.map(m => m.id)));
-  const messagesRef = useRef(messages);
-  useEffect(() => { messagesRef.current = messages; }, [messages]);
-  // Spans the ENTIRE stream — the visual isTyping flag drops on the first
-  // token (intended UX), so it can't also be the double-send guard.
-  const streamInFlightRef = useRef(false);
-  // Live AbortController for the in-flight stream — the stop button's handle.
-  const abortRef = useRef<AbortController | null>(null);
-  // Render-visible mirror of the ref: keeps the composer's send path disabled
-  // for the whole stream so a mid-stream send can't be silently swallowed.
-  const [composerLocked, setComposerLocked] = useState(false);
-
-  const stopGenerating = () => {
-    abortRef.current?.abort();
-  };
-
-  // Conversation steering (2026-09-09): /new + /restart start a fresh
-  // conversation — Telegram/opencode-style. The reset marker (a system row in
-  // the daily PB thread) is both the visible "New conversation" divider and
-  // the LLM context cutoff: history sent to the model starts AFTER the newest
-  // marker, so the brain forgets the old conversation while the family keeps
-  // it in the thread. Guests keep a local-only marker (the POST 401s — the
-  // divider still shows on this device, honestly).
-  const startNewConversation = async () => {
-    msgCounter.current += 1;
-    const marker: Message = {
-      id: msgCounter.current,
-      role: "system",
-      content: "New conversation",
-      timestamp: "Just now",
-      at: Date.now(),
-    };
-    setMessages(prev => [...prev, marker]);
-    try {
-      await fetch("/api/chat/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "reset" }),
-      });
-    } catch { /* offline — local divider only */ }
-  };
-
-  const isResetCommand = (text: string) => /^\/(new|restart)$/i.test(text.trim());
-
-  const sendMessage = async (text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed || isTyping || streamInFlightRef.current) return;
-    if (isResetCommand(trimmed)) {
-      await startNewConversation();
-      return;
-    }
-    streamInFlightRef.current = true;
-    setComposerLocked(true);
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    msgCounter.current += 1;
-    const userAt = Date.now();
-    const userMsg: Message = {
-      id: msgCounter.current,
-      role: "user",
-      content: trimmed,
-      timestamp: "Just now",
-      at: userAt,
-      speaker: activeSpeaker.name,
-      speakerEmoji: activeSpeaker.emoji,
-    };
-
-    setMessages(prev => [...prev, userMsg]);
-    setPinnedToBottom(true);
-    setIsTyping(true);
-    setStatusLine(null);
-
-    msgCounter.current += 1;
-    const streamId = msgCounter.current;
-    // +1 so the reply sorts after its request even if both land in the same ms.
-    const streamAt = userAt + 1;
-    let bubbleOpen = false;
-    // Whatever streamed before a stop/failure — a stopped reply keeps its words.
-    let streamedSoFar = "";
-    // Task 15 — point-adjustment proposals surfaced during THIS turn. They
-    // stay inert: nothing here writes; only the chip's parent-PIN flow POSTs.
-    const turnProposals: PointAdjustmentProposal[] = [];
-    const attachProposal = (value: unknown) => {
-      if (!isPointAdjustmentProposal(value)) return;
-      const dupe = turnProposals.some(
-        (p) => p.args.member === value.args.member && p.args.delta === value.args.delta && p.args.reason === value.args.reason,
-      );
-      if (dupe) return;
-      turnProposals.push(value);
-      setMessages(prev => prev.some(m => m.id === streamId)
-        ? prev.map(m => (m.id === streamId ? { ...m, proposals: [...turnProposals] } : m))
-        : prev);
-    };
-
-    try {
-      const t0 = Date.now();
-      // Context steering: the model only sees messages AFTER the newest
-      // reset marker — a /new conversation starts with a clean brain while
-      // the full day stays readable in the thread above.
-      const lastResetIdx = messagesRef.current.map(m => m.role).lastIndexOf("system");
-      const modelHistory = (lastResetIdx >= 0
-        ? messagesRef.current.slice(lastResetIdx + 1)
-        : messagesRef.current
-      ).slice(-12).map(m => ({
-        role: m.role,
-        content: m.role === "assistant"
-          ? m.content.replace(/\n\n✅[\s\S]*$/, "").trim()
-          : m.content,
-      }));
-      const result = await streamConsuelaChat({
-        message: trimmed,
-        history: modelHistory,
-        signal: controller.signal,
-        onStatus: (label, data) => {
-          setStatusLine(label);
-          attachProposal((data as { proposal?: unknown } | undefined)?.proposal);
-        },
-        onToken: (full) => {
-          streamedSoFar = full;
-          if (!bubbleOpen) { bubbleOpen = true; setIsTyping(false); }
-          setMessages(prev => prev.some(m => m.id === streamId)
-            ? prev.map(m => (m.id === streamId ? { ...m, content: full } : m))
-            : [...prev, {
-                id: streamId, role: "assistant" as const, content: full, timestamp: "Just now", at: streamAt,
-                ...(turnProposals.length ? { proposals: [...turnProposals] } : {}),
-              }]);
-        },
-      });
-      // Buffered (non-streamed) path: the route surfaces proposals as a
-      // top-level array instead of status frames — same chip, same PIN.
-      for (const p of Array.isArray(result.proposals) ? result.proposals : []) attachProposal(p);
-      const { content, streamed } = result;
-
-      // Buffered fallback keeps a short beat so the orb doesn't flash;
-      // streamed replies already rendered live.
-      if (!streamed) {
-        const elapsed = Date.now() - t0;
-        if (elapsed < MIN_THINKING_DELAY) {
-          await new Promise(r => setTimeout(r, MIN_THINKING_DELAY - elapsed));
-        }
-      }
-      setIsTyping(false);
-      setStatusLine(null);
-
-      const finalContent = content || "I processed that.";
-      setMessages(prev => prev.some(m => m.id === streamId)
-        ? prev.map(m => (m.id === streamId ? { ...m, content: finalContent, proposals: m.proposals ?? (turnProposals.length ? [...turnProposals] : undefined) } : m))
-        : [...prev, {
-            id: streamId, role: "assistant" as const, content: finalContent, timestamp: "Just now", at: streamAt,
-            ...(turnProposals.length ? { proposals: [...turnProposals] } : {}),
-          }]);
-
-      // Reconcile against PB (picks up anything that arrived on other devices) —
-      // incremental: only rows newer than the last watermark we've seen.
-      // Safety window: Telegram rows land with their real send time, which can
-      // predate the watermark — re-fetch 10 min back and let mergeThread dedupe.
-      const since = lastPBCreatedRef.current
-        ? new Date(Date.parse(lastPBCreatedRef.current) - 10 * 60 * 1000).toISOString()
-        : undefined;
-      const { messages: fresh, latest } = await fetchPBThread(since);
-      if (latest) lastPBCreatedRef.current = latest;
-      if (fresh.length > 0) setMessages(prev => mergeThread(prev, fresh));
-    } catch (error) {
-      setIsTyping(false);
-      setStatusLine(null);
-
-      if (controller.signal.aborted) {
-        // User pressed stop — not an error. Keep whatever streamed; if nothing
-        // did, say so plainly instead of dropping a silent hole in the thread.
-        const stoppedContent = streamedSoFar.trim() || "Stopped.";
-        setMessages(prev => prev.some(m => m.id === streamId)
-          ? prev.map(m => (m.id === streamId ? { ...m, content: stoppedContent, proposals: m.proposals ?? (turnProposals.length ? [...turnProposals] : undefined) } : m))
-          : [...prev, {
-              id: streamId, role: "assistant" as const, content: stoppedContent, timestamp: "Just now", at: streamAt,
-              ...(turnProposals.length ? { proposals: [...turnProposals] } : {}),
-            }]);
-      } else {
-        // Honest failure: name the problem (offline vs server) and the recovery.
-        const offline = typeof navigator !== "undefined" && !navigator.onLine;
-        const failedContent = offline
-          ? "You're offline — I can't reach the family server right now. Check the connection and try again."
-          : "I couldn't reach the family server just now. Your message is still here — try again in a moment.";
-        msgCounter.current += 1;
-        setMessages(prev => [...prev, {
-          id: msgCounter.current,
-          role: "assistant",
-          content: failedContent,
-          timestamp: "Just now",
-          at: Date.now(),
-          errorFor: trimmed,
-        }]);
-      }
-    } finally {
-      abortRef.current = null;
-      streamInFlightRef.current = false;
-      setComposerLocked(false);
-    }
-  };
+  const stopGenerating = stopChat;
 
   const retryMessage = (failedText: string, failedId: number) => {
-    // Never remove the failed bubble unless the retry will actually run —
-    // a mid-stream guard drop would otherwise eat the user's message.
-    if (isTyping || streamInFlightRef.current) return;
-    setMessages(prev => prev.filter(m => m.id !== failedId));
-    sendMessage(failedText);
+    retryChat(failedText, failedId, activeSpeaker);
+  };
+
+  const sendMessage = (text: string) => {
+    // Sending always re-pins the thread to the newest message.
+    setPinnedToBottom(true);
+    return sendChat(text, activeSpeaker);
   };
 
   const [confirmClearOpen, setConfirmClearOpen] = useState(false);
@@ -736,87 +419,31 @@ function ChatContent() {
         {/* Hero: the family's day + a companion orb — the brief IS the opening */}
         {showHero && (
           <div className="flex flex-col items-center pt-6 pb-6 gap-5">
-            {isTyping ? (
-              <div className="flex flex-col items-center pt-4">
-                <div className="relative w-[200px] h-[200px] flex items-center justify-center chat-hero-enter">
-                  <div
-                    className="chat-ambient-glow absolute inset-0 rounded-full"
-                    style={{
-                      background: "radial-gradient(circle, color-mix(in srgb, var(--color-accent-selected) 50%, transparent) 0%, color-mix(in srgb, var(--color-accent-selected) 20%, transparent) 40%, transparent 70%)",
-                      filter: "blur(24px)",
-                    }}
-                  />
-                  <div
-                    className="w-[140px] h-[140px] rounded-full chat-orb-think"
-                    style={{
-                      background: "radial-gradient(circle at 40% 35%, color-mix(in srgb, var(--color-accent-selected) 85%, white) 0%, color-mix(in srgb, var(--color-accent-selected) 60%, transparent) 35%, color-mix(in srgb, var(--color-accent-selected) 20%, transparent) 70%, transparent 100%)",
-                      boxShadow: "0 0 80px color-mix(in srgb, var(--color-accent-selected) 40%, transparent), 0 0 160px color-mix(in srgb, var(--color-accent-selected) 12%, transparent), inset 0 2px 0 rgba(255,255,255,0.2)",
-                    }}
-                  />
-                  <svg className="absolute inset-0 w-full h-full" viewBox="0 0 200 200" aria-hidden>
-                    {[0, 1, 2, 3, 4].map((i) => {
-                      const phase = i / 5;
-                      const strokeAlpha = 0.55 - phase * 0.4;
-                      const strokeWidth = 2.0 - phase * 0.35;
-                      return (
-                        <circle
-                          key={i}
-                          cx="100" cy="100" r="78"
-                          fill="none"
-                          style={{
-                            stroke: `color-mix(in srgb, var(--color-accent-selected) ${Math.round(strokeAlpha * 100)}%, transparent)`,
-                            strokeWidth,
-                            animationDelay: `${(phase * 1.8).toFixed(2)}s`,
-                            transformOrigin: "100px 100px",
-                          }}
-                          className="chat-ripple"
-                        />
-                      );
-                    })}
-                  </svg>
-                  <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 200 200" aria-hidden>
-                    <circle
-                      cx="100" cy="100" r="88"
-                      fill="none"
-                      style={{ stroke: "color-mix(in srgb, var(--color-accent-selected) 40%, transparent)" }}
-                      strokeWidth="1.0"
-                      strokeDasharray="6 14"
-                      strokeLinecap="round"
-                      className="chat-hero-ring-fast"
-                    />
-                  </svg>
-                </div>
-                <p className="text-sm text-text-secondary mt-3 chat-hero-enter chat-hero-enter-delay-100">
-                  Thinking…
+            <div className="flex items-center gap-4 w-full px-1 chat-hero-enter">
+              <div
+                className="w-[72px] h-[72px] rounded-full shrink-0 chat-hero-orb"
+                style={{
+                  background: "radial-gradient(circle at 40% 35%, color-mix(in srgb, var(--color-accent-selected) 85%, white) 0%, color-mix(in srgb, var(--color-accent-selected) 60%, transparent) 35%, color-mix(in srgb, var(--color-accent-selected) 20%, transparent) 70%, transparent 100%)",
+                  boxShadow: "0 0 40px color-mix(in srgb, var(--color-accent-selected) 25%, transparent), inset 0 2px 0 rgba(255,255,255,0.2)",
+                }}
+                aria-hidden
+              />
+              <div className="min-w-0">
+                <h2 className="text-2xl font-bold leading-tight"
+                  style={{
+                    background: "linear-gradient(135deg, var(--color-accent-selected), color-mix(in srgb, var(--color-accent-selected) 60%, white))",
+                    WebkitBackgroundClip: "text",
+                    WebkitTextFillColor: "transparent",
+                    backgroundClip: "text",
+                  }}
+                >
+                  Hi, I&apos;m Consuela
+                </h2>
+                <p className="text-sm text-text-secondary mt-0.5">
+                  Here&apos;s today — ask me anything.
                 </p>
               </div>
-            ) : (
-              <div className="flex items-center gap-4 w-full px-1 chat-hero-enter">
-                <div
-                  className="w-[72px] h-[72px] rounded-full shrink-0 chat-hero-orb"
-                  style={{
-                    background: "radial-gradient(circle at 40% 35%, color-mix(in srgb, var(--color-accent-selected) 85%, white) 0%, color-mix(in srgb, var(--color-accent-selected) 60%, transparent) 35%, color-mix(in srgb, var(--color-accent-selected) 20%, transparent) 70%, transparent 100%)",
-                    boxShadow: "0 0 40px color-mix(in srgb, var(--color-accent-selected) 25%, transparent), inset 0 2px 0 rgba(255,255,255,0.2)",
-                  }}
-                  aria-hidden
-                />
-                <div className="min-w-0">
-                  <h2 className="text-2xl font-bold leading-tight"
-                    style={{
-                      background: "linear-gradient(135deg, var(--color-accent-selected), color-mix(in srgb, var(--color-accent-selected) 60%, white))",
-                      WebkitBackgroundClip: "text",
-                      WebkitTextFillColor: "transparent",
-                      backgroundClip: "text",
-                    }}
-                  >
-                    Hi, I&apos;m Consuela
-                  </h2>
-                  <p className="text-sm text-text-secondary mt-0.5">
-                    Here&apos;s today — ask me anything.
-                  </p>
-                </div>
-              </div>
-            )}
+            </div>
 
             {/* The family's day — dinner, next up, who's speaking */}
             {!isTyping && (
@@ -975,8 +602,8 @@ function ChatContent() {
           initialValue={draft?.text}
           onSendMessage={sendMessage}
           disabled={false}
-          sendDisabled={isTyping || composerLocked}
-          streaming={isTyping || composerLocked}
+          sendDisabled={streaming}
+          streaming={streaming}
           onStop={stopGenerating}
           showTip={userMessageCount === 0}
         />

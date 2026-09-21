@@ -59,6 +59,7 @@ vi.mock("@/db", () => ({ db: { selectMembers: () => [] } }));
 
 import ChatPage from "@/app/chat/page";
 import AdjustPointsChip from "@/components/chat/AdjustPointsChip";
+import { __resetChatStoreForTests } from "@/lib/chat-store";
 
 const PROPOSAL = {
   tool: "adjust_points" as const,
@@ -112,6 +113,7 @@ function clickButton(el: HTMLElement | Document, label: string): boolean {
 }
 
 beforeEach(() => {
+  __resetChatStoreForTests();
   inputProps.current = null;
   authMock.state = {
     currentUser: { name: "Rebecca G", role: "parent", emoji: "🐱", color: "rose" },

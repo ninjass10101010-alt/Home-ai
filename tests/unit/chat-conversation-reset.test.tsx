@@ -50,6 +50,7 @@ vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams()
 vi.mock("@/db", () => ({ db: { selectMembers: () => [] } }));
 
 import ChatPage from "@/app/chat/page";
+import { __resetChatStoreForTests } from "@/lib/chat-store";
 
 let activeRoot: ReturnType<typeof createRoot> | null = null;
 function render(ui: ReactElement): HTMLElement {
@@ -64,6 +65,7 @@ const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true, mess
 }));
 
 beforeEach(() => {
+  __resetChatStoreForTests();
   inputProps.current = null;
   authMock.state = { currentUser: null, isLoggedIn: false };
   streamMock.fn.mockReset();

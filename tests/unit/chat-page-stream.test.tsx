@@ -70,6 +70,7 @@ vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams()
 vi.mock("@/db", () => ({ db: { selectMembers: () => [] } }));
 
 import ChatPage from "@/app/chat/page";
+import { __resetChatStoreForTests } from "@/lib/chat-store";
 
 let activeRoot: ReturnType<typeof createRoot> | null = null;
 function render(ui: ReactElement): HTMLElement {
@@ -80,6 +81,7 @@ function render(ui: ReactElement): HTMLElement {
 }
 
 beforeEach(() => {
+  __resetChatStoreForTests();
   inputProps.current = null;
   authMock.state = { currentUser: null, isLoggedIn: false };
   streamMock.fn.mockReset();
@@ -122,6 +124,51 @@ describe("chat page streaming", () => {
     // exactly one assistant bubble with the final content
     expect((el.textContent?.match(/Hello/g) || []).length).toBe(1);
     void bubbles;
+  });
+
+  it("keeps the user's message and the thinking bubble visible while Consuela replies (no hero takeover)", async () => {
+    let resolveStream: ((r: { content: string; streamed: boolean }) => void) | null = null;
+    streamMock.fn.mockImplementation(() => new Promise((res) => { resolveStream = res; }));
+
+    const el = render(<ChatPage />);
+    let sendPromise: Promise<void> | undefined;
+    act(() => { sendPromise = inputProps.current!.onSendMessage("first question"); });
+
+    // The regression the family hit: the first send hid the whole thread
+    // behind a 200px orb. The request must stay on screen with the dots below.
+    expect(el.textContent).toContain("first question");
+    expect(el.querySelector(".chat-orb-think")).toBeNull();
+    expect(el.querySelector("[role='log']")).not.toBeNull();
+    expect(el.textContent).toContain("Consuela is thinking…");
+
+    await act(async () => {
+      resolveStream!({ content: "the answer", streamed: true });
+      await sendPromise;
+    });
+    expect(el.textContent).toContain("the answer");
+  });
+
+  it("keeps streaming while the page is unmounted and shows the partial on return (tab navigation)", async () => {
+    let opts: any = null;
+    streamMock.fn.mockImplementation((o: any) => {
+      opts = o;
+      return new Promise(() => { /* never resolves — the reply is still arriving */ });
+    });
+
+    render(<ChatPage />);
+    act(() => { void inputProps.current!.onSendMessage("ask while leaving"); });
+
+    // Navigate away: the page unmounts, the stream keeps running in the store.
+    act(() => { activeRoot?.unmount(); });
+    activeRoot = null;
+    document.body.innerHTML = "";
+
+    act(() => { opts.onToken("while away ", "while away "); });
+
+    // Navigate back: the live thread is already there — no PB refetch needed.
+    const el2 = render(<ChatPage />);
+    expect(el2.textContent).toContain("ask while leaving");
+    expect(el2.textContent).toContain("while away");
   });
 
   it("shows the tool status line while waiting for the first token", async () => {
