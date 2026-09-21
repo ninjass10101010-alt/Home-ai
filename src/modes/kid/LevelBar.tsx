@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/set-state-in-effect */
 /**
  * LevelBar — XP progress bar for Kid Mode.
  *
@@ -121,41 +122,6 @@ export default function LevelBar({
           {points} total pts
         </span>
       </div>
-
-      <style>{`
-        @keyframes levelShimmer {
-          0%   { transform: translateX(-100%); }
-          100% { transform: translateX(200%); }
-        }
-
-        @keyframes levelNearPulse {
-          0%, 100% { opacity: 0.4; }
-          50%      { opacity: 1; }
-        }
-
-        @keyframes levelBadgePop {
-          0%   { transform: scale(0); opacity: 0; }
-          50%  { transform: scale(1.3); }
-          100% { transform: scale(1); opacity: 1; }
-        }
-
-        .level-up-pulse {
-          animation: levelUpGlow 1s ease-in-out;
-        }
-
-        @keyframes levelUpGlow {
-          0%   { filter: brightness(1); transform: scale(1); }
-          25%  { filter: brightness(1.5); transform: scale(1.1); }
-          50%  { filter: brightness(1.2); transform: scale(1.05); }
-          100% { filter: brightness(1); transform: scale(1); }
-        }
-
-        @media (prefers-reduced-motion: reduce) {
-          .level-up-pulse { animation: none !important; }
-          @keyframes levelShimmer { 0%, 100% { transform: none; } }
-          @keyframes levelNearPulse { 0%, 100% { opacity: 0.6; } }
-        }
-      `}</style>
     </div>
   );
 }

@@ -49,7 +49,11 @@ export default function PrizeRaceCard({ prizes, entries, daysUntilReset, myName 
       tone="#f59e0b"
       action={
         <span className="text-xs font-semibold text-text-secondary whitespace-nowrap">
-          ⏳ Resets in {daysUntilReset} day{daysUntilReset !== 1 ? "s" : ""}
+          {daysUntilReset <= 0
+            ? "⏳ Resets tonight!"
+            : daysUntilReset === 1
+              ? "⏳ Resets tomorrow"
+              : `⏳ Resets in ${daysUntilReset} days`}
         </span>
       }
     >

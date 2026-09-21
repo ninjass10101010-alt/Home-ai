@@ -926,10 +926,11 @@ export function getMemberAllTimeStreak(
 const PREV_RANKS_KEY = "consuela-previous-ranks";
 
 export function getDaysUntilWeekReset(): number {
-  const now = new Date();
-  const nextMonday = mondayOf(new Date(now.getTime() + 7 * 86400000));
-  const diffMs = nextMonday.getTime() - now.getTime();
-  return Math.max(0, Math.ceil(diffMs / 86400000));
+  // Days until the NEXT Monday, day-of-week math (not date-instant deltas —
+  // the old mondayOf(now + 7d) skipped a full week on Sundays: next Monday is
+  // 1 day away, not 7-8). Sunday → 1 ("resets tomorrow"), Monday → 0
+  // ("resets tonight" — the race ends at Monday midnight).
+  return (8 - new Date().getDay()) % 7;
 }
 
 export function getPreviousWeekRanks(): Record<string, number> {

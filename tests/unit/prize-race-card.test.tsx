@@ -218,12 +218,16 @@ describe("PrizeRaceCard", () => {
     });
   });
 
-  it("pluralizes the reset countdown", () => {
+  it("handles the countdown boundaries (0 = tonight, 1 = tomorrow, N = days)", () => {
+    const zero = render(
+      <PrizeRaceCard prizes={PRIZES} entries={[entry("Rebecca", 10)]} daysUntilReset={0} />
+    );
+    expect(zero.textContent).toContain("Resets tonight!");
+
     const one = render(
       <PrizeRaceCard prizes={PRIZES} entries={[entry("Rebecca", 10)]} daysUntilReset={1} />
     );
-    expect(one.textContent).toContain("Resets in 1 day");
-    expect(one.textContent).not.toContain("Resets in 1 days");
+    expect(one.textContent).toContain("Resets tomorrow");
 
     const many = render(
       <PrizeRaceCard prizes={PRIZES} entries={[entry("Rebecca", 10)]} daysUntilReset={4} />
