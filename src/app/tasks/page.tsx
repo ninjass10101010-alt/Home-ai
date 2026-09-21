@@ -4,6 +4,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { mapTaskIdeas, mapRewardIdeas } from "@/lib/ai-suggestions";
+import { localTodayISO } from "@/lib/local-date";
 import PageShell from "@/components/ui/PageShell";
 import PageHeader from "@/components/patterns/PageHeader";
 import SectionCard from "@/components/patterns/SectionCard";
@@ -29,7 +30,7 @@ import type { Task, LeaderboardEntry, Reward, Penalty, WeekData, CrewMember } fr
 import { getLevel, BADGES } from "@/types/tasks";
 import {
   TASKS_STORAGE_KEY, REWARDS_KEY, PENALTIES_KEY,
-  todayMondayISO, weekKey, todayISO, emptyWeekData,
+  todayMondayISO, weekKey, emptyWeekData,
   loadWeekData, saveWeekData, addTransaction,
   calculateRealStreak, regenerateRecurringTasks,
   getThisWeeksCompletedDates, getThisWeeksCompletedTasks,
@@ -85,7 +86,9 @@ function nextWeekdayISO(targetDay: number): string {
 }
 
 const getISO = {
-  get today() { return todayISO(); },
+  // Local calendar day for "Today" due options — the UTC date was tomorrow
+  // every evening 8pm–midnight Detroit.
+  get today() { return localTodayISO(); },
   get tomorrow() { return isoOffset(1); },
   get thisWeek() { return isoOffset(6); },
   get fri() { return nextWeekdayISO(5); },
@@ -189,7 +192,7 @@ function emptyTask(firstMember?: { name?: string; emoji?: string }): Task {
     title: "",
     assignee: firstMember?.name || "",
     assigneeEmoji: firstMember?.emoji || "🧒",
-    due: todayISO(),
+    due: localTodayISO(),
     points: 5,
     recurring: null,
     category: "Chores",
@@ -1659,7 +1662,7 @@ export default function TasksPage() {
     if (!isLoggedIn || !currentUser) return false;
     const myEntry = dynamicLeaderboard.find(e => e.name === currentUser.name || e.name.startsWith(currentUser.name));
     if (!myEntry || myEntry.streak < 2) return false;
-    const today = todayISO();
+    const today = localTodayISO();
     return !tasks.some(t => t.completed && t.completedBy === currentUser.name && t.completedAt && t.completedAt.split("T")[0] === today);
   }, [dynamicLeaderboard, tasks, isLoggedIn, currentUser]);
 

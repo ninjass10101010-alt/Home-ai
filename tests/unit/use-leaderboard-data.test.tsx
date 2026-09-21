@@ -12,6 +12,7 @@ import {
   HALL_OF_FAME_KEY,
   TASKS_STORAGE_KEY,
   todayISO,
+  mondayOf,
 } from "@/lib/task-utils";
 import type { HallOfFameEntry } from "@/types/tasks";
 
@@ -161,7 +162,15 @@ describe("useLeaderboardData — per-member streak", () => {
       completedInWeek: thisMondayISO(),
     });
 
-    // Emily: today only → streak 1. Rebecca: today + 2 prior days → streak 3.
+    // Emily: today only → streak 1. Rebecca: today + 2 prior days → streak
+    // = however many of those landed in the CURRENT week (on a Monday only
+    // today counts; mid-week all three do — the walk is week-scoped, so the
+    // expectation must be too or the test rots with the wall clock).
+    const daysSinceMonday = (() => {
+      const monday = mondayOf(new Date());
+      return Math.round((Date.parse(`${todayISO()}T12:00:00.000Z`) - Date.parse(`${monday.toISOString().slice(0, 10)}T12:00:00.000Z`)) / 86400000);
+    })();
+    const expectedRebecca = Math.min(3, Math.max(1, daysSinceMonday + 1));
     localStorage.setItem(
       TASKS_STORAGE_KEY,
       JSON.stringify([
@@ -178,7 +187,7 @@ describe("useLeaderboardData — per-member streak", () => {
     const rebecca = result.current.data.entries.find((e) => e.name === "Rebecca");
 
     expect(emily?.streak).toBe(1);
-    expect(rebecca?.streak).toBe(3);
+    expect(rebecca?.streak).toBe(expectedRebecca);
   });
 });
 

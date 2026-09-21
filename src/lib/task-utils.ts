@@ -294,9 +294,13 @@ export function addTransaction(
 export function calculateRealStreak(
   memberName: string,
   week: WeekData,
-  allCompletionsThisWeek: string[]
+  allCompletionsThisWeek: string[],
+  today: string = localTodayISO()
 ): number {
-  const today = todayISO();
+  // `today` defaults to the FAMILY-LOCAL calendar day (America/Detroit). The
+  // old UTC todayISO() cursor read "tomorrow" every evening 8pm–midnight
+  // local, zeroing every streak each night. The optional param keeps the
+  // streak scenarios deterministic in tests (pinned dates, no wall clock).
   // Compare DATE STRINGS, not Date instants. Deriving `monday` via
   // mondayOf() yields local-midnight → toISOString, which on any zone behind
   // UTC lands at e.g. 04:00Z while the cursor walks at 00:00Z — the Monday
@@ -322,7 +326,9 @@ export function calculateRealStreak(
 }
 
 export function regenerateRecurringTasks(tasks: Task[]): Task[] {
-  const now = todayISO();
+  // Local calendar day — the UTC date rolled the clone due to "tomorrow"
+  // when regen ran in the evening (8pm–midnight Detroit).
+  const now = localTodayISO();
   const monday = todayMondayISO();
 
   const regenKey = loadJSON<string | null>(REGEN_TRACKER_KEY, null);
@@ -378,9 +384,12 @@ export function regenerateRecurringTasks(tasks: Task[]): Task[] {
   return [...remaining, ...clones];
 }
 
-export function getThisWeeksCompletedDates(tasks: Task[], memberName?: string): string[] {
-  const monday = todayMondayISO();
-  const now = todayISO();
+export function getThisWeeksCompletedDates(tasks: Task[], memberName?: string, today: string = localTodayISO()): string[] {
+  // Monday derives from `today` (the same local-midnight normalize the streak
+  // walk uses), so a pinned test date scopes its own week — never the real
+  // wall clock's.
+  const monday = mondayOf(new Date(today)).toISOString().split("T")[0];
+  const now = today;
   return tasks
     .filter(
       (t) =>
@@ -396,7 +405,7 @@ export function getThisWeeksCompletedDates(tasks: Task[], memberName?: string): 
 
 export function getThisWeeksCompletedTasks(tasks: Task[]): Task[] {
   const monday = todayMondayISO();
-  const now = todayISO();
+  const now = localTodayISO();
   return tasks.filter(
     (t) => t.completed && (
       t.completedInWeek === monday ||
@@ -952,7 +961,9 @@ export function getDailyQuests(memberName: string, tasks: Task[]): Task[] {
 export function needsStreakSave(memberName: string, week: WeekData, tasks: Task[]): boolean {
   const streak = week.streak[memberName] || 0;
   if (streak < 2) return false;
-  const today = todayISO();
+  // Local calendar day — with the UTC date this nag fired every evening
+  // ("no completion tomorrow" → banner begging a save the kid already earned).
+  const today = localTodayISO();
   const completedToday = tasks.some(
     t => t.completed && t.completedBy === memberName && t.completedAt && t.completedAt.split("T")[0] === today
   );

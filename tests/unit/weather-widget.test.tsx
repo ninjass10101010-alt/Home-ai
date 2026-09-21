@@ -60,13 +60,18 @@ async function settle(ms = 60) {
   });
 }
 
-function makeOpenMeteoPayload(overrides: { isDay?: number; precip?: number; visibility?: number; cloud?: number; code?: number } = {}) {
+function makeOpenMeteoPayload(overrides: { isDay?: number; precip?: number; visibility?: number; cloud?: number; code?: number; startAt?: string } = {}) {
   const isDay = overrides.isDay ?? 1;
   const precip = overrides.precip ?? 5;
   const visibility = overrides.visibility ?? 16000;
   const cloud = overrides.cloud ?? 30;
   const code = overrides.code ?? 1;
-  const now = new Date();
+  // `startAt` pins the payload's first hour (ISO). The strip truncates at the
+  // LOCAL-day boundary of hours[0], so a real-clock start makes the strip
+  // length time-of-day dependent (a 1 AM run left only 4 hours and this suite
+  // failed every night). Noon UTC = 8 AM family-local = a long, deterministic
+  // rest-of-day strip.
+  const now = overrides.startAt ? new Date(overrides.startAt) : new Date();
   now.setMinutes(0, 0, 0);
   const hourlyTimes: string[] = [];
   for (let i = -1; i < 24; i++) {
@@ -425,7 +430,10 @@ describe("WeatherWidget — Not Boring redesign", () => {
   });
 
   it("maps a tap to the hour actually touched — a mid-strip x pins hour 4, not the last hour", async () => {
-    mockOpenMeteo(makeOpenMeteoPayload());
+    // Pinned mid-day payload: the real-clock start made the strip shrink with
+    // the time of day (a 1 AM run left only hours 0-3 and the 9999-style
+    // clamp hid the pitch math entirely).
+    mockOpenMeteo(makeOpenMeteoPayload({ startAt: "2026-09-21T12:00:00Z" }));
     const el = render(<WeatherWidget />);
     await settle();
 
