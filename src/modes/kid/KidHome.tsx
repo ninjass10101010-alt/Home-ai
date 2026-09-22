@@ -65,6 +65,8 @@ import {
   getDaysUntilWeekReset,
 } from "@/lib/task-utils";
 import { kidRaceLine } from "./quest-labels";
+import KidCrewBoard from "./KidCrewBoard";
+import { splitKidBoard } from "./kid-board";
 import { useWeeklyPrizes } from "@/components/leaderboard/hooks/useWeeklyPrizes";
 import QuestCard from "./QuestCard";
 import LevelBar from "./LevelBar";
@@ -245,6 +247,7 @@ function BedtimeView({ firstName, pointsToday }: {
 
 export default function KidHome() {
   const [pendingTasks, setPendingTasks] = useState<any[]>([]);
+  const [board, setBoard] = useState<{ crews: any[]; open: any[] }>({ crews: [], open: [] });
   const [completedToday, setCompletedToday] = useState<any[]>([]);
   const [todayEvents, setTodayEvents] = useState<any[]>([]);
   const [members, setMembers] = useState<{ name: string; color: string; emoji: string; points: number; streak: number }[]>([]);
@@ -318,17 +321,16 @@ export default function KidHome() {
         !!name && (name.toLowerCase() === currentUser.name.toLowerCase() || name.split(" ")[0].toLowerCase() === myFirst);
 
       const tasks = loadTasks();
-      // Quests this kid can act on: their own assigned chores, open (universal)
-      // tasks, and crew tasks they've joined (to check in) or can still join.
-      setPendingTasks(tasks.filter((t: any) => {
-        if (t.completed) return false;
-        if (t.universal) return true;
-        if (isCrewTask(t)) {
-          if (crewHasMember(t, currentUser.name)) return true;
-          return !crewFull(t);
-        }
-        return isMine(t.assignee);
-      }));
+      const myFull = resolveMemberName(db.selectMembers(), currentUser.name);
+      // "Your Quests" = assigned chores only; crews/open live on the board.
+      setPendingTasks(tasks.filter((t: any) =>
+        !t.completed &&
+        !t.universal &&
+        !isCrewTask(t) &&
+        !isSnatchable(t) &&
+        isMine(t.assignee)
+      ));
+      setBoard(splitKidBoard(tasks, myFull));
       const doneToday = getThisWeeksCompletedTasks(tasks).filter(
         (t: any) => t.completedAt?.slice(0, 10) === new Date().toISOString().slice(0, 10) && isMine(t.completedBy || t.assignee)
       );
@@ -363,6 +365,7 @@ export default function KidHome() {
 
   const user = currentUser;
   const firstName = user?.name?.split(" ")[0] || "Buddy";
+  const boardMemberName = user ? resolveMemberName(db.selectMembers(), user.name) : "";
   const level = Math.floor(points / POINTS_PER_LEVEL) + 1;
 
   // ── Hero two-card math: the weekly race + the forever journey ──
@@ -692,11 +695,12 @@ export default function KidHome() {
       ? `🏖️ Weekend Adventure, ${firstName}!`
       : `Hey ${firstName}! 👋`;
 
+  const totalQuests = pendingTasks.length + board.crews.length + board.open.length;
   const subtitle = isBedtime
     ? "Sweet dreams! See you tomorrow 💤"
     : isWeekend
       ? "Bonus quests available today! 🎉"
-      : `You have ${pendingTasks.length} quest${pendingTasks.length !== 1 ? "s" : ""} today!`;
+      : `You have ${totalQuests} quest${totalQuests !== 1 ? "s" : ""} today!`;
 
   const questPinModal = (
     <Modal
@@ -940,6 +944,14 @@ export default function KidHome() {
 
         {/* ── Content ── */}
         <div className="px-4 space-y-5 relative z-10 pb-8">
+          <KidCrewBoard
+            crews={board.crews}
+            open={board.open}
+            roster={members}
+            memberName={boardMemberName}
+            onAct={openQuestPin}
+          />
+
           {/* Quests */}
           <div>
             <div className="flex items-center justify-between mb-3">
@@ -948,7 +960,7 @@ export default function KidHome() {
               </h2>
             </div>
 
-            {pendingTasks.length === 0 ? (
+            {pendingTasks.length === 0 && board.crews.length + board.open.length === 0 ? (
               <Surface variant="warm" radius="2xl" padding="lg">
                 <div className="text-center py-4">
                   <span className="text-4xl mb-3 block">🎉</span>
@@ -956,6 +968,8 @@ export default function KidHome() {
                   <p className="text-sm text-text-secondary mt-1">You&apos;re a superstar! Check back later for new ones.</p>
                 </div>
               </Surface>
+            ) : pendingTasks.length === 0 ? (
+              <p className="text-sm text-text-secondary px-1">Nothing assigned to you right now — pick a quest above! 👆</p>
             ) : (
               <div className="space-y-2.5">
                 {pendingTasks.map((task) => (

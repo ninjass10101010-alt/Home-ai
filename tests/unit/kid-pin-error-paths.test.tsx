@@ -298,7 +298,18 @@ describe("KidHome — honest error paths on the quest PIN gate", () => {
     }));
     const el = await renderAsync(<KidHome />);
     await settle();
-    await completeQuestWithPin(el, "Grab the mail", "1234");
+
+    // Universal lives on the crew/open board — grab via its row button
+    // (same openQuestPin path as the old quest card).
+    const grab = el.querySelector('[aria-label="Grab it: Grab the mail"]') as HTMLButtonElement;
+    expect(grab).not.toBeNull();
+    await act(async () => { grab.click(); });
+    await settle();
+    const input = document.querySelector('input[aria-label="Your 4-digit PIN"]') as HTMLInputElement;
+    expect(input).not.toBeNull();
+    await act(async () => { setInputValue(input, "1234"); });
+    await act(async () => { buttonByText("Complete")!.click(); });
+    await settle();
 
     const text = document.body.textContent || "";
     expect(text).toContain("Couldn't reach Consuela");
@@ -310,7 +321,6 @@ describe("KidHome — honest error paths on the quest PIN gate", () => {
     const completeBtn = buttonByText("Complete")!;
     expect(completeBtn.querySelector('[class*="animate-spin"]')).toBeNull();
     // PIN cleared from state.
-    const input = document.querySelector('input[aria-label="Your 4-digit PIN"]') as HTMLInputElement;
     expect(input.value).toBe("");
   });
 });

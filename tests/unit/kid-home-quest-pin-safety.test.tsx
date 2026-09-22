@@ -87,6 +87,16 @@ vi.mock("@/lib/task-utils", () => ({
       task?.crew?.members?.filter((m: any) => !!m.checkedInAt).length || 0,
     total: typeof task?.crewSize === "number" ? task.crewSize : 0,
   }),
+  // The three helpers kid-board.ts imports (the pure module replaces this
+  // mock wholesale — without them its imports resolve to undefined).
+  crewMembers: (task: any) => (Array.isArray(task?.crew?.members) ? task.crew.members : []),
+  crewMemberCheckedIn: (task: any, name: string) =>
+    !!task?.crew?.members?.some((m: any) => m.name === name && !!m.checkedInAt),
+  crewAllCheckedIn: (task: any) => {
+    const members = Array.isArray(task?.crew?.members) ? task.crew.members : [];
+    const total = typeof task?.crewSize === "number" ? task.crewSize : 0;
+    return total >= 2 && members.length >= total && members.every((m: any) => !!m.checkedInAt);
+  },
   getDaysUntilWeekReset: () => 3,
   isSnatchable: (task: any, today: string = "2026-09-04") =>
     !!task.stealable && !task.completed && !!task.due && task.due < today,
@@ -323,7 +333,12 @@ describe("KidHome quest completion (age predicates: under-10 tap → pending; 10
     const el = await renderAsync(<KidHome />);
     await settle();
 
-    await tapQuest(el, "Late dishes");
+    // Snatchable lives on the crew/open board now — grab via its row button
+    // (same openQuestPin path).
+    const grab = el.querySelector('[aria-label="Grab it: Late dishes"]') as HTMLButtonElement;
+    expect(grab).not.toBeNull();
+    await act(async () => { grab.click(); });
+    await settle();
 
     // Under-10 or not, a snatchable quest keeps the PIN claim modal.
     expect(document.body.textContent || "").toContain("Confirm it's you");
@@ -362,7 +377,12 @@ describe("KidHome quest completion (age predicates: under-10 tap → pending; 10
     const el = await renderAsync(<KidHome />);
     await settle();
 
-    await tapQuest(el, "Grab the mail");
+    // Universal lives on the crew/open board now — grab via its row button
+    // (same openQuestPin path).
+    const grab = el.querySelector('[aria-label="Grab it: Grab the mail"]') as HTMLButtonElement;
+    expect(grab).not.toBeNull();
+    await act(async () => { grab.click(); });
+    await settle();
 
     // Universal quests ALWAYS keep the claim modal (PIN-free is impossible).
     expect(document.body.textContent || "").toContain("Confirm it's you");
@@ -430,5 +450,67 @@ describe("KidHome quest completion (age predicates: under-10 tap → pending; 10
     // The bedtime view is up (control), and the shield is still there.
     expect(el.textContent).toContain("Sweet dreams");
     expect(el.querySelector('[data-testid="emergency-button"]')).not.toBeNull();
+  });
+});
+
+describe("KidHome a crew/open board above Your Quests", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    localStorage.clear();
+    modeMock.isBedtime = false;
+    mockAuth.currentUser = { name: "Caspian", role: "child", age: 5 };
+    store.tasks = [
+      { ...QUEST },
+      { id: 20, title: "Wash the car", points: 15, completed: false, crewSize: 3,
+        crew: { members: [{ name: "Emily Garcia", emoji: "👧", joinedAt: "x" }] } },
+      { id: 21, title: "Take out trash", points: 12, universal: true, completed: false },
+    ];
+    store.week = { weekStart: "2026-09-01", points: { Caspian: 20 }, streak: {}, lastActive: {}, history: [] };
+    store.saveTasks.mockReset();
+    store.saveWeekData.mockReset();
+    store.syncTasksToPB.mockClear();
+    store.syncWeekDataToPB.mockClear();
+    vi.stubGlobal("matchMedia", vi.fn(() => ({
+      matches: false, addEventListener: () => {}, removeEventListener: () => {},
+      addListener: () => {}, removeListener: () => {},
+    })));
+  });
+
+  afterEach(() => {
+    act(() => { activeRoot?.unmount(); });
+    activeRoot = null;
+    document.body.innerHTML = "";
+    vi.unstubAllGlobals();
+  });
+
+  it("shows crews and open tasks on the board, not as quest cards", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) })));
+    const el = await renderAsync(<KidHome />);
+    await settle();
+
+    const board = el.querySelector('[data-testid="kid-crew-board"]');
+    expect(board).not.toBeNull();
+    const boardText = board!.textContent || "";
+    expect(boardText).toContain("Join a crew!");
+    expect(boardText).toContain("Wash the car");
+    expect(boardText).toContain("1 of 3 joined");
+    expect(boardText).toContain("Up for grabs");
+    expect(boardText).toContain("Take out trash");
+
+    // Crew/open are board controls, never QuestCards.
+    expect(el.querySelector('[aria-label="Join crew: Wash the car"]')).not.toBeNull();
+    expect(el.querySelector('[aria-label="Grab it: Take out trash"]')).not.toBeNull();
+    expect(el.querySelector('[aria-label^="Complete quest: Wash the car"]')).toBeNull();
+
+    // Assigned stays in Your Quests.
+    expect(el.querySelector('[aria-label^="Complete quest: Feed the dog"]')).not.toBeNull();
+  });
+
+  it("an assigned-only list renders no board", async () => {
+    store.tasks = [{ ...QUEST }];
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) })));
+    const el = await renderAsync(<KidHome />);
+    await settle();
+    expect(el.querySelector('[data-testid="kid-crew-board"]')).toBeNull();
   });
 });
