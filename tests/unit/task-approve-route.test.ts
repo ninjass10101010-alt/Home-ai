@@ -296,3 +296,85 @@ describe("POST /api/tasks/approve — action:send-back", () => {
     expect(collectionUpdated()).toBeNull();
   });
 });
+
+describe("POST /api/tasks/approve — action:approve-all", () => {
+  it("pays every listed pending id under one call and aggregates counts", async () => {
+    const t1 = pendingTaskRow();
+    const t2 = pendingTaskRow({
+      id: 102,
+      assignee: "Aurora Garcia",
+      pendingApproval: { byName: "Aurora Garcia", at: "2026-09-19T18:30:00.000Z", points: 5 },
+    });
+    const { pb, points, history } = makePb({
+      snapshotTasks: [t1, t2],
+      collectionTask: null,
+    });
+    // makePb's collection task is only for single-row mirrors; both live in snapshot.
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    const res = await POST(jsonReq({
+      action: "approve-all",
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskIds: [101, 102],
+    }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.paid).toBe(2);
+    expect(body.cleared).toBe(2);
+    expect(points()["Caspian Garcia"]).toBe(8);
+    expect(points()["Aurora Garcia"]).toBe(5);
+    expect(history().filter((t: any) => t.type === "earn")).toHaveLength(2);
+  });
+
+  it("skips already-paid rows without double-paying", async () => {
+    const already = {
+      id: 9,
+      timestamp: "2026-09-20T10:00:00.000Z",
+      member: "Caspian Garcia",
+      type: "earn",
+      amount: 8,
+      description: "Completed: Dishes (+8pts)",
+      taskId: 101,
+    };
+    const { pb, points, history } = makePb({
+      weekHistory: [already],
+      weekPoints: { "Caspian Garcia": 8 },
+      // still pending in snapshot (cleared only after approve) — simulates
+      // another device that paid but hasn't cleared the row yet.
+    });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    const res = await POST(jsonReq({
+      action: "approve-all",
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskIds: [101],
+    }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.paid).toBe(0);
+    expect(body.skipped).toBe(1);
+    expect(points()["Caspian Garcia"]).toBe(8);
+    expect(history().filter((t: any) => t.type === "earn" && t.taskId === 101)).toHaveLength(1);
+  });
+
+  it("fails closed: any unknown id → 404 and pays nothing", async () => {
+    const { pb, points } = makePb({ snapshotTasks: [pendingTaskRow()], collectionTask: null });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    const res = await POST(jsonReq({
+      action: "approve-all",
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskIds: [101, 999999],
+    }));
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ reason: "unknown-task" });
+    expect(points()["Caspian Garcia"]).toBeUndefined();
+  });
+
+  it("400s when taskIds is missing or empty", async () => {
+    const res = await POST(jsonReq({ action: "approve-all", memberName: "Rebecca (Mom)", pin: "0202" }));
+    expect(res.status).toBe(400);
+    const res2 = await POST(jsonReq({ action: "approve-all", memberName: "Rebecca (Mom)", pin: "0202", taskIds: [] }));
+    expect(res2.status).toBe(400);
+  });
+});

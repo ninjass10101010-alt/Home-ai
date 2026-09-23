@@ -320,8 +320,44 @@ export async function POST(request: NextRequest) {
           return sendBackOne(pb, found.task, found.pbRecordId);
         }
 
-        // Task 5 lands here: approve-all (added in that task).
-        return { ok: false as const, reason: "not_implemented" };
+        if (action === "approve-all") {
+          const ids = (body.taskIds as unknown[]).map((n) => Number(n));
+          // Fail closed: resolve EVERY id before paying anything (D6 / spec §5).
+          const snapshotData2 = snapshotData; // already loaded above
+          const found: { task: TaskLike; pbRecordId?: string }[] = [];
+          for (const id of ids) {
+            const f = await findTask(pb, id, snapshotData2);
+            if (!f) return { ok: false as const, reason: "unknown-task" };
+            found.push(f);
+          }
+          const weekRecords = await pb.collection("week_data").getFullList({ requestKey: null });
+          const weekRow = weekRecords.find((r: any) => r.weekStart === currentWeek) || null;
+          let week: WeekData = {
+            weekStart: currentWeek,
+            points: parseJSON<Record<string, number>>(weekRow?.points, {}),
+            streak: parseJSON<Record<string, number>>(weekRow?.streak, {}),
+            lastActive: parseJSON<Record<string, string>>(weekRow?.lastActive, {}),
+            history: parseJSON<Transaction[]>(weekRow?.history, []),
+          };
+          let paid = 0;
+          let cleared = 0;
+          let skipped = 0;
+          for (const f of found) {
+            const r = await approveOne(pb, f.task, f.pbRecordId, week);
+            if (!r.ok) return r;
+            paid += r.paid;
+            cleared += r.cleared;
+            skipped += r.skipped;
+            if (r.weekData) week = r.weekData;
+          }
+          if (paid > 0) {
+            if (weekRow) await pb.collection("week_data").update(weekRow.id, week);
+            else await pb.collection("week_data").create(week);
+          }
+          return { ok: true as const, weekData: week, paid, cleared, skipped };
+        }
+
+        return { ok: false as const, reason: "invalid_body" };
       })
     );
 
