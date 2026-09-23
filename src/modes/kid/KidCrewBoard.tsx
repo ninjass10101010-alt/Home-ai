@@ -14,6 +14,7 @@ import {
   crewAvatars,
   crewProgressLabel,
   crewWaitingNames,
+  first,
   type BoardRosterMember,
 } from "./kid-board";
 
@@ -28,8 +29,6 @@ interface KidCrewBoardProps {
 const MINT = "var(--color-accent-mint)";
 const CYAN = "var(--color-accent-cyan)";
 const AMBER = "var(--color-accent-amber)";
-
-const first = (v?: string | null) => (v || "").trim().split(" ")[0].toLowerCase();
 
 export default function KidCrewBoard({ crews, open, roster, memberName, onAct }: KidCrewBoardProps) {
   if (crews.length === 0 && open.length === 0) return null;
@@ -101,7 +100,7 @@ function AvatarCluster({ task, roster, memberName }: { task: any; roster: BoardR
   );
 }
 
-function statusPill(label: string) {
+function statusPill() {
   return {
     background: `color-mix(in srgb, ${AMBER} 18%, transparent)`,
     color: AMBER,
@@ -140,8 +139,8 @@ function CrewRow({ task, roster, memberName, onAct }: { task: any; roster: Board
             {state === "joinable" ? "Join crew" : "✓ Done my part"}
           </span>
         )}
-        {state === "checked-in" && <span className="rounded-xl px-3 py-2 text-[11px] font-bold" style={statusPill("")}>✓ Done — waiting</span>}
-        {state === "all-done" && <span className="rounded-xl px-3 py-2 text-[11px] font-bold" style={statusPill("")}>🎉 All done — waiting for a grown-up</span>}
+        {state === "checked-in" && <span className="rounded-xl px-3 py-2 text-[11px] font-bold" style={statusPill()}>✓ Done — waiting</span>}
+        {state === "all-done" && <span className="rounded-xl px-3 py-2 text-[11px] font-bold" style={statusPill()}>🎉 All done — waiting for a grown-up</span>}
       </div>
       {waiting.length > 0 && (
         <p className="text-[11px] text-text-muted mt-1.5">waiting on {waiting.join(" & ")} 👀</p>

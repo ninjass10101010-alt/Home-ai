@@ -29,7 +29,7 @@ export interface BoardAvatar {
   checkedIn: boolean;
 }
 
-const first = (v?: string | null) => (v || "").trim().split(" ")[0].toLowerCase();
+export const first = (v?: string | null) => (v || "").trim().split(" ")[0].toLowerCase();
 
 function rosterMatch(roster: BoardRosterMember[], name: string): BoardRosterMember | undefined {
   return roster.find((r) => r.name === name) ?? roster.find((r) => first(r.name) === first(name));
