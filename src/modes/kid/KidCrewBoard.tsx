@@ -152,7 +152,7 @@ function CrewRow({ task, roster, memberName, onAct }: { task: any; roster: Board
   if (actionable) {
     const ariaLabel = state === "joinable" ? `Join crew: ${task.title}` : `Done my part: ${task.title}`;
     return (
-      <button type="button" onClick={() => onAct(task)} aria-label={ariaLabel} className="quest-card w-full text-left p-3 block" style={rowStyle}>
+      <button type="button" onClick={() => onAct(task)} aria-label={ariaLabel} className="quest-card tap w-full text-left p-3 block" style={rowStyle}>
         {body}
       </button>
     );
@@ -171,7 +171,7 @@ function OpenRow({ task, onAct }: { task: any; onAct: (t: any) => void }) {
       type="button"
       onClick={() => onAct(task)}
       aria-label={`Grab it: ${task.title}`}
-      className="quest-card w-full text-left flex items-center gap-3 p-3"
+      className="quest-card tap w-full text-left flex items-center gap-3 p-3"
       style={{
         background: `linear-gradient(135deg, color-mix(in srgb, ${CYAN} 12%, transparent), color-mix(in srgb, ${CYAN} 4%, transparent))`,
         border: `1px solid color-mix(in srgb, ${CYAN} 24%, transparent)`,
