@@ -1663,10 +1663,9 @@ rotate/revoke are **not** written to the MUSE audit log (known v1 gap — the
 - `EMERGENCY_SETUP.md` — Full Gmail + carrier gateway configuration and security notes
 - `TEST_EMERGENCY.md` — Exact curl command and expected Gmail/SMS behavior
 - `MEAL_SYSTEM_ARCHITECTURE.md` — Complete data model, sync rules, AI-ready fields for meals/pantry/grocery
-- `UI_DESIGN_SPECIFICATION.md` — Design system, all CSS variables, component patterns, accessibility rules
-- `UI_DESIGN_VISUAL_REFERENCE.md` + `DESIGN_INDEX.md` — Visual comps and component inventory
-- `SETTINGS_PAGE_DESIGN.md` — Theme + family + emergency contact UI details
-- `QUICK_REFERENCE_CARD.md` — One-page cheat sheet for humans
+- `DESIGN.md` — Design system, all CSS variables, component patterns, accessibility rules (the live design standard)
+- `docs/archive/DESIGN_SPECIFICATION.md` + `docs/archive/UI_DESIGN_VISUAL_REFERENCE.md` + `docs/archive/DESIGN_INDEX.md` + `docs/archive/QUICK_REFERENCE_CARD.md` — archived legacy design docs
+- `docs/archive/SETTINGS_PAGE_DESIGN.md` — Theme + family + emergency contact UI details (legacy)
 - `PUSH_GITHUB.md` — GitHub push runbook + secrets policy (committed — contains NO secrets) · `scripts/security/push-safe.sh` — pre-push secret gate
 - `src/components/3d/Icon3D.tsx` and `src/components/ui/AnimatedEmoji.tsx` — the actual motion source
 - `src/components/ui/WeatherWidget.tsx` — immersive weather visuals, season/holiday backdrops, particle system
