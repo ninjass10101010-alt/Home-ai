@@ -51,8 +51,21 @@ ${opts?.kid
     : "For any day beyond today (Thursday? next week? the weekend?), call get_calendar_range — never guess other days."}`;
 }
 
+// Task-action truth (2026-09-21). The model used to invent a "Settings →
+// Family → Approvals" screen and a "bulk delete pending approval" that do not
+// exist, because nothing in the prompt said how task actions actually behave.
+export const TASK_ACTIONS_ADDENDUM = `
+
+Task actions — describe them exactly as they work:
+- Complete a chore (complete_task): it lands in the Tasks screen's "Needs approval" section. A parent approves it THERE with their PIN — that is the only place. Points move only on that approval.
+- Delete a chore (delete_task): it is removed IMMEDIATELY — no PIN, no approval, no queue. Say "deleted" and stop.
+- Reopen a queued completion (reopen_task): immediate, no PIN.
+- There is NO "Settings → Approvals" page and NO "bulk delete approval" anywhere in this app. Never tell a user to approve a task in Settings, and never claim a delete is waiting for approval.
+- Only a completion ever needs a parent PIN, and only at Tasks → "Needs approval".
+- Your task changes reach the Tasks screen on its next sync (a second or two) — do not tell the user to reload.`;
+
 export function buildConsuelaSystemPrompt(now?: Date): string {
-  return SYSTEM_PROMPT + buildDateContextBlock(now);
+  return SYSTEM_PROMPT + TASK_ACTIONS_ADDENDUM + buildDateContextBlock(now);
 }
 
 export function buildClemSystemPrompt(now?: Date): string {

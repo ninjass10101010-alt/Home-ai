@@ -78,25 +78,38 @@ describe("get_todays_events — live reads + Google merge", () => {
 });
 
 describe("get_pending_tasks — live read, full list", () => {
-  it("reads the tasks collection at call time and returns every pending row", async () => {
-    rows.tasks = [
-      { id: "t1", title: "Walk Rocco", status: "pending", assigned: "Emily", points: 10, due: TODAY },
-      { id: "t2", title: "Dishes", status: "pending", assigned: "Rebecca", points: 5, due: "2026-09-10" },
-      { id: "t3", title: "Old done thing", status: "done", assigned: "Emily", points: 5 },
-    ];
+  it("reads the tasks SNAPSHOT at call time and returns every pending row", async () => {
+    rows.consuela_data_snapshots = [{
+      id: "snap1", key: "tasks-snapshot",
+      data: {
+        tasks: [
+          { id: 1, title: "Walk Rocco", assignee: "Emily", points: 10, due: TODAY, completed: false },
+          { id: 2, title: "Dishes", assignee: "Rebecca", points: 5, due: "2026-09-10", completed: false },
+          { id: 3, title: "Old done thing", assignee: "Emily", points: 5, completed: true },
+        ],
+        deletedTaskIds: [],
+      },
+    }];
     const out = JSON.parse(await getTool("get_pending_tasks")!.handler({}));
     const list = Array.isArray(out) ? out : out.tasks ?? out.pending_tasks;
-    expect(list.filter((t: any) => t.title !== "Old done thing")).toHaveLength(2);
-    expect(calls.some((c) => c.collection === "tasks")).toBe(true);
+    expect(list.map((t: any) => t.title)).toEqual(["Walk Rocco", "Dishes"]);
+    expect(calls.some((c) => c.collection === "consuela_data_snapshots")).toBe(true);
   });
 
   it("member filter still works against live rows", async () => {
-    rows.tasks = [
-      { id: "t1", title: "Walk Rocco", status: "pending", assigned: "Emily", points: 10 },
-      { id: "t2", title: "Dishes", status: "pending", assigned: "Rebecca", points: 5 },
-    ];
+    rows.consuela_data_snapshots = [{
+      id: "snap1", key: "tasks-snapshot",
+      data: {
+        tasks: [
+          { id: 1, title: "Walk Rocco", assignee: "Emily", points: 10, completed: false },
+          { id: 2, title: "Dishes", assignee: "Rebecca", points: 5, completed: false },
+        ],
+        deletedTaskIds: [],
+      },
+    }];
     const out = JSON.parse(await getTool("get_pending_tasks")!.handler({ member: "Emily" }));
     const list = Array.isArray(out) ? out : out.tasks ?? out.pending_tasks;
+    expect(list.map((t: any) => t.title)).toEqual(["Walk Rocco"]);
     expect(list.every((t: any) => String(t.assigned || "").includes("Emily"))).toBe(true);
   });
 });

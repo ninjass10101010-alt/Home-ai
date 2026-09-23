@@ -46,6 +46,7 @@ import {
   completesWithoutPin, completesWithPendingApproval,
   tapCompletePending, sendBackPendingCompletion, approvePendingCompletion, resolveMemberName,
   mergeTasksSnapshot, getDaysUntilWeekReset,
+  loadDeletedTaskIds, saveDeletedTaskIds,
   isCrewTask, crewMembers, crewMemberCount, crewFull, crewHasMember,
   crewMemberCheckedIn, crewCheckinProgress, crewAllCheckedIn, canJoinCrew,
   normalizeSpeedBonus,
@@ -463,6 +464,9 @@ export default function TasksPage() {
         body: JSON.stringify({
           tasks, weekData, rewards, rewardsUpdatedAt: readRewardsStamp(),
           weeklyPrizes: loadWeeklyPrizes(), weeklyPrizesStamp: readWeeklyPrizesStamp(),
+          // Carry the tombstones so a delete (chat-initiated) is durable across
+          // devices — the server also unions them, so a stale push can't drop one.
+          deletedTaskIds: loadDeletedTaskIds(),
         }),
       })
         .then((res) => {
@@ -533,11 +537,12 @@ export default function TasksPage() {
       writeWeeklyPrizesStamp(snap.weeklyPrizesStamp);
     }
     if (snap.penalties?.length) setPenalties((prev: any) => snap.penalties.length > prev.length ? snap.penalties : prev);
-    const { tasks: nextTasks, weekData: nextWeek, tasksChanged, weekChanged } = mergeTasksSnapshot(
+    const { tasks: nextTasks, weekData: nextWeek, tasksChanged, weekChanged, deletedTaskIds } = mergeTasksSnapshot(
       tasksRef.current,
       weekDataRef.current,
       snap
     );
+    if (deletedTaskIds?.length) saveDeletedTaskIds(deletedTaskIds);
     if (tasksChanged) {
       tasksRef.current = nextTasks;
       setTasks(nextTasks);

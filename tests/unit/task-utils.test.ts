@@ -15,6 +15,7 @@ vi.mock("@/db", () => ({
 import {
   calculateRealStreak,
   emptyWeekData,
+  getDaysUntilWeekReset,
   getThisWeeksCompletedDates,
   regenerateRecurringTasks,
   todayISO,
@@ -270,5 +271,27 @@ describe("regenerateRecurringTasks", () => {
     expect(clone.assignee).toBe("All");
     expect(clone.assigneeEmoji).toBe("🤝");
     expect(clone.completed).toBe(false);
+  });
+});
+
+describe("getDaysUntilWeekReset", () => {
+  // 2026-08-31 is a Monday (2026-08-26 is Wednesday).
+  const at = (iso: string) => vi.setSystemTime(new Date(`${iso}T12:00:00Z`));
+
+  it("returns 7 on Monday — the week just began, the reset is next Monday", () => {
+    at("2026-08-31"); // Monday
+    expect(getDaysUntilWeekReset()).toBe(7);
+  });
+
+  it("returns 1 on Sunday — the race resets tomorrow (Monday 00:00)", () => {
+    at("2026-08-30"); // Sunday
+    expect(getDaysUntilWeekReset()).toBe(1);
+  });
+
+  it("counts down across the week (Tue 6 … Sat 2)", () => {
+    at("2026-09-01"); // Tuesday
+    expect(getDaysUntilWeekReset()).toBe(6);
+    at("2026-09-05"); // Saturday
+    expect(getDaysUntilWeekReset()).toBe(2);
   });
 });

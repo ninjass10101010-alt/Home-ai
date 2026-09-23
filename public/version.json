@@ -1,7 +1,7 @@
 {
-  "hash": "114481406d05d9706cd1cbaf51bd049375a97fd0",
-  "short": "1144814",
-  "message": "fix(chat): thread stays visible while thinking + survives tab navigation",
-  "date": "2026-09-20 21:31:12 -0400",
+  "hash": "102dd2d956866884c75b2419f33508cb0d736116",
+  "short": "102dd2d",
+  "message": "fix(kid): add shared .tap press class to KidCrewBoard actionable rows",
+  "date": "2026-09-22 20:20:57 -0400",
   "author": "GarciaFam"
 }

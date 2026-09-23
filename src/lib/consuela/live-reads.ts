@@ -15,6 +15,7 @@
 import { withAdmin } from "@/lib/pb-auth";
 import { localTodayISO, localWeekdayShort } from "@/lib/local-date";
 import { mergeTodaysEvents, mergeEventsRange } from "./todays-events";
+import { readSnapshotTasks } from "@/lib/snapshot-tasks";
 
 /** Family events for `dayISO` (default today), read live. Degrades to [] when
  *  PB is unreachable. */
@@ -123,28 +124,29 @@ export async function mergedTodaysEvents(dayISO = localTodayISO()) {
  *  Home widget) the chat tool returns every pending row. Degrades to [] when
  *  PB is unreachable — an outage must not break get_dashboard_summary. */
 async function pendingTaskRows(): Promise<any[]> {
-  const rows = await withAdmin(async (pb) => {
-    const [taskRows, members] = await Promise.all([
-      pb.collection("tasks").getFullList({ requestKey: null }),
-      pb.collection("members").getFullList({ requestKey: null }),
-    ]);
-    return taskRows
-      .filter((t: any) => t.status === "pending" || (!t.status && !t.done))
-      .map((task: any) => {
-        const member = members.find((m: any) => m.fullName === task.assigned || m.name === task.assigned);
-        const due = task.due === localTodayISO() ? "Today"
-          : task.due === localTodayISO(new Date(Date.now() + 86400000)) ? "Tomorrow"
-          : task.due || "Later";
-        return {
-          id: task.id,
-          title: task.title,
-          assigned: member?.fullName || task.assigned || "Unassigned",
-          due,
-          points: task.priority === "high" ? 20 : task.priority === "medium" ? 15 : task.points || 10,
-        };
-      });
-  });
-  return Array.isArray(rows) ? rows : [];
+  // Read the SNAPSHOT (what the dashboard renders) — the PB `tasks` collection
+  // is a derived replica and diverged from it (2026-09-21). Points come from
+  // the task itself; the old priority→15/20 guess fabricated numbers.
+  const [taskRows, members] = await Promise.all([
+    readSnapshotTasks(),
+    withAdmin(async (pb) => pb.collection("members").getFullList({ requestKey: null })),
+  ]);
+  return (Array.isArray(taskRows) ? taskRows : [])
+    .filter((t: any) => !t.completed)
+    .map((task: any) => {
+      const name = task.assignee || task.assigned;
+      const member = (members || []).find((m: any) => m.fullName === name || m.name === name);
+      const due = task.due === localTodayISO() ? "Today"
+        : task.due === localTodayISO(new Date(Date.now() + 86400000)) ? "Tomorrow"
+        : task.due || "Later";
+      return {
+        id: task.id,
+        title: task.title,
+        assigned: member?.fullName || name || "Unassigned",
+        due,
+        points: task.points ?? 0,
+      };
+    });
 }
 
 export async function livePendingTasks(): Promise<any[]> {

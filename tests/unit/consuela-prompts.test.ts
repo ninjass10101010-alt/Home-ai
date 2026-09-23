@@ -23,3 +23,25 @@ describe("system prompt date context", () => {
     expect(prompt).toContain("Today is Tue, 2026-09-01 (America/Detroit)");
   });
 });
+
+describe("task-action truth (adult prompt)", () => {
+  // The model used to invent a "Settings → Family → Approvals" screen and a
+  // "bulk delete pending approval" that do not exist. The prompt must say how
+  // task actions actually behave so it stops sending users to a fake screen.
+  const prompt = buildConsuelaSystemPrompt(new Date("2026-09-21T12:00:00Z"));
+
+  it("says deletes are immediate (no approval)", () => {
+    expect(prompt).toContain("Delete a chore (delete_task): it is removed IMMEDIATELY");
+    expect(prompt).toContain("no PIN, no approval, no queue");
+  });
+
+  it("points completions at the Tasks 'Needs approval' section only", () => {
+    expect(prompt).toContain('"Needs approval"');
+    expect(prompt).toContain("only place");
+  });
+
+  it("forbids the fictional Settings → Approvals screen", () => {
+    expect(prompt).toContain('NO "Settings → Approvals" page');
+    expect(prompt).toContain('NO "bulk delete approval"');
+  });
+});

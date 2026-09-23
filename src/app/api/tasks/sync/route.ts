@@ -83,12 +83,29 @@ export async function POST(req: NextRequest) {
           requestKey: null,
           filter: `key = "${KEY}"`,
         });
-        // Parent writes the full body verbatim (unchanged). A non-parent writes
-        // only the tasks leg, preserving the stored parent-owned legs so a kid
-        // sync can never move points or wipe the ledger.
+        // Tombstones are UNIONED, never replaced: a device that hasn't yet
+        // adopted a chat-initiated delete would otherwise push a body without
+        // it and resurrect the row everywhere. Deleted ids are also stripped
+        // from whatever task list the pusher sent.
+        const stored = (rows[0] as any)?.data ?? {};
+        const unionDeleted = [
+          ...new Set([
+            ...((stored.deletedTaskIds || []) as any[]).map((n) => Number(n)),
+            ...((body.deletedTaskIds || []) as any[]).map((n) => Number(n)),
+          ]),
+        ].filter((n) => Number.isFinite(n));
+        const stripDeleted = (list: any[]) =>
+          (Array.isArray(list) ? list : []).filter((t) => !unionDeleted.includes(Number(t?.id)));
+        // Parent writes the full body (plus the unioned tombstones). A non-parent
+        // writes only the tasks leg, preserving the stored parent-owned legs so a
+        // kid sync can never move points or wipe the ledger.
+        // A parent write stays byte-identical (verbatim) unless there is a
+        // tombstone to carry — no spurious keys on the common path.
         const data = isParent
-          ? body
-          : { ...((rows[0] as any)?.data ?? {}), tasks: body.tasks };
+          ? unionDeleted.length
+            ? { ...body, tasks: stripDeleted(body.tasks), deletedTaskIds: unionDeleted }
+            : body
+          : { ...stored, tasks: stripDeleted(body.tasks) };
         const payload = {
           key: KEY,
           data,

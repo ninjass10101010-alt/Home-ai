@@ -66,12 +66,13 @@ describe("mergeTasksSnapshot (pure restore guards — same contract as the Tasks
     expect(adopted.completedInWeek).toBe(todayMondayISO());
   });
 
-  it("never duplicates a task already present by id OR by title", () => {
+  it("never duplicates a task already present by id OR by (title + assignee)", () => {
     const local = [makeTask({ id: 1, title: "Dishes" }), makeTask({ id: 2, title: "Laundry" })];
     const res = mergeTasksSnapshot(local, emptyWeekData(), {
       tasks: [
         { id: 1, title: "Dishes (renamed row)" },
-        { id: 99, title: "Laundry" },
+        // Same title AND assignee as the local "Laundry" → one logical row.
+        { id: 99, title: "Laundry", assignee: "Alex" },
       ],
     });
     expect(res.tasksChanged).toBe(false);

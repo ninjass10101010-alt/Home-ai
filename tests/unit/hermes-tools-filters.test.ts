@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const calls: Array<{ collection: string; filter?: string }> = [];
 const creates: Array<{ collection: string; data: any }> = [];
+const updates: Array<{ collection: string; data: any }> = [];
 const rows: Record<string, any[]> = {};
 
 vi.mock("@/lib/pb-auth", () => ({
@@ -11,7 +12,7 @@ vi.mock("@/lib/pb-auth", () => ({
         calls.push({ collection: name, filter: opts?.filter });
         return rows[name] ?? [];
       },
-      update: async (_id: string, d: any) => ({ id: _id, ...d }),
+      update: async (_id: string, d: any) => { updates.push({ collection: name, data: d }); return { id: _id, ...d }; },
       create: async (d: any) => {
         creates.push({ collection: name, data: d });
         return { id: `new-${creates.length}`, ...d };
@@ -34,17 +35,25 @@ import { getTool } from "@/lib/hermes-tools";
 beforeEach(() => {
   calls.length = 0;
   creates.length = 0;
+  updates.length = 0;
   for (const k of Object.keys(rows)) delete rows[k];
 });
 
+const snap = (tasks: any[]) => ([{
+  id: "snap1", key: "tasks-snapshot",
+  data: { tasks, weekData: { weekStart: "2026-09-21", points: {}, history: [] }, deletedTaskIds: [] },
+}]);
+
 describe("hermes-tools — PB-side filters + batching", () => {
   it("complete_task never touches week_data — completions queue for parent approval", async () => {
-    rows.tasks = [{ id: "t1", taskId: 7, title: "Walk Rocco", status: "pending", points: 10, assignee: "Emily" }];
+    rows.consuela_data_snapshots = snap([{ id: 7, title: "Walk Rocco", completed: false, points: 10, assignee: "Emily" }]);
     const tool = getTool("complete_task")!;
     const out = JSON.parse(await tool.handler({ taskId: 7 }));
     expect(out.ok).toBe(true);
     expect(out.queuedForApproval).toBe(true);
     expect(calls.some((c) => c.collection === "week_data")).toBe(false);
+    const write = updates.find((u) => u.collection === "consuela_data_snapshots")!;
+    expect(write.data.data.tasks[0].pendingApproval).toBeTruthy();
   });
 
   it("add_grocery_item reads the grocery list ONCE for multiple items", async () => {
@@ -80,15 +89,13 @@ describe("hermes-tools — PB-side filters + batching", () => {
     expect(eventCall?.filter).not.toContain("date=");
   });
 
-  it("add_task upserts with a taskId filter (no full tasks scan)", async () => {
+  it("add_task writes the new chore to the snapshot the dashboard renders", async () => {
     rows.members = [{ name: "Emily", fullName: "Emily" }];
-    rows.tasks = [];
+    rows.consuela_data_snapshots = snap([]);
     const tool = getTool("add_task")!;
-    await tool.handler({ title: "Test chore", assigned_to: "Emily", points: 5 });
-    const taskReads = calls.filter((c) => c.collection === "tasks");
-    expect(taskReads.length).toBeGreaterThan(0);
-    for (const c of taskReads) {
-      expect(c.filter).toContain("taskId=");
-    }
+    const out = JSON.parse(await tool.handler({ title: "Test chore", assigned_to: "Emily", points: 5 }));
+    expect(out.ok).toBe(true);
+    const write = updates.find((u) => u.collection === "consuela_data_snapshots")!;
+    expect(write.data.data.tasks.map((t: any) => t.title)).toContain("Test chore");
   });
 });

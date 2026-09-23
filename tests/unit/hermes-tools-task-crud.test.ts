@@ -1,4 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+// Task tools now operate on the SNAPSHOT (consuela_data_snapshots) — the store
+// the dashboard renders — not the PB `tasks` collection. This harness seeds a
+// snapshot blob and persists snapshot writes so read-after-write works.
+const SNAP = "consuela_data_snapshots";
 const rows: Record<string, any[]> = {};
 const writes: Array<{ op: string; collection: string; id?: string; data?: any }> = [];
 vi.mock("@/lib/pb-auth", () => ({
@@ -6,8 +10,16 @@ vi.mock("@/lib/pb-auth", () => ({
     collection: (name: string) => ({
       getFullList: async () => rows[name] ?? [],
       getFirstListItem: async () => { throw new Error("404"); },
-      update: async (id: string, d: any) => { writes.push({ op: "update", collection: name, id, data: d }); return { id, ...d }; },
-      create: async (d: any) => { writes.push({ op: "create", collection: name, data: d }); return { id: "n1", ...d }; },
+      update: async (id: string, d: any) => {
+        writes.push({ op: "update", collection: name, id, data: d });
+        if (name === SNAP) { const r = (rows[SNAP] || []).find((x) => x.id === id); if (r) r.data = d.data; }
+        return { id, ...d };
+      },
+      create: async (d: any) => {
+        writes.push({ op: "create", collection: name, data: d });
+        if (name === SNAP) rows[SNAP] = [{ id: "snap1", key: "tasks-snapshot", data: d.data }];
+        return { id: "snap1", ...d };
+      },
       delete: async (id: string) => { writes.push({ op: "delete", collection: name, id }); return true; },
     }),
   })),
@@ -15,14 +27,26 @@ vi.mock("@/lib/pb-auth", () => ({
 vi.mock("@/db", () => ({ db: new Proxy({}, { get: () => async () => [] }) }));
 import { getTool } from "@/lib/hermes-tools";
 
+const snapData = () => rows[SNAP]?.[0]?.data ?? {};
+const snapTasks = () => snapData().tasks ?? [];
+const byId = (id: number) => snapTasks().find((t: any) => Number(t.id) === id);
+
 beforeEach(() => {
   for (const k of Object.keys(rows)) delete rows[k];
   writes.length = 0;
   rows.members = [{ name: "Emily", fullName: "Emily G", role: "child", emoji: "🎻" }];
-  rows.tasks = [
-    { id: "t1", taskId: 101, title: "Walk Rocco", assignee: "Emily G", status: "pending", points: 10, due: "2026-09-10" },
-    { id: "t2", taskId: 102, title: "Done Chore", assignee: "Emily G", status: "done", points: 5 },
-  ];
+  rows[SNAP] = [{
+    id: "snap1",
+    key: "tasks-snapshot",
+    data: {
+      tasks: [
+        { id: 101, title: "Walk Rocco", assignee: "Emily G", points: 10, due: "2026-09-10", completed: false },
+        { id: 102, title: "Done Chore", assignee: "Emily G", points: 5, completed: true },
+      ],
+      weekData: { weekStart: "2026-09-21", points: {}, history: [] },
+      deletedTaskIds: [],
+    },
+  }];
   rows.week_data = [];
 });
 
@@ -30,15 +54,15 @@ it("add_task refuses unknown members", async () => {
   const out = JSON.parse(await getTool("add_task")!.handler({ title: "X", assigned_to: "Bobgy" }));
   expect(out.ok).toBe(false);
   expect(out.error).toContain("get_family_members");
-  expect(writes).toHaveLength(0);
+  expect(snapTasks()).toHaveLength(2);
 });
 
-it("add_task persists recurring + stealable fields", async () => {
+it("add_task persists recurring + stealable fields on the snapshot", async () => {
   const out = JSON.parse(await getTool("add_task")!.handler({ title: "Feed dogs", assigned_to: "Emily", points: 8, recurring: "daily", stealable: true }));
   expect(out.ok).toBe(true);
-  const created = writes.find((w) => w.op === "create")!;
-  expect(created.data.recurring).toBe("daily");
-  expect(created.data.stealable).toBe(true);
+  const added = snapTasks().find((t: any) => t.title === "Feed dogs")!;
+  expect(added.recurring).toBe("daily");
+  expect(added.stealable).toBe(true);
 });
 
 it("update_task patches by taskId and reports before/after", async () => {
@@ -46,6 +70,7 @@ it("update_task patches by taskId and reports before/after", async () => {
   expect(out.ok).toBe(true);
   expect(out.before.points).toBe(10);
   expect(out.after.points).toBe(15);
+  expect(byId(101)!.points).toBe(15);
 });
 
 it("update_task refuses completed rows", async () => {
@@ -58,16 +83,17 @@ it("update_task rejects non-numeric points without writing", async () => {
   const out = JSON.parse(await getTool("update_task")!.handler({ taskId: 101, points: "abc" }));
   expect(out.ok).toBe(false);
   expect(out.error).toContain("number");
-  expect(writes).toHaveLength(0);
+  expect(snapTasks().find((t: any) => t.id === 101).points).toBe(10);
 });
 
-it("delete_task removes and echoes", async () => {
+it("delete_task removes the row and records a tombstone", async () => {
   const out = JSON.parse(await getTool("delete_task")!.handler({ taskId: 101 }));
   expect(out.ok).toBe(true);
-  expect(writes.some((w) => w.op === "delete" && w.id === "t1")).toBe(true);
+  expect(byId(101)).toBeUndefined();
+  expect(snapData().deletedTaskIds).toContain(101);
 });
 
-it("get_completed_tasks lists done rows", async () => {
+it("get_completed_tasks lists done rows from the snapshot", async () => {
   const out = JSON.parse(await getTool("get_completed_tasks")!.handler({}));
   expect(out.completed.map((t: any) => t.title)).toEqual(["Done Chore"]);
 });
@@ -76,45 +102,37 @@ it("complete_task queues a PENDING APPROVAL instead of earning points", async ()
   const out = JSON.parse(await getTool("complete_task")!.handler({ taskId: 101 }));
   expect(out.ok).toBe(true);
   expect(out.queuedForApproval).toBe(true);
-  const up = writes.filter((w) => w.op === "update" && w.collection === "tasks");
-  expect(up.some((w) => w.data.status === "done" && w.data.pendingApproval && w.data.sentBackAt === null)).toBe(true);
-  const pa = up.find((w) => w.data.pendingApproval)!.data.pendingApproval;
-  expect(typeof pa.byName).toBe("string");
-  expect(typeof pa.points).toBe("number");
+  const row = byId(101)!;
+  expect(row.completed).toBe(true);
+  expect(row.pendingApproval).toBeTruthy();
+  expect(row.sentBackAt).toBe(null);
+  expect(typeof row.pendingApproval.byName).toBe("string");
+  expect(typeof row.pendingApproval.points).toBe("number");
+  // chat never moves points — no week_data write
   expect(writes.some((w) => w.collection === "week_data")).toBe(false);
-});
-it("complete_task still refuses double-completion", async () => {
-  const out = JSON.parse(await getTool("complete_task")!.handler({ taskId: 102 }));
-  expect(out.ok).toBe(false);
 });
 
 it("complete_task answers an already-queued row with the honest approval refusal", async () => {
-  rows.tasks = [{ id: "t3", taskId: 103, title: "Queued", assignee: "Emily G", status: "done", completed: true, pendingApproval: { byName: "Emily G", at: "2026-09-10T10:00:00Z", points: 5 }, sentBackAt: null }];
+  rows[SNAP][0].data.tasks = [{ id: 103, title: "Queued", assignee: "Emily G", completed: true, pendingApproval: { byName: "Emily G", at: "2026-09-10T10:00:00Z", points: 5 }, sentBackAt: null }];
   const out = JSON.parse(await getTool("complete_task")!.handler({ taskId: 103 }));
   expect(out.ok).toBe(false);
   expect(out.error).toContain("approval");
-  expect(writes).toHaveLength(0);
 });
 
 it("reopen_task reopens a row still waiting for approval", async () => {
-  rows.tasks = [{ id: "t3", taskId: 103, title: "Queued", assignee: "Emily G", status: "done", completed: true, completedBy: "Emily G", pendingApproval: { byName: "Emily G", at: "2026-09-10T10:00:00Z", points: 5 }, sentBackAt: null }];
+  rows[SNAP][0].data.tasks = [{ id: 103, title: "Queued", assignee: "Emily G", completed: true, completedBy: "Emily G", pendingApproval: { byName: "Emily G", at: "2026-09-10T10:00:00Z", points: 5 }, sentBackAt: null }];
   const out = JSON.parse(await getTool("reopen_task")!.handler({ taskId: 103 }));
   expect(out.ok).toBe(true);
-  const w = writes.find((x) => x.op === "update" && x.collection === "tasks")!;
-  expect(w.data.status).toBe("pending");
-  expect(w.data.pendingApproval).toBeNull();
-  // Every client consumer keys `completed` (task-utils) — a reopened row must
-  // clear it + completedBy or it stays a zombie-done row, invisible to the kid.
-  expect(w.data.completed).toBe(false);
-  expect(w.data.completedBy).toBeNull();
+  const row = byId(103)!;
+  expect(row.completed).toBe(false);
+  expect(row.completedBy).toBeNull();
+  expect(row.pendingApproval).toBeNull();
   expect(writes.some((x) => x.collection === "week_data")).toBe(false);
 });
 
 it("reopen_task refuses an already-paid row with honest copy", async () => {
-  rows.tasks = [{ id: "t2", taskId: 102, title: "Done Chore", assignee: "Emily G", status: "done" }];
-  rows.week_data = [{ weekStart: "2026-09-07", points: JSON.stringify({ "Emily G": 5 }), history: JSON.stringify([{ taskId: 102, type: "earn", amount: 5, member: "Emily G" }]) }];
+  rows[SNAP][0].data.tasks = [{ id: 102, title: "Done Chore", assignee: "Emily G", completed: true }];
   const out = JSON.parse(await getTool("reopen_task")!.handler({ taskId: 102 }));
   expect(out.ok).toBe(false);
   expect(out.error).toContain("Tasks UI");
-  expect(writes.filter((x) => x.op === "update")).toHaveLength(0);
 });

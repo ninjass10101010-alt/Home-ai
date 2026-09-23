@@ -2,6 +2,17 @@ import { db } from "@/db";
 import { groceryCategories } from "@/data/meals";
 import { withAdmin } from "@/lib/pb-auth";
 import { weekKey } from "@/lib/task-utils";
+// Task mutations go through the SNAPSHOT (the store the dashboard renders),
+// not the PB `tasks` collection — see src/lib/snapshot-tasks.ts.
+import {
+  readSnapshotTasks,
+  liveSnapshotTasks,
+  findSnapshotTask,
+  deleteSnapshotTask,
+  upsertSnapshotTask,
+  mutateSnapshot,
+  mirrorTaskToCollection,
+} from "@/lib/snapshot-tasks";
 import { getHAWebSocketClient } from "@/lib/ha/websocket-client";
 import { getStoreLabel, groupByStore } from "@/lib/stores";
 import { localTodayISO, localWeekdayShort, familyTimeZone, weekdayOfISO, localWeekStartISO } from "@/lib/local-date";
@@ -118,21 +129,8 @@ function splitTrimList(value: unknown): string[] {
   return String(value ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 }
 
-async function adminUpsertTask(task: Record<string, unknown>): Promise<any | null> {
-  try {
-    return await withAdmin(async (pb) => {
-      const records = await pb.collection("tasks").getFullList({
-        filter: `taskId=${Number(task.taskId)}`,
-        requestKey: null,
-      });
-      const existing = records.find((r: any) => r.taskId === task.taskId);
-      return existing ? pb.collection("tasks").update(existing.id, task) : pb.collection("tasks").create(task);
-    });
-  } catch (e: any) {
-    console.error("[hermes-tools] upsertTask failed:", e?.message);
-    return null;
-  }
-}
+// (task writes now go through src/lib/snapshot-tasks.ts — the store the
+// dashboard renders; the PB `tasks` collection is a mirrored replica.)
 
 async function adminInsertEvent(event: Record<string, unknown>): Promise<any | null> {
   try {
@@ -167,54 +165,46 @@ async function adminUpsertMeal(meal: Record<string, unknown>): Promise<{ row: an
   }
 }
 
-/** Shared task lookup for update_task/delete_task/reopen_task — mirrors
- *  complete_task's resolution: numeric taskId first, then exact title
- *  (case-insensitive, optional assignee disambiguation). */
-async function findTaskRow(pb: any, args: { taskId?: number; title?: string; assignee?: string }): Promise<any | null> {
-  const records = await pb.collection("tasks").getFullList({ requestKey: null });
-  if (args.taskId !== undefined) {
-    return records.find((r: any) => Number(r.taskId) === Number(args.taskId)) || null;
-  }
-  if (args.title) {
-    const t = String(args.title).trim().toLowerCase();
-    const a = args.assignee ? String(args.assignee).toLowerCase() : undefined;
-    return records.find((r: any) =>
-      String(r.title).trim().toLowerCase() === t &&
-      (!a || String(r.assignee || "").toLowerCase().includes(a))) || null;
-  }
-  return null;
-}
-
 async function updateTaskCore(args: any) {
   try {
-    return await withAdmin(async (pb) => {
-      const row = await findTaskRow(pb, args);
-      if (!row) return { ok: false, error: "task not found — call get_pending_tasks first" };
-      if (row.status === "done") return { ok: false, error: "task is completed — mark it pending in the UI first" };
-      const patch: Record<string, unknown> = {};
-      if (args.newTitle) patch.title = String(args.newTitle).trim();
-      if (args.points !== undefined) {
-        const p = Number(args.points);
-        if (!Number.isFinite(p)) return { ok: false, error: "points must be a number between 1 and 100" };
-        patch.points = Math.max(1, Math.min(100, p));
-      }
-      if (args.due && /^\d{4}-\d{2}-\d{2}$/.test(args.due)) patch.due = args.due;
-      if (args.priority) patch.priority = args.priority;
-      if (args.recurring) patch.recurring = ["none", "daily", "weekly"].includes(args.recurring) ? args.recurring : "none";
-      if (args.stealable !== undefined) patch.stealable = args.stealable === true;
-      if (args.newAssignee) {
-        const members = await liveMembers();
-        const m = (members || []).find((x: any) => String(x.fullName || x.name || "").toLowerCase().includes(String(args.newAssignee).toLowerCase()));
-        if (!m) return { ok: false, error: `unknown member "${args.newAssignee}" — call get_family_members first` };
-        patch.assignee = m.fullName || m.name;
-        patch.assigneeEmoji = m.emoji; // raw value into storage (UI renders via Avatar); textEmoji() is for OUTPUT only
-      }
-      if (Object.keys(patch).length === 0) return { ok: false, error: "no valid fields to update" };
+    let newAssignee: { name: string; emoji: any } | null = null;
+    if (args.newAssignee) {
+      const members = await liveMembers();
+      if (members === null) return { ok: false, error: "member data unavailable — call get_family_members first" };
+      const m = (members || []).find((x: any) => String(x.fullName || x.name || "").toLowerCase().includes(String(args.newAssignee).toLowerCase()));
+      if (!m) return { ok: false, error: `unknown member "${args.newAssignee}" — call get_family_members first` };
+      newAssignee = { name: m.fullName || m.name, emoji: m.emoji };
+    }
+    const patch: Record<string, unknown> = {};
+    if (args.newTitle) patch.title = String(args.newTitle).trim();
+    if (args.points !== undefined) {
+      const p = Number(args.points);
+      if (!Number.isFinite(p)) return { ok: false, error: "points must be a number between 1 and 100" };
+      patch.points = Math.max(1, Math.min(100, p));
+    }
+    if (args.due && /^\d{4}-\d{2}-\d{2}$/.test(args.due)) patch.due = args.due;
+    if (args.priority) patch.priority = args.priority;
+    if (args.recurring) patch.recurring = ["none", "daily", "weekly"].includes(args.recurring) ? args.recurring : "none";
+    if (args.stealable !== undefined) patch.stealable = args.stealable === true;
+    if (newAssignee) {
+      patch.assignee = newAssignee.name;
+      patch.assigneeEmoji = newAssignee.emoji; // raw value into storage (UI renders via Avatar); textEmoji() is for OUTPUT only
+    }
+    if (Object.keys(patch).length === 0) return { ok: false, error: "no valid fields to update" };
+
+    let mirrored: any = null;
+    const result = await mutateSnapshot<any>((data) => {
+      const row = findSnapshotTask(liveSnapshotTasks(data) as any[], args);
+      if (!row) return { data, result: { ok: false, error: "task not found — call get_pending_tasks first" } };
+      if (row.completed) return { data, result: { ok: false, error: "task is completed — mark it pending in the UI first" } };
       const before = { title: row.title, assignee: row.assignee, points: row.points, due: row.due, priority: row.priority, recurring: row.recurring, stealable: row.stealable };
-      const updated = await pb.collection("tasks").update(row.id, patch);
-      const after = { title: updated.title ?? before.title, assignee: updated.assignee ?? before.assignee, points: updated.points ?? before.points, due: updated.due ?? before.due, priority: updated.priority ?? before.priority, recurring: updated.recurring ?? before.recurring, stealable: updated.stealable ?? before.stealable };
-      return { ok: true, taskId: Number(row.taskId), before, after };
+      const next = { ...row, ...patch };
+      mirrored = next;
+      const after = { title: next.title, assignee: next.assignee, points: next.points, due: next.due, priority: next.priority, recurring: next.recurring, stealable: next.stealable };
+      return { data: upsertSnapshotTask(data, next as any), result: { ok: true, taskId: Number(row.id), before, after } };
     });
+    if ((result as any).ok && mirrored) void mirrorTaskToCollection("upsert", mirrored);
+    return result;
   } catch (e: any) {
     return { ok: false, error: `update_task failed: ${e?.message}` };
   }
@@ -500,11 +490,13 @@ const TOOLS: Tool[] = [
           error: `unknown member "${args.assigned_to}" — call get_family_members to see the roster, then retry`,
         });
       }
-      const task: Record<string, unknown> = {
-        taskId: Date.now(),
+      const newId = Date.now();
+      const snapshotTask = {
+        id: newId,
         title: String(args.title).trim(),
         assignee: match.fullName || match.name,
         assigneeEmoji: match.emoji,
+        assigned: match.fullName || match.name,
         due,
         points,
         priority,
@@ -512,20 +504,26 @@ const TOOLS: Tool[] = [
         stealable: args.stealable === true,
         category: "chore",
         universal: false,
-        createdAt: new Date().toISOString(),
+        completed: false,
       };
-      const row = await adminUpsertTask(task);
-      if (!row) return summarize({ ok: false, error: "Could not persist task to the dashboard" });
+      // Write to the SNAPSHOT (what the dashboard renders) and mirror to the
+      // collection best-effort; adminUpsertTask alone never reached the UI.
+      try {
+        await mutateSnapshot<any>((data) => ({ data: upsertSnapshotTask(data, snapshotTask as any), result: null }));
+      } catch (e: any) {
+        return summarize({ ok: false, error: `Could not persist task to the dashboard: ${e?.message}` });
+      }
+      void mirrorTaskToCollection("upsert", snapshotTask as any);
       return summarize({
         ok: true,
-        taskId: row.taskId ?? task.taskId,
-        id: row.id,
-        title: row.title,
-        assignee: row.assignee,
+        taskId: newId,
+        id: newId,
+        title: snapshotTask.title,
+        assignee: snapshotTask.assignee,
         assigneeEmoji: textEmoji(match.emoji),
-        points: row.points,
-        due: row.due,
-        priority: row.priority,
+        points: snapshotTask.points,
+        due: snapshotTask.due,
+        priority: snapshotTask.priority,
       });
     },
   },
@@ -554,7 +552,7 @@ const TOOLS: Tool[] = [
   {
     definition: {
       name: "delete_task",
-      description: "Delete a task by taskId or exact title. The row is removed permanently — completed tasks must be undone in the Tasks UI instead.",
+      description: "Delete a task by taskId or exact title. Removal is IMMEDIATE — no parent PIN and no approval queue (only completions are approval-gated). Completed rows cannot be deleted; they are undone in the Tasks UI instead.",
       parameters: {
         type: "object",
         properties: {
@@ -566,13 +564,15 @@ const TOOLS: Tool[] = [
     },
     handler: async (args: any) => {
       try {
-        const result = await withAdmin(async (pb) => {
-          const row = await findTaskRow(pb, args);
-          if (!row) return { ok: false, error: "task not found — call get_pending_tasks first" };
-          if (row.status === "done") return { ok: false, error: "task is completed — undo it in the Tasks UI (parent PIN) instead of deleting" };
-          await pb.collection("tasks").delete(row.id);
-          return { ok: true, taskId: Number(row.taskId), title: row.title, assignee: row.assignee, deleted: true };
+        let deletedId: number | null = null;
+        const result = await mutateSnapshot<any>((data) => {
+          const row = findSnapshotTask(liveSnapshotTasks(data) as any[], args);
+          if (!row) return { data, result: { ok: false, error: "task not found — call get_pending_tasks first" } };
+          if (row.completed) return { data, result: { ok: false, error: "task is completed — undo it in the Tasks UI (parent PIN) instead of deleting" } };
+          deletedId = Number(row.id);
+          return { data: deleteSnapshotTask(data, Number(row.id)), result: { ok: true, taskId: Number(row.id), title: row.title, assignee: row.assignee, deleted: true } };
         });
+        if (deletedId !== null && (result as any).ok) void mirrorTaskToCollection("delete", { id: deletedId });
         return summarize(result);
       } catch (e: any) {
         return summarize({ ok: false, error: `delete_task failed: ${e?.message}` });
@@ -582,7 +582,7 @@ const TOOLS: Tool[] = [
   {
     definition: {
       name: "reopen_task",
-      description: "Reopen a completed task that is still waiting in the parent approval queue (no points moved yet). Already-paid completions must be undone in the Tasks UI.",
+      description: "Reopen a completed task that is still waiting in the parent approval queue (no points moved yet). Immediate — no PIN. Already-paid completions must be undone in the Tasks UI.",
       parameters: {
         type: "object",
         properties: {
@@ -594,16 +594,19 @@ const TOOLS: Tool[] = [
     },
     handler: async (args: any) => {
       try {
-        const result = await withAdmin(async (pb) => {
-          const row = await findTaskRow(pb, args);
-          if (!row) return { ok: false, error: "task not found — call get_pending_tasks or get_completed_tasks first" };
-          if (row.status !== "done") return { ok: false, error: "task is already pending" };
+        let reopened: any = null;
+        const result = await mutateSnapshot<any>((data) => {
+          const row = findSnapshotTask(liveSnapshotTasks(data) as any[], args);
+          if (!row) return { data, result: { ok: false, error: "task not found — call get_pending_tasks or get_completed_tasks first" } };
+          if (!row.completed) return { data, result: { ok: false, error: "task is already pending" } };
           if (!row.pendingApproval || row.sentBackAt) {
-            return { ok: false, error: "this task's points were already awarded — undo it in the Tasks UI (parent PIN)" };
+            return { data, result: { ok: false, error: "this task's points were already awarded — undo it in the Tasks UI (parent PIN)" } };
           }
-          await pb.collection("tasks").update(row.id, { status: "pending", completed: false, completedBy: null, completedInWeek: null, completedAt: null, pendingApproval: null, sentBackAt: null });
-          return { ok: true, taskId: Number(row.taskId), title: row.title, reopened: true };
+          const next = { ...row, completed: false, completedBy: null, completedInWeek: null, completedAt: null, pendingApproval: null, sentBackAt: null };
+          reopened = next;
+          return { data: upsertSnapshotTask(data, next as any), result: { ok: true, taskId: Number(row.id), title: row.title, reopened: true } };
         });
+        if ((result as any).ok && reopened) void mirrorTaskToCollection("upsert", reopened);
         return summarize(result);
       } catch (e: any) {
         return summarize({ ok: false, error: `reopen_task failed: ${e?.message}` });
@@ -620,17 +623,14 @@ const TOOLS: Tool[] = [
       const days = Math.max(1, Math.min(30, Number(args.days) || 7));
       const cutoff = new Date(Date.now() - days * 86400000).toISOString();
       try {
-        const done = await withAdmin(async (pb) => {
-          const records = await pb.collection("tasks").getFullList({ requestKey: null });
-          return records.filter((r: any) => {
-            if (r.status !== "done") return false;
-            const stamp = String(r.completedAt || r.updated || "");
-            // Legacy rows carry no completion timestamp — include them (they
-            // predate the field) rather than hiding finished chores.
-            return !stamp || stamp >= cutoff;
-          });
+        const done = (await readSnapshotTasks()).filter((r: any) => {
+          if (!r.completed) return false;
+          const stamp = String(r.completedAt || "");
+          // Legacy rows carry no completion timestamp — include them (they
+          // predate the field) rather than hiding finished chores.
+          return !stamp || stamp >= cutoff;
         });
-        return summarize({ days, completed: (done || []).map((t: any) => ({ title: t.title, assignee: t.assignee, completedBy: t.completedBy || t.assignee, completedAt: t.completedAt, week: t.completedInWeek })) });
+        return summarize({ days, completed: done.map((t: any) => ({ title: t.title, assignee: t.assignee, completedBy: t.completedBy || t.assignee, completedAt: t.completedAt, week: t.completedInWeek })) });
       } catch (e: any) {
         return summarize({ error: `completed-task read failed: ${e?.message}`, completed: [] });
       }
@@ -639,7 +639,7 @@ const TOOLS: Tool[] = [
   {
     definition: {
       name: "complete_task",
-      description: "Mark a chore as done — it lands in the parent approval queue (points only move when a parent approves). Find by title or taskId.",
+      description: "Mark a chore as done — it lands in the Tasks screen's \"Needs approval\" section; points move only when a parent approves it THERE with their PIN (the only approval location — there is no Settings/Approvals page). Find by title or taskId.",
       parameters: {
         type: "object",
         properties: {
@@ -655,54 +655,60 @@ const TOOLS: Tool[] = [
       const assignee = args.assignee ? String(args.assignee).trim().toLowerCase() : undefined;
       if (!taskId && !title) return summarize({ ok: false, error: "Provide a title or taskId of the task to complete" });
       try {
-        const result: Record<string, any> = await withAdmin(async (pb) => {
-          const records = await pb.collection("tasks").getFullList({ requestKey: null });
+        let mirrored: any = null;
+        const result: Record<string, any> = await mutateSnapshot<any>((data) => {
+          const live = liveSnapshotTasks(data) as any[];
           // Chat never moves points: only pending rows are completable, and a
           // completion lands as a done-but-UNPAID row for the parent queue —
           // the exact shape the claim route + tapCompletePending write.
-          const pending = records.filter((r: any) => r.status !== "done");
           const findIn = (pool: any[]): any => {
-            let task: any = taskId !== undefined ? pool.find((r: any) => Number(r.taskId) === taskId) : undefined;
-            if (!task && title) {
+            if (taskId !== undefined) {
+              const hit = pool.find((r: any) => Number(r.id) === taskId);
+              if (hit) return hit;
+            }
+            if (title) {
               const t = title.toLowerCase();
-              task = pool.find((r: any) => String(r.title).trim().toLowerCase() === t);
+              let task = pool.find((r: any) => String(r.title).trim().toLowerCase() === t);
               if (!task) task = pool.find((r: any) => String(r.title).trim().toLowerCase().includes(t));
               if (task && assignee && !String(task.assignee || "").toLowerCase().includes(assignee)) {
                 const alt = pool.find((r: any) => String(r.title).trim().toLowerCase() === t && String(r.assignee || "").toLowerCase().includes(assignee));
                 if (alt) task = alt;
               }
+              return task;
             }
-            return task;
+            return undefined;
           };
-          const task = findIn(pending);
+          const task = findIn(live.filter((r: any) => !r.completed));
           if (!task) {
-            // A queued row is status "done", so the pending-only lookup can
-            // never see it — re-match against ALL records and answer an
-            // already-queued completion with the honest queue refusal instead
-            // of the generic not-found. Approved/paid/legacy done rows carry
-            // no live pendingApproval and still fall to not-found.
-            const queued = findIn(records);
+            // A queued row is completed, so the pending-only lookup can never
+            // see it — re-match against ALL rows and answer an already-queued
+            // completion with the honest queue refusal instead of not-found.
+            const queued = findIn(live);
             if (queued?.pendingApproval && !queued.sentBackAt) {
-              return { ok: false, error: "Already completed — waiting for parent approval" };
+              return { data, result: { ok: false, error: "Already completed — waiting for parent approval" } };
             }
-            return { ok: false, error: `No pending task found${title ? ` matching "${title}"` : ""}${taskId !== undefined ? ` (taskId ${taskId})` : ""}` };
+            return { data, result: { ok: false, error: `No pending task found${title ? ` matching "${title}"` : ""}${taskId !== undefined ? ` (taskId ${taskId})` : ""}` } };
           }
-          if (task.pendingApproval && !task.sentBackAt) return { ok: false, error: "Already completed — waiting for parent approval" };
+          if (task.pendingApproval && !task.sentBackAt) return { data, result: { ok: false, error: "Already completed — waiting for parent approval" } };
           const amount = Number(task.points) || 0;
           const now = new Date().toISOString();
-          await pb.collection("tasks").update(task.id, {
+          const next = {
+            ...task,
             completed: true,
-            status: "done",
             completedBy: task.assignee || "Unknown",
             completedInWeek: weekKey(),
             completedAt: now,
             assigned: task.assignee ?? null,
             pendingApproval: { byName: task.assignee || "Unknown", at: now, points: amount },
             sentBackAt: null,
-          });
-          return { ok: true, taskId: Number(task.taskId), title: task.title, assignee: task.assignee, points: amount, queuedForApproval: true };
+          };
+          mirrored = next;
+          return { data: upsertSnapshotTask(data, next as any), result: { ok: true, taskId: Number(task.id), title: task.title, assignee: task.assignee, points: amount, queuedForApproval: true } };
         });
-        if (result.ok) result.note = "A parent approves it in the Tasks queue — points only move on approval.";
+        if (result.ok) {
+          result.note = 'A parent approves it in the Tasks screen\'s "Needs approval" section — points only move on approval.';
+          if (mirrored) void mirrorTaskToCollection("upsert", mirrored);
+        }
         return summarize(result);
       } catch (e: any) {
         return summarize({ ok: false, error: `complete_task failed: ${e?.message}` });

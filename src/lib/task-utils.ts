@@ -8,6 +8,10 @@ export const ARCHIVE_KEY = "consuela-week-archive";
 export const REWARDS_KEY = "consuela-rewards";
 export const PENALTIES_KEY = "consuela-penalties";
 export const REGEN_TRACKER_KEY = "consuela-regen-week";
+// Durable removal signal for the tasks snapshot: the client merge is add-only,
+// so a chat-initiated delete needs a tombstone every device honours (otherwise
+// the next push resurrects the row).
+export const DELETED_TASKS_KEY = "consuela-deleted-task-ids";
 export const FAMILY_GOAL_KEY = "consuela-family-goal";
 export const HALL_OF_FAME_KEY = "consuela-hall-of-fame";
 
@@ -423,6 +427,17 @@ export function saveTasks(tasks: Task[]): void {
   saveJSON(TASKS_STORAGE_KEY, tasks);
 }
 
+export function loadDeletedTaskIds(): number[] {
+  const raw = loadJSON<unknown[]>(DELETED_TASKS_KEY, []);
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(raw.map((n) => Number(n)).filter((n) => Number.isFinite(n)))];
+}
+
+export function saveDeletedTaskIds(ids: number[]): void {
+  const unique = [...new Set((ids || []).map((n) => Number(n)).filter((n) => Number.isFinite(n)))];
+  saveJSON(DELETED_TASKS_KEY, unique);
+}
+
 // ─── Crew tasks (spec §1/§3) ──────────────────────────────────────────────
 // A crew task needs N helpers; every joined member earns the FULL points on
 // approval. All crew math lives here (pure) so the claim route, Tasks page,
@@ -555,12 +570,12 @@ export function mergeTasksSnapshot(
   currentTasks: Task[],
   currentWeekData: WeekData,
   snapshot: any
-): { tasks: Task[]; weekData: WeekData; tasksChanged: boolean; weekChanged: boolean } {
+): { tasks: Task[]; weekData: WeekData; tasksChanged: boolean; weekChanged: boolean; deletedTaskIds: number[] } {
   let tasks = currentTasks;
   let weekData = currentWeekData;
   let tasksChanged = false;
   let weekChanged = false;
-  if (!snapshot) return { tasks, weekData, tasksChanged, weekChanged };
+  if (!snapshot) return { tasks, weekData, tasksChanged, weekChanged, deletedTaskIds: loadDeletedTaskIds() };
 
   let restored: any[] = [];
   if (Array.isArray(snapshot.tasks) && snapshot.tasks.length) {
@@ -592,10 +607,18 @@ export function mergeTasksSnapshot(
     // :396, so two copies never share an id to collide on) — without it both
     // copies land and the receiving device shows duplicate chores with
     // colliding React keys.
+    // A task is the SAME logical row when the id matches, OR the title AND
+    // assignee match. Two members can share a chore title ("Walking Dogs" for
+    // Bailey, Emily and Jasmine) — title-only dedupe silently dropped all but
+    // the first; the same title on the SAME assignee is still one duplicate.
+    const sameLogical = (a: any, b: any) =>
+      a.id === b.id ||
+      (String(a.title ?? "") === String(b.title ?? "") &&
+        String(a.assignee ?? "") === String(b.assignee ?? ""));
     const fresh: any[] = [];
     for (const t of restored) {
-      const matchesLocal = currentTasks.some((p: any) => p.id === t.id || p.title === t.title);
-      const matchesAccepted = fresh.some((f: any) => f.id === t.id || f.title === t.title);
+      const matchesLocal = currentTasks.some((p: any) => sameLogical(p, t));
+      const matchesAccepted = fresh.some((f: any) => sameLogical(f, t));
       if (!matchesLocal && !matchesAccepted) fresh.push(t);
     }
     if (fresh.length) {
@@ -712,7 +735,20 @@ export function mergeTasksSnapshot(
     }
   }
 
-  return { tasks, weekData, tasksChanged, weekChanged };
+  // Tombstones: union every removal this device knows about (local + snapshot)
+  // and drop those rows. The merge is otherwise add-only, so without this a
+  // chat-initiated delete would be re-pushed forever by any device that still
+  // holds the row.
+  const mergedDeleted = [
+    ...new Set([...loadDeletedTaskIds(), ...((snapshot.deletedTaskIds || []) as any[]).map((n) => Number(n))]),
+  ].filter((n) => Number.isFinite(n));
+  if (mergedDeleted.length) {
+    const before = tasks.length;
+    tasks = tasks.filter((t) => !mergedDeleted.includes(Number(t.id)));
+    if (tasks.length !== before) tasksChanged = true;
+  }
+
+  return { tasks, weekData, tasksChanged, weekChanged, deletedTaskIds: mergedDeleted };
 }
 
 /**
@@ -725,13 +761,14 @@ export function mergeTasksSnapshot(
  */
 export function applyTasksSnapshotToStores(snapshot: any): boolean {
   if (!snapshot) return false;
-  const { tasks, weekData, tasksChanged, weekChanged } = mergeTasksSnapshot(
+  const { tasks, weekData, tasksChanged, weekChanged, deletedTaskIds } = mergeTasksSnapshot(
     loadTasks(),
     loadWeekData(),
     snapshot
   );
   if (tasksChanged) saveTasks(tasks);
   if (weekChanged) saveWeekData(weekData);
+  if (deletedTaskIds?.length) saveDeletedTaskIds(deletedTaskIds);
   let changed = tasksChanged || weekChanged;
   // Weekly-prizes leg (same last-write-wins contract the tasks page restore
   // already uses): only a strictly-newer stamp wins, and the snapshot's stamp
@@ -928,9 +965,15 @@ const PREV_RANKS_KEY = "consuela-previous-ranks";
 export function getDaysUntilWeekReset(): number {
   // Days until the NEXT Monday, day-of-week math (not date-instant deltas —
   // the old mondayOf(now + 7d) skipped a full week on Sundays: next Monday is
-  // 1 day away, not 7-8). Sunday → 1 ("resets tomorrow"), Monday → 0
-  // ("resets tonight" — the race ends at Monday midnight).
-  return (8 - new Date().getDay()) % 7;
+  // 1 day away, not 7-8). Sunday → 1 ("resets tomorrow"); Tuesday..Sunday →
+  // 6..1.
+  //
+  // Monday must be 7, NOT 0: the week runs Monday 00:00 → Sunday 23:59, so a
+  // fresh week STARTS on Monday — the reset is a full week away. The old
+  // `(8 - day) % 7` collapsed Monday to 0, which every surface rendered as
+  // "Resets tonight!" on the one day the race had just begun.
+  const days = (8 - new Date().getDay()) % 7;
+  return days === 0 ? 7 : days;
 }
 
 export function getPreviousWeekRanks(): Record<string, number> {
