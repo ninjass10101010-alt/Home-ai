@@ -38,6 +38,10 @@ describe("AI endpoints exempt from session auth", () => {
     expect(isExempt("/api/tasks/claim")).toBe(true);
     expect(isExempt("/api/members/verify")).toBe(true);
   });
+  it("exempts /api/tasks/approve — parent PIN is the credential", () => {
+    expect(isExempt("/api/tasks/approve")).toBe(true);
+    expect(isExempt("/api/tasks/approve/")).toBe(true);
+  });
   it("their lookalike siblings stay gated", () => {
     expect(isExempt("/api/tasks")).toBe(false);
     expect(isExempt("/api/tasks/sync")).toBe(false);
