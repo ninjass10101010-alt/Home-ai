@@ -111,6 +111,21 @@ describe("approvePendingCompletion", () => {
   });
 });
 
+describe("approvePendingCompletion pays the recorded approval amount (B1)", () => {
+  it("pays pendingApproval.points (incl. speed bonus), not task.points", () => {
+    const tasks = [t({
+      id: 42, title: "Open grab", assignee: "Caspian Garcia", assigneeEmoji: "🧒",
+      points: 6, completed: true, completedBy: "Caspian Garcia", completedAt: NOW,
+      completedInWeek: "2026-09-01",
+      pendingApproval: { byName: "Caspian Garcia", at: NOW, points: 8 },
+    })];
+    const { weekData: next } = approvePendingCompletion(tasks, wk(), 42);
+    expect(next.points["Caspian Garcia"]).toBe(8);
+    const earn = next.history.find((tx) => tx.type === "earn");
+    expect(earn?.amount).toBe(8);
+  });
+});
+
 describe("sendBackPendingCompletion", () => {
   it("reopens with zero points and zero history", () => {
     const tasks = [t({ completed: true, completedBy: "Jasmine", completedAt: NOW, completedInWeek: "2026-09-01", pendingApproval: { byName: "Jasmine", at: NOW, points: 5 } })];

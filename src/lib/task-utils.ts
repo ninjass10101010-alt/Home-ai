@@ -148,19 +148,22 @@ export function approvePendingCompletion(
   const isCrew = !!crewRoster;
 
   const sameWeek = task.completedInWeek === weekData.weekStart;
-  const pointsMsg = task.points > 0 ? ` (+${task.points}pts)` : "";
+  // B1: the approval record carries the FULL amount the claim stored
+  // (base + speed bonus). task.points is the pre-bonus base — never pay it alone.
+  const amount = approval.points ?? task.points;
+  const pointsMsg = amount > 0 ? ` (+${amount}pts)` : "";
   let next = weekData;
   let paidAny = false;
   for (const owner of payees) {
     if (memberAlreadyPaid(next.history, taskId, owner)) continue;
     next = {
       ...next,
-      points: { ...next.points, [owner]: (next.points[owner] || 0) + task.points },
+      points: { ...next.points, [owner]: (next.points[owner] || 0) + amount },
     };
     next = addTransaction(
       next,
       "earn",
-      task.points,
+      amount,
       `${isCrew ? "Crew" : sameWeek ? "Completed" : "Approved"}: ${task.title}${pointsMsg}`,
       owner,
       task.id
