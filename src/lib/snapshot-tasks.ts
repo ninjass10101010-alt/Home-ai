@@ -1,5 +1,6 @@
 import { withAdmin } from "@/lib/pb-auth";
 import { withKeyedLock } from "@/lib/keyed-lock";
+import type { WeekData, Transaction } from "@/types/tasks";
 
 /**
  * Server-side access to the TASKS SNAPSHOT — the single source of truth the
@@ -180,4 +181,96 @@ export async function mirrorTaskToCollection(
   } catch (e: any) {
     console.warn("[snapshot-tasks] collection mirror failed:", e?.message);
   }
+}
+
+type PB = ReturnType<typeof import("@/lib/pb").getAdminPB>;
+
+export type SnapshotWeekTaskPatch = {
+  id: number;
+  crew?: unknown;
+  completed?: boolean;
+  completedBy?: string;
+  completedAt?: string;
+  completedInWeek?: string;
+  pendingApproval?: unknown;
+  sentBackAt?: unknown;
+};
+
+/**
+ * Persist weekData (and/or a task-row patch) into the snapshot blob under the
+ * SNAPSHOT keyed lock. Callers MUST already hold the week-ledger lock so the
+ * global order stays week-ledger → snapshot (never reversed).
+ *
+ * Union-merges history by transaction id so a concurrent claim's tx is never
+ * dropped, and only adopts a week at least as new as what's stored.
+ * Best-effort: week_data stays authoritative; failures are logged.
+ */
+export async function persistSnapshotWeek(
+  pb: PB,
+  weekData: WeekData | null,
+  taskRow?: SnapshotWeekTaskPatch
+): Promise<void> {
+  await withKeyedLock(`snapshot:${SNAPSHOT_KEY}`, async () => {
+    try {
+      const rows = await pb.collection(SNAPSHOT_COLLECTION).getFullList({
+        requestKey: null,
+        filter: `key = "${SNAPSHOT_KEY}"`,
+      });
+      const row: any = rows[0];
+      const raw = row?.data;
+      let data: any = {};
+      if (typeof raw === "string") {
+        try { data = JSON.parse(raw) || {}; } catch { data = {}; }
+      } else if (raw && typeof raw === "object") {
+        data = raw;
+      }
+      if (weekData) {
+        const stored: any = data.weekData ?? {};
+        const storedStart = typeof stored.weekStart === "string" ? stored.weekStart : "";
+        let mergedWeek: WeekData = weekData;
+        if (storedStart && storedStart > weekData.weekStart) {
+          mergedWeek = stored;
+        } else if (storedStart === weekData.weekStart) {
+          const byId = new Map<number, Transaction>();
+          for (const t of Array.isArray(stored.history) ? stored.history : []) byId.set(t.id, t);
+          for (const t of weekData.history) byId.set(t.id, t);
+          const history = [...byId.values()].sort((a, b) =>
+            String(a.timestamp).localeCompare(String(b.timestamp))
+          );
+          const points: Record<string, number> = {};
+          for (const t of history) {
+            if (t.type === "earn") points[t.member] = (points[t.member] || 0) + t.amount;
+            else if (t.type === "redeem" || t.type === "penalty" || (t.type === "adjust" && t.amount < 0)) {
+              points[t.member] = Math.max(0, (points[t.member] || 0) + t.amount);
+            } else if (t.type === "adjust") {
+              points[t.member] = (points[t.member] || 0) + t.amount;
+            }
+          }
+          mergedWeek = { ...weekData, history, points };
+        }
+        data.weekData = mergedWeek;
+      }
+      if (taskRow && Array.isArray(data.tasks)) {
+        data.tasks = data.tasks.map((t: any) =>
+          Number(t.id) === Number(taskRow.id)
+            ? {
+                ...t,
+                ...(taskRow.crew !== undefined ? { crew: taskRow.crew } : {}),
+                ...(taskRow.completed !== undefined ? { completed: taskRow.completed } : {}),
+                ...(taskRow.completedBy !== undefined ? { completedBy: taskRow.completedBy } : {}),
+                ...(taskRow.completedAt !== undefined ? { completedAt: taskRow.completedAt } : {}),
+                ...(taskRow.completedInWeek !== undefined ? { completedInWeek: taskRow.completedInWeek } : {}),
+                ...(taskRow.pendingApproval !== undefined ? { pendingApproval: taskRow.pendingApproval } : {}),
+                ...(taskRow.sentBackAt !== undefined ? { sentBackAt: taskRow.sentBackAt } : {}),
+              }
+            : t
+        );
+      }
+      const payload = { key: SNAPSHOT_KEY, data, updated_at: new Date().toISOString() };
+      if (row) await pb.collection(SNAPSHOT_COLLECTION).update(row.id, payload, { requestKey: null });
+      else await pb.collection(SNAPSHOT_COLLECTION).create(payload, { requestKey: null });
+    } catch (e: any) {
+      console.warn("[persistSnapshotWeek] snapshot persist failed:", e?.message);
+    }
+  });
 }
