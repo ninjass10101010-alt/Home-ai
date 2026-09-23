@@ -65,7 +65,8 @@ const h = vi.hoisted(() => {
         }),
     }),
   };
-  return { live, resolveOne, snapshot, pb };
+  const count = (phase: string) => (phases.get(phase) ?? []).length;
+  return { live, resolveOne, snapshot, pb, count };
 });
 
 const mocks = vi.hoisted(() => ({ withAdmin: vi.fn() }));
@@ -135,10 +136,23 @@ describe("tasks/sync read-modify-write atomicity", () => {
     };
 
     // Parent first, kid second — with the lock the parent's section runs to
-    // completion before the kid's read, which is the whole point.
+    // completion before the kid's read, which is the whole point. The lock is
+    // FIFO by ACQUISION, so launching both posts at once races on
+    // signSession/verifySession timing and the kid can occasionally win the
+    // lock (then the parent's verbatim full-body write legitimately lands
+    // last, flipping the tasks-leg assertion). Force the ordering the
+    // assertions encode: launch the kid only once the parent's snapshot read
+    // is parked — i.e. the parent already holds the keyed lock.
+    const parentP = post(parentBody, "parent");
+    let guard = 0;
+    while (h.count("read") < 1) {
+      if (guard++ > 200) throw new Error("parent never reached the snapshot read");
+      await tick();
+    }
+    const kidP = post(kidBody, "child");
     const [parentRes, kidRes] = await drive(
       [["read", 0], ["read", 1], ["write", 0], ["write", 1]],
-      [post(parentBody, "parent"), post(kidBody, "child")]
+      [parentP, kidP]
     );
     expect(parentRes.status).toBe(200);
     expect(kidRes.status).toBe(200);
