@@ -235,3 +235,64 @@ describe("POST /api/tasks/approve — action:approve", () => {
     expect(points()["Caspian Garcia"]).toBeUndefined();
   });
 });
+
+describe("POST /api/tasks/approve — action:send-back", () => {
+  it("reopens a solo pending row with sentBackAt and no ledger write", async () => {
+    const { pb, history, points, collectionUpdated, snapshotUpdates } = makePb();
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    const res = await POST(jsonReq({ action: "send-back", memberName: "Rebecca (Mom)", pin: "0202", taskId: 101 }));
+    expect(res.status).toBe(200);
+    expect(collectionUpdated()?.completed).toBe(false);
+    expect(collectionUpdated()?.pendingApproval).toBeNull();
+    expect(typeof collectionUpdated()?.sentBackAt).toBe("string");
+    expect(history()).toHaveLength(0);
+    expect(points()["Caspian Garcia"]).toBeUndefined();
+    const data = typeof snapshotUpdates()?.data === "string"
+      ? JSON.parse(snapshotUpdates().data)
+      : snapshotUpdates()?.data;
+    expect(data.tasks.find((t: any) => t.id === 101)?.completed).toBe(false);
+    expect(data.tasks.find((t: any) => t.id === 101)?.sentBackAt).toBeTruthy();
+  });
+
+  it("crew send-back strips checkedInAt from every member (B4)", async () => {
+    const crewTask: any = pendingTaskRow({
+      crewSize: 3,
+      crew: {
+        members: [
+          { name: "Caspian Garcia", emoji: "🧒", joinedAt: "2026-09-19T17:00:00.000Z", checkedInAt: "2026-09-19T17:30:00.000Z" },
+          { name: "Aurora Garcia", emoji: "🌈", joinedAt: "2026-09-19T17:05:00.000Z", checkedInAt: "2026-09-19T17:35:00.000Z" },
+        ],
+        removed: ["Emily Johnson"],
+      },
+      pendingApproval: { byName: "Crew", at: "2026-09-19T18:00:00.000Z", points: 10, crew: ["Caspian Garcia", "Aurora Garcia"] },
+    });
+    const { pb, collectionUpdated, snapshotUpdates } = makePb({
+      snapshotTasks: [crewTask],
+      collectionTask: { id: "pb-1", taskId: 101, crewSize: 3, crew: crewTask.crew, pendingApproval: crewTask.pendingApproval, completed: true },
+    });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    const res = await POST(jsonReq({ action: "send-back", memberName: "Rebecca (Mom)", pin: "0202", taskId: 101 }));
+    expect(res.status).toBe(200);
+    const members = collectionUpdated()?.crew?.members ?? [];
+    expect(members).toHaveLength(2);
+    expect(members.every((m: any) => !m.checkedInAt)).toBe(true);
+    expect(members.map((m: any) => m.name)).toEqual(["Caspian Garcia", "Aurora Garcia"]);
+    expect(collectionUpdated()?.crew?.removed).toEqual(["Emily Johnson"]);
+    const data = typeof snapshotUpdates()?.data === "string"
+      ? JSON.parse(snapshotUpdates().data)
+      : snapshotUpdates()?.data;
+    const snapMembers = data.tasks.find((t: any) => t.id === 101)?.crew?.members ?? [];
+    expect(snapMembers.every((m: any) => !m.checkedInAt)).toBe(true);
+  });
+
+  it("no-ops with 200 when nothing is pending", async () => {
+    const { pb, collectionUpdated } = makePb({
+      snapshotTasks: [pendingTaskRow({ pendingApproval: undefined, completed: false })],
+      collectionTask: { id: "pb-1", taskId: 101, completed: false, pendingApproval: null },
+    });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    const res = await POST(jsonReq({ action: "send-back", memberName: "Rebecca (Mom)", pin: "0202", taskId: 101 }));
+    expect(res.status).toBe(200);
+    expect(collectionUpdated()).toBeNull();
+  });
+});

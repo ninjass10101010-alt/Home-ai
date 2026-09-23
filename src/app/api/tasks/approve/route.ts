@@ -62,6 +62,7 @@ type TaskLike = {
   completed?: boolean;
   completedInWeek?: string;
   pendingApproval?: PendingApproval;
+  sentBackAt?: string;
   crew?: { members?: any[]; removed?: string[] } | null;
   crewSize?: number | null;
 };
@@ -200,6 +201,59 @@ async function approveOne(
   return { ok: true, paid, cleared, skipped, weekData: nextWeek };
 }
 
+function stripCrewCheckins(task: TaskLike): unknown {
+  const crew = task.crew;
+  if (!crew || !Array.isArray(crew.members)) return crew ?? null;
+  return {
+    members: crew.members.map((m: any) => ({
+      name: m.name,
+      emoji: m.emoji,
+      joinedAt: m.joinedAt,
+      // checkedInAt intentionally dropped — B4 crew redo
+    })),
+    ...(Array.isArray(crew.removed) && crew.removed.length > 0
+      ? { removed: crew.removed }
+      : {}),
+  };
+}
+
+async function sendBackOne(
+  pb: PB,
+  task: TaskLike,
+  pbRecordId: string | undefined
+): Promise<ApproveResult> {
+  if (!isPendingApproval(task as any)) {
+    return { ok: true, paid: 0, cleared: 0, skipped: 0 };
+  }
+  const now = new Date().toISOString();
+  const isCrew = !!task.crew && Array.isArray(task.crew.members) && task.crew.members.length > 0;
+  const nextCrew = isCrew ? stripCrewCheckins(task) : undefined;
+
+  if (pbRecordId) {
+    await pb.collection("tasks").update(pbRecordId, {
+      completed: false,
+      status: "pending",
+      completedBy: "",
+      completedAt: "",
+      completedInWeek: "",
+      pendingApproval: null,
+      sentBackAt: now,
+      ...(nextCrew !== undefined ? { crew: nextCrew } : {}),
+    }).catch(() => {});
+  }
+  await persistSnapshotWeek(pb, null, {
+    id: task.id,
+    completed: false,
+    completedBy: "",
+    completedAt: "",
+    completedInWeek: "",
+    pendingApproval: null,
+    sentBackAt: now,
+    ...(nextCrew !== undefined ? { crew: nextCrew } : {}),
+  });
+  return { ok: true, paid: 0, cleared: 1, skipped: 0, task: { ...task, pendingApproval: undefined, sentBackAt: now } as any };
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -260,7 +314,13 @@ export async function POST(request: NextRequest) {
           return approved;
         }
 
-        // Tasks 4–5 land here: send-back / approve-all (added in those tasks).
+        if (action === "send-back") {
+          const found = await findTask(pb, Number(body.taskId), snapshotData);
+          if (!found) return { ok: false as const, reason: "unknown-task" };
+          return sendBackOne(pb, found.task, found.pbRecordId);
+        }
+
+        // Task 5 lands here: approve-all (added in that task).
         return { ok: false as const, reason: "not_implemented" };
       })
     );
