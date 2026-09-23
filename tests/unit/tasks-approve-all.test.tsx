@@ -69,11 +69,14 @@ function setInput(input: HTMLInputElement, value: string) {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+const approveCalls: any[] = [];
+
 beforeEach(() => {
   document.body.innerHTML = "";
   localStorage.clear();
   activeRoot?.unmount?.();
   activeRoot = null;
+  approveCalls.length = 0;
   // verifyPinRemote answers ok for the parent, wrongPin for the kids.
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -86,11 +89,30 @@ beforeEach(() => {
         json: async () => (ok ? { member: { name: "Rebecca (Mom)", role: "parent", emoji: "👩" } } : { error: "Invalid PIN" }),
       } as any;
     }
-    // Task 7: approve-all POSTs the batch — answer 200 with no weekData so
-    // the local optimistic pay stays the assertion surface (server adopt is
-    // Task 8's hardening).
     if (url.includes("/api/tasks/approve")) {
-      return { ok: true, status: 200, json: async () => ({ success: true, paid: 2, cleared: 2, skipped: 0 }) } as any;
+      approveCalls.push(JSON.parse(String(init?.body || "{}")));
+      const body = JSON.parse(String(init?.body || "{}"));
+      const n = Array.isArray(body.taskIds) ? body.taskIds.length : 1;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          paid: n,
+          cleared: n,
+          skipped: 0,
+          weekData: {
+            weekStart: MONDAY,
+            points: { "Caspian Garcia": 6, "Aurora Garcia": 8 },
+            streak: {},
+            lastActive: {},
+            history: [
+              { id: 1, timestamp: new Date().toISOString(), member: "Caspian Garcia", type: "earn", amount: 6, description: "Completed: Quest A (+6pts)", taskId: 101 },
+              { id: 2, timestamp: new Date().toISOString(), member: "Aurora Garcia", type: "earn", amount: 8, description: "Completed: Quest B (+8pts)", taskId: 102 },
+            ],
+          },
+        }),
+      } as any;
     }
     return { ok: false, status: 401, json: async () => ({}) } as any;
   }));
@@ -125,6 +147,13 @@ describe("Needs-approval — Approve all (one parent PIN)", () => {
     const tasks = JSON.parse(localStorage.getItem("consuela-tasks") || "[]");
     expect(tasks.every((t: any) => !t.pendingApproval)).toBe(true);
     expect(el.textContent).not.toContain("Needs approval");
+
+    // Task 8: exactly one POST, carrying every visible pending id + credentials.
+    expect(approveCalls).toHaveLength(1);
+    expect(approveCalls[0].action).toBe("approve-all");
+    expect([...approveCalls[0].taskIds].sort((a, b) => a - b)).toEqual([101, 102]);
+    expect(approveCalls[0].memberName).toBe("Rebecca (Mom)");
+    expect(approveCalls[0].pin).toBe("0202");
   });
 
   it("a wrong parent PIN approves NOTHING", async () => {
@@ -144,6 +173,8 @@ describe("Needs-approval — Approve all (one parent PIN)", () => {
     expect(week.history).toHaveLength(0);
     expect(week.points["Caspian Garcia"]).toBeUndefined();
     expect(el.textContent).toContain("Needs approval");
+    // Task 8: a wrong PIN never reaches the server.
+    expect(approveCalls).toHaveLength(0);
   });
 });
 
