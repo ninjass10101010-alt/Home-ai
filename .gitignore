@@ -50,3 +50,7 @@ yarn-error.log*
 next-env.d.ts
 consuela.db
 DEPLOY_NAS_LOCAL.md
+
+# local backups + logs (never commit)
+/backups/
+*.log
