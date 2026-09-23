@@ -915,16 +915,21 @@ export default function TasksPage() {
             setTimeout(() => setApprovalError(""), 2500);
           } else {
             const body = await res.json().catch(() => ({}));
-            showToast(
-              body?.reason === "unknown-task"
-                ? "That task is no longer waiting — refresh and try again."
-                : "Couldn't reach the server to approve — nothing changed."
-            );
+            if (body?.reason === "unknown-task") {
+              showToast("That task is no longer waiting — refresh and try again.");
+            } else if (res.status === 403) {
+              showToast("Only a parent can review tapped tasks — nothing changed.");
+            } else {
+              showToast("The server refused the change — nothing changed.");
+            }
           }
           return { ok: false as const, status: res.status };
         } catch {
-          // Offline/degraded mode (D8): KEEP the local approval; the next
-          // snapshot sync reconciles. Honest local toast.
+          // Cases: (1) network failure → status 0 — offline/degraded mode (D8):
+          // KEEP the local approval; the next snapshot sync reconciles.
+          // (2) the server responded but res.json() failed to parse (e.g. a 200
+          // with a non-JSON body) — the server DID apply the change; keeping the
+          // local approval is still correct (adopt is skipped, sync reconciles).
           return { ok: false as const, status: 0 };
         }
       };

@@ -213,6 +213,35 @@ describe("POST /api/tasks/approve — action:approve", () => {
     expect(history().filter((t: any) => t.type === "earn" && t.taskId === 101)).toHaveLength(1);
   });
 
+  it("re-pays after a same-member earn was later reversed (reversal-aware idempotency)", async () => {
+    const reversed = [
+      { id: 9, timestamp: "2026-09-19T10:00:00.000Z", member: "Caspian Garcia", type: "earn", amount: 8, description: "Completed: Dishes (+8pts)", taskId: 101 },
+      { id: 10, timestamp: "2026-09-20T10:00:00.000Z", member: "Caspian Garcia", type: "adjust", amount: -8, description: "Undo: Dishes (-8pts)", taskId: 101 },
+    ];
+    const { pb, history, points } = makePb({
+      weekHistory: reversed,
+      weekPoints: { "Caspian Garcia": 0 },
+    });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    const res = await POST(jsonReq({ action: "approve", memberName: "Rebecca (Mom)", pin: "0202", taskId: 101 }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.paid).toBe(1);
+    expect(points()["Caspian Garcia"]).toBe(8);
+    expect(history().filter((t: any) => t.type === "earn" && t.taskId === 101)).toHaveLength(2);
+  });
+
+  it("400s a malformed JSON body instead of falling into the 500 catch", async () => {
+    const req = new NextRequest("http://localhost/api/tasks/approve", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "not-json",
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ success: false, reason: "invalid_body" });
+  });
+
   it("snapshot-primary: approves from the snapshot blob even when the collection row is missing", async () => {
     const { pb, points } = makePb({ collectionTask: null });
     mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
@@ -266,7 +295,7 @@ describe("POST /api/tasks/approve — action:send-back", () => {
       },
       pendingApproval: { byName: "Crew", at: "2026-09-19T18:00:00.000Z", points: 10, crew: ["Caspian Garcia", "Aurora Garcia"] },
     });
-    const { pb, collectionUpdated, snapshotUpdates } = makePb({
+    const { pb, collectionUpdated, snapshotUpdates, history, points } = makePb({
       snapshotTasks: [crewTask],
       collectionTask: { id: "pb-1", taskId: 101, crewSize: 3, crew: crewTask.crew, pendingApproval: crewTask.pendingApproval, completed: true },
     });
@@ -277,16 +306,23 @@ describe("POST /api/tasks/approve — action:send-back", () => {
     expect(members).toHaveLength(2);
     expect(members.every((m: any) => !m.checkedInAt)).toBe(true);
     expect(members.map((m: any) => m.name)).toEqual(["Caspian Garcia", "Aurora Garcia"]);
+    // Strip checkedInAt only — joinedAt/emoji survive on both stores.
+    expect(members.map((m: any) => m.joinedAt)).toEqual(["2026-09-19T17:00:00.000Z", "2026-09-19T17:05:00.000Z"]);
+    expect(members.map((m: any) => m.emoji)).toEqual(["🧒", "🌈"]);
     expect(collectionUpdated()?.crew?.removed).toEqual(["Emily Johnson"]);
+    // Send-back never touches the ledger.
+    expect(history()).toHaveLength(0);
+    expect(points()["Caspian Garcia"]).toBeUndefined();
     const data = typeof snapshotUpdates()?.data === "string"
       ? JSON.parse(snapshotUpdates().data)
       : snapshotUpdates()?.data;
     const snapMembers = data.tasks.find((t: any) => t.id === 101)?.crew?.members ?? [];
     expect(snapMembers.every((m: any) => !m.checkedInAt)).toBe(true);
+    expect(snapMembers.map((m: any) => m.joinedAt)).toEqual(["2026-09-19T17:00:00.000Z", "2026-09-19T17:05:00.000Z"]);
   });
 
-  it("no-ops with 200 when nothing is pending", async () => {
-    const { pb, collectionUpdated } = makePb({
+  it("no-ops with 200 when nothing is pending (no row write, no snapshot write)", async () => {
+    const { pb, collectionUpdated, snapshotUpdates } = makePb({
       snapshotTasks: [pendingTaskRow({ pendingApproval: undefined, completed: false })],
       collectionTask: { id: "pb-1", taskId: 101, completed: false, pendingApproval: null },
     });
@@ -294,6 +330,7 @@ describe("POST /api/tasks/approve — action:send-back", () => {
     const res = await POST(jsonReq({ action: "send-back", memberName: "Rebecca (Mom)", pin: "0202", taskId: 101 }));
     expect(res.status).toBe(200);
     expect(collectionUpdated()).toBeNull();
+    expect(snapshotUpdates()).toBeNull();
   });
 });
 

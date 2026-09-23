@@ -491,6 +491,7 @@ async function undoTask(
       completedAt: "",
       completedInWeek: "",
       pendingApproval: null,
+      sentBackAt: now,
     });
     return { ok: true, reopened: true };
   }
@@ -616,6 +617,7 @@ async function crewCheckin(
       completedAt: now,
       completedInWeek: currentWeek,
       pendingApproval: patch.pendingApproval,
+      sentBackAt: null,
     } : {}),
   });
   return { ok: true, task: { ...nextTask, ...patch } };

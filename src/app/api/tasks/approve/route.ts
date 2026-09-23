@@ -256,7 +256,12 @@ async function sendBackOne(
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    let body: any;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ success: false, reason: "invalid_body" }, { status: 400 });
+    }
     const action: ApproveAction | undefined =
       body?.action === "approve" || body?.action === "approve-all" || body?.action === "send-back"
         ? body.action
@@ -362,10 +367,7 @@ export async function POST(request: NextRequest) {
     );
 
     if (!result.ok) {
-      const status =
-        result.reason === "unknown-task" ? 404 :
-        result.reason === "adult_only" ? 403 :
-        result.reason === "invalid_body" ? 400 : 400;
+      const status = result.reason === "unknown-task" ? 404 : 400;
       return NextResponse.json({ success: false, reason: result.reason }, { status });
     }
 

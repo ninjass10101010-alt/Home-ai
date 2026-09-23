@@ -435,6 +435,11 @@ describe("POST /api/tasks/claim — crew actions", () => {
     expect(patch.completed).toBe(true);
     expect(patch.pendingApproval).toMatchObject({ byName: "Crew", points: 12, crew: ["Alex", "Lily"] });
     expect(patch.sentBackAt).toBeNull();
+    // The snapshot mirror carries the same sentBackAt clear (parity).
+    const snap = second.snapshotUpdates();
+    const snapData = typeof snap?.data === "string" ? JSON.parse(snap.data) : snap?.data;
+    const snapTask = (snapData?.tasks || []).find((x: any) => x.id === 42);
+    expect(snapTask?.sentBackAt).toBeNull();
     // No points were moved by a check-in.
     expect(second.weekUpdates()).toBeNull();
   });
@@ -594,6 +599,38 @@ describe("POST /api/tasks/claim — server-authoritative assigned completions", 
     // Task row reopened.
     const reopenPatch = updateCalls.tasks.find((p: any) => p.completed === false);
     expect(reopenPatch).toBeTruthy();
+  });
+
+  it("pending undo (unpaid kid tap) stamps sentBackAt on BOTH the collection row and the snapshot", async () => {
+    const { pb, updateCalls, snapshotUpdates } = makePb({
+      taskPoints: 5,
+      taskRow: {
+        universal: false,
+        completed: true,
+        status: "done",
+        completedBy: "Caspian Garcia",
+        completedInWeek: mondayISO(),
+        pendingApproval: { byName: "Caspian Garcia", at: "2026-09-19T18:00:00.000Z", points: 5 },
+        sentBackAt: "2026-09-19T17:00:00.000Z",
+      },
+    });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ action: "undo", taskId: 42, memberName: "Alex", pin: "1234" }));
+    expect(res.status).toBe(200);
+
+    const coll = updateCalls.tasks.find((p: any) => p.completed === false);
+    expect(coll).toBeTruthy();
+    expect(typeof coll.sentBackAt).toBe("string");
+    expect(coll.sentBackAt).not.toBe("2026-09-19T17:00:00.000Z");
+
+    const snap = snapshotUpdates();
+    expect(snap).toBeTruthy();
+    const data = typeof snap.data === "string" ? JSON.parse(snap.data) : snap.data;
+    const t = (data.tasks || []).find((x: any) => x.id === 42);
+    expect(t.completed).toBe(false);
+    expect(typeof t.sentBackAt).toBe("string");
+    expect(t.sentBackAt).not.toBe("2026-09-19T17:00:00.000Z");
   });
 
   it("undo with nothing to undo → 409, and a reversed earn → 409 already_undone", async () => {
