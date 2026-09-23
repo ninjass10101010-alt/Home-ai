@@ -10,6 +10,7 @@ import {
   crewAllCheckedIn,
   PIN_FREE_MAX_AGE,
 } from "@/lib/task-utils";
+import { persistedTaskEmoji } from "@/lib/task-emoji";
 import type { Transaction, WeekData, CrewMember, Task } from "@/types/tasks";
 import { persistSnapshotWeek } from "@/lib/snapshot-tasks";
 
@@ -43,7 +44,9 @@ function parseJSON<T>(value: unknown, fallback: T): T {
 }
 
 function normalizeMemberName(member: any): string {
-  return member?.name || "";
+  // Ledger key must be the roster FULL name (approve pays pendingApproval.byName
+  // straight into week_data.points) — a first name would split the ledger.
+  return member?.fullName || member?.name || "";
 }
 
 type RouteResult =
@@ -70,14 +73,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Identity: a PIN verifies the named member. A MISSING pin is accepted ONLY
-    // for crew-join/crew-checkin where the SESSION is an under-10 child whose
-    // name matches — the same server-side pin-free rule as /api/auth/quick-login
-    // (age read from PB, fail closed on anything else). Claims/removals always
-    // need a real PIN.
+    // for crew-join/crew-checkin AND assigned `complete` where the SESSION is an
+    // under-10 child whose name matches — the same server-side pin-free rule as
+    // /api/auth/quick-login (age read from PB, fail closed on anything else).
+    // Claims/removals always need a real PIN.
     let claimant: any = null;
     if (pin) {
       claimant = await verifyPinFromPB(memberName, pin);
-    } else if (action === "crew-join" || action === "crew-checkin") {
+    } else if (action === "crew-join" || action === "crew-checkin" || action === "complete") {
       const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
       if (session?.role === "child" && namesMatch(session.name, String(memberName))) {
         const member = await findMemberByName(session.name);
@@ -199,7 +202,7 @@ export async function POST(request: NextRequest) {
           await pb.collection("tasks").update(task.id, {
             assignee: normalizedName,
             assigned: normalizedName,
-            assigneeEmoji: assigneeEmoji || claimant.emoji || "",
+            assigneeEmoji: persistedTaskEmoji(assigneeEmoji || claimant.emoji) || "",
             completed: true,
             status: "done",
             completedBy: normalizedName,
@@ -276,7 +279,7 @@ export async function POST(request: NextRequest) {
         await pb.collection("tasks").update(task.id, {
           assignee: normalizedName,
           assigned: normalizedName,
-          assigneeEmoji: assigneeEmoji || claimant.emoji || "",
+          assigneeEmoji: persistedTaskEmoji(assigneeEmoji || claimant.emoji) || "",
           completed: true,
           status: "done",
           completedBy: normalizedName,
@@ -420,7 +423,7 @@ async function completeTask(
   await pb.collection("tasks").update(task.id, {
     assignee: normalizedName,
     assigned: normalizedName,
-    assigneeEmoji: assigneeEmoji || claimant.emoji || task.assigneeEmoji || "",
+    assigneeEmoji: persistedTaskEmoji(assigneeEmoji || claimant.emoji || task.assigneeEmoji) || "",
     completed: true,
     status: "done",
     completedBy: normalizedName,

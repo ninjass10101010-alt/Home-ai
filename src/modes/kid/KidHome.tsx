@@ -512,6 +512,20 @@ export default function KidHome() {
       const tasks = loadTasks().map((t: any) => (t.id === task.id ? tapCompletePending(t, myName, now, weekKey()) : t));
       saveTasks(tasks);
       void syncTasksToPB(tasks);
+      // Server-authoritative handoff (same seam as Tasks persistServerComplete):
+      // local pending alone never reaches parent approval — the claim route
+      // writes pendingApproval into the snapshot. Fire-and-forget; a network
+      // failure keeps the optimistic row for sync to reconcile.
+      void fetch("/api/tasks/claim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "complete",
+          taskId: task.id,
+          memberName: myName,
+          assigneeEmoji: task.assigneeEmoji,
+        }),
+      }).catch(() => {});
       celebrate(task.points || 0, before, { pending: true });
       setDataVersion((v) => v + 1);
       return;
@@ -644,6 +658,21 @@ export default function KidHome() {
           );
           saveTasks(tasks);
           void syncTasksToPB(tasks);
+          // Server-authoritative handoff (same as under-10 + Tasks page):
+          // verified PIN already checked via verifyPinRemote — this POST
+          // persists pendingApproval to the snapshot for parent approval.
+          // Fire-and-forget; optimistic row stays on network failure.
+          void fetch("/api/tasks/claim", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "complete",
+              taskId: task.id,
+              memberName: myName,
+              pin: questPin,
+              assigneeEmoji: task.assigneeEmoji,
+            }),
+          }).catch(() => {});
           celebrate(task.points || 0, before, { pending: true });
         } else {
           // Neither branch owns this shape (a non-child session somehow reached

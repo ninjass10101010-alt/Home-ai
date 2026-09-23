@@ -4,6 +4,18 @@ import { NextRequest } from "next/server";
 const mocks = vi.hoisted(() => ({
   withAdmin: vi.fn(),
   verifyPinFromPB: vi.fn(),
+  verifySession: vi.fn(),
+  findMemberByName: vi.fn(),
+  namesMatch: (recordName: string, query: string) => {
+    const firstName = query.split(" ")[0];
+    return (
+      recordName === query ||
+      recordName.startsWith(`${query} `) ||
+      recordName.split(" ")[0] === query ||
+      recordName === firstName ||
+      firstName.startsWith(recordName)
+    );
+  },
 }));
 
 vi.mock("@/lib/pb-auth", () => ({
@@ -12,6 +24,13 @@ vi.mock("@/lib/pb-auth", () => ({
 
 vi.mock("@/lib/server-auth", () => ({
   verifyPinFromPB: mocks.verifyPinFromPB,
+  findMemberByName: mocks.findMemberByName,
+  namesMatch: mocks.namesMatch,
+}));
+
+vi.mock("@/lib/session", () => ({
+  SESSION_COOKIE: "consuela_session",
+  verifySession: (token?: string) => mocks.verifySession(token),
 }));
 
 import { POST } from "@/app/api/tasks/claim/route";
@@ -24,10 +43,13 @@ function mondayISO(): string {
   return d.toISOString().split("T")[0];
 }
 
-function jsonReq(body: unknown): NextRequest {
+function jsonReq(body: unknown, cookie?: string): NextRequest {
   return new NextRequest("http://localhost/api/tasks/claim", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      ...(cookie ? { cookie: `consuela_session=${cookie}` } : {}),
+    },
     body: JSON.stringify(body),
   });
 }
@@ -116,6 +138,8 @@ function makePb(opts?: {
 beforeEach(() => {
   mocks.withAdmin.mockReset();
   mocks.verifyPinFromPB.mockReset();
+  mocks.verifySession.mockReset().mockResolvedValue(null);
+  mocks.findMemberByName.mockReset().mockResolvedValue(null);
   // The default claimant is an ADULT — the instant-earn contract. Kid
   // claimants opt into the pendingApproval branch by overriding this mock
   // with role: "child" per test.
@@ -650,5 +674,108 @@ describe("POST /api/tasks/claim — server-authoritative assigned completions", 
     const res2 = await POST(jsonReq({ action: "undo", taskId: 42, memberName: "Alex", pin: "1234" }));
     expect(res2.status).toBe(409);
     expect(await res2.json()).toMatchObject({ reason: "already_undone" });
+  });
+});
+
+describe("POST /api/tasks/claim — pin-free under-10 complete + emoji persistence", () => {
+  beforeEach(() => {
+    mocks.verifyPinFromPB.mockReset();
+    mocks.verifySession.mockReset();
+    mocks.findMemberByName.mockReset();
+  });
+
+  it("no-pin complete: under-10 child session lands pendingApproval (no PIN required)", async () => {
+    mocks.verifySession.mockResolvedValue({ role: "child", name: "Caspian", memberId: "m1" });
+    mocks.findMemberByName.mockResolvedValue({
+      id: "m1",
+      name: "Caspian",
+      fullName: "Caspian Garcia",
+      role: "child",
+      age: 5,
+      emoji: "🧒",
+    });
+    const { pb, weekUpdates, snapshotUpdates, updateCalls } = makePb({
+      taskPoints: 6,
+      taskRow: { universal: false, completed: false, assignee: "Caspian Garcia" },
+    });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(
+      jsonReq(
+        { action: "complete", taskId: 42, memberName: "Caspian Garcia" },
+        "session-token"
+      )
+    );
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).pending).toBe(true);
+    expect(weekUpdates()).toBeNull();
+    const patch = updateCalls.tasks.find((p: any) => p.pendingApproval);
+    expect(patch.pendingApproval).toMatchObject({ byName: "Caspian Garcia", points: 6 });
+    const snap = snapshotUpdates();
+    const data = typeof snap.data === "string" ? JSON.parse(snap.data) : snap.data;
+    expect((data.tasks || []).find((t: any) => t.id === 42).pendingApproval).toMatchObject({
+      byName: "Caspian Garcia",
+    });
+  });
+
+  it("no-pin complete: photo assigneeEmoji never reaches the PB tasks update (max=5000)", async () => {
+    mocks.verifySession.mockResolvedValue({ role: "child", name: "Caspian", memberId: "m1" });
+    mocks.findMemberByName.mockResolvedValue({
+      id: "m1",
+      name: "Caspian",
+      fullName: "Caspian Garcia",
+      role: "child",
+      age: 5,
+      emoji: "🧒",
+    });
+    const photo = `data:image/webp;base64,${"A".repeat(6000)}`;
+    const { pb, updateCalls } = makePb({
+      taskPoints: 5,
+      taskRow: { universal: false, completed: false, assignee: "Caspian Garcia", assigneeEmoji: photo },
+    });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(
+      jsonReq(
+        { action: "complete", taskId: 42, memberName: "Caspian Garcia", assigneeEmoji: photo },
+        "session-token"
+      )
+    );
+
+    expect(res.status).toBe(200);
+    for (const patch of updateCalls.tasks) {
+      if (patch.assigneeEmoji !== undefined) {
+        expect(patch.assigneeEmoji).toBe("👤");
+        expect(String(patch.assigneeEmoji).length).toBeLessThanOrEqual(5000);
+      }
+    }
+  });
+
+  it("no-pin complete: a parent session without a PIN is rejected 401", async () => {
+    mocks.verifySession.mockResolvedValue({ role: "parent", name: "Alex", memberId: "m9" });
+    mocks.findMemberByName.mockResolvedValue({
+      id: "m9",
+      name: "Alex",
+      role: "parent",
+      age: 40,
+      emoji: "🦊",
+    });
+    const { pb } = makePb({ taskPoints: 5, taskRow: { universal: false, completed: false } });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(
+      jsonReq({ action: "complete", taskId: 42, memberName: "Alex" }, "session-token")
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("no-pin complete: no session cookie is rejected 401", async () => {
+    mocks.verifySession.mockResolvedValue(null);
+    const { pb } = makePb({ taskPoints: 5, taskRow: { universal: false, completed: false } });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ action: "complete", taskId: 42, memberName: "Caspian Garcia" }));
+    expect(res.status).toBe(401);
   });
 });

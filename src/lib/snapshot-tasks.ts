@@ -1,5 +1,6 @@
 import { withAdmin } from "@/lib/pb-auth";
 import { withKeyedLock } from "@/lib/keyed-lock";
+import { persistedTaskEmoji } from "@/lib/task-emoji";
 import type { WeekData, Transaction } from "@/types/tasks";
 
 /**
@@ -155,7 +156,8 @@ export async function mirrorTaskToCollection(
         taskId: Number(t.id),
         title: t.title,
         assignee: t.assignee ?? "All",
-        assigneeEmoji: t.assigneeEmoji ?? "👤",
+        // Snapshot may hold a full photo avatar; PB tasks.assigneeEmoji max=5000.
+        assigneeEmoji: persistedTaskEmoji(t.assigneeEmoji) || "👤",
         assigned: t.assignee ?? "All",
         status: t.completed ? "done" : "pending",
         due: t.due ?? null,
@@ -179,7 +181,7 @@ export async function mirrorTaskToCollection(
       else await pb.collection("tasks").create(rec, { requestKey: null });
     });
   } catch (e: any) {
-    console.warn("[snapshot-tasks] collection mirror failed:", e?.message);
+    console.warn("[snapshot-tasks] collection mirror failed:", e?.data ?? e?.message ?? e);
   }
 }
 

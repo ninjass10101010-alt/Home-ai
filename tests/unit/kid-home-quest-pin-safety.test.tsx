@@ -238,6 +238,19 @@ describe("KidHome quest completion (age predicates: under-10 tap → pending; 10
     expect(store.syncTasksToPB).toHaveBeenCalled();
     expect(spyFetch.mock.calls.filter((call) => String(call[0]).includes("/api/members/verify"))).toHaveLength(0);
 
+    // Fix 3: local pending alone is invisible to parent approval — the claim
+    // route must also POST so the snapshot (the approval queue's source of
+    // truth) carries pendingApproval server-side.
+    const claimCalls = spyFetch.mock.calls.filter((call) => String(call[0]).includes("/api/tasks/claim"));
+    expect(claimCalls.length).toBeGreaterThan(0);
+    const claimBody = JSON.parse(String(claimCalls[0][1]?.body));
+    expect(claimBody).toMatchObject({
+      action: "complete",
+      taskId: 7,
+      memberName: "Caspian Garcia",
+    });
+    expect(claimBody.pin).toBeFalsy();
+
     // Celebration fires on the pending completion, and its copy is honest —
     // points are ON THE WAY (parent approves), never "earned".
     const burst = document.querySelector('[aria-label^="Congratulations"]');
@@ -251,7 +264,7 @@ describe("KidHome quest completion (age predicates: under-10 tap → pending; 10
   it("a 10-year-old kid's quest action still asks for the PIN, then lands pending", async () => {
     mockAuth.currentUser = { name: "Caspian", role: "child", age: 10 };
     let verifyOk = false;
-    const spyFetch = vi.fn(async (input: RequestInfo | URL) => {
+    const spyFetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input).includes("/api/members/verify")) {
         return verifyOk
           ? { ok: true, json: async () => ({ member: { name: "Caspian", role: "child" } }) }
@@ -295,6 +308,17 @@ describe("KidHome quest completion (age predicates: under-10 tap → pending; 10
     expect(store.syncWeekDataToPB).not.toHaveBeenCalled();
     expect(store.week.history).toHaveLength(0);
     expect(store.week.points.Caspian).toBe(20);
+    // Fix 3: a verified 10+ completion must also persist server-side (same
+    // claim route the Tasks page uses) so parent approval can see it.
+    const claimCalls = spyFetch.mock.calls.filter((call) => String(call[0]).includes("/api/tasks/claim"));
+    expect(claimCalls.length).toBeGreaterThan(0);
+    const claimBody = JSON.parse(String(claimCalls[0][1]?.body));
+    expect(claimBody).toMatchObject({
+      action: "complete",
+      taskId: 7,
+      memberName: "Caspian Garcia",
+      pin: "1234",
+    });
     const burst = document.querySelector('[aria-label^="Congratulations"]');
     expect(burst).not.toBeNull();
     expect(burst!.getAttribute("aria-label")).toContain("on the way");

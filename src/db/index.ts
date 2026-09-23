@@ -645,14 +645,12 @@ export const db = {
 
   upsertTask: async (task: any) => {
     if (!isServer()) {
-      try {
-        const records = await gatewayList("tasks");
-        const existing = records.find((r: any) => r.taskId === task.taskId);
-        if (existing) return await gatewayUpdate("tasks", existing.id, task);
-        return await gatewayCreate("tasks", task);
-      } catch {
-        return null;
-      }
+      // Never swallow: syncTasksToPB's catch is the ONLY log trail when a
+      // PB validation rejects the row (e.g. assigneeEmoji over max=5000).
+      const records = await gatewayList("tasks");
+      const existing = records.find((r: any) => r.taskId === task.taskId);
+      if (existing) return await gatewayUpdate("tasks", existing.id, task);
+      return await gatewayCreate("tasks", task);
     }
     return pbDb.upsertTask(task);
   },

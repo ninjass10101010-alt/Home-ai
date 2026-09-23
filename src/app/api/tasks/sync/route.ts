@@ -121,7 +121,9 @@ export async function POST(req: NextRequest) {
     if (isParent) return NextResponse.json({ ok: true, saved: true });
     return NextResponse.json({ ok: true, saved: true, ignoredLegs: NON_PARENT_IGNORED_LEGS });
   } catch (e: any) {
-    console.error("[tasks/sync] save failed:", e?.message);
+    // Full PB body: a bare `e.message` ("Failed to update record.") hides the
+    // field/constraint that actually rejected the write.
+    console.error("[tasks/sync] save failed:", e?.message, e?.data ?? "");
     return NextResponse.json({ ok: false, error: "db_error" }, { status: 502 });
   }
 }

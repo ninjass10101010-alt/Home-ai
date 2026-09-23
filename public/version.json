@@ -1,7 +1,7 @@
 {
-  "hash": "91aad65fb6f2afb13daf086d219564dce7c7554c",
-  "short": "91aad65",
-  "message": "test(tasks): pin approve-all POST contract (one PIN, explicit taskIds)",
-  "date": "2026-09-23 12:09:30 -0400",
+  "hash": "025f817ee5e4266b879e5730bea50fdb4ef8d743",
+  "short": "025f817",
+  "message": "fix(tasks): final-review wave — sentBackAt snapshot parity, 400 on bad JSON, honest toast, re-pay+crew tests",
+  "date": "2026-09-23 12:38:35 -0400",
   "author": "GarciaFam"
 }

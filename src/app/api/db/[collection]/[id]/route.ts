@@ -9,8 +9,12 @@ type Ctx = { params: Promise<{ collection: string; id: string }> };
 
 function dbErrorResponse(err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
-  console.error("[db-gateway]", message);
-  return NextResponse.json({ error: "db_error", detail: message }, { status: 502 });
+  const data = (err as { data?: unknown })?.data;
+  console.error("[db-gateway]", message, data ?? "");
+  return NextResponse.json(
+    { error: "db_error", detail: message, data: data ?? undefined },
+    { status: 502 }
+  );
 }
 
 export async function GET(_request: NextRequest, ctx: Ctx) {

@@ -1,5 +1,6 @@
 import { db } from "@/db";
 import { localTodayISO } from "@/lib/local-date";
+import { persistedTaskEmoji } from "@/lib/task-emoji";
 import type { Task, WeekData, Transaction, WeekArchive, FamilyGoal, HallOfFameEntry, Reward, Penalty, WeeklyPrize, CrewMember } from "@/types/tasks";
 
 export const TASKS_STORAGE_KEY = "consuela-tasks";
@@ -1149,7 +1150,9 @@ export async function syncTasksToPB(tasks: Task[]): Promise<void> {
       taskId: task.id,
       title: task.title,
       assignee: task.assignee,
-      assigneeEmoji: task.assigneeEmoji,
+      // PB tasks.assigneeEmoji is text max=5000 — photo avatars (base64 data
+      // URLs from members.emoji) must never reach the collection raw.
+      assigneeEmoji: persistedTaskEmoji(task.assigneeEmoji),
       // Home widget's selectPendingTasks reads `assigned` + `status` —
       // without these the row is invisible to the pending-tasks reader.
       assigned: task.assignee,
@@ -1169,9 +1172,13 @@ export async function syncTasksToPB(tasks: Task[]): Promise<void> {
       crew: task.crew ?? null,
       speedBonus: task.speedBonus ?? null,
     }).catch((e) => {
-      // Crew fields only exist once the pb-seed self-heal has run — surface it
-      // loudly instead of silently dropping joins/check-ins.
-      console.warn(`syncTasksToPB failed for "${task.title}" — run \`npm run pb:seed\` if the tasks schema is stale.`, e?.message);
+      // Surface the FULL rejection (PB validation bodies carry the field name
+      // in `data`, not just `message`) — a swallowed gateway error reads as
+      // "the task never landed" with zero log trail.
+      console.warn(
+        `syncTasksToPB failed for "${task.title}" — run \`npm run pb:seed\` if the tasks schema is stale.`,
+        e?.data ?? e?.message ?? e
+      );
     });
   }
 }

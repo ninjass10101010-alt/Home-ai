@@ -10,8 +10,14 @@ export const dynamic = "force-dynamic";
 // stale data" while a parseable error surfaces in devtools/logs.
 function dbErrorResponse(err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
-  console.error("[db-gateway]", message);
-  return NextResponse.json({ error: "db_error", detail: message }, { status: 502 });
+  // PocketBase ClientResponseError carries the validation body in `.data`
+  // (field name + constraint) — log it whole so a max=5000 reject is visible.
+  const data = (err as { data?: unknown })?.data;
+  console.error("[db-gateway]", message, data ?? "");
+  return NextResponse.json(
+    { error: "db_error", detail: message, data: data ?? undefined },
+    { status: 502 }
+  );
 }
 
 export async function GET(request: NextRequest, ctx: any) {
