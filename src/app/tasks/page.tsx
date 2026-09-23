@@ -884,11 +884,53 @@ export default function TasksPage() {
         setTimeout(() => setApprovalError(""), 2500);
         return;
       }
+      const parentName: string = parent.fullName;
+      // Snapshot for 4xx revert — optimistic updates below may hit localStorage
+      // before the POST settles.
+      const prevTasks = tasks;
+      const prevWeekData = weekData;
+
+      const postApprove = async (payload: Record<string, unknown>) => {
+        try {
+          const res = await fetch("/api/tasks/approve", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ...payload,
+              memberName: parentName,
+              pin: approvalPin,
+            }),
+          });
+          if (res.ok) {
+            const body = await res.json();
+            if (body?.weekData) setWeekData(body.weekData);
+            return { ok: true as const, body };
+          }
+          // 4xx/5xx: revert the optimistic write — the server refused.
+          setTasks(prevTasks);
+          setWeekData(prevWeekData);
+          if (res.status === 401) {
+            setApprovalError("Parent PIN required to review tapped tasks.");
+            setApprovalPin("");
+            setTimeout(() => setApprovalError(""), 2500);
+          } else {
+            const body = await res.json().catch(() => ({}));
+            showToast(
+              body?.reason === "unknown-task"
+                ? "That task is no longer waiting — refresh and try again."
+                : "Couldn't reach the server to approve — nothing changed."
+            );
+          }
+          return { ok: false as const, status: res.status };
+        } catch {
+          // Offline/degraded mode (D8): KEEP the local approval; the next
+          // snapshot sync reconciles. Honest local toast.
+          return { ok: false as const, status: 0 };
+        }
+      };
+
       if (approvalMode === "approve-all") {
-        // One parent-PIN confirmation pays the WHOLE queue. Each row still
-        // runs the same idempotent, reversal-aware approvePendingCompletion —
-        // the per-member guards (taskId+member) make a double-tap safe, and a
-        // row paid on another device simply clears without re-paying.
+        // Optimistic local pay (B1-fixed amount), then one server batch call.
         const result = pendingApprovals.reduce(
           (acc, pending) => {
             const before = acc.weekData.history.length;
@@ -903,22 +945,51 @@ export default function TasksPage() {
         );
         setTasks(result.tasks);
         setWeekData(result.weekData);
-        showToast(result.paid > 0 ? `Approved! ${result.paid} tapped task${result.paid !== 1 ? "s" : ""} paid.` : "All tapped tasks were already paid.");
+        const posted = await postApprove({
+          action: "approve-all",
+          taskIds: pendingApprovals.map((p) => p.id),
+        });
+        if (posted.ok) {
+          const paid = posted.body?.paid ?? result.paid;
+          showToast(
+            paid > 0
+              ? `Approved! ${paid} tapped task${paid !== 1 ? "s" : ""} paid.`
+              : "All tapped tasks were already paid."
+          );
+        } else if (posted.status === 0) {
+          showToast(
+            result.paid > 0
+              ? `Approved! ${result.paid} tapped task${result.paid !== 1 ? "s" : ""} paid (saved locally — will sync).`
+              : "Saved locally — will sync."
+          );
+        }
       } else if (approvalMode === "approve" && approvalTaskId !== null) {
         const target = tasks.find((x) => x.id === approvalTaskId);
         const { tasks: nt, weekData: nw } = approvePendingCompletion(tasks, weekData, approvalTaskId);
         setTasks(nt);
         setWeekData(nw);
         const crew = target?.pendingApproval?.crew;
-        showToast(
-          crew && crew.length > 0
-            ? `Approved! +${target?.points ?? 0}pts each for ${crew.map((n) => n.split(" ")[0]).join(", ")}.`
-            : `Approved! +${target?.points ?? 0}pts for ${(target?.pendingApproval?.byName ?? "").split(" ")[0]}.`
-        );
+        // B1 toast: use the recorded approval amount, not task.points.
+        const amt = target?.pendingApproval?.points ?? target?.points ?? 0;
+        const posted = await postApprove({ action: "approve", taskId: approvalTaskId });
+        if (posted.ok || posted.status === 0) {
+          showToast(
+            crew && crew.length > 0
+              ? `Approved! +${amt}pts each for ${crew.map((n) => n.split(" ")[0]).join(", ")}.`
+              : `Approved! +${amt}pts for ${(target?.pendingApproval?.byName ?? "").split(" ")[0]}.`
+          );
+        }
       } else if (approvalTaskId !== null) {
-        setTasks((prev) => sendBackPendingCompletion(prev, approvalTaskId));
         const target = tasks.find((x) => x.id === approvalTaskId);
-        showToast(target && isCrewTask(target) ? "Sent back — the whole crew reopens, no points given." : "Sent back — no points were given.");
+        setTasks(sendBackPendingCompletion(prevTasks, approvalTaskId));
+        const posted = await postApprove({ action: "send-back", taskId: approvalTaskId });
+        if (posted.ok || posted.status === 0) {
+          showToast(
+            target && isCrewTask(target)
+              ? "Sent back — the whole crew reopens, no points given."
+              : "Sent back — no points were given."
+          );
+        }
       }
       setApprovalTaskId(null);
       setApprovalMode("approve");

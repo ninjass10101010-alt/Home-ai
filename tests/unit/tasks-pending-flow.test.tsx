@@ -70,10 +70,14 @@ function verifyCalls(): string {
   return ((globalThis.fetch as any)?.mock?.calls || []).flat().join(" ");
 }
 
+// Bodies POSTed to /api/tasks/approve by submitApproval (Task 7).
+const approveCalls: any[] = [];
+
 beforeEach(() => {
   document.body.innerHTML = "";
   localStorage.clear();
   vi.unstubAllGlobals();
+  approveCalls.length = 0;
   mockAuth.currentUser = null;
   mockAuth.isLoggedIn = false;
   vi.stubGlobal("matchMedia", vi.fn(() => ({
@@ -321,5 +325,146 @@ describe("needs approval queue", () => {
     expect(document.body.textContent || "").toContain("Parent PIN required to review tapped tasks.");
     expect(storedTasks()[0].pendingApproval).toBeDefined();
     expect(storedHistory()).toHaveLength(0);
+  });
+});
+
+// Task 7: single Approve / Send-back go through POST /api/tasks/approve —
+// optimistic first, adopt server weekData on 200, revert on 4xx, keep the
+// local approval on network failure (D8).
+
+function approveSeed() {
+  // pendingApproval.points (8) deliberately differs from task.points (6) so
+  // the B1 toast / server ledger prove the recorded amount is what pays.
+  return [{
+    ...OPEN, id: 101, title: "Dishes", points: 6,
+    completed: true, completedBy: "Jasmine Rose",
+    completedAt: new Date().toISOString(), completedInWeek: weekKey(),
+    pendingApproval: { byName: "Jasmine Rose", at: new Date().toISOString(), points: 8 },
+  }];
+}
+
+type ApproveRouteMode = "ok" | "reject" | "offline";
+
+function stubApproveRoute(mode: ApproveRouteMode = "ok") {
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes("/api/members/verify")) {
+      return { ok: true, status: 200, json: async () => ({ member: { name: "Rebecca (Mom)", fullName: "Rebecca (Mom)" } }) } as any;
+    }
+    if (url.includes("/api/tasks/approve")) {
+      const payload = JSON.parse(String(init?.body || "{}"));
+      approveCalls.push(payload);
+      if (mode === "offline") throw new TypeError("Failed to fetch");
+      if (mode === "reject") {
+        return { ok: false, status: 404, json: async () => ({ success: false, reason: "unknown-task" }) } as any;
+      }
+      if (payload.action === "send-back") {
+        return { ok: true, status: 200, json: async () => ({ success: true, paid: 0, cleared: 1, skipped: 0 }) } as any;
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          paid: 1,
+          cleared: 1,
+          skipped: 0,
+          weekData: {
+            weekStart: MONDAY,
+            points: { "Caspian Garcia": 8 },
+            streak: {},
+            lastActive: {},
+            history: [{
+              id: 1,
+              timestamp: new Date().toISOString(),
+              member: "Caspian Garcia",
+              type: "earn",
+              amount: 8,
+              description: "Completed: Dishes (+8pts)",
+              taskId: 101,
+            }],
+          },
+        }),
+      } as any;
+    }
+    return { ok: true, status: 200, json: async () => ({ snapshot: null }) } as any;
+  }));
+}
+
+function storedWeek(): any {
+  return JSON.parse(localStorage.getItem("consuela-week-data") || "{}");
+}
+
+async function driveApproval(buttonLabel: string, buttonText: string) {
+  mockAuth.currentUser = { name: "Rebecca (Mom)", role: "parent" };
+  mockAuth.isLoggedIn = true;
+  seed(approveSeed());
+  const el = await renderAsync(<TasksPage />);
+  await settle();
+  await clickByAriaLabel(buttonLabel);
+  await settle();
+  await typeAndSubmit("Parent PIN", buttonText, "0202");
+  return el;
+}
+
+describe("needs approval → server route", () => {
+  it("single Approve POSTs the exact contract body and adopts server weekData", async () => {
+    stubApproveRoute("ok");
+    const el = await driveApproval("Approve Dishes", "Approve");
+
+    expect(approveCalls).toHaveLength(1);
+    expect(approveCalls[0]).toEqual({
+      action: "approve",
+      taskId: 101,
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+    });
+    // Server-adopted ledger: only the route's weekData carries the Caspian
+    // key — local optimistic state would have credited Jasmine Rose instead.
+    expect(storedWeek().points["Caspian Garcia"]).toBe(8);
+    expect(storedWeek().history[0]?.amount).toBe(8);
+    expect(storedTasks()[0].pendingApproval).toBeUndefined();
+    // B1 toast uses the recorded approval amount (8), not task.points (6).
+    expect(document.body.textContent || "").toContain("+8pts");
+    expect(el.textContent || "").not.toContain("Needs approval");
+  });
+
+  it("send-back POSTs send-back and reopens the row with sentBackAt", async () => {
+    stubApproveRoute("ok");
+    await driveApproval("Send back Dishes", "Send back");
+
+    expect(approveCalls).toHaveLength(1);
+    expect(approveCalls[0]).toEqual({
+      action: "send-back",
+      taskId: 101,
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+    });
+    const saved = storedTasks();
+    expect(saved[0].completed).toBe(false);
+    expect(saved[0].pendingApproval).toBeUndefined();
+    expect(typeof saved[0].sentBackAt).toBe("string");
+    expect(storedHistory()).toHaveLength(0);
+  });
+
+  it("4xx from the route reverts the optimistic approval", async () => {
+    stubApproveRoute("reject");
+    await driveApproval("Approve Dishes", "Approve");
+
+    expect(approveCalls).toHaveLength(1);
+    // The optimistic pay was rolled back — the row still waits.
+    expect(storedTasks()[0].pendingApproval).toBeDefined();
+    expect(storedWeek().history).toHaveLength(0);
+    expect(document.body.textContent || "").toContain("no longer waiting");
+  });
+
+  it("network failure KEEPS the local approval (D8 degraded mode)", async () => {
+    stubApproveRoute("offline");
+    await driveApproval("Approve Dishes", "Approve");
+
+    expect(approveCalls).toHaveLength(1);
+    expect(storedTasks()[0].pendingApproval).toBeUndefined();
+    expect(storedWeek().history).toHaveLength(1);
+    expect(document.body.textContent || "").toContain("Approved!");
   });
 });

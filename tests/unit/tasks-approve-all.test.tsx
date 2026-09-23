@@ -86,6 +86,12 @@ beforeEach(() => {
         json: async () => (ok ? { member: { name: "Rebecca (Mom)", role: "parent", emoji: "👩" } } : { error: "Invalid PIN" }),
       } as any;
     }
+    // Task 7: approve-all POSTs the batch — answer 200 with no weekData so
+    // the local optimistic pay stays the assertion surface (server adopt is
+    // Task 8's hardening).
+    if (url.includes("/api/tasks/approve")) {
+      return { ok: true, status: 200, json: async () => ({ success: true, paid: 2, cleared: 2, skipped: 0 }) } as any;
+    }
     return { ok: false, status: 401, json: async () => ({}) } as any;
   }));
   vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {} })));
