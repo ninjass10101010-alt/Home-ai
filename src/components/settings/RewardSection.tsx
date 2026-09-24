@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useSyncExternalStore } from "react";
 import SoftButton from "@/components/ui/SoftButton";
 import IconButton from "@/components/ui/IconButton";
 import Modal from "@/components/ui/Modal";
@@ -8,7 +8,8 @@ import ListRow from "@/components/ui/ListRow";
 import EmptyState from "@/components/ui/EmptyState";
 import FormField from "@/components/patterns/FormField";
 import { REWARDS_KEY, loadRewards, saveRewards } from "@/lib/task-utils";
-import { touchRewardsStamp } from "@/modes/kid/kid-store";
+import { writeRewardsStamp } from "@/modes/kid/kid-store";
+import type { TaskConfigResponse } from "@/lib/task-config";
 
 // Retired Settings-only key. The live shop (RewardsShop) and the Tasks page
 // read/write REWARDS_KEY via task-utils — one catalog, one source.
@@ -28,8 +29,61 @@ interface RewardSectionProps {
   showToast: (msg: string) => void;
 }
 
+const REWARDS_UPDATED_EVENT = "consuela-rewards-updated";
+const EMPTY_REWARDS: any[] = [];
+let cachedRewardsRaw: string | null | undefined;
+let cachedRewards: any[] = EMPTY_REWARDS;
+
+function getRewardsSnapshot(): any[] {
+  if (typeof window === "undefined") return EMPTY_REWARDS;
+  const raw = localStorage.getItem(REWARDS_KEY);
+  if (raw !== cachedRewardsRaw) {
+    cachedRewardsRaw = raw;
+    cachedRewards = loadRewards<any[]>([]);
+  }
+  return cachedRewards;
+}
+
+function getServerRewardsSnapshot(): any[] {
+  return EMPTY_REWARDS;
+}
+
+function subscribeToRewards(onStoreChange: () => void): () => void {
+  window.addEventListener(REWARDS_UPDATED_EVENT, onStoreChange);
+  window.addEventListener("storage", onStoreChange);
+  return () => {
+    window.removeEventListener(REWARDS_UPDATED_EVENT, onStoreChange);
+    window.removeEventListener("storage", onStoreChange);
+  };
+}
+
+function emitRewardsUpdate(): void {
+  window.dispatchEvent(new Event(REWARDS_UPDATED_EVENT));
+}
+
+function configOperationId(action: "replace" | "upsert" | "delete"): string {
+  return `config-rewards-${action}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+async function postRewardCommand(command: Record<string, unknown>): Promise<TaskConfigResponse> {
+  const response = await fetch("/api/tasks/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(command),
+  });
+  const body = await response.json();
+  if (!response.ok || !body?.success || !Array.isArray(body.items)) {
+    throw new Error("config_write_failed");
+  }
+  return body as TaskConfigResponse;
+}
+
 export default function RewardSection({ showToast }: RewardSectionProps) {
-  const [rewards, setRewards] = useState<any[]>([]);
+  const rewards = useSyncExternalStore(
+    subscribeToRewards,
+    getRewardsSnapshot,
+    getServerRewardsSnapshot,
+  );
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState({ name: "", emoji: "🎁", cost: 25, category: "fun" });
@@ -47,7 +101,7 @@ export default function RewardSection({ showToast }: RewardSectionProps) {
         localStorage.removeItem(LEGACY_CATALOG_KEY);
       }
     } catch {}
-    setRewards(loadRewards<any[]>([]));
+    emitRewardsUpdate();
   }, []);
 
   const openModal = (reward?: any) => {
@@ -56,34 +110,61 @@ export default function RewardSection({ showToast }: RewardSectionProps) {
     setModalOpen(true);
   };
 
-  // Every catalog write touches the shared LWW stamp (kid-store) so the
-  // Tasks page's snapshot restore can tell a Settings edit (newer) from a
-  // stale server snapshot (older) — without it, the restore's old "longer
-  // list wins" heuristic resurrected deletes on the next Tasks mount/tick.
-  const save = () => {
+  const save = async () => {
     if (!form.name.trim()) return;
     const reward = { ...form, name: form.name.trim(), id: editing?.id || `reward-${Date.now()}` };
-    const updated = editing ? rewards.map((r) => r.id === editing.id ? reward : r) : [...rewards, reward];
-    setRewards(updated);
-    saveRewards(updated);
-    touchRewardsStamp();
-    showToast(editing ? `✅ Updated "${reward.name}"` : `✅ Added "${reward.name}"`);
-    setModalOpen(false);
+    try {
+      const result = await postRewardCommand({
+        operationId: configOperationId("upsert"),
+        kind: "rewards",
+        action: "upsert",
+        updatedAt: new Date().toISOString(),
+        item: reward,
+      });
+      saveRewards(result.items);
+      writeRewardsStamp(result.updatedAt);
+      emitRewardsUpdate();
+      showToast(editing ? `✅ Updated "${reward.name}"` : `✅ Added "${reward.name}"`);
+      setModalOpen(false);
+    } catch {
+      showToast("Couldn't save the reward. Check the connection and try again.");
+    }
   };
 
-  const remove = (reward: any) => {
-    const updated = rewards.filter((r) => r.id !== reward.id);
-    setRewards(updated);
-    saveRewards(updated);
-    touchRewardsStamp();
-    showToast(`🗑️ Removed "${reward.name}"`);
+  const remove = async (reward: any) => {
+    try {
+      const result = await postRewardCommand({
+        operationId: configOperationId("delete"),
+        kind: "rewards",
+        action: "delete",
+        updatedAt: new Date().toISOString(),
+        itemId: reward.id,
+      });
+      saveRewards(result.items);
+      writeRewardsStamp(result.updatedAt);
+      emitRewardsUpdate();
+      showToast(`🗑️ Removed "${reward.name}"`);
+    } catch {
+      showToast("Couldn't remove the reward. Check the connection and try again.");
+    }
   };
 
-  const resetDefaults = () => {
-    localStorage.removeItem(REWARDS_KEY);
-    touchRewardsStamp();
-    setRewards([]);
-    showToast("✅ Rewards cleared — the shop starts empty");
+  const resetDefaults = async () => {
+    try {
+      const result = await postRewardCommand({
+        operationId: configOperationId("replace"),
+        kind: "rewards",
+        action: "replace",
+        updatedAt: new Date().toISOString(),
+        items: [],
+      });
+      saveRewards(result.items);
+      writeRewardsStamp(result.updatedAt);
+      emitRewardsUpdate();
+      showToast("✅ Rewards cleared — the shop starts empty");
+    } catch {
+      showToast("Couldn't clear the rewards. Check the connection and try again.");
+    }
   };
 
   return (

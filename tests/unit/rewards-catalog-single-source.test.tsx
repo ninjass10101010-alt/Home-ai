@@ -32,6 +32,8 @@ import { REWARDS_KEY, loadRewards } from "@/lib/task-utils";
 const LEGACY_KEY = "consuela-rewards-catalog";
 
 let root: Root | null = null;
+let fetchMock: ReturnType<typeof vi.fn>;
+
 function mount() {
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -42,12 +44,50 @@ function mount() {
 
 beforeEach(() => {
   localStorage.clear();
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: true,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }));
+  fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+    const command = JSON.parse(String(init?.body));
+    let items = loadRewards<any[]>([]);
+    if (command.action === "replace") items = command.items;
+    if (command.action === "upsert") {
+      items = items.some((reward) => String(reward.id) === String(command.item.id))
+        ? items.map((reward) => String(reward.id) === String(command.item.id) ? command.item : reward)
+        : [...items, command.item];
+    }
+    if (command.action === "delete") {
+      items = items.filter((reward) => String(reward.id) !== String(command.itemId));
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        operationId: command.operationId,
+        kind: command.kind,
+        items,
+        updatedAt: command.updatedAt,
+        revision: { revision: "2", updatedAt: command.updatedAt },
+        applied: true,
+      }),
+    };
+  });
+  vi.stubGlobal("fetch", fetchMock);
 });
 
 afterEach(() => {
   act(() => { root?.unmount(); });
   root = null;
   document.body.innerHTML = "";
+  vi.unstubAllGlobals();
 });
 
 describe("RewardSection — one rewards catalog (task-utils REWARDS_KEY)", () => {
@@ -75,7 +115,7 @@ describe("RewardSection — one rewards catalog (task-utils REWARDS_KEY)", () =>
     expect(localStorage.getItem(LEGACY_KEY)).toBe(staleJson);
   });
 
-  it("round-trip: a Settings save lands where the shop reads (loadRewards sees it)", () => {
+  it("round-trip: a Settings save posts to the config route and adopts the response", async () => {
     mount();
 
     const addBtn = Array.from(document.querySelectorAll("button")).find((b) => b.textContent === "Add reward")!;
@@ -90,23 +130,43 @@ describe("RewardSection — one rewards catalog (task-utils REWARDS_KEY)", () =>
       nameInput.dispatchEvent(new Event("input", { bubbles: true }));
     });
     const saveBtn = Array.from(document.querySelectorAll("button")).find((b) => b.textContent === "Save")!;
-    act(() => { saveBtn.click(); });
+    await act(async () => {
+      saveBtn.click();
+      await Promise.resolve();
+    });
 
     const stored = loadRewards<any[]>([]);
     expect(stored).toHaveLength(1);
     expect(stored[0].name).toBe("30 min screen time");
     expect(stored[0].cost).toBe(25);
     expect(localStorage.getItem(LEGACY_KEY)).toBeNull();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/tasks/config",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body))).toMatchObject({
+      kind: "rewards",
+      action: "upsert",
+      item: { name: "30 min screen time", emoji: "🎁", cost: 25 },
+    });
   });
 
-  it("delete writes through the shared key too", () => {
+  it("delete writes the authoritative response through the config route", async () => {
     localStorage.setItem(REWARDS_KEY, JSON.stringify([{ id: 1, name: "Ice cream", emoji: "🍦", cost: 15 }]));
     mount();
 
     const del = document.querySelector('button[aria-label="Delete reward"]') as HTMLButtonElement;
     expect(del).toBeTruthy();
-    act(() => { del.click(); });
+    await act(async () => {
+      del.click();
+      await Promise.resolve();
+    });
 
     expect(loadRewards<any[]>([])).toEqual([]);
+    expect(JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body))).toMatchObject({
+      kind: "rewards",
+      action: "delete",
+      itemId: 1,
+    });
   });
 });

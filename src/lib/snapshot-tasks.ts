@@ -3,6 +3,16 @@ import { withKeyedLock } from "@/lib/keyed-lock";
 import { persistedTaskEmoji, persistedCrewEmoji } from "@/lib/task-emoji";
 import { parseCanonicalTransactions, recomputeWeekPoints } from "@/lib/task-ledger";
 import { normalizeOperationId, normalizeTimestamp } from "@/lib/task-operation-contract";
+import {
+  applyTaskConfigCommand,
+  TASK_CONFIG_ACTIONS,
+  TASK_CONFIG_DATA_KEYS,
+  TASK_CONFIG_KINDS,
+  TASK_CONFIG_STAMP_KEYS,
+  type TaskConfigCommand,
+  type TaskConfigItem,
+  type TaskConfigKind,
+} from "@/lib/task-config";
 import type { WeekData, Transaction } from "@/types/tasks";
 
 /**
@@ -43,6 +53,21 @@ export interface SnapshotOperationReceipt {
   createdAt: string;
 }
 
+export interface SnapshotConfigOperationReceipt {
+  kind: TaskConfigKind;
+  action: "replace" | "upsert" | "delete";
+  updatedAt: string;
+}
+
+export interface SnapshotConfigMutationResult {
+  items: TaskConfigItem[];
+  updatedAt: string;
+  revision: SnapshotRevision;
+  applied: boolean;
+  duplicate: boolean;
+  stale: boolean;
+}
+
 export interface SnapshotProjectionRepair {
   operationId: string;
   taskIds: number[];
@@ -66,6 +91,7 @@ export type SnapshotData = Record<string, any> & {
   revision?: string;
   taskWeekStart?: string;
   operationReceipts?: Record<string, SnapshotOperationReceipt[]>;
+  configOperationReceipts?: Record<string, SnapshotConfigOperationReceipt>;
   pendingProjectionRepairs?: SnapshotProjectionRepair[];
 };
 
@@ -333,6 +359,29 @@ export function getSnapshotOperationReceipts(
   return [...(receipts[normalizedOperationId] ?? [])];
 }
 
+function sanitizeConfigOperationReceipts(
+  value: unknown,
+): Record<string, SnapshotConfigOperationReceipt> {
+  const parsed = parseJSON<unknown>(value, {});
+  const receipts = Object.create(null) as Record<string, SnapshotConfigOperationReceipt>;
+  if (!isObjectRecord(parsed)) return receipts;
+
+  for (const [storedId, candidate] of Object.entries(parsed)) {
+    const operationId = normalizeOperationId(storedId);
+    if (!operationId || !isObjectRecord(candidate)) continue;
+    const kind = TASK_CONFIG_KINDS.includes(candidate.kind as TaskConfigKind)
+      ? candidate.kind as TaskConfigKind
+      : null;
+    const action = TASK_CONFIG_ACTIONS.includes(candidate.action as SnapshotConfigOperationReceipt["action"])
+      ? candidate.action as SnapshotConfigOperationReceipt["action"]
+      : null;
+    const updatedAt = normalizeTimestamp(candidate.updatedAt);
+    if (!kind || !action || !updatedAt) continue;
+    receipts[operationId] = { kind, action, updatedAt };
+  }
+  return receipts;
+}
+
 function sanitizeProjectionRepairs(value: unknown): SnapshotProjectionRepair[] {
   const parsed = parseJSON<unknown>(value, []);
   if (!Array.isArray(parsed)) return [];
@@ -361,18 +410,26 @@ function sanitizeSnapshotMetadata(data: SnapshotData): SnapshotData {
   if ("operationReceipts" in data) {
     next.operationReceipts = sanitizeOperationReceipts(data.operationReceipts);
   }
+  if ("configOperationReceipts" in data) {
+    next.configOperationReceipts = sanitizeConfigOperationReceipts(data.configOperationReceipts);
+  }
   if ("pendingProjectionRepairs" in data) {
     next.pendingProjectionRepairs = sanitizeProjectionRepairs(data.pendingProjectionRepairs);
   }
   return next;
 }
 
-function canonicalSnapshotData(data: SnapshotData, revision: string): SnapshotData {
+function canonicalSnapshotData(
+  data: SnapshotData,
+  revision: string,
+  normalizeWeek = true,
+  sanitizeMetadata = true,
+): SnapshotData {
   const next: SnapshotData = {
-    ...sanitizeSnapshotMetadata(data),
+    ...(sanitizeMetadata ? sanitizeSnapshotMetadata(data) : data),
     revision,
   };
-  if (next.weekData != null) {
+  if (normalizeWeek && next.weekData != null) {
     const weekData = normalizeWeekData(next.weekData);
     if (!weekData) throw new TypeError("invalid_week_data");
     next.weekData = {
@@ -515,6 +572,85 @@ export async function mirrorTaskToCollection(
 }
 
 export type AdminPB = ReturnType<typeof import("@/lib/pb").getAdminPB>;
+
+export async function mutateSnapshotConfig(
+  command: TaskConfigCommand,
+  pb: AdminPB,
+): Promise<SnapshotConfigMutationResult> {
+  return withKeyedLock(`snapshot:${SNAPSHOT_KEY}`, async () => {
+    const rows = await pb.collection(SNAPSHOT_COLLECTION).getFullList({
+      requestKey: null,
+      filter: `key = "${SNAPSHOT_KEY}"`,
+    });
+    const row = rows[0] as any;
+    const current = parseSnapshotData(row?.data);
+    const dataKey = TASK_CONFIG_DATA_KEYS[command.kind];
+    const stampKey = TASK_CONFIG_STAMP_KEYS[command.kind];
+    const currentItems = Array.isArray(current[dataKey])
+      ? current[dataKey] as TaskConfigItem[]
+      : [];
+    const revision = decimalRevision(current.revision);
+    const revisionUpdatedAt = rowUpdatedAt(row, current);
+    const currentStamp = normalizeTimestamp(current[stampKey]) ?? "";
+    const receipt = sanitizeConfigOperationReceipts(current.configOperationReceipts)[command.operationId];
+
+    if (receipt) {
+      return {
+        items: currentItems,
+        updatedAt: currentStamp || receipt.updatedAt,
+        revision: { revision, updatedAt: revisionUpdatedAt },
+        applied: false,
+        duplicate: true,
+        stale: false,
+      };
+    }
+
+    if (currentStamp && command.updatedAt <= currentStamp) {
+      return {
+        items: currentItems,
+        updatedAt: currentStamp,
+        revision: { revision, updatedAt: revisionUpdatedAt },
+        applied: false,
+        duplicate: false,
+        stale: true,
+      };
+    }
+
+    const items = applyTaskConfigCommand(currentItems, command);
+    const configOperationReceipts = sanitizeConfigOperationReceipts(current.configOperationReceipts);
+    configOperationReceipts[command.operationId] = {
+      kind: command.kind,
+      action: command.action,
+      updatedAt: command.updatedAt,
+    };
+    const updatedRevision = nextRevision(revision);
+    const updatedAt = new Date().toISOString();
+    const payload = {
+      key: SNAPSHOT_KEY,
+      data: canonicalSnapshotData({
+        ...current,
+        [dataKey]: items,
+        [stampKey]: command.updatedAt,
+        configOperationReceipts,
+      }, updatedRevision, false, false),
+      updated_at: updatedAt,
+    };
+    if (row) {
+      await pb.collection(SNAPSHOT_COLLECTION).update(row.id, payload, { requestKey: null });
+    } else {
+      await pb.collection(SNAPSHOT_COLLECTION).create(payload, { requestKey: null });
+    }
+
+    return {
+      items,
+      updatedAt: command.updatedAt,
+      revision: { revision: updatedRevision, updatedAt },
+      applied: true,
+      duplicate: false,
+      stale: false,
+    };
+  });
+}
 
 export type SnapshotWeekTaskPatch = {
   id: number;

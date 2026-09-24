@@ -81,6 +81,9 @@ import {
   emptyWeekData,
   syncAllTasksToPB,
   syncHallOfFameToPB,
+  loadPenalties,
+  readPenaltiesStamp,
+  writePenaltiesStamp,
 } from "@/lib/task-utils";
 // New Task-6 exports may be absent pre-implementation; access via the module
 // namespace so RED failures land as per-test Errors, not an import-time crash.
@@ -340,9 +343,43 @@ describe("tasks page — weekly prizes snapshot adopt (last-write-wins stamp)", 
   });
 });
 
+describe("tasks page — penalties snapshot adopt", () => {
+  it("adopts a newer empty penalty catalog and its explicit stamp", async () => {
+    localStorage.setItem("consuela-penalties", JSON.stringify([{ id: 1, name: "Old", emoji: "⚠️", points: 5 }]));
+    writePenaltiesStamp(T_OLD);
+    server.snapshot = { tasks: [], weekData: null, penalties: [], penaltiesUpdatedAt: T_NEW };
+
+    await renderTasksPage();
+    await settle();
+
+    expect(loadPenalties<any[]>([])).toEqual([]);
+    expect(readPenaltiesStamp()).toBe(T_NEW);
+  });
+
+  it("keeps the local penalty catalog when the snapshot stamp is older", async () => {
+    const local = [{ id: 1, name: "Local", emoji: "⚠️", points: 5 }];
+    localStorage.setItem("consuela-penalties", JSON.stringify(local));
+    writePenaltiesStamp(T_NEWEST);
+    server.snapshot = {
+      tasks: [],
+      weekData: null,
+      penalties: [{ id: 2, name: "Stale", emoji: "⚠️", points: 10 }],
+      penaltiesUpdatedAt: T_NEW,
+    };
+
+    await renderTasksPage();
+    await settle();
+
+    expect(loadPenalties<any[]>([])).toEqual(local);
+    expect(readPenaltiesStamp()).toBe(T_NEWEST);
+  });
+});
+
 describe("tasks page — snapshot POST body", () => {
   it("carries weeklyPrizes + weeklyPrizesStamp next to the rewards legs", async () => {
     seedLocalPrizes(PRIZES_SNAP, T_NEW);
+    localStorage.setItem("consuela-penalties", JSON.stringify([{ id: 1, name: "Mess", emoji: "⚠️", points: 5 }]));
+    writePenaltiesStamp(T_NEW);
     server.snapshot = { tasks: [], weekData: null };
 
     await renderTasksPage();
@@ -356,6 +393,8 @@ describe("tasks page — snapshot POST body", () => {
     // Legacy legs untouched by the new fields.
     expect(Array.isArray(push.rewards)).toBe(true);
     expect("rewardsUpdatedAt" in push).toBe(true);
+    expect(push.penalties).toEqual([{ id: 1, name: "Mess", emoji: "⚠️", points: 5 }]);
+    expect(push.penaltiesUpdatedAt).toBe(T_NEW);
   });
 });
 
@@ -435,27 +474,19 @@ describe("syncHallOfFameToPB — prize + celebrated payload", () => {
   });
 });
 
-describe("tasks page — structured sync carries weekly prizes (7th arg live)", () => {
-  // Task 6's seam existed but the page never passed the prizes — the
-  // structured 5s sync (syncAllTasksToPB) must push the weekly_prizes leg so
-  // a fresh PB gains the prize rows even without a snapshot post.
+describe("tasks page — structured sync excludes weekly-prize config", () => {
   it(
-    "after the 5s structured sync, weekly prizes reach the gateway",
+    "after the 5s structured sync, weekly prizes do not bypass the config route",
     { timeout: 12000 },
     async () => {
       seedLocalPrizes(PRIZES_SNAP, T_NEW);
       server.snapshot = { tasks: [], weekData: null };
 
       await renderTasksPage();
-      // Past the 5s structured-sync debounce.
       await settle(5600);
 
-      const creates = callsTo("/api/db/weekly_prizes", "POST");
-      // Expect one rank-keyed create per seeded prize (the endpoint upserts by
-      // rank server-side; duplicates from a re-trigger are harmless but the
-      // first pass must include both ranks).
-      const postedRanks = new Set(creates.map((c) => callBody(c).rank));
-      for (const prize of PRIZES_SNAP) expect(postedRanks.has(prize.rank)).toBe(true);
+      expect(callsTo("/api/db/weekly_prizes", "POST")).toHaveLength(0);
+      expect(callsMatching("/api/db/weekly_prizes/")).toHaveLength(0);
     }
   );
 });

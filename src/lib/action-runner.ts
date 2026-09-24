@@ -1,6 +1,9 @@
 import { db } from "@/db";
 import { upsertGroceryItem } from "./grocery-service";
 import { saveOrQueue } from "./pending-writes";
+import { saveRewards } from "./task-utils";
+import { writeRewardsStamp } from "@/modes/kid/kid-store";
+import type { TaskConfigResponse } from "./task-config";
 
 export type LocalActionType =
   | "event"
@@ -255,17 +258,30 @@ export async function runAction(action: ActionCard): Promise<{ success: boolean;
         return { success: true, message: `Created recipe "${action.title}"` };
       }
       case "reward": {
-        const REWARDS_KEY = "consuela-rewards";
         const points = parseInt(action.detail?.match(/(\d+)/)?.[1] || "50");
-        const newReward = { id: Date.now(), name: action.title, emoji: action.emoji || "🎁", cost: points };
-        if (typeof window !== "undefined") {
-          try {
-            const stored = localStorage.getItem(REWARDS_KEY);
-            const rewards = stored ? JSON.parse(stored) : [];
-            rewards.push(newReward);
-            localStorage.setItem(REWARDS_KEY, JSON.stringify(rewards));
-          } catch {}
+        const updatedAt = new Date().toISOString();
+        const response = await fetch("/api/tasks/config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            operationId: `config-rewards-upsert-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            kind: "rewards",
+            action: "upsert",
+            updatedAt,
+            item: { id: Date.now(), name: action.title, emoji: action.emoji || "🎁", cost: points },
+          }),
+        });
+        const result = await response.json() as Partial<TaskConfigResponse>;
+        if (
+          !response.ok ||
+          !result.success ||
+          !Array.isArray(result.items) ||
+          typeof result.updatedAt !== "string"
+        ) {
+          return { success: false, message: `Couldn't add reward "${action.title}"` };
         }
+        saveRewards(result.items);
+        writeRewardsStamp(result.updatedAt);
         return { success: true, message: `Added reward "${action.title}" (${points}pts)` };
       }
       case "clear": {
