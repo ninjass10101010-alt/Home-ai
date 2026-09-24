@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SnapshotTask } from "@/lib/snapshot-tasks";
 
 process.env.TZ = "America/Detroit";
@@ -22,6 +22,10 @@ const CURRENT = "2026-09-28";
 const NOW = new Date("2026-09-28T12:00:00-04:00");
 
 type Row = Record<string, any>;
+
+function emptyWeek(weekStart: string) {
+  return { weekStart, points: {}, streak: {}, lastActive: {}, history: [] };
+}
 
 function priorWeek() {
   return {
@@ -66,7 +70,14 @@ function sourceTask(overrides: Partial<SnapshotTask>): SnapshotTask {
   } as SnapshotTask;
 }
 
-function createHarness(options: { hallCreateFailures?: number; hallCreateDrops?: number } = {}) {
+function createHarness(options: {
+  hallCreateFailures?: number;
+  hallCreateDrops?: number;
+  updateDrops?: Record<string, number>;
+  deleteFailures?: Record<string, number>;
+  deleteSuccessesBeforeFailure?: Record<string, number>;
+  snapshotWriteDrops?: number;
+} = {}) {
   const state: Record<string, Row[]> = {
     week_data: [],
     week_archive: [],
@@ -84,6 +95,11 @@ function createHarness(options: { hallCreateFailures?: number; hallCreateDrops?:
   let sequence = 0;
   let hallFailures = options.hallCreateFailures ?? 0;
   let hallDrops = options.hallCreateDrops ?? 0;
+  const updateDrops = { ...(options.updateDrops ?? {}) };
+  const deleteFailures = { ...(options.deleteFailures ?? {}) };
+  const deleteSuccessesBeforeFailure = { ...(options.deleteSuccessesBeforeFailure ?? {}) };
+  const deleteFailureNames = new Set(Object.keys(deleteSuccessesBeforeFailure));
+  let snapshotWriteDrops = options.snapshotWriteDrops ?? 0;
   const collections: Record<string, any> = {};
   const callLog = calls as Record<string, { create: Row[]; update: Row[]; deletes: string[] }>;
 
@@ -112,11 +128,30 @@ function createHarness(options: { hallCreateFailures?: number; hallCreateDrops?:
         const index = state[name].findIndex((candidate) => candidate.id === id);
         if (index < 0) throw new Error("missing row");
         const row = { ...state[name][index], ...structuredClone(payload) };
-        state[name][index] = row;
         callLog[name]?.update.push(structuredClone(row));
+        if ((updateDrops[name] ?? 0) > 0) {
+          updateDrops[name] -= 1;
+          return structuredClone(state[name][index]);
+        }
+        if (name === "consuela_data_snapshots" && snapshotWriteDrops > 0) {
+          snapshotWriteDrops -= 1;
+          return structuredClone(state[name][index]);
+        }
+        state[name][index] = row;
         return structuredClone(row);
       }),
       "delete": vi.fn(async (id: string) => {
+        if ((deleteFailures[name] ?? 0) > 0) {
+          deleteFailures[name] -= 1;
+          throw new Error(`${name} delete failed`);
+        }
+        if (deleteFailureNames.has(name)) {
+          if (deleteSuccessesBeforeFailure[name] > 0) deleteSuccessesBeforeFailure[name] -= 1;
+          else {
+            deleteFailureNames.delete(name);
+            throw new Error(`${name} delete failed`);
+          }
+        }
         const index = state[name].findIndex((candidate) => candidate.id === id);
         if (index >= 0) state[name].splice(index, 1);
         callLog[name]?.deletes.push(id);
@@ -184,9 +219,16 @@ function seedRollover(
   });
 }
 
+let warnSpy: ReturnType<typeof vi.spyOn>;
+
 beforeEach(() => {
   mocks.withAdmin.mockReset();
   __resetWeekLedgerLockForTests();
+  warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+});
+
+afterEach(() => {
+  warnSpy.mockRestore();
 });
 
 describe("familyWeekStart", () => {
@@ -340,6 +382,268 @@ describe("ensureCurrentTaskWeek", () => {
     });
     expect(harness.calls.week_data.create).toHaveLength(1);
     expect(harness.calls.week_archive.create).toHaveLength(0);
+  });
+
+  it("persists canonical history when one row contains duplicate transaction IDs", async () => {
+    const harness = createHarness();
+    seedRollover(harness, [sourceTask({ id: 1 })]);
+    const duplicate = structuredClone(priorWeek());
+    duplicate.points = { Alex: 5 };
+    duplicate.history = [duplicate.history[0], structuredClone(duplicate.history[0])];
+    harness.state.week_data = [{ id: "prior-1", ...duplicate }];
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = await ensureCurrentTaskWeek({ now: NOW });
+
+    expect(result.reconciled).toBe(true);
+    expect(harness.calls.week_data.update).toHaveLength(1);
+    expect(harness.state.week_data.find((row) => row.weekStart === PRIOR)?.history).toHaveLength(1);
+  });
+
+  it("verifies the merged primary before deleting duplicate rows", async () => {
+    const harness = createHarness({ updateDrops: { week_data: 1 } });
+    seedRollover(harness, [sourceTask({ id: 1 })], { duplicatePrior: true });
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    await expect(ensureCurrentTaskWeek({ now: NOW })).rejects.toThrow();
+    expect(harness.calls.week_data.deletes).toHaveLength(0);
+    expect(harness.state.week_data.filter((row) => row.weekStart === PRIOR)).toHaveLength(2);
+  });
+
+  it("leaves a verified primary and remaining duplicate after a partial delete", async () => {
+    const harness = createHarness({ deleteSuccessesBeforeFailure: { week_data: 1 } });
+    seedRollover(harness, [sourceTask({ id: 1 })], { duplicatePrior: true });
+    const third = structuredClone(priorWeek());
+    third.history[0].id = 103;
+    harness.state.week_data.push({ id: "prior-3", ...third });
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    await expect(ensureCurrentTaskWeek({ now: NOW })).rejects.toThrow();
+    expect(harness.state.week_data.filter((row) => row.weekStart === PRIOR)).toHaveLength(2);
+    expect(harness.state.week_data.find((row) => row.id === "prior-1")?.history).toHaveLength(1);
+
+    await ensureCurrentTaskWeek({ now: NOW });
+    expect(harness.state.week_data.filter((row) => row.weekStart === PRIOR)).toHaveLength(1);
+  });
+
+  it("reconciles an existing archive against the canonical prior week", async () => {
+    const harness = createHarness();
+    seedRollover(harness, [sourceTask({ id: 1 })]);
+    harness.state.week_archive = [{
+      id: "archive-stale",
+      weekStart: PRIOR,
+      points: { Alex: 7 },
+      streak: {},
+      lastActive: {},
+      history: [{
+        id: 901,
+        timestamp: "2026-09-27T20:00:00.000Z",
+        member: "Alex",
+        type: "earn",
+        amount: 7,
+        description: "Stale",
+        taskId: 1,
+      }],
+    }];
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    await ensureCurrentTaskWeek({ now: NOW });
+
+    expect(harness.calls.week_archive.update).toHaveLength(1);
+    expect(harness.state.week_archive[0].points).toEqual({ Alex: 5 });
+    expect(harness.state.week_archive[0].history.map((tx: Row) => tx.id)).toEqual([101]);
+  });
+
+  it("repairs stale fields on an existing Hall of Fame row", async () => {
+    const harness = createHarness();
+    seedRollover(harness, [sourceTask({ id: 1 })]);
+    harness.state.hall_of_fame = [{
+      id: "hall-1",
+      member: "Alex",
+      weekStart: PRIOR,
+      points: 99,
+      rank: 3,
+      emoji: "stale",
+      prize: "Stale prize",
+      celebrated: true,
+    }];
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = await ensureCurrentTaskWeek({ now: NOW });
+
+    expect(result.reconciled).toBe(true);
+    expect(result.hallOfFameRecorded).toBe(true);
+    expect(harness.state.hall_of_fame[0]).toMatchObject({
+      points: 5,
+      rank: 1,
+      emoji: "🦊",
+      prize: "Pick the movie",
+      celebrated: true,
+    });
+  });
+
+  it("surfaces reconciled false and logs only a sanitized projection warning", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    try {
+      const harness = createHarness({ hallCreateFailures: 1 });
+      seedRollover(harness, [sourceTask({ id: 1 })]);
+      mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+      const response = await GET();
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.reconciled).toBe(false);
+      expect(warnSpy).toHaveBeenCalledWith("[task-week-rollover] projection reconciliation pending");
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("hall projection failed");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("backfills all archived Hall of Fame rows before returning", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    try {
+      const harness = createHarness();
+      harness.state.week_data = [{ id: "current", ...emptyWeek(CURRENT) }];
+      harness.state.week_archive = [{
+        id: "old",
+        ...emptyWeek(PRIOR),
+        points: { Alex: 6 },
+        history: [{
+          id: 601,
+          timestamp: "2026-09-20T10:00:00.000Z",
+          member: "Alex",
+          type: "earn",
+          amount: 6,
+          description: "Old",
+        }],
+      }];
+      harness.state.consuela_data_snapshots = [{
+        id: "snapshot-current",
+        data: { revision: "3", taskWeekStart: CURRENT, weekData: emptyWeek(CURRENT), tasks: [], deletedTaskIds: [] },
+        updated_at: "2026-09-28T12:00:00.000Z",
+      }];
+      mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+      const response = await GET();
+
+      expect(response.status).toBe(200);
+      expect(harness.state.hall_of_fame).toHaveLength(1);
+      expect(harness.state.hall_of_fame[0]).toMatchObject({ member: "Alex", weekStart: PRIOR, points: 6 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("backfills Hall of Fame for every archived week on a no-op rollover", async () => {
+    const harness = createHarness();
+    const oldWeek: any = {
+      ...emptyWeek(PRIOR),
+      points: { Alex: 4 },
+      history: [{
+        id: 301,
+        timestamp: "2026-09-20T10:00:00.000Z",
+        member: "Alex",
+        type: "earn",
+        amount: 4,
+        description: "Old win",
+      }],
+    };
+    harness.state.week_data = [{ id: "current", ...emptyWeek(CURRENT) }];
+    harness.state.week_archive = [{ id: "old-archive", ...oldWeek }];
+    harness.state.consuela_data_snapshots = [{
+      id: "snapshot-current",
+      data: {
+        revision: "4",
+        taskWeekStart: CURRENT,
+        weekData: emptyWeek(CURRENT),
+        tasks: [],
+        deletedTaskIds: [],
+      },
+      updated_at: "2026-09-28T12:00:00.000Z",
+    }];
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = await ensureCurrentTaskWeek({ now: NOW });
+
+    expect(result.reconciled).toBe(true);
+    expect(result.hallOfFameRecorded).toBe(true);
+    expect(harness.state.hall_of_fame).toHaveLength(1);
+    expect(harness.state.hall_of_fame[0]).toMatchObject({ member: "Alex", weekStart: PRIOR, points: 4, rank: 1 });
+  });
+
+  it("does not allocate a recurring clone ID already present in tombstones", async () => {
+    const harness = createHarness();
+    seedRollover(harness, [sourceTask({ id: 1 })]);
+    const reservedId = NOW.getTime() + 1_000_000_000;
+    harness.state.consuela_data_snapshots[0].data.deletedTaskIds = [reservedId];
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = await ensureCurrentTaskWeek({ now: NOW });
+    const clone = harness.snapshotTasks().find((task) => task.title === "Dishes")!;
+
+    expect(result.reconciled).toBe(true);
+    expect(clone.id).toBeGreaterThan(reservedId);
+    expect(harness.snapshotData().deletedTaskIds).not.toContain(clone.id);
+  });
+
+  it("returns reconciled false when the snapshot write is not persisted", async () => {
+    const harness = createHarness({ snapshotWriteDrops: 1 });
+    seedRollover(harness, [sourceTask({ id: 1 })]);
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const first = await ensureCurrentTaskWeek({ now: NOW });
+    const second = await ensureCurrentTaskWeek({ now: NOW });
+
+    expect(first.reconciled).toBe(false);
+    expect(first.currentWeekData.weekStart).toBe(CURRENT);
+    expect(second.reconciled).toBe(true);
+    expect(harness.snapshotTasks().filter((task) => task.title === "Dishes")).toHaveLength(1);
+    expect(harness.state.week_data.filter((row) => row.weekStart === CURRENT)).toHaveLength(1);
+  });
+
+  it("preserves an existing current-week ledger", async () => {
+    const harness = createHarness();
+    seedRollover(harness, [sourceTask({ id: 1 })]);
+    harness.state.week_data.push({
+      id: "current",
+      ...emptyWeek(CURRENT),
+      points: { Alex: 999 },
+      history: [{
+        id: 501,
+        timestamp: "2026-09-28T10:00:00.000Z",
+        member: "Alex",
+        type: "earn",
+        amount: 9,
+        description: "Already current",
+      }],
+    });
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = await ensureCurrentTaskWeek({ now: NOW });
+
+    expect(result.reconciled).toBe(true);
+    expect(result.currentWeekData.points).toEqual({ Alex: 9 });
+    expect(result.currentWeekData.history.map((tx) => tx.id)).toEqual([501]);
+    expect(harness.calls.week_data.create).toHaveLength(0);
+  });
+
+  it("reports reconciled false for malformed current-week state without overwriting it", async () => {
+    const harness = createHarness();
+    seedRollover(harness, [sourceTask({ id: 1 })]);
+    const malformed = emptyWeek(CURRENT);
+    malformed.points = { Alex: 999 };
+    malformed.history = [{ id: 1, timestamp: "bad", member: "Alex", type: "earn", amount: "bad", description: "bad" }] as any;
+    harness.state.week_data.push({ id: "current", ...malformed });
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = await ensureCurrentTaskWeek({ now: NOW });
+
+    expect(result.reconciled).toBe(false);
+    expect(harness.state.week_data.find((row) => row.weekStart === CURRENT)).toEqual({ id: "current", ...malformed });
   });
 
   it("returns reconciled false on HOF projection failure and repairs without a second week", async () => {

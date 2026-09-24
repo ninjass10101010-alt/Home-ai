@@ -1018,6 +1018,36 @@ export function getPreviousWeekRanks(): Record<string, number> {
   return loadJSON<Record<string, number>>(PREV_RANKS_KEY, {});
 }
 
+export async function loadPreviousWeekRanksMerged(
+  currentWeekStart: string = localWeekStartISO(),
+): Promise<Record<string, number>> {
+  try {
+    const rows = await db.listArchivedWeeks();
+    const latest = (Array.isArray(rows) ? rows : [])
+      .filter((row: any) => typeof row?.weekStart === "string" && row.weekStart < currentWeekStart)
+      .sort((left: any, right: any) => left.weekStart.localeCompare(right.weekStart))
+      .at(-1);
+    if (!latest) return getPreviousWeekRanks();
+    const parsed = typeof latest.points === "string"
+      ? JSON.parse(latest.points) as unknown
+      : latest.points;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return getPreviousWeekRanks();
+    }
+    const points = Object.entries(parsed as Record<string, unknown>)
+      .map(([member, value]) => ({ member, points: Number(value) || 0 }))
+      .filter((entry) => entry.points > 0);
+    const ranks: Record<string, number> = {};
+    for (const entry of points) {
+      ranks[entry.member] = 1 + points.filter((other) => other.points > entry.points).length;
+    }
+    saveJSON(PREV_RANKS_KEY, ranks);
+    return ranks;
+  } catch {
+    return getPreviousWeekRanks();
+  }
+}
+
 export function saveCurrentWeekRanksForNextWeek(entries: { name: string; rank: number }[]): void {
   const ranks: Record<string, number> = {};
   for (const e of entries) {
@@ -1345,63 +1375,36 @@ export async function syncHallOfFameToPB(entries: HallOfFameEntry[]): Promise<vo
   }
 }
 
-/**
- * The PB→local hall downlink: read the local hall plus PocketBase's
- * hall_of_fame rows (best-effort — a PB failure degrades to local only) and
- * merge them keyed by `member + weekStart`. Local entries win
- * points/emoji/rank/prize (the rollover device froze them); a PB row's
- * `celebrated === true` ALWAYS wins over the local flag (server authority for
- * the ceremony gate — the /api/hall-of-fame/celebrate claim lives
- * server-side, so a win claimed on one device must not re-fire elsewhere);
- * PB rows unknown to local are adopted (cross-device enshrinement). The
- * merged list is persisted with saveHallOfFame() and returned.
- */
 export async function loadHallOfFameMerged(): Promise<HallOfFameEntry[]> {
   const local = loadHallOfFame();
-  let remote: any[] = [];
+  let remote: any[];
   try {
     const rows = await db.selectHallOfFame();
-    if (Array.isArray(rows)) remote = rows;
+    remote = Array.isArray(rows) ? rows : [];
   } catch {
-    remote = [];
+    return local;
   }
-  const keyOf = (e: { member?: unknown; weekStart?: unknown }) =>
-    `${typeof e.member === "string" ? e.member : ""}::${typeof e.weekStart === "string" ? e.weekStart : ""}`;
   const byKey = new Map<string, HallOfFameEntry>();
-  for (const e of local) byKey.set(keyOf(e), { ...e });
-  const adopted: HallOfFameEntry[] = [];
-  for (const r of remote) {
-    if (!r || typeof r.member !== "string" || r.member.length === 0) continue;
-    if (typeof r.weekStart !== "string" || r.weekStart.length === 0) continue;
-    const key = keyOf(r);
+  for (const row of remote) {
+    if (!row || typeof row.member !== "string" || !row.member) continue;
+    if (typeof row.weekStart !== "string" || !row.weekStart) continue;
+    const key = `${row.member}\u0000${row.weekStart}`;
     const existing = byKey.get(key);
-    if (existing) {
-      if (r.celebrated === true) existing.celebrated = true;
-      continue;
-    }
-    const entryDraft: HallOfFameEntry = {
-      member: r.member,
-      emoji: typeof r.emoji === "string" ? r.emoji : "🏅",
-      weekStart: r.weekStart,
-      points: typeof r.points === "number" ? r.points : 0,
-      rank: typeof r.rank === "number" ? r.rank : 1,
+    const entry: HallOfFameEntry = {
+      member: row.member,
+      emoji: typeof row.emoji === "string" ? row.emoji : "🏅",
+      weekStart: row.weekStart,
+      points: typeof row.points === "number" ? row.points : 0,
+      rank: typeof row.rank === "number" ? row.rank : 1,
+      ...(typeof row.prize === "string" && row.prize ? { prize: row.prize } : {}),
+      ...(row.celebrated === true || existing?.celebrated === true ? { celebrated: true } : {}),
     };
-    if (typeof r.prize === "string" && r.prize.length > 0) entryDraft.prize = r.prize;
-    if (r.celebrated === true) entryDraft.celebrated = true;
-    byKey.set(key, entryDraft);
-    adopted.push(entryDraft);
+    byKey.set(key, entry);
   }
-  const merged: HallOfFameEntry[] = [];
-  const seen = new Set<string>();
-  for (const e of local) {
-    const key = keyOf(e);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    merged.push(byKey.get(key)!);
-  }
-  merged.push(...adopted);
-  saveHallOfFame(merged);
-  return merged;
+  if (byKey.size === 0) return local;
+  const server = [...byKey.values()];
+  saveHallOfFame(server);
+  return server;
 }
 
 export async function syncAllTasksToPB(

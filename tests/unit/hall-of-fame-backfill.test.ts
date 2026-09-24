@@ -75,6 +75,8 @@ function makePb(opts?: {
   const members = opts?.members ?? [{ name: "Aurora", emoji: "🌈" }];
   const prizes = opts?.prizes ?? [];
   const creates: any[] = [];
+  const updates: any[] = [];
+  let sequence = 0;
   const pb = {
     collection: (name: string) => ({
       getFullList: async (params?: any) => {
@@ -85,12 +87,20 @@ function makePb(opts?: {
         return [];
       },
       create: async (payload: any) => {
+        const row = { id: `hall-${++sequence}`, ...payload };
+        if (name === "hall_of_fame") hall.push(row);
         creates.push(payload);
-        return payload;
+        return row;
+      },
+      update: async (id: string, payload: any) => {
+        const index = hall.findIndex((row) => row.id === id);
+        if (index >= 0) hall[index] = { ...hall[index], ...payload };
+        updates.push({ id, payload });
+        return hall[index] ?? payload;
       },
     }),
   };
-  return { pb, creates, hall };
+  return { pb, creates, updates, hall };
 }
 
 describe("ensureArchivedWeeksEnshrined", () => {
@@ -128,10 +138,34 @@ describe("ensureArchivedWeeksEnshrined", () => {
     expect(latest.celebrated).toBeUndefined();
   });
 
+  it("repairs stale existing fields and preserves celebration state", async () => {
+    const { pb, creates, updates, hall } = makePb({
+      archive: [{ weekStart: "2026-09-07", points: JSON.stringify({ Aurora: 13 }) }],
+      hall: [{ id: "hall-1", member: "Aurora", emoji: "stale", weekStart: "2026-09-07", points: 1, rank: 3, prize: "stale", celebrated: true }],
+      prizes: [{ id: "p1", rank: 1, text: "Movie night" }],
+    });
+
+    const written = await ensureArchivedWeeksEnshrined(pb as any);
+
+    expect(written).toBe(1);
+    expect(creates).toHaveLength(0);
+    expect(updates).toHaveLength(1);
+    expect(updates[0].payload).toMatchObject({
+      member: "Aurora",
+      emoji: "🌈",
+      weekStart: "2026-09-07",
+      points: 13,
+      rank: 1,
+      prize: "Movie night",
+      celebrated: true,
+    });
+    expect(hall[0]).toMatchObject({ points: 13, rank: 1, prize: "Movie night" });
+  });
+
   it("is idempotent — already-enshrined weeks create nothing", async () => {
     const { pb, creates } = makePb({
       archive: [{ weekStart: "2026-09-07", points: JSON.stringify({ Aurora: 13 }) }],
-      hall: [{ member: "Aurora", weekStart: "2026-09-07", points: 13, rank: 1, celebrated: true }],
+      hall: [{ member: "Aurora", emoji: "🌈", weekStart: "2026-09-07", points: 13, rank: 1, prize: DEFAULT_WEEKLY_PRIZES[0].text, celebrated: true }],
       prizes: [],
     });
     const written = await ensureArchivedWeeksEnshrined(pb as any);

@@ -121,46 +121,24 @@ beforeEach(() => {
 });
 
 describe("tasks/sync read-modify-write atomicity", () => {
-  it("a parent full write and kid tasks sync preserve canonical config", async () => {
-    const parentBody = {
-      tasks: [{ id: "p1", title: "Parent chore" }],
-      weekData: { weekStart: "2026-09-14", points: { Caspian: 20 }, history: [] },
-      rewards: [{ id: "new-reward" }],
-      penalties: [],
-      rewardsUpdatedAt: "new-stamp",
-    };
-    const kidBody = {
-      tasks: [{ id: "k1", title: "Kid chore" }],
-      // Poison legs a kid must never own — the merge must ignore them.
+  it("rejects stale parent and child task/week bodies without PB access", async () => {
+    const before = h.snapshot();
+
+    const parentRes = await post({
+      tasks: [{ id: 1, title: "Stale parent" }],
       weekData: { weekStart: "2026-09-14", points: { Alex: 999 }, history: [] },
-    };
+    }, "parent");
+    const childRes = await post({
+      tasks: [{ id: 2, title: "Stale child" }],
+      weekData: { weekStart: "2026-09-14", points: { Alex: 999 }, history: [] },
+    }, "child");
 
-    // Parent first, kid second — with the lock the parent's section runs to
-    // completion before the kid's read, which is the whole point. The lock is
-    // FIFO by ACQUISION, so launching both posts at once races on
-    // signSession/verifySession timing and the kid can occasionally win the
-    // lock (then the parent's verbatim full-body write legitimately lands
-    // last, flipping the tasks-leg assertion). Force the ordering the
-    // assertions encode: launch the kid only once the parent's snapshot read
-    // is parked — i.e. the parent already holds the keyed lock.
-    const parentP = post(parentBody, "parent");
-    let guard = 0;
-    while (h.count("read") < 1) {
-      if (guard++ > 200) throw new Error("parent never reached the snapshot read");
-      await tick();
-    }
-    const kidP = post(kidBody, "child");
-    const [parentRes, kidRes] = await drive(
-      [["read", 0], ["read", 1], ["write", 0], ["write", 1]],
-      [parentP, kidP]
-    );
-    expect(parentRes.status).toBe(200);
-    expect(kidRes.status).toBe(200);
-
-    const stored = h.snapshot();
-    expect(stored.weekData.points).toEqual({ Caspian: 20 });
-    expect(stored.rewards).toEqual([{ id: "good-reward" }]);
-    expect(stored.rewardsUpdatedAt).toBe("old-stamp");
-    expect(stored.tasks).toEqual([{ id: "k1", title: "Kid chore" }]);
+    expect(parentRes.status).toBe(410);
+    expect(childRes.status).toBe(410);
+    expect(await parentRes.json()).toEqual({ ok: false, error: "task_snapshot_write_retired" });
+    expect(await childRes.json()).toEqual({ ok: false, error: "task_snapshot_write_retired" });
+    expect(h.snapshot()).toEqual(before);
+    expect(h.count("read")).toBe(0);
+    expect(h.count("write")).toBe(0);
   });
 });

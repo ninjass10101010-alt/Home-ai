@@ -14,6 +14,7 @@ const h = vi.hoisted(() => ({
   groceryThrows: false,
   insertedMeals: [] as any[],
   upsertedRecipes: [] as any[],
+  syncAllTasksToPB: vi.fn(async () => ({})),
 }));
 
 vi.mock("@/db", () => ({
@@ -40,7 +41,7 @@ vi.mock("@/db", () => ({
 }));
 
 vi.mock("@/lib/task-utils", () => ({
-  syncAllTasksToPB: async () => ({}),
+  syncAllTasksToPB: h.syncAllTasksToPB,
   syncFamilyGoalToPB: async () => ({}),
 }));
 
@@ -55,6 +56,7 @@ beforeEach(() => {
   h.groceryThrows = false;
   h.insertedMeals = [];
   h.upsertedRecipes = [];
+  h.syncAllTasksToPB.mockClear();
 });
 
 describe("pushLocalToPB honest counts", () => {
@@ -153,9 +155,9 @@ describe("pushLocalToPB honest counts", () => {
       "recipes",
       "events",
       "schedules",
-      "tasks/leaderboard (6 collections)",
       "family_goals",
       "emergency_contacts",
     ]);
+    expect(h.syncAllTasksToPB).not.toHaveBeenCalled();
   });
 });

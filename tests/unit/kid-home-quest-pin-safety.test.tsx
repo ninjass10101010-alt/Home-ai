@@ -254,7 +254,7 @@ describe("KidHome quest completion (age predicates: under-10 tap → pending; 10
     expect(store.syncWeekDataToPB).not.toHaveBeenCalled();
     expect(store.week.points.Caspian).toBe(20);
     expect(store.week.history.some((tx: any) => tx.type === "earn")).toBe(false);
-    expect(store.syncTasksToPB).toHaveBeenCalled();
+    expect(store.syncTasksToPB).not.toHaveBeenCalled();
     expect(spyFetch.mock.calls.filter((call) => String(call[0]).includes("/api/members/verify"))).toHaveLength(0);
 
     // Fix 3: local pending alone is invisible to parent approval — the claim
@@ -403,7 +403,7 @@ describe("KidHome quest completion (age predicates: under-10 tap → pending; 10
     expect(store.week.history).toHaveLength(0);
   });
 
-  it("a successful universal claim carries completedBy/At/InWeek into the synced row (no field wipe)", async () => {
+  it("a successful universal claim carries completedBy/At/InWeek into the saved local row", async () => {
     const claimFetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/api/tasks/claim")) {
@@ -436,19 +436,13 @@ describe("KidHome quest completion (age predicates: under-10 tap → pending; 10
     await settle();
 
     expect(claimFetch).toHaveBeenCalledWith(expect.stringContaining("/api/tasks/claim"), expect.objectContaining({ method: "POST" }));
-    // The claim route owns the server row — the local mirror must carry the
-    // SAME completion fields, or syncTasksToPB pushes completedInWeek/At as
-    // null and wipes what the server just wrote (the old { ...t, completed: true } bug).
-    expect(store.syncTasksToPB).toHaveBeenCalled();
-    const synced = store.syncTasksToPB.mock.calls.at(-1)![0];
-    const row = synced.find((t: any) => t.id === 9);
+    expect(store.syncTasksToPB).not.toHaveBeenCalled();
+    const saved = store.saveTasks.mock.calls.at(-1)![0];
+    const row = saved.find((t: any) => t.id === 9);
     expect(row.completed).toBe(true);
     expect(row.completedBy).toBe("Caspian Garcia");
     expect(row.completedInWeek).toBe("2026-09-01");
     expect(typeof row.completedAt).toBe("string");
-    // The saved local row matches (same array is saved + pushed).
-    const saved = store.saveTasks.mock.calls.at(-1)![0];
-    expect(saved.find((t: any) => t.id === 9).completedInWeek).toBe("2026-09-01");
     // A kid claim is pending — the celebration copy says "on the way".
     const burst = document.querySelector('[aria-label^="Congratulations"]');
     expect(burst!.getAttribute("aria-label")).toContain("on the way");

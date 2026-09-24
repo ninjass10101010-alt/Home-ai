@@ -26,7 +26,7 @@ import { db } from "@/db";
 import { useAuth } from "@/hooks/useAuth";
 import { useWallMode } from "@/hooks/useWallMode";
 import { useWallConfirm } from "@/hooks/useWallConfirm";
-import type { Task, LeaderboardEntry, Reward, Penalty, WeekData, CrewMember } from "@/types/tasks";
+import type { Task, LeaderboardEntry, Reward, Penalty, WeekData, CrewMember, HallOfFameEntry } from "@/types/tasks";
 import { getLevel, BADGES } from "@/types/tasks";
 import {
   TASKS_STORAGE_KEY, REWARDS_KEY, PENALTIES_KEY,
@@ -34,19 +34,19 @@ import {
   loadWeekData, saveWeekData, addTransaction,
   calculateRealStreak,
   getThisWeeksCompletedDates, getThisWeeksCompletedTasks,
-  loadTasks, saveTasks, loadRewards, saveRewards,
-  loadPenalties, savePenalties,
+  loadTasks, saveTasks,
+  saveRewards, savePenalties,
   readPenaltiesStamp, writePenaltiesStamp,
   getMemberAllTimePoints, getMemberAllTimeCompletions,
-  getPreviousWeekRanks, loadHallOfFame,
-  syncAllTasksToPB, syncWeekDataToPB,
+  getPreviousWeekRanks, loadHallOfFame, loadHallOfFameMerged,
+  loadPreviousWeekRanksMerged,
   loadWeeklyPrizes, saveWeeklyPrizes,
   readWeeklyPrizesStamp, writeWeeklyPrizesStamp,
   pickDefaultClaimMember, isSnatchable, isPendingApproval,
   completesWithoutPin, completesWithPendingApproval,
   tapCompletePending, sendBackPendingCompletion, approvePendingCompletion, resolveMemberName,
   mergeTasksSnapshot, getDaysUntilWeekReset, adoptServerWeekData,
-  loadDeletedTaskIds, saveDeletedTaskIds,
+  saveDeletedTaskIds,
   isCrewTask, crewMembers, crewMemberCount, crewFull, crewHasMember,
   crewMemberCheckedIn, crewCheckinProgress, crewAllCheckedIn, canJoinCrew,
   normalizeSpeedBonus,
@@ -349,6 +349,25 @@ export default function TasksPage() {
     }
   });
 
+  const [hallOfFame, setHallOfFame] = useState<HallOfFameEntry[]>(() => loadHallOfFame());
+  const [previousRanks, setPreviousRanks] = useState<Record<string, number>>(() => getPreviousWeekRanks());
+
+  useEffect(() => {
+    if (!mounted) return;
+    let active = true;
+    void Promise.all([
+      loadHallOfFameMerged(),
+      loadPreviousWeekRanksMerged(weekData.weekStart),
+    ]).then(([serverHall, serverRanks]) => {
+      if (!active) return;
+      setHallOfFame(serverHall);
+      setPreviousRanks(serverRanks);
+    });
+    return () => {
+      active = false;
+    };
+  }, [mounted, prizesVersion, weekData.weekStart]);
+
   useEffect(() => { saveTasks(tasks); }, [tasks]);
   useEffect(() => { saveWeekData(weekData); }, [weekData]);
 
@@ -429,56 +448,7 @@ export default function TasksPage() {
   useEffect(() => { saveRewards(rewards); }, [rewards]);
   useEffect(() => { savePenalties(penalties); }, [penalties]);
 
-  // Persist tasks + week data to PocketBase in the background (snapshot + structured)
-  const syncPendingRef = useRef(false);
-  const pbSyncPendingRef = useRef(false);
   const claimSnapshotRef = useRef<{ tasks: Task[]; weekData: WeekData } | null>(null);
-  useEffect(() => {
-    if (!mounted) return;
-    if (syncPendingRef.current) return;
-    syncPendingRef.current = true;
-    const t = setTimeout(() => {
-      fetch("/api/tasks/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        // The rewards catalog rides the snapshot WITH its last-write-wins
-        // stamp (kid-store) so a Settings delete (newer stamp) is never
-        // overwritten by a stale snapshot on the next restore. The weekly
-        // prizes ride the same contract (task-utils stamp key).
-        body: JSON.stringify({
-          tasks,
-          weekData,
-          rewards: loadRewards<Reward[]>([]),
-          rewardsUpdatedAt: readRewardsStamp(),
-          penalties: loadPenalties<Penalty[]>([]),
-          penaltiesUpdatedAt: readPenaltiesStamp(),
-          weeklyPrizes: loadWeeklyPrizes(), weeklyPrizesStamp: readWeeklyPrizesStamp(),
-          // Carry the tombstones so a delete (chat-initiated) is durable across
-          // devices — the server also unions them, so a stale push can't drop one.
-          deletedTaskIds: loadDeletedTaskIds(),
-        }),
-      })
-        .then((res) => {
-          if (!res.ok) console.warn(`Tasks snapshot sync failed (${res.status}) — will retry on next change`);
-        })
-        .catch(() => {});
-      syncPendingRef.current = false;
-    }, 2000);
-    return () => { clearTimeout(t); syncPendingRef.current = false; };
-  }, [tasks, weekData, mounted]);
-
-  // Structured PB sync (individual collections)
-  useEffect(() => {
-    if (!mounted) return;
-    if (pbSyncPendingRef.current) return;
-    pbSyncPendingRef.current = true;
-    const t = setTimeout(() => {
-      void syncAllTasksToPB(tasks, weekData, {}, [], [], []);
-      pbSyncPendingRef.current = false;
-    }, 5000);
-    return () => { clearTimeout(t); pbSyncPendingRef.current = false; };
-  }, [tasks, weekData, mounted]);
-
   // Restore tasks state from PocketBase snapshot on mount (bridges container restarts)
   const restoreAttempted = useRef(false);
   // True when the snapshot read 401'd — a signed-out browser can't read the
@@ -1103,9 +1073,6 @@ export default function TasksPage() {
       const updated = { ...weekData, points: { ...weekData.points, [normalizedName]: Math.max(0, current) } };
       const nextWeek = addTransaction(updated, "adjust", -task.points, `Undo: ${task.title} (-${task.points}pts)`, normalizedName, task.id);
       setWeekData(nextWeek);
-      // Push the reversal now (not on the 5s debounce) so the server-side claim
-      // guard releases the task for re-claiming immediately.
-      syncWeekDataToPB(nextWeek);
       // Server-authoritative undo too (week_data + snapshot + task row) — a
       // guest device's local undo must reach every device. Server refusals
       // (nothing_to_undo / already_undone) mean the local-only earn is already
@@ -1675,8 +1642,6 @@ export default function TasksPage() {
   const thisWeeksCompleted = getThisWeeksCompletedTasks(tasks);
   const thisWeeksCompletedCount = thisWeeksCompleted.length;
 
-  const hallOfFame = useMemo(() => loadHallOfFame(), [weekData]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const dynamicLeaderboard: LeaderboardEntry[] = useMemo(() => {
     const entries = membersData
       .filter((m: any) => m.role !== "pet")
@@ -1762,7 +1727,6 @@ export default function TasksPage() {
   const scopedAllTimeEarned = scopedMember
     ? scopedMember.allTimePoints
     : dynamicLeaderboard.reduce((sum, e) => sum + e.allTimePoints, 0);
-  const previousRanks = useMemo(() => getPreviousWeekRanks(), [weekData]); // eslint-disable-line react-hooks/exhaustive-deps
   const sheetEntry = sheetMember ? dynamicLeaderboard.find(e => e.name === sheetMember) : null;
 
   useEffect(() => {

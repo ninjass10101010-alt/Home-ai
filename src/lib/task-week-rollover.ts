@@ -1,6 +1,6 @@
 import { withAdmin } from "@/lib/pb-auth";
 import { localWeekStartISO } from "@/lib/local-date";
-import { hallEntriesForWeek } from "@/lib/hall-of-fame-backfill";
+import { ensureArchivedWeeksEnshrined } from "@/lib/hall-of-fame-backfill";
 import {
   hasUnreversedTaskEarn,
   parseCanonicalTransactions,
@@ -16,7 +16,7 @@ import {
   type SnapshotTask,
 } from "@/lib/snapshot-tasks";
 import { withWeekLedgerLock } from "@/lib/week-ledger-lock";
-import type { HallOfFameEntry, Transaction, WeekData, WeeklyPrize } from "@/types/tasks";
+import type { Transaction, WeekData } from "@/types/tasks";
 
 export interface TaskWeekRolloverResult {
   weekStart: string;
@@ -41,8 +41,6 @@ interface ProjectionResult {
   recorded: boolean;
   reconciled: boolean;
 }
-
-let taskIdSequence = 0;
 
 function normalizeWeekStart(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -192,7 +190,7 @@ function canonicalizeRows(rows: Row[], weekStart: string): CanonicalRows {
     sortedRows.length > 1 ||
     storedWeeks.some((stored) => {
       const canonical = { ...stored, points: recomputeWeekPoints(stored.history) };
-      return !sameWeek(stored, canonical);
+      return !sameHistory(stored.history, history) || !sameWeek(stored, canonical);
     });
   return { rows: sortedRows, week, needsRepair };
 }
@@ -217,6 +215,15 @@ async function reconcileCanonicalRows(
     { ...weekPayload(group.week), ...extra },
     { requestKey: null },
   );
+  const afterUpdate = (await readRows(pb, collectionName)).filter(
+    (row) => normalizeWeekStart(row.weekStart) === group.week.weekStart,
+  );
+  const verifiedPrimary = afterUpdate.find((row) => row.id === primary.id);
+  if (!verifiedPrimary) throw new TypeError("week_primary_write_missing");
+  const primaryState = canonicalizeRows([verifiedPrimary], group.week.weekStart);
+  if (primaryState.needsRepair || !sameWeek(primaryState.week, group.week)) {
+    throw new TypeError("week_primary_verification_failed");
+  }
   for (const duplicate of duplicates) {
     await collection.delete(duplicate.id, { requestKey: null });
   }
@@ -233,26 +240,30 @@ async function reconcileCanonicalRows(
 async function ensureCurrentWeekRow(
   pb: AdminPB,
   weekStart: string,
-): Promise<{ week: WeekData; changed: boolean }> {
-  const rows = (await readRows(pb, "week_data")).filter(
-    (row) => normalizeWeekStart(row.weekStart) === weekStart,
-  );
-  if (rows.length === 0) {
-    const week = emptyWeekData(weekStart);
-    await pb.collection("week_data").create(weekPayload(week), { requestKey: null });
-    const created = (await readRows(pb, "week_data")).filter(
+): Promise<{ week: WeekData | null; changed: boolean; reconciled: boolean }> {
+  try {
+    const rows = (await readRows(pb, "week_data")).filter(
       (row) => normalizeWeekStart(row.weekStart) === weekStart,
     );
-    if (created.length !== 1) throw new TypeError("current_week_create_failed");
-    const verified = canonicalizeRows(created, weekStart);
-    if (verified.needsRepair || !sameWeek(verified.week, week)) {
-      throw new TypeError("current_week_verification_failed");
+    if (rows.length === 0) {
+      const week = emptyWeekData(weekStart);
+      await pb.collection("week_data").create(weekPayload(week), { requestKey: null });
+      const created = (await readRows(pb, "week_data")).filter(
+        (row) => normalizeWeekStart(row.weekStart) === weekStart,
+      );
+      if (created.length !== 1) throw new TypeError("current_week_create_failed");
+      const verified = canonicalizeRows(created, weekStart);
+      if (verified.needsRepair || !sameWeek(verified.week, week)) {
+        throw new TypeError("current_week_verification_failed");
+      }
+      return { week: verified.week, changed: true, reconciled: true };
     }
-    return { week: verified.week, changed: true };
+    const group = canonicalizeRows(rows, weekStart);
+    await reconcileCanonicalRows(pb, "week_data", group);
+    return { week: group.week, changed: group.needsRepair, reconciled: true };
+  } catch {
+    return { week: null, changed: false, reconciled: false };
   }
-  const group = canonicalizeRows(rows, weekStart);
-  await reconcileCanonicalRows(pb, "week_data", group);
-  return { week: group.week, changed: group.needsRepair };
 }
 
 async function archiveCanonicalWeek(
@@ -281,13 +292,18 @@ async function archiveCanonicalWeek(
     }
     return { week: verified.week, changed: true };
   }
-  const group = canonicalizeRows(rows, prior.week.weekStart);
+  const observed = canonicalizeRows(rows, prior.week.weekStart);
+  const group: CanonicalRows = {
+    rows: observed.rows,
+    week: prior.week,
+    needsRepair: observed.needsRepair || !sameWeek(observed.week, prior.week),
+  };
   const archivedAt =
-    typeof group.rows[0].archivedAt === "string" && group.rows[0].archivedAt
-      ? group.rows[0].archivedAt
+    typeof observed.rows[0].archivedAt === "string" && observed.rows[0].archivedAt
+      ? observed.rows[0].archivedAt
       : now.toISOString();
   await reconcileCanonicalRows(pb, "week_archive", group, { archivedAt });
-  return { week: group.week, changed: group.needsRepair };
+  return { week: prior.week, changed: group.needsRepair };
 }
 
 function taskIsCrew(task: SnapshotTask): boolean {
@@ -376,14 +392,15 @@ export function resetRecurringTasksForWeek(
 }
 
 function issueServerTaskId(existing: ReadonlySet<number>, nowMs: number): number {
-  for (let attempt = 0; attempt < 10000; attempt += 1) {
-    const candidate = nowMs + taskIdSequence;
-    taskIdSequence += 1;
-    if (Number.isSafeInteger(candidate) && candidate > 0 && !existing.has(candidate)) {
-      return candidate;
-    }
+  let candidate = nowMs;
+  for (const id of existing) {
+    if (id >= candidate) candidate = id + 1;
   }
-  throw new TypeError("task_id_exhausted");
+  while (existing.has(candidate)) candidate += 1;
+  if (!Number.isSafeInteger(candidate) || candidate <= 0) {
+    throw new TypeError("task_id_exhausted");
+  }
+  return candidate;
 }
 
 function normalizeTaskIds(value: unknown): number[] {
@@ -397,61 +414,29 @@ function normalizeTaskIds(value: unknown): number[] {
   ];
 }
 
-async function projectHallOfFame(
-  pb: AdminPB,
-  week: WeekData,
-): Promise<boolean> {
-  const [memberRows, rawPrizeRows, hallRows] = await Promise.all([
-    readRows(pb, "members"),
-    readRows(pb, "weekly_prizes"),
-    readRows(pb, "hall_of_fame"),
-  ]);
-  const emojis: Record<string, string> = {};
-  for (const member of memberRows) {
-    if (typeof member.name === "string" && member.name && !emojis[member.name]) {
-      emojis[member.name] = typeof member.emoji === "string" ? member.emoji : "🏅";
-    }
-  }
-  const prizes = new Map<number, string>();
-  for (const row of [...rawPrizeRows].sort((left, right) =>
-    String(left.id).localeCompare(String(right.id)),
-  )) {
-    const rank = Number(row.rank);
-    if (![1, 2, 3].includes(rank) || typeof row.text !== "string" || !row.text) continue;
-    if (!prizes.has(rank)) prizes.set(rank, row.text);
-  }
-  const prizeCatalog: Array<Pick<WeeklyPrize, "rank" | "text">> = [...prizes].map(
-    ([rank, text]) => ({ rank: rank as 1 | 2 | 3, text }),
+function taskResetMatches(stored: SnapshotTask | undefined, expected: SnapshotTask): boolean {
+  if (!stored || Number(stored.id) !== Number(expected.id)) return false;
+  return (
+    stored.title === expected.title &&
+    stored.assignee === expected.assignee &&
+    stored.assigneeEmoji === expected.assigneeEmoji &&
+    stored.due === expected.due &&
+    stored.points === expected.points &&
+    stored.recurring === expected.recurring &&
+    stored.category === expected.category &&
+    stored.priority === expected.priority &&
+    stored.universal === expected.universal &&
+    stored.stealable === expected.stealable &&
+    stored.crewSize === expected.crewSize &&
+    stored.speedBonus === expected.speedBonus &&
+    stored.completed === false &&
+    stored.completedBy === undefined &&
+    stored.completedAt === undefined &&
+    stored.completedInWeek === undefined &&
+    stored.pendingApproval === undefined &&
+    stored.sentBackAt === undefined &&
+    JSON.stringify(stored.crew ?? null) === JSON.stringify(expected.crew ?? null)
   );
-  const existing = new Set(
-    hallRows
-      .filter((row) => typeof row.member === "string" && normalizeWeekStart(row.weekStart))
-      .map((row) => `${row.member}\u0000${normalizeWeekStart(row.weekStart)}`),
-  );
-  const entries: HallOfFameEntry[] = hallEntriesForWeek(
-    week.points,
-    week.weekStart,
-    emojis,
-    prizeCatalog,
-  );
-  let recorded = false;
-  for (const entry of entries) {
-    const key = `${entry.member}\u0000${entry.weekStart}`;
-    if (existing.has(key)) continue;
-    await pb.collection("hall_of_fame").create({ ...entry }, { requestKey: null });
-    existing.add(key);
-    recorded = true;
-  }
-  if (recorded) {
-    const verified = await readRows(pb, "hall_of_fame");
-    for (const entry of entries) {
-      const key = `${entry.member}\u0000${entry.weekStart}`;
-      if (!verified.some((row) => row.member === entry.member && normalizeWeekStart(row.weekStart) === entry.weekStart)) {
-        throw new TypeError("hall_of_fame_verification_failed");
-      }
-    }
-  }
-  return recorded;
 }
 
 export function familyWeekStart(now: Date = new Date()): string {
@@ -491,17 +476,45 @@ export async function ensureCurrentTaskWeek(
       }
 
       const currentResult = await ensureCurrentWeekRow(pb, weekStart);
-      const projection: ProjectionResult = previous
-        ? await projectHallOfFame(pb, previous.week)
-            .then((recorded) => ({ recorded, reconciled: true }))
-            .catch(() => ({ recorded: false, reconciled: false }))
-        : { recorded: false, reconciled: true };
+      let projection: ProjectionResult;
+      try {
+        const changed = await ensureArchivedWeeksEnshrined(pb);
+        projection = { recorded: changed > 0, reconciled: true };
+      } catch {
+        console.warn("[task-week-rollover] projection reconciliation pending");
+        projection = { recorded: false, reconciled: false };
+      }
 
       const existingSnapshot = await readSnapshotWithRevision();
+      if (!currentResult.week || !currentResult.reconciled) {
+        const stored = normalizeWeekData(existingSnapshot.data.weekData);
+        const fallback = stored?.weekStart === weekStart
+          ? { ...stored, points: recomputeWeekPoints(stored.history) }
+          : emptyWeekData(weekStart);
+        return {
+          weekStart,
+          previousWeekStart,
+          archived,
+          tasksReset: false,
+          hallOfFameRecorded: projection.recorded,
+          currentWeekData: fallback,
+          revision: existingSnapshot.revision,
+          reconciled: false,
+        };
+      }
+
+      const currentWeek = currentResult.week;
+      const tombstoneProbeIds = normalizeTaskIds(existingSnapshot.data.deletedTaskIds);
+      const allocatedProbeIds: number[] = [];
       const resetProbe = resetRecurringTasksForWeek(
         liveSnapshotTasks(existingSnapshot.data),
         weekStart,
-        (existing) => issueServerTaskId(existing, now.getTime()),
+        (existing) => {
+          const reserved = new Set([...existing, ...tombstoneProbeIds, ...allocatedProbeIds]);
+          const id = issueServerTaskId(reserved, now.getTime());
+          allocatedProbeIds.push(id);
+          return id;
+        },
       );
       const storedWeek = normalizeWeekData(existingSnapshot.data.weekData);
       const canonicalStoredWeek = storedWeek
@@ -511,7 +524,7 @@ export async function ensureCurrentTaskWeek(
         existingSnapshot.data.taskWeekStart === weekStart &&
         resetProbe.deletedTaskIds.length === 0 &&
         canonicalStoredWeek &&
-        sameWeek(canonicalStoredWeek, currentResult.week)
+        sameWeek(canonicalStoredWeek, currentWeek)
       ) {
         return {
           weekStart,
@@ -519,7 +532,7 @@ export async function ensureCurrentTaskWeek(
           archived,
           tasksReset: false,
           hallOfFameRecorded: projection.recorded,
-          currentWeekData: currentResult.week,
+          currentWeekData: currentWeek,
           revision: existingSnapshot.revision,
           reconciled: projection.reconciled,
         };
@@ -527,41 +540,75 @@ export async function ensureCurrentTaskWeek(
 
       const snapshotMutation = await mutateSnapshotWithMeta(
         (data) => {
+          const liveBefore = liveSnapshotTasks(data);
+          const existingIds = new Set(liveBefore.map((task) => Number(task.id)));
+          const tombstoneIds = normalizeTaskIds(data.deletedTaskIds);
+          const allocatedIds: number[] = [];
           const needsReset = data.taskWeekStart !== weekStart;
           const reset = resetRecurringTasksForWeek(
-            liveSnapshotTasks(data),
+            liveBefore,
             weekStart,
-            (existing) => issueServerTaskId(existing, now.getTime()),
+            (existing) => {
+              const reserved = new Set([...existing, ...tombstoneIds, ...allocatedIds]);
+              const id = issueServerTaskId(reserved, now.getTime());
+              allocatedIds.push(id);
+              return id;
+            },
           );
-          const deletedTaskIds = [
-            ...new Set([
-              ...normalizeTaskIds(data.deletedTaskIds),
-              ...reset.deletedTaskIds,
-            ]),
-          ];
+          const deletedTaskIds = [...new Set([...tombstoneIds, ...reset.deletedTaskIds])];
+          const expectedTasks = reset.tasks.filter((task) => !existingIds.has(Number(task.id)));
           return {
             data: {
               ...data,
               tasks: reset.tasks,
               deletedTaskIds,
-              weekData: currentResult.week,
+              weekData: currentWeek,
               taskWeekStart: weekStart,
             },
-            result: needsReset || reset.deletedTaskIds.length > 0,
+            result: {
+              tasksReset: needsReset || reset.deletedTaskIds.length > 0,
+              deletedTaskIds: reset.deletedTaskIds,
+              expectedTasks,
+            },
           };
         },
         pb,
       );
 
+      const verifiedSnapshot = await readSnapshotWithRevision();
+      const verifiedWeek = normalizeWeekData(verifiedSnapshot.data.weekData);
+      const canonicalVerifiedWeek = verifiedWeek
+        ? { ...verifiedWeek, points: recomputeWeekPoints(verifiedWeek.history) }
+        : null;
+      const verifiedTombstones = new Set(normalizeTaskIds(verifiedSnapshot.data.deletedTaskIds));
+      const verifiedTasks = liveSnapshotTasks(verifiedSnapshot.data);
+      const storedRawIds = new Set(
+        (Array.isArray(verifiedSnapshot.data.tasks) ? verifiedSnapshot.data.tasks : [])
+          .map((task: SnapshotTask) => Number(task.id)),
+      );
+      const expected = snapshotMutation.result;
+      const snapshotReconciled =
+        verifiedSnapshot.data.taskWeekStart === weekStart &&
+        Boolean(canonicalVerifiedWeek) &&
+        sameWeek(canonicalVerifiedWeek!, currentWeek) &&
+        expected.deletedTaskIds.every((id) => verifiedTombstones.has(id)) &&
+        expected.deletedTaskIds.every((id) => !storedRawIds.has(id)) &&
+        expected.expectedTasks.every((task) =>
+          taskResetMatches(
+            verifiedTasks.find((candidate) => Number(candidate.id) === Number(task.id)),
+            task,
+          )
+        );
+
       return {
         weekStart,
         previousWeekStart,
         archived,
-        tasksReset: snapshotMutation.result,
+        tasksReset: expected.tasksReset,
         hallOfFameRecorded: projection.recorded,
-        currentWeekData: currentResult.week,
-        revision: snapshotMutation.revision,
-        reconciled: projection.reconciled,
+        currentWeekData: currentWeek,
+        revision: verifiedSnapshot.revision,
+        reconciled: projection.reconciled && snapshotReconciled,
       };
     }),
   );
