@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { act } from "react";
 import type { ReactElement } from "react";
 import WeatherWidget from "@/components/ui/WeatherWidget";
+import { SceneLayers } from "@/components/ui/WxToys";
 import { moonPhase, moonPhaseName, makeCloudSpec } from "@/components/ui/WeatherScene";
 import { wearAdvice, stormAdvice, snowAdvice, fusionOutlook } from "@/lib/weather-insights";
 import { getWeatherSkin, resolveAccent } from "@/components/ui/WeatherSkins";
@@ -59,6 +60,31 @@ async function settle(ms = 60) {
   await act(async () => {
     await new Promise((r) => setTimeout(r, ms));
   });
+}
+
+function parseHexColor(value: string): [number, number, number] {
+  const hex = value.replace("#", "");
+  return [0, 2, 4].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16)) as [number, number, number];
+}
+
+function colorLuminance(color: [number, number, number]): number {
+  const [red, green, blue] = color.map((value) => {
+    const channel = value / 255;
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+}
+
+function effectiveContrast(foreground: string, opacity: number, background: string): number {
+  const foregroundRgb = parseHexColor(foreground);
+  const backgroundRgb = parseHexColor(background);
+  const composite = foregroundRgb.map((channel, index) =>
+    Math.round(channel * opacity + backgroundRgb[index] * (1 - opacity))
+  ) as [number, number, number];
+  const foregroundLuminance = colorLuminance(composite);
+  const backgroundLuminance = colorLuminance(backgroundRgb);
+  return (Math.max(foregroundLuminance, backgroundLuminance) + 0.05) /
+    (Math.min(foregroundLuminance, backgroundLuminance) + 0.05);
 }
 
 function makeOpenMeteoPayload(overrides: { isDay?: number; precip?: number; visibility?: number; cloud?: number; code?: number; startAt?: string } = {}) {
@@ -316,6 +342,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
 
   it("uses a sky-blue clear-day canvas while preserving condition palettes", () => {
     expect(SKY.clear).toBe("from-[#55bce8] via-[#8fd8f1] to-[#d8f2f4]");
+    expect(SKY.cloudy).toBe("from-[#dfe4ee] via-[#eef1f6] to-[#d9e6f5]");
     expect(SKY.rain).toBe("from-[#b9c4d8] via-[#c9d7ea] to-[#d8d3f0]");
     expect(SKY.snow).toBe("from-[#f4f7fb] via-[#e6efff] to-[#efe6fb]");
     expect(SKY.storm).toBe("from-[#6a6f96] via-[#5d5b8f] to-[#4d4770]");
@@ -639,6 +666,36 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(moon!.querySelectorAll("div").length).toBe(2);
   });
 
+  it("maps clear-sky cloud visibility to 0% and 100% cover", () => {
+    const clearSky = render(<SceneLayers scene="clear" showFog={false} showBirds={false} cloudCover={0} />);
+    const clearSkyClouds = Array.from(clearSky.querySelectorAll<HTMLElement>("[data-cloud-layer]"));
+    expect(clearSkyClouds.map((cloud) => cloud.style.opacity)).toEqual(["0", "0"]);
+
+    const coveredSky = render(<SceneLayers scene="clear" showFog={false} showBirds={false} cloudCover={100} />);
+    const coveredSkyClouds = Array.from(coveredSky.querySelectorAll<HTMLElement>("[data-cloud-layer]"));
+    expect(coveredSkyClouds.every((cloud) => Number(cloud.style.opacity) > 0)).toBe(true);
+  });
+
+  it("keeps cloudy, rain, and snow poster accents visibly distinct", () => {
+    const cases = [
+      { scene: "cloudy" as const, shape: "cloud-bars", background: "#EEF1F6" },
+      { scene: "rain" as const, shape: "rain-diamonds", background: "#C9D7EA" },
+      { scene: "snow" as const, shape: "snow-diamonds", background: "#E6EFFF" },
+    ];
+    const results = cases.map(({ scene, shape, background }) => {
+      const el = render(<SceneLayers scene={scene} showFog={false} showBirds={false} />);
+      const accent = el.querySelector<SVGElement>(`[data-weather-shape="${shape}"]`);
+      const opacity = Number(accent?.getAttribute("opacity"));
+      const contrast = effectiveContrast(accent?.getAttribute("stroke") ?? "", opacity, background);
+      return { scene, opacity, contrast };
+    });
+
+    results.forEach(({ scene, opacity, contrast }) => {
+      expect(opacity, `${scene} poster accent opacity`).toBeGreaterThanOrEqual(0.9);
+      expect(contrast, `${scene} poster accent contrast`).toBeGreaterThanOrEqual(3);
+    });
+  });
+
   it("layers turquoise poster clouds behind a dominant clear-day temperature", async () => {
     mockOpenMeteo(makeOpenMeteoPayload({ code: 0, cloud: 80 }));
     const el = render(<WeatherWidget />);
@@ -657,7 +714,9 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(temp.className).toContain("sm:text-[80px]");
     expect(temp.className).toContain("xl:text-[96px]");
     const icon = el.querySelector('[data-testid="wx-hero-icon"]') as HTMLElement;
-    expect(parseFloat((icon.firstElementChild as HTMLElement).style.width)).toBeLessThan(64);
+    const renderedIconWidth = parseFloat((icon.firstElementChild as HTMLElement).style.width);
+    expect(renderedIconWidth).toBeGreaterThanOrEqual(48);
+    expect(renderedIconWidth).toBeLessThan(64);
 
     const movingLayer = clouds?.querySelector('[data-cloud-form="poster"]') as HTMLElement;
     const accent = scene?.querySelector('[data-testid="wx-poster-accents"]') as HTMLElement;

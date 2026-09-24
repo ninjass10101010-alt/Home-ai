@@ -112,15 +112,15 @@ function PosterAccents({ scene, motionOk }: { scene: WxScene; motionOk: boolean 
         </>
       )}
       {scene === "cloudy" && (
-        <path data-weather-shape="cloud-bars" d="M24 42h62M48 66h92M18 90h54" stroke={WX_POSTER.cloudLight} strokeWidth="9" strokeLinecap="round" opacity="0.35" />
+        <path data-weather-shape="cloud-bars" d="M24 42h62M48 66h92M18 90h54" stroke="#0F6673" strokeWidth="9" strokeLinecap="round" opacity="1" />
       )}
       {scene === "rain" && (
-        <g data-weather-shape="rain-diamonds" stroke={WX_POSTER.rain} strokeWidth="4" strokeLinecap="round" opacity="0.48">
+        <g data-weather-shape="rain-diamonds" stroke="#244A8F" strokeWidth="4" strokeLinecap="round" opacity="1">
           <path d="m34 18-8 20M82 52l-8 20M260 24l-8 20M294 82l-8 20" />
         </g>
       )}
       {scene === "snow" && (
-        <g data-weather-shape="snow-diamonds" stroke={WX_POSTER.snow} strokeWidth="3" strokeLinecap="round" opacity="0.7">
+        <g data-weather-shape="snow-diamonds" stroke="#5B4B8A" strokeWidth="3" strokeLinecap="round" opacity="1">
           <path d="m34 22 8 8-8 8-8-8ZM92 64l7 7-7 7-7-7ZM266 24l8 8-8 8-8-8ZM294 92l6 6-6 6-6-6Z" />
         </g>
       )}
@@ -149,7 +149,7 @@ export function SceneLayers({ scene, showFog, showBirds, cloudCover = 25 }: {
   const isWet = scene === "rain" || scene === "storm";
   const cover = Number.isFinite(cloudCover) ? Math.max(0, Math.min(100, cloudCover)) : 25;
   const cloudTone = scene === "clear" ? "poster" : "day";
-  const frontCloudOpacity = scene === "clear" ? Math.min(0.9, 0.12 + cover / 110) : 0.9;
+  const frontCloudOpacity = scene === "clear" ? cover * 0.009 : 0.9;
   const backCloudOpacity = scene === "clear" ? Math.max(0, (cover - 20) / 100) * 0.72 : 0.6;
   return (
     <div data-testid="wx-scene-layers" data-scene={scene} className="absolute inset-0" aria-hidden="true">
