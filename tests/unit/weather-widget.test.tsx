@@ -7,6 +7,7 @@ import WeatherWidget from "@/components/ui/WeatherWidget";
 import { moonPhase, moonPhaseName, makeCloudSpec } from "@/components/ui/WeatherScene";
 import { wearAdvice, stormAdvice, snowAdvice, fusionOutlook } from "@/lib/weather-insights";
 import { getWeatherSkin, resolveAccent } from "@/components/ui/WeatherSkins";
+import { SKY } from "@/components/ui/wx-tokens";
 import { WeatherProvider } from "@/hooks/useWeather";
 import { AtmosphericProvider } from "@/hooks/useAtmosphericTheme";
 import { AuthProvider } from "@/hooks/useAuth";
@@ -313,6 +314,41 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(strip.getAttribute("aria-valuenow")).toBe("0");
   });
 
+  it("uses a sky-blue clear-day canvas while preserving condition palettes", () => {
+    expect(SKY.clear).toBe("from-[#55bce8] via-[#8fd8f1] to-[#d8f2f4]");
+    expect(SKY.rain).toBe("from-[#b9c4d8] via-[#c9d7ea] to-[#d8d3f0]");
+    expect(SKY.snow).toBe("from-[#f4f7fb] via-[#e6efff] to-[#efe6fb]");
+    expect(SKY.storm).toBe("from-[#6a6f96] via-[#5d5b8f] to-[#4d4770]");
+    expect(SKY.night).toBe("from-[#6f74a8] via-[#a29dc9] to-[#e2dbf2]");
+  });
+
+  it("crossfades the card scene while preserving the day-strip preview contract", async () => {
+    const payload = makeOpenMeteoPayload({ code: 0, cloud: 10 });
+    payload.hourly.weather_code = payload.hourly.weather_code.map((_, i) => (i <= 1 ? 0 : 61));
+    mockOpenMeteo(payload);
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    const strip = el.querySelector('[role="slider"][aria-label="Preview the rest of the day"]') as HTMLElement;
+    expect(el.querySelector('[data-testid="wx-scene-layers"]')?.getAttribute("data-scene")).toBe("clear");
+
+    act(() => {
+      strip.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    });
+
+    expect(strip.getAttribute("aria-valuenow")).toBe("1");
+    expect(el.querySelector('[data-testid="wx-scene-layers"]')?.getAttribute("data-scene")).toBe("rain");
+    expect((el.querySelector('.wx-sky[data-active="true"]') as HTMLElement).className).toContain("from-[#b9c4d8]");
+    expect(el.querySelector('[data-testid="wx-hero-temp"]')?.textContent).toBe("70");
+
+    act(() => {
+      strip.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    await settle();
+    expect(strip.getAttribute("aria-valuenow")).toBe("0");
+    expect(el.querySelector('[data-testid="wx-scene-layers"]')?.getAttribute("data-scene")).toBe("clear");
+  });
+
   it("switches to the night sky when the API reports is_day=0", async () => {
     mockOpenMeteo(makeOpenMeteoPayload({ isDay: 0 }));
     const el = render(<WeatherWidget />);
@@ -556,6 +592,28 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(uvRow.length).toBe(1);
   });
 
+  it("keeps the modal scrubber and spoken timeline value intact through a scene change", async () => {
+    const payload = makeOpenMeteoPayload({ code: 0, cloud: 10 });
+    payload.hourly.weather_code = payload.hourly.weather_code.map((_, i) => (i <= 1 ? 0 : 71));
+    mockOpenMeteo(payload);
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    act(() => findDetailsButton(el)!.click());
+    const dialog = document.querySelector("#weather-details-dialog") as HTMLElement;
+    const scrubber = dialog.querySelector('[role="slider"][aria-label="Scrub through the next 24 hours"]') as HTMLElement;
+    expect(scrubber.getAttribute("aria-valuenow")).toBe("0");
+
+    act(() => {
+      scrubber.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    });
+
+    expect(scrubber.getAttribute("aria-valuenow")).toBe("1");
+    expect(scrubber.getAttribute("aria-valuetext")).toContain("degrees");
+    expect(dialog.querySelector('[data-testid="wx-scene-layers"]')?.getAttribute("data-scene")).toBe("snow");
+    expect((dialog.querySelector('.wx-sky[data-active="true"]') as HTMLElement).className).toContain("from-[#f4f7fb]");
+  });
+
   it("renders fog from real low visibility even with moderate humidity", async () => {
     mockOpenMeteo(makeOpenMeteoPayload({ visibility: 800 }));
     const el = render(<WeatherWidget />);
@@ -579,6 +637,32 @@ describe("WeatherWidget — Not Boring redesign", () => {
     const moon = el.querySelector('[data-testid="wx-moon"]');
     expect(moon).toBeTruthy();
     expect(moon!.querySelectorAll("div").length).toBe(2);
+  });
+
+  it("layers turquoise poster clouds behind a dominant clear-day temperature", async () => {
+    mockOpenMeteo(makeOpenMeteoPayload({ code: 0, cloud: 80 }));
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    const scene = el.querySelector('[data-testid="wx-scene-layers"]') as HTMLElement | null;
+    expect(scene?.getAttribute("data-scene")).toBe("clear");
+    const clouds = scene?.querySelector('[data-testid="wx-poster-clouds"]') as HTMLElement | null;
+    expect(clouds?.getAttribute("data-cloud-cover")).toBe("80");
+    expect(clouds?.querySelectorAll('[data-cloud-form="poster"]').length).toBe(2);
+    expect(clouds?.querySelectorAll("[data-cloud-layer]").length).toBe(2);
+    expect(scene?.querySelector('[data-testid="wx-poster-accents"] [data-weather-shape="sun"]')).toBeTruthy();
+
+    const temp = el.querySelector('[data-testid="wx-hero-temp"]') as HTMLElement;
+    expect(temp.className).toContain("text-[64px]");
+    expect(temp.className).toContain("sm:text-[80px]");
+    expect(temp.className).toContain("xl:text-[96px]");
+    const icon = el.querySelector('[data-testid="wx-hero-icon"]') as HTMLElement;
+    expect(parseFloat((icon.firstElementChild as HTMLElement).style.width)).toBeLessThan(64);
+
+    const movingLayer = clouds?.querySelector('[data-cloud-form="poster"]') as HTMLElement;
+    const accent = scene?.querySelector('[data-testid="wx-poster-accents"]') as HTMLElement;
+    expect(movingLayer.style.animation).toBe("");
+    expect(accent.style.animation).toBe("");
   });
 
   it("birds fly around the sun on a clear day", async () => {
@@ -1060,7 +1144,7 @@ describe("weather skins — severity + Consuela night", () => {
 
   it("emits one sky gradient source shared by the scene", () => {
     const summer = getWeatherSkin("summer", false, 1);
-    expect(summer.skyGradient("summer")).toBe("linear-gradient(175deg, #FFD8CB 0%, #FFEBCF 100%)");
+    expect(summer.skyGradient("summer")).toBe("linear-gradient(175deg, #55BCE8 0%, #D8F2F4 100%)");
     expect(summer.skyGradient(null)).toBe("linear-gradient(175deg, #1B1E33 0%, #2A2440 100%)");
     const storm = getWeatherSkin("summer", false, 95);
     expect(storm.skyGradient("summer")).toBe(storm.skyGradient("winter"));

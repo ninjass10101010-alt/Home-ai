@@ -1023,7 +1023,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
           <div key={k} className={`wx-sky absolute inset-0 bg-gradient-to-b ${g}`} data-active={heroScene === k} />
         ))}
         <div className="absolute inset-0 overflow-hidden" aria-hidden="true">
-          <SceneLayers scene={heroScene} showFog={heroFog} showBirds={heroBirds} />
+          <SceneLayers scene={heroScene} showFog={heroFog} showBirds={heroBirds} cloudCover={heroCloud} />
         </div>
         {fetchError && !weatherData && (
           <div className="pointer-events-none absolute inset-0 z-[1] bg-[rgba(120,128,145,0.38)] backdrop-blur-[1px]" aria-hidden="true" />
@@ -1042,7 +1042,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
           className="pointer-events-none absolute inset-0 z-10"
           aria-hidden="true"
           style={{
-            background: `radial-gradient(70% 55% at 50% 42%, ${heroScene === "storm" ? "rgba(6,6,9,0.40)" : "rgba(255,255,255,0.24)"} 0%, transparent 72%)`,
+            background: `radial-gradient(70% 55% at 50% 42%, ${heroScene === "storm" ? "rgba(6,6,9,0.40)" : heroScene === "clear" ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.24)"} 0%, transparent 72%)`,
           }}
         />
 
@@ -1096,12 +1096,12 @@ export default function WeatherWidget({ className = "" }: { className?: string }
                 <div className="isolate relative mt-1 sm:mt-2 flex w-full items-center justify-between">
                   <div className="flex items-baseline leading-none">
                   {heroTempTarget == null ? (
-                    <span data-testid="wx-hero-temp" className="text-[44px] font-black leading-none tracking-[-0.03em] sm:text-[56px] xl:text-[64px]" style={{ color: skin.ink }}>—</span>
+                    <span data-testid="wx-hero-temp" className="text-[64px] font-black leading-none tracking-[-0.03em] sm:text-[80px] xl:text-[96px]" style={{ color: skin.ink }}>—</span>
                   ) : (
                     <>
                       <span
                         data-testid="wx-hero-temp"
-                        className="relative z-10 text-[44px] font-black leading-none tracking-[-0.03em] tabular-nums sm:text-[56px] xl:text-[64px]"
+                        className="relative z-10 text-[64px] font-black leading-none tracking-[-0.03em] tabular-nums sm:text-[80px] xl:text-[96px]"
                         style={{ color: skin.ink }}
                       >
                         {heroTemp}
@@ -1112,8 +1112,8 @@ export default function WeatherWidget({ className = "" }: { className?: string }
                   )}
                   </div>
                   {/* clay condition — clamp prevents overflow on 320 px phones */}
-                  <div data-testid="wx-hero-icon" className="shrink-0 flex items-center justify-center" style={{ width: "clamp(56px, 18vw, 76px)", height: "clamp(56px, 18vw, 76px)", animation: "wxThumbIn .6s cubic-bezier(.2,.8,.2,1) both" }}>
-                    <Condition code={condCode} size={76} />
+                  <div data-testid="wx-hero-icon" className="shrink-0 flex items-center justify-center" style={{ width: "clamp(48px, 16vw, 64px)", height: "clamp(48px, 16vw, 64px)", animation: "wxThumbIn .6s cubic-bezier(.2,.8,.2,1) both" }}>
+                    <Condition code={condCode} size={64} />
                   </div>
                 </div>
                 {heroCondition && (
@@ -1361,7 +1361,7 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, accent
                 <div key={k} className={`wx-sky absolute inset-0 bg-gradient-to-b ${g}`} data-active={mScene === k} />
               ))}
               <div className="absolute inset-0 overflow-hidden" aria-hidden="true">
-                <SceneLayers scene={mScene} showFog={mFog} showBirds={mBirds} />
+                <SceneLayers scene={mScene} showFog={mFog} showBirds={mBirds} cloudCover={mCloud} />
               </div>
               <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 text-center">
                 <Condition code={mCond} size={64} />

@@ -1,6 +1,7 @@
 "use client";
 
 import { CSSProperties, useEffect, useId, useState } from "react";
+import { WX_POSTER } from "./wx-tokens";
 
 // WxToys — the toy weather kit: SunOrb, CloudPuff, seagull Birds,
 // keyframe-wired SceneLayers, and the clay Condition icon set.
@@ -29,16 +30,23 @@ export function SunOrb({ night = false }: { night?: boolean }) {
 }
 
 // Three overlapping blobs = chunky toy cloud. Pastel, with soft undershadow.
-export function CloudPuff({ className = "", style }: { className?: string; style?: CSSProperties }) {
-  const blob =
-    "absolute rounded-full bg-gradient-to-b from-white to-[#e8edf7] " +
-    "shadow-[inset_0_-6px_10px_rgba(150,165,200,.35),inset_0_3px_6px_rgba(255,255,255,1)]";
+export function CloudPuff({ className = "", style, tone = "day", layer }: {
+  className?: string;
+  style?: CSSProperties;
+  tone?: "day" | "poster";
+  layer?: "front" | "back";
+}) {
+  const blob = tone === "poster"
+    ? "absolute rounded-full bg-gradient-to-b from-[#e9fffc] via-[#b9eee8] to-[#82d8d0] " +
+      "shadow-[inset_0_-6px_10px_rgba(30,130,140,.28),inset_0_3px_6px_rgba(255,255,255,1)]"
+    : "absolute rounded-full bg-gradient-to-b from-white to-[#e8edf7] " +
+      "shadow-[inset_0_-6px_10px_rgba(150,165,200,.35),inset_0_3px_6px_rgba(255,255,255,1)]";
   return (
-    <div aria-hidden="true" className={`relative h-14 w-24 ${className}`} style={style}>
+    <div aria-hidden="true" className={`relative h-14 w-24 ${className}`} style={style} data-cloud-form={tone} data-cloud-layer={layer}>
       <div className={`${blob} left-0 bottom-0 h-10 w-10`} />
       <div className={`${blob} left-6 bottom-0 h-14 w-14`} />
       <div className={`${blob} right-0 bottom-0 h-9 w-9`} />
-      <div className="absolute -bottom-2 left-3 right-3 h-3 rounded-full bg-slate-500/15 blur-md" />
+      <div className={`absolute -bottom-2 left-3 right-3 h-3 rounded-full blur-md ${tone === "poster" ? "bg-[#2aa6a4]/20" : "bg-slate-500/15"}`} />
     </div>
   );
 }
@@ -84,13 +92,69 @@ export function useWxMotionOk(): boolean {
   return motionOk;
 }
 
+function PosterAccents({ scene, motionOk }: { scene: WxScene; motionOk: boolean }) {
+  return (
+    <svg
+      key={scene}
+      data-testid="wx-poster-accents"
+      data-scene={scene}
+      viewBox="0 0 320 180"
+      preserveAspectRatio="xMidYMid slice"
+      className="absolute inset-0 h-full w-full"
+      aria-hidden="true"
+      style={motionOk ? { animation: "wxFadeIn 0.85s ease both" } : undefined}
+    >
+      {scene === "clear" && (
+        <>
+          <circle data-weather-shape="sun" cx="258" cy="40" r="19" fill={WX_POSTER.sun} opacity="0.82" />
+          <path data-weather-shape="sun-rays" d="M258 10v8M258 62v8M228 40h8M280 40h8M237 19l6 6M273 55l6 6M279 19l-6 6M243 55l-6 6" stroke={WX_POSTER.sun} strokeWidth="4" strokeLinecap="round" opacity="0.72" />
+          <path data-weather-shape="poster-horizon" d="M0 156C68 132 126 170 194 148C244 132 278 145 320 128V180H0Z" fill={WX_POSTER.cloudMid} opacity="0.2" />
+        </>
+      )}
+      {scene === "cloudy" && (
+        <path data-weather-shape="cloud-bars" d="M24 42h62M48 66h92M18 90h54" stroke={WX_POSTER.cloudLight} strokeWidth="9" strokeLinecap="round" opacity="0.35" />
+      )}
+      {scene === "rain" && (
+        <g data-weather-shape="rain-diamonds" stroke={WX_POSTER.rain} strokeWidth="4" strokeLinecap="round" opacity="0.48">
+          <path d="m34 18-8 20M82 52l-8 20M260 24l-8 20M294 82l-8 20" />
+        </g>
+      )}
+      {scene === "snow" && (
+        <g data-weather-shape="snow-diamonds" stroke={WX_POSTER.snow} strokeWidth="3" strokeLinecap="round" opacity="0.7">
+          <path d="m34 22 8 8-8 8-8-8ZM92 64l7 7-7 7-7-7ZM266 24l8 8-8 8-8-8ZM294 92l6 6-6 6-6-6Z" />
+        </g>
+      )}
+      {scene === "storm" && (
+        <g data-weather-shape="storm-bolt" opacity="0.68">
+          <path d="m266 14-18 34h17l-5 30 25-40h-17Z" fill={WX_POSTER.storm} />
+          <path d="m54 28-6 14M84 70l-6 14" stroke={WX_POSTER.rain} strokeWidth="4" strokeLinecap="round" />
+        </g>
+      )}
+      {scene === "night" && (
+        <path data-weather-shape="night-orbit" d="M246 20a25 25 0 1 0 18 39 28 28 0 0 1-18-39Z" fill={WX_POSTER.cloudLight} opacity="0.28" />
+      )}
+    </svg>
+  );
+}
+
 // ─── Scene layer wired to the wx* keyframes ─────────────────────
 
-export function SceneLayers({ scene, showFog, showBirds }: { scene: string; showFog: boolean; showBirds: boolean }) {
+export function SceneLayers({ scene, showFog, showBirds, cloudCover = 25 }: {
+  scene: WxScene;
+  showFog: boolean;
+  showBirds: boolean;
+  cloudCover?: number;
+}) {
   const motionOk = useWxMotionOk();
   const isWet = scene === "rain" || scene === "storm";
+  const cover = Number.isFinite(cloudCover) ? Math.max(0, Math.min(100, cloudCover)) : 25;
+  const cloudTone = scene === "clear" ? "poster" : "day";
+  const frontCloudOpacity = scene === "clear" ? Math.min(0.9, 0.12 + cover / 110) : 0.9;
+  const backCloudOpacity = scene === "clear" ? Math.max(0, (cover - 20) / 100) * 0.72 : 0.6;
   return (
-    <>
+    <div data-testid="wx-scene-layers" data-scene={scene} className="absolute inset-0" aria-hidden="true">
+      <PosterAccents scene={scene} motionOk={motionOk} />
+
       {/* Stars */}
       {scene === "night" &&
         Array.from({ length: 18 }).map((_, i) => (
@@ -106,17 +170,21 @@ export function SceneLayers({ scene, showFog, showBirds }: { scene: string; show
         ))}
 
       {/* Drifting toy clouds (two depths) */}
-      {scene !== "clear" && scene !== "night" && (
-        <>
+      {scene !== "night" && (
+        <div data-testid="wx-poster-clouds" data-cloud-cover={Math.round(cover)} className="absolute inset-0">
           <CloudPuff
-            className="absolute top-16 left-4 scale-125 opacity-90"
-            style={motionOk ? { animation: "wxCloudDrift 26s ease-in-out infinite alternate" } : undefined}
+            layer="front"
+            tone={cloudTone}
+            className="absolute top-12 left-[-12px] -rotate-6 scale-[1.35]"
+            style={{ opacity: frontCloudOpacity, ...(motionOk ? { animation: "wxCloudDrift 26s ease-in-out infinite alternate" } : {}) }}
           />
           <CloudPuff
-            className="absolute top-32 right-2 scale-90 opacity-60 blur-[1px]"
-            style={motionOk ? { animation: "wxCloudDrift 38s ease-in-out infinite alternate-reverse" } : undefined}
+            layer="back"
+            tone={cloudTone}
+            className="absolute top-28 right-[-12px] rotate-3 scale-[1.15] blur-[1px]"
+            style={{ opacity: backCloudOpacity, ...(motionOk ? { animation: "wxCloudDrift 38s ease-in-out infinite alternate-reverse" } : {}) }}
           />
-        </>
+        </div>
       )}
 
       {/* Rain streaks */}
@@ -184,7 +252,7 @@ export function SceneLayers({ scene, showFog, showBirds }: { scene: string; show
           </div>
         ))}
       </div>
-    </>
+    </div>
   );
 }
 

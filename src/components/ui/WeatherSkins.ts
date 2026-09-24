@@ -1,3 +1,5 @@
+import { WX_POSTER } from "./wx-tokens";
+
 export type SeasonKey = "spring" | "summer" | "autumn" | "winter";
 
 export interface WeatherSkin {
@@ -113,6 +115,11 @@ function skyGradient(season: SeasonKey | null): string {
   return `linear-gradient(175deg, ${s.skyTop} 0%, ${s.skyBottom} 100%)`;
 }
 
+function posterSkyGradient(season: SeasonKey | null): string {
+  if (season === null) return skyGradient(null);
+  return `linear-gradient(175deg, ${WX_POSTER.clearTop} 0%, ${WX_POSTER.clearBottom} 100%)`;
+}
+
 const NIGHT_ACCENTS: { test: (code: number) => boolean; accent: string }[] = [
   { test: (c) => c >= 95, accent: "#FFB44F" },
   { test: (c) => (c >= 51 && c <= 67) || (c >= 80 && c <= 82), accent: "#58C7E8" },
@@ -153,6 +160,21 @@ export function getWeatherSkin(season: SeasonKey, isNight: boolean, code: number
   }
   const base = DAY_SKINS[season] ?? DAY_SKINS.summer;
   const kind = severeFamily(code);
+  if (code >= 0 && code <= 2) {
+    return {
+      ...base,
+      name: `${base.name}-clear`,
+      skyTop: WX_POSTER.clearTop,
+      skyBottom: WX_POSTER.clearBottom,
+      cloud: WX_POSTER.cloudLight,
+      cloudDeep: WX_POSTER.cloudDeep,
+      celestial: WX_POSTER.sun,
+      glow: WX_POSTER.clearGlow,
+      severe: false,
+      severeFamily: null,
+      skyGradient: posterSkyGradient,
+    };
+  }
   if (kind === "storm") {
     // Severity reaches the glance layer by day too: a daytime thunderstorm no
     // longer renders as a cheerful pastel lemon card. Desaturate the sky wash

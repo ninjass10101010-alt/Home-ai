@@ -2,8 +2,22 @@
 // (User's wx-tokens.js, verbatim, plus a storm sky/ink: WMO 95/96/99
 // reach the card but SKY had no storm key.)
 
+export const WX_POSTER = {
+  clearTop: "#55BCE8",
+  clearMid: "#8FD8F1",
+  clearBottom: "#D8F2F4",
+  cloudLight: "#E9FFFC",
+  cloudMid: "#82D8D0",
+  cloudDeep: "#2AA6A4",
+  sun: "#FFD166",
+  rain: "#C7EEFA",
+  snow: "#FFFFFF",
+  storm: "#FFC857",
+  clearGlow: "rgba(58, 180, 220, 0.34)",
+} as const;
+
 export const SKY: Record<string, string> = {
-  clear: "from-[#bfe3ff] via-[#dcefff] to-[#ffe7c9]", // sky → cream
+  clear: "from-[#55bce8] via-[#8fd8f1] to-[#d8f2f4]",
   cloudy: "from-[#dfe4ee] via-[#eef1f6] to-[#d9e6f5]", // pearl grey → powder blue
   rain: "from-[#b9c4d8] via-[#c9d7ea] to-[#d8d3f0]", // slate → lilac
   snow: "from-[#f4f7fb] via-[#e6efff] to-[#efe6fb]", // near-white → lavender
