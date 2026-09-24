@@ -200,6 +200,9 @@ export function sendBackPendingCompletion(tasks: Task[], taskId: number): Task[]
                     emoji: m.emoji,
                     joinedAt: m.joinedAt,
                   })),
+                  ...(Array.isArray(t.crew.removed) && t.crew.removed.length > 0
+                    ? { removed: [...t.crew.removed] }
+                    : {}),
                 }
               : t.crew,
         }

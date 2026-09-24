@@ -615,6 +615,245 @@ export async function mirrorTaskToCollection(
 
 export type AdminPB = ReturnType<typeof import("@/lib/pb").getAdminPB>;
 
+export interface CanonicalTaskLookup {
+  task: SnapshotTask | null;
+  source: "snapshot" | "pb" | "none";
+  tombstoned: boolean;
+  ambiguous: boolean;
+  revision: SnapshotRevision;
+  data: SnapshotData;
+  snapshotRowId: string | null;
+  pbRecordId: string | null;
+}
+
+export async function readSnapshotStateWithRevision(pb: AdminPB): Promise<{
+  data: SnapshotData;
+  revision: SnapshotRevision;
+  rowId: string | null;
+}> {
+  const rows = await pb.collection(SNAPSHOT_COLLECTION).getFullList({
+    requestKey: null,
+    filter: `key = "${SNAPSHOT_KEY}"`,
+  });
+  const row = rows[0] as any;
+  const data = sanitizeSnapshotMetadata(parseSnapshotData(row?.data));
+  return {
+    data,
+    revision: {
+      revision: decimalRevision(data.revision),
+      updatedAt: rowUpdatedAt(row, data),
+    },
+    rowId: row?.id ?? null,
+  };
+}
+
+function snapshotTaskFromCollection(record: Record<string, any>): SnapshotTask | null {
+  const id = Number(record?.taskId);
+  if (!isPositiveTaskId(id)) return null;
+  return {
+    id,
+    title: typeof record.title === "string" ? record.title : "task",
+    assignee: typeof record.assignee === "string" ? record.assignee : "",
+    assigneeEmoji: typeof record.assigneeEmoji === "string" ? record.assigneeEmoji : "",
+    assigned: typeof record.assigned === "string" ? record.assigned : record.assignee ?? "",
+    status: record.status ?? (record.completed === true ? "done" : "pending"),
+    due: record.due ?? null,
+    points: record.points ?? 0,
+    recurring: record.recurring ?? null,
+    category: record.category ?? "chores",
+    priority: record.priority ?? "medium",
+    universal: record.universal === undefined ? true : record.universal === true,
+    stealable: record.stealable === true,
+    speedBonus: record.speedBonus ?? null,
+    crewSize: record.crewSize ?? null,
+    crew: parseJSON<SnapshotTask["crew"]>(record.crew, null),
+    completed: record.completed === true,
+    completedBy: record.completedBy ?? null,
+    completedAt: record.completedAt ?? null,
+    completedInWeek: record.completedInWeek ?? null,
+    pendingApproval: parseJSON<SnapshotTask["pendingApproval"]>(record.pendingApproval, null),
+    sentBackAt: record.sentBackAt ?? null,
+  };
+}
+
+export async function findCanonicalTask(
+  pb: AdminPB,
+  taskId: number,
+): Promise<CanonicalTaskLookup> {
+  if (!isPositiveTaskId(taskId)) {
+    return {
+      task: null,
+      source: "none",
+      tombstoned: false,
+      ambiguous: false,
+      revision: { revision: "0", updatedAt: "" },
+      data: {},
+      snapshotRowId: null,
+      pbRecordId: null,
+    };
+  }
+  const snapshot = await readSnapshotStateWithRevision(pb);
+  const tombstoned = (snapshot.data.deletedTaskIds ?? []).some((candidate) => Number(candidate) === taskId);
+  if (tombstoned) {
+    return {
+      task: null,
+      source: "none",
+      tombstoned: true,
+      ambiguous: false,
+      revision: snapshot.revision,
+      data: snapshot.data,
+      snapshotRowId: snapshot.rowId,
+      pbRecordId: null,
+    };
+  }
+  const snapshotMatches = liveSnapshotTasks(snapshot.data).filter(
+    (task) => Number(task.id) === taskId,
+  );
+  if (snapshotMatches.length > 0) {
+    return {
+      task: snapshotMatches.length === 1 ? snapshotMatches[0] : null,
+      source: "snapshot",
+      tombstoned: false,
+      ambiguous: snapshotMatches.length > 1,
+      revision: snapshot.revision,
+      data: snapshot.data,
+      snapshotRowId: snapshot.rowId,
+      pbRecordId: null,
+    };
+  }
+
+  const rows = await pb.collection("tasks").getFullList({ requestKey: null });
+  const matches = (Array.isArray(rows) ? rows : [])
+    .filter((row: any) => Number(row?.taskId) === taskId)
+    .map((row: any) => ({ row, task: snapshotTaskFromCollection(row) }))
+    .filter((entry): entry is { row: Record<string, any>; task: SnapshotTask } => entry.task !== null);
+  if (matches.length > 0) {
+    return {
+      task: matches.length === 1 ? matches[0].task : null,
+      source: "pb",
+      tombstoned: false,
+      ambiguous: matches.length > 1,
+      revision: snapshot.revision,
+      data: snapshot.data,
+      snapshotRowId: snapshot.rowId,
+      pbRecordId: matches.length === 1 ? String(matches[0].row.id) : null,
+    };
+  }
+  return {
+    task: null,
+    source: "none",
+    tombstoned: false,
+    ambiguous: false,
+    revision: snapshot.revision,
+    data: snapshot.data,
+    snapshotRowId: snapshot.rowId,
+    pbRecordId: null,
+  };
+}
+
+function stableProjectionValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stableProjectionValue);
+  if (isObjectRecord(value)) {
+    return Object.fromEntries(
+      Object.keys(value).sort().map((key) => [key, stableProjectionValue(value[key])]),
+    );
+  }
+  return value;
+}
+
+function sameProjectionValue(left: unknown, right: unknown): boolean {
+  return JSON.stringify(stableProjectionValue(left)) === JSON.stringify(stableProjectionValue(right));
+}
+
+function taskProjectionRecord(task: SnapshotTask): Record<string, unknown> {
+  return {
+    taskId: task.id,
+    title: task.title,
+    assignee: task.assignee ?? "All",
+    assigneeEmoji: persistedTaskEmoji(task.assigneeEmoji) || "👤",
+    assigned: task.assignee ?? "All",
+    status: task.completed === true ? "done" : "pending",
+    due: task.due ?? null,
+    points: task.points ?? 0,
+    recurring: task.recurring ?? null,
+    category: task.category ?? "chores",
+    priority: task.priority ?? "medium",
+    universal: task.universal === true,
+    stealable: task.stealable === true,
+    completed: task.completed === true,
+    completedBy: task.completedBy ?? null,
+    completedAt: task.completedAt ?? null,
+    completedInWeek: task.completedInWeek ?? null,
+    pendingApproval: task.pendingApproval ?? null,
+    sentBackAt: task.sentBackAt ?? null,
+    crewSize: task.crewSize ?? null,
+    crew: persistedCrewEmoji(task.crew as any),
+    speedBonus: task.speedBonus ?? null,
+  };
+}
+
+function projectionValue(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return value;
+  }
+}
+
+function taskProjectionMatches(row: Record<string, any>, expected: Record<string, unknown>): boolean {
+  return Object.entries(expected).every(([key, expectedValue]) => {
+    const actualValue = ["crew", "pendingApproval"].includes(key)
+      ? projectionValue(row[key])
+      : row[key];
+    if (["crew", "pendingApproval"].includes(key)) return sameProjectionValue(actualValue, expectedValue);
+    if (["crewSize", "speedBonus", "completedBy", "completedAt", "completedInWeek", "sentBackAt", "recurring", "due"].includes(key)) {
+      const leftEmpty = actualValue === null || actualValue === undefined || actualValue === "";
+      const rightEmpty = expectedValue === null || expectedValue === undefined || expectedValue === "";
+      if (leftEmpty && rightEmpty) return true;
+      if ((key === "crewSize" || key === "speedBonus") && Number(actualValue) === 0 && Number(expectedValue) === 0) {
+        return true;
+      }
+    }
+    return actualValue === expectedValue;
+  });
+}
+
+export async function projectCanonicalTaskToPB(
+  pb: AdminPB,
+  task: SnapshotTask | null,
+  taskId: number,
+): Promise<boolean> {
+  if (!isPositiveTaskId(taskId)) return false;
+  try {
+    const collection = pb.collection("tasks");
+    const rows = async () => {
+      const value = await collection.getFullList({ requestKey: null });
+      return (Array.isArray(value) ? value : []).filter(
+        (row: any) => Number(row?.taskId) === taskId,
+      );
+    };
+    if (!task) {
+      for (const row of await rows()) await collection.delete(row.id, { requestKey: null });
+      return (await rows()).length === 0;
+    }
+    const expected = taskProjectionRecord(task);
+    const before = await rows();
+    if (before.length === 0) {
+      await collection.create(expected, { requestKey: null });
+    } else if (!taskProjectionMatches(before[0], expected)) {
+      await collection.update(before[0].id, expected, { requestKey: null });
+    }
+    for (const duplicate of before.slice(1)) {
+      await collection.delete(duplicate.id, { requestKey: null });
+    }
+    const after = await rows();
+    return after.length === 1 && taskProjectionMatches(after[0], expected);
+  } catch {
+    return false;
+  }
+}
+
 export type SnapshotConfigItemsSanitizer = (
   kind: TaskConfigKind,
   value: unknown,
