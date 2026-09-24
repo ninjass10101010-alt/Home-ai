@@ -73,7 +73,11 @@ export default function MorningBriefingWidget({ briefing, loading, ack, ackError
   if (briefing.acknowledged) {
     return (
       <div className="opacity-60 transition-opacity duration-700">
-        <WidgetCard tone={BRIEFING_TONE} icon={<HomeWidgetIcon variant="briefing" size="lg" />} className={className}>
+        <WidgetCard
+          tone={BRIEFING_TONE}
+          icon={<HomeWidgetIcon variant="briefing" state="default" size="lg" />}
+          className={className}
+        >
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 p-5 text-center">
             <h3 className="text-base font-bold text-text-primary">Morning Briefing</h3>
             <p className="mt-0.5 text-xs text-text-secondary">Seen for today — Consuela will refresh it tomorrow</p>
@@ -105,7 +109,7 @@ export default function MorningBriefingWidget({ briefing, loading, ack, ackError
     <SectionCard
       title="Morning Briefing"
       description="What Consuela lined up for today"
-      icon={<HomeWidgetIcon variant="briefing" size="lg" />}
+      icon={<HomeWidgetIcon variant="briefing" state="unread" size="lg" />}
       tone={BRIEFING_TONE}
       centeredHeader
       className={className}

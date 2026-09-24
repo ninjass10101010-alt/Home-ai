@@ -188,7 +188,11 @@ export default function CurrentMealWidget({ className = "" }: { className?: stri
   const emojiBorderAlpha = alphaHex(0x20 + 0x18 * proximity + (isNear ? 0x15 : 0));
 
   return (
-    <WidgetCard tone="#10b981" icon={<HomeWidgetIcon variant="meal" size="lg" />} className={className}>
+    <WidgetCard
+      tone="#10b981"
+      icon={<HomeWidgetIcon variant="meal" state={isNear ? "near" : "default"} size="lg" />}
+      className={className}
+    >
       {/* Floating seasonal emoji in corner */}
       <div
         className="absolute top-2 right-2 text-4xl pointer-events-none select-none meal-float-gentle"

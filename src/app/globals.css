@@ -411,6 +411,44 @@ body {
     inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
+.home-widget-icon {
+  transform-origin: center;
+  transition: transform 220ms var(--ease-settle);
+}
+
+.home-widget-icon-state-default {
+  transform: none;
+}
+
+.home-widget-icon-state-near {
+  transform: translateY(-2px) scale(1.04);
+}
+
+.home-widget-icon-state-unread {
+  transform: translateY(-1px) rotate(1deg) scale(1.02);
+}
+
+.home-widget-icon-state-on {
+  transform: scale(1.04);
+}
+
+.home-widget-icon-state-attention {
+  transform: translateY(-1px) rotate(-2deg) scale(1.04);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-widget-icon,
+  .home-widget-icon-state-default,
+  .home-widget-icon-state-near,
+  .home-widget-icon-state-unread,
+  .home-widget-icon-state-on,
+  .home-widget-icon-state-attention {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
+}
+
 :root[data-theme="light"] .widget-card,
 :root:not([data-theme="dark"]) .widget-card {
   --widget-accent: color-mix(in srgb, var(--color-accent-selected) 72%, black);

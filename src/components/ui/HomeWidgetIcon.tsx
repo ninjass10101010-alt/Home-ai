@@ -158,7 +158,13 @@ export default function HomeWidgetIcon({
   className,
   title,
 }: HomeWidgetIconProps) {
-  const classes = ["home-widget-icon", "shrink-0", sizeClasses[size], className]
+  const classes = [
+    "home-widget-icon",
+    state ? `home-widget-icon-state-${state}` : undefined,
+    "shrink-0",
+    sizeClasses[size],
+    className,
+  ]
     .filter(Boolean)
     .join(" ");
 

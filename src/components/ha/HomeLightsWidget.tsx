@@ -33,7 +33,7 @@ export default function HomeLightsWidget({ className }: { className?: string }) 
   return (
     <SectionCard
       title="Home Lights"
-      icon={<HomeWidgetIcon variant="lights" size="lg" />}
+      icon={<HomeWidgetIcon variant="lights" state={anyOn ? "on" : "default"} size="lg" />}
       tone="#f59e0b"
       compact
       centeredHeader

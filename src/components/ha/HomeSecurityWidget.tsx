@@ -40,7 +40,7 @@ export default function HomeSecurityWidget({ className }: { className?: string }
   return (
     <SectionCard
       title="Home Security"
-      icon={<HomeWidgetIcon variant="security" size="lg" />}
+      icon={<HomeWidgetIcon variant="security" state={openSensors.length > 0 ? "attention" : "default"} size="lg" />}
       tone="#f43f5e"
       compact
       centeredHeader

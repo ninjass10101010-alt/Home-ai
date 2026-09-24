@@ -40,7 +40,25 @@ describe("MorningBriefingWidget acknowledged state", () => {
     );
     expect(iconBox).toBeTruthy();
     expect(iconBox?.querySelector('svg[data-variant="briefing"]')).not.toBeNull();
+    expect(iconBox?.querySelector('svg[data-variant="briefing"]')?.getAttribute("data-state")).toBe("default");
     expect(iconBox?.textContent).not.toContain("🌅");
     expect((el.querySelector(".widget-card") as HTMLElement | null)?.style.getPropertyValue("--widget-tone")).toContain("#f97316");
+  });
+
+  it("selects the unread motion state while the briefing awaits acknowledgement", () => {
+    const briefing = {
+      id: "b1",
+      scopeDate: "2026-08-20",
+      acknowledged: false,
+      summary: {
+        events: [{ id: "e1", title: "School pickup", time: "3:00 PM" }],
+        tasks: [],
+        meals: [],
+        suggestions: [],
+      },
+    } as never;
+
+    const el = render(<MorningBriefingWidget briefing={briefing} loading={false} ack={ack} ackError={false} />);
+    expect(el.querySelector('svg[data-variant="briefing"]')?.getAttribute("data-state")).toBe("unread");
   });
 });

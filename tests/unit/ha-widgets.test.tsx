@@ -31,7 +31,7 @@ interface CallRecord {
   body: Record<string, unknown>;
 }
 
-function stubFetch() {
+function stubFetch(states = SYNC_STATES) {
   const calls: CallRecord[] = [];
   const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
     const u = String(url);
@@ -39,7 +39,7 @@ function stubFetch() {
       return {
         ok: true,
         status: 200,
-        json: async () => ({ success: true, count: SYNC_STATES.length, states: SYNC_STATES }),
+        json: async () => ({ success: true, count: states.length, states }),
       };
     }
     if (u.endsWith("/api/ha/call-service") || u.endsWith("/api/ha/alarm")) {
@@ -108,6 +108,7 @@ describe("Home widgets (Home Assistant)", () => {
     expect(el.textContent).toContain("1 home");
     expect(el.textContent).toContain("Front door");
     expectWidgetIcon(el, "security", "🛡️");
+    expect(el.querySelector('svg[data-variant="security"]')?.getAttribute("data-state")).toBe("attention");
 
     act(() => findButton(el, /Arm home/).click());
     await settle();
@@ -172,6 +173,7 @@ describe("Home widgets (Home Assistant)", () => {
     expect(el.textContent).toContain("On");
     expect(el.textContent).toContain("Off");
     expectWidgetIcon(el, "lights", "💡");
+    expect(el.querySelector('svg[data-variant="lights"]')?.getAttribute("data-state")).toBe("on");
 
     act(() => findRow(el, "Kitchen").click());
     await settle();
@@ -194,6 +196,24 @@ describe("Home widgets (Home Assistant)", () => {
       service: "turn_off",
       serviceData: { entity_id: ["light.kitchen", "light.hall"] },
     });
+  });
+
+  it("HomeLightsWidget selects the default icon state when all lights are off", async () => {
+    const states = SYNC_STATES.filter((state) => !state.entity_id.startsWith("light."));
+    stubFetch(states);
+    const el = render(<HomeLightsWidget />);
+    await settle();
+
+    expect(el.querySelector('svg[data-variant="lights"]')?.getAttribute("data-state")).toBe("default");
+  });
+
+  it("HomeSecurityWidget selects the default icon state when no sensors need attention", async () => {
+    const states = SYNC_STATES.filter((state) => state.entity_id !== "binary_sensor.front_door");
+    stubFetch(states);
+    const el = render(<HomeSecurityWidget />);
+    await settle();
+
+    expect(el.querySelector('svg[data-variant="security"]')?.getAttribute("data-state")).toBe("default");
   });
 
   it("HomeClimateWidget preserves the empty-state emoji while illustrating the header slot", async () => {

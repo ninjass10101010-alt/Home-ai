@@ -100,6 +100,17 @@ describe("CurrentMealWidget", () => {
     expect(el.textContent).toContain("Almost time · in 10m");
   });
 
+  it("selects the meal icon motion state from proximity", () => {
+    seedSchedule("8:00 PM");
+    const far = render(<CurrentMealWidget />);
+    expect(far.querySelector('svg[data-variant="meal"]')?.getAttribute("data-state")).toBe("default");
+
+    document.body.innerHTML = "";
+    seedSchedule("5:10 PM");
+    const near = render(<CurrentMealWidget />);
+    expect(near.querySelector('svg[data-variant="meal"]')?.getAttribute("data-state")).toBe("near");
+  });
+
   it("once the meal has started it reads 'Started at 4:30 PM'", () => {
     seedSchedule("4:30 PM");
     const el = render(<CurrentMealWidget />);
