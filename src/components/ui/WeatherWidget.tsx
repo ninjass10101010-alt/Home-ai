@@ -32,6 +32,11 @@ interface ForecastDay {
   precipitation: number | null;
 }
 
+interface SolarInterval {
+  sunriseISO: string;
+  sunsetISO: string;
+}
+
 interface HourPoint {
   time: string;
   temp: number | null;
@@ -43,6 +48,8 @@ interface HourPoint {
   windDir: number | null;
   humidity: number | null;
   visibility: number | null;
+  sunriseISO: string | null;
+  sunsetISO: string | null;
 }
 
 interface WeatherData {
@@ -663,6 +670,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
         const current = data.current ?? {};
         const daily = data.daily;
         const hourly = data.hourly;
+        const hourlyLocalTimes = hourly?.time?.slice();
         const currentWMO = wmoCondition(current.weather_code ?? 1);
         const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -682,6 +690,15 @@ export default function WeatherWidget({ className = "" }: { className?: string }
         if (daily?.sunrise) daily.sunrise = daily.sunrise.map(toTrueUTC);
         if (daily?.sunset) daily.sunset = daily.sunset.map(toTrueUTC);
 
+        const solarByDate = new Map<string, SolarInterval>();
+        daily?.time?.forEach((date: string, index: number) => {
+          const sunriseISO = daily.sunrise?.[index];
+          const sunsetISO = daily.sunset?.[index];
+          if (typeof sunriseISO === "string" && typeof sunsetISO === "string") {
+            solarByDate.set(date, { sunriseISO, sunsetISO });
+          }
+        });
+
         const hours: HourPoint[] = [];
         if (hourly?.time) {
           const nowMs = Date.now();
@@ -690,6 +707,8 @@ export default function WeatherWidget({ className = "" }: { className?: string }
           const fallbackIsDay = getRealTimeOfDay() === "day";
           for (let i = start; i < Math.min(start + 24, hourly.time.length); i++) {
             const temp = typeof hourly.temperature_2m?.[i] === "number" ? hourly.temperature_2m[i] : null; // a missing temp must not bend the curve
+            const localDate = hourlyLocalTimes?.[i]?.slice(0, 10);
+            const solar = localDate ? solarByDate.get(localDate) : undefined;
             hours.push({
               time: hourly.time[i],
               temp,
@@ -701,6 +720,8 @@ export default function WeatherWidget({ className = "" }: { className?: string }
               windDir: typeof hourly.wind_direction_10m?.[i] === "number" ? hourly.wind_direction_10m[i] : null,
               humidity: typeof hourly.relative_humidity_2m?.[i] === "number" ? hourly.relative_humidity_2m[i] : null,
               visibility: typeof hourly.visibility?.[i] === "number" ? hourly.visibility[i] : null,
+              sunriseISO: solar?.sunriseISO ?? null,
+              sunsetISO: solar?.sunsetISO ?? null,
             });
           }
         }
@@ -888,7 +909,11 @@ export default function WeatherWidget({ className = "" }: { className?: string }
   const heroPrecipitation = activeHour ? activeHour.precip : weatherData?.hours[0]?.precip ?? null;
   const heroWind = activeHour ? activeHour.wind : weatherData?.wind ?? null;
   const heroWindDirection = activeHour ? activeHour.windDir : weatherData?.windDir ?? null;
-  const heroSunProgress = sunProgressAt(activeHour?.time ?? new Date().toISOString(), weatherData?.sunriseISO ?? null, weatherData?.sunsetISO ?? null);
+  const heroSunProgress = sunProgressAt(
+    activeHour?.time ?? new Date().toISOString(),
+    activeHour ? activeHour.sunriseISO : weatherData?.sunriseISO ?? null,
+    activeHour ? activeHour.sunsetISO : weatherData?.sunsetISO ?? null
+  );
   const heroFogCode = sceneCode === 45 || sceneCode === 48;
   const heroFogMeasurement = (heroVis != null && heroVis < 8000) || (heroVis == null && heroHumidity != null && heroHumidity >= 82);
   const heroFog = heroFogCode || heroFogMeasurement;
@@ -1385,12 +1410,14 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
   const mWind = scrubHour ? scrubHour.wind : data.wind;
   const mWindDirection = scrubHour ? scrubHour.windDir : data.windDir;
   const mCloud = scrubHour ? scrubHour.cloud : data.cloud;
+  const mSunriseISO = scrubHour ? scrubHour.sunriseISO : data.sunriseISO;
+  const mSunsetISO = scrubHour ? scrubHour.sunsetISO : data.sunsetISO;
   const mFogCode = mCode === 45 || mCode === 48;
   const mFogMeasurement = (mVis != null && mVis < 8000) || (mVis == null && mHumidity != null && mHumidity >= 82);
   const mFog = mFogCode || mFogMeasurement;
   const mPresentation = conditionPresentation(mScene, mCode, mCloud, mIsDay);
   const mCond = mPresentation.icon;
-  const mSunProgress = sunProgressAt(scrubHour?.time ?? new Date().toISOString(), data.sunriseISO, data.sunsetISO);
+  const mSunProgress = sunProgressAt(scrubHour?.time ?? new Date().toISOString(), mSunriseISO, mSunsetISO);
   const mBirds =
     !fetchError &&
     mIsDay &&
@@ -1562,12 +1589,12 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
               <LeaderRow label="Pressure" value={scrubIdx !== 0 ? "—" : data.pressure != null ? `${data.pressure} hPa` : "—"} />
             </div>
 
-            {data.sunriseISO && data.sunsetISO && (
+            {mSunriseISO && mSunsetISO && (
               <div className="rounded-2xl border border-white/10 bg-white/[0.05] p-4">
                 <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-white/50">Daylight</p>
                 <SunArc
-                  sunriseISO={data.sunriseISO}
-                  sunsetISO={data.sunsetISO}
+                  sunriseISO={mSunriseISO}
+                  sunsetISO={mSunsetISO}
                   progress={mSunProgress}
                   accent={mAccent}
                 />

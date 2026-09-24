@@ -253,6 +253,43 @@ function makeOpenMeteoPayload(overrides: { isDay?: number; precip?: number; visi
   };
 }
 
+function localApiDate(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function localApiIso(date: Date): string {
+  return `${localApiDate(date)}T${String(date.getHours()).padStart(2, "0")}:00`;
+}
+
+function makeSolarCrossMidnightPayload() {
+  const base = new Date();
+  base.setMinutes(0, 0, 0);
+  const payload = makeOpenMeteoPayload({ code: 0, cloud: 0, precip: 0 });
+  const offsetSeconds = -base.getTimezoneOffset() * 60;
+  const hourlyTimes = Array.from({ length: 25 }, (_, index) =>
+    localApiIso(new Date(base.getTime() - 3_600_000 + index * 3_600_000))
+  );
+  const dailyTimes = Array.from({ length: 6 }, (_, index) =>
+    localApiDate(new Date(base.getTime() + index * 86_400_000))
+  );
+  const sunrise = dailyTimes.map((date, index) => `${date}T${index === 0 ? "06:00" : "07:00"}`);
+  const sunset = dailyTimes.map((date, index) => `${date}T${index === 0 ? "19:00" : "20:00"}`);
+  Object.assign(payload, { utc_offset_seconds: offsetSeconds });
+  payload.hourly.time = hourlyTimes;
+  payload.daily.time = dailyTimes;
+  payload.daily.sunrise = sunrise;
+  payload.daily.sunset = sunset;
+  return { payload, hourlyTimes, sunrise, sunset, offsetSeconds };
+}
+
+function daylightCard(dialog: HTMLElement): HTMLElement | null {
+  const heading = Array.from(dialog.querySelectorAll<HTMLElement>("p")).find(
+    (node) => node.textContent?.trim() === "Daylight"
+  );
+  return heading?.parentElement ?? null;
+}
+
 function mockOpenMeteo(payload: unknown) {
   vi.stubGlobal(
     "fetch",
@@ -1650,6 +1687,97 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(scrubber.getAttribute("aria-valuetext")).toContain("degrees");
     expect(dialog.querySelector('[data-testid="wx-scene-layers"]')?.getAttribute("data-scene")).toBe("snow");
     expect((dialog.querySelector('.wx-sky[data-active="true"]') as HTMLElement).className).toContain("from-[#f4f7fb]");
+  });
+
+  it("uses the selected clear day's solar interval after the modal scrubber crosses midnight", async () => {
+    const { payload, hourlyTimes, sunrise, sunset, offsetSeconds } = makeSolarCrossMidnightPayload();
+    mockOpenMeteo(payload);
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    act(() => findDetailsButton(el)!.click());
+    const dialog = document.querySelector("#weather-details-dialog") as HTMLElement;
+    const scrubber = dialog.querySelector('[role="slider"][aria-label="Scrub through the next 24 hours"]') as HTMLElement;
+    act(() => scrubber.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true })));
+    await settle(0);
+
+    const scene = dialog.querySelector('[data-testid="wx-scene-layers"]') as HTMLElement;
+    const sun = scene.querySelector('[data-weather-shape="sun"]');
+    const selectedMs = new Date(`${hourlyTimes[hourlyTimes.length - 1]}Z`).getTime() - offsetSeconds * 1000;
+    const sunriseMs = new Date(`${sunrise[1]}Z`).getTime() - offsetSeconds * 1000;
+    const sunsetMs = new Date(`${sunset[1]}Z`).getTime() - offsetSeconds * 1000;
+    const expectedProgress = Math.max(0, Math.min(1, (selectedMs - sunriseMs) / (sunsetMs - sunriseMs)));
+    expect(sun).toBeTruthy();
+    expect(Number(sun!.getAttribute("cx"))).toBeCloseTo(42 + expectedProgress * 236, 5);
+    expect(daylightCard(dialog)?.textContent).toContain("↑ 7 AM");
+    expect(daylightCard(dialog)?.textContent).toContain("↓ 8 PM");
+    expect(daylightCard(dialog)?.textContent).not.toContain("↑ 6 AM");
+  });
+
+  it("omits the solar marker and daylight card when the selected day has no interval", async () => {
+    const { payload } = makeSolarCrossMidnightPayload();
+    (payload.daily as any).sunrise = [(payload.daily as any).sunrise[0]];
+    (payload.daily as any).sunset = [(payload.daily as any).sunset[0]];
+    mockOpenMeteo(payload);
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    act(() => findDetailsButton(el)!.click());
+    const dialog = document.querySelector("#weather-details-dialog") as HTMLElement;
+    const scrubber = dialog.querySelector('[role="slider"][aria-label="Scrub through the next 24 hours"]') as HTMLElement;
+    act(() => scrubber.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true })));
+    await settle(0);
+
+    const scene = dialog.querySelector('[data-testid="wx-scene-layers"]') as HTMLElement;
+    expect(scene.getAttribute("data-sun-progress")).toBe("unavailable");
+    expect(scene.querySelector('[data-weather-shape="sun"]')).toBeNull();
+    expect(daylightCard(dialog)).toBeNull();
+  });
+
+  it.each([85, 86])("maps WMO $code to snow showers on the card", async (code) => {
+    mockOpenMeteo(makeOpenMeteoPayload({ code, precip: 70 }));
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    const icon = el.querySelector('[data-testid="wx-hero-icon"]')?.firstElementChild;
+    expect(el.textContent).toContain("Snow Showers");
+    expect(el.textContent).not.toContain("Thunderstorm");
+    expect(icon?.querySelector('svg[viewBox="0 0 48 62"]')).toBeNull();
+  });
+
+  it.each([85, 86])("maps WMO $code to snow showers in the details modal", async (code) => {
+    mockOpenMeteo(makeOpenMeteoPayload({ code, precip: 70 }));
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    act(() => findDetailsButton(el)!.click());
+    await settle();
+    const dialog = document.querySelector("#weather-details-dialog") as HTMLElement;
+    const icon = modalCondition(dialog);
+    expect(dialog.textContent).toContain("Snow Showers");
+    expect(dialog.textContent).not.toContain("Thunderstorm");
+    expect(icon?.querySelector('svg[viewBox="0 0 48 62"]')).toBeNull();
+  });
+
+  it.each([85, 86])("maps WMO $code to snow showers in the 5-day forecast", async (code) => {
+    const payload = makeOpenMeteoPayload({ code, precip: 70 });
+    payload.daily.weather_code = payload.daily.time.map(() => code);
+    mockOpenMeteo(payload);
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    act(() => findDetailsButton(el)!.click());
+    await settle();
+    const dialog = document.querySelector("#weather-details-dialog") as HTMLElement;
+    const dailyTab = Array.from(dialog.querySelectorAll<HTMLButtonElement>('[role="tab"]')).find(
+      (button) => button.textContent === "daily"
+    );
+    act(() => dailyTab!.click());
+    const rows = Array.from(dialog.querySelectorAll<HTMLElement>('[role="listitem"]'));
+    expect(rows).toHaveLength(5);
+    expect(rows.every((row) => row.textContent?.includes("Snow Showers"))).toBe(true);
+    expect(rows.every((row) => !row.textContent?.includes("Thunderstorm"))).toBe(true);
+    expect(rows.every((row) => !row.querySelector('span[aria-hidden="true"] svg[viewBox="0 0 48 62"]'))).toBe(true);
   });
 
   it("renders fog from real low visibility even with moderate humidity", async () => {

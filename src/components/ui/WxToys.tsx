@@ -377,6 +377,7 @@ export function wmoCondition(code: number): { condition: string; emoji: string }
   if (code <= 57) return { condition: "Drizzle", emoji: "🌦️" };
   if (code <= 67) return { condition: "Rainy", emoji: "🌧️" };
   if (code <= 77) return { condition: "Snowy", emoji: "❄️" };
+  if (code === 85 || code === 86) return { condition: "Snow Showers", emoji: "❄️" };
   if (code <= 82) return { condition: "Rain Showers", emoji: "🌧️" };
   return { condition: "Thunderstorm", emoji: "⛈️" };
 }
