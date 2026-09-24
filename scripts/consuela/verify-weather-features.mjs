@@ -1,6 +1,7 @@
 import { chromium } from "playwright";
 
 const BASE = "http://localhost:3000";
+const CARD = '[role="group"][aria-label*="degrees"]';
 let failures = 0;
 const ok = (cond, label, extra = "") => {
   console.log(`  ${cond ? "✓" : "✗"} ${label}${extra ? ` (${extra})` : ""}`);
@@ -57,7 +58,7 @@ await page.route("**/api.open-meteo.com/**", (route) => {
 
 const load = async () => {
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector('[role="img"][aria-label*="degrees"]', { timeout: 15000 }).catch(() => {});
+  await page.waitForSelector(CARD, { timeout: 15000 });
   await page.waitForTimeout(2500);
 };
 
@@ -68,31 +69,30 @@ console.log("[data wiring]");
 ok(/current=[^&]*visibility/.test(fetchedUrl), "fetch requests current visibility");
 ok(/hourly=[^&]*visibility/.test(fetchedUrl), "fetch requests hourly visibility");
 
-console.log("[procedural clouds — 90% cover]");
-const cloudInfo = await page.evaluate(() => {
-  const card = document.querySelector('[role="group"]');
-  const svgs = Array.from(card.querySelectorAll('svg[viewBox="0 0 200 70"]'));
-  return { count: svgs.length, blobCounts: svgs.map((s) => s.querySelectorAll("ellipse").length) };
-});
-ok(cloudInfo.count === 4, "4 procedural cloud slots render", JSON.stringify(cloudInfo.blobCounts));
-ok(cloudInfo.blobCounts.every((n) => n >= 4), "each cloud is a unique multi-blob cluster");
-
-console.log("[tap-to-puff]");
-const puffResult = await page.evaluate(async () => {
-  const card = document.querySelector('[role="group"]');
-  const svgs = Array.from(card.querySelectorAll('svg[viewBox="0 0 200 70"]'));
-  const visible = svgs.map((s) => s.closest("div[style]")).find((w) => Number(getComputedStyle(w).opacity) > 0.4);
-  if (!visible) return { tapped: false };
-  const before = visible.querySelectorAll("ellipse").length;
-  const rect = visible.getBoundingClientRect();
-  visible.dispatchEvent(new PointerEvent("pointerdown", { clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2, bubbles: true }));
-  await new Promise((r) => setTimeout(r, 250));
-  const after = visible.querySelectorAll("ellipse").length;
-  const puffAnim = Array.from(visible.querySelectorAll("ellipse")).some((e) => String(e.getAttribute("style") || "").includes("wxPuff"));
-  return { tapped: true, before, after, puffAnim };
-});
-ok(puffResult.tapped && puffResult.after === puffResult.before + 1, "tap adds one puff blob", JSON.stringify(puffResult));
-ok(puffResult.puffAnim, "puff animates via wxPuff");
+console.log("[poster clouds — 90% cover]");
+const cloudInfo = await page.evaluate((selector) => {
+  const card = document.querySelector(selector);
+  const cloudLayer = card?.querySelector('[data-testid="wx-poster-clouds"]');
+  if (!cloudLayer) return null;
+  const puffs = Array.from(cloudLayer.querySelectorAll("[data-cloud-layer]")).map((puff) => {
+    const style = getComputedStyle(puff);
+    return {
+      form: puff.getAttribute("data-cloud-form"),
+      layer: puff.getAttribute("data-cloud-layer"),
+      opacity: Number(style.opacity),
+      visibility: style.visibility,
+    };
+  });
+  return {
+    cover: cloudLayer.getAttribute("data-cloud-cover"),
+    visible: cloudLayer.getAttribute("data-visible"),
+    count: puffs.length,
+    puffs,
+  };
+}, CARD);
+ok(cloudInfo?.cover === "90" && cloudInfo.visible === "true", "poster cloud layer carries measured 90% cover", JSON.stringify(cloudInfo));
+ok(cloudInfo?.count === 2, "measured cover renders a finite two-layer cloud stack", cloudInfo?.count);
+ok(cloudInfo?.puffs.every(({ form, layer, opacity, visibility }) => form && layer && opacity > 0 && visibility === "visible"), "cloud puffs expose data-backed visible layers", JSON.stringify(cloudInfo?.puffs));
 
 console.log("[visibility fog — 800m]");
 const fogA = await page.evaluate(() => !!document.querySelector('[data-testid="wx-fog"]'));
@@ -101,16 +101,23 @@ ok(fogA, "fog renders from real 800m visibility");
 // ── Scenario B: clear visibility ────────────────────────────────────────────
 scenario = { cloud: 90, visibility: 16000 };
 await page.reload({ waitUntil: "domcontentloaded" });
+await page.waitForSelector(CARD, { timeout: 15000 });
 await page.waitForTimeout(2500);
 console.log("[visibility fog — 16km]");
 const fogB = await page.evaluate(() => !!document.querySelector('[data-testid="wx-fog"]'));
 ok(!fogB, "no fog when visibility is clear");
-const birdsB = await page.evaluate(() => document.querySelector('[data-testid="wx-birds"]')?.style.opacity);
-ok(birdsB === "0", "birds hidden under 90% cloud cover", `opacity=${birdsB}`);
+const birdsB = await page.evaluate(() => {
+  const birds = document.querySelector('[data-testid="wx-birds"]');
+  if (!birds) return null;
+  const style = getComputedStyle(birds);
+  return { visible: birds.getAttribute("data-visible"), opacity: style.opacity, visibility: style.visibility };
+});
+ok(birdsB?.visible === "false" && birdsB.opacity === "0" && birdsB.visibility === "hidden", "birds stay data-visible false and hidden under 90% cloud cover", JSON.stringify(birdsB));
 
 // ── Scenario D: clear sky — birds out ───────────────────────────────────────
 scenario = { cloud: 10, visibility: 16000 };
 await page.reload({ waitUntil: "domcontentloaded" });
+await page.waitForSelector(CARD, { timeout: 15000 });
 await page.waitForTimeout(2500);
 console.log("[birds — clear sky]");
 const birdsD = await page.evaluate(() => {
@@ -129,8 +136,8 @@ ok(birdsD && birdsD.count === 3, "three birds orbit the sun");
 ok(birdsD && birdsD.orbit, "birds fly the left-to-right-then-behind-the-sun orbit");
 ok(birdsD && birdsD.flap === 3, "seagull wing-flap morphs each bird's path");
 
-// ── Scenario C: forced night — moon phase ───────────────────────────────────
-scenario = { cloud: 20, visibility: 16000, isDay: 0 };
+// ── Scenario C: forced night — clay moon ─────────────────────────────────────
+scenario = { cloud: 20, visibility: 16000, isDay: 0, code: 0 };
 await page.evaluate(() => {
   const raw = localStorage.getItem("home-ai-weather-config");
   const cfg = raw ? JSON.parse(raw) : {};
@@ -138,13 +145,21 @@ await page.evaluate(() => {
   localStorage.setItem("home-ai-weather-config", JSON.stringify(cfg));
 });
 await page.reload({ waitUntil: "domcontentloaded" });
+await page.waitForSelector(CARD, { timeout: 15000 });
 await page.waitForTimeout(2500);
-console.log("[moon phase — forced night]");
+console.log("[night moon — forced night]");
 const moon = await page.evaluate(() => {
-  const lit = document.querySelector('[data-testid="wx-moon-lit"]');
-  return lit ? { d: lit.getAttribute("d") } : null;
+  const root = document.querySelector('[data-testid="wx-moon"]');
+  if (!root) return null;
+  const maskedDisc = root.children[1];
+  const computed = maskedDisc ? getComputedStyle(maskedDisc) : null;
+  return {
+    discs: root.children.length,
+    maskImage: maskedDisc?.style.maskImage || maskedDisc?.style.webkitMaskImage || computed?.maskImage || computed?.webkitMaskImage || "",
+  };
 });
-ok(moon && /^M 20 4 A 16 16/.test(moon.d || ""), "true moon phase path renders", moon?.d?.slice(0, 44));
+ok(moon?.discs === 2, "clay moon exposes earthshine and masked inner discs", JSON.stringify(moon));
+ok(/radial-gradient\([^)]*transparent[^)]*black/.test(moon?.maskImage || ""), "moon inner disc uses the current CSS crescent mask", moon?.maskImage?.slice(0, 90));
 
 console.log("[modal moon row]");
 await page.locator('button[aria-label="Open weather details"]').click();
