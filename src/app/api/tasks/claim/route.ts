@@ -73,7 +73,8 @@ function statusForReason(reason: ClaimFailureReason | string): number {
     reason === "nothing_to_undo" ||
     reason === "crew_full" ||
     reason === "member_checked_in" ||
-    reason === "operation_conflict"
+    reason === "operation_conflict" ||
+    reason === "insufficient_balance"
   ) return 409;
   return 503;
 }

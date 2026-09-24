@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { withAdmin } from "@/lib/pb-auth";
 import { normalizeWeekData, type AdminPB } from "@/lib/snapshot-tasks";
 import {
@@ -23,6 +24,7 @@ import type {
 export type LedgerOperationErrorCode =
   | "invalid_ledger_operation"
   | "insufficient_balance"
+  | "operation_conflict"
   | "ledger_write_conflict";
 
 export type LedgerOperationResult =
@@ -79,12 +81,32 @@ interface NormalizedLedgerEntry {
 interface NormalizedLedgerOperation {
   operationId: string;
   source: LedgerOperationSource;
+  fingerprint: string;
   entries: NormalizedLedgerEntry[];
 }
 
 const transactionTypes = new Set<Transaction["type"]>(LEDGER_TRANSACTION_TYPES);
 
 const operationSources = new Set<LedgerOperationSource>(LEDGER_OPERATION_SOURCES);
+
+function operationFingerprint(
+  source: LedgerOperationSource,
+  entries: NormalizedLedgerEntry[],
+): string {
+  return createHash("sha256")
+    .update(JSON.stringify({
+      source,
+      entries: entries.map((entry) => ({
+        type: entry.type,
+        member: entry.member,
+        amount: entry.amount,
+        description: entry.description,
+        ...(entry.taskId === undefined ? {} : { taskId: entry.taskId }),
+        ...(entry.appliedBy === undefined ? {} : { appliedBy: entry.appliedBy }),
+      })),
+    }))
+    .digest("hex");
+}
 
 const projectionFailure = "projection_failed";
 let transactionSequence = 0;
@@ -195,7 +217,15 @@ function normalizeOperation(value: unknown): NormalizedLedgerOperation | null {
     });
   }
 
-  return { operationId, source: source as LedgerOperationSource, entries };
+  const suppliedFingerprint = value.fingerprint;
+  if (
+    suppliedFingerprint !== undefined &&
+    (typeof suppliedFingerprint !== "string" || !/^[a-f0-9]{64}$/.test(suppliedFingerprint))
+  ) return null;
+  const fingerprint = typeof suppliedFingerprint === "string"
+    ? suppliedFingerprint
+    : operationFingerprint(source as LedgerOperationSource, entries);
+  return { operationId, source: source as LedgerOperationSource, fingerprint, entries };
 }
 
 interface CanonicalWeek {
@@ -256,10 +286,13 @@ function sameOperationEntry(
   entry: NormalizedLedgerEntry,
   operationId: string,
   source: LedgerOperationSource,
+  fingerprint: string,
 ): boolean {
   return (
     transaction.meta?.operationId === operationId &&
     transaction.meta?.source === source &&
+    (transaction.meta?.fingerprint === undefined ||
+      transaction.meta?.fingerprint === fingerprint) &&
     transaction.member === entry.member &&
     transaction.type === entry.type &&
     transaction.amount === entry.amount &&
@@ -278,7 +311,8 @@ function sameTransaction(left: Transaction, right: Transaction): boolean {
     left.taskId === right.taskId &&
     left.appliedBy === right.appliedBy &&
     left.meta?.operationId === right.meta?.operationId &&
-    left.meta?.source === right.meta?.source
+    left.meta?.source === right.meta?.source &&
+    left.meta?.fingerprint === right.meta?.fingerprint
   );
 }
 
@@ -298,16 +332,26 @@ function containsTransactions(
 function findMissingEntries(
   history: Transaction[],
   operation: NormalizedLedgerOperation,
-): { missing: NormalizedLedgerEntry[]; duplicate: boolean } | null {
+): { missing: NormalizedLedgerEntry[]; duplicate: boolean; conflict: boolean } | null {
   const existing = history.filter(
     (transaction) => transaction.meta?.operationId === operation.operationId,
   );
+  const fingerprinted = existing.filter((transaction) => transaction.meta?.fingerprint);
+  if (fingerprinted.some((transaction) => transaction.meta?.fingerprint !== operation.fingerprint)) {
+    return { missing: [], duplicate: false, conflict: true };
+  }
   const unmatched = [...existing];
   const missing: NormalizedLedgerEntry[] = [];
 
   for (const entry of operation.entries) {
     const index = unmatched.findIndex((transaction) =>
-      sameOperationEntry(transaction, entry, operation.operationId, operation.source),
+      sameOperationEntry(
+        transaction,
+        entry,
+        operation.operationId,
+        operation.source,
+        operation.fingerprint,
+      ),
     );
     if (index === -1) {
       missing.push(entry);
@@ -316,8 +360,8 @@ function findMissingEntries(
     unmatched.splice(index, 1);
   }
 
-  if (unmatched.length > 0) return null;
-  return { missing, duplicate: existing.length > 0 };
+  if (unmatched.length > 0) return { missing: [], duplicate: existing.length > 0, conflict: true };
+  return { missing, duplicate: existing.length > 0, conflict: false };
 }
 
 function nextTransactionId(history: Transaction[], nowMs: number): number | null {
@@ -356,6 +400,7 @@ function createTransaction(
     meta: {
       operationId: operation.operationId,
       source: operation.source,
+      fingerprint: operation.fingerprint,
     },
   };
 }
@@ -431,6 +476,14 @@ export async function applyWeekLedgerOperation(
   args: ApplyWeekLedgerOperationArgs,
 ): Promise<LedgerOperationResult> {
   const input: Record<string, unknown> = isRecord(args) ? args : {};
+  const weekStart = typeof input.weekStart === "string" ? input.weekStart.trim() : "";
+  return withWeekLedgerLock(weekStart, () => applyWeekLedgerOperationLocked(args));
+}
+
+export async function applyWeekLedgerOperationLocked(
+  args: ApplyWeekLedgerOperationArgs,
+): Promise<LedgerOperationResult> {
+  const input: Record<string, unknown> = isRecord(args) ? args : {};
   const weekStart = normalizeWeekStart(input.weekStart) ?? "";
   const operation = input.operation;
   const operationId = resultOperationId(operation);
@@ -449,21 +502,22 @@ export async function applyWeekLedgerOperation(
   }
 
   try {
-    return await withWeekLedgerLock(weekStart, async () =>
-      withAdmin(async (pb): Promise<LedgerOperationResult> => {
+    return await withAdmin(async (pb): Promise<LedgerOperationResult> => {
         const read = await readWeekRow(pb, weekStart);
         const current = read.weekData;
         const normalizedOperation = normalizeOperation(operation);
         if (!normalizedOperation) {
           return failure("invalid_ledger_operation", current, operationId);
         }
-        if (hasNegativeOutcome(current.history)) {
-          return failure("insufficient_balance", current, normalizedOperation.operationId);
-        }
-
         const replay = findMissingEntries(current.history, normalizedOperation);
         if (!replay) {
           return failure("invalid_ledger_operation", current, normalizedOperation.operationId);
+        }
+        if (replay.conflict) {
+          return failure("operation_conflict", current, normalizedOperation.operationId);
+        }
+        if (replay.missing.length > 0 && hasNegativeOutcome(current.history)) {
+          return failure("insufficient_balance", current, normalizedOperation.operationId);
         }
 
         const nowMs = now.getTime();
@@ -495,7 +549,7 @@ export async function applyWeekLedgerOperation(
         }
 
         const mergedHistory = [...current.history, ...newTransactions];
-        if (hasNegativeOutcome(mergedHistory)) {
+        if (replay.missing.length > 0 && hasNegativeOutcome(mergedHistory)) {
           return failure("insufficient_balance", current, normalizedOperation.operationId);
         }
         const points = recomputeWeekPoints(mergedHistory);
@@ -531,7 +585,7 @@ export async function applyWeekLedgerOperation(
             !containsTransactions(verified.history, mergedHistory) ||
             !samePoints(verified.points, points) ||
             verifiedRead.pointsNeedRepair ||
-            hasNegativeOutcome(verified.history)
+            (newTransactions.length > 0 && hasNegativeOutcome(verified.history))
           ) {
             throw new LedgerOperationAbort("ledger_write_conflict", current);
           }
@@ -570,8 +624,7 @@ export async function applyWeekLedgerOperation(
           operationId: normalizedOperation.operationId,
           ...(projectionError === undefined ? {} : { projectionError }),
         };
-      }),
-    );
+    });
   } catch (error) {
     if (error instanceof LedgerOperationAbort) {
       return failure(error.code, error.weekData, operationId);

@@ -65,6 +65,7 @@ export type LedgerOperationSource =
 export interface LedgerOperationMeta {
   operationId: string;
   source: LedgerOperationSource;
+  fingerprint?: string;
 }
 
 export interface Transaction {
@@ -91,6 +92,7 @@ export interface LedgerEntryInput {
 export interface LedgerOperationInput {
   operationId: string;
   source: LedgerOperationSource;
+  fingerprint?: string;
   entries: LedgerEntryInput[];
 }
 
