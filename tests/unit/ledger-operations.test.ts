@@ -170,6 +170,7 @@ describe("applyWeekLedgerOperation", () => {
   it("skips an unreversed task earn for the same member and re-earn after reversal", async () => {
     const firstHarness = makePb({
       history: [transaction(1, { taskId: 101, meta: undefined })],
+      points: { Alex: 8 },
     });
     mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(firstHarness.pb));
 
@@ -376,5 +377,542 @@ describe("applyWeekLedgerOperation", () => {
 
     expect(result).toMatchObject({ ok: false, code: "ledger_write_conflict" });
     expect(projected).toBe(false);
+  });
+});
+
+function weekRow(id: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id,
+    weekStart: WEEK,
+    points: "{}",
+    streak: "{}",
+    lastActive: "{}",
+    history: "[]",
+    ...overrides,
+  };
+}
+
+function duplicateInitialPb() {
+  const existing = transaction(1, {
+    taskId: 101,
+    meta: { operationId: "op-duplicate-initial", source: "task-approval" },
+  });
+  const stored = weekRow("week-1", {
+    points: JSON.stringify({ Alex: 8 }),
+    history: JSON.stringify([existing]),
+  });
+  const rows = [stored, { ...structuredClone(stored), id: "week-2" }];
+  return {
+    pb: {
+      collection: vi.fn(() => ({
+        getFullList: vi.fn(async () => structuredClone(rows)),
+        update: vi.fn(),
+        create: vi.fn(),
+      })),
+    } as any,
+  };
+}
+
+function duplicateVerificationPb() {
+  let row = weekRow("week-1");
+  let written = false;
+  return {
+    pb: {
+      collection: vi.fn(() => ({
+        getFullList: vi.fn(async () =>
+          written
+            ? [structuredClone(row), { ...structuredClone(row), id: "week-2" }]
+            : [structuredClone(row)],
+        ),
+        getOne: vi.fn(async () => structuredClone(row)),
+        update: vi.fn(async (_id: string, payload: Record<string, unknown>) => {
+          row = { ...row, ...structuredClone(payload) };
+          written = true;
+          return structuredClone(row);
+        }),
+        create: vi.fn(),
+      })),
+    } as any,
+  };
+}
+
+function createRowPb(options: { fail?: boolean } = {}) {
+  let row: Record<string, unknown> | null = null;
+  const collection = {
+    getFullList: vi.fn(async () => (row ? [structuredClone(row)] : [])),
+    getOne: vi.fn(async () => (row ? structuredClone(row) : null)),
+    update: vi.fn(),
+    create: vi.fn(async (payload: Record<string, unknown>) => {
+      if (options.fail) throw new Error("create failed");
+      row = { id: "created-week", ...structuredClone(payload) };
+      return structuredClone(row);
+    }),
+  };
+  return {
+    pb: {
+      collection: vi.fn(() => collection),
+    } as any,
+    collection,
+  };
+}
+
+describe("ledger operation review regressions", () => {
+  it("rejects duplicate week rows on the initial canonical read", async () => {
+    const harness = duplicateInitialPb();
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = await applyWeekLedgerOperation({
+      weekStart: WEEK,
+      operation: {
+        operationId: "op-duplicate-initial",
+        source: "task-approval",
+        entries: [{ type: "earn", member: "Alex", amount: 8, description: "Approved", taskId: 101 }],
+      },
+    });
+
+    expect(result).toMatchObject({ ok: false, code: "ledger_write_conflict" });
+  });
+
+  it("rejects duplicate week rows on post-write verification", async () => {
+    const harness = duplicateVerificationPb();
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = await applyWeekLedgerOperation({
+      weekStart: WEEK,
+      operation: {
+        operationId: "op-duplicate-verification",
+        source: "planner-adjust",
+        entries: [{ type: "adjust", member: "Alex", amount: 1, description: "Bonus" }],
+      },
+    });
+
+    expect(result).toMatchObject({ ok: false, code: "ledger_write_conflict" });
+  });
+
+  it.each([
+    ["read", new Date(0)],
+    ["negative", new Date(-1)],
+    ["invalid", "not-a-date" as unknown as Date],
+  ])("rejects %s dates before writing", async (_label, now) => {
+    const harness = makePb();
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = await applyWeekLedgerOperation({
+      weekStart: WEEK,
+      operation: {
+        operationId: `op-invalid-now-${_label}`,
+        source: "planner-adjust",
+        entries: [{ type: "adjust", member: "Alex", amount: 1, description: "Bonus" }],
+      },
+      now,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: "invalid_ledger_operation",
+      operationId: `op-invalid-now-${_label}`,
+    });
+    expect(harness.writeCount).toBe(0);
+  });
+
+  it("returns a safe empty identity for an unsafe operation ID", async () => {
+    const harness = makePb();
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = await applyWeekLedgerOperation({
+      weekStart: WEEK,
+      operation: {
+        operationId: "__proto__",
+        source: "planner-adjust",
+        entries: [{ type: "adjust", member: "Alex", amount: 1, description: "Bonus" }],
+      },
+    });
+
+    expect(result).toMatchObject({ ok: false, code: "invalid_ledger_operation", operationId: "" });
+    expect(JSON.stringify(result)).not.toContain("__proto__");
+    expect(harness.writeCount).toBe(0);
+  });
+
+  it("repairs stale points for an exact replay without adding history", async () => {
+    const existing = transaction(1, {
+      taskId: 101,
+      meta: { operationId: "op-stale-exact", source: "task-approval" },
+    });
+    const harness = makePb({ history: [existing], points: { Alex: 999 } });
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = expectSuccess(
+      await applyWeekLedgerOperation({
+        weekStart: WEEK,
+        operation: {
+          operationId: "op-stale-exact",
+          source: "task-approval",
+          entries: [{ type: "earn", member: "Alex", amount: 8, description: "Approved", taskId: 101 }],
+        },
+      }),
+    );
+
+    expect(result.applied).toBe(false);
+    expect(result.duplicate).toBe(true);
+    expect(result.weekData.history).toHaveLength(1);
+    expect(result.weekData.points).toEqual({ Alex: 8 });
+    expect(harness.writeCount).toBe(1);
+  });
+
+  it("repairs stale points for a semantic replay without adding history", async () => {
+    const harness = makePb({
+      history: [transaction(1, { taskId: 101 })],
+      points: { Alex: 999 },
+    });
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = expectSuccess(
+      await applyWeekLedgerOperation({
+        weekStart: WEEK,
+        operation: {
+          operationId: "op-stale-semantic",
+          source: "assigned-complete",
+          entries: [{ type: "earn", member: "Alex", amount: 8, description: "Completed", taskId: 101 }],
+        },
+      }),
+    );
+
+    expect(result.applied).toBe(false);
+    expect(result.semanticDuplicate).toBe(true);
+    expect(result.weekData.history).toHaveLength(1);
+    expect(result.weekData.points).toEqual({ Alex: 8 });
+    expect(harness.writeCount).toBe(1);
+  });
+
+  it("repairs stale points when partial replay is completed by a semantic duplicate", async () => {
+    const harness = makePb({
+      history: [
+        transaction(1, {
+          taskId: 101,
+          meta: { operationId: "op-stale-partial", source: "task-approval" },
+        }),
+        transaction(2, { taskId: 202, member: "Bailey" }),
+      ],
+      points: { Alex: 999, Bailey: 999 },
+    });
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = expectSuccess(
+      await applyWeekLedgerOperation({
+        weekStart: WEEK,
+        operation: {
+          operationId: "op-stale-partial",
+          source: "task-approval",
+          entries: [
+            { type: "earn", member: "Alex", amount: 8, description: "Approved", taskId: 101 },
+            { type: "earn", member: "Bailey", amount: 8, description: "Approved", taskId: 202 },
+          ],
+        },
+      }),
+    );
+
+    expect(result.applied).toBe(false);
+    expect(result.duplicate).toBe(true);
+    expect(result.semanticDuplicate).toBe(true);
+    expect(result.weekData.history).toHaveLength(2);
+    expect(result.weekData.points).toEqual({ Alex: 8, Bailey: 8 });
+    expect(harness.writeCount).toBe(1);
+  });
+
+  it("creates and verifies a new canonical week row", async () => {
+    const harness = createRowPb();
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = expectSuccess(
+      await applyWeekLedgerOperation({
+        weekStart: WEEK,
+        operation: {
+          operationId: "op-create-row",
+          source: "planner-adjust",
+          entries: [{ type: "adjust", member: "Alex", amount: 3, description: "Bonus" }],
+        },
+      }),
+    );
+
+    expect(result.applied).toBe(true);
+    expect(result.weekData.points).toEqual({ Alex: 3 });
+    expect(harness.collection.create).toHaveBeenCalledOnce();
+  });
+
+  it("maps PB read, update, and create errors to a stable conflict", async () => {
+    const readHarness = {
+      pb: {
+        collection: vi.fn(() => ({
+          getFullList: vi.fn(async () => {
+            throw new Error("read private material");
+          }),
+        })),
+      } as any,
+    };
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(readHarness.pb));
+    const readResult = await applyWeekLedgerOperation({
+      weekStart: WEEK,
+      operation: {
+        operationId: "op-read-error",
+        source: "planner-adjust",
+        entries: [{ type: "adjust", member: "Alex", amount: 1, description: "Bonus" }],
+      },
+    });
+    expect(readResult).toMatchObject({ ok: false, code: "ledger_write_conflict" });
+    expect(JSON.stringify(readResult)).not.toContain("read private material");
+
+    const updateHarness = makePb({ writeError: new Error("update private material") });
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(updateHarness.pb));
+    const updateResult = await applyWeekLedgerOperation({
+      weekStart: WEEK,
+      operation: {
+        operationId: "op-update-error",
+        source: "planner-adjust",
+        entries: [{ type: "adjust", member: "Alex", amount: 1, description: "Bonus" }],
+      },
+    });
+    expect(updateResult).toMatchObject({ ok: false, code: "ledger_write_conflict" });
+    expect(JSON.stringify(updateResult)).not.toContain("update private material");
+
+    const createHarness = createRowPb({ fail: true });
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(createHarness.pb));
+    const createResult = await applyWeekLedgerOperation({
+      weekStart: WEEK,
+      operation: {
+        operationId: "op-create-error",
+        source: "planner-adjust",
+        entries: [{ type: "adjust", member: "Alex", amount: 1, description: "Bonus" }],
+      },
+    });
+    expect(createResult).toMatchObject({ ok: false, code: "ledger_write_conflict" });
+    expect(JSON.stringify(createResult)).not.toContain("create failed");
+  });
+
+  it("rejects same-operation entries with a different identity", async () => {
+    const harness = makePb({
+      history: [
+        transaction(1, {
+          taskId: 101,
+          meta: { operationId: "op-same-id", source: "task-approval" },
+        }),
+      ],
+    });
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = await applyWeekLedgerOperation({
+      weekStart: WEEK,
+      operation: {
+        operationId: "op-same-id",
+        source: "task-approval",
+        entries: [{ type: "earn", member: "Bailey", amount: 8, description: "Approved", taskId: 101 }],
+      },
+    });
+
+    expect(result).toMatchObject({ ok: false, code: "invalid_ledger_operation" });
+    expect(harness.writeCount).toBe(0);
+  });
+
+  it("matches reordered entries from the same operation without writing", async () => {
+    const harness = makePb({
+      history: [
+        transaction(1, {
+          member: "Alex",
+          taskId: 101,
+          meta: { operationId: "op-reordered", source: "task-approval" },
+        }),
+        transaction(2, {
+          member: "Bailey",
+          taskId: 101,
+          meta: { operationId: "op-reordered", source: "task-approval" },
+        }),
+      ],
+      points: { Alex: 8, Bailey: 8 },
+    });
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = expectSuccess(
+      await applyWeekLedgerOperation({
+        weekStart: WEEK,
+        operation: {
+          operationId: "op-reordered",
+          source: "task-approval",
+          entries: [
+            { type: "earn", member: "Bailey", amount: 8, description: "Approved", taskId: 101 },
+            { type: "earn", member: "Alex", amount: 8, description: "Approved", taskId: 101 },
+          ],
+        },
+      }),
+    );
+
+    expect(result.duplicate).toBe(true);
+    expect(result.applied).toBe(false);
+    expect(result.weekData.history).toHaveLength(2);
+    expect(harness.writeCount).toBe(0);
+  });
+
+  it("returns an unreconciled success when projection returns false", async () => {
+    const harness = makePb();
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = expectSuccess(
+      await applyWeekLedgerOperation({
+        weekStart: WEEK,
+        operation: {
+          operationId: "op-projection-false",
+          source: "planner-adjust",
+          entries: [{ type: "adjust", member: "Alex", amount: 1, description: "Bonus" }],
+        },
+        project: async () => false,
+      }),
+    );
+
+    expect(result.reconciled).toBe(false);
+    expect(result.projectionError).toBe("projection_failed");
+  });
+
+  it("does not treat reversals for another task or member as a reversal", async () => {
+    const harness = makePb({
+      history: [
+        transaction(1, { taskId: 101, member: "Alex" }),
+        transaction(2, { taskId: 102, member: "Alex" }),
+        transaction(3, {
+          taskId: 102,
+          member: "Alex",
+          type: "adjust",
+          amount: -8,
+          description: "Other task reversal",
+          timestamp: "2026-09-21T11:00:00.000Z",
+        }),
+        transaction(4, { taskId: 101, member: "Bailey" }),
+        transaction(5, {
+          taskId: 101,
+          member: "Bailey",
+          type: "adjust",
+          amount: -8,
+          description: "Other member reversal",
+          timestamp: "2026-09-21T12:00:00.000Z",
+        }),
+      ],
+    });
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = expectSuccess(
+      await applyWeekLedgerOperation({
+        weekStart: WEEK,
+        operation: {
+          operationId: "op-wrong-reversal",
+          source: "assigned-complete",
+          entries: [{ type: "earn", member: "Alex", amount: 8, description: "Completed", taskId: 101 }],
+        },
+      }),
+    );
+
+    expect(result.semanticDuplicate).toBe(true);
+    expect(result.applied).toBe(false);
+  });
+
+  it("allows re-earn after a later matching task and member reversal", async () => {
+    const harness = makePb({
+      history: [
+        transaction(1, { taskId: 101, member: "Alex" }),
+        transaction(2, { taskId: 102, member: "Alex" }),
+        transaction(3, {
+          taskId: 102,
+          member: "Alex",
+          type: "adjust",
+          amount: -8,
+          description: "Other task reversal",
+          timestamp: "2026-09-21T11:00:00.000Z",
+        }),
+        transaction(4, { taskId: 101, member: "Bailey" }),
+        transaction(5, {
+          taskId: 101,
+          member: "Bailey",
+          type: "adjust",
+          amount: -8,
+          description: "Other member reversal",
+          timestamp: "2026-09-21T12:00:00.000Z",
+        }),
+        transaction(6, {
+          taskId: 101,
+          member: "Alex",
+          type: "adjust",
+          amount: -8,
+          description: "Matching reversal",
+          timestamp: "2026-09-21T13:00:00.000Z",
+        }),
+      ],
+    });
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = expectSuccess(
+      await applyWeekLedgerOperation({
+        weekStart: WEEK,
+        operation: {
+          operationId: "op-matching-reversal",
+          source: "assigned-complete",
+          entries: [{ type: "earn", member: "Alex", amount: 8, description: "Completed", taskId: 101 }],
+        },
+      }),
+    );
+
+    expect(result.applied).toBe(true);
+    expect(result.semanticDuplicate).toBe(false);
+    expect(result.weekData.history).toHaveLength(7);
+  });
+
+  it("keeps generated IDs positive, safe, and collision-free", async () => {
+    const now = new Date("2026-09-21T10:00:00.000Z");
+    const nowMs = now.getTime();
+    const existingIds = Array.from({ length: 2000 }, (_, index) => transaction(nowMs + index));
+    const harness = makePb({ history: existingIds });
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = expectSuccess(
+      await applyWeekLedgerOperation({
+        weekStart: WEEK,
+        operation: {
+          operationId: "op-id-collision",
+          source: "planner-adjust",
+          entries: [{ type: "adjust", member: "Alex", amount: 1, description: "Bonus" }],
+        },
+        now,
+      }),
+    );
+
+    const newId = result.weekData.history.at(-1)?.id;
+    expect(newId).toBeGreaterThan(0);
+    expect(Number.isSafeInteger(newId)).toBe(true);
+    expect(existingIds.some((entry) => entry.id === newId)).toBe(false);
+  });
+
+  it("rejects malformed transaction data returned by verification", async () => {
+    let row = weekRow("week-1");
+    const harness = {
+      pb: {
+        collection: vi.fn(() => ({
+          getFullList: vi.fn(async () => [structuredClone(row)]),
+          getOne: vi.fn(async () => structuredClone(row)),
+          update: vi.fn(async (_id: string, payload: Record<string, unknown>) => {
+            const history = (payload.history as unknown[]).map((entry) => ({ ...(entry as object), id: 0 }));
+            row = { ...row, ...payload, history: JSON.stringify(history) };
+            return structuredClone(row);
+          }),
+          create: vi.fn(),
+        })),
+      } as any,
+    };
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = await applyWeekLedgerOperation({
+      weekStart: WEEK,
+      operation: {
+        operationId: "op-malformed-verification",
+        source: "planner-adjust",
+        entries: [{ type: "adjust", member: "Alex", amount: 1, description: "Bonus" }],
+      },
+    });
+
+    expect(result).toMatchObject({ ok: false, code: "ledger_write_conflict" });
   });
 });

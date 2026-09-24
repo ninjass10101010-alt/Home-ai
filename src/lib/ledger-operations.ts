@@ -124,13 +124,21 @@ function emptyWeekData(weekStart: string): WeekData {
 
 function resultOperationId(operation: unknown): string {
   if (!isRecord(operation) || typeof operation.operationId !== "string") return "";
-  return normalizeOperationId(operation.operationId) ?? operation.operationId.trim();
+  return normalizeOperationId(operation.operationId) ?? "";
 }
 
 function isValidWeekStart(value: unknown): value is string {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const date = new Date(`${value}T00:00:00.000Z`);
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function validNow(value: unknown): Date | null {
+  const candidate = value === undefined ? new Date() : value;
+  if (!(candidate instanceof Date)) return null;
+  const time = candidate.getTime();
+  if (!Number.isSafeInteger(time) || time <= 0) return null;
+  return new Date(time);
 }
 
 function normalizeOperation(value: unknown): NormalizedLedgerOperation | null {
@@ -197,19 +205,40 @@ function normalizeOperation(value: unknown): NormalizedLedgerOperation | null {
   return { operationId, source: source as LedgerOperationSource, entries };
 }
 
+interface CanonicalWeek {
+  weekData: WeekData;
+  pointsNeedRepair: boolean;
+}
+
+function samePoints(
+  left: Record<string, number>,
+  right: Record<string, number>,
+): boolean {
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  return (
+    leftKeys.length === rightKeys.length &&
+    leftKeys.every((key, index) => key === rightKeys[index] && left[key] === right[key])
+  );
+}
+
 function canonicalWeek(
   value: unknown,
   weekStart: string,
-): WeekData | null {
+): CanonicalWeek | null {
   const parsed = normalizeWeekData(value);
   if (!parsed || parsed.weekStart !== weekStart) return null;
   const history = parseCanonicalTransactions(parsed.history);
   if (!history) return null;
   if (history.some((transaction) => !Number.isSafeInteger(transaction.amount))) return null;
+  const points = recomputeWeekPoints(history);
   return {
-    ...parsed,
-    history,
-    points: recomputeWeekPoints(history),
+    weekData: {
+      ...parsed,
+      history,
+      points,
+    },
+    pointsNeedRepair: !samePoints(parsed.points, points),
   };
 }
 
@@ -240,6 +269,34 @@ function sameOperationEntry(
   );
 }
 
+function sameTransaction(left: Transaction, right: Transaction): boolean {
+  return (
+    left.id === right.id &&
+    left.timestamp === right.timestamp &&
+    left.member === right.member &&
+    left.type === right.type &&
+    left.amount === right.amount &&
+    left.description === right.description &&
+    left.taskId === right.taskId &&
+    left.appliedBy === right.appliedBy &&
+    left.meta?.operationId === right.meta?.operationId &&
+    left.meta?.source === right.meta?.source
+  );
+}
+
+function containsTransactions(
+  verified: Transaction[],
+  expected: Transaction[],
+): boolean {
+  const remaining = [...verified];
+  for (const transaction of expected) {
+    const index = remaining.findIndex((candidate) => sameTransaction(candidate, transaction));
+    if (index === -1) return false;
+    remaining.splice(index, 1);
+  }
+  return true;
+}
+
 function findMissingEntries(
   history: Transaction[],
   operation: NormalizedLedgerOperation,
@@ -265,11 +322,18 @@ function findMissingEntries(
   return { missing, duplicate: existing.length > 0 };
 }
 
-function nextTransactionId(history: Transaction[], nowMs: number): number {
+function nextTransactionId(history: Transaction[], nowMs: number): number | null {
   let candidate = nowMs + transactionSequence;
   transactionSequence += 1;
   const used = new Set(history.map((transaction) => transaction.id));
-  while (used.has(candidate) || !Number.isSafeInteger(candidate)) candidate += 1;
+  while (
+    candidate <= 0 ||
+    !Number.isSafeInteger(candidate) ||
+    used.has(candidate)
+  ) {
+    if (!Number.isSafeInteger(candidate) || candidate >= Number.MAX_SAFE_INTEGER) return null;
+    candidate += 1;
+  }
   return candidate;
 }
 
@@ -279,9 +343,11 @@ function createTransaction(
   history: Transaction[],
   timestamp: string,
   nowMs: number,
-): Transaction {
+): Transaction | null {
+  const id = nextTransactionId(history, nowMs);
+  if (id === null) return null;
   return {
-    id: nextTransactionId(history, nowMs),
+    id,
     timestamp,
     member: entry.member,
     type: entry.type,
@@ -299,35 +365,51 @@ function createTransaction(
 async function readWeekRow(
   pb: AdminPB,
   weekStart: string,
-): Promise<{ row: Record<string, any> | null; weekData: WeekData }> {
+): Promise<{
+  row: Record<string, any> | null;
+  weekData: WeekData;
+  pointsNeedRepair: boolean;
+}> {
   const rows = await pb.collection("week_data").getFullList({ requestKey: null });
-  const row = (Array.isArray(rows) ? rows : []).find(
+  const matchingRows = (Array.isArray(rows) ? rows : []).filter(
     (candidate: any) => String(candidate?.weekStart ?? "") === weekStart,
-  ) as Record<string, any> | undefined;
-  if (!row) return { row: null, weekData: emptyWeekData(weekStart) };
-  const weekData = canonicalWeek(row, weekStart);
-  if (!weekData) throw new LedgerOperationAbort("invalid_ledger_operation", emptyWeekData(weekStart));
-  return { row, weekData };
+  );
+  if (matchingRows.length > 1) {
+    throw new LedgerOperationAbort("ledger_write_conflict", emptyWeekData(weekStart));
+  }
+  const row = matchingRows[0] as Record<string, any> | undefined;
+  if (!row) return { row: null, weekData: emptyWeekData(weekStart), pointsNeedRepair: false };
+  const canonical = canonicalWeek(row, weekStart);
+  if (!canonical) throw new LedgerOperationAbort("invalid_ledger_operation", emptyWeekData(weekStart));
+  return { row, weekData: canonical.weekData, pointsNeedRepair: canonical.pointsNeedRepair };
 }
 
 async function readWrittenWeek(
   pb: AdminPB,
   weekStart: string,
   rowId: unknown,
-): Promise<WeekData | null> {
+): Promise<CanonicalWeek | null> {
   const collection = pb.collection("week_data");
-  let row: unknown = null;
+  let directRow: unknown = null;
   if (rowId !== null && rowId !== undefined && typeof collection.getOne === "function") {
-    row = await collection.getOne(String(rowId), { requestKey: null });
+    directRow = await collection.getOne(String(rowId), { requestKey: null });
   }
-  if (!row) {
-    const rows = await collection.getFullList({ requestKey: null });
-    row = (Array.isArray(rows) ? rows : []).find(
-      (candidate: any) => String(candidate?.weekStart ?? "") === weekStart,
-    );
+  const rows = await collection.getFullList({ requestKey: null });
+  const matchingRows = (Array.isArray(rows) ? rows : []).filter(
+    (candidate: any) => String(candidate?.weekStart ?? "") === weekStart,
+  );
+  if (matchingRows.length > 1) {
+    throw new LedgerOperationAbort("ledger_write_conflict", emptyWeekData(weekStart));
   }
+  const listedRow = matchingRows[0] as Record<string, any> | undefined;
+  if (listedRow && rowId !== null && rowId !== undefined && String(listedRow.id) !== String(rowId)) {
+    throw new LedgerOperationAbort("ledger_write_conflict", emptyWeekData(weekStart));
+  }
+  const row = listedRow ?? directRow;
   if (!row) return null;
-  return canonicalWeek(row, weekStart);
+  const canonical = canonicalWeek(row, weekStart);
+  if (!canonical) throw new LedgerOperationAbort("ledger_write_conflict", emptyWeekData(weekStart));
+  return canonical;
 }
 
 function failure(
@@ -357,9 +439,11 @@ export async function applyWeekLedgerOperation(
   const operationId = resultOperationId(operation);
   const fallback = emptyWeekData(weekStart);
   const project = input.project;
+  const now = validNow(input.now);
 
   if (
     !isValidWeekStart(weekStart) ||
+    !now ||
     (project !== undefined && typeof project !== "function")
   ) {
     return failure("invalid_ledger_operation", fallback, operationId);
@@ -383,9 +467,6 @@ export async function applyWeekLedgerOperation(
           return failure("invalid_ledger_operation", current, normalizedOperation.operationId);
         }
 
-        const now = input.now instanceof Date && Number.isFinite(input.now.getTime())
-          ? new Date(input.now.getTime())
-          : new Date();
         const timestamp = now.toISOString();
         const nowMs = now.getTime();
         const workingHistory = [...current.history];
@@ -408,6 +489,9 @@ export async function applyWeekLedgerOperation(
             timestamp,
             nowMs,
           );
+          if (!transaction) {
+            return failure("invalid_ledger_operation", current, normalizedOperation.operationId);
+          }
           newTransactions.push(transaction);
           workingHistory.push(transaction);
         }
@@ -423,7 +507,7 @@ export async function applyWeekLedgerOperation(
           history: mergedHistory,
         };
 
-        if (newTransactions.length > 0) {
+        if (newTransactions.length > 0 || read.pointsNeedRepair) {
           const collection = pb.collection("week_data");
           const payload = {
             weekStart,
@@ -440,30 +524,20 @@ export async function applyWeekLedgerOperation(
             rowId = (created as any)?.id ?? null;
           }
 
-          const verified = await readWrittenWeek(pb, weekStart, rowId);
-          if (!verified) {
+          const verifiedRead = await readWrittenWeek(pb, weekStart, rowId);
+          if (!verifiedRead) {
             throw new LedgerOperationAbort("ledger_write_conflict", current);
           }
-          const verifiedIds = new Set(verified.history.map((transaction) => transaction.id));
-          const verifiedTransactions = newTransactions.every((transaction) => {
-            const found = verified.history.find((candidate) => candidate.id === transaction.id);
-            return Boolean(
-              found &&
-                found.meta?.operationId === transaction.meta?.operationId &&
-                found.meta?.source === transaction.meta?.source &&
-                found.member === transaction.member &&
-                found.type === transaction.type &&
-                found.amount === transaction.amount &&
-                found.taskId === transaction.taskId,
-            ) && verifiedIds.has(transaction.id);
-          });
-          if (!verifiedTransactions || hasNegativeOutcome(verified.history)) {
+          const verified = verifiedRead.weekData;
+          if (
+            !containsTransactions(verified.history, mergedHistory) ||
+            !samePoints(verified.points, points) ||
+            verifiedRead.pointsNeedRepair ||
+            hasNegativeOutcome(verified.history)
+          ) {
             throw new LedgerOperationAbort("ledger_write_conflict", current);
           }
-          weekData = {
-            ...verified,
-            points: recomputeWeekPoints(verified.history),
-          };
+          weekData = verified;
         }
 
         let reconciled = true;
