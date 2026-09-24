@@ -904,9 +904,10 @@ export default function TasksPage() {
               tasks: next.tasks,
               weekData: next.weekData,
               paid: acc.paid + (next.weekData.history.length > before ? 1 : 0),
+              cleared: acc.cleared + (next.weekData.history.length > before ? 1 : 0),
             };
           },
-          { tasks, weekData, paid: 0 }
+          { tasks, weekData, paid: 0, cleared: 0 }
         );
         setTasks(result.tasks);
         setWeekData(result.weekData);
@@ -915,16 +916,16 @@ export default function TasksPage() {
           taskIds: pendingApprovals.map((p) => p.id),
         });
         if (posted.ok) {
-          const paid = posted.body?.paid ?? result.paid;
+          const cleared = posted.body?.cleared ?? result.cleared;
           showToast(
-            paid > 0
-              ? `Approved! ${paid} tapped task${paid !== 1 ? "s" : ""} paid.`
+            cleared > 0
+              ? `Approved! ${cleared} tapped task${cleared !== 1 ? "s" : ""} paid.`
               : "All tapped tasks were already paid."
           );
         } else if (posted.status === 0) {
           showToast(
-            result.paid > 0
-              ? `Approved! ${result.paid} tapped task${result.paid !== 1 ? "s" : ""} paid (saved locally — will sync).`
+            result.cleared > 0
+              ? `Approved! ${result.cleared} tapped task${result.cleared !== 1 ? "s" : ""} paid (saved locally — will sync).`
               : "Saved locally — will sync."
           );
         }

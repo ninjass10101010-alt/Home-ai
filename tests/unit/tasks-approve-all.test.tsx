@@ -70,6 +70,7 @@ function setInput(input: HTMLInputElement, value: string) {
 }
 
 const approveCalls: any[] = [];
+let responseCounts: { paid?: number; cleared?: number } | null = null;
 
 beforeEach(() => {
   activeRoot?.unmount?.();
@@ -77,6 +78,7 @@ beforeEach(() => {
   document.body.innerHTML = "";
   localStorage.clear();
   approveCalls.length = 0;
+  responseCounts = null;
   // verifyPinRemote answers ok for the parent, wrongPin for the kids.
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -98,8 +100,8 @@ beforeEach(() => {
         status: 200,
         json: async () => ({
           success: true,
-          paid: n,
-          cleared: n,
+           paid: responseCounts?.paid ?? n,
+           cleared: responseCounts?.cleared ?? n,
           skipped: 0,
           weekData: {
             weekStart: MONDAY,
@@ -155,6 +157,24 @@ describe("Needs-approval — Approve all (one parent PIN)", () => {
     expect(approveCalls[0].memberName).toBe("Rebecca (Mom)");
     expect(approveCalls[0].pin).toBe("0202");
     expect(approveCalls[0].operationId).toEqual(expect.any(String));
+  });
+
+  it("uses the server cleared task count for the approve-all completion message", async () => {
+    responseCounts = { paid: 2, cleared: 1 };
+    seedPendingTaps();
+    const el = await renderAsync(<TasksPage />);
+    await settle();
+    const approveAll = [...el.querySelectorAll("button")].find((b) => /Approve all/i.test(b.textContent || ""));
+    await act(async () => { approveAll!.click(); });
+    await settle();
+    const pinInput = document.querySelector('input[aria-label="Parent PIN"]') as HTMLInputElement;
+    await act(async () => { setInput(pinInput, "0202"); });
+    const dlg = document.querySelector('[role="dialog"]');
+    const confirm = [...dlg!.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Approve all");
+    await act(async () => { confirm!.click(); });
+    await settle();
+    expect(el.textContent || document.body.textContent).toContain("Approved! 1 tapped task paid.");
+    expect(el.textContent || document.body.textContent).not.toContain("Approved! 2 tapped tasks paid.");
   });
 
   it("a wrong parent PIN approves NOTHING", async () => {

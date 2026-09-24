@@ -7,6 +7,16 @@ const mocks = vi.hoisted(() => ({
   getLiveMemberById: vi.fn(),
   getLiveMembers: vi.fn(),
   lockOrder: [] as string[],
+  snapshotGate: null as null | { started: () => void; release: Promise<void> },
+  keyedTails: new Map<string, Promise<void>>(),
+  weekTails: new Map<string, Promise<void>>(),
+  localWeekStartISO: vi.fn(() => {
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    const day = date.getDay();
+    date.setDate(date.getDate() + (day === 0 ? -6 : 1 - day));
+    return date.toISOString().split("T")[0];
+  }),
 }));
 
 vi.mock("@/lib/pb-auth", () => ({
@@ -22,25 +32,47 @@ vi.mock("@/lib/live-member", () => ({
   getLiveMembers: mocks.getLiveMembers,
 }));
 
+vi.mock("@/lib/local-date", () => ({
+  localWeekStartISO: mocks.localWeekStartISO,
+}));
+
 vi.mock("@/lib/keyed-lock", () => ({
   withKeyedLock: async <T>(key: string, fn: () => Promise<T>): Promise<T> => {
-    mocks.lockOrder.push(`acquire:${key}`);
+    const previous = mocks.keyedTails.get(key) ?? Promise.resolve();
+    const current = previous.then(async () => {
+      mocks.lockOrder.push(`acquire:${key}`);
+      if (key === "snapshot:tasks-snapshot" && mocks.snapshotGate) {
+        mocks.snapshotGate.started();
+        await mocks.snapshotGate.release;
+      }
+      return fn();
+    });
+    const tail = current.then(() => undefined, () => undefined);
+    mocks.keyedTails.set(key, tail);
     try {
-      return await fn();
+      return await current;
     } finally {
       mocks.lockOrder.push(`release:${key}`);
+      if (mocks.keyedTails.get(key) === tail) mocks.keyedTails.delete(key);
     }
   },
   __resetKeyedLockForTests: vi.fn(),
 }));
 
 vi.mock("@/lib/week-ledger-lock", () => ({
-  withWeekLedgerLock: async <T>(_week: string, fn: () => Promise<T>): Promise<T> => {
-    mocks.lockOrder.push("acquire:week-ledger");
+  withWeekLedgerLock: async <T>(week: string, fn: () => Promise<T>): Promise<T> => {
+    const previous = mocks.weekTails.get(week) ?? Promise.resolve();
+    const current = previous.then(async () => {
+      mocks.lockOrder.push("acquire:week-ledger");
+      return fn();
+    });
+    const tail = current.then(() => undefined, () => undefined);
+    mocks.weekTails.set(week, tail);
     try {
-      return await fn();
+      return await current;
     } finally {
       mocks.lockOrder.push("release:week-ledger");
+      if (mocks.weekTails.get(week) === tail) mocks.weekTails.delete(week);
     }
   },
 }));
@@ -54,6 +86,12 @@ function mondayISO(): string {
   const day = d.getDay();
   d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
   return d.toISOString().split("T")[0];
+}
+
+function previousMondayISO(): string {
+  const d = new Date(`${mondayISO()}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() - 7);
+  return d.toISOString().slice(0, 10);
 }
 
 function jsonReq(body: unknown): NextRequest {
@@ -90,8 +128,10 @@ function makePb(opts?: {
   collectionTask?: Record<string, unknown> | null;
   failWeekUpdate?: boolean;
   failSnapshotWriteAfter?: number;
+  failSnapshotWritesThrough?: number;
   failTaskWriteOnce?: boolean;
   deletedTaskIds?: number[];
+  weekArchive?: any[];
 }) {
   const weekStart = mondayISO();
   let history = opts?.weekHistory ? [...opts.weekHistory] : [];
@@ -117,7 +157,10 @@ function makePb(opts?: {
   let snapProjectionRepairs: any;
   let collectionUpdated: any = null;
   let snapshotWrites = 0;
+  let weekWrites = 0;
+  let taskWrites = 0;
   let failTaskWrite = Boolean(opts?.failTaskWriteOnce);
+  const archiveRows = [...(opts?.weekArchive ?? [])];
 
   const collectionTask = opts?.collectionTask === undefined
     ? { id: "pb-1", taskId: 101, title: "Dishes", points: 6, completed: true, pendingApproval: pendingTaskRow().pendingApproval }
@@ -129,6 +172,12 @@ function makePb(opts?: {
     snapshotUpdates: () => snapshotWritten,
     snapshotWrites: () => snapshotWrites,
     snapshotTask: (id: number) => snapTasks.find((task: any) => Number(task.id) === id),
+    updateSnapshotTask: (id: number, patch: Record<string, unknown>) => {
+      snapTasks = snapTasks.map((task: any) => Number(task.id) === id ? { ...task, ...patch } : task);
+    },
+    weekWrites: () => weekWrites,
+    taskWrites: () => taskWrites,
+    archiveRows: () => archiveRows,
     collectionUpdated: () => collectionUpdated,
     history: () => history,
     points: () => points,
@@ -148,8 +197,9 @@ function makePb(opts?: {
               }),
             }],
             update: async (_id: string, payload: any) => {
-              snapshotWrites += 1;
-              if (opts?.failSnapshotWriteAfter === snapshotWrites) throw new Error("snapshot write failed");
+               snapshotWrites += 1;
+               if (opts?.failSnapshotWritesThrough !== undefined && snapshotWrites <= opts.failSnapshotWritesThrough) throw new Error("snapshot write failed");
+               if (opts?.failSnapshotWriteAfter === snapshotWrites) throw new Error("snapshot write failed");
               snapshotWritten = payload;
               const data = typeof payload.data === "string" ? JSON.parse(payload.data) : payload.data;
               snapTasks = data.tasks ?? snapTasks;
@@ -160,8 +210,9 @@ function makePb(opts?: {
               return { id: "snap-1", ...payload };
             },
             create: async (payload: any) => {
-              snapshotWrites += 1;
-              if (opts?.failSnapshotWriteAfter === snapshotWrites) throw new Error("snapshot write failed");
+               snapshotWrites += 1;
+               if (opts?.failSnapshotWritesThrough !== undefined && snapshotWrites <= opts.failSnapshotWritesThrough) throw new Error("snapshot write failed");
+               if (opts?.failSnapshotWriteAfter === snapshotWrites) throw new Error("snapshot write failed");
               snapshotWritten = payload;
               return { id: "snap-2", ...payload };
             },
@@ -172,6 +223,7 @@ function makePb(opts?: {
             getFullList: async () => [weekRow],
             getOne: async () => weekRow,
             update: async (_id: string, payload: any) => {
+              weekWrites += 1;
               if (opts?.failWeekUpdate) throw new Error("week write failed");
               weekWritten = payload;
               if (payload.history) history = payload.history;
@@ -180,6 +232,7 @@ function makePb(opts?: {
               return weekRow;
             },
             create: async (payload: any) => {
+              weekWrites += 1;
               if (opts?.failWeekUpdate) throw new Error("week write failed");
               weekWritten = payload;
               if (payload.history) history = payload.history;
@@ -189,10 +242,30 @@ function makePb(opts?: {
             },
           };
         }
+        if (name === "week_archive") {
+          return {
+            getFullList: async () => archiveRows,
+            create: async (payload: any) => {
+              archiveRows.push({ id: `wa-${archiveRows.length + 1}`, ...payload });
+              return archiveRows.at(-1);
+            },
+            update: async (id: string, payload: any) => {
+              const row = archiveRows.find((candidate: any) => candidate.id === id);
+              if (row) Object.assign(row, payload);
+              return row ?? payload;
+            },
+            delete: async (id: string) => {
+              const index = archiveRows.findIndex((candidate: any) => candidate.id === id);
+              if (index >= 0) archiveRows.splice(index, 1);
+              return true;
+            },
+          };
+        }
         if (name === "tasks") {
           return {
             getFullList: async () => collectionRows,
             create: async (payload: any) => {
+              taskWrites += 1;
               if (failTaskWrite) {
                 failTaskWrite = false;
                 throw new Error("task projection failed");
@@ -202,6 +275,7 @@ function makePb(opts?: {
               return row;
             },
             update: async (id: string, payload: any) => {
+              taskWrites += 1;
               if (failTaskWrite) {
                 failTaskWrite = false;
                 throw new Error("task projection failed");
@@ -212,6 +286,7 @@ function makePb(opts?: {
               return row ?? { id, ...payload };
             },
             delete: async (id: string) => {
+              taskWrites += 1;
               const index = collectionRows.findIndex((candidate: any) => String(candidate.id) === id);
               if (index >= 0) collectionRows.splice(index, 1);
               return true;
@@ -230,6 +305,10 @@ beforeEach(() => {
   mocks.getLiveMemberById.mockReset();
   mocks.getLiveMembers.mockReset();
   mocks.lockOrder.length = 0;
+  mocks.localWeekStartISO.mockClear();
+  mocks.snapshotGate = null;
+  mocks.keyedTails.clear();
+  mocks.weekTails.clear();
   mocks.verifyPinFromPB.mockResolvedValue({ id: "parent-rebecca", name: "Rebecca (Mom)", role: "parent", emoji: "👩" });
   mocks.getLiveMembers.mockResolvedValue([
     { id: "parent-rebecca", name: "Rebecca (Mom)", role: "parent", emoji: "👩" },
@@ -315,6 +394,203 @@ describe("POST /api/tasks/approve — action:approve", () => {
     expect(collectionUpdated()).toBeNull();
   });
 
+  it("replays an archived Sunday operation on Monday without paying the current week", async () => {
+    const operationId = "op-sunday-to-monday";
+    const fingerprint = approvalCommandFingerprint(
+      { operationId, action: "approve", taskId: 101 },
+      "parent-rebecca",
+    );
+    const archivedTransaction = {
+      id: 501,
+      timestamp: `${previousMondayISO()}T18:00:00.000Z`,
+      member: "Caspian Garcia",
+      type: "earn",
+      amount: 8,
+      description: "Completed: Dishes (+8pts)",
+      taskId: 101,
+      meta: { operationId, source: "task-approval", fingerprint },
+    };
+    const { pb, weekWrites, taskWrites, snapshotUpdates, history } = makePb({
+      snapshotTasks: [],
+      deletedTaskIds: [101],
+      collectionTask: { id: "pb-1", taskId: 101, title: "Dishes", pendingApproval: pendingTaskRow().pendingApproval },
+      weekArchive: [{
+        id: "archive-sunday",
+        weekStart: previousMondayISO(),
+        points: { "Caspian Garcia": 8 },
+        streak: {},
+        lastActive: {},
+        history: [archivedTransaction],
+      }],
+    });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    const response = await POST(jsonReq({
+      action: "approve",
+      operationId,
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskId: 101,
+    }));
+    expect(response.status).toBe(202);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      success: true,
+      reconciled: false,
+      paid: 0,
+      cleared: 1,
+      noCurrentTask: true,
+      weekData: { weekStart: mondayISO(), history: [] },
+      projectionFailures: [101],
+    });
+    expect(weekWrites()).toBe(0);
+    expect(history()).toHaveLength(0);
+    expect(taskWrites()).toBe(1);
+    const snapshotData = typeof snapshotUpdates()?.data === "string"
+      ? JSON.parse(snapshotUpdates().data)
+      : snapshotUpdates()?.data;
+    expect(snapshotData.operationReceipts[operationId]).toEqual([
+      expect.objectContaining({ taskId: 101, fingerprint }),
+    ]);
+  });
+
+  it("captures the authority week once for the whole approval path", async () => {
+    const { pb } = makePb();
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    mocks.localWeekStartISO.mockReturnValue(mondayISO());
+    const response = await POST(jsonReq({
+      action: "approve",
+      operationId: "op-week-capture-once",
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskId: 101,
+    }));
+    expect(response.status).toBe(200);
+    expect(mocks.localWeekStartISO).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a committed tombstoned replay as a 202 repair when the PB mirror cannot be deleted", async () => {
+    const operationId = "op-tombstone-replay";
+    const fingerprint = approvalCommandFingerprint(
+      { operationId, action: "approve", taskId: 101 },
+      "parent-rebecca",
+    );
+    const { pb, snapshotUpdates, taskWrites } = makePb({
+      snapshotTasks: [],
+      deletedTaskIds: [101],
+      collectionTask: { id: "pb-1", taskId: 101 },
+      failTaskWriteOnce: true,
+      weekHistory: [{
+        id: 601,
+        timestamp: `${mondayISO()}T10:00:00.000Z`,
+        member: "Caspian Garcia",
+        type: "earn",
+        amount: 8,
+        description: "Completed: Dishes (+8pts)",
+        taskId: 101,
+        meta: { operationId, source: "task-approval", fingerprint },
+      }],
+    });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    const response = await POST(jsonReq({
+      action: "approve",
+      operationId,
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskId: 101,
+    }));
+    expect(response.status).toBe(202);
+    const body = await response.json();
+    expect(body).toMatchObject({ success: true, reconciled: false, paid: 0, projectionFailures: [101] });
+    expect(taskWrites()).toBe(1);
+    const snapshotData = typeof snapshotUpdates()?.data === "string"
+      ? JSON.parse(snapshotUpdates().data)
+      : snapshotUpdates()?.data;
+    expect(snapshotData.operationReceipts[operationId]).toEqual([
+      expect.objectContaining({ taskId: 101, fingerprint }),
+    ]);
+  });
+
+  it("does not pay or clear a later re-pending edit during replay", async () => {
+    const operationId = "op-later-edit-replay";
+    const fingerprint = approvalCommandFingerprint(
+      { operationId, action: "approve", taskId: 101 },
+      "parent-rebecca",
+    );
+    const laterPending = pendingTaskRow({
+      pendingApproval: { byName: "Caspian Garcia", at: "2026-09-25T12:00:00.000Z", points: 8 },
+    });
+    const { pb, history, snapshotTask } = makePb({
+      snapshotTasks: [laterPending],
+      collectionTask: null,
+      weekHistory: [{
+        id: 901,
+        timestamp: "2026-09-21T10:00:00.000Z",
+        member: "Caspian Garcia",
+        type: "earn",
+        amount: 8,
+        description: "Completed: Dishes (+8pts)",
+        taskId: 101,
+        meta: { operationId, source: "task-approval", fingerprint },
+      }],
+    });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    const response = await POST(jsonReq({
+      action: "approve",
+      operationId,
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskId: 101,
+    }));
+    expect(response.status).toBe(200);
+    expect((await response.json()).paid).toBe(0);
+    expect(history()).toHaveLength(1);
+    expect(snapshotTask(101)?.pendingApproval).toBeTruthy();
+  });
+
+  it("does not re-earn after a later undo during replay", async () => {
+    const operationId = "op-later-undo-replay";
+    const fingerprint = approvalCommandFingerprint(
+      { operationId, action: "approve", taskId: 101 },
+      "parent-rebecca",
+    );
+    const { pb, history } = makePb({
+      snapshotTasks: [pendingTaskRow({ pendingApproval: undefined, completed: true })],
+      collectionTask: null,
+      weekHistory: [
+        {
+          id: 1001,
+          timestamp: "2026-09-21T10:00:00.000Z",
+          member: "Caspian Garcia",
+          type: "earn",
+          amount: 8,
+          description: "Completed: Dishes (+8pts)",
+          taskId: 101,
+          meta: { operationId, source: "task-approval", fingerprint },
+        },
+        {
+          id: 1002,
+          timestamp: "2026-09-21T11:00:00.000Z",
+          member: "Caspian Garcia",
+          type: "adjust",
+          amount: -8,
+          description: "Undo: Dishes (-8pts)",
+          taskId: 101,
+        },
+      ],
+    });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    const response = await POST(jsonReq({
+      action: "approve",
+      operationId,
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskId: 101,
+    }));
+    expect(response.status).toBe(200);
+    expect((await response.json()).paid).toBe(0);
+    expect(history().filter((transaction: any) => transaction.meta?.operationId === operationId)).toHaveLength(1);
+  });
+
   it("does not clear pending state when the ledger write fails", async () => {
     const { pb, collectionUpdated, snapshotTask } = makePb({ failWeekUpdate: true });
     mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
@@ -365,6 +641,27 @@ describe("POST /api/tasks/approve — action:approve", () => {
     expect(secondBody).toMatchObject({ success: true, reconciled: true, paid: 0 });
     expect(history()).toHaveLength(1);
     expect(snapshotTask(101)?.pendingApproval).toBeNull();
+  });
+
+  it("keeps committed approval repairable when both snapshot and marker writes fail", async () => {
+    const { pb, history, snapshotWrites, snapshotTask } = makePb({ failSnapshotWritesThrough: 2 });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    const request = {
+      action: "approve",
+      operationId: "op-marker-failure",
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskId: 101,
+    };
+    const first = await POST(jsonReq(request));
+    expect(first.status).toBe(202);
+    expect(await first.json()).toMatchObject({ success: true, reconciled: false, paid: 1 });
+    expect(snapshotWrites()).toBe(2);
+    expect(snapshotTask(101)?.pendingApproval).toBeTruthy();
+    const second = await POST(jsonReq(request));
+    expect(second.status).toBe(200);
+    expect((await second.json()).paid).toBe(0);
+    expect(history()).toHaveLength(1);
   });
 
   it("returns 202 after ledger success when PB projection fails and repairs without replaying", async () => {
@@ -429,6 +726,92 @@ describe("POST /api/tasks/approve — action:approve", () => {
     expect(history()).toHaveLength(1);
   });
 
+  it("returns the fresh canonical task state after replay repair", async () => {
+    const { pb, updateSnapshotTask } = makePb();
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    const request = {
+      action: "approve",
+      operationId: "op-fresh-task-replay",
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskId: 101,
+    };
+    expect((await POST(jsonReq(request))).status).toBe(200);
+    updateSnapshotTask(101, { title: "Edited after approval" });
+    const replay = await POST(jsonReq(request));
+    expect(replay.status).toBe(200);
+    expect((await replay.json()).task).toMatchObject({
+      id: 101,
+      title: "Edited after approval",
+      pendingApproval: null,
+    });
+  });
+
+  it("keeps a pre-ledger operation fingerprint conflict at 409", async () => {
+    const operationId = "op-preledger-conflict";
+    const { pb, weekWrites, snapshotWrites, taskWrites } = makePb({
+      weekHistory: [{
+        id: 1001,
+        timestamp: `${mondayISO()}T10:00:00.000Z`,
+        member: "Caspian Garcia",
+        type: "earn",
+        amount: 8,
+        description: "Completed: Dishes (+8pts)",
+        taskId: 101,
+        meta: { operationId, source: "task-approval", fingerprint: "a".repeat(64) },
+      }],
+    });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    const response = await POST(jsonReq({
+      action: "approve",
+      operationId,
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskId: 101,
+    }));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ reason: "operation_conflict" });
+    expect(weekWrites()).toBe(0);
+    expect(snapshotWrites()).toBe(0);
+    expect(taskWrites()).toBe(0);
+  });
+
+  it("returns 202 for a post-ledger partial-entry conflict without replaying points", async () => {
+    const operationId = "op-partial-entry-conflict";
+    const fingerprint = approvalCommandFingerprint(
+      { operationId, action: "approve", taskId: 101 },
+      "parent-rebecca",
+    );
+    const { pb, history, weekWrites } = makePb({
+      snapshotTasks: [pendingTaskRow({
+        pendingApproval: { byName: "Caspian Garcia", at: "2026-09-19T18:00:00.000Z", points: 9 },
+      })],
+      collectionTask: null,
+      weekHistory: [{
+        id: 1101,
+        timestamp: `${mondayISO()}T10:00:00.000Z`,
+        member: "Caspian Garcia",
+        type: "earn",
+        amount: 8,
+        description: "Completed: Dishes (+8pts)",
+        taskId: 101,
+        meta: { operationId, source: "task-approval", fingerprint },
+      }],
+    });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    const response = await POST(jsonReq({
+      action: "approve",
+      operationId,
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskId: 101,
+    }));
+    expect(response.status).toBe(202);
+    expect(await response.json()).toMatchObject({ success: true, reconciled: false, paid: 0 });
+    expect(weekWrites()).toBe(0);
+    expect(history()).toHaveLength(1);
+  });
+
   it("maps a semantic duplicate to a stable 409 without double-paying", async () => {
     const already = {
       id: 9,
@@ -447,6 +830,131 @@ describe("POST /api/tasks/approve — action:approve", () => {
     expect(body).toMatchObject({ reason: "semantic_duplicate" });
     expect(points()["Caspian Garcia"]).toBe(8);
     expect(history().filter((t: any) => t.type === "earn" && t.taskId === 101)).toHaveLength(1);
+  });
+
+  it("resolves the full canonical crew roster and appends only missing partial-replay entries", async () => {
+    const operationId = "op-partial-crew";
+    const fingerprint = approvalCommandFingerprint(
+      { operationId, action: "approve", taskId: 101 },
+      "parent-rebecca",
+    );
+    const crewTask = pendingTaskRow({
+      crewSize: 2,
+      assignee: "Crew",
+      completedBy: "Crew",
+      crew: {
+        members: [
+          { name: "Caspian Garcia", emoji: "🧒", joinedAt: "2026-09-19T17:00:00.000Z", checkedInAt: "2026-09-19T17:30:00.000Z" },
+          { name: "Aurora Garcia", emoji: "🌈", joinedAt: "2026-09-19T17:05:00.000Z", checkedInAt: "2026-09-19T17:35:00.000Z" },
+        ],
+      },
+      pendingApproval: {
+        byName: "Crew",
+        at: "2026-09-19T18:00:00.000Z",
+        points: 10,
+        crew: ["Caspian Garcia", "Aurora Garcia"],
+      },
+    });
+    const existing = {
+      id: 701,
+      timestamp: `${mondayISO()}T10:00:00.000Z`,
+      member: "Caspian Garcia",
+      type: "earn",
+      amount: 10,
+      description: "Crew: Dishes (+10pts)",
+      taskId: 101,
+      meta: { operationId, source: "task-approval", fingerprint },
+    };
+    const { pb, history, points } = makePb({
+      snapshotTasks: [crewTask],
+      collectionTask: null,
+      weekHistory: [existing],
+      weekPoints: { "Caspian Garcia": 10 },
+    });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    const response = await POST(jsonReq({
+      action: "approve",
+      operationId,
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskId: 101,
+    }));
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({ paid: 1, cleared: 1 });
+    expect(history().filter((transaction: any) => transaction.meta?.operationId === operationId)).toHaveLength(2);
+    expect(points()).toMatchObject({ "Caspian Garcia": 10, "Aurora Garcia": 10 });
+  });
+
+  it("rejects a removed crew payee before any write", async () => {
+    const crewTask = pendingTaskRow({
+      crewSize: 2,
+      crew: {
+        members: [
+          { name: "Caspian Garcia", emoji: "🧒", joinedAt: "2026-09-19T17:00:00.000Z", checkedInAt: "2026-09-19T17:30:00.000Z" },
+          { name: "Aurora Garcia", emoji: "🌈", joinedAt: "2026-09-19T17:05:00.000Z", checkedInAt: "2026-09-19T17:35:00.000Z" },
+        ],
+        removed: ["Caspian Garcia"],
+      },
+      pendingApproval: { byName: "Crew", at: "2026-09-19T18:00:00.000Z", points: 10, crew: ["Caspian Garcia", "Aurora Garcia"] },
+    });
+    const { pb, weekWrites, snapshotWrites, taskWrites } = makePb({ snapshotTasks: [crewTask], collectionTask: null });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    const response = await POST(jsonReq({
+      action: "approve",
+      operationId: "op-removed-payee",
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskId: 101,
+    }));
+    expect(response.status).toBe(400);
+    expect(weekWrites()).toBe(0);
+    expect(snapshotWrites()).toBe(0);
+    expect(taskWrites()).toBe(0);
+  });
+
+  it("rejects a crew approval unless every canonical member checked in", async () => {
+    const crewTask = pendingTaskRow({
+      crewSize: 1,
+      crew: {
+        members: [{ name: "Caspian Garcia", emoji: "🧒", joinedAt: "2026-09-19T17:00:00.000Z" }],
+      },
+      pendingApproval: { byName: "Crew", at: "2026-09-19T18:00:00.000Z", points: 8, crew: ["Caspian Garcia"] },
+    });
+    const { pb, weekWrites, snapshotWrites, taskWrites } = makePb({ snapshotTasks: [crewTask], collectionTask: null });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    const response = await POST(jsonReq({
+      action: "approve",
+      operationId: "op-missing-checkin",
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskId: 101,
+    }));
+    expect(response.status).toBe(400);
+    expect(weekWrites()).toBe(0);
+    expect(snapshotWrites()).toBe(0);
+    expect(taskWrites()).toBe(0);
+  });
+
+  it("rejects an ambiguous live payee identity before any write", async () => {
+    mocks.getLiveMembers.mockResolvedValue([
+      { id: "parent-rebecca", name: "Rebecca (Mom)", role: "parent", emoji: "👩" },
+      { id: "child-one", name: "Caspian Garcia", role: "child", emoji: "🧒" },
+      { id: "child-two", name: "Caspian Garcia", role: "child", emoji: "🧒" },
+    ]);
+    const { pb, weekWrites, snapshotWrites, taskWrites } = makePb();
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    const response = await POST(jsonReq({
+      action: "approve",
+      operationId: "op-ambiguous-payee",
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskId: 101,
+    }));
+    expect(response.status).toBe(400);
+    expect(weekWrites()).toBe(0);
+    expect(snapshotWrites()).toBe(0);
+    expect(taskWrites()).toBe(0);
   });
 
   it("counts crew payees separately from the cleared task row", async () => {
@@ -573,6 +1081,60 @@ describe("POST /api/tasks/approve — action:approve", () => {
     expect(collectionUpdated()).toBeNull();
   });
 
+  it("rejects a fresh pending row carrying a non-null sentBackAt before any ledger write", async () => {
+    const { pb, weekWrites, snapshotWrites, taskWrites } = makePb({
+      snapshotTasks: [pendingTaskRow({ sentBackAt: "2026-09-20T10:00:00.000Z" })],
+      collectionTask: null,
+    });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    const response = await POST(jsonReq({
+      action: "approve",
+      operationId: "op-sentback-pending-fresh",
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskId: 101,
+    }));
+    expect(response.status).toBe(409);
+    expect(weekWrites()).toBe(0);
+    expect(snapshotWrites()).toBe(0);
+    expect(taskWrites()).toBe(0);
+  });
+
+  it("returns 202 rather than 409 for a committed operation whose canonical task is ambiguous", async () => {
+    const operationId = "op-committed-ambiguous";
+    const fingerprint = approvalCommandFingerprint(
+      { operationId, action: "approve", taskId: 101 },
+      "parent-rebecca",
+    );
+    const { pb, weekWrites } = makePb({
+      snapshotTasks: [
+        pendingTaskRow({ sentBackAt: "2026-09-20T10:00:00.000Z" }),
+        pendingTaskRow({ sentBackAt: "2026-09-20T10:00:00.000Z" }),
+      ],
+      collectionTask: null,
+      weekHistory: [{
+        id: 801,
+        timestamp: `${mondayISO()}T10:00:00.000Z`,
+        member: "Caspian Garcia",
+        type: "earn",
+        amount: 8,
+        description: "Completed: Dishes (+8pts)",
+        taskId: 101,
+        meta: { operationId, source: "task-approval", fingerprint },
+      }],
+    });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    const response = await POST(jsonReq({
+      action: "approve",
+      operationId,
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskId: 101,
+    }));
+    expect(response.status).toBe(202);
+    expect(weekWrites()).toBe(0);
+  });
+
   it("no-ops with 200 when the row is no longer pending (already approved elsewhere)", async () => {
     const { pb, points } = makePb({
       snapshotTasks: [pendingTaskRow({ pendingApproval: undefined, completed: true })],
@@ -644,6 +1206,30 @@ describe("POST /api/tasks/approve — action:send-back", () => {
     expect(snapMembers.map((m: any) => m.joinedAt)).toEqual(["2026-09-19T17:00:00.000Z", "2026-09-19T17:05:00.000Z"]);
   });
 
+  it("rejects malformed crew send-back state before snapshot or PB writes", async () => {
+    const crewTask = pendingTaskRow({
+      crewSize: 2,
+      crew: { members: [{ name: "Caspian Garcia", emoji: "🧒", joinedAt: "2026-09-19T17:00:00.000Z" }, null] },
+      pendingApproval: { byName: "Crew", at: "2026-09-19T18:00:00.000Z", points: 10, crew: ["Caspian Garcia"] },
+    });
+    const { pb, weekWrites, snapshotWrites, taskWrites } = makePb({
+      snapshotTasks: [crewTask],
+      collectionTask: null,
+    });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    const response = await POST(jsonReq({
+      action: "send-back",
+      operationId: "op-invalid-crew-sendback",
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskId: 101,
+    }));
+    expect(response.status).toBe(400);
+    expect(weekWrites()).toBe(0);
+    expect(snapshotWrites()).toBe(0);
+    expect(taskWrites()).toBe(0);
+  });
+
   it("returns 202 when send-back snapshot projection fails and repairs the same operation", async () => {
     const { pb, history, weekWritten, snapshotTask } = makePb({ failSnapshotWriteAfter: 1 });
     mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
@@ -655,8 +1241,8 @@ describe("POST /api/tasks/approve — action:send-back", () => {
       taskId: 101,
     };
     const first = await POST(jsonReq(request));
-    expect(first.status).toBe(202);
-    expect((await first.json()).reconciled).toBe(false);
+    expect(first.status).toBe(503);
+    expect(await first.json()).toMatchObject({ error: "snapshot_write_failed", retryable: true });
     expect(snapshotTask(101)?.pendingApproval).toBeTruthy();
     expect(history()).toHaveLength(0);
     expect(weekWritten()).toBeNull();
@@ -764,6 +1350,39 @@ describe("POST /api/tasks/approve — action:approve-all", () => {
     ]);
   });
 
+  it("serializes contending approvals and releases the first snapshot lock before the next week lock", async () => {
+    const { pb } = makePb();
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    let started!: () => void;
+    let release!: () => void;
+    const startedPromise = new Promise<void>((resolve) => { started = resolve; });
+    const releasePromise = new Promise<void>((resolve) => { release = resolve; });
+    mocks.snapshotGate = { started, release: releasePromise };
+    const first = POST(jsonReq({
+      action: "approve",
+      operationId: "op-contention-first",
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskId: 101,
+    }));
+    await startedPromise;
+    const second = POST(jsonReq({
+      action: "approve",
+      operationId: "op-contention-second",
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskId: 101,
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(mocks.lockOrder.filter((entry) => entry === "acquire:week-ledger")).toHaveLength(1);
+    release();
+    const responses = await Promise.all([first, second]);
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+    const firstRelease = mocks.lockOrder.indexOf("release:snapshot:tasks-snapshot");
+    const secondWeekAcquire = mocks.lockOrder.lastIndexOf("acquire:week-ledger");
+    expect(firstRelease).toBeLessThan(secondWeekAcquire);
+  });
+
   it("maps an already-paid approve-all row to 409 without double-paying", async () => {
     const already = {
       id: 9,
@@ -832,10 +1451,11 @@ describe("POST /api/tasks/approve — action:approve-all", () => {
   });
 
   it("fails closed: any unknown id → 404 and pays nothing", async () => {
-    const { pb, points } = makePb({ snapshotTasks: [pendingTaskRow()], collectionTask: null });
+    const { pb, points, weekWrites, snapshotWrites, taskWrites } = makePb({ snapshotTasks: [pendingTaskRow()], collectionTask: null });
     mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
     const res = await POST(jsonReq({
       action: "approve-all",
+      operationId: "op-unknown-zero-write",
       memberName: "Rebecca (Mom)",
       pin: "0202",
       taskIds: [101, 999999],
@@ -843,6 +1463,9 @@ describe("POST /api/tasks/approve — action:approve-all", () => {
     expect(res.status).toBe(404);
     expect(await res.json()).toMatchObject({ reason: "unknown-task" });
     expect(points()["Caspian Garcia"]).toBeUndefined();
+    expect(weekWrites()).toBe(0);
+    expect(snapshotWrites()).toBe(0);
+    expect(taskWrites()).toBe(0);
   });
 
   it("400s when taskIds is missing or empty", async () => {
