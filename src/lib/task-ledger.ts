@@ -116,7 +116,9 @@ export function hasUnreversedTaskEarn(
   taskId: number,
   member: string,
 ): boolean {
-  const earns = history.filter(
+  const canonicalHistory = parseCanonicalTransactions(history);
+  if (!canonicalHistory) throw new TypeError("invalid_transaction_history");
+  const earns = canonicalHistory.filter(
     (transaction) =>
       transaction.type === "earn" &&
       Number(transaction.taskId) === Number(taskId) &&
@@ -124,18 +126,18 @@ export function hasUnreversedTaskEarn(
   );
   const latestEarn = earns.reduce<Transaction | null>((latest, transaction) => {
     if (!latest) return transaction;
-    return String(transaction.timestamp).localeCompare(String(latest.timestamp)) >= 0
+    return Date.parse(transaction.timestamp) >= Date.parse(latest.timestamp)
       ? transaction
       : latest;
   }, null);
   if (!latestEarn) return false;
 
-  return !history.some(
+  return !canonicalHistory.some(
     (transaction) =>
       transaction.type === "adjust" &&
       transaction.amount < 0 &&
       Number(transaction.taskId) === Number(taskId) &&
       transaction.member === member &&
-      String(transaction.timestamp).localeCompare(String(latestEarn.timestamp)) >= 0,
+      Date.parse(transaction.timestamp) >= Date.parse(latestEarn.timestamp),
   );
 }
