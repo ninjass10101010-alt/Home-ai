@@ -16,6 +16,7 @@
 
 # agent session state
 .superpowers
+.worktrees/
 
 # local scratch scripts (may contain credentials — never commit)
 seed-demo-events.mjs
