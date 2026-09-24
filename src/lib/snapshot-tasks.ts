@@ -61,6 +61,7 @@ export interface SnapshotConfigOperationReceipt {
   action: "replace" | "upsert" | "delete";
   updatedAt: string;
   fingerprint?: string;
+  reconcileRequired?: boolean;
 }
 
 export interface SnapshotConfigMutationResult {
@@ -72,6 +73,7 @@ export interface SnapshotConfigMutationResult {
   stale: boolean;
   conflict: boolean;
   reconcile: boolean;
+  clearRepairMarker: boolean;
 }
 
 export interface SnapshotProjectionRepair {
@@ -394,11 +396,15 @@ function sanitizeConfigOperationReceipts(
     const fingerprint = typeof candidate.fingerprint === "string" && /^[a-f0-9]{64}$/.test(candidate.fingerprint)
       ? candidate.fingerprint
       : undefined;
+    const reconcileRequired = fingerprint && candidate.reconcileRequired === true
+      ? true
+      : undefined;
     retained.push([operationId, {
       kind,
       action,
       updatedAt,
       ...(fingerprint ? { fingerprint } : {}),
+      ...(reconcileRequired ? { reconcileRequired } : {}),
     }]);
   }
 
@@ -616,6 +622,13 @@ export class InvalidStoredTaskConfigError extends Error {
   }
 }
 
+export class InvalidResultingTaskConfigError extends Error {
+  constructor(readonly kind: TaskConfigKind) {
+    super("invalid_resulting_config");
+    this.name = "InvalidResultingTaskConfigError";
+  }
+}
+
 export async function mutateSnapshotConfig(
   command: TaskConfigCommand,
   pb: AdminPB,
@@ -647,16 +660,20 @@ export async function mutateSnapshotConfig(
     const currentStamp = normalizeTimestamp(current[stampKey]) ?? "";
     const fingerprint = taskConfigCommandFingerprint(command);
     const receipt = sanitizeConfigOperationReceipts(current.configOperationReceipts)[command.operationId];
-    const persistSanitizedCurrent = async () => {
+    const persistSanitizedCurrent = async (
+      repairMarker?: SnapshotConfigOperationReceipt,
+    ) => {
       const updatedRevision = nextRevision(revision);
       const updatedAt = new Date().toISOString();
+      const configOperationReceipts = sanitizeConfigOperationReceipts(current.configOperationReceipts);
+      if (repairMarker) configOperationReceipts[command.operationId] = repairMarker;
       const payload = {
         key: SNAPSHOT_KEY,
         data: canonicalSnapshotData({
           ...current,
           [dataKey]: currentItems!,
-          ...("configOperationReceipts" in current
-            ? { configOperationReceipts: sanitizeConfigOperationReceipts(current.configOperationReceipts) }
+          ...("configOperationReceipts" in current || repairMarker
+            ? { configOperationReceipts }
             : {}),
         }, updatedRevision, false, false),
         updated_at: updatedAt,
@@ -689,12 +706,21 @@ export async function mutateSnapshotConfig(
         stale: false,
         conflict: !matches,
         reconcile: true,
+        clearRepairMarker: matches && receipt.reconcileRequired === true,
       };
     }
 
     if (currentStamp && command.updatedAt <= currentStamp) {
       if (!currentItems) throw new InvalidStoredTaskConfigError(command.kind);
-      const sanitizedWrite = currentChanged ? await persistSanitizedCurrent() : null;
+      const sanitizedWrite = currentChanged
+        ? await persistSanitizedCurrent({
+            kind: command.kind,
+            action: command.action,
+            updatedAt: command.updatedAt,
+            fingerprint,
+            reconcileRequired: true,
+          })
+        : null;
       return {
         items: currentItems,
         updatedAt: currentStamp,
@@ -704,12 +730,13 @@ export async function mutateSnapshotConfig(
         stale: true,
         conflict: false,
         reconcile: currentChanged,
+        clearRepairMarker: currentChanged,
       };
     }
 
     const baseItems = command.action === "replace" ? [] : currentItems!;
     const items = sanitizeItems(command.kind, applyTaskConfigCommand(baseItems, command));
-    if (!items) throw new TypeError("invalid_resulting_config");
+    if (!items) throw new InvalidResultingTaskConfigError(command.kind);
     const configOperationReceipts = sanitizeConfigOperationReceipts({
       ...sanitizeConfigOperationReceipts(current.configOperationReceipts),
       [command.operationId]: {
@@ -746,7 +773,45 @@ export async function mutateSnapshotConfig(
       stale: false,
       conflict: false,
       reconcile: true,
+      clearRepairMarker: false,
     };
+  });
+}
+
+export async function clearTaskConfigRepairMarker(
+  operationId: string,
+  pb: AdminPB,
+): Promise<SnapshotRevision | null> {
+  const normalizedOperationId = normalizeOperationId(operationId);
+  if (!normalizedOperationId) return null;
+  return withKeyedLock(`snapshot:${SNAPSHOT_KEY}`, async () => {
+    const rows = await pb.collection(SNAPSHOT_COLLECTION).getFullList({
+      requestKey: null,
+      filter: `key = "${SNAPSHOT_KEY}"`,
+    });
+    const row = rows[0] as any;
+    const current = parseSnapshotData(row?.data);
+    const configOperationReceipts = sanitizeConfigOperationReceipts(current.configOperationReceipts);
+    if (configOperationReceipts[normalizedOperationId]?.reconcileRequired !== true) {
+      return null;
+    }
+    delete configOperationReceipts[normalizedOperationId];
+    const revision = nextRevision(current.revision);
+    const updatedAt = new Date().toISOString();
+    const payload = {
+      key: SNAPSHOT_KEY,
+      data: canonicalSnapshotData({
+        ...current,
+        configOperationReceipts,
+      }, revision, false, false),
+      updated_at: updatedAt,
+    };
+    if (row) {
+      await pb.collection(SNAPSHOT_COLLECTION).update(row.id, payload, { requestKey: null });
+    } else {
+      await pb.collection(SNAPSHOT_COLLECTION).create(payload, { requestKey: null });
+    }
+    return { revision, updatedAt };
   });
 }
 

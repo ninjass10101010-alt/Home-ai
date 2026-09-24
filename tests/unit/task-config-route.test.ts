@@ -407,10 +407,70 @@ describe("POST /api/tasks/config", () => {
       ],
     });
 
-    expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: "invalid_config_command" });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: "config_natural_key_conflict",
+      kind: "rewards",
+    });
     expect(harness.writes.snapshot).toHaveLength(0);
     expect(harness.writes.rewards.create).toHaveLength(0);
+  });
+
+  it("rejects replacement lists over the item limit with a stable 422", async () => {
+    const harness = makeHarness();
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+    const items = Array.from({ length: 101 }, (_, index) => ({
+      name: `Reward ${index}`,
+      emoji: "🎁",
+      cost: index + 1,
+    }));
+
+    const response = await postConfig({
+      operationId: "op-config-list-limit",
+      kind: "rewards",
+      action: "replace",
+      updatedAt: "2026-09-24T10:00:00.000Z",
+      items,
+    });
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: "invalid_resulting_config",
+      kind: "rewards",
+    });
+    expect(harness.writes.snapshot).toHaveLength(0);
+    expect(harness.writes.rewards.create).toHaveLength(0);
+  });
+
+  it("rejects an upsert whose resulting list has a natural-key collision", async () => {
+    const snapshot = defaultSnapshot();
+    snapshot.rewards = [
+      { id: 1, name: "A", emoji: "🅰️", cost: 1 },
+      { id: 2, name: "B", emoji: "🅱️", cost: 2 },
+    ];
+    const harness = makeHarness({ snapshot });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+
+    const response = await postConfig({
+      operationId: "op-config-result-collision",
+      kind: "rewards",
+      action: "upsert",
+      updatedAt: "2026-09-24T10:00:00.000Z",
+      item: { id: 1, name: "B", emoji: "🅱️", cost: 20 },
+    });
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: "invalid_resulting_config",
+      kind: "rewards",
+    });
+    expect(harness.writes.snapshot).toHaveLength(0);
+    expect(harness.writes.rewards.create).toHaveLength(0);
+    expect(harness.writes.rewards.update).toHaveLength(0);
+    expect(harness.writes.rewards.delete).toHaveLength(0);
   });
 
   it("reconciles replacement PB rows by stable name and deletes stale rows", async () => {
@@ -774,14 +834,55 @@ describe("POST /api/tasks/config", () => {
     expect(body).toMatchObject({
       applied: false,
       updatedAt: "2026-09-24T11:00:00.000Z",
-      revision: { revision: "5" },
+      revision: { revision: "6" },
     });
     expect(body.items[0].emoji).toBe("👤");
     expect(harness.snapshot().rewards[0].emoji).toBe("👤");
-    expect(harness.writes.snapshot).toHaveLength(1);
+    expect(harness.snapshot().configOperationReceipts["op-config-sanitize-stale"]).toBeUndefined();
+    expect(harness.writes.snapshot).toHaveLength(2);
     expect(harness.writes.rewards.create).toHaveLength(0);
     expect(harness.writes.rewards.update).toHaveLength(0);
     expect(harness.writes.rewards.delete).toHaveLength(0);
+  });
+
+  it("persists a stale repair marker until PB reconciliation succeeds", async () => {
+    const command = {
+      operationId: "op-config-stale-repair",
+      kind: "rewards" as const,
+      action: "replace" as const,
+      updatedAt: "2026-09-24T10:00:00.000Z",
+      items: [],
+    };
+    const config = await import(/* @vite-ignore */ configModulePath);
+    const snapshot = defaultSnapshot();
+    snapshot.rewards = [{ id: 1, name: "Legacy", emoji: "data:image/webp;base64,private", cost: 25 }];
+    snapshot.rewardsUpdatedAt = "2026-09-24T11:00:00.000Z";
+    const harness = makeHarness({
+      snapshot,
+      rewards: [{ id: "movie-row", name: "Legacy", emoji: "data:image/webp;base64,private", cost: 25 }],
+      failConfigOperation: "update",
+      failConfigRowId: "movie-row",
+    });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+
+    const failed = await postConfig(command);
+    const marked = harness.snapshot().configOperationReceipts[command.operationId];
+    expect(failed.status).toBe(502);
+    expect(marked).toEqual({
+      kind: "rewards",
+      action: "replace",
+      updatedAt: command.updatedAt,
+      fingerprint: config.taskConfigCommandFingerprint(command),
+      reconcileRequired: true,
+    });
+
+    const repaired = await postConfig(command);
+
+    expect(repaired.status).toBe(200);
+    expect(harness.attempts.rewards.update).toBe(2);
+    expect(harness.writes.rewards.update).toHaveLength(1);
+    expect(harness.writes.rewards.create).toHaveLength(0);
+    expect(harness.snapshot().configOperationReceipts[command.operationId]).toBeUndefined();
   });
 
   it("replays an operation without another snapshot or PB write", async () => {

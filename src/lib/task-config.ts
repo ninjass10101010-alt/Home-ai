@@ -56,9 +56,15 @@ export interface TaskConfigResponse {
   applied: boolean;
 }
 
+export type TaskConfigErrorCode =
+  | "forbidden_config_field"
+  | "invalid_config_command"
+  | "config_natural_key_conflict"
+  | "invalid_resulting_config";
+
 export type TaskConfigParseResult =
   | TaskConfigCommand
-  | { error: "forbidden_config_field" | "invalid_config_command" };
+  | { error: TaskConfigErrorCode; kind?: TaskConfigKind };
 
 export const TASK_CONFIG_KINDS = ["rewards", "penalties", "weekly-prizes"] as const;
 export const TASK_CONFIG_ACTIONS = ["replace", "upsert", "delete"] as const;
@@ -121,12 +127,19 @@ export function taskConfigCommandFingerprint(command: TaskConfigCommand): string
   return createHash("sha256").update(canonicalValue(payload)).digest("hex");
 }
 
-function invalid(): TaskConfigParseResult {
-  return { error: "invalid_config_command" };
+function commandError(
+  error: TaskConfigErrorCode,
+  kind?: TaskConfigKind,
+): TaskConfigParseResult {
+  return { error, ...(kind ? { kind } : {}) };
 }
 
-function forbidden(): TaskConfigParseResult {
-  return { error: "forbidden_config_field" };
+function invalid(kind?: TaskConfigKind): TaskConfigParseResult {
+  return commandError("invalid_config_command", kind);
+}
+
+function forbidden(kind?: TaskConfigKind): TaskConfigParseResult {
+  return commandError("forbidden_config_field", kind);
 }
 
 function normalizeText(value: unknown, allowEmpty = false): string | null {
@@ -240,24 +253,30 @@ function itemKey(kind: TaskConfigKind, item: TaskConfigItem): string {
   return String((item as RewardConfigItem | PenaltyConfigItem).name).toLowerCase();
 }
 
+type ParsedItemsResult =
+  | { ok: true; items: TaskConfigItem[] }
+  | { ok: false; error: TaskConfigErrorCode };
+
 function parseItems(
   kind: TaskConfigKind,
   value: unknown,
   boundary: TaskConfigEmojiBoundary,
-): TaskConfigItem[] | "forbidden" | null {
-  if (!Array.isArray(value) || value.length > 100) return null;
+): ParsedItemsResult {
+  if (!Array.isArray(value) || value.length > 100) {
+    return { ok: false, error: "invalid_resulting_config" };
+  }
   const items: TaskConfigItem[] = [];
   const keys = new Set<string>();
   for (const candidate of value) {
     const item = parseItem(kind, candidate, boundary);
-    if (item === "forbidden") return "forbidden";
-    if (!item) return null;
+    if (item === "forbidden") return { ok: false, error: "forbidden_config_field" };
+    if (!item) return { ok: false, error: "invalid_resulting_config" };
     const key = itemKey(kind, item);
-    if (keys.has(key)) return null;
+    if (keys.has(key)) return { ok: false, error: "config_natural_key_conflict" };
     keys.add(key);
     items.push(item);
   }
-  return items;
+  return { ok: true, items };
 }
 
 export function sanitizeTaskConfigItems(
@@ -265,8 +284,8 @@ export function sanitizeTaskConfigItems(
   value: unknown,
   emojiBoundary: TaskConfigEmojiBoundary,
 ): TaskConfigItem[] | null {
-  const items = parseItems(kind, value, emojiBoundary);
-  return items === "forbidden" ? null : items;
+  const result = parseItems(kind, value, emojiBoundary);
+  return result.ok ? result.items : null;
 }
 
 export function parseTaskConfigCommand(
@@ -295,25 +314,27 @@ export function parseTaskConfigCommand(
   ) return invalid();
 
   if (value.item !== undefined && parseItem(kind, value.item, emojiBoundary) === "forbidden") {
-    return forbidden();
+    return forbidden(kind);
   }
-  if (value.items !== undefined && parseItems(kind, value.items, emojiBoundary) === "forbidden") {
-    return forbidden();
+  if (value.items !== undefined) {
+    const itemsResult = parseItems(kind, value.items, emojiBoundary);
+    if (!itemsResult.ok && itemsResult.error === "forbidden_config_field") {
+      return forbidden(kind);
+    }
   }
 
   if (action === "replace") {
     if (value.item !== undefined || value.itemId !== undefined) return invalid();
-    const items = parseItems(kind, value.items, emojiBoundary);
-    if (items === "forbidden") return forbidden();
-    if (!items) return invalid();
-    return { operationId, kind, action, updatedAt, items };
+    const itemsResult = parseItems(kind, value.items, emojiBoundary);
+    if (!itemsResult.ok) return commandError(itemsResult.error, kind);
+    return { operationId, kind, action, updatedAt, items: itemsResult.items };
   }
 
   if (action === "upsert") {
     if (value.items !== undefined || value.itemId !== undefined) return invalid();
     const item = parseItem(kind, value.item, emojiBoundary);
-    if (item === "forbidden") return forbidden();
-    if (!item) return invalid();
+    if (item === "forbidden") return forbidden(kind);
+    if (!item) return commandError("invalid_resulting_config", kind);
     return { operationId, kind, action, updatedAt, item };
   }
 
