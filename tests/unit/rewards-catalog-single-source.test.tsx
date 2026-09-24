@@ -34,11 +34,11 @@ const LEGACY_KEY = "consuela-rewards-catalog";
 let root: Root | null = null;
 let fetchMock: ReturnType<typeof vi.fn>;
 
-function mount() {
+function mount(showToast = vi.fn()) {
   const container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() => { root!.render(<RewardSection showToast={vi.fn()} />); });
+  act(() => { root!.render(<RewardSection showToast={showToast} />); });
   return container;
 }
 
@@ -168,5 +168,52 @@ describe("RewardSection — one rewards catalog (task-utils REWARDS_KEY)", () =>
       action: "delete",
       itemId: 1,
     });
+  });
+
+  it("keeps the local catalog and shows no success after a 502", async () => {
+    const existing = [{ id: 1, name: "Ice cream", emoji: "🍦", cost: 15 }];
+    localStorage.setItem(REWARDS_KEY, JSON.stringify(existing));
+    const showToast = vi.fn();
+    mount(showToast);
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 502,
+      json: async () => ({ error: "config_store_unreachable" }),
+    } as any);
+
+    const del = document.querySelector('button[aria-label="Delete reward"]') as HTMLButtonElement;
+    await act(async () => {
+      del.click();
+      await Promise.resolve();
+    });
+
+    expect(loadRewards<any[]>([])).toEqual(existing);
+    expect(showToast).toHaveBeenCalledWith("Couldn't remove the reward. Check the connection and try again.");
+    expect(showToast).not.toHaveBeenCalledWith(expect.stringContaining("Removed"));
+  });
+
+  it("keeps an add form open with no local success after a network rejection", async () => {
+    const showToast = vi.fn();
+    mount(showToast);
+    const add = Array.from(document.querySelectorAll("button")).find((button) => button.textContent === "Add reward")!;
+    act(() => { add.click(); });
+    const input = document.querySelector('input[placeholder="e.g., 30 min screen time"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+    act(() => {
+      setter.call(input, "Movie");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    fetchMock.mockRejectedValueOnce(new TypeError("network unavailable"));
+
+    const save = Array.from(document.querySelectorAll("button")).find((button) => button.textContent === "Save")!;
+    await act(async () => {
+      save.click();
+      await Promise.resolve();
+    });
+
+    expect(loadRewards<any[]>([])).toEqual([]);
+    expect(document.body.textContent).toContain("Add reward");
+    expect(showToast).toHaveBeenCalledWith("Couldn't save the reward. Check the connection and try again.");
+    expect(showToast).not.toHaveBeenCalledWith(expect.stringContaining("Added"));
   });
 });

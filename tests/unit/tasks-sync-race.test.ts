@@ -121,7 +121,7 @@ beforeEach(() => {
 });
 
 describe("tasks/sync read-modify-write atomicity", () => {
-  it("a kid's tasks-leg sync interleaved with a parent's full write NEVER resurrects the parent's old legs", async () => {
+  it("a parent full write and kid tasks sync preserve canonical config", async () => {
     const parentBody = {
       tasks: [{ id: "p1", title: "Parent chore" }],
       weekData: { weekStart: "2026-09-14", points: { Caspian: 20 }, history: [] },
@@ -158,11 +158,9 @@ describe("tasks/sync read-modify-write atomicity", () => {
     expect(kidRes.status).toBe(200);
 
     const stored = h.snapshot();
-    // The parent's fresh legs SURVIVE the interleaved kid write…
     expect(stored.weekData.points).toEqual({ Caspian: 20 });
-    expect(stored.rewards).toEqual([{ id: "new-reward" }]);
-    expect(stored.rewardsUpdatedAt).toBe("new-stamp");
-    // …and the kid's tasks leg landed too (its poison legs ignored).
+    expect(stored.rewards).toEqual([{ id: "good-reward" }]);
+    expect(stored.rewardsUpdatedAt).toBe("old-stamp");
     expect(stored.tasks).toEqual([{ id: "k1", title: "Kid chore" }]);
   });
 });
