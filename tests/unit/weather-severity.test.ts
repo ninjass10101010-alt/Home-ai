@@ -8,14 +8,20 @@ describe("severeFamily", () => {
     expect(severeFamily(96)).toBe("storm");
     expect(severeFamily(99)).toBe("storm");
   });
-  it("flags heavy snow at 73/75/85/86", () => {
-    for (const c of [73, 75, 85, 86]) expect(severeFamily(c)).toBe("snow");
+  it("flags heavy snow at 73/75/86", () => {
+    for (const c of [73, 75, 86]) expect(severeFamily(c)).toBe("snow");
+  });
+  it("keeps WMO 85 a snow shower rather than heavy snow", () => {
+    expect(severeFamily(85)).toBeNull();
+    const shower = getWeatherSkin("winter", false, 85);
+    expect(shower.severe).toBe(false);
+    expect(shower.severeFamily).toBeNull();
   });
   it("returns null for mild codes (drizzle, light snow, cloudy)", () => {
     for (const c of [0, 1, 3, 51, 61, 71, 80, 94]) expect(severeFamily(c)).toBeNull();
   });
-  it("exposes the snow code set unchanged", () => {
-    expect([...HEAVY_SNOW_CODES].sort()).toEqual([73, 75, 85, 86]);
+  it("exposes the snow code set without WMO 85", () => {
+    expect([...HEAVY_SNOW_CODES].sort()).toEqual([73, 75, 86]);
   });
   it("keeps the blue clear-day poster out of severe weather semantics", () => {
     const clear = getWeatherSkin("summer", false, 0);

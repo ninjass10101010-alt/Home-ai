@@ -303,6 +303,22 @@ function mockOpenMeteo(payload: unknown) {
   );
 }
 
+function mockOpenMeteoSequence(payloads: unknown[]) {
+  let index = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("api.open-meteo.com")) {
+        const payload = payloads[Math.min(index, payloads.length - 1)];
+        index += 1;
+        return Promise.resolve({ json: () => Promise.resolve(payload) });
+      }
+      return Promise.reject(new Error("no network"));
+    })
+  );
+}
+
 describe("WeatherWidget — Not Boring redesign", () => {
   beforeEach(() => {
     vi.stubGlobal("requestAnimationFrame", vi.fn((cb: FrameRequestCallback) => setTimeout(() => cb(Date.now()), 0) as unknown as number));
@@ -1417,8 +1433,89 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(el.textContent).toContain("Big snow today — boots by the door");
     expect(el.textContent).not.toContain("Raincoats ready");
     const activeSky = el.querySelector('.wx-sky[data-active="true"]') as HTMLElement | null;
-    // toy snow wash, not the clear pastel
-    expect(activeSky!.className).toContain("from-[#f4f7fb]");
+    expect(activeSky!.className).toContain("from-[#5d6f8c]");
+  });
+
+  it("keeps WMO 85 a snow shower while 86 remains heavy snow", async () => {
+    localStorage.setItem("home-ai-weather-config", JSON.stringify({ timeOfDay: "day", season: "winter", holidayOverride: "christmas" }));
+    try {
+      mockOpenMeteoSequence([
+        makeOpenMeteoPayload({ code: 85, precip: 70 }),
+        makeOpenMeteoPayload({ code: 86, precip: 70 }),
+      ]);
+      const shower = render(<WeatherWidget />);
+      const heavy = render(<WeatherWidget />);
+      await settle(250);
+
+      expect(shower.textContent).toContain("Snow Showers");
+      expect(shower.textContent).not.toContain("Big snow");
+      expect(shower.querySelector("[data-weather-art-motion]")).toBeTruthy();
+      expect(heavy.textContent).toContain("Big snow today — boots by the door");
+      expect(heavy.querySelector("[data-weather-art-motion]")).toBeNull();
+    } finally {
+      localStorage.removeItem("home-ai-weather-config");
+    }
+  });
+
+  it("renders a distinct heavy-snow poster on the card while normal snow stays light", async () => {
+    localStorage.setItem("home-ai-weather-config", JSON.stringify({ timeOfDay: "day", season: "winter", holidayOverride: "none" }));
+    try {
+      mockOpenMeteoSequence([
+        makeOpenMeteoPayload({ code: 71, precip: 80 }),
+        makeOpenMeteoPayload({ code: 86, precip: 80 }),
+      ]);
+      const normal = render(<WeatherWidget />);
+      const heavy = render(<WeatherWidget />);
+      await settle(250);
+
+      const normalScene = normal.querySelector('[data-testid="wx-scene-layers"]') as HTMLElement;
+      const heavyScene = heavy.querySelector('[data-testid="wx-scene-layers"]') as HTMLElement;
+      const normalSky = normal.querySelector('.wx-sky[data-active="true"]') as HTMLElement;
+      const heavySky = heavy.querySelector('.wx-sky[data-active="true"]') as HTMLElement;
+      expect(normalScene.getAttribute("data-heavy-snow")).toBe("false");
+      expect(heavyScene.getAttribute("data-heavy-snow")).toBe("true");
+      expect(normalSky.className).toContain("from-[#f4f7fb]");
+      expect(heavySky.className).toContain("from-[#5d6f8c]");
+      expect(heavySky.className).not.toBe(normalSky.className);
+      expect(normalScene.querySelectorAll('[data-weather-precip="snow"]').length).toBeGreaterThan(0);
+      expect(heavyScene.querySelectorAll('[data-weather-precip="snow"]').length).toBeGreaterThan(0);
+      expect((heavy.querySelector('[data-testid="wx-hero-temp"]') as HTMLElement).style.color).toBe("rgb(255, 255, 255)");
+    } finally {
+      localStorage.removeItem("home-ai-weather-config");
+    }
+  });
+
+  it("renders a distinct heavy-snow poster in the modal while preserving snow particles", async () => {
+    localStorage.setItem("home-ai-weather-config", JSON.stringify({ timeOfDay: "day", season: "winter", holidayOverride: "none" }));
+    try {
+      mockOpenMeteoSequence([
+        makeOpenMeteoPayload({ code: 71, precip: 80 }),
+        makeOpenMeteoPayload({ code: 86, precip: 80 }),
+      ]);
+      const normal = render(<WeatherWidget />);
+      const heavy = render(<WeatherWidget />);
+      await settle(250);
+      act(() => findDetailsButton(normal)!.click());
+      act(() => findDetailsButton(heavy)!.click());
+      await settle(250);
+
+      const dialogs = Array.from(document.querySelectorAll<HTMLElement>("#weather-details-dialog"));
+      expect(dialogs).toHaveLength(2);
+      const normalScene = dialogs[0].querySelector('[data-testid="wx-scene-layers"]') as HTMLElement;
+      const heavyScene = dialogs[1].querySelector('[data-testid="wx-scene-layers"]') as HTMLElement;
+      const normalSky = dialogs[0].querySelector('.wx-sky[data-active="true"]') as HTMLElement;
+      const heavySky = dialogs[1].querySelector('.wx-sky[data-active="true"]') as HTMLElement;
+      expect(normalScene.getAttribute("data-heavy-snow")).toBe("false");
+      expect(heavyScene.getAttribute("data-heavy-snow")).toBe("true");
+      expect(normalSky.className).toContain("from-[#f4f7fb]");
+      expect(heavySky.className).toContain("from-[#5d6f8c]");
+      expect(normalScene.querySelectorAll('[data-weather-precip="snow"]').length).toBeGreaterThan(0);
+      expect(heavyScene.querySelectorAll('[data-weather-precip="snow"]').length).toBeGreaterThan(0);
+      const heavyHero = Array.from(dialogs[1].querySelectorAll<HTMLElement>("span")).find((node) => node.className.includes("text-[60px]"));
+      expect(heavyHero?.style.color).toBe("rgb(255, 255, 255)");
+    } finally {
+      localStorage.removeItem("home-ai-weather-config");
+    }
   });
 
   it("keeps the Try again recovery tappable inside the pointer-events-none overlay", async () => {
@@ -1689,6 +1786,64 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect((dialog.querySelector('.wx-sky[data-active="true"]') as HTMLElement).className).toContain("from-[#f4f7fb]");
   });
 
+  it("omits the daylight interval when sunrise is null", async () => {
+    const { payload } = makeSolarCrossMidnightPayload();
+    (payload.daily as any).sunrise[0] = null;
+    mockOpenMeteo(payload);
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    act(() => findDetailsButton(el)!.click());
+    const dialog = document.querySelector("#weather-details-dialog") as HTMLElement;
+    const scene = dialog.querySelector('[data-testid="wx-scene-layers"]') as HTMLElement;
+    expect(dialog.textContent).not.toContain("1970");
+    expect(scene.getAttribute("data-sun-progress")).toBe("unavailable");
+    expect(scene.querySelector('[data-weather-shape="sun"]')).toBeNull();
+    expect(daylightCard(dialog)).toBeNull();
+  });
+
+  it("omits the daylight interval when sunset is null", async () => {
+    const { payload } = makeSolarCrossMidnightPayload();
+    (payload.daily as any).sunset[0] = null;
+    mockOpenMeteo(payload);
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    act(() => findDetailsButton(el)!.click());
+    const dialog = document.querySelector("#weather-details-dialog") as HTMLElement;
+    const scene = dialog.querySelector('[data-testid="wx-scene-layers"]') as HTMLElement;
+    expect(dialog.textContent).not.toContain("1970");
+    expect(scene.getAttribute("data-sun-progress")).toBe("unavailable");
+    expect(scene.querySelector('[data-weather-shape="sun"]')).toBeNull();
+    expect(daylightCard(dialog)).toBeNull();
+  });
+
+  it("omits the daylight interval when sunset is not after sunrise", async () => {
+    const { payload } = makeSolarCrossMidnightPayload();
+    (payload.daily as any).sunset[0] = (payload.daily as any).sunrise[0];
+    mockOpenMeteo(payload);
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    act(() => findDetailsButton(el)!.click());
+    const dialog = document.querySelector("#weather-details-dialog") as HTMLElement;
+    const scene = dialog.querySelector('[data-testid="wx-scene-layers"]') as HTMLElement;
+    expect(scene.getAttribute("data-sun-progress")).toBe("unavailable");
+    expect(scene.querySelector('[data-weather-shape="sun"]')).toBeNull();
+    expect(daylightCard(dialog)).toBeNull();
+  });
+
+  it("keeps weather available when a solar timestamp is undefined", async () => {
+    const { payload } = makeSolarCrossMidnightPayload();
+    (payload.daily as any).sunrise[0] = undefined;
+    mockOpenMeteo(payload);
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    expect(el.textContent).toContain("H:75°");
+    expect(el.textContent).not.toContain("Weather unavailable");
+  });
+
   it("uses the selected clear day's solar interval after the modal scrubber crosses midnight", async () => {
     const { payload, hourlyTimes, sunrise, sunset, offsetSeconds } = makeSolarCrossMidnightPayload();
     mockOpenMeteo(payload);
@@ -1714,7 +1869,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(daylightCard(dialog)?.textContent).not.toContain("↑ 6 AM");
   });
 
-  it("omits the solar marker and daylight card when the selected day has no interval", async () => {
+  it("omits the modal solar marker and daylight card when the selected day has no interval", async () => {
     const { payload } = makeSolarCrossMidnightPayload();
     (payload.daily as any).sunrise = [(payload.daily as any).sunrise[0]];
     (payload.daily as any).sunset = [(payload.daily as any).sunset[0]];
@@ -1742,6 +1897,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
     const icon = el.querySelector('[data-testid="wx-hero-icon"]')?.firstElementChild;
     expect(el.textContent).toContain("Snow Showers");
     expect(el.textContent).not.toContain("Thunderstorm");
+    expect(icon?.getAttribute("data-weather-icon")).toBe("snow");
     expect(icon?.querySelector('svg[viewBox="0 0 48 62"]')).toBeNull();
   });
 
@@ -1756,6 +1912,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
     const icon = modalCondition(dialog);
     expect(dialog.textContent).toContain("Snow Showers");
     expect(dialog.textContent).not.toContain("Thunderstorm");
+    expect(icon?.getAttribute("data-weather-icon")).toBe("snow");
     expect(icon?.querySelector('svg[viewBox="0 0 48 62"]')).toBeNull();
   });
 
@@ -1777,6 +1934,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(rows).toHaveLength(5);
     expect(rows.every((row) => row.textContent?.includes("Snow Showers"))).toBe(true);
     expect(rows.every((row) => !row.textContent?.includes("Thunderstorm"))).toBe(true);
+    expect(rows.every((row) => row.querySelector('[data-weather-icon="snow"]'))).toBe(true);
     expect(rows.every((row) => !row.querySelector('span[aria-hidden="true"] svg[viewBox="0 0 48 62"]'))).toBe(true);
   });
 
@@ -2402,13 +2560,16 @@ describe("weather skins — severity + Consuela night", () => {
   it("treats heavy snow as severe with its own slate treatment", () => {
     const calm = getWeatherSkin("winter", false, 71); // light snow = calm
     expect(calm.severe).toBe(false);
-    for (const code of [73, 75, 85, 86]) {
+    for (const code of [73, 75, 86]) {
       const snow = getWeatherSkin("winter", false, code);
       expect(snow.severe).toBe(true);
       expect(snow.severeFamily).toBe("snow");
       expect(snow.accent).toBe("#7FA8D9");
       expect(snow.skyTop).not.toBe(calm.skyTop);
     }
+    const shower = getWeatherSkin("winter", false, 85);
+    expect(shower.severe).toBe(false);
+    expect(shower.severeFamily).toBeNull();
   });
 
   it("keeps the lamplit indigo night instead of near-black", () => {

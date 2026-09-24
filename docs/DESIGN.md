@@ -32,7 +32,7 @@ Warm glass remains the frame for every Home widget. Weather is the one full-blee
 
 ### Scene system
 - Layered SVG/CSS: sky gradient (skin), sun/moon disc riding the sun arc, cloud forms, particle precipitation, fog layer, lightning flash for storm codes.
-- Season changes the skin tint, not the illustration. Holiday overlays persist on top.
+- Season affects accents and chrome; the live condition canvas remains condition-driven. Holiday overlays persist on top.
 - Scene changes crossfade; values count up; hard cuts are banned.
 
 ### Interaction
@@ -143,7 +143,7 @@ Use this exact delta format in the "What's New" area and update 1.5 journeys:
 
 ### UI Change Record — 2026-09-24 — Cross-midnight solar intervals and snow-shower WMO truth
 - Added / Changed: `src/components/ui/WeatherWidget.tsx`, `src/components/ui/WxToys.tsx`, and `tests/unit/weather-widget.test.tsx`.
-- Visual / Motion: Every retained hourly point now carries the sunrise and sunset interval for its local forecast day. The clear-day card scene, modal scene marker, and Daylight arc follow the selected hour across midnight; a selected day without a complete interval omits the daylight arc rather than drawing a false position. WMO 85 and 86 render `Snow Showers` with the snow condition icon in the card, modal, and 5-day forecast.
+- Visual / Motion: Every retained hourly point now carries the sunrise and sunset interval for its local forecast day. The modal timeline and shared per-hour mapping follow the selected hour across midnight; the card's rest-of-day strip remains within the current local day. A selected day without a complete, finite interval whose sunset is after sunrise omits the daylight arc rather than drawing a false position. WMO 85 and 86 render `Snow Showers` with the snow condition icon in the card, modal, and 5-day forecast; 85 remains a normal snow-shower scene while 73/75/86 use the heavy-snow treatment.
 - Data / Accessibility: Missing solar intervals remain unavailable, with no fallback to another day. Existing hydration-safe motion, reduced-motion/visibility gates, contrast derivation, and clay icon behavior remain unchanged.
 - **CONTRACTS to keep:** (1) never pair an hour with another day's solar interval; (2) hide the selected daylight arc when its interval is unavailable; (3) WMO 85/86 must use the snow label/icon in every owned Weather presentation path; (4) no storm label, storm icon, dependency, asset, font, or unrelated navigation/data change.
 

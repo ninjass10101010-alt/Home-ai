@@ -177,20 +177,21 @@ function getRealTimeOfDay(): TimeOfDayFlag {
   return hour >= 6 && hour < 19 ? "day" : "night";
 }
 
-function posterTextSurface(scene: ReturnType<typeof wmoToScene>): string[] {
+function posterTextSurface(scene: ReturnType<typeof wmoToScene>, heavySnow = false): string[] {
   if (scene === "clear") return ["#55BCE8", "#8FD8F1", "#D8F2F4"];
   if (scene === "cloudy") return ["#DFE4EE", "#EEF1F6", "#D9E6F5"];
   if (scene === "rain") return ["#B9C4D8", "#C9D7EA", "#D8D3F0"];
+  if (scene === "snow" && heavySnow) return ["#5D6F8C", "#465A78", "#354861"];
   if (scene === "snow") return ["#F4F7FB", "#E6EFFF", "#EFE6FB"];
   if (scene === "storm") return ["#6A6F96", "#5D5B8F", "#4D4770"];
   return ["#6F74A8", "#A29DC9", "#E2DBF2"];
 }
 
-function weatherHeaderTextSurfaces(scene: ReturnType<typeof wmoToScene>, failedFetch = false): string[] {
+function weatherHeaderTextSurfaces(scene: ReturnType<typeof wmoToScene>, failedFetch = false, heavySnow = false): string[] {
   const glassAlpha = scene === "storm" ? 0.4 : 0.3;
   const sheenAlpha = 0.4;
   const surfaceAlpha = glassAlpha + sheenAlpha * (1 - glassAlpha);
-  const baseSurfaces = posterTextSurface(scene);
+  const baseSurfaces = posterTextSurface(scene, heavySnow);
   const surfaces = failedFetch
     ? baseSurfaces.map((surface) => mixHex(surface, "#788091", 0.38))
     : baseSurfaces;
@@ -254,12 +255,21 @@ const HOLIDAY_STYLE: Partial<Record<HolidayOverride, { accent: string; particle:
   virginguadalupe: { accent: "#0d9488", particle: "holy-roses", label: "🌹 Virgin of Guadalupe" },
 };
 
+function validSolarInterval(sunriseISO: string | null | undefined, sunsetISO: string | null | undefined): SolarInterval | null {
+  if (typeof sunriseISO !== "string" || typeof sunsetISO !== "string") return null;
+  const sunriseMs = new Date(sunriseISO).getTime();
+  const sunsetMs = new Date(sunsetISO).getTime();
+  if (!Number.isFinite(sunriseMs) || !Number.isFinite(sunsetMs) || sunsetMs <= sunriseMs) return null;
+  return { sunriseISO, sunsetISO };
+}
+
 function sunProgressAt(timeISO: string, sunriseISO: string | null, sunsetISO: string | null): number | null {
-  if (!sunriseISO || !sunsetISO) return null;
+  const interval = validSolarInterval(sunriseISO, sunsetISO);
+  if (!interval) return null;
   const t = new Date(timeISO).getTime();
-  const sr = new Date(sunriseISO).getTime();
-  const ss = new Date(sunsetISO).getTime();
-  if (!isFinite(t) || !isFinite(sr) || !isFinite(ss) || ss <= sr) return null;
+  const sr = new Date(interval.sunriseISO).getTime();
+  const ss = new Date(interval.sunsetISO).getTime();
+  if (!Number.isFinite(t) || !Number.isFinite(sr) || !Number.isFinite(ss) || ss <= sr) return null;
   return Math.max(0, Math.min(1, (t - sr) / (ss - sr)));
 }
 
@@ -497,15 +507,17 @@ function UvDots({ uv, accent }: { uv: number; accent: string }) {
 }
 
 function SunArc({ sunriseISO, sunsetISO, progress, accent }: {
-  sunriseISO: string; sunsetISO: string; progress: number | null; accent: string;
+  sunriseISO: string | null; sunsetISO: string | null; progress: number | null; accent: string;
 }) {
+  const interval = validSolarInterval(sunriseISO, sunsetISO);
+  if (!interval) return null;
   const P0 = { x: 16, y: 58 };
   const C = { x: 140, y: -10 };
   const P1 = { x: 264, y: 58 };
   const t = progress == null ? null : Math.max(0, Math.min(1, progress));
   const px = t == null ? null : (1 - t) ** 2 * P0.x + 2 * (1 - t) * t * C.x + t ** 2 * P1.x;
   const py = t == null ? null : (1 - t) ** 2 * P0.y + 2 * (1 - t) * t * C.y + t ** 2 * P1.y;
-  const ms = new Date(sunsetISO).getTime() - new Date(sunriseISO).getTime();
+  const ms = new Date(interval.sunsetISO).getTime() - new Date(interval.sunriseISO).getTime();
   const dayLen = ms > 0 ? `${Math.floor(ms / 3_600_000)}h ${Math.round((ms % 3_600_000) / 60_000)}m` : null;
   return (
     <div>
@@ -515,9 +527,9 @@ function SunArc({ sunriseISO, sunsetISO, progress, accent }: {
          {px != null && py != null && <circle cx={px} cy={py} r={6} fill={accent} style={{ filter: `drop-shadow(0 0 6px ${accent})` }} />}
       </svg>
       <div className="mt-1 flex items-center justify-between text-[11px] font-semibold text-white/70">
-        <span>↑ {formatHourLabel(sunriseISO)}</span>
+        <span>↑ {formatHourLabel(interval.sunriseISO)}</span>
         {dayLen && <span className="text-white/50">{dayLen} of daylight</span>}
-        <span>↓ {formatHourLabel(sunsetISO)}</span>
+        <span>↓ {formatHourLabel(interval.sunsetISO)}</span>
       </div>
     </div>
   );
@@ -679,24 +691,27 @@ export default function WeatherWidget({ className = "" }: { className?: string }
         // hourly axis when a parent's phone travels. Interpret them in the
         // location's own UTC offset (the API answers `utc_offset_seconds`).
         const utcOffsetSec: number = typeof data.utc_offset_seconds === "number" ? data.utc_offset_seconds : 0;
-        const parseLocalIso = (t: string): number => {
-          const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(t);
-          if (!m) return new Date(t).getTime();
-          const asUtc = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]));
-          return asUtc - utcOffsetSec * 1000;
+        const parseLocalIso = (value: unknown): number | null => {
+          if (typeof value !== "string") return null;
+          const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(value);
+          const ms = m
+            ? Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5])) - utcOffsetSec * 1000
+            : new Date(value).getTime();
+          return Number.isFinite(ms) ? ms : null;
         };
-        const toTrueUTC = (t: string): string => new Date(parseLocalIso(t)).toISOString();
-        if (hourly?.time) hourly.time = hourly.time.map(toTrueUTC);
-        if (daily?.sunrise) daily.sunrise = daily.sunrise.map(toTrueUTC);
-        if (daily?.sunset) daily.sunset = daily.sunset.map(toTrueUTC);
+        const toTrueUTC = (value: unknown): string | null => {
+          const ms = parseLocalIso(value);
+          return ms == null ? null : new Date(ms).toISOString();
+        };
+        if (hourly?.time) hourly.time = hourly.time.map((value: unknown) => toTrueUTC(value) ?? (typeof value === "string" ? value : ""));
+        const dailySunrise = daily?.sunrise?.map(toTrueUTC) ?? [];
+        const dailySunset = daily?.sunset?.map(toTrueUTC) ?? [];
 
         const solarByDate = new Map<string, SolarInterval>();
         daily?.time?.forEach((date: string, index: number) => {
-          const sunriseISO = daily.sunrise?.[index];
-          const sunsetISO = daily.sunset?.[index];
-          if (typeof sunriseISO === "string" && typeof sunsetISO === "string") {
-            solarByDate.set(date, { sunriseISO, sunsetISO });
-          }
+          if (typeof date !== "string") return;
+          const interval = validSolarInterval(dailySunrise[index], dailySunset[index]);
+          if (interval) solarByDate.set(date, interval);
         });
 
         const hours: HourPoint[] = [];
@@ -773,8 +788,8 @@ export default function WeatherWidget({ className = "" }: { className?: string }
           pressure: typeof current.pressure_msl === "number" ? Math.round(current.pressure_msl) : null,
           visibility: typeof current.visibility === "number" ? current.visibility : null,
           condition: currentWMO.condition,
-          sunriseISO: daily?.sunrise?.[0] ?? null,
-          sunsetISO: daily?.sunset?.[0] ?? null,
+          sunriseISO: solarByDate.get(daily?.time?.[0] ?? "")?.sunriseISO ?? null,
+          sunsetISO: solarByDate.get(daily?.time?.[0] ?? "")?.sunsetISO ?? null,
           hours,
           forecast,
           todayHigh: typeof daily?.temperature_2m_max?.[0] === "number" ? Math.round(daily.temperature_2m_max[0]) : null,
@@ -900,6 +915,8 @@ export default function WeatherWidget({ className = "" }: { className?: string }
   // Toy hero inputs — the card sky/world/icon derive from the same live
   // code + day flag the old scene used (active hour while previewing).
   const heroScene = isPaused ? "cloudy" : wmoToScene(sceneCode, sceneIsDay);
+  const heroHeavySnow = heroScene === "snow" && severeFamily(sceneCode) === "snow";
+  const heroSkyScene = heroHeavySnow ? "heavySnow" : heroScene;
   const heroCloud = activeHour ? activeHour.cloud : weatherData?.cloud ?? null;
   const heroPresentation = isPaused
     ? { label: "Weather unavailable", icon: "cloudy" as const }
@@ -909,10 +926,13 @@ export default function WeatherWidget({ className = "" }: { className?: string }
   const heroPrecipitation = activeHour ? activeHour.precip : weatherData?.hours[0]?.precip ?? null;
   const heroWind = activeHour ? activeHour.wind : weatherData?.wind ?? null;
   const heroWindDirection = activeHour ? activeHour.windDir : weatherData?.windDir ?? null;
+  const heroSolar = activeHour
+    ? validSolarInterval(activeHour.sunriseISO, activeHour.sunsetISO)
+    : validSolarInterval(weatherData?.sunriseISO, weatherData?.sunsetISO);
   const heroSunProgress = sunProgressAt(
     activeHour?.time ?? new Date().toISOString(),
-    activeHour ? activeHour.sunriseISO : weatherData?.sunriseISO ?? null,
-    activeHour ? activeHour.sunsetISO : weatherData?.sunsetISO ?? null
+    heroSolar?.sunriseISO ?? null,
+    heroSolar?.sunsetISO ?? null
   );
   const heroFogCode = sceneCode === 45 || sceneCode === 48;
   const heroFogMeasurement = (heroVis != null && heroVis < 8000) || (heroVis == null && heroHumidity != null && heroHumidity >= 82);
@@ -931,7 +951,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
   // Severity owns the card: storms and heavy snow never borrow the holiday
   // party accent, and the celebratory layers stay home until it passes.
   const accent = resolveAccent(rawSkin, holidayStyle?.accent);
-  const headerSurfaces = weatherHeaderTextSurfaces(heroScene, isPaused);
+  const headerSurfaces = weatherHeaderTextSurfaces(heroScene, isPaused, heroHeavySnow);
   const chromeInk = contrastSafeTextAccent(accent, headerSurfaces, "#1E293B");
   const holidayBadgeInk = holidayStyle
     ? contrastSafeTextAccent(
@@ -940,12 +960,12 @@ export default function WeatherWidget({ className = "" }: { className?: string }
         chromeInk
       )
     : chromeInk;
-  const cardTextSurfaces = posterTextSurface(heroScene);
-  const cardTextAccent = contrastSafeTextAccent(accent, cardTextSurfaces, heroScene === "storm" ? "#FFFFFF" : "#1E293B");
+  const cardTextSurfaces = posterTextSurface(heroScene, heroHeavySnow);
+  const cardTextAccent = contrastSafeTextAccent(accent, cardTextSurfaces, heroScene === "storm" || heroHeavySnow ? "#FFFFFF" : "#1E293B");
   const selectedCellTextAccent = contrastSafeTextAccent(
     accent,
     cardTextSurfaces.map((surface) => mixHex(accent, surface, 0x26 / 255)),
-    heroScene === "storm" ? "#FFFFFF" : "#1E293B"
+    heroScene === "storm" || heroHeavySnow ? "#FFFFFF" : "#1E293B"
   );
   // High-contrast boost never reached the widget (inline skin styling bypasses
   // the app's [data-contrast="boost"] system). Boost alpha when the flag is set.
@@ -962,16 +982,16 @@ export default function WeatherWidget({ className = "" }: { className?: string }
     // is the SKY stack now, and the skin inks were tuned for the old skies.
     // storm keeps white; every other scene (incl. the lightened night) reads
     // as a pastel that dark slate-800 ink passes AA on at every stop.
-    const toyInk = heroScene === "storm" ? "#FFFFFF" : "#1E293B";
-    const softAlpha = isBoosted ? 0.9 : heroScene === "storm" ? 0.95 : 0.78;
+    const toyInk = heroScene === "storm" || heroHeavySnow ? "#FFFFFF" : "#1E293B";
+    const softAlpha = isBoosted ? 0.9 : heroScene === "storm" || heroHeavySnow ? 0.95 : 0.78;
     return {
       ...rawSkin,
       ink: toyInk,
-      inkSoft: heroScene === "storm" ? `rgba(255,255,255,${softAlpha})` : `rgba(30,41,59,${softAlpha})`,
+      inkSoft: heroScene === "storm" || heroHeavySnow ? `rgba(255,255,255,${softAlpha})` : `rgba(30,41,59,${softAlpha})`,
       border: isBoosted ? rawSkin.border.replace(/0\.\d+\)$/, "0.35)") : rawSkin.border,
       stripTrack: isBoosted ? rawSkin.stripTrack.replace(/0\.\d+\)$/, "0.28)") : rawSkin.stripTrack,
     };
-  }, [rawSkin, isBoosted, heroScene]);
+  }, [rawSkin, isBoosted, heroScene, heroHeavySnow]);
 
   const heroTempTarget = activeHour
     ? activeHour.temp == null ? null : conv(activeHour.temp)
@@ -1110,11 +1130,12 @@ export default function WeatherWidget({ className = "" }: { className?: string }
         }}
       >
         {Object.entries(SKY).map(([k, g]) => (
-          <div key={k} className={`wx-sky absolute inset-0 bg-gradient-to-b ${g}`} data-active={heroScene === k} />
+          <div key={k} className={`wx-sky absolute inset-0 bg-gradient-to-b ${g}`} data-active={heroSkyScene === k} />
         ))}
         <div className="absolute inset-0 overflow-hidden" aria-hidden="true">
           <SceneLayers
             scene={heroScene}
+            heavySnow={heroHeavySnow}
             fogCode={heroFogCode}
             showBirds={heroBirds}
             cloudCover={heroCloud}
@@ -1145,7 +1166,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
           className="pointer-events-none absolute inset-0 z-10"
           aria-hidden="true"
           style={{
-            background: `radial-gradient(70% 55% at 50% 42%, ${heroScene === "storm" ? "rgba(6,6,9,0.40)" : heroScene === "night" ? "rgba(255,255,255,0.45)" : heroScene === "clear" ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.24)"} 0%, transparent 72%)`,
+            background: `radial-gradient(70% 55% at 50% 42%, ${heroScene === "storm" ? "rgba(6,6,9,0.40)" : heroHeavySnow ? "rgba(6,6,9,0.20)" : heroScene === "night" ? "rgba(255,255,255,0.45)" : heroScene === "clear" ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.24)"} 0%, transparent 72%)`,
           }}
         />
 
@@ -1226,8 +1247,8 @@ export default function WeatherWidget({ className = "" }: { className?: string }
                 )}
                 {severeLine && (
                   <div className="relative z-10 mt-1.5 max-w-full rounded-2xl px-3 py-2 text-center" style={{ background: `${accent}18`, border: `1px solid ${accent}22` }} role="status">
-                    <p className="text-[11px] font-bold leading-tight" style={{ color: heroScene === "storm" ? "#FFF8EC" : "#4A2E05" }}>{severeFamily(weatherData?.code ?? 0) === "snow" ? "❄️" : "⛈️"} {severeLine.headline}</p>
-                    <p className="mt-0.5 text-[11px] font-medium leading-tight" style={{ color: heroScene === "storm" ? "rgba(255,248,236,0.85)" : "rgba(74,46,5,0.85)" }}>{severeLine.detail}</p>
+                    <p className="text-[11px] font-bold leading-tight" style={{ color: heroScene === "storm" || heroHeavySnow ? "#FFF8EC" : "#4A2E05" }}>{severeFamily(weatherData?.code ?? 0) === "snow" ? "❄️" : "⛈️"} {severeLine.headline}</p>
+                    <p className="mt-0.5 text-[11px] font-medium leading-tight" style={{ color: heroScene === "storm" || heroHeavySnow ? "rgba(255,248,236,0.85)" : "rgba(74,46,5,0.85)" }}>{severeLine.detail}</p>
                   </div>
                 )}
                 {!severeLine && fusionLine && (
@@ -1394,11 +1415,13 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
   const mIsDay = todOverride === "day" ? true : todOverride === "night" ? false : scrubHour?.isDay ?? data.isDay;
   const mCode = scrubHour?.code ?? data.code;
   const mScene = wmoToScene(mCode, mIsDay);
+  const mHeavySnow = mScene === "snow" && severeFamily(mCode) === "snow";
+  const mSkyScene = mHeavySnow ? "heavySnow" : mScene;
   const mStorm = mScene === "storm";
   const mSkin = {
     ...getWeatherSkin(season, !mIsDay, mCode),
-    ink: mStorm ? "#FFFFFF" : "#1E293B",
-    inkSoft: mStorm ? "rgba(255,255,255,0.95)" : "rgba(30,41,59,0.78)",
+    ink: mStorm || mHeavySnow ? "#FFFFFF" : "#1E293B",
+    inkSoft: mStorm || mHeavySnow ? "rgba(255,255,255,0.95)" : "rgba(30,41,59,0.78)",
   };
   const mAccent = resolveAccent(mSkin, holidayAccent);
   const mTextAccent = contrastSafeTextAccent(mAccent, "#0A0D18", "#FFFFFF");
@@ -1412,12 +1435,13 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
   const mCloud = scrubHour ? scrubHour.cloud : data.cloud;
   const mSunriseISO = scrubHour ? scrubHour.sunriseISO : data.sunriseISO;
   const mSunsetISO = scrubHour ? scrubHour.sunsetISO : data.sunsetISO;
+  const mSolar = validSolarInterval(mSunriseISO, mSunsetISO);
   const mFogCode = mCode === 45 || mCode === 48;
   const mFogMeasurement = (mVis != null && mVis < 8000) || (mVis == null && mHumidity != null && mHumidity >= 82);
   const mFog = mFogCode || mFogMeasurement;
   const mPresentation = conditionPresentation(mScene, mCode, mCloud, mIsDay);
   const mCond = mPresentation.icon;
-  const mSunProgress = sunProgressAt(scrubHour?.time ?? new Date().toISOString(), mSunriseISO, mSunsetISO);
+  const mSunProgress = sunProgressAt(scrubHour?.time ?? new Date().toISOString(), mSolar?.sunriseISO ?? null, mSolar?.sunsetISO ?? null);
   const mBirds =
     !fetchError &&
     mIsDay &&
@@ -1491,11 +1515,12 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
           <div className="space-y-5 p-5">
             <div className="relative h-56 overflow-hidden rounded-2xl" style={{ border: "1px solid rgba(255,255,255,0.10)" }}>
               {Object.entries(SKY).map(([k, g]) => (
-                <div key={k} className={`wx-sky absolute inset-0 bg-gradient-to-b ${g}`} data-active={mScene === k} />
+                <div key={k} className={`wx-sky absolute inset-0 bg-gradient-to-b ${g}`} data-active={mSkyScene === k} />
               ))}
               <div className="absolute inset-0 overflow-hidden" aria-hidden="true">
                 <SceneLayers
                   scene={mScene}
+                  heavySnow={mHeavySnow}
                   fogCode={mFogCode}
                   showBirds={mBirds}
                   cloudCover={mCloud}
@@ -1589,12 +1614,12 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
               <LeaderRow label="Pressure" value={scrubIdx !== 0 ? "—" : data.pressure != null ? `${data.pressure} hPa` : "—"} />
             </div>
 
-            {mSunriseISO && mSunsetISO && (
+            {mSolar && (
               <div className="rounded-2xl border border-white/10 bg-white/[0.05] p-4">
                 <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-white/50">Daylight</p>
                 <SunArc
-                  sunriseISO={mSunriseISO}
-                  sunsetISO={mSunsetISO}
+                  sunriseISO={mSolar.sunriseISO}
+                  sunsetISO={mSolar.sunsetISO}
                   progress={mSunProgress}
                   accent={mAccent}
                 />

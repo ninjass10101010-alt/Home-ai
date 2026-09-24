@@ -33,7 +33,7 @@ export function SunOrb({ night = false }: { night?: boolean }) {
 export function CloudPuff({ className = "", style, tone = "day", layer }: {
   className?: string;
   style?: CSSProperties;
-  tone?: "day" | "poster" | "night";
+  tone?: "day" | "poster" | "night" | "heavy-snow";
   layer?: "front" | "back";
 }) {
   const blob = tone === "poster"
@@ -42,14 +42,17 @@ export function CloudPuff({ className = "", style, tone = "day", layer }: {
     : tone === "night"
       ? "absolute rounded-full bg-gradient-to-b from-[#e6e4ff] via-[#aaa9d2] to-[#7477a8] " +
         "shadow-[inset_0_-6px_10px_rgba(45,45,90,.35),inset_0_3px_6px_rgba(255,255,255,.8)]"
-      : "absolute rounded-full bg-gradient-to-b from-white to-[#e8edf7] " +
-        "shadow-[inset_0_-6px_10px_rgba(150,165,200,.35),inset_0_3px_6px_rgba(255,255,255,1)]";
+      : tone === "heavy-snow"
+        ? "absolute rounded-full bg-gradient-to-b from-[#e8f0fb] via-[#c3d1e4] to-[#8da2bf] " +
+          "shadow-[inset_0_-6px_10px_rgba(42,58,82,.34),inset_0_3px_6px_rgba(255,255,255,.95)]"
+        : "absolute rounded-full bg-gradient-to-b from-white to-[#e8edf7] " +
+          "shadow-[inset_0_-6px_10px_rgba(150,165,200,.35),inset_0_3px_6px_rgba(255,255,255,1)]";
   return (
     <div aria-hidden="true" className={`relative h-14 w-24 ${className}`} style={style} data-cloud-form={tone} data-cloud-layer={layer}>
       <div className={`${blob} left-0 bottom-0 h-10 w-10`} />
       <div className={`${blob} left-6 bottom-0 h-14 w-14`} />
       <div className={`${blob} right-0 bottom-0 h-9 w-9`} />
-      <div className={`absolute -bottom-2 left-3 right-3 h-3 rounded-full blur-md ${tone === "poster" ? "bg-[#2aa6a4]/20" : tone === "night" ? "bg-[#45486f]/25" : "bg-slate-500/15"}`} />
+      <div className={`absolute -bottom-2 left-3 right-3 h-3 rounded-full blur-md ${tone === "poster" ? "bg-[#2aa6a4]/20" : tone === "night" ? "bg-[#45486f]/25" : tone === "heavy-snow" ? "bg-[#344963]/30" : "bg-slate-500/15"}`} />
     </div>
   );
 }
@@ -132,7 +135,7 @@ function fogOpacityFor(fogCode: boolean, visibility: number | null, humidity: nu
   return codeOpacity;
 }
 
-function PosterAccents({ scene, motionOk, sunProgress, cloudCover, precipitation }: { scene: WxScene; motionOk: boolean; sunProgress: number | null; cloudCover?: number | null; precipitation?: number | null }) {
+function PosterAccents({ scene, heavySnow = false, motionOk, sunProgress, cloudCover, precipitation }: { scene: WxScene; heavySnow?: boolean; motionOk: boolean; sunProgress: number | null; cloudCover?: number | null; precipitation?: number | null }) {
   const sun = posterSunPosition(sunProgress);
   const horizon = posterHorizon(sunProgress);
   const numericCloud = finiteMeasurement(cloudCover);
@@ -143,9 +146,10 @@ function PosterAccents({ scene, motionOk, sunProgress, cloudCover, precipitation
   const snowAccentCount = numericPrecipitation == null || numericPrecipitation <= 0 ? 0 : Math.max(1, Math.min(4, Math.round(numericPrecipitation / 25)));
   return (
     <svg
-      key={scene}
+      key={`${scene}-${heavySnow ? "heavy-snow" : "normal"}`}
       data-testid="wx-poster-accents"
       data-scene={scene}
+      data-heavy-snow={heavySnow ? "true" : "false"}
       data-sun-progress={measurementLabel(sunProgress)}
       data-cloud-cover={measurementLabel(numericCloud)}
       data-precipitation={measurementLabel(numericPrecipitation)}
@@ -171,7 +175,7 @@ function PosterAccents({ scene, motionOk, sunProgress, cloudCover, precipitation
         </g>
       )}
       {scene === "snow" && snowAccentCount > 0 && (
-        <g data-weather-shape="snow-diamonds" fill="none" stroke="#5B4B8A" strokeWidth="3" strokeLinecap="round" opacity={precipitationAccentOpacity}>
+        <g data-weather-shape="snow-diamonds" fill="none" stroke={heavySnow ? "#E6F0FF" : "#5B4B8A"} strokeWidth="3" strokeLinecap="round" opacity={precipitationAccentOpacity}>
           {["m34 22 8 8-8 8-8-8Z", "m92 64 7 7-7 7-7-7Z", "m266 24 8 8-8 8-8-8Z", "m294 92 6 6-6 6-6-6Z"].slice(0, snowAccentCount).map((path) => <path key={path} fill="none" d={path} />)}
         </g>
       )}
@@ -190,8 +194,9 @@ function PosterAccents({ scene, motionOk, sunProgress, cloudCover, precipitation
 
 // ─── Scene layer wired to the wx* keyframes ─────────────────────
 
-export function SceneLayers({ scene, showFog = false, fogCode = showFog, showBirds, cloudCover, precipitation, wind, windDirection, humidity, visibility, sunProgress, paused = false }: {
+export function SceneLayers({ scene, heavySnow = false, showFog = false, fogCode = showFog, showBirds, cloudCover, precipitation, wind, windDirection, humidity, visibility, sunProgress, paused = false }: {
   scene: WxScene;
+  heavySnow?: boolean;
   showFog?: boolean;
   fogCode?: boolean;
   showBirds: boolean;
@@ -214,7 +219,7 @@ export function SceneLayers({ scene, showFog = false, fogCode = showFog, showBir
   const normalizedHumidity = finiteMeasurement(humidity);
   const normalizedVisibility = finiteMeasurement(visibility);
   const cloudCount = cover <= 0 ? 0 : cover >= (scene === "clear" ? 20 : 50) ? 2 : 1;
-  const cloudTone = scene === "clear" ? "poster" : scene === "night" ? "night" : "day";
+  const cloudTone = heavySnow ? "heavy-snow" : scene === "clear" ? "poster" : scene === "night" ? "night" : "day";
   const frontCloudOpacity = cloudCount > 0 ? (scene === "clear" ? cover * 0.009 : Math.min(0.9, 0.25 + cover * 0.0065)) : 0;
   const backCloudOpacity = cloudCount > 1 ? (scene === "clear" ? Math.max(0, (cover - 20) / 100) * 0.72 : Math.min(0.72, 0.18 + cover * 0.0054)) : 0;
   const driftDuration = numericWind != null && numericWind > 0 ? Math.max(16, 46 - numericWind) : null;
@@ -234,6 +239,7 @@ export function SceneLayers({ scene, showFog = false, fogCode = showFog, showBir
     <div
       data-testid="wx-scene-layers"
       data-scene={scene}
+      data-heavy-snow={heavySnow ? "true" : "false"}
       data-motion={motionOk ? "running" : "paused"}
       data-sun-progress={measurementLabel(sunProgress)}
       data-precipitation={measurementLabel(normalizedPrecipitation)}
@@ -241,7 +247,7 @@ export function SceneLayers({ scene, showFog = false, fogCode = showFog, showBir
       className="absolute inset-0"
       aria-hidden="true"
     >
-      <PosterAccents scene={scene} motionOk={motionOk} sunProgress={finiteMeasurement(sunProgress)} cloudCover={numericCloudCover} precipitation={normalizedPrecipitation} />
+      <PosterAccents scene={scene} heavySnow={heavySnow} motionOk={motionOk} sunProgress={finiteMeasurement(sunProgress)} cloudCover={numericCloudCover} precipitation={normalizedPrecipitation} />
 
       {scene === "night" &&
         Array.from({ length: 18 }).map((_, i) => (
@@ -622,7 +628,7 @@ export function Condition({ code, size = 80 }: { code: ConditionCode; size?: num
       );
     case "snow":
       return (
-        <div className="relative" style={{ width: size, height: size }}>
+        <div data-weather-icon="snow" className="relative" style={{ width: size, height: size }}>
           <Cloud size={size} />
           <div className="absolute inset-x-4 bottom-0 flex justify-between">
             <Flake size={size * 0.2} />

@@ -9,7 +9,7 @@ export function isStormCode(code: number): boolean {
 }
 
 // The family's other school-closing event: heavy, accumulative snow.
-export const HEAVY_SNOW_CODES: Set<number> = new Set([73, 75, 85, 86]);
+export const HEAVY_SNOW_CODES: Set<number> = new Set([73, 75, 86]);
 
 export type SevereKind = "storm" | "snow" | null;
 

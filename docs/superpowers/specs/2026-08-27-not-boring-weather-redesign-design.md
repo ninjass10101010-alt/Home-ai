@@ -8,7 +8,7 @@ Direction: **user-pinned 2026-08-27** — "(Not Boring) Weather's UI language, i
 ## Direction contract (confirmed 2026-08-27)
 
 - **THESIS:** Weather is something you play, not read — one shared timeline drives scene, number, and details. Refuses the category default: icon + big number + five identical day rows.
-- **OWN-WORLD:** (Not Boring) Weather's grammar — huge black-weight numerals, data-true layered scene, timeline scrubber spine, dotted-leader metric rows, minimal chrome — rendered in Consuela's pastel season skins by day (guava/lemon/soft-red/ice keyed to season) and full Not Boring near-black + single-accent after real sunset.
+- **OWN-WORLD:** (Not Boring) Weather's grammar — huge black-weight numerals, data-true layered scene, timeline scrubber spine, dotted-leader metric rows, minimal chrome — rendered with condition-driven poster canvases and season-derived accents/chrome. Clear and other conditions own their factual palette; full Not Boring dark palette remains available after real sunset.
 - **STORY:** A parent glancing at the kitchen tablet sees the day's weather as a living scene, reads the strip for when rain comes, presses the strip to preview any hour, and opens the modal to scrub the whole day and settle the jacket/umbrella question.
 - **FIRST VIEWPORT:** 350px card — data-true scene fills the card behind a huge SF Pro black-weight temperature at center; condition + H/L beneath; bottom fifth is the day strip (temp curve, rain ticks, NOW/3PM/6PM/9PM). Primary action: press the strip to preview, tap the card for the modal.
 - **FORM:** User-pinned direction beats any roll; no concept seed. Single 1×1 bento card + modal, one `renderHour()` path shared by card preview and modal scrubber.
@@ -38,18 +38,14 @@ Success: the family asks the card instead of their phones. Proof is live Open-Me
 - Minimal chrome, rounded metric pills, one accent per state
 
 **Palette — our own, per user direction:**
-- **Day skins (pastel readings of Not Boring skins), auto-keyed to the existing season system:**
-  - Spring — pastel lemon + soft lilac
-  - Summer — pastel guava (soft coral) + peach
-  - Autumn — soft red pastel + warm amber
-  - Winter — pastel ice blue + silver white
-  - Each skin: sky gradient, scene tints, one accent (strip/rain markers/interactive), ink color
+- **Condition canvases:** clear/partly cloudy use the deliberate sky-blue poster canvas; cloudy, rain, normal snow, heavy snow, storm, and night keep their own factual washes. Season supplies accent/chrome treatment and does not replace the condition canvas.
+- **Day accents:** the existing season system still contributes one accent, strip/marker treatment, and ink contrast across the condition canvas.
 - **Night — full Not Boring:** near-black `#0A0A0A` base, white numerals, one condition accent (soft red / amber / cyan), high contrast. Keyed to real sunset via `is_day`.
 - Holiday overlays persist on top of the new scene system.
 
 **Type:** keep the SF Pro stack (brand commitment, no paid fonts). Hero temp: weight 800–900, tight tracking, `tabular-nums` (stable during count-up/scrub). Labels: tracked uppercase for dotted-leader rows.
 
-**Scene system:** layered SVG/CSS replacing static seasonal illustration — sun disc riding a real sun arc, cloud forms whose count/opacity track `cloud_cover`, existing particle system re-driven by real wind (speed → velocity, direction → drift angle) and precip (probability → density), fog layer from humidity, lightning flash for storm codes. Season = skin tint, not a different illustration.
+**Scene system:** layered SVG/CSS replacing static seasonal illustration — sun disc riding a real sun arc, cloud forms whose count/opacity track `cloud_cover`, existing particle system re-driven by real wind (speed → velocity, direction → drift angle) and precip (probability → density), fog layer from humidity, lightning flash for storm codes. Season affects accents and chrome, not the condition-driven canvas.
 
 ## 4. Scope and boundaries
 

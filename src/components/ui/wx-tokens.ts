@@ -21,6 +21,7 @@ export const SKY: Record<string, string> = {
   cloudy: "from-[#dfe4ee] via-[#eef1f6] to-[#d9e6f5]", // pearl grey → powder blue
   rain: "from-[#b9c4d8] via-[#c9d7ea] to-[#d8d3f0]", // slate → lilac
   snow: "from-[#f4f7fb] via-[#e6efff] to-[#efe6fb]", // near-white → lavender
+  heavySnow: "from-[#5d6f8c] via-[#465a78] to-[#354861]",
   storm: "from-[#6a6f96] via-[#5d5b8f] to-[#4d4770]", // deep slate-violet storm wash (white ink stays ≥4.5:1 at every stop)
   night: "from-[#6f74a8] via-[#a29dc9] to-[#e2dbf2]", // lighter dusk wash (slate-800 ink stays ≥4.5:1 at every stop)
 };

@@ -41,6 +41,15 @@ describe("weatherEpisodeDecision", () => {
     expect(r.fire).toBe(false);
     expect(r.nextState.active).toBe(false);
   });
+  it("does not alert for WMO 85 snow showers but alerts for WMO 86 heavy snow", () => {
+    const shower = weatherEpisodeDecision({ code: 85, severeEndISO: null, now, state: CLOSED, tz: "America/Detroit" });
+    const heavy = weatherEpisodeDecision({ code: 86, severeEndISO: null, now, state: CLOSED, tz: "America/Detroit" });
+    expect(shower.fire).toBe(false);
+    expect(shower.nextState).toMatchObject({ active: false, family: null });
+    expect(heavy.fire).toBe(true);
+    expect(heavy.title).toMatch(/Big snow/i);
+  });
+
   it("holds (no fire) during quiet hours and stays unalerted to retry after", () => {
     const quietNow = new Date("2026-01-05T02:00:00-05:00");
     const r = weatherEpisodeDecision({ code: 95, severeEndISO: null, now: quietNow, state: CLOSED, tz: "America/Detroit" });
