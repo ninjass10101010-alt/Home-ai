@@ -680,9 +680,43 @@ describe("POST /api/tasks/approve — action:approve", () => {
     }));
 
     expect(res.status).toBe(503);
-    expect(await res.json()).toMatchObject({ error: "ledger_unavailable" });
+    expect(await res.json()).toMatchObject({ error: "ledger_unavailable", retryable: true });
     expect(snapshotTask(101)?.pendingApproval).toBeTruthy();
     expect(collectionUpdated()).toBeNull();
+  });
+
+  it("marks task-store and member-roster outages as retryable 503s", async () => {
+    const taskStore = makePb();
+    mocks.ensureCurrentTaskWeek.mockRejectedValueOnce(new Error("week store unavailable"));
+    mocks.withAdmin.mockImplementation((fn: any) => fn(taskStore.pb));
+    const storeResponse = await POST(jsonReq({
+      action: "approve",
+      operationId: "op-task-store-retry",
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskId: 101,
+    }));
+    expect(storeResponse.status).toBe(503);
+    expect(await storeResponse.json()).toMatchObject({
+      error: "task_store_unavailable",
+      retryable: true,
+    });
+
+    const roster = makePb();
+    mocks.getLiveMemberById.mockRejectedValueOnce(new Error("roster unavailable"));
+    mocks.withAdmin.mockImplementation((fn: any) => fn(roster.pb));
+    const rosterResponse = await POST(jsonReq({
+      action: "approve",
+      operationId: "op-roster-retry",
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskId: 101,
+    }));
+    expect(rosterResponse.status).toBe(503);
+    expect(await rosterResponse.json()).toMatchObject({
+      error: "member_roster_unavailable",
+      retryable: true,
+    });
   });
 
   it("returns 202 after ledger success when snapshot projection fails and repairs on the same operation", async () => {
@@ -1126,8 +1160,58 @@ describe("POST /api/tasks/approve — action:approve", () => {
     expect(taskWrites()).toBe(0);
   });
 
+  it("accepts a zero crew size as non-crew state for a solo approval", async () => {
+    const soloTask = pendingTaskRow({ crewSize: 0 });
+    const { pb, history, points, collectionUpdated } = makePb({
+      snapshotTasks: [soloTask],
+      collectionTask: { id: "pb-1", taskId: 101, crewSize: 0, pendingApproval: soloTask.pendingApproval, completed: true },
+    });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    const response = await POST(jsonReq({
+      action: "approve",
+      operationId: "op-zero-crew-size",
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskId: 101,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ paid: 1, cleared: 1 });
+    expect(points()["Caspian Garcia"]).toBe(8);
+    expect(history().filter((transaction: any) => transaction.taskId === 101)).toHaveLength(1);
+    expect(collectionUpdated()?.pendingApproval).toBeNull();
+  });
+
+  it("accepts a zero crew size as non-crew state for an open approval", async () => {
+    const openTask = pendingTaskRow({
+      crewSize: 0,
+      universal: true,
+      assignee: "Caspian Garcia",
+      completedBy: "Caspian Garcia",
+    });
+    const { pb, history, points, collectionUpdated } = makePb({
+      snapshotTasks: [openTask],
+      collectionTask: { id: "pb-1", taskId: 101, crewSize: 0, universal: true, pendingApproval: openTask.pendingApproval, completed: true },
+    });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    const response = await POST(jsonReq({
+      action: "approve",
+      operationId: "op-zero-crew-size-open",
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskId: 101,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ paid: 1, cleared: 1 });
+    expect(points()["Caspian Garcia"]).toBe(8);
+    expect(history().filter((transaction: any) => transaction.taskId === 101)).toHaveLength(1);
+    expect(collectionUpdated()?.pendingApproval).toBeNull();
+  });
+
   it.each([
     ["negative crew size", { crewSize: -1 }],
+    ["non-integer crew size", { crewSize: 2.5 }],
     ["solo crew data", { crew: { members: [] } }],
     ["unresolved completedBy", { completedBy: "Unknown Human" }],
     ["crew size below two", { crewSize: 1, crew: { members: [{ name: "Caspian Garcia", emoji: "🧒", joinedAt: "2026-09-19T17:00:00.000Z", checkedInAt: "2026-09-19T17:30:00.000Z" }] } }],
@@ -1140,6 +1224,45 @@ describe("POST /api/tasks/approve — action:approve", () => {
     const response = await POST(jsonReq({
       action: "approve",
       operationId: `op-malformed-${_label.replace(/\s+/g, "-")}`,
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskId: 101,
+    }));
+    expect(response.status).toBe(400);
+    expect(weekWrites()).toBe(0);
+    expect(snapshotWrites()).toBe(0);
+    expect(taskWrites()).toBe(0);
+  });
+
+  it.each([
+    ["unresolved removed name", "Former Human", false],
+    ["ambiguous removed name", "Caspian", true],
+  ])("rejects %s before any write", async (_label, removedName, ambiguousRoster) => {
+    const roster = [
+      { id: "parent-rebecca", name: "Rebecca (Mom)", role: "parent", emoji: "👩" },
+      { id: "child-caspian", name: "Caspian Garcia", role: "child", emoji: "🧒" },
+      { id: "child-aurora", name: "Aurora Garcia", role: "child", emoji: "🌈" },
+    ];
+    if (ambiguousRoster) {
+      roster.push({ id: "child-two", name: "Caspian Johnson", role: "child", emoji: "🧒" });
+    }
+    mocks.getLiveMembers.mockResolvedValue(roster);
+    const crewTask = pendingTaskRow({
+      crewSize: 2,
+      crew: {
+        members: [
+          { name: "Caspian Garcia", emoji: "🧒", joinedAt: "2026-09-19T17:00:00.000Z", checkedInAt: "2026-09-19T17:30:00.000Z" },
+          { name: "Aurora Garcia", emoji: "🌈", joinedAt: "2026-09-19T17:05:00.000Z", checkedInAt: "2026-09-19T17:35:00.000Z" },
+        ],
+        removed: [removedName],
+      },
+      pendingApproval: { byName: "Crew", at: "2026-09-19T18:00:00.000Z", points: 10, crew: ["Caspian Garcia", "Aurora Garcia"] },
+    });
+    const { pb, weekWrites, snapshotWrites, taskWrites } = makePb({ snapshotTasks: [crewTask], collectionTask: null });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    const response = await POST(jsonReq({
+      action: "approve",
+      operationId: `op-invalid-removed-${_label.replace(/\s+/g, "-")}`,
       memberName: "Rebecca (Mom)",
       pin: "0202",
       taskId: 101,
