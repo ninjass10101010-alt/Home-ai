@@ -29,8 +29,11 @@ function makePb() {
   };
 }
 
-const mocks = vi.hoisted(() => ({ withAdmin: vi.fn() }));
+const mocks = vi.hoisted(() => ({ withAdmin: vi.fn(), ensureCurrentTaskWeek: vi.fn() }));
 vi.mock("@/lib/pb-auth", () => ({ withAdmin: (fn: any) => mocks.withAdmin(fn) }));
+vi.mock("@/lib/task-week-rollover", () => ({
+  ensureCurrentTaskWeek: mocks.ensureCurrentTaskWeek,
+}));
 
 import { GET, POST } from "@/app/api/tasks/sync/route";
 
@@ -104,6 +107,8 @@ beforeEach(() => {
   db.creates = [];
   mocks.withAdmin.mockReset();
   mocks.withAdmin.mockImplementation((fn: any) => fn(makePb()));
+  mocks.ensureCurrentTaskWeek.mockReset();
+  mocks.ensureCurrentTaskWeek.mockResolvedValue({});
 });
 
 describe("tasks/sync leg gating", () => {
@@ -175,5 +180,6 @@ describe("tasks/sync leg gating", () => {
     const res = await GET();
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, snapshot: { tasks: [{ id: "t1" }] } });
+    expect(mocks.ensureCurrentTaskWeek).toHaveBeenCalledOnce();
   });
 });

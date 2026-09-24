@@ -32,16 +32,15 @@ import {
   TASKS_STORAGE_KEY, REWARDS_KEY, PENALTIES_KEY,
   todayMondayISO, weekKey, emptyWeekData,
   loadWeekData, saveWeekData, addTransaction,
-  calculateRealStreak, regenerateRecurringTasks,
+  calculateRealStreak,
   getThisWeeksCompletedDates, getThisWeeksCompletedTasks,
   loadTasks, saveTasks, loadRewards, saveRewards,
   loadPenalties, savePenalties,
   readPenaltiesStamp, writePenaltiesStamp,
-  getArchivedWeeks, getMemberAllTimePoints, getMemberAllTimeCompletions,
+  getMemberAllTimePoints, getMemberAllTimeCompletions,
   getPreviousWeekRanks, loadHallOfFame,
   syncAllTasksToPB, syncWeekDataToPB,
-  archiveAndResetWeek, archiveWeekWinner, saveCurrentWeekRanksForNextWeek,
-  archiveWeekIfMissing, loadWeeklyPrizes, saveWeeklyPrizes,
+  loadWeeklyPrizes, saveWeeklyPrizes,
   readWeeklyPrizesStamp, writeWeeklyPrizesStamp,
   pickDefaultClaimMember, isSnatchable, isPendingApproval,
   completesWithoutPin, completesWithPendingApproval,
@@ -237,22 +236,6 @@ function migrateAssigneeNames(tasks: Task[], members: any[]): Task[] {
   });
 }
 
-// Competition-ranked point entries for a week (ties share a rank) — feeds the
-// Hall of Fame winner record and the previous-week rank arrows.
-function rankedEntriesFromWeek(week: WeekData, emojis: Record<string, string>): { name: string; emoji: string; points: number; rank: number }[] {
-  const entries = Object.entries(week.points || {})
-    .map(([name, points]) => ({ name, emoji: emojis[name] || "👤", points: points || 0, rank: 0 }))
-    .filter((e) => e.points > 0)
-    .sort((a, b) => b.points - a.points);
-  let lastPoints = Number.NaN;
-  let lastRank = 0;
-  entries.forEach((e, i) => {
-    if (e.points !== lastPoints) { lastRank = i + 1; lastPoints = e.points; }
-    e.rank = lastRank;
-  });
-  return entries;
-}
-
 function loadFromStorage<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
   try {
@@ -368,36 +351,6 @@ export default function TasksPage() {
 
   useEffect(() => { saveTasks(tasks); }, [tasks]);
   useEffect(() => { saveWeekData(weekData); }, [weekData]);
-
-  const [ranksVersion, setRanksVersion] = useState(0);
-
-  useEffect(() => {
-    if (!mounted) return;
-    const interval = setInterval(() => {
-      const current = weekKey();
-      if (current !== weekData.weekStart) {
-        // Record the finished week BEFORE resetting: archive it, enshrine the
-        // top 3 with their weekly prizes in the Hall of Fame, and keep the
-        // ranks for next week's movement arrows. (archiveAndResetWeek also
-        // persists the archive + the fresh empty week, so the saveWeekData
-        // effect can't clobber it.)
-        const entries = rankedEntriesFromWeek(weekData, memberEmojis);
-        if (entries.length) {
-          archiveWeekWinner(entries, weekData.weekStart, loadWeeklyPrizes());
-          saveCurrentWeekRanksForNextWeek(entries);
-        }
-        archiveAndResetWeek(weekData, current);
-        setWeekData(emptyWeekData(current));
-        setRanksVersion((v) => v + 1);
-        setTasks(prev => {
-          const regenerated = regenerateRecurringTasks(prev);
-          saveTasks(regenerated);
-          return regenerated;
-        });
-      }
-    }, 60000);
-    return () => clearInterval(interval);
-  }, [mounted, weekData, memberEmojis]);
 
   const [filterMember, setFilterMember] = useState("All");
   useEffect(() => {
@@ -520,7 +473,7 @@ export default function TasksPage() {
     if (pbSyncPendingRef.current) return;
     pbSyncPendingRef.current = true;
     const t = setTimeout(() => {
-      syncAllTasksToPB(tasks, weekData, getArchivedWeeks(), [], [], []);
+      void syncAllTasksToPB(tasks, weekData, {}, [], [], []);
       pbSyncPendingRef.current = false;
     }, 5000);
     return () => { clearTimeout(t); pbSyncPendingRef.current = false; };
@@ -625,30 +578,6 @@ export default function TasksPage() {
     window.addEventListener("consuela-data-refreshed", onRefreshed);
     return () => window.removeEventListener("consuela-data-refreshed", onRefreshed);
   }, [restoreFromSnapshot]);
-
-  // Backfill the Hall of Fame + previous-week ranks for weeks that rolled over
-  // while the page was closed (loadWeekData archives them on load, but the
-  // winner/ranks were never recorded on that path). Idempotent: skips weeks
-  // already enshrined.
-  useEffect(() => {
-    if (!mounted) return;
-    const archive = getArchivedWeeks();
-    const weeks = Object.keys(archive).sort();
-    if (!weeks.length) return;
-    const latest = weeks[weeks.length - 1];
-    // Make sure the finished week lands in PB's week_archive (idempotent).
-    // The reload path archives to localStorage only, so without this the
-    // assistant's get_past_weeks never sees weeks that rolled over while the
-    // page was closed. Fire-and-forget: a PB failure must not block the rest.
-    void archiveWeekIfMissing(archive[latest]);
-    if (loadHallOfFame().some((h) => h.weekStart === latest)) return;
-    const entries = rankedEntriesFromWeek(archive[latest], memberEmojis);
-    if (!entries.length) return;
-    archiveWeekWinner(entries, latest, loadWeeklyPrizes());
-    saveCurrentWeekRanksForNextWeek(entries);
-    setRanksVersion((v) => v + 1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mounted]);
 
   const triggerConfetti = useCallback(() => {
     if (typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
@@ -1746,10 +1675,7 @@ export default function TasksPage() {
   const thisWeeksCompleted = getThisWeeksCompletedTasks(tasks);
   const thisWeeksCompletedCount = thisWeeksCompleted.length;
 
-  // Hall of Fame drives the out-of-band 🥇 Weekly Champ badge on the entries.
-  // Re-read when the week or the enshrinement version bumps (rollover path),
-  // mirroring the previousRanks memo below.
-  const hallOfFame = useMemo(() => loadHallOfFame(), [weekData, ranksVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+  const hallOfFame = useMemo(() => loadHallOfFame(), [weekData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const dynamicLeaderboard: LeaderboardEntry[] = useMemo(() => {
     const entries = membersData
@@ -1836,7 +1762,7 @@ export default function TasksPage() {
   const scopedAllTimeEarned = scopedMember
     ? scopedMember.allTimePoints
     : dynamicLeaderboard.reduce((sum, e) => sum + e.allTimePoints, 0);
-  const previousRanks = useMemo(() => getPreviousWeekRanks(), [weekData, ranksVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+  const previousRanks = useMemo(() => getPreviousWeekRanks(), [weekData]); // eslint-disable-line react-hooks/exhaustive-deps
   const sheetEntry = sheetMember ? dynamicLeaderboard.find(e => e.name === sheetMember) : null;
 
   useEffect(() => {

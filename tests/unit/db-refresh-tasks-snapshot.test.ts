@@ -87,6 +87,56 @@ describe("db.refreshCaches tasks/week_data pull", () => {
     expect(loadWeekData().points.Rebecca).toBe(5);
   });
 
+  it("applies the server week as cache data without browser archive or regeneration writes", async () => {
+    const {
+      ARCHIVE_KEY,
+      saveTasks,
+      saveWeekData,
+      todayMondayISO,
+    } = await import("@/lib/task-utils");
+    const currentWeek = todayMondayISO();
+    saveWeekData({
+      weekStart: "2000-01-03",
+      points: { Alex: 5 },
+      streak: {},
+      lastActive: {},
+      history: [],
+    });
+    saveTasks([{
+      id: 1,
+      title: "Dishes",
+      assignee: "Alex",
+      assigneeEmoji: "🦊",
+      due: "2000-01-09",
+      points: 5,
+      recurring: "weekly",
+      category: "kitchen",
+      completed: true,
+      completedInWeek: "2000-01-03",
+      priority: "medium",
+    } as any]);
+    snapshotPayload = {
+      tasks: [],
+      deletedTaskIds: [1],
+      weekData: {
+        weekStart: currentWeek,
+        points: {},
+        streak: {},
+        lastActive: {},
+        history: [],
+      },
+    };
+
+    const db = await loadDb();
+    await db.refreshCaches();
+
+    const { loadTasks, loadWeekData } = await import("@/lib/task-utils");
+    expect(loadTasks()).toEqual([]);
+    expect(loadWeekData().weekStart).toBe(currentWeek);
+    expect(localStorage.getItem(ARCHIVE_KEY)).toBeNull();
+    expect(localStorage.getItem("consuela-regen-week")).toBeNull();
+  });
+
   it("a blocked (401) snapshot read leaves the local stores untouched and never throws", async () => {
     const { saveTasks, saveWeekData, emptyWeekData } = await import("@/lib/task-utils");
     saveTasks([{ id: 1, title: "Dishes", assignee: "Alex", assigneeEmoji: "🦊", due: "2026-09-04", points: 5, recurring: null, category: "kitchen", completed: false, priority: "medium" } as any]);

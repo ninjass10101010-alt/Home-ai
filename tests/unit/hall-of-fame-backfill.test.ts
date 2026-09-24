@@ -10,7 +10,6 @@ vi.mock("@/lib/pb-auth", () => ({
 }));
 
 import { hallEntriesForWeek, ensureArchivedWeeksEnshrined } from "@/lib/hall-of-fame-backfill";
-import { GET as syncGET } from "@/app/api/tasks/sync/route";
 import { DEFAULT_WEEKLY_PRIZES } from "@/lib/task-utils";
 
 // ─── Pure: entry computation ──────────────────────────────────────────────────
@@ -140,33 +139,4 @@ describe("ensureArchivedWeeksEnshrined", () => {
     expect(creates).toHaveLength(0);
   });
 
-  it("GET /api/tasks/sync runs the enshrinement before answering", async () => {
-    const creates: any[] = [];
-    const archive = [{ weekStart: "2026-09-07", points: JSON.stringify({ Aurora: 13 }) }];
-    const hall: any[] = [];
-    const pb = {
-      collection: (name: string) => ({
-        getFullList: async () => {
-          if (name === "consuela_data_snapshots") {
-            return [{ data: JSON.stringify({ tasks: [], weekData: { weekStart: "2026-09-14", points: {}, streak: {}, lastActive: {}, history: [] } }) }];
-          }
-          if (name === "week_archive") return archive;
-          if (name === "hall_of_fame") return hall;
-          if (name === "members") return [{ name: "Aurora", emoji: "🌈" }];
-          if (name === "weekly_prizes") return [{ id: "p1", rank: 1, emoji: "🥇", text: "Picks Friday's family movie" }];
-          return [];
-        },
-        create: async (payload: any) => { creates.push(payload); return payload; },
-      }),
-    };
-    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
-
-    const res = await syncGET();
-    expect(res.status).toBe(200);
-    const body: any = await res.json();
-    expect(body.ok).toBe(true);
-    expect(body.snapshot).toBeTruthy();
-    // The champion was enshrined as a side effect of the 60s sync read.
-    expect(creates.some((c: any) => c.member === "Aurora" && c.rank === 1)).toBe(true);
-  });
 });
