@@ -493,8 +493,12 @@ export default function TasksPage() {
         // overwritten by a stale snapshot on the next restore. The weekly
         // prizes ride the same contract (task-utils stamp key).
         body: JSON.stringify({
-          tasks, weekData, rewards, rewardsUpdatedAt: readRewardsStamp(),
-          penalties, penaltiesUpdatedAt: readPenaltiesStamp(),
+          tasks,
+          weekData,
+          rewards: loadRewards<Reward[]>([]),
+          rewardsUpdatedAt: readRewardsStamp(),
+          penalties: loadPenalties<Penalty[]>([]),
+          penaltiesUpdatedAt: readPenaltiesStamp(),
           weeklyPrizes: loadWeeklyPrizes(), weeklyPrizesStamp: readWeeklyPrizesStamp(),
           // Carry the tombstones so a delete (chat-initiated) is durable across
           // devices — the server also unions them, so a stale push can't drop one.
@@ -508,7 +512,7 @@ export default function TasksPage() {
       syncPendingRef.current = false;
     }, 2000);
     return () => { clearTimeout(t); syncPendingRef.current = false; };
-  }, [tasks, weekData, rewards, penalties, mounted]);
+  }, [tasks, weekData, mounted]);
 
   // Structured PB sync (individual collections)
   useEffect(() => {
@@ -520,7 +524,7 @@ export default function TasksPage() {
       pbSyncPendingRef.current = false;
     }, 5000);
     return () => { clearTimeout(t); pbSyncPendingRef.current = false; };
-  }, [tasks, weekData, rewards, penalties, mounted]);
+  }, [tasks, weekData, mounted]);
 
   // Restore tasks state from PocketBase snapshot on mount (bridges container restarts)
   const restoreAttempted = useRef(false);

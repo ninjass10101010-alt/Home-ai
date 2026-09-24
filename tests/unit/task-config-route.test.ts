@@ -202,7 +202,7 @@ function makeHarness(options?: {
           writes[name].push({ id: null, payload: structuredClone(payload) });
           return { id: `${name}-new`, ...payload };
         }
-        if (shouldFail(name, "create")) throw new Error(`fail:${name}:create`);
+        if (shouldFail(name, "create", String(payload.name))) throw new Error(`fail:${name}:create`);
         const id = `${name}-${++sequence}`;
         writes[name as "rewards" | "penalties" | "weekly_prizes"].create.push({ id, payload: structuredClone(payload) });
         rows[name] = [...(rows[name] ?? []), { id, ...payload }];
@@ -481,10 +481,70 @@ describe("POST /api/tasks/config", () => {
       item: { id: 3, name: "New", emoji: "🎁", cost: 5 },
     });
 
-    expect(response.status).toBe(502);
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: "invalid_current_config",
+      kind: "rewards",
+    });
     expect(harness.writes.snapshot).toHaveLength(0);
     expect(harness.writes.rewards.create).toHaveLength(0);
     expect(harness.writes.rewards.update).toHaveLength(0);
+    expect(harness.writes.rewards.delete).toHaveLength(0);
+  });
+
+  it.each([
+    ["non-array", "broken"],
+    ["duplicate", [
+      { id: 1, name: "Movie", emoji: "🎬", cost: 25 },
+      { id: 2, name: "movie", emoji: "🍿", cost: 50 },
+    ]],
+  ])("replace recovers %s current config from the incoming list", async (_shape, stored) => {
+    const snapshot = defaultSnapshot();
+    snapshot.rewards = stored;
+    const harness = makeHarness({ snapshot, rewards: [{ id: "stale", name: "Stale", emoji: "🗑️", cost: 1 }] });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+
+    const response = await postConfig({
+      operationId: `op-config-replace-recovery-${_shape}`,
+      kind: "rewards",
+      action: "replace",
+      updatedAt: "2026-09-24T10:00:00.000Z",
+      items: [{ name: "Recovered", emoji: "🍿", cost: 15 }],
+    });
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).items).toEqual([
+      { name: "Recovered", emoji: "🍿", cost: 15 },
+    ]);
+    expect(harness.snapshot().rewards).toEqual([
+      { name: "Recovered", emoji: "🍿", cost: 15 },
+    ]);
+    expect(harness.writes.rewards.delete).toEqual([{ id: "stale" }]);
+    expect(harness.writes.rewards.create).toHaveLength(1);
+  });
+
+  it("returns stable invalid_current_config for delete against a non-array current list", async () => {
+    const snapshot = defaultSnapshot();
+    snapshot.rewards = "broken";
+    const harness = makeHarness({ snapshot });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+
+    const response = await postConfig({
+      operationId: "op-config-delete-broken",
+      kind: "rewards",
+      action: "delete",
+      updatedAt: "2026-09-24T10:00:00.000Z",
+      itemId: 1,
+    });
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: "invalid_current_config",
+      kind: "rewards",
+    });
+    expect(harness.writes.snapshot).toHaveLength(0);
     expect(harness.writes.rewards.delete).toHaveLength(0);
   });
 
@@ -620,7 +680,7 @@ describe("POST /api/tasks/config", () => {
     expect(harness.snapshot().operationReceipts).toEqual(defaultSnapshot().operationReceipts);
   });
 
-  it("sanitizes replayed stored config before PB reconciliation", async () => {
+  it("rejects replay through a fingerprintless legacy receipt", async () => {
     const snapshot = defaultSnapshot();
     snapshot.rewards = [{ id: 1, name: "Legacy", emoji: "data:image/webp;base64,private", cost: 25 }];
     snapshot.configOperationReceipts = {
@@ -641,10 +701,87 @@ describe("POST /api/tasks/config", () => {
       item: { id: 1, name: "Legacy", emoji: "🎬", cost: 25 },
     });
 
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: "operation_conflict",
+      operationId: "op-config-legacy-replay",
+    });
+    expect(harness.writes.snapshot).toHaveLength(0);
+    expect(harness.writes.rewards.create).toHaveLength(0);
+    expect(harness.writes.rewards.update).toHaveLength(0);
+    expect(harness.writes.rewards.delete).toHaveLength(0);
+  });
+
+  it("persists sanitized replay config without replay PB writes", async () => {
+    const command = {
+      operationId: "op-config-sanitize-replay",
+      kind: "rewards" as const,
+      action: "upsert" as const,
+      updatedAt: "2026-09-24T10:00:00.000Z",
+      item: { id: 1, name: "Legacy", emoji: "🎬", cost: 25 },
+    };
+    const config = await import(/* @vite-ignore */ configModulePath);
+    const snapshot = defaultSnapshot();
+    snapshot.rewards = [{ id: 1, name: "Legacy", emoji: "data:image/webp;base64,private", cost: 25 }];
+    snapshot.configOperationReceipts = {
+      [command.operationId]: {
+        kind: command.kind,
+        action: command.action,
+        updatedAt: command.updatedAt,
+        fingerprint: config.taskConfigCommandFingerprint(command),
+      },
+    };
+    const harness = makeHarness({
+      snapshot,
+      rewards: [{ id: "movie-row", name: "Legacy", emoji: "👤", cost: 25 }],
+    });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+
+    const response = await postConfig(command);
+
     expect(response.status).toBe(200);
-    expect((await response.json()).items[0].emoji).toBe("👤");
-    expect(harness.writes.rewards.create[0].payload.emoji).toBe("👤");
-    expect(JSON.stringify(harness.writes)).not.toContain("base64");
+    const body = await response.json();
+    expect(body).toMatchObject({ applied: false, revision: { revision: "5" } });
+    expect(body.items[0].emoji).toBe("👤");
+    expect(harness.snapshot().rewards[0].emoji).toBe("👤");
+    expect(harness.writes.snapshot).toHaveLength(1);
+    expect(harness.writes.rewards.create).toHaveLength(0);
+    expect(harness.writes.rewards.update).toHaveLength(0);
+    expect(harness.writes.rewards.delete).toHaveLength(0);
+  });
+
+  it("persists sanitized stale config without PB writes", async () => {
+    const snapshot = defaultSnapshot();
+    snapshot.rewards = [{ id: 1, name: "Legacy", emoji: "data:image/webp;base64,private", cost: 25 }];
+    snapshot.rewardsUpdatedAt = "2026-09-24T11:00:00.000Z";
+    const harness = makeHarness({
+      snapshot,
+      rewards: [{ id: "movie-row", name: "Legacy", emoji: "👤", cost: 25 }],
+    });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+
+    const response = await postConfig({
+      operationId: "op-config-sanitize-stale",
+      kind: "rewards",
+      action: "replace",
+      updatedAt: "2026-09-24T10:00:00.000Z",
+      items: [],
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      applied: false,
+      updatedAt: "2026-09-24T11:00:00.000Z",
+      revision: { revision: "5" },
+    });
+    expect(body.items[0].emoji).toBe("👤");
+    expect(harness.snapshot().rewards[0].emoji).toBe("👤");
+    expect(harness.writes.snapshot).toHaveLength(1);
+    expect(harness.writes.rewards.create).toHaveLength(0);
+    expect(harness.writes.rewards.update).toHaveLength(0);
+    expect(harness.writes.rewards.delete).toHaveLength(0);
   });
 
   it("replays an operation without another snapshot or PB write", async () => {
@@ -855,6 +992,87 @@ describe("POST /api/tasks/config", () => {
     expect(repaired.status).toBe(200);
     expect(harness.attempts.rewards.delete).toBe(2);
     expect(harness.writes.rewards.delete).toHaveLength(1);
+    expect(harness.writes.snapshot).toHaveLength(1);
+  });
+
+  it("resumes a mid-sequence PB create failure on the same operation", async () => {
+    const harness = makeHarness({ failConfigOperation: "create", failConfigRowId: "B" });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+    const command = {
+      operationId: "op-config-mid-create",
+      kind: "rewards" as const,
+      action: "replace" as const,
+      updatedAt: "2026-09-24T10:00:00.000Z",
+      items: [
+        { name: "A", emoji: "🅰️", cost: 1 },
+        { name: "B", emoji: "🅱️", cost: 2 },
+        { name: "C", emoji: "🇨", cost: 3 },
+      ],
+    };
+
+    expect((await postConfig(command)).status).toBe(502);
+    expect(harness.writes.rewards.create.map((entry) => entry.payload.name)).toEqual(["A"]);
+    expect((await postConfig(command)).status).toBe(200);
+    expect(harness.writes.rewards.create.map((entry) => entry.payload.name)).toEqual(["A", "B", "C"]);
+    expect(harness.attempts.rewards.create).toBe(4);
+    expect(harness.writes.snapshot).toHaveLength(1);
+  });
+
+  it("resumes a mid-sequence PB update failure on the same operation", async () => {
+    const harness = makeHarness({
+      rewards: [
+        { id: "row-a", name: "A", emoji: "🅰️", cost: 1 },
+        { id: "row-b", name: "B", emoji: "🅱️", cost: 2 },
+        { id: "row-c", name: "C", emoji: "🇨", cost: 3 },
+      ],
+      failConfigOperation: "update",
+      failConfigRowId: "row-b",
+    });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+    const command = {
+      operationId: "op-config-mid-update",
+      kind: "rewards" as const,
+      action: "replace" as const,
+      updatedAt: "2026-09-24T10:00:00.000Z",
+      items: [
+        { name: "A", emoji: "🍎", cost: 10 },
+        { name: "B", emoji: "🍌", cost: 20 },
+        { name: "C", emoji: "🍇", cost: 30 },
+      ],
+    };
+
+    expect((await postConfig(command)).status).toBe(502);
+    expect(harness.writes.rewards.update.map((entry) => entry.id)).toEqual(["row-a"]);
+    expect((await postConfig(command)).status).toBe(200);
+    expect(harness.writes.rewards.update.map((entry) => entry.id)).toEqual(["row-a", "row-b", "row-c"]);
+    expect(harness.attempts.rewards.update).toBe(4);
+    expect(harness.writes.snapshot).toHaveLength(1);
+  });
+
+  it("resumes a mid-sequence PB delete failure on the same operation", async () => {
+    const harness = makeHarness({
+      rewards: [
+        { id: "row-a", name: "A", emoji: "🅰️", cost: 1 },
+        { id: "row-b", name: "B", emoji: "🅱️", cost: 2 },
+        { id: "row-c", name: "C", emoji: "🇨", cost: 3 },
+      ],
+      failConfigOperation: "delete",
+      failConfigRowId: "row-b",
+    });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+    const command = {
+      operationId: "op-config-mid-delete",
+      kind: "rewards" as const,
+      action: "replace" as const,
+      updatedAt: "2026-09-24T10:00:00.000Z",
+      items: [],
+    };
+
+    expect((await postConfig(command)).status).toBe(502);
+    expect(harness.writes.rewards.delete.map((entry) => entry.id)).toEqual(["row-a"]);
+    expect((await postConfig(command)).status).toBe(200);
+    expect(harness.writes.rewards.delete.map((entry) => entry.id)).toEqual(["row-a", "row-b", "row-c"]);
+    expect(harness.attempts.rewards.delete).toBe(4);
     expect(harness.writes.snapshot).toHaveLength(1);
   });
 
@@ -1079,6 +1297,36 @@ describe("reward action runner", () => {
         action: "upsert",
         item: { name: "Movie", emoji: "🎬", cost: 50 },
       });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("returns failure without success after a reward action network rejection", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError("network unavailable");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const { runAction } = await import(/* @vite-ignore */ "@/lib/action-runner");
+      const result = await runAction({ type: "reward", title: "Movie", detail: "50 pts" });
+      expect(result).toEqual({ success: false, message: "network unavailable" });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("returns failure without success after a reward action 502", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: false,
+      status: 502,
+      json: async () => ({ error: "config_store_unreachable" }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const { runAction } = await import(/* @vite-ignore */ "@/lib/action-runner");
+      const result = await runAction({ type: "reward", title: "Movie", detail: "50 pts" });
+      expect(result).toEqual({ success: false, message: "Couldn't add reward \"Movie\"" });
     } finally {
       vi.unstubAllGlobals();
     }
