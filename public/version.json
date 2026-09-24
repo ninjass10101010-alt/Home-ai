@@ -1,7 +1,7 @@
 {
-  "hash": "bd9094d38b4368ee7e28eaf6f9eed2f2894d22c3",
-  "short": "bd9094d",
-  "message": "fix(tasks,kid,db): unblock kid assigned completions from parent approval",
-  "date": "2026-09-23 17:29:46 -0400",
+  "hash": "59d88fa22a8b8f0959492aaad5b155831809b888",
+  "short": "59d88fa",
+  "message": "test(weather): align feature probe with current DOM",
+  "date": "2026-09-24 18:41:31 -0400",
   "author": "GarciaFam"
 }
