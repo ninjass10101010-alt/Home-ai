@@ -53,7 +53,12 @@ type Harness = {
     penalties: { create: any[]; update: any[]; delete: any[] };
     weekly_prizes: { create: any[]; update: any[]; delete: any[] };
   };
+  attempts: Record<"rewards" | "penalties" | "weekly_prizes", Record<"create" | "update" | "delete", number>>;
   snapshot: () => StoredSnapshot;
+  api: {
+    memberGetOne: ReturnType<typeof vi.fn>;
+    memberGetFirstListItem: ReturnType<typeof vi.fn>;
+  };
 };
 
 const defaultSnapshot = (): StoredSnapshot => ({
@@ -101,6 +106,8 @@ function makeHarness(options?: {
   weeklyPrizes?: any[];
   member?: Record<string, unknown> | null;
   memberError?: any;
+  failConfigOperation?: "create" | "update" | "delete";
+  failConfigRowId?: string;
 }): Harness {
   let snapshot = structuredClone(options?.snapshot ?? defaultSnapshot());
   const rows: Record<string, any[]> = {
@@ -116,7 +123,42 @@ function makeHarness(options?: {
     penalties: { create: [], update: [], delete: [] },
     weekly_prizes: { create: [], update: [], delete: [] },
   };
+  const attempts: Harness["attempts"] = {
+    rewards: { create: 0, update: 0, delete: 0 },
+    penalties: { create: 0, update: 0, delete: 0 },
+    weekly_prizes: { create: 0, update: 0, delete: 0 },
+  };
+  let configFailurePending = Boolean(options?.failConfigOperation);
+  const shouldFail = (
+    name: string,
+    operation: "create" | "update" | "delete",
+    id?: string,
+  ) => {
+    if (name !== "rewards" && name !== "penalties" && name !== "weekly_prizes") return false;
+    attempts[name][operation] += 1;
+    if (
+      configFailurePending &&
+      options?.failConfigOperation === operation &&
+      (!options.failConfigRowId || options.failConfigRowId === id)
+    ) {
+      configFailurePending = false;
+      return true;
+    }
+    return false;
+  };
   let sequence = 0;
+  const memberGetOne = vi.fn(async (id: string, requestOptions?: { requestKey?: string | null }) => {
+    void requestOptions;
+    if (id !== "parent-live") return null;
+    if (options?.memberError) throw options.memberError;
+    if (options?.member === null) {
+      const error = new Error("missing") as Error & { status: number };
+      error.status = 404;
+      throw error;
+    }
+    return options?.member ?? { id: "parent-live", name: "Live Parent", role: "parent" };
+  });
+  const memberGetFirstListItem = vi.fn(async () => null);
 
   const pb = {
     collection: vi.fn((name: string) => ({
@@ -132,18 +174,8 @@ function makeHarness(options?: {
         }
         return structuredClone(rows[name] ?? []);
       }),
-      getFirstListItem: vi.fn(async () => {
-        if (name === "members") {
-          if (options?.memberError) throw options.memberError;
-          if (options?.member === null) {
-            const error = new Error("missing") as Error & { status: number };
-            error.status = 404;
-            throw error;
-          }
-          return options?.member ?? { id: "parent-live", name: "Live Parent", role: "parent" };
-        }
-        return null;
-      }),
+      getOne: memberGetOne,
+      getFirstListItem: memberGetFirstListItem,
       update: vi.fn(async (id: string, payload: Record<string, any>) => {
         if (name === "consuela_data_snapshots") {
           writes.snapshot.push({ id, payload: structuredClone(payload) });
@@ -154,6 +186,7 @@ function makeHarness(options?: {
           writes[name].push({ id, payload: structuredClone(payload) });
           return { id, ...payload };
         }
+        if (shouldFail(name, "update", id)) throw new Error(`fail:${name}:update:${id}`);
         writes[name as "rewards" | "penalties" | "weekly_prizes"].update.push({ id, payload: structuredClone(payload) });
         const row = rows[name]?.find((candidate) => candidate.id === id);
         if (row) Object.assign(row, payload);
@@ -169,6 +202,7 @@ function makeHarness(options?: {
           writes[name].push({ id: null, payload: structuredClone(payload) });
           return { id: `${name}-new`, ...payload };
         }
+        if (shouldFail(name, "create")) throw new Error(`fail:${name}:create`);
         const id = `${name}-${++sequence}`;
         writes[name as "rewards" | "penalties" | "weekly_prizes"].create.push({ id, payload: structuredClone(payload) });
         rows[name] = [...(rows[name] ?? []), { id, ...payload }];
@@ -179,6 +213,7 @@ function makeHarness(options?: {
           writes[name].push({ id, payload: null });
           return true;
         }
+        if (shouldFail(name, "delete", id)) throw new Error(`fail:${name}:delete:${id}`);
         writes[name as "rewards" | "penalties" | "weekly_prizes"].delete.push({ id });
         rows[name] = (rows[name] ?? []).filter((row) => row.id !== id);
         return true;
@@ -186,7 +221,13 @@ function makeHarness(options?: {
     })),
   };
 
-  return { pb, writes, snapshot: () => structuredClone(snapshot) };
+  return {
+    pb,
+    writes,
+    attempts,
+    snapshot: () => structuredClone(snapshot),
+    api: { memberGetOne, memberGetFirstListItem },
+  };
 }
 
 function configRequest(body: unknown, role: "parent" | "child" = "parent"): NextRequest {
@@ -351,6 +392,27 @@ describe("POST /api/tasks/config", () => {
     expect(harness.writes.snapshot).toHaveLength(0);
   });
 
+  it("rejects case-insensitive incoming natural-key collisions before any mutation", async () => {
+    const harness = makeHarness();
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+
+    const response = await postConfig({
+      operationId: "op-config-incoming-collision",
+      kind: "rewards",
+      action: "replace",
+      updatedAt: "2026-09-24T10:00:00.000Z",
+      items: [
+        { name: "Movie", emoji: "🎬", cost: 25 },
+        { name: "movie", emoji: "🍿", cost: 50 },
+      ],
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "invalid_config_command" });
+    expect(harness.writes.snapshot).toHaveLength(0);
+    expect(harness.writes.rewards.create).toHaveLength(0);
+  });
+
   it("reconciles replacement PB rows by stable name and deletes stale rows", async () => {
     const harness = makeHarness({
       rewards: [
@@ -371,13 +433,82 @@ describe("POST /api/tasks/config", () => {
 
     expect(response.status).toBe(200);
     expect(harness.writes.rewards.update).toEqual([
-      { id: "movie-id", payload: { name: "Movie", emoji: "🍿", cost: 50 } },
+      { id: "duplicate-movie", payload: { name: "Movie", emoji: "🍿", cost: 50 } },
     ]);
     expect(harness.writes.rewards.delete.map((entry) => entry.id).sort()).toEqual([
-      "duplicate-movie",
+      "movie-id",
       "old-id",
     ]);
     expect(harness.writes.rewards.create).toHaveLength(0);
+  });
+
+  it("sanitizes current legacy items before writing an upsert result", async () => {
+    const snapshot = defaultSnapshot();
+    snapshot.rewards = [
+      { id: 1, name: "Legacy", emoji: "data:image/webp;base64,private", cost: 25 },
+      { id: 2, name: "Keep", emoji: "🎮", cost: 10 },
+    ];
+    const harness = makeHarness({ snapshot });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+
+    const response = await postConfig({
+      operationId: "op-config-sanitize-current",
+      kind: "rewards",
+      action: "upsert",
+      updatedAt: "2026-09-24T10:00:00.000Z",
+      item: { id: 3, name: "New", emoji: "🎬", cost: 50 },
+    });
+
+    expect(response.status).toBe(200);
+    expect(harness.snapshot().rewards.map((item: any) => item.emoji)).toEqual(["👤", "🎮", "🎬"]);
+    expect(JSON.stringify(harness.snapshot())).not.toContain("base64");
+  });
+
+  it("rejects case-insensitive current natural-key collisions before any mutation", async () => {
+    const snapshot = defaultSnapshot();
+    snapshot.rewards = [
+      { id: 1, name: "Movie", emoji: "🎬", cost: 25 },
+      { id: 2, name: "movie", emoji: "🍿", cost: 50 },
+    ];
+    const harness = makeHarness({ snapshot });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+
+    const response = await postConfig({
+      operationId: "op-config-current-collision",
+      kind: "rewards",
+      action: "upsert",
+      updatedAt: "2026-09-24T10:00:00.000Z",
+      item: { id: 3, name: "New", emoji: "🎁", cost: 5 },
+    });
+
+    expect(response.status).toBe(502);
+    expect(harness.writes.snapshot).toHaveLength(0);
+    expect(harness.writes.rewards.create).toHaveLength(0);
+    expect(harness.writes.rewards.update).toHaveLength(0);
+    expect(harness.writes.rewards.delete).toHaveLength(0);
+  });
+
+  it("retains the lowest PB id for duplicate natural keys regardless of row order", async () => {
+    const harness = makeHarness({
+      rewards: [
+        { id: "z-movie", name: "MOVIE", emoji: "🍿", cost: 50 },
+        { id: "a-movie", name: "Movie", emoji: "🎬", cost: 25 },
+      ],
+    });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+
+    const response = await postConfig({
+      operationId: "op-config-pb-deterministic",
+      kind: "rewards",
+      action: "replace",
+      updatedAt: "2026-09-24T10:00:00.000Z",
+      items: [{ name: "Movie", emoji: "🎬", cost: 25 }],
+    });
+
+    expect(response.status).toBe(200);
+    expect(harness.writes.rewards.update).toEqual([]);
+    expect(harness.writes.rewards.delete).toEqual([{ id: "z-movie" }]);
+    expect(harness.writes.rewards.create).toEqual([]);
   });
 
   it("upserts by stable name, deletes by client id, and compacts weekly ranks", async () => {
@@ -431,17 +562,42 @@ describe("POST /api/tasks/config", () => {
     expect(harness.writes.weekly_prizes.delete).toContainEqual({ id: "pb-p2" });
   });
 
-  it("stores a separate normalized receipt without task receipt data", async () => {
+  it("stores a deterministic command fingerprint independent of object key order", async () => {
+    const config = await import(/* @vite-ignore */ configModulePath);
+    const fingerprint = (config as any).taskConfigCommandFingerprint;
+    expect(typeof fingerprint).toBe("function");
+    if (typeof fingerprint !== "function") return;
+    const left = {
+      operationId: "op-fingerprint",
+      kind: "rewards",
+      action: "replace",
+      updatedAt: "2026-09-24T10:00:00.000Z",
+      items: [{ id: 1, name: "Movie", emoji: "🎬", cost: 50, category: "fun" }],
+    };
+    const right = {
+      items: [{ category: "fun", cost: 50, emoji: "🎬", name: "Movie", id: 1 }],
+      updatedAt: "2026-09-24T10:00:00.000Z",
+      action: "replace",
+      kind: "rewards",
+      operationId: "op-fingerprint",
+    };
+    expect(fingerprint(left)).toBe(fingerprint(right));
+    expect(fingerprint(left)).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("stores a separate normalized receipt with its command fingerprint", async () => {
     const harness = makeHarness();
     mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
-
-    const response = await postConfig({
+    const command = {
       operationId: "  op-config-receipt  ",
-      kind: "penalties",
-      action: "replace",
+      kind: "penalties" as const,
+      action: "replace" as const,
       updatedAt: "2026-09-24T12:00:00+02:00",
       items: [{ name: "Messy room", emoji: "⚠️", points: 5 }],
-    });
+    };
+
+    const response = await postConfig(command);
+    const config = await import(/* @vite-ignore */ configModulePath);
 
     expect(response.status).toBe(200);
     const body = await response.json();
@@ -452,6 +608,13 @@ describe("POST /api/tasks/config", () => {
         kind: "penalties",
         action: "replace",
         updatedAt: "2026-09-24T10:00:00.000Z",
+        fingerprint: (config as any).taskConfigCommandFingerprint({
+          operationId: "op-config-receipt",
+          kind: "penalties",
+          action: "replace",
+          updatedAt: "2026-09-24T10:00:00.000Z",
+          items: command.items,
+        }),
       },
     });
     expect(harness.snapshot().operationReceipts).toEqual(defaultSnapshot().operationReceipts);
@@ -511,6 +674,190 @@ describe("POST /api/tasks/config", () => {
     expect(harness.writes.rewards.update).toHaveLength(writesAfterFirst.update);
   });
 
+  it.each([
+    ["kind", {
+      operationId: "op-config-conflict",
+      kind: "penalties",
+      action: "replace",
+      updatedAt: "2026-09-24T10:00:00.000Z",
+      items: [{ name: "Mess", emoji: "⚠️", points: 5 }],
+    }],
+    ["action", {
+      operationId: "op-config-conflict",
+      kind: "rewards",
+      action: "upsert",
+      updatedAt: "2026-09-24T10:00:00.000Z",
+      item: { id: 1, name: "Movie", emoji: "🎬", cost: 50 },
+    }],
+    ["timestamp", {
+      operationId: "op-config-conflict",
+      kind: "rewards",
+      action: "replace",
+      updatedAt: "2026-09-24T10:00:01.000Z",
+      items: [{ name: "Movie", emoji: "🎬", cost: 50 }],
+    }],
+    ["payload", {
+      operationId: "op-config-conflict",
+      kind: "rewards",
+      action: "replace",
+      updatedAt: "2026-09-24T10:00:00.000Z",
+      items: [{ name: "Movie", emoji: "🎬", cost: 75 }],
+    }],
+  ])("returns a stable conflict when an operationId is reused with a different %s", async (_field, mismatch) => {
+    const harness = makeHarness();
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+    const original = {
+      operationId: "op-config-conflict",
+      kind: "rewards" as const,
+      action: "replace" as const,
+      updatedAt: "2026-09-24T10:00:00.000Z",
+      items: [{ name: "Movie", emoji: "🎬", cost: 50 }],
+    };
+    expect((await postConfig(original)).status).toBe(200);
+    const writes = {
+      snapshot: harness.writes.snapshot.length,
+      create: harness.writes.rewards.create.length,
+      update: harness.writes.rewards.update.length,
+    };
+
+    const first = await postConfig(mismatch);
+    const second = await postConfig(mismatch);
+
+    expect(first.status).toBe(409);
+    const firstBody = await first.json();
+    expect(firstBody).toEqual({
+      success: false,
+      error: "operation_conflict",
+      operationId: "op-config-conflict",
+    });
+    expect(second.status).toBe(409);
+    expect(await second.json()).toEqual(firstBody);
+    expect(harness.writes.snapshot).toHaveLength(writes.snapshot);
+    expect(harness.writes.rewards.create).toHaveLength(writes.create);
+    expect(harness.writes.rewards.update).toHaveLength(writes.update);
+  });
+
+  it("bounds config receipts by exported count and age while retaining newest operations", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-24T10:00:00.000Z"));
+    try {
+      const config = await import(/* @vite-ignore */ configModulePath);
+      expect(config.TASK_CONFIG_RECEIPT_MAX_COUNT).toBe(256);
+      expect(config.TASK_CONFIG_RECEIPT_MAX_AGE_MS).toBe(30 * 24 * 60 * 60 * 1000);
+      const now = Date.now();
+      const receipts: Record<string, any> = {};
+      for (let index = 0; index < config.TASK_CONFIG_RECEIPT_MAX_COUNT + 14; index += 1) {
+        receipts[`recent-${index}`] = {
+          kind: "rewards",
+          action: "replace",
+          updatedAt: new Date(now - (config.TASK_CONFIG_RECEIPT_MAX_COUNT + 13 - index) * 1000).toISOString(),
+          fingerprint: "a".repeat(64),
+        };
+      }
+      receipts["too-old"] = {
+        kind: "rewards",
+        action: "replace",
+        updatedAt: new Date(now - config.TASK_CONFIG_RECEIPT_MAX_AGE_MS - 1).toISOString(),
+        fingerprint: "b".repeat(64),
+      };
+      const snapshot = defaultSnapshot();
+      snapshot.configOperationReceipts = receipts;
+      const harness = makeHarness({ snapshot });
+      mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+
+      const response = await postConfig({
+        operationId: "newest-config",
+        kind: "rewards",
+        action: "replace",
+        updatedAt: "2026-09-24T10:00:00.000Z",
+        items: [{ name: "Movie", emoji: "🎬", cost: 50 }],
+      });
+
+      expect(response.status).toBe(200);
+      const stored = harness.snapshot().configOperationReceipts;
+      expect(Object.keys(stored)).toHaveLength(config.TASK_CONFIG_RECEIPT_MAX_COUNT);
+      expect(stored["newest-config"]).toBeTruthy();
+      expect(stored[`recent-${config.TASK_CONFIG_RECEIPT_MAX_COUNT + 13}`]).toBeTruthy();
+      expect(stored["recent-13"]).toBeUndefined();
+      expect(stored["too-old"]).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("repairs a failed PB create with the same operation", async () => {
+    const harness = makeHarness({ failConfigOperation: "create" });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+    const command = {
+      operationId: "op-config-create-repair",
+      kind: "rewards" as const,
+      action: "replace" as const,
+      updatedAt: "2026-09-24T10:00:00.000Z",
+      items: [{ name: "Movie", emoji: "🎬", cost: 50 }],
+    };
+
+    const failed = await postConfig(command);
+    const repaired = await postConfig(command);
+
+    expect(failed.status).toBe(502);
+    expect(repaired.status).toBe(200);
+    expect(harness.attempts.rewards.create).toBe(2);
+    expect(harness.writes.rewards.create).toHaveLength(1);
+    expect(harness.writes.snapshot).toHaveLength(1);
+    expect(harness.writes.tasks).toHaveLength(0);
+    expect(harness.writes.week_data).toHaveLength(0);
+  });
+
+  it("repairs a failed PB update with the same operation", async () => {
+    const harness = makeHarness({
+      rewards: [{ id: "movie-row", name: "Movie", emoji: "🎬", cost: 25 }],
+      failConfigOperation: "update",
+      failConfigRowId: "movie-row",
+    });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+    const command = {
+      operationId: "op-config-update-repair",
+      kind: "rewards" as const,
+      action: "replace" as const,
+      updatedAt: "2026-09-24T10:00:00.000Z",
+      items: [{ name: "Movie", emoji: "🍿", cost: 50 }],
+    };
+
+    const failed = await postConfig(command);
+    const repaired = await postConfig(command);
+
+    expect(failed.status).toBe(502);
+    expect(repaired.status).toBe(200);
+    expect(harness.attempts.rewards.update).toBe(2);
+    expect(harness.writes.rewards.update).toHaveLength(1);
+    expect(harness.writes.snapshot).toHaveLength(1);
+  });
+
+  it("repairs a failed PB delete with the same operation", async () => {
+    const harness = makeHarness({
+      rewards: [{ id: "stale-row", name: "Stale", emoji: "🗑️", cost: 5 }],
+      failConfigOperation: "delete",
+      failConfigRowId: "stale-row",
+    });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+    const command = {
+      operationId: "op-config-delete-repair",
+      kind: "rewards" as const,
+      action: "replace" as const,
+      updatedAt: "2026-09-24T10:00:00.000Z",
+      items: [],
+    };
+
+    const failed = await postConfig(command);
+    const repaired = await postConfig(command);
+
+    expect(failed.status).toBe(502);
+    expect(repaired.status).toBe(200);
+    expect(harness.attempts.rewards.delete).toBe(2);
+    expect(harness.writes.rewards.delete).toHaveLength(1);
+    expect(harness.writes.snapshot).toHaveLength(1);
+  });
+
   it("sanitizes config emoji before snapshot and PB writes", async () => {
     const harness = makeHarness();
     mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
@@ -549,6 +896,62 @@ describe("POST /api/tasks/config", () => {
       "release:task-config:rewards",
     ]);
     expect(mocks.lockOrder.some((entry) => entry.includes("week-ledger"))).toBe(false);
+  });
+
+  it("accepts the exact future-skew boundary and rejects one millisecond beyond it", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-24T10:00:00.000Z"));
+    try {
+      const config = await import(/* @vite-ignore */ configModulePath);
+      expect(config.TASK_CONFIG_MAX_FUTURE_SKEW_MS).toBe(5 * 60 * 1000);
+      const base = {
+        operationId: "op-config-skew",
+        kind: "rewards",
+        action: "replace",
+        items: [],
+      };
+      expect(config.parseTaskConfigCommand({
+        ...base,
+        updatedAt: "2026-09-24T10:05:00.000Z",
+      }, (emoji: string) => emoji)).toMatchObject({ updatedAt: "2026-09-24T10:05:00.000Z" });
+      expect(config.parseTaskConfigCommand({
+        ...base,
+        updatedAt: "2026-09-24T10:05:00.001Z",
+      }, (emoji: string) => emoji)).toEqual({ error: "invalid_config_command" });
+
+      const exact = makeHarness();
+      mocks.withAdmin.mockImplementation((fn: any) => fn(exact.pb));
+      const accepted = await postConfig({ ...base, updatedAt: "2026-09-24T10:05:00.000Z" });
+      expect(accepted.status).toBe(200);
+
+      const beyond = makeHarness();
+      mocks.withAdmin.mockImplementation((fn: any) => fn(beyond.pb));
+      const rejected = await postConfig({ ...base, updatedAt: "2026-09-24T10:05:00.001Z" });
+      expect(rejected.status).toBe(400);
+      expect(await rejected.json()).toEqual({ error: "invalid_config_command" });
+      expect(beyond.writes.snapshot).toHaveLength(0);
+      expect(beyond.writes.rewards.create).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects a year-9999 stamp before any mutation", async () => {
+    const harness = makeHarness();
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+
+    const response = await postConfig({
+      operationId: "op-config-year-9999",
+      kind: "rewards",
+      action: "replace",
+      updatedAt: "9999-12-31T23:59:59.999Z",
+      items: [{ name: "Movie", emoji: "🎬", cost: 50 }],
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "invalid_config_command" });
+    expect(harness.writes.snapshot).toHaveLength(0);
+    expect(harness.writes.rewards.create).toHaveLength(0);
   });
 
   it("normalizes the command and rejects action-shape errors", async () => {
@@ -592,6 +995,8 @@ describe("verifyLiveParentSession", () => {
       ok: true,
       member: { id: "parent-live", name: "Live", role: "parent" },
     });
+    expect(harness.api.memberGetOne).toHaveBeenCalledWith("parent-live", { requestKey: null });
+    expect(harness.api.memberGetFirstListItem).not.toHaveBeenCalled();
   });
 
   it("fails closed when the signed member is missing from PB", async () => {
@@ -605,6 +1010,8 @@ describe("verifyLiveParentSession", () => {
     );
 
     expect(result).toEqual({ ok: false, status: 401, reason: "member_missing" });
+    expect(harness.api.memberGetOne).toHaveBeenCalledWith("parent-live", { requestKey: null });
+    expect(harness.api.memberGetFirstListItem).not.toHaveBeenCalled();
   });
 
   it("returns 503 when live PB verification is unavailable", async () => {
@@ -618,6 +1025,22 @@ describe("verifyLiveParentSession", () => {
     );
 
     expect(result).toEqual({ ok: false, status: 503, reason: "member_lookup_failed" });
+    expect(harness.api.memberGetOne).toHaveBeenCalledWith("parent-live", { requestKey: null });
+    expect(harness.api.memberGetFirstListItem).not.toHaveBeenCalled();
+  });
+
+  it("rejects a signed parent after live PB demotion", async () => {
+    mocks.verifySession.mockResolvedValue({ memberId: "parent-live", name: "Signed", role: "parent" });
+    const harness = makeHarness({ member: { id: "parent-live", name: "Live", role: "child" } });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+    const liveMember = await vi.importActual<typeof import("@/lib/live-member")>(liveMemberModulePath);
+
+    const result = await liveMember.verifyLiveParentSession(
+      configRequest({}, "parent"),
+    );
+
+    expect(result).toEqual({ ok: false, status: 403, reason: "adult_only" });
+    expect(harness.api.memberGetOne).toHaveBeenCalledWith("parent-live", { requestKey: null });
   });
 });
 

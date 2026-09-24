@@ -5,7 +5,10 @@ import { parseCanonicalTransactions, recomputeWeekPoints } from "@/lib/task-ledg
 import { normalizeOperationId, normalizeTimestamp } from "@/lib/task-operation-contract";
 import {
   applyTaskConfigCommand,
+  taskConfigCommandFingerprint,
   TASK_CONFIG_ACTIONS,
+  TASK_CONFIG_RECEIPT_MAX_AGE_MS,
+  TASK_CONFIG_RECEIPT_MAX_COUNT,
   TASK_CONFIG_DATA_KEYS,
   TASK_CONFIG_KINDS,
   TASK_CONFIG_STAMP_KEYS,
@@ -57,6 +60,7 @@ export interface SnapshotConfigOperationReceipt {
   kind: TaskConfigKind;
   action: "replace" | "upsert" | "delete";
   updatedAt: string;
+  fingerprint?: string;
 }
 
 export interface SnapshotConfigMutationResult {
@@ -66,6 +70,7 @@ export interface SnapshotConfigMutationResult {
   applied: boolean;
   duplicate: boolean;
   stale: boolean;
+  conflict: boolean;
 }
 
 export interface SnapshotProjectionRepair {
@@ -361,10 +366,13 @@ export function getSnapshotOperationReceipts(
 
 function sanitizeConfigOperationReceipts(
   value: unknown,
+  now = Date.now(),
 ): Record<string, SnapshotConfigOperationReceipt> {
   const parsed = parseJSON<unknown>(value, {});
-  const receipts = Object.create(null) as Record<string, SnapshotConfigOperationReceipt>;
-  if (!isObjectRecord(parsed)) return receipts;
+  const retained: Array<[string, SnapshotConfigOperationReceipt]> = [];
+  if (!isObjectRecord(parsed)) {
+    return Object.create(null) as Record<string, SnapshotConfigOperationReceipt>;
+  }
 
   for (const [storedId, candidate] of Object.entries(parsed)) {
     const operationId = normalizeOperationId(storedId);
@@ -376,8 +384,30 @@ function sanitizeConfigOperationReceipts(
       ? candidate.action as SnapshotConfigOperationReceipt["action"]
       : null;
     const updatedAt = normalizeTimestamp(candidate.updatedAt);
-    if (!kind || !action || !updatedAt) continue;
-    receipts[operationId] = { kind, action, updatedAt };
+    if (
+      !kind ||
+      !action ||
+      !updatedAt ||
+      Date.parse(updatedAt) < now - TASK_CONFIG_RECEIPT_MAX_AGE_MS
+    ) continue;
+    const fingerprint = typeof candidate.fingerprint === "string" && /^[a-f0-9]{64}$/.test(candidate.fingerprint)
+      ? candidate.fingerprint
+      : undefined;
+    retained.push([operationId, {
+      kind,
+      action,
+      updatedAt,
+      ...(fingerprint ? { fingerprint } : {}),
+    }]);
+  }
+
+  retained.sort((left, right) => (
+    right[1].updatedAt.localeCompare(left[1].updatedAt) ||
+    left[0].localeCompare(right[0])
+  ));
+  const receipts = Object.create(null) as Record<string, SnapshotConfigOperationReceipt>;
+  for (const [operationId, receipt] of retained.slice(0, TASK_CONFIG_RECEIPT_MAX_COUNT)) {
+    receipts[operationId] = receipt;
   }
   return receipts;
 }
@@ -573,9 +603,15 @@ export async function mirrorTaskToCollection(
 
 export type AdminPB = ReturnType<typeof import("@/lib/pb").getAdminPB>;
 
+export type SnapshotConfigItemsSanitizer = (
+  kind: TaskConfigKind,
+  value: unknown,
+) => TaskConfigItem[] | null;
+
 export async function mutateSnapshotConfig(
   command: TaskConfigCommand,
   pb: AdminPB,
+  sanitizeItems: SnapshotConfigItemsSanitizer,
 ): Promise<SnapshotConfigMutationResult> {
   return withKeyedLock(`snapshot:${SNAPSHOT_KEY}`, async () => {
     const rows = await pb.collection(SNAPSHOT_COLLECTION).getFullList({
@@ -586,22 +622,31 @@ export async function mutateSnapshotConfig(
     const current = parseSnapshotData(row?.data);
     const dataKey = TASK_CONFIG_DATA_KEYS[command.kind];
     const stampKey = TASK_CONFIG_STAMP_KEYS[command.kind];
-    const currentItems = Array.isArray(current[dataKey])
-      ? current[dataKey] as TaskConfigItem[]
-      : [];
+    const storedItems = current[dataKey];
+    if (storedItems !== undefined && !Array.isArray(storedItems)) {
+      throw new TypeError("invalid_stored_config");
+    }
+    const currentItems = sanitizeItems(command.kind, storedItems ?? []);
+    if (!currentItems) throw new TypeError("invalid_stored_config");
     const revision = decimalRevision(current.revision);
     const revisionUpdatedAt = rowUpdatedAt(row, current);
     const currentStamp = normalizeTimestamp(current[stampKey]) ?? "";
+    const fingerprint = taskConfigCommandFingerprint(command);
     const receipt = sanitizeConfigOperationReceipts(current.configOperationReceipts)[command.operationId];
 
     if (receipt) {
+      const matches = receipt.kind === command.kind &&
+        receipt.action === command.action &&
+        receipt.updatedAt === command.updatedAt &&
+        (!receipt.fingerprint || receipt.fingerprint === fingerprint);
       return {
         items: currentItems,
         updatedAt: currentStamp || receipt.updatedAt,
         revision: { revision, updatedAt: revisionUpdatedAt },
         applied: false,
-        duplicate: true,
+        duplicate: matches,
         stale: false,
+        conflict: !matches,
       };
     }
 
@@ -613,16 +658,21 @@ export async function mutateSnapshotConfig(
         applied: false,
         duplicate: false,
         stale: true,
+        conflict: false,
       };
     }
 
-    const items = applyTaskConfigCommand(currentItems, command);
-    const configOperationReceipts = sanitizeConfigOperationReceipts(current.configOperationReceipts);
-    configOperationReceipts[command.operationId] = {
-      kind: command.kind,
-      action: command.action,
-      updatedAt: command.updatedAt,
-    };
+    const items = sanitizeItems(command.kind, applyTaskConfigCommand(currentItems, command));
+    if (!items) throw new TypeError("invalid_resulting_config");
+    const configOperationReceipts = sanitizeConfigOperationReceipts({
+      ...sanitizeConfigOperationReceipts(current.configOperationReceipts),
+      [command.operationId]: {
+        kind: command.kind,
+        action: command.action,
+        updatedAt: command.updatedAt,
+        fingerprint,
+      },
+    });
     const updatedRevision = nextRevision(revision);
     const updatedAt = new Date().toISOString();
     const payload = {
@@ -648,6 +698,7 @@ export async function mutateSnapshotConfig(
       applied: true,
       duplicate: false,
       stale: false,
+      conflict: false,
     };
   });
 }

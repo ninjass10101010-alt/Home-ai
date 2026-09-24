@@ -41,7 +41,7 @@ export async function getLiveMemberById(id: string): Promise<LiveMember | null> 
   if (!memberId) return null;
   return withAdmin(async (pb) => {
     try {
-      const row = await pb.collection("members").getFirstListItem(memberId, { requestKey: null });
+      const row = await pb.collection("members").getOne(memberId, { requestKey: null });
       return sanitizeLiveMember(row);
     } catch (error: any) {
       if (error?.status === 404 || error?.response?.status === 404) return null;

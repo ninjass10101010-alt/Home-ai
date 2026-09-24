@@ -13,7 +13,30 @@ const COLLECTION = "consuela_data_snapshots";
 // pet session may sync the tasks leg only; the rest are ignored (never merged)
 // and reported honestly in the response (F2) — the weekly prize legs are
 // parent-owned the same way and are not applied from non-parent posts.
-const NON_PARENT_IGNORED_LEGS = ["weekData", "rewards", "penalties", "weeklyPrizes", "weeklyPrizesStamp"];
+const NON_PARENT_IGNORED_LEGS = [
+  "weekData",
+  "rewards",
+  "rewardsUpdatedAt",
+  "penalties",
+  "penaltiesUpdatedAt",
+  "weeklyPrizes",
+  "weeklyPrizesStamp",
+  "configOperationReceipts",
+  "revision",
+  "operationReceipts",
+  "pendingProjectionRepairs",
+  "taskWeekStart",
+];
+const SERVER_OWNED_SNAPSHOT_KEYS = NON_PARENT_IGNORED_LEGS.filter((key) => key !== "weekData");
+
+function preserveServerOwnedSnapshotData(stored: Record<string, any>, data: Record<string, any>) {
+  const next = { ...data };
+  for (const key of SERVER_OWNED_SNAPSHOT_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(stored, key)) next[key] = stored[key];
+    else delete next[key];
+  }
+  return next;
+}
 
 export async function GET() {
   try {
@@ -117,11 +140,12 @@ export async function POST(req: NextRequest) {
         // The tasks leg is the push's own list, pending-guarded above; every
         // other key passes through verbatim — no spurious keys on the common
         // path.
-        const data = isParent
+        const candidateData = isParent
           ? unionDeleted.length
             ? { ...body, tasks: protectedTasks, deletedTaskIds: unionDeleted }
             : { ...body, tasks: protectedTasks }
           : { ...stored, tasks: protectedTasks };
+        const data = preserveServerOwnedSnapshotData(stored, candidateData);
         const payload = {
           key: KEY,
           data,

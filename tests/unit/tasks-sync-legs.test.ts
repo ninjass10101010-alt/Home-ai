@@ -54,16 +54,47 @@ const POISONED = {
   rewards: [{ id: "evil-reward" }],
   penalties: [{ id: "evil-penalty" }],
   rewardsUpdatedAt: "2026-09-15T00:00:00.000Z",
+  penaltiesUpdatedAt: "2026-09-15T00:00:00.000Z",
   weeklyPrizes: [{ rank: 1, emoji: "🥇", text: "evil prize" }],
   weeklyPrizesStamp: "2026-09-15T00:00:00.000Z",
+  revision: "999",
+  operationReceipts: { evil: [] },
+  configOperationReceipts: { evil: {} },
+  pendingProjectionRepairs: [{ operationId: "evil", taskIds: [1], createdAt: "2026-09-15T00:00:00.000Z" }],
 };
 
 const EXISTING = {
   tasks: [{ id: "old" }],
   weekData: { weekStart: "2026-09-14", points: 5, history: [] },
   rewards: [{ id: "good-reward" }],
+  rewardsUpdatedAt: "2026-09-24T10:00:00.000Z",
   penalties: [{ id: "good-penalty" }],
-  rewardsUpdatedAt: "old-stamp",
+  penaltiesUpdatedAt: "2026-09-24T10:00:00.000Z",
+  weeklyPrizes: [{ id: "p1", rank: 1, emoji: "🥇", text: "good prize" }],
+  weeklyPrizesStamp: "2026-09-24T10:00:00.000Z",
+  revision: "17",
+  operationReceipts: {
+    canonical: [{
+      operationId: "canonical",
+      action: "approve",
+      taskId: 1,
+      createdAt: "2026-09-24T09:00:00.000Z",
+    }],
+  },
+  configOperationReceipts: {
+    canonical: {
+      kind: "rewards",
+      action: "replace",
+      updatedAt: "2026-09-24T09:00:00.000Z",
+      fingerprint: "a".repeat(64),
+    },
+  },
+  pendingProjectionRepairs: [{
+    operationId: "canonical-repair",
+    taskIds: [2],
+    createdAt: "2026-09-24T09:00:00.000Z",
+  }],
+  taskWeekStart: "2026-09-21",
 };
 
 beforeEach(() => {
@@ -83,7 +114,7 @@ describe("tasks/sync leg gating", () => {
     expect(await res.json()).toEqual({
       ok: true,
       saved: true,
-      ignoredLegs: ["weekData", "rewards", "penalties", "weeklyPrizes", "weeklyPrizesStamp"],
+      ignoredLegs: ["weekData", "rewards", "rewardsUpdatedAt", "penalties", "penaltiesUpdatedAt", "weeklyPrizes", "weeklyPrizesStamp", "configOperationReceipts", "revision", "operationReceipts", "pendingProjectionRepairs", "taskWeekStart"],
     });
 
     expect(db.updates).toHaveLength(1);
@@ -95,8 +126,13 @@ describe("tasks/sync leg gating", () => {
     expect(stored.penalties).toEqual(EXISTING.penalties);
     expect(stored.rewardsUpdatedAt).toBe(EXISTING.rewardsUpdatedAt);
     // Weekly prize legs are not applied from a non-parent body either.
-    expect(stored.weeklyPrizes).toBeUndefined();
-    expect(stored.weeklyPrizesStamp).toBeUndefined();
+    expect(stored.weeklyPrizes).toEqual(EXISTING.weeklyPrizes);
+    expect(stored.weeklyPrizesStamp).toBe(EXISTING.weeklyPrizesStamp);
+    expect(stored.revision).toBe(EXISTING.revision);
+    expect(stored.operationReceipts).toEqual(EXISTING.operationReceipts);
+    expect(stored.configOperationReceipts).toEqual(EXISTING.configOperationReceipts);
+    expect(stored.pendingProjectionRepairs).toEqual(EXISTING.pendingProjectionRepairs);
+    expect(stored.taskWeekStart).toBe(EXISTING.taskWeekStart);
   });
 
   it("pet POST with no prior snapshot stores the tasks leg only", async () => {
@@ -105,20 +141,26 @@ describe("tasks/sync leg gating", () => {
     expect(await res.json()).toEqual({
       ok: true,
       saved: true,
-      ignoredLegs: ["weekData", "rewards", "penalties", "weeklyPrizes", "weeklyPrizesStamp"],
+      ignoredLegs: ["weekData", "rewards", "rewardsUpdatedAt", "penalties", "penaltiesUpdatedAt", "weeklyPrizes", "weeklyPrizesStamp", "configOperationReceipts", "revision", "operationReceipts", "pendingProjectionRepairs", "taskWeekStart"],
     });
     expect(db.creates).toHaveLength(1);
     // Non-tasks legs — including weekly prizes — are never written.
     expect(db.creates[0].data).toEqual({ tasks: POISONED.tasks });
   });
 
-  it("parent POST is byte-identical: full body stored verbatim, response unchanged", async () => {
+  it("stale signed-parent POST cannot overwrite canonical config or server metadata", async () => {
     db.rows = [{ id: "row1", data: EXISTING }];
     const res = await post(POISONED, "parent");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, saved: true });
     expect(db.updates).toHaveLength(1);
-    expect(db.updates[0].payload.data).toEqual(POISONED);
+    const stored = db.updates[0].payload.data;
+    expect(stored).toEqual({
+      ...POISONED,
+      ...EXISTING,
+      weekData: POISONED.weekData,
+      tasks: POISONED.tasks,
+    });
   });
 
   it("guest POST → 401 unauthorized, PB untouched", async () => {

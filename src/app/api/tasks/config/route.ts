@@ -17,6 +17,10 @@ import {
 
 export const dynamic = "force-dynamic";
 
+type ConfigRouteOutcome =
+  | { response: TaskConfigResponse }
+  | { conflict: true; operationId: string };
+
 function configKey(kind: TaskConfigKind, item: TaskConfigItem): string {
   if (kind === "weekly-prizes") {
     return `rank:${(item as Extract<TaskConfigItem, { rank: 1 | 2 | 3 }>).rank}`;
@@ -52,7 +56,12 @@ async function reconcileConfigCollection(
       ? "penalties"
       : "rewards";
   const collection = pb.collection(collectionName);
-  const existing = await collection.getFullList({ requestKey: null }) as Record<string, unknown>[];
+  const existingRows = await collection.getFullList({ requestKey: null }) as Record<string, unknown>[];
+  const existing = existingRows.sort((left, right) => (
+    configKey(kind, left as unknown as TaskConfigItem).localeCompare(
+      configKey(kind, right as unknown as TaskConfigItem),
+    ) || String(left.id).localeCompare(String(right.id))
+  ));
   const incoming = new Map(items.map((item) => [configKey(kind, item), item]));
   const retained = new Set<string>();
 
@@ -95,27 +104,39 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const response = await withAdmin(async (pb) =>
+    const outcome = await withAdmin(async (pb): Promise<ConfigRouteOutcome> =>
       withKeyedLock(`task-config:${command.kind}`, async () => {
-        const mutation = await mutateSnapshotConfig(command, pb);
-        const items = sanitizeTaskConfigItems(command.kind, mutation.items, textEmoji);
-        if (!items) throw new TypeError("invalid_stored_config");
+        const mutation = await mutateSnapshotConfig(
+          command,
+          pb,
+          (kind, value) => sanitizeTaskConfigItems(kind, value, textEmoji),
+        );
+        if (mutation.conflict) {
+          return { conflict: true, operationId: command.operationId };
+        }
         if (!mutation.stale) {
-          await reconcileConfigCollection(pb, command.kind, items);
+          await reconcileConfigCollection(pb, command.kind, mutation.items);
         }
         const bodyResponse: TaskConfigResponse = {
           success: true,
           operationId: command.operationId,
           kind: command.kind,
-          items,
+          items: mutation.items,
           updatedAt: mutation.updatedAt,
           revision: mutation.revision,
           applied: mutation.applied,
         };
-        return bodyResponse;
+        return { response: bodyResponse };
       })
     );
-    return NextResponse.json(response);
+    if ("conflict" in outcome) {
+      return NextResponse.json({
+        success: false,
+        error: "operation_conflict",
+        operationId: outcome.operationId,
+      }, { status: 409 });
+    }
+    return NextResponse.json(outcome.response);
   } catch {
     return NextResponse.json({ error: "config_store_unreachable" }, { status: 502 });
   }

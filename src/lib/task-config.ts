@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   isRecord,
   normalizeOperationId,
@@ -61,6 +62,7 @@ export type TaskConfigParseResult =
 
 export const TASK_CONFIG_KINDS = ["rewards", "penalties", "weekly-prizes"] as const;
 export const TASK_CONFIG_ACTIONS = ["replace", "upsert", "delete"] as const;
+export const TASK_CONFIG_MAX_FUTURE_SKEW_MS = 5 * 60 * 1000;
 
 export const TASK_CONFIG_DATA_KEYS: Record<TaskConfigKind, string> = {
   rewards: "rewards",
@@ -90,7 +92,34 @@ const MAX_TEXT_LENGTH = 5000;
 const MAX_ID_LENGTH = 200;
 const MAX_POINTS = 1_000_000_000;
 
+export const TASK_CONFIG_RECEIPT_MAX_COUNT = 256;
+export const TASK_CONFIG_RECEIPT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
 export type TaskConfigEmojiBoundary = (value: string) => string;
+
+function canonicalValue(value: unknown): string {
+  if (value === null) return "null";
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "number" && Number.isFinite(value)) return JSON.stringify(value);
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (Array.isArray(value)) return `[${value.map(canonicalValue).join(",")}]`;
+  if (isRecord(value)) {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalValue(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(String(value));
+}
+
+export function taskConfigCommandFingerprint(command: TaskConfigCommand): string {
+  const payload = {
+    kind: command.kind,
+    action: command.action,
+    updatedAt: command.updatedAt,
+    ...(command.items !== undefined ? { items: command.items } : {}),
+    ...(command.item !== undefined ? { item: command.item } : {}),
+    ...(command.itemId !== undefined ? { itemId: command.itemId } : {}),
+  };
+  return createHash("sha256").update(canonicalValue(payload)).digest("hex");
+}
 
 function invalid(): TaskConfigParseResult {
   return { error: "invalid_config_command" };
@@ -243,6 +272,7 @@ export function sanitizeTaskConfigItems(
 export function parseTaskConfigCommand(
   value: unknown,
   emojiBoundary: TaskConfigEmojiBoundary,
+  now = Date.now(),
 ): TaskConfigParseResult {
   if (!isRecord(value)) return invalid();
   if (Object.keys(value).some((key) => !TOP_LEVEL_KEYS.has(key))) return forbidden();
@@ -255,7 +285,14 @@ export function parseTaskConfigCommand(
   const action = TASK_CONFIG_ACTIONS.includes(value.action as TaskConfigAction)
     ? value.action as TaskConfigAction
     : null;
-  if (!operationId || operationId.length > MAX_ID_LENGTH || !updatedAt || !kind || !action) return invalid();
+  if (
+    !operationId ||
+    operationId.length > MAX_ID_LENGTH ||
+    !updatedAt ||
+    Date.parse(updatedAt) > now + TASK_CONFIG_MAX_FUTURE_SKEW_MS ||
+    !kind ||
+    !action
+  ) return invalid();
 
   if (value.item !== undefined && parseItem(kind, value.item, emojiBoundary) === "forbidden") {
     return forbidden();
