@@ -292,6 +292,174 @@ describe("POST /api/tasks/manage", () => {
     expect(body.task).toMatchObject({ assignee: "Open", universal: true, speedBonus: 2 });
   });
 
+  it("preserves member photo data in the snapshot but sanitizes the PB projection", async () => {
+    const photo = "data:image/webp;base64,PHOTO";
+    mocks.getLiveMembers.mockResolvedValue([
+      { id: "parent-live", name: "Live Parent", role: "parent", emoji: "🧑" },
+      { id: "child-1", name: "Alex Child", role: "child", emoji: photo },
+    ]);
+    const harness = makeHarness({ taskRows: [] });
+    const response = await postManage(harness, {
+      action: "add",
+      operationId: "op-photo-canonical",
+      task: { title: "Photo", assignee: "Alex Child", points: 1 },
+    });
+
+    expect(response.status).toBe(200);
+    const added = harness.snapshot().tasks.find((row: Row) => row.title === "Photo");
+    expect(added?.assigneeEmoji).toBe(photo);
+    expect(harness.tasks()[0]?.assigneeEmoji).toBe("👤");
+  });
+
+  it.each([
+    ["universal", { universal: true }],
+    ["assigned", { universal: false, crewSize: null, assignee: "Alex Child" }],
+    ["crewSize null", { crewSize: null }],
+  ])("rejects %s conversion that would lose crew state", async (_label, patch) => {
+    const snapshot = {
+      revision: "4",
+      tasks: [{
+        ...defaultTask(),
+        assignee: "Crew",
+        assigneeEmoji: "🤝",
+        crewSize: 3,
+        crew: {
+          members: [{ name: "Alex Child", emoji: "🦊", joinedAt: "2026-09-24T09:00:00.000Z" }],
+          removed: ["Removed Human"],
+        },
+      }],
+      deletedTaskIds: [],
+      weekData: { weekStart: "2026-09-21", points: {}, streak: {}, lastActive: {}, history: [] },
+    };
+    const harness = makeHarness({ snapshot, taskRows: [] });
+    const response = await postManage(harness, {
+      action: "update",
+      operationId: `op-crew-convert-${_label.replace(/\s+/g, "-")}`,
+      taskId: 77,
+      patch,
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: "invalid_task_command" });
+    expect(harness.snapshotWrites()).toBe(0);
+  });
+
+  it("fails closed when duplicate exact live names exist", async () => {
+    mocks.getLiveMembers.mockResolvedValue([
+      { id: "child-a", name: "Alex Child", role: "child", emoji: "🦊" },
+      { id: "child-b", name: "Alex Child", role: "child", emoji: "🐺" },
+    ]);
+    const harness = makeHarness({ taskRows: [] });
+    const response = await postManage(harness, {
+      action: "add",
+      operationId: "op-duplicate-exact",
+      task: { title: "Duplicate", assignee: "Alex Child", points: 1 },
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: "unknown_assignee" });
+    expect(harness.snapshotWrites()).toBe(0);
+  });
+
+  it("stores a normalized fingerprint in the task receipt", async () => {
+    const harness = makeHarness({ taskRows: [] });
+    const response = await postManage(harness, {
+      action: "add",
+      operationId: "op-fingerprint-receipt",
+      task: { title: "Fingerprint", assignee: "Alex Child", points: 1 },
+    });
+    expect(response.status).toBe(200);
+    const receipt = harness.snapshot().operationReceipts["op-fingerprint-receipt"][0];
+    expect(receipt.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("rejects a fingerprintless legacy receipt on replay", async () => {
+    const snapshot = {
+      revision: "4",
+      tasks: [defaultTask()],
+      deletedTaskIds: [],
+      operationReceipts: {
+        "op-legacy-route-receipt": [{
+          operationId: "op-legacy-route-receipt",
+          action: "update",
+          taskId: 77,
+          createdAt: "2026-09-24T10:00:00.000Z",
+        }],
+      },
+      weekData: { weekStart: "2026-09-21", points: {}, streak: {}, lastActive: {}, history: [] },
+    };
+    const harness = makeHarness({ snapshot, taskRows: [] });
+    const response = await postManage(harness, {
+      action: "update",
+      operationId: "op-legacy-route-receipt",
+      taskId: 77,
+      patch: { title: "Replay" },
+    });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: "operation_conflict" });
+    expect(harness.snapshotWrites()).toBe(0);
+  });
+
+  it("replays a prior operation after a later edit without changing canonical state", async () => {
+    const harness = makeHarness();
+    expect((await postManage(harness, {
+      action: "update",
+      operationId: "op-replay-later-original",
+      taskId: 77,
+      patch: { title: "Original" },
+    })).status).toBe(200);
+    expect((await postManage(harness, {
+      action: "update",
+      operationId: "op-replay-later-change",
+      taskId: 77,
+      patch: { title: "Changed later" },
+    })).status).toBe(200);
+
+    const replay = await postManage(harness, {
+      action: "update",
+      operationId: "op-replay-later-original",
+      taskId: 77,
+      patch: { title: "Original" },
+    });
+
+    expect(replay.status).toBe(200);
+    expect(harness.snapshot().tasks.find((row: Row) => row.id === 77).title).toBe("Changed later");
+  });
+
+  it("rejects a reused operation with a different payload", async () => {
+    const harness = makeHarness();
+    expect((await postManage(harness, {
+      action: "update",
+      operationId: "op-reused-payload",
+      taskId: 77,
+      patch: { title: "First" },
+    })).status).toBe(200);
+    const response = await postManage(harness, {
+      action: "update",
+      operationId: "op-reused-payload",
+      taskId: 77,
+      patch: { title: "Second" },
+    });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: "operation_conflict" });
+  });
+
+  it("returns 503 when roster lookup fails for a new add", async () => {
+    mocks.getLiveMembers.mockRejectedValue(new Error("PB unavailable"));
+    const harness = makeHarness({ taskRows: [] });
+    const response = await postManage(harness, {
+      action: "add",
+      operationId: "op-roster-failure-route",
+      task: { title: "Roster", assignee: "Alex Child", points: 1 },
+    });
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: "member_roster_unavailable" });
+    expect(harness.snapshotWrites()).toBe(0);
+  });
+
   it("rejects a pet assignee", async () => {
     const harness = makeHarness();
     const response = await postManage(harness, {
