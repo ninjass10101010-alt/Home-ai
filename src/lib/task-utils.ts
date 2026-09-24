@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { localTodayISO } from "@/lib/local-date";
+import { localTodayISO, localWeekStartISO } from "@/lib/local-date";
 import { persistedTaskEmoji, persistedCrewEmoji } from "@/lib/task-emoji";
 import type { Task, WeekData, Transaction, WeekArchive, FamilyGoal, HallOfFameEntry, Reward, Penalty, WeeklyPrize, CrewMember } from "@/types/tasks";
 
@@ -8,7 +8,6 @@ export const WEEK_DATA_KEY = "consuela-week-data";
 export const ARCHIVE_KEY = "consuela-week-archive";
 export const REWARDS_KEY = "consuela-rewards";
 export const PENALTIES_KEY = "consuela-penalties";
-export const REGEN_TRACKER_KEY = "consuela-regen-week";
 // Durable removal signal for the tasks snapshot: the client merge is add-only,
 // so a chat-initiated delete needs a tombstone every device honours (otherwise
 // the next push resurrects the row).
@@ -210,7 +209,7 @@ export function sendBackPendingCompletion(tasks: Task[], taskId: number): Task[]
 
 export function emptyWeekData(startISO?: string): WeekData {
   return {
-    weekStart: startISO || todayMondayISO(),
+    weekStart: startISO || localWeekStartISO(),
     points: {},
     streak: {},
     lastActive: {},
@@ -270,30 +269,11 @@ function saveJSON(key: string, data: unknown): void {
 
 export function loadWeekData(): WeekData {
   const stored = loadJSON<WeekData | null>(WEEK_DATA_KEY, null);
-  if (!stored || !stored.weekStart) return emptyWeekData();
-  const currentMonday = todayMondayISO();
-  if (stored.weekStart !== currentMonday) {
-    archiveAndResetWeek(stored, currentMonday);
-    return emptyWeekData(currentMonday);
-  }
-  return stored;
+  return stored?.weekStart ? stored : emptyWeekData();
 }
 
 export function saveWeekData(data: WeekData): void {
   saveJSON(WEEK_DATA_KEY, data);
-}
-
-export function archiveAndResetWeek(oldWeek: WeekData, newMonday: string): void {
-  const archive = loadJSON<WeekArchive>(ARCHIVE_KEY, {});
-  archive[oldWeek.weekStart] = oldWeek;
-  const keys = Object.keys(archive).sort();
-  if (keys.length > 12) {
-    for (let i = 0; i < keys.length - 12; i++) {
-      delete archive[keys[i]];
-    }
-  }
-  saveJSON(ARCHIVE_KEY, archive);
-  saveJSON(WEEK_DATA_KEY, emptyWeekData(newMonday));
 }
 
 export function addTransaction(
@@ -364,10 +344,6 @@ export function regenerateRecurringTasks(tasks: Task[]): Task[] {
   // when regen ran in the evening (8pm–midnight Detroit).
   const now = localTodayISO();
   const monday = todayMondayISO();
-
-  const regenKey = loadJSON<string | null>(REGEN_TRACKER_KEY, null);
-  if (regenKey === monday) return tasks;
-  saveJSON(REGEN_TRACKER_KEY, monday);
 
   // Clone sources: recurring tasks completed in a PRIOR week (or with no
   // completedInWeek recorded). Tasks completed THIS week are left untouched —
@@ -449,8 +425,7 @@ export function getThisWeeksCompletedTasks(tasks: Task[]): Task[] {
 }
 
 export function loadTasks(): Task[] {
-  const raw = loadJSON<Task[]>(TASKS_STORAGE_KEY, []);
-  return regenerateRecurringTasks(raw);
+  return loadJSON<Task[]>(TASKS_STORAGE_KEY, []);
 }
 
 export function saveTasks(tasks: Task[]): void {

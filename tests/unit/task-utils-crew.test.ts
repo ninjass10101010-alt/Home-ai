@@ -199,7 +199,7 @@ describe("Crew helpers", () => {
 describe("Recurring crew regeneration", () => {
   it("clones a recurring crew task with an empty crew and preserved size/bonus", async () => {
     localStorage.clear();
-    const { regenerateRecurringTasks } = await import("@/lib/task-utils");
+    const { resetRecurringTasksForWeek } = await import("@/lib/task-week-rollover");
     const completed = makeTask({
       id: 30,
       title: "Deep clean the playroom",
@@ -209,16 +209,17 @@ describe("Recurring crew regeneration", () => {
       completedBy: "Alex",
       assignee: "Alex",
       crewSize: 3,
-      crew: { members: [member("Alex", { checkedInAt: "x" }), member("Lily")] },
-      speedBonus: undefined,
+      crew: { members: [member("Alex", { checkedInAt: "x" }), member("Lily")], removed: ["Old"] },
+      speedBonus: 4,
     });
-    const regen = regenerateRecurringTasks([completed]);
-    const clone = regen.find((t) => t.title === "Deep clean the playroom");
+    const regen = resetRecurringTasksForWeek([completed], "2026-09-14", () => 31);
+    const clone = regen.tasks.find((t) => t.title === "Deep clean the playroom");
     expect(clone).toBeTruthy();
     expect(clone!.completed).toBe(false);
     expect(clone!.crewSize).toBe(3);
-    expect(clone!.crew).toEqual({ members: [] });
-    // the consumed source is removed (no compounding duplicates)
-    expect(regen.some((t) => t.id === 30)).toBe(false);
+    expect(clone!.speedBonus).toBe(4);
+    expect(clone!.crew).toEqual({ members: [], removed: [] });
+    expect(regen.deletedTaskIds).toEqual([30]);
+    expect(regen.tasks.some((t) => t.id === 30)).toBe(false);
   });
 });
