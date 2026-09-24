@@ -97,6 +97,9 @@ describe("HomeWidgetIcon", () => {
     const motionStart = globalsCss.indexOf(".home-widget-icon {");
     const motionEnd = globalsCss.indexOf(':root[data-theme="light"] .widget-card', motionStart);
     const motionCss = globalsCss.slice(motionStart, motionEnd);
+    const reducedMotionStart = motionCss.indexOf("@media (prefers-reduced-motion: reduce)");
+    const reducedMotionEnd = reducedMotionStart >= 0 ? motionCss.indexOf("}", reducedMotionStart) : -1;
+    const reducedMotionCss = motionCss.slice(reducedMotionStart, reducedMotionEnd);
 
     expect(motionStart).toBeGreaterThan(-1);
     expect(motionEnd).toBeGreaterThan(motionStart);
@@ -105,7 +108,9 @@ describe("HomeWidgetIcon", () => {
     }
     expect(motionCss).toContain("transition: transform 220ms");
     expect(motionCss).not.toContain("infinite");
-    expect(motionCss).toContain("@media (prefers-reduced-motion: reduce)");
+    expect(reducedMotionStart).toBeGreaterThan(-1);
+    expect(reducedMotionEnd).toBeGreaterThan(reducedMotionStart);
+    expect(reducedMotionCss).toMatch(/\.home-widget-icon[\s\S]*?transform:\s*none\s*!important;/);
     expect(motionCss).toContain("animation: none !important;");
     expect(motionCss).toContain("transition: none !important;");
   });

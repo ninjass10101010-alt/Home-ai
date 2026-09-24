@@ -14,6 +14,14 @@ function render(ui: ReactElement): HTMLElement {
   return el.firstChild as HTMLElement;
 }
 
+function mount(ui: ReactElement) {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  act(() => root.render(ui));
+  return { container, root };
+}
+
 const ack = async () => true;
 
 describe("MorningBriefingWidget acknowledged state", () => {
@@ -60,5 +68,34 @@ describe("MorningBriefingWidget acknowledged state", () => {
 
     const el = render(<MorningBriefingWidget briefing={briefing} loading={false} ack={ack} ackError={false} />);
     expect(el.querySelector('svg[data-variant="briefing"]')?.getAttribute("data-state")).toBe("unread");
+  });
+
+  it("keeps the briefing icon mounted through acknowledgement so its state can transition", () => {
+    const briefing = {
+      id: "b1",
+      scopeDate: "2026-08-20",
+      acknowledged: false,
+      summary: {
+        events: [{ id: "e1", title: "School pickup", time: "3:00 PM" }],
+        tasks: [],
+        meals: [],
+        suggestions: [],
+      },
+    } as never;
+
+    const { container, root } = mount(<MorningBriefingWidget briefing={briefing} loading={false} ack={ack} ackError={false} />);
+    const before = container.querySelector('svg[data-variant="briefing"]');
+    expect(before).not.toBeNull();
+    expect(before?.getAttribute("data-state")).toBe("unread");
+
+    act(() => {
+      root.render(<MorningBriefingWidget briefing={{ ...briefing, acknowledged: true }} loading={false} ack={ack} ackError={false} />);
+    });
+
+    const after = container.querySelector('svg[data-variant="briefing"]');
+    expect(after).toBe(before);
+    expect(after?.getAttribute("data-state")).toBe("default");
+    expect(after?.getAttribute("class")).toContain("home-widget-icon-state-default");
+    expect(container.textContent).toContain("Acknowledged ✓");
   });
 });

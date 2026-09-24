@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import SectionCard from "@/components/patterns/SectionCard";
 import WidgetCard from "@/components/patterns/WidgetCard";
 import HomeWidgetIcon from "@/components/ui/HomeWidgetIcon";
 import Chip from "@/components/ui/Chip";
@@ -68,28 +67,9 @@ export default function MorningBriefingWidget({ briefing, loading, ack, ackError
 
   if (loading || !briefing) return null;
 
-  // An acknowledged briefing still shows its "seen" card even when today's
-  // plan is empty — the ack is a status, not a content gate.
-  if (briefing.acknowledged) {
-    return (
-      <div className="opacity-60 transition-opacity duration-700">
-        <WidgetCard
-          tone={BRIEFING_TONE}
-          icon={<HomeWidgetIcon variant="briefing" state="default" size="lg" />}
-          className={className}
-        >
-          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 p-5 text-center">
-            <h3 className="text-base font-bold text-text-primary">Morning Briefing</h3>
-            <p className="mt-0.5 text-xs text-text-secondary">Seen for today — Consuela will refresh it tomorrow</p>
-            <Chip size="sm" tone="success" className="mt-2">Acknowledged ✓</Chip>
-          </div>
-        </WidgetCard>
-      </div>
-    );
-  }
+  if (briefingSectionsEmpty(briefing) && !briefing.acknowledged) return null;
 
-  if (briefingSectionsEmpty(briefing)) return null;
-
+  const acknowledged = briefing.acknowledged;
   const summary = briefing.summary!;
   const count = totalCount(briefing);
 
@@ -105,95 +85,102 @@ export default function MorningBriefingWidget({ briefing, loading, ack, ackError
     }
   };
 
-  return (
-    <SectionCard
-      title="Morning Briefing"
-      description="What Consuela lined up for today"
-      icon={<HomeWidgetIcon variant="briefing" state="unread" size="lg" />}
-      tone={BRIEFING_TONE}
-      centeredHeader
-      className={className}
-      action={
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          aria-expanded={expanded}
-          aria-label={expanded ? "Collapse morning briefing" : "Expand morning briefing"}
-          className="tap-sm inline-flex items-center gap-1.5 rounded-full border border-[var(--color-accent-selected)]/25 bg-[var(--color-surface-0)]/20 px-3 py-1 text-xs font-semibold widget-accent-text"
-        >
-          {count} item{count !== 1 ? "s" : ""} <span className="text-[10px]">{expanded ? "▲" : "▼"}</span>
-        </button>
-      }
-    >
-      {expanded ? (
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
-          {summary.events.length > 0 && (
-            <div className="space-y-2">
-              <SectionLabel emoji="📅" label="Today's events" count={summary.events.length} />
-              {summary.events.slice(0, 5).map((event, i) => (
-                <Row key={str(event.id, `event-${i}`)} icon={str(event.icon, "📅")} title={str(event.title, "Untitled event")} meta={str(event.time)} />
-              ))}
-            </div>
-          )}
-
-          {summary.tasks.length > 0 && (
-            <div className="space-y-2">
-              <SectionLabel emoji="✅" label="Priority tasks" count={summary.tasks.length} />
-              {summary.tasks
-                .slice()
-                .sort((a, b) => (Number(b.points) || 0) - (Number(a.points) || 0))
-                .slice(0, 6)
-                .map((task, i) => (
-                  <Row
-                    key={str(task.id, `task-${i}`)}
-                    icon="✅"
-                    title={str(task.title, "Untitled task")}
-                    meta={`${str(task.assigned, str(task.assignee, "Anyone"))} · ${Number(task.points) || 0} pts`}
-                  />
-                ))}
-            </div>
-          )}
-
-          {summary.meals.length > 0 && (
-            <div className="space-y-2">
-              <SectionLabel emoji="🍽️" label="Meals" count={summary.meals.length} />
-              {summary.meals.map((meal, i) => (
-                <Row
-                  key={str(meal.id, `meal-${i}`)}
-                  icon={str(meal.emoji, "🍽️")}
-                  title={str(meal.name, "Untitled meal")}
-                  meta={[str(meal.mealType), str(meal.time)].filter(Boolean).join(" · ")}
-                />
-              ))}
-            </div>
-          )}
-
-          {summary.suggestions.length > 0 && (
-            <div className="space-y-2">
-              <SectionLabel emoji="✨" label="Consuela's noticed" count={summary.suggestions.length} />
-              {summary.suggestions.slice(0, 5).map((s, i) => (
-                <Row
-                  key={str(s.id, `suggestion-${i}`)}
-                  icon={str(s.emoji, "✨")}
-                  title={str(s.title, "Suggestion")}
-                  meta={str(s.body)}
-                />
-              ))}
-            </div>
-          )}
-
-          <SoftButton size="md" variant="primary" className="w-full" loading={acknowledging} onClick={handleGotIt}>
-            Got it ✓
-          </SoftButton>
-          {ackError && (
-            <Toast open tone="error">
-              Couldn&apos;t save — try again
-            </Toast>
-          )}
+  const cardContent = acknowledged ? (
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1 p-5 text-center">
+      <h3 className="text-base font-bold text-text-primary">Morning Briefing</h3>
+      <p className="mt-0.5 text-xs text-text-secondary">Seen for today — Consuela will refresh it tomorrow</p>
+      <Chip size="sm" tone="success" className="mt-2">Acknowledged ✓</Chip>
+    </div>
+  ) : (
+    <>
+      <div className="relative shrink-0 border-b border-white/10 p-4 pb-3 text-center">
+        <div className="absolute right-3 top-3">
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            aria-expanded={expanded}
+            aria-label={expanded ? "Collapse morning briefing" : "Expand morning briefing"}
+            className="tap-sm inline-flex items-center gap-1.5 rounded-full border border-[var(--color-accent-selected)]/25 bg-[var(--color-surface-0)]/20 px-3 py-1 text-xs font-semibold widget-accent-text"
+          >
+            {count} item{count !== 1 ? "s" : ""} <span className="text-[10px]">{expanded ? "▲" : "▼"}</span>
+          </button>
         </div>
-      ) : (
-        <p className="text-xs text-text-muted">Tap the badge above to see today’s plan.</p>
-      )}
-    </SectionCard>
+        <h3 className="mt-1 font-bold text-text-primary text-base">Morning Briefing</h3>
+        <p className="mt-0.5 text-text-secondary text-xs">What Consuela lined up for today</p>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col p-5">
+        {expanded ? (
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
+            {summary.events.length > 0 && (
+              <div className="space-y-2">
+                <SectionLabel emoji="📅" label="Today's events" count={summary.events.length} />
+                {summary.events.slice(0, 5).map((event, i) => (
+                  <Row key={str(event.id, `event-${i}`)} icon={str(event.icon, "📅")} title={str(event.title, "Untitled event")} meta={str(event.time)} />
+                ))}
+              </div>
+            )}
+
+            {summary.tasks.length > 0 && (
+              <div className="space-y-2">
+                <SectionLabel emoji="✅" label="Priority tasks" count={summary.tasks.length} />
+                {summary.tasks
+                  .slice()
+                  .sort((a, b) => (Number(b.points) || 0) - (Number(a.points) || 0))
+                  .slice(0, 6)
+                  .map((task, i) => (
+                    <Row
+                      key={str(task.id, `task-${i}`)}
+                      icon="✅"
+                      title={str(task.title, "Untitled task")}
+                      meta={`${str(task.assigned, str(task.assignee, "Anyone"))} · ${Number(task.points) || 0} pts`}
+                    />
+                  ))}
+              </div>
+            )}
+
+            {summary.meals.length > 0 && (
+              <div className="space-y-2">
+                <SectionLabel emoji="🍽️" label="Meals" count={summary.meals.length} />
+                {summary.meals.map((meal, i) => (
+                  <Row key={str(meal.id, `meal-${i}`)} icon={str(meal.emoji, "🍽️")} title={str(meal.name, "Untitled meal")} meta={[str(meal.mealType), str(meal.time)].filter(Boolean).join(" · ")} />
+                ))}
+              </div>
+            )}
+
+            {summary.suggestions.length > 0 && (
+              <div className="space-y-2">
+                <SectionLabel emoji="✨" label="Consuela's noticed" count={summary.suggestions.length} />
+                {summary.suggestions.slice(0, 5).map((s, i) => (
+                  <Row key={str(s.id, `suggestion-${i}`)} icon={str(s.emoji, "✨")} title={str(s.title, "Suggestion")} meta={str(s.body)} />
+                ))}
+              </div>
+            )}
+
+            <SoftButton size="md" variant="primary" className="w-full" loading={acknowledging} onClick={handleGotIt}>
+              Got it ✓
+            </SoftButton>
+            {ackError && (
+              <Toast open tone="error">
+                Couldn&apos;t save — try again
+              </Toast>
+            )}
+          </div>
+        ) : (
+          <p className="text-xs text-text-muted">Tap the badge above to see today’s plan.</p>
+        )}
+      </div>
+    </>
+  );
+
+  return (
+    <div className={acknowledged ? "opacity-60 transition-opacity duration-700" : className}>
+      <WidgetCard
+        tone={BRIEFING_TONE}
+        icon={<HomeWidgetIcon variant="briefing" state={acknowledged ? "default" : "unread"} size="lg" />}
+        className={className}
+      >
+        {cardContent}
+      </WidgetCard>
+    </div>
   );
 }
