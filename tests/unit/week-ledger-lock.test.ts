@@ -4,7 +4,14 @@ import { NextRequest } from "next/server";
 const mocks = vi.hoisted(() => ({
   withAdmin: vi.fn(),
   verifyPinFromPB: vi.fn(),
+  getLiveMemberById: vi.fn(),
+  getLiveMembers: vi.fn(),
 }));
+
+const liveMembers = [
+  { id: "alex-live", name: "Alex", role: "parent", emoji: "🦊" },
+  { id: "sam-live", name: "Sam", role: "parent", emoji: "🧑" },
+];
 
 vi.mock("@/lib/pb-auth", () => ({
   withAdmin: (fn: (pb: unknown) => Promise<unknown>) => mocks.withAdmin(fn),
@@ -12,6 +19,11 @@ vi.mock("@/lib/pb-auth", () => ({
 
 vi.mock("@/lib/server-auth", () => ({
   verifyPinFromPB: mocks.verifyPinFromPB,
+}));
+
+vi.mock("@/lib/live-member", () => ({
+  getLiveMemberById: mocks.getLiveMemberById,
+  getLiveMembers: mocks.getLiveMembers,
 }));
 
 import { POST as claimPOST } from "@/app/api/tasks/claim/route";
@@ -51,8 +63,24 @@ function makeRacyPb(initial?: { weekPoints?: Record<string, number> }) {
       points: initial?.weekPoints ?? {},
       streak: {},
       lastActive: {},
-      history: [] as unknown[],
+      history: initial?.weekPoints
+        ? [{ id: 1, timestamp: "2026-09-21T00:00:00.000Z", member: "Sam", type: "earn", amount: 10, description: "Initial" }]
+        : [] as unknown[],
     },
+  };
+  let snapshotRow: any = {
+    id: "snapshot-1",
+    data: JSON.stringify({
+      tasks: [],
+      deletedTaskIds: [],
+      weekData: {
+        weekStart: mondayISO(),
+        points: {},
+        streak: {},
+        lastActive: {},
+        history: [],
+      },
+    }),
   };
   const phases = new Map<string, Deferred[]>();
   const call = (phase: string, compute: () => unknown) =>
@@ -98,12 +126,16 @@ function makeRacyPb(initial?: { weekPoints?: Record<string, number> }) {
         };
       }
       if (name === "consuela_data_snapshots") {
-        // Best-effort snapshot mirror (not part of the race under test) —
-        // resolve immediately so it never stalls the orchestrated order.
         return {
-          getFullList: async () => [],
-          update: async () => ({}),
-          create: async () => ({}),
+          getFullList: async () => [{ ...snapshotRow }],
+          update: async (_id: string, payload: Record<string, unknown>) => {
+            snapshotRow = { ...snapshotRow, ...payload };
+            return snapshotRow;
+          },
+          create: async (payload: Record<string, unknown>) => {
+            snapshotRow = { ...snapshotRow, ...payload };
+            return snapshotRow;
+          },
         };
       }
       return {
@@ -150,8 +182,18 @@ async function drive(
         break;
       }
     }
+    if (!progressed) {
+      for (const phase of ["tasks.read", "week.read", "week.write", "week.verify", "tasks.write", "rewards.read"]) {
+        for (let index = 0; index < 20; index += 1) {
+          if (resolveOne(phase, index)) {
+            progressed = true;
+            break;
+          }
+        }
+        if (progressed) break;
+      }
+    }
     await tick();
-    if (!progressed && settled.every(Boolean)) break;
   }
   return Promise.all(responses);
 }
@@ -159,7 +201,11 @@ async function drive(
 beforeEach(() => {
   mocks.withAdmin.mockReset();
   mocks.verifyPinFromPB.mockReset();
+  mocks.getLiveMemberById.mockReset();
+  mocks.getLiveMembers.mockReset().mockResolvedValue(liveMembers);
+  mocks.getLiveMemberById.mockImplementation(async (id: string) => liveMembers.find((member) => member.id === id) ?? null);
   mocks.verifyPinFromPB.mockImplementation(async (name: string) => ({
+    id: String(name).includes("Sam") ? "sam-live" : "alex-live",
     name: String(name).includes("Sam") ? "Sam" : "Alex",
     role: "parent",
     emoji: "🦊",
@@ -195,8 +241,8 @@ describe("week ledger lock — claim vs claim", () => {
     const { pb, resolveOne, snapshot } = makeRacyPb();
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
 
-    const p1 = claimPOST(jsonReq("/api/tasks/claim", { taskId: 42, claimantName: "Alex", claimantPin: "1234" }));
-    const p2 = claimPOST(jsonReq("/api/tasks/claim", { taskId: 42, claimantName: "Sam", claimantPin: "5678" }));
+    const p1 = claimPOST(jsonReq("/api/tasks/claim", { action: "claim", operationId: "op-lock-claim-1", taskId: 42, claimantName: "Alex", claimantPin: "1234" }));
+    const p2 = claimPOST(jsonReq("/api/tasks/claim", { action: "claim", operationId: "op-lock-claim-2", taskId: 42, claimantName: "Sam", claimantPin: "5678" }));
     const [r1, r2] = await drive(
       resolveOne,
       [
@@ -229,7 +275,7 @@ describe("week ledger lock — claim vs redeem", () => {
     const { pb, resolveOne, snapshot } = makeRacyPb({ weekPoints: { Sam: 10 } });
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
 
-    const pClaim = claimPOST(jsonReq("/api/tasks/claim", { taskId: 42, claimantName: "Alex", claimantPin: "1234" }));
+    const pClaim = claimPOST(jsonReq("/api/tasks/claim", { action: "claim", operationId: "op-lock-claim-redeem", taskId: 42, claimantName: "Alex", claimantPin: "1234" }));
     const pRedeem = redeemPOST(jsonReq("/api/rewards/redeem", { rewardId: "r1", memberName: "Sam", pin: "5678" }));
     const [rClaim, rRedeem] = await drive(
       resolveOne,
@@ -246,8 +292,8 @@ describe("week ledger lock — claim vs redeem", () => {
     expect(rRedeem.status).toBe(200);
 
     const snap = snapshot();
-    expect(snap.history).toHaveLength(2);
-    const earn = snap.history.find((t: any) => t.type === "earn");
+    expect(snap.history).toHaveLength(3);
+    const earn = snap.history.find((t: any) => t.type === "earn" && t.taskId === 42);
     const redeem = snap.history.find((t: any) => t.type === "redeem");
     expect(earn).toMatchObject({ member: "Alex", taskId: 42, amount: 5 });
     expect(redeem).toMatchObject({ member: "Sam", amount: -5 });

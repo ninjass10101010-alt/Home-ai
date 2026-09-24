@@ -88,17 +88,22 @@ describe("Crew approval", () => {
     expect(weekData.history.filter((tx) => tx.type === "earn" && tx.member === "Lily" && tx.taskId === 77)).toHaveLength(1);
   });
 
-  it("send-back clears the crew check-ins and the pending state", () => {
-    const task = crewPendingTask();
+  it("send-back clears the crew check-ins and preserves removed tombstones", () => {
+    const task = crewPendingTask({
+      crew: {
+        members: [member("Alex", "t1"), member("Lily", "t2")],
+        removed: ["Former Member"],
+      },
+    });
     expect(crewAllCheckedIn(task)).toBe(true);
     const next = sendBackPendingCompletion([task], task.id);
     expect(next[0].completed).toBe(false);
     expect(next[0].pendingApproval).toBeUndefined();
     expect(next[0].sentBackAt).toBeTruthy();
     expect(crewAllCheckedIn(next[0])).toBe(false);
-    // Crew membership survives; only the check-ins reset.
     expect(next[0].crew?.members.map((m) => m.name)).toEqual(["Alex", "Lily"]);
     expect(next[0].crew?.members.every((m) => !m.checkedInAt)).toBe(true);
+    expect(next[0].crew?.removed).toEqual(["Former Member"]);
   });
 
   it("pendingPointsFor includes an in-flight crew value", () => {
