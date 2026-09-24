@@ -1,7 +1,8 @@
 import { withAdmin } from "@/lib/pb-auth";
 import { withKeyedLock } from "@/lib/keyed-lock";
 import { persistedTaskEmoji, persistedCrewEmoji } from "@/lib/task-emoji";
-import { recomputeWeekPoints } from "@/lib/task-ledger";
+import { parseCanonicalTransactions, recomputeWeekPoints } from "@/lib/task-ledger";
+import { normalizeOperationId, normalizeTimestamp } from "@/lib/task-operation-contract";
 import type { WeekData, Transaction } from "@/types/tasks";
 
 /**
@@ -64,7 +65,7 @@ export type SnapshotData = Record<string, any> & {
   deletedTaskIds?: number[];
   revision?: string;
   taskWeekStart?: string;
-  operationReceipts?: Record<string, SnapshotOperationReceipt>;
+  operationReceipts?: Record<string, SnapshotOperationReceipt[]>;
   pendingProjectionRepairs?: SnapshotProjectionRepair[];
 };
 
@@ -269,28 +270,67 @@ function rowUpdatedAt(row: any, data: SnapshotData): string {
   return typeof updatedAt === "string" ? updatedAt : "";
 }
 
-function sanitizeOperationReceipts(value: unknown): Record<string, SnapshotOperationReceipt> {
-  const parsed = parseJSON<unknown>(value, {});
-  if (!isObjectRecord(parsed)) return {};
-  const receipts: Record<string, SnapshotOperationReceipt> = {};
+function isPositiveTaskId(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
 
-  for (const candidate of Object.values(parsed)) {
-    if (!isObjectRecord(candidate)) continue;
-    const operationId = typeof candidate.operationId === "string" ? candidate.operationId.trim() : "";
-    const action = typeof candidate.action === "string" ? candidate.action.trim() : "";
-    const taskId = Number(candidate.taskId);
-    const createdAt = typeof candidate.createdAt === "string" ? candidate.createdAt : "";
-    if (!operationId || !action || !Number.isFinite(taskId) || !createdAt) continue;
-    receipts[operationId] = {
-      operationId,
-      action,
-      taskId,
-      ...(typeof candidate.deleted === "boolean" ? { deleted: candidate.deleted } : {}),
-      createdAt,
-    };
+function sanitizeOperationReceipt(value: unknown): SnapshotOperationReceipt | null {
+  if (!isObjectRecord(value)) return null;
+  const operationId = normalizeOperationId(value.operationId);
+  const action = typeof value.action === "string" ? value.action.trim() : "";
+  const taskId = value.taskId;
+  const createdAt = normalizeTimestamp(value.createdAt);
+  if (
+    !operationId ||
+    !action ||
+    !isPositiveTaskId(taskId) ||
+    !createdAt ||
+    (value.deleted !== undefined && typeof value.deleted !== "boolean")
+  ) {
+    return null;
+  }
+  return {
+    operationId,
+    action,
+    taskId,
+    ...(typeof value.deleted === "boolean" ? { deleted: value.deleted } : {}),
+    createdAt,
+  };
+}
+
+function sanitizeOperationReceipts(
+  value: unknown,
+): Record<string, SnapshotOperationReceipt[]> {
+  const parsed = parseJSON<unknown>(value, {});
+  const grouped = new Map<string, Map<number, SnapshotOperationReceipt>>();
+  if (!isObjectRecord(parsed)) return Object.create(null) as Record<string, SnapshotOperationReceipt[]>;
+
+  for (const stored of Object.values(parsed)) {
+    const candidates = Array.isArray(stored) ? stored : [stored];
+    for (const candidate of candidates) {
+      const receipt = sanitizeOperationReceipt(candidate);
+      if (!receipt) continue;
+      const byTask = grouped.get(receipt.operationId) ?? new Map<number, SnapshotOperationReceipt>();
+      byTask.set(receipt.taskId, receipt);
+      grouped.set(receipt.operationId, byTask);
+    }
   }
 
+  const receipts = Object.create(null) as Record<string, SnapshotOperationReceipt[]>;
+  for (const [operationId, byTask] of grouped) {
+    receipts[operationId] = [...byTask.values()].sort((left, right) => left.taskId - right.taskId);
+  }
   return receipts;
+}
+
+export function getSnapshotOperationReceipts(
+  data: SnapshotData,
+  operationId: unknown,
+): SnapshotOperationReceipt[] {
+  const normalizedOperationId = normalizeOperationId(operationId);
+  if (!normalizedOperationId) return [];
+  const receipts = sanitizeOperationReceipts(data.operationReceipts);
+  return [...(receipts[normalizedOperationId] ?? [])];
 }
 
 function sanitizeProjectionRepairs(value: unknown): SnapshotProjectionRepair[] {
@@ -300,10 +340,14 @@ function sanitizeProjectionRepairs(value: unknown): SnapshotProjectionRepair[] {
 
   for (const candidate of parsed) {
     if (!isObjectRecord(candidate)) continue;
-    const operationId = typeof candidate.operationId === "string" ? candidate.operationId.trim() : "";
-    const createdAt = typeof candidate.createdAt === "string" ? candidate.createdAt : "";
+    const operationId = normalizeOperationId(candidate.operationId);
+    const createdAt = normalizeTimestamp(candidate.createdAt);
     const taskIds = Array.isArray(candidate.taskIds)
-      ? [...new Set(candidate.taskIds.map(Number).filter(Number.isFinite))]
+      ? [
+          ...new Set(
+            candidate.taskIds.filter(isPositiveTaskId),
+          ),
+        ]
       : [];
     if (!operationId || !createdAt || taskIds.length === 0) continue;
     repairs.push({ operationId, taskIds, createdAt });
@@ -324,10 +368,16 @@ function sanitizeSnapshotMetadata(data: SnapshotData): SnapshotData {
 }
 
 function canonicalSnapshotData(data: SnapshotData, revision: string): SnapshotData {
-  return {
+  const next: SnapshotData = {
     ...sanitizeSnapshotMetadata(data),
     revision,
   };
+  if (next.weekData != null) {
+    const weekData = normalizeWeekData(next.weekData);
+    if (!weekData) throw new TypeError("invalid_week_data");
+    next.weekData = weekData;
+  }
+  return next;
 }
 
 export async function readSnapshotWithRevision(): Promise<{
@@ -485,21 +535,20 @@ export type SnapshotWeekTaskPatch = {
  */
 function normalizeWeekData(value: unknown): WeekData | null {
   const parsed = parseJSON<unknown>(value, null);
-  if (!isObjectRecord(parsed) || typeof parsed.weekStart !== "string" || !parsed.weekStart) {
+  if (!isObjectRecord(parsed) || typeof parsed.weekStart !== "string" || !parsed.weekStart.trim()) {
     return null;
   }
   const pointsValue = parseJSON<unknown>(parsed.points, {});
   const streakValue = parseJSON<unknown>(parsed.streak, {});
   const lastActiveValue = parseJSON<unknown>(parsed.lastActive, {});
-  const historyValue = parseJSON<unknown>(parsed.history, []);
+  const history = parseCanonicalTransactions(parsed.history);
+  if (!history) return null;
   return {
-    weekStart: parsed.weekStart,
+    weekStart: parsed.weekStart.trim(),
     points: isObjectRecord(pointsValue) ? (pointsValue as Record<string, number>) : {},
     streak: isObjectRecord(streakValue) ? (streakValue as Record<string, number>) : {},
     lastActive: isObjectRecord(lastActiveValue) ? (lastActiveValue as Record<string, string>) : {},
-    history: Array.isArray(historyValue)
-      ? (historyValue.filter(isObjectRecord) as unknown as Transaction[])
-      : [],
+    history,
   };
 }
 
@@ -525,7 +574,9 @@ export async function persistSnapshotWeek(
       if (weekData) {
         const incoming = normalizeWeekData(weekData);
         if (!incoming) throw new TypeError("invalid_week_data");
-        const stored = normalizeWeekData(data.weekData);
+        const hasStoredWeek = data.weekData != null;
+        const stored = hasStoredWeek ? normalizeWeekData(data.weekData) : null;
+        if (hasStoredWeek && !stored) throw new TypeError("invalid_stored_week_data");
         let mergedWeek = incoming;
 
         if (stored && stored.weekStart > incoming.weekStart) {

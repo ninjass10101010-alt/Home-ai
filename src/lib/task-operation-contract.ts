@@ -15,19 +15,17 @@ export const INTERNAL_TASK_COMMAND_KINDS = [
 
 export const INTERNAL_TASK_COMMAND_SOURCES = ["hermes", "muse", "server"] as const;
 
-const forbiddenPayloadKeys = new Set([
+const authorityTokens = new Set([
   "member",
   "amount",
   "payee",
-  "points",
-  "pendingapproval",
+  "point",
   "history",
-  "proto",
-  "prototype",
-  "constructor",
+  "pending",
+  "approval",
 ]);
 
-const credentialKeyFragments = [
+const credentialTokens = new Set([
   "pin",
   "password",
   "passcode",
@@ -37,26 +35,100 @@ const credentialKeyFragments = [
   "authorization",
   "cookie",
   "session",
-  "apikey",
   "bearer",
-];
+  "apikey",
+]);
 
-function normalizeKey(key: string): string {
-  return key.toLowerCase().replace(/[^a-z0-9]/g, "");
+const unsafeRecordTokens = new Set([
+  "proto",
+  "prototype",
+  "constructor",
+  "tostring",
+  "valueof",
+  "hasownproperty",
+  "isprototypeof",
+  "propertyisenumerable",
+  "tolocalestring",
+]);
+
+const unsafeOperationIds = new Set(
+  [...Object.getOwnPropertyNames(Object.prototype), "__proto__", "prototype"].map((key) => key.toLowerCase()),
+);
+
+function keyTokens(key: string): string[] {
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .replace(/([a-z])([0-9])/g, "$1 $2")
+    .replace(/([0-9])([a-z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+
+function singular(token: string): string {
+  return token.length > 1 && token.endsWith("s") ? token.slice(0, -1) : token;
+}
+
+function isUnsafeOperationId(operationId: string): boolean {
+  return unsafeOperationIds.has(operationId.toLowerCase());
+}
+
+export function normalizeOperationId(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const operationId = value.trim();
+  return operationId && !isUnsafeOperationId(operationId) ? operationId : null;
+}
+
+export function normalizeTimestamp(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const timestamp = value.trim();
+  return timestamp && Number.isFinite(Date.parse(timestamp)) ? timestamp : null;
+}
+
+export function isNormalizedOperationId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value === value.trim() &&
+    Boolean(value) &&
+    !isUnsafeOperationId(value)
+  );
+}
+
+function hasNormalizedBoundary(values: Set<string>, value: string): boolean {
+  for (const candidate of values) {
+    if (value.startsWith(candidate) || value.endsWith(candidate)) return true;
+  }
+  return false;
 }
 
 function isForbiddenPayloadKey(key: string): boolean {
-  const normalized = normalizeKey(key);
+  const tokens = keyTokens(key);
+  const compact = tokens.join("");
+  const tokenMatch = tokens.some((token) => {
+    const normalized = singular(token);
+    return (
+      authorityTokens.has(normalized) ||
+      credentialTokens.has(normalized) ||
+      unsafeRecordTokens.has(normalized) ||
+      token.startsWith("completed") ||
+      token.startsWith("completion")
+    );
+  });
   return (
-    normalized.startsWith("completed") ||
-    normalized === "completion" ||
-    forbiddenPayloadKeys.has(normalized) ||
-    credentialKeyFragments.some((fragment) => normalized.includes(fragment))
+    tokenMatch ||
+    compact.startsWith("completed") ||
+    compact.startsWith("completion") ||
+    hasNormalizedBoundary(authorityTokens, compact) ||
+    hasNormalizedBoundary(credentialTokens, compact) ||
+    hasNormalizedBoundary(unsafeRecordTokens, compact)
   );
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }
 
 export function hasForbiddenTaskCommandPayloadKey(value: unknown): boolean {
@@ -94,7 +166,7 @@ export function hasValidInternalTaskCommandShape(
   context: unknown,
 ): boolean {
   if (!isRecord(command) || !isRecord(context)) return false;
-  if (typeof command.operationId !== "string" || !command.operationId.trim()) return false;
+  if (!isNormalizedOperationId(command.operationId)) return false;
   if (!isInternalTaskCommandKind(command.kind)) return false;
   if (!isRecord(command.actor)) return false;
   if (

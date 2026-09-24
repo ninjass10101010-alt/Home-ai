@@ -42,14 +42,23 @@ describe("internal task command registry", () => {
 
   it.each([
     "member",
+    "memberId",
+    "memberName",
+    "memberid",
     "amount",
+    "amountTotal",
+    "amounttotal",
     "payee",
+    "payeeId",
+    "payeeid",
     "points",
     "completed",
     "completedBy",
     "completion",
     "pendingApproval",
     "history",
+    "ledgerHistory",
+    "ledgerhistory",
     "pin",
     "pinCode",
     "claimantPin",
@@ -106,6 +115,102 @@ describe("internal task command registry", () => {
       unregister();
     }
   });
+
+  it("preserves legitimate task and action identity fields", async () => {
+    const payload = {
+      taskId: 42,
+      title: "Dishes",
+      assignee: "Child A",
+      targetName: "Child B",
+      operationId: "op-payload-identity",
+      shipping: true,
+    };
+    const handler = vi.fn(async (received): Promise<InternalTaskCommandResult> => {
+      expect(received.payload).toBe(payload);
+      return { ok: true, operationId: received.operationId, reconciled: true };
+    });
+    const unregister = registerInternalTaskCommandHandler("update", handler);
+    const command: InternalTaskCommand = { ...baseCommand, kind: "update", payload };
+
+    try {
+      const result = await executeInternalTaskCommand(command, { source: "server" });
+      expect(result.ok).toBe(true);
+      expect(handler).toHaveBeenCalledOnce();
+    } finally {
+      unregister();
+    }
+  });
+
+  it("normalizes a padded operation ID once before dispatch", async () => {
+    const handler = vi.fn(async (received): Promise<InternalTaskCommandResult> => {
+      expect(received.operationId).toBe("op-padded");
+      return { ok: true, operationId: received.operationId, reconciled: true };
+    });
+    const unregister = registerInternalTaskCommandHandler("complete", handler);
+    const command = { ...baseCommand, operationId: "  op-padded  " };
+
+    try {
+      const result = await executeInternalTaskCommand(command, { source: "hermes" });
+      expect(handler).toHaveBeenCalledWith(
+        { ...baseCommand, operationId: "op-padded" },
+        { source: "hermes" },
+      );
+      expect(result.operationId).toBe("op-padded");
+      expect(result.ok).toBe(true);
+    } finally {
+      unregister();
+    }
+  });
+
+  it("does not let a handler substitute the operation ID", async () => {
+    const unregister = registerInternalTaskCommandHandler("complete", async () => ({
+      ok: true,
+      operationId: "op-substituted",
+      reconciled: true,
+    }));
+
+    try {
+      const result = await executeInternalTaskCommand(
+        { ...baseCommand, operationId: "  op-authoritative  " },
+        { source: "server" },
+      );
+      expect(result).toEqual({
+        ok: true,
+        operationId: "op-authoritative",
+        reconciled: true,
+      });
+    } finally {
+      unregister();
+    }
+  });
+
+  it.each(["__proto__", "constructor", "prototype", "toString"])(
+    "rejects prototype-like operation ID %s",
+    async (operationId) => {
+      const handler = vi.fn(async (): Promise<InternalTaskCommandResult> => ({
+        ok: true,
+        operationId: baseCommand.operationId,
+        reconciled: true,
+      }));
+      const unregister = registerInternalTaskCommandHandler("complete", handler);
+
+      try {
+        const result = await executeInternalTaskCommand(
+          { ...baseCommand, operationId: `  ${operationId}  ` },
+          { source: "muse" },
+        );
+        expect(result).toEqual({
+          ok: false,
+          operationId: operationId,
+          reason: "invalid_task_command",
+          reconciled: false,
+        });
+        expect(handler).not.toHaveBeenCalled();
+      } finally {
+        unregister();
+      }
+    },
+  );
 
   it("cleans up registration and returns unsupported without a handler", async () => {
     const handler = vi.fn(async (): Promise<InternalTaskCommandResult> => ({
