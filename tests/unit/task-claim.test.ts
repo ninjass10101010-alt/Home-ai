@@ -44,6 +44,7 @@ import { POST } from "@/app/api/tasks/claim/route";
 import { executeInternalTaskCommand } from "@/lib/task-commands";
 import { taskClaimInternalPayload, type ClaimAction } from "@/lib/task-claim";
 import { taskManageInternalPayload } from "@/lib/task-manage";
+import { localWeekStartISO } from "@/lib/local-date";
 
 function mondayISO(): string {
   const d = new Date();
@@ -153,6 +154,10 @@ function makePb(opts?: {
       data.tasks = (data.tasks || []).filter((task: any) => Number(task.id) !== id);
       data.deletedTaskIds = [...new Set([...(data.deletedTaskIds || []), id])];
       snapshotRow = { ...snapshotRow, data: JSON.stringify(data) };
+    },
+    updateWeekHistory: (history: unknown[]) => {
+      weekRow.history = JSON.stringify(history);
+      weekRow.points = JSON.stringify({});
     },
     pb: {
       collection: (name: string) => {
@@ -1215,6 +1220,61 @@ describe("POST /api/tasks/claim — snapshot authority and replay", () => {
     expect(snapshotData().tasks[0]).toMatchObject({ completed: false, status: "pending" });
   });
 
+  it("clears checked-in state on a paid crew undo", async () => {
+    const task = {
+      id: 86,
+      title: "Crew",
+      assignee: "Crew",
+      points: 5,
+      universal: false,
+      completed: true,
+      status: "done",
+      completedBy: "Alex",
+      completedInWeek: mondayISO(),
+      crewSize: 2,
+      crew: {
+        members: [
+          { name: "Alex", emoji: "", joinedAt: "join-a", checkedInAt: "check-a" },
+          { name: "Bailey Garcia", emoji: "", joinedAt: "join-b", checkedInAt: "check-b" },
+        ],
+        removed: ["Former"],
+      },
+    };
+    const { pb, weekUpdates, snapshotData } = makePb({
+      taskPoints: 5,
+      taskRow: task,
+      snapshotTasks: [task],
+      weekHistory: JSON.stringify([{
+        id: 1,
+        timestamp: "2026-09-21T10:00:00.000Z",
+        member: "Alex",
+        type: "earn",
+        amount: 5,
+        description: "Completed: Crew (+5pts)",
+        taskId: 86,
+      }]),
+    });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const response = await POST(jsonReq({
+      action: "undo",
+      operationId: "op-paid-crew-undo-reset",
+      taskId: 86,
+      memberName: "Alex",
+      pin: "1234",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(weekUpdates().history.some((entry: any) => entry.type === "adjust" && entry.amount === -5)).toBe(true);
+    expect(snapshotData().tasks[0].crew).toEqual({
+      members: [
+        { name: "Alex", emoji: "", joinedAt: "join-a" },
+        { name: "Bailey Garcia", emoji: "", joinedAt: "join-b" },
+      ],
+      removed: ["Former"],
+    });
+  });
+
   it("clears crew check-ins on pending undo while preserving members and tombstones", async () => {
     const task = {
       id: 77,
@@ -1279,6 +1339,11 @@ describe("POST /api/tasks/claim — snapshot authority and replay", () => {
 
     expect(first.status).toBe(202);
     expect(second.status).toBe(200);
+    expect((await second.json()).task).toMatchObject({
+      title: "Managed title",
+      assignee: "Bailey Garcia",
+      completed: true,
+    });
     expect(weekUpdates().history).toHaveLength(1);
     expect(weekUpdates().history[0].amount).toBe(5);
     expect(snapshotData().tasks.find((row: any) => row.id === 78)).toMatchObject({
@@ -1286,6 +1351,124 @@ describe("POST /api/tasks/claim — snapshot authority and replay", () => {
       assignee: "Bailey Garcia",
       completed: true,
     });
+  });
+
+  it("keeps a reversed historical claim replay from re-completing the current row", async () => {
+    const task = { id: 83, title: "Race", assignee: "Open", points: 5, universal: true, completed: false };
+    const { pb, weekUpdates, updateSnapshotTask, updateWeekHistory, snapshotData } = makePb({
+      taskPoints: 5,
+      taskRow: task,
+      snapshotTasks: [task],
+      failSnapshotWriteAfter: 1,
+    });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+    const body = {
+      action: "claim",
+      operationId: "op-reversed-claim-replay",
+      taskId: 83,
+      memberName: "Alex",
+      pin: "1234",
+    };
+
+    const first = await POST(jsonReq(body));
+    updateSnapshotTask(83, { completed: false, status: "pending", completedBy: "" });
+    updateWeekHistory([
+      ...weekUpdates().history,
+      { id: 900, timestamp: "2099-01-01T00:00:00.000Z", member: "Alex", type: "adjust", amount: -5, description: "Later reversal", taskId: 83 },
+    ]);
+    const second = await POST(jsonReq(body));
+
+    expect(first.status).toBe(202);
+    expect(second.status).toBe(200);
+    expect((await second.json()).task).toMatchObject({ completed: false, status: "pending" });
+    expect(snapshotData().tasks[0]).toMatchObject({ completed: false, status: "pending" });
+  });
+
+  it("keeps a superseded undo replay from reopening the current row", async () => {
+    const task = {
+      id: 84,
+      title: "Crew",
+      assignee: "Crew",
+      points: 5,
+      universal: false,
+      completed: true,
+      status: "done",
+      completedBy: "Alex",
+      completedInWeek: mondayISO(),
+      crewSize: 2,
+      crew: {
+        members: [{ name: "Alex", emoji: "", joinedAt: "join", checkedInAt: "check" }],
+        removed: ["Former"],
+      },
+    };
+    const { pb, weekUpdates, updateSnapshotTask, updateWeekHistory, snapshotData } = makePb({
+      taskPoints: 5,
+      taskRow: task,
+      snapshotTasks: [task],
+      weekHistory: JSON.stringify([{
+        id: 1,
+        timestamp: "2026-09-21T10:00:00.000Z",
+        member: "Alex",
+        type: "earn",
+        amount: 5,
+        description: "Completed: Crew (+5pts)",
+        taskId: 84,
+      }]),
+      failSnapshotWriteAfter: 1,
+    });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+    const body = {
+      action: "undo",
+      operationId: "op-superseded-undo-replay",
+      taskId: 84,
+      memberName: "Alex",
+      pin: "1234",
+    };
+
+    const first = await POST(jsonReq(body));
+    updateSnapshotTask(84, { completed: true, status: "done", completedBy: "Alex" });
+    updateWeekHistory([
+      ...weekUpdates().history,
+      { id: 901, timestamp: "2099-01-01T00:00:00.000Z", member: "Alex", type: "earn", amount: 5, description: "Re-earned", taskId: 84 },
+    ]);
+    const second = await POST(jsonReq(body));
+
+    expect(first.status).toBe(202);
+    expect(second.status).toBe(200);
+    expect((await second.json()).task).toMatchObject({ completed: true, status: "done" });
+    expect(snapshotData().tasks[0]).toMatchObject({ completed: true, status: "done" });
+  });
+
+  it("acknowledges a retry after the same child member is demoted", async () => {
+    const task = { id: 85, title: "Dishes", assignee: "Caspian Garcia", points: 5, universal: false, completed: false };
+    const { pb } = makePb({
+      taskPoints: 5,
+      taskRow: task,
+      snapshotTasks: [task],
+      failTaskWrite: true,
+    });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+    mocks.verifyPinFromPB.mockResolvedValue({ id: "child-caspian", name: "Caspian Garcia", role: "child" });
+    const body = {
+      action: "complete",
+      operationId: "op-demoted-child-retry",
+      taskId: 85,
+      memberName: "Caspian Garcia",
+      pin: "1234",
+    };
+
+    const first = await POST(jsonReq(body));
+    const roster = defaultLiveMembers.map((member) =>
+      member.id === "child-caspian" ? { ...member, role: "parent" } : member
+    );
+    mocks.getLiveMembers.mockResolvedValue(roster);
+    mocks.getLiveMemberById.mockImplementation(async (id: string) => roster.find((member) => member.id === id) ?? null);
+    mocks.verifyPinFromPB.mockResolvedValue({ id: "child-caspian", name: "Caspian Garcia", role: "parent" });
+    const second = await POST(jsonReq(body));
+
+    expect(first.status).toBe(202);
+    expect(second.status).toBe(200);
+    expect((await second.json()).duplicate).toBe(true);
   });
 
   it("acknowledges a ledger operation after a later tombstone without recreating the task", async () => {
@@ -1337,6 +1520,47 @@ describe("POST /api/tasks/claim — snapshot authority and replay", () => {
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({ reason: "insufficient_balance" });
     expect(updateCalls.week_data).toBeUndefined();
+  });
+
+  it("keeps the authority week stable when a request crosses Monday", async () => {
+    vi.useFakeTimers();
+    const beforeMonday = new Date("2026-09-20T23:59:59.000Z");
+    const afterMonday = new Date("2026-09-21T05:00:01.000Z");
+    vi.setSystemTime(beforeMonday);
+    const authorityWeek = localWeekStartISO();
+    let releaseRead!: () => void;
+    let readStarted!: () => void;
+    const gate = new Promise<void>((resolve) => { releaseRead = resolve; });
+    const started = new Promise<void>((resolve) => { readStarted = resolve; });
+    const task = { id: 87, title: "Race", assignee: "Open", points: 5, universal: true, completed: false };
+    const { pb, updateCalls } = makePb({
+      taskPoints: 5,
+      taskRow: task,
+      snapshotTasks: [task],
+      snapshotReadStarted: readStarted,
+      snapshotReadGate: gate,
+    });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+    try {
+      const response = POST(jsonReq({
+        action: "claim",
+        operationId: "op-monday-boundary",
+        taskId: 87,
+        memberName: "Alex",
+        pin: "1234",
+      }));
+      await started;
+      vi.setSystemTime(afterMonday);
+      releaseRead();
+      const result = await response;
+
+      expect(result.status).toBe(200);
+      const weekWrites = updateCalls.week_data ?? [];
+      expect(weekWrites[0].weekStart).toBe(authorityWeek);
+      expect(weekWrites[0].weekStart).not.toBe(localWeekStartISO());
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not let a stale assigned precheck pay after manage reassigns the task", async () => {
