@@ -17,6 +17,7 @@ vi.mock("@/lib/server-auth", () => ({
 import { POST as claimPOST } from "@/app/api/tasks/claim/route";
 import { POST as redeemPOST } from "@/app/api/rewards/redeem/route";
 import { withWeekLedgerLock, __resetWeekLedgerLockForTests } from "@/lib/week-ledger-lock";
+import { applyWeekLedgerOperation } from "@/lib/ledger-operations";
 
 function mondayISO(): string {
   const d = new Date();
@@ -251,5 +252,49 @@ describe("week ledger lock — claim vs redeem", () => {
     expect(earn).toMatchObject({ member: "Alex", taskId: 42, amount: 5 });
     expect(redeem).toMatchObject({ member: "Sam", amount: -5 });
     expect(snap.points).toEqual({ Alex: 5, Sam: 5 });
+  });
+});
+
+describe("week ledger lock — helper ownership", () => {
+  it("holds the week lock through the helper projection callback", async () => {
+    const { pb, resolveOne } = makeRacyPb();
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+    let projectionStarted!: () => void;
+    let releaseProjection!: () => void;
+    const projectionReady = new Promise<void>((resolve) => { projectionStarted = resolve; });
+    const projectionRelease = new Promise<void>((resolve) => { releaseProjection = resolve; });
+    let nestedEntered = false;
+
+    const resultPromise = applyWeekLedgerOperation({
+      weekStart: mondayISO(),
+      operation: {
+        operationId: "op-lock-owner",
+        source: "planner-adjust",
+        entries: [{ type: "adjust", member: "Alex", amount: 1, description: "One" }],
+      },
+      project: async () => {
+        projectionStarted();
+        await projectionRelease;
+      },
+    });
+
+    await tick();
+    resolveOne("week.read", 0);
+    await tick();
+    resolveOne("week.write", 0);
+    await tick();
+    resolveOne("week.verify", 0);
+    await projectionReady;
+
+    const nested = withWeekLedgerLock(mondayISO(), async () => {
+      nestedEntered = true;
+    });
+    await tick();
+    expect(nestedEntered).toBe(false);
+
+    releaseProjection();
+    await resultPromise;
+    await nested;
+    expect(nestedEntered).toBe(true);
   });
 });

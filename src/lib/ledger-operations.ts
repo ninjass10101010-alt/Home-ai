@@ -1,0 +1,509 @@
+import { withAdmin } from "@/lib/pb-auth";
+import { normalizeWeekData, type AdminPB } from "@/lib/snapshot-tasks";
+import {
+  hasUnreversedTaskEarn,
+  parseCanonicalTransactions,
+  recomputeWeekPoints,
+} from "@/lib/task-ledger";
+import {
+  isRecord,
+  normalizeOperationId,
+} from "@/lib/task-operation-contract";
+import { withWeekLedgerLock } from "@/lib/week-ledger-lock";
+import type {
+  LedgerOperationInput,
+  LedgerOperationSource,
+  Transaction,
+  WeekData,
+} from "@/types/tasks";
+
+export type LedgerOperationErrorCode =
+  | "invalid_ledger_operation"
+  | "insufficient_balance"
+  | "ledger_write_conflict";
+
+export type LedgerOperationResult =
+  | {
+      ok: true;
+      applied: boolean;
+      duplicate: boolean;
+      semanticDuplicate: boolean;
+      reconciled: boolean;
+      weekData: WeekData;
+      operationId: string;
+      projectionError?: string;
+    }
+  | {
+      ok: false;
+      code: LedgerOperationErrorCode;
+      applied: false;
+      duplicate: false;
+      semanticDuplicate: false;
+      reconciled: false;
+      weekData: WeekData;
+      operationId: string;
+    };
+
+export interface LedgerProjectionContext {
+  pb: AdminPB;
+  weekData: WeekData;
+  operationId: string;
+  applied: boolean;
+  duplicate: boolean;
+  semanticDuplicate: boolean;
+}
+
+export type LedgerProjection = (
+  context: LedgerProjectionContext,
+) => Promise<boolean | void>;
+
+export interface ApplyWeekLedgerOperationArgs {
+  weekStart: string;
+  operation: LedgerOperationInput;
+  project?: LedgerProjection;
+  now?: Date;
+}
+
+interface NormalizedLedgerEntry {
+  type: Transaction["type"];
+  member: string;
+  amount: number;
+  description: string;
+  taskId?: number;
+  appliedBy?: string;
+}
+
+interface NormalizedLedgerOperation {
+  operationId: string;
+  source: LedgerOperationSource;
+  entries: NormalizedLedgerEntry[];
+}
+
+const transactionTypes = new Set<Transaction["type"]>([
+  "earn",
+  "redeem",
+  "penalty",
+  "adjust",
+]);
+
+const operationSources = new Set<LedgerOperationSource>([
+  "assigned-complete",
+  "open-claim",
+  "late-snatch",
+  "task-approval",
+  "reward-redeem",
+  "planner-adjust",
+  "task-undo",
+  "legacy-migration",
+]);
+
+const projectionFailure = "projection_failed";
+let transactionSequence = 0;
+
+class LedgerOperationAbort extends Error {
+  readonly code: LedgerOperationErrorCode;
+  readonly weekData: WeekData;
+
+  constructor(code: LedgerOperationErrorCode, weekData: WeekData) {
+    super(code);
+    this.name = "LedgerOperationAbort";
+    this.code = code;
+    this.weekData = weekData;
+  }
+}
+
+function emptyWeekData(weekStart: string): WeekData {
+  return {
+    weekStart,
+    points: {},
+    streak: {},
+    lastActive: {},
+    history: [],
+  };
+}
+
+function resultOperationId(operation: unknown): string {
+  if (!isRecord(operation) || typeof operation.operationId !== "string") return "";
+  return normalizeOperationId(operation.operationId) ?? operation.operationId.trim();
+}
+
+function isValidWeekStart(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function normalizeOperation(value: unknown): NormalizedLedgerOperation | null {
+  if (!isRecord(value)) return null;
+  const operationId = normalizeOperationId(value.operationId);
+  const source = value.source;
+  if (
+    !operationId ||
+    typeof source !== "string" ||
+    !operationSources.has(source as LedgerOperationSource) ||
+    !Array.isArray(value.entries) ||
+    value.entries.length === 0
+  ) {
+    return null;
+  }
+
+  const entries: NormalizedLedgerEntry[] = [];
+  for (const candidate of value.entries) {
+    if (!isRecord(candidate)) return null;
+    const type = candidate.type;
+    const member = typeof candidate.member === "string" ? candidate.member.trim() : "";
+    const description =
+      typeof candidate.description === "string" ? candidate.description.trim() : "";
+    const amount = candidate.amount;
+    if (
+      typeof type !== "string" ||
+      !transactionTypes.has(type as Transaction["type"]) ||
+      !member ||
+      !description ||
+      typeof amount !== "number" ||
+      !Number.isSafeInteger(amount)
+    ) {
+      return null;
+    }
+
+    let taskId: number | undefined;
+    if (candidate.taskId !== undefined) {
+      if (
+        typeof candidate.taskId !== "number" ||
+        !Number.isSafeInteger(candidate.taskId) ||
+        candidate.taskId <= 0
+      ) {
+        return null;
+      }
+      taskId = candidate.taskId;
+    }
+
+    let appliedBy: string | undefined;
+    if (candidate.appliedBy !== undefined) {
+      if (typeof candidate.appliedBy !== "string" || !candidate.appliedBy.trim()) return null;
+      appliedBy = candidate.appliedBy.trim();
+    }
+
+    entries.push({
+      type: type as Transaction["type"],
+      member,
+      amount,
+      description,
+      ...(taskId === undefined ? {} : { taskId }),
+      ...(appliedBy === undefined ? {} : { appliedBy }),
+    });
+  }
+
+  return { operationId, source: source as LedgerOperationSource, entries };
+}
+
+function canonicalWeek(
+  value: unknown,
+  weekStart: string,
+): WeekData | null {
+  const parsed = normalizeWeekData(value);
+  if (!parsed || parsed.weekStart !== weekStart) return null;
+  const history = parseCanonicalTransactions(parsed.history);
+  if (!history) return null;
+  if (history.some((transaction) => !Number.isSafeInteger(transaction.amount))) return null;
+  return {
+    ...parsed,
+    history,
+    points: recomputeWeekPoints(history),
+  };
+}
+
+function hasNegativeOutcome(history: Transaction[]): boolean {
+  const balances: Record<string, number> = {};
+  for (const transaction of history) {
+    const next = (balances[transaction.member] ?? 0) + transaction.amount;
+    if (next < 0) return true;
+    if (!Number.isSafeInteger(next)) return true;
+    balances[transaction.member] = next;
+  }
+  return false;
+}
+
+function sameOperationEntry(
+  transaction: Transaction,
+  entry: NormalizedLedgerEntry,
+  operationId: string,
+  source: LedgerOperationSource,
+): boolean {
+  return (
+    transaction.meta?.operationId === operationId &&
+    transaction.meta?.source === source &&
+    transaction.member === entry.member &&
+    transaction.type === entry.type &&
+    transaction.amount === entry.amount &&
+    transaction.taskId === entry.taskId
+  );
+}
+
+function findMissingEntries(
+  history: Transaction[],
+  operation: NormalizedLedgerOperation,
+): { missing: NormalizedLedgerEntry[]; duplicate: boolean } | null {
+  const existing = history.filter(
+    (transaction) => transaction.meta?.operationId === operation.operationId,
+  );
+  const unmatched = [...existing];
+  const missing: NormalizedLedgerEntry[] = [];
+
+  for (const entry of operation.entries) {
+    const index = unmatched.findIndex((transaction) =>
+      sameOperationEntry(transaction, entry, operation.operationId, operation.source),
+    );
+    if (index === -1) {
+      missing.push(entry);
+      continue;
+    }
+    unmatched.splice(index, 1);
+  }
+
+  if (unmatched.length > 0) return null;
+  return { missing, duplicate: existing.length > 0 };
+}
+
+function nextTransactionId(history: Transaction[], nowMs: number): number {
+  let candidate = nowMs + transactionSequence;
+  transactionSequence += 1;
+  const used = new Set(history.map((transaction) => transaction.id));
+  while (used.has(candidate) || !Number.isSafeInteger(candidate)) candidate += 1;
+  return candidate;
+}
+
+function createTransaction(
+  entry: NormalizedLedgerEntry,
+  operation: NormalizedLedgerOperation,
+  history: Transaction[],
+  timestamp: string,
+  nowMs: number,
+): Transaction {
+  return {
+    id: nextTransactionId(history, nowMs),
+    timestamp,
+    member: entry.member,
+    type: entry.type,
+    amount: entry.amount,
+    description: entry.description,
+    ...(entry.taskId === undefined ? {} : { taskId: entry.taskId }),
+    ...(entry.appliedBy === undefined ? {} : { appliedBy: entry.appliedBy }),
+    meta: {
+      operationId: operation.operationId,
+      source: operation.source,
+    },
+  };
+}
+
+async function readWeekRow(
+  pb: AdminPB,
+  weekStart: string,
+): Promise<{ row: Record<string, any> | null; weekData: WeekData }> {
+  const rows = await pb.collection("week_data").getFullList({ requestKey: null });
+  const row = (Array.isArray(rows) ? rows : []).find(
+    (candidate: any) => String(candidate?.weekStart ?? "") === weekStart,
+  ) as Record<string, any> | undefined;
+  if (!row) return { row: null, weekData: emptyWeekData(weekStart) };
+  const weekData = canonicalWeek(row, weekStart);
+  if (!weekData) throw new LedgerOperationAbort("invalid_ledger_operation", emptyWeekData(weekStart));
+  return { row, weekData };
+}
+
+async function readWrittenWeek(
+  pb: AdminPB,
+  weekStart: string,
+  rowId: unknown,
+): Promise<WeekData | null> {
+  const collection = pb.collection("week_data");
+  let row: unknown = null;
+  if (rowId !== null && rowId !== undefined && typeof collection.getOne === "function") {
+    row = await collection.getOne(String(rowId), { requestKey: null });
+  }
+  if (!row) {
+    const rows = await collection.getFullList({ requestKey: null });
+    row = (Array.isArray(rows) ? rows : []).find(
+      (candidate: any) => String(candidate?.weekStart ?? "") === weekStart,
+    );
+  }
+  if (!row) return null;
+  return canonicalWeek(row, weekStart);
+}
+
+function failure(
+  code: LedgerOperationErrorCode,
+  weekData: WeekData,
+  operationId: string,
+): LedgerOperationResult {
+  return {
+    ok: false,
+    code,
+    applied: false,
+    duplicate: false,
+    semanticDuplicate: false,
+    reconciled: false,
+    weekData,
+    operationId,
+  };
+}
+
+export async function applyWeekLedgerOperation(
+  args: ApplyWeekLedgerOperationArgs,
+): Promise<LedgerOperationResult> {
+  const input = args as unknown as Record<string, unknown>;
+  const rawWeekStart = input.weekStart;
+  const weekStart = typeof rawWeekStart === "string" ? rawWeekStart.trim() : "";
+  const operation = input.operation;
+  const operationId = resultOperationId(operation);
+  const fallback = emptyWeekData(weekStart);
+  const project = input.project;
+
+  if (
+    !isValidWeekStart(weekStart) ||
+    (project !== undefined && typeof project !== "function")
+  ) {
+    return failure("invalid_ledger_operation", fallback, operationId);
+  }
+
+  try {
+    return await withWeekLedgerLock(weekStart, async () =>
+      withAdmin(async (pb): Promise<LedgerOperationResult> => {
+        const read = await readWeekRow(pb, weekStart);
+        const current = read.weekData;
+        const normalizedOperation = normalizeOperation(operation);
+        if (!normalizedOperation) {
+          return failure("invalid_ledger_operation", current, operationId);
+        }
+        if (hasNegativeOutcome(current.history)) {
+          return failure("insufficient_balance", current, normalizedOperation.operationId);
+        }
+
+        const replay = findMissingEntries(current.history, normalizedOperation);
+        if (!replay) {
+          return failure("invalid_ledger_operation", current, normalizedOperation.operationId);
+        }
+
+        const now = input.now instanceof Date && Number.isFinite(input.now.getTime())
+          ? new Date(input.now.getTime())
+          : new Date();
+        const timestamp = now.toISOString();
+        const nowMs = now.getTime();
+        const workingHistory = [...current.history];
+        const newTransactions: Transaction[] = [];
+        let semanticDuplicate = false;
+
+        for (const entry of replay.missing) {
+          if (
+            entry.type === "earn" &&
+            entry.taskId !== undefined &&
+            hasUnreversedTaskEarn(workingHistory, entry.taskId, entry.member)
+          ) {
+            semanticDuplicate = true;
+            continue;
+          }
+          const transaction = createTransaction(
+            entry,
+            normalizedOperation,
+            workingHistory,
+            timestamp,
+            nowMs,
+          );
+          newTransactions.push(transaction);
+          workingHistory.push(transaction);
+        }
+
+        const mergedHistory = [...current.history, ...newTransactions];
+        if (hasNegativeOutcome(mergedHistory)) {
+          return failure("insufficient_balance", current, normalizedOperation.operationId);
+        }
+        const points = recomputeWeekPoints(mergedHistory);
+        let weekData: WeekData = {
+          ...current,
+          points,
+          history: mergedHistory,
+        };
+
+        if (newTransactions.length > 0) {
+          const collection = pb.collection("week_data");
+          const payload = {
+            weekStart,
+            points,
+            streak: current.streak,
+            lastActive: current.lastActive,
+            history: mergedHistory,
+          };
+          let rowId: unknown = read.row?.id ?? null;
+          if (read.row) {
+            await collection.update(read.row.id, payload, { requestKey: null });
+          } else {
+            const created = await collection.create(payload, { requestKey: null });
+            rowId = (created as any)?.id ?? null;
+          }
+
+          const verified = await readWrittenWeek(pb, weekStart, rowId);
+          if (!verified) {
+            throw new LedgerOperationAbort("ledger_write_conflict", current);
+          }
+          const verifiedIds = new Set(verified.history.map((transaction) => transaction.id));
+          const verifiedTransactions = newTransactions.every((transaction) => {
+            const found = verified.history.find((candidate) => candidate.id === transaction.id);
+            return Boolean(
+              found &&
+                found.meta?.operationId === transaction.meta?.operationId &&
+                found.meta?.source === transaction.meta?.source &&
+                found.member === transaction.member &&
+                found.type === transaction.type &&
+                found.amount === transaction.amount &&
+                found.taskId === transaction.taskId,
+            ) && verifiedIds.has(transaction.id);
+          });
+          if (!verifiedTransactions || hasNegativeOutcome(verified.history)) {
+            throw new LedgerOperationAbort("ledger_write_conflict", current);
+          }
+          weekData = {
+            ...verified,
+            points: recomputeWeekPoints(verified.history),
+          };
+        }
+
+        let reconciled = true;
+        let projectionError: string | undefined;
+        if (project) {
+          try {
+            const projected = await project({
+              pb,
+              weekData,
+              operationId: normalizedOperation.operationId,
+              applied: newTransactions.length > 0,
+              duplicate: replay.duplicate,
+              semanticDuplicate,
+            });
+            if (projected === false) {
+              reconciled = false;
+              projectionError = projectionFailure;
+            }
+          } catch {
+            reconciled = false;
+            projectionError = projectionFailure;
+          }
+        }
+
+        return {
+          ok: true,
+          applied: newTransactions.length > 0,
+          duplicate: replay.duplicate,
+          semanticDuplicate,
+          reconciled,
+          weekData,
+          operationId: normalizedOperation.operationId,
+          ...(projectionError === undefined ? {} : { projectionError }),
+        };
+      }),
+    );
+  } catch (error) {
+    if (error instanceof LedgerOperationAbort) {
+      return failure(error.code, error.weekData, operationId);
+    }
+    return failure("ledger_write_conflict", fallback, operationId);
+  }
+}
