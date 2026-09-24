@@ -375,7 +375,10 @@ function canonicalSnapshotData(data: SnapshotData, revision: string): SnapshotDa
   if (next.weekData != null) {
     const weekData = normalizeWeekData(next.weekData);
     if (!weekData) throw new TypeError("invalid_week_data");
-    next.weekData = weekData;
+    next.weekData = {
+      ...weekData,
+      points: recomputeWeekPoints(weekData.history),
+    };
   }
   return next;
 }
@@ -595,10 +598,7 @@ export async function persistSnapshotWeek(
           };
         }
 
-        data.weekData = {
-          ...mergedWeek,
-          points: recomputeWeekPoints(mergedWeek.history),
-        };
+        data.weekData = mergedWeek;
         data.taskWeekStart = mergedWeek.weekStart;
       }
 

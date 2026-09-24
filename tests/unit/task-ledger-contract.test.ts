@@ -74,6 +74,9 @@ describe("task ledger contract", () => {
       { ...valid, id: 1.5 },
       { ...valid, timestamp: "" },
       { ...valid, timestamp: "not-a-timestamp" },
+      { ...valid, timestamp: "1" },
+      { ...valid, timestamp: "2026-02-30T10:00:00.000Z" },
+      { ...valid, timestamp: "2026-09-21" },
       { ...valid, member: " " },
       { ...valid, amount: "5" },
       { ...valid, type: "legacy" },
@@ -86,6 +89,33 @@ describe("task ledger contract", () => {
       expect(parseCanonicalTransactions([candidate])).toBeNull();
       expect(() => recomputeWeekPoints([candidate] as unknown as Transaction[])).toThrow();
     }
+  });
+
+  it("rejects malformed history before the semantic earn gate", () => {
+    const malformed = [
+      transaction(1, "Alex", "earn", Number.NaN, "2026-09-21T10:00:00.000Z", 42),
+    ];
+
+    expect(() => hasUnreversedTaskEarn(malformed, 42, "Alex")).toThrow();
+  });
+
+  it("canonicalizes offset timestamps before comparing earn reversals", () => {
+    const history: Transaction[] = [
+      transaction(1, "Alex", "earn", 5, "2026-09-21T12:00:00+02:00", 42),
+      transaction(2, "Alex", "adjust", -5, "2026-09-21T05:00:00-05:00", 42),
+    ];
+
+    expect(parseCanonicalTransactions(history)).toEqual([
+      {
+        ...history[0],
+        timestamp: "2026-09-21T10:00:00.000Z",
+      },
+      {
+        ...history[1],
+        timestamp: "2026-09-21T10:00:00.000Z",
+      },
+    ]);
+    expect(hasUnreversedTaskEarn(history, 42, "Alex")).toBe(false);
   });
 
   it("normalizes canonical transaction operation metadata", () => {

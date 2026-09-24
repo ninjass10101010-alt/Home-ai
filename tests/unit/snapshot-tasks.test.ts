@@ -2,11 +2,10 @@ import { beforeEach, describe, it, expect, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   withAdmin: vi.fn(),
-  withKeyedLock: vi.fn(),
 }));
 
 vi.mock("@/lib/pb-auth", () => ({ withAdmin: mocks.withAdmin }));
-vi.mock("@/lib/keyed-lock", () => ({ withKeyedLock: mocks.withKeyedLock }));
+import { __resetKeyedLockForTests } from "@/lib/keyed-lock";
 
 import {
   liveSnapshotTasks,
@@ -35,8 +34,7 @@ const makePB = (row?: Record<string, unknown>) => {
 
 beforeEach(() => {
   mocks.withAdmin.mockReset();
-  mocks.withKeyedLock.mockReset();
-  mocks.withKeyedLock.mockImplementation(async (_key: string, fn: () => unknown) => fn());
+  __resetKeyedLockForTests();
 });
 
 describe("snapshot-tasks pure helpers", () => {
@@ -235,6 +233,89 @@ describe("snapshot revisions and receipts", () => {
     expect(payload.updated_at).toBe(result.revision.updatedAt);
   });
 
+  it("sorts offset-form history by UTC instant after canonicalization", async () => {
+    const { pb, collection } = makePB({
+      id: "snapshot-1",
+      data: {
+        revision: "20",
+        weekData: {
+          weekStart: "2026-09-21",
+          points: {},
+          streak: {},
+          lastActive: {},
+          history: [
+            {
+              id: 2,
+              timestamp: "2026-09-21T05:30:00-05:00",
+              member: "Alex",
+              type: "earn",
+              amount: 2,
+              description: "Later instant",
+            },
+            {
+              id: 1,
+              timestamp: "2026-09-21T12:00:00+02:00",
+              member: "Alex",
+              type: "earn",
+              amount: 1,
+              description: "Earlier instant",
+            },
+          ],
+        },
+      },
+    });
+
+    const result = await persistSnapshotWeek(pb, {
+      weekStart: "2026-09-21",
+      points: {},
+      streak: {},
+      lastActive: {},
+      history: [],
+    });
+
+    expect(result.ok).toBe(true);
+    const payload = collection.update.mock.calls[0][1] as any;
+    expect(payload.data.weekData.history.map((transaction: any) => transaction.timestamp)).toEqual([
+      "2026-09-21T10:00:00.000Z",
+      "2026-09-21T10:30:00.000Z",
+    ]);
+  });
+
+  it("recomputes balances on a task-only snapshot write while preserving streak data", async () => {
+    const { pb, collection } = makePB({
+      id: "snapshot-1",
+      data: {
+        revision: "20",
+        tasks: [t(42, "Dishes", { completed: false })],
+        weekData: {
+          weekStart: "2026-09-21",
+          points: { Alex: 999 },
+          streak: { Alex: 3 },
+          lastActive: { Alex: "2026-09-21T10:00:00.000Z" },
+          history: [
+            {
+              id: 1,
+              timestamp: "2026-09-21T10:00:00.000Z",
+              member: "Alex",
+              type: "earn",
+              amount: 5,
+              description: "Completed: Dishes",
+            },
+          ],
+        },
+      },
+    });
+
+    const result = await persistSnapshotWeek(pb, null, { id: 42, completed: true });
+
+    expect(result.ok).toBe(true);
+    const payload = collection.update.mock.calls[0][1] as any;
+    expect(payload.data.weekData.points).toEqual({ Alex: 5 });
+    expect(payload.data.weekData.streak).toEqual({ Alex: 3 });
+    expect(payload.data.weekData.lastActive).toEqual({ Alex: "2026-09-21T10:00:00.000Z" });
+    expect(payload.data.weekData.history).toHaveLength(1);
+  });
+
   it("fails closed when stored ledger history contains a malformed entry", async () => {
     const { pb, collection } = makePB({
       id: "snapshot-1",
@@ -394,6 +475,49 @@ describe("snapshot revisions and receipts", () => {
     const receipts = (collection.update.mock.calls[0][1] as any).data.operationReceipts;
     expect(Object.keys(receipts)).toEqual([]);
     expect(Object.getPrototypeOf(receipts)).toBeNull();
+  });
+
+  it("serializes concurrent revision writes with the actual keyed lock", async () => {
+    let storedRow: Record<string, unknown> = {
+      id: "snapshot-1",
+      data: { revision: "20", tasks: [] },
+      updated_at: "2026-09-21T10:00:00.000Z",
+    };
+    let activeReads = 0;
+    let maxActiveReads = 0;
+    const collection = {
+      getFullList: vi.fn(async () => {
+        activeReads += 1;
+        maxActiveReads = Math.max(maxActiveReads, activeReads);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        activeReads -= 1;
+        return [structuredClone(storedRow)];
+      }),
+      update: vi.fn(async (id: string, payload: Record<string, unknown>) => {
+        await new Promise((resolve) => setTimeout(resolve, 2));
+        storedRow = { id, ...structuredClone(payload) };
+        return storedRow;
+      }),
+      create: vi.fn(),
+    };
+    const pb = { collection: vi.fn(() => collection) } as any;
+
+    const [first, second] = await Promise.all([
+      mutateSnapshotWithMeta(
+        (data) => ({ data: { ...data, taskWeekStart: "first" }, result: null }),
+        pb,
+      ),
+      mutateSnapshotWithMeta(
+        (data) => ({ data: { ...data, taskWeekStart: "second" }, result: null }),
+        pb,
+      ),
+    ]);
+
+    expect(first.revision.revision).toBe("21");
+    expect(second.revision.revision).toBe("22");
+    expect((storedRow.data as any).revision).toBe("22");
+    expect((storedRow.data as any).taskWeekStart).toBe("second");
+    expect(maxActiveReads).toBe(1);
   });
 
   it("returns a sanitized failure reason without exposing error details", async () => {

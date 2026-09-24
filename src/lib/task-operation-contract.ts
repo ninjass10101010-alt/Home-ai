@@ -21,6 +21,15 @@ const authorityTokens = new Set([
   "payee",
   "point",
   "history",
+  "ledger",
+  "transaction",
+  "recipient",
+  "payer",
+  "actor",
+  "role",
+  "user",
+  "claimant",
+  "operation",
   "pending",
   "approval",
 ]);
@@ -80,10 +89,43 @@ export function normalizeOperationId(value: unknown): string | null {
   return operationId && !isUnsafeOperationId(operationId) ? operationId : null;
 }
 
+const isoDateTimePattern =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|[+-](\d{2}):(\d{2}))$/i;
+
+function daysInMonth(year: number, month: number): number {
+  if (month === 2) return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) ? 29 : 28;
+  return [4, 6, 9, 11].includes(month) ? 30 : 31;
+}
+
 export function normalizeTimestamp(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const timestamp = value.trim();
-  return timestamp && Number.isFinite(Date.parse(timestamp)) ? timestamp : null;
+  const match = isoDateTimePattern.exec(timestamp);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  const offsetHour = match[9] === undefined ? 0 : Number(match[9]);
+  const offsetMinute = match[10] === undefined ? 0 : Number(match[10]);
+  if (
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > daysInMonth(year, month) ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59 ||
+    offsetHour > 14 ||
+    offsetMinute > 59 ||
+    (offsetHour === 14 && offsetMinute !== 0)
+  ) {
+    return null;
+  }
+  const epoch = Date.parse(timestamp);
+  return Number.isFinite(epoch) ? new Date(epoch).toISOString() : null;
 }
 
 export function isNormalizedOperationId(value: unknown): value is string {
@@ -120,6 +162,8 @@ function isForbiddenPayloadKey(key: string): boolean {
     compact.startsWith("completed") ||
     compact.startsWith("completion") ||
     hasNormalizedBoundary(authorityTokens, compact) ||
+    compact === "opid" ||
+    tokens.some((token, index) => token === "op" && tokens[index + 1] === "id") ||
     hasNormalizedBoundary(credentialTokens, compact) ||
     hasNormalizedBoundary(unsafeRecordTokens, compact)
   );

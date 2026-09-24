@@ -59,6 +59,16 @@ describe("internal task command registry", () => {
     "history",
     "ledgerHistory",
     "ledgerhistory",
+    "ledgerEntries",
+    "transactions",
+    "transactionHistory",
+    "recipient",
+    "payer",
+    "actor",
+    "role",
+    "userId",
+    "claimant",
+    "operationId",
     "pin",
     "pinCode",
     "claimantPin",
@@ -116,13 +126,44 @@ describe("internal task command registry", () => {
     }
   });
 
+  it.each(["op-internal-1", "op-conflicting-identity"])(
+    "rejects payload-owned operation ID %s",
+    async (payloadOperationId) => {
+      const handler = vi.fn(async (): Promise<InternalTaskCommandResult> => ({
+        ok: true,
+        operationId: baseCommand.operationId,
+        reconciled: true,
+      }));
+      const unregister = registerInternalTaskCommandHandler("complete", handler);
+      const command: InternalTaskCommand = {
+        ...baseCommand,
+        payload: { taskId: 42, metadata: { operationId: payloadOperationId } },
+      };
+
+      try {
+        const result = await executeInternalTaskCommand(command, { source: "muse" });
+        expect(result).toEqual({
+          ok: false,
+          operationId: baseCommand.operationId,
+          reason: "forbidden_task_command_payload",
+          reconciled: false,
+        });
+        expect(handler).not.toHaveBeenCalled();
+      } finally {
+        unregister();
+      }
+    },
+  );
+
   it("preserves legitimate task and action identity fields", async () => {
     const payload = {
       taskId: 42,
       title: "Dishes",
       assignee: "Child A",
       targetName: "Child B",
-      operationId: "op-payload-identity",
+      action: "update",
+      due: "2026-09-28",
+      priority: "high",
       shipping: true,
     };
     const handler = vi.fn(async (received): Promise<InternalTaskCommandResult> => {
@@ -211,6 +252,34 @@ describe("internal task command registry", () => {
       }
     },
   );
+
+  it("does not let an older cleanup remove a replacement registration", async () => {
+    const unregisterFirst = registerInternalTaskCommandHandler("complete", async () => ({
+      ok: true,
+      operationId: baseCommand.operationId,
+      reason: "first",
+      reconciled: true,
+    }));
+    const unregisterSecond = registerInternalTaskCommandHandler("complete", async () => ({
+      ok: true,
+      operationId: baseCommand.operationId,
+      reason: "second",
+      reconciled: true,
+    }));
+
+    try {
+      unregisterFirst();
+      const replacementResult = await executeInternalTaskCommand(baseCommand, { source: "server" });
+      expect(replacementResult.reason).toBe("second");
+
+      unregisterSecond();
+      const unsupportedResult = await executeInternalTaskCommand(baseCommand, { source: "server" });
+      expect(unsupportedResult.reason).toBe("unsupported_task_command");
+    } finally {
+      unregisterFirst();
+      unregisterSecond();
+    }
+  });
 
   it("cleans up registration and returns unsupported without a handler", async () => {
     const handler = vi.fn(async (): Promise<InternalTaskCommandResult> => ({
