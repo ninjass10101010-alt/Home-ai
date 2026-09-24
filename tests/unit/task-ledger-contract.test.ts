@@ -122,7 +122,7 @@ describe("task ledger contract", () => {
     const parsed = parseCanonicalTransactions([
       {
         ...transaction(1, " Alex ", "earn", 5, "2026-09-21T10:00:00.000Z", 42),
-        meta: { operationId: "  op-ledger-1  ", source: "assigned-complete" },
+        meta: { operationId: "  op-ledger-1  ", source: "assigned-complete", fingerprint: "c".repeat(64) },
       },
     ]);
 
@@ -135,7 +135,7 @@ describe("task ledger contract", () => {
         amount: 5,
         description: "earn:1",
         taskId: 42,
-        meta: { operationId: "op-ledger-1", source: "assigned-complete" },
+        meta: { operationId: "op-ledger-1", source: "assigned-complete", fingerprint: "c".repeat(64) },
       },
     ]);
   });

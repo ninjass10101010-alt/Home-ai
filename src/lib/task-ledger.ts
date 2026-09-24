@@ -35,10 +35,18 @@ function canonicalLedgerMeta(value: unknown): LedgerOperationMeta | null {
   if (!isRecord(value)) return null;
   const operationId = normalizeOperationId(value.operationId);
   const source = value.source;
+  const fingerprint = value.fingerprint;
   if (!operationId || typeof source !== "string" || !ledgerOperationSources.has(source as LedgerOperationSource)) {
     return null;
   }
-  return { operationId, source: source as LedgerOperationSource };
+  if (fingerprint !== undefined && (typeof fingerprint !== "string" || !/^[a-f0-9]{64}$/.test(fingerprint))) {
+    return null;
+  }
+  return {
+    operationId,
+    source: source as LedgerOperationSource,
+    ...(typeof fingerprint === "string" ? { fingerprint } : {}),
+  };
 }
 
 export function parseCanonicalTransactions(value: unknown): Transaction[] | null {
@@ -139,7 +147,7 @@ export function hasUnreversedTaskEarn(
   return !canonicalHistory.some(
     (transaction) =>
       transaction.type === "adjust" &&
-      transaction.amount < 0 &&
+      transaction.amount <= 0 &&
       Number(transaction.taskId) === Number(taskId) &&
       transaction.member === member &&
       Date.parse(transaction.timestamp) >= Date.parse(latestEarn.timestamp),

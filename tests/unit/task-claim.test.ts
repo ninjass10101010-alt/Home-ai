@@ -43,6 +43,7 @@ vi.mock("@/lib/live-member", () => ({
 import { POST } from "@/app/api/tasks/claim/route";
 import { executeInternalTaskCommand } from "@/lib/task-commands";
 import { taskClaimInternalPayload, type ClaimAction } from "@/lib/task-claim";
+import { taskManageInternalPayload } from "@/lib/task-manage";
 
 function mondayISO(): string {
   const d = new Date();
@@ -91,6 +92,8 @@ function makePb(opts?: {
   snapshotData?: Record<string, unknown>;
   failTaskWrite?: boolean;
   failSnapshotWriteAfter?: number;
+  snapshotReadStarted?: () => void;
+  snapshotReadGate?: Promise<void>;
 }) {
   const weekRow = {
     id: "w1",
@@ -133,17 +136,37 @@ function makePb(opts?: {
   };
   let snapshotWritten: any = null;
   let snapshotWrites = 0;
+  let snapshotReads = 0;
   return {
     updateCalls,
     taskCollectionReads: () => taskCollectionReads,
     weekUpdates: () => written,
     snapshotUpdates: () => snapshotWritten,
     snapshotData: () => typeof snapshotRow.data === "string" ? JSON.parse(snapshotRow.data) : structuredClone(snapshotRow.data),
+    updateSnapshotTask: (id: number, patch: Record<string, unknown>) => {
+      const data = typeof snapshotRow.data === "string" ? JSON.parse(snapshotRow.data) : structuredClone(snapshotRow.data);
+      data.tasks = (data.tasks || []).map((task: any) => Number(task.id) === id ? { ...task, ...patch } : task);
+      snapshotRow = { ...snapshotRow, data: JSON.stringify(data) };
+    },
+    tombstoneSnapshotTask: (id: number) => {
+      const data = typeof snapshotRow.data === "string" ? JSON.parse(snapshotRow.data) : structuredClone(snapshotRow.data);
+      data.tasks = (data.tasks || []).filter((task: any) => Number(task.id) !== id);
+      data.deletedTaskIds = [...new Set([...(data.deletedTaskIds || []), id])];
+      snapshotRow = { ...snapshotRow, data: JSON.stringify(data) };
+    },
     pb: {
       collection: (name: string) => {
         if (name === "consuela_data_snapshots") {
           return {
-            getFullList: async () => [snapshotRow],
+            getFullList: async () => {
+              const value = structuredClone(snapshotRow);
+              const read = snapshotReads++;
+              if (read === 0) {
+                opts?.snapshotReadStarted?.();
+                if (opts?.snapshotReadGate) await opts.snapshotReadGate;
+              }
+              return [value];
+            },
             update: async (_id: string, payload: any) => {
               snapshotWrites += 1;
               if (opts?.failSnapshotWriteAfter === snapshotWrites) {
@@ -843,13 +866,16 @@ describe("POST /api/tasks/claim — snapshot authority and replay", () => {
     const { pb, updateCalls } = makePb({ taskPoints: 5, taskRow: task, snapshotTasks: [task] });
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
 
-    const responses = await Promise.all([
+    const [firstResponse, secondResponse] = await Promise.all([
       POST(jsonReq({ action: "claim", operationId: "op-race-a", taskId: 75, memberName: "Alex", pin: "1234" })),
       POST(jsonReq({ action: "claim", operationId: "op-race-b", taskId: 75, memberName: "Alex", pin: "1234" })),
     ]);
+    const winner = firstResponse.status === 200 ? firstResponse : secondResponse;
+    const loser = firstResponse.status === 200 ? secondResponse : firstResponse;
 
-    expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+    expect([firstResponse.status, secondResponse.status].sort()).toEqual([200, 409]);
     expect(updateCalls.week_data).toHaveLength(1);
+    expect((await loser.json()).claimedBy).toBe((await winner.json()).claimedBy);
   });
 
   it("uses PB only when the snapshot has no live task and no tombstone", async () => {
@@ -1144,6 +1170,214 @@ describe("POST /api/tasks/claim — snapshot authority and replay", () => {
     expect(updateCalls.week_data).toHaveLength(1);
     expect(weekUpdates().history).toHaveLength(1);
     expect(snapshotData().weekData.history).toHaveLength(1);
+  });
+
+  it("reopens a zero-point completed task with a zero adjustment", async () => {
+    const task = {
+      id: 76,
+      title: "Nothing",
+      assignee: "Alex",
+      points: 0,
+      universal: false,
+      completed: true,
+      status: "done",
+      completedBy: "Alex",
+      completedInWeek: mondayISO(),
+    };
+    const { pb, weekUpdates, snapshotData } = makePb({
+      taskPoints: 0,
+      taskRow: task,
+      snapshotTasks: [task],
+      weekHistory: JSON.stringify([{
+        id: 1,
+        timestamp: "2026-09-21T10:00:00.000Z",
+        member: "Alex",
+        type: "earn",
+        amount: 0,
+        description: "Completed: Nothing (+0pts)",
+        taskId: 76,
+      }]),
+    });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const response = await POST(jsonReq({
+      action: "undo",
+      operationId: "op-zero-undo",
+      taskId: 76,
+      memberName: "Alex",
+      pin: "1234",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(weekUpdates().history).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "adjust", amount: 0, taskId: 76 }),
+    ]));
+    expect(snapshotData().tasks[0]).toMatchObject({ completed: false, status: "pending" });
+  });
+
+  it("clears crew check-ins on pending undo while preserving members and tombstones", async () => {
+    const task = {
+      id: 77,
+      title: "Crew",
+      assignee: "Crew",
+      points: 5,
+      universal: false,
+      completed: true,
+      status: "done",
+      completedBy: "Crew",
+      completedInWeek: mondayISO(),
+      crewSize: 2,
+      crew: {
+        members: [
+          { name: "Caspian Garcia", emoji: "🧒", joinedAt: "join-a", checkedInAt: "check-a" },
+          { name: "Bailey Garcia", emoji: "👧", joinedAt: "join-b", checkedInAt: "check-b" },
+        ],
+        removed: ["Former Member"],
+      },
+      pendingApproval: { byName: "Crew", at: "2026-09-24T10:00:00.000Z", points: 5, crew: ["Caspian Garcia", "Bailey Garcia"] },
+    };
+    const { pb, snapshotData } = makePb({ taskPoints: 5, taskRow: task, snapshotTasks: [task] });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const response = await POST(jsonReq({
+      action: "undo",
+      operationId: "op-crew-undo-reset",
+      taskId: 77,
+      memberName: "Alex",
+      pin: "1234",
+    }));
+
+    expect(response.status).toBe(200);
+    const crew = snapshotData().tasks[0].crew;
+    expect(crew.members).toEqual([
+      { name: "Caspian Garcia", emoji: "🧒", joinedAt: "join-a" },
+      { name: "Bailey Garcia", emoji: "👧", joinedAt: "join-b" },
+    ]);
+    expect(crew.removed).toEqual(["Former Member"]);
+  });
+
+  it("replays a ledger operation after points change without charging the new amount", async () => {
+    const task = { id: 78, title: "Race", assignee: "Open", points: 5, universal: true, completed: false };
+    const { pb, weekUpdates, snapshotData, updateSnapshotTask } = makePb({
+      taskPoints: 5,
+      taskRow: task,
+      snapshotTasks: [task],
+      failSnapshotWriteAfter: 1,
+    });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+    const body = {
+      action: "claim",
+      operationId: "op-ledger-replay-points",
+      taskId: 78,
+      memberName: "Alex",
+      pin: "1234",
+    };
+
+    const first = await POST(jsonReq(body));
+    updateSnapshotTask(78, { points: 9, title: "Managed title", assignee: "Bailey Garcia" });
+    const second = await POST(jsonReq(body));
+
+    expect(first.status).toBe(202);
+    expect(second.status).toBe(200);
+    expect(weekUpdates().history).toHaveLength(1);
+    expect(weekUpdates().history[0].amount).toBe(5);
+    expect(snapshotData().tasks.find((row: any) => row.id === 78)).toMatchObject({
+      title: "Managed title",
+      assignee: "Bailey Garcia",
+      completed: true,
+    });
+  });
+
+  it("acknowledges a ledger operation after a later tombstone without recreating the task", async () => {
+    const task = { id: 79, title: "Race", assignee: "Open", points: 5, universal: true, completed: false };
+    const { pb, tombstoneSnapshotTask, snapshotData } = makePb({
+      taskPoints: 5,
+      taskRow: task,
+      snapshotTasks: [task],
+      failSnapshotWriteAfter: 1,
+    });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+    const body = {
+      action: "claim",
+      operationId: "op-ledger-replay-tombstone",
+      taskId: 79,
+      memberName: "Alex",
+      pin: "1234",
+    };
+
+    const first = await POST(jsonReq(body));
+    tombstoneSnapshotTask(79);
+    const second = await POST(jsonReq(body));
+
+    expect(first.status).toBe(202);
+    expect(second.status).toBe(200);
+    expect(snapshotData().tasks.some((row: any) => row.id === 79)).toBe(false);
+  });
+
+  it("maps a stable insufficient-balance ledger result to conflict", async () => {
+    const task = { id: 81, title: "Race", assignee: "Open", points: 5, universal: true, completed: false };
+    const { pb, updateCalls } = makePb({
+      taskPoints: 5,
+      taskRow: task,
+      snapshotTasks: [task],
+      weekHistory: JSON.stringify([
+        { id: 1, timestamp: "2026-09-21T09:00:00.000Z", member: "Sam", type: "adjust", amount: -1, description: "Legacy negative" },
+      ]),
+    });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const response = await POST(jsonReq({
+      action: "claim",
+      operationId: "op-insufficient-claim",
+      taskId: 81,
+      memberName: "Alex",
+      pin: "1234",
+    }));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ reason: "insufficient_balance" });
+    expect(updateCalls.week_data).toBeUndefined();
+  });
+
+  it("does not let a stale assigned precheck pay after manage reassigns the task", async () => {
+    let releaseRead!: () => void;
+    let readStarted!: () => void;
+    const gate = new Promise<void>((resolve) => { releaseRead = resolve; });
+    const started = new Promise<void>((resolve) => { readStarted = resolve; });
+    const task = { id: 82, title: "Dishes", assignee: "Alex", points: 5, universal: false, completed: false };
+    const { pb, updateCalls } = makePb({
+      taskPoints: 5,
+      taskRow: task,
+      snapshotTasks: [task],
+      snapshotReadStarted: readStarted,
+      snapshotReadGate: gate,
+    });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+    const manage = executeInternalTaskCommand({
+      operationId: "op-manage-race",
+      kind: "update",
+      actor: { memberId: "parent-alex", name: "Alex", role: "parent" },
+      payload: taskManageInternalPayload({
+        action: "update",
+        operationId: "op-manage-race",
+        taskId: 82,
+        patch: { assignee: "Bailey Garcia" },
+      }),
+    }, { source: "server" });
+    await started;
+    const claim = POST(jsonReq({
+      action: "complete",
+      operationId: "op-stale-claim-race",
+      taskId: 82,
+      memberName: "Alex",
+      pin: "1234",
+    }));
+    releaseRead();
+    const [manageResult, claimResponse] = await Promise.all([manage, claim]);
+
+    expect(manageResult.ok).toBe(true);
+    expect(claimResponse.status).toBe(403);
+    expect(updateCalls.week_data).toBeUndefined();
   });
 
   it("rejects no-PIN open claims and no-PIN crew removal", async () => {

@@ -9,7 +9,11 @@ vi.mock("@/lib/pb-auth", () => ({
   withAdmin: (fn: (pb: unknown) => Promise<unknown>) => mocks.withAdmin(fn),
 }));
 
-import { applyWeekLedgerOperation, type LedgerOperationResult } from "@/lib/ledger-operations";
+import {
+  applyWeekLedgerOperation,
+  applyWeekLedgerOperationLocked,
+  type LedgerOperationResult,
+} from "@/lib/ledger-operations";
 import { __resetWeekLedgerLockForTests } from "@/lib/week-ledger-lock";
 
 const WEEK = "2026-09-21";
@@ -708,7 +712,7 @@ describe("ledger operation review regressions", () => {
       },
     });
 
-    expect(result).toMatchObject({ ok: false, code: "invalid_ledger_operation" });
+    expect(result).toMatchObject({ ok: false, code: "operation_conflict" });
     expect(harness.writeCount).toBe(0);
   });
 
@@ -1054,6 +1058,79 @@ describe("second review regressions", () => {
 
     expect(result).toMatchObject({ ok: false, code: "invalid_ledger_operation" });
     expect(harness.writeCount).toBe(0);
+  });
+
+  it("returns operation_conflict for a reused operation ID with a different intent fingerprint", async () => {
+    const existing = transaction(1, {
+      taskId: 101,
+      meta: {
+        operationId: "op-intent-conflict",
+        source: "assigned-complete",
+        fingerprint: "a".repeat(64),
+      },
+    });
+    const harness = makePb({ history: [existing] });
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = await applyWeekLedgerOperation({
+      weekStart: WEEK,
+      operation: {
+        operationId: "op-intent-conflict",
+        source: "assigned-complete",
+        fingerprint: "b".repeat(64),
+        entries: [{ type: "earn", member: "Bailey", amount: 9, description: "Changed", taskId: 101 }],
+      },
+    });
+
+    expect(result).toMatchObject({ ok: false, code: "operation_conflict" });
+    expect(harness.writeCount).toBe(0);
+  });
+
+  it("keeps the public wrapper behavior while the locked helper runs under the caller lock", async () => {
+    const harness = makePb();
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+    const result = await applyWeekLedgerOperationLocked({
+      weekStart: WEEK,
+      operation: {
+        operationId: "op-locked-helper",
+        source: "planner-adjust",
+        entries: [{ type: "adjust", member: "Alex", amount: 1, description: "Bonus" }],
+      },
+    });
+
+    expect(result).toMatchObject({ ok: true, applied: true });
+  });
+
+  it("replays an exact operation even when later history is temporarily negative", async () => {
+    const existing = transaction(1, {
+      taskId: 101,
+      description: "Approved",
+      meta: { operationId: "op-negative-replay", source: "task-approval" },
+    });
+    const harness = makePb({
+      history: [
+        existing,
+        transaction(2, {
+          member: "Bailey",
+          type: "adjust",
+          amount: -1,
+          description: "Later negative",
+        }),
+      ],
+    });
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = expectSuccess(await applyWeekLedgerOperation({
+      weekStart: WEEK,
+      operation: {
+        operationId: "op-negative-replay",
+        source: "task-approval",
+        entries: [{ type: "earn", member: "Alex", amount: 8, description: "Approved", taskId: 101 }],
+      },
+    }));
+
+    expect(result.duplicate).toBe(true);
+    expect(result.weekData.history).toHaveLength(2);
   });
 
   it.each([null, undefined])("returns invalid_ledger_operation for %s arguments", async (value) => {

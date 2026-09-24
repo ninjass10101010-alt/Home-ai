@@ -9,7 +9,7 @@ import {
   getSnapshotOperationReceipts,
   liveSnapshotTasks,
   mutateSnapshotWithMeta,
-  readSnapshotWithRevision,
+  readSnapshotStateWithRevision,
   type SnapshotData,
   type SnapshotOperationReceipt,
   type SnapshotTask,
@@ -26,6 +26,7 @@ import {
   type InternalTaskCommandResult,
 } from "@/lib/task-commands";
 import { withWeekLedgerLock } from "@/lib/week-ledger-lock";
+import { withTaskCommandLock } from "@/lib/task-command-lock";
 import type { Task } from "@/types/tasks";
 
 export type ManageAction = "add" | "update" | "delete";
@@ -895,32 +896,33 @@ async function handleCommand(
   const parsed = validated.value;
   const fingerprint = validated.fingerprint;
   const action = parsed.action;
-  let roster: LiveMember[] = [];
-  if (action !== "delete") {
-    try {
-      roster = await liveRoster();
-    } catch {
-      return failure(operationId, "member_roster_unavailable");
-    }
-  }
-
   try {
     return await withWeekLedgerLock(localWeekStartISO(), () =>
-      withAdmin(async (pb) => {
-        const initial = await readSnapshotWithRevision();
+      withTaskCommandLock(action === "add" ? "allocation" : parsed.taskId, () =>
+        withAdmin(async (pb) => {
+        let roster: LiveMember[] = [];
+        if (action !== "delete") {
+          try {
+            roster = await liveRoster();
+          } catch {
+            return failure(operationId, "member_roster_unavailable");
+          }
+        }
+        const initial = await readSnapshotStateWithRevision(pb);
         const requestedTaskId = action === "add" ? undefined : parsed.taskId;
         const existingReceipt = receiptFor(initial.data, action, operationId, requestedTaskId, fingerprint);
         if (existingReceipt.conflict) return failure(operationId, "operation_conflict");
         if (existingReceipt.receipt) {
-          const taskId = existingReceipt.receipt.taskId;
-          const task = action === "delete"
+          const replayState = await readSnapshotStateWithRevision(pb);
+          const replayTaskId = existingReceipt.receipt.taskId;
+          const replayTask = action === "delete"
             ? null
-            : liveSnapshotTasks(initial.data).find((candidate) => Number(candidate.id) === taskId) ?? null;
-          if (action !== "delete" && !task) {
-            const tombstoned = (initial.data.deletedTaskIds || []).map(Number).includes(taskId);
+            : liveSnapshotTasks(replayState.data).find((candidate) => Number(candidate.id) === replayTaskId) ?? null;
+          if (action !== "delete" && !replayTask) {
+            const tombstoned = (replayState.data.deletedTaskIds || []).map(Number).includes(replayTaskId);
             if (tombstoned) {
-              const reconciled = await projectDelete(pb, taskId);
-              return success(operationId, null, initial.revision, reconciled, {
+              const reconciled = await projectDelete(pb, replayTaskId);
+              return success(operationId, null, replayState.revision, reconciled, {
                 duplicate: true,
                 deleted: true,
                 noCurrentTask: true,
@@ -929,9 +931,9 @@ async function handleCommand(
             return failure(operationId, "snapshot_write_failed");
           }
           const reconciled = action === "delete"
-            ? await projectDelete(pb, taskId)
-            : await projectUpsert(pb, task as SnapshotTask);
-          return success(operationId, task, initial.revision, reconciled);
+            ? await projectDelete(pb, replayTaskId)
+            : await projectUpsert(pb, replayTask as SnapshotTask);
+          return success(operationId, replayTask, replayState.revision, reconciled);
         }
 
         let preparedTask: SnapshotTask | null = null;
@@ -973,8 +975,12 @@ async function handleCommand(
               return { data, result: { duplicate: true, taskId: existingTaskReceipt.taskId, task, deleted } };
             }
             if (action === "add") {
-              const next = { ...(preparedTask as SnapshotTask) };
-              next.id = allocateTaskId(data, Date.now());
+              const shaped = addShape(parsed.task as Record<string, unknown>, roster, data);
+              if (!shaped.ok) return { data, result: { duplicate: false, error: shaped.reason, taskId: 0, task: null } };
+              const next = {
+                ...(shaped.value as SnapshotTask),
+                id: allocateTaskId(data, Date.now()),
+              };
               preparedTask = next;
               const receipt = {
                 operationId,
@@ -1018,11 +1024,16 @@ async function handleCommand(
         const mutationResult = mutation.result;
         if (mutationResult.error) return failure(operationId, mutationResult.error);
         if (mutationResult.duplicate) {
-          const task = mutationResult.task;
-          if (action !== "delete" && !task) {
+          const replayState = await readSnapshotStateWithRevision(pb);
+          const currentTask = action === "delete"
+            ? null
+            : liveSnapshotTasks(replayState.data).find(
+                (candidate) => Number(candidate.id) === mutationResult.taskId,
+              ) ?? mutationResult.task;
+          if (action !== "delete" && !currentTask) {
             if (mutationResult.deleted) {
               const reconciled = await projectDelete(pb, mutationResult.taskId);
-              return success(operationId, null, mutation.revision, reconciled, {
+              return success(operationId, null, replayState.revision, reconciled, {
                 duplicate: true,
                 deleted: true,
                 noCurrentTask: true,
@@ -1032,19 +1043,25 @@ async function handleCommand(
           }
           const reconciled = action === "delete"
             ? await projectDelete(pb, mutationResult.taskId)
-            : await projectUpsert(pb, task as SnapshotTask);
-          return success(operationId, task, mutation.revision, reconciled);
+            : await projectUpsert(pb, currentTask as SnapshotTask);
+          return success(operationId, currentTask, replayState.revision, reconciled);
         }
-        const verified = await readSnapshotWithRevision();
+        const verified = await readSnapshotStateWithRevision(pb);
         const expectedTask = preparedTask;
         if (!mutationVerified(verified.data, action, operationId, mutationResult.taskId, fingerprint, expectedTask)) {
           return failure(operationId, "snapshot_write_failed");
         }
+        const projectionTask = action === "delete"
+          ? null
+          : liveSnapshotTasks(verified.data).find(
+              (candidate) => Number(candidate.id) === mutationResult.taskId,
+            ) ?? expectedTask;
         const reconciled = action === "delete"
           ? await projectDelete(pb, mutationResult.taskId)
-          : await projectUpsert(pb, expectedTask as SnapshotTask);
-        return success(operationId, action === "delete" ? null : expectedTask, verified.revision, reconciled);
-      }),
+          : await projectUpsert(pb, projectionTask as SnapshotTask);
+        return success(operationId, projectionTask, verified.revision, reconciled);
+        }),
+      ),
     );
   } catch {
     return failure(operationId, "snapshot_write_failed");

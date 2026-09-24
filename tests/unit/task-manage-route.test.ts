@@ -684,8 +684,29 @@ describe("POST /api/tasks/manage", () => {
     expect(response.status).toBe(200);
     expect(mocks.lockOrder).toEqual([
       "acquire:week-ledger",
+      "acquire:task-command:allocation",
       "acquire:snapshot:tasks-snapshot",
       "release:snapshot:tasks-snapshot",
+      "release:task-command:allocation",
+      "release:week-ledger",
+    ]);
+  });
+
+  it.each([
+    ["update", { action: "update", operationId: "op-lock-update", taskId: 77, patch: { title: "Locked update" } }],
+    ["delete", { action: "delete", operationId: "op-lock-delete", taskId: 77 }],
+  ])("uses the per-task command lock for %s", async (_action, body) => {
+    const harness = makeHarness();
+    mocks.lockOrder.length = 0;
+    const response = await postManage(harness, body);
+
+    expect(response.status).toBe(200);
+    expect(mocks.lockOrder).toEqual([
+      "acquire:week-ledger",
+      "acquire:task-command:77",
+      "acquire:snapshot:tasks-snapshot",
+      "release:snapshot:tasks-snapshot",
+      "release:task-command:77",
       "release:week-ledger",
     ]);
   });

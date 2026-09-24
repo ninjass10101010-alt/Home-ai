@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import { withAdmin } from "@/lib/pb-auth";
-import { withKeyedLock } from "@/lib/keyed-lock";
+import { withTaskCommandLock } from "@/lib/task-command-lock";
 import { getLiveMembers, type LiveMember } from "@/lib/live-member";
 import { localTodayISO, localWeekStartISO } from "@/lib/local-date";
-import { applyWeekLedgerOperation } from "@/lib/ledger-operations";
+import { applyWeekLedgerOperationLocked } from "@/lib/ledger-operations";
+import { withWeekLedgerLock } from "@/lib/week-ledger-lock";
 import {
   crewAllCheckedIn,
   isCrewTask,
@@ -115,6 +116,7 @@ export type ClaimFailureReason =
   | "invalid_crew_member"
   | "invalid_task_state"
   | "operation_conflict"
+  | "insufficient_balance"
   | "ledger_unavailable"
   | "snapshot_write_failed"
   | "task_store_unavailable";
@@ -468,64 +470,129 @@ function ledgerRepairEntries(transactions: Transaction[]) {
   }));
 }
 
+function ledgerReplayTransactions(
+  week: WeekData | null,
+  operationId: string,
+): Transaction[] {
+  return week?.history.filter(
+    (transaction) => transaction.meta?.operationId === operationId,
+  ) ?? [];
+}
+
+function replayBuild(
+  command: ClaimCommand,
+  actor: ClaimActor & { emoji?: string },
+  task: SnapshotTask,
+  now: string,
+  weekStart: string,
+): SnapshotTask {
+  if (command.action === "claim") {
+    return {
+      ...task,
+      ...completedFields(now, weekStart, actor),
+      pendingApproval: null,
+    };
+  }
+  if (command.action === "complete") {
+    return {
+      ...task,
+      ...completedFields(now, weekStart, actor),
+      pendingApproval: null,
+    };
+  }
+  return {
+    ...task,
+    completed: false,
+    status: "pending",
+    completedBy: "",
+    completedAt: "",
+    completedInWeek: "",
+    pendingApproval: null,
+    sentBackAt: now,
+  };
+}
+
+async function readCurrentCanonicalTask(taskId: number): Promise<CanonicalTaskLookup> {
+  return withAdmin((pb) => findCanonicalTask(pb, taskId));
+}
+
 async function repairReceiptProjection(
   command: ClaimCommand,
   actor: ClaimActor,
   lookup: CanonicalTaskLookup,
-): Promise<{ reconciled: boolean; revision: SnapshotRevision; weekData?: WeekData }> {
+  weekOverride?: WeekData | null,
+  receiptPresent = true,
+): Promise<{ reconciled: boolean; revision: SnapshotRevision; weekData?: WeekData; reason?: ClaimFailureReason }> {
   const actorRole = actor.role.trim().toLowerCase();
   const shouldInspectLedger = actorRole === "parent" &&
     (command.action === "claim" || command.action === "complete" || command.action === "undo");
-  if (!shouldInspectLedger) {
-    const reconciled = await withAdmin((pb) =>
-      projectCanonicalTaskToPB(pb, lookup.task, command.taskId)
-    );
-    return { reconciled, revision: lookup.revision };
-  }
   const weekStart = localWeekStartISO();
-  let week: WeekData | null = null;
-  try {
-    const inspected = await withAdmin(async (pb) => {
-      const current = await readSnapshotStateWithRevision(pb);
-      return {
-        week: await readWeek(pb, weekStart),
-        revision: current.revision,
-      };
-    });
-    week = inspected.week;
-  } catch {
+  let week = weekOverride;
+  if (shouldInspectLedger && week === undefined) {
     try {
-      const reconciled = await withAdmin((pb) =>
-        projectCanonicalTaskToPB(pb, lookup.task, command.taskId)
-      );
-      return { reconciled, revision: lookup.revision };
+      week = await withAdmin((pb) => readWeek(pb, weekStart));
     } catch {
-      return { reconciled: false, revision: lookup.revision };
+      week = null;
     }
   }
-  const transactions = week?.history.filter(
-    (transaction) => transaction.meta?.operationId === command.operationId,
-  ) ?? [];
+  const transactions = ledgerReplayTransactions(week ?? null, command.operationId);
   if (transactions.length === 0) {
     const reconciled = await withAdmin((pb) =>
       projectCanonicalTaskToPB(pb, lookup.task, command.taskId)
     );
-    return { reconciled, revision: lookup.revision, ...(week ? { weekData: week } : {}) };
+    return {
+      reconciled,
+      revision: lookup.revision,
+      ...(week ? { weekData: week } : {}),
+    };
   }
   const source = transactions[0].meta?.source as LedgerOperationSource | undefined;
-  if (!source || transactions.some((transaction) => transaction.meta?.source !== source)) {
-    return { reconciled: false, revision: lookup.revision, ...(week ? { weekData: week } : {}) };
+  const expectedFingerprint = claimCommandFingerprint(command, actor);
+  const storedFingerprints = transactions
+    .map((transaction) => transaction.meta?.fingerprint)
+    .filter((value): value is string => typeof value === "string");
+  if (
+    !source ||
+    transactions.some((transaction) => transaction.meta?.source !== source) ||
+    storedFingerprints.some((fingerprint) => fingerprint !== expectedFingerprint)
+  ) {
+    return {
+      reconciled: false,
+      revision: lookup.revision,
+      ...(week ? { weekData: week } : {}),
+      reason: "operation_conflict",
+    };
   }
   let revision = lookup.revision;
-  const result = await applyWeekLedgerOperation({
+  const result = await applyWeekLedgerOperationLocked({
     weekStart,
     operation: {
       operationId: command.operationId,
       source,
+      fingerprint: storedFingerprints[0] ?? expectedFingerprint,
       entries: ledgerRepairEntries(transactions),
     },
     project: async ({ pb, weekData }) => {
       const current = await readSnapshotStateWithRevision(pb);
+      const currentTask = liveSnapshotTasksForData(current.data, command.taskId);
+      const tombstoned = (current.data.deletedTaskIds ?? []).some(
+        (candidate) => Number(candidate) === command.taskId,
+      );
+      let projectedTask = currentTask;
+      if (!receiptPresent && currentTask) {
+        const outcome = await writeCanonicalTask(
+          pb,
+          { ...lookup, task: currentTask, revision: current.revision, data: current.data },
+          command,
+          actor,
+          expectedFingerprint,
+          currentTask,
+          (task) => replayBuild(command, actor, task, new Date().toISOString(), weekStart),
+        );
+        if (!outcome.ok) return false;
+        projectedTask = outcome.task;
+        revision = outcome.revision;
+      }
       if (!snapshotHasLedgerOperation(current.data, command.operationId)) {
         const persisted = await persistSnapshotWeek(pb, weekData);
         if (!persisted.ok) return false;
@@ -533,10 +600,18 @@ async function repairReceiptProjection(
       } else {
         revision = current.revision;
       }
-      return projectCanonicalTaskToPB(pb, lookup.task, command.taskId);
+      if (!projectedTask && !tombstoned) return false;
+      return projectCanonicalTaskToPB(pb, projectedTask, command.taskId);
     },
   });
-  if (!result.ok) return { reconciled: false, revision, ...(week ? { weekData: week } : {}) };
+  if (!result.ok) {
+    return {
+      reconciled: false,
+      revision,
+      ...(week ? { weekData: week } : {}),
+      ...(result.code === "operation_conflict" ? { reason: "operation_conflict" as const } : {}),
+    };
+  }
   return {
     reconciled: result.reconciled,
     revision,
@@ -550,17 +625,42 @@ async function replayReceipt(
   lookup: CanonicalTaskLookup,
 ): Promise<ClaimServiceResult | null> {
   const fingerprint = claimCommandFingerprint(command, actor);
-  const receipt = receiptState(lookup, command, actor, fingerprint);
+  let currentLookup: CanonicalTaskLookup;
+  try {
+    currentLookup = await readCurrentCanonicalTask(command.taskId);
+  } catch {
+    return failure(command.operationId, "task_store_unavailable", command.action);
+  }
+  const receipt = receiptState(currentLookup, command, actor, fingerprint);
   if (receipt.conflict) return failure(command.operationId, "operation_conflict", command.action);
-  if (!receipt.receipt) return null;
-  if (!lookup.task && !lookup.tombstoned) {
+  const actorRole = actor.role.trim().toLowerCase();
+  const ledgerAction = actorRole === "parent" &&
+    (command.action === "claim" || command.action === "complete" || command.action === "undo");
+  let week: WeekData | null = null;
+  if (ledgerAction) {
+    try {
+      week = await withAdmin((pb) => readWeek(pb, localWeekStartISO()));
+    } catch {
+      week = null;
+    }
+  }
+  const transactions = ledgerReplayTransactions(week, command.operationId);
+  if (!receipt.receipt && transactions.length === 0) return null;
+  if (!currentLookup.task && !currentLookup.tombstoned) {
     return failure(command.operationId, "snapshot_write_failed", command.action);
   }
-  const repair = await repairReceiptProjection(command, actor, lookup);
+  const repair = await repairReceiptProjection(
+    command,
+    actor,
+    currentLookup,
+    week,
+    Boolean(receipt.receipt),
+  );
+  if (repair.reason) return failure(command.operationId, repair.reason, command.action);
   return success(
     command,
     actor,
-    lookup.task,
+    currentLookup.task,
     repair.revision,
     repair.reconciled,
     repair.weekData,
@@ -805,7 +905,7 @@ function earnReversed(history: Transaction[], earn: Transaction): boolean {
   return history.some(
     (transaction) =>
       transaction.type === "adjust" &&
-      transaction.amount < 0 &&
+      transaction.amount <= 0 &&
       transaction.taskId === earn.taskId &&
       transaction.member === earn.member &&
       Date.parse(transaction.timestamp) >= Date.parse(earn.timestamp),
@@ -835,11 +935,12 @@ async function applyLedgerMutation(
   const weekStart = localWeekStartISO();
   let revision = context.lookup.revision;
   let task: SnapshotTask | null = null;
-  const result = await applyWeekLedgerOperation({
+  const result = await applyWeekLedgerOperationLocked({
     weekStart,
     operation: {
       operationId: command.operationId,
       source: context.source,
+      fingerprint: context.fingerprint,
       entries: context.entries,
     },
     project: async ({ pb, weekData, semanticDuplicate }) => {
@@ -862,18 +963,35 @@ async function applyLedgerMutation(
       return projectCanonicalTaskToPB(pb, outcome.task, command.taskId);
     },
   });
-  if (!result.ok) return failure(command.operationId, "ledger_unavailable", command.action);
+  if (!result.ok) {
+    if (result.code === "insufficient_balance") {
+      return failure(command.operationId, "insufficient_balance", command.action);
+    }
+    if (result.code === "operation_conflict") {
+      return failure(command.operationId, "operation_conflict", command.action);
+    }
+    if (result.code === "invalid_ledger_operation") {
+      return failure(command.operationId, "invalid_task_state", command.action);
+    }
+    return failure(command.operationId, "ledger_unavailable", command.action);
+  }
   if (result.semanticDuplicate) {
-    const winner = result.weekData.history.find(
-      (transaction) =>
-        transaction.meta?.operationId === command.operationId &&
-        transaction.type === "earn",
-    );
+    let winner: Transaction | null = null;
+    for (const transaction of result.weekData.history) {
+      if (
+        transaction.type === "earn" &&
+        transaction.taskId === command.taskId &&
+        (!winner || Date.parse(transaction.timestamp) >= Date.parse(winner.timestamp))
+      ) {
+        winner = transaction;
+      }
+    }
+    const winnerMember = context.task.completedBy || winner?.member;
     return failure(
       command.operationId,
       "already_claimed",
       command.action,
-      winner?.member,
+      winnerMember,
     );
   }
   return success(
@@ -890,6 +1008,7 @@ async function applyLedgerMutation(
 async function executeClaimCommandUnlocked(
   command: ClaimCommand,
   rawActor: ClaimActor,
+  authorityWeekStart: string,
 ): Promise<ClaimServiceResult> {
   const action = command.action;
   if (!Number.isSafeInteger(command.taskId) || command.taskId <= 0) {
@@ -923,6 +1042,11 @@ async function executeClaimCommandUnlocked(
     return failure(command.operationId, "task_store_unavailable", action);
   }
   if (replay) return replay;
+  try {
+    lookup = await readCurrentCanonicalTask(command.taskId);
+  } catch {
+    return failure(command.operationId, "task_store_unavailable", action);
+  }
   if (lookup.ambiguous) return failure(command.operationId, "ambiguous_task", action);
   if (!lookup.task || lookup.tombstoned) return failure(command.operationId, "unknown_task", action);
   const task = lookup.task;
@@ -932,7 +1056,7 @@ async function executeClaimCommandUnlocked(
     return failure(command.operationId, "pin_required", action);
   }
 
-  const weekStart = localWeekStartISO();
+  const weekStart = authorityWeekStart;
   const now = new Date().toISOString();
   const fingerprint = claimCommandFingerprint(command, actor);
   const points = validTaskPoints(task);
@@ -943,7 +1067,14 @@ async function executeClaimCommandUnlocked(
     if (gate === "not_late_yet" || gate === "not_universal") {
       return failure(command.operationId, gate, action);
     }
-    if (doneThisWeek(task, weekStart)) return failure(command.operationId, "already_completed", action);
+    if (doneThisWeek(task, weekStart)) {
+      return failure(
+        command.operationId,
+        "already_completed",
+        action,
+        typeof task.completedBy === "string" && task.completedBy ? task.completedBy : undefined,
+      );
+    }
     if (points === null) return failure(command.operationId, "invalid_task_state", action);
     const speedBonus = gate === "late" ? 0 : normalizeSpeedBonus(task.speedBonus);
     const amount = points + speedBonus;
@@ -1044,13 +1175,16 @@ async function executeClaimCommandUnlocked(
       if (actorRole === "child" && baseActor.authentication === "pin") {
         return failure(command.operationId, "session_required", action);
       }
-      if (actorRole !== "parent" && approval.crew && approval.crew.length > 0) {
-        return failure(command.operationId, "adult_only", action);
-      }
-      const owner = resolveHumanMember(roster, approval.byName);
-      if (!owner) return failure(command.operationId, "unknown_task_owner", action);
-      if (actorRole === "child" && owner.id !== actor.id) {
-        return failure(command.operationId, "not_task_owner", action);
+      if (approval.crew && approval.crew.length > 0) {
+        if (actorRole !== "parent") {
+          return failure(command.operationId, "adult_only", action);
+        }
+      } else {
+        const owner = resolveHumanMember(roster, approval.byName);
+        if (!owner) return failure(command.operationId, "unknown_task_owner", action);
+        if (actorRole === "child" && owner.id !== actor.id) {
+          return failure(command.operationId, "not_task_owner", action);
+        }
       }
       const build = (current: SnapshotTask): SnapshotTask => ({
         ...current,
@@ -1061,6 +1195,25 @@ async function executeClaimCommandUnlocked(
         completedInWeek: "",
         pendingApproval: null,
         sentBackAt: now,
+        ...(isCrewTask(current as unknown as Task) && current.crew
+          ? {
+              crew: {
+                members: current.crew.members.map((member: {
+                  name: string;
+                  emoji: string;
+                  joinedAt: string;
+                  checkedInAt?: string;
+                }) => ({
+                  name: member.name,
+                  emoji: member.emoji,
+                  joinedAt: member.joinedAt,
+                })),
+                ...(Array.isArray(current.crew.removed) && current.crew.removed.length > 0
+                  ? { removed: [...current.crew.removed] }
+                  : {}),
+              },
+            }
+          : {}),
       });
       return withAdmin((pb) => writeCanonicalTask(
         pb,
@@ -1081,7 +1234,7 @@ async function executeClaimCommandUnlocked(
     if (earnReversed(week.history, earn)) {
       return failure(command.operationId, "already_undone", action);
     }
-    if (!Number.isSafeInteger(earn.amount) || earn.amount <= 0) {
+    if (!Number.isSafeInteger(earn.amount) || earn.amount < 0) {
       return failure(command.operationId, "invalid_task_state", action);
     }
     return applyLedgerMutation(command, {
@@ -1103,8 +1256,8 @@ async function executeClaimCommandUnlocked(
       entries: [{
         type: "adjust",
         member: actor.name,
-        amount: -earn.amount,
-        description: `Undo: ${task.title || "task"} (-${earn.amount}pts)`,
+        amount: earn.amount === 0 ? 0 : -earn.amount,
+        description: `Undo: ${task.title || "task"} (${earn.amount === 0 ? "0" : `-${earn.amount}`}pts)`,
         taskId: command.taskId,
       }],
     });
@@ -1238,9 +1391,13 @@ export function executeClaimCommand(
   if (!Number.isSafeInteger(command.taskId) || command.taskId <= 0) {
     return Promise.resolve(failure(command.operationId, "invalid_task_id", command.action));
   }
-  return withKeyedLock(
-    `task-claim:${command.taskId}`,
-    () => executeClaimCommandUnlocked(command, rawActor),
+  const weekStart = localWeekStartISO();
+  return withWeekLedgerLock(
+    weekStart,
+    () => withTaskCommandLock(
+      command.taskId,
+      () => executeClaimCommandUnlocked(command, rawActor, weekStart),
+    ),
   );
 }
 
