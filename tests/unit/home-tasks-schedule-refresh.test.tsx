@@ -96,16 +96,17 @@ async function settle(ms = 120) {
   await act(async () => { await new Promise((r) => setTimeout(r, ms)); });
 }
 
-function expectWidgetIcon(root: HTMLElement, variant: string, oldEmoji: string) {
+function expectWidgetIcon(root: HTMLElement, variant: string, oldEmoji?: string) {
   const slots = Array.from(root.querySelectorAll("div")).filter(
     (div) => div.className.includes("absolute") && div.className.includes("z-30") && div.className.includes("pointer-events-none")
   );
   const slot = slots.find(
-    (div) => div.querySelector(`svg[data-variant="${variant}"]`) || div.textContent?.includes(oldEmoji)
+    (div) => div.querySelector(`svg[data-variant="${variant}"]`) || (oldEmoji ? div.textContent?.includes(oldEmoji) : false)
   );
   expect(slot, `expected ${variant} widget icon slot`).toBeTruthy();
   expect(slot?.querySelector(`svg[data-variant="${variant}"]`)).not.toBeNull();
-  expect(slot?.textContent).not.toContain(oldEmoji);
+  if (oldEmoji) expect(slot?.textContent).not.toContain(oldEmoji);
+  return slot;
 }
 
 describe("Home Tasks + Daily Schedule refresh (consuela-data-refreshed)", () => {
@@ -176,7 +177,8 @@ describe("Home Tasks + Daily Schedule refresh (consuela-data-refreshed)", () => 
     const el = await renderAsync(<HomePage />);
     await settle();
 
-    expectWidgetIcon(el, "ask", "🗨️");
+    const quickAskSlot = expectWidgetIcon(el, "ask");
+    expect(quickAskSlot?.querySelector('svg[viewBox="0 0 24 24"]')).toBeNull();
   });
 
   it("stops listening after unmount (no setState on a dead tree)", async () => {
