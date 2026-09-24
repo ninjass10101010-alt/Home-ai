@@ -1285,10 +1285,13 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, accent
 
   const mIsDay = todOverride === "day" ? true : todOverride === "night" ? false : scrubHour?.isDay ?? data.isDay;
   const mCode = scrubHour?.code ?? data.code;
-  const mSkin = getWeatherSkin(season, !mIsDay, mCode);
-
-  // Toy modal hero follows the scrubbed hour like the card follows preview.
   const mScene = wmoToScene(mCode, mIsDay);
+  const mStorm = mScene === "storm";
+  const mSkin = {
+    ...getWeatherSkin(season, !mIsDay, mCode),
+    ink: mStorm ? "#FFFFFF" : "#1E293B",
+    inkSoft: mStorm ? "rgba(255,255,255,0.78)" : "rgba(30,41,59,0.78)",
+  };
   const mVis = scrubHour?.visibility ?? data.visibility;
   const mFog = mCode === 45 || mCode === 48 || (mVis != null && mVis < 8000);
   const mCloud = scrubHour?.cloud ?? data.cloud ?? null;
@@ -1367,18 +1370,24 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, accent
               </div>
               <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 text-center">
                 <Condition code={mCond} size={64} />
-                <div className="flex items-start leading-none">
-                  <span
-                    className="text-[60px] font-black leading-none tracking-[-0.03em] tabular-nums"
-                    style={{ color: mSkin.ink, textShadow: mSkin.night ? "none" : "0 1px 12px rgba(255,255,255,0.35)" }}
-                  >
-                    {scrubTemp}
-                  </span>
-                  <span className="mt-1 ml-0.5 text-2xl font-light leading-none" style={{ color: mSkin.night ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.45)" }} aria-hidden="true">°</span>
+                <div
+                  data-testid="wx-modal-hero-ink"
+                  className="flex flex-col items-center rounded-2xl px-4 py-2"
+                  style={{ backgroundColor: mScene === "night" ? "rgba(255, 255, 255, 0.45)" : undefined }}
+                >
+                  <div className="flex items-start leading-none">
+                    <span
+                      className="text-[60px] font-black leading-none tracking-[-0.03em] tabular-nums"
+                      style={{ color: mSkin.ink, textShadow: mStorm ? "none" : "0 1px 12px rgba(255,255,255,0.35)" }}
+                    >
+                      {scrubTemp}
+                    </span>
+                    <span className="mt-1 ml-0.5 text-2xl font-light leading-none" style={{ color: mSkin.inkSoft }} aria-hidden="true">°</span>
+                  </div>
+                  <p className="mt-1.5 text-sm font-semibold" style={{ color: mSkin.ink, textShadow: mStorm ? "none" : "0 1px 10px rgba(255,255,255,0.3)" }}>
+                    {scrubHour ? `${formatHourLabel(scrubHour.time)} · ${wmoToCondition(scrubHour.code).condition}` : data.condition}
+                  </p>
                 </div>
-                <p className="mt-1.5 text-sm font-semibold" style={{ color: mSkin.ink, textShadow: mSkin.night ? "none" : "0 1px 10px rgba(255,255,255,0.3)" }}>
-                  {scrubHour ? `${formatHourLabel(scrubHour.time)} · ${wmoToCondition(scrubHour.code).condition}` : data.condition}
-                </p>
               </div>
             </div>
 

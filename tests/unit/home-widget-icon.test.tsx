@@ -7,6 +7,7 @@ import HomeWidgetIcon, {
   type HomeWidgetIconState,
   type HomeWidgetIconVariant,
 } from "@/components/ui/HomeWidgetIcon";
+import WidgetCard from "@/components/patterns/WidgetCard";
 
 const expectedVariants = [
   "briefing",
@@ -49,8 +50,31 @@ describe("HomeWidgetIcon", () => {
     expect(markup).toBe(render(variant));
     expect(markup).toContain('viewBox="0 0 48 48"');
     expect(markup).toContain(`data-variant="${variant}"`);
-    expect(markup).toContain('fill="currentColor"');
+    expect(markup).toContain('stroke="var(--home-widget-icon-ink)"');
+    expect(markup).toContain('fill="var(--home-widget-icon-accent)"');
     expect(markup).toContain('fill="#fff"');
+  });
+
+  it("keeps white icon surfaces on explicit dark ink and tone accents", () => {
+    const wrapperMarkup = renderToStaticMarkup(
+      <WidgetCard tone="#8b5cf6" icon={<HomeWidgetIcon variant="tasks" size="lg" />}>
+        <span>content</span>
+      </WidgetCard>,
+    );
+    const iconMarkup = render("tasks");
+    const iconCssStart = globalsCss.indexOf(".home-widget-icon {");
+    const iconCssEnd = globalsCss.indexOf(".home-widget-icon-state-default", iconCssStart);
+    const iconCss = globalsCss.slice(iconCssStart, iconCssEnd);
+
+    expect(wrapperMarkup).toMatch(/--widget-tone:\s*#8b5cf6/);
+    expect(iconMarkup).toContain('stroke="var(--home-widget-icon-ink)"');
+    expect(iconMarkup).toContain('fill="var(--home-widget-icon-accent)"');
+    expect(iconMarkup).not.toContain("currentColor");
+    expect(iconCss).toMatch(/--home-widget-icon-ink:\s*#1e293b;/);
+    expect(iconCss).toMatch(
+      /--home-widget-icon-accent:\s*color-mix\(in srgb, var\(--widget-tone, var\(--color-accent-selected\)\) 50%, var\(--home-widget-icon-ink\)\);/,
+    );
+    expect(iconCss).toContain("color: var(--home-widget-icon-ink);");
   });
 
   it("keeps decorative artwork out of the accessibility tree", () => {

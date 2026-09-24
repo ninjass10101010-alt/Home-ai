@@ -412,6 +412,9 @@ body {
 }
 
 .home-widget-icon {
+  --home-widget-icon-ink: #1e293b;
+  --home-widget-icon-accent: color-mix(in srgb, var(--widget-tone, var(--color-accent-selected)) 50%, var(--home-widget-icon-ink));
+  color: var(--home-widget-icon-ink);
   transform-origin: center;
   transition: transform 220ms var(--ease-settle);
 }

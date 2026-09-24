@@ -95,6 +95,14 @@ function effectiveContrast(foreground: string, opacity: number, background: stri
     (Math.min(foregroundLuminance, backgroundLuminance) + 0.05);
 }
 
+function compositeHex(foreground: string, background: string, opacity: number): string {
+  const foregroundRgb = parseHexColor(foreground);
+  const backgroundRgb = parseHexColor(background);
+  return `#${foregroundRgb
+    .map((channel, index) => Math.round(channel * opacity + backgroundRgb[index] * (1 - opacity)).toString(16).padStart(2, "0"))
+    .join("")}`;
+}
+
 function makeOpenMeteoPayload(overrides: { isDay?: number; precip?: number; visibility?: number; cloud?: number | null; code?: number; startAt?: string } = {}) {
   const isDay = overrides.isDay ?? 1;
   const precip = overrides.precip ?? 5;
@@ -397,6 +405,42 @@ describe("WeatherWidget — Not Boring redesign", () => {
     const heroTemp = el.querySelector('[data-testid="wx-hero-temp"]') as HTMLElement | null;
     expect(heroTemp).toBeTruthy();
     expect(heroTemp!.style.color).toBe("rgb(30, 41, 59)");
+  });
+
+  it("keeps forced-night modal text on a readable light-scrim treatment", async () => {
+    localStorage.setItem("home-ai-weather-config", JSON.stringify({ timeOfDay: "night" }));
+    try {
+      mockOpenMeteo(makeOpenMeteoPayload({ isDay: 1 }));
+      const el = render(<WeatherWidget />);
+      await settle();
+
+      act(() => findDetailsButton(el)!.click());
+      const dialog = document.querySelector("#weather-details-dialog") as HTMLElement;
+      const activeSky = dialog.querySelector('.wx-sky[data-active="true"]') as HTMLElement;
+      const heroInk = dialog.querySelector('[data-testid="wx-modal-hero-ink"]') as HTMLElement | null;
+      const heroTemp = Array.from(dialog.querySelectorAll<HTMLElement>("span")).find((node) => node.className.includes("text-[60px]"));
+      const degree = heroTemp?.nextElementSibling as HTMLElement | undefined;
+
+      expect(activeSky.className).toContain("from-[#6f74a8]");
+      expect(heroTemp).toBeTruthy();
+      if (!heroTemp) return;
+      expect(heroTemp.style.color).toBe("rgb(30, 41, 59)");
+      expect(degree).toBeTruthy();
+      expect(degree!.style.color).toBe("rgba(30, 41, 59, 0.78)");
+      expect(heroInk).toBeTruthy();
+      expect(heroInk!.style.backgroundColor).toBe("rgba(255, 255, 255, 0.45)");
+      const nightStops = ["#6f74a8", "#a29dc9", "#e2dbf2"];
+      const minimumHeroContrast = Math.min(...nightStops.map((background) =>
+        effectiveContrast("#1E293B", 1, compositeHex("#FFFFFF", background, 0.45))
+      ));
+      const minimumSoftContrast = Math.min(...nightStops.map((background) =>
+        effectiveContrast("#1E293B", 0.78, compositeHex("#FFFFFF", background, 0.45))
+      ));
+      expect(minimumHeroContrast).toBeGreaterThanOrEqual(4.5);
+      expect(minimumSoftContrast).toBeGreaterThanOrEqual(4.5);
+    } finally {
+      localStorage.removeItem("home-ai-weather-config");
+    }
   });
 
   it("renders a storm-violet sky and storm copy when a thunderstorm code arrives", async () => {
