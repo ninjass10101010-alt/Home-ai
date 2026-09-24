@@ -29,7 +29,7 @@ interface ForecastDay {
   low: number;
   condition: string;
   emoji: string;
-  precipitation: number;
+  precipitation: number | null;
 }
 
 interface HourPoint {
@@ -157,7 +157,7 @@ function mixHex(a: string, b: string, t: number): string {
     const cb = (pb >> shift) & 255;
     return Math.round(ca + (cb - ca) * t);
   };
-  return `rgb(${ch(16)}, ${ch(8)}, ${ch(0)})`;
+  return `#${[ch(16), ch(8), ch(0)].map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
 }
 
 function tempBarColor(t: number): string {
@@ -177,6 +177,16 @@ function posterTextSurface(scene: ReturnType<typeof wmoToScene>): string[] {
   if (scene === "snow") return ["#F4F7FB", "#E6EFFF", "#EFE6FB"];
   if (scene === "storm") return ["#6A6F96", "#5D5B8F", "#4D4770"];
   return ["#6F74A8", "#A29DC9", "#E2DBF2"];
+}
+
+function weatherHeaderTextSurfaces(scene: ReturnType<typeof wmoToScene>): string[] {
+  const glassAlpha = scene === "storm" ? 0.4 : 0.3;
+  const sheenAlpha = 0.4;
+  const surfaceAlpha = glassAlpha + sheenAlpha * (1 - glassAlpha);
+  return posterTextSurface(scene).flatMap((surface) => [
+    mixHex(surface, "#FFFFFF", glassAlpha),
+    mixHex(surface, "#FFFFFF", surfaceAlpha),
+  ]);
 }
 
 function getRealSeason(): SeasonKey {
@@ -597,7 +607,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [clockTick, setClockTick] = useState(0);
-  const [tabHidden, setTabHidden] = useState(false);
+  const [tabHidden, setTabHidden] = useState(() => typeof document !== "undefined" && document.hidden);
   const [familyEvents, setFamilyEvents] = useState<InsightEvent[]>([]);
   const [previewPinned, setPreviewPinned] = useState(false);
   const motionOk = useWxMotionOk();
@@ -688,7 +698,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
               low,
               condition: wmo.condition,
               emoji: wmo.emoji,
-              precipitation: daily.precipitation_probability_max?.[i + 1] || 0,
+              precipitation: typeof daily.precipitation_probability_max?.[i + 1] === "number" ? daily.precipitation_probability_max[i + 1] : null,
             };
           }).filter((d: ForecastDay | null): d is ForecastDay => d != null)
           : [];
@@ -876,6 +886,15 @@ export default function WeatherWidget({ className = "" }: { className?: string }
   // Severity owns the card: storms and heavy snow never borrow the holiday
   // party accent, and the celebratory layers stay home until it passes.
   const accent = resolveAccent(rawSkin, holidayStyle?.accent);
+  const headerSurfaces = weatherHeaderTextSurfaces(heroScene);
+  const chromeInk = contrastSafeTextAccent(accent, headerSurfaces, "#1E293B");
+  const holidayBadgeInk = holidayStyle
+    ? contrastSafeTextAccent(
+        holidayStyle.accent,
+        headerSurfaces.map((surface) => mixHex(surface, holidayStyle.accent, 0x22 / 255)),
+        chromeInk
+      )
+    : chromeInk;
   const cardTextAccent = contrastSafeTextAccent(accent, posterTextSurface(heroScene), heroScene === "storm" ? "#FFFFFF" : "#1E293B");
   // High-contrast boost never reached the widget (inline skin styling bypasses
   // the app's [data-contrast="boost"] system). Boost alpha when the flag is set.
@@ -923,7 +942,8 @@ export default function WeatherWidget({ className = "" }: { className?: string }
     const wetHour = weatherData.rainHourISO
       ? weatherData.hours.find((h) => h.time === weatherData.rainHourISO)
       : null;
-    return wearAdvice(feels, wetHour?.precip ?? null, isKid);
+    const knownWet = RAIN_CODES.has(weatherData.code) || SNOW_CODES.has(weatherData.code);
+    return wearAdvice(feels, wetHour?.precip ?? null, isKid, knownWet);
   }, [weatherData, isKid]);
 
   // Calendar fusion — "Rain around Soccer Practice": the one thing only
@@ -1083,11 +1103,11 @@ export default function WeatherWidget({ className = "" }: { className?: string }
                 <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
                 <circle cx="12" cy="10" r="3" />
               </svg>
-              <span className="relative truncate" style={{ color: skin.ink }}>{weather.location}</span>
+              <span className="relative truncate" style={{ color: chromeInk }}>{weather.location}</span>
               {holidayStyle && (
                 <span
                   className="ml-1 shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider"
-                  style={{ background: `${holidayStyle.accent}22`, color: heroScene === "storm" ? holidayStyle.accent : skin.ink, border: `1px solid ${holidayStyle.accent}55` }}
+                  style={{ background: `${holidayStyle.accent}22`, color: holidayBadgeInk, border: `1px solid ${holidayStyle.accent}55` }}
                 >
                   {holidayStyle.label}
                 </span>
@@ -1102,7 +1122,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
               aria-controls="weather-details-dialog"
               aria-label="Open weather details"
               className={`pointer-events-auto relative z-30 flex min-h-[44px] items-center gap-1 rounded-full px-3 py-1 text-xs font-bold transition-all duration-200 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 ${heroScene === "storm" ? GLASS_NIGHT : GLASS}`}
-              style={{ color: heroScene === "storm" ? accent : skin.ink, ["--tw-ring-color" as string]: accent }}
+              style={{ color: chromeInk, ["--tw-ring-color" as string]: accent }}
             >
               <span>Details</span>
               <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 opacity-60" aria-hidden="true">
@@ -1598,7 +1618,9 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
                           <Condition code={dayCondition(day.condition)} size={22} />
                         </span>
                         <span className="hidden min-w-0 flex-1 truncate text-xs font-medium text-white/75 sm:block">{day.condition}</span>
-                        <span className="shrink-0 rounded-full px-2 py-1 text-xs font-bold leading-none text-white" style={{ background: `${mAccent}22`, border: `1px solid ${mAccent}30` }}>{day.precipitation}%</span>
+                        {day.precipitation != null ? (
+                          <span className="shrink-0 rounded-full px-2 py-1 text-xs font-bold leading-none text-white" style={{ background: `${mAccent}22`, border: `1px solid ${mAccent}30` }}>{day.precipitation}%</span>
+                        ) : null}
                         {/* Low temp hidden on very small phones to avoid crowding */}
                         <span className="hidden min-[380px]:inline w-8 shrink-0 text-right text-sm font-semibold text-white/70">{day.displayLow}°</span>
                         <div className="relative h-1.5 min-w-10 flex-1 rounded-full bg-white/10 sm:max-w-24" aria-hidden="true">

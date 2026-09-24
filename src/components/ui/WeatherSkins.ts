@@ -183,12 +183,23 @@ export function contrastSafeTextAccent(accent: string, surface: string | string[
   const parsedSurfaces = (Array.isArray(surface) ? surface : [surface]).map(parseHexColor);
   const parsedFallback = parseHexColor(fallback);
   if (!parsedAccent || parsedSurfaces.some((value) => value == null) || !parsedFallback) return fallback;
-  const target = colorLuminance(parsedSurfaces[0]!) > colorLuminance(parsedFallback) ? fallback : "#FFFFFF";
-  for (let step = 0; step <= 20; step += 1) {
-    const candidate = mixHexColor(accent, target, step / 20);
-    if (parsedSurfaces.every((value) => contrastRatio(candidate, `#${value!.map((channel) => channel.toString(16).padStart(2, "0")).join("")}`) >= 4.5)) return candidate;
+  const isSafe = (candidate: string) => parsedSurfaces.every(
+    (value) => value != null && contrastRatio(candidate, formatHexColor(value)) >= 4.5
+  );
+  const candidates = [accent];
+  for (const target of [fallback, "#FFFFFF", "#1E293B", "#000000"]) {
+    for (let step = 0; step <= 20; step += 1) {
+      candidates.push(mixHexColor(accent, target, step / 20));
+    }
+    candidates.push(target);
   }
-  return target;
+  for (let channel = 0; channel <= 255; channel += 1) {
+    const value = channel.toString(16).padStart(2, "0");
+    candidates.push(`#${value}${value}${value}`);
+  }
+  const safe = candidates.find(isSafe);
+  if (!safe) throw new Error("Unable to derive a contrast-safe text color");
+  return safe;
 }
 
 export function accentForeground(accent: string): string {

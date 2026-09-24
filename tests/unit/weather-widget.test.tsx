@@ -3,13 +3,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { createRoot } from "react-dom/client";
-import { act, createElement } from "react";
+import { act, createElement, useLayoutEffect } from "react";
 import type { ReactElement } from "react";
 import WeatherWidget from "@/components/ui/WeatherWidget";
 import { SceneLayers, conditionPresentation } from "@/components/ui/WxToys";
 import { moonPhase, moonPhaseName, makeCloudSpec } from "@/components/ui/WeatherScene";
 import { wearAdvice, stormAdvice, snowAdvice, fusionOutlook } from "@/lib/weather-insights";
-import { getWeatherSkin, resolveAccent } from "@/components/ui/WeatherSkins";
+import { contrastSafeTextAccent, getWeatherSkin, resolveAccent } from "@/components/ui/WeatherSkins";
 import { SKY } from "@/components/ui/wx-tokens";
 import { WeatherProvider } from "@/hooks/useWeather";
 import { AtmosphericProvider } from "@/hooks/useAtmosphericTheme";
@@ -131,6 +131,18 @@ function compositeHex(foreground: string, background: string, opacity: number): 
   return `#${foregroundRgb
     .map((channel, index) => Math.round(channel * opacity + backgroundRgb[index] * (1 - opacity)).toString(16).padStart(2, "0"))
     .join("")}`;
+}
+
+function stormHeaderSurfaces(): string[] {
+  const stops = ["#6A6F96", "#5D5B8F", "#4D4770"];
+  return stops.flatMap((stop) => [0.4, 0.64].map((opacity) => compositeHex("#FFFFFF", stop, opacity)));
+}
+
+function LayoutMotionCapture({ capture }: { capture: () => void }) {
+  useLayoutEffect(() => {
+    capture();
+  }, [capture]);
+  return null;
 }
 
 function makeOpenMeteoPayload(overrides: { isDay?: number; precip?: number; visibility?: number; cloud?: number | null; code?: number; startAt?: string } = {}) {
@@ -255,6 +267,26 @@ describe("WeatherWidget — Not Boring redesign", () => {
       (d) => (d as HTMLElement).style.maxHeight === "440px"
     );
     expect(clippedPanel).toBeUndefined();
+  });
+
+  it("omits daily precipitation chips when probability data is missing", async () => {
+    const payload = makeOpenMeteoPayload();
+    (payload.daily as any).precipitation_probability_max = payload.daily.time.map(() => null);
+    mockOpenMeteo(payload);
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    act(() => findDetailsButton(el)!.click());
+    const dailyTab = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="tab"]')).find(
+      (button) => button.textContent === "daily"
+    );
+    expect(dailyTab).toBeTruthy();
+    act(() => dailyTab!.click());
+
+    const dialog = document.querySelector("#weather-details-dialog") as HTMLElement;
+    const rows = Array.from(dialog.querySelectorAll<HTMLElement>('[role="listitem"]'));
+    expect(rows).toHaveLength(5);
+    expect(rows.every((row) => !row.textContent?.includes("0%"))).toBe(true);
   });
 
   it("closes the modal via the Close action", async () => {
@@ -581,6 +613,21 @@ describe("WeatherWidget — Not Boring redesign", () => {
   });
 
   it.each([
+    { code: 61, condition: "Rainy" },
+    { code: 71, condition: "Snowy" },
+  ])("uses known current wetness when hourly precipitation and outlook are unavailable for WMO $code", async ({ code, condition }) => {
+    const payload = makeOpenMeteoPayload({ code });
+    (payload as any).hourly = undefined;
+    mockOpenMeteo(payload);
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    expect(el.textContent).toContain(condition);
+    expect(el.textContent).not.toContain("Sunglasses weather");
+    expect(el.textContent).toContain("Raincoats ready");
+  });
+
+  it.each([
     { cover: 0, label: "Clear" },
     { cover: null, label: "Partly Cloudy" },
     { cover: 100, label: "Partly Cloudy" },
@@ -725,6 +772,15 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(Math.min(...["#55BCE8", "#8FD8F1", "#D8F2F4"].map((surface) => contrastRatio(safeText, surface))), holiday).toBeGreaterThanOrEqual(4.5);
   });
 
+  it.each([
+    { name: "night", accent: "#FF6F5E", surfaces: ["#6F74A8", "#A29DC9", "#E2DBF2"], fallback: "#1E293B" },
+    { name: "storm header", accent: "#FFB44F", surfaces: stormHeaderSurfaces(), fallback: "#FFFFFF" },
+    { name: "slate", accent: "#7FA8D9", surfaces: ["#1E293B", "#334155"], fallback: "#FFFFFF" },
+  ])("returns only validated text candidates for the $name surface", ({ accent, surfaces, fallback }) => {
+    const safe = contrastSafeTextAccent(accent, surfaces, fallback);
+    expect(Math.min(...surfaces.map((surface) => contrastRatio(safe, surface)))).toBeGreaterThanOrEqual(4.5);
+  });
+
   it("keeps clear-day NOW text safe in the rendered card and holiday tabs readable in the modal", async () => {
     const helpers = await import("@/components/ui/WeatherSkins") as unknown as {
       contrastSafeTextAccent?: (accent: string, surface: string | string[], fallback: string) => string;
@@ -795,6 +851,50 @@ describe("WeatherWidget — Not Boring redesign", () => {
     const scrubber = dialog.querySelector('[role="slider"][aria-label="Scrub through the next 24 hours"]') as HTMLElement;
     act(() => scrubber.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })));
     expect(activeTab().style.background).not.toContain("255, 180, 79");
+  });
+
+  it.each([
+    { name: "hidden tab", hidden: true, reducedMotion: false },
+    { name: "reduced motion", hidden: false, reducedMotion: true },
+  ])("starts ambient and holiday motion disabled when mounted in a $name environment", async ({ hidden, reducedMotion }) => {
+    const descriptor = Object.getOwnPropertyDescriptor(document, "hidden");
+    Object.defineProperty(document, "hidden", { configurable: true, value: hidden });
+    vi.stubGlobal("matchMedia", vi.fn(() => ({
+      matches: reducedMotion,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+    })));
+    localStorage.setItem("home-ai-weather-config", JSON.stringify({ timeOfDay: "day", season: "autumn", holidayOverride: "halloween" }));
+    try {
+      mockOpenMeteo(makeOpenMeteoPayload({ code: 0, cloud: 10 }));
+      let initialMotion: string | null = null;
+      const capture = () => {
+        initialMotion = document.querySelector('[data-testid="wx-scene-layers"]')?.getAttribute("data-motion") ?? null;
+      };
+      render(
+        <>
+          <WeatherWidget />
+          <LayoutMotionCapture capture={capture} />
+        </>
+      );
+
+      expect(initialMotion).toBe("paused");
+      await settle(300);
+      const art = document.querySelector("[data-weather-art-motion]") as HTMLElement | null;
+      const particles = document.querySelector("[data-weather-particle-motion]") as HTMLElement | null;
+      expect(art?.getAttribute("data-weather-art-motion")).toBe("paused");
+      if (hidden) {
+        expect(particles).toBeNull();
+      } else {
+        expect(particles?.getAttribute("data-weather-particle-motion")).toBe("paused");
+      }
+    } finally {
+      if (descriptor) Object.defineProperty(document, "hidden", descriptor);
+      else delete (document as any).hidden;
+      localStorage.removeItem("home-ai-weather-config");
+    }
   });
 
   it("pauses ambient poster motion while the tab is hidden", async () => {
@@ -927,6 +1027,47 @@ describe("WeatherWidget — Not Boring redesign", () => {
       delete document.documentElement.dataset.theme;
     }
   });
+  it.each(["light", "dark"] as const)("keeps storm header chrome readable over the actual glass composite in the %s theme", async (theme) => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("home-ai-weather-config", JSON.stringify({ timeOfDay: "day", season: "summer", holidayOverride: "christmas" }));
+    try {
+      mockOpenMeteo(makeOpenMeteoPayload({ code: 95 }));
+      const el = render(<WeatherWidget />);
+      await settle();
+      const hero = el.querySelector('[data-testid="wx-hero-temp"]') as HTMLElement;
+      const location = Array.from(el.querySelectorAll<HTMLElement>("span")).find(
+        (node) => node.className.includes("relative") && node.className.includes("truncate")
+      );
+      const locationChip = location?.parentElement;
+      const details = findDetailsButton(el);
+      const holiday = Array.from(el.querySelectorAll<HTMLElement>("span")).find(
+        (node) => node.className.includes("uppercase") && node.textContent?.includes("Christmas")
+      );
+      const surfaces = stormHeaderSurfaces();
+      const holidaySurfaces = surfaces.map((surface) => compositeHex("#ef4444", surface, 0x22 / 255));
+
+      expect(hero.style.color).toBe("rgb(255, 255, 255)");
+      expect(location).toBeTruthy();
+      expect(locationChip?.className).toContain("bg-white/40");
+      expect(locationChip?.className).toContain("before:from-white/40");
+      expect(details?.className).toContain("bg-white/40");
+      expect(details?.className).toContain("before:from-white/40");
+      expect(holiday).toBeTruthy();
+      if (!location || !details || !holiday) return;
+
+      expect(location.style.color).not.toBe(hero.style.color);
+      expect(Math.min(...surfaces.map((surface) => contrastRatio(location.style.color, surface)))).toBeGreaterThanOrEqual(4.5);
+      expect(Math.min(...surfaces.map((surface) => contrastRatio(details.style.color, surface)))).toBeGreaterThanOrEqual(4.5);
+      expect(
+        Math.min(...holidaySurfaces.map((surface) => contrastRatio(holiday.style.color, surface))),
+        JSON.stringify({ holidayInk: holiday.style.color, surfaces, holidaySurfaces })
+      ).toBeGreaterThanOrEqual(4.5);
+    } finally {
+      delete document.documentElement.dataset.theme;
+      localStorage.removeItem("home-ai-weather-config");
+    }
+  });
+
   it("keeps forced-night modal text on a readable light-scrim treatment", async () => {
     localStorage.setItem("home-ai-weather-config", JSON.stringify({ timeOfDay: "night" }));
     try {
