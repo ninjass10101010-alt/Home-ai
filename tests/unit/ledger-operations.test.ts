@@ -916,3 +916,152 @@ describe("ledger operation review regressions", () => {
     expect(result).toMatchObject({ ok: false, code: "ledger_write_conflict" });
   });
 });
+
+describe("second review regressions", () => {
+  it("normalizes a padded legacy weekStart and updates it without creating a row", async () => {
+    const existing = transaction(1, {
+      taskId: 101,
+      meta: { operationId: "op-padded-existing", source: "task-approval" },
+    });
+    let row = weekRow("week-1", {
+      weekStart: ` ${WEEK} `,
+      points: JSON.stringify({ Alex: 8 }),
+      history: JSON.stringify([existing]),
+    });
+    const collection = {
+      getFullList: vi.fn(async () => [structuredClone(row)]),
+      getOne: vi.fn(async () => structuredClone(row)),
+      update: vi.fn(async (_id: string, payload: Record<string, unknown>) => {
+        row = { ...row, ...structuredClone(payload) };
+        return structuredClone(row);
+      }),
+      create: vi.fn(),
+    };
+    const harness = { pb: { collection: vi.fn(() => collection) } as any };
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = expectSuccess(
+      await applyWeekLedgerOperation({
+        weekStart: WEEK,
+        operation: {
+          operationId: "op-padded-new",
+          source: "task-approval",
+          entries: [{ type: "earn", member: "Bailey", amount: 8, description: "Approved", taskId: 101 }],
+        },
+      }),
+    );
+
+    expect(result.weekData.weekStart).toBe(WEEK);
+    expect(collection.update).toHaveBeenCalledOnce();
+    expect(collection.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects multiple rows whose padded weekStarts normalize to the same week", async () => {
+    const existing = transaction(1, {
+      taskId: 101,
+      meta: { operationId: "op-padded-duplicate", source: "task-approval" },
+    });
+    const stored = weekRow("week-1", {
+      weekStart: ` ${WEEK} `,
+      points: JSON.stringify({ Alex: 8 }),
+      history: JSON.stringify([existing]),
+    });
+    const rows = [stored, { ...structuredClone(stored), id: "week-2", weekStart: WEEK }];
+    const collection = {
+      getFullList: vi.fn(async () => structuredClone(rows)),
+      getOne: vi.fn(async () => structuredClone(rows[0])),
+      update: vi.fn(),
+      create: vi.fn(),
+    };
+    const harness = { pb: { collection: vi.fn(() => collection) } as any };
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = await applyWeekLedgerOperation({
+      weekStart: WEEK,
+      operation: {
+        operationId: "op-padded-duplicate",
+        source: "task-approval",
+        entries: [{ type: "earn", member: "Alex", amount: 8, description: "Approved", taskId: 101 }],
+      },
+    });
+
+    expect(result).toMatchObject({ ok: false, code: "ledger_write_conflict" });
+    expect(collection.update).not.toHaveBeenCalled();
+    expect(collection.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects maximum JS Date timestamps before writing", async () => {
+    const harness = makePb();
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = await applyWeekLedgerOperation({
+      weekStart: WEEK,
+      operation: {
+        operationId: "op-expanded-year",
+        source: "planner-adjust",
+        entries: [{ type: "adjust", member: "Alex", amount: 1, description: "Bonus" }],
+      },
+      now: new Date(8640000000000000),
+    });
+
+    expect(result).toMatchObject({ ok: false, code: "invalid_ledger_operation" });
+    expect(harness.writeCount).toBe(0);
+  });
+
+  it("reports transaction-ID exhaustion as a retryable conflict", async () => {
+    const now = new Date("2026-09-21T10:00:00.000Z");
+    const nowMs = now.getTime();
+    const originalIsSafeInteger = Number.isSafeInteger;
+    const isSafeInteger = vi.spyOn(Number, "isSafeInteger").mockImplementation((value) => {
+      if (typeof value === "number" && value > nowMs && value < nowMs + 100000) return false;
+      return originalIsSafeInteger(value);
+    });
+    const harness = makePb();
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    try {
+      const result = await applyWeekLedgerOperation({
+        weekStart: WEEK,
+        operation: {
+          operationId: "op-id-exhausted",
+          source: "planner-adjust",
+          entries: [{ type: "adjust", member: "Alex", amount: 1, description: "Bonus" }],
+        },
+        now,
+      });
+      expect(result).toMatchObject({ ok: false, code: "ledger_write_conflict" });
+    } finally {
+      isSafeInteger.mockRestore();
+    }
+    expect(harness.writeCount).toBe(0);
+  });
+
+  it("rejects pre-existing duplicate transaction IDs", async () => {
+    const harness = makePb({
+      history: [transaction(1), transaction(1, { member: "Bailey" })],
+      points: { Alex: 8, Bailey: 8 },
+    });
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = await applyWeekLedgerOperation({
+      weekStart: WEEK,
+      operation: {
+        operationId: "op-duplicate-transaction-id",
+        source: "planner-adjust",
+        entries: [{ type: "adjust", member: "Alex", amount: 1, description: "Bonus" }],
+      },
+    });
+
+    expect(result).toMatchObject({ ok: false, code: "invalid_ledger_operation" });
+    expect(harness.writeCount).toBe(0);
+  });
+
+  it.each([null, undefined])("returns invalid_ledger_operation for %s arguments", async (value) => {
+    const result = await applyWeekLedgerOperation(value as any);
+    expect(result).toMatchObject({
+      ok: false,
+      code: "invalid_ledger_operation",
+      operationId: "",
+    });
+  });
+});
