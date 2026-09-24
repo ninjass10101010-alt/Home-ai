@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import SectionCard from "@/components/patterns/SectionCard";
+import HomeWidgetIcon from "@/components/ui/HomeWidgetIcon";
 import Chip from "@/components/ui/Chip";
 import SoftButton from "@/components/ui/SoftButton";
 import { entitiesByDomain, entityFriendlyName, useAlarmCall, useHAState } from "@/hooks/useHAState";
@@ -39,7 +40,7 @@ export default function HomeSecurityWidget({ className }: { className?: string }
   return (
     <SectionCard
       title="Home Security"
-      icon="🛡️"
+      icon={<HomeWidgetIcon variant="security" size="lg" />}
       tone="#f43f5e"
       compact
       centeredHeader

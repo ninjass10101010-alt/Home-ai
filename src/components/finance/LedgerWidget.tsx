@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import SectionCard from "@/components/patterns/SectionCard";
+import HomeWidgetIcon from "@/components/ui/HomeWidgetIcon";
 import { useAuth } from "@/hooks/useAuth";
 import {
   formatUSD,
@@ -46,7 +47,7 @@ export default function LedgerWidget({ className = "" }: { className?: string })
   return (
     <SectionCard
       tone="#22c55e"
-      icon="📒"
+      icon={<HomeWidgetIcon variant="ledger" size="lg" />}
       title="The Ledger"
       description="Family finances — tended by Alex"
       centeredHeader

@@ -90,6 +90,23 @@ function weekTileValue(el: HTMLElement): string | null {
   return value?.textContent ?? null;
 }
 
+function expectStatIcon(root: HTMLElement, label: string, variant: string, oldEmoji: string) {
+  const labelNode = Array.from(root.querySelectorAll("div")).find((div) => div.textContent === label && div.childElementCount === 0);
+  const tile = labelNode?.parentElement;
+  if (!tile) throw new Error(`${label} stat tile not found`);
+  expect(tile.querySelector(`svg[data-variant="${variant}"]`)).not.toBeNull();
+  expect(tile.textContent).not.toContain(oldEmoji);
+}
+
+function expectWidgetIcon(root: HTMLElement, variant: string, oldEmoji: string) {
+  const slot = Array.from(root.querySelectorAll("div")).find(
+    (div) => div.className.includes("absolute") && div.className.includes("z-30") && div.className.includes("pointer-events-none")
+  );
+  if (!slot) throw new Error("widget icon slot not found");
+  expect(slot.querySelector(`svg[data-variant="${variant}"]`)).not.toBeNull();
+  expect(slot.textContent).not.toContain(oldEmoji);
+}
+
 describe("plannedDaysThisWeek (pure)", () => {
   const wk = "2026-09-01";
 
@@ -137,6 +154,16 @@ describe("Home Week tile honesty", () => {
     activeRoot = null;
     document.body.innerHTML = "";
     vi.unstubAllGlobals();
+  });
+
+  it("uses illustrated icons across Home stat tiles and the week summary", async () => {
+    const el = await renderAsync(<HomePage />);
+    await settle();
+
+    expectStatIcon(el, "Events", "events", "📅");
+    expectStatIcon(el, "Tasks", "tasks", "✅");
+    expectStatIcon(el, "Week", "week", "🍽️");
+    expectWidgetIcon(el, "week", "🗓️");
   });
 
   it("shows the real planned-day count, not a hardcoded 7", async () => {

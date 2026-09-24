@@ -6,6 +6,7 @@ import { useWeeklyPrizes } from "./hooks/useWeeklyPrizes";
 import { useAuth } from "@/hooks/useAuth";
 import { db } from "@/db";
 import SectionCard from "@/components/patterns/SectionCard";
+import HomeWidgetIcon from "@/components/ui/HomeWidgetIcon";
 import Avatar from "@/components/ui/Avatar";
 import EmptyState from "@/components/ui/EmptyState";
 import RankArrow from "./RankArrow";
@@ -172,7 +173,7 @@ export default function HomeLeaderboardWidget({ className = "" }: { className?: 
 
   if (!mounted) {
     return (
-      <SectionCard title="This Week's Leaderboard" icon="🏆" tone="#f59e0b" centeredHeader className={className}>
+      <SectionCard title="This Week's Leaderboard" icon={<HomeWidgetIcon variant="leaderboard" size="lg" />} tone="#f59e0b" centeredHeader className={className}>
         <div className="space-y-2">
           {[1, 2, 3].map((i) => (
             <div key={i} className="h-12 rounded-2xl bg-white/5 animate-pulse" />
@@ -188,7 +189,7 @@ export default function HomeLeaderboardWidget({ className = "" }: { className?: 
     const prizeEmojis = [...prizes].sort((a, b) => a.rank - b.rank).map((p) => p.emoji).join("");
     return (
       <Link href="/tasks" className="block h-full active:scale-[0.99] transition-transform">
-        <SectionCard title="This Week's Leaderboard" icon="🏆" tone="#f59e0b" centeredHeader className={className}>
+        <SectionCard title="This Week's Leaderboard" icon={<HomeWidgetIcon variant="leaderboard" size="lg" />} tone="#f59e0b" centeredHeader className={className}>
           <EmptyState
             title="Be the first!"
             description="Complete a task to start the race this week."
@@ -221,7 +222,7 @@ export default function HomeLeaderboardWidget({ className = "" }: { className?: 
       <SectionCard
         title="This Week's Leaderboard"
         description={`Resets in ${daysUntilReset} day${daysUntilReset !== 1 ? "s" : ""}`}
-        icon="🏆"
+        icon={<HomeWidgetIcon variant="leaderboard" size="lg" />}
         tone="#f59e0b"
         centeredHeader
         className={className}

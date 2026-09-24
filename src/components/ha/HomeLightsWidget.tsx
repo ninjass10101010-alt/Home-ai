@@ -1,6 +1,7 @@
 "use client";
 
 import SectionCard from "@/components/patterns/SectionCard";
+import HomeWidgetIcon from "@/components/ui/HomeWidgetIcon";
 import Chip from "@/components/ui/Chip";
 import EmptyState from "@/components/ui/EmptyState";
 import ListRow from "@/components/ui/ListRow";
@@ -32,7 +33,7 @@ export default function HomeLightsWidget({ className }: { className?: string }) 
   return (
     <SectionCard
       title="Home Lights"
-      icon="💡"
+      icon={<HomeWidgetIcon variant="lights" size="lg" />}
       tone="#f59e0b"
       compact
       centeredHeader

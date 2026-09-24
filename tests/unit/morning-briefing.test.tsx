@@ -17,7 +17,7 @@ function render(ui: ReactElement): HTMLElement {
 const ack = async () => true;
 
 describe("MorningBriefingWidget acknowledged state", () => {
-  it("renders the acknowledged state centered with a protruding sunrise icon", () => {
+  it("renders the acknowledged state centered with the illustrated briefing icon", () => {
     const briefing = {
       id: "b1",
       scopeDate: "2026-08-20",
@@ -39,7 +39,8 @@ describe("MorningBriefingWidget acknowledged state", () => {
       (d) => d.className.includes("absolute") && d.className.includes("z-30") && d.className.includes("pointer-events-none")
     );
     expect(iconBox).toBeTruthy();
-    expect(iconBox?.textContent).toContain("🌅");
+    expect(iconBox?.querySelector('svg[data-variant="briefing"]')).not.toBeNull();
+    expect(iconBox?.textContent).not.toContain("🌅");
     expect((el.querySelector(".widget-card") as HTMLElement | null)?.style.getPropertyValue("--widget-tone")).toContain("#f97316");
   });
 });

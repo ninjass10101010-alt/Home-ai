@@ -23,6 +23,14 @@ function render(ui: ReactElement): HTMLElement {
   return el;
 }
 
+function widgetIconSlot(root: HTMLElement): HTMLElement {
+  const slot = Array.from(root.querySelectorAll("div")).find(
+    (div) => div.className.includes("absolute") && div.className.includes("z-30") && div.className.includes("pointer-events-none")
+  );
+  if (!slot) throw new Error("widget icon slot not found");
+  return slot as HTMLElement;
+}
+
 // Thu Aug 27 2026, 5:00 PM — matches the "Thu" weekday used in consuela-meals seeds.
 const THURSDAY_5PM = new Date(2026, 7, 27, 17, 0, 0);
 
@@ -60,6 +68,13 @@ describe("CurrentMealWidget", () => {
     expect(title?.className).toContain("whitespace-nowrap");
     const badge = Array.from(el.querySelectorAll("span")).find((s) => s.className.includes("meal-time-badge"));
     expect(badge?.className).toContain("shrink-0");
+  });
+
+  it("uses the illustrated meal icon in the protruding widget slot", () => {
+    const el = render(<CurrentMealWidget />);
+    const slot = widgetIconSlot(el);
+    expect(slot.querySelector('svg[data-variant="meal"]')).not.toBeNull();
+    expect(slot.textContent).not.toContain("🍽️");
   });
 
   it("shows the quiet prompt when no schedule exists", () => {

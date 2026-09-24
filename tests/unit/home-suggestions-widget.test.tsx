@@ -15,6 +15,14 @@ function render(ui: ReactElement): HTMLElement {
   return el;
 }
 
+function widgetIconSlot(root: HTMLElement): HTMLElement {
+  const slot = Array.from(root.querySelectorAll("div")).find(
+    (div) => div.className.includes("absolute") && div.className.includes("z-30") && div.className.includes("pointer-events-none")
+  );
+  if (!slot) throw new Error("widget icon slot not found");
+  return slot as HTMLElement;
+}
+
 function makeSuggestions(n: number) {
   return Array.from({ length: n }, (_, i) => ({
     id: `s${i}`,
@@ -51,6 +59,19 @@ describe("HomeSuggestionsWidget containment", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     document.body.innerHTML = "";
+  });
+
+  it("uses the illustrated suggestions icon while preserving row-level emoji", async () => {
+    stubFetchWith(makeSuggestions(1));
+    const el = render(<HomeSuggestionsWidget />);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 30));
+    });
+
+    const slot = widgetIconSlot(el);
+    expect(slot.querySelector('svg[data-variant="suggestions"]')).not.toBeNull();
+    expect(slot.textContent).not.toContain("✨");
+    expect(el.textContent).toContain("🥫");
   });
 
   it("caps the visible rows at 2 and offers a '+N more · See all' footer", async () => {

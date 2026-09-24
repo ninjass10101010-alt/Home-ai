@@ -1,6 +1,7 @@
 "use client";
 
 import SectionCard from "@/components/patterns/SectionCard";
+import HomeWidgetIcon from "@/components/ui/HomeWidgetIcon";
 import SoftButton from "@/components/ui/SoftButton";
 import EmptyState from "@/components/ui/EmptyState";
 import { entitiesByDomain, useHACall, useHAState } from "@/hooks/useHAState";
@@ -16,7 +17,7 @@ export default function HomeClimateWidget({ className }: { className?: string })
 
   if (!climate) {
     return (
-      <SectionCard title="Home Climate" icon="🌡️" tone="#22d3ee" compact centeredHeader className={className}>
+      <SectionCard title="Home Climate" icon={<HomeWidgetIcon variant="climate" size="lg" />} tone="#22d3ee" compact centeredHeader className={className}>
         <EmptyState title="No climate data" description="Connect a thermostat to Home Assistant to see indoor conditions here." icon="🌡️" flat />
       </SectionCard>
     );
@@ -34,7 +35,7 @@ export default function HomeClimateWidget({ className }: { className?: string })
   };
 
   return (
-    <SectionCard title="Home Climate" icon="🌡️" tone="#22d3ee" compact centeredHeader className={className}>
+    <SectionCard title="Home Climate" icon={<HomeWidgetIcon variant="climate" size="lg" />} tone="#22d3ee" compact centeredHeader className={className}>
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 text-center">
         <div className="text-4xl font-bold text-text-primary">{Number.isFinite(currentTemp) ? `${Math.round(currentTemp)}°` : "--"}</div>
         <p className="text-xs text-text-secondary">{hvacMode}</p>

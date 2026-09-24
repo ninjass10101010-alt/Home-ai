@@ -59,7 +59,7 @@ vi.mock("@/hooks/useAtmosphericTheme", () => ({
 }));
 
 const layoutMock = vi.hoisted(() => ({
-  visibleWidgets: [{ id: "tasks" }, { id: "schedule" }] as any[],
+  visibleWidgets: [{ id: "tasks" }, { id: "schedule" }, { id: "aiQuickAsk" }] as any[],
   orientation: "phone" as const,
   mounted: true,
 }));
@@ -96,6 +96,18 @@ async function settle(ms = 120) {
   await act(async () => { await new Promise((r) => setTimeout(r, ms)); });
 }
 
+function expectWidgetIcon(root: HTMLElement, variant: string, oldEmoji: string) {
+  const slots = Array.from(root.querySelectorAll("div")).filter(
+    (div) => div.className.includes("absolute") && div.className.includes("z-30") && div.className.includes("pointer-events-none")
+  );
+  const slot = slots.find(
+    (div) => div.querySelector(`svg[data-variant="${variant}"]`) || div.textContent?.includes(oldEmoji)
+  );
+  expect(slot, `expected ${variant} widget icon slot`).toBeTruthy();
+  expect(slot?.querySelector(`svg[data-variant="${variant}"]`)).not.toBeNull();
+  expect(slot?.textContent).not.toContain(oldEmoji);
+}
+
 describe("Home Tasks + Daily Schedule refresh (consuela-data-refreshed)", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
@@ -125,6 +137,7 @@ describe("Home Tasks + Daily Schedule refresh (consuela-data-refreshed)", () => 
     await settle();
     expect(el.textContent).toContain("Dishes");
     expect(el.textContent).not.toContain("Feed the fish");
+    expectWidgetIcon(el, "tasks", "✅");
 
     // Another device's task lands in the store via the snapshot pull.
     seedTasks(["Dishes", "Feed the fish"]);
@@ -143,6 +156,7 @@ describe("Home Tasks + Daily Schedule refresh (consuela-data-refreshed)", () => 
     const el = await renderAsync(<HomePage />);
     await settle();
     expect(el.textContent).toContain("No items scheduled");
+    expectWidgetIcon(el, "schedule", "🕐");
 
     // The 60s refresh repopulated the schedules cache.
     scheduleMock.items = [
@@ -155,6 +169,14 @@ describe("Home Tasks + Daily Schedule refresh (consuela-data-refreshed)", () => 
     await settle();
 
     expect(el.textContent).toContain("Soccer Practice");
+  });
+
+  it("Quick ask uses the illustrated ask icon in its widget slot", async () => {
+    seedTasks([]);
+    const el = await renderAsync(<HomePage />);
+    await settle();
+
+    expectWidgetIcon(el, "ask", "🗨️");
   });
 
   it("stops listening after unmount (no setState on a dead tree)", async () => {

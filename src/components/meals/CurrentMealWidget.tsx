@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import WidgetCard from "@/components/patterns/WidgetCard";
+import HomeWidgetIcon from "@/components/ui/HomeWidgetIcon";
 import DayLine from "@/components/patterns/DayLine";
 import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
 import { localWeekStartISO } from "@/lib/local-date";
@@ -187,7 +188,7 @@ export default function CurrentMealWidget({ className = "" }: { className?: stri
   const emojiBorderAlpha = alphaHex(0x20 + 0x18 * proximity + (isNear ? 0x15 : 0));
 
   return (
-    <WidgetCard tone="#10b981" icon="🍽️" className={className}>
+    <WidgetCard tone="#10b981" icon={<HomeWidgetIcon variant="meal" size="lg" />} className={className}>
       {/* Floating seasonal emoji in corner */}
       <div
         className="absolute top-2 right-2 text-4xl pointer-events-none select-none meal-float-gentle"

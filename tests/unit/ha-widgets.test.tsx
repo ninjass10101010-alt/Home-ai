@@ -59,6 +59,15 @@ function render(ui: ReactElement): HTMLElement {
   return el;
 }
 
+function expectWidgetIcon(root: HTMLElement, variant: string, oldEmoji: string) {
+  const slot = Array.from(root.querySelectorAll("div")).find(
+    (div) => div.className.includes("absolute") && div.className.includes("z-30") && div.className.includes("pointer-events-none")
+  );
+  if (!slot) throw new Error("widget icon slot not found");
+  expect(slot.querySelector(`svg[data-variant="${variant}"]`)).not.toBeNull();
+  expect(slot.textContent).not.toContain(oldEmoji);
+}
+
 async function settle() {
   await act(async () => {
     await new Promise((r) => setTimeout(r, 30));
@@ -98,6 +107,7 @@ describe("Home widgets (Home Assistant)", () => {
     expect(el.textContent).toContain("Rebecca");
     expect(el.textContent).toContain("1 home");
     expect(el.textContent).toContain("Front door");
+    expectWidgetIcon(el, "security", "🛡️");
 
     act(() => findButton(el, /Arm home/).click());
     await settle();
@@ -137,6 +147,7 @@ describe("Home widgets (Home Assistant)", () => {
     expect(el.textContent).toContain("22°");
     expect(el.textContent).toContain("heat");
     expect(el.textContent).toContain("Humidity 44%");
+    expectWidgetIcon(el, "climate", "🌡️");
 
     const plus = el.querySelector('button[aria-label="Increase target temperature"]') as HTMLButtonElement | null;
     expect(plus).toBeTruthy();
@@ -160,6 +171,7 @@ describe("Home widgets (Home Assistant)", () => {
     expect(el.textContent).toContain("Hall");
     expect(el.textContent).toContain("On");
     expect(el.textContent).toContain("Off");
+    expectWidgetIcon(el, "lights", "💡");
 
     act(() => findRow(el, "Kitchen").click());
     await settle();
@@ -182,6 +194,15 @@ describe("Home widgets (Home Assistant)", () => {
       service: "turn_off",
       serviceData: { entity_id: ["light.kitchen", "light.hall"] },
     });
+  });
+
+  it("HomeClimateWidget preserves the empty-state emoji while illustrating the header slot", async () => {
+    const el = render(<HomeClimateWidget />);
+    await settle();
+
+    expect(el.textContent).toContain("No climate data");
+    expect(el.textContent).toContain("🌡️");
+    expectWidgetIcon(el, "climate", "🌡️");
   });
 
   it("HomeSecurityWidget hides the Arm home/Disarm button for a child user", async () => {

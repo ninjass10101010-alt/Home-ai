@@ -88,6 +88,14 @@ async function renderWidget(): Promise<HTMLElement> {
   return el;
 }
 
+function widgetIconSlot(root: HTMLElement): HTMLElement {
+  const slot = Array.from(root.querySelectorAll("div")).find(
+    (div) => div.className.includes("absolute") && div.className.includes("z-30") && div.className.includes("pointer-events-none")
+  );
+  if (!slot) throw new Error("widget icon slot not found");
+  return slot as HTMLElement;
+}
+
 // One shared structural pin for every race-line variant: the clamp lives on
 // the wrapper <p> itself; the line is a single text flow with no child
 // elements carrying a clamp class (a `line-clamp-1` inline span forces
@@ -118,6 +126,15 @@ describe("HomeLeaderboardWidget — weekly prize race line", () => {
     act(() => { activeRoot?.unmount(); });
     activeRoot = null;
     document.body.innerHTML = "";
+  });
+
+  it("uses the illustrated leaderboard icon while preserving row medals", async () => {
+    seedPrizes(PRIZES);
+    const el = await renderWidget();
+    const slot = widgetIconSlot(el);
+    expect(slot.querySelector('svg[data-variant="leaderboard"]')).not.toBeNull();
+    expect(slot.textContent).not.toContain("🏆");
+    expect(el.textContent).toContain("🥇");
   });
 
   it("renders no race line at all when no prizes are configured", async () => {

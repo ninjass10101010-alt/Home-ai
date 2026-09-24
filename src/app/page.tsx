@@ -8,7 +8,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import PageShell from "@/components/ui/PageShell";
 import Avatar, { type AvatarSize } from "@/components/ui/Avatar";
 import WeatherWidget from "@/components/ui/WeatherWidget";
-import { Icon3D } from "@/components/3d";
+import HomeWidgetIcon from "@/components/ui/HomeWidgetIcon";
 import EmergencyButton from "@/components/ui/EmergencyButton";
 import ScheduleDisplay from "@/components/ui/ScheduleDisplay";
 import { db } from "@/db";
@@ -542,9 +542,9 @@ export default function HomePage() {
 
           <div className="px-4 space-y-6 relative z-10">
             <div className="grid grid-cols-3 gap-3">
-              <StatTile label={todayEvents.length === 1 ? "Event" : "Events"} value={todayEvents.length} detail="Today" icon="📅" tone={todayEvents.length > 0 ? "warning" : "accent"} compact progress={dayFraction} />
-              <StatTile label="Tasks" value={pendingTasks.length} detail="Pending" icon="✅" tone={pendingTasks.length > 0 ? "danger" : "success"} compact />
-              <StatTile label="Week" value={weekPlannedDays === null ? "—" : weekPlannedDays} detail="Days planned" icon="🍽️" tone="accent" compact progress={weekPlannedDays === null ? null : weekPlannedDays / 7} />
+              <StatTile label={todayEvents.length === 1 ? "Event" : "Events"} value={todayEvents.length} detail="Today" icon={<HomeWidgetIcon variant="events" size="sm" />} tone={todayEvents.length > 0 ? "warning" : "accent"} compact progress={dayFraction} />
+              <StatTile label="Tasks" value={pendingTasks.length} detail="Pending" icon={<HomeWidgetIcon variant="tasks" size="sm" />} tone={pendingTasks.length > 0 ? "danger" : "success"} compact />
+              <StatTile label="Week" value={weekPlannedDays === null ? "—" : weekPlannedDays} detail="Days planned" icon={<HomeWidgetIcon variant="week" size="sm" />} tone="accent" compact progress={weekPlannedDays === null ? null : weekPlannedDays / 7} />
             </div>
 
             <div className={gridClass}>
@@ -580,7 +580,7 @@ export default function HomePage() {
                   const upcoming = Array.isArray(upcomingImportant) ? upcomingImportant.slice(0, 2) : [];
                   return (
                     <div key="todayEvents" className={span}>
-                      <SectionCard title="Today" description={`${todayEvents.length} ${todayEvents.length === 1 ? "event" : "events"} on the family calendar`} icon="📅" tone="#3b82f6" compact centeredHeader headingLevel="h2" className="h-full"
+                      <SectionCard title="Today" description={`${todayEvents.length} ${todayEvents.length === 1 ? "event" : "events"} on the family calendar`} icon={<HomeWidgetIcon variant="events" size="lg" />} tone="#3b82f6" compact centeredHeader headingLevel="h2" className="h-full"
                         footer={
                           hiddenEvents > 0 ? (
                             <Link href="/calendar" className="tap-sm text-xs font-semibold widget-accent-text">+{hiddenEvents} more · See all →</Link>
@@ -683,7 +683,7 @@ export default function HomePage() {
                   const hiddenTasks = pendingTasks.length - visibleTasks.length;
                   return (
                     <div key="tasks" className={span}>
-                      <SectionCard title="Tasks" description={`${pendingTasks.length} pending for the family`} icon="✅" tone="#f43f5e" compact centeredHeader headingLevel="h2" className="h-full"
+                      <SectionCard title="Tasks" description={`${pendingTasks.length} pending for the family`} icon={<HomeWidgetIcon variant="tasks" size="lg" />} tone="#f43f5e" compact centeredHeader headingLevel="h2" className="h-full"
                         footer={
                           isParent && pendingApprovalCount > 0 ? (
                             <Link href="/tasks" className="tap-sm text-xs font-semibold widget-accent-text">{pendingApprovalCount} need approval →</Link>
@@ -746,7 +746,7 @@ export default function HomePage() {
                 case "aiQuickAsk":
                   return (
                     <div key="aiQuickAsk" className={span}>
-                      <WidgetCard tone="#8b5cf6" icon={<Icon3D variant="chat" size="lg" />} className="h-full">
+                      <WidgetCard tone="#8b5cf6" icon={<HomeWidgetIcon variant="ask" size="lg" />} className="h-full">
                         <div className="flex flex-1 flex-col items-center justify-center gap-1 p-5 text-center">
                           <Link href="/chat" className="flex items-center gap-2 tap-sm">
                             <h3 className="text-base font-bold text-text-primary">Quick ask</h3>
@@ -779,7 +779,7 @@ export default function HomePage() {
             </div>
 
             <div className="mt-6">
-              <SectionCard title="This Week" description="Meal and family rhythm at a glance" icon="🗓️" tone="#10b981" compact headingLevel="h2">
+              <SectionCard title="This Week" description="Meal and family rhythm at a glance" icon={<HomeWidgetIcon variant="week" size="lg" />} tone="#10b981" compact headingLevel="h2">
                 <DayStrip value="today" onChange={(dayId) => router.push(`/meals?day=${dayId}`)} days={weekDays} compact />
                 <DayLine className="mt-3" mode="week" tone="#10b981" progress={weekFraction} markers={weekDayBoundaries} />
               </SectionCard>

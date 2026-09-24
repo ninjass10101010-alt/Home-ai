@@ -19,6 +19,15 @@ function render(ui: ReactElement): HTMLElement {
   return el;
 }
 
+function expectLedgerHeaderIcon(root: HTMLElement) {
+  const slot = Array.from(root.querySelectorAll("div")).find(
+    (div) => div.className.includes("absolute") && div.className.includes("z-30") && div.className.includes("pointer-events-none")
+  );
+  if (!slot) throw new Error("widget icon slot not found");
+  expect(slot.querySelector('svg[data-variant="ledger"]')).not.toBeNull();
+  expect(slot.textContent).not.toContain("📒");
+}
+
 const PAYLOAD = {
   yearData: {
     "2026-09": {
@@ -61,6 +70,7 @@ describe("LedgerWidget", () => {
     expect(el.textContent).toContain("$1,235 of $7,713");
     expect(el.textContent).toContain("September 2026");
     expect(el.textContent).toContain("Balances as of 8/31/2026");
+    expectLedgerHeaderIcon(el);
     // deep link to the embed page
     const link = Array.from(el.querySelectorAll("a[href='/ledger']"));
     expect(link.length).toBeGreaterThan(0);
@@ -84,6 +94,7 @@ describe("LedgerWidget", () => {
     const el = render(<LedgerWidget />);
     await act(async () => {});
     expect(el.textContent).toContain("unreachable");
+    expectLedgerHeaderIcon(el);
 
     fetchOk();
     const btn = Array.from(el.querySelectorAll("button")).find((b) =>

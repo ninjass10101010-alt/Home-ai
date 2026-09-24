@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import Link from "next/link";
 import WidgetCard from "@/components/patterns/WidgetCard";
+import HomeWidgetIcon from "@/components/ui/HomeWidgetIcon";
 import DayLine, { parseTimeToMinutes } from "@/components/patterns/DayLine";
 import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
 
@@ -59,7 +60,7 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
 
   if (schedule.length === 0) {
     return (
-      <WidgetCard tone="#22d3ee" icon="🕐" className={className}>
+      <WidgetCard tone="#22d3ee" icon={<HomeWidgetIcon variant="schedule" size="lg" />} className={className}>
         <div className="relative shrink-0 border-b border-white/10 p-4 pb-3 text-center">
           <h3 className="mt-1 text-sm font-bold text-text-primary">{title}</h3>
           <span className="mt-0.5 text-[10px] font-medium text-text-muted">0 upcoming</span>
@@ -111,7 +112,7 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
   };
 
   return (
-    <WidgetCard tone="#22d3ee" icon="🕐" className={className}>
+    <WidgetCard tone="#22d3ee" icon={<HomeWidgetIcon variant="schedule" size="lg" />} className={className}>
       <div className="flex flex-col items-center border-b border-white/10 p-4 text-center">
         <h2 className="mt-1 text-sm font-bold text-text-primary">{title}</h2>
         <span className="mt-0.5 text-[10px] font-medium text-text-muted">{upcomingCount} upcoming</span>

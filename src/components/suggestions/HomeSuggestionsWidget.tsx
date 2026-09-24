@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import SectionCard from "@/components/patterns/SectionCard";
+import HomeWidgetIcon from "@/components/ui/HomeWidgetIcon";
 import Surface from "@/components/ui/Surface";
 import SoftButton from "@/components/ui/SoftButton";
 import IconButton from "@/components/ui/IconButton";
@@ -123,7 +124,7 @@ export default function HomeSuggestionsWidget({ className = "" }: { className?: 
 
   if (!mounted) {
     return (
-      <SectionCard title="Consuela suggests" icon="✨" tone="#8b5cf6" centeredHeader className={className}>
+      <SectionCard title="Consuela suggests" icon={<HomeWidgetIcon variant="suggestions" size="lg" />} tone="#8b5cf6" centeredHeader className={className}>
         <div className="space-y-2">
           {[1, 2].map((i) => (
             <div key={i} className="h-14 rounded-2xl bg-white/5 animate-pulse" />
@@ -141,7 +142,7 @@ export default function HomeSuggestionsWidget({ className = "" }: { className?: 
     return (
       <SectionCard
         title="Consuela suggests"
-        icon="✨"
+        icon={<HomeWidgetIcon variant="suggestions" size="lg" />}
         tone="#8b5cf6"
         centeredHeader
         className={className}
@@ -163,7 +164,7 @@ export default function HomeSuggestionsWidget({ className = "" }: { className?: 
     <SectionCard
       title="Consuela suggests"
       description="Proactive alerts for the family"
-      icon="✨"
+      icon={<HomeWidgetIcon variant="suggestions" size="lg" />}
       tone="#8b5cf6"
       centeredHeader
       className={className}

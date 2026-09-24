@@ -103,6 +103,15 @@ async function settle(ms = 150) {
   await act(async () => { await new Promise((r) => setTimeout(r, ms)); });
 }
 
+function expectTodayWidgetIcon(root: HTMLElement) {
+  const slot = Array.from(root.querySelectorAll("div")).find(
+    (div) => div.className.includes("absolute") && div.className.includes("z-30") && div.className.includes("pointer-events-none")
+  );
+  if (!slot) throw new Error("Today widget icon slot not found");
+  expect(slot.querySelector('svg[data-variant="events"]')).not.toBeNull();
+  expect(slot.textContent).not.toContain("📅");
+}
+
 describe("Home Today widget — Google Calendar events merged in", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
@@ -152,6 +161,7 @@ describe("Home Today widget — Google Calendar events merged in", () => {
     expect(el.textContent).toContain("Bailey & Emily at home!");
     expect(el.textContent).toContain("1 event on the family calendar");
     expect(el.textContent).not.toContain("Quiet day");
+    expectTodayWidgetIcon(el);
   });
 
   it("shows a multi-day Google event on a middle day (coverage, not just the start day)", async () => {
