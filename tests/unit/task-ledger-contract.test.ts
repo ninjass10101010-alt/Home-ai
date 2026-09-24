@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { Transaction } from "@/types/tasks";
-import { hasUnreversedTaskEarn, recomputeWeekPoints } from "@/lib/task-ledger";
+import {
+  hasUnreversedTaskEarn,
+  parseCanonicalTransactions,
+  recomputeWeekPoints,
+} from "@/lib/task-ledger";
 
 const transaction = (
   id: number,
@@ -60,5 +64,49 @@ describe("task ledger contract", () => {
 
     history.push(transaction(4, "Alex", "adjust", -7, "2026-09-21T13:00:00.000Z", 42));
     expect(hasUnreversedTaskEarn(history, 42, "Alex")).toBe(false);
+  });
+
+  it("rejects every malformed canonical transaction instead of filtering it", () => {
+    const valid = transaction(1, "Alex", "earn", 5, "2026-09-21T10:00:00.000Z", 42);
+    const malformed = [
+      { ...valid, id: "1" },
+      { ...valid, id: 0 },
+      { ...valid, id: 1.5 },
+      { ...valid, timestamp: "" },
+      { ...valid, timestamp: "not-a-timestamp" },
+      { ...valid, member: " " },
+      { ...valid, amount: "5" },
+      { ...valid, type: "legacy" },
+      { ...valid, taskId: 0 },
+      { ...valid, taskId: 1.5 },
+      { ...valid, description: "" },
+    ];
+
+    for (const candidate of malformed) {
+      expect(parseCanonicalTransactions([candidate])).toBeNull();
+      expect(() => recomputeWeekPoints([candidate] as unknown as Transaction[])).toThrow();
+    }
+  });
+
+  it("normalizes canonical transaction operation metadata", () => {
+    const parsed = parseCanonicalTransactions([
+      {
+        ...transaction(1, " Alex ", "earn", 5, "2026-09-21T10:00:00.000Z", 42),
+        meta: { operationId: "  op-ledger-1  ", source: "assigned-complete" },
+      },
+    ]);
+
+    expect(parsed).toEqual([
+      {
+        id: 1,
+        timestamp: "2026-09-21T10:00:00.000Z",
+        member: "Alex",
+        type: "earn",
+        amount: 5,
+        description: "earn:1",
+        taskId: 42,
+        meta: { operationId: "op-ledger-1", source: "assigned-complete" },
+      },
+    ]);
   });
 });

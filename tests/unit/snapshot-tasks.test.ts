@@ -16,6 +16,7 @@ import {
   readSnapshotWithRevision,
   mutateSnapshotWithMeta,
   persistSnapshotWeek,
+  getSnapshotOperationReceipts,
 } from "@/lib/snapshot-tasks";
 
 const t = (id: number, title: string, extra: Record<string, any> = {}) => ({ id, title, ...extra });
@@ -91,12 +92,14 @@ describe("snapshot revisions and receipts", () => {
     expect(result.rowId).toBe("snapshot-1");
     expect(result.data.tasks).toEqual([t(1, "Dishes")]);
     expect(result.data.operationReceipts).toEqual({
-      "op-old": {
-        operationId: "op-old",
-        action: "complete",
-        taskId: 1,
-        createdAt: "2026-09-21T10:00:00.000Z",
-      },
+      "op-old": [
+        {
+          operationId: "op-old",
+          action: "complete",
+          taskId: 1,
+          createdAt: "2026-09-21T10:00:00.000Z",
+        },
+      ],
     });
     expect(result.revision).toEqual({
       revision: "7",
@@ -132,7 +135,7 @@ describe("snapshot revisions and receipts", () => {
               pin: "must-not-persist",
               requestCredentials: "must-not-persist",
             },
-          },
+          } as any,
         },
         result: "done" as const,
       }),
@@ -145,12 +148,14 @@ describe("snapshot revisions and receipts", () => {
     const payload = collection.update.mock.calls[0][1] as any;
     expect(payload.data.revision).toBe("9");
     expect(payload.data.operationReceipts).toEqual({
-      "op-safe": {
-        operationId: "op-safe",
-        action: "complete",
-        taskId: 42,
-        createdAt: "2026-09-21T11:00:00.000Z",
-      },
+      "op-safe": [
+        {
+          operationId: "op-safe",
+          action: "complete",
+          taskId: 42,
+          createdAt: "2026-09-21T11:00:00.000Z",
+        },
+      ],
     });
     expect(JSON.stringify(payload)).not.toContain("must-not-persist");
     expect(result.revision.updatedAt).toBe(payload.updated_at);
@@ -228,6 +233,167 @@ describe("snapshot revisions and receipts", () => {
     expect(payload.data.weekData.history).toHaveLength(3);
     expect(payload.data.taskWeekStart).toBe("2026-09-21");
     expect(payload.updated_at).toBe(result.revision.updatedAt);
+  });
+
+  it("fails closed when stored ledger history contains a malformed entry", async () => {
+    const { pb, collection } = makePB({
+      id: "snapshot-1",
+      data: {
+        revision: "4",
+        weekData: {
+          weekStart: "2026-09-21",
+          points: { Alex: 5 },
+          streak: {},
+          lastActive: {},
+          history: [
+            {
+              id: 1,
+              timestamp: "2026-09-21T10:00:00.000Z",
+              member: "Alex",
+              type: "earn",
+              amount: 5,
+              description: "Completed: Dishes",
+            },
+            {
+              id: 2,
+              timestamp: "2026-09-21T11:00:00.000Z",
+              member: "Alex",
+              type: "earn",
+              amount: "not-a-number",
+              description: "Malformed",
+            },
+          ],
+        },
+      },
+    });
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      const result = await persistSnapshotWeek(pb, {
+        weekStart: "2026-09-21",
+        points: {},
+        streak: {},
+        lastActive: {},
+        history: [],
+      });
+
+      expect(result).toEqual({
+        ok: false,
+        revision: { revision: "4", updatedAt: "" },
+        error: "snapshot_write_failed",
+      });
+      expect(collection.update).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("stores every task outcome for one shared batch operation", async () => {
+    const { pb, collection } = makePB({
+      id: "snapshot-1",
+      data: { revision: "11", tasks: [] },
+    });
+    const receipts = [
+      {
+        operationId: "op-batch",
+        action: "approve",
+        taskId: 41,
+        createdAt: "2026-09-21T11:00:00.000Z",
+      },
+      {
+        operationId: "op-batch",
+        action: "approve",
+        taskId: 42,
+        deleted: true,
+        createdAt: "2026-09-21T11:00:01.000Z",
+      },
+    ];
+
+    await mutateSnapshotWithMeta(
+      (data) => ({
+        data: {
+          ...data,
+          operationReceipts: { "op-batch": receipts } as any,
+        },
+        result: null,
+      }),
+      pb,
+    );
+
+    const payload = collection.update.mock.calls[0][1] as any;
+    expect(payload.data.operationReceipts).toEqual({ "op-batch": receipts });
+    expect(
+      getSnapshotOperationReceipts(payload.data, "  op-batch  "),
+    ).toEqual(receipts);
+    expect(
+      getSnapshotOperationReceipts(payload.data, "__proto__"),
+    ).toEqual([]);
+  });
+
+  it("normalizes padded operation receipt IDs on replay", async () => {
+    const { pb } = makePB({
+      id: "snapshot-1",
+      data: {
+        revision: "12",
+        operationReceipts: JSON.stringify({
+          "  op-replay  ": [
+            {
+              operationId: "  op-replay  ",
+              action: "approve-all",
+              taskId: 42,
+              createdAt: " 2026-09-21T11:00:00.000Z ",
+            },
+          ],
+        }),
+      },
+      updated_at: "2026-09-21T11:01:00.000Z",
+    });
+    mocks.withAdmin.mockImplementation(async (fn: (client: unknown) => unknown) => fn(pb));
+
+    const result = await readSnapshotWithRevision();
+
+    expect(result.data.operationReceipts).toEqual({
+      "op-replay": [
+        {
+          operationId: "op-replay",
+          action: "approve-all",
+          taskId: 42,
+          createdAt: "2026-09-21T11:00:00.000Z",
+        },
+      ],
+    });
+  });
+
+  it("drops receipts with invalid IDs, timestamps, or prototype-like operation IDs", async () => {
+    const { pb, collection } = makePB({
+      id: "snapshot-1",
+      data: { revision: "13", tasks: [] },
+    });
+    const invalid = [
+      ["zero", { operationId: "op-zero", action: "approve", taskId: 0, createdAt: "2026-09-21T11:00:00.000Z" }],
+      ["negative", { operationId: "op-negative", action: "approve", taskId: -1, createdAt: "2026-09-21T11:00:00.000Z" }],
+      ["fraction", { operationId: "op-fraction", action: "approve", taskId: 1.5, createdAt: "2026-09-21T11:00:00.000Z" }],
+      ["blank-time", { operationId: "op-blank-time", action: "approve", taskId: 42, createdAt: " " }],
+      ["bad-time", { operationId: "op-bad-time", action: "approve", taskId: 42, createdAt: "not-a-timestamp" }],
+      ["__proto__", { operationId: "__proto__", action: "approve", taskId: 42, createdAt: "2026-09-21T11:00:00.000Z" }],
+      ["constructor", { operationId: "constructor", action: "approve", taskId: 42, createdAt: "2026-09-21T11:00:00.000Z" }],
+    ] as const;
+
+    await mutateSnapshotWithMeta(
+      (data) => ({
+        data: {
+          ...data,
+          operationReceipts: Object.fromEntries(invalid) as any,
+        },
+        result: null,
+      }),
+      pb,
+    );
+
+    const receipts = (collection.update.mock.calls[0][1] as any).data.operationReceipts;
+    expect(Object.keys(receipts)).toEqual([]);
+    expect(Object.getPrototypeOf(receipts)).toBeNull();
   });
 
   it("returns a sanitized failure reason without exposing error details", async () => {

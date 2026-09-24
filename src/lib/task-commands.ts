@@ -6,6 +6,7 @@ import {
   INTERNAL_TASK_COMMAND_KINDS,
   INTERNAL_TASK_COMMAND_SOURCES,
   isInternalTaskCommandKind,
+  normalizeOperationId,
 } from "@/lib/task-operation-contract";
 
 export type InternalTaskCommandKind = (typeof INTERNAL_TASK_COMMAND_KINDS)[number];
@@ -63,10 +64,18 @@ export async function executeInternalTaskCommand(
   command: InternalTaskCommand,
   context: InternalTaskCommandContext,
 ): Promise<InternalTaskCommandResult> {
-  const operationId =
+  const rawOperationId =
     typeof command?.operationId === "string" ? command.operationId : "";
+  const normalizedOperationId = normalizeOperationId(rawOperationId);
+  const operationId = rawOperationId.trim();
+  const normalizedInput =
+    normalizedOperationId && typeof command === "object" && command !== null
+      ? command.operationId === normalizedOperationId
+        ? command
+        : { ...command, operationId: normalizedOperationId }
+      : command;
 
-  if (!hasValidInternalTaskCommandShape(command, context)) {
+  if (!normalizedOperationId || !hasValidInternalTaskCommandShape(normalizedInput, context)) {
     return {
       ok: false,
       operationId,
@@ -75,31 +84,34 @@ export async function executeInternalTaskCommand(
     };
   }
 
-  if (hasForbiddenTaskCommandPayloadKey(command.payload)) {
+  if (hasForbiddenTaskCommandPayloadKey(normalizedInput.payload)) {
     return {
       ok: false,
-      operationId,
+      operationId: normalizedOperationId,
       reason: "forbidden_task_command_payload",
       reconciled: false,
     };
   }
 
-  const handler = handlers.get(command.kind);
+  const handler = handlers.get(normalizedInput.kind);
   if (!handler) {
     return {
       ok: false,
-      operationId,
+      operationId: normalizedOperationId,
       reason: "unsupported_task_command",
       reconciled: false,
     };
   }
 
   try {
-    return await handler(command, context);
+    const result = await handler(normalizedInput, context);
+    return result.operationId === normalizedOperationId
+      ? result
+      : { ...result, operationId: normalizedOperationId };
   } catch {
     return {
       ok: false,
-      operationId,
+      operationId: normalizedOperationId,
       reason: "task_command_handler_failed",
       reconciled: false,
     };
