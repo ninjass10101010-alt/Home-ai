@@ -12,7 +12,9 @@ import {
 } from "@/lib/task-config";
 import {
   mutateSnapshotConfig,
+  clearTaskConfigRepairMarker,
   InvalidStoredTaskConfigError,
+  InvalidResultingTaskConfigError,
   type AdminPB,
 } from "@/lib/snapshot-tasks";
 
@@ -101,6 +103,13 @@ export async function POST(request: NextRequest) {
 
   const command = parseTaskConfigCommand(body, textEmoji);
   if ("error" in command) {
+    if (command.error === "config_natural_key_conflict" || command.error === "invalid_resulting_config") {
+      return NextResponse.json({
+        success: false,
+        error: command.error,
+        kind: command.kind,
+      }, { status: command.error === "config_natural_key_conflict" ? 409 : 422 });
+    }
     return NextResponse.json({ error: command.error }, { status: 400 });
   }
 
@@ -115,8 +124,13 @@ export async function POST(request: NextRequest) {
         if (mutation.conflict) {
           return { conflict: true, operationId: command.operationId };
         }
+        let responseRevision = mutation.revision;
         if (mutation.reconcile) {
           await reconcileConfigCollection(pb, command.kind, mutation.items);
+          if (mutation.clearRepairMarker) {
+            const clearedRevision = await clearTaskConfigRepairMarker(command.operationId, pb);
+            if (clearedRevision) responseRevision = clearedRevision;
+          }
         }
         const bodyResponse: TaskConfigResponse = {
           success: true,
@@ -124,7 +138,7 @@ export async function POST(request: NextRequest) {
           kind: command.kind,
           items: mutation.items,
           updatedAt: mutation.updatedAt,
-          revision: mutation.revision,
+          revision: responseRevision,
           applied: mutation.applied,
         };
         return { response: bodyResponse };
@@ -143,6 +157,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         success: false,
         error: "invalid_current_config",
+        kind: error.kind,
+      }, { status: 422 });
+    }
+    if (error instanceof InvalidResultingTaskConfigError) {
+      return NextResponse.json({
+        success: false,
+        error: "invalid_resulting_config",
         kind: error.kind,
       }, { status: 422 });
     }
