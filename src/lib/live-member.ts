@@ -50,6 +50,15 @@ export async function getLiveMemberById(id: string): Promise<LiveMember | null> 
   });
 }
 
+export async function getLiveMembers(): Promise<LiveMember[]> {
+  return withAdmin(async (pb) => {
+    const rows = await pb.collection("members").getFullList({ requestKey: null });
+    return Array.isArray(rows)
+      ? rows.map((row) => sanitizeLiveMember(row)).filter((member): member is LiveMember => member !== null)
+      : [];
+  });
+}
+
 export async function verifyLiveParentSession(request: NextRequest): Promise<LiveParentAuth> {
   const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
   if (!session) return { ok: false, status: 401, reason: "unauthorized" };
