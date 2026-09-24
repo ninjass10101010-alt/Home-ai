@@ -435,16 +435,19 @@ function canonicalCrew(
   roster: LiveMember[],
   requireCheckedIn: boolean,
   requireFullSize = false,
+  allowUnresolvedRemoved = false,
 ): CanonicalCrew | "invalid" {
   const rawCrew = task.crew;
   const crew = recordValue(rawCrew);
   const crewSize = task.crewSize;
-  const hasCrew = rawCrew !== undefined && rawCrew !== null || (crewSize !== undefined && crewSize !== null && Number(crewSize) > 0);
+  const hasCrewSize = crewSize !== undefined && crewSize !== null;
+  if (hasCrewSize && (typeof crewSize !== "number" || !Number.isSafeInteger(crewSize) || crewSize < 0)) return "invalid";
+  const hasCrew = rawCrew !== undefined && rawCrew !== null || (hasCrewSize && crewSize > 0);
   if (!hasCrew) {
     if (rawCrew !== undefined && rawCrew !== null) return "invalid";
     return { members: [], memberNames: new Set(), removedNames: new Set() };
   }
-  if (!crew || !Array.isArray(crew.members) || typeof crewSize !== "number" || !Number.isSafeInteger(crewSize) || crewSize < 2) return "invalid";
+  if (!crew || !Array.isArray(crew.members) || !hasCrewSize || crewSize < 2) return "invalid";
   if (requireFullSize && crew.members.length < crewSize) return "invalid";
   const members: LiveMember[] = [];
   const memberNames = new Set<string>();
@@ -464,16 +467,20 @@ function canonicalCrew(
   }
   const removed = crew.removed === undefined ? [] : crew.removed;
   if (!Array.isArray(removed) || removed.some((name) => typeof name !== "string" || !name.trim())) return "invalid";
-  const removedNames = new Set(
-    removed
-      .map((name) => resolveHumanMember(roster, name)?.name)
-      .filter((name): name is string => Boolean(name)),
-  );
+  const removedNames = new Set<string>();
+  for (const name of removed) {
+    const resolved = resolveHumanMember(roster, name);
+    if (!resolved) {
+      if (!allowUnresolvedRemoved) return "invalid";
+      continue;
+    }
+    removedNames.add(resolved.name);
+  }
   return { members, memberNames, removedNames };
 }
 
 function validateCrewForSendBack(task: SnapshotTask, roster: LiveMember[]): "valid" | "invalid" {
-  return canonicalCrew(task, roster, true) === "invalid" ? "invalid" : "valid";
+  return canonicalCrew(task, roster, true, false, true) === "invalid" ? "invalid" : "valid";
 }
 
 function resolvePayees(
@@ -485,7 +492,14 @@ function resolvePayees(
     const member = resolveHumanMember(roster, pending.byName);
     if (!member) return "invalid";
     if (task.crew !== undefined && task.crew !== null) return "invalid";
-    if (task.crewSize !== undefined && task.crewSize !== null) return "invalid";
+    if (task.crewSize !== undefined && task.crewSize !== null) {
+      if (
+        typeof task.crewSize !== "number" ||
+        !Number.isSafeInteger(task.crewSize) ||
+        task.crewSize < 0 ||
+        task.crewSize > 0
+      ) return "invalid";
+    }
     const ownerValues = [task.completedBy, task.assignee];
     if (ownerValues.some((value) => typeof value !== "string" || !value.trim())) return "invalid";
     const owners = ownerValues.map((value) => resolveHumanMember(roster, value));

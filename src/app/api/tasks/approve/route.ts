@@ -39,6 +39,10 @@ function errorResponse(
   action?: ApproveAction,
 ) {
   const publicReason = reason === "unknown_task" ? "unknown-task" : reason;
+  const retryable = reason === "task_store_unavailable" ||
+    reason === "member_roster_unavailable" ||
+    reason === "ledger_unavailable" ||
+    reason === "snapshot_write_failed";
   return NextResponse.json({
     success: false,
     operationId,
@@ -46,7 +50,7 @@ function errorResponse(
     reason: publicReason,
     error: publicReason,
     code: reason,
-    ...(reason === "ledger_unavailable" || reason === "snapshot_write_failed" ? { retryable: true } : {}),
+    ...(retryable ? { retryable: true } : {}),
     ...(reason === "semantic_duplicate" ? { duplicate: true, semanticDuplicate: true } : {}),
   }, { status });
 }
