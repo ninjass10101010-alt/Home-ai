@@ -536,7 +536,7 @@ export type SnapshotWeekTaskPatch = {
  * dropped, and only adopts a week at least as new as what's stored.
  * Best-effort: week_data stays authoritative; failures are logged.
  */
-function normalizeWeekData(value: unknown): WeekData | null {
+export function normalizeWeekData(value: unknown): WeekData | null {
   const parsed = parseJSON<unknown>(value, null);
   if (!isObjectRecord(parsed) || typeof parsed.weekStart !== "string" || !parsed.weekStart.trim()) {
     return null;
