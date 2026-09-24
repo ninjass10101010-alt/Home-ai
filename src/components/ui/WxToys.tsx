@@ -120,8 +120,8 @@ function PosterAccents({ scene, motionOk }: { scene: WxScene; motionOk: boolean 
         </g>
       )}
       {scene === "snow" && (
-        <g data-weather-shape="snow-diamonds" stroke="#5B4B8A" strokeWidth="3" strokeLinecap="round" opacity="1">
-          <path d="m34 22 8 8-8 8-8-8ZM92 64l7 7-7 7-7-7ZM266 24l8 8-8 8-8-8ZM294 92l6 6-6 6-6-6Z" />
+        <g data-weather-shape="snow-diamonds" fill="none" stroke="#5B4B8A" strokeWidth="3" strokeLinecap="round" opacity="1">
+          <path fill="none" d="m34 22 8 8-8 8-8-8ZM92 64l7 7-7 7-7-7ZM266 24l8 8-8 8-8-8ZM294 92l6 6-6 6-6-6Z" />
         </g>
       )}
       {scene === "storm" && (
@@ -139,18 +139,19 @@ function PosterAccents({ scene, motionOk }: { scene: WxScene; motionOk: boolean 
 
 // ─── Scene layer wired to the wx* keyframes ─────────────────────
 
-export function SceneLayers({ scene, showFog, showBirds, cloudCover = 25 }: {
+export function SceneLayers({ scene, showFog, showBirds, cloudCover }: {
   scene: WxScene;
   showFog: boolean;
   showBirds: boolean;
-  cloudCover?: number;
+  cloudCover?: number | null;
 }) {
   const motionOk = useWxMotionOk();
   const isWet = scene === "rain" || scene === "storm";
-  const cover = Number.isFinite(cloudCover) ? Math.max(0, Math.min(100, cloudCover)) : 25;
+  const numericCloudCover = typeof cloudCover === "number" && Number.isFinite(cloudCover) ? cloudCover : null;
+  const cover = numericCloudCover == null ? 0 : Math.max(0, Math.min(100, numericCloudCover));
   const cloudTone = scene === "clear" ? "poster" : "day";
-  const frontCloudOpacity = scene === "clear" ? cover * 0.009 : 0.9;
-  const backCloudOpacity = scene === "clear" ? Math.max(0, (cover - 20) / 100) * 0.72 : 0.6;
+  const frontCloudOpacity = cover > 0 ? (scene === "clear" ? cover * 0.009 : 0.9) : 0;
+  const backCloudOpacity = cover > 0 ? (scene === "clear" ? Math.max(0, (cover - 20) / 100) * 0.72 : 0.6) : 0;
   return (
     <div data-testid="wx-scene-layers" data-scene={scene} className="absolute inset-0" aria-hidden="true">
       <PosterAccents scene={scene} motionOk={motionOk} />
@@ -171,7 +172,7 @@ export function SceneLayers({ scene, showFog, showBirds, cloudCover = 25 }: {
 
       {/* Drifting toy clouds (two depths) */}
       {scene !== "night" && (
-        <div data-testid="wx-poster-clouds" data-cloud-cover={Math.round(cover)} className="absolute inset-0">
+        <div data-testid="wx-poster-clouds" data-cloud-cover={numericCloudCover == null ? "unavailable" : Math.round(cover)} className="absolute inset-0">
           <CloudPuff
             layer="front"
             tone={cloudTone}
@@ -279,14 +280,18 @@ export function wmoToScene(code: number, isDay: boolean): WxScene {
 
 export type ConditionCode = "clear" | "partly" | "cloudy" | "rain" | "storm" | "snow" | "fog" | "night";
 
-export function sceneToCondition(scene: WxScene, code: number): ConditionCode {
+export function sceneToCondition(scene: WxScene, code: number, cloudCover?: number | null): ConditionCode {
   if (scene === "night") return "night";
   if (scene === "storm") return "storm";
   if (scene === "snow") return "snow";
   if (scene === "rain") return "rain";
   if (code === 45 || code === 48) return "fog";
   if (scene === "cloudy") return "cloudy";
-  return code === 1 || code === 2 ? "partly" : "clear";
+  if (code === 1 || code === 2) {
+    if (cloudCover === undefined) return "partly";
+    return typeof cloudCover === "number" && Number.isFinite(cloudCover) && cloudCover > 0 ? "partly" : "clear";
+  }
+  return "clear";
 }
 
 // 5-day rows carry condition text (no WMO code), so map the text.

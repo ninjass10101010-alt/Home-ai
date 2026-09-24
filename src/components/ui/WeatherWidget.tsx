@@ -407,7 +407,7 @@ function DayStrip({ hours, conv, skin, accent, previewIdx, previewPinned, onPrev
                 {i === 0 ? "NOW" : formatHourTick(h.time)}
               </span>
               <span className="flex h-[26px] w-full items-center justify-center">
-                <Condition code={sceneToCondition(wmoToScene(h.code, h.isDay), h.code)} size={26} />
+                <Condition code={sceneToCondition(wmoToScene(h.code, h.isDay), h.code, h.cloud)} size={26} />
               </span>
               <span className="text-[13px] font-black tabular-nums" style={{ color: skin.ink }}>
                 {conv(h.temp)}°
@@ -847,13 +847,14 @@ export default function WeatherWidget({ className = "" }: { className?: string }
   // Toy hero inputs — the card sky/world/icon derive from the same live
   // code + day flag the old scene used (active hour while previewing).
   const heroScene = isPaused ? "cloudy" : wmoToScene(sceneCode, sceneIsDay);
-  const condCode = isPaused ? "cloudy" : sceneToCondition(heroScene, sceneCode);
-  const heroCloud = activeHour?.cloud ?? weatherData?.cloud ?? 25;
+  const heroCloud = activeHour?.cloud ?? weatherData?.cloud ?? null;
+  const condCode = isPaused ? "cloudy" : sceneToCondition(heroScene, sceneCode, heroCloud);
   const heroVis = activeHour?.visibility ?? weatherData?.visibility ?? null;
   const heroFog = isPaused || sceneCode === 45 || sceneCode === 48 || (heroVis != null && heroVis < 8000);
   const heroBirds =
     !fetchError &&
     sceneIsDay &&
+    heroCloud != null &&
     heroCloud < 30 &&
     !RAIN_CODES.has(sceneCode) &&
     !SNOW_CODES.has(sceneCode) &&
@@ -1288,13 +1289,14 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, accent
 
   // Toy modal hero follows the scrubbed hour like the card follows preview.
   const mScene = wmoToScene(mCode, mIsDay);
-  const mCond = sceneToCondition(mScene, mCode);
   const mVis = scrubHour?.visibility ?? data.visibility;
   const mFog = mCode === 45 || mCode === 48 || (mVis != null && mVis < 8000);
-  const mCloud = scrubHour?.cloud ?? data.cloud ?? 25;
+  const mCloud = scrubHour?.cloud ?? data.cloud ?? null;
+  const mCond = sceneToCondition(mScene, mCode, mCloud);
   const mBirds =
     !fetchError &&
     mIsDay &&
+    mCloud != null &&
     mCloud < 30 &&
     !RAIN_CODES.has(mCode) &&
     !SNOW_CODES.has(mCode) &&
@@ -1487,7 +1489,7 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, accent
                         {i === 0 ? "NOW" : formatHourTick(h.time)}
                       </span>
                       <span className="flex h-[26px] w-full items-center justify-center" aria-hidden="true">
-                        <Condition code={sceneToCondition(wmoToScene(h.code, h.isDay), h.code)} size={24} />
+                        <Condition code={sceneToCondition(wmoToScene(h.code, h.isDay), h.code, h.cloud)} size={24} />
                       </span>
                       <span className="text-sm font-black tabular-nums text-white">{conv(h.temp)}°</span>
                       {h.precip >= 20 ? (

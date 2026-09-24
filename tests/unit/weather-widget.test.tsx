@@ -62,6 +62,14 @@ async function settle(ms = 60) {
   });
 }
 
+function conditionShowsCloud(condition: Element | null): boolean {
+  return !!condition?.firstElementChild;
+}
+
+function modalCondition(dialog: HTMLElement): Element | null {
+  return dialog.querySelector('[data-testid="wx-scene-layers"]')?.parentElement?.nextElementSibling?.firstElementChild ?? null;
+}
+
 function parseHexColor(value: string): [number, number, number] {
   const hex = value.replace("#", "");
   return [0, 2, 4].map((offset) => Number.parseInt(hex.slice(offset, offset + 2), 16)) as [number, number, number];
@@ -87,11 +95,11 @@ function effectiveContrast(foreground: string, opacity: number, background: stri
     (Math.min(foregroundLuminance, backgroundLuminance) + 0.05);
 }
 
-function makeOpenMeteoPayload(overrides: { isDay?: number; precip?: number; visibility?: number; cloud?: number; code?: number; startAt?: string } = {}) {
+function makeOpenMeteoPayload(overrides: { isDay?: number; precip?: number; visibility?: number; cloud?: number | null; code?: number; startAt?: string } = {}) {
   const isDay = overrides.isDay ?? 1;
   const precip = overrides.precip ?? 5;
   const visibility = overrides.visibility ?? 16000;
-  const cloud = overrides.cloud ?? 30;
+  const cloud = overrides.cloud === undefined ? 30 : overrides.cloud;
   const code = overrides.code ?? 1;
   // `startAt` pins the payload's first hour (ISO). The strip truncates at the
   // LOCAL-day boundary of hours[0], so a real-clock start makes the strip
@@ -676,6 +684,49 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(coveredSkyClouds.every((cloud) => Number(cloud.style.opacity) > 0)).toBe(true);
   });
 
+  it.each([
+    { code: 1, cloud: 0 },
+    { code: 2, cloud: 0 },
+    { code: 1, cloud: 40 },
+    { code: 2, cloud: 40 },
+  ])("keeps WMO $code condition icons truthful at $cloud percent cloud cover in the card and modal", async ({ code, cloud }) => {
+    mockOpenMeteo(makeOpenMeteoPayload({ code, cloud }));
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    const cardCondition = el.querySelector('[data-testid="wx-hero-icon"]')?.firstElementChild ?? null;
+    expect(conditionShowsCloud(cardCondition)).toBe(cloud > 0);
+
+    act(() => findDetailsButton(el)!.click());
+    await settle();
+    const dialog = document.querySelector("#weather-details-dialog") as HTMLElement;
+    expect(conditionShowsCloud(modalCondition(dialog))).toBe(cloud > 0);
+  });
+
+  it("keeps missing cloud cover unavailable without inventing clouds or birds", async () => {
+    mockOpenMeteo(makeOpenMeteoPayload({ code: 1, cloud: null }));
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    const cardScene = el.querySelector('[data-testid="wx-scene-layers"]') as HTMLElement;
+    const cardClouds = cardScene.querySelector('[data-testid="wx-poster-clouds"]') as HTMLElement;
+    expect(cardClouds.getAttribute("data-cloud-cover")).toBe("unavailable");
+    expect(Array.from(cardClouds.querySelectorAll<HTMLElement>("[data-cloud-layer]")).map((cloud) => cloud.style.opacity)).toEqual(["0", "0"]);
+    expect(conditionShowsCloud(el.querySelector('[data-testid="wx-hero-icon"]')?.firstElementChild ?? null)).toBe(false);
+    expect((el.querySelector('[data-testid="wx-birds"]') as HTMLElement).style.opacity).toBe("0");
+
+    act(() => findDetailsButton(el)!.click());
+    await settle();
+    const dialog = document.querySelector("#weather-details-dialog") as HTMLElement;
+    const modalScene = dialog.querySelector('[data-testid="wx-scene-layers"]') as HTMLElement;
+    const modalClouds = modalScene.querySelector('[data-testid="wx-poster-clouds"]') as HTMLElement;
+    expect(modalClouds.getAttribute("data-cloud-cover")).toBe("unavailable");
+    expect(Array.from(modalClouds.querySelectorAll<HTMLElement>("[data-cloud-layer]")).map((cloud) => cloud.style.opacity)).toEqual(["0", "0"]);
+    expect(conditionShowsCloud(modalCondition(dialog))).toBe(false);
+    expect((dialog.querySelector('[data-testid="wx-birds"]') as HTMLElement).style.opacity).toBe("0");
+    expect(dialog.textContent).not.toContain("Cloud cover");
+  });
+
   it("keeps cloudy, rain, and snow poster accents visibly distinct", () => {
     const cases = [
       { scene: "cloudy" as const, shape: "cloud-bars", background: "#EEF1F6" },
@@ -694,6 +745,16 @@ describe("WeatherWidget — Not Boring redesign", () => {
       expect(opacity, `${scene} poster accent opacity`).toBeGreaterThanOrEqual(0.9);
       expect(contrast, `${scene} poster accent contrast`).toBeGreaterThanOrEqual(3);
     });
+  });
+
+  it("renders snow diamonds with an explicit transparent fill contract", () => {
+    const el = render(<SceneLayers scene="snow" showFog={false} showBirds={false} />);
+    const snow = el.querySelector<SVGElement>('[data-weather-shape="snow-diamonds"]');
+    const paths = Array.from(snow?.querySelectorAll("path") ?? []);
+
+    expect(snow?.getAttribute("fill")).toBe("none");
+    expect(paths).toHaveLength(1);
+    expect(paths[0]?.getAttribute("fill")).toBe("none");
   });
 
   it("layers turquoise poster clouds behind a dominant clear-day temperature", async () => {
