@@ -828,6 +828,9 @@ export default function TasksPage() {
         return;
       }
       const parentName: string = parent.fullName;
+      const operationId = typeof globalThis.crypto?.randomUUID === "function"
+        ? globalThis.crypto.randomUUID()
+        : `approval-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       // Snapshot for 4xx revert — optimistic updates below may hit localStorage
       // before the POST settles.
       const prevTasks = tasks;
@@ -840,6 +843,7 @@ export default function TasksPage() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               ...payload,
+              operationId,
               memberName: parentName,
               pin: approvalPin,
             }),

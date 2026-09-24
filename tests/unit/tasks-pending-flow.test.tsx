@@ -416,6 +416,7 @@ describe("needs approval → server route", () => {
     expect(approveCalls[0]).toEqual({
       action: "approve",
       taskId: 101,
+      operationId: expect.any(String),
       memberName: "Rebecca (Mom)",
       pin: "0202",
     });
@@ -437,6 +438,7 @@ describe("needs approval → server route", () => {
     expect(approveCalls[0]).toEqual({
       action: "send-back",
       taskId: 101,
+      operationId: expect.any(String),
       memberName: "Rebecca (Mom)",
       pin: "0202",
     });

@@ -72,10 +72,10 @@ function setInput(input: HTMLInputElement, value: string) {
 const approveCalls: any[] = [];
 
 beforeEach(() => {
-  document.body.innerHTML = "";
-  localStorage.clear();
   activeRoot?.unmount?.();
   activeRoot = null;
+  document.body.innerHTML = "";
+  localStorage.clear();
   approveCalls.length = 0;
   // verifyPinRemote answers ok for the parent, wrongPin for the kids.
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -154,6 +154,7 @@ describe("Needs-approval — Approve all (one parent PIN)", () => {
     expect([...approveCalls[0].taskIds].sort((a, b) => a - b)).toEqual([101, 102]);
     expect(approveCalls[0].memberName).toBe("Rebecca (Mom)");
     expect(approveCalls[0].pin).toBe("0202");
+    expect(approveCalls[0].operationId).toEqual(expect.any(String));
   });
 
   it("a wrong parent PIN approves NOTHING", async () => {
