@@ -46,7 +46,7 @@ function errorResponse(
     reason: publicReason,
     error: publicReason,
     code: reason,
-    ...(reason === "ledger_unavailable" ? { retryable: true } : {}),
+    ...(reason === "ledger_unavailable" || reason === "snapshot_write_failed" ? { retryable: true } : {}),
     ...(reason === "semantic_duplicate" ? { duplicate: true, semanticDuplicate: true } : {}),
   }, { status });
 }
@@ -138,6 +138,7 @@ export async function POST(request: NextRequest) {
     reconciled: result.reconciled,
     ...(result.projectionFailures?.length ? { projectionFailures: result.projectionFailures } : {}),
     ...(result.duplicate ? { duplicate: true } : {}),
-    ...(result.task ? { task: result.task } : {}),
+    ...(result.task !== undefined ? { task: result.task } : {}),
+    ...(result.noCurrentTask ? { noCurrentTask: true } : {}),
   }, { status: result.reconciled ? 200 : 202 });
 }
