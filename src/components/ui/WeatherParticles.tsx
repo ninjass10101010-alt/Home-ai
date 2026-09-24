@@ -23,7 +23,7 @@ interface Particle {
 export type ParticleKind = "blossom" | "leaf" | "firefly" | "snowflake" | "christmas-snow" | "bat" | "spark" | "heart" | "confetti" | "harvest" | "shamrock" | "marigold" | "tricolor-sparks" | "holy-roses" | "none";
 
 
-export default function WeatherParticles({ type, tod }: { type: ParticleKind; tod: TimeOfDayFlag }) {
+export default function WeatherParticles({ type, tod, motionOk = true }: { type: ParticleKind; tod: TimeOfDayFlag; motionOk?: boolean }) {
   const [particles, setParticles] = useState<Particle[]>([]);
 
   useEffect(() => {
@@ -72,7 +72,7 @@ export default function WeatherParticles({ type, tod }: { type: ParticleKind; to
   if (type === "none" || particles.length === 0) return null;
 
   return (
-    <div className="absolute inset-0 overflow-hidden rounded-2xl pointer-events-none z-10" aria-hidden="true">
+    <div className="weather-particle-motion absolute inset-0 overflow-hidden rounded-2xl pointer-events-none z-10" data-weather-particle-motion={motionOk ? "running" : "paused"} aria-hidden="true">
       {particles.map((p) => {
         // ── Blossom petals ──
         if (type === "blossom") {

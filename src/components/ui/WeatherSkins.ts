@@ -141,15 +141,61 @@ export function resolveAccent(skin: WeatherSkin, holidayAccent: string | null | 
   return skin.severe ? skin.accent : holidayAccent ?? skin.accent;
 }
 
+type Rgb = [number, number, number];
+
+function parseHexColor(value: string): Rgb | null {
+  const raw = value.trim().replace(/^#/, "");
+  if (!/^[0-9a-f]{3,8}$/i.test(raw)) return null;
+  const expanded = raw.length <= 4 ? raw.split("").map((part) => `${part}${part}`).join("") : raw.slice(0, 6);
+  return [0, 2, 4].map((offset) => Number.parseInt(expanded.slice(offset, offset + 2), 16)) as Rgb;
+}
+
+function formatHexColor(rgb: Rgb): string {
+  return `#${rgb.map((channel) => Math.max(0, Math.min(255, Math.round(channel))).toString(16).padStart(2, "0")).join("")}`;
+}
+
 function mixHexColor(a: string, b: string, t: number): string {
-  const pa = parseInt(a.slice(1), 16);
-  const pb = parseInt(b.slice(1), 16);
-  const ch = (shift: number) => {
-    const ca = (pa >> shift) & 255;
-    const cb = (pb >> shift) & 255;
-    return Math.round(ca + (cb - ca) * t);
-  };
-  return `#${((ch(16) << 16) | (ch(8) << 8) | ch(0)).toString(16).padStart(6, "0")}`;
+  const pa = parseHexColor(a);
+  const pb = parseHexColor(b);
+  if (!pa || !pb) return a;
+  return formatHexColor(pa.map((channel, index) => channel + (pb[index] - channel) * t) as Rgb);
+}
+
+function colorLuminance(color: Rgb): number {
+  const channels = color.map((channel) => {
+    const value = channel / 255;
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+}
+
+function contrastRatio(a: string, b: string): number {
+  const foreground = parseHexColor(a);
+  const background = parseHexColor(b);
+  if (!foreground || !background) return 1;
+  const first = colorLuminance(foreground);
+  const second = colorLuminance(background);
+  return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
+}
+
+export function contrastSafeTextAccent(accent: string, surface: string | string[], fallback: string): string {
+  const parsedAccent = parseHexColor(accent);
+  const parsedSurfaces = (Array.isArray(surface) ? surface : [surface]).map(parseHexColor);
+  const parsedFallback = parseHexColor(fallback);
+  if (!parsedAccent || parsedSurfaces.some((value) => value == null) || !parsedFallback) return fallback;
+  const target = colorLuminance(parsedSurfaces[0]!) > colorLuminance(parsedFallback) ? fallback : "#FFFFFF";
+  for (let step = 0; step <= 20; step += 1) {
+    const candidate = mixHexColor(accent, target, step / 20);
+    if (parsedSurfaces.every((value) => contrastRatio(candidate, `#${value!.map((channel) => channel.toString(16).padStart(2, "0")).join("")}`) >= 4.5)) return candidate;
+  }
+  return target;
+}
+
+export function accentForeground(accent: string): string {
+  const white = "#FFFFFF";
+  const black = "#000000";
+  if (!parseHexColor(accent)) return white;
+  return contrastRatio(accent, white) >= contrastRatio(accent, black) ? white : black;
 }
 
 export function getWeatherSkin(season: SeasonKey, isNight: boolean, code: number): WeatherSkin {

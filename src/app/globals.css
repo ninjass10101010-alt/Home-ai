@@ -1831,6 +1831,26 @@ body {
   }
 }
 
+.weather-art-motion[data-weather-art-motion="paused"],
+.weather-art-motion[data-weather-art-motion="paused"] *,
+.weather-particle-motion[data-weather-particle-motion="paused"],
+.weather-particle-motion[data-weather-particle-motion="paused"] * {
+  animation: none !important;
+  transition: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .weather-art-motion *,
+  .weather-particle-motion * {
+    animation: none !important;
+    transition: none !important;
+  }
+  .weather-details-modal {
+    animation: none !important;
+    transform: none !important;
+  }
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    CHAT HERO — polished cinematic greeting state
    ═══════════════════════════════════════════════════════════════════════════ */

@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import type { HolidayOverride } from "@/lib/weather-config";
 
 type TimeOfDayFlag = "day" | "night";
@@ -469,12 +470,12 @@ function ChristmasOverlay() {
   );
 }
 
-function HalloweenOverlay() {
+function HalloweenOverlay({ motionOk }: { motionOk: boolean }) {
   return (
     <svg className="absolute inset-0 w-full h-full" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style={{ pointerEvents: "none" }}>
       {/* Moon */}
-      <circle cx="270" cy="35" r="28" fill="rgba(253,224,71,0.12)" style={{ animation: "weatherGlowPulse 3s ease-in-out infinite" }}>
-        <animate attributeName="r" values="28;31;28" dur="3s" repeatCount="indefinite" />
+      <circle cx="270" cy="35" r="28" fill="rgba(253,224,71,0.12)" style={{ animation: motionOk ? "weatherGlowPulse 3s ease-in-out infinite" : undefined }}>
+        {motionOk && <animate attributeName="r" values="28;31;28" dur="3s" repeatCount="indefinite" />}
       </circle>
       <circle cx="270" cy="35" r="20" fill="rgba(253,224,71,0.20)" />
       {/* Silhouetted bats */}
@@ -957,52 +958,65 @@ export default function SeasonHolidayArt({
   tod,
   activeHoliday,
   backdrop = true,
+  motionOk = true,
 }: {
   season: SeasonKey;
   tod: TimeOfDayFlag;
   activeHoliday: HolidayOverride;
   backdrop?: boolean;
+  motionOk?: boolean;
 }) {
+  let content: ReactNode = null;
   if (activeHoliday === "none" || activeHoliday === "auto") {
-    if (!backdrop) return null;
-    return (
-      <>
-        {season === "spring" && <SpringBackdrop tod={tod} />}
-        {season === "summer" && <SummerBackdrop tod={tod} />}
-        {season === "autumn" && <AutumnBackdrop tod={tod} />}
-        {season === "winter" && <WinterBackdrop tod={tod} />}
-      </>
-    );
+    if (backdrop) {
+      if (season === "spring") content = <SpringBackdrop tod={tod} />;
+      if (season === "summer") content = <SummerBackdrop tod={tod} />;
+      if (season === "autumn") content = <AutumnBackdrop tod={tod} />;
+      if (season === "winter") content = <WinterBackdrop tod={tod} />;
+    }
+  } else {
+    switch (activeHoliday) {
+      case "christmas":
+        content = <>{backdrop && <WinterBackdrop tod={tod} />}<ChristmasOverlay /></>;
+        break;
+      case "halloween":
+        content = <HalloweenOverlay motionOk={motionOk} />;
+        break;
+      case "july4th":
+        content = <FireworksOverlay />;
+        break;
+      case "valentines":
+        content = <ValentinesOverlay />;
+        break;
+      case "newyears":
+        content = <NewYearsOverlay />;
+        break;
+      case "cincodemayo":
+        content = <CincoDeMayoOverlay />;
+        break;
+      case "thanksgiving":
+        content = <ThanksgivingOverlay />;
+        break;
+      case "stpatricks":
+        content = <StPatricksOverlay />;
+        break;
+      case "diadelosmuertos":
+        content = <DiaDeLosMuertosOverlay />;
+        break;
+      case "mexicanindependence":
+        content = <MexicanIndependenceOverlay />;
+        break;
+      case "virginguadalupe":
+        content = <VirginGuadalupeOverlay />;
+        break;
+      default:
+        content = null;
+    }
   }
-  switch (activeHoliday) {
-    case "christmas":
-      return (
-        <>
-          {backdrop && <WinterBackdrop tod={tod} />}
-          <ChristmasOverlay />
-        </>
-      );
-    case "halloween":
-      return <HalloweenOverlay />;
-    case "july4th":
-      return <FireworksOverlay />;
-    case "valentines":
-      return <ValentinesOverlay />;
-    case "newyears":
-      return <NewYearsOverlay />;
-    case "cincodemayo":
-      return <CincoDeMayoOverlay />;
-    case "thanksgiving":
-      return <ThanksgivingOverlay />;
-    case "stpatricks":
-      return <StPatricksOverlay />;
-    case "diadelosmuertos":
-      return <DiaDeLosMuertosOverlay />;
-    case "mexicanindependence":
-      return <MexicanIndependenceOverlay />;
-    case "virginguadalupe":
-      return <VirginGuadalupeOverlay />;
-    default:
-      return null;
-  }
+  if (!content) return null;
+  return (
+    <div className="weather-art-motion absolute inset-0" data-weather-art-motion={motionOk ? "running" : "paused"}>
+      {content}
+    </div>
+  );
 }

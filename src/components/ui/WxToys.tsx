@@ -33,20 +33,23 @@ export function SunOrb({ night = false }: { night?: boolean }) {
 export function CloudPuff({ className = "", style, tone = "day", layer }: {
   className?: string;
   style?: CSSProperties;
-  tone?: "day" | "poster";
+  tone?: "day" | "poster" | "night";
   layer?: "front" | "back";
 }) {
   const blob = tone === "poster"
     ? "absolute rounded-full bg-gradient-to-b from-[#e9fffc] via-[#b9eee8] to-[#82d8d0] " +
       "shadow-[inset_0_-6px_10px_rgba(30,130,140,.28),inset_0_3px_6px_rgba(255,255,255,1)]"
-    : "absolute rounded-full bg-gradient-to-b from-white to-[#e8edf7] " +
-      "shadow-[inset_0_-6px_10px_rgba(150,165,200,.35),inset_0_3px_6px_rgba(255,255,255,1)]";
+    : tone === "night"
+      ? "absolute rounded-full bg-gradient-to-b from-[#e6e4ff] via-[#aaa9d2] to-[#7477a8] " +
+        "shadow-[inset_0_-6px_10px_rgba(45,45,90,.35),inset_0_3px_6px_rgba(255,255,255,.8)]"
+      : "absolute rounded-full bg-gradient-to-b from-white to-[#e8edf7] " +
+        "shadow-[inset_0_-6px_10px_rgba(150,165,200,.35),inset_0_3px_6px_rgba(255,255,255,1)]";
   return (
     <div aria-hidden="true" className={`relative h-14 w-24 ${className}`} style={style} data-cloud-form={tone} data-cloud-layer={layer}>
       <div className={`${blob} left-0 bottom-0 h-10 w-10`} />
       <div className={`${blob} left-6 bottom-0 h-14 w-14`} />
       <div className={`${blob} right-0 bottom-0 h-9 w-9`} />
-      <div className={`absolute -bottom-2 left-3 right-3 h-3 rounded-full blur-md ${tone === "poster" ? "bg-[#2aa6a4]/20" : "bg-slate-500/15"}`} />
+      <div className={`absolute -bottom-2 left-3 right-3 h-3 rounded-full blur-md ${tone === "poster" ? "bg-[#2aa6a4]/20" : tone === "night" ? "bg-[#45486f]/25" : "bg-slate-500/15"}`} />
     </div>
   );
 }
@@ -116,16 +119,17 @@ function posterHorizon(progress: number | null): string | null {
   return `M0 ${left}C68 ${middle} 126 ${left - 18} 194 ${right}C244 ${middle} 278 ${left - 8} 320 ${right - 12}V180H0Z`;
 }
 
-function fogOpacityFor(showFog: boolean, visibility: number | null, humidity: number | null): number {
-  let opacity = showFog ? 0.5 : 0;
+function fogOpacityFor(fogCode: boolean, visibility: number | null, humidity: number | null): number {
+  const codeOpacity = fogCode ? 0.5 : 0;
   const visible = finiteMeasurement(visibility);
   const humid = finiteMeasurement(humidity);
   if (visible != null && visible < 8000) {
-    opacity = Math.max(opacity, (1 - visible / 8000) * 0.55);
-  } else if (visible == null && humid != null && humid >= 82) {
-    opacity = Math.max(opacity, Math.min(0.55, ((humid - 82) / 18) * 0.55));
+    return Math.max(codeOpacity, (1 - visible / 8000) * 0.55);
   }
-  return opacity;
+  if (visible == null && humid != null && humid >= 82) {
+    return Math.max(codeOpacity, Math.min(0.55, ((humid - 82) / 18) * 0.55));
+  }
+  return codeOpacity;
 }
 
 function PosterAccents({ scene, motionOk, sunProgress, cloudCover, precipitation }: { scene: WxScene; motionOk: boolean; sunProgress: number | null; cloudCover?: number | null; precipitation?: number | null }) {
@@ -186,9 +190,10 @@ function PosterAccents({ scene, motionOk, sunProgress, cloudCover, precipitation
 
 // ─── Scene layer wired to the wx* keyframes ─────────────────────
 
-export function SceneLayers({ scene, showFog, showBirds, cloudCover, precipitation, wind, windDirection, humidity, visibility, sunProgress, paused = false }: {
+export function SceneLayers({ scene, showFog = false, fogCode = showFog, showBirds, cloudCover, precipitation, wind, windDirection, humidity, visibility, sunProgress, paused = false }: {
   scene: WxScene;
-  showFog: boolean;
+  showFog?: boolean;
+  fogCode?: boolean;
   showBirds: boolean;
   cloudCover?: number | null;
   precipitation?: number | null;
@@ -209,10 +214,10 @@ export function SceneLayers({ scene, showFog, showBirds, cloudCover, precipitati
   const normalizedHumidity = finiteMeasurement(humidity);
   const normalizedVisibility = finiteMeasurement(visibility);
   const cloudCount = cover <= 0 ? 0 : cover >= (scene === "clear" ? 20 : 50) ? 2 : 1;
-  const cloudTone = scene === "clear" ? "poster" : "day";
+  const cloudTone = scene === "clear" ? "poster" : scene === "night" ? "night" : "day";
   const frontCloudOpacity = cloudCount > 0 ? (scene === "clear" ? cover * 0.009 : Math.min(0.9, 0.25 + cover * 0.0065)) : 0;
   const backCloudOpacity = cloudCount > 1 ? (scene === "clear" ? Math.max(0, (cover - 20) / 100) * 0.72 : Math.min(0.72, 0.18 + cover * 0.0054)) : 0;
-  const driftDuration = numericWind == null ? null : Math.max(16, 46 - numericWind);
+  const driftDuration = numericWind != null && numericWind > 0 ? Math.max(16, 46 - numericWind) : null;
   const driftAnimation = motionOk && driftDuration != null;
   const isWet = scene === "rain" || scene === "storm";
   const rainCount = isWet && normalizedPrecipitation != null && normalizedPrecipitation > 0
@@ -224,7 +229,7 @@ export function SceneLayers({ scene, showFog, showBirds, cloudCover, precipitati
   const rainSlant = numericWind != null && numericWindDirection != null
     ? Math.max(-14, Math.min(14, (numericWindDirection > 90 && numericWindDirection < 270 ? -1 : 1) * Math.min(numericWind * 0.7, 14)))
     : 0;
-  const fogOpacity = fogOpacityFor(showFog, normalizedVisibility, normalizedHumidity);
+  const fogOpacity = fogOpacityFor(fogCode, normalizedVisibility, normalizedHumidity);
   return (
     <div
       data-testid="wx-scene-layers"
@@ -251,22 +256,20 @@ export function SceneLayers({ scene, showFog, showBirds, cloudCover, precipitati
           />
         ))}
 
-      {scene !== "night" && (
-        <div data-testid="wx-poster-clouds" data-cloud-cover={numericCloudCover == null ? "unavailable" : Math.round(cover)} className="absolute inset-0">
-          <CloudPuff
-            layer="front"
-            tone={cloudTone}
-            className="absolute top-12 left-[-12px] -rotate-6 scale-[1.35]"
-            style={{ opacity: frontCloudOpacity, ...(driftAnimation && driftDuration != null ? { animation: `wxCloudDrift ${driftDuration}s ease-in-out infinite alternate` } : {}) }}
-          />
-          <CloudPuff
-            layer="back"
-            tone={cloudTone}
-            className="absolute top-28 right-[-12px] rotate-3 scale-[1.15] blur-[1px]"
-            style={{ opacity: backCloudOpacity, ...(driftAnimation && driftDuration != null ? { animation: `wxCloudDrift ${driftDuration + 12}s ease-in-out infinite alternate-reverse` } : {}) }}
-          />
-        </div>
-      )}
+      <div data-testid="wx-poster-clouds" data-cloud-cover={numericCloudCover == null ? "unavailable" : Math.round(cover)} className="absolute inset-0">
+        <CloudPuff
+          layer="front"
+          tone={cloudTone}
+          className="absolute top-12 left-[-12px] -rotate-6 scale-[1.35]"
+          style={{ opacity: frontCloudOpacity, ...(driftAnimation && driftDuration != null ? { animation: `wxCloudDrift ${driftDuration}s ease-in-out infinite alternate` } : {}) }}
+        />
+        <CloudPuff
+          layer="back"
+          tone={cloudTone}
+          className="absolute top-28 right-[-12px] rotate-3 scale-[1.15] blur-[1px]"
+          style={{ opacity: backCloudOpacity, ...(driftAnimation && driftDuration != null ? { animation: `wxCloudDrift ${driftDuration + 12}s ease-in-out infinite alternate-reverse` } : {}) }}
+        />
+      </div>
 
       {rainCount > 0 && (
         <div data-weather-rain-layer style={{ transform: numericWind != null && numericWindDirection != null ? `rotate(${rainSlant}deg)` : undefined }}>
