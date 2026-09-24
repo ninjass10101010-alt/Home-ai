@@ -6,6 +6,7 @@ import { localWeekStartISO } from "@/lib/local-date";
 import { applyWeekLedgerOperationLocked } from "@/lib/ledger-operations";
 import { withTaskCommandLock } from "@/lib/task-command-lock";
 import { withWeekLedgerLock } from "@/lib/week-ledger-lock";
+import { ensureCurrentTaskWeek } from "@/lib/task-week-rollover";
 import { hasUnreversedTaskEarn, recomputeWeekPoints } from "@/lib/task-ledger";
 import {
   findCanonicalTask,
@@ -57,6 +58,7 @@ export interface ApproveResponse {
   cleared: number;
   skipped: number;
   reconciled: boolean;
+  repairRequired: boolean;
   projectionFailures?: number[];
   task?: SnapshotTask | null;
   noCurrentTask?: boolean;
@@ -88,6 +90,7 @@ export interface ApprovalServiceResult {
   cleared: number;
   skipped: number;
   reconciled: boolean;
+  repairRequired: boolean;
   duplicate?: boolean;
   projectionFailures?: number[];
   reason?: ApprovalFailureReason;
@@ -255,12 +258,31 @@ async function readWeek(pb: AdminPB, weekStart: string): Promise<WeekData> {
   return { ...week, points: recomputeWeekPoints(week.history) };
 }
 
+function uniqueTransactions(groups: Transaction[][]): Transaction[] {
+  const byId = new Map<number, Transaction>();
+  for (const transaction of groups.flat()) {
+    const previous = byId.get(transaction.id);
+    if (previous && JSON.stringify(stableValue(previous)) !== JSON.stringify(stableValue(transaction))) {
+      throw new Error("conflicting_transaction_id");
+    }
+    byId.set(transaction.id, transaction);
+  }
+  return [...byId.values()];
+}
+
 async function readOperationLedger(
   pb: AdminPB,
   authorityWeekStart: string,
   operationId: string,
 ): Promise<OperationLedgerSearch> {
   const currentWeek = await readWeek(pb, authorityWeekStart);
+  const dataRows = await pb.collection("week_data").getFullList({ requestKey: null });
+  const dataWeeks: WeekData[] = [];
+  for (const row of Array.isArray(dataRows) ? dataRows : []) {
+    const week = normalizeWeekData(row);
+    if (!week) throw new Error("invalid_week_data");
+    dataWeeks.push({ ...week, points: recomputeWeekPoints(week.history) });
+  }
   const currentTransactions = currentWeek.history.filter(
     (transaction) => transaction.meta?.operationId === operationId,
   );
@@ -269,12 +291,24 @@ async function readOperationLedger(
   for (const row of Array.isArray(archiveRows) ? archiveRows : []) {
     const week = normalizeWeekData(row);
     if (!week) throw new Error("invalid_archive_week_data");
-    archiveWeeks.push(week);
+    archiveWeeks.push({ ...week, points: recomputeWeekPoints(week.history) });
   }
-  const archiveTransactions = archiveWeeks.flatMap((week) =>
-    week.history.filter((transaction) => transaction.meta?.operationId === operationId),
+  const allTransactions = uniqueTransactions([
+    dataWeeks.flatMap((week) => week.history),
+    archiveWeeks.flatMap((week) => week.history),
+  ]).sort((left, right) =>
+    left.timestamp.localeCompare(right.timestamp) || left.id - right.id,
   );
-  return { currentWeek, currentTransactions, archiveTransactions, archiveWeeks };
+  const archiveTransactions = uniqueTransactions(
+    archiveWeeks.map((week) => week.history),
+  ).filter((transaction) => transaction.meta?.operationId === operationId);
+  return {
+    currentWeek,
+    currentTransactions,
+    archiveTransactions,
+    archiveWeeks,
+    allTransactions,
+  };
 }
 
 function normalizeLiveRoster(value: unknown): LiveMember[] | null {
@@ -400,6 +434,7 @@ function canonicalCrew(
   task: SnapshotTask,
   roster: LiveMember[],
   requireCheckedIn: boolean,
+  requireFullSize = false,
 ): CanonicalCrew | "invalid" {
   const rawCrew = task.crew;
   const crew = recordValue(rawCrew);
@@ -409,7 +444,8 @@ function canonicalCrew(
     if (rawCrew !== undefined && rawCrew !== null) return "invalid";
     return { members: [], memberNames: new Set(), removedNames: new Set() };
   }
-  if (!crew || !Array.isArray(crew.members) || typeof crewSize !== "number" || !Number.isSafeInteger(crewSize) || crewSize <= 0) return "invalid";
+  if (!crew || !Array.isArray(crew.members) || typeof crewSize !== "number" || !Number.isSafeInteger(crewSize) || crewSize < 2) return "invalid";
+  if (requireFullSize && crew.members.length < crewSize) return "invalid";
   const members: LiveMember[] = [];
   const memberNames = new Set<string>();
   const ids = new Set<string>();
@@ -429,7 +465,9 @@ function canonicalCrew(
   const removed = crew.removed === undefined ? [] : crew.removed;
   if (!Array.isArray(removed) || removed.some((name) => typeof name !== "string" || !name.trim())) return "invalid";
   const removedNames = new Set(
-    removed.map((name) => resolveHumanMember(roster, name)?.name ?? name.trim()),
+    removed
+      .map((name) => resolveHumanMember(roster, name)?.name)
+      .filter((name): name is string => Boolean(name)),
   );
   return { members, memberNames, removedNames };
 }
@@ -446,17 +484,17 @@ function resolvePayees(
   if (pending.crew === null) {
     const member = resolveHumanMember(roster, pending.byName);
     if (!member) return "invalid";
-    if (task.crewSize !== undefined && task.crewSize !== null && Number(task.crewSize) > 0) return "invalid";
-    const ownerNames = [task.completedBy, task.assignee]
-      .filter((value): value is string => typeof value === "string" && Boolean(value.trim()))
-      .map((value) => resolveHumanMember(roster, value)?.name)
-      .filter((value): value is string => Boolean(value));
-    if (ownerNames.some((value) => value !== member.name)) return "invalid";
+    if (task.crew !== undefined && task.crew !== null) return "invalid";
+    if (task.crewSize !== undefined && task.crewSize !== null) return "invalid";
+    const ownerValues = [task.completedBy, task.assignee];
+    if (ownerValues.some((value) => typeof value !== "string" || !value.trim())) return "invalid";
+    const owners = ownerValues.map((value) => resolveHumanMember(roster, value));
+    if (owners.some((value) => !value || value.name !== member.name)) return "invalid";
     return [member.name];
   }
 
   if (pending.byName !== "Crew") return "invalid";
-  const crewState = canonicalCrew(task, roster, true);
+  const crewState = canonicalCrew(task, roster, true, true);
   if (crewState === "invalid") return "invalid";
   if (pending.crew.length !== crewState.memberNames.size) return "invalid";
   const payees: string[] = [];
@@ -483,6 +521,7 @@ interface OperationLedgerSearch {
   currentTransactions: Transaction[];
   archiveTransactions: Transaction[];
   archiveWeeks: WeekData[];
+  allTransactions: Transaction[];
 }
 
 interface PreparedTask {
@@ -510,21 +549,13 @@ interface PreparedCommand {
   search: OperationLedgerSearch;
 }
 
-function operationTransactions(
-  week: WeekData,
-  operationId: string,
-): Transaction[] {
-  return week.history.filter((transaction) => transaction.meta?.operationId === operationId);
-}
-
 function allOperationTransactions(
   search: OperationLedgerSearch,
   operationId: string,
 ): Transaction[] {
-  return [
-    ...operationTransactions(search.currentWeek, operationId),
-    ...search.archiveTransactions,
-  ];
+  return search.allTransactions.filter(
+    (transaction) => transaction.meta?.operationId === operationId,
+  );
 }
 
 function validateOperationTransactions(
@@ -590,6 +621,93 @@ function entryDescription(task: SnapshotTask, pending: PendingIntent, weekStart:
   const title = typeof task.title === "string" && task.title.trim() ? task.title.trim() : "task";
   const prefix = crew ? "Crew" : task.completedInWeek === weekStart ? "Completed" : "Approved";
   return `${prefix}: ${title}${pending.amount > 0 ? ` (+${pending.amount}pts)` : ""}`;
+}
+
+function ledgerEntryKey(entry: Pick<LedgerEntryInput, "taskId" | "member">): string {
+  return `${entry.taskId}:${entry.member}`;
+}
+
+function transactionMatchesEntry(transaction: Transaction, entry: LedgerEntryInput): boolean {
+  return transaction.taskId === entry.taskId &&
+    transaction.member === entry.member &&
+    transaction.type === entry.type &&
+    transaction.amount === entry.amount;
+}
+
+function replayLedgerEntries(
+  prepared: PreparedCommand,
+  operationId: string,
+  expectedEntries: LedgerEntryInput[],
+): { entries: LedgerEntryInput[]; conflict: boolean } {
+  const allOperation = prepared.search.allTransactions.filter(
+    (transaction) => transaction.meta?.operationId === operationId,
+  );
+  const currentOperation = prepared.search.currentTransactions;
+  const allByKey = new Map<string, Transaction>();
+  for (const transaction of allOperation) {
+    const key = ledgerEntryKey(transaction);
+    const previous = allByKey.get(key);
+    if (previous && !transactionMatchesEntry(previous, {
+      type: transaction.type,
+      member: transaction.member,
+      amount: transaction.amount,
+      taskId: transaction.taskId,
+      description: transaction.description,
+    })) return { entries: [], conflict: true };
+    allByKey.set(key, transaction);
+  }
+  const currentByKey = new Map(currentOperation.map((transaction) => [ledgerEntryKey(transaction), transaction]));
+  const expectedKeys = new Set(expectedEntries.map(ledgerEntryKey));
+  const entries: LedgerEntryInput[] = [];
+  const seen = new Set<string>();
+  for (const entry of expectedEntries) {
+    const key = ledgerEntryKey(entry);
+    const existing = allByKey.get(key);
+    if (existing && !transactionMatchesEntry(existing, entry)) {
+      return { entries: [], conflict: true };
+    }
+    if (currentByKey.has(key)) {
+      const current = currentByKey.get(key)!;
+      const currentEntry: LedgerEntryInput = {
+        type: current.type,
+        member: current.member,
+        amount: current.amount,
+        description: current.description,
+        taskId: current.taskId,
+        ...(current.appliedBy === undefined ? {} : { appliedBy: current.appliedBy }),
+      };
+      if (!seen.has(key)) {
+        entries.push(currentEntry);
+        seen.add(key);
+      }
+      continue;
+    }
+    if (!existing && !seen.has(key)) {
+      entries.push(entry);
+      seen.add(key);
+    }
+  }
+  for (const key of allByKey.keys()) {
+    if (!expectedKeys.has(key)) return { entries: [], conflict: true };
+  }
+  return { entries, conflict: false };
+}
+
+function operationEntriesComplete(
+  prepared: PreparedCommand,
+  operationId: string,
+  expectedEntries: LedgerEntryInput[],
+  currentWeek: WeekData,
+): boolean {
+  const transactions = [
+    ...prepared.search.allTransactions,
+    ...currentWeek.history,
+  ].filter((transaction) => transaction.meta?.operationId === operationId);
+  const byKey = new Map(transactions.map((transaction) => [ledgerEntryKey(transaction), transaction]));
+  return expectedEntries.every((entry) => {
+    const transaction = byKey.get(ledgerEntryKey(entry));
+    return Boolean(transaction && transactionMatchesEntry(transaction, entry));
+  });
 }
 
 function freshEntries(
@@ -672,7 +790,6 @@ async function resolveTasks(
     if (command.action === "send-back") {
       if (receipt) {
         if (!task && !lookup.tombstoned) return "task_store_unavailable";
-        if (task && validateCrewForSendBack(task, roster) === "invalid") return "invalid_task_state";
         prepared.push({
           id, lookup, task, receipt, transactions, intent: null, payees: [],
           entries: [], expectedEntries: [], replay: true, needsLedger: false,
@@ -720,7 +837,7 @@ async function resolveTasks(
         if (pending === "invalid") {
           projectionInvalid = true;
         } else if (pending && hasLaterPending(task, transactions)) {
-          projectionInvalid = task.sentBackAt != null;
+          projectionInvalid = true;
         } else if (pending && task.sentBackAt != null) {
           projectionInvalid = true;
         } else if (pending) {
@@ -832,8 +949,14 @@ interface SnapshotWriteOutcome {
   conflict: boolean;
 }
 
-function sameJson(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+function sameCanonicalWeek(left: WeekData, right: WeekData): boolean {
+  const canonicalLeft = { ...left, points: recomputeWeekPoints(left.history) };
+  const canonicalRight = { ...right, points: recomputeWeekPoints(right.history) };
+  return JSON.stringify(stableValue(canonicalLeft)) === JSON.stringify(stableValue(canonicalRight));
+}
+
+function sameSnapshotTaskState(left: SnapshotTask, right: SnapshotTask): boolean {
+  return JSON.stringify(stableValue(left)) === JSON.stringify(stableValue(right));
 }
 
 async function verifyApprovalSnapshot(
@@ -844,45 +967,24 @@ async function verifyApprovalSnapshot(
   weekData: WeekData | null,
 ): Promise<boolean> {
   const state = await readSnapshotStateWithRevision(pb);
+  const receiptState = receiptMap(state.data, command, fingerprint);
+  if (receiptState.conflict) return false;
   const receipts = getSnapshotOperationReceipts(state.data, command.operationId);
   if (weekData) {
+    if (state.data.taskWeekStart !== weekData.weekStart) return false;
     const snapshotWeek = normalizeWeekData(state.data.weekData);
-    if (!snapshotWeek) return false;
-    const ids = new Set(snapshotWeek.history.map((transaction) => transaction.id));
-    if (weekData.history.some((transaction) => !ids.has(transaction.id))) return false;
+    if (!snapshotWeek || !sameCanonicalWeek(snapshotWeek, weekData)) return false;
   }
   for (const patch of patches) {
     const receipt = receipts.find(
       (candidate) => candidate.taskId === patch.id && candidate.fingerprint === fingerprint,
     );
     if (!receipt) return false;
-    if (patch.receiptOnly || patch.task === null) continue;
-    if (!patch.shouldApply(patch.task)) continue;
+    if (patch.receiptOnly || patch.task === null || !patch.shouldApply(patch.task)) continue;
     const current = liveSnapshotTasks(state.data).find((task) => Number(task.id) === patch.id);
     if (!current) return false;
-    for (const [key, expected] of Object.entries(patch.values)) {
-      if (key === "crew") {
-        if (!sameJson(current.crew, expected)) return false;
-      } else if (current[key] !== expected) {
-        const leftEmpty = current[key] === undefined || current[key] === null || current[key] === "";
-        const rightEmpty = expected === undefined || expected === null || expected === "";
-        if (!leftEmpty || !rightEmpty) return false;
-      }
-    }
-  }
-  return true;
-}
-
-function snapshotTaskMatchesValues(task: SnapshotTask, values: Record<string, unknown>): boolean {
-  for (const [key, expected] of Object.entries(values)) {
-    if (key === "crew") {
-      if (!sameJson(task.crew, expected)) return false;
-      continue;
-    }
-    if (task[key] === expected) continue;
-    const leftEmpty = task[key] === undefined || task[key] === null || task[key] === "";
-    const rightEmpty = expected === undefined || expected === null || expected === "";
-    if (!leftEmpty || !rightEmpty) return false;
+    const expected = { ...patch.task, ...patch.values } as SnapshotTask;
+    if (!sameSnapshotTaskState(current, expected)) return false;
   }
   return true;
 }
@@ -906,23 +1008,7 @@ async function snapshotWriteAlreadySatisfied(
     Array.isArray(state.data.deletedTaskIds) ? state.data.deletedTaskIds.map((id) => Number(id)) : [],
   );
   if (patches.some((patch) => !patch.receiptOnly && deletedTaskIds.has(patch.id))) return false;
-  const receipts = getSnapshotOperationReceipts(state.data, command.operationId);
-  if (patches.some((patch) => {
-    const hasReceipt = receipts.some(
-      (receipt) => receipt.taskId === patch.id && receipt.fingerprint === fingerprint,
-    );
-    if (!hasReceipt) return true;
-    if (patch.receiptOnly || patch.task === null || !patch.shouldApply(patch.task)) return false;
-    const current = liveSnapshotTasks(state.data).find((task) => Number(task.id) === patch.id);
-    return !current || !snapshotTaskMatchesValues(current, patch.values);
-  })) return false;
-  if (weekData) {
-    const snapshotWeek = normalizeWeekData(state.data.weekData);
-    if (!snapshotWeek) return false;
-    const ids = new Set(snapshotWeek.history.map((transaction) => transaction.id));
-    if (weekData.history.some((transaction) => !ids.has(transaction.id))) return false;
-  }
-  return true;
+  return verifyApprovalSnapshot(pb, command, fingerprint, patches, weekData);
 }
 
 async function writeApprovalSnapshot(
@@ -1056,8 +1142,8 @@ function approvalPatch(prepared: PreparedTask, sendBack: boolean): SnapshotPatch
       };
     }
     const crewResult = stripCrewCheckins(task);
-    if (crewResult === "invalid") return null;
-    const crew = crewResult.value;
+    if (crewResult === "invalid" && !prepared.receipt) return null;
+    const crew = crewResult === "invalid" ? task.crew : crewResult.value;
     return {
       id: prepared.id,
       task,
@@ -1136,6 +1222,7 @@ function failure(
     cleared: 0,
     skipped: 0,
     reconciled: false,
+    repairRequired: false,
     reason,
   };
 }
@@ -1161,6 +1248,7 @@ function success(
     cleared,
     skipped,
     reconciled,
+    repairRequired: !reconciled,
     ...(projectionFailures.length > 0 ? { projectionFailures } : {}),
     ...(duplicate ? { duplicate: true } : {}),
     ...(task !== undefined ? { task } : {}),
@@ -1230,12 +1318,12 @@ async function executeSendBack(
 }
 
 function hasUnreplayedSemanticDuplicate(
-  week: WeekData,
+  search: OperationLedgerSearch,
   operationId: string,
   entries: LedgerEntryInput[],
 ): boolean {
   const operationEntries = new Set(
-    week.history
+    search.allTransactions
       .filter((transaction) => transaction.meta?.operationId === operationId && transaction.taskId !== undefined)
       .map((transaction) => `${transaction.taskId}:${transaction.member}`),
   );
@@ -1243,7 +1331,7 @@ function hasUnreplayedSemanticDuplicate(
     entry.type === "earn" &&
     entry.taskId !== undefined &&
     !operationEntries.has(`${entry.taskId}:${entry.member}`) &&
-    hasUnreversedTaskEarn(week.history, entry.taskId, entry.member),
+    hasUnreversedTaskEarn(search.allTransactions, entry.taskId, entry.member),
   );
 }
 
@@ -1264,8 +1352,12 @@ async function executeApproval(
   if (active.length === 0) {
     return success(command, prepared.week, 0, 0, 0, true);
   }
-  const ledgerItems = active.filter((item) => item.needsLedger);
-  const entries = ledgerItems.flatMap((item) => item.expectedEntries);
+  const expectedEntries = active.flatMap((item) => item.expectedEntries);
+  const replayEntries = replayLedgerEntries(prepared, command.operationId, expectedEntries);
+  if (replayEntries.conflict) {
+    return failure(command.operationId, command.action, "operation_conflict", prepared.week);
+  }
+  const entries = replayEntries.entries;
   const beforeIds = new Set(prepared.week.history.map((transaction) => transaction.id));
   let cleared = 0;
   let projectionFailures: number[] = [];
@@ -1273,6 +1365,11 @@ async function executeApproval(
   let noCurrentTask = false;
 
   const project = async (pb: AdminPB, weekData: WeekData): Promise<boolean> => {
+    if (!operationEntriesComplete(prepared, command.operationId, expectedEntries, weekData)) {
+      projectionFailures = active.map((item) => item.id);
+      await addRepairMarker(pb, command.operationId, projectionFailures);
+      return false;
+    }
     const patches = active
       .map((item) => approvalPatch(item, false))
       .filter((patch): patch is SnapshotPatch => patch !== null);
@@ -1306,7 +1403,7 @@ async function executeApproval(
 
   let result: Awaited<ReturnType<typeof applyWeekLedgerOperationLocked>> | null = null;
   if (entries.length > 0) {
-    if (hasUnreplayedSemanticDuplicate(prepared.week, command.operationId, entries)) {
+    if (hasUnreplayedSemanticDuplicate(prepared.search, command.operationId, expectedEntries)) {
       return failure(command.operationId, command.action, "semantic_duplicate", prepared.week);
     }
     result = await applyWeekLedgerOperationLocked({
@@ -1324,37 +1421,6 @@ async function executeApproval(
     });
     if (!result.ok) {
       const failedResult = result;
-      const committedOperation = allOperationTransactions(prepared.search, command.operationId).length > 0;
-      if (
-        committedOperation &&
-        (failedResult.code === "operation_conflict" || failedResult.code === "invalid_ledger_operation")
-      ) {
-        projectionFailures = active.map((item) => item.id);
-        try {
-          await withAdmin((pb) => project(pb, failedResult.weekData));
-        } catch {
-          projectionFailures = active.map((item) => item.id);
-        }
-        try {
-          const current = await withAdmin((pb) => readProjectedTask(pb, active[0].id));
-          projectedTask = current.task;
-          noCurrentTask = current.noCurrentTask;
-        } catch {
-          noCurrentTask = active[0].task === null;
-        }
-        return success(
-          command,
-          failedResult.weekData,
-          0,
-          cleared,
-          0,
-          false,
-          projectionFailures,
-          false,
-          projectedTask,
-          noCurrentTask,
-        );
-      }
       const reason: ApprovalFailureReason = failedResult.code === "operation_conflict"
         ? "operation_conflict"
         : failedResult.code === "invalid_ledger_operation"
@@ -1413,7 +1479,7 @@ function withTaskLocks<T>(ids: number[], index: number, fn: () => Promise<T>): P
   return withTaskCommandLock(ids[index], () => withTaskLocks(ids, index + 1, fn));
 }
 
-export function executeApprovalCommand(
+export async function executeApprovalCommand(
   command: ApproveCommand,
   actor: ApprovalActor,
 ): Promise<ApprovalServiceResult> {
@@ -1430,7 +1496,27 @@ export function executeApprovalCommand(
     return Promise.resolve(failure(command.operationId, command.action, "unauthorized", emptyWeekData(localWeekStartISO())));
   }
   const ids = approvalTaskIds(parsed);
-  const authorityWeekStart = localWeekStartISO();
+  let authorityWeekStart: string;
+  try {
+    const rollover = await ensureCurrentTaskWeek();
+    const rolloverWeekStart = canonicalWeekStart(rollover.weekStart);
+    if (!rollover.reconciled || !rolloverWeekStart) {
+      return Promise.resolve(failure(
+        command.operationId,
+        parsed.action,
+        "task_store_unavailable",
+        emptyWeekData(rolloverWeekStart ?? localWeekStartISO()),
+      ));
+    }
+    authorityWeekStart = rolloverWeekStart;
+  } catch {
+    return Promise.resolve(failure(
+      command.operationId,
+      parsed.action,
+      "task_store_unavailable",
+      emptyWeekData(localWeekStartISO()),
+    ));
+  }
   return withWeekLedgerLock(authorityWeekStart, () => withTaskLocks(ids, 0, async () => {
     const weekStart = authorityWeekStart;
     const live = await loadLiveParent(actor);
@@ -1445,6 +1531,7 @@ export function executeApprovalCommand(
               currentTransactions: [],
               archiveTransactions: [],
               archiveWeeks: [],
+              allTransactions: [],
             }
           : await readOperationLedger(pb, weekStart, parsed.operationId);
         const snapshot = await readSnapshotStateWithRevision(pb);
