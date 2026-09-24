@@ -1,6 +1,7 @@
 import { withAdmin } from "@/lib/pb-auth";
 import { withKeyedLock } from "@/lib/keyed-lock";
 import { persistedTaskEmoji, persistedCrewEmoji } from "@/lib/task-emoji";
+import { recomputeWeekPoints } from "@/lib/task-ledger";
 import type { WeekData, Transaction } from "@/types/tasks";
 
 /**
@@ -28,9 +29,43 @@ export type SnapshotTask = Record<string, any> & {
   assignee?: string;
 };
 
+export interface SnapshotRevision {
+  revision: string;
+  updatedAt: string;
+}
+
+export interface SnapshotOperationReceipt {
+  operationId: string;
+  action: string;
+  taskId: number;
+  deleted?: boolean;
+  createdAt: string;
+}
+
+export interface SnapshotProjectionRepair {
+  operationId: string;
+  taskIds: number[];
+  createdAt: string;
+}
+
+export interface SnapshotWriteResult {
+  ok: boolean;
+  revision: SnapshotRevision;
+  error?: string;
+}
+
+export interface SnapshotMutationResult<T> {
+  result: T;
+  revision: SnapshotRevision;
+}
+
 export type SnapshotData = Record<string, any> & {
   tasks?: SnapshotTask[];
   deletedTaskIds?: number[];
+  revision?: string;
+  taskWeekStart?: string;
+  operationReceipts?: Record<string, SnapshotOperationReceipt>;
+  pendingProjectionRepairs?: SnapshotProjectionRepair[];
 };
 
 /** Live (non-tombstoned) tasks from a snapshot blob. */
@@ -197,21 +232,168 @@ export function protectPendingOnPush(args: {
   });
 }
 
-async function readRow(): Promise<{ id: string | null; data: SnapshotData }> {
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseJSON<T>(value: unknown, fallback: T): T {
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as T;
+      return parsed ?? fallback;
+    } catch {
+      return fallback;
+    }
+  }
+  return isObjectRecord(value) || Array.isArray(value) ? (value as T) : fallback;
+}
+
+function parseSnapshotData(value: unknown): SnapshotData {
+  const parsed = parseJSON<unknown>(value, {});
+  return isObjectRecord(parsed) ? (parsed as SnapshotData) : {};
+}
+
+function decimalRevision(value: unknown): string {
+  const revision = typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? String(value)
+    : value;
+  return typeof revision === "string" && /^\d+$/.test(revision) ? BigInt(revision).toString() : "0";
+}
+
+function nextRevision(value: unknown): string {
+  return (BigInt(decimalRevision(value)) + BigInt(1)).toString();
+}
+
+function rowUpdatedAt(row: any, data: SnapshotData): string {
+  const updatedAt = row?.updated_at ?? row?.updatedAt ?? data.updatedAt;
+  return typeof updatedAt === "string" ? updatedAt : "";
+}
+
+function sanitizeOperationReceipts(value: unknown): Record<string, SnapshotOperationReceipt> {
+  const parsed = parseJSON<unknown>(value, {});
+  if (!isObjectRecord(parsed)) return {};
+  const receipts: Record<string, SnapshotOperationReceipt> = {};
+
+  for (const candidate of Object.values(parsed)) {
+    if (!isObjectRecord(candidate)) continue;
+    const operationId = typeof candidate.operationId === "string" ? candidate.operationId.trim() : "";
+    const action = typeof candidate.action === "string" ? candidate.action.trim() : "";
+    const taskId = Number(candidate.taskId);
+    const createdAt = typeof candidate.createdAt === "string" ? candidate.createdAt : "";
+    if (!operationId || !action || !Number.isFinite(taskId) || !createdAt) continue;
+    receipts[operationId] = {
+      operationId,
+      action,
+      taskId,
+      ...(typeof candidate.deleted === "boolean" ? { deleted: candidate.deleted } : {}),
+      createdAt,
+    };
+  }
+
+  return receipts;
+}
+
+function sanitizeProjectionRepairs(value: unknown): SnapshotProjectionRepair[] {
+  const parsed = parseJSON<unknown>(value, []);
+  if (!Array.isArray(parsed)) return [];
+  const repairs: SnapshotProjectionRepair[] = [];
+
+  for (const candidate of parsed) {
+    if (!isObjectRecord(candidate)) continue;
+    const operationId = typeof candidate.operationId === "string" ? candidate.operationId.trim() : "";
+    const createdAt = typeof candidate.createdAt === "string" ? candidate.createdAt : "";
+    const taskIds = Array.isArray(candidate.taskIds)
+      ? [...new Set(candidate.taskIds.map(Number).filter(Number.isFinite))]
+      : [];
+    if (!operationId || !createdAt || taskIds.length === 0) continue;
+    repairs.push({ operationId, taskIds, createdAt });
+  }
+
+  return repairs;
+}
+
+function sanitizeSnapshotMetadata(data: SnapshotData): SnapshotData {
+  const next = { ...data };
+  if ("operationReceipts" in data) {
+    next.operationReceipts = sanitizeOperationReceipts(data.operationReceipts);
+  }
+  if ("pendingProjectionRepairs" in data) {
+    next.pendingProjectionRepairs = sanitizeProjectionRepairs(data.pendingProjectionRepairs);
+  }
+  return next;
+}
+
+function canonicalSnapshotData(data: SnapshotData, revision: string): SnapshotData {
+  return {
+    ...sanitizeSnapshotMetadata(data),
+    revision,
+  };
+}
+
+export async function readSnapshotWithRevision(): Promise<{
+  data: SnapshotData;
+  revision: SnapshotRevision;
+  rowId: string | null;
+}> {
   return withAdmin(async (pb) => {
     const rows = await pb.collection(SNAPSHOT_COLLECTION).getFullList({
       requestKey: null,
       filter: `key = "${SNAPSHOT_KEY}"`,
     });
     const row = rows[0] as any;
-    return { id: row?.id ?? null, data: (row?.data ?? {}) as SnapshotData };
+    const data = sanitizeSnapshotMetadata(parseSnapshotData(row?.data));
+    return {
+      data,
+      revision: {
+        revision: decimalRevision(data.revision),
+        updatedAt: rowUpdatedAt(row, data),
+      },
+      rowId: row?.id ?? null,
+    };
   });
+}
+
+async function readRow(): Promise<{ id: string | null; data: SnapshotData }> {
+  const result = await readSnapshotWithRevision();
+  return { id: result.rowId, data: result.data };
 }
 
 /** Read the live task list (tombstones already applied). */
 export async function readSnapshotTasks(): Promise<SnapshotTask[]> {
   const { data } = await readRow();
   return liveSnapshotTasks(data);
+}
+
+export async function mutateSnapshotWithMeta<T>(
+  fn: (data: SnapshotData) => { data: SnapshotData; result: T },
+  pb?: AdminPB,
+): Promise<SnapshotMutationResult<T>> {
+  return withKeyedLock(`snapshot:${SNAPSHOT_KEY}`, async () => {
+    const mutate = async (client: AdminPB): Promise<SnapshotMutationResult<T>> => {
+      const rows = await client.collection(SNAPSHOT_COLLECTION).getFullList({
+        requestKey: null,
+        filter: `key = "${SNAPSHOT_KEY}"`,
+      });
+      const row = rows[0] as any;
+      const current = sanitizeSnapshotMetadata(parseSnapshotData(row?.data));
+      const { data, result } = fn(current);
+      const revision = nextRevision(current.revision);
+      const updatedAt = new Date().toISOString();
+      const payload = {
+        key: SNAPSHOT_KEY,
+        data: canonicalSnapshotData(data, revision),
+        updated_at: updatedAt,
+      };
+      if (row) {
+        await client.collection(SNAPSHOT_COLLECTION).update(row.id, payload, { requestKey: null });
+      } else {
+        await client.collection(SNAPSHOT_COLLECTION).create(payload, { requestKey: null });
+      }
+      return { result, revision: { revision, updatedAt } };
+    };
+
+    return pb ? mutate(pb) : withAdmin(mutate);
+  });
 }
 
 /**
@@ -222,21 +404,8 @@ export async function readSnapshotTasks(): Promise<SnapshotTask[]> {
 export async function mutateSnapshot<T>(
   fn: (data: SnapshotData) => { data: SnapshotData; result: T }
 ): Promise<T> {
-  return withKeyedLock(`snapshot:${SNAPSHOT_KEY}`, () =>
-    withAdmin(async (pb) => {
-      const rows = await pb.collection(SNAPSHOT_COLLECTION).getFullList({
-        requestKey: null,
-        filter: `key = "${SNAPSHOT_KEY}"`,
-      });
-      const row = rows[0] as any;
-      const current = (row?.data ?? {}) as SnapshotData;
-      const { data, result } = fn(current);
-      const payload = { key: SNAPSHOT_KEY, data, updated_at: new Date().toISOString() };
-      if (rows.length > 0) await pb.collection(SNAPSHOT_COLLECTION).update(row.id, payload, { requestKey: null });
-      else await pb.collection(SNAPSHOT_COLLECTION).create(payload, { requestKey: null });
-      return result;
-    })
-  );
+  const mutation = await mutateSnapshotWithMeta(fn);
+  return mutation.result;
 }
 
 /**
@@ -292,7 +461,7 @@ export async function mirrorTaskToCollection(
   }
 }
 
-type PB = ReturnType<typeof import("@/lib/pb").getAdminPB>;
+export type AdminPB = ReturnType<typeof import("@/lib/pb").getAdminPB>;
 
 export type SnapshotWeekTaskPatch = {
   id: number;
@@ -314,72 +483,120 @@ export type SnapshotWeekTaskPatch = {
  * dropped, and only adopts a week at least as new as what's stored.
  * Best-effort: week_data stays authoritative; failures are logged.
  */
+function normalizeWeekData(value: unknown): WeekData | null {
+  const parsed = parseJSON<unknown>(value, null);
+  if (!isObjectRecord(parsed) || typeof parsed.weekStart !== "string" || !parsed.weekStart) {
+    return null;
+  }
+  const pointsValue = parseJSON<unknown>(parsed.points, {});
+  const streakValue = parseJSON<unknown>(parsed.streak, {});
+  const lastActiveValue = parseJSON<unknown>(parsed.lastActive, {});
+  const historyValue = parseJSON<unknown>(parsed.history, []);
+  return {
+    weekStart: parsed.weekStart,
+    points: isObjectRecord(pointsValue) ? (pointsValue as Record<string, number>) : {},
+    streak: isObjectRecord(streakValue) ? (streakValue as Record<string, number>) : {},
+    lastActive: isObjectRecord(lastActiveValue) ? (lastActiveValue as Record<string, string>) : {},
+    history: Array.isArray(historyValue)
+      ? (historyValue.filter(isObjectRecord) as unknown as Transaction[])
+      : [],
+  };
+}
+
 export async function persistSnapshotWeek(
-  pb: PB,
+  pb: AdminPB,
   weekData: WeekData | null,
   taskRow?: SnapshotWeekTaskPatch
-): Promise<void> {
-  await withKeyedLock(`snapshot:${SNAPSHOT_KEY}`, async () => {
-    try {
+): Promise<SnapshotWriteResult> {
+  let currentRevision = "0";
+  let currentUpdatedAt = "";
+
+  try {
+    return await withKeyedLock(`snapshot:${SNAPSHOT_KEY}`, async () => {
       const rows = await pb.collection(SNAPSHOT_COLLECTION).getFullList({
         requestKey: null,
         filter: `key = "${SNAPSHOT_KEY}"`,
       });
-      const row: any = rows[0];
-      const raw = row?.data;
-      let data: any = {};
-      if (typeof raw === "string") {
-        try { data = JSON.parse(raw) || {}; } catch { data = {}; }
-      } else if (raw && typeof raw === "object") {
-        data = raw;
-      }
+      const row = rows[0] as any;
+      const data = sanitizeSnapshotMetadata(parseSnapshotData(row?.data));
+      currentRevision = decimalRevision(data.revision);
+      currentUpdatedAt = rowUpdatedAt(row, data);
+
       if (weekData) {
-        const stored: any = data.weekData ?? {};
-        const storedStart = typeof stored.weekStart === "string" ? stored.weekStart : "";
-        let mergedWeek: WeekData = weekData;
-        if (storedStart && storedStart > weekData.weekStart) {
+        const incoming = normalizeWeekData(weekData);
+        if (!incoming) throw new TypeError("invalid_week_data");
+        const stored = normalizeWeekData(data.weekData);
+        let mergedWeek = incoming;
+
+        if (stored && stored.weekStart > incoming.weekStart) {
           mergedWeek = stored;
-        } else if (storedStart === weekData.weekStart) {
+        } else if (stored && stored.weekStart === incoming.weekStart) {
           const byId = new Map<number, Transaction>();
-          for (const t of Array.isArray(stored.history) ? stored.history : []) byId.set(t.id, t);
-          for (const t of weekData.history) byId.set(t.id, t);
-          const history = [...byId.values()].sort((a, b) =>
-            String(a.timestamp).localeCompare(String(b.timestamp))
-          );
-          const points: Record<string, number> = {};
-          for (const t of history) {
-            if (t.type === "earn") points[t.member] = (points[t.member] || 0) + t.amount;
-            else if (t.type === "redeem" || t.type === "penalty" || (t.type === "adjust" && t.amount < 0)) {
-              points[t.member] = Math.max(0, (points[t.member] || 0) + t.amount);
-            } else if (t.type === "adjust") {
-              points[t.member] = (points[t.member] || 0) + t.amount;
-            }
-          }
-          mergedWeek = { ...weekData, history, points };
+          for (const transaction of stored.history) byId.set(transaction.id, transaction);
+          for (const transaction of incoming.history) byId.set(transaction.id, transaction);
+          mergedWeek = {
+            ...incoming,
+            history: [...byId.values()].sort(
+              (left, right) =>
+                String(left.timestamp).localeCompare(String(right.timestamp)) ||
+                left.id - right.id,
+            ),
+          };
         }
-        data.weekData = mergedWeek;
+
+        data.weekData = {
+          ...mergedWeek,
+          points: recomputeWeekPoints(mergedWeek.history),
+        };
+        data.taskWeekStart = mergedWeek.weekStart;
       }
+
       if (taskRow && Array.isArray(data.tasks)) {
-        data.tasks = data.tasks.map((t: any) =>
-          Number(t.id) === Number(taskRow.id)
+        data.tasks = data.tasks.map((task: SnapshotTask) =>
+          Number(task.id) === Number(taskRow.id)
             ? {
-                ...t,
+                ...task,
                 ...(taskRow.crew !== undefined ? { crew: taskRow.crew } : {}),
                 ...(taskRow.completed !== undefined ? { completed: taskRow.completed } : {}),
                 ...(taskRow.completedBy !== undefined ? { completedBy: taskRow.completedBy } : {}),
                 ...(taskRow.completedAt !== undefined ? { completedAt: taskRow.completedAt } : {}),
-                ...(taskRow.completedInWeek !== undefined ? { completedInWeek: taskRow.completedInWeek } : {}),
-                ...(taskRow.pendingApproval !== undefined ? { pendingApproval: taskRow.pendingApproval } : {}),
+                ...(taskRow.completedInWeek !== undefined
+                  ? { completedInWeek: taskRow.completedInWeek }
+                  : {}),
+                ...(taskRow.pendingApproval !== undefined
+                  ? { pendingApproval: taskRow.pendingApproval }
+                  : {}),
                 ...(taskRow.sentBackAt !== undefined ? { sentBackAt: taskRow.sentBackAt } : {}),
               }
-            : t
+            : task,
         );
       }
-      const payload = { key: SNAPSHOT_KEY, data, updated_at: new Date().toISOString() };
-      if (row) await pb.collection(SNAPSHOT_COLLECTION).update(row.id, payload, { requestKey: null });
-      else await pb.collection(SNAPSHOT_COLLECTION).create(payload, { requestKey: null });
-    } catch (e: any) {
-      console.warn("[persistSnapshotWeek] snapshot persist failed:", e?.message);
-    }
-  });
+
+      const revision = nextRevision(data.revision);
+      const updatedAt = new Date().toISOString();
+      const payload = {
+        key: SNAPSHOT_KEY,
+        data: canonicalSnapshotData(data, revision),
+        updated_at: updatedAt,
+      };
+      if (row) {
+        await pb.collection(SNAPSHOT_COLLECTION).update(row.id, payload, { requestKey: null });
+      } else {
+        await pb.collection(SNAPSHOT_COLLECTION).create(payload, { requestKey: null });
+      }
+      currentRevision = revision;
+      currentUpdatedAt = updatedAt;
+      return {
+        ok: true,
+        revision: { revision, updatedAt },
+      };
+    });
+  } catch {
+    console.warn("[persistSnapshotWeek] snapshot persist failed");
+    return {
+      ok: false,
+      revision: { revision: currentRevision, updatedAt: currentUpdatedAt },
+      error: "snapshot_write_failed",
+    };
+  }
 }
