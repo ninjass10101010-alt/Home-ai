@@ -52,6 +52,21 @@ export interface PendingApproval {
   crew?: string[];
 }
 
+export type LedgerOperationSource =
+  | "assigned-complete"
+  | "open-claim"
+  | "late-snatch"
+  | "task-approval"
+  | "reward-redeem"
+  | "planner-adjust"
+  | "task-undo"
+  | "legacy-migration";
+
+export interface LedgerOperationMeta {
+  operationId: string;
+  source: LedgerOperationSource;
+}
+
 export interface Transaction {
   id: number;
   timestamp: string;
@@ -61,6 +76,22 @@ export interface Transaction {
   description: string;
   taskId?: number;
   appliedBy?: string;
+  meta?: LedgerOperationMeta;
+}
+
+export interface LedgerEntryInput {
+  type: Transaction["type"];
+  member: string;
+  amount: number;
+  description: string;
+  taskId?: number;
+  appliedBy?: string;
+}
+
+export interface LedgerOperationInput {
+  operationId: string;
+  source: LedgerOperationSource;
+  entries: LedgerEntryInput[];
 }
 
 export interface WeekData {
