@@ -84,9 +84,7 @@ function BirdGlyph({ size, flap, color, flapping }: { size: number; flap: number
 }
 
 export function useWxMotionOk(): boolean {
-  const [motionOk, setMotionOk] = useState(
-    () => typeof window === "undefined" || !window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
+  const [motionOk, setMotionOk] = useState(false);
   useEffect(() => {
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
     const update = () => setMotionOk(!mq.matches);

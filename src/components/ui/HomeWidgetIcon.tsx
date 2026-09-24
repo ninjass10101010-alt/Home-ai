@@ -178,6 +178,7 @@ export default function HomeWidgetIcon({
       aria-label={decorative ? undefined : title}
       focusable="false"
       className={classes}
+      style={{ transformBox: "view-box", transformOrigin: "24px 24px" }}
       data-variant={variant}
       data-state={state}
     >

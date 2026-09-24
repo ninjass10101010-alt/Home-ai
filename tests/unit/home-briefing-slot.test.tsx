@@ -131,12 +131,17 @@ describe("Home morning briefing slot", () => {
     vi.unstubAllGlobals();
   });
 
-  it("keeps an acknowledged empty briefing in the Home slot", async () => {
+  it("does not add a grid slot for an acknowledged empty briefing", async () => {
     const el = await renderAsync(<HomePage />);
     await settle();
 
-    expect(el.textContent).toContain("Morning Briefing");
-    expect(el.textContent).toContain("Acknowledged ✓");
-    expect(el.querySelector('svg[data-variant="briefing"]')).not.toBeNull();
+    expect(el.textContent).not.toContain("Morning Briefing");
+    expect(el.textContent).not.toContain("Acknowledged ✓");
+    expect(el.querySelector('svg[data-variant="briefing"]')).toBeNull();
+    const bentoGrid = Array.from(el.querySelectorAll<HTMLElement>("div")).find(
+      (node) => node.className.includes("grid-cols-1") && node.className.includes("gap-6") && !node.className.includes("grid-cols-3")
+    );
+    expect(bentoGrid).toBeTruthy();
+    expect(bentoGrid?.children).toHaveLength(0);
   });
 });

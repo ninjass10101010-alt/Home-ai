@@ -126,6 +126,13 @@ describe("HomeWidgetIcon", () => {
     expect(markup).toContain(`home-widget-icon-state-${state}`);
   });
 
+  it("gives SVG state transforms an explicit view-box origin", () => {
+    const markup = render("tasks", "near");
+
+    expect(markup).toContain("transform-box:view-box");
+    expect(markup).toContain("transform-origin:24px 24px");
+  });
+
   it("keeps state motion finite and neutralizes it under reduced motion", () => {
     const motionStart = globalsCss.indexOf(".home-widget-icon {");
     const motionEnd = globalsCss.indexOf(':root[data-theme="light"] .widget-card', motionStart);

@@ -101,7 +101,7 @@ export function plannedDaysThisWeek(meals: any[] | null, weekOf: string): number
  */
 function MorningBriefingSlot({ span }: { span: string }) {
   const { briefing, loading, ack, ackError } = useMorningBriefing();
-  if (loading || !briefing || (briefingSectionsEmpty(briefing) && !briefing.acknowledged)) return null;
+  if (loading || !briefing || briefingSectionsEmpty(briefing)) return null;
   return (
     <div className={span}>
       <MorningBriefingWidget briefing={briefing} loading={loading} ack={ack} ackError={ackError} className="h-full" />

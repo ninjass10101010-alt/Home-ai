@@ -179,11 +179,15 @@ function posterTextSurface(scene: ReturnType<typeof wmoToScene>): string[] {
   return ["#6F74A8", "#A29DC9", "#E2DBF2"];
 }
 
-function weatherHeaderTextSurfaces(scene: ReturnType<typeof wmoToScene>): string[] {
+function weatherHeaderTextSurfaces(scene: ReturnType<typeof wmoToScene>, failedFetch = false): string[] {
   const glassAlpha = scene === "storm" ? 0.4 : 0.3;
   const sheenAlpha = 0.4;
   const surfaceAlpha = glassAlpha + sheenAlpha * (1 - glassAlpha);
-  return posterTextSurface(scene).flatMap((surface) => [
+  const baseSurfaces = posterTextSurface(scene);
+  const surfaces = failedFetch
+    ? baseSurfaces.map((surface) => mixHex(surface, "#788091", 0.38))
+    : baseSurfaces;
+  return surfaces.flatMap((surface) => [
     mixHex(surface, "#FFFFFF", glassAlpha),
     mixHex(surface, "#FFFFFF", surfaceAlpha),
   ]);
@@ -303,12 +307,13 @@ const STRIP_CELL = 56;
 const STRIP_GAP = 4; // gap-1 in the flex row = 4px
 const STRIP_PITCH = STRIP_CELL + STRIP_GAP; // actual per-cell pitch including gap
 
-function DayStrip({ hours, conv, skin, accent, textAccent, previewIdx, previewPinned, onPreview, onTapPin, onRelease }: {
+function DayStrip({ hours, conv, skin, accent, textAccent, selectedTextAccent, previewIdx, previewPinned, onPreview, onTapPin, onRelease }: {
   hours: HourPoint[];
   conv: (f: number) => number;
   skin: ReturnType<typeof getWeatherSkin>;
   accent: string;
   textAccent: string;
+  selectedTextAccent: string;
   previewIdx: number | null;
   previewPinned: boolean;
   onPreview: (idx: number | null) => void;
@@ -399,6 +404,7 @@ function DayStrip({ hours, conv, skin, accent, textAccent, previewIdx, previewPi
       <div ref={scrollRef} className="scrollbar-hide flex gap-1 overflow-x-auto pb-1" aria-hidden="true">
         {hours.map((h, i) => {
           const selected = previewIdx === i;
+          const cellTextAccent = selected ? selectedTextAccent : textAccent;
           return (
             <div
               key={h.time}
@@ -413,18 +419,18 @@ function DayStrip({ hours, conv, skin, accent, textAccent, previewIdx, previewPi
             >
               <span
                 className="text-[11px] font-bold tracking-wide"
-                style={{ color: i === 0 ? textAccent : skin.inkSoft }}
+                style={{ color: selected ? selectedTextAccent : i === 0 ? textAccent : skin.inkSoft }}
               >
                 {i === 0 ? "NOW" : formatHourTick(h.time)}
               </span>
               <span className="flex h-[26px] w-full items-center justify-center">
                 <Condition code={conditionPresentation(wmoToScene(h.code, h.isDay), h.code, h.cloud, h.isDay).icon} size={26} />
               </span>
-              <span className="text-[13px] font-black tabular-nums" style={{ color: skin.ink }}>
+              <span className="text-[13px] font-black tabular-nums" style={{ color: selected ? selectedTextAccent : skin.ink }}>
                 {conv(h.temp)}°
               </span>
               {h.precip != null && h.precip >= 20 ? (
-                <span className="text-[10px] font-semibold tabular-nums" style={{ color: textAccent }}>
+                <span className="text-[10px] font-semibold tabular-nums" style={{ color: cellTextAccent }}>
                   {Math.round(h.precip)}%
                 </span>
               ) : (
@@ -607,7 +613,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [clockTick, setClockTick] = useState(0);
-  const [tabHidden, setTabHidden] = useState(() => typeof document !== "undefined" && document.hidden);
+  const [tabHidden, setTabHidden] = useState(false);
   const [familyEvents, setFamilyEvents] = useState<InsightEvent[]>([]);
   const [previewPinned, setPreviewPinned] = useState(false);
   const motionOk = useWxMotionOk();
@@ -815,6 +821,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
   }, [updatedAt]);
 
   useEffect(() => {
+    setTabHidden(document.hidden === true);
     const onVisibility = () => {
       setTabHidden(document.hidden);
       if (
@@ -865,7 +872,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
     : conditionPresentation(heroScene, sceneCode, heroCloud, sceneIsDay);
   const heroVis = activeHour ? activeHour.visibility : weatherData?.visibility ?? null;
   const heroHumidity = activeHour ? activeHour.humidity : weatherData?.humidity ?? null;
-  const heroPrecipitation = activeHour?.precip ?? null;
+  const heroPrecipitation = activeHour ? activeHour.precip : weatherData?.hours[0]?.precip ?? null;
   const heroWind = activeHour ? activeHour.wind : weatherData?.wind ?? null;
   const heroWindDirection = activeHour ? activeHour.windDir : weatherData?.windDir ?? null;
   const heroSunProgress = sunProgressAt(activeHour?.time ?? new Date().toISOString(), weatherData?.sunriseISO ?? null, weatherData?.sunsetISO ?? null);
@@ -886,7 +893,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
   // Severity owns the card: storms and heavy snow never borrow the holiday
   // party accent, and the celebratory layers stay home until it passes.
   const accent = resolveAccent(rawSkin, holidayStyle?.accent);
-  const headerSurfaces = weatherHeaderTextSurfaces(heroScene);
+  const headerSurfaces = weatherHeaderTextSurfaces(heroScene, isPaused);
   const chromeInk = contrastSafeTextAccent(accent, headerSurfaces, "#1E293B");
   const holidayBadgeInk = holidayStyle
     ? contrastSafeTextAccent(
@@ -895,7 +902,13 @@ export default function WeatherWidget({ className = "" }: { className?: string }
         chromeInk
       )
     : chromeInk;
-  const cardTextAccent = contrastSafeTextAccent(accent, posterTextSurface(heroScene), heroScene === "storm" ? "#FFFFFF" : "#1E293B");
+  const cardTextSurfaces = posterTextSurface(heroScene);
+  const cardTextAccent = contrastSafeTextAccent(accent, cardTextSurfaces, heroScene === "storm" ? "#FFFFFF" : "#1E293B");
+  const selectedCellTextAccent = contrastSafeTextAccent(
+    accent,
+    cardTextSurfaces.map((surface) => mixHex(accent, surface, 0x26 / 255)),
+    heroScene === "storm" ? "#FFFFFF" : "#1E293B"
+  );
   // High-contrast boost never reached the widget (inline skin styling bypasses
   // the app's [data-contrast="boost"] system). Boost alpha when the flag is set.
   const [isBoosted, setIsBoosted] = useState(false);
@@ -942,7 +955,10 @@ export default function WeatherWidget({ className = "" }: { className?: string }
     const wetHour = weatherData.rainHourISO
       ? weatherData.hours.find((h) => h.time === weatherData.rainHourISO)
       : null;
-    const knownWet = RAIN_CODES.has(weatherData.code) || SNOW_CODES.has(weatherData.code);
+    const knownWet =
+      RAIN_CODES.has(weatherData.code) ||
+      SNOW_CODES.has(weatherData.code) ||
+      weatherData.hours.some((hour) => RAIN_CODES.has(hour.code) || SNOW_CODES.has(hour.code));
     return wearAdvice(feels, wetHour?.precip ?? null, isKid, knownWet);
   }, [weatherData, isKid]);
 
@@ -1254,6 +1270,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
                 skin={skin}
                 accent={accent}
                 textAccent={cardTextAccent}
+                selectedTextAccent={selectedCellTextAccent}
                 previewIdx={previewIdx}
                 previewPinned={previewPinned}
                 onPreview={handlePreview}
