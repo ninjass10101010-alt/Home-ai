@@ -112,8 +112,10 @@ describe("PlanTab member strip hydration", () => {
     expect(warmed.find((m: any) => m.name === "Jeffery")?.emoji).toBe("😎");
 
     // The pre-mount render source must ignore the warmed cache entirely.
+    // The fallback roster carries each fallback's DECLARED fullName (the
+    // ledger key convention — 2026-09-23 review), never the display name.
     const fallback = (db as any).selectMembersFallback();
-    expect(fallback.find((m: any) => m.fullName === "Jeffery (Dad)")?.emoji).toBe("👨");
+    expect(fallback.find((m: any) => m.fullName === "Jeffery Garcia")?.emoji).toBe("👨");
     expect(fallback.map((m: any) => m.name)).toEqual([
       "Rebecca", "Jeffery", "Emily", "Bailey", "Jasmine", "Aurora", "Caspian", "Rocco", "Rico",
     ]);

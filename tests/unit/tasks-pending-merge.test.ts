@@ -119,3 +119,41 @@ describe("mergeTasksSnapshot pendingApproval adoption", () => {
     expect(out.tasks[0].completedBy).toBeUndefined();
   });
 });
+
+describe("offline send-back vs stale remote pending (2026-09-23 review)", () => {
+  const TAP_AT = "2026-09-06T12:00:00.000Z";
+  const SENT_BACK_AT = "2026-09-06T12:30:00.000Z";
+  const RECLAIM_AT = "2026-09-06T13:00:00.000Z";
+
+  it("a local OFFLINE send-back (sentBackAt post-dates the remote tap) is not re-pended by the stale snapshot row", () => {
+    // Parent sent the tap back while offline: locally the row is open with a
+    // durable sentBackAt; the server (and the kid's device) still show the
+    // pending tap. Without the gate, the parent's own next pull adopted the
+    // remote pending back into the queue — the send-back silently undid
+    // itself and the row could never leave the approval queue.
+    const local = [t({ sentBackAt: SENT_BACK_AT })];
+    const remote = [t({ completed: true, pendingApproval: { byName: "Megan", at: TAP_AT, points: 5 } })];
+    const out = mergeTasksSnapshot(local as Task[], wk(), snap(remote, wk()));
+    expect(out.tasksChanged).toBe(false);
+    expect(out.tasks[0].completed).toBe(false);
+    expect((out.tasks[0] as any).pendingApproval).toBeUndefined();
+    expect((out.tasks[0] as any).sentBackAt).toBe(SENT_BACK_AT);
+  });
+
+  it("a remote pending NEWER than the local send-back stamp (kid re-claimed after the send-back) still wins", () => {
+    const local = [t({ sentBackAt: SENT_BACK_AT })];
+    const remote = [t({ completed: true, pendingApproval: { byName: "Megan", at: RECLAIM_AT, points: 5 } })];
+    const out = mergeTasksSnapshot(local as Task[], wk(), snap(remote, wk()));
+    expect(out.tasksChanged).toBe(true);
+    expect(out.tasks[0].completed).toBe(true);
+    expect((out.tasks[0] as any).pendingApproval).toEqual({ byName: "Megan", at: RECLAIM_AT, points: 5 });
+  });
+
+  it("a local open row WITHOUT a send-back stamp still adopts the remote pending (no behavior change)", () => {
+    const local = [t({})];
+    const remote = [t({ completed: true, pendingApproval: { byName: "Megan", at: TAP_AT, points: 5 } })];
+    const out = mergeTasksSnapshot(local as Task[], wk(), snap(remote, wk()));
+    expect(out.tasksChanged).toBe(true);
+    expect((out.tasks[0] as any).pendingApproval).toEqual({ byName: "Megan", at: TAP_AT, points: 5 });
+  });
+});

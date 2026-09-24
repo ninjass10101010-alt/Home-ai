@@ -1,7 +1,7 @@
 {
-  "hash": "025f817ee5e4266b879e5730bea50fdb4ef8d743",
-  "short": "025f817",
-  "message": "fix(tasks): final-review wave — sentBackAt snapshot parity, 400 on bad JSON, honest toast, re-pay+crew tests",
-  "date": "2026-09-23 12:38:35 -0400",
+  "hash": "bd9094d38b4368ee7e28eaf6f9eed2f2894d22c3",
+  "short": "bd9094d",
+  "message": "fix(tasks,kid,db): unblock kid assigned completions from parent approval",
+  "date": "2026-09-23 17:29:46 -0400",
   "author": "GarciaFam"
 }

@@ -294,7 +294,7 @@ function cacheMemberColor(m: any, i: number) {
 // render sites must use this (see PlanTab's member strip).
 function mappedMembersFallback() {
   return membersFallback.map(m => ({
-    id: m.id, name: m.name.split(' ')[0], fullName: m.name, role: m.role,
+    id: m.id, name: m.name.split(' ')[0], fullName: m.fullName ?? m.name, role: m.role,
     color: cacheMemberColor(m, m.id - 1), emoji: m.emoji || "😊",
   }));
 }

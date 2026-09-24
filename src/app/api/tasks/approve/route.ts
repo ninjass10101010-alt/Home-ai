@@ -98,6 +98,16 @@ async function findTask(
   const rows = await pb.collection("tasks").getFullList({ requestKey: null });
   const rec = rows.find((r: any) => Number(r.taskId) === Number(taskId));
   if (snap) {
+    const pbPending = rec
+      ? (parseJSON<PendingApproval | null>(rec.pendingApproval, null as any) ?? null)
+      : null;
+    // Union-heal (2026-09-23 review): the sync route's push guard closes the
+    // clobber going forward; this heals rows already orphaned in production —
+    // a parent's stale push used to wipe the snapshot's pendingApproval while
+    // the PB mirror row still carries it. The idempotent (taskId+member,
+    // reversal-aware) ledger makes a stale PB pending harmless: an
+    // already-paid task re-approve is a skipped no-op, never a double-pay.
+    const healed = ((snap as any).pendingApproval ?? null) || pbPending;
     return {
       task: {
         id: Number(snap.id),
@@ -105,7 +115,7 @@ async function findTask(
         points: snap.points,
         completed: snap.completed,
         completedInWeek: snap.completedInWeek,
-        pendingApproval: snap.pendingApproval,
+        pendingApproval: healed ?? undefined,
         crew: snap.crew,
         crewSize: snap.crewSize,
       },

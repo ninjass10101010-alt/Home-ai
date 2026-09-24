@@ -467,4 +467,34 @@ describe("needs approval → server route", () => {
     expect(storedWeek().history).toHaveLength(1);
     expect(document.body.textContent || "").toContain("Approved!");
   });
+
+  it("a 5xx from the route keeps the local approval (same class as network failure, never a 4xx revert)", async () => {
+    // 2026-09-23 review: the route pays the snapshot week + clears the row
+    // INSIDE the lock before a later PB write can throw — a 5xx can be a
+    // PARTIAL apply. Reverting fought the next merge's paidElsewhere
+    // adoption (approve → un-approve → re-approve churn). 5xx now takes the
+    // D8 keep-local path.
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/api/members/verify")) {
+        return { ok: true, status: 200, json: async () => ({ member: { name: "Rebecca (Mom)", fullName: "Rebecca (Mom)" } }) } as any;
+      }
+      if (url.includes("/api/tasks/approve")) {
+        approveCalls.push(JSON.parse(String(init?.body || "{}")));
+        return { ok: false, status: 502, json: async () => ({ error: "db_error" }) } as any;
+      }
+      return { ok: true, status: 200, json: async () => ({ snapshot: null }) } as any;
+    }));
+    await driveApproval("Approve Dishes", "Approve");
+
+    expect(approveCalls).toHaveLength(1);
+    // Local optimistic approval SURVIVES the 5xx (no revert — identical to
+    // the offline path)…
+    expect(storedTasks()[0].pendingApproval).toBeUndefined();
+    expect(storedWeek().history).toHaveLength(1);
+    // …and the caller's saved-locally success copy wins, never a 4xx-style
+    // "the server refused" revert toast.
+    expect(document.body.textContent || "").toContain("Approved!");
+    expect(document.body.textContent || "").not.toContain("refused");
+  });
 });

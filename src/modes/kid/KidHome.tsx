@@ -24,7 +24,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import PageShell from "@/components/ui/PageShell";
 import Avatar from "@/components/ui/Avatar";
 import EmergencyButton from "@/components/ui/EmergencyButton";
@@ -55,6 +55,8 @@ import {
   tapCompletePending,
   isSnatchable,
   resolveMemberName,
+  isPendingApproval,
+  sendBackPendingCompletion,
   raceGap,
   prizeForRank,
   isCrewTask,
@@ -275,6 +277,18 @@ export default function KidHome() {
   const [dataVersion, setDataVersion] = useState(0);
   // Kid profile sheet (tap the hero avatar) — shared by bedtime + normal flows.
   const [profileSheetOpen, setProfileSheetOpen] = useState(false);
+  // Claim outbox (2026-09-23 review, Critical #2): a fire-and-forget claim
+  // POST that fails (network / 5xx / expired 15-min kid session) used to
+  // strand the kid's completion FOREVER — the parent queue reads the server
+  // snapshot, the local pending row never reached it, re-tap was blocked,
+  // and kids can't reach the /tasks self-cancel. Failed claims stay queued
+  // here and re-POST on every refresh tick until the server confirms;
+  // entries the session can never deliver (401 without a usable PIN) go
+  // `stalled` and surface an honest ask-a-grown-up notice instead.
+  // Ref-held + version counter: the retry effect must key on dataVersion,
+  // never on outbox mutations (that would loop).
+  const claimOutboxRef = useRef<Record<number, { memberName: string; pin?: string; stalled?: boolean }>>({});
+  const [claimOutboxVersion, setClaimOutboxVersion] = useState(0);
 
   const { currentUser, logout, sessionWarning, sessionRemainingMs } = useAuth();
   const { isBedtime, isWeekend } = useDashboardMode();
@@ -293,6 +307,135 @@ export default function KidHome() {
       window.removeEventListener("consuela-members-updated", onMembersUpdated);
       window.removeEventListener("consuela-data-refreshed", onDataRefreshed);
     };
+  }, []);
+
+  // The ONE claim-POST seam for kid completions (under-10 no-pin + 10+ with
+  // pin): same body shapes the route contract pins, plus outbox bookkeeping —
+  // success/409/404 clears the entry, anything else keeps it for the retry
+  // tick, and a 401 an entry can never recover from (no usable PIN) stalls it
+  // with an honest notice. The optimistic row + celebration are unaffected
+  // (500s never block the kid flow — kid-pin-error-paths contract).
+  const postClaimComplete = useCallback(
+    async (args: { taskId: number; memberName: string; pin?: string; assigneeEmoji?: string }) => {
+      const enqueue = (stalled = false) => {
+        claimOutboxRef.current[args.taskId] = {
+          memberName: args.memberName,
+          ...(args.pin ? { pin: args.pin } : {}),
+          ...(stalled ? { stalled: true } : {}),
+        };
+        setClaimOutboxVersion((v) => v + 1);
+      };
+      const clear = () => {
+        if (args.taskId in claimOutboxRef.current) {
+          delete claimOutboxRef.current[args.taskId];
+          setClaimOutboxVersion((v) => v + 1);
+        }
+      };
+      try {
+        const res = await fetch("/api/tasks/claim", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "complete",
+            taskId: args.taskId,
+            memberName: args.memberName,
+            ...(args.pin ? { pin: args.pin } : {}),
+            ...(args.assigneeEmoji !== undefined ? { assigneeEmoji: args.assigneeEmoji } : {}),
+          }),
+        });
+        if (res.ok) { clear(); return; }
+        if (res.status === 409 || res.status === 404) { clear(); return; } // server already knows
+        // 401: this session can't deliver the claim (expired, or the pin is
+        // no longer accepted) — no point hammering; stall with the notice.
+        enqueue(res.status === 401);
+      } catch {
+        enqueue(); // network — retry on the next refresh tick
+      }
+    },
+    []
+  );
+
+  // Retry tick: re-POST every non-stalled outbox entry whose row is still
+  // pending locally. Runs on mount and every dataVersion bump (completions +
+  // the 60s consuela-data-refreshed pull) — an orphan from a FAILED POST, or
+  // a legacy pre-server-handoff tap living only in this device's localStorage,
+  // self-heals here instead of stranding forever.
+  useEffect(() => {
+    if (!currentUser) return;
+    const tasks = loadTasks();
+    // Legacy-orphan adoption: a pending row older than two minutes whose
+    // claim never reached the server (a tap from before the server handoff
+    // shipped, or a failure from before this outbox existed) lives ONLY in
+    // this device's localStorage — the parent queue reads the server
+    // snapshot, so it never surfaces. Adopt it into the outbox and let the
+    // first retry tick deliver it: 200 clears it, 409 (already completed /
+    // already claimed) also clears. The two-minute floor keeps a claim
+    // whose POST is still in flight from being double-POSTed by the scan.
+    const LEGACY_AGE_MS = 2 * 60 * 1000;
+    const nowMs = Date.now();
+    let adopted = 0;
+    for (const t of tasks) {
+      if (!isPendingApproval(t) || !(t as any).pendingApproval?.at) continue;
+      if (t.id in claimOutboxRef.current) continue;
+      const age = nowMs - Date.parse(String((t as any).pendingApproval.at));
+      if (Number.isNaN(age) || age < LEGACY_AGE_MS) continue;
+      claimOutboxRef.current[t.id] = {
+        memberName: (t as any).pendingApproval.byName || resolveMemberName(db.selectMembers(), currentUser.name),
+      };
+      adopted += 1;
+    }
+    if (adopted) setClaimOutboxVersion((v) => v + 1);
+
+    const entries = Object.entries(claimOutboxRef.current).filter(([, v]) => !v.stalled);
+    if (!entries.length) return;
+    for (const [taskIdStr, entry] of entries) {
+      const taskId = Number(taskIdStr);
+      const row = tasks.find((t: any) => t.id === taskId);
+      if (!row || !row.pendingApproval) {
+        // Resolved elsewhere (approved / sent back / deleted) — drop it.
+        if (taskId in claimOutboxRef.current) {
+          delete claimOutboxRef.current[taskId];
+          setClaimOutboxVersion((v) => v + 1);
+        }
+        continue;
+      }
+      void postClaimComplete({
+        taskId,
+        memberName: entry.memberName,
+        ...(entry.pin ? { pin: entry.pin } : {}),
+        ...(row.assigneeEmoji !== undefined ? { assigneeEmoji: row.assigneeEmoji } : {}),
+      });
+    }
+  }, [dataVersion, currentUser, postClaimComplete]);
+
+  // Outbox notice state: queued claims are still being re-sent; stalled ones
+  // (401 — this session can't deliver them) ask a grown-up. Both are honest,
+  // non-blocking, and clear themselves the moment the server confirms.
+  const claimOutboxSummary = useMemo(() => {
+    const entries = Object.values(claimOutboxRef.current);
+    return {
+      total: entries.length,
+      queued: entries.filter((e) => !e.stalled).length,
+      stalled: entries.filter((e) => e.stalled).length,
+    };
+    // claimOutboxVersion is the outbox mutation signal (the ref itself never
+    // re-renders the component).
+  }, [claimOutboxVersion]);
+
+  // Kid self-cancel (PIN-free, same contract as the /tasks page's tapping-kid
+  // cancel): a pending tap reopens with the durable sentBackAt proof — the
+  // same stamp the parent send-back uses, so the snapshot pull's timestamp
+  // gates and the sync route's push guard both honour the clear instead of
+  // resurrecting the pending row.
+  const cancelQuestTap = useCallback((taskId: number) => {
+    const tasks = sendBackPendingCompletion(loadTasks(), taskId);
+    saveTasks(tasks);
+    void syncTasksToPB(tasks);
+    if (taskId in claimOutboxRef.current) {
+      delete claimOutboxRef.current[taskId];
+      setClaimOutboxVersion((v) => v + 1);
+    }
+    setDataVersion((v) => v + 1);
   }, []);
 
   useEffect(() => {
@@ -514,18 +657,10 @@ export default function KidHome() {
       void syncTasksToPB(tasks);
       // Server-authoritative handoff (same seam as Tasks persistServerComplete):
       // local pending alone never reaches parent approval — the claim route
-      // writes pendingApproval into the snapshot. Fire-and-forget; a network
-      // failure keeps the optimistic row for sync to reconcile.
-      void fetch("/api/tasks/claim", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "complete",
-          taskId: task.id,
-          memberName: myName,
-          assigneeEmoji: task.assigneeEmoji,
-        }),
-      }).catch(() => {});
+      // writes pendingApproval into the snapshot. Fire-and-forget; a failure
+      // queues in the claim outbox for the refresh-tick retry (never blocks
+      // the celebration).
+      void postClaimComplete({ taskId: task.id, memberName: myName, assigneeEmoji: task.assigneeEmoji });
       celebrate(task.points || 0, before, { pending: true });
       setDataVersion((v) => v + 1);
       return;
@@ -538,7 +673,7 @@ export default function KidHome() {
     setQuestPinTask(task);
     setQuestPin("");
     setQuestPinError("");
-  }, [user, celebrate, runCrewAction]);
+  }, [user, celebrate, runCrewAction, postClaimComplete]);
 
   const closeQuestPin = useCallback(() => {
     setQuestPinTask(null);
@@ -661,18 +796,10 @@ export default function KidHome() {
           // Server-authoritative handoff (same as under-10 + Tasks page):
           // verified PIN already checked via verifyPinRemote — this POST
           // persists pendingApproval to the snapshot for parent approval.
-          // Fire-and-forget; optimistic row stays on network failure.
-          void fetch("/api/tasks/claim", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              action: "complete",
-              taskId: task.id,
-              memberName: myName,
-              pin: questPin,
-              assigneeEmoji: task.assigneeEmoji,
-            }),
-          }).catch(() => {});
+          // Fire-and-forget; a failure queues in the claim outbox (the pin
+          // lives only in this in-memory entry, never persisted) and retries
+          // on the refresh tick.
+          void postClaimComplete({ taskId: task.id, memberName: myName, pin: questPin, assigneeEmoji: task.assigneeEmoji });
           celebrate(task.points || 0, before, { pending: true });
         } else {
           // Neither branch owns this shape (a non-child session somehow reached
@@ -698,7 +825,7 @@ export default function KidHome() {
         setQuestPinBusy(false);
       }
     },
-    [questPinTask, questCrewAction, runCrewAction, user, celebrate]
+    [questPinTask, questCrewAction, runCrewAction, user, celebrate, postClaimComplete]
   );
 
   const submitQuestPin = async () => {
@@ -1050,6 +1177,27 @@ export default function KidHome() {
             </div>
           )}
 
+          {/* Claim outbox notice (2026-09-23 review): honest, non-blocking,
+              self-clearing when the server confirms the claim. */}
+          {claimOutboxSummary.total > 0 && (
+            <div
+              className="rounded-xl px-3 py-2"
+              style={{
+                background: "color-mix(in srgb, var(--color-accent-amber) 10%, transparent)",
+                border: "1px solid color-mix(in srgb, var(--color-accent-amber) 25%, transparent)",
+              }}
+            >
+              <p className="text-[11px] font-semibold text-[var(--color-accent-amber)]">
+                {claimOutboxSummary.stalled > 0
+                  ? `⏳ Couldn't send ${claimOutboxSummary.stalled} chore${claimOutboxSummary.stalled !== 1 ? "s" : ""} — ask a grown-up to check your chores.`
+                  : `⏳ Still sending ${claimOutboxSummary.queued} chore${claimOutboxSummary.queued !== 1 ? "s" : ""} to the family server…`}
+                {claimOutboxSummary.stalled > 0 && claimOutboxSummary.queued > 0
+                  ? ` (${claimOutboxSummary.queued} still sending…)`
+                  : ""}
+              </p>
+            </div>
+          )}
+
           {/* Completed today */}
           {completedToday.length > 0 && (
             <div>
@@ -1057,20 +1205,42 @@ export default function KidHome() {
                 ✅ Done today ({completedToday.length})
               </h2>
               <div className="space-y-1.5">
-                {completedToday.slice(0, 3).map((task) => (
-                  <div
-                    key={task.id}
-                    className="flex items-center gap-2.5 px-3 py-2 rounded-xl opacity-50"
-                    style={{
-                      background: "color-mix(in srgb, var(--color-accent-mint) 5%, transparent)",
-                      border: "1px solid color-mix(in srgb, var(--color-accent-mint) 10%, transparent)",
-                    }}
-                  >
-                    <span className="text-sm">✅</span>
-                    <span className="text-xs text-text-muted line-through flex-1">{task.title}</span>
-                    <span className="text-[11px] font-bold text-[var(--color-accent-mint)]">+{task.points}</span>
-                  </div>
-                ))}
+                {completedToday.slice(0, 3).map((task) => {
+                  const pending = isPendingApproval(task);
+                  return (
+                    <div
+                      key={task.id}
+                      className="flex items-center gap-2.5 px-3 py-2 rounded-xl opacity-50"
+                      style={{
+                        background: "color-mix(in srgb, var(--color-accent-mint) 5%, transparent)",
+                        border: "1px solid color-mix(in srgb, var(--color-accent-mint) 10%, transparent)",
+                      }}
+                    >
+                      {/* A pending tap is done-but-unpaid: the ⏳ + honest
+                          self-cancel replace the paid ✅/+N treatment, and the
+                          cancel is the same durable send-back stamp the
+                          parent flow uses (never a silent local clear). */}
+                      <span className="text-sm">{pending ? "⏳" : "✅"}</span>
+                      <span className={`text-xs text-text-muted flex-1 ${pending ? "" : "line-through"}`}>
+                        {task.title}
+                        {pending && <span className="ml-1 text-[11px] font-semibold text-[var(--color-accent-amber)]">on the way</span>}
+                      </span>
+                      {pending ? (
+                        <button
+                          type="button"
+                          aria-label={`Cancel: ${task.title}`}
+                          onClick={() => cancelQuestTap(task.id)}
+                          className="text-[11px] font-semibold px-2 py-1 rounded-lg"
+                          style={{ color: "var(--color-accent-rose)" }}
+                        >
+                          ↩ Not done
+                        </button>
+                      ) : (
+                        <span className="text-[11px] font-bold text-[var(--color-accent-mint)]">+{task.points}</span>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}

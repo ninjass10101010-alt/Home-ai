@@ -5,7 +5,7 @@ vi.mock("@/db", () => ({ db: { upsertTask: vi.fn(async () => ({})) } }));
 
 import {
   isPendingApproval, pendingApprovals, pendingPointsFor, completesWithoutPin,
-  tapCompletePending, approvePendingCompletion, sendBackPendingCompletion,
+  tapCompletePending, approvePendingCompletion, sendBackPendingCompletion, adoptServerWeekData,
 } from "@/lib/task-utils";
 
 function t(over: Partial<Task>): Task {
@@ -187,5 +187,50 @@ describe("regenerateRecurringTasks with pending rows", () => {
     const out = regenerateRecurringTasks([done]);
     expect(out.some((r) => r.id === 9)).toBe(false);
     expect(out.some((r) => r.title === "Take out trash" && !r.completed)).toBe(true);
+  });
+});
+
+describe("adoptServerWeekData (guarded server-ledger adoption, 2026-09-23 review)", () => {
+  const offlineTx = {
+    id: 1, timestamp: "2026-09-22T10:00:00.000Z", member: "Jasmine Rose",
+    type: "earn", amount: 8, description: "Completed: Dishes (+8pts)", taskId: 101,
+  } as any;
+
+  it("same week, server ledger SHORTER than local → local survives (offline approval tx is never dropped)", () => {
+    
+    const prev = wk({ history: [offlineTx] as any });
+    const server = wk({ history: [] });
+    expect(adoptServerWeekData(prev, server)).toBe(prev);
+  });
+
+  it("same week, server ledger at least as long → adopted (the normal online flow)", () => {
+    
+    const prev = wk({ history: [offlineTx] as any });
+    const server = wk({
+      points: { "Caspian Garcia": 8 },
+      history: [offlineTx, { id: 2, timestamp: "2026-09-22T11:00:00.000Z", member: "Caspian Garcia", type: "earn", amount: 8, description: "x", taskId: 102 }] as any,
+    });
+    expect(adoptServerWeekData(prev, server)).toBe(server);
+  });
+
+  it("server carries a NEWER week → adopted verbatim (Monday rollover)", () => {
+    
+    const prev = wk({ weekStart: "2026-09-01", history: [offlineTx] as any });
+    const server = wk({ weekStart: "2026-09-08", history: [] });
+    expect(adoptServerWeekData(prev, server)).toBe(server);
+  });
+
+  it("server carries an OLDER week (stale server) → local kept", () => {
+    
+    const prev = wk({ weekStart: "2026-09-08" });
+    const server = wk({ weekStart: "2026-09-01" });
+    expect(adoptServerWeekData(prev, server)).toBe(prev);
+  });
+
+  it("empty/absent server week → local kept; empty local → server adopted", () => {
+    const prev = wk();
+    expect(adoptServerWeekData(prev, {} as WeekData)).toBe(prev);
+    const server = wk();
+    expect(adoptServerWeekData({} as WeekData, server)).toBe(server);
   });
 });

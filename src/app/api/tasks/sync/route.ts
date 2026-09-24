@@ -3,6 +3,7 @@ import { withAdmin } from "@/lib/pb-auth";
 import { verifySession, SESSION_COOKIE } from "@/lib/session";
 import { withKeyedLock } from "@/lib/keyed-lock";
 import { ensureArchivedWeeksEnshrined } from "@/lib/hall-of-fame-backfill";
+import { protectPendingOnPush } from "@/lib/snapshot-tasks";
 
 export const dynamic = "force-dynamic";
 
@@ -96,16 +97,31 @@ export async function POST(req: NextRequest) {
         ].filter((n) => Number.isFinite(n));
         const stripDeleted = (list: any[]) =>
           (Array.isArray(list) ? list : []).filter((t) => !unionDeleted.includes(Number(t?.id)));
+        // Push-side pending guard (2026-09-23 review): a parent's stale local
+        // list must never ERASE a pendingApproval the claim route just wrote
+        // server-side (kid devices never push the snapshot), and a stale
+        // device must never RESURRECT one the stored row has already resolved
+        // (approve / send-back). Proof rules mirror the pull-side merge gates
+        // in mergeTasksSnapshot (task-utils).
+        const protectedTasks = protectPendingOnPush({
+          storedTasks: (Array.isArray(stored.tasks) ? stored.tasks : []).filter(
+            (t: any) => !unionDeleted.includes(Number(t?.id))
+          ),
+          pushedTasks: stripDeleted(body.tasks),
+          pushedHistory: isParent ? body?.weekData?.history : undefined,
+          storedHistory: stored?.weekData?.history,
+        });
         // Parent writes the full body (plus the unioned tombstones). A non-parent
         // writes only the tasks leg, preserving the stored parent-owned legs so a
         // kid sync can never move points or wipe the ledger.
-        // A parent write stays byte-identical (verbatim) unless there is a
-        // tombstone to carry — no spurious keys on the common path.
+        // The tasks leg is the push's own list, pending-guarded above; every
+        // other key passes through verbatim — no spurious keys on the common
+        // path.
         const data = isParent
           ? unionDeleted.length
-            ? { ...body, tasks: stripDeleted(body.tasks), deletedTaskIds: unionDeleted }
-            : body
-          : { ...stored, tasks: stripDeleted(body.tasks) };
+            ? { ...body, tasks: protectedTasks, deletedTaskIds: unionDeleted }
+            : { ...body, tasks: protectedTasks }
+          : { ...stored, tasks: protectedTasks };
         const payload = {
           key: KEY,
           data,

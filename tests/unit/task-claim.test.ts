@@ -288,7 +288,7 @@ describe("POST /api/tasks/claim", () => {
 
   it("child claimant → pendingApproval on the task row, no week_data earn", async () => {
     mocks.verifyPinFromPB.mockResolvedValue({ id: "k", name: "Caspian Garcia", role: "child", emoji: "🧒" });
-    const { pb, updateCalls } = makePb({ taskPoints: 5 });
+    const { pb, updateCalls, snapshotUpdates } = makePb({ taskPoints: 5 });
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
 
     const res = await POST(jsonReq({ taskId: 42, claimantName: "Caspian", claimantPin: "1010" }));
@@ -309,6 +309,14 @@ describe("POST /api/tasks/claim", () => {
     // wiping the kid's optimistic pending row and clobbering the claim back
     // to unclaimed.
     expect(taskPatch.sentBackAt).toBeNull();
+    // SNAPSHOT PARITY (2026-09-23 review): the same stamp clear must land on
+    // the snapshot row the dashboard actually renders — a stale send-back
+    // stamp surviving there resurrects the same merge-gate wipe.
+    const snap = snapshotUpdates();
+    const snapData = typeof snap?.data === "string" ? JSON.parse(snap.data) : snap?.data;
+    const snapTask = (snapData?.tasks || []).find((x: any) => x.id === 42);
+    expect(snapTask?.pendingApproval).toMatchObject({ byName: "Caspian Garcia", points: 5 });
+    expect(snapTask?.sentBackAt).toBeNull();
   });
 
   it("a second claim on the kid's pending row is still rejected", async () => {
@@ -414,6 +422,37 @@ describe("POST /api/tasks/claim — crew actions", () => {
     const res = await POST(jsonReq({ action: "crew-join", taskId: 42, memberName: "Alex", pin: "1234" }));
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ success: false, reason: "crew_full" });
+  });
+
+  it("crew-join gates a photo avatar down to the fallback glyph (PB json field, same class as assigneeEmoji)", async () => {
+    // 2026-09-23 review: crew members' emojis come from members.emoji — a
+    // photo member there is a 100KB+ base64 data URL. crewJoin stored it
+    // verbatim into the PB tasks row (and the crew rides syncTasksToPB /
+    // mirrorTaskToCollection raw), the same photo-bloat class the emoji gate
+    // closed for assigneeEmoji.
+    const photo = `data:image/webp;base64,${"A".repeat(80_000)}`;
+    mocks.verifyPinFromPB.mockResolvedValue({ name: "Emily Garcia", role: "child", emoji: photo });
+    const { pb, updateCalls } = makePb({ taskPoints: 10, taskRow: crewTaskRow({ crewSize: 3, crew: { members: [] } }) });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ action: "crew-join", taskId: 42, memberName: "Emily", pin: "1010" }));
+    expect(res.status).toBe(200);
+    const patch = updateCalls.tasks.find((p: any) => p.crew);
+    const joined = patch.crew.members.find((m: any) => m.name === "Emily Garcia");
+    expect(joined).toBeTruthy();
+    expect(joined.emoji).toBe("👤");
+    expect(JSON.stringify(patch.crew).length).toBeLessThan(5000);
+  });
+
+  it("crew-join keeps a short glyph emoji as-is", async () => {
+    mocks.verifyPinFromPB.mockResolvedValue({ name: "Lily", role: "child", emoji: "🌸" });
+    const { pb, updateCalls } = makePb({ taskPoints: 10, taskRow: crewTaskRow({ crewSize: 3, crew: { members: [] } }) });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ action: "crew-join", taskId: 42, memberName: "Lily", pin: "1010" }));
+    expect(res.status).toBe(200);
+    const patch = updateCalls.tasks.find((p: any) => p.crew);
+    expect(patch.crew.members.find((m: any) => m.name === "Lily").emoji).toBe("🌸");
   });
 
   it("crew-join rejects a non-crew task", async () => {
@@ -559,7 +598,11 @@ describe("POST /api/tasks/claim — server-authoritative assigned completions", 
     expect(patch.pendingApproval).toMatchObject({ byName: "Caspian Garcia", points: 6 });
     const snap = snapshotUpdates();
     const data = typeof snap.data === "string" ? JSON.parse(snap.data) : snap.data;
-    expect((data.tasks || []).find((t: any) => t.id === 42).pendingApproval).toMatchObject({ byName: "Caspian Garcia" });
+    const snapTask = (data.tasks || []).find((t: any) => t.id === 42);
+    expect(snapTask.pendingApproval).toMatchObject({ byName: "Caspian Garcia" });
+    // SNAPSHOT PARITY (2026-09-23 review): the completeTask path clears the
+    // stale send-back stamp on the snapshot row too.
+    expect(snapTask.sentBackAt).toBeNull();
   });
 
   it("complete rejects universal tasks (they go through claim) and crew tasks", async () => {

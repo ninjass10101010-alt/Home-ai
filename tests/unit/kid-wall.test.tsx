@@ -119,6 +119,25 @@ vi.mock("@/lib/task-utils", () => ({
     completedInWeek: week,
     pendingApproval: { byName, at: nowISO, points: task.points },
   }),
+  // 2026-09-23 review: the claim outbox + kid self-cancel seams.
+  isPendingApproval: (task: any) => !!task?.completed && !!task?.pendingApproval,
+  sendBackPendingCompletion: (tasks: any[], taskId: number) => {
+    const task = tasks.find((t: any) => t.id === taskId);
+    if (!task || !(!!task.completed && !!task.pendingApproval)) return tasks;
+    return tasks.map((t: any) =>
+      t.id === taskId
+        ? {
+            ...t,
+            completed: false,
+            completedBy: undefined,
+            completedAt: undefined,
+            completedInWeek: undefined,
+            pendingApproval: undefined,
+            sentBackAt: new Date().toISOString(),
+          }
+        : t
+    );
+  },
 }));
 
 vi.mock("@/components/integrations/SpotifyWidget", () => ({ default: () => null }));

@@ -68,15 +68,18 @@ describe("MemberSheet pending-task photo avatars", () => {
     document.body.innerHTML = "";
   });
 
-  it("renders a photo assigneeEmoji as an <img>, not raw base64 text", async () => {
+  it("renders the sheet member's roster photo as an <img>, not raw base64 text (roster-first, 2026-09-23 review)", async () => {
+    // Task rows no longer carry photo avatars (the persistedTaskEmoji write
+    // gate collapses them at every PB boundary) — the pending row's avatar
+    // resolves from the sheet entry's live-roster emoji instead.
     render(
       <MemberSheet
         open
-        entry={{ name: "Emily", emoji: "👧", streak: 2, rank: 1, levelEmoji: "⭐", levelTitle: "Champ" }}
+        entry={{ name: "Emily", emoji: PHOTO, streak: 2, rank: 1, levelEmoji: "⭐", levelTitle: "Champ" }}
         allTimePoints={120}
         allTimeComps={30}
         weeklyPoints={40}
-        pendingTasks={[{ id: 1, title: "Feed the cat", assignee: "Emily", assigneeEmoji: PHOTO, points: 5 }]}
+        pendingTasks={[{ id: 1, title: "Feed the cat", assignee: "Emily", assigneeEmoji: "👤", points: 5 }]}
         affordableRewards={[]}
         weekGraph={[{ day: "M", points: 10 }, { day: "T", points: 20 }]}
         onClose={() => {}}

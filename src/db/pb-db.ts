@@ -96,7 +96,7 @@ export const db = {
   async selectMembers() {
     const records = await safeList<any>("members", []);
     if (records.length === 0) return membersFallback.map(m => ({
-      id: m.id, name: m.name.split(' ')[0], fullName: m.name,
+      id: m.id, name: m.name.split(' ')[0], fullName: m.fullName ?? m.name,
       role: m.role, color: memberColor(m.id - 1), emoji: m.emoji || "😊",
       skinColor: m.skinColor, hairColor: m.hairColor, age: m.age,
     }));

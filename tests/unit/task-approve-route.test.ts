@@ -250,6 +250,34 @@ describe("POST /api/tasks/approve — action:approve", () => {
     expect(points()["Caspian Garcia"]).toBe(8);
   });
 
+  it("union-heal: a snapshot row whose pending was clobbered by a stale push recovers it from the PB mirror row (2026-09-23 review)", async () => {
+    // Production-orphan state: the sync route used to replace the tasks leg
+    // verbatim, wiping a kid's just-written pendingApproval from the SNAPSHOT
+    // while the PB tasks collection row still carries it. The approve route
+    // must heal the pending from the mirror — and the (taskId+member,
+    // reversal-aware) idempotent ledger makes a stale mirror pending harmless
+    // (already-paid rows re-approve as a skipped no-op, never a double-pay).
+    const { pb, points, history } = makePb({
+      snapshotTasks: [pendingTaskRow({ pendingApproval: undefined })],
+      collectionTask: {
+        id: "pb-1",
+        taskId: 101,
+        title: "Dishes",
+        points: 6,
+        completed: true,
+        pendingApproval: pendingTaskRow().pendingApproval,
+      },
+    });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    const res = await POST(jsonReq({ action: "approve", memberName: "Rebecca (Mom)", pin: "0202", taskId: 101 }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.paid).toBe(1);
+    expect(points()["Caspian Garcia"]).toBe(8);
+    const earn = history().find((t: any) => t.type === "earn" && t.taskId === 101);
+    expect(earn?.amount).toBe(8);
+  });
+
   it("no-ops with 200 when the row is no longer pending (already approved elsewhere)", async () => {
     const { pb, points } = makePb({
       snapshotTasks: [pendingTaskRow({ pendingApproval: undefined, completed: true })],

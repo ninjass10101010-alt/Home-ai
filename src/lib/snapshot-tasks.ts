@@ -1,6 +1,6 @@
 import { withAdmin } from "@/lib/pb-auth";
 import { withKeyedLock } from "@/lib/keyed-lock";
-import { persistedTaskEmoji } from "@/lib/task-emoji";
+import { persistedTaskEmoji, persistedCrewEmoji } from "@/lib/task-emoji";
 import type { WeekData, Transaction } from "@/types/tasks";
 
 /**
@@ -92,6 +92,111 @@ export function upsertSnapshotTask(data: SnapshotData, task: SnapshotTask): Snap
   return { ...data, tasks: [...tasks, task], deletedTaskIds: tomb };
 }
 
+/**
+ * Push-side guard for POST /api/tasks/sync's tasks leg (2026-09-23 review).
+ *
+ * The snapshot's completion state now has TWO writers: the browser push (a
+ * device's full local list) and the server claim/approve routes (pending
+ * taps land via persistSnapshotWeek). Kid devices never push the snapshot,
+ * so a parent's stale local list — captured before a kid's claim landed —
+ * used to REPLACE the tasks leg verbatim and silently erase the just-written
+ * `pendingApproval`: the kid's "on the way" row never reached the parent
+ * queue, the points were never paid, and nothing self-healed (the weekData
+ * leg union-merges by tx id, the tasks leg did not).
+ *
+ * Mirrors the pull-side proof gates in `mergeTasksSnapshot` (task-utils): a
+ * pushed row may only CLEAR a stored live pending when the PUSH carries
+ * proof — an earn tx for that task in the pusher's own weekData.history
+ * (approval happened on the pushing device) or a sentBackAt stamp that does
+ * not pre-date the stored tap — or carries an even FRESHER claim
+ * (newest-claim-wins). Symmetrically, a pushed row may not RE-INTRODUCE a
+ * pending the stored row has already resolved (paid in the stored history,
+ * or sent back after the pushed tap) — that is a stale device resurrecting a
+ * ghost approval.
+ *
+ * Rows with no pendingApproval on either side pass through verbatim.
+ */
+export function protectPendingOnPush(args: {
+  storedTasks: SnapshotTask[];
+  pushedTasks: SnapshotTask[];
+  /** Pusher's weekData.history — parent pushes only (kids never approve). */
+  pushedHistory?: unknown[];
+  /** The stored snapshot's weekData.history (server-side resolution proof). */
+  storedHistory?: unknown[];
+}): SnapshotTask[] {
+  const { storedTasks, pushedTasks, pushedHistory, storedHistory } = args;
+  const byId = new Map(storedTasks.map((t) => [Number(t?.id), t]));
+  const hasEarnFor = (history: unknown[] | undefined, id: number) =>
+    Array.isArray(history) &&
+    history.some((tx: any) => tx?.type === "earn" && Number(tx?.taskId) === id);
+  const ts = (v: unknown): number | null => {
+    const n = Date.parse(String(v ?? ""));
+    return Number.isNaN(n) ? null : n;
+  };
+  // The stored row's completion stamps travel with whichever pending wins —
+  // a live pending implies its own completion, a resolved row implies its
+  // own reopen. A protected pushed row keeps every OTHER pushed field (a
+  // parent's legitimate title/points edits still land).
+  const storedCompletion = (s: SnapshotTask) => ({
+    completed: (s as any).completed ?? false,
+    completedBy: (s as any).completedBy ?? null,
+    completedAt: (s as any).completedAt ?? null,
+    completedInWeek: (s as any).completedInWeek ?? null,
+  });
+  return pushedTasks.map((p) => {
+    const s = byId.get(Number(p?.id));
+    if (!s) return p; // fresh row the server doesn't know — the push owns it
+    const id = Number(p.id);
+    const storedPending = (s as any).pendingApproval ?? null;
+    const pushedPending = (p as any).pendingApproval ?? null;
+    if (!storedPending && !pushedPending) return p;
+
+    if (storedPending && !pushedPending) {
+      const storedAt = ts((storedPending as any)?.at);
+      const pushedSentBack = ts((p as any).sentBackAt);
+      const mayClear =
+        hasEarnFor(pushedHistory, id) ||
+        (pushedSentBack !== null && (storedAt === null || pushedSentBack >= storedAt));
+      if (mayClear) return p;
+      // Protect the live stored tap. sentBackAt: null — a live pending has
+      // no send-back in effect (also clears pre-parity stale stamps).
+      return {
+        ...p,
+        ...storedCompletion(s),
+        pendingApproval: storedPending,
+        sentBackAt: null,
+      };
+    }
+
+    if (!storedPending && pushedPending) {
+      const pushedAt = ts((pushedPending as any)?.at);
+      const storedSentBack = ts((s as any).sentBackAt);
+      const resolved =
+        hasEarnFor(storedHistory, id) ||
+        (storedSentBack !== null && (pushedAt === null || storedSentBack >= pushedAt));
+      if (!resolved) return p; // genuinely fresh pending the server lacks — accept (self-heal)
+      // Ghost: strip the stale pending and restore the stored resolution state.
+      return {
+        ...p,
+        ...storedCompletion(s),
+        pendingApproval: null,
+        sentBackAt: (s as any).sentBackAt ?? null,
+      };
+    }
+
+    // Both sides claim a pending — newest claim wins.
+    const storedAt = ts((storedPending as any)?.at) ?? 0;
+    const pushedAt = ts((pushedPending as any)?.at) ?? 0;
+    if (pushedAt >= storedAt) return p;
+    return {
+      ...p,
+      ...storedCompletion(s),
+      pendingApproval: storedPending,
+      sentBackAt: null,
+    };
+  });
+}
+
 async function readRow(): Promise<{ id: string | null; data: SnapshotData }> {
   return withAdmin(async (pb) => {
     const rows = await pb.collection(SNAPSHOT_COLLECTION).getFullList({
@@ -174,7 +279,9 @@ export async function mirrorTaskToCollection(
         pendingApproval: t.pendingApproval ?? null,
         sentBackAt: t.sentBackAt ?? null,
         crewSize: t.crewSize ?? null,
-        crew: t.crew ?? null,
+        // Crew member emojis ride the same PB json field — photo avatars
+        // from members.emoji must be gated exactly like assigneeEmoji.
+        crew: persistedCrewEmoji(t.crew as any),
         speedBonus: t.speedBonus ?? null,
       };
       if (existing) await pb.collection("tasks").update((existing as any).id, rec, { requestKey: null });

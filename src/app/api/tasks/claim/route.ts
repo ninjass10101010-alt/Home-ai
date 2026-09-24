@@ -212,7 +212,10 @@ export async function POST(request: NextRequest) {
             sentBackAt: null,
           });
           // Mirror the done-but-unpaid row into the snapshot (no ledger change —
-          // kid points land only on parent approval).
+          // kid points land only on parent approval). sentBackAt: null clears
+          // any stale send-back stamp on the snapshot row (parity with the
+          // collection write above — a re-claim after send-back must not keep
+          // the old proof stamp).
           await persistSnapshotWeek(pb, null, {
             id: Number(taskId),
             completed: true,
@@ -220,6 +223,7 @@ export async function POST(request: NextRequest) {
             completedAt: now,
             completedInWeek: currentWeek,
             pendingApproval: pending,
+            sentBackAt: null,
           });
           return { ok: true, pending: true, claimedBy: normalizedName } as const;
         }
@@ -397,6 +401,9 @@ async function completeTask(
       completedAt: now,
       completedInWeek: currentWeek,
       pendingApproval: pending,
+      // Parity with the collection write: a re-claim clears the stale
+      // send-back stamp on the snapshot row too.
+      sentBackAt: null,
     });
     return { ok: true, pending: true, claimedBy: normalizedName };
   }
@@ -562,7 +569,9 @@ async function crewJoin(
   const now = new Date().toISOString();
   const nextMembers: CrewMember[] = [
     ...members,
-    { name: normalizedName, emoji: claimant?.emoji || "", joinedAt: now },
+    // Crew member emojis ride PB tasks.crew (json) — photo avatars from
+    // members.emoji are 100KB+ data URLs; gate exactly like assigneeEmoji.
+    { name: normalizedName, emoji: persistedTaskEmoji(claimant?.emoji) || "", joinedAt: now },
   ];
   await pb.collection("tasks").update(task.id, { crew: { members: nextMembers } });
   await persistSnapshotWeek(pb, null, { id: Number(task.taskId), crew: { members: nextMembers } });

@@ -1,6 +1,6 @@
 import { db } from "@/db";
 import { localTodayISO } from "@/lib/local-date";
-import { persistedTaskEmoji } from "@/lib/task-emoji";
+import { persistedTaskEmoji, persistedCrewEmoji } from "@/lib/task-emoji";
 import type { Task, WeekData, Transaction, WeekArchive, FamilyGoal, HallOfFameEntry, Reward, Penalty, WeeklyPrize, CrewMember } from "@/types/tasks";
 
 export const TASKS_STORAGE_KEY = "consuela-tasks";
@@ -216,6 +216,32 @@ export function emptyWeekData(startISO?: string): WeekData {
     lastActive: {},
     history: [],
   };
+}
+
+/**
+ * Adopt a server-returned weekData (POST /api/tasks/approve 200 body) WITHOUT
+ * ever dropping local-only transactions (2026-09-23 review, Critical #3).
+ *
+ * An offline approval's earn tx lives ONLY in the local ledger — the server
+ * never saw it. An unconditional `setWeekData(server)` used to erase it on
+ * the next online approve, and the re-armed snapshot push then propagated the
+ * truncated ledger to every device: permanent point loss. Adoption gates
+ * mirror mergeTasksSnapshot's own week-adoption rules:
+ *   - server week newer than local (or local empty) → adopt verbatim;
+ *   - server week OLDER than local (stale server) → keep local;
+ *   - same week → adopt only a server ledger at least as rich as the local
+ *     one (server history length >= local). A shorter server ledger means
+ *     the local one carries the offline tx the server lacks — keep it; the
+ *     next snapshot push uploads it and the server unions by tx id.
+ */
+export function adoptServerWeekData(prev: WeekData, server: WeekData): WeekData {
+  const prevStart = String(prev?.weekStart ?? "");
+  const serverStart = String(server?.weekStart ?? "");
+  if (!serverStart) return prev;
+  if (!prevStart || serverStart > prevStart) return server;
+  if (serverStart < prevStart) return prev;
+  if ((server.history?.length || 0) >= (prev.history?.length || 0)) return server;
+  return prev;
 }
 
 let _txId = Date.now();
@@ -666,6 +692,20 @@ export function mergeTasksSnapshot(
     const localDone = !!local.completed || !!localPending;
     const remoteClearsPending = !!localPending && !snapshotPending;
     const remoteReopens = !!local.completed && !snapRow.completed;
+    // 2026-09-23 review: a locally SENT-BACK row (not done, durable
+    // sentBackAt — an OFFLINE send-back whose POST never landed) must not be
+    // re-pended by a snapshot row whose tap the send-back POST-DATES. The
+    // kid's device hasn't pulled the clear yet, so the snapshot still shows
+    // the old pending; without this gate the parent's own next pull adopted
+    // it back into the queue — the send-back silently undid itself. (A
+    // remote pending NEWER than the stamp is a genuine re-claim and wins.)
+    if (!localDone && snapshotPending && (local as any).sentBackAt) {
+      const localSentBackTs = Date.parse(String((local as any).sentBackAt));
+      const remoteTapTs = Date.parse(String((snapshotPending as any)?.at ?? ""));
+      if (!Number.isNaN(localSentBackTs) && (Number.isNaN(remoteTapTs) || localSentBackTs >= remoteTapTs)) {
+        continue;
+      }
+    }
     if (localDone && (remoteClearsPending || remoteReopens)) {
       const paidElsewhere = (snapshot.weekData?.history || []).some(
         (tx: any) => tx.type === "earn" && tx.taskId === snapRow.id
@@ -1169,7 +1209,9 @@ export async function syncTasksToPB(tasks: Task[]): Promise<void> {
       completedInWeek: task.completedInWeek ?? null,
       completedAt: task.completedAt ?? null,
       crewSize: task.crewSize ?? null,
-      crew: task.crew ?? null,
+      // Crew member emojis ride the same PB write — photo avatars from
+      // members.emoji must be gated exactly like assigneeEmoji.
+      crew: persistedCrewEmoji(task.crew as any),
       speedBonus: task.speedBonus ?? null,
     }).catch((e) => {
       // Surface the FULL rejection (PB validation bodies carry the field name

@@ -45,7 +45,7 @@ import {
   pickDefaultClaimMember, isSnatchable, isPendingApproval,
   completesWithoutPin, completesWithPendingApproval,
   tapCompletePending, sendBackPendingCompletion, approvePendingCompletion, resolveMemberName,
-  mergeTasksSnapshot, getDaysUntilWeekReset,
+  mergeTasksSnapshot, getDaysUntilWeekReset, adoptServerWeekData,
   loadDeletedTaskIds, saveDeletedTaskIds,
   isCrewTask, crewMembers, crewMemberCount, crewFull, crewHasMember,
   crewMemberCheckedIn, crewCheckinProgress, crewAllCheckedIn, canJoinCrew,
@@ -311,6 +311,18 @@ export default function TasksPage() {
     // safeDisplayEmoji belongs ONLY in text contexts (memberOptionLabel).
     ...Object.fromEntries(membersData.map((m: any) => [m.fullName, m.emoji || "👤"]))
   }), [membersData, currentUser]);
+
+  // Roster-first avatar resolution for TASK ROWS (2026-09-23 review): task
+  // rows may carry assigneeEmoji "👤" — the persistedTaskEmoji write gate
+  // collapses photo avatars at every PB boundary, so rendering the stored
+  // field as the member's avatar shows a silhouette for photo members on
+  // exactly the rows the family looks at (pending, approval queue, on-the-
+  // way, completed). The live roster holds the real photo (members.emoji);
+  // the stored glyph stays the fallback for non-member assignees
+  // ("Open"/"Crew"/"All") and legacy first-name rows.
+  const assigneeEmojis: Record<string, string> = useMemo(() =>
+    Object.fromEntries(membersData.map((m: any) => [m.fullName, m.emoji || "👤"])),
+  [membersData]);
 
   const memberColors: Record<string, string> = useMemo(() => {
     const colors = Object.fromEntries(membersData.map((m: any) => [m.fullName, m.color]));
@@ -903,10 +915,23 @@ export default function TasksPage() {
           });
           if (res.ok) {
             const body = await res.json();
-            if (body?.weekData) setWeekData(body.weekData);
+            // Guarded adoption (2026-09-23 review): an offline approval's tx
+            // lives ONLY locally — an unconditional adopt erased it (and the
+            // re-armed sync pushed the truncated ledger everywhere).
+            if (body?.weekData) setWeekData(adoptServerWeekData(prevWeekData, body.weekData));
             return { ok: true as const, body };
           }
-          // 4xx/5xx: revert the optimistic write — the server refused.
+          if (res.status >= 500) {
+            // 5xx ≈ network failure (D8): the route may have PARTIALLY
+            // applied (the snapshot row is cleared + week paid inside the
+            // lock before a later write throws) — reverting would fight the
+            // next merge's paidElsewhere adoption (approve → un-approve →
+            // re-approve churn). Keep the local approval; the idempotent
+            // server + the merge reconcile. Callers take the status-0
+            // saved-locally path (identical to offline).
+            return { ok: false as const, status: 0 };
+          }
+          // 4xx: revert the optimistic write — the server refused.
           setTasks(prevTasks);
           setWeekData(prevWeekData);
           if (res.status === 401) {
@@ -2070,7 +2095,7 @@ export default function TasksPage() {
                           className="h-8 w-0.5 shrink-0 rounded-full"
                           style={{ backgroundColor: rowColor, boxShadow: `0 0 8px ${rowColor}` }}
                         />
-                        <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={task.assigneeEmoji} size="sm" variant="emoji" />
+                        <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={assigneeEmojis[task.assignee] || task.assigneeEmoji} size="sm" variant="emoji" />
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-sm text-text-primary">{task.title}</div>
                           <div className="truncate text-xs text-text-secondary">
@@ -2125,7 +2150,7 @@ export default function TasksPage() {
                         backgroundImage: `linear-gradient(135deg, color-mix(in srgb, var(--color-accent-amber) 40%, transparent) 0%, color-mix(in srgb, var(--color-accent-amber) 20%, transparent) 100%)`,
                       }}
                     >
-                      <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={isCrew ? "🤝" : task.assigneeEmoji} size="sm" variant="emoji" />
+                      <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={isCrew ? "🤝" : assigneeEmojis[task.assignee] || task.assigneeEmoji} size="sm" variant="emoji" />
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm text-text-primary">{task.title}</div>
                         <div className="truncate text-xs text-text-secondary">
@@ -2177,7 +2202,7 @@ export default function TasksPage() {
                               className="h-8 w-0.5 shrink-0 rounded-full"
                               style={{ backgroundColor: "var(--color-accent-amber)", boxShadow: `0 0 8px var(--color-accent-amber)` }}
                             />
-                            <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={task.assigneeEmoji} size="sm" variant="emoji" />
+                            <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={assigneeEmojis[task.assignee] || task.assigneeEmoji} size="sm" variant="emoji" />
                             <div className="min-w-0 flex-1">
                               <div className="truncate text-sm text-text-primary">{task.title}</div>
                               <div className="truncate text-xs text-text-secondary">{owner.byName.split(" ")[0]} · tapped {owner.at.split("T")[0]} · {task.points}pts on the way</div>
@@ -2216,7 +2241,7 @@ export default function TasksPage() {
                             className="h-8 w-0.5 shrink-0 rounded-full"
                             style={{ backgroundColor: rowColor, boxShadow: `0 0 8px ${rowColor}` }}
                           />
-                          <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={task.assigneeEmoji} size="sm" variant="emoji" />
+                          <Avatar name={task.assignee} color={memberColors[task.assignee] || "green"} emoji={assigneeEmojis[task.assignee] || task.assigneeEmoji} size="sm" variant="emoji" />
                           <div className="min-w-0 flex-1">
                             <div className="truncate text-sm text-text-primary">{task.title}</div>
                             <div className="truncate text-xs text-text-secondary">{task.assignee.split(" ")[0]} · {task.completedBy?.split(" ")[0] || task.assignee.split(" ")[0]} · {task.completedInWeek === weekData.weekStart ? "This week" : "Past"}</div>
@@ -2248,7 +2273,7 @@ export default function TasksPage() {
                   {aiSuggestions.map((suggestion) => (
                     <Surface key={suggestion.title} variant="glass-subtle" radius="xl" padding="sm">
                       <div className="flex items-start gap-3">
-                        <Avatar name={suggestion.assignee} color={memberColors[suggestion.assignee] || "green"} emoji={suggestion.assigneeEmoji} size="sm" variant="emoji" />
+                        <Avatar name={suggestion.assignee} color={memberColors[suggestion.assignee] || "green"} emoji={assigneeEmojis[suggestion.assignee] || suggestion.assigneeEmoji} size="sm" variant="emoji" />
                         <div className="min-w-0 flex-1">
                           <div className="text-sm font-semibold text-text-primary">{suggestion.title}</div>
                           <div className="mt-1 text-xs text-text-muted">
@@ -2414,6 +2439,7 @@ export default function TasksPage() {
                 quests={myPendingQuests}
                 onAccept={(quest) => openPinEntry(quest.id)}
                 onGoToTasks={() => setActiveTab("tasks")}
+                rosterEmoji={assigneeEmojis}
               />
             )}
 
