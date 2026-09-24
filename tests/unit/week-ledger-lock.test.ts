@@ -284,6 +284,8 @@ describe("week ledger lock — helper ownership", () => {
     resolveOne("week.write", 0);
     await tick();
     resolveOne("week.verify", 0);
+    await tick();
+    resolveOne("week.read", 1);
     await projectionReady;
 
     const nested = withWeekLedgerLock(mondayISO(), async () => {
