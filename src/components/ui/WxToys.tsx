@@ -256,18 +256,18 @@ export function SceneLayers({ scene, showFog = false, fogCode = showFog, showBir
           />
         ))}
 
-      <div data-testid="wx-poster-clouds" data-cloud-cover={numericCloudCover == null ? "unavailable" : Math.round(cover)} className="absolute inset-0">
+      <div data-testid="wx-poster-clouds" data-cloud-cover={numericCloudCover == null ? "unavailable" : Math.round(cover)} data-visible={cover > 0 ? "true" : "false"} className="absolute inset-0">
         <CloudPuff
           layer="front"
           tone={cloudTone}
           className="absolute top-12 left-[-12px] -rotate-6 scale-[1.35]"
-          style={{ opacity: frontCloudOpacity, ...(driftAnimation && driftDuration != null ? { animation: `wxCloudDrift ${driftDuration}s ease-in-out infinite alternate` } : {}) }}
+          style={{ opacity: frontCloudOpacity, visibility: frontCloudOpacity > 0 ? "visible" : "hidden", ...(driftAnimation && driftDuration != null ? { animation: `wxCloudDrift ${driftDuration}s ease-in-out infinite alternate` } : {}) }}
         />
         <CloudPuff
           layer="back"
           tone={cloudTone}
           className="absolute top-28 right-[-12px] rotate-3 scale-[1.15] blur-[1px]"
-          style={{ opacity: backCloudOpacity, ...(driftAnimation && driftDuration != null ? { animation: `wxCloudDrift ${driftDuration + 12}s ease-in-out infinite alternate-reverse` } : {}) }}
+          style={{ opacity: backCloudOpacity, visibility: backCloudOpacity > 0 ? "visible" : "hidden", ...(driftAnimation && driftDuration != null ? { animation: `wxCloudDrift ${driftDuration + 12}s ease-in-out infinite alternate-reverse` } : {}) }}
         />
       </div>
 
@@ -320,7 +320,7 @@ export function SceneLayers({ scene, showFog = false, fogCode = showFog, showBir
         </div>
       )}
 
-      <div data-testid="wx-birds" className="absolute top-14 right-6 h-28 w-48" style={{ opacity: showBirds ? 1 : 0, transition: motionOk ? "opacity 1.2s ease" : "none" }} aria-hidden="true">
+      <div data-testid="wx-birds" data-visible={showBirds ? "true" : "false"} className="absolute top-14 right-6 h-28 w-48" style={{ opacity: showBirds ? 1 : 0, visibility: showBirds ? "visible" : "hidden", transition: motionOk ? "opacity 1.2s ease" : "none" }} aria-hidden="true">
         {BIRDS.map((b, i) => (
           <div
             key={i}

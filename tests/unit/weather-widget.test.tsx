@@ -82,17 +82,28 @@ function metricRow(dialog: HTMLElement, label: string): HTMLElement | undefined 
   );
 }
 
-function parseColor(value: string): [number, number, number] {
+type ParsedColor = [number, number, number, number];
+
+function parseColor(value: string): ParsedColor {
   const hex = value.trim();
-  if (hex.startsWith("#")) return parseHexColor(hex);
-  const rgb = hex.match(/rgba?\(\s*(\d+)[, ]+\s*(\d+)[, ]+\s*(\d+)/i);
-  if (rgb) return [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])];
-  return [0, 0, 0];
+  if (hex.startsWith("#")) return [...parseHexColor(hex), 1] as ParsedColor;
+  const rgb = hex.match(/rgba?\(\s*(\d+)[, ]+\s*(\d+)[, ]+\s*(\d+)(?:[, ]+\s*([\d.]+))?\s*\)/i);
+  if (rgb) {
+    const alpha = rgb[4] == null ? 1 : Number(rgb[4]);
+    return [Number(rgb[1]), Number(rgb[2]), Number(rgb[3]), alpha];
+  }
+  return [0, 0, 0, 1];
 }
 
 function contrastRatio(foreground: string, background: string): number {
-  const foregroundLuminance = colorLuminance(parseColor(foreground));
-  const backgroundLuminance = colorLuminance(parseColor(background));
+  const foregroundColor = parseColor(foreground);
+  const backgroundColor = parseColor(background);
+  const foregroundRgb = foregroundColor.slice(0, 3).map((channel, index) =>
+    Math.round(channel * foregroundColor[3] + backgroundColor[index] * (1 - foregroundColor[3]))
+  ) as [number, number, number];
+  const backgroundRgb = backgroundColor.slice(0, 3) as [number, number, number];
+  const foregroundLuminance = colorLuminance(foregroundRgb);
+  const backgroundLuminance = colorLuminance(backgroundRgb);
   return (Math.max(foregroundLuminance, backgroundLuminance) + 0.05) /
     (Math.min(foregroundLuminance, backgroundLuminance) + 0.05);
 }
@@ -143,8 +154,21 @@ function selectedCellSurfaces(stops: string[], accent: string): string[] {
   return stops.map((stop) => compositeHex(accent, stop, 0x26 / 255));
 }
 
-function modalSelectedCellSurfaces(accent: string, alpha: number): string[] {
-  return ["#101422", "#0A0D18"].map((surface) => compositeHex(accent, surface, alpha));
+function modalPanelTextSurfaces(): string[] {
+  return ["#F5F6FA", "#0F1117"].flatMap((pageSurface) => {
+    const overlay = compositeHex("#0A0F1C", pageSurface, 0.55);
+    return [
+      compositeHex("#101422", overlay, 0.92),
+      compositeHex("#0A0D18", overlay, 0.94),
+    ];
+  });
+}
+
+function modalCellTextSurfaces(accent: string): string[] {
+  return modalPanelTextSurfaces().flatMap((surface) => [
+    surface,
+    compositeHex(accent, surface, 0x1F / 255),
+  ]);
 }
 
 function failedFetchHeaderSurfaces(): string[] {
@@ -842,11 +866,16 @@ describe("WeatherWidget — Not Boring redesign", () => {
   });
 
   it.each([
-    { name: "clear", code: 0, isDay: 1, timeOfDay: "day", holiday: "none", accent: "#E85D45" },
-    { name: "storm", code: 95, isDay: 1, timeOfDay: "day", holiday: "none", accent: "#FFB44F" },
-    { name: "night", code: 0, isDay: 0, timeOfDay: "night", holiday: "none", accent: "#FF6F5E" },
-    { name: "holiday", code: 0, isDay: 1, timeOfDay: "day", holiday: "christmas", accent: "#EF4444" },
-  ])("keeps selected $name modal hourly labels readable on the accent-alpha surface", async ({ code, isDay, timeOfDay, holiday, accent }) => {
+    { name: "clear", theme: "light" as const, code: 0, isDay: 1, timeOfDay: "day", holiday: "none", accent: "#E85D45" },
+    { name: "storm", theme: "light" as const, code: 95, isDay: 1, timeOfDay: "day", holiday: "none", accent: "#FFB44F" },
+    { name: "night", theme: "light" as const, code: 0, isDay: 0, timeOfDay: "night", holiday: "none", accent: "#FF6F5E" },
+    { name: "holiday", theme: "light" as const, code: 0, isDay: 1, timeOfDay: "day", holiday: "christmas", accent: "#EF4444" },
+    { name: "clear", theme: "dark" as const, code: 0, isDay: 1, timeOfDay: "day", holiday: "none", accent: "#E85D45" },
+    { name: "storm", theme: "dark" as const, code: 95, isDay: 1, timeOfDay: "day", holiday: "none", accent: "#FFB44F" },
+    { name: "night", theme: "dark" as const, code: 0, isDay: 0, timeOfDay: "night", holiday: "none", accent: "#FF6F5E" },
+    { name: "holiday", theme: "dark" as const, code: 0, isDay: 1, timeOfDay: "day", holiday: "christmas", accent: "#EF4444" },
+  ])("keeps selected and unselected $name modal cells readable in the $theme theme", async ({ code, isDay, timeOfDay, holiday, accent, theme }) => {
+    document.documentElement.dataset.theme = theme;
     localStorage.setItem("home-ai-weather-config", JSON.stringify({ timeOfDay, season: "summer", holidayOverride: holiday }));
     try {
       mockOpenMeteo(makeOpenMeteoPayload({ code, isDay, precip: 80 }));
@@ -856,27 +885,41 @@ describe("WeatherWidget — Not Boring redesign", () => {
       await settle();
 
       const dialog = document.querySelector("#weather-details-dialog") as HTMLElement;
-      const selected = dialog.querySelector('[role="list"] [role="listitem"] button') as HTMLElement;
-      const hour = Array.from(selected.querySelectorAll<HTMLElement>("span")).find((node) => node.textContent === "NOW");
-      const temperature = Array.from(selected.querySelectorAll<HTMLElement>("span")).find((node) => node.textContent === "70°");
-      const precipitation = Array.from(selected.querySelectorAll<HTMLElement>("span")).find((node) => node.textContent === "80%");
+      const panel = dialog.querySelector(".weather-details-modal") as HTMLElement;
+      expect(panel).toBeTruthy();
+      expect(panel.style.background).toContain("linear-gradient(170deg, rgba(16, 20, 34, 0.92) 0%, rgba(10, 13, 24, 0.94) 100%)");
+      const cells = Array.from(dialog.querySelectorAll<HTMLButtonElement>('[role="list"] [role="listitem"] button'));
+      expect(cells.length).toBeGreaterThan(1);
+      const selected = cells[0];
+      const unselected = cells[1];
       const alpha = Number(selected.style.background.match(/,\s*([\d.]+)\)/)?.[1]);
-      const colors = [hour, temperature, precipitation].map((node) => {
-        if (!node) return "";
-        return node.style.color || (node.className.includes("text-white") ? "#FFFFFF" : "");
-      });
-      const surfaces = modalSelectedCellSurfaces(accent, alpha);
-
-      expect(hour).toBeTruthy();
-      expect(temperature).toBeTruthy();
-      expect(precipitation).toBeTruthy();
       expect(Number.isFinite(alpha)).toBe(true);
-      expect(alpha).toBeGreaterThan(0);
+      expect(alpha).toBeCloseTo(0.12, 5);
+      const labels = [selected, unselected].flatMap((cell) => {
+        const spans = Array.from(cell.querySelectorAll<HTMLElement>("span"));
+        return [
+          spans.find((node) => node.textContent === "NOW" || /^\d+(AM|PM)$/.test(node.textContent ?? "")),
+          spans.find((node) => node.textContent === "70°" || node.textContent === "—"),
+          spans.find((node) => node.textContent === "80%"),
+        ].filter((node): node is HTMLElement => !!node);
+      });
+      const colors = labels.map((node) => node.style.color);
+      const surfaces = modalCellTextSurfaces(accent);
+
+      expect(labels).toHaveLength(6);
       expect(colors.every(Boolean)).toBe(true);
       expect(new Set(colors).size).toBe(1);
       expect(Math.min(...surfaces.flatMap((surface) => colors.map((color) => contrastRatio(color, surface))))).toBeGreaterThanOrEqual(4.5);
     } finally {
+      delete document.documentElement.dataset.theme;
       localStorage.removeItem("home-ai-weather-config");
+    }
+  });
+
+  it("validates modal cell foregrounds against the rendered panel composites", () => {
+    for (const accent of ["#E85D45", "#FFB44F", "#FF6F5E", "#EF4444"]) {
+      const foreground = contrastSafeTextAccent(accent, modalCellTextSurfaces(accent), "#FFFFFF");
+      expect(Math.min(...modalCellTextSurfaces(accent).map((surface) => contrastRatio(foreground, surface))), accent).toBeGreaterThanOrEqual(4.5);
     }
   });
 
@@ -1479,6 +1522,42 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(el.textContent).not.toContain("H:");
   });
 
+  it("keeps a null selected-hour temperature unavailable beside a valid current temperature", async () => {
+    const payload = makeOpenMeteoPayload();
+    const start = payload.hourly.time.findIndex((time) => new Date(time).getTime() >= Date.now() - 59 * 60_000);
+    const selected = Math.min((start < 0 ? 0 : start) + 1, payload.hourly.time.length - 1);
+    (payload.hourly as any).temperature_2m[selected] = null;
+    mockOpenMeteo(payload);
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    expect(el.querySelector('[data-testid="wx-hero-temp"]')?.textContent).toBe("70");
+    const strip = el.querySelector('[role="slider"][aria-label="Preview the rest of the day"]') as HTMLElement;
+    act(() => strip.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })));
+
+    const cardHero = el.querySelector('[data-testid="wx-hero-temp"]') as HTMLElement;
+    expect(cardHero.textContent).toBe("—");
+    expect(cardHero.nextElementSibling).toBeNull();
+    expect(strip.getAttribute("aria-valuetext")).toContain("temperature unavailable");
+    const cardCell = strip.querySelector("[data-selected]") as HTMLElement;
+    expect(Array.from(cardCell.querySelectorAll<HTMLElement>("span")).some((node) => node.textContent === "—")).toBe(true);
+
+    act(() => findDetailsButton(el)!.click());
+    await settle();
+    const dialog = document.querySelector("#weather-details-dialog") as HTMLElement;
+    const scrubber = dialog.querySelector('[role="slider"][aria-label="Scrub through the next 24 hours"]') as HTMLElement;
+    act(() => scrubber.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })));
+
+    const modalHero = Array.from(dialog.querySelectorAll<HTMLElement>("span")).find((node) => node.className.includes("text-[60px]"));
+    expect(modalHero?.textContent).toBe("—");
+    expect(modalHero?.nextElementSibling).toBeNull();
+    expect(scrubber.getAttribute("aria-valuetext")).toContain("temperature unavailable");
+    const modalCells = dialog.querySelectorAll<HTMLButtonElement>('[role="list"] [role="listitem"] button');
+    const selectedCell = modalCells[1];
+    expect(selectedCell.getAttribute("aria-label")).toContain("temperature unavailable");
+    expect(Array.from(selectedCell.querySelectorAll<HTMLElement>("span")).some((node) => node.textContent === "—")).toBe(true);
+  });
+
   it("omits the modal temperature when current and hourly temperatures are unavailable", async () => {
     const payload = makeOpenMeteoPayload();
     (payload.current as Record<string, unknown>).temperature_2m = null;
@@ -1493,9 +1572,14 @@ describe("WeatherWidget — Not Boring redesign", () => {
 
     const dialog = document.querySelector("#weather-details-dialog") as HTMLElement;
     const temperature = Array.from(dialog.querySelectorAll<HTMLElement>("span")).find((node) => node.className.includes("text-[60px]"));
+    const scrubber = dialog.querySelector('[role="slider"][aria-label="Scrub through the next 24 hours"]') as HTMLElement;
     expect(temperature).toBeTruthy();
     expect(temperature!.textContent).toBe("—");
     expect(temperature!.nextElementSibling).toBeNull();
+    expect(scrubber).toBeTruthy();
+    const firstCell = dialog.querySelector('[role="list"] [role="listitem"] button') as HTMLButtonElement;
+    expect(firstCell.getAttribute("aria-label")).toContain("temperature unavailable");
+    expect(Array.from(firstCell.querySelectorAll<HTMLElement>("span")).some((node) => node.textContent === "—")).toBe(true);
     expect(dialog.textContent).not.toContain("0°");
   });
 
@@ -1646,6 +1730,37 @@ describe("WeatherWidget — Not Boring redesign", () => {
      expect(dialog.textContent).toContain("Partly Cloudy");
      expect((dialog.querySelector('[data-testid="wx-birds"]') as HTMLElement).style.opacity).toBe("0");
     expect(dialog.textContent).not.toContain("Cloud cover");
+  });
+
+  it.each([0, null])("keeps zero or unknown clouds and disallowed birds unavailable under high contrast (%s)", (cover) => {
+    const boostStyle = document.createElement("style");
+    boostStyle.textContent = '[data-contrast="boost"] * { opacity: 1 !important; }';
+    document.head.appendChild(boostStyle);
+    document.documentElement.dataset.contrast = "boost";
+    try {
+      const el = renderSceneProps({
+        scene: "clear",
+        showFog: false,
+        showBirds: false,
+        cloudCover: cover,
+        precipitation: 0,
+        wind: 0,
+      });
+      const clouds = el.querySelector('[data-testid="wx-poster-clouds"]') as HTMLElement;
+      const layers = Array.from(clouds.querySelectorAll<HTMLElement>("[data-cloud-layer]"));
+      const birds = el.querySelector('[data-testid="wx-birds"]') as HTMLElement;
+
+      expect(clouds.getAttribute("data-visible")).toBe("false");
+      expect(layers).toHaveLength(2);
+      expect(layers.every((layer) => getComputedStyle(layer).opacity === "1")).toBe(true);
+      expect(layers.every((layer) => getComputedStyle(layer).visibility === "hidden")).toBe(true);
+      expect(birds.getAttribute("data-visible")).toBe("false");
+      expect(getComputedStyle(birds).opacity).toBe("1");
+      expect(getComputedStyle(birds).visibility).toBe("hidden");
+    } finally {
+      delete document.documentElement.dataset.contrast;
+      boostStyle.remove();
+    }
   });
 
   it("keeps cloudy, rain, and snow poster accents visibly distinct", () => {

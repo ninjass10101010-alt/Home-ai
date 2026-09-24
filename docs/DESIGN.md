@@ -135,6 +135,12 @@ Use this exact delta format in the "What's New" area and update 1.5 journeys:
   > "On the Home screen the chat bubble now gently floats up and down..."
 ```
 
+### UI Change Record — 2026-09-24 — Nullable hourly temperature, boosted scene truth, and composite modal cells
+- Added / Changed: `src/components/ui/WeatherWidget.tsx`, `WxToys.tsx`, `tests/unit/weather-widget.test.tsx`, and the focused contrast model.
+- Data / Accessibility: `HourPoint.temp` remains nullable through parsing and every selected-temperature surface; missing values preserve the hour, announce temperature unavailability, and render an em dash without a degree mark instead of borrowing the current reading or fabricating `0°`. Cloud layers and birds use scoped visibility/data-visible state so zero or unknown cloud cover and disallowed birds stay unavailable under boosted contrast. Modal selected and unselected hourly labels share one foreground validated across the actual translucent panel/overlay composites in both themes and clear, storm, night, and holiday accents.
+- Motion: normal cloud drift and bird opacity transitions remain unchanged; visibility gates only suppress data-unavailable layers and do not add motion.
+- **CONTRACTS to keep:** (1) hourly temperature never falls back to current temperature; (2) other selected-hour metrics retain their existing no-fallback behavior; (3) boosted opacity cannot reveal unavailable scene data; (4) every modal cell label uses the validated composite-aware foreground; (5) no precipitation, hydration, visibility, reduced-motion, dependency, asset, font, navigation, row-emoji, kid-only, family-data, or server change.
+
 ### UI Change Record — 2026-09-24 — Final review: hydration-safe motion, factual precipitation, composites, and slot preservation
 - Added / Changed: `src/components/ui/WeatherWidget.tsx`, `WxToys.tsx`, `WeatherSkins.ts`, `HomeWidgetIcon.tsx`, `src/app/page.tsx`, `tests/unit/weather-widget.test.tsx`, NEW `tests/unit/weather-skins.test.ts`, `tests/unit/home-briefing-slot.test.tsx`, and `tests/unit/home-widget-icon.test.tsx`.
 - Visual / Motion: Weather scene, holiday artwork, particles, and modal animation attributes share a paused first-render snapshot, then read `document.hidden` and `prefers-reduced-motion` after mount; normal visible motion resumes after readiness. `HomeWidgetIcon` state transforms use an explicit `24px 24px` SVG view-box origin.

@@ -34,7 +34,7 @@ interface ForecastDay {
 
 interface HourPoint {
   time: string;
-  temp: number;
+  temp: number | null;
   code: number;
   precip: number | null;
   isDay: boolean;
@@ -193,8 +193,18 @@ function weatherHeaderTextSurfaces(scene: ReturnType<typeof wmoToScene>, failedF
   ]);
 }
 
-function modalSelectedCellTextSurfaces(accent: string): string[] {
-  return ["#101422", "#0A0D18"].map((surface) => mixHex(surface, accent, 0x1F / 255));
+function modalCellTextSurfaces(accent: string): string[] {
+  return ["#F5F6FA", "#0F1117"].flatMap((pageSurface) => {
+    const overlay = mixHex(pageSurface, "#0A0F1C", 0.55);
+    const panel = [
+      mixHex(overlay, "#101422", 0.92),
+      mixHex(overlay, "#0A0D18", 0.94),
+    ];
+    return panel.flatMap((surface) => [
+      surface,
+      mixHex(surface, accent, 0x1F / 255),
+    ]);
+  });
 }
 
 function getRealSeason(): SeasonKey {
@@ -368,7 +378,7 @@ function DayStrip({ hours, conv, skin, accent, textAccent, selectedTextAccent, p
       aria-valuemin={0}
       aria-valuemax={hours.length - 1}
       aria-valuenow={previewIdx ?? 0}
-      aria-valuetext={pv ? `${formatHourLabel(pv.time)}, ${conv(pv.temp)} degrees, ${pv.precip == null ? "precipitation unavailable" : `${Math.round(pv.precip)}% chance of precipitation`}` : "Now"}
+      aria-valuetext={pv ? `${formatHourLabel(pv.time)}, ${pv.temp == null ? "temperature unavailable" : `${conv(pv.temp)} degrees`}, ${pv.precip == null ? "precipitation unavailable" : `${Math.round(pv.precip)}% chance of precipitation`}` : "Now"}
       className="relative shrink-0 cursor-grab select-none outline-none rounded-xl focus-visible:ring-2 focus-visible:ring-offset-0 active:cursor-grabbing"
       style={{ touchAction: "pan-y", ["--tw-ring-color" as string]: accent }}
       onPointerDown={(e) => {
@@ -431,7 +441,7 @@ function DayStrip({ hours, conv, skin, accent, textAccent, selectedTextAccent, p
                 <Condition code={conditionPresentation(wmoToScene(h.code, h.isDay), h.code, h.cloud, h.isDay).icon} size={26} />
               </span>
               <span className="text-[13px] font-black tabular-nums" style={{ color: selected ? selectedTextAccent : skin.ink }}>
-                {conv(h.temp)}°
+                {h.temp == null ? "—" : `${conv(h.temp)}°`}
               </span>
               {h.precip != null && h.precip >= 20 ? (
                 <span className="text-[10px] font-semibold tabular-nums" style={{ color: cellTextAccent }}>
@@ -544,7 +554,7 @@ function TimelineScrubber({ hours, conv, accent, textAccent, idx, onIdx }: {
       aria-valuemin={0}
       aria-valuemax={hours.length - 1}
       aria-valuenow={idx}
-      aria-valuetext={`${formatHourLabel(cur.time)}, ${conv(cur.temp)} degrees, ${cur.precip == null ? "precipitation unavailable" : `${Math.round(cur.precip)}% chance of precipitation`}`}
+      aria-valuetext={`${formatHourLabel(cur.time)}, ${cur.temp == null ? "temperature unavailable" : `${conv(cur.temp)} degrees`}, ${cur.precip == null ? "precipitation unavailable" : `${Math.round(cur.precip)}% chance of precipitation`}`}
       tabIndex={0}
       className="relative cursor-ew-resize select-none rounded-xl py-3 outline-none focus-visible:ring-2 focus-visible:ring-white/50"
       style={{ touchAction: "none" }}
@@ -679,11 +689,10 @@ export default function WeatherWidget({ className = "" }: { className?: string }
           if (start === -1) start = 0;
           const fallbackIsDay = getRealTimeOfDay() === "day";
           for (let i = start; i < Math.min(start + 24, hourly.time.length); i++) {
-            const temp = hourly.temperature_2m?.[i] ?? current.temperature_2m;
-            if (typeof temp !== "number") continue; // a missing temp must not bend the curve
+            const temp = typeof hourly.temperature_2m?.[i] === "number" ? hourly.temperature_2m[i] : null; // a missing temp must not bend the curve
             hours.push({
               time: hourly.time[i],
-              temp: temp,
+              temp,
               code: hourly.weather_code?.[i] ?? current.weather_code ?? 1,
               precip: typeof hourly.precipitation_probability?.[i] === "number" ? hourly.precipitation_probability[i] : null,
               isDay: hourly.is_day?.[i] != null ? hourly.is_day[i] === 1 : fallbackIsDay,
@@ -940,7 +949,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
   }, [rawSkin, isBoosted, heroScene]);
 
   const heroTempTarget = activeHour
-    ? conv(activeHour.temp)
+    ? activeHour.temp == null ? null : conv(activeHour.temp)
     : (weatherData?.temp == null ? null : conv(weatherData.temp));
   const heroTemp = useAnimatedNumber(heroTempTarget ?? 0);
 
@@ -1368,7 +1377,7 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
   };
   const mAccent = resolveAccent(mSkin, holidayAccent);
   const mTextAccent = contrastSafeTextAccent(mAccent, "#0A0D18", "#FFFFFF");
-  const mSelectedCellTextAccent = contrastSafeTextAccent(mAccent, modalSelectedCellTextSurfaces(mAccent), "#FFFFFF");
+  const mCellTextAccent = contrastSafeTextAccent(mAccent, modalCellTextSurfaces(mAccent), "#FFFFFF");
   const mAccentForeground = accentForeground(mAccent);
   const mVis = scrubHour ? scrubHour.visibility : data.visibility;
   const mHumidity = scrubHour ? scrubHour.humidity : data.humidity;
@@ -1394,7 +1403,9 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
   const mWindValue = mWind == null ? "—" : `${Math.round(mWind)} mph${mWindDirection == null ? "" : ` ${cardinalFromDegrees(mWindDirection)}`}`;
   const mPrecipitationValue = mPrecipitation == null ? "—" : `${Math.round(mPrecipitation)}%`;
 
-  const scrubTempTarget = scrubHour ? conv(scrubHour.temp) : data.temp == null ? null : conv(data.temp);
+  const scrubTempTarget = scrubHour
+    ? scrubHour.temp == null ? null : conv(scrubHour.temp)
+    : data.temp == null ? null : conv(data.temp);
   const scrubTemp = useAnimatedNumber(scrubTempTarget ?? 0);
 
   const nowMoon = moonPhase(new Date().getTime());
@@ -1601,20 +1612,20 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
                       onClick={() => setScrubIdx(i)}
                       className="relative flex flex-col items-center gap-1.5 rounded-xl px-2.5 py-2.5 transition-colors"
                       style={i === scrubIdx ? { background: `${mAccent}1F` } : undefined}
-                      aria-label={`${formatHourLabel(h.time)}, ${conv(h.temp)} degrees`}
+                      aria-label={`${formatHourLabel(h.time)}, ${h.temp == null ? "temperature unavailable" : `${conv(h.temp)} degrees`}`}
                     >
                       {i === scrubIdx && (
                         <span className="absolute inset-x-2 top-0 h-[2.5px] rounded-full" style={{ background: mAccent }} aria-hidden="true" />
                       )}
-                      <span className="text-[11px] font-bold" style={{ color: i === scrubIdx ? mSelectedCellTextAccent : "rgba(255,255,255,0.6)" }}>
+                      <span className="text-[11px] font-bold" style={{ color: mCellTextAccent }}>
                         {i === 0 ? "NOW" : formatHourTick(h.time)}
                       </span>
                       <span className="flex h-[26px] w-full items-center justify-center" aria-hidden="true">
                         <Condition code={conditionPresentation(wmoToScene(h.code, h.isDay), h.code, h.cloud, h.isDay).icon} size={24} />
                       </span>
-                      <span className="text-sm font-black tabular-nums" style={{ color: i === scrubIdx ? mSelectedCellTextAccent : "#FFFFFF" }}>{conv(h.temp)}°</span>
+                      <span className="text-sm font-black tabular-nums" style={{ color: mCellTextAccent }}>{h.temp == null ? "—" : `${conv(h.temp)}°`}</span>
                       {h.precip != null && h.precip >= 20 ? (
-                        <span className="text-[11px] font-semibold tabular-nums" style={{ color: i === scrubIdx ? mSelectedCellTextAccent : mTextAccent }}>
+                        <span className="text-[11px] font-semibold tabular-nums" style={{ color: mCellTextAccent }}>
                           {Math.round(h.precip)}%
                         </span>
                       ) : (
