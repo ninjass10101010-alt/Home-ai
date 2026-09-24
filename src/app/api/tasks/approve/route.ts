@@ -136,6 +136,7 @@ export async function POST(request: NextRequest) {
     cleared: result.cleared,
     skipped: result.skipped,
     reconciled: result.reconciled,
+    repairRequired: result.repairRequired,
     ...(result.projectionFailures?.length ? { projectionFailures: result.projectionFailures } : {}),
     ...(result.duplicate ? { duplicate: true } : {}),
     ...(result.task !== undefined ? { task: result.task } : {}),
