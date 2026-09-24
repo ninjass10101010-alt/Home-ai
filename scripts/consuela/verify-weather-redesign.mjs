@@ -30,9 +30,8 @@ async function newPage(vp) {
     const rect = card.getBoundingClientRect();
     const activeSky = card.querySelector('.wx-sky[data-active="true"]');
     const strip = card.querySelector('[role="slider"][aria-label="Preview the rest of the day"]');
-    const stripSvg = strip?.querySelector("svg");
-    const rainTicks = stripSvg?.querySelectorAll("rect").length ?? 0;
-    const curve = stripSvg?.querySelector("path");
+    const stripScroller = strip?.firstElementChild;
+    const stripCells = stripScroller?.children.length ?? 0;
     const details = Array.from(card.querySelectorAll("button")).find((b) => b.getAttribute("aria-label") === "Open weather details");
     return {
       card: true,
@@ -40,9 +39,8 @@ async function newPage(vp) {
       w: Math.round(rect.width),
       sky: activeSky ? getComputedStyle(activeSky).background.slice(0, 60) : null,
       strip: !!strip,
-      stripW: stripSvg?.getBoundingClientRect().width ?? 0,
-      rainTicks,
-      curve: !!curve,
+      stripW: stripScroller?.getBoundingClientRect().width ?? 0,
+      stripCells,
       labels: strip?.textContent ?? "",
       details: !!details,
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
@@ -56,7 +54,7 @@ async function newPage(vp) {
     check(!!probe.sky, `active sky layer (${probe.sky}…)`, "no active sky layer");
     check(probe.strip, "day strip slider present", "day strip slider missing");
     check(probe.stripW > 200, `strip measured real width (${Math.round(probe.stripW)}px)`, `strip width ${probe.stripW}px`);
-    check(probe.curve, "temperature curve path drawn", "no temperature curve");
+    check(probe.stripCells >= 2, `clay hour cells present (${probe.stripCells})`, `day strip rendered ${probe.stripCells} cells`);
     check(probe.labels.includes("NOW"), "strip labels NOW", "strip missing NOW label");
     check(probe.details, "Details trigger present", "Details trigger missing");
     check(!probe.overflowX, "no horizontal overflow", "horizontal overflow detected");
@@ -169,8 +167,8 @@ async function newPage(vp) {
   });
   check(night.card, "card rendered at night", "card missing at night");
   if (night.card) {
-    check(night.skyBg?.includes("rgb(27, 30, 51)"), `night sky active (${night.skyBg}…)`, `night sky wrong: ${night.skyBg}`);
-    check(night.tempColor === "rgb(255, 255, 255)", `white hero numerals (${night.tempColor})`, `hero color ${night.tempColor}`);
+    check(night.skyBg?.includes("rgb(111, 116, 168"), `poster night sky active (${night.skyBg}…)`, `night sky wrong: ${night.skyBg}`);
+    check(night.tempColor === "rgb(30, 41, 59)", `slate hero numerals (${night.tempColor})`, `hero color ${night.tempColor}`);
   }
   check(errors.length === 0, "0 page errors", `page errors: ${errors.join(" | ")}`);
   await page.close();
@@ -189,11 +187,13 @@ async function newPage(vp) {
     if (!card) return { card: false };
     const rect = card.getBoundingClientRect();
     const strip = card.querySelector('[role="slider"][aria-label="Preview the rest of the day"]');
+    const stripScroller = strip?.firstElementChild;
     return {
       card: true,
       w: Math.round(rect.width),
       strip: !!strip,
-      stripW: Math.round(strip?.querySelector("svg")?.getBoundingClientRect().width ?? 0),
+      stripW: Math.round(stripScroller?.getBoundingClientRect().width ?? 0),
+      stripCells: stripScroller?.children.length ?? 0,
       overflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth,
     };
   });
@@ -201,6 +201,7 @@ async function newPage(vp) {
   if (phone.card) {
     check(phone.w <= 390, `card width ${phone.w}px fits viewport`, `card overflows: ${phone.w}px`);
     check(phone.strip && phone.stripW > 250, `strip fills card (${phone.stripW}px)`, `strip too narrow: ${phone.stripW}px`);
+    check(phone.stripCells >= 2, `clay hour cells present (${phone.stripCells})`, `day strip rendered ${phone.stripCells} cells`);
     check(!phone.overflowX, "no horizontal overflow", "horizontal overflow on phone");
   }
   check(errors.length === 0, "0 page errors", `page errors: ${errors.join(" | ")}`);

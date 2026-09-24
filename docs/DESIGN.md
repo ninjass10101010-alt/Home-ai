@@ -9,13 +9,13 @@
 - **Bento grid:** Home uses `auto-rows-[350px]`; widgets are 1×1 or 2×1 and must never spill their cell (contained scroll or `+N more` footer).
 - **Visuals:** CSS/SVG/emoji only — no stock imagery, no icon libraries, no WebGL.
 - **Motion:** CSS animations only (no framer-motion); state-driven, never decorative infinite loops; pause when tab hidden; every animation has a `prefers-reduced-motion` fallback.
-- **Emoji as iconography:** liberal, lightweight, consistent with family-member emoji avatars.
+- **Iconography by context:** Home widget identity slots use the shared `HomeWidgetIcon` vector family; emoji remain lightweight for family-member avatars, row-level meaning, and kid-only artwork where text does not already carry the meaning.
 - **Emergency + dialogs:** the floating emergency shield is locked to `--color-accent-rose` (rose means alarm only — never decoration); the shared `Modal` carries real dialog semantics (`role="dialog"`, `aria-modal`, `aria-labelledby`, focus trap, focus-return to the trigger) for every consumer.
 - **Calendar day strip + glass-month title (2026-09-04):** the `/calendar` month-grid card carries a horizontal day strip (weekday letter over a numeral circle; selected = solid `--color-accent-button` gradient pill with white numeral, today = accent ring) sharing ONE `selectedDay` state with the grid; the month title replays a 240ms `calendarMonthSettle` rise per month change via key-remount. Both themes mirror; reduced-motion zeroes it.
 
-## Weather card world — "(Not Boring), Consuela-style" (replacement world, 2026-08-27)
+## Weather poster inside the Home visual system — "(Not Boring), Consuela-style" (replacement world, 2026-08-27; hybrid contract 2026-09-24)
 
-The weather card alone speaks (Not Boring) Weather's interface language, in Consuela's palette. Every other widget stays pastel-bento.
+Warm glass remains the frame for every Home widget. Weather is the one full-bleed illustrated poster inside that system; every other Home widget keeps its glass/tone treatment and identifies itself through the shared `HomeWidgetIcon` vector language. Weather therefore leads the illustration story without replacing the dashboard's established card material.
 
 ### Grammar
 - Huge temperature as the hero object: SF Pro weight 800–900, tight tracking, `tabular-nums`.
@@ -25,13 +25,10 @@ The weather card alone speaks (Not Boring) Weather's interface language, in Cons
 - One accent per state: the skin's accent colors strip, rain ticks, and interactive elements only.
 
 ### Palettes
-- **Day skins, auto-keyed to season (no user picker):**
-  - Spring — pastel lemon + soft lilac
-  - Summer — pastel guava (soft coral) + peach
-  - Autumn — soft red pastel + warm amber
-  - Winter — pastel ice blue + silver white
-- **Night — full Not Boring:** near-black `#0A0A0A` base, white numerals, one condition accent (soft red / amber / cyan). Keyed to real `is_day`/sunset from the API, never a fixed clock time.
-- Both palettes must hold AA contrast for all text at all times of day.
+- **Clear and partly cloudy daytime — the poster signature:** sky blue `#55BCE8 → #8FD8F1 → #D8F2F4`, turquoise poster clouds, and the yellow sun accent. This deliberate canvas is not overridden by the season selector.
+- **Condition-aware alternatives:** cloudy, rain, snow, storm, and night keep their own powder/slate/lilac/indigo washes; storm and heavy snow stay serious, and holiday accents never override severity.
+- **Text truth:** all Weather text, chips, controls, and hourly labels meet AA contrast in light and dark app themes. Storm switches to white ink; every other current poster scene uses slate `#1E293B` or its approved equivalent.
+- Seasonal and holiday layers may sit over the live scene, but the WMO condition, cloud cover, visibility, precipitation, and day/night state remain the source of truth.
 
 ### Scene system
 - Layered SVG/CSS: sky gradient (skin), sun/moon disc riding the sun arc, cloud forms, particle precipitation, fog layer, lightning flash for storm codes.
@@ -42,6 +39,17 @@ The weather card alone speaks (Not Boring) Weather's interface language, in Cons
 - Card: press-and-drag the day strip to preview any hour (scene, temp, condition follow); release animates back to now. Tap elsewhere on the card → modal.
 - Modal: 24h scrubber (`role="slider"` with spoken `aria-valuetext`), exploded metric rows, UV 5-dot scale, pressure, sun arc, hourly/daily toggle.
 - Missing data hides rows; it never fakes values.
+
+## Home widget vector icon system — `HomeWidgetIcon` (2026-09-24)
+
+`src/components/ui/HomeWidgetIcon.tsx` is the single identity-artwork component for adult/family Home widget and stat-tile icon slots. It is inline SVG only: one `0 0 48 48` viewBox, flat geometric paths, `currentColor` linework, white surfaces, and one tone-colored accent shape. Supported variants are `briefing`, `ask`, `suggestions`, `leaderboard`, `events`, `schedule`, `meal`, `tasks`, `week`, `security`, `climate`, `lights`, and `ledger`.
+
+- **Scale:** `sm` = 32px for compact stat tiles, `md` = 48px for non-card utility use, and `lg` = 64px inside the shared 88px protruding widget halo. The SVG must stay square and inside that halo at phone, tablet, wall, and wide breakpoints.
+- **Decorative semantics:** the SVG stays `aria-hidden="true"` and `focusable="false"` because the adjacent card title, stat label, or control already names the action. Never add `role="img"`, `aria-label`, or a second spoken label to a decorative instance; a future standalone meaningful symbol belongs on a named control instead.
+- **Scope:** Weather keeps its condition-specific clay poster artwork. `HomeWidgetIcon` replaces only owned Home widget/stat identity slots; row emojis, CapsuleNav glyphs, family avatars, and kid-only Home artwork stay as they are.
+- **State boundary:** `meal` uses `near` only during the existing real countdown window, `briefing` uses `unread` until acknowledgement, `lights` uses `on` when any light is on, and `security` uses `attention` when a tracked sensor is open. Unchanged state must not start motion; no new polling or state store belongs in the icon layer.
+- **Motion boundary:** stateful icons use one short 220ms transform transition on a real class change. No non-Weather widget icon loops. Weather's existing data-driven ambient loops remain owned by the Weather scene.
+- **Reduced motion:** `prefers-reduced-motion: reduce` removes the icon transition and transform with `none !important` while retaining the semantic state class and the static icon.
 
 ## Ask Consuela chat — "Consuela's kitchen table" (accent unification, 2026-09-04)
 
@@ -125,6 +133,13 @@ Use this exact delta format in the "What's New" area and update 1.5 journeys:
 - User-facing description (copy-paste ready for responses):
   > "On the Home screen the chat bubble now gently floats up and down..."
 ```
+
+### UI Change Record — 2026-09-24 — Home illustration + motion hybrid
+- Added / Changed: NEW `src/components/ui/HomeWidgetIcon.tsx` and focused coverage in `tests/unit/home-widget-icon.test.tsx`; Home wiring in `src/app/page.tsx`, `ScheduleDisplay.tsx`, `MorningBriefingWidget.tsx`, `HomeSuggestionsWidget.tsx`, `HomeLeaderboardWidget.tsx`, `CurrentMealWidget.tsx`, `HomeSecurityWidget.tsx`, `HomeClimateWidget.tsx`, `HomeLightsWidget.tsx`, and `LedgerWidget.tsx`; Weather poster work in `WeatherWidget.tsx`, `WxToys.tsx`, `WeatherSkins.ts`, and `wx-tokens.ts`; state motion in `src/app/globals.css`; focused probe `scripts/consuela/verify-weather-redesign.mjs`.
+- Visual: warm glass remains every card's frame. Weather is the single full-bleed illustrated poster, led by the clear-day sky-blue canvas and data-true clouds/weather accents. Other Home identity slots use the flat-vector `HomeWidgetIcon` family in the established protruding halo; compact stat tiles use the same 32px artwork at in-box scale. Row emoji, family avatars, CapsuleNav, and kid-only artwork do not change.
+- Motion: only real semantic seams move — meal near, briefing unread, lights on, security attention. Each is a 220ms CSS transform transition with no idle loop; Weather keeps its existing condition-driven ambient motion as a separate system. `prefers-reduced-motion: reduce` forces icon transform/transition to none while preserving state and artwork.
+- Accessibility: decorative `HomeWidgetIcon` instances remain `aria-hidden="true"` + `focusable="false"`; adjacent headings/labels carry meaning. Icons stay 32px square in stat tiles and 64px square inside the 88px widget halo.
+- **CONTRACTS to keep:** (1) never replace warm glass with a second card material; (2) Weather keeps condition-specific poster art while the remaining owned Home identity slots use `HomeWidgetIcon`; (3) do not add a new variant without extending the typed supported-variant set and focused coverage; (4) decorative icon instances never gain a duplicate accessible name; (5) no non-Weather icon animation may run while state is unchanged; (6) reduced motion must reset both transition and transform, not merely shorten them.
 
 ### UI Change Record — 2026-09-23 — Server-authoritative task approvals
 - Added / Changed: NEW `src/app/api/tasks/approve/route.ts` (approve/approve-all/send-back actions — parent PIN via `verifyPinFromPB`, snapshot-primary task lookup, entire pay under `withWeekLedgerLock` → snapshot keyed lock, pays `pendingApproval.points`, per-payee `taskId+member` reversal-aware idempotency, crew send-back strips `checkedInAt`, approve-all takes explicit `taskIds` and fails closed on unknown ids), `src/lib/snapshot-tasks.ts` (shared `persistSnapshotWeek` — claim route now imports it), `src/lib/task-utils.ts` (B1 fix — amount = `pendingApproval.points ?? task.points`), `src/middleware.ts` (exempts `/api/tasks/approve`), `src/app/tasks/page.tsx` (client `submitApproval` POSTs and adopts server `weekData`; offline keeps local approval), tests: NEW `tests/unit/task-approve-route` + extended pending-flow, approve-all, middleware-exempt, pending-approval (B1 amount).
@@ -1159,18 +1174,16 @@ Use this exact delta format in the "What's New" area and update 1.5 journeys:
 
 ### 1.2 Documenting Recent & Future UI Updates
 
-**Current "What's New" (2026-05-26 immersive weather refresh):**
-As of the latest build, the Home dashboard weather widget features:
-- **Immersive Weather Widget** (`src/components/ui/WeatherWidget.tsx`): Full-bleed glassmorphism backgrounds with seasonal/holiday themes.
-- **Protruding weather icon**: The animated condition icon overhangs the card's top-left corner (88px, ~24px outside the card frame) with a pulsing season-accent glow halo + drop shadow; the frosted panel rebalanced left padding to clear it.
-- **Season backdrops**: `SpringBackdrop` (cherry blossoms, mist), `SummerBackdrop` (palm silhouettes, heat haze, galaxy stars), `AutumnBackdrop` (bare oak trees, fog), `WinterBackdrop` (aurora borealis, icicles, pine silhouettes).
-- **Holiday overlays**: `ChristmasOverlay` (fairy lights, snow), `HalloweenOverlay` (bats, moon, mist), `FireworksOverlay` (4th of July bursts), `ValentinesOverlay` (floating hearts, rose glow), `NewYearsOverlay` (golden sparkles, champagne fizz).
-- **Particle system**: `WeatherParticles` component with animated SVG/CSS particles — blossom petals, autumn leaves, fireflies, snowflakes, sparks, hearts.
-- **Settings integration**: Holiday/Event Theme selector in Settings (`src/app/settings/page.tsx`) with live preview.
-- Users can force-enable any holiday theme or use auto-detection based on date.
+**Current Home visual refresh (2026-09-24):**
+- **Hybrid frame + poster:** warm glass remains the Home card frame; Weather is the one full-bleed illustrated poster, with a sky-blue clear-day canvas, data-true clouds, and condition-aware rain/snow/storm/night layers.
+- **Shared vector identities:** `HomeWidgetIcon` supplies the owned Home widget/stat identity artwork in 13 variants. Protruding widget icons are 64px inside the established 88px halo; compact stat icons are 32px.
+- **State-aware motion:** meal proximity, briefing acknowledgement, light power, and security attention each receive one short semantic state transition. No non-Weather widget icon loops while unchanged.
+- **Accessibility:** decorative icon SVGs remain hidden from assistive technology; visible titles/labels carry the meaning. Reduced motion removes the state transform and transition.
+- **Unchanged contexts:** row-level emoji, family avatars, CapsuleNav glyphs, and kid-only Home artwork keep their existing language.
 
 ### 1.3 Motion & Animated Elements
 
+- **Home widget icon state motion (2026-09-24):** `HomeWidgetIcon` moves only when an existing semantic state changes (meal near, briefing unread, lights on, security attention): a 220ms transform transition, never an idle loop. `prefers-reduced-motion: reduce` removes both transition and transform while preserving the static state artwork.
 - **Planner motion stripped (2026-06-15):** Float, bob, scale (`active:scale-*`), and translate (`hover:-translate-y-*`) animations were removed from the Meals, Grocery, Pantry, and Recipes tabs. These sections are for planning — motion can introduce visual instability during input. Color transitions (`transition-colors`), opacity transitions, focus rings, and progress-bar animations remain for accessibility. The `liquid-glass` CSS hover lift is preserved (it's a class-level treatment, not per-element motion). Home screen, chat, and other surfaces keep their animated elements.
 
 See files:
