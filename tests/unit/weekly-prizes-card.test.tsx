@@ -4,8 +4,6 @@
 //  (2) a parent gets the three rank rows prefilled from DEFAULT_WEEKLY_PRIZES;
 //  (3) "Add prize" hides at 3 rows and returns once one is removed;
 //  (4) deleting rank 2 re-packs the ranks contiguously (former #3 becomes #2);
-//  (5) Save writes the list + LWW stamp + one rank-keyed upsert per row, then
-//      toasts;
 //  (6) an explicitly-empty prize list shows the calm empty state.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot, type Root } from "react-dom/client";
@@ -16,9 +14,6 @@ import { act, createElement } from "react";
 const mockAuth = vi.hoisted(() => ({ currentUser: null as null | { name: string; role: string } }));
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => mockAuth }));
 
-const upsertSpy = vi.hoisted(() => vi.fn(async (_data: any) => null));
-vi.mock("@/db", () => ({ db: { upsertWeeklyPrize: (data: any) => upsertSpy(data) } }));
-
 import WeeklyPrizesCard from "@/components/settings/WeeklyPrizesCard";
 import {
   loadWeeklyPrizes,
@@ -28,6 +23,22 @@ import {
 } from "@/lib/task-utils";
 
 const showToast = vi.fn();
+const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+  const command = JSON.parse(String(init?.body));
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({
+      success: true,
+      operationId: command.operationId,
+      kind: "weekly-prizes",
+      items: command.items,
+      updatedAt: command.updatedAt,
+      revision: { revision: "2", updatedAt: command.updatedAt },
+      applied: true,
+    }),
+  };
+});
 
 let host: HTMLDivElement | null = null;
 let root: Root | null = null;
@@ -70,7 +81,7 @@ function typeInto(el: HTMLInputElement, value: string) {
 beforeEach(() => {
   localStorage.clear();
   mockAuth.currentUser = null;
-  upsertSpy.mockClear();
+  fetchMock.mockClear();
   showToast.mockClear();
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: true,
@@ -82,6 +93,7 @@ beforeEach(() => {
     removeEventListener: vi.fn(),
     dispatchEvent: vi.fn(),
   }));
+  vi.stubGlobal("fetch", fetchMock);
 });
 
 afterEach(() => {
@@ -150,7 +162,7 @@ describe("WeeklyPrizesCard", () => {
     expect(button(el, "Remove prize 2")).toBeTruthy();
   });
 
-  it("Save writes the list, stamps it, upserts one row per prize, and toasts", async () => {
+  it("Save posts one replacement command, adopts its response, and toasts", async () => {
     mockAuth.currentUser = { name: "Rebecca", role: "parent" };
     const el = mount();
 
@@ -163,10 +175,16 @@ describe("WeeklyPrizesCard", () => {
     );
     expect(readWeeklyPrizesStamp()).toBeTruthy();
 
-    expect(upsertSpy).toHaveBeenCalledTimes(3);
-    expect(upsertSpy).toHaveBeenNthCalledWith(1, { rank: 1, emoji: "🥇", text: "Picks Friday's family movie" });
-    expect(upsertSpy).toHaveBeenNthCalledWith(2, { rank: 2, emoji: "🥈", text: "Chooses the dessert night" });
-    expect(upsertSpy).toHaveBeenNthCalledWith(3, { rank: 3, emoji: "🥉", text: "+$2 allowance" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/tasks/config",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
+      kind: "weekly-prizes",
+      action: "replace",
+      items: DEFAULT_WEEKLY_PRIZES,
+    });
     expect(showToast).toHaveBeenCalledWith("🏆 Weekly prizes saved");
   });
 
@@ -182,8 +200,13 @@ describe("WeeklyPrizesCard", () => {
 
     expect(loadWeeklyPrizes()[0].text).toBe("Picks the weekend road trip");
     expect(loadWeeklyPrizes()[1].text).toBe("Chooses the dessert night");
-    // The server push carried the edited text too (rank-keyed upsert per row).
-    expect(upsertSpy).toHaveBeenNthCalledWith(1, { rank: 1, emoji: "🥇", text: "Picks the weekend road trip" });
+    expect(JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body))).toMatchObject({
+      kind: "weekly-prizes",
+      action: "replace",
+      items: expect.arrayContaining([
+        expect.objectContaining({ rank: 1, text: "Picks the weekend road trip" }),
+      ]),
+    });
   });
 
   it("shows the calm empty state when the prizes list is empty", () => {

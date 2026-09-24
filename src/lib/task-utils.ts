@@ -814,6 +814,15 @@ export function applyTasksSnapshotToStores(snapshot: any): boolean {
   if (weekChanged) saveWeekData(weekData);
   if (deletedTaskIds?.length) saveDeletedTaskIds(deletedTaskIds);
   let changed = tasksChanged || weekChanged;
+  if (
+    Array.isArray(snapshot.penalties) &&
+    typeof snapshot.penaltiesUpdatedAt === "string" &&
+    snapshot.penaltiesUpdatedAt > readPenaltiesStamp()
+  ) {
+    writePenaltiesStamp(snapshot.penaltiesUpdatedAt);
+    savePenalties(snapshot.penalties);
+    changed = true;
+  }
   // Weekly-prizes leg (same last-write-wins contract the tasks page restore
   // already uses): only a strictly-newer stamp wins, and the snapshot's stamp
   // is carried through verbatim so this device stops looking "edited".
@@ -843,6 +852,16 @@ export function loadPenalties<T>(fallback: T): T {
 
 export function savePenalties<T>(penalties: T): void {
   saveJSON(PENALTIES_KEY, penalties);
+}
+
+export const PENALTIES_STAMP_KEY = "consuela-penalties-updatedAt";
+
+export function readPenaltiesStamp(): string {
+  return loadJSON<string>(PENALTIES_STAMP_KEY, "");
+}
+
+export function writePenaltiesStamp(stamp: string): void {
+  saveJSON(PENALTIES_STAMP_KEY, stamp);
 }
 
 // ─── Weekly prizes — the top-3 finishers' rewards for the week race ────────

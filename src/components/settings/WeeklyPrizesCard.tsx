@@ -5,17 +5,41 @@ import { useAuth } from "@/hooks/useAuth";
 import SectionCard from "@/components/patterns/SectionCard";
 import SoftButton from "@/components/ui/SoftButton";
 import IconButton from "@/components/ui/IconButton";
-import { db } from "@/db";
 import {
   loadWeeklyPrizes,
   saveWeeklyPrizes,
-  touchWeeklyPrizesStamp,
+  writeWeeklyPrizesStamp,
   DEFAULT_WEEKLY_PRIZES,
 } from "@/lib/task-utils";
+import type { TaskConfigResponse } from "@/lib/task-config";
 import type { WeeklyPrize } from "@/types/tasks";
 
 const MEDALS = ["🥇", "🥈", "🥉"] as const;
 const MAX_PRIZES = 3;
+
+function weeklyPrizeOperationId(): string {
+  return `config-weekly-prizes-replace-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+async function postWeeklyPrizes(items: WeeklyPrize[]): Promise<TaskConfigResponse> {
+  const updatedAt = new Date().toISOString();
+  const response = await fetch("/api/tasks/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      operationId: weeklyPrizeOperationId(),
+      kind: "weekly-prizes",
+      action: "replace",
+      updatedAt,
+      items,
+    }),
+  });
+  const body = await response.json();
+  if (!response.ok || !body?.success || !Array.isArray(body.items)) {
+    throw new Error("config_write_failed");
+  }
+  return body as TaskConfigResponse;
+}
 
 interface WeeklyPrizesCardProps {
   showToast: (msg: string) => void;
@@ -48,9 +72,6 @@ export default function WeeklyPrizesCard({ showToast }: WeeklyPrizesCardProps) {
     setPrizes((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
   };
 
-  // Ranks always stay contiguous 1..N — removing a row shifts the ones below
-  // up so a save never leaves a hole (PB rows are rank-keyed and there is no
-  // delete API, so a compact ladder is what keeps the two stores aligned).
   const removeRow = (id: string) => {
     dirtyRef.current = true;
     setPrizes((prev) =>
@@ -71,29 +92,22 @@ export default function WeeklyPrizesCard({ showToast }: WeeklyPrizesCardProps) {
   const saveAll = async () => {
     if (saving) return;
     setSaving(true);
+    const list = prizes.map((p, i) => ({
+      ...p,
+      rank: (i + 1) as 1 | 2 | 3,
+      emoji: p.emoji.trim() || MEDALS[i],
+      text: p.text.trim(),
+    }));
     try {
-      const list = prizes.map((p, i) => ({
-        ...p,
-        rank: (i + 1) as 1 | 2 | 3,
-        emoji: p.emoji.trim() || MEDALS[i],
-        text: p.text.trim(),
-      }));
-      setPrizes(list);
-      saveWeeklyPrizes(list);
-      // Stamp BEFORE the push — every local save is the family's latest claim
-      // of truth, so a peer's snapshot older than this moment loses.
-      touchWeeklyPrizesStamp();
-      for (const p of list) {
-        try {
-          await db.upsertWeeklyPrize({ rank: p.rank, emoji: p.emoji, text: p.text });
-        } catch {
-          // One row's failure never blocks the rest — the next push retries.
-        }
-      }
-      // Save landed — the card is clean again, so the next refresh pulse may
-      // re-read (a peer's newer edit can land after this point).
+      const result = await postWeeklyPrizes(list);
+      const authoritative = result.items as WeeklyPrize[];
+      setPrizes(authoritative);
+      saveWeeklyPrizes(authoritative);
+      writeWeeklyPrizesStamp(result.updatedAt);
       dirtyRef.current = false;
       showToast("🏆 Weekly prizes saved");
+    } catch {
+      showToast("Couldn't save the prizes. Check the connection and try again.");
     } finally {
       setSaving(false);
     }

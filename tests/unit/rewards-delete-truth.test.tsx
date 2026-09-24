@@ -22,6 +22,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 const mockAuth = vi.hoisted(() => ({ currentUser: null as null | any, isLoggedIn: false }));
+const mockMembers = vi.hoisted(() => ({ current: [] as any[] }));
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => mockAuth }));
 vi.mock("@/components/ui/SyncInit", () => ({ default: () => null }));
 
@@ -30,7 +31,7 @@ vi.mock("@/db", () => ({
     {},
     {
       get: (_t, prop) => {
-        if (prop === "selectMembers" || prop === "selectMembersFallback") return () => [];
+        if (prop === "selectMembers" || prop === "selectMembersFallback") return () => mockMembers.current;
         return async () => null;
       },
     }
@@ -77,9 +78,46 @@ describe("Rewards delete truth — snapshot restore must not resurrect", () => {
     server.snapshot = null;
     mockAuth.currentUser = null;
     mockAuth.isLoggedIn = false;
+    mockMembers.current = [];
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: any, init?: any) => {
+        if (String(input) === "/api/tasks/config") {
+          const command = JSON.parse(String(init?.body));
+          let items = loadRewards<any[]>([]);
+          if (command.action === "replace") items = command.items;
+          if (command.action === "upsert") {
+            items = items.some((reward) => String(reward.id) === String(command.item.id))
+              ? items.map((reward) => String(reward.id) === String(command.item.id) ? command.item : reward)
+              : [...items, command.item];
+          }
+          if (command.action === "delete") {
+            items = items.filter((reward) => String(reward.id) !== String(command.itemId));
+          }
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              success: true,
+              operationId: command.operationId,
+              kind: "rewards",
+              items,
+              updatedAt: command.updatedAt,
+              revision: { revision: "2", updatedAt: command.updatedAt },
+              applied: true,
+            }),
+          };
+        }
         if (String(input).includes("/api/tasks/sync")) {
           if (String(init?.method || "GET").toUpperCase() === "POST") {
             server.posts.push(JSON.parse(String(init.body)));
@@ -156,6 +194,48 @@ describe("Rewards delete truth — snapshot restore must not resurrect", () => {
     expect(push.rewards.map((r: any) => r.name)).toEqual(["Ice cream", "Screen time"]);
     expect(push.rewardsUpdatedAt).toBe(T_NEW);
   });
+
+  it("saves a Tasks-page reward through the config route", async () => {
+    mockAuth.currentUser = { name: "Rebecca", role: "parent" };
+    mockAuth.isLoggedIn = true;
+    mockMembers.current = [{ id: "parent-1", name: "Rebecca", fullName: "Rebecca", role: "parent", emoji: "👩", color: "#22c55e" }];
+    server.snapshot = { tasks: [], weekData: null };
+
+    await renderAsync(<TasksPage />);
+    await settle();
+    const leaderboard = Array.from(document.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("Leaderboard")) as HTMLButtonElement;
+    expect(leaderboard).toBeTruthy();
+    act(() => { leaderboard.click(); });
+    await settle();
+
+    const heading = Array.from(document.querySelectorAll("h2, h3"))
+      .find((element) => element.textContent === "Rewards")!;
+    const card = heading.closest(".widget-card") as HTMLElement;
+    const add = Array.from(card.querySelectorAll("button"))
+      .find((button) => button.textContent?.trim() === "Add") as HTMLButtonElement;
+    act(() => { add.click(); });
+    const input = document.querySelector('input[placeholder="Extra screen time"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+    act(() => {
+      setter.call(input, "Movie night");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const save = Array.from(document.querySelectorAll("button"))
+      .find((button) => button.textContent?.trim() === "Save") as HTMLButtonElement;
+    await act(async () => {
+      save.click();
+      await Promise.resolve();
+    });
+
+    const configCall = (globalThis.fetch as any).mock.calls.find(([url]: any[]) => url === "/api/tasks/config");
+    expect(configCall).toBeTruthy();
+    expect(JSON.parse(String(configCall[1].body))).toMatchObject({
+      kind: "rewards",
+      action: "upsert",
+      item: { name: "Movie night", cost: 50 },
+    });
+  });
 });
 
 describe("RewardSection — every catalog write stamps the list", () => {
@@ -171,6 +251,32 @@ describe("RewardSection — every catalog write stamps the list", () => {
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
       dispatchEvent: vi.fn(),
+    }));
+    vi.stubGlobal("fetch", vi.fn(async (_input: any, init?: any) => {
+      const command = JSON.parse(String(init?.body));
+      let items = loadRewards<any[]>([]);
+      if (command.action === "replace") items = command.items;
+      if (command.action === "upsert") {
+        items = items.some((reward) => String(reward.id) === String(command.item.id))
+          ? items.map((reward) => String(reward.id) === String(command.item.id) ? command.item : reward)
+          : [...items, command.item];
+      }
+      if (command.action === "delete") {
+        items = items.filter((reward) => String(reward.id) !== String(command.itemId));
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          operationId: command.operationId,
+          kind: "rewards",
+          items,
+          updatedAt: command.updatedAt,
+          revision: { revision: "2", updatedAt: command.updatedAt },
+          applied: true,
+        }),
+      };
     }));
   });
 
@@ -191,29 +297,44 @@ describe("RewardSection — every catalog write stamps the list", () => {
     return container;
   }
 
-  it("delete writes the shorter list AND bumps the LWW stamp", () => {
+  it("delete writes the shorter list through the config route and adopts its stamp", async () => {
     localStorage.setItem(REWARDS_KEY, JSON.stringify([A, B]));
     localStorage.setItem(REWARDS_STAMP_KEY, T_OLD);
     mount();
 
     const del = document.querySelector('button[aria-label="Delete reward"]') as HTMLButtonElement;
     expect(del).toBeTruthy();
-    act(() => { del.click(); });
+    await act(async () => {
+      del.click();
+      await Promise.resolve();
+    });
 
     expect(loadRewards<any[]>([]).map((r) => r.name)).toEqual(["Screen time"]);
-    const stamp = localStorage.getItem(REWARDS_STAMP_KEY);
-    expect(stamp).toBeTruthy();
-    expect(stamp).not.toBe(T_OLD);
-    expect(stamp! > T_OLD).toBe(true);
+    expect(localStorage.getItem(REWARDS_STAMP_KEY)).toBeTruthy();
+    expect(JSON.parse(String((globalThis.fetch as any).mock.calls.at(-1)?.[1]?.body))).toMatchObject({
+      kind: "rewards",
+      action: "delete",
+      itemId: 1,
+    });
   });
 
-  it("clear-all stamps too (an emptied catalog is still a claim of truth)", () => {
+  it("clear-all posts a replacement and adopts the authoritative empty catalog", async () => {
+    localStorage.setItem(REWARDS_KEY, JSON.stringify([A]));
     mount();
 
     const clear = Array.from(document.querySelectorAll("button")).find((b) => b.textContent === "Clear all") as HTMLButtonElement;
     expect(clear).toBeTruthy();
-    act(() => { clear.click(); });
+    await act(async () => {
+      clear.click();
+      await Promise.resolve();
+    });
 
+    expect(loadRewards<any[]>([])).toEqual([]);
+    expect(JSON.parse(String((globalThis.fetch as any).mock.calls.at(-1)?.[1]?.body))).toMatchObject({
+      kind: "rewards",
+      action: "replace",
+      items: [],
+    });
     expect(localStorage.getItem(REWARDS_STAMP_KEY)).toBeTruthy();
   });
 });

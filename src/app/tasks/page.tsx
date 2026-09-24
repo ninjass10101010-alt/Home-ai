@@ -36,6 +36,7 @@ import {
   getThisWeeksCompletedDates, getThisWeeksCompletedTasks,
   loadTasks, saveTasks, loadRewards, saveRewards,
   loadPenalties, savePenalties,
+  readPenaltiesStamp, writePenaltiesStamp,
   getArchivedWeeks, getMemberAllTimePoints, getMemberAllTimeCompletions,
   getPreviousWeekRanks, loadHallOfFame,
   syncAllTasksToPB, syncWeekDataToPB,
@@ -51,8 +52,9 @@ import {
   crewMemberCheckedIn, crewCheckinProgress, crewAllCheckedIn, canJoinCrew,
   normalizeSpeedBonus,
 } from "@/lib/task-utils";
+import type { TaskConfigResponse } from "@/lib/task-config";
 import {
-  readRewardsStamp, touchRewardsStamp, writeRewardsStamp,
+  readRewardsStamp, writeRewardsStamp,
   verifyPinRemote, unreachableCopy,
 } from "@/modes/kid/kid-store";
 import Podium from "@/components/leaderboard/Podium";
@@ -76,6 +78,23 @@ import ConfettiBurst from "@/components/ui/ConfettiBurst";
 function isoOffset(days: number): string {
   const d = new Date(Date.now() + days * 86400000);
   return d.toISOString().split("T")[0];
+}
+
+function taskConfigOperationId(kind: string, action: string): string {
+  return `config-${kind}-${action}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+async function postTaskConfig(command: Record<string, unknown>): Promise<TaskConfigResponse> {
+  const response = await fetch("/api/tasks/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(command),
+  });
+  const body = await response.json();
+  if (!response.ok || !body?.success || !Array.isArray(body.items)) {
+    throw new Error("config_write_failed");
+  }
+  return body as TaskConfigResponse;
 }
 
 function nextWeekdayISO(targetDay: number): string {
@@ -475,6 +494,7 @@ export default function TasksPage() {
         // prizes ride the same contract (task-utils stamp key).
         body: JSON.stringify({
           tasks, weekData, rewards, rewardsUpdatedAt: readRewardsStamp(),
+          penalties, penaltiesUpdatedAt: readPenaltiesStamp(),
           weeklyPrizes: loadWeeklyPrizes(), weeklyPrizesStamp: readWeeklyPrizesStamp(),
           // Carry the tombstones so a delete (chat-initiated) is durable across
           // devices — the server also unions them, so a stale push can't drop one.
@@ -488,7 +508,7 @@ export default function TasksPage() {
       syncPendingRef.current = false;
     }, 2000);
     return () => { clearTimeout(t); syncPendingRef.current = false; };
-  }, [tasks, weekData, rewards, mounted]);
+  }, [tasks, weekData, rewards, penalties, mounted]);
 
   // Structured PB sync (individual collections)
   useEffect(() => {
@@ -496,7 +516,7 @@ export default function TasksPage() {
     if (pbSyncPendingRef.current) return;
     pbSyncPendingRef.current = true;
     const t = setTimeout(() => {
-      syncAllTasksToPB(tasks, weekData, getArchivedWeeks(), rewards, penalties, loadHallOfFame(), loadWeeklyPrizes());
+      syncAllTasksToPB(tasks, weekData, getArchivedWeeks(), [], [], []);
       pbSyncPendingRef.current = false;
     }, 5000);
     return () => { clearTimeout(t); pbSyncPendingRef.current = false; };
@@ -548,7 +568,15 @@ export default function TasksPage() {
       saveWeeklyPrizes(snap.weeklyPrizes);
       writeWeeklyPrizesStamp(snap.weeklyPrizesStamp);
     }
-    if (snap.penalties?.length) setPenalties((prev: any) => snap.penalties.length > prev.length ? snap.penalties : prev);
+    if (
+      typeof snap.penaltiesUpdatedAt === "string" &&
+      snap.penaltiesUpdatedAt > readPenaltiesStamp() &&
+      Array.isArray(snap.penalties)
+    ) {
+      savePenalties(snap.penalties);
+      writePenaltiesStamp(snap.penaltiesUpdatedAt);
+      setPenalties(snap.penalties);
+    }
     const { tasks: nextTasks, weekData: nextWeek, tasksChanged, weekChanged, deletedTaskIds } = mergeTasksSnapshot(
       tasksRef.current,
       weekDataRef.current,
@@ -1511,26 +1539,77 @@ export default function TasksPage() {
 
   const startAddReward = () => { setEditingRewardId(null); setAddingReward(true); setRewardForm({ id: Date.now(), name: "", emoji: "🎁", cost: 50 }); };
   const startEditReward = (r: Reward) => { setEditingRewardId(r.id); setAddingReward(false); setRewardForm({ ...r }); };
-  const saveReward = () => {
+  const saveReward = async () => {
     if (!rewardForm.name.trim()) return;
-    if (addingReward) setRewards(prev => [...prev, { ...rewardForm, id: Date.now() }]);
-    else setRewards(prev => prev.map(r => r.id === editingRewardId ? { ...rewardForm } : r));
-    touchRewardsStamp();
-    setEditingRewardId(null);
-    setAddingReward(false);
+    try {
+      const result = await postTaskConfig({
+        operationId: taskConfigOperationId("rewards", "upsert"),
+        kind: "rewards",
+        action: "upsert",
+        updatedAt: new Date().toISOString(),
+        item: { ...rewardForm, name: rewardForm.name.trim() },
+      });
+      setRewards(result.items as Reward[]);
+      writeRewardsStamp(result.updatedAt);
+      setEditingRewardId(null);
+      setAddingReward(false);
+    } catch {
+      showToast("Couldn't save the reward. Check the connection and try again.");
+    }
   };
-  const deleteReward = (id: number) => { setRewards(prev => prev.filter(r => r.id !== id)); touchRewardsStamp(); setEditingRewardId(null); };
+  const deleteReward = async (id: number) => {
+    try {
+      const result = await postTaskConfig({
+        operationId: taskConfigOperationId("rewards", "delete"),
+        kind: "rewards",
+        action: "delete",
+        updatedAt: new Date().toISOString(),
+        itemId: id,
+      });
+      setRewards(result.items as Reward[]);
+      writeRewardsStamp(result.updatedAt);
+      setEditingRewardId(null);
+    } catch {
+      showToast("Couldn't remove the reward. Check the connection and try again.");
+    }
+  };
 
   const startAddPenalty = () => { setEditingPenaltyId(null); setAddingPenalty(true); setPenaltyForm({ id: Date.now(), name: "", emoji: "⚠️", points: 10 }); };
   const startEditPenalty = (p: Penalty) => { setEditingPenaltyId(p.id); setAddingPenalty(false); setPenaltyForm({ ...p }); };
-  const savePenalty = () => {
+  const savePenalty = async () => {
     if (!penaltyForm.name.trim()) return;
-    if (addingPenalty) setPenalties(prev => [...prev, { ...penaltyForm, id: Date.now() }]);
-    else setPenalties(prev => prev.map(p => p.id === editingPenaltyId ? { ...penaltyForm } : p));
-    setEditingPenaltyId(null);
-    setAddingPenalty(false);
+    try {
+      const result = await postTaskConfig({
+        operationId: taskConfigOperationId("penalties", "upsert"),
+        kind: "penalties",
+        action: "upsert",
+        updatedAt: new Date().toISOString(),
+        item: { ...penaltyForm, name: penaltyForm.name.trim() },
+      });
+      setPenalties(result.items as Penalty[]);
+      writePenaltiesStamp(result.updatedAt);
+      setEditingPenaltyId(null);
+      setAddingPenalty(false);
+    } catch {
+      showToast("Couldn't save the penalty. Check the connection and try again.");
+    }
   };
-  const deletePenalty = (id: number) => { setPenalties(prev => prev.filter(p => p.id !== id)); setEditingPenaltyId(null); };
+  const deletePenalty = async (id: number) => {
+    try {
+      const result = await postTaskConfig({
+        operationId: taskConfigOperationId("penalties", "delete"),
+        kind: "penalties",
+        action: "delete",
+        updatedAt: new Date().toISOString(),
+        itemId: id,
+      });
+      setPenalties(result.items as Penalty[]);
+      writePenaltiesStamp(result.updatedAt);
+      setEditingPenaltyId(null);
+    } catch {
+      showToast("Couldn't remove the penalty. Check the connection and try again.");
+    }
+  };
 
   const generateAiRewards = async () => {
     setAiRewardSuggesting(true);
@@ -1554,10 +1633,21 @@ export default function TasksPage() {
     setAiRewardSuggesting(false);
   };
 
-  const adoptReward = (r: Reward) => {
-    setRewards(prev => [...prev, { ...r, id: Date.now() }]);
-    touchRewardsStamp();
-    setAiRewards(prev => prev.filter(rr => rr.name !== r.name));
+  const adoptReward = async (r: Reward) => {
+    try {
+      const result = await postTaskConfig({
+        operationId: taskConfigOperationId("rewards", "upsert"),
+        kind: "rewards",
+        action: "upsert",
+        updatedAt: new Date().toISOString(),
+        item: { ...r, id: Date.now() },
+      });
+      setRewards(result.items as Reward[]);
+      writeRewardsStamp(result.updatedAt);
+      setAiRewards(prev => prev.filter(rr => rr.name !== r.name));
+    } catch {
+      showToast("Couldn't add the reward. Check the connection and try again.");
+    }
   };
 
   const openAdjust = (name: string) => {
