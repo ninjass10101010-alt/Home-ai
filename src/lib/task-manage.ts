@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { withAdmin } from "@/lib/pb-auth";
 import * as liveMember from "@/lib/live-member";
 import type { LiveMember } from "@/lib/live-member";
@@ -92,7 +93,8 @@ export type TaskManageParseResult =
 
 export const TASK_MANAGE_MAX_TITLE_LENGTH = 200;
 export const TASK_MANAGE_MAX_CATEGORY_LENGTH = 40;
-export const TASK_MANAGE_MAX_EMOJI_LENGTH = 128;
+export const TASK_MANAGE_MAX_EMOJI_LENGTH = 400_000;
+export const TASK_MANAGE_MAX_TRANSPORT_LENGTH = 500_000;
 export const TASK_MANAGE_MAX_POINTS = 100;
 export const TASK_MANAGE_MAX_SPEED_BONUS = 5;
 export const TASK_MANAGE_MIN_CREW_SIZE = 2;
@@ -137,6 +139,15 @@ const TOP_LEVEL_KEYS: Record<ManageAction, Set<string>> = {
 const FORBIDDEN_KEYS = new Set([
   "id",
   "taskid",
+  "member",
+  "memberid",
+  "amount",
+  "payee",
+  "userid",
+  "role",
+  "claimant",
+  "actor",
+  "operationidentity",
   "status",
   "created",
   "createdat",
@@ -166,10 +177,15 @@ const FORBIDDEN_KEYS = new Set([
   "transactions",
   "transactionhistory",
   "pin",
+  "pincode",
   "password",
+  "passcode",
   "token",
   "secret",
   "authorization",
+  "cookie",
+  "bearer",
+  "apikey",
   "session",
   "operationid",
   "opid",
@@ -191,11 +207,28 @@ function isForbiddenKey(key: string): boolean {
   const compact = compactKey(key);
   return (
     FORBIDDEN_KEYS.has(compact) ||
+    compact.startsWith("member") ||
+    compact.startsWith("amount") ||
+    compact.startsWith("payee") ||
+    compact.startsWith("user") ||
+    compact.startsWith("role") ||
+    compact.startsWith("claimant") ||
+    compact.startsWith("actor") ||
     compact.startsWith("completed") ||
     compact.startsWith("completion") ||
     compact.includes("tombstone") ||
     compact.includes("approval") ||
-    compact.includes("operationid")
+    compact.includes("operationid") ||
+    compact.startsWith("pin") ||
+    compact.startsWith("password") ||
+    compact.startsWith("passcode") ||
+    compact.startsWith("token") ||
+    compact.startsWith("secret") ||
+    compact.startsWith("authorization") ||
+    compact.startsWith("cookie") ||
+    compact.startsWith("bearer") ||
+    compact.startsWith("apikey") ||
+    compact.startsWith("session")
   );
 }
 
@@ -242,14 +275,13 @@ function normalizedText(value: unknown, max: number, allowEmpty = false): string
   return text;
 }
 
-function normalizedEmoji(value: unknown, fallback = "👤"): string {
+function canonicalEmoji(value: unknown, fallback = "👤"): string {
   if (typeof value !== "string") return fallback;
   const emoji = value.trim();
   if (
     !emoji ||
     emoji.length > TASK_MANAGE_MAX_EMOJI_LENGTH ||
-    /[\u0000-\u001f\u007f]/u.test(emoji) ||
-    /^(data:|https?:\/\/|\/\/)/iu.test(emoji)
+    /[\u0000-\u001f\u007f]/u.test(emoji)
   ) {
     return fallback;
   }
@@ -304,8 +336,9 @@ function findLiveMember(members: LiveMember[], value: unknown): LiveMember | nul
   if (typeof value !== "string") return null;
   const name = value.trim().toLowerCase();
   if (!name) return null;
-  const exact = members.find((member) => member.name.trim().toLowerCase() === name);
-  if (exact) return exact;
+  const exactMatches = members.filter((member) => member.name.trim().toLowerCase() === name);
+  if (exactMatches.length === 1) return exactMatches[0];
+  if (exactMatches.length > 1) return null;
   const firstName = name.split(/\s+/)[0];
   const firstNameMatches = members.filter(
     (member) => member.name.trim().toLowerCase().split(/\s+/)[0] === firstName,
@@ -350,7 +383,10 @@ function taskShape(
 ): TaskShapeResult {
   const title = normalizedText(raw.title, TASK_MANAGE_MAX_TITLE_LENGTH);
   if (!title) return { ok: false, reason: "invalid_task_command" };
-  if (raw.assigneeEmoji !== undefined && typeof raw.assigneeEmoji !== "string") {
+  if (
+    raw.assigneeEmoji !== undefined &&
+    (typeof raw.assigneeEmoji !== "string" || !canonicalEmoji(raw.assigneeEmoji, ""))
+  ) {
     return { ok: false, reason: "invalid_task_command" };
   }
   const points = normalizedPoints(raw.points);
@@ -385,6 +421,24 @@ function taskShape(
     return { ok: false, reason: "invalid_task_command" };
   }
 
+  const crewSize = normalizedCrewSize(raw.crewSize);
+  const existingCrewMembers = existing && Array.isArray(existing.crew?.members)
+    ? existing.crew.members
+    : [];
+  const existingCrewRemoved = existing && Array.isArray(existing.crew?.removed)
+    ? existing.crew.removed
+    : [];
+  if (
+    existing &&
+    mode.value !== "crew" &&
+    (existingCrewMembers.length > 0 || existingCrewRemoved.length > 0)
+  ) {
+    return { ok: false, reason: "invalid_task_command" };
+  }
+  if (mode.value === "crew" && existingCrewMembers.length > Number(crewSize)) {
+    return { ok: false, reason: "invalid_task_command" };
+  }
+
   const requestedAssignee = raw.assignee;
   if (requestedAssignee !== undefined && typeof requestedAssignee !== "string") {
     return { ok: false, reason: "invalid_task_command" };
@@ -408,18 +462,9 @@ function taskShape(
       return { ok: false, reason: "unknown_assignee" };
     }
     assignee = requestedMember.name.trim();
-    assigneeEmoji = normalizedEmoji(requestedMember.emoji);
+    assigneeEmoji = canonicalEmoji(requestedMember.emoji);
   }
 
-  const crewSize = normalizedCrewSize(raw.crewSize);
-  if (
-    mode.value === "crew" &&
-    existing &&
-    Array.isArray(existing.crew?.members) &&
-    existing.crew.members.length > Number(crewSize)
-  ) {
-    return { ok: false, reason: "invalid_task_command" };
-  }
   const output: Record<string, unknown> = {
     id,
     title,
@@ -507,10 +552,14 @@ function receiptFor(
   data: SnapshotData,
   action: ManageAction,
   operationId: string,
-  taskId?: number,
-): { conflict: boolean; receipt: any | null } {
+  taskId: number | undefined,
+  fingerprint: string,
+): { conflict: boolean; receipt: SnapshotOperationReceipt | null } {
   const receipts = getSnapshotOperationReceipts(data, operationId);
   if (!receipts.length) return { conflict: false, receipt: null };
+  if (receipts.some((receipt) => !receipt.fingerprint || receipt.fingerprint !== fingerprint)) {
+    return { conflict: true, receipt: null };
+  }
   const matching = taskId === undefined
     ? receipts.filter((receipt) => receipt.action === action)
     : receipts.filter((receipt) => receipt.action === action && receipt.taskId === taskId);
@@ -568,70 +617,40 @@ function sameValue(left: unknown, right: unknown): boolean {
   return JSON.stringify(stableValue(left)) === JSON.stringify(stableValue(right));
 }
 
+function fingerprintValue(value: unknown, key?: string): unknown {
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (key === "recurring") {
+      const recurring = text.toLowerCase();
+      return recurring === "" || recurring === "none" ? null : recurring;
+    }
+    return text;
+  }
+  if (Array.isArray(value)) return value.map((entry) => fingerprintValue(entry));
+  if (isRecord(value)) {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .filter((entry) => value[entry] !== undefined)
+        .map((entry) => [entry, fingerprintValue(value[entry], entry)]),
+    );
+  }
+  return value;
+}
+
+export function taskManageCommandFingerprint(command: ManageTaskCommand): string {
+  const payload = command.action === "add"
+    ? { action: command.action, operationId: command.operationId, task: command.task }
+    : command.action === "update"
+      ? { action: command.action, operationId: command.operationId, taskId: command.taskId, patch: command.patch }
+      : { action: command.action, operationId: command.operationId, taskId: command.taskId };
+  return createHash("sha256")
+    .update(JSON.stringify(fingerprintValue(payload)))
+    .digest("hex");
+}
+
 function taskMatches(left: SnapshotTask, right: SnapshotTask): boolean {
   return sameValue(canonicalComparable(left), canonicalComparable(right));
-}
-
-function editableComparable(task: SnapshotTask): Record<string, unknown> {
-  const comparable = canonicalComparable(task);
-  for (const key of [
-    "completed",
-    "completedBy",
-    "completedAt",
-    "completedInWeek",
-    "pendingApproval",
-    "sentBackAt",
-  ]) delete comparable[key];
-  if (comparable.speedBonus === undefined || comparable.speedBonus === null || comparable.speedBonus === 0) {
-    comparable.speedBonus = 0;
-  }
-  if (comparable.crewSize === undefined || comparable.crewSize === null || comparable.crewSize === 0) {
-    comparable.crewSize = null;
-  }
-  if (comparable.assigneeEmoji !== undefined) comparable.assigneeEmoji = normalizedEmoji(comparable.assigneeEmoji);
-  if (
-    comparable.crew === null ||
-    (isRecord(comparable.crew) &&
-      Array.isArray(comparable.crew.members) &&
-      comparable.crew.members.length === 0 &&
-      (!Array.isArray(comparable.crew.removed) || comparable.crew.removed.length === 0))
-  ) {
-    comparable.crew = null;
-  }
-  return comparable;
-}
-
-function replayInputMatches(
-  action: ManageAction,
-  input: Record<string, unknown>,
-  patch: Record<string, unknown>,
-  current: SnapshotTask,
-  members: LiveMember[],
-  taskId: number,
-): boolean {
-  const shaped = action === "add"
-    ? taskShape(input, members, taskId)
-    : updateShape(patch, current, members);
-  if (!shaped.ok) return false;
-  const expected = editableComparable(shaped.value as SnapshotTask);
-  const actual = editableComparable(current);
-  const source = action === "add" ? input : patch;
-  const keys = new Set(Object.keys(source));
-  if (keys.has("assignee") || keys.has("universal") || keys.has("crewSize") || keys.has("speedBonus") || keys.has("stealable")) {
-    keys.add("assignee");
-    keys.add("universal");
-    keys.add("crewSize");
-    keys.add("speedBonus");
-    keys.add("stealable");
-  }
-  for (const key of keys) {
-    if (key === "assigneeEmoji") {
-      if (normalizedEmoji(expected[key]) !== normalizedEmoji(actual[key])) return false;
-      continue;
-    }
-    if (!sameValue(expected[key], actual[key])) return false;
-  }
-  return true;
 }
 
 function mutationVerified(
@@ -639,9 +658,10 @@ function mutationVerified(
   action: ManageAction,
   operationId: string,
   taskId: number,
+  fingerprint: string,
   expectedTask: SnapshotTask | null,
 ): boolean {
-  const receipt = receiptFor(data, action, operationId, taskId);
+  const receipt = receiptFor(data, action, operationId, taskId, fingerprint);
   if (receipt.conflict || !receipt.receipt) return false;
   if (action === "delete") {
     const tombstones = Array.isArray(data.deletedTaskIds) ? data.deletedTaskIds.map(Number) : [];
@@ -773,11 +793,6 @@ function success(
   };
 }
 
-function commandTaskId(decoded: Record<string, unknown>, action: ManageAction): number | null {
-  if (action === "add") return null;
-  return parseTaskId(decoded.taskId);
-}
-
 type DecodedPayload =
   | { ok: true; value: Record<string, unknown> }
   | { ok: false; reason: TaskManageErrorCode };
@@ -790,7 +805,9 @@ function decodePayload(payload: Record<string, unknown>, action: ManageAction): 
   if (keys.length !== 1 || keys[0] !== "taskData" || typeof payload.taskData !== "string") {
     return { ok: false, reason: "invalid_task_command" };
   }
-  if (payload.taskData.length > 100_000) return { ok: false, reason: "invalid_task_command" };
+  if (payload.taskData.length > TASK_MANAGE_MAX_TRANSPORT_LENGTH) {
+    return { ok: false, reason: "invalid_task_command" };
+  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(payload.taskData) as unknown;
@@ -800,28 +817,18 @@ function decodePayload(payload: Record<string, unknown>, action: ManageAction): 
   if (!isRecord(parsed)) {
     return { ok: false, reason: "invalid_task_command" };
   }
+  const allowedKeys = action === "add"
+    ? ["task"]
+    : action === "update"
+      ? ["taskId", "patch"]
+      : ["taskId"];
+  if (Object.keys(parsed).some((key) => !allowedKeys.includes(key))) {
+    return { ok: false, reason: "forbidden_task_field" };
+  }
   const nested = { ...parsed };
   if (action !== "add") delete nested.taskId;
   if (containsForbiddenKey(nested)) {
     return { ok: false, reason: "forbidden_task_field" };
-  }
-  if (action === "add") {
-    if (Object.keys(parsed).length !== 1 || !isRecord(parsed.task)) {
-      return { ok: false, reason: "invalid_task_command" };
-    }
-  } else if (action === "update") {
-    if (
-      Object.keys(parsed).some((key) => key !== "taskId" && key !== "patch") ||
-      !isRecord(parsed.patch) ||
-      !parseTaskId(parsed.taskId)
-    ) {
-      return { ok: false, reason: "invalid_task_command" };
-    }
-  } else if (
-    Object.keys(parsed).length !== 1 ||
-    !parseTaskId(parsed.taskId)
-  ) {
-    return { ok: false, reason: "invalid_task_command" };
   }
   return { ok: true, value: parsed };
 }
@@ -837,8 +844,11 @@ function encodePayload(command: ManageTaskCommand): Record<string, unknown> {
 function validateCommand(
   command: InternalTaskCommand,
   context: InternalTaskCommandContext,
-): { ok: true; value: Record<string, unknown> } | { ok: false; reason: TaskManageErrorCode } {
+): { ok: true; value: ManageTaskCommand; fingerprint: string } | { ok: false; reason: TaskManageErrorCode } {
   if (context.source !== "server" && context.source !== "hermes" && context.source !== "muse") {
+    return { ok: false, reason: "invalid_task_command" };
+  }
+  if (command.kind !== "add" && command.kind !== "update" && command.kind !== "delete") {
     return { ok: false, reason: "invalid_task_command" };
   }
   if (command.actor.role.trim().toLowerCase() !== "parent") {
@@ -846,10 +856,15 @@ function validateCommand(
   }
   const operationId = normalizedOperationId(command.operationId);
   if (!operationId) return { ok: false, reason: "invalid_task_command" };
-  const decoded = decodePayload(command.payload, command.kind as ManageAction);
-  return decoded.ok
-    ? { ok: true, value: decoded.value }
-    : { ok: false, reason: decoded.reason };
+  const decoded = decodePayload(command.payload, command.kind);
+  if (!decoded.ok) return { ok: false, reason: decoded.reason };
+  const parsed = parseManageTaskCommand({
+    action: command.kind,
+    operationId,
+    ...decoded.value,
+  });
+  if ("error" in parsed) return { ok: false, reason: parsed.error };
+  return { ok: true, value: parsed, fingerprint: taskManageCommandFingerprint(parsed) };
 }
 
 type MutationResult = {
@@ -875,16 +890,24 @@ async function handleCommand(
   const operationId = normalizedOperationId(command.operationId) ?? "";
   const validated = validateCommand(command, context);
   if (!validated.ok) return failure(operationId, validated.reason);
-  const decoded = validated.value;
-  const action = command.kind as ManageAction;
-  let members: LiveMember[] | null = null;
+  const parsed = validated.value;
+  const fingerprint = validated.fingerprint;
+  const action = parsed.action;
+  let roster: LiveMember[] = [];
+  if (action !== "delete") {
+    try {
+      roster = await liveRoster();
+    } catch {
+      return failure(operationId, "member_roster_unavailable");
+    }
+  }
 
   try {
     return await withWeekLedgerLock(localWeekStartISO(), () =>
       withAdmin(async (pb) => {
         const initial = await readSnapshotWithRevision();
-        const requestedTaskId = commandTaskId(decoded, action);
-        const existingReceipt = receiptFor(initial.data, action, operationId, requestedTaskId ?? undefined);
+        const requestedTaskId = action === "add" ? undefined : parsed.taskId;
+        const existingReceipt = receiptFor(initial.data, action, operationId, requestedTaskId, fingerprint);
         if (existingReceipt.conflict) return failure(operationId, "operation_conflict");
         if (existingReceipt.receipt) {
           const taskId = existingReceipt.receipt.taskId;
@@ -892,46 +915,16 @@ async function handleCommand(
             ? null
             : liveSnapshotTasks(initial.data).find((candidate) => Number(candidate.id) === taskId) ?? null;
           if (action !== "delete" && !task) return failure(operationId, "snapshot_write_failed");
-          if (action !== "delete") {
-            if (members === null) {
-              try {
-                members = await liveRoster();
-              } catch {
-                members = [];
-              }
-            }
-            if (members.length > 0) {
-              const matches = replayInputMatches(
-                action,
-                decoded.task as Record<string, unknown>,
-                decoded.patch as Record<string, unknown>,
-                task as SnapshotTask,
-                members,
-                taskId,
-              );
-              if (!matches) return failure(operationId, "operation_conflict");
-            }
-          }
           const reconciled = action === "delete"
             ? await projectDelete(pb, taskId)
             : await projectUpsert(pb, task as SnapshotTask);
           return success(operationId, task, initial.revision, reconciled);
         }
 
-        if (action !== "delete" && members === null) {
-          try {
-            members = await liveRoster();
-          } catch {
-            return failure(operationId, "member_roster_unavailable");
-          }
-        }
-
-        const roster = action === "delete" ? [] : members as LiveMember[];
         let preparedTask: SnapshotTask | null = null;
         let taskId: number;
         if (action === "add") {
-          const raw = decoded.task as Record<string, unknown>;
-          const shaped = addShape(raw, roster, initial.data);
+          const shaped = addShape(parsed.task as Record<string, unknown>, roster, initial.data);
           if (!shaped.ok) return failure(operationId, shaped.reason);
           preparedTask = shaped.value as SnapshotTask;
           taskId = preparedTask.id;
@@ -939,7 +932,7 @@ async function handleCommand(
           taskId = requestedTaskId!;
           const existing = liveSnapshotTasks(initial.data).find((candidate) => Number(candidate.id) === taskId);
           if (!existing) return failure(operationId, "unknown_task");
-          const shaped = updateShape(decoded.patch as Record<string, unknown>, existing, roster);
+          const shaped = updateShape(parsed.patch as Record<string, unknown>, existing, roster);
           if (!shaped.ok) return failure(operationId, shaped.reason);
           preparedTask = shaped.value as SnapshotTask;
         } else {
@@ -951,13 +944,19 @@ async function handleCommand(
 
         const mutation = await mutateSnapshotWithMeta<MutationResult>(
           (data): { data: SnapshotData; result: MutationResult } => {
-            const receipts = receiptFor(data, action, operationId, requestedTaskId ?? undefined);
-            if (receipts.conflict) return { data, result: { duplicate: false, error: "operation_conflict" as const, taskId: requestedTaskId ?? 0, task: null } };
-            if (receipts.receipt) {
+            const receipts = receiptFor(data, action, operationId, requestedTaskId, fingerprint);
+            if (receipts.conflict) {
+              return {
+                data,
+                result: { duplicate: false, error: "operation_conflict" as const, taskId: requestedTaskId ?? 0, task: null },
+              };
+            }
+            const existingTaskReceipt = receipts.receipt;
+            if (existingTaskReceipt) {
               const task = action === "delete"
                 ? null
-                : liveSnapshotTasks(data).find((candidate) => Number(candidate.id) === receipts.receipt.taskId) ?? null;
-              return { data, result: { duplicate: true, taskId: receipts.receipt.taskId, task } };
+                : liveSnapshotTasks(data).find((candidate) => Number(candidate.id) === existingTaskReceipt.taskId) ?? null;
+              return { data, result: { duplicate: true, taskId: existingTaskReceipt.taskId, task } };
             }
             if (action === "add") {
               const next = { ...(preparedTask as SnapshotTask) };
@@ -967,6 +966,7 @@ async function handleCommand(
                 operationId,
                 action,
                 taskId: next.id,
+                fingerprint,
                 createdAt: new Date().toISOString(),
               };
               return { data: addReceipt({ ...data, tasks: [...(data.tasks || []), next] }, receipt), result: { duplicate: false, taskId: next.id, task: next } };
@@ -974,7 +974,7 @@ async function handleCommand(
             if (action === "update") {
               const current = liveSnapshotTasks(data).find((candidate) => Number(candidate.id) === taskId);
               if (!current) return { data, result: { duplicate: false, error: "unknown_task" as const, taskId, task: null } };
-              const shaped = updateShape(decoded.patch as Record<string, unknown>, current, roster);
+              const shaped = updateShape(parsed.patch as Record<string, unknown>, current, roster);
               if (!shaped.ok) return { data, result: { duplicate: false, error: shaped.reason, taskId, task: null } };
               const next = shaped.value as SnapshotTask;
               preparedTask = next;
@@ -982,6 +982,7 @@ async function handleCommand(
                 operationId,
                 action,
                 taskId,
+                fingerprint,
                 createdAt: new Date().toISOString(),
               };
               return { data: addReceipt({ ...data, tasks: (data.tasks || []).map((task) => Number(task.id) === taskId ? next : task) }, receipt), result: { duplicate: false, taskId, task: next } };
@@ -992,6 +993,7 @@ async function handleCommand(
               action,
               taskId,
               deleted: true,
+              fingerprint,
               createdAt: new Date().toISOString(),
             };
             return { data: addReceipt(tombstoned, receipt), result: { duplicate: false, taskId, task: null, deleted: true } };
@@ -999,15 +1001,18 @@ async function handleCommand(
           pb,
         );
 
-        const mutationResult = mutation.result as Record<string, any>;
+        const mutationResult = mutation.result;
         if (mutationResult.error) return failure(operationId, mutationResult.error);
         if (mutationResult.duplicate) {
-          const task = mutationResult.task as SnapshotTask | null;
-          return success(operationId, task, mutation.revision, false);
+          const task = mutationResult.task;
+          const reconciled = action === "delete"
+            ? await projectDelete(pb, mutationResult.taskId)
+            : await projectUpsert(pb, task as SnapshotTask);
+          return success(operationId, task, mutation.revision, reconciled);
         }
         const verified = await readSnapshotWithRevision();
         const expectedTask = preparedTask;
-        if (!mutationVerified(verified.data, action, operationId, mutationResult.taskId, expectedTask)) {
+        if (!mutationVerified(verified.data, action, operationId, mutationResult.taskId, fingerprint, expectedTask)) {
           return failure(operationId, "snapshot_write_failed");
         }
         const reconciled = action === "delete"

@@ -53,6 +53,7 @@ export interface SnapshotOperationReceipt {
   action: string;
   taskId: number;
   deleted?: boolean;
+  fingerprint?: string;
   createdAt: string;
 }
 
@@ -314,6 +315,9 @@ function sanitizeOperationReceipt(value: unknown): SnapshotOperationReceipt | nu
   const action = typeof value.action === "string" ? value.action.trim() : "";
   const taskId = value.taskId;
   const createdAt = normalizeTimestamp(value.createdAt);
+  const fingerprint = typeof value.fingerprint === "string" && /^[a-f0-9]{64}$/.test(value.fingerprint)
+    ? value.fingerprint
+    : undefined;
   if (
     !operationId ||
     !action ||
@@ -328,6 +332,7 @@ function sanitizeOperationReceipt(value: unknown): SnapshotOperationReceipt | nu
     action,
     taskId,
     ...(typeof value.deleted === "boolean" ? { deleted: value.deleted } : {}),
+    ...(fingerprint ? { fingerprint } : {}),
     createdAt,
   };
 }
