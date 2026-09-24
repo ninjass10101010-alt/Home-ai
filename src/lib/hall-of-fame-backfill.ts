@@ -9,12 +9,6 @@
 // saw an empty Hall of Fame forever (exactly the live state 2026-09-19: week
 // 2026-09-07 had Aurora at 13 pts, hall_of_fame had 0 rows).
 //
-// This module recomputes the enshrinement from durable server truth
-// (week_archive + members + weekly_prizes) and upserts the missing rows.
-// Idempotent per (member, weekStart); never touches existing rows, so a
-// `celebrated: true` stamp can never be lost. It runs as a self-healing step
-// inside GET /api/tasks/sync — the 60s refresh every signed-in device already
-// performs — so champions get recorded no matter which session is active.
 import type { HallOfFameEntry, WeeklyPrize } from "@/types/tasks";
 import { DEFAULT_WEEKLY_PRIZES } from "@/lib/task-utils";
 
@@ -64,11 +58,6 @@ export function hallEntriesForWeek(
   return out;
 }
 
-/**
- * Impure: ensure every archived week that carried points has its top-3 rows in
- * hall_of_fame. Returns the number of rows created (0 on a no-op pass). Never
- * deletes or updates existing rows — idempotent and celebration-safe.
- */
 export async function ensureArchivedWeeksEnshrined(pb: PB): Promise<number> {
   const [archiveRows, hallRows, memberRows, prizeRows] = await Promise.all([
     pb.collection("week_archive").getFullList({ requestKey: null }),
@@ -78,40 +67,87 @@ export async function ensureArchivedWeeksEnshrined(pb: PB): Promise<number> {
   ]);
 
   const emojis: Record<string, string> = {};
-  for (const m of memberRows as any[]) {
-    if (m?.name) emojis[m.name] = m.emoji || "🏅";
+  for (const member of memberRows as any[]) {
+    if (member?.name && !emojis[member.name]) emojis[member.name] = member.emoji || "🏅";
   }
-  const prizes = (prizeRows as any[]).map((p) => ({ rank: Number(p.rank) as 1 | 2 | 3, text: String(p.text || "") }));
-  const prizeCatalog = prizes.length ? prizes : DEFAULT_WEEKLY_PRIZES.map((p) => ({ rank: p.rank, text: p.text }));
-  const enshrined = new Set(
-    (hallRows as any[]).map((h) => `${h.member}::${h.weekStart}`),
-  );
-
-  // Only the NEWEST finished week gets a live win ceremony — older weeks are
-  // already history (their ceremony moment passed long ago), so their entries
-  // are created pre-celebrated and stay visible in the Hall of Fame list.
+  const prizeByRank = new Map<number, string>();
+  for (const row of [...(prizeRows as any[])].sort((left, right) => String(left.id).localeCompare(String(right.id)))) {
+    const rank = Number(row.rank);
+    if (![1, 2, 3].includes(rank) || typeof row.text !== "string" || !row.text) continue;
+    if (!prizeByRank.has(rank)) prizeByRank.set(rank, row.text);
+  }
+  const prizeCatalog = prizeByRank.size
+    ? [...prizeByRank].map(([rank, text]) => ({ rank: rank as 1 | 2 | 3, text }))
+    : DEFAULT_WEEKLY_PRIZES.map((prize) => ({ rank: prize.rank, text: prize.text }));
+  const byKey = new Map<string, any[]>();
+  for (const row of hallRows as any[]) {
+    const key = `${String(row.member ?? "")}\u0000${String(row.weekStart ?? "")}`;
+    byKey.set(key, [...(byKey.get(key) ?? []), row]);
+  }
   const archivedWeeks = (archiveRows as any[])
-    .map((r) => String(r?.weekStart || ""))
+    .map((row) => String(row?.weekStart || ""))
     .filter(Boolean)
     .sort();
-  const latestArchivedWeek = archivedWeeks[archivedWeeks.length - 1] ?? "";
+  const latestArchivedWeek = archivedWeeks.at(-1) ?? "";
+  const expected = new Map<string, HallOfFameEntry>();
+  let changed = 0;
 
-  let created = 0;
   for (const row of archiveRows as any[]) {
     const weekStart = String(row?.weekStart || "");
     if (!weekStart) continue;
     const points = parseMaybeJSON<Record<string, number>>(row?.points, {});
     const entries = hallEntriesForWeek(points, weekStart, emojis, prizeCatalog);
-    const isHistory = weekStart !== latestArchivedWeek;
+    const history = weekStart !== latestArchivedWeek;
     for (const entry of entries) {
-      if (enshrined.has(`${entry.member}::${entry.weekStart}`)) continue;
-      await pb.collection("hall_of_fame").create({
-        ...entry,
-        ...(isHistory ? { celebrated: true } : {}),
-      });
-      enshrined.add(`${entry.member}::${entry.weekStart}`);
-      created++;
+      const key = `${entry.member}\u0000${entry.weekStart}`;
+      expected.set(key, entry);
+      const rows = byKey.get(key) ?? [];
+      const celebrated = rows.some((candidate) => candidate.celebrated === true);
+      if (rows.length === 0) {
+        await pb.collection("hall_of_fame").create({
+          ...entry,
+          ...(history ? { celebrated: true } : {}),
+        }, { requestKey: null });
+        changed += 1;
+        continue;
+      }
+      for (const candidate of rows) {
+        const matches =
+          Number(candidate.points) === entry.points &&
+          Number(candidate.rank) === entry.rank &&
+          String(candidate.emoji || "") === entry.emoji &&
+          String(candidate.prize || "") === String(entry.prize || "");
+        if (matches) continue;
+        await pb.collection("hall_of_fame").update(candidate.id, {
+          member: entry.member,
+          weekStart: entry.weekStart,
+          emoji: entry.emoji,
+          points: entry.points,
+          rank: entry.rank,
+          prize: entry.prize ?? null,
+          celebrated,
+        }, { requestKey: null });
+        changed += 1;
+      }
     }
   }
-  return created;
+
+  const verifiedRows = await pb.collection("hall_of_fame").getFullList({ requestKey: null });
+  for (const entry of expected.values()) {
+    const matches = (verifiedRows as any[]).filter(
+      (row) => row.member === entry.member && row.weekStart === entry.weekStart,
+    );
+    if (matches.length === 0) throw new Error("hall_of_fame_write_missing");
+    for (const row of matches) {
+      if (
+        Number(row.points) !== entry.points ||
+        Number(row.rank) !== entry.rank ||
+        String(row.emoji || "") !== entry.emoji ||
+        String(row.prize || "") !== String(entry.prize || "")
+      ) {
+        throw new Error("hall_of_fame_write_mismatch");
+      }
+    }
+  }
+  return changed;
 }

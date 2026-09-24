@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { syncAllTasksToPB, syncFamilyGoalToPB } from "@/lib/task-utils";
+import { syncFamilyGoalToPB } from "@/lib/task-utils";
 
 function loadJSON<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
@@ -9,13 +9,6 @@ function loadJSON<T>(key: string, fallback: T): T {
   } catch {
     return fallback;
   }
-}
-
-function normalizeTaskCollection(data: any): any[] {
-  if (!data) return [];
-  if (Array.isArray(data)) return data;
-  if (data.tasks) return data.tasks;
-  return Object.values(data).filter((v: any) => v && typeof v === "object");
 }
 
 // Runs one item write and reports the outcome honestly. The browser db layer
@@ -143,29 +136,6 @@ export async function pushLocalToPB(): Promise<{ collection: string; pushed: num
     }
   }
   results.push({ collection: "schedules", pushed, errors });
-
-  // Tasks / Leaderboard (already has syncAllTasksToPB)
-  const tasks = loadJSON<any>("consuela-tasks", []);
-  const weekData = loadJSON<any>("consuela-week-data", null);
-  const archive = loadJSON<any>("consuela-week-archive", []);
-  const rewards = loadJSON<any>("consuela-rewards", []);
-  const penalties = loadJSON<any>("consuela-penalties", []);
-  const hallOfFame = loadJSON<any>("consuela-hall-of-fame", []);
-  pushed = 0; errors = 0;
-  try {
-    await syncAllTasksToPB(
-      normalizeTaskCollection(tasks),
-      weekData,
-      archive,
-      rewards,
-      penalties,
-      hallOfFame
-    );
-    pushed = 1;
-  } catch {
-    errors = 1;
-  }
-  results.push({ collection: "tasks/leaderboard (6 collections)", pushed, errors });
 
   // Family Goal (separate upsert)
   const familyGoal = loadJSON<any>("consuela-family-goal", null);

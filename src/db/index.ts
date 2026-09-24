@@ -205,7 +205,6 @@ async function refreshTasksSnapshot() {
     const data = await res.json();
     applyTasksSnapshotToStores(data?.snapshot);
   } catch {
-    /* snapshot store unavailable — local task state stays authoritative */
   }
 }
 

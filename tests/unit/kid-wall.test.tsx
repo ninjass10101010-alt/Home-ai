@@ -272,7 +272,7 @@ describe("KidHome on the wall (spec §6 amendment)", () => {
     expect(store.saveWeekData).not.toHaveBeenCalled();
     expect(store.syncWeekDataToPB).not.toHaveBeenCalled();
     expect(store.week.points.Caspian).toBe(20);
-    expect(store.syncTasksToPB).toHaveBeenCalled();
+    expect(store.syncTasksToPB).not.toHaveBeenCalled();
 
     // Celebration fires with the honest "on the way" copy, and the pad closes.
     const burst = document.querySelector('[aria-label^="Congratulations"]');

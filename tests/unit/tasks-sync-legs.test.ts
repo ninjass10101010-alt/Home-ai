@@ -108,64 +108,48 @@ beforeEach(() => {
   mocks.withAdmin.mockReset();
   mocks.withAdmin.mockImplementation((fn: any) => fn(makePb()));
   mocks.ensureCurrentTaskWeek.mockReset();
-  mocks.ensureCurrentTaskWeek.mockResolvedValue({});
+  mocks.ensureCurrentTaskWeek.mockResolvedValue({ reconciled: true });
 });
 
 describe("tasks/sync leg gating", () => {
-  it("child POST: ignores weekData/rewards/penalties, keeps the stored parent legs", async () => {
+  it("child task/week POST is retired without touching PB", async () => {
     db.rows = [{ id: "row1", data: EXISTING }];
     const res = await post(POISONED, "child");
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({
-      ok: true,
-      saved: true,
-      ignoredLegs: ["weekData", "rewards", "rewardsUpdatedAt", "penalties", "penaltiesUpdatedAt", "weeklyPrizes", "weeklyPrizesStamp", "configOperationReceipts", "revision", "operationReceipts", "pendingProjectionRepairs", "taskWeekStart"],
-    });
-
-    expect(db.updates).toHaveLength(1);
-    const stored = db.updates[0].payload.data;
-    expect(stored.tasks).toEqual(POISONED.tasks);
-    // The parent-owned legs survive verbatim — a kid sync can never move points.
-    expect(stored.weekData).toEqual(EXISTING.weekData);
-    expect(stored.rewards).toEqual(EXISTING.rewards);
-    expect(stored.penalties).toEqual(EXISTING.penalties);
-    expect(stored.rewardsUpdatedAt).toBe(EXISTING.rewardsUpdatedAt);
-    // Weekly prize legs are not applied from a non-parent body either.
-    expect(stored.weeklyPrizes).toEqual(EXISTING.weeklyPrizes);
-    expect(stored.weeklyPrizesStamp).toBe(EXISTING.weeklyPrizesStamp);
-    expect(stored.revision).toBe(EXISTING.revision);
-    expect(stored.operationReceipts).toEqual(EXISTING.operationReceipts);
-    expect(stored.configOperationReceipts).toEqual(EXISTING.configOperationReceipts);
-    expect(stored.pendingProjectionRepairs).toEqual(EXISTING.pendingProjectionRepairs);
-    expect(stored.taskWeekStart).toBe(EXISTING.taskWeekStart);
+    expect(res.status).toBe(410);
+    expect(await res.json()).toEqual({ ok: false, error: "task_snapshot_write_retired" });
+    expect(db.updates).toHaveLength(0);
+    expect(db.creates).toHaveLength(0);
   });
 
-  it("pet POST with no prior snapshot stores the tasks leg only", async () => {
+  it("pet task/week POST is retired without touching PB", async () => {
     const res = await post(POISONED, "pet");
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({
-      ok: true,
-      saved: true,
-      ignoredLegs: ["weekData", "rewards", "rewardsUpdatedAt", "penalties", "penaltiesUpdatedAt", "weeklyPrizes", "weeklyPrizesStamp", "configOperationReceipts", "revision", "operationReceipts", "pendingProjectionRepairs", "taskWeekStart"],
-    });
-    expect(db.creates).toHaveLength(1);
-    // Non-tasks legs — including weekly prizes — are never written.
-    expect(db.creates[0].data).toEqual({ tasks: POISONED.tasks });
+    expect(res.status).toBe(410);
+    expect(await res.json()).toEqual({ ok: false, error: "task_snapshot_write_retired" });
+    expect(db.updates).toHaveLength(0);
+    expect(db.creates).toHaveLength(0);
   });
 
-  it("stale signed-parent POST cannot overwrite canonical config or server metadata", async () => {
+  it("parent task/week POST is retired without touching PB", async () => {
     db.rows = [{ id: "row1", data: EXISTING }];
     const res = await post(POISONED, "parent");
+    expect(res.status).toBe(410);
+    expect(await res.json()).toEqual({ ok: false, error: "task_snapshot_write_retired" });
+    expect(db.updates).toHaveLength(0);
+    expect(db.creates).toHaveLength(0);
+  });
+
+  it("config compatibility fields remain accepted but ignored", async () => {
+    const res = await post({
+      rewards: POISONED.rewards,
+      rewardsUpdatedAt: POISONED.rewardsUpdatedAt,
+      penalties: POISONED.penalties,
+      penaltiesUpdatedAt: POISONED.penaltiesUpdatedAt,
+      weeklyPrizes: POISONED.weeklyPrizes,
+      weeklyPrizesStamp: POISONED.weeklyPrizesStamp,
+    }, "parent");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, saved: true });
-    expect(db.updates).toHaveLength(1);
-    const stored = db.updates[0].payload.data;
-    expect(stored).toEqual({
-      ...POISONED,
-      ...EXISTING,
-      weekData: POISONED.weekData,
-      tasks: POISONED.tasks,
-    });
+    expect(await res.json()).toMatchObject({ ok: true, saved: false });
+    expect(mocks.withAdmin).not.toHaveBeenCalled();
   });
 
   it("guest POST → 401 unauthorized, PB untouched", async () => {
@@ -179,7 +163,7 @@ describe("tasks/sync leg gating", () => {
     db.rows = [{ id: "row1", data: { tasks: [{ id: "t1" }] } }];
     const res = await GET();
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, snapshot: { tasks: [{ id: "t1" }] } });
+    expect(await res.json()).toEqual({ ok: true, snapshot: { tasks: [{ id: "t1" }] }, reconciled: true });
     expect(mocks.ensureCurrentTaskWeek).toHaveBeenCalledOnce();
   });
 });

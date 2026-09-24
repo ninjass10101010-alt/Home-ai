@@ -375,26 +375,17 @@ describe("tasks page — penalties snapshot adopt", () => {
   });
 });
 
-describe("tasks page — snapshot POST body", () => {
-  it("carries weeklyPrizes + weeklyPrizesStamp next to the rewards legs", async () => {
+describe("tasks page — snapshot writes", () => {
+  it("does not post task, week, or config snapshot bodies", async () => {
     seedLocalPrizes(PRIZES_SNAP, T_NEW);
     localStorage.setItem("consuela-penalties", JSON.stringify([{ id: 1, name: "Mess", emoji: "⚠️", points: 5 }]));
     writePenaltiesStamp(T_NEW);
     server.snapshot = { tasks: [], weekData: null };
 
     await renderTasksPage();
-    // Past the 2s snapshot debounce.
     await settle(2300);
 
-    const push = server.posts.find((p) => Array.isArray(p.tasks));
-    expect(push).toBeTruthy();
-    expect(push.weeklyPrizes).toEqual(PRIZES_SNAP);
-    expect(push.weeklyPrizesStamp).toBe(T_NEW);
-    // Legacy legs untouched by the new fields.
-    expect(Array.isArray(push.rewards)).toBe(true);
-    expect("rewardsUpdatedAt" in push).toBe(true);
-    expect(push.penalties).toEqual([{ id: 1, name: "Mess", emoji: "⚠️", points: 5 }]);
-    expect(push.penaltiesUpdatedAt).toBe(T_NEW);
+    expect(server.posts.some((post) => Array.isArray(post.tasks) || post.weekData != null)).toBe(false);
   });
 });
 

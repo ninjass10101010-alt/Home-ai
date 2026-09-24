@@ -16,6 +16,7 @@ import {
   getMemberAllTimeCompletions,
   loadHallOfFame,
   loadHallOfFameMerged,
+  loadPreviousWeekRanksMerged,
   todayMondayISO,
 } from "@/lib/task-utils";
 
@@ -35,6 +36,12 @@ function sameHall(a: HallOfFameEntry[], b: HallOfFameEntry[]): boolean {
       e.celebrated === o.celebrated
     );
   });
+}
+
+function sameRanks(a: Record<string, number>, b: Record<string, number>): boolean {
+  const aKeys = Object.keys(a).sort();
+  const bKeys = Object.keys(b).sort();
+  return aKeys.length === bKeys.length && aKeys.every((key, index) => key === bKeys[index] && a[key] === b[key]);
 }
 
 export interface LeaderboardData {
@@ -59,6 +66,8 @@ export function useLeaderboardData() {
   // Mirror of what was last applied so the async downlink can skip scheduling
   // a state update entirely when the merged hall matches (the common case).
   const hallRef = useRef<HallOfFameEntry[]>([]);
+  const previousRanksRef = useRef<Record<string, number>>({});
+  const [previousRanks, setPreviousRanks] = useState<Record<string, number>>({});
 
   // The Home leaderboard stays mounted on the always-on kitchen display while
   // tasks get completed elsewhere. The 60s CacheRefresher merges another
@@ -84,6 +93,8 @@ export function useLeaderboardData() {
     setTasks(loadTasks());
     hallRef.current = loadHallOfFame();
     setHall(hallRef.current);
+    previousRanksRef.current = getPreviousWeekRanks();
+    setPreviousRanks(previousRanksRef.current);
     setMounted(true);
   }, [refreshVersion]);
 
@@ -93,26 +104,28 @@ export function useLeaderboardData() {
   useEffect(() => {
     if (!mounted) return;
     let alive = true;
-    loadHallOfFameMerged()
-      .then((merged) => {
-        if (!alive || sameHall(hallRef.current, merged)) return;
+    void Promise.all([
+      loadHallOfFameMerged(),
+      loadPreviousWeekRanksMerged(weekData?.weekStart || todayMondayISO()),
+    ]).then(([merged, ranks]) => {
+      if (!alive) return;
+      if (!sameHall(hallRef.current, merged)) {
         hallRef.current = merged;
         setHall(merged);
-      })
-      .catch(() => {});
+      }
+      if (!sameRanks(previousRanksRef.current, ranks)) {
+        previousRanksRef.current = ranks;
+        setPreviousRanks(ranks);
+      }
+    });
     return () => {
       alive = false;
     };
-  }, [mounted, refreshVersion]);
+  }, [mounted, refreshVersion, weekData?.weekStart]);
 
   const daysUntilReset = useMemo(() => {
     if (!mounted) return 7;
     return getDaysUntilWeekReset();
-  }, [mounted]);
-
-  const previousRanks = useMemo(() => {
-    if (!mounted) return {};
-    return getPreviousWeekRanks();
   }, [mounted]);
 
   const entries = useMemo<LeaderboardEntry[]>(() => {

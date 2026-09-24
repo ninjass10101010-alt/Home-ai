@@ -49,7 +49,6 @@ import {
   getThisWeeksCompletedDates,
   calculateRealStreak,
   getMemberAllTimePoints,
-  syncTasksToPB,
   completesWithoutPin,
   completesWithPendingApproval,
   tapCompletePending,
@@ -289,6 +288,11 @@ export default function KidHome() {
   // never on outbox mutations (that would loop).
   const claimOutboxRef = useRef<Record<number, { memberName: string; pin?: string; stalled?: boolean }>>({});
   const [claimOutboxVersion, setClaimOutboxVersion] = useState(0);
+  const [claimOutboxSnapshot, setClaimOutboxSnapshot] = useState<Record<number, { memberName: string; pin?: string; stalled?: boolean }>>({});
+  const bumpClaimOutbox = useCallback(() => {
+    setClaimOutboxVersion((value) => value + 1);
+    setClaimOutboxSnapshot({ ...claimOutboxRef.current });
+  }, []);
 
   const { currentUser, logout, sessionWarning, sessionRemainingMs } = useAuth();
   const { isBedtime, isWeekend } = useDashboardMode();
@@ -323,12 +327,12 @@ export default function KidHome() {
           ...(args.pin ? { pin: args.pin } : {}),
           ...(stalled ? { stalled: true } : {}),
         };
-        setClaimOutboxVersion((v) => v + 1);
+        bumpClaimOutbox();
       };
       const clear = () => {
         if (args.taskId in claimOutboxRef.current) {
           delete claimOutboxRef.current[args.taskId];
-          setClaimOutboxVersion((v) => v + 1);
+          bumpClaimOutbox();
         }
       };
       try {
@@ -352,7 +356,7 @@ export default function KidHome() {
         enqueue(); // network — retry on the next refresh tick
       }
     },
-    []
+    [bumpClaimOutbox]
   );
 
   // Retry tick: re-POST every non-stalled outbox entry whose row is still
@@ -384,7 +388,7 @@ export default function KidHome() {
       };
       adopted += 1;
     }
-    if (adopted) setClaimOutboxVersion((v) => v + 1);
+    if (adopted) bumpClaimOutbox();
 
     const entries = Object.entries(claimOutboxRef.current).filter(([, v]) => !v.stalled);
     if (!entries.length) return;
@@ -395,7 +399,7 @@ export default function KidHome() {
         // Resolved elsewhere (approved / sent back / deleted) — drop it.
         if (taskId in claimOutboxRef.current) {
           delete claimOutboxRef.current[taskId];
-          setClaimOutboxVersion((v) => v + 1);
+          bumpClaimOutbox();
         }
         continue;
       }
@@ -406,13 +410,13 @@ export default function KidHome() {
         ...(row.assigneeEmoji !== undefined ? { assigneeEmoji: row.assigneeEmoji } : {}),
       });
     }
-  }, [dataVersion, currentUser, postClaimComplete]);
+  }, [dataVersion, currentUser, postClaimComplete, bumpClaimOutbox]);
 
   // Outbox notice state: queued claims are still being re-sent; stalled ones
   // (401 — this session can't deliver them) ask a grown-up. Both are honest,
   // non-blocking, and clear themselves the moment the server confirms.
   const claimOutboxSummary = useMemo(() => {
-    const entries = Object.values(claimOutboxRef.current);
+    const entries = Object.values(claimOutboxSnapshot);
     return {
       total: entries.length,
       queued: entries.filter((e) => !e.stalled).length,
@@ -420,7 +424,7 @@ export default function KidHome() {
     };
     // claimOutboxVersion is the outbox mutation signal (the ref itself never
     // re-renders the component).
-  }, [claimOutboxVersion]);
+  }, [claimOutboxSnapshot]);
 
   // Kid self-cancel (PIN-free, same contract as the /tasks page's tapping-kid
   // cancel): a pending tap reopens with the durable sentBackAt proof — the
@@ -430,13 +434,12 @@ export default function KidHome() {
   const cancelQuestTap = useCallback((taskId: number) => {
     const tasks = sendBackPendingCompletion(loadTasks(), taskId);
     saveTasks(tasks);
-    void syncTasksToPB(tasks);
     if (taskId in claimOutboxRef.current) {
       delete claimOutboxRef.current[taskId];
-      setClaimOutboxVersion((v) => v + 1);
+      bumpClaimOutbox();
     }
     setDataVersion((v) => v + 1);
-  }, []);
+  }, [bumpClaimOutbox]);
 
   useEffect(() => {
     (async () => {
@@ -598,7 +601,6 @@ export default function KidHome() {
             : t
         );
         saveTasks(tasks);
-        void syncTasksToPB(tasks);
         setQuestPinTask(null);
         setQuestCrewAction(null);
         setQuestPin("");
@@ -654,7 +656,6 @@ export default function KidHome() {
       const before = pointsFor(week.points, myName);
       const tasks = loadTasks().map((t: any) => (t.id === task.id ? tapCompletePending(t, myName, now, weekKey()) : t));
       saveTasks(tasks);
-      void syncTasksToPB(tasks);
       // Server-authoritative handoff (same seam as Tasks persistServerComplete):
       // local pending alone never reaches parent approval — the claim route
       // writes pendingApproval into the snapshot. Fire-and-forget; a failure
@@ -738,9 +739,6 @@ export default function KidHome() {
             return { ok: false, error: err };
           }
           if (data?.weekData?.weekStart === weekKey()) saveWeekData(data.weekData);
-          // Mirror the claim route's server-side completion fields on the local
-          // row — syncTasksToPB writes completedInWeek/completedAt as-is, so a
-          // bare { completed: true } would WIPE the server's completion fields.
           const claimantIsChild = user?.role === "child";
           const tasks = loadTasks().map((t: any) =>
             t.id === task.id
@@ -755,7 +753,6 @@ export default function KidHome() {
               : t
           );
           saveTasks(tasks);
-          void syncTasksToPB(tasks);
           // A kid claim is done-but-UNPAID (the route held the earn for parent
           // approval) — the celebration copy must say "on the way".
           celebrate(task.points || 0, before, { pending: claimantIsChild });
@@ -792,7 +789,6 @@ export default function KidHome() {
             t.id === task.id ? tapCompletePending(t, myName, now, currentWeek) : t
           );
           saveTasks(tasks);
-          void syncTasksToPB(tasks);
           // Server-authoritative handoff (same as under-10 + Tasks page):
           // verified PIN already checked via verifyPinRemote — this POST
           // persists pendingApproval to the snapshot for parent approval.

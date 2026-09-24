@@ -305,7 +305,7 @@ describe("KidHome — honest error paths on the quest PIN gate", () => {
     expect(spyFetch.mock.calls.filter((call) => String(call[0]).includes("/api/members/verify"))).toHaveLength(0);
     expect(store.saveWeekData).not.toHaveBeenCalled();
     expect(store.week.history).toHaveLength(0);
-    expect(store.syncTasksToPB).toHaveBeenCalled();
+    expect(store.syncTasksToPB).not.toHaveBeenCalled();
     expect(document.querySelector('[aria-label^="Congratulations"]')).not.toBeNull();
   });
 
