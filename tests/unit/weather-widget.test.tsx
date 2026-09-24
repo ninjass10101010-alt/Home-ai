@@ -143,6 +143,10 @@ function selectedCellSurfaces(stops: string[], accent: string): string[] {
   return stops.map((stop) => compositeHex(accent, stop, 0x26 / 255));
 }
 
+function modalSelectedCellSurfaces(accent: string, alpha: number): string[] {
+  return ["#101422", "#0A0D18"].map((surface) => compositeHex(accent, surface, alpha));
+}
+
 function failedFetchHeaderSurfaces(): string[] {
   const stops = ["#DFE4EE", "#EEF1F6", "#D9E6F5"];
   const glassAlpha = 0.3;
@@ -838,6 +842,45 @@ describe("WeatherWidget — Not Boring redesign", () => {
   });
 
   it.each([
+    { name: "clear", code: 0, isDay: 1, timeOfDay: "day", holiday: "none", accent: "#E85D45" },
+    { name: "storm", code: 95, isDay: 1, timeOfDay: "day", holiday: "none", accent: "#FFB44F" },
+    { name: "night", code: 0, isDay: 0, timeOfDay: "night", holiday: "none", accent: "#FF6F5E" },
+    { name: "holiday", code: 0, isDay: 1, timeOfDay: "day", holiday: "christmas", accent: "#EF4444" },
+  ])("keeps selected $name modal hourly labels readable on the accent-alpha surface", async ({ code, isDay, timeOfDay, holiday, accent }) => {
+    localStorage.setItem("home-ai-weather-config", JSON.stringify({ timeOfDay, season: "summer", holidayOverride: holiday }));
+    try {
+      mockOpenMeteo(makeOpenMeteoPayload({ code, isDay, precip: 80 }));
+      const el = render(<WeatherWidget />);
+      await settle();
+      act(() => findDetailsButton(el)!.click());
+      await settle();
+
+      const dialog = document.querySelector("#weather-details-dialog") as HTMLElement;
+      const selected = dialog.querySelector('[role="list"] [role="listitem"] button') as HTMLElement;
+      const hour = Array.from(selected.querySelectorAll<HTMLElement>("span")).find((node) => node.textContent === "NOW");
+      const temperature = Array.from(selected.querySelectorAll<HTMLElement>("span")).find((node) => node.textContent === "70°");
+      const precipitation = Array.from(selected.querySelectorAll<HTMLElement>("span")).find((node) => node.textContent === "80%");
+      const alpha = Number(selected.style.background.match(/,\s*([\d.]+)\)/)?.[1]);
+      const colors = [hour, temperature, precipitation].map((node) => {
+        if (!node) return "";
+        return node.style.color || (node.className.includes("text-white") ? "#FFFFFF" : "");
+      });
+      const surfaces = modalSelectedCellSurfaces(accent, alpha);
+
+      expect(hour).toBeTruthy();
+      expect(temperature).toBeTruthy();
+      expect(precipitation).toBeTruthy();
+      expect(Number.isFinite(alpha)).toBe(true);
+      expect(alpha).toBeGreaterThan(0);
+      expect(colors.every(Boolean)).toBe(true);
+      expect(new Set(colors).size).toBe(1);
+      expect(Math.min(...surfaces.flatMap((surface) => colors.map((color) => contrastRatio(color, surface))))).toBeGreaterThanOrEqual(4.5);
+    } finally {
+      localStorage.removeItem("home-ai-weather-config");
+    }
+  });
+
+  it.each([
     ["#ef4444", "christmas"],
     ["#f97316", "halloween"],
     ["#f43f5e", "valentines"],
@@ -1434,6 +1477,26 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(el.textContent).toContain("—");
     expect(el.textContent).not.toContain("Feels like");
     expect(el.textContent).not.toContain("H:");
+  });
+
+  it("omits the modal temperature when current and hourly temperatures are unavailable", async () => {
+    const payload = makeOpenMeteoPayload();
+    (payload.current as Record<string, unknown>).temperature_2m = null;
+    (payload.current as Record<string, unknown>).apparent_temperature = null;
+    (payload.hourly as Record<string, unknown>).temperature_2m = payload.hourly.time.map(() => null);
+    mockOpenMeteo(payload);
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    act(() => findDetailsButton(el)!.click());
+    await settle();
+
+    const dialog = document.querySelector("#weather-details-dialog") as HTMLElement;
+    const temperature = Array.from(dialog.querySelectorAll<HTMLElement>("span")).find((node) => node.className.includes("text-[60px]"));
+    expect(temperature).toBeTruthy();
+    expect(temperature!.textContent).toBe("—");
+    expect(temperature!.nextElementSibling).toBeNull();
+    expect(dialog.textContent).not.toContain("0°");
   });
 
   it("promotes a calendar-fused rain note into the tinted pill when an event lines up", async () => {

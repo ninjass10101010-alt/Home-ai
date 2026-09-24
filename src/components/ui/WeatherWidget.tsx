@@ -193,6 +193,10 @@ function weatherHeaderTextSurfaces(scene: ReturnType<typeof wmoToScene>, failedF
   ]);
 }
 
+function modalSelectedCellTextSurfaces(accent: string): string[] {
+  return ["#101422", "#0A0D18"].map((surface) => mixHex(surface, accent, 0x1F / 255));
+}
+
 function getRealSeason(): SeasonKey {
   const month = new Date().getMonth();
   if (month >= 2 && month <= 4) return "spring";
@@ -1364,6 +1368,7 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
   };
   const mAccent = resolveAccent(mSkin, holidayAccent);
   const mTextAccent = contrastSafeTextAccent(mAccent, "#0A0D18", "#FFFFFF");
+  const mSelectedCellTextAccent = contrastSafeTextAccent(mAccent, modalSelectedCellTextSurfaces(mAccent), "#FFFFFF");
   const mAccentForeground = accentForeground(mAccent);
   const mVis = scrubHour ? scrubHour.visibility : data.visibility;
   const mHumidity = scrubHour ? scrubHour.humidity : data.humidity;
@@ -1389,7 +1394,8 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
   const mWindValue = mWind == null ? "—" : `${Math.round(mWind)} mph${mWindDirection == null ? "" : ` ${cardinalFromDegrees(mWindDirection)}`}`;
   const mPrecipitationValue = mPrecipitation == null ? "—" : `${Math.round(mPrecipitation)}%`;
 
-  const scrubTemp = useAnimatedNumber(conv(scrubHour?.temp ?? data.temp ?? 0));
+  const scrubTempTarget = scrubHour ? conv(scrubHour.temp) : data.temp == null ? null : conv(data.temp);
+  const scrubTemp = useAnimatedNumber(scrubTempTarget ?? 0);
 
   const nowMoon = moonPhase(new Date().getTime());
   const forecastRows = data.forecast.map((day) => ({
@@ -1472,13 +1478,21 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
                   style={{ backgroundColor: mScene === "night" ? "rgba(255, 255, 255, 0.45)" : undefined }}
                 >
                   <div className="flex items-start leading-none">
-                    <span
-                      className="text-[60px] font-black leading-none tracking-[-0.03em] tabular-nums"
-                      style={{ color: mSkin.ink, textShadow: mStorm ? "none" : "0 1px 12px rgba(255,255,255,0.35)" }}
-                    >
-                      {scrubTemp}
-                    </span>
-                    <span className="mt-1 ml-0.5 text-2xl font-light leading-none" style={{ color: mSkin.inkSoft }} aria-hidden="true">°</span>
+                    {scrubTempTarget == null ? (
+                      <span className="text-[60px] font-black leading-none tracking-[-0.03em]" style={{ color: mSkin.ink, textShadow: mStorm ? "none" : "0 1px 12px rgba(255,255,255,0.35)" }}>
+                        —
+                      </span>
+                    ) : (
+                      <>
+                        <span
+                          className="text-[60px] font-black leading-none tracking-[-0.03em] tabular-nums"
+                          style={{ color: mSkin.ink, textShadow: mStorm ? "none" : "0 1px 12px rgba(255,255,255,0.35)" }}
+                        >
+                          {scrubTemp}
+                        </span>
+                        <span className="mt-1 ml-0.5 text-2xl font-light leading-none" style={{ color: mSkin.inkSoft }} aria-hidden="true">°</span>
+                      </>
+                    )}
                   </div>
                   <p className="mt-1.5 text-sm font-semibold" style={{ color: mSkin.ink, textShadow: mStorm ? "none" : "0 1px 10px rgba(255,255,255,0.3)" }}>
                     {scrubHour ? `${formatHourLabel(scrubHour.time)} · ${mPresentation.label}` : mPresentation.label}
@@ -1592,15 +1606,15 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
                       {i === scrubIdx && (
                         <span className="absolute inset-x-2 top-0 h-[2.5px] rounded-full" style={{ background: mAccent }} aria-hidden="true" />
                       )}
-                      <span className="text-[11px] font-bold" style={{ color: i === scrubIdx ? mTextAccent : "rgba(255,255,255,0.6)" }}>
+                      <span className="text-[11px] font-bold" style={{ color: i === scrubIdx ? mSelectedCellTextAccent : "rgba(255,255,255,0.6)" }}>
                         {i === 0 ? "NOW" : formatHourTick(h.time)}
                       </span>
                       <span className="flex h-[26px] w-full items-center justify-center" aria-hidden="true">
                         <Condition code={conditionPresentation(wmoToScene(h.code, h.isDay), h.code, h.cloud, h.isDay).icon} size={24} />
                       </span>
-                      <span className="text-sm font-black tabular-nums text-white">{conv(h.temp)}°</span>
+                      <span className="text-sm font-black tabular-nums" style={{ color: i === scrubIdx ? mSelectedCellTextAccent : "#FFFFFF" }}>{conv(h.temp)}°</span>
                       {h.precip != null && h.precip >= 20 ? (
-                        <span className="text-[11px] font-semibold tabular-nums" style={{ color: mTextAccent }}>
+                        <span className="text-[11px] font-semibold tabular-nums" style={{ color: i === scrubIdx ? mSelectedCellTextAccent : mTextAccent }}>
                           {Math.round(h.precip)}%
                         </span>
                       ) : (

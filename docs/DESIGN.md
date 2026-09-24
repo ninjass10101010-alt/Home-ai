@@ -38,7 +38,7 @@ Warm glass remains the frame for every Home widget. Weather is the one full-blee
 ### Interaction
 - Card: press-and-drag the day strip to preview any hour (scene, temp, condition follow); release animates back to now. Tap elsewhere on the card → modal.
 - Modal: 24h scrubber (`role="slider"` with spoken `aria-valuetext`), exploded metric rows, UV 5-dot scale, pressure, sun arc, hourly/daily toggle.
-- Missing data hides rows; it never fakes values.
+- Missing data hides rows or renders an em dash where a hero value is required; it never fakes values.
 
 ## Home widget vector icon system — `HomeWidgetIcon` (2026-09-24)
 
@@ -138,7 +138,7 @@ Use this exact delta format in the "What's New" area and update 1.5 journeys:
 ### UI Change Record — 2026-09-24 — Final review: hydration-safe motion, factual precipitation, composites, and slot preservation
 - Added / Changed: `src/components/ui/WeatherWidget.tsx`, `WxToys.tsx`, `WeatherSkins.ts`, `HomeWidgetIcon.tsx`, `src/app/page.tsx`, `tests/unit/weather-widget.test.tsx`, NEW `tests/unit/weather-skins.test.ts`, `tests/unit/home-briefing-slot.test.tsx`, and `tests/unit/home-widget-icon.test.tsx`.
 - Visual / Motion: Weather scene, holiday artwork, particles, and modal animation attributes share a paused first-render snapshot, then read `document.hidden` and `prefers-reduced-motion` after mount; normal visible motion resumes after readiness. `HomeWidgetIcon` state transforms use an explicit `24px 24px` SVG view-box origin.
-- Data / Accessibility: Current-hour precipitation supplies the initial rain/snow scene without inventing probability; current or future wet WMO codes suppress dry wear advice; real daily `0%` remains distinct from missing data. Selected strip cells derive text from the accent-alpha composite, failed-fetch headers derive from the overlay composite, and malformed/empty/alpha-bearing color inputs fail closed. Acknowledged empty briefings remain directly renderable by `MorningBriefingWidget`, while the Home slot still returns `null` and adds no grid cell.
+- Data / Accessibility: Current-hour precipitation supplies the initial rain/snow scene without inventing probability; current or future wet WMO codes suppress dry wear advice; real daily `0%` remains distinct from missing data. Selected card and modal hourly cells derive text from their actual accent-alpha composites, failed-fetch headers derive from the overlay composite, and the modal hero omits an unavailable temperature instead of rendering `0°`. Color inputs accept 3/6-digit opaque hex plus fully opaque 4/8-digit forms; malformed, empty, and every non-opaque alpha-bearing form fail closed. Acknowledged empty briefings remain directly renderable by `MorningBriefingWidget`, while the Home slot still returns `null` and adds no grid cell.
 - **CONTRACTS to keep:** (1) server and first client motion markup are identical and paused until readiness; (2) no precipitation probability is manufactured; (3) text foregrounds are validated against the actual modeled composite; (4) invalid color inputs throw rather than returning an unverified foreground; (5) acknowledged empty Home briefings do not occupy a grid slot; (6) no dependency, asset, font, navigation, row emoji, kid-only, family-data, or server change.
 
 ### UI Change Record — 2026-09-24 — Weather chrome, missing data, and mount-time motion review
