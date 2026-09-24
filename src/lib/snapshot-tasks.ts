@@ -71,6 +71,7 @@ export interface SnapshotConfigMutationResult {
   duplicate: boolean;
   stale: boolean;
   conflict: boolean;
+  reconcile: boolean;
 }
 
 export interface SnapshotProjectionRepair {
@@ -608,6 +609,13 @@ export type SnapshotConfigItemsSanitizer = (
   value: unknown,
 ) => TaskConfigItem[] | null;
 
+export class InvalidStoredTaskConfigError extends Error {
+  constructor(readonly kind: TaskConfigKind) {
+    super("invalid_current_config");
+    this.name = "InvalidStoredTaskConfigError";
+  }
+}
+
 export async function mutateSnapshotConfig(
   command: TaskConfigCommand,
   pb: AdminPB,
@@ -623,46 +631,84 @@ export async function mutateSnapshotConfig(
     const dataKey = TASK_CONFIG_DATA_KEYS[command.kind];
     const stampKey = TASK_CONFIG_STAMP_KEYS[command.kind];
     const storedItems = current[dataKey];
-    if (storedItems !== undefined && !Array.isArray(storedItems)) {
-      throw new TypeError("invalid_stored_config");
+    const currentItems = Array.isArray(storedItems)
+      ? sanitizeItems(command.kind, storedItems)
+      : null;
+    const currentChanged = Boolean(
+      Array.isArray(storedItems) &&
+      currentItems &&
+      JSON.stringify(storedItems) !== JSON.stringify(currentItems),
+    );
+    if (command.action !== "replace" && !currentItems) {
+      throw new InvalidStoredTaskConfigError(command.kind);
     }
-    const currentItems = sanitizeItems(command.kind, storedItems ?? []);
-    if (!currentItems) throw new TypeError("invalid_stored_config");
     const revision = decimalRevision(current.revision);
     const revisionUpdatedAt = rowUpdatedAt(row, current);
     const currentStamp = normalizeTimestamp(current[stampKey]) ?? "";
     const fingerprint = taskConfigCommandFingerprint(command);
     const receipt = sanitizeConfigOperationReceipts(current.configOperationReceipts)[command.operationId];
+    const persistSanitizedCurrent = async () => {
+      const updatedRevision = nextRevision(revision);
+      const updatedAt = new Date().toISOString();
+      const payload = {
+        key: SNAPSHOT_KEY,
+        data: canonicalSnapshotData({
+          ...current,
+          [dataKey]: currentItems!,
+          ...("configOperationReceipts" in current
+            ? { configOperationReceipts: sanitizeConfigOperationReceipts(current.configOperationReceipts) }
+            : {}),
+        }, updatedRevision, false, false),
+        updated_at: updatedAt,
+      };
+      if (row) {
+        await pb.collection(SNAPSHOT_COLLECTION).update(row.id, payload, { requestKey: null });
+      } else {
+        await pb.collection(SNAPSHOT_COLLECTION).create(payload, { requestKey: null });
+      }
+      return { revision: updatedRevision, updatedAt };
+    };
 
     if (receipt) {
       const matches = receipt.kind === command.kind &&
         receipt.action === command.action &&
         receipt.updatedAt === command.updatedAt &&
-        (!receipt.fingerprint || receipt.fingerprint === fingerprint);
+        receipt.fingerprint === fingerprint;
+      if (matches && !currentItems) {
+        throw new InvalidStoredTaskConfigError(command.kind);
+      }
+      const sanitizedWrite = matches && currentChanged
+        ? await persistSanitizedCurrent()
+        : null;
       return {
-        items: currentItems,
+        items: currentItems!,
         updatedAt: currentStamp || receipt.updatedAt,
-        revision: { revision, updatedAt: revisionUpdatedAt },
+        revision: sanitizedWrite ?? { revision, updatedAt: revisionUpdatedAt },
         applied: false,
         duplicate: matches,
         stale: false,
         conflict: !matches,
+        reconcile: true,
       };
     }
 
     if (currentStamp && command.updatedAt <= currentStamp) {
+      if (!currentItems) throw new InvalidStoredTaskConfigError(command.kind);
+      const sanitizedWrite = currentChanged ? await persistSanitizedCurrent() : null;
       return {
         items: currentItems,
         updatedAt: currentStamp,
-        revision: { revision, updatedAt: revisionUpdatedAt },
+        revision: sanitizedWrite ?? { revision, updatedAt: revisionUpdatedAt },
         applied: false,
         duplicate: false,
         stale: true,
         conflict: false,
+        reconcile: currentChanged,
       };
     }
 
-    const items = sanitizeItems(command.kind, applyTaskConfigCommand(currentItems, command));
+    const baseItems = command.action === "replace" ? [] : currentItems!;
+    const items = sanitizeItems(command.kind, applyTaskConfigCommand(baseItems, command));
     if (!items) throw new TypeError("invalid_resulting_config");
     const configOperationReceipts = sanitizeConfigOperationReceipts({
       ...sanitizeConfigOperationReceipts(current.configOperationReceipts),
@@ -699,6 +745,7 @@ export async function mutateSnapshotConfig(
       duplicate: false,
       stale: false,
       conflict: false,
+      reconcile: true,
     };
   });
 }

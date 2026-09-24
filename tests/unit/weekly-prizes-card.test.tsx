@@ -188,6 +188,38 @@ describe("WeeklyPrizesCard", () => {
     expect(showToast).toHaveBeenCalledWith("🏆 Weekly prizes saved");
   });
 
+  it("keeps local prizes and shows no success after a network rejection", async () => {
+    mockAuth.currentUser = { name: "Rebecca", role: "parent" };
+    const existing = [{ id: "p1", rank: 1 as const, emoji: "🥇", text: "Existing" }];
+    seedPrizes(existing);
+    const el = mount();
+    fetchMock.mockRejectedValueOnce(new TypeError("network unavailable"));
+
+    await act(async () => { buttonByText(el, "Save prizes")!.click(); });
+
+    expect(loadWeeklyPrizes()).toEqual(existing);
+    expect(showToast).toHaveBeenCalledWith("Couldn't save the prizes. Check the connection and try again.");
+    expect(showToast).not.toHaveBeenCalledWith("🏆 Weekly prizes saved");
+  });
+
+  it("keeps local prizes and shows no success after a 502", async () => {
+    mockAuth.currentUser = { name: "Rebecca", role: "parent" };
+    const existing = [{ id: "p1", rank: 1 as const, emoji: "🥇", text: "Existing" }];
+    seedPrizes(existing);
+    const el = mount();
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 502,
+      json: async () => ({ error: "config_store_unreachable" }),
+    } as any);
+
+    await act(async () => { buttonByText(el, "Save prizes")!.click(); });
+
+    expect(loadWeeklyPrizes()).toEqual(existing);
+    expect(showToast).toHaveBeenCalledWith("Couldn't save the prizes. Check the connection and try again.");
+    expect(showToast).not.toHaveBeenCalledWith("🏆 Weekly prizes saved");
+  });
+
   it("edit round-trip: typing into a text field and saving persists the new text", async () => {
     mockAuth.currentUser = { name: "Rebecca", role: "parent" };
     const el = mount();

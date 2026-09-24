@@ -12,6 +12,7 @@ import {
 } from "@/lib/task-config";
 import {
   mutateSnapshotConfig,
+  InvalidStoredTaskConfigError,
   type AdminPB,
 } from "@/lib/snapshot-tasks";
 
@@ -114,7 +115,7 @@ export async function POST(request: NextRequest) {
         if (mutation.conflict) {
           return { conflict: true, operationId: command.operationId };
         }
-        if (!mutation.stale) {
+        if (mutation.reconcile) {
           await reconcileConfigCollection(pb, command.kind, mutation.items);
         }
         const bodyResponse: TaskConfigResponse = {
@@ -137,7 +138,14 @@ export async function POST(request: NextRequest) {
       }, { status: 409 });
     }
     return NextResponse.json(outcome.response);
-  } catch {
+  } catch (error) {
+    if (error instanceof InvalidStoredTaskConfigError) {
+      return NextResponse.json({
+        success: false,
+        error: "invalid_current_config",
+        kind: error.kind,
+      }, { status: 422 });
+    }
     return NextResponse.json({ error: "config_store_unreachable" }, { status: 502 });
   }
 }

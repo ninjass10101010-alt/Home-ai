@@ -11,7 +11,7 @@ import { act } from "react";
 import type { ReactElement } from "react";
 import TasksPage from "@/app/tasks/page";
 import RewardSection from "@/components/settings/RewardSection";
-import { REWARDS_KEY, loadRewards } from "@/lib/task-utils";
+import { PENALTIES_KEY, REWARDS_KEY, loadPenalties, loadRewards } from "@/lib/task-utils";
 import { REWARDS_STAMP_KEY } from "@/modes/kid/kid-store";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -32,6 +32,13 @@ vi.mock("@/db", () => ({
     {
       get: (_t, prop) => {
         if (prop === "selectMembers" || prop === "selectMembersFallback") return () => mockMembers.current;
+        if (prop === "listArchivedWeeks") return async () => [];
+        if (prop === "upsertTask" || prop === "upsertWeekData" || prop === "archiveWeek") {
+          return async (data: any) => {
+            server.dbWrites.push({ method: String(prop), data });
+            return data;
+          };
+        }
         return async () => null;
       },
     }
@@ -42,6 +49,9 @@ vi.mock("@/db", () => ({
 const server = vi.hoisted(() => ({
   snapshot: null as any,
   posts: [] as any[],
+  dbWrites: [] as Array<{ method: string; data: any }>,
+  fetchMock: null as ReturnType<typeof vi.fn> | null,
+  configFailure: null as null | "network" | "502",
 }));
 
 let activeRoot: Root | null = null;
@@ -75,6 +85,9 @@ describe("Rewards delete truth — snapshot restore must not resurrect", () => {
     document.body.innerHTML = "";
     localStorage.clear();
     server.posts = [];
+    server.dbWrites = [];
+    server.fetchMock = null;
+    server.configFailure = null;
     server.snapshot = null;
     mockAuth.currentUser = null;
     mockAuth.isLoggedIn = false;
@@ -89,20 +102,28 @@ describe("Rewards delete truth — snapshot restore must not resurrect", () => {
       removeEventListener: vi.fn(),
       dispatchEvent: vi.fn(),
     }));
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: any, init?: any) => {
+    server.fetchMock = vi.fn(async (input: any, init?: any) => {
         if (String(input) === "/api/tasks/config") {
+          if (server.configFailure === "network") throw new TypeError("network unavailable");
+          if (server.configFailure === "502") {
+            return {
+              ok: false,
+              status: 502,
+              json: async () => ({ error: "config_store_unreachable" }),
+            };
+          }
           const command = JSON.parse(String(init?.body));
-          let items = loadRewards<any[]>([]);
+          let items = command.kind === "penalties"
+            ? loadPenalties<any[]>([])
+            : loadRewards<any[]>([]);
           if (command.action === "replace") items = command.items;
           if (command.action === "upsert") {
-            items = items.some((reward) => String(reward.id) === String(command.item.id))
-              ? items.map((reward) => String(reward.id) === String(command.item.id) ? command.item : reward)
+            items = items.some((item) => String(item.id) === String(command.item.id))
+              ? items.map((item) => String(item.id) === String(command.item.id) ? command.item : item)
               : [...items, command.item];
           }
           if (command.action === "delete") {
-            items = items.filter((reward) => String(reward.id) !== String(command.itemId));
+            items = items.filter((item) => String(item.id) !== String(command.itemId));
           }
           return {
             ok: true,
@@ -110,7 +131,7 @@ describe("Rewards delete truth — snapshot restore must not resurrect", () => {
             json: async () => ({
               success: true,
               operationId: command.operationId,
-              kind: "rewards",
+              kind: command.kind,
               items,
               updatedAt: command.updatedAt,
               revision: { revision: "2", updatedAt: command.updatedAt },
@@ -126,8 +147,8 @@ describe("Rewards delete truth — snapshot restore must not resurrect", () => {
           return { ok: true, status: 200, json: async () => ({ ok: true, snapshot: server.snapshot }) };
         }
         return { ok: true, status: 200, json: async () => ({ ok: true }) };
-      })
-    );
+    });
+    vi.stubGlobal("fetch", server.fetchMock);
   });
 
   afterEach(async () => {
@@ -235,6 +256,153 @@ describe("Rewards delete truth — snapshot restore must not resurrect", () => {
       action: "upsert",
       item: { name: "Movie night", cost: 50 },
     });
+  });
+
+  it("rolls back a Tasks-page reward edit after a network rejection", async () => {
+    localStorage.setItem(REWARDS_KEY, JSON.stringify([A]));
+    mockAuth.currentUser = { name: "Rebecca", role: "parent" };
+    mockAuth.isLoggedIn = true;
+    mockMembers.current = [{ id: "parent-1", name: "Rebecca", fullName: "Rebecca", role: "parent", emoji: "👩", color: "#22c55e" }];
+    server.snapshot = { tasks: [], weekData: null };
+    await renderAsync(<TasksPage />);
+    await settle();
+    const leaderboard = Array.from(document.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("Leaderboard")) as HTMLButtonElement;
+    act(() => { leaderboard.click(); });
+    await settle();
+    const card = Array.from(document.querySelectorAll("h2, h3"))
+      .find((element) => element.textContent === "Rewards")!.closest(".widget-card") as HTMLElement;
+    act(() => {
+      (Array.from(card.querySelectorAll("button"))
+        .find((button) => button.textContent?.trim() === "Add") as HTMLButtonElement).click();
+    });
+    const input = document.querySelector('input[placeholder="Extra screen time"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+    act(() => {
+      setter.call(input, "Network reward");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    server.configFailure = "network";
+    await act(async () => {
+      (Array.from(document.querySelectorAll("button"))
+        .find((button) => button.textContent?.trim() === "Save") as HTMLButtonElement).click();
+      await Promise.resolve();
+    });
+
+    expect(loadRewards<any[]>([])).toEqual([A]);
+    expect(document.body.textContent).toContain("Couldn't save the reward");
+    expect(document.body.textContent).toContain("Add Reward");
+  });
+
+  it("rolls back a Tasks-page penalty edit after a 502", async () => {
+    const existing = [{ id: 1, name: "Mess", emoji: "⚠️", points: 5 }];
+    localStorage.setItem(PENALTIES_KEY, JSON.stringify(existing));
+    mockAuth.currentUser = { name: "Rebecca", role: "parent" };
+    mockAuth.isLoggedIn = true;
+    mockMembers.current = [{ id: "parent-1", name: "Rebecca", fullName: "Rebecca", role: "parent", emoji: "👩", color: "#22c55e" }];
+    server.snapshot = { tasks: [], weekData: null };
+    await renderAsync(<TasksPage />);
+    await settle();
+    const leaderboard = Array.from(document.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("Leaderboard")) as HTMLButtonElement;
+    act(() => { leaderboard.click(); });
+    await settle();
+    const card = Array.from(document.querySelectorAll("h2, h3"))
+      .find((element) => element.textContent === "Penalties")!.closest(".widget-card") as HTMLElement;
+    act(() => {
+      (Array.from(card.querySelectorAll("button"))
+        .find((button) => button.textContent?.trim() === "Add") as HTMLButtonElement).click();
+    });
+    const input = document.querySelector('input[placeholder="Forgot homework"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+    act(() => {
+      setter.call(input, "Failed penalty");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    server.configFailure = "502";
+    await act(async () => {
+      (Array.from(document.querySelectorAll("button"))
+        .find((button) => button.textContent?.trim() === "Save") as HTMLButtonElement).click();
+      await Promise.resolve();
+    });
+
+    expect(loadPenalties<any[]>([])).toEqual(existing);
+    expect(document.body.textContent).toContain("Couldn't save the penalty");
+    expect(document.body.textContent).toContain("Add Penalty");
+  });
+
+  it("config-only reward and penalty edits schedule no task/week sync while a task edit still syncs", { timeout: 45000 }, async () => {
+    mockAuth.currentUser = { name: "Rebecca", role: "parent" };
+    mockAuth.isLoggedIn = true;
+    mockMembers.current = [{ id: "parent-1", name: "Rebecca", fullName: "Rebecca", role: "parent", emoji: "👩", color: "#22c55e" }];
+    server.snapshot = { tasks: [], weekData: null };
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+    const setInput = (input: HTMLInputElement, value: string) => {
+      act(() => {
+        setter.call(input, value);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    };
+
+    await renderAsync(<TasksPage />);
+    await settle(5700);
+    expect(server.posts.length).toBeGreaterThan(0);
+    expect(server.dbWrites.length).toBeGreaterThan(0);
+    server.posts = [];
+    server.dbWrites = [];
+
+    const leaderboard = Array.from(document.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("Leaderboard")) as HTMLButtonElement;
+    act(() => { leaderboard.click(); });
+    await settle();
+    const rewardsCard = Array.from(document.querySelectorAll("h2, h3"))
+      .find((element) => element.textContent === "Rewards")!.closest(".widget-card") as HTMLElement;
+    act(() => {
+      (Array.from(rewardsCard.querySelectorAll("button"))
+        .find((button) => button.textContent?.trim() === "Add") as HTMLButtonElement).click();
+    });
+    setInput(document.querySelector('input[placeholder="Extra screen time"]') as HTMLInputElement, "Reward only");
+    await act(async () => {
+      (Array.from(document.querySelectorAll("button"))
+        .find((button) => button.textContent?.trim() === "Save") as HTMLButtonElement).click();
+      await Promise.resolve();
+    });
+    await settle(5700);
+    expect(server.posts).toHaveLength(0);
+    expect(server.dbWrites).toHaveLength(0);
+
+    const penaltiesCard = Array.from(document.querySelectorAll("h2, h3"))
+      .find((element) => element.textContent === "Penalties")!.closest(".widget-card") as HTMLElement;
+    act(() => {
+      (Array.from(penaltiesCard.querySelectorAll("button"))
+        .find((button) => button.textContent?.trim() === "Add") as HTMLButtonElement).click();
+    });
+    setInput(document.querySelector('input[placeholder="Forgot homework"]') as HTMLInputElement, "Penalty only");
+    await act(async () => {
+      (Array.from(document.querySelectorAll("button"))
+        .find((button) => button.textContent?.trim() === "Save") as HTMLButtonElement).click();
+      await Promise.resolve();
+    });
+    await settle(5700);
+    expect(server.posts).toHaveLength(0);
+    expect(server.dbWrites).toHaveLength(0);
+
+    const tasksTab = Array.from(document.querySelectorAll("button"))
+      .find((button) => button.textContent?.trim() === "Tasks") as HTMLButtonElement;
+    act(() => { tasksTab.click(); });
+    await settle();
+    act(() => {
+      (document.querySelector('button[aria-label="Add task"]') as HTMLButtonElement).click();
+    });
+    setInput(document.querySelector('input[placeholder="Task title"]') as HTMLInputElement, "Real task change");
+    await act(async () => {
+      (Array.from(document.querySelectorAll("button"))
+        .find((button) => button.textContent?.trim() === "Save") as HTMLButtonElement).click();
+      await Promise.resolve();
+    });
+    await settle(5700);
+    expect(server.posts).toHaveLength(1);
+    expect(server.dbWrites.length).toBeGreaterThan(0);
   });
 });
 
