@@ -5,14 +5,14 @@ import {
 } from "@/lib/task-operation-contract";
 import type { LedgerOperationMeta, LedgerOperationSource, Transaction } from "@/types/tasks";
 
-const transactionTypes = new Set<Transaction["type"]>([
+export const LEDGER_TRANSACTION_TYPES = [
   "earn",
   "redeem",
   "penalty",
   "adjust",
-]);
+] as const satisfies readonly Transaction["type"][];
 
-const ledgerOperationSources = new Set<LedgerOperationSource>([
+export const LEDGER_OPERATION_SOURCES = [
   "assigned-complete",
   "open-claim",
   "late-snatch",
@@ -21,7 +21,11 @@ const ledgerOperationSources = new Set<LedgerOperationSource>([
   "planner-adjust",
   "task-undo",
   "legacy-migration",
-]);
+] as const satisfies readonly LedgerOperationSource[];
+
+const transactionTypes = new Set<Transaction["type"]>(LEDGER_TRANSACTION_TYPES);
+
+const ledgerOperationSources = new Set<LedgerOperationSource>(LEDGER_OPERATION_SOURCES);
 
 function positiveSafeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;

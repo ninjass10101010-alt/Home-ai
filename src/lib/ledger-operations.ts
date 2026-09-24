@@ -2,12 +2,15 @@ import { withAdmin } from "@/lib/pb-auth";
 import { normalizeWeekData, type AdminPB } from "@/lib/snapshot-tasks";
 import {
   hasUnreversedTaskEarn,
+  LEDGER_OPERATION_SOURCES,
+  LEDGER_TRANSACTION_TYPES,
   parseCanonicalTransactions,
   recomputeWeekPoints,
 } from "@/lib/task-ledger";
 import {
   isRecord,
   normalizeOperationId,
+  normalizeTimestamp,
 } from "@/lib/task-operation-contract";
 import { withWeekLedgerLock } from "@/lib/week-ledger-lock";
 import type {
@@ -79,23 +82,9 @@ interface NormalizedLedgerOperation {
   entries: NormalizedLedgerEntry[];
 }
 
-const transactionTypes = new Set<Transaction["type"]>([
-  "earn",
-  "redeem",
-  "penalty",
-  "adjust",
-]);
+const transactionTypes = new Set<Transaction["type"]>(LEDGER_TRANSACTION_TYPES);
 
-const operationSources = new Set<LedgerOperationSource>([
-  "assigned-complete",
-  "open-claim",
-  "late-snatch",
-  "task-approval",
-  "reward-redeem",
-  "planner-adjust",
-  "task-undo",
-  "legacy-migration",
-]);
+const operationSources = new Set<LedgerOperationSource>(LEDGER_OPERATION_SOURCES);
 
 const projectionFailure = "projection_failed";
 let transactionSequence = 0;
@@ -127,10 +116,14 @@ function resultOperationId(operation: unknown): string {
   return normalizeOperationId(operation.operationId) ?? "";
 }
 
-function isValidWeekStart(value: unknown): value is string {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const date = new Date(`${value}T00:00:00.000Z`);
-  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+function normalizeWeekStart(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const weekStart = value.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) return null;
+  const date = new Date(`${weekStart}T00:00:00.000Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === weekStart
+    ? weekStart
+    : null;
 }
 
 function validNow(value: unknown): Date | null {
@@ -231,6 +224,11 @@ function canonicalWeek(
   const history = parseCanonicalTransactions(parsed.history);
   if (!history) return null;
   if (history.some((transaction) => !Number.isSafeInteger(transaction.amount))) return null;
+  const ids = new Set<number>();
+  for (const transaction of history) {
+    if (ids.has(transaction.id)) return null;
+    ids.add(transaction.id);
+  }
   const points = recomputeWeekPoints(history);
   return {
     weekData: {
@@ -372,7 +370,7 @@ async function readWeekRow(
 }> {
   const rows = await pb.collection("week_data").getFullList({ requestKey: null });
   const matchingRows = (Array.isArray(rows) ? rows : []).filter(
-    (candidate: any) => String(candidate?.weekStart ?? "") === weekStart,
+    (candidate: any) => normalizeWeekStart(candidate?.weekStart) === weekStart,
   );
   if (matchingRows.length > 1) {
     throw new LedgerOperationAbort("ledger_write_conflict", emptyWeekData(weekStart));
@@ -396,7 +394,7 @@ async function readWrittenWeek(
   }
   const rows = await collection.getFullList({ requestKey: null });
   const matchingRows = (Array.isArray(rows) ? rows : []).filter(
-    (candidate: any) => String(candidate?.weekStart ?? "") === weekStart,
+    (candidate: any) => normalizeWeekStart(candidate?.weekStart) === weekStart,
   );
   if (matchingRows.length > 1) {
     throw new LedgerOperationAbort("ledger_write_conflict", emptyWeekData(weekStart));
@@ -432,18 +430,19 @@ function failure(
 export async function applyWeekLedgerOperation(
   args: ApplyWeekLedgerOperationArgs,
 ): Promise<LedgerOperationResult> {
-  const input = args as unknown as Record<string, unknown>;
-  const rawWeekStart = input.weekStart;
-  const weekStart = typeof rawWeekStart === "string" ? rawWeekStart.trim() : "";
+  const input: Record<string, unknown> = isRecord(args) ? args : {};
+  const weekStart = normalizeWeekStart(input.weekStart) ?? "";
   const operation = input.operation;
   const operationId = resultOperationId(operation);
   const fallback = emptyWeekData(weekStart);
   const project = input.project;
   const now = validNow(input.now);
+  const timestamp = now ? normalizeTimestamp(now.toISOString()) : null;
 
   if (
-    !isValidWeekStart(weekStart) ||
+    !weekStart ||
     !now ||
+    !timestamp ||
     (project !== undefined && typeof project !== "function")
   ) {
     return failure("invalid_ledger_operation", fallback, operationId);
@@ -467,7 +466,6 @@ export async function applyWeekLedgerOperation(
           return failure("invalid_ledger_operation", current, normalizedOperation.operationId);
         }
 
-        const timestamp = now.toISOString();
         const nowMs = now.getTime();
         const workingHistory = [...current.history];
         const newTransactions: Transaction[] = [];
@@ -490,7 +488,7 @@ export async function applyWeekLedgerOperation(
             nowMs,
           );
           if (!transaction) {
-            return failure("invalid_ledger_operation", current, normalizedOperation.operationId);
+            return failure("ledger_write_conflict", current, normalizedOperation.operationId);
           }
           newTransactions.push(transaction);
           workingHistory.push(transaction);
