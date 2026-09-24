@@ -51,6 +51,7 @@ type Harness = {
   tasks: () => Row[];
   snapshotWrites: () => number;
   taskWrites: () => number;
+  removeTaskWithoutTombstone: (taskId: number) => void;
   failNextTaskWrite: () => void;
 };
 
@@ -183,6 +184,12 @@ function makeHarness(options?: {
     tasks: () => structuredClone(taskRows),
     snapshotWrites: () => snapshotWrites,
     taskWrites: () => taskWrites,
+    removeTaskWithoutTombstone: (taskId: number) => {
+      snapshot = {
+        ...snapshot,
+        tasks: (snapshot.tasks || []).filter((task: Row) => Number(task.id) !== taskId),
+      };
+    },
     failNextTaskWrite: () => {
       failTaskWrite = true;
     },
@@ -371,6 +378,80 @@ describe("POST /api/tasks/manage", () => {
     expect(response.status).toBe(200);
     const receipt = harness.snapshot().operationReceipts["op-fingerprint-receipt"][0];
     expect(receipt.fingerprint).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("acknowledges an add replay after the added task is tombstoned", async () => {
+    const harness = makeHarness({ taskRows: [] });
+    const added = await postManage(harness, {
+      action: "add",
+      operationId: "op-add-later-delete",
+      task: { title: "Delete later", assignee: "Alex Child", points: 1 },
+    });
+    const addedBody = await added.json();
+    expect(added.status).toBe(200);
+    const deleted = await postManage(harness, {
+      action: "delete",
+      operationId: "op-delete-after-add",
+      taskId: addedBody.task.id,
+    });
+    expect(deleted.status).toBe(200);
+    const writes = harness.snapshotWrites();
+
+    const replay = await postManage(harness, {
+      action: "add",
+      operationId: "op-add-later-delete",
+      task: { title: "Delete later", assignee: "Alex Child", points: 1 },
+    });
+    const replayBody = await replay.json();
+
+    expect(replay.status).toBe(200);
+    expect(replayBody).toMatchObject({ success: true, duplicate: true, deleted: true, noCurrentTask: true, task: null });
+    expect(harness.snapshotWrites()).toBe(writes);
+    expect(harness.snapshot().tasks.some((row: Row) => row.id === addedBody.task.id)).toBe(false);
+  });
+
+  it("acknowledges an update replay after the updated task is tombstoned", async () => {
+    const harness = makeHarness();
+    const command = {
+      action: "update",
+      operationId: "op-update-later-delete",
+      taskId: 77,
+      patch: { title: "Deleted update" },
+    };
+    expect((await postManage(harness, command)).status).toBe(200);
+    expect((await postManage(harness, {
+      action: "delete",
+      operationId: "op-delete-after-update",
+      taskId: 77,
+    })).status).toBe(200);
+    const writes = harness.snapshotWrites();
+
+    const replay = await postManage(harness, command);
+    const replayBody = await replay.json();
+
+    expect(replay.status).toBe(200);
+    expect(replayBody).toMatchObject({ success: true, duplicate: true, deleted: true, noCurrentTask: true, task: null });
+    expect(harness.snapshotWrites()).toBe(writes);
+  });
+
+  it("keeps an untombstoned missing task repairable", async () => {
+    const harness = makeHarness();
+    const command = {
+      action: "update",
+      operationId: "op-missing-no-tombstone",
+      taskId: 77,
+      patch: { title: "Missing" },
+    };
+    expect((await postManage(harness, command)).status).toBe(200);
+    harness.removeTaskWithoutTombstone(77);
+    const writes = harness.snapshotWrites();
+
+    const replay = await postManage(harness, command);
+    const body = await replay.json();
+
+    expect(replay.status).toBe(503);
+    expect(body).toMatchObject({ error: "snapshot_write_failed" });
+    expect(harness.snapshotWrites()).toBe(writes);
   });
 
   it("rejects a fingerprintless legacy receipt on replay", async () => {

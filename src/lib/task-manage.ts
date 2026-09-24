@@ -783,6 +783,7 @@ function success(
   task: SnapshotTask | null,
   revision: { revision: string; updatedAt: string },
   reconciled: boolean,
+  state?: Pick<InternalTaskCommandResult, "duplicate" | "deleted" | "noCurrentTask">,
 ): InternalTaskCommandResult {
   return {
     ok: true,
@@ -790,6 +791,7 @@ function success(
     task: task ? (task as unknown as Task) : undefined,
     revision,
     reconciled,
+    ...(state ?? {}),
   };
 }
 
@@ -914,7 +916,18 @@ async function handleCommand(
           const task = action === "delete"
             ? null
             : liveSnapshotTasks(initial.data).find((candidate) => Number(candidate.id) === taskId) ?? null;
-          if (action !== "delete" && !task) return failure(operationId, "snapshot_write_failed");
+          if (action !== "delete" && !task) {
+            const tombstoned = (initial.data.deletedTaskIds || []).map(Number).includes(taskId);
+            if (tombstoned) {
+              const reconciled = await projectDelete(pb, taskId);
+              return success(operationId, null, initial.revision, reconciled, {
+                duplicate: true,
+                deleted: true,
+                noCurrentTask: true,
+              });
+            }
+            return failure(operationId, "snapshot_write_failed");
+          }
           const reconciled = action === "delete"
             ? await projectDelete(pb, taskId)
             : await projectUpsert(pb, task as SnapshotTask);
@@ -956,7 +969,8 @@ async function handleCommand(
               const task = action === "delete"
                 ? null
                 : liveSnapshotTasks(data).find((candidate) => Number(candidate.id) === existingTaskReceipt.taskId) ?? null;
-              return { data, result: { duplicate: true, taskId: existingTaskReceipt.taskId, task } };
+              const deleted = action !== "delete" && !task && (data.deletedTaskIds || []).map(Number).includes(existingTaskReceipt.taskId);
+              return { data, result: { duplicate: true, taskId: existingTaskReceipt.taskId, task, deleted } };
             }
             if (action === "add") {
               const next = { ...(preparedTask as SnapshotTask) };
@@ -1005,6 +1019,17 @@ async function handleCommand(
         if (mutationResult.error) return failure(operationId, mutationResult.error);
         if (mutationResult.duplicate) {
           const task = mutationResult.task;
+          if (action !== "delete" && !task) {
+            if (mutationResult.deleted) {
+              const reconciled = await projectDelete(pb, mutationResult.taskId);
+              return success(operationId, null, mutation.revision, reconciled, {
+                duplicate: true,
+                deleted: true,
+                noCurrentTask: true,
+              });
+            }
+            return failure(operationId, "snapshot_write_failed");
+          }
           const reconciled = action === "delete"
             ? await projectDelete(pb, mutationResult.taskId)
             : await projectUpsert(pb, task as SnapshotTask);
