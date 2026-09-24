@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot } from "react-dom/client";
-import { act } from "react";
+import { act, createElement } from "react";
 import type { ReactElement } from "react";
 import WeatherWidget from "@/components/ui/WeatherWidget";
 import { SceneLayers } from "@/components/ui/WxToys";
@@ -68,6 +68,10 @@ function conditionShowsCloud(condition: Element | null): boolean {
 
 function modalCondition(dialog: HTMLElement): Element | null {
   return dialog.querySelector('[data-testid="wx-scene-layers"]')?.parentElement?.nextElementSibling?.firstElementChild ?? null;
+}
+
+function renderSceneProps(props: Record<string, unknown>): HTMLElement {
+  return render(createElement(SceneLayers as any, props));
 }
 
 function parseHexColor(value: string): [number, number, number] {
@@ -392,6 +396,240 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(el.querySelector('[data-testid="wx-scene-layers"]')?.getAttribute("data-scene")).toBe("clear");
   });
 
+  it("drives poster geometry and weather layers from measured inputs", () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({
+      matches: false,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+    })));
+    const dawn = renderSceneProps({
+      scene: "clear",
+      showFog: false,
+      showBirds: false,
+      cloudCover: 40,
+      sunProgress: 0.1,
+      wind: 4,
+      windDirection: 90,
+      precipitation: 0,
+    });
+    const later = renderSceneProps({
+      scene: "clear",
+      showFog: false,
+      showBirds: false,
+      cloudCover: 40,
+      sunProgress: 0.85,
+      wind: 28,
+      windDirection: 270,
+      precipitation: 80,
+    });
+
+    const dawnSun = dawn.querySelector('[data-weather-shape="sun"]');
+    const laterSun = later.querySelector('[data-weather-shape="sun"]');
+    const dawnHorizon = dawn.querySelector('[data-weather-shape="poster-horizon"]');
+    const laterHorizon = later.querySelector('[data-weather-shape="poster-horizon"]');
+    expect(dawnSun?.getAttribute("cx")).not.toBe(laterSun?.getAttribute("cx"));
+    expect(dawnSun?.getAttribute("cy")).not.toBe(laterSun?.getAttribute("cy"));
+    expect(dawnHorizon?.getAttribute("d")).not.toBe(laterHorizon?.getAttribute("d"));
+    const rainy = renderSceneProps({
+      scene: "rain",
+      showFog: false,
+      showBirds: false,
+      cloudCover: 40,
+      precipitation: 80,
+      wind: 28,
+      windDirection: 270,
+    });
+    expect(rainy.querySelectorAll("[data-weather-precip]").length).toBeGreaterThan(0);
+    expect((rainy.querySelector('[data-testid="wx-scene-layers"]') ?? rainy).getAttribute("data-wind")).toBe("28");
+    expect((rainy.querySelector("[data-cloud-layer]") as HTMLElement).style.animation).toContain("18s");
+  });
+
+  it("does not invent unknown or zero poster measurements", () => {
+    const unknown = renderSceneProps({
+      scene: "rain",
+      showFog: false,
+      showBirds: false,
+      cloudCover: null,
+      precipitation: null,
+      wind: null,
+      windDirection: null,
+      humidity: null,
+      visibility: null,
+    });
+    const zero = renderSceneProps({
+      scene: "rain",
+      showFog: false,
+      showBirds: false,
+      cloudCover: 0,
+      precipitation: 0,
+      wind: 0,
+      windDirection: 180,
+      humidity: 40,
+      visibility: 16000,
+    });
+
+    const unknownScene = unknown.querySelector('[data-testid="wx-scene-layers"]') ?? unknown;
+    const zeroScene = zero.querySelector('[data-testid="wx-scene-layers"]') ?? zero;
+    expect(unknownScene.getAttribute("data-precipitation")).toBe("unavailable");
+    expect(unknownScene.getAttribute("data-wind")).toBe("unavailable");
+    expect(unknownScene.querySelectorAll("[data-weather-precip]").length).toBe(0);
+    expect(unknownScene.querySelector('[data-weather-shape="rain-diamonds"]')).toBeNull();
+    expect(zeroScene.getAttribute("data-precipitation")).toBe("0");
+    expect(zeroScene.querySelectorAll("[data-weather-precip]").length).toBe(0);
+    expect(zeroScene.querySelector('[data-weather-shape="rain-diamonds"]')).toBeNull();
+    expect(zeroScene.querySelector('[data-testid="wx-fog"]')).toBeNull();
+  });
+
+  it("keeps condition labels and icons aligned across day, night, cloud, fog, and overcast", async () => {
+    const toys = await import("@/components/ui/WxToys");
+    const presentation = (toys as unknown as {
+      conditionPresentation?: (scene: string, code: number, cloud: number | null, isDay: boolean) => { label: string; icon: string };
+    }).conditionPresentation;
+    expect(typeof presentation).toBe("function");
+    if (typeof presentation !== "function") return;
+
+    const cases = [
+      { code: 1, isDay: true, cloud: 0, label: "Clear", icon: "clear" },
+      { code: 1, isDay: true, cloud: null, label: "Partly Cloudy", icon: "partly" },
+      { code: 2, isDay: true, cloud: 0, label: "Clear", icon: "clear" },
+      { code: 1, isDay: false, cloud: 0, label: "Clear", icon: "night" },
+      { code: 1, isDay: false, cloud: 40, label: "Partly Cloudy", icon: "partly-night" },
+      { code: 3, isDay: true, cloud: null, label: "Overcast", icon: "cloudy" },
+      { code: 3, isDay: false, cloud: 80, label: "Overcast", icon: "cloudy" },
+      { code: 45, isDay: false, cloud: null, label: "Foggy", icon: "fog" },
+    ];
+
+    for (const testCase of cases) {
+      const scene = toys.wmoToScene(testCase.code, testCase.isDay);
+      expect(presentation(scene, testCase.code, testCase.cloud, testCase.isDay)).toEqual({
+        label: testCase.label,
+        icon: testCase.icon,
+      });
+    }
+  });
+
+  it("keeps explicit null hourly cloud unknown while current cloud remains available", async () => {
+    const payload = makeOpenMeteoPayload({ code: 1, cloud: 90 });
+    (payload.hourly as any).cloud_cover = payload.hourly.cloud_cover.map(() => null);
+    mockOpenMeteo(payload);
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    const strip = el.querySelector('[role="slider"][aria-label="Preview the rest of the day"]') as HTMLElement;
+    const currentScene = el.querySelector('[data-testid="wx-scene-layers"]') as HTMLElement;
+    expect(currentScene.querySelector('[data-testid="wx-poster-clouds"]')?.getAttribute("data-cloud-cover")).toBe("90");
+
+    act(() => strip.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })));
+    const previewScene = el.querySelector('[data-testid="wx-scene-layers"]') as HTMLElement;
+    expect(previewScene.querySelector('[data-testid="wx-poster-clouds"]')?.getAttribute("data-cloud-cover")).toBe("unavailable");
+    expect(Array.from(previewScene.querySelectorAll<HTMLElement>("[data-cloud-layer]")).every((cloud) => cloud.style.opacity === "0")).toBe(true);
+
+    act(() => findDetailsButton(el)!.click());
+    await settle();
+    const dialog = document.querySelector("#weather-details-dialog") as HTMLElement;
+    expect(dialog.querySelector('[data-testid="wx-poster-clouds"]')?.getAttribute("data-cloud-cover")).toBe("unavailable");
+  });
+
+  it("re-derives a holiday modal accent when clear scrubs to storm", async () => {
+    localStorage.setItem("home-ai-weather-config", JSON.stringify({ timeOfDay: "auto", season: "auto", holidayOverride: "christmas" }));
+    try {
+      const payload = makeOpenMeteoPayload({ code: 0, cloud: 10 });
+      const start = payload.hourly.time.findIndex((time) => new Date(time).getTime() >= Date.now() - 59 * 60_000);
+      const first = start < 0 ? 0 : start;
+      payload.hourly.weather_code[first] = 0;
+      payload.hourly.weather_code[first + 1] = 95;
+      mockOpenMeteo(payload);
+      const el = render(<WeatherWidget />);
+      await settle();
+      act(() => findDetailsButton(el)!.click());
+
+      const dialog = document.querySelector("#weather-details-dialog") as HTMLElement;
+      const activeTab = () => dialog.querySelector('[role="tab"][aria-selected="true"]') as HTMLElement;
+      expect(activeTab().style.background).toContain("239, 68, 68");
+      const scrubber = dialog.querySelector('[role="slider"][aria-label="Scrub through the next 24 hours"]') as HTMLElement;
+      act(() => scrubber.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })));
+      expect(activeTab().style.background).toContain("255, 180, 79");
+      act(() => scrubber.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true })));
+      expect(activeTab().style.background).toContain("239, 68, 68");
+    } finally {
+      localStorage.removeItem("home-ai-weather-config");
+    }
+  });
+
+  it("re-derives a clear modal accent when storm scrubs back to clear", async () => {
+    const payload = makeOpenMeteoPayload({ code: 95, cloud: 80 });
+    const start = payload.hourly.time.findIndex((time) => new Date(time).getTime() >= Date.now() - 59 * 60_000);
+    const first = start < 0 ? 0 : start;
+    payload.hourly.weather_code[first] = 95;
+    payload.hourly.weather_code[first + 1] = 0;
+    mockOpenMeteo(payload);
+    const el = render(<WeatherWidget />);
+    await settle();
+    act(() => findDetailsButton(el)!.click());
+
+    const dialog = document.querySelector("#weather-details-dialog") as HTMLElement;
+    const activeTab = () => dialog.querySelector('[role="tab"][aria-selected="true"]') as HTMLElement;
+    expect(activeTab().style.background).toContain("255, 180, 79");
+    const scrubber = dialog.querySelector('[role="slider"][aria-label="Scrub through the next 24 hours"]') as HTMLElement;
+    act(() => scrubber.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })));
+    expect(activeTab().style.background).not.toContain("255, 180, 79");
+  });
+
+  it("pauses ambient poster motion while the tab is hidden", async () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({
+      matches: false,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+    })));
+    mockOpenMeteo(makeOpenMeteoPayload({ code: 0, cloud: 10 }));
+    const el = render(<WeatherWidget />);
+    await settle();
+    const scene = el.querySelector('[data-testid="wx-scene-layers"]') as HTMLElement;
+    const birds = scene.querySelector('[data-testid="wx-birds"]') as HTMLElement;
+    expect(scene.getAttribute("data-motion")).toBe("running");
+    expect(birds.style.transition).toBe("opacity 1.2s ease");
+
+    const descriptor = Object.getOwnPropertyDescriptor(document, "hidden");
+    Object.defineProperty(document, "hidden", { configurable: true, value: true });
+    try {
+      act(() => document.dispatchEvent(new Event("visibilitychange")));
+      await settle();
+      expect(scene.getAttribute("data-motion")).toBe("paused");
+      expect(birds.style.transition).toBe("none");
+      expect(scene.querySelector('[data-weather-shape="sun"]')?.parentElement?.getAttribute("style") ?? "").not.toContain("wxFadeIn");
+    } finally {
+      if (descriptor) Object.defineProperty(document, "hidden", descriptor);
+      else delete (document as any).hidden;
+    }
+  });
+
+  it("removes the bird opacity transition under reduced motion", () => {
+    const el = renderSceneProps({ scene: "clear", showFog: false, showBirds: true, cloudCover: 10, precipitation: 0, wind: 8 });
+    const birds = el.querySelector('[data-testid="wx-birds"]') as HTMLElement;
+    expect(birds.style.transition).toBe("none");
+  });
+  it("passes the selected hour measurements into the card poster", async () => {
+    const payload = makeOpenMeteoPayload({ code: 0, precip: 80, cloud: 40 });
+    const start = payload.hourly.time.findIndex((time) => new Date(time).getTime() >= Date.now() - 59 * 60_000);
+    const first = start < 0 ? 0 : start;
+    payload.hourly.weather_code[first] = 0;
+    payload.hourly.weather_code[first + 1] = 61;
+    mockOpenMeteo(payload);
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    const strip = el.querySelector('[role="slider"][aria-label="Preview the rest of the day"]') as HTMLElement;
+    act(() => strip.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })));
+    const scene = el.querySelector('[data-testid="wx-scene-layers"]') as HTMLElement;
+    expect(scene.getAttribute("data-scene")).toBe("rain");
+    expect(scene.getAttribute("data-precipitation")).toBe("80");
+    expect(scene.getAttribute("data-wind")).toBe("8");
+    expect(scene.getAttribute("data-sun-progress")).not.toBe("unavailable");
+  });
   it("switches to the night sky when the API reports is_day=0", async () => {
     mockOpenMeteo(makeOpenMeteoPayload({ isDay: 0 }));
     const el = render(<WeatherWidget />);
@@ -407,6 +645,36 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(heroTemp!.style.color).toBe("rgb(30, 41, 59)");
   });
 
+  it.each(["light", "dark"] as const)("keeps the card night and storm ink readable in the %s theme", async (theme) => {
+    document.documentElement.dataset.theme = theme;
+    try {
+      for (const scene of [
+        { code: 0, isDay: 0, stops: ["#6f74a8", "#a29dc9", "#e2dbf2"], ink: "#1E293B", softOpacity: 0.78 },
+        { code: 95, isDay: 1, stops: ["#6a6f96", "#5d5b8f", "#4d4770"], ink: "#FFFFFF", softOpacity: 0.95 },
+      ]) {
+        mockOpenMeteo(makeOpenMeteoPayload({ code: scene.code, isDay: scene.isDay }));
+        const el = render(<WeatherWidget />);
+        await settle();
+        const hero = el.querySelector('[data-testid="wx-hero-temp"]') as HTMLElement;
+        const soft = hero.nextElementSibling as HTMLElement;
+        expect(hero.style.color).toBe(scene.ink === "#FFFFFF" ? "rgb(255, 255, 255)" : "rgb(30, 41, 59)");
+        expect(el.querySelector('[data-testid="wx-card-scrim"]')?.getAttribute("style")).toContain(scene.code === 95 ? "rgba(6, 6, 9, 0.4)" : "rgba(255, 255, 255, 0.45)");
+        const scrimOpacity = scene.code === 95 ? 0.4 : 0.45;
+        const scrimColor = scene.code === 95 ? "#060609" : "#FFFFFF";
+        const minimum = Math.min(...scene.stops.map((background) =>
+          effectiveContrast(scene.ink, 1, compositeHex(scrimColor, background, scrimOpacity))
+        ));
+        const minimumSoft = Math.min(...scene.stops.map((background) =>
+          effectiveContrast(scene.ink, scene.softOpacity, compositeHex(scrimColor, background, scrimOpacity))
+        ));
+        expect(minimum).toBeGreaterThanOrEqual(4.5);
+        expect(minimumSoft).toBeGreaterThanOrEqual(4.5);
+        expect(soft.style.color).toContain(scene.ink === "#FFFFFF" ? "255, 255, 255" : "30, 41, 59");
+      }
+    } finally {
+      delete document.documentElement.dataset.theme;
+    }
+  });
   it("keeps forced-night modal text on a readable light-scrim treatment", async () => {
     localStorage.setItem("home-ai-weather-config", JSON.stringify({ timeOfDay: "night" }));
     try {
@@ -756,8 +1024,9 @@ describe("WeatherWidget — Not Boring redesign", () => {
     const cardClouds = cardScene.querySelector('[data-testid="wx-poster-clouds"]') as HTMLElement;
     expect(cardClouds.getAttribute("data-cloud-cover")).toBe("unavailable");
     expect(Array.from(cardClouds.querySelectorAll<HTMLElement>("[data-cloud-layer]")).map((cloud) => cloud.style.opacity)).toEqual(["0", "0"]);
-    expect(conditionShowsCloud(el.querySelector('[data-testid="wx-hero-icon"]')?.firstElementChild ?? null)).toBe(false);
-    expect((el.querySelector('[data-testid="wx-birds"]') as HTMLElement).style.opacity).toBe("0");
+     expect(conditionShowsCloud(el.querySelector('[data-testid="wx-hero-icon"]')?.firstElementChild ?? null)).toBe(true);
+     expect(el.textContent).toContain("Partly Cloudy");
+     expect((el.querySelector('[data-testid="wx-birds"]') as HTMLElement).style.opacity).toBe("0");
 
     act(() => findDetailsButton(el)!.click());
     await settle();
@@ -766,8 +1035,9 @@ describe("WeatherWidget — Not Boring redesign", () => {
     const modalClouds = modalScene.querySelector('[data-testid="wx-poster-clouds"]') as HTMLElement;
     expect(modalClouds.getAttribute("data-cloud-cover")).toBe("unavailable");
     expect(Array.from(modalClouds.querySelectorAll<HTMLElement>("[data-cloud-layer]")).map((cloud) => cloud.style.opacity)).toEqual(["0", "0"]);
-    expect(conditionShowsCloud(modalCondition(dialog))).toBe(false);
-    expect((dialog.querySelector('[data-testid="wx-birds"]') as HTMLElement).style.opacity).toBe("0");
+     expect(conditionShowsCloud(modalCondition(dialog))).toBe(true);
+     expect(dialog.textContent).toContain("Partly Cloudy");
+     expect((dialog.querySelector('[data-testid="wx-birds"]') as HTMLElement).style.opacity).toBe("0");
     expect(dialog.textContent).not.toContain("Cloud cover");
   });
 
@@ -778,7 +1048,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
       { scene: "snow" as const, shape: "snow-diamonds", background: "#E6EFFF" },
     ];
     const results = cases.map(({ scene, shape, background }) => {
-      const el = render(<SceneLayers scene={scene} showFog={false} showBirds={false} />);
+      const el = render(<SceneLayers scene={scene} showFog={false} showBirds={false} cloudCover={80} precipitation={80} />);
       const accent = el.querySelector<SVGElement>(`[data-weather-shape="${shape}"]`);
       const opacity = Number(accent?.getAttribute("opacity"));
       const contrast = effectiveContrast(accent?.getAttribute("stroke") ?? "", opacity, background);
@@ -792,13 +1062,13 @@ describe("WeatherWidget — Not Boring redesign", () => {
   });
 
   it("renders snow diamonds with an explicit transparent fill contract", () => {
-    const el = render(<SceneLayers scene="snow" showFog={false} showBirds={false} />);
+    const el = render(<SceneLayers scene="snow" showFog={false} showBirds={false} cloudCover={80} precipitation={80} />);
     const snow = el.querySelector<SVGElement>('[data-weather-shape="snow-diamonds"]');
     const paths = Array.from(snow?.querySelectorAll("path") ?? []);
 
     expect(snow?.getAttribute("fill")).toBe("none");
-    expect(paths).toHaveLength(1);
-    expect(paths[0]?.getAttribute("fill")).toBe("none");
+    expect(paths.length).toBeGreaterThan(0);
+    expect(paths.every((path) => path.getAttribute("fill") === "none")).toBe(true);
   });
 
   it("layers turquoise poster clouds behind a dominant clear-day temperature", async () => {
@@ -1315,7 +1585,9 @@ describe("weather skins — severity + Consuela night", () => {
   });
 });
 
-describe("weather insights — family language helpers", () => {  it("wearAdvice answers the kid question with kid copy and rain beats warmth", () => {
+describe("weather insights — family language helpers", () => {
+  it("wearAdvice answers the kid question with kid copy and rain beats warmth", () => {
+    expect(wearAdvice(50, null, false).headline).toBe("Light jacket");
     expect(wearAdvice(75, 5, false).headline).toBe("Sunglasses weather");
     expect(wearAdvice(75, 5, true).headline).toBe("No jacket needed");
     expect(wearAdvice(34, 10, true).headline).toBe("Grab a coat");

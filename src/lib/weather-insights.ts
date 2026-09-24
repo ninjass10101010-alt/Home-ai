@@ -25,11 +25,11 @@ export interface WearAdvice {
   detail: string | null;
 }
 
-export function wearAdvice(feelsLikeF: number, precipProb: number, isKid: boolean): WearAdvice {
+export function wearAdvice(feelsLikeF: number, precipProb: number | null, isKid: boolean): WearAdvice {
   const cold = feelsLikeF < 40;
   const chilly = feelsLikeF < 55;
   const hot = feelsLikeF >= 90;
-  const wet = precipProb >= 40;
+  const wet = precipProb != null && precipProb >= 40;
 
   const coat = isKid ? "Grab a coat" : "Coats this morning";
   const layers = isKid ? "Bring a jacket" : "Light jacket";

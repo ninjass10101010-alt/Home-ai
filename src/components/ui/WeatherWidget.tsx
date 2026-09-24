@@ -11,7 +11,7 @@ import Skeleton from "@/components/ui/Skeleton";
 import { db } from "@/db";
 import { moonPhase, moonPhaseName } from "./WeatherScene";
 import { SKY, INK, GLASS, GLASS_NIGHT } from "./wx-tokens";
-import { SceneLayers, Condition, wmoToScene, sceneToCondition, dayCondition } from "./WxToys";
+import { SceneLayers, Condition, wmoToScene, dayCondition, conditionPresentation, wmoCondition } from "./WxToys";
 import { getWeatherSkin, cardinalFromDegrees, SeasonKey, severeFamily, resolveAccent } from "./WeatherSkins";
 import { wearAdvice, stormAdvice, snowAdvice, fusionOutlook, InsightEvent } from "@/lib/weather-insights";
 import type { ParticleKind } from "./WeatherParticles";
@@ -36,11 +36,11 @@ interface HourPoint {
   time: string;
   temp: number;
   code: number;
-  precip: number;
+  precip: number | null;
   isDay: boolean;
   cloud: number | null;
   wind: number | null;
-  windDir: number;
+  windDir: number | null;
   humidity: number | null;
   visibility: number | null;
 }
@@ -50,7 +50,7 @@ interface WeatherData {
   feelsLike: number | null;
   humidity: number | null;
   wind: number | null;
-  windDir: number;
+  windDir: number | null;
   code: number;
   isDay: boolean;
   cloud: number | null;
@@ -77,17 +77,6 @@ interface WeatherData {
 const RAIN_CODES = new Set([51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99]);
 const SNOW_CODES = new Set([71, 73, 75, 77, 85, 86]);
 const STORM_CODES = new Set([95, 96, 99]);
-
-function wmoToCondition(code: number) {
-  if (code === 0) return { condition: "Clear", emoji: "☀️" };
-  if (code <= 3) return { condition: "Partly Cloudy", emoji: "⛅" };
-  if (code <= 48) return { condition: "Foggy", emoji: "🌫️" };
-  if (code <= 57) return { condition: "Drizzle", emoji: "🌦️" };
-  if (code <= 67) return { condition: "Rainy", emoji: "🌧️" };
-  if (code <= 77) return { condition: "Snowy", emoji: "❄️" };
-  if (code <= 82) return { condition: "Rain Showers", emoji: "🌧️" };
-  return { condition: "Thunderstorm", emoji: "⛈️" };
-}
 
 function formatHourLabel(iso: string): string {
   const h = new Date(iso).getHours();
@@ -135,10 +124,12 @@ function deriveOutlookInfo(hourly: HourlyBlock | undefined, condition: string): 
   const isPrecipCode = (code: number) => RAIN_CODES.has(code) || SNOW_CODES.has(code);
   let hit = -1;
   for (let i = start + 1; i <= end && hit === -1; i++) {
-    if ((precip[i] ?? 0) >= 50) hit = i;
+    const probability = precip[i];
+    if (typeof probability === "number" && probability >= 50) hit = i;
   }
   for (let i = start + 1; i <= end && hit === -1; i++) {
-    if ((precip[i] ?? 0) >= 30 && isPrecipCode(codes[i])) hit = i;
+    const probability = precip[i];
+    if (typeof probability === "number" && probability >= 30 && isPrecipCode(codes[i])) hit = i;
   }
   for (let i = start + 1; i <= end && hit === -1; i++) {
     if (isPrecipCode(codes[i])) hit = i;
@@ -219,12 +210,12 @@ const HOLIDAY_STYLE: Partial<Record<HolidayOverride, { accent: string; particle:
   virginguadalupe: { accent: "#0d9488", particle: "holy-roses", label: "🌹 Virgin of Guadalupe" },
 };
 
-function sunProgressAt(timeISO: string, sunriseISO: string | null, sunsetISO: string | null): number {
-  if (!sunriseISO || !sunsetISO) return 0.5;
+function sunProgressAt(timeISO: string, sunriseISO: string | null, sunsetISO: string | null): number | null {
+  if (!sunriseISO || !sunsetISO) return null;
   const t = new Date(timeISO).getTime();
   const sr = new Date(sunriseISO).getTime();
   const ss = new Date(sunsetISO).getTime();
-  if (!isFinite(t) || !isFinite(sr) || !isFinite(ss) || ss <= sr) return 0.5;
+  if (!isFinite(t) || !isFinite(sr) || !isFinite(ss) || ss <= sr) return null;
   return Math.max(0, Math.min(1, (t - sr) / (ss - sr)));
 }
 
@@ -348,7 +339,7 @@ function DayStrip({ hours, conv, skin, accent, previewIdx, previewPinned, onPrev
       aria-valuemin={0}
       aria-valuemax={hours.length - 1}
       aria-valuenow={previewIdx ?? 0}
-      aria-valuetext={pv ? `${formatHourLabel(pv.time)}, ${conv(pv.temp)} degrees, ${pv.precip}% chance of precipitation` : "Now"}
+      aria-valuetext={pv ? `${formatHourLabel(pv.time)}, ${conv(pv.temp)} degrees, ${pv.precip == null ? "precipitation unavailable" : `${Math.round(pv.precip)}% chance of precipitation`}` : "Now"}
       className="relative shrink-0 cursor-grab select-none outline-none rounded-xl focus-visible:ring-2 focus-visible:ring-offset-0 active:cursor-grabbing"
       style={{ touchAction: "pan-y", ["--tw-ring-color" as string]: accent }}
       onPointerDown={(e) => {
@@ -407,14 +398,14 @@ function DayStrip({ hours, conv, skin, accent, previewIdx, previewPinned, onPrev
                 {i === 0 ? "NOW" : formatHourTick(h.time)}
               </span>
               <span className="flex h-[26px] w-full items-center justify-center">
-                <Condition code={sceneToCondition(wmoToScene(h.code, h.isDay), h.code, h.cloud)} size={26} />
+                <Condition code={conditionPresentation(wmoToScene(h.code, h.isDay), h.code, h.cloud, h.isDay).icon} size={26} />
               </span>
               <span className="text-[13px] font-black tabular-nums" style={{ color: skin.ink }}>
                 {conv(h.temp)}°
               </span>
-              {h.precip >= 20 ? (
+              {h.precip != null && h.precip >= 20 ? (
                 <span className="text-[10px] font-semibold tabular-nums" style={{ color: accent }}>
-                  {h.precip}%
+                  {Math.round(h.precip)}%
                 </span>
               ) : (
                 <span className="h-[12px]" />
@@ -459,14 +450,14 @@ function UvDots({ uv, accent }: { uv: number; accent: string }) {
 }
 
 function SunArc({ sunriseISO, sunsetISO, progress, accent }: {
-  sunriseISO: string; sunsetISO: string; progress: number; accent: string;
+  sunriseISO: string; sunsetISO: string; progress: number | null; accent: string;
 }) {
   const P0 = { x: 16, y: 58 };
   const C = { x: 140, y: -10 };
   const P1 = { x: 264, y: 58 };
-  const t = Math.max(0, Math.min(1, progress));
-  const px = (1 - t) ** 2 * P0.x + 2 * (1 - t) * t * C.x + t ** 2 * P1.x;
-  const py = (1 - t) ** 2 * P0.y + 2 * (1 - t) * t * C.y + t ** 2 * P1.y;
+  const t = progress == null ? null : Math.max(0, Math.min(1, progress));
+  const px = t == null ? null : (1 - t) ** 2 * P0.x + 2 * (1 - t) * t * C.x + t ** 2 * P1.x;
+  const py = t == null ? null : (1 - t) ** 2 * P0.y + 2 * (1 - t) * t * C.y + t ** 2 * P1.y;
   const ms = new Date(sunsetISO).getTime() - new Date(sunriseISO).getTime();
   const dayLen = ms > 0 ? `${Math.floor(ms / 3_600_000)}h ${Math.round((ms % 3_600_000) / 60_000)}m` : null;
   return (
@@ -474,7 +465,7 @@ function SunArc({ sunriseISO, sunsetISO, progress, accent }: {
       <svg viewBox="0 0 280 66" className="block w-full" aria-hidden="true">
         <path d={`M ${P0.x} ${P0.y} Q ${C.x} ${C.y} ${P1.x} ${P1.y}`} fill="none" stroke="rgba(255,255,255,0.22)" strokeWidth={1.5} strokeDasharray="3 5" strokeLinecap="round" />
         <line x1={8} y1={58} x2={272} y2={58} stroke="rgba(255,255,255,0.14)" strokeWidth={1} />
-        <circle cx={px} cy={py} r={6} fill={accent} style={{ filter: `drop-shadow(0 0 6px ${accent})` }} />
+         {px != null && py != null && <circle cx={px} cy={py} r={6} fill={accent} style={{ filter: `drop-shadow(0 0 6px ${accent})` }} />}
       </svg>
       <div className="mt-1 flex items-center justify-between text-[11px] font-semibold text-white/70">
         <span>↑ {formatHourLabel(sunriseISO)}</span>
@@ -522,7 +513,7 @@ function TimelineScrubber({ hours, conv, accent, idx, onIdx }: {
       aria-valuemin={0}
       aria-valuemax={hours.length - 1}
       aria-valuenow={idx}
-      aria-valuetext={`${formatHourLabel(cur.time)}, ${conv(cur.temp)} degrees, ${cur.precip}% chance of precipitation`}
+      aria-valuetext={`${formatHourLabel(cur.time)}, ${conv(cur.temp)} degrees, ${cur.precip == null ? "precipitation unavailable" : `${Math.round(cur.precip)}% chance of precipitation`}`}
       tabIndex={0}
       className="relative cursor-ew-resize select-none rounded-xl py-3 outline-none focus-visible:ring-2 focus-visible:ring-white/50"
       style={{ touchAction: "none" }}
@@ -544,7 +535,7 @@ function TimelineScrubber({ hours, conv, accent, idx, onIdx }: {
     >
       <div className="relative h-1.5 rounded-full bg-white/12">
         {hours.map((h, i) => (
-          h.precip >= 35 ? (
+          h.precip != null && h.precip >= 35 ? (
             <div
               key={i}
               className="absolute top-1/2 h-[7px] -translate-y-1/2 rounded-full"
@@ -629,7 +620,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
         const current = data.current ?? {};
         const daily = data.daily;
         const hourly = data.hourly;
-        const currentWMO = wmoToCondition(current.weather_code ?? 1);
+        const currentWMO = wmoCondition(current.weather_code ?? 1);
         const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
         // Open-Meteo returns location-local naive ISO strings ("2026-09-01T14:00").
@@ -661,22 +652,20 @@ export default function WeatherWidget({ className = "" }: { className?: string }
               time: hourly.time[i],
               temp: temp,
               code: hourly.weather_code?.[i] ?? current.weather_code ?? 1,
-              precip: hourly.precipitation_probability?.[i] ?? 0,
+              precip: typeof hourly.precipitation_probability?.[i] === "number" ? hourly.precipitation_probability[i] : null,
               isDay: hourly.is_day?.[i] != null ? hourly.is_day[i] === 1 : fallbackIsDay,
-              cloud: hourly.cloud_cover?.[i] ?? current.cloud_cover ?? null,
-              wind: hourly.wind_speed_10m?.[i] ?? current.wind_speed_10m ?? null,
-              windDir: hourly.wind_direction_10m?.[i] ?? current.wind_direction_10m ?? 270,
-              humidity: hourly.relative_humidity_2m?.[i] ?? current.relative_humidity_2m ?? null,
-              visibility: typeof hourly.visibility?.[i] === "number"
-                ? hourly.visibility[i]
-                : (typeof current.visibility === "number" ? current.visibility : null),
+              cloud: typeof hourly.cloud_cover?.[i] === "number" ? hourly.cloud_cover[i] : null,
+              wind: typeof hourly.wind_speed_10m?.[i] === "number" ? hourly.wind_speed_10m[i] : null,
+              windDir: typeof hourly.wind_direction_10m?.[i] === "number" ? hourly.wind_direction_10m[i] : null,
+              humidity: typeof hourly.relative_humidity_2m?.[i] === "number" ? hourly.relative_humidity_2m[i] : null,
+              visibility: typeof hourly.visibility?.[i] === "number" ? hourly.visibility[i] : null,
             });
           }
         }
 
         const forecast: ForecastDay[] = daily?.time
           ? daily.time.slice(1, 6).map((date: string, i: number) => {
-            const wmo = wmoToCondition(daily.weather_code?.[i + 1] ?? 1);
+            const wmo = wmoCondition(daily.weather_code?.[i + 1] ?? 1);
             const high = typeof daily.temperature_2m_max?.[i + 1] === "number" ? Math.round(daily.temperature_2m_max[i + 1]) : null;
             const low = typeof daily.temperature_2m_min?.[i + 1] === "number" ? Math.round(daily.temperature_2m_min[i + 1]) : null;
             if (high == null || low == null) return null; // a fabricated 70/55 is worse than a missing row
@@ -713,7 +702,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
           feelsLike: typeof current.apparent_temperature === "number" ? Math.round(current.apparent_temperature) : (typeof current.temperature_2m === "number" ? Math.round(current.temperature_2m) : null),
           humidity: typeof current.relative_humidity_2m === "number" ? current.relative_humidity_2m : null,
           wind: typeof current.wind_speed_10m === "number" ? Math.round(current.wind_speed_10m) : null,
-          windDir: current.wind_direction_10m ?? 270,
+          windDir: typeof current.wind_direction_10m === "number" ? current.wind_direction_10m : null,
           code: current.weather_code ?? 1,
           isDay: current.is_day != null ? current.is_day === 1 : getRealTimeOfDay() === "day",
           cloud: typeof current.cloud_cover === "number" ? current.cloud_cover : null,
@@ -847,10 +836,17 @@ export default function WeatherWidget({ className = "" }: { className?: string }
   // Toy hero inputs — the card sky/world/icon derive from the same live
   // code + day flag the old scene used (active hour while previewing).
   const heroScene = isPaused ? "cloudy" : wmoToScene(sceneCode, sceneIsDay);
-  const heroCloud = activeHour?.cloud ?? weatherData?.cloud ?? null;
-  const condCode = isPaused ? "cloudy" : sceneToCondition(heroScene, sceneCode, heroCloud);
-  const heroVis = activeHour?.visibility ?? weatherData?.visibility ?? null;
-  const heroFog = isPaused || sceneCode === 45 || sceneCode === 48 || (heroVis != null && heroVis < 8000);
+  const heroCloud = activeHour ? activeHour.cloud : weatherData?.cloud ?? null;
+  const heroPresentation = isPaused
+    ? { label: "Weather unavailable", icon: "cloudy" as const }
+    : conditionPresentation(heroScene, sceneCode, heroCloud, sceneIsDay);
+  const heroVis = activeHour ? activeHour.visibility : weatherData?.visibility ?? null;
+  const heroHumidity = activeHour ? activeHour.humidity : weatherData?.humidity ?? null;
+  const heroPrecipitation = activeHour?.precip ?? null;
+  const heroWind = activeHour ? activeHour.wind : weatherData?.wind ?? null;
+  const heroWindDirection = activeHour ? activeHour.windDir : weatherData?.windDir ?? null;
+  const heroSunProgress = sunProgressAt(activeHour?.time ?? new Date().toISOString(), weatherData?.sunriseISO ?? null, weatherData?.sunsetISO ?? null);
+  const heroFog = isPaused || sceneCode === 45 || sceneCode === 48 || (heroVis != null && heroVis < 8000) || (heroVis == null && heroHumidity != null && heroHumidity >= 82);
   const heroBirds =
     !fetchError &&
     sceneIsDay &&
@@ -880,7 +876,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
     // storm keeps white; every other scene (incl. the lightened night) reads
     // as a pastel that dark slate-800 ink passes AA on at every stop.
     const toyInk = heroScene === "storm" ? "#FFFFFF" : "#1E293B";
-    const softAlpha = isBoosted ? 0.9 : 0.78;
+    const softAlpha = isBoosted ? 0.9 : heroScene === "storm" ? 0.95 : 0.78;
     return {
       ...rawSkin,
       ink: toyInk,
@@ -910,7 +906,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
     const wetHour = weatherData.rainHourISO
       ? weatherData.hours.find((h) => h.time === weatherData.rainHourISO)
       : null;
-    return wearAdvice(feels, wetHour?.precip ?? (RAIN_CODES.has(weatherData.code) ? 70 : 8), isKid);
+    return wearAdvice(feels, wetHour?.precip ?? null, isKid);
   }, [weatherData, isKid]);
 
   // Calendar fusion — "Rain around Soccer Practice": the one thing only
@@ -989,8 +985,10 @@ export default function WeatherWidget({ className = "" }: { className?: string }
   }, [weatherData, loading, fetchError, stripHours.length]);
 
   const heroCondition = activeHour
-    ? `${formatHourLabel(activeHour.time)} · ${wmoToCondition(activeHour.code).condition}`
-    : weatherData?.condition ?? null;
+    ? `${formatHourLabel(activeHour.time)} · ${heroPresentation.label}`
+    : weatherData
+      ? heroPresentation.label
+      : null;
 
   const closeDetails = useCallback(() => {
     setDetailsOpen(false);
@@ -1024,7 +1022,19 @@ export default function WeatherWidget({ className = "" }: { className?: string }
           <div key={k} className={`wx-sky absolute inset-0 bg-gradient-to-b ${g}`} data-active={heroScene === k} />
         ))}
         <div className="absolute inset-0 overflow-hidden" aria-hidden="true">
-          <SceneLayers scene={heroScene} showFog={heroFog} showBirds={heroBirds} cloudCover={heroCloud} />
+          <SceneLayers
+            scene={heroScene}
+            showFog={heroFog}
+            showBirds={heroBirds}
+            cloudCover={heroCloud}
+            precipitation={heroPrecipitation}
+            wind={heroWind}
+            windDirection={heroWindDirection}
+            humidity={heroHumidity}
+            visibility={heroVis}
+            sunProgress={heroSunProgress}
+            paused={tabHidden}
+          />
         </div>
         {fetchError && !weatherData && (
           <div className="pointer-events-none absolute inset-0 z-[1] bg-[rgba(120,128,145,0.38)] backdrop-blur-[1px]" aria-hidden="true" />
@@ -1040,10 +1050,11 @@ export default function WeatherWidget({ className = "" }: { className?: string }
         )}
 
         <div
+          data-testid="wx-card-scrim"
           className="pointer-events-none absolute inset-0 z-10"
           aria-hidden="true"
           style={{
-            background: `radial-gradient(70% 55% at 50% 42%, ${heroScene === "storm" ? "rgba(6,6,9,0.40)" : heroScene === "clear" ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.24)"} 0%, transparent 72%)`,
+            background: `radial-gradient(70% 55% at 50% 42%, ${heroScene === "storm" ? "rgba(6,6,9,0.40)" : heroScene === "night" ? "rgba(255,255,255,0.45)" : heroScene === "clear" ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.24)"} 0%, transparent 72%)`,
           }}
         />
 
@@ -1114,7 +1125,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
                   </div>
                   {/* clay condition — clamp prevents overflow on 320 px phones */}
                   <div data-testid="wx-hero-icon" className="shrink-0 flex items-center justify-center" style={{ width: "clamp(48px, 16vw, 64px)", height: "clamp(48px, 16vw, 64px)", animation: "wxThumbIn .6s cubic-bezier(.2,.8,.2,1) both" }}>
-                    <Condition code={condCode} size={64} />
+                    <Condition code={heroPresentation.icon} size={64} />
                   </div>
                 </div>
                 {heroCondition && (
@@ -1229,7 +1240,8 @@ export default function WeatherWidget({ className = "" }: { className?: string }
           conv={conv}
           season={season}
           todOverride={todOverride}
-          accent={accent}
+          holidayAccent={holidayStyle?.accent ?? null}
+          tabHidden={tabHidden}
           fetchError={fetchError}
           onClose={closeDetails}
         />
@@ -1240,13 +1252,14 @@ export default function WeatherWidget({ className = "" }: { className?: string }
 
 // ─── Details modal — 24h timeline scrubber + exploded metrics ───────────────
 
-function WeatherDetailsModal({ data, location, conv, season, todOverride, accent, fetchError, onClose }: {
+function WeatherDetailsModal({ data, location, conv, season, todOverride, holidayAccent, tabHidden, fetchError, onClose }: {
   data: WeatherData;
   location: string;
   conv: (f: number) => number;
   season: SeasonKey;
   todOverride: "auto" | "day" | "night";
-  accent: string;
+  holidayAccent: string | null;
+  tabHidden: boolean;
   fetchError: string | null;
   onClose: () => void;
 }) {
@@ -1290,12 +1303,19 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, accent
   const mSkin = {
     ...getWeatherSkin(season, !mIsDay, mCode),
     ink: mStorm ? "#FFFFFF" : "#1E293B",
-    inkSoft: mStorm ? "rgba(255,255,255,0.78)" : "rgba(30,41,59,0.78)",
+    inkSoft: mStorm ? "rgba(255,255,255,0.95)" : "rgba(30,41,59,0.78)",
   };
-  const mVis = scrubHour?.visibility ?? data.visibility;
-  const mFog = mCode === 45 || mCode === 48 || (mVis != null && mVis < 8000);
-  const mCloud = scrubHour?.cloud ?? data.cloud ?? null;
-  const mCond = sceneToCondition(mScene, mCode, mCloud);
+  const mAccent = resolveAccent(mSkin, holidayAccent);
+  const mVis = scrubHour ? scrubHour.visibility : data.visibility;
+  const mHumidity = scrubHour ? scrubHour.humidity : data.humidity;
+  const mPrecipitation = scrubHour ? scrubHour.precip : null;
+  const mWind = scrubHour ? scrubHour.wind : data.wind;
+  const mWindDirection = scrubHour ? scrubHour.windDir : data.windDir;
+  const mCloud = scrubHour ? scrubHour.cloud : data.cloud;
+  const mFog = mCode === 45 || mCode === 48 || (mVis != null && mVis < 8000) || (mVis == null && mHumidity != null && mHumidity >= 82);
+  const mPresentation = conditionPresentation(mScene, mCode, mCloud, mIsDay);
+  const mCond = mPresentation.icon;
+  const mSunProgress = sunProgressAt(scrubHour?.time ?? new Date().toISOString(), data.sunriseISO, data.sunsetISO);
   const mBirds =
     !fetchError &&
     mIsDay &&
@@ -1305,6 +1325,8 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, accent
     !SNOW_CODES.has(mCode) &&
     !STORM_CODES.has(mCode) &&
     !mFog;
+  const mWindValue = mWind == null ? "—" : `${Math.round(mWind)} mph${mWindDirection == null ? "" : ` ${cardinalFromDegrees(mWindDirection)}`}`;
+  const mPrecipitationValue = mPrecipitation == null ? "—" : `${Math.round(mPrecipitation)}%`;
 
   const scrubTemp = useAnimatedNumber(conv(scrubHour?.temp ?? data.temp ?? 0));
 
@@ -1353,7 +1375,8 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, accent
             type="button"
             onClick={onClose}
             aria-label="Close weather details"
-            className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-white/12 bg-white/10 text-white/80 backdrop-blur transition hover:bg-white/16 hover:text-white active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-white/12 bg-white/10 text-white/80 backdrop-blur transition hover:bg-white/16 hover:text-white active:scale-95 focus-visible:outline-none focus-visible:ring-2"
+            style={{ ["--tw-ring-color" as string]: mAccent }}
           >
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M1 1L13 13M13 1L1 13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
           </button>
@@ -1366,7 +1389,19 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, accent
                 <div key={k} className={`wx-sky absolute inset-0 bg-gradient-to-b ${g}`} data-active={mScene === k} />
               ))}
               <div className="absolute inset-0 overflow-hidden" aria-hidden="true">
-                <SceneLayers scene={mScene} showFog={mFog} showBirds={mBirds} cloudCover={mCloud} />
+                <SceneLayers
+                  scene={mScene}
+                  showFog={mFog}
+                  showBirds={mBirds}
+                  cloudCover={mCloud}
+                  precipitation={mPrecipitation}
+                  wind={mWind}
+                  windDirection={mWindDirection}
+                  humidity={mHumidity}
+                  visibility={mVis}
+                  sunProgress={mSunProgress}
+                  paused={tabHidden}
+                />
               </div>
               <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 text-center">
                 <Condition code={mCond} size={64} />
@@ -1385,7 +1420,7 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, accent
                     <span className="mt-1 ml-0.5 text-2xl font-light leading-none" style={{ color: mSkin.inkSoft }} aria-hidden="true">°</span>
                   </div>
                   <p className="mt-1.5 text-sm font-semibold" style={{ color: mSkin.ink, textShadow: mStorm ? "none" : "0 1px 10px rgba(255,255,255,0.3)" }}>
-                    {scrubHour ? `${formatHourLabel(scrubHour.time)} · ${wmoToCondition(scrubHour.code).condition}` : data.condition}
+                    {scrubHour ? `${formatHourLabel(scrubHour.time)} · ${mPresentation.label}` : mPresentation.label}
                   </p>
                 </div>
               </div>
@@ -1394,7 +1429,7 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, accent
             {hours.length >= 2 && (
               <div>
                 <p className="mb-1 text-[11px] font-bold uppercase tracking-[0.16em] text-white/50">Next 24 Hours</p>
-                <TimelineScrubber hours={hours} conv={conv} accent={accent} idx={scrubIdx} onIdx={setScrubIdx} />
+                <TimelineScrubber hours={hours} conv={conv} accent={mAccent} idx={scrubIdx} onIdx={setScrubIdx} />
               </div>
             )}
 
@@ -1406,19 +1441,21 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, accent
               />
               <LeaderRow
                 label="Wind"
-                value={`${Math.round(scrubHour?.wind ?? data.wind ?? 0)} mph ${cardinalFromDegrees(scrubHour?.windDir ?? data.windDir)}`}
-                hidden={scrubHour?.wind == null && data.wind == null}
+                value={mWindValue}
+                hidden={mWind == null}
               >
-                <svg
-                  viewBox="0 0 16 16"
-                  className="h-3.5 w-3.5 shrink-0"
-                  style={{ color: accent, transform: `rotate(${((scrubHour?.windDir ?? data.windDir) + 180) % 360}deg)`, transition: "transform 0.6s var(--ease-settle, ease-out)" }}
-                  aria-hidden="true"
-                >
-                  <path d="M8 1.5 L11 10.5 L8 8.8 L5 10.5 Z" fill="currentColor" />
-                </svg>
+                {mWindDirection != null && (
+                  <svg
+                    viewBox="0 0 16 16"
+                    className="h-3.5 w-3.5 shrink-0"
+                    style={{ color: mAccent, transform: `rotate(${(mWindDirection + 180) % 360}deg)`, transition: "transform 0.6s var(--ease-settle, ease-out)" }}
+                    aria-hidden="true"
+                  >
+                    <path d="M8 1.5 L11 10.5 L8 8.8 L5 10.5 Z" fill="currentColor" />
+                  </svg>
+                )}
               </LeaderRow>
-              <LeaderRow label="Precipitation" value={`${Math.round(scrubHour?.precip ?? 0)}%`} />
+              <LeaderRow label="Precipitation" value={mPrecipitationValue} hidden={mPrecipitation == null} />
               <LeaderRow
                 label="Cloud cover"
                 value={scrubHour?.cloud != null || data.cloud != null ? `${Math.round(scrubHour?.cloud ?? data.cloud!)}%` : "—"}
@@ -1432,7 +1469,7 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, accent
                 <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-white/60">UV index</span>
                 <span className="flex-1 border-b border-dotted border-white/25" aria-hidden="true" />
                 <span className="flex items-center gap-2 rounded-full bg-white/10 px-2.5 py-1">
-                  {scrubIdx === 0 && data.uv != null ? <UvDots uv={data.uv} accent={accent} /> : null}
+                  {scrubIdx === 0 && data.uv != null ? <UvDots uv={data.uv} accent={mAccent} /> : null}
                   <span className="text-[13px] font-bold tabular-nums text-white">{scrubIdx !== 0 ? "—" : data.uv != null ? String(data.uv) : "—"}</span>
                 </span>
               </div>
@@ -1445,8 +1482,8 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, accent
                 <SunArc
                   sunriseISO={data.sunriseISO}
                   sunsetISO={data.sunsetISO}
-                  progress={sunProgressAt(new Date().toISOString(), data.sunriseISO, data.sunsetISO)}
-                  accent={accent}
+                  progress={mSunProgress}
+                  accent={mAccent}
                 />
                 <div className="mt-3 flex items-baseline gap-2.5">
                   <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-white/60">Moon</span>
@@ -1472,7 +1509,7 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, accent
                       aria-selected={view === v}
                       onClick={() => setView(v)}
                       className="rounded-full px-3 py-1 text-[11px] font-bold capitalize transition-colors"
-                      style={view === v ? { background: accent, color: "#fff" } : { color: "rgba(255,255,255,0.6)" }}
+                      style={view === v ? { background: mAccent, color: "#fff" } : { color: "rgba(255,255,255,0.6)" }}
                     >
                       {v}
                     </button>
@@ -1488,22 +1525,22 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, accent
                       type="button"
                       onClick={() => setScrubIdx(i)}
                       className="relative flex flex-col items-center gap-1.5 rounded-xl px-2.5 py-2.5 transition-colors"
-                      style={i === scrubIdx ? { background: `${accent}1F` } : undefined}
+                      style={i === scrubIdx ? { background: `${mAccent}1F` } : undefined}
                       aria-label={`${formatHourLabel(h.time)}, ${conv(h.temp)} degrees`}
                     >
                       {i === scrubIdx && (
-                        <span className="absolute inset-x-2 top-0 h-[2.5px] rounded-full" style={{ background: accent }} aria-hidden="true" />
+                        <span className="absolute inset-x-2 top-0 h-[2.5px] rounded-full" style={{ background: mAccent }} aria-hidden="true" />
                       )}
-                      <span className="text-[11px] font-bold" style={{ color: i === scrubIdx ? accent : "rgba(255,255,255,0.6)" }}>
+                      <span className="text-[11px] font-bold" style={{ color: i === scrubIdx ? mAccent : "rgba(255,255,255,0.6)" }}>
                         {i === 0 ? "NOW" : formatHourTick(h.time)}
                       </span>
                       <span className="flex h-[26px] w-full items-center justify-center" aria-hidden="true">
-                        <Condition code={sceneToCondition(wmoToScene(h.code, h.isDay), h.code, h.cloud)} size={24} />
+                        <Condition code={conditionPresentation(wmoToScene(h.code, h.isDay), h.code, h.cloud, h.isDay).icon} size={24} />
                       </span>
                       <span className="text-sm font-black tabular-nums text-white">{conv(h.temp)}°</span>
-                      {h.precip >= 20 ? (
-                        <span className="text-[11px] font-semibold tabular-nums" style={{ color: accent }}>
-                          {h.precip}%
+                      {h.precip != null && h.precip >= 20 ? (
+                        <span className="text-[11px] font-semibold tabular-nums" style={{ color: mAccent }}>
+                          {Math.round(h.precip)}%
                         </span>
                       ) : (
                         <span className="h-[13px]" aria-hidden="true" />
@@ -1537,7 +1574,7 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, accent
                           <Condition code={dayCondition(day.condition)} size={22} />
                         </span>
                         <span className="hidden min-w-0 flex-1 truncate text-xs font-medium text-white/75 sm:block">{day.condition}</span>
-                        <span className="shrink-0 rounded-full px-2 py-1 text-xs font-bold leading-none text-white" style={{ background: `${accent}22`, border: `1px solid ${accent}30` }}>{day.precipitation}%</span>
+                        <span className="shrink-0 rounded-full px-2 py-1 text-xs font-bold leading-none text-white" style={{ background: `${mAccent}22`, border: `1px solid ${mAccent}30` }}>{day.precipitation}%</span>
                         {/* Low temp hidden on very small phones to avoid crowding */}
                         <span className="hidden min-[380px]:inline w-8 shrink-0 text-right text-sm font-semibold text-white/70">{day.displayLow}°</span>
                         <div className="relative h-1.5 min-w-10 flex-1 rounded-full bg-white/10 sm:max-w-24" aria-hidden="true">
@@ -1550,7 +1587,7 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, accent
                             }}
                           />
                         </div>
-                        <span className="w-8 shrink-0 text-right text-sm font-black" style={{ color: accent }}>{day.displayHigh}°</span>
+                        <span className="w-8 shrink-0 text-right text-sm font-black" style={{ color: mAccent }}>{day.displayHigh}°</span>
                       </div>
                     );
                   })}
@@ -1564,7 +1601,8 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, accent
           <button
             type="button"
             onClick={onClose}
-            className="w-full rounded-full border border-white/12 bg-white/12 py-3 text-sm font-bold text-white backdrop-blur transition hover:bg-white/16 active:scale-[0.99]"
+            className="w-full rounded-full border bg-white/12 py-3 text-sm font-bold text-white backdrop-blur transition hover:bg-white/16 active:scale-[0.99]"
+            style={{ borderColor: `${mAccent}66`, backgroundColor: `${mAccent}18` }}
           >
             Close
           </button>

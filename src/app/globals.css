@@ -411,6 +411,17 @@ body {
     inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
+.briefing-acknowledged {
+  opacity: 0.6;
+  transition: opacity 700ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .briefing-acknowledged {
+    transition: none !important;
+  }
+}
+
 .home-widget-icon {
   --home-widget-icon-ink: #1e293b;
   --home-widget-icon-accent: color-mix(in srgb, var(--widget-tone, var(--color-accent-selected)) 50%, var(--home-widget-icon-ink));

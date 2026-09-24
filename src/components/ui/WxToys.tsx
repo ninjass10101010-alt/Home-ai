@@ -92,42 +92,89 @@ export function useWxMotionOk(): boolean {
   return motionOk;
 }
 
-function PosterAccents({ scene, motionOk }: { scene: WxScene; motionOk: boolean }) {
+function finiteMeasurement(value: number | null | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function measurementLabel(value: number | null | undefined): string {
+  const numeric = finiteMeasurement(value);
+  return numeric == null ? "unavailable" : String(Math.round(numeric));
+}
+
+function posterSunPosition(progress: number | null): { x: number; y: number } | null {
+  if (progress == null) return null;
+  const p = Math.max(0, Math.min(1, progress));
+  return { x: 42 + p * 236, y: 58 - Math.sin(p * Math.PI) * 42 };
+}
+
+function posterHorizon(progress: number | null): string | null {
+  if (progress == null) return null;
+  const p = Math.max(0, Math.min(1, progress));
+  const left = 150 + p * 8;
+  const middle = 166 - p * 12;
+  const right = 130 + p * 10;
+  return `M0 ${left}C68 ${middle} 126 ${left - 18} 194 ${right}C244 ${middle} 278 ${left - 8} 320 ${right - 12}V180H0Z`;
+}
+
+function fogOpacityFor(showFog: boolean, visibility: number | null, humidity: number | null): number {
+  let opacity = showFog ? 0.5 : 0;
+  const visible = finiteMeasurement(visibility);
+  const humid = finiteMeasurement(humidity);
+  if (visible != null && visible < 8000) {
+    opacity = Math.max(opacity, (1 - visible / 8000) * 0.55);
+  } else if (visible == null && humid != null && humid >= 82) {
+    opacity = Math.max(opacity, Math.min(0.55, ((humid - 82) / 18) * 0.55));
+  }
+  return opacity;
+}
+
+function PosterAccents({ scene, motionOk, sunProgress, cloudCover, precipitation }: { scene: WxScene; motionOk: boolean; sunProgress: number | null; cloudCover?: number | null; precipitation?: number | null }) {
+  const sun = posterSunPosition(sunProgress);
+  const horizon = posterHorizon(sunProgress);
+  const numericCloud = finiteMeasurement(cloudCover);
+  const numericPrecipitation = finiteMeasurement(precipitation);
+  const cloudAccentOpacity = numericCloud == null || numericCloud <= 0 ? 0 : Math.min(1, 0.35 + numericCloud / 100);
+  const precipitationAccentOpacity = numericPrecipitation == null || numericPrecipitation <= 0 ? 0 : Math.min(1, 0.35 + numericPrecipitation / 100);
+  const rainAccentCount = numericPrecipitation == null || numericPrecipitation <= 0 ? 0 : Math.max(1, Math.min(4, Math.round(numericPrecipitation / 25)));
+  const snowAccentCount = numericPrecipitation == null || numericPrecipitation <= 0 ? 0 : Math.max(1, Math.min(4, Math.round(numericPrecipitation / 25)));
   return (
     <svg
       key={scene}
       data-testid="wx-poster-accents"
       data-scene={scene}
+      data-sun-progress={measurementLabel(sunProgress)}
+      data-cloud-cover={measurementLabel(numericCloud)}
+      data-precipitation={measurementLabel(numericPrecipitation)}
       viewBox="0 0 320 180"
       preserveAspectRatio="xMidYMid slice"
       className="absolute inset-0 h-full w-full"
       aria-hidden="true"
       style={motionOk ? { animation: "wxFadeIn 0.85s ease both" } : undefined}
     >
-      {scene === "clear" && (
+      {scene === "clear" && sun && (
         <>
-          <circle data-weather-shape="sun" cx="258" cy="40" r="19" fill={WX_POSTER.sun} opacity="0.82" />
-          <path data-weather-shape="sun-rays" d="M258 10v8M258 62v8M228 40h8M280 40h8M237 19l6 6M273 55l6 6M279 19l-6 6M243 55l-6 6" stroke={WX_POSTER.sun} strokeWidth="4" strokeLinecap="round" opacity="0.72" />
-          <path data-weather-shape="poster-horizon" d="M0 156C68 132 126 170 194 148C244 132 278 145 320 128V180H0Z" fill={WX_POSTER.cloudMid} opacity="0.2" />
+          <circle data-weather-shape="sun" cx={sun.x} cy={sun.y} r="19" fill={WX_POSTER.sun} opacity="0.82" />
+          <path data-weather-shape="sun-rays" d={`M${sun.x} ${sun.y - 30}v8M${sun.x} ${sun.y + 22}v8M${sun.x - 30} ${sun.y}h8M${sun.x + 22} ${sun.y}h8M${sun.x - 21} ${sun.y - 21}l6 6M${sun.x + 15} ${sun.y + 15}l6 6M${sun.x + 15} ${sun.y - 21}l-6 6M${sun.x - 21} ${sun.y + 15}l-6 6`} stroke={WX_POSTER.sun} strokeWidth="4" strokeLinecap="round" opacity="0.72" />
+          {horizon && <path data-weather-shape="poster-horizon" d={horizon} fill={WX_POSTER.cloudMid} opacity="0.2" />}
         </>
       )}
-      {scene === "cloudy" && (
-        <path data-weather-shape="cloud-bars" d="M24 42h62M48 66h92M18 90h54" stroke="#0F6673" strokeWidth="9" strokeLinecap="round" opacity="1" />
+      {scene === "cloudy" && cloudAccentOpacity > 0 && (
+        <path data-weather-shape="cloud-bars" d="M24 42h62M48 66h92M18 90h54" stroke="#0F6673" strokeWidth="9" strokeLinecap="round" opacity={cloudAccentOpacity} />
       )}
-      {scene === "rain" && (
-        <g data-weather-shape="rain-diamonds" stroke="#244A8F" strokeWidth="4" strokeLinecap="round" opacity="1">
-          <path d="m34 18-8 20M82 52l-8 20M260 24l-8 20M294 82l-8 20" />
+      {scene === "rain" && rainAccentCount > 0 && (
+        <g data-weather-shape="rain-diamonds" stroke="#244A8F" strokeWidth="4" strokeLinecap="round" opacity={precipitationAccentOpacity}>
+          {["M34 18l-8 20", "M82 52l-8 20", "M260 24l-8 20", "M294 82l-8 20"].slice(0, rainAccentCount).map((path) => <path key={path} d={path} />)}
         </g>
       )}
-      {scene === "snow" && (
-        <g data-weather-shape="snow-diamonds" fill="none" stroke="#5B4B8A" strokeWidth="3" strokeLinecap="round" opacity="1">
-          <path fill="none" d="m34 22 8 8-8 8-8-8ZM92 64l7 7-7 7-7-7ZM266 24l8 8-8 8-8-8ZM294 92l6 6-6 6-6-6Z" />
+      {scene === "snow" && snowAccentCount > 0 && (
+        <g data-weather-shape="snow-diamonds" fill="none" stroke="#5B4B8A" strokeWidth="3" strokeLinecap="round" opacity={precipitationAccentOpacity}>
+          {["m34 22 8 8-8 8-8-8Z", "m92 64 7 7-7 7-7-7Z", "m266 24 8 8-8 8-8-8Z", "m294 92 6 6-6 6-6-6Z"].slice(0, snowAccentCount).map((path) => <path key={path} fill="none" d={path} />)}
         </g>
       )}
       {scene === "storm" && (
         <g data-weather-shape="storm-bolt" opacity="0.68">
           <path d="m266 14-18 34h17l-5 30 25-40h-17Z" fill={WX_POSTER.storm} />
-          <path d="m54 28-6 14M84 70l-6 14" stroke={WX_POSTER.rain} strokeWidth="4" strokeLinecap="round" />
+          {numericPrecipitation != null && numericPrecipitation > 0 && <path d="m54 28-6 14M84 70l-6 14" stroke={WX_POSTER.rain} strokeWidth="4" strokeLinecap="round" opacity={precipitationAccentOpacity} />}
         </g>
       )}
       {scene === "night" && (
@@ -139,24 +186,58 @@ function PosterAccents({ scene, motionOk }: { scene: WxScene; motionOk: boolean 
 
 // ─── Scene layer wired to the wx* keyframes ─────────────────────
 
-export function SceneLayers({ scene, showFog, showBirds, cloudCover }: {
+export function SceneLayers({ scene, showFog, showBirds, cloudCover, precipitation, wind, windDirection, humidity, visibility, sunProgress, paused = false }: {
   scene: WxScene;
   showFog: boolean;
   showBirds: boolean;
   cloudCover?: number | null;
+  precipitation?: number | null;
+  wind?: number | null;
+  windDirection?: number | null;
+  humidity?: number | null;
+  visibility?: number | null;
+  sunProgress?: number | null;
+  paused?: boolean;
 }) {
-  const motionOk = useWxMotionOk();
-  const isWet = scene === "rain" || scene === "storm";
-  const numericCloudCover = typeof cloudCover === "number" && Number.isFinite(cloudCover) ? cloudCover : null;
+  const motionOk = useWxMotionOk() && !paused;
+  const numericCloudCover = finiteMeasurement(cloudCover);
   const cover = numericCloudCover == null ? 0 : Math.max(0, Math.min(100, numericCloudCover));
+  const numericPrecipitation = finiteMeasurement(precipitation);
+  const normalizedPrecipitation = numericPrecipitation == null ? null : Math.max(0, Math.min(100, numericPrecipitation));
+  const numericWind = finiteMeasurement(wind);
+  const numericWindDirection = finiteMeasurement(windDirection);
+  const normalizedHumidity = finiteMeasurement(humidity);
+  const normalizedVisibility = finiteMeasurement(visibility);
+  const cloudCount = cover <= 0 ? 0 : cover >= (scene === "clear" ? 20 : 50) ? 2 : 1;
   const cloudTone = scene === "clear" ? "poster" : "day";
-  const frontCloudOpacity = cover > 0 ? (scene === "clear" ? cover * 0.009 : 0.9) : 0;
-  const backCloudOpacity = cover > 0 ? (scene === "clear" ? Math.max(0, (cover - 20) / 100) * 0.72 : 0.6) : 0;
+  const frontCloudOpacity = cloudCount > 0 ? (scene === "clear" ? cover * 0.009 : Math.min(0.9, 0.25 + cover * 0.0065)) : 0;
+  const backCloudOpacity = cloudCount > 1 ? (scene === "clear" ? Math.max(0, (cover - 20) / 100) * 0.72 : Math.min(0.72, 0.18 + cover * 0.0054)) : 0;
+  const driftDuration = numericWind == null ? null : Math.max(16, 46 - numericWind);
+  const driftAnimation = motionOk && driftDuration != null;
+  const isWet = scene === "rain" || scene === "storm";
+  const rainCount = isWet && normalizedPrecipitation != null && normalizedPrecipitation > 0
+    ? Math.max(1, Math.round((normalizedPrecipitation / 100) * 28))
+    : 0;
+  const snowCount = scene === "snow" && normalizedPrecipitation != null && normalizedPrecipitation > 0
+    ? Math.max(1, Math.round((normalizedPrecipitation / 100) * 22))
+    : 0;
+  const rainSlant = numericWind != null && numericWindDirection != null
+    ? Math.max(-14, Math.min(14, (numericWindDirection > 90 && numericWindDirection < 270 ? -1 : 1) * Math.min(numericWind * 0.7, 14)))
+    : 0;
+  const fogOpacity = fogOpacityFor(showFog, normalizedVisibility, normalizedHumidity);
   return (
-    <div data-testid="wx-scene-layers" data-scene={scene} className="absolute inset-0" aria-hidden="true">
-      <PosterAccents scene={scene} motionOk={motionOk} />
+    <div
+      data-testid="wx-scene-layers"
+      data-scene={scene}
+      data-motion={motionOk ? "running" : "paused"}
+      data-sun-progress={measurementLabel(sunProgress)}
+      data-precipitation={measurementLabel(normalizedPrecipitation)}
+      data-wind={measurementLabel(numericWind)}
+      className="absolute inset-0"
+      aria-hidden="true"
+    >
+      <PosterAccents scene={scene} motionOk={motionOk} sunProgress={finiteMeasurement(sunProgress)} cloudCover={numericCloudCover} precipitation={normalizedPrecipitation} />
 
-      {/* Stars */}
       {scene === "night" &&
         Array.from({ length: 18 }).map((_, i) => (
           <span
@@ -170,42 +251,46 @@ export function SceneLayers({ scene, showFog, showBirds, cloudCover }: {
           />
         ))}
 
-      {/* Drifting toy clouds (two depths) */}
       {scene !== "night" && (
         <div data-testid="wx-poster-clouds" data-cloud-cover={numericCloudCover == null ? "unavailable" : Math.round(cover)} className="absolute inset-0">
           <CloudPuff
             layer="front"
             tone={cloudTone}
             className="absolute top-12 left-[-12px] -rotate-6 scale-[1.35]"
-            style={{ opacity: frontCloudOpacity, ...(motionOk ? { animation: "wxCloudDrift 26s ease-in-out infinite alternate" } : {}) }}
+            style={{ opacity: frontCloudOpacity, ...(driftAnimation && driftDuration != null ? { animation: `wxCloudDrift ${driftDuration}s ease-in-out infinite alternate` } : {}) }}
           />
           <CloudPuff
             layer="back"
             tone={cloudTone}
             className="absolute top-28 right-[-12px] rotate-3 scale-[1.15] blur-[1px]"
-            style={{ opacity: backCloudOpacity, ...(motionOk ? { animation: "wxCloudDrift 38s ease-in-out infinite alternate-reverse" } : {}) }}
+            style={{ opacity: backCloudOpacity, ...(driftAnimation && driftDuration != null ? { animation: `wxCloudDrift ${driftDuration + 12}s ease-in-out infinite alternate-reverse` } : {}) }}
           />
         </div>
       )}
 
-      {/* Rain streaks */}
-      {isWet &&
-        Array.from({ length: 28 }).map((_, i) => (
-          <span
-            key={i}
-            className="absolute top-[-40px] h-10 w-[2px] rounded-full bg-gradient-to-b from-transparent via-white/80 to-white/20"
-            style={{
-              left: `${(i * 41) % 100}%`,
-              animation: motionOk ? `wxRainStreak ${0.8 + (i % 5) * 0.12}s linear ${(i % 7) * 0.17}s infinite` : undefined,
-            }}
-          />
-        ))}
+      {rainCount > 0 && (
+        <div data-weather-rain-layer style={{ transform: numericWind != null && numericWindDirection != null ? `rotate(${rainSlant}deg)` : undefined }}>
+          {Array.from({ length: rainCount }).map((_, i) => (
+            <span
+              key={i}
+              data-weather-precip="rain"
+              data-precipitation={measurementLabel(normalizedPrecipitation)}
+              className="absolute top-[-40px] h-10 w-[2px] rounded-full bg-gradient-to-b from-transparent via-white/80 to-white/20"
+              style={{
+                left: `${(i * 41) % 100}%`,
+                animation: motionOk ? `wxRainStreak ${0.8 + (i % 5) * 0.12}s linear ${(i % 7) * 0.17}s infinite` : undefined,
+              }}
+            />
+          ))}
+        </div>
+      )}
 
-      {/* Snow */}
-      {scene === "snow" &&
-        Array.from({ length: 22 }).map((_, i) => (
+      {snowCount > 0 &&
+        Array.from({ length: snowCount }).map((_, i) => (
           <span
             key={i}
+            data-weather-precip="snow"
+            data-precipitation={measurementLabel(normalizedPrecipitation)}
             className="absolute top-[-16px] rounded-full bg-white shadow-[0_0_6px_rgba(255,255,255,.9)]"
             style={{
               left: `${(i * 47) % 100}%`,
@@ -216,8 +301,6 @@ export function SceneLayers({ scene, showFog, showBirds, cloudCover }: {
           />
         ))}
 
-      {/* Lightning flash — a full-bleed white wash (storms only; rain
-          shouldn't invent severity the API never reported) */}
       {scene === "storm" && (
         <div
           className="absolute inset-0 bg-white mix-blend-overlay"
@@ -225,9 +308,8 @@ export function SceneLayers({ scene, showFog, showBirds, cloudCover }: {
         />
       )}
 
-      {/* Fog band */}
-      {showFog && (
-        <div data-testid="wx-fog">
+      {fogOpacity > 0 && (
+        <div data-testid="wx-fog" data-fog-opacity={fogOpacity.toFixed(2)}>
           <div
             className="absolute inset-x-[-10%] bottom-0 h-40 bg-gradient-to-t from-white/60 to-transparent blur-xl"
             style={motionOk ? { animation: "wxFogDrift 30s ease-in-out infinite alternate" } : undefined}
@@ -235,8 +317,7 @@ export function SceneLayers({ scene, showFog, showBirds, cloudCover }: {
         </div>
       )}
 
-      {/* Birds — flapping seagulls circling, only on a nice day */}
-      <div data-testid="wx-birds" className="absolute top-14 right-6 h-28 w-48" style={{ opacity: showBirds ? 1 : 0, transition: "opacity 1.2s ease" }} aria-hidden="true">
+      <div data-testid="wx-birds" className="absolute top-14 right-6 h-28 w-48" style={{ opacity: showBirds ? 1 : 0, transition: motionOk ? "opacity 1.2s ease" : "none" }} aria-hidden="true">
         {BIRDS.map((b, i) => (
           <div
             key={i}
@@ -278,20 +359,57 @@ export function wmoToScene(code: number, isDay: boolean): WxScene {
   return scene;
 }
 
-export type ConditionCode = "clear" | "partly" | "cloudy" | "rain" | "storm" | "snow" | "fog" | "night";
+export type ConditionCode = "clear" | "partly" | "partly-night" | "cloudy" | "rain" | "storm" | "snow" | "fog" | "night";
+
+export interface ConditionPresentation {
+  label: string;
+  icon: ConditionCode;
+}
+
+export function wmoCondition(code: number): { condition: string; emoji: string } {
+  if (code === 0) return { condition: "Clear", emoji: "☀️" };
+  if (code <= 2) return { condition: "Partly Cloudy", emoji: "⛅" };
+  if (code === 3) return { condition: "Overcast", emoji: "☁️" };
+  if (code <= 48) return { condition: "Foggy", emoji: "🌫️" };
+  if (code <= 57) return { condition: "Drizzle", emoji: "🌦️" };
+  if (code <= 67) return { condition: "Rainy", emoji: "🌧️" };
+  if (code <= 77) return { condition: "Snowy", emoji: "❄️" };
+  if (code <= 82) return { condition: "Rain Showers", emoji: "🌧️" };
+  return { condition: "Thunderstorm", emoji: "⛈️" };
+}
 
 export function sceneToCondition(scene: WxScene, code: number, cloudCover?: number | null): ConditionCode {
+  if (code === 45 || code === 48) return "fog";
+  if (code === 3) return "cloudy";
+  if (code === 1 || code === 2) {
+    const cloudState = cloudCover === undefined || cloudCover === null
+      ? "unknown"
+      : finiteMeasurement(cloudCover) == null
+        ? "unknown"
+        : cloudCover <= 0
+          ? "clear"
+          : "partly";
+    if (cloudState === "unknown") return scene === "night" ? "partly-night" : "partly";
+    if (cloudState === "clear") return scene === "night" ? "night" : "clear";
+    return scene === "night" ? "partly-night" : "partly";
+  }
   if (scene === "night") return "night";
   if (scene === "storm") return "storm";
   if (scene === "snow") return "snow";
   if (scene === "rain") return "rain";
-  if (code === 45 || code === 48) return "fog";
   if (scene === "cloudy") return "cloudy";
-  if (code === 1 || code === 2) {
-    if (cloudCover === undefined) return "partly";
-    return typeof cloudCover === "number" && Number.isFinite(cloudCover) && cloudCover > 0 ? "partly" : "clear";
-  }
   return "clear";
+}
+
+export function conditionPresentation(scene: WxScene, code: number, cloudCover?: number | null, isDay = true): ConditionPresentation {
+  const wmo = wmoCondition(code);
+  const numericCloud = finiteMeasurement(cloudCover);
+  let label = wmo.condition;
+  if ((code === 1 || code === 2) && numericCloud != null && numericCloud <= 0) label = "Clear";
+  if (code === 3) label = "Overcast";
+  if (code === 45 || code === 48) label = "Foggy";
+  if (code === 0 && !isDay) label = "Clear";
+  return { label, icon: sceneToCondition(scene, code, cloudCover) };
 }
 
 // 5-day rows carry condition text (no WMO code), so map the text.
@@ -464,6 +582,17 @@ export function Condition({ code, size = 80 }: { code: ConditionCode; size?: num
           </div>
           <div className="absolute bottom-0 left-0">
             <Cloud size={size * 0.85} />
+          </div>
+        </div>
+      );
+    case "partly-night":
+      return (
+        <div className="relative" style={{ width: size, height: size * 0.75 }}>
+          <div className="absolute top-0 right-2">
+            <Moon size={size * 0.5} />
+          </div>
+          <div className="absolute bottom-0 left-0">
+            <Cloud size={size * 0.85} tone="night" />
           </div>
         </div>
       );

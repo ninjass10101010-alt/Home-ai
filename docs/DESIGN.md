@@ -19,7 +19,7 @@ Warm glass remains the frame for every Home widget. Weather is the one full-blee
 
 ### Grammar
 - Huge temperature as the hero object: SF Pro weight 800–900, tight tracking, `tabular-nums`.
-- Data-true scene: cloud count/opacity track `cloud_cover`, particle velocity/drift track wind speed/direction, rain density tracks precipitation probability, fog tracks humidity, sun position tracks the real sun arc. No element decorates without data.
+- Data-true scene: cloud count/opacity track `cloud_cover`, particle velocity/drift track wind speed/direction, rain and snow density track precipitation probability, fog tracks humidity/visibility, and sun/horizon position tracks the real sun arc. No element decorates without data; unavailable measurements stay unavailable rather than becoming fixed or zero-percent values.
 - One shared timeline: card day-strip preview and modal scrubber render through the same hour-state path.
 - Minimal chrome; details live in dotted-leader rows (`HUMIDITY ··· 62%`) with tracked-uppercase labels and rounded metric pills.
 - One accent per state: the skin's accent colors the active clay hourly cell, precipitation labels, and interactive elements only.
@@ -27,7 +27,7 @@ Warm glass remains the frame for every Home widget. Weather is the one full-blee
 ### Palettes
 - **Clear and partly cloudy daytime — the poster signature:** sky blue `#55BCE8 → #8FD8F1 → #D8F2F4`, turquoise poster clouds, and the yellow sun accent. This deliberate canvas is not overridden by the season selector.
 - **Condition-aware alternatives:** cloudy, rain, snow, storm, and night keep their own powder/slate/lilac/indigo washes; storm and heavy snow stay serious, and holiday accents never override severity.
-- **Text truth:** all Weather text, chips, controls, and hourly labels meet AA contrast in light and dark app themes. Storm switches to white ink; every other current poster scene uses slate `#1E293B` or its approved equivalent. The forced-night details hero places slate text on a 45% white scrim; the card’s existing night treatment is unchanged.
+- **Text truth:** all Weather text, chips, controls, and hourly labels meet AA contrast in light and dark app themes. Storm switches to white ink; every other current poster scene uses slate `#1E293B` or its approved equivalent. The forced-night details hero and the card's night text field use a 45% white scrim; the card’s lamplit night palette and data path remain unchanged.
 - Seasonal and holiday layers may sit over the live scene, but the WMO condition, cloud cover, visibility, precipitation, and day/night state remain the source of truth.
 
 ### Scene system
@@ -46,11 +46,11 @@ Warm glass remains the frame for every Home widget. Weather is the one full-blee
 
 - **Scale:** `sm` = 32px for compact stat tiles, `md` = 48px for non-card utility use, and `lg` = 64px inside the shared 88px protruding widget halo. The SVG must stay square and inside that halo at phone, tablet, wall, and wide breakpoints.
 - **Ink/accent:** `--home-widget-icon-ink` is slate `#1E293B`; `--home-widget-icon-accent` mixes 50% of the owning `--widget-tone` (or the selected app accent) with that ink. The white icon surfaces therefore keep linework and state accents readable in both app themes without flattening each widget’s tone identity.
-- **Decorative semantics:** the SVG stays `aria-hidden="true"` and `focusable="false"` because the adjacent card title, stat label, or control already names the action. Never add `role="img"`, `aria-label`, or a second spoken label to a decorative instance; a future standalone meaningful symbol belongs on a named control instead.
+- **Decorative semantics:** the SVG stays `aria-hidden="true"` and `focusable="false"` for widget/stat instances because the adjacent card title, stat label, or control already names the action. An explicit standalone `title` opts into `role="img"` plus an accessible name; no current decorative widget instance uses that opt-in, and decorative instances never gain `role="img"`, `aria-label`, or a second spoken label.
 - **Scope:** Weather keeps its condition-specific clay poster artwork. `HomeWidgetIcon` replaces only owned Home widget/stat identity slots; row emojis, CapsuleNav glyphs, family avatars, and kid-only Home artwork stay as they are.
 - **State boundary:** `meal` uses `near` only during the existing real countdown window, `briefing` uses `unread` until acknowledgement, `lights` uses `on` when any light is on, and `security` uses `attention` when a tracked sensor is open. Unchanged state must not start motion; no new polling or state store belongs in the icon layer.
-- **Motion boundary:** stateful icons use one short 220ms transform transition on a real class change. No non-Weather widget icon loops. Weather's existing data-driven ambient loops remain owned by the Weather scene.
-- **Reduced motion:** `prefers-reduced-motion: reduce` removes the icon transition and transform with `none !important` while retaining the semantic state class and the static icon.
+- **Motion boundary:** stateful icons use one short 220ms transform transition on a real class change. No non-Weather widget icon loops. Weather's existing data-driven ambient loops remain owned by the Weather scene and pause while the tab is hidden.
+- **Reduced motion:** `prefers-reduced-motion: reduce` removes the icon transition and transform with `none !important`, removes the briefing acknowledgement opacity transition, and removes Weather bird/scene transitions while retaining semantic state classes and static artwork.
 
 ## Ask Consuela chat — "Consuela's kitchen table" (accent unification, 2026-09-04)
 
@@ -140,6 +140,12 @@ Use this exact delta format in the "What's New" area and update 1.5 journeys:
 - Visual: White icon surfaces retain dark linework and tone-mixed accents in light and dark app themes. The Weather card’s existing lamplit night treatment and factual data are unchanged; only the details hero receives the night scrim.
 - Accessibility: Icon instances remain decorative; the modal test asserts the forced-night sky, slate hero/degree tokens, and scrim token rather than assuming a contrast result from a color name.
 - **CONTRACTS to keep:** (1) `--home-widget-icon-ink` and `--home-widget-icon-accent` remain explicit and theme-independent; (2) icon accents continue to derive from the owning widget tone; (3) the Weather card’s night palette/data path remains unchanged; (4) the details modal’s forced-night hero uses the documented slate/scrim treatment; (5) the active Weather strip remains clay hourly cells with precipitation labels, not retired rain-tick artwork.
+
+### UI Change Record — 2026-09-24 — Weather data truth and Home review fixes
+- Added / Changed: `src/components/ui/WeatherWidget.tsx`, `src/components/ui/WxToys.tsx`, `src/components/ui/HomeWidgetIcon.tsx`, `src/components/briefing/MorningBriefingWidget.tsx`, `src/app/page.tsx`, `src/app/globals.css`, and focused weather/Home/icon regressions.
+- Visual: Weather poster sun, horizon, clouds, precipitation, wind drift/slant, and fog now follow available measurements; null measurements remain unavailable. Modal accent follows the scrubbed condition and severity policy, and card night/storm text keeps its readable scrim/ink treatment in both themes.
+- Accessibility / Motion: Decorative icons remain hidden; an explicit standalone title is accessible. Selected-hour cloud data is never replaced by current cloud, ambient Weather motion pauses for hidden tabs, and reduced motion removes briefing/bird/scene transitions while preserving static state.
+- **CONTRACTS to keep:** (1) no weather visual invents a value for null measurements; (2) selected-hour cloud null remains unknown; (3) modal controls use scrubbed `mSkin`/severity accent; (4) acknowledged empty briefings remain in the Home slot; (5) briefing geometry remains full-height and compact across acknowledgement.
 
 ### UI Change Record — 2026-09-24 — Home illustration + motion hybrid
 - Added / Changed: NEW `src/components/ui/HomeWidgetIcon.tsx` and focused coverage in `tests/unit/home-widget-icon.test.tsx`; Home wiring in `src/app/page.tsx`, `ScheduleDisplay.tsx`, `MorningBriefingWidget.tsx`, `HomeSuggestionsWidget.tsx`, `HomeLeaderboardWidget.tsx`, `CurrentMealWidget.tsx`, `HomeSecurityWidget.tsx`, `HomeClimateWidget.tsx`, `HomeLightsWidget.tsx`, and `LedgerWidget.tsx`; Weather poster work in `WeatherWidget.tsx`, `WxToys.tsx`, `WeatherSkins.ts`, and `wx-tokens.ts`; state motion in `src/app/globals.css`; focused probe `scripts/consuela/verify-weather-redesign.mjs`.

@@ -167,18 +167,20 @@ export default function HomeWidgetIcon({
   ]
     .filter(Boolean)
     .join(" ");
+  const decorative = !title;
 
   return (
     <svg
       viewBox="0 0 48 48"
       fill="none"
-      aria-hidden="true"
+      aria-hidden={decorative ? "true" : undefined}
+      role={decorative ? undefined : "img"}
+      aria-label={decorative ? undefined : title}
       focusable="false"
       className={classes}
       data-variant={variant}
       data-state={state}
     >
-      {title ? <title>{title}</title> : null}
       {IconArtwork({ variant, state })}
     </svg>
   );

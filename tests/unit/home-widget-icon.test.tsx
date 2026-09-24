@@ -78,16 +78,25 @@ describe("HomeWidgetIcon", () => {
   });
 
   it("keeps decorative artwork out of the accessibility tree", () => {
+    const markup = renderToStaticMarkup(<HomeWidgetIcon variant="briefing" />);
+
+    expect(markup).toContain('aria-hidden="true"');
+    expect(markup).toContain('focusable="false"');
+    expect(markup).not.toContain("<title");
+    expect(markup).not.toContain("aria-label=");
+    expect(markup).not.toContain("role=");
+    expect(markup).not.toMatch(/<text\b/);
+  });
+
+  it("exposes an explicit title as an accessible standalone name", () => {
     const markup = renderToStaticMarkup(
       <HomeWidgetIcon variant="briefing" title="Morning briefing" />,
     );
 
-    expect(markup).toContain('aria-hidden="true"');
+    expect(markup).not.toContain('aria-hidden="true"');
+    expect(markup).toContain('role="img"');
+    expect(markup).toContain('aria-label="Morning briefing"');
     expect(markup).toContain('focusable="false"');
-    expect(markup).toContain("<title>Morning briefing</title>");
-    expect(markup).not.toContain("aria-label=");
-    expect(markup).not.toContain("role=");
-    expect(markup).not.toMatch(/<text\b/);
   });
 
   it.each([

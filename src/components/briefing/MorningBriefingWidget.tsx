@@ -173,7 +173,7 @@ export default function MorningBriefingWidget({ briefing, loading, ack, ackError
   );
 
   return (
-    <div className={acknowledged ? "opacity-60 transition-opacity duration-700" : className}>
+    <div className={`${className}${acknowledged ? " briefing-acknowledged" : ""}`}>
       <WidgetCard
         tone={BRIEFING_TONE}
         icon={<HomeWidgetIcon variant="briefing" state={acknowledged ? "default" : "unread"} size="lg" />}
