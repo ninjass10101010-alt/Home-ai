@@ -39,6 +39,9 @@ export interface InternalTaskCommandResult {
   paid?: number;
   cleared?: number;
   skipped?: number;
+  duplicate?: boolean;
+  deleted?: boolean;
+  noCurrentTask?: boolean;
 }
 
 export type InternalTaskCommandHandler = (

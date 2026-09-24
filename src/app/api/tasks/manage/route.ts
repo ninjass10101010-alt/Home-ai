@@ -72,7 +72,9 @@ export async function POST(request: NextRequest) {
       revision,
       updatedAt: revision.updatedAt,
       reconciled: result.reconciled,
-      ...(command.action === "delete" ? { deleted: true } : {}),
+      ...(result.duplicate ? { duplicate: true } : {}),
+      ...(result.deleted || command.action === "delete" ? { deleted: true } : {}),
+      ...(result.noCurrentTask ? { noCurrentTask: true } : {}),
     },
     { status: result.reconciled ? 200 : 202 },
   );
