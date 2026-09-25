@@ -41,6 +41,7 @@ it("keeps task and ledger collections command-only", () => {
     for (const role of ["parent", "child", "pet"] as const) {
       expect(canWrite(collection, role)).toBe(false);
     }
+    expect(canWrite(collection, undefined)).toBe(false);
   }
 });
 it("writePolicy answers the three tiers and undefined for anything unlisted", () => {
