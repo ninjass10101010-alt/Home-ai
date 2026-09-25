@@ -1,7 +1,7 @@
 {
-  "hash": "59d88fa22a8b8f0959492aaad5b155831809b888",
-  "short": "59d88fa",
-  "message": "test(weather): align feature probe with current DOM",
-  "date": "2026-09-24 18:41:31 -0400",
+  "hash": "e18763faabdc62c4ba7bc5e9dac3f65e1e5c715a",
+  "short": "e18763f",
+  "message": "fix(weather): add geometric poster characters and single moon",
+  "date": "2026-09-24 22:22:16 -0400",
   "author": "GarciaFam"
 }
