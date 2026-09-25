@@ -37,6 +37,7 @@ export interface ReconcileTaskProjectionResult {
   reconciled: boolean;
   repaired: string[];
   failed: string[];
+  warnings: string[];
   weekData: WeekData | null;
   revision?: SnapshotRevision;
 }
@@ -59,6 +60,7 @@ interface CanonicalLedger {
   approvalIntents: ApprovalLedgerIntent[];
   invalidApprovalOperations: string[];
   archiveWarnings: string[];
+  weekWarnings: string[];
   needsWeekWrite: boolean;
 }
 
@@ -234,15 +236,31 @@ function approvalLedgerIntents(transactions: Transaction[]): {
   return { intents, invalid };
 }
 
+function expectedWeekChanged(expected: WeekData | null | undefined, ledger: CanonicalLedger): boolean {
+  if (!expected) return false;
+  if (expected.weekStart !== ledger.weekData.weekStart) return true;
+  if (!sameValue(expected.history, ledger.weekData.history)) return true;
+  if (!sameValue(expected.points, recomputeWeekPoints(expected.history))) return false;
+  return ledger.currentRows.some(
+    (row) => !sameValue(parseStoredField(row.points), expected.points),
+  );
+}
+
 async function readCanonicalLedger(pb: AdminPB, weekStart: string): Promise<CanonicalLedger> {
   const allWeekRows = await pb.collection("week_data").getFullList({ requestKey: null });
   if (!Array.isArray(allWeekRows)) throw new Error("week_data_read_failed");
-  if (allWeekRows.some((row: Row) => !validWeekStart(row?.weekStart))) {
-    throw new Error("invalid_week_data");
+  const weekWarnings: string[] = [];
+  const currentRows: Row[] = [];
+  for (const row of allWeekRows as Row[]) {
+    const rowWeek = validWeekStart(row?.weekStart);
+    if (!rowWeek) {
+      weekWarnings.push("week:unrelated_row");
+      continue;
+    }
+    if (rowWeek !== weekStart) continue;
+    currentRows.push(row);
   }
-  const currentRows = allWeekRows
-    .filter((row: Row) => validWeekStart(row?.weekStart) === weekStart)
-    .sort((left: Row, right: Row) => String(left.id).localeCompare(String(right.id))) as Row[];
+  currentRows.sort((left: Row, right: Row) => String(left.id).localeCompare(String(right.id)));
   const currentWeeks = normalizeCurrentWeekRows(currentRows, weekStart);
   const history = mergeHistories(currentWeeks.map((week) => week.history));
   const points = recomputeWeekPoints(history);
@@ -273,6 +291,7 @@ async function readCanonicalLedger(pb: AdminPB, weekStart: string): Promise<Cano
     approvalIntents: approvalMetadata.intents,
     invalidApprovalOperations: approvalMetadata.invalid,
     archiveWarnings: archive.warnings,
+    weekWarnings,
     needsWeekWrite,
   };
 }
@@ -481,13 +500,14 @@ async function approvalRepairVerified(
     noCurrentTask?: boolean;
     projectionFailures?: number[];
   },
+  preloadedRows?: Row[],
 ): Promise<boolean> {
   if (!repair.ok || ((repair.projectionFailures?.length ?? 0) > 0 && repair.noCurrentTask !== true)) return false;
   try {
     const state = await snapshotRead(pb);
     const receipts = getSnapshotOperationReceipts(state.data, operationId);
     if (receipts.length === 0) return false;
-    if (!await verifyProjectedTasks(pb, state.data, taskIds)) return false;
+    if (!await verifyProjectedTasks(pb, state.data, taskIds, preloadedRows)) return false;
     if (repair.reconciled) return true;
     return repair.noCurrentTask === true;
   } catch {
@@ -590,12 +610,14 @@ function failure(
   failed: string[],
   weekData: WeekData | null,
   revision?: SnapshotRevision,
+  warnings: string[] = [],
 ): ReconcileTaskProjectionResult {
   return {
     ok: false,
     reconciled: false,
     repaired: [],
     failed: [...new Set(failed)],
+    warnings: [...new Set(warnings)],
     weekData,
     ...(revision ? { revision } : {}),
   };
@@ -607,12 +629,14 @@ function success(
   weekData: WeekData | null,
   revision: SnapshotRevision,
   reconciled: boolean,
+  warnings: string[] = [],
 ): ReconcileTaskProjectionResult {
   return {
     ok: failed.length === 0 && reconciled,
     reconciled,
     repaired: [...new Set(repaired)],
     failed: [...new Set(failed)],
+    warnings: [...new Set(warnings)],
     weekData,
     revision,
   };
@@ -706,6 +730,7 @@ export async function reconcileTaskProjectionLocked(
     return withTaskLocks(lockIds, 0, async () => {
       const repaired: string[] = [];
       const failed: string[] = [];
+      const warnings: string[] = [];
       let snapshot: Awaited<ReturnType<typeof readSnapshotStateWithRevision>>;
       try {
         snapshot = await snapshotRead(pb);
@@ -725,6 +750,7 @@ export async function reconcileTaskProjectionLocked(
         return failure(["week:ledger"], null, snapshot.revision);
       }
       if (ledger.archiveWarnings.length > 0) failed.push(...ledger.archiveWarnings);
+      if (ledger.weekWarnings.length > 0) warnings.push(...ledger.weekWarnings);
       if (ledger.invalidApprovalOperations.length > 0) {
         failed.push(...ledger.invalidApprovalOperations.map(() => "approval:metadata"));
       }
@@ -753,6 +779,9 @@ export async function reconcileTaskProjectionLocked(
       const baselineIds = scopedTaskIds
         ? [...new Set([...lockIds, ...requestedTaskIds])].filter((id) => scopedTaskIds.has(id)).sort((left, right) => left - right)
         : [...new Set([...allIds, ...requestedTaskIds])].sort((left, right) => left - right);
+      if (expectedWeekChanged(options.expectedWeekData ?? null, ledger)) {
+        return failure(["week:changed"], null, snapshot.revision, warnings);
+      }
       let finalStateChanged = false;
       try {
         finalStateChanged =
@@ -767,7 +796,7 @@ export async function reconcileTaskProjectionLocked(
         finalStateChanged = true;
       }
       if (finalStateChanged) {
-        return failure(["tasks:changed"], null, snapshot.revision);
+        return failure(["tasks:changed"], null, snapshot.revision, warnings);
       }
       const duplicateTasks = duplicateLiveTaskIds(snapshot.data);
       if (duplicateTasks.length > 0) {
@@ -852,14 +881,25 @@ export async function reconcileTaskProjectionLocked(
             action: marker.action,
             actorId: marker.actorId,
             fingerprint: marker.fingerprint,
+            preloadedTaskRows: postTaskRows,
             locked: true,
           });
-    const verified = await approvalRepairVerified(
-      pb,
-      marker.operationId,
-      markerTaskIds,
-      repair,
-    );
+          let repairedRows: Row[] | null = null;
+          try {
+            const rows = await pb.collection("tasks").getFullList({ requestKey: null });
+            if (!Array.isArray(rows)) throw new Error("tasks_read_failed");
+            repairedRows = [...(rows as Row[])];
+          } catch {
+            failed.push("approval:read");
+            continue;
+          }
+          const verified = await approvalRepairVerified(
+            pb,
+            marker.operationId,
+            markerTaskIds,
+            repair,
+            repairedRows,
+          );
 
           if (!verified) {
             failed.push(
@@ -1007,7 +1047,7 @@ export async function reconcileTaskProjectionLocked(
         failed.push("week:ledger");
         finalLedger = ledger;
       }
-      const result = success(repaired, failed, finalLedger.weekData, snapshot.revision, failed.length === 0);
+      const result = success(repaired, failed, finalLedger.weekData, snapshot.revision, failed.length === 0, warnings);
       return result;
     });
   });
@@ -1038,7 +1078,6 @@ export async function reconcileTaskProjection(
     operationId: options.operationId,
     now: options.now,
     expectedRevision: rollover.revision?.revision,
-    expectedWeekData: rollover.currentWeekData,
   });
   try {
     return options.pb ? await run(options.pb) : await withAdmin(run);

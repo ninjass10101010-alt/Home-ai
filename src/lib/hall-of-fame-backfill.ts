@@ -88,31 +88,34 @@ export async function ensureArchivedWeeksEnshrined(pb: PB): Promise<number> {
     byKey.set(key, [...(byKey.get(key) ?? []), row]);
   }
   const archiveGroups = new Map<string, { row: any; history: any[] }[]>();
+  const protectedWeeks = new Set<string>();
   for (const row of archiveRows as any[]) {
     const weekStart = String(row?.weekStart || "");
     if (!isMondayWeekStart(weekStart)) {
       console.warn("[hall-of-fame] skipping archive row with an invalid week start");
+      protectedWeeks.add(weekStart);
       continue;
     }
     if (row.history === undefined || row.history === null || row.history === "") {
       console.warn("[hall-of-fame] skipping archive row with a missing history");
+      protectedWeeks.add(weekStart);
       continue;
     }
     const history = parseCanonicalTransactions(row.history);
     if (!history) {
       console.warn("[hall-of-fame] skipping archive row with an unreadable history");
+      protectedWeeks.add(weekStart);
       continue;
     }
     history.sort((left, right) => left.timestamp.localeCompare(right.timestamp) || left.id - right.id);
     archiveGroups.set(weekStart, [...(archiveGroups.get(weekStart) ?? []), { row, history }]);
   }
   const archiveData: { row: any; weekStart: string; points: Record<string, number> }[] = [];
-  const quarantinedWeeks = new Set<string>();
   for (const [weekStart, group] of [...archiveGroups.entries()].sort(([left], [right]) => left.localeCompare(right))) {
     const first = group[0];
     if (group.some((candidate) => JSON.stringify(candidate.history) !== JSON.stringify(first.history))) {
       console.warn("[hall-of-fame] quarantining archive week with conflicting duplicates");
-      quarantinedWeeks.add(weekStart);
+      protectedWeeks.add(weekStart);
       continue;
     }
     archiveData.push({ row: first.row, weekStart, points: recomputeWeekPoints(first.history) });
@@ -123,11 +126,13 @@ export async function ensureArchivedWeeksEnshrined(pb: PB): Promise<number> {
   let changed = 0;
 
   const coreMatches = (row: any, entry: HallOfFameEntry) =>
+    !!row &&
     Number(row.points) === entry.points &&
     Number(row.rank) === entry.rank &&
     String(row.emoji || "") === entry.emoji &&
     String(row.prize || "") === String(entry.prize || "");
 
+  const primaryRepairs: { id: string; entry: HallOfFameEntry }[] = [];
   for (const { weekStart, points } of archiveData) {
     const entries = hallEntriesForWeek(points, weekStart, emojis, prizeCatalog);
     const historical = weekStart !== latestArchivedWeek;
@@ -156,26 +161,34 @@ export async function ensureArchivedWeeksEnshrined(pb: PB): Promise<number> {
           prize: entry.prize ?? null,
           celebrated,
         }, { requestKey: null });
+        primaryRepairs.push({ id: String(primary.id), entry });
         changed += 1;
       }
-      const verified = await pb.collection("hall_of_fame").getFullList({ requestKey: null });
-      const verifiedRows = (Array.isArray(verified) ? verified : []).filter((row: any) =>
-        String(row.id) === String(primary.id),
-      );
-      if (verifiedRows.length !== 1 || !coreMatches(verifiedRows[0], entry)) {
+    }
+  }
+
+  if (primaryRepairs.length > 0) {
+    const readBack = await pb.collection("hall_of_fame").getFullList({ requestKey: null });
+    const readBackById = new Map<string, any>();
+    for (const row of Array.isArray(readBack) ? readBack : []) readBackById.set(String(row.id), row);
+    for (const repair of primaryRepairs) {
+      if (!coreMatches(readBackById.get(repair.id), repair.entry)) {
         throw new Error("hall_of_fame_primary_verification_failed");
       }
-      for (const duplicate of rows.slice(1)) {
-        await pb.collection("hall_of_fame").delete(duplicate.id, { requestKey: null });
-        changed += 1;
-      }
+    }
+  }
+
+  for (const key of expected.keys()) {
+    for (const duplicate of (byKey.get(key) ?? []).slice(1)) {
+      await pb.collection("hall_of_fame").delete(duplicate.id, { requestKey: null });
+      changed += 1;
     }
   }
 
   for (const row of [...(hallRows as any[])].sort((left, right) => String(left.id).localeCompare(String(right.id)))) {
     const key = `${String(row.member ?? "")}\u0000${String(row.weekStart ?? "")}`;
     if (expected.has(key)) continue;
-    if (quarantinedWeeks.has(String(row.weekStart ?? ""))) continue;
+    if (protectedWeeks.has(String(row.weekStart ?? ""))) continue;
     await pb.collection("hall_of_fame").delete(row.id, { requestKey: null });
     changed += 1;
   }
@@ -195,7 +208,7 @@ export async function ensureArchivedWeeksEnshrined(pb: PB): Promise<number> {
   }
   for (const [key, rows] of verifiedByKey) {
     if (expected.has(key)) continue;
-    if (quarantinedWeeks.has(String(rows[0]?.weekStart ?? ""))) continue;
+    if (protectedWeeks.has(String(rows[0]?.weekStart ?? ""))) continue;
     throw new Error("hall_of_fame_stale_row");
   }
   return changed;

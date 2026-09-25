@@ -3,6 +3,7 @@ import { withAdmin } from "@/lib/pb-auth";
 import { verifySession, SESSION_COOKIE } from "@/lib/session";
 import { ensureCurrentTaskWeek } from "@/lib/task-week-rollover";
 import { reconcileTaskProjectionLocked } from "@/lib/task-projection-reconciler";
+import { repairCategories } from "@/lib/task-repair-categories";
 
 export const dynamic = "force-dynamic";
 
@@ -22,11 +23,6 @@ const IGNORED_COMPATIBILITY_LEGS = [
   "pendingProjectionRepairs",
   "taskWeekStart",
 ];
-const REPAIR_CATEGORY = /^(?:approval|projection|rollover|snapshot|week|week_archive|task)(?:[:_][a-z0-9_-]+){1,2}$/i;
-
-function repairCategories(values: string[] | undefined): string[] {
-  return [...new Set((values ?? []).filter((value) => REPAIR_CATEGORY.test(value)))];
-}
 
 async function readSnapshot() {
   return withAdmin(async (pb) => {
@@ -113,6 +109,7 @@ export async function GET() {
     ...repairCategories(rollover.reconciled ? [] : ["rollover:pending"]),
     ...repairCategories(reconciliation.failed),
   ];
+  const warningCategories = repairCategories(reconciliation.warnings);
   const reconciled = rollover.reconciled && reconciliation.reconciled && failedCategories.length === 0;
   return NextResponse.json({
     ok: reconciled,
@@ -121,6 +118,7 @@ export async function GET() {
     reconciled,
     repaired: repairedCategories,
     failed: failedCategories,
+    warnings: warningCategories,
   });
 }
 

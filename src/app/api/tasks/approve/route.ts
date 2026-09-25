@@ -43,6 +43,7 @@ function errorResponse(
   const retryable = reason === "task_store_unavailable" ||
     reason === "member_roster_unavailable" ||
     reason === "ledger_unavailable" ||
+    reason === "repair_required" ||
     reason === "snapshot_write_failed";
   return NextResponse.json({
     success: false,
