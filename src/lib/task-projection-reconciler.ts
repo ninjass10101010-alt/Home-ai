@@ -559,7 +559,11 @@ export async function reconcileTaskProjectionLocked(
         : storedMarkers;
       for (const marker of markers) {
         const markerTaskIds = validTaskIds(marker.taskIds);
+        const markerWasPresent = Array.isArray(snapshot.data.pendingProjectionRepairs) && snapshot.data.pendingProjectionRepairs.some(
+          (candidate) => candidate.operationId === marker.operationId,
+        );
         if (approvalMarker(ledger, snapshot.data, marker.operationId)) {
+          const projectionWasCurrent = await verifyProjectedTasks(pb, snapshot.data, markerTaskIds);
           const repair = await repairApprovalOperation({
             pb,
             weekStart,
@@ -577,7 +581,7 @@ export async function reconcileTaskProjectionLocked(
             failed.push(repair.reason === "ledger_unavailable" ? "approval:unproven" : "approval:projection");
             continue;
           }
-          repaired.push("approval:projection");
+          if (!projectionWasCurrent) repaired.push("approval:projection");
           const afterRepair = await snapshotRead(pb);
           const stillMarked = Array.isArray(afterRepair.data.pendingProjectionRepairs) && afterRepair.data.pendingProjectionRepairs.some(
             (candidate) => candidate.operationId === marker.operationId,
@@ -586,6 +590,8 @@ export async function reconcileTaskProjectionLocked(
             const consumed = await consumeProjectionMarker(pb, marker.operationId);
             if (!consumed) failed.push("approval:marker");
             else repaired.push("approval:marker");
+          } else if (markerWasPresent) {
+            repaired.push("approval:marker");
           }
           snapshot = await snapshotRead(pb);
           continue;

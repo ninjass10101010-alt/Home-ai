@@ -520,6 +520,45 @@ describe("task projection reconciler", () => {
     expect(second.snapshot.data.pendingProjectionRepairs).toHaveLength(0);
   });
 
+  it("is idempotent when the same approval operation is reconciled twice", async () => {
+    const operationId = "op-approve-idempotent";
+    const fingerprint = approvalCommandFingerprint(
+      { operationId, action: "approve", taskId: 56 },
+      PARENT_ID,
+    );
+    const paid = transaction(56, CHILD_NAME, 5, {
+      meta: { operationId, source: "task-approval", fingerprint },
+    });
+    const pendingTask = task(56, {
+      completed: true,
+      completedBy: CHILD_NAME,
+      completedAt: `${WEEK}T10:00:00.000Z`,
+      completedInWeek: WEEK,
+      pendingApproval: { byName: CHILD_NAME, at: `${WEEK}T10:00:00.000Z`, points: 5 },
+    });
+    const harness = makeHarness({
+      snapshot: {
+        revision: "1",
+        taskWeekStart: WEEK,
+        tasks: [pendingTask],
+        deletedTaskIds: [],
+        pendingProjectionRepairs: [{ operationId, taskIds: [56], createdAt: `${WEEK}T10:01:00.000Z` }],
+        weekData: { weekStart: WEEK, points: {}, streak: {}, lastActive: {}, history: [paid] },
+      },
+      taskRows: [{ ...pendingTask, id: "pb-56", taskId: 56 }],
+      weekRows: [{ id: "week-current", weekStart: WEEK, points: {}, streak: {}, lastActive: {}, history: [paid] }],
+    });
+    mocks.withAdmin.mockImplementation(async (fn: any) => fn(harness.pb));
+
+    const first = await reconcileTaskProjection({ pb: harness.pb as any, weekStart: WEEK, operationId });
+    const second = await reconcileTaskProjection({ pb: harness.pb as any, weekStart: WEEK, operationId });
+
+    expect(first.repaired.length).toBeGreaterThan(0);
+    expect(second.repaired).toEqual([]);
+    expect(second.failed).toEqual([]);
+    expect(harness.weekRows[0].history).toHaveLength(1);
+  });
+
   it("replays a send-back marker through approval repair without a ledger transaction", async () => {
     const operationId = "op-sendback-replay";
     const fingerprint = approvalCommandFingerprint(
