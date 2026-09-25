@@ -3,13 +3,13 @@ import { withAdmin } from "@/lib/pb-auth";
 import * as liveMember from "@/lib/live-member";
 import type { LiveMember } from "@/lib/live-member";
 import { localTodayISO, localWeekStartISO } from "@/lib/local-date";
-import { persistedCrewEmoji, persistedTaskEmoji } from "@/lib/task-emoji";
 import {
   deleteSnapshotTask,
   getSnapshotOperationReceipts,
   liveSnapshotTasks,
   mutateSnapshotWithMeta,
   readSnapshotStateWithRevision,
+  taskProjectionRecord,
   type SnapshotData,
   type SnapshotOperationReceipt,
   type SnapshotTask,
@@ -691,33 +691,6 @@ function optionalScalarEqual(key: string, left: unknown, right: unknown): boolea
   return left === right;
 }
 
-function projectionRecord(task: SnapshotTask): Record<string, unknown> {
-  return {
-    taskId: task.id,
-    title: task.title,
-    assignee: task.assignee,
-    assigneeEmoji: persistedTaskEmoji(task.assigneeEmoji) || "👤",
-    assigned: task.assignee,
-    status: task.completed ? "done" : "pending",
-    due: task.due,
-    points: task.points,
-    recurring: task.recurring ?? null,
-    category: task.category,
-    priority: task.priority,
-    universal: task.universal === true,
-    stealable: task.stealable === true,
-    completed: task.completed === true,
-    completedBy: task.completedBy ?? null,
-    completedAt: task.completedAt ?? null,
-    completedInWeek: task.completedInWeek ?? null,
-    pendingApproval: task.pendingApproval ?? null,
-    sentBackAt: task.sentBackAt ?? null,
-    crewSize: task.crewSize ?? null,
-    crew: persistedCrewEmoji(task.crew as any),
-    speedBonus: task.speedBonus ?? null,
-  };
-}
-
 function projectionMatches(row: Record<string, any>, expected: Record<string, unknown>): boolean {
   return Object.entries(expected).every(([key, expectedValue]) => {
     const actualValue = ["crew", "pendingApproval"].includes(key)
@@ -743,7 +716,7 @@ async function projectUpsert(pb: any, task: SnapshotTask): Promise<boolean> {
     const matches = before
       .filter((row) => Number(row.taskId) === Number(task.id))
       .sort((left, right) => String(left.id).localeCompare(String(right.id)));
-    const expected = projectionRecord(task);
+    const expected = taskProjectionRecord(task);
     if (matches.length === 1 && projectionMatches(matches[0], expected)) return true;
     if (matches[0] && !projectionMatches(matches[0], expected)) {
       await collection.update(matches[0].id, expected, { requestKey: null });

@@ -16,6 +16,7 @@ vi.mock("@/lib/server-auth", () => ({
   verifyPinFromPB: mocks.verifyPinFromPB,
 }));
 
+import { GET } from "@/app/api/tasks/sync/route";
 import { POST } from "@/app/api/tasks/approve/route";
 import { approvalCommandFingerprint } from "@/lib/task-approval";
 import { __resetKeyedLockForTests } from "@/lib/keyed-lock";
@@ -215,5 +216,53 @@ describe("approval with the real task-week rollover", () => {
     );
     expect(archiveEvent).toBeGreaterThanOrEqual(0);
     expect(taskProjectionEvent).toBeGreaterThan(archiveEvent);
+  });
+
+  it("serves a reconciled snapshot through GET with the real rollover and reconciler", async () => {
+    const harness = createHarness();
+    const task = {
+      id: 102,
+      title: "Laundry",
+      assignee: "Caspian Garcia",
+      assigneeEmoji: "🧒",
+      assigned: "Caspian Garcia",
+      due: CURRENT,
+      points: 4,
+      recurring: null,
+      category: "chores",
+      priority: "medium",
+      universal: false,
+      stealable: false,
+      completed: false,
+      completedBy: null,
+      completedAt: null,
+      completedInWeek: null,
+      pendingApproval: null,
+      sentBackAt: null,
+      crewSize: null,
+      crew: null,
+    };
+    harness.state.week_data.push({ id: "week-current", weekStart: CURRENT, points: {}, streak: {}, lastActive: {}, history: [] });
+    harness.state.tasks.push({ id: "pb-102", taskId: 102, title: "Laundry", completed: true, completedBy: "Caspian Garcia" });
+    harness.state.consuela_data_snapshots.push({
+      id: "snapshot-current",
+      key: "tasks-snapshot",
+      data: {
+        revision: "1",
+        taskWeekStart: CURRENT,
+        weekData: { weekStart: CURRENT, points: {}, streak: {}, lastActive: {}, history: [] },
+        tasks: [task],
+        deletedTaskIds: [],
+      },
+      updated_at: "2026-09-28T12:00:00.000Z",
+    });
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const response = await GET();
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ ok: true, reconciled: true, snapshot: { taskWeekStart: CURRENT } });
+    expect(harness.state.tasks[0].completed).toBe(false);
   });
 });

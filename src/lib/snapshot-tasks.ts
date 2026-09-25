@@ -792,7 +792,7 @@ function sameProjectionValue(left: unknown, right: unknown): boolean {
   return JSON.stringify(stableProjectionValue(left)) === JSON.stringify(stableProjectionValue(right));
 }
 
-function taskProjectionRecord(task: SnapshotTask): Record<string, unknown> {
+export function taskProjectionRecord(task: SnapshotTask): Record<string, unknown> {
   return {
     taskId: task.id,
     title: task.title,
@@ -850,29 +850,48 @@ export async function projectCanonicalTaskToPB(
   pb: AdminPB,
   task: SnapshotTask | null,
   taskId: number,
+  preloadedRows?: Record<string, any>[],
 ): Promise<boolean> {
   if (!isPositiveTaskId(taskId)) return false;
   try {
     const collection = pb.collection("tasks");
-    const rows = async () => {
-      const value = await collection.getFullList({ requestKey: null });
-      return (Array.isArray(value) ? value : []).filter(
-        (row: any) => Number(row?.taskId) === taskId,
-      );
+    let loadedRows: Record<string, any>[] | null = preloadedRows ?? null;
+    const allRows = async () => {
+      if (!loadedRows) {
+        const value = await collection.getFullList({ requestKey: null });
+        loadedRows = Array.isArray(value) ? [...value] : [];
+      }
+      return loadedRows;
     };
+    const rows = async () => (await allRows()).filter(
+      (row: any) => Number(row?.taskId) === taskId,
+    );
     if (!task) {
-      for (const row of await rows()) await collection.delete(row.id, { requestKey: null });
+      for (const row of await rows()) {
+        await collection.delete(row.id, { requestKey: null });
+        const cached = await allRows();
+        const index = cached.findIndex((candidate) => candidate.id === row.id);
+        if (index >= 0) cached.splice(index, 1);
+      }
       return (await rows()).length === 0;
     }
     const expected = taskProjectionRecord(task);
     const before = await rows();
     if (before.length === 0) {
-      await collection.create(expected, { requestKey: null });
+      const created = await collection.create(expected, { requestKey: null });
+      const cached = await allRows();
+      cached.push({ id: (created as any)?.id, ...expected });
     } else if (!taskProjectionMatches(before[0], expected)) {
       await collection.update(before[0].id, expected, { requestKey: null });
+      const cached = await allRows();
+      const index = cached.findIndex((candidate) => candidate.id === before[0].id);
+      if (index >= 0) cached[index] = { ...cached[index], ...expected };
     }
     for (const duplicate of before.slice(1)) {
       await collection.delete(duplicate.id, { requestKey: null });
+      const cached = await allRows();
+      const index = cached.findIndex((candidate) => candidate.id === duplicate.id);
+      if (index >= 0) cached.splice(index, 1);
     }
     const after = await rows();
     return after.length === 1 && taskProjectionMatches(after[0], expected);

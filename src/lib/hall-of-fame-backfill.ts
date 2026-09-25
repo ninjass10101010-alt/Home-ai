@@ -90,22 +90,33 @@ export async function ensureArchivedWeeksEnshrined(pb: PB): Promise<number> {
   const archiveGroups = new Map<string, { row: any; history: any[] }[]>();
   for (const row of archiveRows as any[]) {
     const weekStart = String(row?.weekStart || "");
-    if (!isMondayWeekStart(weekStart)) throw new Error("invalid_archive_week");
+    if (!isMondayWeekStart(weekStart)) {
+      console.warn("[hall-of-fame] skipping archive row with an invalid week start");
+      continue;
+    }
     if (row.history === undefined || row.history === null || row.history === "") {
-      throw new Error("invalid_archive_history");
+      console.warn("[hall-of-fame] skipping archive row with a missing history");
+      continue;
     }
     const history = parseCanonicalTransactions(row.history);
-    if (!history) throw new Error("invalid_archive_history");
+    if (!history) {
+      console.warn("[hall-of-fame] skipping archive row with an unreadable history");
+      continue;
+    }
     history.sort((left, right) => left.timestamp.localeCompare(right.timestamp) || left.id - right.id);
     archiveGroups.set(weekStart, [...(archiveGroups.get(weekStart) ?? []), { row, history }]);
   }
-  const archiveData = [...archiveGroups.entries()].map(([weekStart, group]) => {
+  const archiveData: { row: any; weekStart: string; points: Record<string, number> }[] = [];
+  const quarantinedWeeks = new Set<string>();
+  for (const [weekStart, group] of [...archiveGroups.entries()].sort(([left], [right]) => left.localeCompare(right))) {
     const first = group[0];
     if (group.some((candidate) => JSON.stringify(candidate.history) !== JSON.stringify(first.history))) {
-      throw new Error("duplicate_archive_week");
+      console.warn("[hall-of-fame] quarantining archive week with conflicting duplicates");
+      quarantinedWeeks.add(weekStart);
+      continue;
     }
-    return { row: first.row, weekStart, points: recomputeWeekPoints(first.history) };
-  });
+    archiveData.push({ row: first.row, weekStart, points: recomputeWeekPoints(first.history) });
+  }
   const archivedWeeks = archiveData.map(({ weekStart }) => weekStart).sort();
   const latestArchivedWeek = archivedWeeks.at(-1) ?? "";
   const expected = new Map<string, HallOfFameEntry>();
@@ -164,6 +175,7 @@ export async function ensureArchivedWeeksEnshrined(pb: PB): Promise<number> {
   for (const row of [...(hallRows as any[])].sort((left, right) => String(left.id).localeCompare(String(right.id)))) {
     const key = `${String(row.member ?? "")}\u0000${String(row.weekStart ?? "")}`;
     if (expected.has(key)) continue;
+    if (quarantinedWeeks.has(String(row.weekStart ?? ""))) continue;
     await pb.collection("hall_of_fame").delete(row.id, { requestKey: null });
     changed += 1;
   }
@@ -181,8 +193,10 @@ export async function ensureArchivedWeeksEnshrined(pb: PB): Promise<number> {
       throw new Error("hall_of_fame_write_verification_failed");
     }
   }
-  for (const key of verifiedByKey.keys()) {
-    if (!expected.has(key)) throw new Error("hall_of_fame_stale_row");
+  for (const [key, rows] of verifiedByKey) {
+    if (expected.has(key)) continue;
+    if (quarantinedWeeks.has(String(rows[0]?.weekStart ?? ""))) continue;
+    throw new Error("hall_of_fame_stale_row");
   }
   return changed;
 }

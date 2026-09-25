@@ -193,7 +193,7 @@ describe("tasks/sync leg gating", () => {
     expect(mocks.reconcileTaskProjectionLocked).toHaveBeenCalledOnce();
   });
 
-  it("GET returns a sanitized pending state instead of success", async () => {
+  it("GET returns a verified snapshot with a repair-level pending state", async () => {
     db.rows = [{ id: "row1", data: { tasks: [{ id: "t1" }] } }];
     mocks.reconcileTaskProjectionLocked.mockResolvedValue({
       ok: false,
@@ -203,9 +203,10 @@ describe("tasks/sync leg gating", () => {
       weekData: null,
     });
     const res = await GET();
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({
       ok: false,
+      snapshot: { tasks: [{ id: "t1" }] },
       reconciled: false,
       repaired: ["task:1:completion"],
       failed: ["approval:pending"],
