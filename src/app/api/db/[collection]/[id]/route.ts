@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withAdmin } from "@/lib/pb-auth";
 import { verifySession, SESSION_COOKIE } from "@/lib/session";
-import { isGatewayCollection, sanitizeClientRow, canWrite } from "@/lib/db-gateway";
+import type { SessionRole } from "@/lib/session-policy";
+import { isGatewayCollection, sanitizeClientRow, canWrite, writePolicy } from "@/lib/db-gateway";
 
 export const dynamic = "force-dynamic";
 
@@ -32,14 +33,18 @@ export async function GET(_request: NextRequest, ctx: Ctx) {
 
 export async function PATCH(request: NextRequest, ctx: Ctx) {
   const { collection, id } = await ctx.params;
-  if (!isGatewayCollection(collection)) {
+  const policy = writePolicy(collection);
+  if (!policy) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+  if (policy === "command") {
+    return NextResponse.json({ error: "command_only" }, { status: 403 });
   }
   // Middleware already 401s guests, but authorization must also live in the
   // route: writes are role-gated per collection (F2).
   const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  if (!canWrite(collection, session.role)) {
+  if (!canWrite(collection, session.role as SessionRole)) {
     return NextResponse.json({ error: "adult_only" }, { status: 403 });
   }
   let parsed: Record<string, unknown>;
@@ -59,12 +64,16 @@ export async function PATCH(request: NextRequest, ctx: Ctx) {
 
 export async function DELETE(request: NextRequest, ctx: Ctx) {
   const { collection, id } = await ctx.params;
-  if (!isGatewayCollection(collection)) {
+  const policy = writePolicy(collection);
+  if (!policy) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+  if (policy === "command") {
+    return NextResponse.json({ error: "command_only" }, { status: 403 });
   }
   const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
   if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  if (!canWrite(collection, session.role)) {
+  if (!canWrite(collection, session.role as SessionRole)) {
     return NextResponse.json({ error: "adult_only" }, { status: 403 });
   }
   try {
