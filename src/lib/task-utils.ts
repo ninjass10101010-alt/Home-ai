@@ -744,24 +744,27 @@ export function mergeTasksSnapshot(
 
   if (snapshot.weekData?.weekStart) {
     const snapWk = snapshot.weekData;
-    if (currentWeekData.weekStart !== snapWk.weekStart) {
-      // A different week is adopted ONLY when the snapshot is at least as new
-      // as the local one (ISO dates compare lexically). A snapshot week OLDER
-      // than the local week is stale — no device has synced since the Monday
-      // rollover — and adopting it resurrects last week's points into the
-      // fresh week (which the week-reset interval then archives and wipes).
-      if (String(snapWk.weekStart) >= String(currentWeekData.weekStart)) {
-        weekData = { ...currentWeekData, ...snapWk };
+    // A snapshot week OLDER than the local one is stale — no device has synced
+    // since the Monday rollover — and adopting it would resurrect last week's
+    // points into the fresh week (which the week-reset interval then archives
+    // and wipes). ISO dates compare lexically, so that is a string compare.
+    const adoptable = currentWeekData.weekStart !== snapWk.weekStart
+      ? String(snapWk.weekStart) >= String(currentWeekData.weekStart)
+      : true;
+    // Otherwise the server leg IS the ledger and it wins outright, with NO
+    // history-length comparison: every write is a durable command, so a locally
+    // held transaction always has a queued command behind it, and a shorter
+    // server ledger is the server's answer — never evidence of a lost local row.
+    //
+    // A no-op pull must report `weekChanged: false` and hand back the SAME
+    // reference it was given, so a 60s refresh that changed nothing does not
+    // churn the store or look like an adoption.
+    if (adoptable) {
+      const next = { ...currentWeekData, ...snapWk };
+      if (JSON.stringify(next) !== JSON.stringify(currentWeekData)) {
+        weekData = next;
         weekChanged = true;
       }
-    } else {
-      // Same week: the server leg IS the ledger. There is deliberately NO
-      // history-length comparison here any more — with every write a durable
-      // command, a locally held transaction always has a queued command behind
-      // it, so a shorter server ledger is never "the server lost my row"; it is
-      // the server's answer and it wins.
-      weekData = { ...currentWeekData, ...snapWk };
-      weekChanged = true;
     }
   }
 

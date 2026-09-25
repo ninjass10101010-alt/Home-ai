@@ -812,6 +812,128 @@ describe("task projection reconciler", () => {
     expect(harness.snapshot.data.pendingProjectionRepairs).toHaveLength(0);
   });
 
+  // Task 10 — a penalty/adjust marker projects the WEEK leg, not a task row, so
+  // it must be consumed by the canonical-week projection and never routed into
+  // the approval repair (which would try to find tasks to reopen).
+  it("consumes a penalty repair marker via the week projection, with no approval repair", async () => {
+    const operationId = "op-ledger-penalty-repair";
+    const ledgerTransaction = {
+      id: 77,
+      timestamp: `${WEEK}T10:00:00.000Z`,
+      member: CHILD_NAME,
+      type: "penalty",
+      amount: -15,
+      description: "Penalty: Mess (-15pts)",
+      appliedBy: PARENT_NAME,
+      meta: { operationId, source: "task-penalty", fingerprint: "a".repeat(64), actorId: PARENT_ID },
+    };
+    const openingEarn = {
+      id: 76,
+      timestamp: `${WEEK}T08:00:00.000Z`,
+      member: CHILD_NAME,
+      type: "earn",
+      amount: 20,
+      description: "Completed: Dishes (+20pts)",
+      taskId: 41,
+    };
+    const harness = makeHarness({
+      snapshot: {
+        revision: "1",
+        taskWeekStart: WEEK,
+        tasks: [],
+        deletedTaskIds: [],
+        operationReceipts: {},
+        pendingProjectionRepairs: [{
+          operationId,
+          taskIds: [],
+          action: "penalty",
+          actorId: PARENT_ID,
+          fingerprint: "a".repeat(64),
+          createdAt: `${WEEK}T10:01:00.000Z`,
+        }],
+        // The snapshot's week leg is the one that lagged; the canonical
+        // week_data row already carries the transaction.
+        weekData: { weekStart: WEEK, points: {}, streak: {}, lastActive: {}, history: [] },
+      },
+      weekRows: [{
+        id: "week-current",
+        weekStart: WEEK,
+        points: { [CHILD_NAME]: 20 },
+        streak: {},
+        lastActive: {},
+        history: [openingEarn, ledgerTransaction],
+      }],
+      taskRows: [],
+    });
+    mocks.withAdmin.mockImplementation(async (fn: any) => fn(harness.pb));
+
+    const result = await reconcileTaskProjection({ pb: harness.pb as any, weekStart: WEEK });
+
+    expect(result.reconciled).toBe(true);
+    expect(result.failed).toEqual([]);
+    // The marker is GONE — consumed by the week projection.
+    expect(harness.snapshot.data.pendingProjectionRepairs).toHaveLength(0);
+    // The snapshot now carries the canonical week the ledger already held, with
+    // the points recomputed from the history (20 earn - 15 penalty = 5).
+    expect(harness.snapshot.data.weekData.history).toHaveLength(2);
+    expect(harness.snapshot.data.weekData.points[CHILD_NAME]).toBe(5);
+    // And it was NOT an approval repair: a ledger command writes no task
+    // receipt, so none was invented, and no task row was touched.
+    expect(harness.snapshot.data.operationReceipts[operationId]).toBeUndefined();
+    expect(harness.snapshot.data.tasks).toEqual([]);
+  });
+
+  it("consumes an adjust repair marker via the week projection, with no approval repair", async () => {
+    const operationId = "op-ledger-adjust-repair";
+    const ledgerTransaction = {
+      id: 78,
+      timestamp: `${WEEK}T10:00:00.000Z`,
+      member: CHILD_NAME,
+      type: "adjust",
+      amount: 20,
+      description: "Manual adjust: +20pts",
+      appliedBy: PARENT_NAME,
+      meta: { operationId, source: "manual-adjust", fingerprint: "b".repeat(64), actorId: PARENT_ID },
+    };
+    const harness = makeHarness({
+      snapshot: {
+        revision: "1",
+        taskWeekStart: WEEK,
+        tasks: [],
+        deletedTaskIds: [],
+        operationReceipts: {},
+        pendingProjectionRepairs: [{
+          operationId,
+          taskIds: [],
+          action: "adjust",
+          actorId: PARENT_ID,
+          fingerprint: "b".repeat(64),
+          createdAt: `${WEEK}T10:01:00.000Z`,
+        }],
+        weekData: { weekStart: WEEK, points: {}, streak: {}, lastActive: {}, history: [] },
+      },
+      weekRows: [{
+        id: "week-current",
+        weekStart: WEEK,
+        points: { [CHILD_NAME]: 20 },
+        streak: {},
+        lastActive: {},
+        history: [ledgerTransaction],
+      }],
+      taskRows: [],
+    });
+    mocks.withAdmin.mockImplementation(async (fn: any) => fn(harness.pb));
+
+    const result = await reconcileTaskProjection({ pb: harness.pb as any, weekStart: WEEK });
+
+    expect(result.reconciled).toBe(true);
+    expect(result.failed).toEqual([]);
+    expect(harness.snapshot.data.pendingProjectionRepairs).toHaveLength(0);
+    expect(harness.snapshot.data.weekData.history).toHaveLength(1);
+    expect(harness.snapshot.data.weekData.points[CHILD_NAME]).toBe(20);
+    expect(harness.snapshot.data.operationReceipts[operationId]).toBeUndefined();
+  });
+
   it("does not append a missing crew payee during replay repair", async () => {
     const operationId = "op-crew-missing-proof";
     const fingerprint = approvalCommandFingerprint(

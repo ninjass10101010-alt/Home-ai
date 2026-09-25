@@ -7,6 +7,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { parseClaimCommand } from "@/lib/task-claim";
 import { parseTaskConfigCommand } from "@/lib/task-config";
+import { parseLedgerCommand } from "@/lib/task-ledger-command";
 import {
   TASK_OUTBOX_ENTRY_PREFIX,
   __resetTaskOutboxForTests,
@@ -151,8 +152,14 @@ describe("credential bundle on the wire", () => {
     });
     rememberTaskCommandCredential("op-claim-1", { pin: "1234" });
 
-    const credential = resolveTaskOutboxCredential(entry);
-    const body = buildTaskOperationRequestBody(entry, credential);
+    // Non-vacuous: the resolver is asked for the LIVE queued entry's id (not a
+    // literal), the wire body really carries the pin, and the credential is
+    // still resolvable afterwards.
+    const queued = listTaskOutbox().find((candidate) => candidate.operationId === entry.operationId);
+    expect(queued).toBeTruthy();
+    const credential = resolveTaskOutboxCredential(queued!);
+    expect(credential).toEqual({ pin: "1234" });
+    const body = buildTaskOperationRequestBody(queued!, credential);
     expect(body.pin).toBe("1234");
 
     const parsed = parseClaimCommand(body);
@@ -168,7 +175,12 @@ describe("credential bundle on the wire", () => {
       displayTarget: { kind: "claim", taskId: 3 },
     });
 
-    const body = buildTaskOperationRequestBody(entry, resolveTaskOutboxCredential(entry));
+    // Non-vacuous: nothing was registered for this queued id, and the built
+    // body therefore carries no credential at all.
+    const queued = listTaskOutbox().find((candidate) => candidate.operationId === entry.operationId);
+    expect(queued).toBeTruthy();
+    expect(resolveTaskOutboxCredential(queued!)).toBeUndefined();
+    const body = buildTaskOperationRequestBody(queued!, resolveTaskOutboxCredential(queued!));
     expect(body.pin).toBeUndefined();
     expect("error" in parseClaimCommand(body)).toBe(false);
   });
@@ -187,7 +199,13 @@ describe("credential bundle on the wire", () => {
     });
     rememberTaskCommandCredential("op-config-1", { pin: "1234", parentPin: PARENT_PIN });
 
-    const body = buildTaskOperationRequestBody(entry, resolveTaskOutboxCredential(entry));
+    // Non-vacuous: a credential IS registered for this id, so the assertion is
+    // that the config route's allowlist withholds BOTH keys from the wire — not
+    // that nothing happened to be registered.
+    const queued = listTaskOutbox().find((candidate) => candidate.operationId === entry.operationId);
+    expect(queued).toBeTruthy();
+    expect(resolveTaskOutboxCredential(queued!)).toEqual({ pin: "1234", parentPin: PARENT_PIN });
+    const body = buildTaskOperationRequestBody(queued!, resolveTaskOutboxCredential(queued!));
     expect(body.pin).toBeUndefined();
     expect(body.parentPin).toBeUndefined();
     expect("error" in parseTaskConfigCommand(body, (value) => value)).toBe(false);

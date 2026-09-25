@@ -146,6 +146,39 @@ describe("applyTasksSnapshotToStores (the 60s refresh seam into localStorage)", 
     expect(stored.map((t: any) => t.title)).toEqual(expect.arrayContaining(["Dishes", "Feed the fish"]));
   });
 
+  it("a deep-equal canonical week reports weekChanged:false and returns the SAME reference", () => {
+    const local = { ...emptyWeekData(), points: { Alex: 5 } };
+    const identical = { ...local };
+    const result = mergeTasksSnapshot([], local, { weekData: identical });
+
+    // A 60s pull that changed nothing must not churn the store, re-render every
+    // subscriber, or look like an adoption.
+    expect(result.weekChanged).toBe(false);
+    expect(result.weekData).toBe(local);
+  });
+
+  it("a genuinely different canonical week still reports weekChanged:true", () => {
+    const local = emptyWeekData();
+    const moved = { ...local, points: { Alex: 5 } };
+    const result = mergeTasksSnapshot([], local, { weekData: moved });
+
+    expect(result.weekChanged).toBe(true);
+    expect(result.weekData).not.toBe(local);
+    expect(result.weekData.points).toEqual({ Alex: 5 });
+  });
+
+  it("applyTasksSnapshotToStores writes nothing for a deep-equal refresh", () => {
+    saveTasks([]);
+    const week = emptyWeekData();
+    saveWeekData(week);
+    const rawWeek = localStorage.getItem(WEEK_DATA_KEY);
+
+    const changed = applyTasksSnapshotToStores({ tasks: [], weekData: { ...week } });
+
+    expect(changed).toBe(false);
+    expect(localStorage.getItem(WEEK_DATA_KEY)).toBe(rawWeek);
+  });
+
   it("a no-change task refresh rewrites the identical week leg (no task churn)", () => {
     saveTasks([makeTask({ id: 1, title: "Dishes" })]);
     saveWeekData(emptyWeekData());
@@ -156,11 +189,10 @@ describe("applyTasksSnapshotToStores (the 60s refresh seam into localStorage)", 
       tasks: [{ id: 1, title: "Dishes" }],
       weekData: week,
     });
-    // The task leg is byte-identical, so no task write happens. The week leg is
-    // always re-adopted (it is the server's), so `changed` is honestly true:
-    // the ledger was re-adopted, even though it carried the same values.
+    // The task leg is byte-identical and the week leg is deep-equal, so a
+    // no-op refresh writes nothing at all.
     expect(localStorage.getItem(TASKS_STORAGE_KEY)).toBe(rawTasks);
-    expect(changed).toBe(true);
+    expect(changed).toBe(false);
     expect(JSON.parse(localStorage.getItem(WEEK_DATA_KEY)!)).toEqual(week);
   });
 

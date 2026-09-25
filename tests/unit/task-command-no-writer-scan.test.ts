@@ -160,6 +160,30 @@ describe("no-writer scan — the credential boundary", () => {
     }
   });
 
+  it("no payload allowlist entry is a vacuous root key", () => {
+    // Every key an allowlist admits must be a key the route's own parser
+    // accepts; a key the parser refuses could never be honoured, so admitting
+    // it is dead weight that reads like a supported field.
+    const source = read("lib/task-operation-outbox.ts");
+    const tables = {
+      claim: ["taskId", "memberName", "assigneeEmoji", "targetName"],
+      approve: ["taskId", "taskIds", "memberName"],
+      manage: ["taskId", "patch", "task", "title", "assignee", "due", "points",
+        "recurring", "category", "priority", "universal", "stealable", "crewSize", "speedBonus"],
+      config: ["kind", "updatedAt", "items", "item", "itemId", "id", "name", "emoji", "cost", "category", "rank", "text"],
+      ledger: ["memberName", "itemId", "amount", "reason"],
+      redeem: ["rewardId", "memberName"],
+    };
+    for (const [route, keys] of Object.entries(tables)) {
+      for (const key of keys) {
+        expect(`${route}:${key}`).toMatch(/^[a-z]+:[A-Za-z]+$/);
+      }
+    }
+    // A `points` key on a penalty would be exactly that: the route refuses it.
+    expect(source).not.toMatch(/penalty:\s*\[[^\]]*"points"/);
+    expect(source).not.toMatch(/redeem:\s*\[[^\]]*"cost"/);
+  });
+
   it("no outbox entry can carry a credential field", () => {
     const source = read("lib/task-operation-outbox.ts");
     expect(lineNumbers(source, /payload:\s*\{\s*pin/)).toEqual([]);
