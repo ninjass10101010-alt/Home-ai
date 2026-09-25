@@ -73,6 +73,7 @@ import TrophyCase from "@/components/leaderboard/TrophyCase";
 import ShareCard from "@/components/leaderboard/ShareCard";
 import WeeklyWinModal from "@/components/leaderboard/WeeklyWinModal";
 import ConfettiBurst from "@/components/ui/ConfettiBurst";
+import TaskLedgerQuarantineNotice from "@/components/tasks/TaskLedgerQuarantineNotice";
 
 function isoOffset(days: number): string {
   const d = new Date(Date.now() + days * 86400000);
@@ -1922,6 +1923,8 @@ export default function TasksPage() {
                 </div>
               </Modal>
              )}
+
+            <TaskLedgerQuarantineNotice localWeekData={weekData} isParent={isParent} />
 
             {openBoard.length > 0 && (
               <SectionCard title="🫳 Open" description="Nobody's claimed these — fastest fingers earn the bonus." icon="⚡">
