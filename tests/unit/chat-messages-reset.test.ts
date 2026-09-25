@@ -15,10 +15,15 @@ vi.mock("@/db", () => ({ db: dbMock }));
 vi.mock("@/lib/session", () => ({
   verifySession: vi.fn(async (cookie?: string) =>
     cookie
-      ? { name: "Rebecca Garcia", role: "parent", id: "m1" }
+      ? { name: "Rebecca Garcia", role: "parent", id: "m1", memberId: "m1" }
       : null
   ),
   SESSION_COOKIE: "consuela_session",
+}));
+
+const liveSessionMocks = vi.hoisted(() => ({ requireLiveSession: vi.fn() }));
+vi.mock("@/lib/server-auth", () => ({
+  requireLiveSession: liveSessionMocks.requireLiveSession,
 }));
 
 import { POST } from "@/app/api/chat/messages/route";
@@ -30,9 +35,19 @@ function req(body: unknown, cookie?: string) {
   } as any;
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   dbMock.insertChatMessage.mockClear();
   dbMock.insertChatMessage.mockImplementation(async () => ({}));
+  const { verifySession } = await import("@/lib/session");
+  liveSessionMocks.requireLiveSession.mockReset().mockImplementation(async (request: any) => {
+    const token = request.cookies?.get?.("consuela_session")?.value;
+    const signed = await verifySession(token);
+    if (!signed) return { ok: false as const, status: 401 as const, error: "unauthorized" as const };
+    return {
+      ok: true as const,
+      identity: { memberId: "m1", name: signed.name, role: signed.role as "parent" },
+    };
+  });
 });
 
 describe("POST /api/chat/messages — reset marker", () => {

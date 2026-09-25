@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { localTodayISO } from "@/lib/local-date";
-import { verifySession, SESSION_COOKIE } from "@/lib/session";
+import { requireLiveSession } from "@/lib/server-auth";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-  const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
-  if (!session) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const live = await requireLiveSession(request);
+  if (!live.ok) {
+    return NextResponse.json({ error: live.error }, { status: live.status });
   }
   const rawScopeDate = request.nextUrl.searchParams.get("scopeDate");
   // M-C — the scopeDate flows into PB filters; reject anything that is not a
@@ -22,12 +22,12 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
-  if (!session) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const live = await requireLiveSession(request);
+  if (!live.ok) {
+    return NextResponse.json({ error: live.error }, { status: live.status });
   }
   const { id } = await request.json();
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
-  await db.ackMorningBriefing(id, session.name);
+  await db.ackMorningBriefing(id, live.identity.name);
   return NextResponse.json({ ok: true });
 }

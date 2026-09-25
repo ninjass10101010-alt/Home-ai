@@ -3,11 +3,16 @@ import { NextRequest } from "next/server";
 
 const selectPendingSuggestions = vi.fn();
 const verifySession = vi.fn();
+const requireLiveSession = vi.fn();
 vi.mock("@/db", () => ({ db: { selectPendingSuggestions: (...a: unknown[]) => selectPendingSuggestions(...a) } }));
 vi.mock("@/lib/session", () => ({
   verifySession: (...a: unknown[]) => verifySession(...a),
   SESSION_COOKIE: "consuela_session",
 }));
+vi.mock("@/lib/server-auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/server-auth")>();
+  return { ...actual, requireLiveSession: (...a: unknown[]) => requireLiveSession(...a) };
+});
 
 import { GET } from "@/app/api/consuela/suggestions/route";
 
@@ -21,6 +26,17 @@ const row = (kind: string, i: number) => ({ id: `${kind}-${i}`, kind, title: `${
 beforeEach(() => {
   selectPendingSuggestions.mockReset();
   verifySession.mockReset();
+  // The live gate answers from the same session the suite configures; a
+  // revoked session is never a child.
+  requireLiveSession.mockReset().mockImplementation(async (request: any) => {
+    const token = request.headers?.get?.("cookie")?.match(/consuela_session=([^;]+)/)?.[1];
+    const signed = await verifySession(token);
+    if (!signed) return { ok: false, status: 401, error: "unauthorized" };
+    return {
+      ok: true,
+      identity: { memberId: signed.memberId ?? "m1", name: signed.name ?? "R", role: signed.role },
+    };
+  });
 });
 
 describe("GET /api/consuela/suggestions — role-aware limit", () => {

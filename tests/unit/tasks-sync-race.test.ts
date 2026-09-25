@@ -127,7 +127,7 @@ beforeEach(() => {
 });
 
 describe("tasks/sync read-modify-write atomicity", () => {
-  it("rejects stale parent and child task/week bodies without PB access", async () => {
+  it("rejects stale parent and child task/week bodies without touching the snapshot store", async () => {
     const before = h.snapshot();
 
     const parentRes = await post({

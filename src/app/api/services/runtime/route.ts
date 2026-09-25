@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifySession, SESSION_COOKIE } from "@/lib/session";
+import { requireLiveSession } from "@/lib/server-auth";
 import { getServiceConfig } from "@/lib/services/config";
 import { SERVICES_REGISTRY } from "@/lib/services/registry";
 
@@ -9,9 +9,9 @@ export const dynamic = "force-dynamic";
 // Only registry fields flagged publicRuntime are exposed; everything else —
 // and all secrets — stay server-side.
 export async function GET(request: NextRequest) {
-  const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
-  if (!session) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const live = await requireLiveSession(request);
+  if (!live.ok) {
+    return NextResponse.json({ error: live.error }, { status: live.status });
   }
 
   const out: Record<string, Record<string, string>> = {};

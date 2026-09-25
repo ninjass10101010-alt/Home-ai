@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   verifyPinFromPB: vi.fn(),
   updateMemberRecordByActorId: vi.fn(),
   verifySession: vi.fn(),
+  requireLiveSession: vi.fn(),
 }));
 
 vi.mock("@/lib/pb-auth", () => ({
@@ -15,6 +16,7 @@ vi.mock("@/lib/pb-auth", () => ({
 vi.mock("@/lib/server-auth", () => ({
   verifyPinFromPB: mocks.verifyPinFromPB,
   updateMemberRecordByActorId: mocks.updateMemberRecordByActorId,
+  requireLiveSession: mocks.requireLiveSession,
   sanitizeMember: (m: any) => {
     const { pin, ...rest } = m;
     return rest;
@@ -55,6 +57,18 @@ const CHILD_RECORD = { id: "m-kid", name: "Emily Garcia", role: "child", emoji: 
 
 beforeEach(() => {
   for (const m of Object.values(mocks)) m.mockReset();
+  // The live gate reads the cookie through this suite's own verifySession mock
+  // (so the session-path assertions still observe the cookie being checked) and
+  // refuses any row whose live role drifted from the signed one.
+  mocks.requireLiveSession.mockImplementation(async (request: any) => {
+    const token = request.cookies?.get?.("consuela_session")?.value;
+    const signed = await mocks.verifySession(token);
+    if (!signed) return { ok: false as const, status: 401 as const, error: "unauthorized" as const };
+    return {
+      ok: true as const,
+      identity: { memberId: signed.memberId, name: signed.name, role: signed.role },
+    };
+  });
 });
 
 describe("POST /api/members/profile — child-session avatar-only path", () => {

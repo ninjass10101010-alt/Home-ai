@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { verifySession, SESSION_COOKIE } from "@/lib/session";
+import { requireLiveSession } from "@/lib/server-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -36,9 +36,9 @@ export async function GET(request: NextRequest) {
 // post-marker history to the model). Session-gated — guests keep a local-only
 // reset (their device shows the divider, the family thread doesn't change).
 export async function POST(request: NextRequest) {
-  const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
-  if (!session) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const live = await requireLiveSession(request);
+  if (!live.ok) {
+    return NextResponse.json({ error: live.error }, { status: live.status });
   }
   const body = await request.json().catch(() => ({}));
   if (body?.action !== "reset") {
@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
   const threadId = new Date().toISOString().split("T")[0];
   try {
     await db.insertChatMessage({
-      userId: session.name || "family",
+      userId: live.identity.name || "family",
       role: "system",
       content: "New conversation",
       source: "dashboard",

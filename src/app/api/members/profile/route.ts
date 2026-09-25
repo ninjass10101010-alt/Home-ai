@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withAdmin } from "@/lib/pb-auth";
-import { verifyPinFromPB, sanitizeMember, updateMemberRecordByActorId } from "@/lib/server-auth";
-import { verifySession, SESSION_COOKIE } from "@/lib/session";
+import { requireLiveSession, verifyPinFromPB, sanitizeMember, updateMemberRecordByActorId } from "@/lib/server-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -29,10 +28,11 @@ export async function POST(request: NextRequest) {
       }
     } else {
       // Child-session avatar-only path (spec 2026-09-09): no PIN, but the
-      // session itself must be a child, the target record must be the session's
-      // own member, and the patch may touch ONLY avatar vocab fields.
-      const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
-      if (!session || session.role !== "child") {
+      // session itself must be a live child, the target record must be the
+      // live session's own member, and the patch may touch ONLY avatar vocab
+      // fields.
+      const live = await requireLiveSession(request);
+      if (!live.ok || live.identity.role !== "child") {
         return NextResponse.json({ error: "Invalid PIN" }, { status: 401 });
       }
       const nonAvatarKeys = Object.keys(patch).filter(
@@ -45,12 +45,12 @@ export async function POST(request: NextRequest) {
         );
       }
       actor = await withAdmin(async (pb) => {
-        const record = await pb.collection("members").getOne(session.memberId).catch(() => null);
+        const record = await pb.collection("members").getOne(live.identity.memberId).catch(() => null);
         if (!record) return null;
-        // Belt: always true after getOne(session.memberId) — the REAL
+        // Belt: always true after getOne(live.identity.memberId) — the REAL
         // cross-member seam is updateMemberRecordByActorId's id match.
-        if (record.id !== session.memberId) return null;
-        return { ...record, name: session.name };
+        if (record.id !== live.identity.memberId) return null;
+        return { ...record, name: live.identity.name };
       });
       if (!actor) {
         return NextResponse.json({ error: "Invalid session" }, { status: 401 });

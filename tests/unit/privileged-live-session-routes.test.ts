@@ -326,7 +326,7 @@ describe("privileged routes revalidate the live role — a signed parent after P
     expect(pbWrites.delete).not.toHaveBeenCalled();
   });
 
-  it("POST /api/tasks/sync → 403 session_role_changed, no PB read and no write", async () => {
+  it("POST /api/tasks/sync → 403 session_role_changed, no snapshot read and no write", async () => {
     liveRoster["m-parent"].role = "child";
 
     const response = await syncPOST(
@@ -773,7 +773,7 @@ describe("positive paths stay open for a live identity", () => {
 });
 
 describe("every gate consumes the shared live-session contract", () => {
-  it("generic writes and the roster map a refused session verbatim and never touch PocketBase", async () => {
+  it("generic writes and the roster map a refused session verbatim; the handlers add no PocketBase access of their own", async () => {
     mocks.requireLiveSession.mockResolvedValue(SESSION_ROLE_CHANGED);
 
     const cookie = await sessionCookie({ memberId: "m-parent", name: "Rebecca", role: "parent" });

@@ -1,8 +1,11 @@
 // F2 (continued) + Task 11 — POST /api/tasks/sync used to let any session
 // overwrite the shared snapshot blob. Every browser snapshot write is retired:
 // `tasks`/`weekData` → 410 LEGACY_SYNC_WRITE_ERROR, malformed JSON → 400
-// `invalid_body`, and any other valid object → 400 `invalid_body` too. No
-// rejection reaches PocketBase.
+// `invalid_body`, and any other valid object → 400 `invalid_body` too. The
+// handler itself is write-free: no rejection reaches the snapshot store. The
+// live identity read the route's session gate performs is the ONLY PocketBase
+// access on this path, and requireLiveSession is stubbed here, so
+// `withAdmin` stays untouched — the property under test is the handler's.
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { signSession, SESSION_COOKIE } from "@/lib/session";
@@ -149,7 +152,7 @@ beforeEach(() => {
 });
 
 describe("tasks/sync leg gating", () => {
-  it("child task/week POST is retired without touching PB", async () => {
+  it("child task/week POST is retired without touching the snapshot store", async () => {
     db.rows = [{ id: "row1", data: EXISTING }];
     const res = await post(POISONED, "child");
     expect(res.status).toBe(410);
@@ -158,7 +161,7 @@ describe("tasks/sync leg gating", () => {
     expect(db.creates).toHaveLength(0);
   });
 
-  it("pet task/week POST is retired without touching PB", async () => {
+  it("pet task/week POST is retired without touching the snapshot store", async () => {
     const res = await post(POISONED, "pet");
     expect(res.status).toBe(410);
     expect(await res.json()).toEqual({ ok: false, error: LEGACY_SYNC_WRITE_ERROR });
@@ -166,7 +169,7 @@ describe("tasks/sync leg gating", () => {
     expect(db.creates).toHaveLength(0);
   });
 
-  it("parent task/week POST is retired without touching PB", async () => {
+  it("parent task/week POST is retired without touching the snapshot store", async () => {
     db.rows = [{ id: "row1", data: EXISTING }];
     const res = await post(POISONED, "parent");
     expect(res.status).toBe(410);
@@ -175,7 +178,7 @@ describe("tasks/sync leg gating", () => {
     expect(db.creates).toHaveLength(0);
   });
 
-  it("a tasks-only body is 410 before any PB access or partial import", async () => {
+  it("a tasks-only body is 410 before any snapshot read or partial import", async () => {
     db.rows = [{ id: "row1", data: EXISTING }];
     const res = await post({ tasks: [{ id: 42, title: "Forged" }] }, "parent");
     expect(res.status).toBe(410);
@@ -185,7 +188,7 @@ describe("tasks/sync leg gating", () => {
     expect(db.creates).toHaveLength(0);
   });
 
-  it("a weekData-only body is 410 before any PB access or partial import", async () => {
+  it("a weekData-only body is 410 before any snapshot read or partial import", async () => {
     db.rows = [{ id: "row1", data: EXISTING }];
     const res = await post({ weekData: { points: { Alex: 9999 } } }, "parent");
     expect(res.status).toBe(410);
@@ -195,7 +198,7 @@ describe("tasks/sync leg gating", () => {
     expect(db.creates).toHaveLength(0);
   });
 
-  it("malformed sync JSON is 400 invalid_body with zero PB access", async () => {
+  it("malformed sync JSON is 400 invalid_body with zero snapshot access", async () => {
     db.rows = [{ id: "row1", data: EXISTING }];
     const res = await postRaw("not-json", "parent");
     expect(res.status).toBe(400);
@@ -229,14 +232,14 @@ describe("tasks/sync leg gating", () => {
     expect(mocks.withAdmin).not.toHaveBeenCalled();
   });
 
-  it("a non-object body is 400 invalid_body with zero PB access", async () => {
+  it("a non-object body is 400 invalid_body with zero snapshot access", async () => {
     const res = await post([{ tasks: [] }], "parent");
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ ok: false, error: "invalid_body" });
     expect(mocks.withAdmin).not.toHaveBeenCalled();
   });
 
-  it("guest POST → 401 unauthorized, PB untouched", async () => {
+  it("guest POST → 401 unauthorized, snapshot untouched", async () => {
     const res = await post(POISONED);
     expect(res.status).toBe(401);
     expect((await res.json()).error).toBe("unauthorized");

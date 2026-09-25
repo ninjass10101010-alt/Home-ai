@@ -19,6 +19,11 @@ vi.mock("@/lib/session", () => ({
   SESSION_COOKIE: "consuela_session",
 }));
 
+const liveSessionMocks = vi.hoisted(() => ({ requireLiveSession: vi.fn() }));
+vi.mock("@/lib/server-auth", () => ({
+  requireLiveSession: liveSessionMocks.requireLiveSession,
+}));
+
 const pbMocks = vi.hoisted(() => ({ update: vi.fn(), handle: null as any }));
 vi.mock("@/lib/pb-auth", () => ({
   withAdmin: async (fn: (pb: any) => Promise<any>) => fn(pbMocks.handle),
@@ -47,6 +52,14 @@ beforeEach(() => {
   dbMock.selectMorningBriefing.mockResolvedValue(null);
   dbMock.ackMorningBriefing.mockReset();
   dbMock.ackMorningBriefing.mockResolvedValue({});
+  liveSessionMocks.requireLiveSession.mockReset().mockImplementation(async (request: any) => {
+    const token = request.cookies?.get?.("consuela_session")?.value;
+    if (!token) return { ok: false as const, status: 401 as const, error: "unauthorized" as const };
+    return {
+      ok: true as const,
+      identity: { memberId: "m1", name: "Rebecca Garcia", role: "parent" as const },
+    };
+  });
   pbMocks.update.mockReset();
   pbMocks.handle = { collection: () => ({ update: pbMocks.update }) };
 });

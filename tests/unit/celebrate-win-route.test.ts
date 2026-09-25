@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   withAdmin: vi.fn(),
   findMemberByName: vi.fn(),
   verifySession: vi.fn(),
+  requireLiveSession: vi.fn(),
+  liveRoles: {} as Record<string, string>,
 }));
 
 vi.mock("@/lib/pb-auth", () => ({
@@ -21,6 +23,7 @@ vi.mock("@/lib/pb-auth", () => ({
 
 vi.mock("@/lib/server-auth", () => ({
   findMemberByName: (name: string) => mocks.findMemberByName(name),
+  requireLiveSession: mocks.requireLiveSession,
   // Faithful copy of the pure matcher in src/lib/server-auth.ts (kept real so
   // the ownership check is tested against the same matching rules).
   namesMatch: (recordName: string, query: string) => {
@@ -97,10 +100,27 @@ beforeEach(() => {
   mocks.withAdmin.mockReset();
   mocks.findMemberByName.mockReset();
   mocks.verifySession.mockReset();
+  mocks.liveRoles = { "m-cas": "child", "m-reb": "parent" };
   mocks.verifySession.mockImplementation(async (token?: string) => {
     if (!token || token === "bogus") return null;
     const [role, name, memberId] = token.split("|");
     return { role, name, memberId };
+  });
+  // The live gate: the same contract as requireLiveSession, built from this
+  // suite's own signed-cookie convention plus a live role per member id.
+  mocks.requireLiveSession.mockReset().mockImplementation(async (request: any) => {
+    const token = request.cookies?.get?.("consuela_session")?.value;
+    const signed = await mocks.verifySession(token);
+    if (!signed) return { ok: false as const, status: 401 as const, error: "unauthorized" as const };
+    const liveRole = mocks.liveRoles[signed.memberId];
+    if (!liveRole) return { ok: false as const, status: 401 as const, error: "unauthorized" as const };
+    if (liveRole !== signed.role) {
+      return { ok: false as const, status: 403 as const, error: "session_role_changed" as const };
+    }
+    return {
+      ok: true as const,
+      identity: { memberId: signed.memberId, name: signed.name, role: liveRole },
+    };
   });
   mocks.findMemberByName.mockImplementation(async (name: string) => {
     const roster: Record<string, any> = {

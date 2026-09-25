@@ -357,7 +357,7 @@ async function liveChatSession(request: NextRequest): Promise<LiveChatSession> {
  * tool scoping, and the message stack. Used by the buffered POST and the
  * streamed handler so the two paths can never drift.
  */
-async function buildChatContext(request: NextRequest, body: ChatRequestBody, gate: LiveChatSession) {
+async function buildChatContext(body: ChatRequestBody, gate: LiveChatSession) {
   const { history = [], system, agent } = body;
   const message = body.message ?? "";
   // MF-3 — role comes from the session cookie only; body.role is ignored
@@ -433,7 +433,7 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody, g
     // Health-recorder context hoisted so the catch path records rounds/brain too.
     const ctx = { agent: body.agent || "consuela", rounds: 0, brain: null as string | null, targets: 0 };
     try {
-      const { message, isClem, targets, tools, messages, sessionName } = await buildChatContext(request, body, gate);
+      const { message, isClem, targets, tools, messages, sessionName } = await buildChatContext(body, gate);
       ctx.brain = targets.length ? `${targets[0].provider}/${targets[0].model}` : null;
       ctx.targets = targets.length;
       let finalContent = "";
@@ -637,7 +637,7 @@ export async function POST(request: NextRequest) {
   // carry the REAL rounds/brain/agent instead of zeroed placeholders.
   const ctx = { agent: body.agent || "consuela", rounds: 0, brain: null as string | null, targets: 0 };
   try {
-    const { isClem, targets, tools, messages, role, sessionName } = await buildChatContext(request, body, gate);
+    const { isClem, targets, tools, messages, role, sessionName } = await buildChatContext(body, gate);
     ctx.brain = targets.length ? `${targets[0].provider}/${targets[0].model}` : null;
     ctx.targets = targets.length;
     console.log(`[ai] agent=${body.agent || "consuela"} isClem=${isClem} brain=${targets[0]?.provider}/${targets[0]?.model} role=${role}`);

@@ -47,6 +47,7 @@ vi.mock('@/lib/pb', () => ({
 // Mock server-side PIN verification so PATCH routes can pass auth gate in tests
 vi.mock('@/lib/server-auth', () => ({
   verifyPinAgainstAnyMember: vi.fn(() => Promise.resolve({ id: 'member-1', name: 'Test Member' })),
+  requireLiveSession: vi.fn(() => Promise.resolve({ ok: false, status: 401, error: 'unauthorized' })),
 }));
 
 // Mock skill tree lib functions

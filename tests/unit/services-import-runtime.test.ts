@@ -4,6 +4,7 @@ import { NextRequest } from "next/server";
 const mocks = vi.hoisted(() => ({
   withAdmin: vi.fn(),
   verifyPinAgainstAnyMember: vi.fn(),
+  requireLiveSession: vi.fn(),
   liveRole: "parent",
 }));
 
@@ -13,7 +14,11 @@ vi.mock("@/lib/pb-auth", () => ({
 
 vi.mock("@/lib/server-auth", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/server-auth")>();
-  return { ...actual, verifyPinAgainstAnyMember: mocks.verifyPinAgainstAnyMember };
+  return {
+    ...actual,
+    verifyPinAgainstAnyMember: mocks.verifyPinAgainstAnyMember,
+    requireLiveSession: mocks.requireLiveSession,
+  };
 });
 
 import { POST as importPOST } from "@/app/api/services/import/route";
@@ -64,6 +69,24 @@ beforeEach(() => {
   mocks.verifyPinAgainstAnyMember.mockReset();
   mocks.liveRole = "parent";
   mocks.withAdmin.mockImplementation((fn: any) => fn(pbForRows([]).pb));
+  // The live gate reads the cookie + this suite's liveRole, so a PocketBase
+  // outage below still exercises the route's own degraded 200 path.
+  mocks.requireLiveSession.mockReset().mockImplementation(async (request: any, options?: any) => {
+    const { verifySession } = await import("@/lib/session");
+    const token = request.cookies?.get?.(SESSION_COOKIE)?.value;
+    const signed = await verifySession(token);
+    if (!signed) return { ok: false, status: 401, error: "unauthorized" };
+    if (mocks.liveRole !== signed.role) {
+      return { ok: false, status: 403, error: "session_role_changed" };
+    }
+    if (options?.requireRole && mocks.liveRole !== options.requireRole) {
+      return { ok: false, status: 403, error: "adult_only" };
+    }
+    return {
+      ok: true,
+      identity: { memberId: signed.memberId, name: signed.name, role: mocks.liveRole },
+    };
+  });
 });
 
 afterEach(() => {

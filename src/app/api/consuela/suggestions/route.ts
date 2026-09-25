@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { verifyPinAgainstAnyMember } from "@/lib/server-auth";
-import { verifySession, SESSION_COOKIE } from "@/lib/session";
+import { requireLiveSession, verifyPinAgainstAnyMember } from "@/lib/server-auth";
 import { PARENT_ONLY_SUGGESTION_KINDS } from "@/lib/consuela/suggestion-visibility";
 
 export const dynamic = "force-dynamic";
@@ -26,9 +25,10 @@ export async function GET(request: NextRequest) {
   // pantry_low emits one row per low item, so filtering client-side AFTER a
   // limit-20 fetch can leave a kid with "All clear" while their own chore /
   // calendar suggestions sit past row 20. Filter by role server-side and apply
-  // the limit AFTER filtering. Guests (no session) are not children → full list.
-  const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
-  const isChild = session?.role === "child";
+  // the limit AFTER filtering. The role comes from the LIVE PocketBase row, so
+  // a session that is absent, revoked or demoted is never treated as a child.
+  const live = await requireLiveSession(request);
+  const isChild = live.ok && live.identity.role === "child";
   const rows = await db.selectPendingSuggestions({ limit: isChild ? 200 : limit });
   const items = isChild
     ? rows.filter((s: { kind?: string }) => !PARENT_ONLY_SUGGESTION_KINDS.has(s.kind ?? "")).slice(0, limit)

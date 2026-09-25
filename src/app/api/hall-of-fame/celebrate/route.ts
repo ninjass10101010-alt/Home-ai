@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifySession, SESSION_COOKIE } from "@/lib/session";
-import { findMemberByName, namesMatch } from "@/lib/server-auth";
+import { findMemberByName, namesMatch, requireLiveSession } from "@/lib/server-auth";
 import { withAdmin } from "@/lib/pb-auth";
 
 export const dynamic = "force-dynamic";
@@ -12,18 +11,18 @@ export const dynamic = "force-dynamic";
  * This route is the claim path instead:
  *
  * - Session required (the shared consuela_session cookie, like
- *   /api/chat/messages POST).
+ *   /api/chat/messages POST), revalidated against the LIVE PocketBase row.
  * - Ownership: child/pet sessions may celebrate ONLY their own win; parent
  *   sessions may claim for any member (a parent dismisses the modal for an
- *   absent kid).
+ *   absent kid). Ownership is the live memberId — never a name match.
  * - The target row must be a rank ≤ 3 hall_of_fame entry for that
  *   member+weekStart with a non-empty prize — else 404.
  * - Idempotent: re-claiming an already-celebrated row is a 200 no-op.
  */
 export async function POST(request: NextRequest) {
-  const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
-  if (!session) {
-    return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  const live = await requireLiveSession(request);
+  if (!live.ok) {
+    return NextResponse.json({ ok: false, error: live.error }, { status: live.status });
   }
 
   const body = await request.json().catch(() => ({}));
@@ -41,13 +40,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: "member_not_found" }, { status: 404 });
   }
 
-  // Ownership gate — parents are the allowlist; child/pet sessions must be
-  // claiming their OWN entry (id match first, shared name matcher second).
-  const isOwn =
-    Boolean(session.memberId) && String(member.id) === String(session.memberId)
-      ? true
-      : namesMatch(String(member.name || ""), String(session.name || ""));
-  if (session.role !== "parent" && !isOwn) {
+  // Ownership gate — parents are the allowlist; every other live identity may
+  // claim only its OWN entry, matched on the canonical PocketBase id.
+  const isOwn = String(member.id) === String(live.identity.memberId);
+  if (live.identity.role !== "parent" && !isOwn) {
     return NextResponse.json({ ok: false, error: "forbidden" }, { status: 403 });
   }
 
