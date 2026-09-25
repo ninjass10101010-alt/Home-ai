@@ -1194,3 +1194,77 @@ export async function persistSnapshotWeek(
     };
   }
 }
+
+export async function replaceSnapshotWeekData(
+  pb: AdminPB,
+  weekData: WeekData,
+): Promise<SnapshotWriteResult> {
+  let currentRevision = "0";
+  let currentUpdatedAt = "";
+  try {
+    return await withKeyedLock(`snapshot:${SNAPSHOT_KEY}`, async () => {
+      const rows = await pb.collection(SNAPSHOT_COLLECTION).getFullList({
+        requestKey: null,
+        filter: `key = "${SNAPSHOT_KEY}"`,
+      });
+      const row = rows[0] as any;
+      const data = sanitizeSnapshotMetadata(parseSnapshotData(row?.data));
+      currentRevision = decimalRevision(data.revision);
+      currentUpdatedAt = rowUpdatedAt(row, data);
+      const incoming = normalizeWeekData(weekData);
+      if (!incoming) throw new TypeError("invalid_week_data");
+      const revision = nextRevision(data.revision);
+      const updatedAt = new Date().toISOString();
+      const expectedWeek = {
+        ...incoming,
+        points: recomputeWeekPoints(incoming.history),
+      };
+      const payload = {
+        key: SNAPSHOT_KEY,
+        data: canonicalSnapshotData({
+          ...data,
+          weekData: expectedWeek,
+          taskWeekStart: incoming.weekStart,
+        }, revision),
+        updated_at: updatedAt,
+      };
+      if (row) {
+        await pb.collection(SNAPSHOT_COLLECTION).update(row.id, payload, { requestKey: null });
+      } else {
+        await pb.collection(SNAPSHOT_COLLECTION).create(payload, { requestKey: null });
+      }
+      const verifiedRows = await pb.collection(SNAPSHOT_COLLECTION).getFullList({
+        requestKey: null,
+        filter: `key = "${SNAPSHOT_KEY}"`,
+      });
+      const verifiedRow = verifiedRows[0] as any;
+      const verifiedData = sanitizeSnapshotMetadata(parseSnapshotData(verifiedRow?.data));
+      const verifiedWeek = normalizeWeekData(verifiedData.weekData);
+      if (
+        !verifiedRow ||
+        verifiedData.revision !== revision ||
+        verifiedData.taskWeekStart !== incoming.weekStart ||
+        !verifiedWeek ||
+        JSON.stringify(verifiedWeek) !== JSON.stringify(expectedWeek)
+      ) {
+        return {
+          ok: false,
+          revision: { revision, updatedAt },
+          error: "snapshot_write_failed",
+        };
+      }
+      currentRevision = revision;
+      currentUpdatedAt = updatedAt;
+      return {
+        ok: true,
+        revision: { revision, updatedAt },
+      };
+    });
+  } catch {
+    return {
+      ok: false,
+      revision: { revision: currentRevision, updatedAt: currentUpdatedAt },
+      error: "snapshot_write_failed",
+    };
+  }
+}

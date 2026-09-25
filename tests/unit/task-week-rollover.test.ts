@@ -493,8 +493,9 @@ describe("ensureCurrentTaskWeek", () => {
       const response = await GET();
       const body = await response.json();
 
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(503);
       expect(body.reconciled).toBe(false);
+      expect(body.failed).toEqual(expect.arrayContaining(["rollover:pending"]));
       expect(warnSpy).toHaveBeenCalledWith("[task-week-rollover] projection reconciliation pending");
       expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("hall projection failed");
     } finally {

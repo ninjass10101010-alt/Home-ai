@@ -11,6 +11,7 @@
 //
 import type { HallOfFameEntry, WeeklyPrize } from "@/types/tasks";
 import { DEFAULT_WEEKLY_PRIZES } from "@/lib/task-utils";
+import { parseCanonicalTransactions, recomputeWeekPoints } from "@/lib/task-ledger";
 
 type PB = ReturnType<typeof import("@/lib/pb").getAdminPB>;
 
@@ -96,7 +97,14 @@ export async function ensureArchivedWeeksEnshrined(pb: PB): Promise<number> {
     const weekStart = String(row?.weekStart || "");
     if (!weekStart) continue;
     const points = parseMaybeJSON<Record<string, number>>(row?.points, {});
-    const entries = hallEntriesForWeek(points, weekStart, emojis, prizeCatalog);
+    const historyValue = row?.history;
+    let canonicalPoints = points;
+    if (historyValue !== undefined && historyValue !== null && historyValue !== "") {
+      const history = parseCanonicalTransactions(historyValue);
+      if (!history) throw new Error("invalid_archive_history");
+      canonicalPoints = recomputeWeekPoints(history);
+    }
+    const entries = hallEntriesForWeek(canonicalPoints, weekStart, emojis, prizeCatalog);
     const history = weekStart !== latestArchivedWeek;
     for (const entry of entries) {
       const key = `${entry.member}\u0000${entry.weekStart}`;

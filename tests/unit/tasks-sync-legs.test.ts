@@ -29,10 +29,17 @@ function makePb() {
   };
 }
 
-const mocks = vi.hoisted(() => ({ withAdmin: vi.fn(), ensureCurrentTaskWeek: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  withAdmin: vi.fn(),
+  ensureCurrentTaskWeek: vi.fn(),
+  reconcileTaskProjectionLocked: vi.fn(),
+}));
 vi.mock("@/lib/pb-auth", () => ({ withAdmin: (fn: any) => mocks.withAdmin(fn) }));
 vi.mock("@/lib/task-week-rollover", () => ({
   ensureCurrentTaskWeek: mocks.ensureCurrentTaskWeek,
+}));
+vi.mock("@/lib/task-projection-reconciler", () => ({
+  reconcileTaskProjectionLocked: mocks.reconcileTaskProjectionLocked,
 }));
 
 import { GET, POST } from "@/app/api/tasks/sync/route";
@@ -108,7 +115,15 @@ beforeEach(() => {
   mocks.withAdmin.mockReset();
   mocks.withAdmin.mockImplementation((fn: any) => fn(makePb()));
   mocks.ensureCurrentTaskWeek.mockReset();
-  mocks.ensureCurrentTaskWeek.mockResolvedValue({ reconciled: true });
+  mocks.reconcileTaskProjectionLocked.mockReset();
+  mocks.ensureCurrentTaskWeek.mockResolvedValue({ reconciled: true, weekStart: "2026-09-21" });
+  mocks.reconcileTaskProjectionLocked.mockResolvedValue({
+    ok: true,
+    reconciled: true,
+    repaired: [],
+    failed: [],
+    weekData: null,
+  });
 });
 
 describe("tasks/sync leg gating", () => {
@@ -159,11 +174,36 @@ describe("tasks/sync leg gating", () => {
     expect(mocks.withAdmin).not.toHaveBeenCalled();
   });
 
-  it("GET returns the snapshot (unchanged)", async () => {
+  it("GET returns the snapshot after successful reconciliation", async () => {
     db.rows = [{ id: "row1", data: { tasks: [{ id: "t1" }] } }];
     const res = await GET();
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, snapshot: { tasks: [{ id: "t1" }] }, reconciled: true });
-    expect(mocks.ensureCurrentTaskWeek).toHaveBeenCalledOnce();
+    expect(await res.json()).toEqual({
+      ok: true,
+      snapshot: { tasks: [{ id: "t1" }] },
+      reconciled: true,
+      repaired: [],
+      failed: [],
+    });
+    expect(mocks.reconcileTaskProjectionLocked).toHaveBeenCalledOnce();
+  });
+
+  it("GET returns a sanitized pending state instead of success", async () => {
+    db.rows = [{ id: "row1", data: { tasks: [{ id: "t1" }] } }];
+    mocks.reconcileTaskProjectionLocked.mockResolvedValue({
+      ok: false,
+      reconciled: false,
+      repaired: ["task:1:completion"],
+      failed: ["approval:pending", "secret:raw-row"],
+      weekData: null,
+    });
+    const res = await GET();
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({
+      ok: false,
+      reconciled: false,
+      repaired: ["task:1:completion"],
+      failed: ["approval:pending"],
+    });
   });
 });
