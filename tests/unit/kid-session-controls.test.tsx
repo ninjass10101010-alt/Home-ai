@@ -64,6 +64,7 @@ vi.mock("@/hooks/useAtmosphericTheme", () => ({
 
 import KidHome from "@/modes/kid/KidHome";
 import { AuthProvider } from "@/hooks/useAuth";
+import { sessionTtlSeconds } from "@/lib/session-policy";
 
 let activeRoot: Root | null = null;
 async function renderAsync(ui: ReactElement): Promise<HTMLElement> {
@@ -128,5 +129,17 @@ describe("KidHome session controls", () => {
     const el = await renderAsync(<KidHome />);
     await settle();
     expect(el.textContent).not.toContain("min left");
+  });
+
+  it("the kid countdown can never promise more than the kid server window", async () => {
+    const kidWindowMinutes = sessionTtlSeconds("child") / 60;
+    mockAuth.sessionWarning = true;
+    mockAuth.sessionRemainingMs = sessionTtlSeconds("child") * 1000;
+    const el = await renderAsync(<KidHome />);
+    await settle();
+    expect(kidWindowMinutes).toBeLessThan(sessionTtlSeconds("parent") / 60);
+    expect(el.querySelector(`[aria-label="Signed in for ${kidWindowMinutes} more minutes"]`)).not.toBeNull();
+    expect(el.textContent).toContain(`${kidWindowMinutes} min left`);
+    mockAuth.sessionWarning = false;
   });
 });

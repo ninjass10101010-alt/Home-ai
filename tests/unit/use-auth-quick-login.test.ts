@@ -20,6 +20,7 @@ vi.mock("@/db", () => ({
 }));
 
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
+import { sessionTtlSeconds } from "@/lib/session-policy";
 
 const ctxRef: { current: ReturnType<typeof useAuth> | null } = { current: null };
 
@@ -63,6 +64,22 @@ describe("useAuth.quickLogin — PIN-free sign-in for under-10 kids", () => {
     const { result } = renderAuthHook();
     await act(async () => { const r = await result.current!.quickLogin("Jasmine"); expect(r.success).toBe(false); });
     expect(result.current!.currentUser).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  // A kid session is signed for the KID window — the countdown may never
+  // promise the parent's 30 minutes the server would refuse to sign.
+  it("a quick-logged-in kid is promised only the kid server window", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "/api/auth/touch") return { ok: true, status: 200, json: async () => ({ ok: true, member: { memberId: "7", name: "Caspian", role: "child" }, expiresIn: 900 }) };
+      return { ok: true, status: 200, json: async () => ({ success: true, member: { id: "7", name: "Caspian", role: "child", emoji: "🧒", color: "green", age: 5 } }) };
+    });
+    vi.stubGlobal("fetch", fetchMock as any);
+    const { result } = renderAuthHook();
+    await act(async () => { const r = await result.current!.quickLogin("Caspian"); expect(r.success).toBe(true); });
+    expect(result.current!.sessionRemainingMs).toBe(sessionTtlSeconds("child") * 1000);
+    expect(result.current!.sessionRemainingMs).toBeLessThan(sessionTtlSeconds("parent") * 1000);
+    expect(fetchMock.mock.calls.some(([u]: any) => u === "/api/auth/touch")).toBe(false);
     vi.unstubAllGlobals();
   });
 });

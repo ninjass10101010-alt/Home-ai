@@ -18,6 +18,7 @@ vi.mock("@/db", () => ({
 }));
 
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
+import { sessionTtlSeconds } from "@/lib/session-policy";
 
 const ctxRef: { current: ReturnType<typeof useAuth> | null } = { current: null };
 
@@ -132,6 +133,28 @@ describe("useAuth.login — server-side authentication", () => {
     expect((call as any[])[1].method).toBe("POST");
     expect(localStorage.getItem("consuela-auth-user")).toBeNull();
     expect(ctxRef.current!.isLoggedIn).toBe(false);
+
+    vi.unstubAllGlobals();
+  });
+
+  // The client countdown is a UX hint, never a licence to outlive the signed
+  // cookie: signing in may not promise more than the role's server window, and
+  // a rotation is driven by activity only — never by the sign-in itself.
+  it("signing in promises no more than the parent's server window and never rotates on its own", async () => {
+    const parentMember = { ...SANITIZED_MEMBER, id: 1, name: "Rebecca", role: "parent" as const, emoji: "👩", color: "violet" };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ success: true, member: parentMember }),
+      { status: 200 }
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderProvider();
+    await act(async () => {
+      await ctxRef.current!.login("Rebecca", "1010");
+    });
+
+    expect(ctxRef.current!.sessionRemainingMs).toBe(sessionTtlSeconds("parent") * 1000);
+    expect(fetchMock.mock.calls.some(([u]) => String(u) === "/api/auth/touch")).toBe(false);
 
     vi.unstubAllGlobals();
   });

@@ -17,9 +17,17 @@ vi.mock("next/dynamic", () => {
   return { default: () => Noop };
 });
 
-vi.mock("@/hooks/useAuth", () => ({
-  useAuth: () => ({ currentUser: null, isLoggedIn: false, isParent: false, logout: vi.fn(), sessionRemainingMs: 30 * 60 * 1000, sessionWarning: false, extendSession: vi.fn() }),
+const authMock = vi.hoisted(() => ({
+  currentUser: null as any,
+  isLoggedIn: false,
+  isParent: false,
+  logout: vi.fn(),
+  extendSession: vi.fn(),
+  quickLogin: vi.fn(async () => ({ success: false })),
+  sessionRemainingMs: 30 * 60 * 1000,
+  sessionWarning: false,
 }));
+vi.mock("@/hooks/useAuth", () => ({ useAuth: () => authMock }));
 
 vi.mock("@/hooks/useDashboardMode", () => ({
   useDashboardMode: () => ({ mode: "family", isBedtime: false, isWeekend: false, currentHour: 12, currentDay: 3, previousMode: null }),
@@ -29,6 +37,9 @@ const mealsMock = vi.hoisted(() => ({ status: { items: [] as any[], blocked: fal
 vi.mock("@/db", () => ({
   db: {
     selectMembersDetailed: () => [],
+    selectMembers: () => [
+      { name: "Rebecca", fullName: "Rebecca (Mom)", role: "parent", color: "violet", emoji: "👩" },
+    ],
     selectTodaysEvents: () => [],
     selectPendingTasks: () => [],
     selectTodaysSchedules: () => [],
@@ -130,6 +141,13 @@ describe("Home Week tile honesty", () => {
       removeListener: () => {},
     })));
     mealsMock.status = { items: [], blocked: false };
+    authMock.currentUser = null;
+    authMock.isLoggedIn = false;
+    authMock.isParent = false;
+    authMock.sessionRemainingMs = 30 * 60 * 1000;
+    authMock.sessionWarning = false;
+    authMock.logout.mockClear();
+    authMock.extendSession.mockClear();
   });
 
   afterEach(() => {
@@ -159,5 +177,64 @@ describe("Home Week tile honesty", () => {
     const el = await renderAsync(<HomePage />);
     await settle();
     expect(weekTileValue(el)).toBe("—");
+  });
+});
+
+describe("Home session controls", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    localStorage.clear();
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) })));
+    vi.stubGlobal("matchMedia", vi.fn(() => ({
+      matches: false,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+    })));
+    mealsMock.status = { items: [], blocked: false };
+    authMock.currentUser = {
+      id: 1,
+      name: "Rebecca (Mom)",
+      role: "parent",
+      emoji: "👩",
+      color: "violet",
+      avatarSize: "md",
+      glow: false,
+    };
+    authMock.isLoggedIn = true;
+    authMock.isParent = true;
+    authMock.sessionRemainingMs = 30 * 60 * 1000;
+    authMock.sessionWarning = false;
+    authMock.logout.mockClear();
+    authMock.extendSession.mockClear();
+  });
+
+  afterEach(() => {
+    act(() => { activeRoot?.unmount(); });
+    activeRoot = null;
+    document.body.innerHTML = "";
+    vi.unstubAllGlobals();
+  });
+
+  it("hides the countdown pill while the whole window is still ahead", async () => {
+    const el = await renderAsync(<HomePage />);
+    await settle();
+    expect(el.ownerDocument.body.querySelector('[aria-label^="Auto sign-out in"]')).toBeNull();
+  });
+
+  it("counts the signed window down and 'tap to stay' asks for an extension", async () => {
+    authMock.sessionRemainingMs = 20_000;
+    authMock.sessionWarning = true;
+    const el = await renderAsync(<HomePage />);
+    await settle();
+
+    expect(el.ownerDocument.body.querySelector('[aria-label="Auto sign-out in 00:20"]')).not.toBeNull();
+    const stay = el.ownerDocument.body.querySelector('[aria-label="Stay signed in"]') as HTMLButtonElement;
+    expect(stay).not.toBeNull();
+    expect(el.ownerDocument.body.textContent).toContain("signed out in 20s");
+
+    await act(async () => { stay.click(); });
+    expect(authMock.extendSession).toHaveBeenCalled();
   });
 });

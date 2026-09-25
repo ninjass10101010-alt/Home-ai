@@ -3,17 +3,17 @@
 import { useState, useEffect, useCallback, createContext, useContext, ReactNode, useRef } from 'react';
 import { db } from '@/db';
 import { flushPendingWrites } from '@/lib/pending-writes';
+import { isSessionRole, sessionTtlSeconds, type SessionRole } from '@/lib/session-policy';
 import {
   requestTaskOutboxFlush,
   warnTaskOutboxFlushFailure,
 } from '@/lib/task-operation-outbox';
 
 const AUTH_STORAGE_KEY = 'consuela-auth-user';
-const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;
-// Kid sessions are shorter (wall + shared tablets: the family screen should
-// come back quickly once a kid wanders off), and they warn for a full
-// 5 minutes instead of 30s so the flip never surprises a child.
-const KID_INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000;
+const TOUCH_THROTTLE_MS = 60 * 1000;
+const DEFAULT_REMAINING_MS = sessionTtlSeconds('parent') * 1000;
+// Kids warn for a full 5 minutes instead of 30s so the flip never surprises a
+// child.
 const SESSION_WARN_MS = 30 * 1000;
 const KID_SESSION_WARN_MS = 5 * 60 * 1000;
 const SESSION_TICK_MS = 1 * 1000;
@@ -68,10 +68,12 @@ export const useAuth = () => {
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
-  const [sessionRemainingMs, setSessionRemainingMs] = useState<number>(INACTIVITY_TIMEOUT_MS);
+  const [sessionRemainingMs, setSessionRemainingMs] = useState<number>(DEFAULT_REMAINING_MS);
   const [sessionWarning, setSessionWarning] = useState<boolean>(false);
   const currentUserRef = useRef<AuthUser | null>(null);
-  const lastActivityRef = useRef<number>(0);
+  const lastActivityAtRef = useRef<number>(0);
+  const lastSuccessfulTouchAtRef = useRef<number>(0);
+  const touchInFlightRef = useRef<boolean>(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const clearTimers = useCallback(() => {
@@ -79,11 +81,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
-  }, []);
-
-  const handleActivity = useCallback(() => {
-    lastActivityRef.current = Date.now();
-    setSessionWarning(false);
   }, []);
 
   const logout = useCallback(() => {
@@ -94,27 +91,76 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     setCurrentUser(null);
     currentUserRef.current = null;
+    lastSuccessfulTouchAtRef.current = 0;
     localStorage.removeItem(AUTH_STORAGE_KEY);
     setSessionWarning(false);
-    setSessionRemainingMs(INACTIVITY_TIMEOUT_MS);
+    setSessionRemainingMs(DEFAULT_REMAINING_MS);
   }, []);
 
-  const extendSession = useCallback(() => {
-    lastActivityRef.current = Date.now();
-    setSessionWarning(false);
-    setSessionRemainingMs(isKidRole(currentUserRef.current?.role) ? KID_INACTIVITY_TIMEOUT_MS : INACTIVITY_TIMEOUT_MS);
+  const adoptTouchedRole = useCallback((role: SessionRole) => {
+    const active = currentUserRef.current;
+    if (!active || active.role === role) return;
+    const updated: AuthUser = { ...active, role };
+    currentUserRef.current = updated;
+    setCurrentUser(updated);
+    try {
+      const stored = localStorage.getItem(AUTH_STORAGE_KEY);
+      if (!stored) return;
+      const parsed = JSON.parse(stored) as Record<string, unknown>;
+      parsed.role = role;
+      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(parsed));
+    } catch {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+    }
   }, []);
+
+  const touchSession = useCallback(async (force = false) => {
+    if (!currentUserRef.current) return;
+    if (touchInFlightRef.current) return;
+    if (!force && Date.now() - lastSuccessfulTouchAtRef.current < TOUCH_THROTTLE_MS) return;
+
+    touchInFlightRef.current = true;
+    try {
+      const response = await fetch("/api/auth/touch", { method: "POST" });
+      if (response.status === 200) {
+        lastSuccessfulTouchAtRef.current = Date.now();
+        setSessionWarning(false);
+        const body = await response.json().catch(() => null) as { member?: { role?: unknown } } | null;
+        const touchedRole = body?.member?.role;
+        if (isSessionRole(touchedRole)) adoptTouchedRole(touchedRole);
+      } else if (response.status === 401 || response.status === 403) {
+        logout();
+      }
+    } catch {
+    } finally {
+      touchInFlightRef.current = false;
+    }
+  }, [adoptTouchedRole, logout]);
+
+  const handleActivity = useCallback(() => {
+    lastActivityAtRef.current = Date.now();
+    setSessionWarning(false);
+    void touchSession();
+  }, [touchSession]);
+
+  const extendSession = useCallback(() => {
+    lastActivityAtRef.current = Date.now();
+    setSessionWarning(false);
+    setSessionRemainingMs(sessionTtlSeconds(currentUserRef.current?.role ?? "parent") * 1000);
+    void touchSession(true);
+  }, [touchSession]);
 
   // Load persisted session + start inactivity timer on mount
   useEffect(() => {
-    lastActivityRef.current = Date.now();
+    lastActivityAtRef.current = Date.now();
+    lastSuccessfulTouchAtRef.current = 0;
 
     try {
       const stored = localStorage.getItem(AUTH_STORAGE_KEY);
       if (stored) {
         const parsed: AuthUser = JSON.parse(stored);
         const member = db.selectMembersDetailed().find((m: any) => memberMatchesName(m, parsed.name));
-        if (member) {
+        if (member && isSessionRole(parsed.role)) {
           const hydrated = {
             id: Number(parsed.id) || 0,
             name: parsed.name,
@@ -179,23 +225,24 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     window.addEventListener("consuela-members-updated", handleMembersUpdated);
 
     intervalRef.current = setInterval(() => {
-      const elapsed = Date.now() - lastActivityRef.current;
-      // Role-aware timeout: kids/pets get the shorter window + the longer
-      // warning (kid-friendly countdown on KidHome; adults keep 30s/30min).
-      const role = currentUserRef.current?.role;
-      const timeout = isKidRole(role) ? KID_INACTIVITY_TIMEOUT_MS : INACTIVITY_TIMEOUT_MS;
-      const warnAt = isKidRole(role) ? KID_SESSION_WARN_MS : SESSION_WARN_MS;
-      const remaining = Math.max(0, timeout - elapsed);
-      setSessionRemainingMs(remaining);
-      if (remaining <= warnAt) {
+      const active = currentUserRef.current;
+      if (!active) return;
+      const now = Date.now();
+      const ttlMs = sessionTtlSeconds(active.role) * 1000;
+      const activityRemaining = ttlMs - (now - lastActivityAtRef.current);
+      const touchRemaining = lastSuccessfulTouchAtRef.current === 0
+        ? ttlMs
+        : ttlMs - (now - lastSuccessfulTouchAtRef.current);
+      const remainingMs = Math.max(
+        0,
+        Math.min(activityRemaining, touchRemaining),
+      );
+      setSessionRemainingMs(remainingMs);
+      if (remainingMs <= (isKidRole(active.role) ? KID_SESSION_WARN_MS : SESSION_WARN_MS)) {
         setSessionWarning(true);
       }
-      if (elapsed >= timeout) {
-        setCurrentUser(null);
-        currentUserRef.current = null;
-        setSessionRemainingMs(0);
-        setSessionWarning(false);
-        localStorage.removeItem(AUTH_STORAGE_KEY);
+      if (remainingMs === 0) {
+        logout();
       }
     }, SESSION_TICK_MS);
 
@@ -225,8 +272,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     setCurrentUser(authUser);
     currentUserRef.current = authUser;
-    lastActivityRef.current = Date.now();
-    setSessionRemainingMs(INACTIVITY_TIMEOUT_MS);
+    lastActivityAtRef.current = Date.now();
+    lastSuccessfulTouchAtRef.current = 0;
+    setSessionRemainingMs(sessionTtlSeconds(authUser.role) * 1000);
     setSessionWarning(false);
 
     const stored = {
