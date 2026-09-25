@@ -1649,6 +1649,47 @@ still 401 at middleware, and a wrong role is 403 `adult_only`.
   must never grow a `create`/`update`/`delete` against `week_data` or the tasks
   snapshot — unmatched legacy rows are surfaced and exported, never applied.
 
+**The browser outbox is how a device asks for a write (`consuela-task-operation-outbox-v1`).**
+Normal browser task/ledger writes are **retired** — no device pushes `tasks`,
+`weekData`, points or history anywhere, and no client surface calls
+`saveTasks`/`saveWeekData`/`addTransaction` or POSTs a command route directly.
+Every task/ledger mutation leaves the device as a durable command queued in
+`src/lib/task-operation-outbox.ts`, persisted under the localStorage key
+**`consuela-task-operation-outbox-v1`** (one `:entry:<operationId>` record per
+command; a credential never enters the entry). An entry is queued — with its
+stable `operationId` and a display target — *before* any local state moves, is
+released only after a `200`/`202` acknowledgment has handed back authoritative
+`weekData`/`task` plus the snapshot revision for adoption, retries on the same
+`operationId`, and only clears on acknowledgment or an explicit user cancel of
+a non-applied operation. The queue carries the outbox-carrying command routes
+(`/api/tasks/claim`, `/api/tasks/approve`, `/api/tasks/manage`,
+`/api/tasks/config`, `/api/tasks/ledger`, `/api/rewards/redeem`);
+`/api/tasks/quarantine` is the one command route it does not carry, because that
+route writes nothing to the server. **Do not fork the key or the entry shape** —
+import `TASK_OUTBOX_STORAGE_KEY` and the queue helpers, never re-implement a
+localStorage command buffer.
+
+**`executeInternalTaskCommand` is the sanctioned server-side command seam.**
+`executeInternalTaskCommand` (`src/lib/task-commands.ts`) is the *only* entry
+point a non-browser task mutation may use: it takes a normalized
+`{ operationId, kind, actor, payload }` command plus a `context.source`
+(`hermes` | `muse` | `server`), refuses a malformed id or shape, a forbidden
+payload key (any authority token — `member`, `amount`, `points`, `history`, … —
+or any credential token) and an unregistered kind, then dispatches to the
+handler registered via `registerInternalTaskCommandHandler`.
+`/api/tasks/manage`, `/api/tasks/claim` and `/api/tasks/approve` all execute
+through it. A new internal writer **registers a handler and calls this** — it
+never reaches PocketBase or the week row on its own, and it never infers a
+payee, amount or approval identity from untrusted tool arguments.
+**Wave 3 scope, explicitly NOT yet remediated:** the adjacent writers are still
+outside this seam and still write their own way — reward redemption
+(`POST /api/rewards/redeem` runs its own `withWeekLedgerLock` body instead of the
+shared ledger operation helper), the planner point adjustment, the Hermes/MUSE
+task writers (`complete_task` / `reopen_task` / `add_task` / `update_task`),
+briefing authority (morning briefing, assistant live reads, screensaver task
+progress) and all-time totals. Treat all of them as unremediated: never describe
+them as riding the command seam, and migrate them in Wave 3.
+
 **Parent-only admin auth (pets denied).** `authorizeAdminRequest`
 (`src/lib/admin-auth.ts`) is an **allowlist on `role === "parent"`**: a valid
 session that is child or pet is 403 `adult_only`, and a valid PIN belonging to a
