@@ -101,7 +101,7 @@ export default function LeaderboardRow({
           <div className="text-[11px] text-text-muted">pts</div>
         </div>
         {isAdmin && (
-          <IconButton size="sm" variant="ghost" aria-label="Adjust points" onClick={(e: React.MouseEvent) => { e.stopPropagation(); onAdjust(entry.name); }}>
+          <IconButton size="sm" variant="ghost" aria-label={`Adjust points for ${entry.name}`} onClick={(e: React.MouseEvent) => { e.stopPropagation(); onAdjust(entry.name); }}>
             ⚙️
           </IconButton>
         )}

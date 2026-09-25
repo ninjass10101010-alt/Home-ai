@@ -3,7 +3,12 @@ import {
   normalizeOperationId,
   normalizeTimestamp,
 } from "@/lib/task-operation-contract";
-import type { LedgerOperationMeta, LedgerOperationSource, Transaction } from "@/types/tasks";
+import type {
+  LedgerOperationAction,
+  LedgerOperationMeta,
+  LedgerOperationSource,
+  Transaction,
+} from "@/types/tasks";
 
 export const LEDGER_TRANSACTION_TYPES = [
   "earn",
@@ -20,10 +25,20 @@ export const LEDGER_OPERATION_SOURCES = [
   "reward-redeem",
   "planner-adjust",
   "task-undo",
+  "task-penalty",
+  "manual-adjust",
   "legacy-migration",
 ] as const satisfies readonly LedgerOperationSource[];
 
 const transactionTypes = new Set<Transaction["type"]>(LEDGER_TRANSACTION_TYPES);
+
+const ledgerOperationActions = new Set<LedgerOperationAction>([
+  "approve",
+  "approve-all",
+  "send-back",
+  "penalty",
+  "adjust",
+]);
 
 const ledgerOperationSources = new Set<LedgerOperationSource>(LEDGER_OPERATION_SOURCES);
 
@@ -46,7 +61,7 @@ function canonicalLedgerMeta(value: unknown): LedgerOperationMeta | null {
     return null;
   }
   if (actorId !== undefined && (typeof actorId !== "string" || !actorId.trim())) return null;
-  if (action !== undefined && action !== "approve" && action !== "approve-all" && action !== "send-back") return null;
+  if (action !== undefined && !ledgerOperationActions.has(action as LedgerOperationAction)) return null;
   if (taskIds !== undefined) {
     if (!Array.isArray(taskIds) || taskIds.length === 0 || taskIds.some((id) => !positiveSafeInteger(id))) return null;
     if (new Set(taskIds).size !== taskIds.length) return null;
@@ -56,7 +71,7 @@ function canonicalLedgerMeta(value: unknown): LedgerOperationMeta | null {
     source: source as LedgerOperationSource,
     ...(typeof fingerprint === "string" ? { fingerprint } : {}),
     ...(typeof actorId === "string" ? { actorId: actorId.trim() } : {}),
-    ...(action !== undefined ? { action } : {}),
+    ...(action !== undefined ? { action: action as LedgerOperationAction } : {}),
     ...(taskIds !== undefined ? { taskIds: [...taskIds].sort((left, right) => left - right) } : {}),
   };
 }

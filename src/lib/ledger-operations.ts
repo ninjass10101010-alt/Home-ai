@@ -15,6 +15,7 @@ import {
 } from "@/lib/task-operation-contract";
 import { withWeekLedgerLock } from "@/lib/week-ledger-lock";
 import type {
+  LedgerOperationAction,
   LedgerOperationInput,
   LedgerOperationSource,
   Transaction,
@@ -83,7 +84,7 @@ interface NormalizedLedgerOperation {
   source: LedgerOperationSource;
   fingerprint: string;
   actorId?: string;
-  action?: "approve" | "approve-all" | "send-back";
+  action?: LedgerOperationAction;
   taskIds?: number[];
   entries: NormalizedLedgerEntry[];
 }
@@ -91,6 +92,14 @@ interface NormalizedLedgerOperation {
 const transactionTypes = new Set<Transaction["type"]>(LEDGER_TRANSACTION_TYPES);
 
 const operationSources = new Set<LedgerOperationSource>(LEDGER_OPERATION_SOURCES);
+
+const operationActions = new Set<LedgerOperationAction>([
+  "approve",
+  "approve-all",
+  "send-back",
+  "penalty",
+  "adjust",
+]);
 
 function operationFingerprint(
   source: LedgerOperationSource,
@@ -228,7 +237,7 @@ function normalizeOperation(value: unknown): NormalizedLedgerOperation | null {
   const actorId = value.actorId;
   if (actorId !== undefined && (typeof actorId !== "string" || !actorId.trim())) return null;
   const action = value.action;
-  if (action !== undefined && action !== "approve" && action !== "approve-all" && action !== "send-back") return null;
+  if (action !== undefined && !operationActions.has(action as LedgerOperationAction)) return null;
   const taskIds = value.taskIds;
   if (taskIds !== undefined) {
     if (!Array.isArray(taskIds) || taskIds.length === 0 || taskIds.some((id) =>
@@ -244,7 +253,7 @@ function normalizeOperation(value: unknown): NormalizedLedgerOperation | null {
     source: source as LedgerOperationSource,
     fingerprint,
     ...(typeof actorId === "string" ? { actorId: actorId.trim() } : {}),
-    ...(action !== undefined ? { action } : {}),
+    ...(action !== undefined ? { action: action as LedgerOperationAction } : {}),
     ...(taskIds !== undefined ? { taskIds: [...taskIds].sort((left, right) => left - right) } : {}),
     entries,
   };

@@ -41,6 +41,24 @@ function installFetch() {
       if (url === "/api/tasks/config") {
         const body = init?.body ? JSON.parse(String(init.body)) : null;
         server.configRequests.push(body);
+        if (server.configStatus === 409) {
+          // The real route's stale answer: a stable 409 carrying the
+          // authoritative catalog, never a false 200.
+          return {
+            ok: false,
+            status: 409,
+            json: async () => ({
+              success: false,
+              error: "stale_config",
+              operationId: body?.operationId,
+              kind: body?.kind,
+              items: [],
+              updatedAt: "2026-09-24T10:00:00.000Z",
+              applied: false,
+              stale: true,
+            }),
+          };
+        }
         if (server.configStatus >= 400) {
           return { ok: false, status: server.configStatus, json: async () => ({ error: "config_store_unreachable" }) };
         }
@@ -204,6 +222,79 @@ describe("WeeklyPrizesCard writes a durable config command", () => {
     const entry = listTaskOutbox()[0];
     expect(entry).toMatchObject({ route: "/api/tasks/config", action: "replace", payload: { kind: "weekly-prizes" } });
     expect((entry.payload.items as any[])[0]).toMatchObject({ text: "Picks the movie" });
+  });
+});
+
+describe("Settings surfaces report the queue honestly", () => {
+  it("RewardSection shows the queued count and no success toast before acknowledgment", async () => {
+    server.configStatus = 503;
+    localStorage.setItem("consuela-rewards", JSON.stringify([]));
+    await mount(<RewardSection showToast={() => {}} />);
+    await settle();
+
+    (Array.from(document.querySelectorAll("button")).find((b) => b.textContent === "Add reward") as HTMLButtonElement).click();
+    await settle();
+    const input = document.querySelector('input[placeholder="e.g., 30 min screen time"]') as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+      setter.call(input, "Movie night");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      (Array.from(document.querySelectorAll("button")).find((b) => b.textContent === "Save") as HTMLButtonElement).click();
+    });
+    await settle(150);
+
+    // The parent can SEE that the change is still in flight.
+    expect(document.querySelector('[data-testid="rewards-command-queue"]')?.textContent).toMatch(/Sending 1 change/);
+    expect(loadRewards<any[]>([])).toEqual([]);
+  });
+
+  it("RewardSection surfaces a refusal with a discard action", async () => {
+    server.configStatus = 409;
+    localStorage.setItem("consuela-rewards", JSON.stringify([]));
+    await mount(<RewardSection showToast={() => {}} />);
+    await settle();
+
+    (Array.from(document.querySelectorAll("button")).find((b) => b.textContent === "Add reward") as HTMLButtonElement).click();
+    await settle();
+    const input = document.querySelector('input[placeholder="e.g., 30 min screen time"]') as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+      setter.call(input, "Movie night");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      (Array.from(document.querySelectorAll("button")).find((b) => b.textContent === "Save") as HTMLButtonElement).click();
+    });
+    await settle(250);
+
+    const failures = document.querySelector('[data-testid="rewards-command-failures"]');
+    expect(failures).not.toBeNull();
+    const discard = failures!.querySelector('[aria-label^="Discard unsaved"]') as HTMLButtonElement;
+    expect(discard).toBeTruthy();
+    await act(async () => { discard.click(); });
+    await settle(150);
+    expect(document.querySelector('[data-testid="rewards-command-failures"]')).toBeNull();
+  });
+
+  it("WeeklyPrizesCard shows the same honest queue surface", async () => {
+    server.configStatus = 503;
+    await mount(<WeeklyPrizesCard showToast={() => {}} />);
+    await settle();
+
+    const text = document.querySelector('input[aria-label="Prize 1 text"]') as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+      setter.call(text, "Picks the movie");
+      text.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      (Array.from(document.querySelectorAll("button")).find((b) => (b.textContent || "").includes("Save prizes")) as HTMLButtonElement).click();
+    });
+    await settle(150);
+
+    expect(document.querySelector('[data-testid="prizes-command-queue"]')?.textContent).toMatch(/Sending 1 change/);
   });
 });
 

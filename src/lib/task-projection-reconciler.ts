@@ -849,7 +849,12 @@ export async function reconcileTaskProjectionLocked(
         const markerWasPresent = Array.isArray(snapshot.data.pendingProjectionRepairs) && snapshot.data.pendingProjectionRepairs.some(
           (candidate) => candidate.operationId === marker.operationId,
         );
-        if (approvalMarker(ledger, snapshot.data, marker.operationId)) {
+        // A penalty/adjust marker projects the WEEK leg, which the ledger
+        // already owns; it is cleared by the next reconciled pull, never
+        // replayed as a task-row approval repair.
+        const markerIsApproval = marker.action === undefined ||
+          marker.action === "approve" || marker.action === "approve-all" || marker.action === "send-back";
+        if (markerIsApproval && approvalMarker(ledger, snapshot.data, marker.operationId)) {
           let projectionWasCurrent = false;
           try {
             projectionWasCurrent = await verifyProjectedTasks(pb, snapshot.data, markerTaskIds, postTaskRows);

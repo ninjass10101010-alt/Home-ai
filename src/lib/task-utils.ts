@@ -743,9 +743,12 @@ export function mergeTasksSnapshot(
         weekData = { ...currentWeekData, ...snapWk };
         weekChanged = true;
       }
-    } else if ((snapWk.history?.length || 0) > (currentWeekData.history?.length || 0)) {
-      // Same week, but another device recorded more transactions — adopt the
-      // richer weekData so cross-device points aren't lost.
+    } else {
+      // Same week: the server leg IS the ledger. There is deliberately NO
+      // history-length comparison here any more — with every write a durable
+      // command, a locally held transaction always has a queued command behind
+      // it, so a shorter server ledger is never "the server lost my row"; it is
+      // the server's answer and it wins.
       weekData = { ...currentWeekData, ...snapWk };
       weekChanged = true;
     }
@@ -786,6 +789,18 @@ export function applyTasksSnapshotToStores(snapshot: any): boolean {
   if (weekChanged) saveWeekData(weekData);
   if (deletedTaskIds?.length) saveDeletedTaskIds(deletedTaskIds);
   let changed = tasksChanged || weekChanged;
+  // Rewards leg: the same last-write-wins contract as the penalties and
+  // prizes legs. Without it the reward catalog was PULL-only, so a device that
+  // never wrote a config command could never learn the server's list.
+  if (
+    Array.isArray(snapshot.rewards) &&
+    typeof snapshot.rewardsUpdatedAt === "string" &&
+    snapshot.rewardsUpdatedAt > readRewardsStamp()
+  ) {
+    writeRewardsStamp(snapshot.rewardsUpdatedAt);
+    saveRewards(snapshot.rewards);
+    changed = true;
+  }
   if (
     Array.isArray(snapshot.penalties) &&
     typeof snapshot.penaltiesUpdatedAt === "string" &&
@@ -816,6 +831,18 @@ export function loadRewards<T>(fallback: T): T {
 
 export function saveRewards<T>(rewards: T): void {
   saveJSON(REWARDS_KEY, rewards);
+}
+
+// The rewards last-write-wins stamp lives under the key kid-store already
+// uses, so the two modules always agree on how fresh this device's catalog is.
+export const REWARDS_STAMP_KEY = "consuela-rewards-updatedAt";
+
+export function readRewardsStamp(): string {
+  return loadJSON<string>(REWARDS_STAMP_KEY, "");
+}
+
+export function writeRewardsStamp(stamp: string): void {
+  saveJSON(REWARDS_STAMP_KEY, stamp);
 }
 
 export function loadPenalties<T>(fallback: T): T {

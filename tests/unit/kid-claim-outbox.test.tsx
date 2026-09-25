@@ -301,6 +301,30 @@ describe("KidHome commands (durable outbox → notice → retry → confirm)", (
     expect(listTaskOutbox()[0].operationId).toBe(entry.operationId);
   });
 
+  it("a session-only undo transmits without any credential", async () => {
+    const calls = stubFetchWithClaims(["throw"]);
+    await renderAsync(<KidHome />);
+    await settle();
+    store.tasks = [{
+      ...QUEST,
+      completed: true,
+      completedBy: "Caspian Garcia",
+      completedAt: new Date().toISOString(),
+      completedInWeek: "2026-09-01",
+      pendingApproval: { byName: "Caspian Garcia", at: new Date().toISOString(), points: 10 },
+    }];
+    act(() => { window.dispatchEvent(new Event("consuela-data-refreshed")); });
+    await settle();
+    const cancel = document.querySelector(`[aria-label^="Cancel: ${QUEST.title}"]`) as HTMLElement;
+    expect(cancel).not.toBeNull();
+    await act(async () => { cancel.click(); });
+    await settle(150);
+
+    const undos = calls.filter((body) => body.action === "undo");
+    expect(undos.length).toBeGreaterThan(0);
+    expect(undos[0].pin).toBeUndefined();
+  });
+
   it("a 401 (expired kid session) holds the command as auth-required instead of hammering", async () => {
     const calls = stubFetchWithClaims([401]);
     const el = await renderAsync(<KidHome />);
@@ -368,7 +392,9 @@ describe("KidHome commands (durable outbox → notice → retry → confirm)", (
       completedInWeek: "2026-09-01",
       pendingApproval: { byName: "Caspian Garcia", at: new Date().toISOString(), points: 10 },
     }];
-    const calls = stubFetchWithClaims([200]);
+    // A dead network keeps the command queued so BOTH facts are visible at
+    // once: the body that actually went out, and that nothing local changed.
+    const calls = stubFetchWithClaims(["throw"]);
     const el = await renderAsync(<KidHome />);
     await settle();
 
@@ -377,7 +403,7 @@ describe("KidHome commands (durable outbox → notice → retry → confirm)", (
     const cancel = el.querySelector(`[aria-label^="Cancel: ${QUEST.title}"]`) as HTMLElement;
     expect(cancel).not.toBeNull();
     await act(async () => { cancel.click(); });
-    await settle();
+    await settle(150);
 
     // The reopen is a durable server undo queued FIRST. The pending row is
     // never cleared locally, so a lost command can never silently erase the
@@ -386,6 +412,17 @@ describe("KidHome commands (durable outbox → notice → retry → confirm)", (
     expect(entry).toMatchObject({ route: "/api/tasks/claim", action: "undo", payload: { taskId: QUEST.id } });
     expect(entry.payload.pin).toBeUndefined();
     expect(store.tasks[0].pendingApproval).toBeTruthy();
+    // The command really TRANSMITS: a PIN-free self-cancel sends a session
+    // undo body (no `pin` on the wire), never a claim.
+    const undos = calls.filter((body) => body.action === "undo" && body.taskId === QUEST.id);
+    expect(undos.length).toBeGreaterThan(0);
+    expect(undos[0]).toMatchObject({
+      action: "undo",
+      taskId: QUEST.id,
+      memberName: "Caspian Garcia",
+      operationId: entry.operationId,
+    });
+    expect(undos[0].pin).toBeUndefined();
     expect(claimCallsFor(calls, QUEST.id)).toHaveLength(0);
   });
 });

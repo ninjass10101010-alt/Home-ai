@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useSyncExternalStore } from "react";
 import { queueTaskCommandAndFlush } from "@/lib/task-command-queue";
+import { useTaskCommandQueue } from "@/hooks/useTaskCommandQueue";
 import SoftButton from "@/components/ui/SoftButton";
 import IconButton from "@/components/ui/IconButton";
 import Modal from "@/components/ui/Modal";
@@ -70,6 +71,11 @@ function queueRewardsCommand(action: "replace" | "upsert" | "delete", rest: Reco
 }
 
 export default function RewardSection({ showToast }: RewardSectionProps) {
+  // The Settings surface owns its OWN queue counters (it is never mounted at
+  // the same time as Tasks or KidHome), so a parent editing the catalog sees
+  // the command is still sending — and a refusal is visible, not swallowed.
+  const { entries, counts, cancel } = useTaskCommandQueue();
+  const failedEntries = entries.filter((entry) => entry.status === "failed");
   const rewards = useSyncExternalStore(
     subscribeToRewards,
     getRewardsSnapshot,
@@ -125,6 +131,43 @@ export default function RewardSection({ showToast }: RewardSectionProps) {
 
   return (
     <>
+      {counts.pending > 0 && (
+        <div
+          data-testid="rewards-command-queue"
+          className="mb-3 rounded-xl px-3 py-2 text-[11px] font-semibold"
+          style={{
+            background: "color-mix(in srgb, var(--color-accent-amber) 10%, transparent)",
+            border: "1px solid color-mix(in srgb, var(--color-accent-amber) 25%, transparent)",
+            color: "var(--color-accent-amber)",
+          }}
+        >
+          {counts.queued > 0
+            ? `⏳ Sending ${counts.queued} change${counts.queued !== 1 ? "s" : ""} to the family server…`
+            : ""}
+          {counts.authRequired > 0 ? " 🔒 Waiting on a PIN." : ""}
+          {counts.reconciling > 0 ? " ⏳ Finishing up." : ""}
+          {counts.failed > 0 ? " ⚠️ Couldn't be saved." : ""}
+        </div>
+      )}
+      {counts.failed > 0 && (
+        <ul data-testid="rewards-command-failures" className="mb-3 space-y-1">
+          {failedEntries.map((entry) => (
+            <li key={entry.operationId} className="flex items-center gap-2">
+              <span className="text-[11px] text-text-secondary">
+                {entry.displayTarget.title || entry.action}
+              </span>
+              <button
+                type="button"
+                aria-label={`Discard unsaved ${entry.displayTarget.title || entry.action}`}
+                onClick={() => cancel(entry.operationId)}
+                className="tap-sm text-[11px] font-semibold text-[var(--color-accent-rose)]"
+              >
+                Discard
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="space-y-3">
         {rewards.map((reward) => (
           <ListRow

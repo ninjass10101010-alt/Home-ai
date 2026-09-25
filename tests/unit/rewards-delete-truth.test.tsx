@@ -514,12 +514,11 @@ describe("RewardSection — every catalog write stamps the list", () => {
     await act(async () => { await new Promise((r) => setTimeout(r, 150)); });
 
     // The delete traveled as a durable config command and was acknowledged, so
-    // the outbox is empty. The catalog is NOT shortened here: an empty ack
-    // carries no catalog leg, so the shorter list arrives on the next pull —
-    // a lost command can never leave a phantom deletion behind, and a failed
-    // one can never delete.
+    // the outbox is empty and the catalog is the server's shorter list, adopted
+    // by the acknowledgment. A lost command leaves both rewards in place — the
+    // component never removes one on its own.
     expect(listTaskOutbox()).toHaveLength(0);
-    expect(loadRewards<any[]>([]).map((r) => r.name)).toEqual(["Ice cream", "Screen time"]);
+    expect(loadRewards<any[]>([]).map((r) => r.name)).toEqual(["Screen time"]);
     expect(JSON.parse(String((globalThis.fetch as any).mock.calls.at(-1)?.[1]?.body))).toMatchObject({
       kind: "rewards",
       action: "delete",

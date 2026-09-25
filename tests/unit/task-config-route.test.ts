@@ -345,7 +345,7 @@ describe("POST /api/tasks/config", () => {
     expect(harness.snapshot().operationReceipts).toEqual(snapshot.operationReceipts);
   });
 
-  it("does not resurrect a deleted reward with an older stamp", async () => {
+  it("refuses an older-stamp command as a stable 409 stale_config, never a false 200", async () => {
     const harness = makeHarness({
       rewards: [{ id: "stale-reward", name: "Stale", emoji: "🍿", cost: 10 }],
     });
@@ -359,14 +359,48 @@ describe("POST /api/tasks/config", () => {
       items: [{ name: "Old Movie", emoji: "🎬", cost: 50 }],
     });
 
-    expect(response.status).toBe(200);
+    // A command that lost the race is NOT an acknowledgment: the caller gets a
+    // stable 409 plus the AUTHORITATIVE catalog, so it can repair this device
+    // and tell the parent the truth instead of claiming a save.
+    expect(response.status).toBe(409);
     const body = await response.json();
+    expect(body).toMatchObject({
+      success: false,
+      error: "stale_config",
+      kind: "rewards",
+      applied: false,
+      stale: true,
+    });
     expect(body.items).toEqual([]);
     expect(body.updatedAt).toBe("2026-09-24T09:00:00.000Z");
-    expect(body.applied).toBe(false);
     expect(harness.writes.rewards.create).toHaveLength(0);
     expect(harness.writes.rewards.delete).toHaveLength(0);
     expect(harness.writes.snapshot).toHaveLength(0);
+  });
+
+  it("a 200 config acknowledgment carries kind, items, updatedAt, applied and stale", async () => {
+    const harness = makeHarness();
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+
+    const response = await postConfig({
+      operationId: "op-config-shape",
+      kind: "rewards",
+      action: "upsert",
+      updatedAt: "2026-09-24T12:00:00.000Z",
+      item: { id: 1, name: "Movie", emoji: "🎬", cost: 50 },
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      success: true,
+      kind: "rewards",
+      applied: true,
+      stale: false,
+      operationId: "op-config-shape",
+    });
+    expect(Array.isArray(body.items)).toBe(true);
+    expect(typeof body.updatedAt).toBe("string");
   });
 
   it.each([
@@ -830,12 +864,16 @@ describe("POST /api/tasks/config", () => {
       items: [],
     });
 
-    expect(response.status).toBe(200);
+    // The older-stamp command is stale, so the route answers 409 with the
+    // sanitized authoritative list; the sanitize repair itself still happened.
+    expect(response.status).toBe(409);
     const body = await response.json();
     expect(body).toMatchObject({
+      success: false,
+      error: "stale_config",
       applied: false,
+      stale: true,
       updatedAt: "2026-09-24T11:00:00.000Z",
-      revision: { revision: "6" },
     });
     expect(body.items[0].emoji).toBe("👤");
     expect(harness.snapshot().rewards[0].emoji).toBe("👤");
@@ -1395,7 +1433,9 @@ describe("reward action runner", () => {
       // outbox seam is pinned in config-outbox-callers.test.tsx; what matters
       // here is that the runner reports the queued state honestly.
       expect(result.success).toBe(true);
-      expect(result.message).toContain("saving to the family server");
+      // Outside a browser the durable store is a no-op, so the honest report
+      // is "queued" — never a claim that the server took it.
+      expect(result.message).toMatch(/Queued reward|saving to the family server/);
       expect(loadRewards<any[]>([])).toEqual([]);
     } finally {
       vi.unstubAllGlobals();
@@ -1431,7 +1471,9 @@ describe("reward action runner", () => {
       const { runAction } = await import(/* @vite-ignore */ "@/lib/action-runner");
       const result = await runAction({ type: "reward", title: "Movie", detail: "50 pts" });
       expect(result.success).toBe(true);
-      expect(result.message).toContain("saving to the family server");
+      // Outside a browser the durable store is a no-op, so the honest report
+      // is "queued" — never a claim that the server took it.
+      expect(result.message).toMatch(/Queued reward|saving to the family server/);
       expect(loadRewards<any[]>([])).toEqual([]);
     } finally {
       vi.unstubAllGlobals();

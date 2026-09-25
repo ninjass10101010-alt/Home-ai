@@ -36,11 +36,14 @@ import {
 } from "@/lib/task-commands";
 import type {
   LedgerEntryInput,
+  LedgerOperationAction,
   Transaction,
   WeekData,
 } from "@/types/tasks";
 
 export type ApproveAction = "approve" | "approve-all" | "send-back";
+
+const APPROVAL_REPAIR_ACTIONS = new Set<string>(["approve", "approve-all", "send-back"]);
 
 export interface ApproveCommand {
   operationId: string;
@@ -1671,7 +1674,11 @@ export interface ApprovalRepairOptions {
   weekStart: string;
   operationId: string;
   taskIds?: number[];
-  action?: ApproveAction;
+  // A projection-repair marker can name any ledger action (a penalty or a
+  // manual adjust projects the WEEK leg, not a task row). Only the three
+  // approval actions are replayed as task repairs; the caller must filter the
+  // rest before calling.
+  action?: LedgerOperationAction;
   actorId?: string;
   fingerprint?: string;
   preloadedTaskRows?: TaskRowCache;
@@ -1704,9 +1711,10 @@ function repairIntentFromEvidence(
   options: ApprovalRepairOptions,
   receipts: SnapshotOperationReceipt[],
   transactions: Transaction[],
+  approvedAction?: ApproveAction,
 ): ApprovalIntent | undefined {
   const optionActor = typeof options.actorId === "string" && options.actorId.trim() ? options.actorId.trim() : undefined;
-  const optionAction = options.action;
+  const optionAction = approvedAction;
   const optionFingerprint = typeof options.fingerprint === "string" && /^[a-f0-9]{64}$/.test(options.fingerprint)
     ? options.fingerprint
     : undefined;
@@ -1757,8 +1765,15 @@ export async function repairApprovalOperationLocked(
 ): Promise<ApprovalServiceResult> {
   const operationId = normalizeOperationId(options?.operationId) ?? "";
   const weekStart = canonicalWeekStart(options?.weekStart) ?? "";
+  const requestedAction = options.action;
+  const action: ApproveAction = requestedAction !== undefined && APPROVAL_REPAIR_ACTIONS.has(requestedAction)
+    ? requestedAction as ApproveAction
+    : "approve";
   if (!operationId || !weekStart) {
-    return failure(operationId, "approve", "invalid_task_state", emptyWeekData(localWeekStartISO()));
+    return failure(operationId, action, "invalid_task_state", emptyWeekData(localWeekStartISO()));
+  }
+  if (requestedAction !== undefined && !APPROVAL_REPAIR_ACTIONS.has(requestedAction)) {
+    return repairRequiredFailure(operationId, "approve", emptyWeekData(weekStart));
   }
 
   try {
@@ -1768,9 +1783,16 @@ export async function repairApprovalOperationLocked(
     const operationTransactions = search.allTransactions.filter(
       (transaction) => transaction.meta?.operationId === operationId,
     );
-    const intent = repairIntentFromEvidence(options, receipts, operationTransactions);
+    // When the marker named no action, the evidence decides it (a send-back
+    // marker often carries none) — only a NAMED action constrains inference.
+    const intent = repairIntentFromEvidence(
+      options,
+      receipts,
+      operationTransactions,
+      requestedAction === undefined ? undefined : action,
+    );
     if (!intent) {
-      return repairRequiredFailure(operationId, options.action ?? "approve", search.currentWeek);
+      return repairRequiredFailure(operationId, action, search.currentWeek);
     }
     if (options.taskIds?.length && JSON.stringify([...options.taskIds].sort((left, right) => left - right)) !== JSON.stringify(intent.taskIds)) {
       return failure(operationId, intent.action, "operation_conflict", search.currentWeek);
@@ -1878,7 +1900,7 @@ export async function repairApprovalOperationLocked(
       options.preloadedTaskRows,
     );
   } catch {
-    return failure(operationId, options.action ?? "approve", "task_store_unavailable", emptyWeekData(localWeekStartISO()));
+    return failure(operationId, action, "task_store_unavailable", emptyWeekData(localWeekStartISO()));
   }
 }
 
@@ -1893,8 +1915,15 @@ export async function repairApprovalOperation(
   }
   const operationId = normalizeOperationId(options?.operationId) ?? "";
   const weekStart = canonicalWeekStart(options?.weekStart) ?? "";
+  const requestedAction = options.action;
+  const action: ApproveAction = requestedAction !== undefined && APPROVAL_REPAIR_ACTIONS.has(requestedAction)
+    ? requestedAction as ApproveAction
+    : "approve";
   if (!operationId || !weekStart) {
-    return failure(operationId, "approve", "invalid_task_state", emptyWeekData(localWeekStartISO()));
+    return failure(operationId, action, "invalid_task_state", emptyWeekData(localWeekStartISO()));
+  }
+  if (requestedAction !== undefined && !APPROVAL_REPAIR_ACTIONS.has(requestedAction)) {
+    return repairRequiredFailure(operationId, "approve", emptyWeekData(weekStart));
   }
   try {
     const taskIds = await withAdmin(async (pb) => {

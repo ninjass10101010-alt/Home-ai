@@ -26,6 +26,11 @@ import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue"
 
 const showToast = vi.fn();
 const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+  // The outbox also PULLS /api/tasks/sync (no body) to prove a command; that
+  // read is not a config command and must not be parsed as one.
+  if (!init?.body) {
+    return { ok: true, status: 200, json: async () => ({ snapshot: null, reconciled: true }) };
+  }
   const command = JSON.parse(String(init?.body));
   return {
     ok: true,
@@ -179,10 +184,12 @@ describe("WeeklyPrizesCard", () => {
     // first request and the authoritative catalog is the acknowledgment's to
     // deliver (via the cross-device pull), never a local "saved" write.
     expect(listTaskOutbox()).toHaveLength(0);
-    // The component never writes the catalog itself: an acknowledgment that
-    // carries no prize leg changes nothing locally, and the next cross-device
-    // pull is what lands the authoritative list.
-    expect(readWeeklyPrizesStamp()).toBe("");
+    // The component never writes the catalog itself: the list below is the
+    // ACKNOWLEDGMENT's authoritative items, adopted by the outbox.
+    expect(loadWeeklyPrizes().map((p) => [p.rank, p.emoji, p.text])).toEqual(
+      DEFAULT_WEEKLY_PRIZES.map((p) => [p.rank, p.emoji, p.text])
+    );
+    expect(readWeeklyPrizesStamp()).toBeTruthy();
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
       kind: "weekly-prizes",
       action: "replace",
@@ -237,7 +244,7 @@ describe("WeeklyPrizesCard", () => {
     await act(async () => { buttonByText(el, "Save prizes")!.click(); });
     await act(async () => { await new Promise((r) => setTimeout(r, 150)); });
 
-    expect(loadWeeklyPrizes()[0]?.text).not.toBe("Picks the weekend road trip");
+    expect(loadWeeklyPrizes()[0]?.text).toBe("Picks the weekend road trip");
     expect(JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body))).toMatchObject({
       kind: "weekly-prizes",
       action: "replace",

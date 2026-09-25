@@ -105,7 +105,7 @@ describe("mergeTasksSnapshot (pure restore guards — same contract as the Tasks
     expect(landed[0].title).toBe("Tidy the playroom");
   });
 
-  it("adopts a NEWER week and a richer same-week history, ignores a poorer or OLDER week", () => {
+  it("adopts a NEWER week, always adopts the same-week server leg, refuses an OLDER week", () => {
     const local = emptyWeekData(); // current week, empty history
     // Older snapshot week: a device that missed the Monday rollover. Adopting
     // it would resurrect last week's points into the fresh week — refused.
@@ -119,9 +119,13 @@ describe("mergeTasksSnapshot (pure restore guards — same contract as the Tasks
     expect(richRes.weekChanged).toBe(true);
     expect(richRes.weekData.history).toHaveLength(1);
 
-    const poorer = mergeTasksSnapshot([], richer, { weekData: local });
-    expect(poorer.weekChanged).toBe(false);
-    expect(poorer.weekData).toBe(richer);
+    // Task 10: the same-week server leg is authoritative even when it is
+    // SHORTER. Every ledger write is a durable command, so a locally held
+    // transaction always has a queued command behind it and a shorter server
+    // ledger is the server's answer — not evidence of a lost local row.
+    const serverShorter = mergeTasksSnapshot([], richer, { weekData: local });
+    expect(serverShorter.weekChanged).toBe(true);
+    expect(serverShorter.weekData.history).toHaveLength(0);
   });
 });
 
@@ -142,19 +146,22 @@ describe("applyTasksSnapshotToStores (the 60s refresh seam into localStorage)", 
     expect(stored.map((t: any) => t.title)).toEqual(expect.arrayContaining(["Dishes", "Feed the fish"]));
   });
 
-  it("a no-change refresh leaves the stores byte-identical (never clobbers local state)", () => {
+  it("a no-change task refresh rewrites the identical week leg (no task churn)", () => {
     saveTasks([makeTask({ id: 1, title: "Dishes" })]);
     saveWeekData(emptyWeekData());
     const rawTasks = localStorage.getItem(TASKS_STORAGE_KEY);
-    const rawWeek = localStorage.getItem(WEEK_DATA_KEY);
+    const week = emptyWeekData();
 
     const changed = applyTasksSnapshotToStores({
       tasks: [{ id: 1, title: "Dishes" }],
-      weekData: emptyWeekData(),
+      weekData: week,
     });
-    expect(changed).toBe(false);
+    // The task leg is byte-identical, so no task write happens. The week leg is
+    // always re-adopted (it is the server's), so `changed` is honestly true:
+    // the ledger was re-adopted, even though it carried the same values.
     expect(localStorage.getItem(TASKS_STORAGE_KEY)).toBe(rawTasks);
-    expect(localStorage.getItem(WEEK_DATA_KEY)).toBe(rawWeek);
+    expect(changed).toBe(true);
+    expect(JSON.parse(localStorage.getItem(WEEK_DATA_KEY)!)).toEqual(week);
   });
 
   it("persists a richer same-week history so cross-device points land", () => {

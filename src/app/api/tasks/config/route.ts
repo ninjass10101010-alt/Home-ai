@@ -9,6 +9,7 @@ import {
   type TaskConfigItem,
   type TaskConfigKind,
   type TaskConfigResponse,
+  type TaskConfigStaleResponse,
 } from "@/lib/task-config";
 import {
   mutateSnapshotConfig,
@@ -22,6 +23,7 @@ export const dynamic = "force-dynamic";
 
 type ConfigRouteOutcome =
   | { response: TaskConfigResponse }
+  | { stale: TaskConfigStaleResponse }
   | { conflict: true; operationId: string };
 
 function configKey(kind: TaskConfigKind, item: TaskConfigItem): string {
@@ -132,6 +134,23 @@ export async function POST(request: NextRequest) {
             if (clearedRevision) responseRevision = clearedRevision;
           }
         }
+        if (mutation.stale) {
+          // The command was refused as STALE rather than quietly accepted: the
+          // stored catalog moved past this write, so the caller is handed the
+          // authoritative items and a stable 409 it can surface honestly.
+          return {
+            stale: {
+              success: false,
+              error: "stale_config",
+              operationId: command.operationId,
+              kind: command.kind,
+              items: mutation.items,
+              updatedAt: mutation.updatedAt,
+              applied: false,
+              stale: true,
+            },
+          };
+        }
         const bodyResponse: TaskConfigResponse = {
           success: true,
           operationId: command.operationId,
@@ -140,6 +159,7 @@ export async function POST(request: NextRequest) {
           updatedAt: mutation.updatedAt,
           revision: responseRevision,
           applied: mutation.applied,
+          stale: false,
         };
         return { response: bodyResponse };
       })
@@ -150,6 +170,9 @@ export async function POST(request: NextRequest) {
         error: "operation_conflict",
         operationId: outcome.operationId,
       }, { status: 409 });
+    }
+    if ("stale" in outcome) {
+      return NextResponse.json(outcome.stale, { status: 409 });
     }
     return NextResponse.json(outcome.response);
   } catch (error) {

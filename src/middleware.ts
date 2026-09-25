@@ -32,6 +32,10 @@ const API_EXEMPT = [
   // "family completes tasks but points don't show" bug.
   "/api/tasks/claim",
   "/api/tasks/approve",
+  // Parent-PIN gated ledger command (penalty / manual adjust). Like the
+  // approval route it self-authenticates on the member PIN so a guest device
+  // can never reach it, and it hard-requires role === "parent".
+  "/api/tasks/ledger",
   "/api/members/verify",
 ];
 

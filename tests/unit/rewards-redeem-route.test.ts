@@ -39,11 +39,13 @@ function makePb(opts?: {
   rewards?: any[] | null;
   points?: Record<string, number>;
   history?: any[];
+  members?: Array<{ name: string; role: string }>;
 }) {
   const rewardRows =
     opts?.rewards === null
       ? []
       : opts?.rewards ?? [{ id: "r1", name: "Movie night", emoji: "🎬", cost: 150 }];
+  const memberRows = opts?.members ?? [{ name: "Rebecca Garcia", role: "parent" }];
   const weekRow = {
     id: "w1",
     weekStart: currentWeekKey(),
@@ -57,6 +59,9 @@ function makePb(opts?: {
     writes,
     pb: {
       collection: (name: string) => {
+        if (name === "members") {
+          return { getFullList: async () => memberRows };
+        }
         if (name === "rewards") {
           return { getFullList: async () => rewardRows };
         }
@@ -83,8 +88,20 @@ function makePb(opts?: {
 beforeEach(() => {
   mocks.withAdmin.mockReset();
   mocks.verifyPinFromPB.mockReset();
-  mocks.verifyPinFromPB.mockResolvedValue({ id: "k", name: "Caspian Garcia", role: "child", emoji: "🧒" });
+  // The member PIN verifies the redeeming child; a PARENT pin only matches a
+  // parent, so the >100pt gate has something real to check.
+  mocks.verifyPinFromPB.mockImplementation(async (name: string, pin: string) => {
+    if (pin === "9090" && /rebecca/i.test(name)) {
+      return { id: "p", name: "Rebecca Garcia", role: "parent", emoji: "👩" };
+    }
+    if (pin === "1010") {
+      return { id: "k", name: "Caspian Garcia", role: "child", emoji: "🧒" };
+    }
+    return null;
+  });
 });
+
+const CHEAP_REWARD = [{ id: "r-cheap", name: "Ice cream", emoji: "🍦", cost: 15 }];
 
 describe("POST /api/rewards/redeem", () => {
   it("deducts the SERVER cost and ignores the client-supplied cost", async () => {
@@ -92,7 +109,7 @@ describe("POST /api/rewards/redeem", () => {
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
 
     const res = await POST(
-      jsonReq({ rewardId: "r1", memberName: "Caspian", pin: "1010", cost: 1 })
+      jsonReq({ rewardId: "r1", memberName: "Caspian", pin: "1010", parentPin: "9090", cost: 1 })
     );
 
     expect(res.status).toBe(200);
@@ -105,46 +122,77 @@ describe("POST /api/rewards/redeem", () => {
   });
 
   it("writes a transaction matching the app's redeem shape", async () => {
-    const { pb, writes } = makePb();
+    const { pb, writes } = makePb({ rewards: CHEAP_REWARD });
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
 
-    await POST(jsonReq({ rewardId: "r1", memberName: "Caspian", pin: "1010" }));
+    await POST(jsonReq({ rewardId: "r-cheap", memberName: "Caspian", pin: "1010" }));
 
     const tx = writes[0].history.at(-1);
     expect(typeof tx.id).toBe("number");
     expect(typeof tx.timestamp).toBe("string");
     expect(tx.member).toBe("Caspian Garcia");
     expect(tx.type).toBe("redeem");
-    expect(tx.amount).toBe(-150);
-    expect(tx.description).toContain("Movie night");
-    expect(tx.description).toMatch(/Redeemed:/);
-    expect(tx.description).toBe("Redeemed: Movie night (-150pts)");
+    expect(tx.amount).toBe(-15);
+    expect(tx.description).toBe("Redeemed: Ice cream (-15pts)");
   });
 
   it("resolves a reward by name when the client id is not the PB row id", async () => {
-    const { pb, writes } = makePb();
+    const { pb, writes } = makePb({ rewards: CHEAP_REWARD });
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
 
     const res = await POST(
-      jsonReq({ rewardId: "reward-1699", rewardName: "Movie night", memberName: "Caspian", pin: "1010" })
+      jsonReq({ rewardId: "reward-1699", rewardName: "Ice cream", memberName: "Caspian", pin: "1010" })
     );
 
     expect(res.status).toBe(200);
-    expect(writes[0].history.at(-1).amount).toBe(-150);
+    expect(writes[0].history.at(-1).amount).toBe(-15);
   });
 
   it("rejects insufficient points with 400 and an honest 'needs N more pts' message", async () => {
-    const { pb, writes } = makePb({ points: { "Caspian Garcia": 40 } });
+    const { pb, writes } = makePb({ rewards: CHEAP_REWARD, points: { "Caspian Garcia": 4 } });
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
 
-    const res = await POST(jsonReq({ rewardId: "r1", memberName: "Caspian", pin: "1010" }));
+    const res = await POST(jsonReq({ rewardId: "r-cheap", memberName: "Caspian", pin: "1010" }));
 
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.ok).toBe(false);
     expect(body.reason).toBe("insufficient");
-    expect(body.error).toMatch(/needs 110 more pts/);
+    expect(body.error).toMatch(/needs 11 more pts/);
     expect(writes).toHaveLength(0);
+  });
+
+  it("refuses a >100pt reward with no parent PIN (the gate is server-side, not client-side)", async () => {
+    const { pb, writes } = makePb();
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ rewardId: "r1", memberName: "Caspian", pin: "1010" }));
+
+    expect(res.status).toBe(401);
+    expect((await res.json()).reason).toBe("parent_pin_required");
+    expect(writes).toHaveLength(0);
+  });
+
+  it("refuses a >100pt reward whose parent PIN is wrong", async () => {
+    const { pb, writes } = makePb();
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(
+      jsonReq({ rewardId: "r1", memberName: "Caspian", pin: "1010", parentPin: "0000" }),
+    );
+
+    expect(res.status).toBe(401);
+    expect(writes).toHaveLength(0);
+  });
+
+  it("never needs a parent PIN at or below the threshold", async () => {
+    const { pb, writes } = makePb({ rewards: [{ id: "r-edge", name: "Big treat", emoji: "🍕", cost: 100 }] });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ rewardId: "r-edge", memberName: "Caspian", pin: "1010" }));
+
+    expect(res.status).toBe(200);
+    expect(writes).toHaveLength(1);
   });
 
   it("returns 404 for an unknown reward", async () => {
@@ -181,20 +229,21 @@ describe("POST /api/rewards/redeem", () => {
 
   it("rejects a duplicate redeem of the same reward within 60s with 409", async () => {
     const { pb, writes } = makePb({
+      rewards: CHEAP_REWARD,
       history: [
         {
           id: 111,
           timestamp: new Date().toISOString(),
           member: "Caspian Garcia",
           type: "redeem",
-          amount: -150,
-          description: "Redeemed: Movie night (-150pts)",
+          amount: -15,
+          description: "Redeemed: Ice cream (-15pts)",
         },
       ],
     });
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
 
-    const res = await POST(jsonReq({ rewardId: "r1", memberName: "Caspian", pin: "1010" }));
+    const res = await POST(jsonReq({ rewardId: "r-cheap", memberName: "Caspian", pin: "1010" }));
 
     expect(res.status).toBe(409);
     expect((await res.json()).reason).toBe("duplicate");
@@ -203,20 +252,21 @@ describe("POST /api/rewards/redeem", () => {
 
   it("allows a second redeem after the 60s dedupe window", async () => {
     const { pb, writes } = makePb({
+      rewards: CHEAP_REWARD,
       history: [
         {
           id: 111,
           timestamp: new Date(Date.now() - 61_000).toISOString(),
           member: "Caspian Garcia",
           type: "redeem",
-          amount: -150,
-          description: "Redeemed: Movie night (-150pts)",
+          amount: -15,
+          description: "Redeemed: Ice cream (-15pts)",
         },
       ],
     });
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
 
-    const res = await POST(jsonReq({ rewardId: "r1", memberName: "Caspian", pin: "1010" }));
+    const res = await POST(jsonReq({ rewardId: "r-cheap", memberName: "Caspian", pin: "1010" }));
 
     expect(res.status).toBe(200);
     expect(writes[0].history).toHaveLength(2);
@@ -234,8 +284,8 @@ describe("POST /api/rewards/redeem", () => {
       timestamp: new Date().toISOString(),
       member: "Caspian Garcia",
       type: "redeem",
-      amount: -50,
-      description: "Redeemed: Sticker pack (-50pts)",
+      amount: -20,
+      description: "Redeemed: Sticker pack (-20pts)",
     };
     let stored: any = {
       id: "w1",
@@ -246,10 +296,14 @@ describe("POST /api/rewards/redeem", () => {
       history: JSON.stringify([]),
     };
     let updates = 0;
+    const memberRows = [{ name: "Rebecca Garcia", role: "parent" }];
     const pb = {
       collection: (name: string) => {
+        if (name === "members") {
+          return { getFullList: async () => memberRows };
+        }
         if (name === "rewards") {
-          return { getFullList: async () => [{ id: "r1", name: "Movie night", emoji: "🎬", cost: 150 }] };
+          return { getFullList: async () => CHEAP_REWARD };
         }
         return {
           getFullList: async () => [stored],
@@ -262,7 +316,7 @@ describe("POST /api/rewards/redeem", () => {
             stored = clobber
               ? {
                   ...stored,
-                  points: JSON.stringify({ "Caspian Garcia": 150 }),
+                  points: JSON.stringify({ "Caspian Garcia": 180 }),
                   history: JSON.stringify([otherTx]),
                 }
               : { ...payload, id: stored.id, weekStart };
@@ -282,7 +336,7 @@ describe("POST /api/rewards/redeem", () => {
     const { pb, updates, stored } = makeClobberingPb({ clobberEveryWrite: false });
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
 
-    const res = await POST(jsonReq({ rewardId: "r1", memberName: "Caspian", pin: "1010" }));
+    const res = await POST(jsonReq({ rewardId: "r-cheap", memberName: "Caspian", pin: "1010" }));
 
     expect(res.status).toBe(200);
     expect((await res.json()).ok).toBe(true);
@@ -290,17 +344,18 @@ describe("POST /api/rewards/redeem", () => {
     const raw = stored();
     const finalHistory = Array.isArray(raw.history) ? raw.history : JSON.parse(raw.history);
     const amounts = finalHistory.map((t: any) => t.amount);
-    expect(amounts).toContain(-50); // the concurrent writer's deduction
-    expect(amounts).toContain(-150); // ours
+    expect(amounts).toContain(-20); // the concurrent writer's deduction
+    expect(amounts).toContain(-15); // ours
     const finalPoints = typeof raw.points === "string" ? JSON.parse(raw.points) : raw.points;
-    expect(finalPoints["Caspian Garcia"]).toBe(0);
+    // 200 start, minus the concurrent writer's 20 and our 15.
+    expect(finalPoints["Caspian Garcia"]).toBe(165);
   });
 
   it("returns 409 conflict without a false success when every write is clobbered", async () => {
     const { pb, updates } = makeClobberingPb({ clobberEveryWrite: true });
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
 
-    const res = await POST(jsonReq({ rewardId: "r1", memberName: "Caspian", pin: "1010" }));
+    const res = await POST(jsonReq({ rewardId: "r-cheap", memberName: "Caspian", pin: "1010" }));
 
     expect(res.status).toBe(409);
     const body = await res.json();

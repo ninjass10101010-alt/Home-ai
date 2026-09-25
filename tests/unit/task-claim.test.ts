@@ -813,6 +813,130 @@ describe("POST /api/tasks/claim — server-authoritative assigned completions", 
     expect(reopenPatch).toBeTruthy();
   });
 
+  // Task 10 B1: a session-only undo is a KID'S self-cancel of their own
+  // pending tap. A paid undo (one that reverses real points) is a different,
+  // more dangerous command and must never be reachable without the member PIN.
+  describe("session-only undo is a child self-cancel, never a paid undo", () => {
+    const pendingRow = {
+      universal: false,
+      completed: true,
+      status: "done",
+      completedBy: "Caspian Garcia",
+      completedInWeek: mondayISO(),
+      pendingApproval: { byName: "Caspian Garcia", at: "2026-09-19T18:00:00.000Z", points: 5 },
+    };
+    const paidRow = (completedBy: string) => ({
+      universal: false,
+      completed: true,
+      status: "done",
+      completedBy,
+      completedInWeek: mondayISO(),
+      assignee: completedBy,
+    });
+    const paidHistory = (member: string) => JSON.stringify([
+      {
+        id: 1,
+        timestamp: "2026-09-18T10:00:00.000Z",
+        member,
+        type: "earn",
+        amount: 8,
+        description: "Completed: Dishes (+8pts)",
+        taskId: 42,
+      },
+    ]);
+
+    it("a child's session self-cancel of their OWN pending tap reopens with no PIN", async () => {
+      const { pb, updateCalls } = makePb({ taskPoints: 5, taskRow: pendingRow });
+      mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+      mocks.verifySession.mockResolvedValue({ memberId: "child-caspian", name: "Caspian Garcia", role: "child" });
+
+      const res = await POST(
+        jsonReq({ action: "undo", taskId: 42, memberName: "Caspian Garcia" }, "session-caspian"),
+      );
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ success: true, action: "undo" });
+      // A session self-cancel never touches the ledger: no points existed yet.
+      expect(updateCalls.week_data ?? []).toHaveLength(0);
+      expect(updateCalls.tasks.some((patch: any) => patch.completed === false)).toBe(true);
+      expect(mocks.verifyPinFromPB).not.toHaveBeenCalled();
+    });
+
+    it("a PARENT paid undo with authentication session and no PIN is refused", async () => {
+      const { pb, updateCalls, weekUpdates } = makePb({
+        taskPoints: 8,
+        taskRow: paidRow("Alex"),
+        weekHistory: paidHistory("Alex"),
+      });
+      mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+      mocks.verifySession.mockResolvedValue({ memberId: "parent-alex", name: "Alex", role: "parent" });
+
+      const res = await POST(
+        jsonReq({ action: "undo", taskId: 42, memberName: "Alex" }, "session-alex"),
+      );
+
+      expect(res.status).toBe(401);
+      const body = await res.json();
+      expect(body).toMatchObject({ success: false, reason: "pin_required" });
+      // No ledger write, no row reopen: nothing moved.
+      expect(weekUpdates()).toBeNull();
+      expect(updateCalls.tasks).toHaveLength(0);
+    });
+
+    it("a CHILD paid undo with authentication session and no PIN is refused", async () => {
+      // Bailey is 12: a paid reversal is a real point movement, so it needs a
+      // PIN even from the kid's own session.
+      const { pb, updateCalls, weekUpdates } = makePb({
+        taskPoints: 8,
+        taskRow: paidRow("Bailey Garcia"),
+        weekHistory: paidHistory("Bailey Garcia"),
+      });
+      mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+      mocks.verifySession.mockResolvedValue({ memberId: "child-bailey", name: "Bailey Garcia", role: "child" });
+
+      const res = await POST(
+        jsonReq({ action: "undo", taskId: 42, memberName: "Bailey Garcia" }, "session-bailey"),
+      );
+
+      expect(res.status).toBe(401);
+      expect(await res.json()).toMatchObject({ success: false, reason: "pin_required" });
+      expect(weekUpdates()).toBeNull();
+      expect(updateCalls.tasks).toHaveLength(0);
+    });
+
+    it("a session undo of ANOTHER kid's pending tap is refused", async () => {
+      const { pb, updateCalls } = makePb({ taskPoints: 5, taskRow: pendingRow });
+      mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+      mocks.verifySession.mockResolvedValue({ memberId: "child-bailey", name: "Bailey Garcia", role: "child" });
+
+      const res = await POST(
+        jsonReq({ action: "undo", taskId: 42, memberName: "Caspian Garcia" }, "session-bailey"),
+      );
+
+      // The session actor is Bailey but the body names Caspian: the route
+      // refuses the mismatch before any write.
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ success: false, reason: "unknown_actor" });
+      expect(updateCalls.tasks).toHaveLength(0);
+    });
+
+    it("a paid undo WITH the member PIN still works (the PIN path is untouched)", async () => {
+      const { pb, updateCalls } = makePb({
+        taskPoints: 8,
+        taskRow: paidRow("Alex"),
+        weekHistory: paidHistory("Alex"),
+      });
+      mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+      const res = await POST(
+        jsonReq({ action: "undo", taskId: 42, memberName: "Alex", pin: "1234" }),
+      );
+
+      expect(res.status).toBe(200);
+      expect(updateCalls.week_data?.[0]?.history.some((t: any) => t.type === "adjust" && t.amount === -8)).toBe(true);
+    });
+  });
+
   it("pending undo (unpaid kid tap) stamps sentBackAt on BOTH the collection row and the snapshot", async () => {
     const { pb, updateCalls, snapshotUpdates } = makePb({
       taskPoints: 5,
@@ -950,19 +1074,24 @@ describe("POST /api/tasks/claim — snapshot authority and replay", () => {
       completedInWeek: mondayISO(),
       pendingApproval: { byName: "Caspian Garcia", at: "2026-09-24T10:00:00.000Z", points: 5 },
     };
-    const { pb, updateCalls } = makePb({ taskPoints: 5, taskRow: task, snapshotTasks: [task] });
-    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
     mocks.verifySession.mockImplementation(async (token?: string) =>
       token === "member-a"
         ? { role: "child", name: "Caspian", memberId: "child-caspian" }
         : { role: "child", name: "Bailey", memberId: "child-bailey" }
     );
 
+    // Each attempt reads a fresh still-pending row, so the second refusal is
+    // about WHO is asking (not about the row having been reopened).
+    const firstPb = makePb({ taskPoints: 5, taskRow: task, snapshotTasks: [task] });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(firstPb.pb));
     const first = await POST(jsonReq({
       action: "undo",
       operationId: "op-undo-a",
       taskId: 55,
     }, "member-a"));
+
+    const secondPb = makePb({ taskPoints: 5, taskRow: task, snapshotTasks: [task] });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(secondPb.pb));
     const second = await POST(jsonReq({
       action: "undo",
       operationId: "op-undo-b",
@@ -971,7 +1100,8 @@ describe("POST /api/tasks/claim — snapshot authority and replay", () => {
 
     expect(first.status).toBe(200);
     expect(second.status).toBe(403);
-    expect(updateCalls.week_data).toBeUndefined();
+    expect(firstPb.updateCalls.week_data).toBeUndefined();
+    expect(secondPb.updateCalls.tasks).toHaveLength(0);
   });
 
   it("rejects removed crew names and preserves tombstones", async () => {

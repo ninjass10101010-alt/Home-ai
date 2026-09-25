@@ -11,6 +11,7 @@ import {
   registerTaskOutboxDriver,
   requestTaskOutboxFlush,
   resolveTaskOutboxCredential,
+  onTaskOutboxAcknowledged,
   subscribeTaskOutbox,
   type FlushTaskOutboxResult,
   type SnapshotRead,
@@ -28,6 +29,7 @@ export interface UseTaskOperationOutboxOptions {
 
 export interface UseTaskOperationOutboxResult {
   entries: TaskOutboxEntry[];
+  onAcknowledged: (listener: (acknowledgement: { operationId?: string }) => void) => () => void;
   pending: number;
   queued: number;
   reconciling: number;
@@ -88,6 +90,10 @@ export function useTaskOperationOutbox(
 
   const flush = useCallback(() => requestTaskOutboxFlush(), []);
   const cancel = useCallback((operationId: string) => cancelTaskOutboxEntry(operationId), []);
+  const onAcknowledged = useCallback(
+    (listener: (acknowledgement: { operationId?: string }) => void) => onTaskOutboxAcknowledged(listener),
+    [],
+  );
 
   return useMemo<UseTaskOperationOutboxResult>(() => {
     const reconciling = entries.filter((entry) => entry.status === "reconciling").length;
@@ -102,6 +108,7 @@ export function useTaskOperationOutbox(
       failed,
       flush,
       cancel,
+      onAcknowledged,
     };
-  }, [entries, flush, cancel]);
+  }, [entries, flush, cancel, onAcknowledged]);
 }

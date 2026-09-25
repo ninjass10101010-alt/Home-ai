@@ -59,6 +59,9 @@ beforeEach(() => {
     dispatchEvent: vi.fn(),
   }));
   fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+    if (!init?.body) {
+      return { ok: true, status: 200, json: async () => ({ snapshot: null, reconciled: true }) };
+    }
     const command = JSON.parse(String(init?.body));
     let items = loadRewards<any[]>([]);
     if (command.action === "replace") items = command.items;
@@ -140,11 +143,13 @@ describe("RewardSection — one rewards catalog (task-utils REWARDS_KEY)", () =>
     });
 
     await act(async () => { await new Promise((r) => setTimeout(r, 150)); });
-    // The catalog is the acknowledgment's to write: this component never
-    // persists a "success" first, so a lost command loses nothing silently
-    // and a phantom entry can never appear.
-    expect(loadRewards<any[]>([])).toEqual([]);
+    // The component never persists a "success" first. The list that appears is
+    // the ACKNOWLEDGMENT's authoritative items, adopted by the outbox — not the
+    // form's optimistic value and not a phantom entry.
     expect(listTaskOutbox()).toHaveLength(0);
+    expect(loadRewards<any[]>([])).toEqual([
+      expect.objectContaining({ name: "30 min screen time", cost: 25, emoji: "🎁" }),
+    ]);
     expect(localStorage.getItem(LEGACY_KEY)).toBeNull();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/tasks/config",
@@ -169,8 +174,10 @@ describe("RewardSection — one rewards catalog (task-utils REWARDS_KEY)", () =>
     });
 
     await act(async () => { await new Promise((r) => setTimeout(r, 150)); });
-    expect(loadRewards<any[]>([])).toHaveLength(1);
+    // The only reward is gone server-side, so the authoritative acknowledgment
+    // IS the empty catalog — adopted from the ack, not written by the click.
     expect(listTaskOutbox()).toHaveLength(0);
+    expect(loadRewards<any[]>([])).toEqual([]);
     expect(JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body))).toMatchObject({
       kind: "rewards",
       action: "delete",

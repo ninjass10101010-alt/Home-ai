@@ -358,8 +358,13 @@ describe("KidHome quest completion (age predicates: under-10 tap → pending; 10
     // completed pending on KidHome but claim-modal on the Tasks page. The
     // age predicates gate universal/snatchable OUT of the PIN-free path, so
     // claims keep the claim route for every kid.
+    // A claim is PIN-gated for EVERY age (Task 10 H3), so the typed PIN is
+    // verified server-side BEFORE the command is queued.
     const claimFetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.includes("/api/members/verify")) {
+        return { ok: true, status: 200, json: async () => ({ member: { name: "Caspian Garcia", role: "child" } }) };
+      }
       if (url.includes("/api/tasks/claim")) {
         return { ok: true, status: 200, json: async () => ({ success: true, claimedBy: "Caspian Garcia" }) };
       }
@@ -390,6 +395,9 @@ describe("KidHome quest completion (age predicates: under-10 tap → pending; 10
     // pending for kids), a CHILD claimant mirrors the route's pendingApproval
     // answer: the row is claimed done-but-unpaid, still with NO earn tx
     // (routing parity with the Tasks page claim modal is unchanged).
+    // The PIN is verified FIRST, then the single durable claim command goes
+    // out with that credential — never a queued claim built on an unverified PIN.
+    expect(claimFetch.mock.calls.some((call) => String(call[0]).includes("/api/members/verify"))).toBe(true);
     expect(claimFetch).toHaveBeenCalledWith(expect.stringContaining("/api/tasks/claim"), expect.objectContaining({ method: "POST" }));
     // A child claimant's done-but-unpaid answer is the acknowledgment's write.
     expect(store.saveTasks).not.toHaveBeenCalled();
@@ -399,10 +407,13 @@ describe("KidHome quest completion (age predicates: under-10 tap → pending; 10
   it("a successful universal claim is one durable claim command with no local row write", async () => {
     const claimFetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.includes("/api/members/verify")) {
+        return { ok: true, status: 200, json: async () => ({ member: { name: "Caspian Garcia", role: "child" } }) };
+      }
       if (url.includes("/api/tasks/claim")) {
         // Real route shape: { success, claimedBy: <server-normalized FULL
-        // name>, weekData } — the local mirror must use claimedBy, not the
-        // first-name user.name (a split ledger key).
+        // name>, weekData } — the ledger key is the server's name, not the
+        // first-name session.
         return { ok: true, status: 200, json: async () => ({ success: true, claimedBy: "Caspian Garcia" }) };
       }
       return { ok: true, status: 200, json: async () => ({}) };
