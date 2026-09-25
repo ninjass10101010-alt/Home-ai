@@ -4,7 +4,11 @@ import { useEffect, useRef } from 'react';
 import { usePathname } from 'next/navigation';
 import { db } from '@/db';
 import { flushPendingWrites } from '@/lib/pending-writes';
-import { requestTaskOutboxFlush, warnTaskOutboxFlushFailure } from '@/lib/task-operation-outbox';
+import {
+  requestTaskOutboxFlush,
+  warnTaskOutboxFlushFailure,
+  warnTaskOutboxRefreshFailure,
+} from '@/lib/task-operation-outbox';
 
 const REFRESH_INTERVAL_MS = 60_000;
 
@@ -21,7 +25,8 @@ export function CacheRefresher({ children }: { children: React.ReactNode }) {
       void requestTaskOutboxFlush()
         .catch(warnTaskOutboxFlushFailure)
         .then(() => flushPendingWrites())
-        .then(() => db.refreshCaches());
+        .then(() => db.refreshCaches())
+        .catch(warnTaskOutboxRefreshFailure);
     };
 
     if (!mounted.current) {

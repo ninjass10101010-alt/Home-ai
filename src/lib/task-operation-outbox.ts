@@ -14,8 +14,8 @@ export const TASK_OUTBOX_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 export const TASK_OUTBOX_MAX_ATTEMPTS = 8;
 export const TASK_OUTBOX_BASE_BACKOFF_MS = 2_000;
 export const TASK_OUTBOX_MAX_BACKOFF_MS = 5 * 60_000;
-export const TASK_OUTBOX_MAX_AUTH_ATTEMPTS = 3;
-export const TASK_OUTBOX_AUTH_BACKOFF_MS = 30_000;
+export const TASK_OUTBOX_MAX_AUTH_BACKOFF_MS = 30 * 60_000;
+export const TASK_OUTBOX_MAX_RECONCILE_BACKOFF_MS = 30 * 60_000;
 export const TASK_OUTBOX_REQUEST_TIMEOUT_MS = 30_000;
 export const TASK_OUTBOX_STORAGE_WRITE_ATTEMPTS = 2;
 
@@ -56,6 +56,7 @@ export interface TaskOutboxEntry {
   createdAt: string;
   attemptCount: number;
   authAttemptCount?: number;
+  reconcileAttemptCount?: number;
   lastErrorCategory?: TaskOutboxErrorCategory;
   lastErrorReason?: string;
   nextAttemptAt?: string;
@@ -90,6 +91,7 @@ export interface TaskOutboxDriver {
   send: (entry: TaskOutboxEntry, credential?: string) => Promise<TaskOutboxSendResult>;
   getCredential?: (entry: TaskOutboxEntry) => string | undefined;
   pullSnapshot?: () => Promise<SnapshotRead>;
+  adoptSnapshot?: (read: SnapshotRead) => void | Promise<void>;
   onAcknowledged?: (acknowledgement: TaskOutboxAcknowledgement) => void | Promise<void>;
 }
 
@@ -227,7 +229,12 @@ const DUPLICATE_REASONS = new Set([
 
 const EMPTY_SERVER_SNAPSHOT: TaskOutboxEntry[] = Object.freeze<TaskOutboxEntry[]>([]) as TaskOutboxEntry[];
 
-const AUTH_BLOCKED: FlushTaskOutboxResult = { acknowledged: 0, retryable: 1, permanent: 0 };
+const RETAINED: FlushTaskOutboxResult = { acknowledged: 0, retryable: 1, permanent: 0 };
+
+function cappedLadder(baseMs: number, capMs: number, step: number): number {
+  const attempt = Math.max(1, Math.floor(step));
+  return Math.min(baseMs * 2 ** (attempt - 1), capMs);
+}
 
 const hasOwn = (value: Record<string, unknown>, key: string): boolean =>
   Object.prototype.hasOwnProperty.call(value, key);
@@ -324,10 +331,12 @@ function parseEntry(value: unknown): TaskOutboxEntry | null {
     0,
     Math.min(1_000, Math.floor(typeof value.attemptCount === "number" ? value.attemptCount : 0)),
   );
-  const authAttemptCount =
-    typeof value.authAttemptCount === "number" && Number.isFinite(value.authAttemptCount)
-      ? Math.max(0, Math.min(1_000, Math.floor(value.authAttemptCount)))
+  const boundedCount = (candidate: unknown): number | undefined =>
+    typeof candidate === "number" && Number.isFinite(candidate)
+      ? Math.max(0, Math.min(1_000, Math.floor(candidate)))
       : undefined;
+  const authAttemptCount = boundedCount(value.authAttemptCount);
+  const reconcileAttemptCount = boundedCount(value.reconcileAttemptCount);
   const category = ERROR_CATEGORIES.has(String(value.lastErrorCategory))
     ? (value.lastErrorCategory as TaskOutboxErrorCategory)
     : undefined;
@@ -341,6 +350,7 @@ function parseEntry(value: unknown): TaskOutboxEntry | null {
     createdAt,
     attemptCount,
     ...(authAttemptCount !== undefined ? { authAttemptCount } : {}),
+    ...(reconcileAttemptCount !== undefined ? { reconcileAttemptCount } : {}),
     ...(category ? { lastErrorCategory: category } : {}),
     ...(optionalText(value.lastErrorReason) ? { lastErrorReason: optionalText(value.lastErrorReason) } : {}),
     ...(nextAttemptAt ? { nextAttemptAt } : {}),
@@ -357,7 +367,7 @@ function createdMs(entry: TaskOutboxEntry): number {
 function boundEntries(entries: TaskOutboxEntry[]): TaskOutboxEntry[] {
   const floor = Date.now() - TASK_OUTBOX_RETENTION_MS;
   const kept = entries
-    .filter((entry) => createdMs(entry) >= floor)
+    .filter((entry) => entry.status === "failed" || createdMs(entry) >= floor)
     .sort((left, right) => createdMs(left) - createdMs(right));
   return kept.length > TASK_OUTBOX_MAX_ENTRIES
     ? kept.slice(kept.length - TASK_OUTBOX_MAX_ENTRIES)
@@ -383,7 +393,7 @@ interface TaskOutboxIndex {
 let cache: TaskOutboxEntry[] | null = null;
 let cacheIndexRaw: string | null = null;
 let unpersisted = new Map<string, TaskOutboxEntry>();
-let inFlight: Promise<FlushTaskOutboxResult> | null = null;
+let inFlightByDriver = new WeakMap<TaskOutboxDriver, Promise<FlushTaskOutboxResult>>();
 
 function isBrowser(): boolean {
   return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
@@ -452,14 +462,21 @@ function readStoredEntry(operationId: string): TaskOutboxEntry | null {
   return parseEntry(parsed);
 }
 
-function loadStoredEntries(index: TaskOutboxIndex): TaskOutboxEntry[] {
+function loadStoredEntries(index: TaskOutboxIndex): {
+  entries: TaskOutboxEntry[];
+  orphanIds: string[];
+} {
   const entries: TaskOutboxEntry[] = [];
+  const orphanIds: string[] = [];
   for (const id of index.ids) {
     const entry = readStoredEntry(id);
     if (entry) entries.push(entry);
+    else orphanIds.push(id);
   }
-  return entries;
+  return { entries, orphanIds };
 }
+
+let orphanIds: string[] = [];
 
 function readRaw(): TaskOutboxEntry[] {
   if (!isBrowser()) return EMPTY_SERVER_SNAPSHOT;
@@ -467,7 +484,9 @@ function readRaw(): TaskOutboxEntry[] {
   if (cache && raw === cacheIndexRaw) return cache;
   const index = parseIndex(raw);
   const extras = index.legacy && cache ? [...cache, ...unpersisted.values()] : [...unpersisted.values()];
-  const merged = mergeByOperationId(loadStoredEntries(index), extras);
+  const loaded = loadStoredEntries(index);
+  orphanIds = loaded.orphanIds;
+  const merged = mergeByOperationId(loaded.entries, extras);
   cache = boundEntries(merged);
   cacheIndexRaw = raw;
   return cache;
@@ -519,12 +538,16 @@ function commitEntries(next: TaskOutboxEntry[], previous: TaskOutboxEntry[]): bo
     }
     const removed = [...previousIds].filter((id) => !nextIds.has(id));
     const fresh = parseIndex(readIndexRaw());
-    const ids = [...new Set([...fresh.ids, ...nextIds])].filter((id) => !removed.includes(id));
+    const pruned = fresh.ids.filter(
+      (id) => nextIds.has(id) || (readStoredEntry(id) !== null && !removed.includes(id)),
+    );
+    orphanIds = [];
     window.localStorage.setItem(
       TASK_OUTBOX_STORAGE_KEY,
-      JSON.stringify({ rev: fresh.rev + 1, ids }),
+      JSON.stringify({ rev: fresh.rev + 1, ids: [...new Set([...pruned, ...nextIds])] }),
     );
   } catch {
+    warnTaskOutboxStorageFailure();
     cache = next;
     cacheIndexRaw = null;
     rememberUnpersisted(next);
@@ -546,7 +569,7 @@ function notify(): void {
     try {
       listener();
     } catch {
-      return;
+      continue;
     }
   }
 }
@@ -684,8 +707,23 @@ function patchEntry(operationId: string, patch: Partial<TaskOutboxEntry>): TaskO
 }
 
 export function taskOutboxBackoffMs(attemptCount: number): number {
-  const attempt = Math.max(1, Math.floor(attemptCount));
-  return Math.min(TASK_OUTBOX_BASE_BACKOFF_MS * 2 ** (attempt - 1), TASK_OUTBOX_MAX_BACKOFF_MS);
+  return cappedLadder(TASK_OUTBOX_BASE_BACKOFF_MS, TASK_OUTBOX_MAX_BACKOFF_MS, attemptCount);
+}
+
+export function taskOutboxAuthBackoffMs(authAttemptCount: number): number {
+  return cappedLadder(
+    TASK_OUTBOX_BASE_BACKOFF_MS,
+    TASK_OUTBOX_MAX_AUTH_BACKOFF_MS,
+    authAttemptCount,
+  );
+}
+
+export function taskOutboxReconcileBackoffMs(reconcileAttemptCount: number): number {
+  return cappedLadder(
+    TASK_OUTBOX_BASE_BACKOFF_MS,
+    TASK_OUTBOX_MAX_RECONCILE_BACKOFF_MS,
+    reconcileAttemptCount,
+  );
 }
 
 function reasonOf(body: TaskOutboxAcknowledgement): string {
@@ -709,9 +747,11 @@ function markRetryable(
     status: "retrying",
     lastErrorCategory: category,
     lastErrorReason: reason,
+    authAttemptCount: 0,
+    reconcileAttemptCount: 0,
     nextAttemptAt: new Date(Date.now() + taskOutboxBackoffMs(attemptCount)).toISOString(),
   });
-  return { acknowledged: 0, retryable: 1, permanent: 0 };
+  return RETAINED;
 }
 
 function markFailed(
@@ -740,35 +780,32 @@ function markAuthRequired(
       lastErrorReason: reason,
       nextAttemptAt: undefined,
     });
-    return AUTH_BLOCKED;
+    return RETAINED;
   }
   const authAttemptCount = (entry.authAttemptCount ?? 0) + 1;
-  if (authAttemptCount >= TASK_OUTBOX_MAX_AUTH_ATTEMPTS) {
-    return markFailed(entry, "unauthorized", reason || "unauthorized");
-  }
   patchEntry(entry.operationId, {
     status: "auth-required",
     lastErrorCategory: "unauthorized",
     lastErrorReason: reason,
     authAttemptCount,
-    nextAttemptAt: new Date(Date.now() + TASK_OUTBOX_AUTH_BACKOFF_MS).toISOString(),
+    nextAttemptAt: new Date(Date.now() + taskOutboxAuthBackoffMs(authAttemptCount)).toISOString(),
   });
-  return AUTH_BLOCKED;
+  return RETAINED;
 }
 
 function markReconciling(entry: TaskOutboxEntry, reason: string): FlushTaskOutboxResult {
-  const attemptCount = entry.attemptCount + 1;
-  if (attemptCount >= TASK_OUTBOX_MAX_ATTEMPTS) {
-    return markFailed(entry, "projection", reason || "projection_unresolved");
-  }
+  const reconcileAttemptCount = (entry.reconcileAttemptCount ?? 0) + 1;
   patchEntry(entry.operationId, {
-    attemptCount,
     status: "reconciling",
     lastErrorCategory: "projection",
     lastErrorReason: reason,
-    nextAttemptAt: new Date(Date.now() + taskOutboxBackoffMs(attemptCount)).toISOString(),
+    authAttemptCount: 0,
+    reconcileAttemptCount,
+    nextAttemptAt: new Date(
+      Date.now() + taskOutboxReconcileBackoffMs(reconcileAttemptCount),
+    ).toISOString(),
   });
-  return { acknowledged: 0, retryable: 1, permanent: 0 };
+  return RETAINED;
 }
 
 async function acknowledge(
@@ -776,8 +813,9 @@ async function acknowledge(
   body: TaskOutboxAcknowledgement,
   options: FlushTaskOutboxOptions,
 ): Promise<FlushTaskOutboxResult> {
+  if (!options.onAcknowledged) return markReconciling(entry, "adoption_unavailable");
   try {
-    await options.onAcknowledged?.(body);
+    await options.onAcknowledged(body);
   } catch {
     return markRetryable(entry, "projection", "adoption_failed");
   }
@@ -922,15 +960,6 @@ function receiptsFor(view: SnapshotView, operationId: string): SnapshotOperation
   return Array.isArray(stored) ? stored.filter(isRecord) : [];
 }
 
-function receiptTaskIds(receipt: SnapshotOperationReceipt): number[] {
-  const ids = Array.isArray(receipt.taskIds)
-    ? receipt.taskIds.map(Number).filter((id) => Number.isSafeInteger(id))
-    : [];
-  const own = Number(receipt.taskId);
-  if (Number.isSafeInteger(own) && !ids.includes(own)) ids.push(own);
-  return ids;
-}
-
 function receiptProvesResolved(entry: TaskOutboxEntry, view: SnapshotView): boolean {
   if (entry.route === "/api/tasks/config") {
     const receipt = view.configReceipts[entry.operationId];
@@ -942,34 +971,29 @@ function receiptProvesResolved(entry: TaskOutboxEntry, view: SnapshotView): bool
   );
   if (!receipts.length) return false;
   if (entry.route === "/api/tasks/manage" && entry.action === "add") {
-    return receipts.some((receipt) => Number.isSafeInteger(Number(receipt.taskId)));
+    return receipts.some((receipt) => {
+      const id = Number(receipt.taskId);
+      return Number.isSafeInteger(id) && id > 0;
+    });
   }
   const requested = Array.isArray(entry.payload.taskIds)
     ? entry.payload.taskIds.map(Number)
     : [Number(entry.payload.taskId)];
   if (!requested.every((id) => Number.isSafeInteger(id) && id > 0)) return false;
-  const covered = new Set(receipts.flatMap((receipt) => receiptTaskIds(receipt)));
-  if (!requested.every((id) => covered.has(id))) return false;
+  const perTask = new Map<number, SnapshotOperationReceipt>();
+  for (const receipt of receipts) perTask.set(Number(receipt.taskId), receipt);
+  if (!requested.every((id) => perTask.has(id))) return false;
   if (entry.action === "delete") {
-    return receipts.every((receipt) => receipt.deleted === true);
+    return requested.every((id) => perTask.get(id)?.deleted === true);
   }
   return true;
 }
 
 function approveProvesResolved(entry: TaskOutboxEntry, view: SnapshotView): boolean {
-  if (entry.action === "send-back") {
-    const task = findTask(view, entry.payload.taskId);
-    if (!task || task.completed === true) return false;
-    return typeof task.sentBackAt === "string" && task.sentBackAt.trim().length > 0;
-  }
-  const taskIds = Array.isArray(entry.payload.taskIds)
-    ? entry.payload.taskIds
-    : [entry.payload.taskId];
-  if (!taskIds.length) return false;
-  return taskIds.every((taskId) => {
-    const task = findTask(view, taskId);
-    return Boolean(task) && !isRecord(task!.pendingApproval);
-  });
+  if (entry.action !== "send-back") return false;
+  const task = findTask(view, entry.payload.taskId);
+  if (!task || task.completed === true) return false;
+  return typeof task.sentBackAt === "string" && task.sentBackAt.trim().length > 0;
 }
 
 function claimProvesResolved(entry: TaskOutboxEntry, view: SnapshotView): boolean {
@@ -1162,6 +1186,29 @@ export async function pullTaskSnapshotDocument(
   };
 }
 
+export async function adoptTaskOutboxSnapshot(read: SnapshotRead): Promise<void> {
+  if (!read.snapshot) return;
+  const stores = await import("@/lib/task-utils");
+  stores.applyTasksSnapshotToStores(read.snapshot);
+}
+
+export async function adoptTaskOutboxAcknowledgement(
+  acknowledgement: TaskOutboxAcknowledgement,
+): Promise<void> {
+  if (!acknowledgement.task && !acknowledgement.weekData) return;
+  const stores = await import("@/lib/task-utils");
+  if (acknowledgement.task) {
+    const merged = stores.mergeTasksSnapshot(stores.loadTasks(), stores.loadWeekData(), {
+      tasks: [acknowledgement.task],
+    });
+    if (merged.tasksChanged) stores.saveTasks(merged.tasks);
+    if (merged.weekChanged) stores.saveWeekData(merged.weekData);
+  }
+  if (acknowledgement.weekData) {
+    stores.saveWeekData(stores.adoptServerWeekData(stores.loadWeekData(), acknowledgement.weekData));
+  }
+}
+
 export function createFetchTaskOutboxDriver(
   overrides: TaskOutboxFetchDriverOptions = {},
 ): TaskOutboxDriver {
@@ -1171,9 +1218,9 @@ export function createFetchTaskOutboxDriver(
       overrides.send ??
       ((entry, credential) => sendTaskOperationRequest(entry, credential, requestTimeoutMs)),
     ...(overrides.getCredential ? { getCredential: overrides.getCredential } : {}),
-    pullSnapshot:
-      overrides.pullSnapshot ?? (() => pullTaskSnapshotDocument(requestTimeoutMs)),
-    ...(overrides.onAcknowledged ? { onAcknowledged: overrides.onAcknowledged } : {}),
+    pullSnapshot: overrides.pullSnapshot ?? (() => pullTaskSnapshotDocument(requestTimeoutMs)),
+    adoptSnapshot: overrides.adoptSnapshot ?? adoptTaskOutboxSnapshot,
+    onAcknowledged: overrides.onAcknowledged ?? adoptTaskOutboxAcknowledgement,
   };
 }
 
@@ -1198,20 +1245,46 @@ export function warnTaskOutboxFlushFailure(error: unknown): void {
   console.warn("[task-outbox] flush failed", name);
 }
 
-async function proveFromSnapshot(
+export function warnTaskOutboxRefreshFailure(error: unknown): void {
+  if (typeof console === "undefined") return;
+  const name = error instanceof Error && error.name ? error.name : "unknown";
+  console.warn("[task-outbox] cache refresh failed", name);
+}
+
+export function warnTaskOutboxStorageFailure(): void {
+  if (typeof console === "undefined") return;
+  console.warn("[task-outbox] storage write degraded to memory only");
+}
+
+export function taskOutboxOrphanStorageIds(): string[] {
+  return [...orphanIds];
+}
+
+type SnapshotProof =
+  | { kind: "proven"; acknowledgement: TaskOutboxAcknowledgement }
+  | { kind: "blocked" }
+  | { kind: "unmatched" };
+
+async function resolveSnapshotProof(
   entry: TaskOutboxEntry,
   body: TaskOutboxAcknowledgement,
   options: FlushTaskOutboxOptions,
-): Promise<TaskOutboxAcknowledgement | null> {
-  if (!options.pullSnapshot) return null;
+): Promise<SnapshotProof> {
+  if (!options.pullSnapshot || !options.adoptSnapshot) return { kind: "blocked" };
   let read: SnapshotRead;
   try {
     read = await options.pullSnapshot();
   } catch {
-    return null;
+    return { kind: "blocked" };
   }
-  if (!snapshotProvesResolved(entry, read, body)) return null;
-  return { ...body, reconciled: true };
+  if (read.reconciled === false) return { kind: "blocked" };
+  try {
+    await options.adoptSnapshot(read);
+  } catch {
+    return { kind: "blocked" };
+  }
+  if (!snapshotProvesResolved(entry, read, body)) return { kind: "unmatched" };
+  return { kind: "proven", acknowledgement: { ...body, reconciled: true } };
 }
 
 async function processEntry(
@@ -1243,8 +1316,9 @@ async function processEntry(
       return await acknowledge(entry, body, options);
     }
     if (status === 200 || status === 202 || status === 409) {
-      const proof = await proveFromSnapshot(entry, body, options);
-      if (proof) return await acknowledge(entry, proof, options);
+      const proof = await resolveSnapshotProof(entry, body, options);
+      if (proof.kind === "proven") return await acknowledge(entry, proof.acknowledgement, options);
+      if (proof.kind === "blocked") return markReconciling(entry, "projection_pending");
       if (status === 409) return classifyConflict(entry, body);
       if (status === 200) return markRetryable(entry, "projection", "unreconciled_success");
       return markReconciling(entry, reasonOf(body) || "projection_pending");
@@ -1301,14 +1375,16 @@ async function runFlush(options: FlushTaskOutboxOptions): Promise<FlushTaskOutbo
 }
 
 export function flushTaskOutbox(
-  options: FlushTaskOutboxOptions = getTaskOutboxDriver(),
+  options?: FlushTaskOutboxOptions,
 ): Promise<FlushTaskOutboxResult> {
-  if (inFlight) return inFlight;
-  const running = runFlush(options);
+  const driver = options ?? getTaskOutboxDriver();
+  const existing = inFlightByDriver.get(driver);
+  if (existing) return existing;
+  const running = runFlush(driver);
   const shared = running.finally(() => {
-    if (inFlight === shared) inFlight = null;
+    if (inFlightByDriver.get(driver) === shared) inFlightByDriver.delete(driver);
   });
-  inFlight = shared;
+  inFlightByDriver.set(driver, shared);
   return shared;
 }
 
@@ -1320,7 +1396,7 @@ export function __resetTaskOutboxForTests(): void {
   cache = null;
   cacheIndexRaw = null;
   unpersisted = new Map<string, TaskOutboxEntry>();
-  inFlight = null;
+  inFlightByDriver = new WeakMap<TaskOutboxDriver, Promise<FlushTaskOutboxResult>>();
   driverStack.length = 0;
   listeners.clear();
 }

@@ -1,21 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
-import { isRecord } from "@/lib/task-operation-contract";
 import {
-  adoptServerWeekData,
-  applyTasksSnapshotToStores,
-  loadTasks,
-  loadWeekData,
-  mergeTasksSnapshot,
-  saveTasks,
-  saveWeekData,
-} from "@/lib/task-utils";
-import {
+  adoptTaskOutboxAcknowledgement,
+  adoptTaskOutboxSnapshot,
   cancelTaskOutboxEntry,
-  pullTaskSnapshotDocument,
   getTaskOutboxServerSnapshot,
   getTaskOutboxSnapshot,
+  pullTaskSnapshotDocument,
   registerTaskOutboxDriver,
   requestTaskOutboxFlush,
   subscribeTaskOutbox,
@@ -27,8 +19,9 @@ import {
 
 export interface UseTaskOperationOutboxOptions {
   getCredential?: (entry: TaskOutboxEntry) => string | undefined;
-  onAcknowledged?: (acknowledgement: TaskOutboxAcknowledgement) => void | Promise<void>;
   pullSnapshot?: () => Promise<SnapshotRead>;
+  adoptSnapshot?: (read: SnapshotRead) => void | Promise<void>;
+  onAcknowledged?: (acknowledgement: TaskOutboxAcknowledgement) => void | Promise<void>;
   autoFlush?: boolean;
 }
 
@@ -43,24 +36,7 @@ export interface UseTaskOperationOutboxResult {
   cancel: (operationId: string) => boolean;
 }
 
-export async function pullAdoptedTaskSnapshot(): Promise<SnapshotRead> {
-  const read = await pullTaskSnapshotDocument();
-  if (read.snapshot) applyTasksSnapshotToStores(read.snapshot);
-  return read;
-}
-
-export function adoptAuthoritativeAcknowledgement(acknowledgement: TaskOutboxAcknowledgement): void {
-  if (acknowledgement.task) {
-    const merged = mergeTasksSnapshot(loadTasks(), loadWeekData(), {
-      tasks: [acknowledgement.task],
-    });
-    if (merged.tasksChanged) saveTasks(merged.tasks);
-    if (merged.weekChanged) saveWeekData(merged.weekData);
-  }
-  if (acknowledgement.weekData) {
-    saveWeekData(adoptServerWeekData(loadWeekData(), acknowledgement.weekData));
-  }
-}
+export { adoptTaskOutboxAcknowledgement, adoptTaskOutboxSnapshot };
 
 export function useTaskOperationOutbox(
   options: UseTaskOperationOutboxOptions = {},
@@ -75,23 +51,25 @@ export function useTaskOperationOutbox(
 
   useEffect(() => {
     optionsRef.current = options;
-  }, [options]);
+  });
 
   useEffect(() => {
     const unregister = registerTaskOutboxDriver({
       getCredential: (entry) => optionsRef.current.getCredential?.(entry),
-      pullSnapshot: () => {
-        const override = optionsRef.current.pullSnapshot;
-        return override ? override() : pullAdoptedTaskSnapshot();
-      },
+      pullSnapshot: () =>
+        optionsRef.current.pullSnapshot
+          ? optionsRef.current.pullSnapshot()
+          : pullTaskSnapshotDocument(),
+      adoptSnapshot: (read) =>
+        (optionsRef.current.adoptSnapshot ?? adoptTaskOutboxSnapshot)(read),
       onAcknowledged: (acknowledgement) =>
-        (optionsRef.current.onAcknowledged ?? adoptAuthoritativeAcknowledgement)(acknowledgement),
+        (optionsRef.current.onAcknowledged ?? adoptTaskOutboxAcknowledgement)(acknowledgement),
     });
     return unregister;
   }, []);
 
   useEffect(() => {
-    if (autoFlush) void requestTaskOutboxFlush();
+    if (autoFlush) void requestTaskOutboxFlush().catch(() => {});
     const onOnline = () => {
       void requestTaskOutboxFlush().catch(() => {});
     };

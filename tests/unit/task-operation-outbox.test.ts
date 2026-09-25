@@ -9,8 +9,9 @@ import type { SnapshotData } from "@/lib/snapshot-tasks";
 import {
   TASK_OUTBOX_BASE_BACKOFF_MS,
   TASK_OUTBOX_MAX_ATTEMPTS,
-  TASK_OUTBOX_MAX_AUTH_ATTEMPTS,
+  TASK_OUTBOX_MAX_AUTH_BACKOFF_MS,
   TASK_OUTBOX_MAX_BACKOFF_MS,
+  TASK_OUTBOX_MAX_RECONCILE_BACKOFF_MS,
   TASK_OUTBOX_MAX_ENTRIES,
   TASK_OUTBOX_REQUEST_TIMEOUT_MS,
   TASK_OUTBOX_STORAGE_KEY,
@@ -32,10 +33,14 @@ import {
   sendTaskOperationRequest,
   snapshotProvesResolved,
   subscribeTaskOutbox,
+  taskOutboxAuthBackoffMs,
   taskOutboxBackoffMs,
   taskOutboxEntryStorageKey,
+  taskOutboxOrphanStorageIds,
+  taskOutboxReconcileBackoffMs,
   type SnapshotRead,
   type TaskOutboxAcknowledgement,
+  type TaskOutboxDriver,
   type TaskOutboxEntry,
 } from "@/lib/task-operation-outbox";
 import { parseClaimCommand } from "@/lib/task-claim";
@@ -138,6 +143,16 @@ function errorAck(
   extra: Record<string, unknown> = {},
 ): TaskOutboxAcknowledgement {
   return { operationId, reconciled: false, ...extra };
+}
+
+const ADOPT_NOOP = async () => {};
+
+async function flushWithAdoption(options: Partial<TaskOutboxDriver>) {
+  return flushTaskOutbox({
+    onAcknowledged: ADOPT_NOOP,
+    adoptSnapshot: ADOPT_NOOP,
+    ...options,
+  } as TaskOutboxDriver);
 }
 
 function respond(status: number, body: TaskOutboxAcknowledgement) {
@@ -365,7 +380,7 @@ describe("acknowledgement state machine", () => {
     const order: string[] = [];
     enqueueClaim();
 
-    const result = await flushTaskOutbox({
+    const result = await flushWithAdoption({
       send: async (entry) => {
         order.push(`send:${entry.operationId}`);
         return { status: 200, body: ack(entry.operationId) };
@@ -385,7 +400,7 @@ describe("acknowledgement state machine", () => {
     enqueueClaim();
     let pullCount = 0;
 
-    const first = await flushTaskOutbox({
+    const first = await flushWithAdoption({
       send: respond(202, { operationId: "op-claim-1", reconciled: false, repairRequired: true }),
       pullSnapshot: async () => {
         pullCount += 1;
@@ -399,7 +414,7 @@ describe("acknowledgement state machine", () => {
     expect(entryFor("op-claim-1").lastErrorCategory).toBe("projection");
 
     expireBackoff("op-claim-1");
-    const second = await flushTaskOutbox({
+    const second = await flushWithAdoption({
       send: respond(202, { operationId: "op-claim-1", reconciled: false, repairRequired: true }),
       pullSnapshot: async () =>
         snapshotOf([
@@ -416,7 +431,7 @@ describe("acknowledgement state machine", () => {
 
   it("keeps a 202 entry when no snapshot pull is available", async () => {
     enqueueClaim();
-    const result = await flushTaskOutbox({
+    const result = await flushWithAdoption({
       send: respond(202, { operationId: "op-claim-1", reconciled: false }),
     });
     expect(result).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
@@ -425,7 +440,7 @@ describe("acknowledgement state machine", () => {
 
   it("keeps a 202 entry when the pulled snapshot does not prove the operation", async () => {
     enqueueClaim();
-    const result = await flushTaskOutbox({
+    const result = await flushWithAdoption({
       send: respond(202, { operationId: "op-claim-1", reconciled: false }),
       pullSnapshot: async () => snapshotOf([canonicalTask()]),
     });
@@ -435,7 +450,7 @@ describe("acknowledgement state machine", () => {
 
   it("removes a 409 semantic duplicate only when the snapshot proves this operation resolved", async () => {
     enqueueClaim();
-    const unresolved = await flushTaskOutbox({
+    const unresolved = await flushWithAdoption({
       send: respond(
         409,
         errorAck("op-claim-1", { reason: "semantic_duplicate", semanticDuplicate: true }),
@@ -449,7 +464,7 @@ describe("acknowledgement state machine", () => {
 
     removeTaskOutboxEntry("op-claim-1");
     enqueueClaim();
-    const resolved = await flushTaskOutbox({
+    const resolved = await flushWithAdoption({
       send: respond(
         409,
         errorAck("op-claim-1", { reason: "semantic_duplicate", semanticDuplicate: true }),
@@ -463,7 +478,7 @@ describe("acknowledgement state machine", () => {
 
   it("classifies a retryable 409 by reason instead of dropping it", async () => {
     enqueueClaim();
-    const result = await flushTaskOutbox({
+    const result = await flushWithAdoption({
       send: respond(
         409,
         errorAck("op-claim-1", { reason: "operation_conflict", retryable: true }),
@@ -482,13 +497,13 @@ describe("acknowledgement state machine", () => {
       body: errorAck("op-claim-1", { reason: "unauthorized" }),
     }));
 
-    const first = await flushTaskOutbox({ send });
+    const first = await flushWithAdoption({ send });
     expect(first).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
     expect(entryFor("op-claim-1").status).toBe("auth-required");
     expect(entryFor("op-claim-1").lastErrorCategory).toBe("unauthorized");
     expect(entryFor("op-claim-1").authAttemptCount).toBe(1);
 
-    const second = await flushTaskOutbox({ send });
+    const second = await flushWithAdoption({ send });
     expect(second).toEqual({ acknowledged: 0, retryable: 0, permanent: 0 });
     expect(send).toHaveBeenCalledTimes(1);
   });
@@ -503,7 +518,7 @@ describe("acknowledgement state machine", () => {
     for (const [status, reason, category] of cases) {
       const operationId = `op-permanent-${status}`;
       enqueueClaim({ operationId });
-      const result = await flushTaskOutbox({
+      const result = await flushWithAdoption({
         send: async () => ({ status, body: errorAck(operationId, { reason }) }),
       });
       expect(result.permanent).toBe(1);
@@ -515,7 +530,7 @@ describe("acknowledgement state machine", () => {
 
   it("keeps the entry in place when adoption throws", async () => {
     enqueueClaim();
-    const result = await flushTaskOutbox({
+    const result = await flushWithAdoption({
       send: respond(200, ack("op-claim-1")),
       onAcknowledged: () => {
         throw new Error("store write failed");
@@ -530,7 +545,7 @@ describe("backoff and retry", () => {
   it("schedules a bounded exponential next attempt for a 5xx", async () => {
     enqueueClaim();
     const before = Date.now();
-    const result = await flushTaskOutbox({
+    const result = await flushWithAdoption({
       send: respond(503, errorAck("op-claim-1", { reason: "task_store_unavailable", retryable: true })),
     });
 
@@ -544,17 +559,17 @@ describe("backoff and retry", () => {
 
   it("does not resend before nextAttemptAt and resends once it is due", async () => {
     enqueueClaim();
-    await flushTaskOutbox({
+    await flushWithAdoption({
       send: respond(503, errorAck("op-claim-1", { reason: "task_store_unavailable", retryable: true })),
     });
 
     const blocked = vi.fn(async () => ({ status: 200, body: ack("op-claim-1") }));
-    const skipped = await flushTaskOutbox({ send: blocked });
+    const skipped = await flushWithAdoption({ send: blocked });
     expect(skipped).toEqual({ acknowledged: 0, retryable: 0, permanent: 0 });
     expect(blocked).not.toHaveBeenCalled();
 
     expireBackoff("op-claim-1");
-    const allowed = await flushTaskOutbox({ send: blocked });
+    const allowed = await flushWithAdoption({ send: blocked });
     expect(allowed).toEqual({ acknowledged: 1, retryable: 0, permanent: 0 });
     expect(blocked).toHaveBeenCalledTimes(1);
     expect(listTaskOutbox()).toHaveLength(0);
@@ -562,7 +577,7 @@ describe("backoff and retry", () => {
 
   it("retries a thrown network failure within the backoff cap", async () => {
     enqueueClaim();
-    const result = await flushTaskOutbox({
+    const result = await flushWithAdoption({
       send: async () => {
         throw new TypeError("Failed to fetch");
       },
@@ -584,18 +599,18 @@ describe("backoff and retry", () => {
 
     for (let index = 0; index < TASK_OUTBOX_MAX_ATTEMPTS - 1; index += 1) {
       if (entryFor("op-claim-1").nextAttemptAt) expireBackoff("op-claim-1");
-      const result = await flushTaskOutbox({ send });
+      const result = await flushWithAdoption({ send });
       expect(result).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
     }
     expireBackoff("op-claim-1");
-    const final = await flushTaskOutbox({ send });
+    const final = await flushWithAdoption({ send });
     expect(final).toEqual({ acknowledged: 0, retryable: 0, permanent: 1 });
 
     expect(send).toHaveBeenCalledTimes(TASK_OUTBOX_MAX_ATTEMPTS);
     expect(entryFor("op-claim-1").status).toBe("failed");
     expect(entryFor("op-claim-1").nextAttemptAt).toBeUndefined();
 
-    const again = await flushTaskOutbox({ send });
+    const again = await flushWithAdoption({ send });
     expect(again).toEqual({ acknowledged: 0, retryable: 0, permanent: 0 });
     expect(send).toHaveBeenCalledTimes(TASK_OUTBOX_MAX_ATTEMPTS);
   });
@@ -620,14 +635,47 @@ describe("single in-flight flush and cross-tab subscription", () => {
       return { status: 200, body: ack(entry.operationId) };
     });
 
-    const first = flushTaskOutbox({ send });
-    const second = flushTaskOutbox({ send });
+    const driver = { send, onAcknowledged: ADOPT_NOOP, adoptSnapshot: ADOPT_NOOP };
+    const first = flushTaskOutbox(driver);
+    const second = flushTaskOutbox(driver);
     expect(second).toBe(first);
 
     release();
     await Promise.all([first, second]);
     expect(send).toHaveBeenCalledTimes(1);
     expect(listTaskOutbox()).toHaveLength(0);
+  });
+
+  it("gives different drivers their own in-flight flush", async () => {
+    enqueueClaim();
+    const firstSend = vi.fn(async () => ({ status: 200, body: ack("op-claim-1") }));
+    const secondSend = vi.fn(async () => ({ status: 200, body: ack("op-claim-1") }));
+    const firstDriver = { send: firstSend, onAcknowledged: ADOPT_NOOP, adoptSnapshot: ADOPT_NOOP };
+    const secondDriver = { send: secondSend, onAcknowledged: ADOPT_NOOP, adoptSnapshot: ADOPT_NOOP };
+
+    const first = flushTaskOutbox(firstDriver);
+    const second = flushTaskOutbox(secondDriver);
+    expect(second).not.toBe(first);
+    await Promise.all([first, second]);
+    expect(firstSend).toHaveBeenCalledTimes(1);
+    expect(secondSend).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps notifying subscribers after one throws", () => {
+    const seen: string[] = [];
+    const unsubscribeThrower = subscribeTaskOutbox(() => {
+      seen.push("thrower");
+      throw new Error("subscriber exploded");
+    });
+    const unsubscribeSecond = subscribeTaskOutbox(() => seen.push("second"));
+    const unsubscribeThird = subscribeTaskOutbox(() => seen.push("third"));
+
+    enqueueClaim({ operationId: "op-notify" });
+
+    expect(seen).toEqual(["thrower", "second", "third"]);
+    unsubscribeThrower();
+    unsubscribeSecond();
+    unsubscribeThird();
   });
 
   it("notifies subscribers on a local enqueue and on another tab's write", () => {
@@ -697,7 +745,7 @@ describe("explicit cancel", () => {
     expect(listTaskOutbox()).toHaveLength(0);
 
     enqueueClaim();
-    await flushTaskOutbox({ send: respond(202, { operationId: "op-claim-1", reconciled: false }) });
+    await flushWithAdoption({ send: respond(202, { operationId: "op-claim-1", reconciled: false }) });
     expect(entryFor("op-claim-1").status).toBe("reconciling");
     expect(cancelTaskOutboxEntry("op-claim-1")).toBe(false);
     expect(listTaskOutbox()).toHaveLength(1);
@@ -713,41 +761,6 @@ describe("route and action specific snapshot proof", () => {
     provingExtra?: Record<string, unknown>;
     provingAck?: TaskOutboxAcknowledgement;
   }> = [
-    {
-      name: "approve",
-      entry: enqueueTaskOperation({
-        operationId: "op-approve-1",
-        route: "/api/tasks/approve",
-        action: "approve",
-        payload: { taskId: 42, memberName: "Alex" },
-        displayTarget: { taskId: 42, kind: "approval" },
-      }),
-      proving: [[canonicalTask({ completed: true })]],
-      notProving: [
-        [canonicalTask({ completed: true, pendingApproval: { byName: "Caspian", at: "now", points: 5 } })],
-        [canonicalTask({ id: 43, title: "Trash", completed: true })],
-      ],
-    },
-    {
-      name: "approve-all",
-      entry: enqueueTaskOperation({
-        operationId: "op-approve-all-1",
-        route: "/api/tasks/approve",
-        action: "approve-all",
-        payload: { taskIds: [42, 43], memberName: "Alex" },
-        displayTarget: { kind: "approval" },
-      }),
-      proving: [
-        [canonicalTask({ completed: true }), canonicalTask({ id: 43, title: "Trash", completed: true })],
-      ],
-      notProving: [
-        [canonicalTask({ completed: true })],
-        [
-          canonicalTask({ completed: true }),
-          canonicalTask({ id: 43, title: "Trash", completed: true, pendingApproval: { byName: "Caspian", at: "now", points: 5 } }),
-        ],
-      ],
-    },
     {
       name: "send-back",
       entry: enqueueTaskOperation({
@@ -972,6 +985,72 @@ describe("route and action specific snapshot proof", () => {
     expect(snapshotProvesResolved(entry, read)).toBe(true);
   });
 
+  it("requires an exact approval receipt, never a cleared pending row", () => {
+    const approve = enqueueTaskOperation({
+      operationId: "op-approve-receipt",
+      route: "/api/tasks/approve",
+      action: "approve",
+      payload: { taskId: 42, memberName: "Alex" },
+      displayTarget: { taskId: 42, kind: "approval" },
+    });
+    const approveAll = enqueueTaskOperation({
+      operationId: "op-approve-all-receipt",
+      route: "/api/tasks/approve",
+      action: "approve-all",
+      payload: { taskIds: [42, 43], memberName: "Alex" },
+      displayTarget: { kind: "approval" },
+    });
+    const settled = [canonicalTask({ completed: true }), canonicalTask({ id: 43, title: "Trash", completed: true })];
+    const receipts = (operationReceipts: SnapshotRead["operationReceipts"]) => ({
+      snapshot: { tasks: settled, deletedTaskIds: [], weekData: { history: [] } } as unknown as SnapshotData,
+      operationReceipts,
+    });
+
+    expect(snapshotProvesResolved(approve, receipts(undefined))).toBe(false);
+    expect(snapshotProvesResolved(approveAll, receipts(undefined))).toBe(false);
+    expect(
+      snapshotProvesResolved(
+        approveAll,
+        receipts({
+          "op-approve-all-receipt": [
+            { operationId: "op-approve-all-receipt", action: "approve-all", taskId: 42, taskIds: [42, 43], createdAt: "2026-09-25T10:00:00.000Z" },
+          ],
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      snapshotProvesResolved(
+        approve,
+        receipts({
+          "op-approve-receipt": [
+            { operationId: "op-approve-receipt", action: "approve", taskId: 43, createdAt: "2026-09-25T10:00:00.000Z" },
+          ],
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      snapshotProvesResolved(
+        approve,
+        receipts({
+          "op-approve-receipt": [
+            { operationId: "op-approve-receipt", action: "approve", taskId: 42, createdAt: "2026-09-25T10:00:00.000Z" },
+          ],
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      snapshotProvesResolved(
+        approveAll,
+        receipts({
+          "op-approve-all-receipt": [
+            { operationId: "op-approve-all-receipt", action: "approve-all", taskId: 42, taskIds: [42, 43], createdAt: "2026-09-25T10:00:00.000Z" },
+            { operationId: "op-approve-all-receipt", action: "approve-all", taskId: 43, taskIds: [42, 43], createdAt: "2026-09-25T10:00:00.000Z" },
+          ],
+        }),
+      ),
+    ).toBe(true);
+  });
+
   it("proves from the canonical operation receipt before any state guess", () => {
     const addEntry = enqueueTaskOperation({
       operationId: "op-receipt-add",
@@ -1119,7 +1198,7 @@ describe("route and action specific snapshot proof", () => {
 describe("auth recovery and classification", () => {
   it("retries a session-gated 401 on a bounded auth backoff without spending the attempt budget", async () => {
     enqueueClaim({ operationId: "op-session-401" });
-    const first = await flushTaskOutbox({
+    const first = await flushWithAdoption({
       send: respond(401, errorAck("op-session-401", { reason: "session_required" })),
     });
 
@@ -1130,16 +1209,16 @@ describe("auth recovery and classification", () => {
     expect(blocked.authAttemptCount).toBe(1);
     expect(Date.parse(blocked.nextAttemptAt ?? "")).toBeGreaterThan(Date.now());
 
-    const skipped = await flushTaskOutbox({ send: respond(200, ack("op-session-401")) });
+    const skipped = await flushWithAdoption({ send: respond(200, ack("op-session-401")) });
     expect(skipped).toEqual({ acknowledged: 0, retryable: 0, permanent: 0 });
 
     expireBackoff("op-session-401");
-    const recovered = await flushTaskOutbox({ send: respond(200, ack("op-session-401")) });
+    const recovered = await flushWithAdoption({ send: respond(200, ack("op-session-401")) });
     expect(recovered).toEqual({ acknowledged: 1, retryable: 0, permanent: 0 });
     expect(listTaskOutbox()).toHaveLength(0);
   });
 
-  it("gives up on a session-gated 401 after the bounded auth budget, not the send budget", async () => {
+  it("retains a session-gated 401 indefinitely on a capped ladder and never fails it", async () => {
     enqueueTaskOperation({
       operationId: "op-manage-session",
       route: "/api/tasks/manage",
@@ -1147,26 +1226,43 @@ describe("auth recovery and classification", () => {
       payload: { taskId: 42 },
       displayTarget: { taskId: 42, kind: "task" },
     });
-    const send = vi.fn(async () => ({
+    const unauthorized = vi.fn(async () => ({
       status: 401,
       body: errorAck("op-manage-session", { reason: "unauthorized" }),
     }));
 
-    for (let index = 0; index < TASK_OUTBOX_MAX_AUTH_ATTEMPTS; index += 1) {
+    for (let index = 0; index < 12; index += 1) {
       expireBackoff("op-manage-session");
-      await flushTaskOutbox({ send });
+      const result = await flushWithAdoption({ send: unauthorized });
+      expect(result).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
     }
 
-    expect(send).toHaveBeenCalledTimes(TASK_OUTBOX_MAX_AUTH_ATTEMPTS);
-    expect(entryFor("op-manage-session").status).toBe("failed");
-    expect(entryFor("op-manage-session").lastErrorCategory).toBe("unauthorized");
-    expect(entryFor("op-manage-session").attemptCount).toBe(0);
-    expect(entryFor("op-manage-session").nextAttemptAt).toBeUndefined();
+    expect(unauthorized).toHaveBeenCalledTimes(12);
+    const blocked = entryFor("op-manage-session");
+    expect(blocked.status).toBe("auth-required");
+    expect(blocked.attemptCount).toBe(0);
+    expect(blocked.authAttemptCount).toBe(12);
+    expect(
+      Date.parse(blocked.nextAttemptAt ?? "") - Date.now(),
+    ).toBeLessThanOrEqual(TASK_OUTBOX_MAX_AUTH_BACKOFF_MS + 1_000);
+
+    expireBackoff("op-manage-session");
+    const recovered = await flushWithAdoption({ send: respond(200, ack("op-manage-session")) });
+    expect(recovered).toEqual({ acknowledged: 1, retryable: 0, permanent: 0 });
+    expect(listTaskOutbox()).toHaveLength(0);
+  });
+
+  it("caps the auth ladder and the reconcile ladder at their long backoff ceilings", () => {
+    expect(taskOutboxAuthBackoffMs(1)).toBe(TASK_OUTBOX_BASE_BACKOFF_MS);
+    expect(taskOutboxAuthBackoffMs(3)).toBe(TASK_OUTBOX_BASE_BACKOFF_MS * 4);
+    expect(taskOutboxAuthBackoffMs(40)).toBe(TASK_OUTBOX_MAX_AUTH_BACKOFF_MS);
+    expect(taskOutboxReconcileBackoffMs(1)).toBe(TASK_OUTBOX_BASE_BACKOFF_MS);
+    expect(taskOutboxReconcileBackoffMs(40)).toBe(TASK_OUTBOX_MAX_RECONCILE_BACKOFF_MS);
   });
 
   it("classifies a deterministic operation_conflict as permanent", async () => {
     enqueueClaim();
-    const result = await flushTaskOutbox({
+    const result = await flushWithAdoption({
       send: respond(409, errorAck("op-claim-1", { reason: "operation_conflict" })),
       pullSnapshot: async () => snapshotOf([canonicalTask()]),
     });
@@ -1179,7 +1275,7 @@ describe("auth recovery and classification", () => {
 
   it("treats a 200 without a reconciled field as a route-declared success", async () => {
     enqueueClaim();
-    const result = await flushTaskOutbox({
+    const result = await flushWithAdoption({
       send: respond(200, { operationId: "op-claim-1" } as TaskOutboxAcknowledgement),
     });
 
@@ -1189,7 +1285,7 @@ describe("auth recovery and classification", () => {
 
   it("never treats a 202 as reconciled, even when the body claims otherwise", async () => {
     enqueueClaim();
-    await flushTaskOutbox({
+    await flushWithAdoption({
       send: respond(202, { operationId: "op-claim-1", reconciled: true } as TaskOutboxAcknowledgement),
       pullSnapshot: async () => snapshotOf([canonicalTask()]),
     });
@@ -1200,7 +1296,7 @@ describe("auth recovery and classification", () => {
 
   it("classifies a throwing credential resolver instead of failing the flush", async () => {
     enqueueClaim({ operationId: "op-claim-1", action: "claim" });
-    const result = await flushTaskOutbox({
+    const result = await flushWithAdoption({
       send: respond(200, ack("op-claim-1")),
       getCredential: () => {
         throw new Error("resolver exploded");
@@ -1213,7 +1309,7 @@ describe("auth recovery and classification", () => {
 
   it("keeps a failed entry instead of dropping it when acknowledgement work throws", async () => {
     enqueueClaim();
-    const result = await flushTaskOutbox({
+    const result = await flushWithAdoption({
       send: respond(200, ack("op-claim-1")),
       onAcknowledged: () => {
         throw new Error("store write failed");
@@ -1239,7 +1335,7 @@ describe("request timeouts and the in-flight guard", () => {
     vi.stubGlobal("fetch", hung);
 
     const driver = createFetchTaskOutboxDriver({ requestTimeoutMs: 25 });
-    const first = await flushTaskOutbox(driver);
+    const first = await flushWithAdoption(driver);
 
     expect(first).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
     expect(hung).toHaveBeenCalledTimes(1);
@@ -1250,7 +1346,7 @@ describe("request timeouts and the in-flight guard", () => {
       "fetch",
       vi.fn(async () => ({ ok: true, status: 200, json: async () => ack("op-claim-1") })),
     );
-    const second = await flushTaskOutbox(driver);
+    const second = await flushWithAdoption(driver);
     expect(second).toEqual({ acknowledged: 1, retryable: 0, permanent: 0 });
   });
 
@@ -1574,13 +1670,13 @@ describe("real route request bodies with an ephemeral PIN", () => {
     enqueueClaim({ operationId: "op-needs-pin", action: "claim" });
     const send = vi.fn();
 
-    const result = await flushTaskOutbox({ send: send as never });
+    const result = await flushWithAdoption({ send: send as never });
     expect(send).not.toHaveBeenCalled();
     expect(result).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
     expect(entryFor("op-needs-pin").status).toBe("auth-required");
     expect(entryFor("op-needs-pin").authAttemptCount).toBeUndefined();
 
-    const withCredential = await flushTaskOutbox({
+    const withCredential = await flushWithAdoption({
       send: respond(200, ack("op-needs-pin")),
       getCredential: () => PIN,
     });
@@ -1852,5 +1948,182 @@ describe("useTaskOperationOutbox driver lifecycle", () => {
       second.unmount();
     });
     document.body.innerHTML = "";
+  });
+});
+
+describe("second review contracts", () => {
+  it("never retires a 202 from a server-declared mid-repair snapshot", async () => {
+    enqueueClaim();
+    const pull = vi.fn(async () => ({ ...snapshotOf([canonicalTask({ completed: true })]), reconciled: false }));
+
+    const result = await flushWithAdoption({
+      send: respond(202, { operationId: "op-claim-1", reconciled: false, repairRequired: true }),
+      pullSnapshot: pull,
+    });
+
+    expect(result).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
+    expect(pull).toHaveBeenCalledTimes(1);
+    expect(entryFor("op-claim-1").status).toBe("reconciling");
+    expect(listTaskOutbox()).toHaveLength(1);
+  });
+
+  it("never retires a 409 from a server-declared mid-repair snapshot", async () => {
+    enqueueClaim();
+    const result = await flushWithAdoption({
+      send: respond(409, errorAck("op-claim-1", { reason: "semantic_duplicate" })),
+      pullSnapshot: async () => ({ ...snapshotOf([canonicalTask({ completed: true })]), reconciled: false }),
+    });
+
+    expect(result).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
+    expect(entryFor("op-claim-1").status).toBe("reconciling");
+  });
+
+  it("requires adoption before removing a proven 202", async () => {
+    enqueueClaim();
+    const proving = async () =>
+      snapshotOf([canonicalTask({ completed: true, pendingApproval: { byName: "Caspian", at: "now", points: 5 } })]);
+
+    const withoutAdoption = await flushTaskOutbox({
+      send: respond(202, { operationId: "op-claim-1", reconciled: false }),
+      pullSnapshot: proving,
+      onAcknowledged: ADOPT_NOOP,
+    });
+    expect(withoutAdoption).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
+    expect(listTaskOutbox()).toHaveLength(1);
+    expect(entryFor("op-claim-1").status).toBe("reconciling");
+
+    expireBackoff("op-claim-1");
+    const failingAdoption = await flushWithAdoption({
+      send: respond(202, { operationId: "op-claim-1", reconciled: false }),
+      pullSnapshot: proving,
+      adoptSnapshot: async () => {
+        throw new Error("store unavailable");
+      },
+    });
+    expect(failingAdoption).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
+    expect(listTaskOutbox()).toHaveLength(1);
+
+    expireBackoff("op-claim-1");
+    const adopted: string[] = [];
+    const adoptedResult = await flushWithAdoption({
+      send: respond(202, { operationId: "op-claim-1", reconciled: false }),
+      pullSnapshot: proving,
+      adoptSnapshot: async (read) => {
+        adopted.push(read.reconciled === true ? "reconciled" : "mid-repair");
+      },
+    });
+    expect(adopted).toEqual(["reconciled"]);
+    expect(adoptedResult).toEqual({ acknowledged: 1, retryable: 0, permanent: 0 });
+    expect(listTaskOutbox()).toHaveLength(0);
+  });
+
+  it("requires adoption before removing a plain 200", async () => {
+    enqueueClaim();
+    const result = await flushTaskOutbox({
+      send: respond(200, ack("op-claim-1")),
+      pullSnapshot: async () => snapshotOf([]),
+    });
+
+    expect(result).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
+    expect(listTaskOutbox()).toHaveLength(1);
+    expect(entryFor("op-claim-1").status).toBe("reconciling");
+  });
+
+  it("keeps a reconciling entry forever, uncancellable, on a capped ladder", async () => {
+    enqueueClaim();
+    const unreconciled = respond(202, { operationId: "op-claim-1", reconciled: false, repairRequired: true });
+
+    for (let index = 0; index < 12; index += 1) {
+      expireBackoff("op-claim-1");
+      const result = await flushWithAdoption({
+        send: unreconciled,
+        pullSnapshot: async () => snapshotOf([canonicalTask()]),
+      });
+      expect(result).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
+    }
+
+    const entry = entryFor("op-claim-1");
+    expect(entry.status).toBe("reconciling");
+    expect(entry.reconcileAttemptCount).toBe(12);
+    expect(entry.attemptCount).toBe(0);
+    expect(entry.lastErrorCategory).toBe("projection");
+    expect(entry.lastErrorReason).toBe("projection_pending");
+    expect(Date.parse(entry.nextAttemptAt ?? "") - Date.now()).toBeLessThanOrEqual(
+      TASK_OUTBOX_MAX_RECONCILE_BACKOFF_MS + 1_000,
+    );
+    expect(cancelTaskOutboxEntry("op-claim-1")).toBe(false);
+    expect(listTaskOutbox()).toHaveLength(1);
+  });
+
+  it("keeps failed entries past the retention window until an explicit cancel", () => {
+    enqueueClaim({ operationId: "op-failed" });
+    const entryKey = taskOutboxEntryStorageKey("op-failed");
+    const stored = JSON.parse(window.localStorage.getItem(entryKey) ?? "{}") as Record<string, unknown>;
+    window.localStorage.setItem(
+      entryKey,
+      JSON.stringify({ ...stored, status: "failed", createdAt: "2020-01-01T00:00:00.000Z" }),
+    );
+    window.localStorage.setItem(
+      TASK_OUTBOX_STORAGE_KEY,
+      JSON.stringify({ rev: 200, ids: storedIds() }),
+    );
+    __resetTaskOutboxForTests();
+
+    expect(listTaskOutbox().map((candidate) => candidate.operationId)).toEqual(["op-failed"]);
+    expect(cancelTaskOutboxEntry("op-failed")).toBe(true);
+    expect(listTaskOutbox()).toHaveLength(0);
+  });
+
+  it("still drops a non-failed entry past the retention window", () => {
+    enqueueClaim({ operationId: "op-ancient-queued" });
+    const entryKey = taskOutboxEntryStorageKey("op-ancient-queued");
+    const stored = JSON.parse(window.localStorage.getItem(entryKey) ?? "{}") as Record<string, unknown>;
+    window.localStorage.setItem(entryKey, JSON.stringify({ ...stored, createdAt: "2020-01-01T00:00:00.000Z" }));
+    window.localStorage.setItem(TASK_OUTBOX_STORAGE_KEY, JSON.stringify({ rev: 201, ids: storedIds() }));
+    __resetTaskOutboxForTests();
+
+    expect(listTaskOutbox()).toHaveLength(0);
+  });
+
+  it("reconstructs an entry key that a lost index still points at", () => {
+    enqueueClaim({ operationId: "op-rebuild" });
+    const indexRaw = window.localStorage.getItem(TASK_OUTBOX_STORAGE_KEY);
+    window.localStorage.setItem(TASK_OUTBOX_STORAGE_KEY, JSON.stringify({ rev: 300, ids: ["op-rebuild", "op-ghost"] }));
+    __resetTaskOutboxForTests();
+
+    expect(listTaskOutbox().map((entry) => entry.operationId)).toEqual(["op-rebuild"]);
+    expect(taskOutboxOrphanStorageIds()).toEqual(["op-ghost"]);
+
+    enqueueTaskOperation({
+      operationId: "op-after-prune",
+      route: "/api/tasks/manage",
+      action: "delete",
+      payload: { taskId: 3 },
+      displayTarget: { taskId: 3, kind: "task" },
+    });
+
+    const pruned = JSON.parse(window.localStorage.getItem(TASK_OUTBOX_STORAGE_KEY) ?? "{}") as {
+      ids: string[];
+    };
+    expect(pruned.ids.sort()).toEqual(["op-after-prune", "op-rebuild"]);
+    expect(indexRaw).not.toBeNull();
+    expect(taskOutboxOrphanStorageIds()).toEqual([]);
+  });
+
+  it("warns once and keeps working when storage writes degrade", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("QuotaExceededError");
+    });
+
+    expect(() => enqueueClaim({ operationId: "op-degraded" })).not.toThrow();
+    expect(listTaskOutbox().map((entry) => entry.operationId)).toEqual(["op-degraded"]);
+    expect(warn.mock.calls.some(([first]) => first === "[task-outbox] storage write degraded to memory only")).toBe(true);
+    for (const call of warn.mock.calls) {
+      expect(JSON.stringify(call.slice(1))).not.toContain("op-degraded");
+    }
+
+    setItem.mockRestore();
+    warn.mockRestore();
   });
 });

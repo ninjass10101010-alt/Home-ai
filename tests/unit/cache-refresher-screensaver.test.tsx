@@ -12,11 +12,13 @@ const refreshCaches = vi.fn(async () => {});
 const flushPendingWrites = vi.fn(async () => {});
 const requestTaskOutboxFlush = vi.fn(async () => ({ acknowledged: 0, retryable: 0, permanent: 0 }));
 const warnTaskOutboxFlushFailure = vi.fn((error: unknown) => error);
+const warnTaskOutboxRefreshFailure = vi.fn((error: unknown) => error);
 vi.mock("@/db", () => ({ db: { refreshCaches: () => refreshCaches() } }));
 vi.mock("@/lib/pending-writes", () => ({ flushPendingWrites: () => flushPendingWrites() }));
 vi.mock("@/lib/task-operation-outbox", () => ({
   requestTaskOutboxFlush: () => requestTaskOutboxFlush(),
   warnTaskOutboxFlushFailure: (error: unknown) => warnTaskOutboxFlushFailure(error),
+  warnTaskOutboxRefreshFailure: (error: unknown) => warnTaskOutboxRefreshFailure(error),
 }));
 
 import { CacheRefresher } from "@/components/ui/CacheRefresher";
@@ -44,6 +46,7 @@ beforeEach(() => {
   flushPendingWrites.mockClear();
   requestTaskOutboxFlush.mockClear();
   warnTaskOutboxFlushFailure.mockClear();
+  warnTaskOutboxRefreshFailure.mockClear();
 });
 
 afterEach(() => {
@@ -178,6 +181,26 @@ it("still replays pending writes and refreshes caches when the outbox flush reje
     expect(requestTaskOutboxFlush).toHaveBeenCalledTimes(2);
     expect(flushPendingWrites).toHaveBeenCalledTimes(2);
     expect(refreshCaches).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("has a terminal catch so a failing cache refresh cannot escape", async () => {
+  const failure = new Error("refresh exploded");
+  refreshCaches.mockRejectedValueOnce(failure);
+  pathnameRef.current = "/";
+  vi.useFakeTimers();
+  try {
+    render(
+      <CacheRefresher>
+        <p>home</p>
+      </CacheRefresher>
+    );
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(flushPendingWrites).toHaveBeenCalledTimes(1);
+    expect(warnTaskOutboxRefreshFailure).toHaveBeenCalledWith(failure);
   } finally {
     vi.useRealTimers();
   }
