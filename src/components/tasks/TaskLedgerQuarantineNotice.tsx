@@ -62,10 +62,7 @@ export default function TaskLedgerQuarantineNotice({
         const json = await postQuarantine("dry-run", localWeekData);
         if (dead || !json) return;
         const count = json.report.quarantined.length;
-        if (count === 0) {
-          markHandled();
-          return;
-        }
+        if (count === 0) return;
         setState({ count, path: null });
       } catch {
         return;
