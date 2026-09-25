@@ -1,8 +1,8 @@
-// F2 (continued) — POST /api/tasks/sync shares the same hole: any session
-// could overwrite the shared snapshot blob, whose `weekData` leg carries the
-// family's weekly points. Non-parent sessions may sync the tasks leg ONLY;
-// the weekData/rewards/penalties legs are ignored (not merged) and the
-// response says so via `ignoredLegs`. Parent behavior is unchanged.
+// F2 (continued) + Task 11 — POST /api/tasks/sync used to let any session
+// overwrite the shared snapshot blob. Every browser snapshot write is retired:
+// `tasks`/`weekData` → 410 LEGACY_SYNC_WRITE_ERROR, malformed JSON → 400
+// `invalid_body`, and any other valid object → 400 `invalid_body` too. No
+// rejection reaches PocketBase.
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { signSession, SESSION_COOKIE } from "@/lib/session";
@@ -42,9 +42,13 @@ vi.mock("@/lib/task-projection-reconciler", () => ({
   reconcileTaskProjectionLocked: mocks.reconcileTaskProjectionLocked,
 }));
 
-import { GET, POST } from "@/app/api/tasks/sync/route";
+import { GET, LEGACY_SYNC_WRITE_ERROR, POST } from "@/app/api/tasks/sync/route";
 
 async function post(body: unknown, role?: string) {
+  return postRaw(JSON.stringify(body), role);
+}
+
+async function postRaw(rawBody: string, role?: string) {
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (role) {
     const token = await signSession({ memberId: "m1", name: "Kid", role });
@@ -53,7 +57,7 @@ async function post(body: unknown, role?: string) {
   const r = new NextRequest("http://x/api/tasks/sync", {
     method: "POST",
     headers,
-    body: JSON.stringify(body),
+    body: rawBody,
   });
   return POST(r);
 }
@@ -136,7 +140,7 @@ describe("tasks/sync leg gating", () => {
     db.rows = [{ id: "row1", data: EXISTING }];
     const res = await post(POISONED, "child");
     expect(res.status).toBe(410);
-    expect(await res.json()).toEqual({ ok: false, error: "task_snapshot_write_retired" });
+    expect(await res.json()).toEqual({ ok: false, error: LEGACY_SYNC_WRITE_ERROR });
     expect(db.updates).toHaveLength(0);
     expect(db.creates).toHaveLength(0);
   });
@@ -144,7 +148,7 @@ describe("tasks/sync leg gating", () => {
   it("pet task/week POST is retired without touching PB", async () => {
     const res = await post(POISONED, "pet");
     expect(res.status).toBe(410);
-    expect(await res.json()).toEqual({ ok: false, error: "task_snapshot_write_retired" });
+    expect(await res.json()).toEqual({ ok: false, error: LEGACY_SYNC_WRITE_ERROR });
     expect(db.updates).toHaveLength(0);
     expect(db.creates).toHaveLength(0);
   });
@@ -153,12 +157,52 @@ describe("tasks/sync leg gating", () => {
     db.rows = [{ id: "row1", data: EXISTING }];
     const res = await post(POISONED, "parent");
     expect(res.status).toBe(410);
-    expect(await res.json()).toEqual({ ok: false, error: "task_snapshot_write_retired" });
+    expect(await res.json()).toEqual({ ok: false, error: LEGACY_SYNC_WRITE_ERROR });
     expect(db.updates).toHaveLength(0);
     expect(db.creates).toHaveLength(0);
   });
 
-  it("config compatibility fields remain accepted but ignored", async () => {
+  it("a tasks-only body is 410 before any PB access or partial import", async () => {
+    db.rows = [{ id: "row1", data: EXISTING }];
+    const res = await post({ tasks: [{ id: 42, title: "Forged" }] }, "parent");
+    expect(res.status).toBe(410);
+    expect(await res.json()).toEqual({ ok: false, error: LEGACY_SYNC_WRITE_ERROR });
+    expect(mocks.withAdmin).not.toHaveBeenCalled();
+    expect(db.updates).toHaveLength(0);
+    expect(db.creates).toHaveLength(0);
+  });
+
+  it("a weekData-only body is 410 before any PB access or partial import", async () => {
+    db.rows = [{ id: "row1", data: EXISTING }];
+    const res = await post({ weekData: { points: { Alex: 9999 } } }, "parent");
+    expect(res.status).toBe(410);
+    expect(await res.json()).toEqual({ ok: false, error: LEGACY_SYNC_WRITE_ERROR });
+    expect(mocks.withAdmin).not.toHaveBeenCalled();
+    expect(db.updates).toHaveLength(0);
+    expect(db.creates).toHaveLength(0);
+  });
+
+  it("malformed sync JSON is 400 invalid_body with zero PB access", async () => {
+    db.rows = [{ id: "row1", data: EXISTING }];
+    const res = await postRaw("not-json", "parent");
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ ok: false, error: "invalid_body" });
+    expect(mocks.withAdmin).not.toHaveBeenCalled();
+    expect(db.updates).toHaveLength(0);
+    expect(db.creates).toHaveLength(0);
+  });
+
+  it("a valid non-task body is 400 invalid_body — this route is not a migration endpoint", async () => {
+    db.rows = [{ id: "row1", data: EXISTING }];
+    const res = await post({ rewards: [] }, "parent");
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ ok: false, error: "invalid_body" });
+    expect(mocks.withAdmin).not.toHaveBeenCalled();
+    expect(db.updates).toHaveLength(0);
+    expect(db.creates).toHaveLength(0);
+  });
+
+  it("the config compatibility legs are refused exactly like any other non-task body", async () => {
     const res = await post({
       rewards: POISONED.rewards,
       rewardsUpdatedAt: POISONED.rewardsUpdatedAt,
@@ -167,8 +211,15 @@ describe("tasks/sync leg gating", () => {
       weeklyPrizes: POISONED.weeklyPrizes,
       weeklyPrizesStamp: POISONED.weeklyPrizesStamp,
     }, "parent");
-    expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ ok: true, saved: false });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ ok: false, error: "invalid_body" });
+    expect(mocks.withAdmin).not.toHaveBeenCalled();
+  });
+
+  it("a non-object body is 400 invalid_body with zero PB access", async () => {
+    const res = await post([{ tasks: [] }], "parent");
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ ok: false, error: "invalid_body" });
     expect(mocks.withAdmin).not.toHaveBeenCalled();
   });
 

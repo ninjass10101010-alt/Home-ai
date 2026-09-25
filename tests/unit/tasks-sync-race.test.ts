@@ -72,7 +72,7 @@ const h = vi.hoisted(() => {
 const mocks = vi.hoisted(() => ({ withAdmin: vi.fn() }));
 vi.mock("@/lib/pb-auth", () => ({ withAdmin: (fn: any) => mocks.withAdmin(fn) }));
 
-import { POST } from "@/app/api/tasks/sync/route";
+import { LEGACY_SYNC_WRITE_ERROR, POST } from "@/app/api/tasks/sync/route";
 import { __resetKeyedLockForTests } from "@/lib/keyed-lock";
 
 async function post(body: unknown, role: string) {
@@ -135,8 +135,8 @@ describe("tasks/sync read-modify-write atomicity", () => {
 
     expect(parentRes.status).toBe(410);
     expect(childRes.status).toBe(410);
-    expect(await parentRes.json()).toEqual({ ok: false, error: "task_snapshot_write_retired" });
-    expect(await childRes.json()).toEqual({ ok: false, error: "task_snapshot_write_retired" });
+    expect(await parentRes.json()).toEqual({ ok: false, error: LEGACY_SYNC_WRITE_ERROR });
+    expect(await childRes.json()).toEqual({ ok: false, error: LEGACY_SYNC_WRITE_ERROR });
     expect(h.snapshot()).toEqual(before);
     expect(h.count("read")).toBe(0);
     expect(h.count("write")).toBe(0);
