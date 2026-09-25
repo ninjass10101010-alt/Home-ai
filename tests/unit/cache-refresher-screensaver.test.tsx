@@ -10,8 +10,12 @@ const pathnameRef = { current: "/screensaver" };
 vi.mock("next/navigation", () => ({ usePathname: () => pathnameRef.current }));
 const refreshCaches = vi.fn(async () => {});
 const flushPendingWrites = vi.fn(async () => {});
+const requestTaskOutboxFlush = vi.fn(async () => ({ acknowledged: 0, retryable: 0, permanent: 0 }));
 vi.mock("@/db", () => ({ db: { refreshCaches: () => refreshCaches() } }));
 vi.mock("@/lib/pending-writes", () => ({ flushPendingWrites: () => flushPendingWrites() }));
+vi.mock("@/lib/task-operation-outbox", () => ({
+  requestTaskOutboxFlush: () => requestTaskOutboxFlush(),
+}));
 
 import { CacheRefresher } from "@/components/ui/CacheRefresher";
 
@@ -36,6 +40,7 @@ function rerender(ui: ReactElement) {
 beforeEach(() => {
   refreshCaches.mockClear();
   flushPendingWrites.mockClear();
+  requestTaskOutboxFlush.mockClear();
 });
 
 afterEach(() => {
@@ -63,6 +68,7 @@ it("does not poll the gateway on /screensaver", async () => {
     await vi.advanceTimersByTimeAsync(60_000 + 5_000);
     expect(refreshCaches).not.toHaveBeenCalled();
     expect(flushPendingWrites).not.toHaveBeenCalled();
+    expect(requestTaskOutboxFlush).not.toHaveBeenCalled();
   } finally {
     vi.useRealTimers();
   }
@@ -112,6 +118,35 @@ it("re-arms gateway polling after client navigation between normal routes", asyn
     await vi.advanceTimersByTimeAsync(60_000);
     expect(refreshCaches).toHaveBeenCalledTimes(3);
     expect(flushPendingWrites).toHaveBeenCalledTimes(3);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("drains the durable task outbox before replaying pending writes on every refresh path", async () => {
+  pathnameRef.current = "/";
+  vi.useFakeTimers();
+  try {
+    render(
+      <CacheRefresher>
+        <p>home</p>
+      </CacheRefresher>
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(requestTaskOutboxFlush).toHaveBeenCalledTimes(1);
+    expect(requestTaskOutboxFlush.mock.invocationCallOrder[0]).toBeLessThan(
+      flushPendingWrites.mock.invocationCallOrder[0],
+    );
+    expect(flushPendingWrites).toHaveBeenCalledTimes(1);
+    expect(refreshCaches).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(requestTaskOutboxFlush).toHaveBeenCalledTimes(2);
+    expect(flushPendingWrites).toHaveBeenCalledTimes(2);
+
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(requestTaskOutboxFlush).toHaveBeenCalledTimes(3);
   } finally {
     vi.useRealTimers();
   }

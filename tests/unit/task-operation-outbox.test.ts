@@ -1,0 +1,1289 @@
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createElement } from "react";
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+
+import { loadTasks } from "@/lib/task-utils";
+import type { SnapshotData } from "@/lib/snapshot-tasks";
+import {
+  TASK_OUTBOX_BASE_BACKOFF_MS,
+  TASK_OUTBOX_MAX_ATTEMPTS,
+  TASK_OUTBOX_MAX_BACKOFF_MS,
+  TASK_OUTBOX_MAX_ENTRIES,
+  TASK_OUTBOX_STORAGE_KEY,
+  __resetTaskOutboxForTests,
+  buildTaskOperationRequestBody,
+  cancelTaskOutboxEntry,
+  createTaskOperationId,
+  enqueueTaskOperation,
+  flushTaskOutbox,
+  getTaskOutboxServerSnapshot,
+  getTaskOutboxSnapshot,
+  listTaskOutbox,
+  pullTaskSnapshotDocument,
+  removeTaskOutboxEntry,
+  requestTaskOutboxFlush,
+  sendTaskOperationRequest,
+  setTaskOutboxDriver,
+  snapshotProvesResolved,
+  subscribeTaskOutbox,
+  taskOutboxBackoffMs,
+  type SnapshotRead,
+  type TaskOutboxAcknowledgement,
+  type TaskOutboxEntry,
+} from "@/lib/task-operation-outbox";
+import { parseClaimCommand } from "@/lib/task-claim";
+import { parseApproveCommand } from "@/lib/task-approval";
+import { parseManageTaskCommand } from "@/lib/task-manage";
+import { parseTaskConfigCommand } from "@/lib/task-config";
+import { useTaskOperationOutbox, type UseTaskOperationOutboxResult } from "@/hooks/useTaskOperationOutbox";
+
+vi.mock("@/db", () => ({
+  db: {
+    upsertTask: vi.fn(async () => null),
+    selectHallOfFame: vi.fn(async () => []),
+    insertHallOfFameEntry: vi.fn(async () => null),
+  },
+}));
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+const PIN = "test-credential-value";
+const OTHER_PIN = "second-credential-value";
+
+function storedRaw(): string {
+  return window.localStorage.getItem(TASK_OUTBOX_STORAGE_KEY) ?? "";
+}
+
+function storedEntries(): TaskOutboxEntry[] {
+  return JSON.parse(storedRaw() || "[]") as TaskOutboxEntry[];
+}
+
+function expireBackoff(operationId: string): void {
+  window.localStorage.setItem(
+    TASK_OUTBOX_STORAGE_KEY,
+    JSON.stringify(
+      storedEntries().map((entry) =>
+        entry.operationId === operationId
+          ? { ...entry, nextAttemptAt: new Date(Date.now() - 1_000).toISOString() }
+          : entry,
+      ),
+    ),
+  );
+}
+
+function enqueueClaim(overrides: Partial<Parameters<typeof enqueueTaskOperation>[0]> = {}) {
+  return enqueueTaskOperation({
+    operationId: "op-claim-1",
+    route: "/api/tasks/claim",
+    action: "complete",
+    payload: { taskId: 42, memberName: "Caspian", pin: PIN },
+    displayTarget: { taskId: 42, title: "Dishes", kind: "claim" },
+    ...overrides,
+  });
+}
+
+function ack(
+  operationId: string,
+  overrides: Partial<TaskOutboxAcknowledgement> = {},
+): TaskOutboxAcknowledgement {
+  return { operationId, reconciled: true, ...overrides };
+}
+
+function errorAck(
+  operationId: string,
+  extra: Record<string, unknown> = {},
+): TaskOutboxAcknowledgement {
+  return { operationId, reconciled: false, ...extra };
+}
+
+function respond(status: number, body: TaskOutboxAcknowledgement) {
+  return async () => ({ status, body });
+}
+
+function snapshotOf(
+  tasks: Record<string, unknown>[],
+  extra: Record<string, unknown> = {},
+): SnapshotRead {
+  return {
+    snapshot: {
+      tasks,
+      deletedTaskIds: [],
+      weekData: { weekStart: "2026-09-21", points: {}, streak: {}, lastActive: {}, history: [] },
+      rewards: [],
+      rewardsUpdatedAt: "",
+      penalties: [],
+      penaltiesUpdatedAt: "",
+      weeklyPrizes: [],
+      weeklyPrizesStamp: "",
+      ...extra,
+    } as unknown as SnapshotData,
+    reconciled: true,
+  };
+}
+
+function canonicalTask(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: 42,
+    title: "Dishes",
+    assignee: "Caspian",
+    points: 5,
+    completed: false,
+    crewSize: 0,
+    ...overrides,
+  };
+}
+
+function entryFor(operationId: string): TaskOutboxEntry {
+  const found = listTaskOutbox().find((entry) => entry.operationId === operationId);
+  if (!found) throw new Error(`missing outbox entry ${operationId}`);
+  return found;
+}
+
+beforeEach(() => {
+  window.localStorage.clear();
+  __resetTaskOutboxForTests();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  window.localStorage.clear();
+  __resetTaskOutboxForTests();
+});
+
+describe("storage and sanitization", () => {
+  it("persists a sanitized entry and reuses its operation ID", () => {
+    const entry = enqueueClaim();
+
+    expect(listTaskOutbox()).toHaveLength(1);
+    expect(entry.operationId).toBe("op-claim-1");
+    expect(storedRaw()).not.toContain(PIN);
+    expect(storedRaw()).not.toContain("pin");
+  });
+
+  it("never stores credentials, authority, history, or ledger fields", () => {
+    enqueueTaskOperation({
+      operationId: "op-manage-1",
+      route: "/api/tasks/manage",
+      action: "update",
+      payload: {
+        taskId: 7,
+        patch: { title: "Trash", points: 9, pin: PIN, weekData: { points: { Caspian: 900 } } },
+        token: OTHER_PIN,
+        history: [{ id: 1 }],
+        weekData: { history: [] },
+        authorization: `Bearer ${PIN}`,
+        secret: PIN,
+        completedBy: "Alex",
+      },
+      displayTarget: { taskId: 7, kind: "task" },
+    });
+
+    const raw = storedRaw();
+    for (const forbidden of [PIN, OTHER_PIN, "token", "secret", "authorization", "history", "weekData", "completedBy"]) {
+      expect(raw).not.toContain(forbidden);
+    }
+    expect(storedEntries()[0].payload).toEqual({ taskId: 7, patch: { title: "Trash", points: 9 } });
+  });
+
+  it("keeps legitimate manage and config fields the routes require", () => {
+    enqueueTaskOperation({
+      operationId: "op-manage-add",
+      route: "/api/tasks/manage",
+      action: "add",
+      payload: {
+        task: {
+          title: "Recycle",
+          assignee: "Bailey",
+          assigneeEmoji: "🐻",
+          due: "2026-09-27",
+          points: 10,
+          recurring: "weekly",
+          category: "chores",
+          priority: "high",
+          universal: true,
+          stealable: true,
+          crewSize: 3,
+          speedBonus: 2,
+          completed: true,
+          pendingApproval: { byName: "X", at: "now", points: 999 },
+        },
+      },
+      displayTarget: { temporaryId: 5150, title: "Recycle", kind: "task" },
+    });
+    enqueueTaskOperation({
+      operationId: "op-config-replace",
+      route: "/api/tasks/config",
+      action: "replace",
+      payload: {
+        kind: "rewards",
+        updatedAt: "2026-09-25T10:00:00.000Z",
+        items: [{ name: "Ice cream", emoji: "🍦", cost: 40, category: "treat", weeklyPoints: 900 }],
+      },
+      displayTarget: { kind: "config" },
+    });
+
+    const added = entryFor("op-manage-add");
+    const config = entryFor("op-config-replace");
+    const task = added.payload.task as Record<string, unknown>;
+
+    expect(task.points).toBe(10);
+    expect(task.crewSize).toBe(3);
+    expect(task.universal).toBe(true);
+    expect(task.speedBonus).toBe(2);
+    expect(task).not.toHaveProperty("completed");
+    expect(task).not.toHaveProperty("pendingApproval");
+    expect(config.payload.items).toEqual([
+      { name: "Ice cream", emoji: "🍦", cost: 40, category: "treat" },
+    ]);
+  });
+
+  it("restores queued entries after a reload with no credential material", async () => {
+    enqueueClaim();
+    vi.resetModules();
+    const reloaded = await import("@/lib/task-operation-outbox");
+
+    const restored = reloaded.listTaskOutbox();
+    expect(restored).toHaveLength(1);
+    expect(restored[0].operationId).toBe("op-claim-1");
+    expect(restored[0].status).toBe("queued");
+    expect(storedRaw()).not.toContain(PIN);
+  });
+
+  it("treats corrupt or foreign storage contents as an empty outbox", () => {
+    window.localStorage.setItem(TASK_OUTBOX_STORAGE_KEY, "{not json");
+    expect(listTaskOutbox()).toEqual([]);
+
+    window.localStorage.setItem(TASK_OUTBOX_STORAGE_KEY, JSON.stringify([{ nope: true }]));
+    expect(listTaskOutbox()).toEqual([]);
+
+    window.localStorage.setItem(TASK_OUTBOX_STORAGE_KEY, JSON.stringify({ entries: [] }));
+    expect(listTaskOutbox()).toEqual([]);
+  });
+
+  it("keeps a session-usable entry when storage writes fail with a quota error", () => {
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("QuotaExceededError");
+    });
+
+    expect(() => enqueueClaim()).not.toThrow();
+    expect(listTaskOutbox()).toHaveLength(1);
+    expect(listTaskOutbox()[0].operationId).toBe("op-claim-1");
+
+    setItem.mockRestore();
+  });
+
+  it("bounds the stored count to the newest entries", () => {
+    for (let index = 0; index < TASK_OUTBOX_MAX_ENTRIES + 5; index += 1) {
+      enqueueTaskOperation({
+        operationId: `op-bulk-${String(index).padStart(3, "0")}`,
+        route: "/api/tasks/manage",
+        action: "delete",
+        payload: { taskId: index + 1 },
+        displayTarget: { taskId: index + 1, kind: "task" },
+      });
+    }
+
+    const stored = listTaskOutbox().map((entry) => entry.operationId);
+    expect(stored).toHaveLength(TASK_OUTBOX_MAX_ENTRIES);
+    expect(stored[0]).toBe("op-bulk-005");
+    expect(stored[stored.length - 1]).toBe(
+      `op-bulk-${String(TASK_OUTBOX_MAX_ENTRIES + 4).padStart(3, "0")}`,
+    );
+  });
+
+  it("drops entries past the retention window on read", () => {
+    enqueueClaim();
+    const fresh = storedEntries()[0];
+    window.localStorage.setItem(
+      TASK_OUTBOX_STORAGE_KEY,
+      JSON.stringify([
+        { ...fresh, operationId: "op-ancient", createdAt: "2020-01-01T00:00:00.000Z" },
+        fresh,
+      ]),
+    );
+
+    expect(listTaskOutbox().map((entry) => entry.operationId)).toEqual(["op-claim-1"]);
+  });
+
+  it("mints a distinct operation ID per call", () => {
+    const ids = new Set(Array.from({ length: 25 }, () => createTaskOperationId()));
+    expect(ids.size).toBe(25);
+    for (const id of ids) expect(id).toMatch(/^[A-Za-z0-9][A-Za-z0-9_-]{7,199}$/);
+  });
+
+  it("replaces rather than duplicates an entry re-enqueued under the same operation ID", () => {
+    enqueueClaim();
+    enqueueClaim({ action: "undo" });
+    expect(listTaskOutbox()).toHaveLength(1);
+    expect(listTaskOutbox()[0].action).toBe("undo");
+  });
+});
+
+describe("acknowledgement state machine", () => {
+  it("adopts authoritative data before removing a 200 entry", async () => {
+    const order: string[] = [];
+    enqueueClaim();
+
+    const result = await flushTaskOutbox({
+      send: async (entry) => {
+        order.push(`send:${entry.operationId}`);
+        return { status: 200, body: ack(entry.operationId) };
+      },
+      onAcknowledged: (acknowledgement) => {
+        order.push(`adopt:${acknowledgement.operationId}`);
+        expect(listTaskOutbox()).toHaveLength(1);
+      },
+    });
+
+    expect(result).toEqual({ acknowledged: 1, retryable: 0, permanent: 0 });
+    expect(order).toEqual(["send:op-claim-1", "adopt:op-claim-1"]);
+    expect(listTaskOutbox()).toHaveLength(0);
+  });
+
+  it("retains a 202 until a pulled snapshot proves it resolved, then removes it", async () => {
+    enqueueClaim();
+    let pullCount = 0;
+
+    const first = await flushTaskOutbox({
+      send: respond(202, { operationId: "op-claim-1", reconciled: false, repairRequired: true }),
+      pullSnapshot: async () => {
+        pullCount += 1;
+        return snapshotOf([canonicalTask()]);
+      },
+    });
+
+    expect(first).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
+    expect(pullCount).toBe(1);
+    expect(entryFor("op-claim-1").status).toBe("reconciling");
+    expect(entryFor("op-claim-1").lastErrorCategory).toBe("projection");
+
+    expireBackoff("op-claim-1");
+    const second = await flushTaskOutbox({
+      send: respond(202, { operationId: "op-claim-1", reconciled: false, repairRequired: true }),
+      pullSnapshot: async () =>
+        snapshotOf([
+          canonicalTask({
+            completed: true,
+            pendingApproval: { byName: "Caspian", at: "2026-09-25T10:00:00.000Z", points: 5 },
+          }),
+        ]),
+    });
+
+    expect(second).toEqual({ acknowledged: 1, retryable: 0, permanent: 0 });
+    expect(listTaskOutbox()).toHaveLength(0);
+  });
+
+  it("keeps a 202 entry when no snapshot pull is available", async () => {
+    enqueueClaim();
+    const result = await flushTaskOutbox({
+      send: respond(202, { operationId: "op-claim-1", reconciled: false }),
+    });
+    expect(result).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
+    expect(listTaskOutbox()).toHaveLength(1);
+  });
+
+  it("keeps a 202 entry when the pulled snapshot does not prove the operation", async () => {
+    enqueueClaim();
+    const result = await flushTaskOutbox({
+      send: respond(202, { operationId: "op-claim-1", reconciled: false }),
+      pullSnapshot: async () => snapshotOf([canonicalTask()]),
+    });
+    expect(result.retryable).toBe(1);
+    expect(listTaskOutbox()).toHaveLength(1);
+  });
+
+  it("removes a 409 semantic duplicate only when the snapshot proves this operation resolved", async () => {
+    enqueueClaim();
+    const unresolved = await flushTaskOutbox({
+      send: respond(
+        409,
+        errorAck("op-claim-1", { reason: "semantic_duplicate", semanticDuplicate: true }),
+      ),
+      pullSnapshot: async () => snapshotOf([canonicalTask()]),
+    });
+
+    expect(unresolved).toEqual({ acknowledged: 0, retryable: 0, permanent: 1 });
+    expect(entryFor("op-claim-1").status).toBe("failed");
+    expect(entryFor("op-claim-1").lastErrorCategory).toBe("semantic-duplicate");
+
+    removeTaskOutboxEntry("op-claim-1");
+    enqueueClaim();
+    const resolved = await flushTaskOutbox({
+      send: respond(
+        409,
+        errorAck("op-claim-1", { reason: "semantic_duplicate", semanticDuplicate: true }),
+      ),
+      pullSnapshot: async () => snapshotOf([canonicalTask({ completed: true, completedBy: "Caspian" })]),
+    });
+
+    expect(resolved).toEqual({ acknowledged: 1, retryable: 0, permanent: 0 });
+    expect(listTaskOutbox()).toHaveLength(0);
+  });
+
+  it("classifies a retryable 409 by reason instead of dropping it", async () => {
+    enqueueClaim();
+    const result = await flushTaskOutbox({
+      send: respond(
+        409,
+        errorAck("op-claim-1", { reason: "operation_conflict", retryable: true }),
+      ),
+      pullSnapshot: async () => snapshotOf([canonicalTask()]),
+    });
+
+    expect(result).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
+    expect(entryFor("op-claim-1").status).toBe("retrying");
+  });
+
+  it("marks 401 auth-required without hammering and never auto-retries it", async () => {
+    enqueueClaim();
+    const send = vi.fn(async () => ({
+      status: 401,
+      body: errorAck("op-claim-1", { reason: "unauthorized" }),
+    }));
+
+    const first = await flushTaskOutbox({ send });
+    expect(first).toEqual({ acknowledged: 0, retryable: 0, permanent: 1 });
+    expect(entryFor("op-claim-1").status).toBe("auth-required");
+    expect(entryFor("op-claim-1").lastErrorCategory).toBe("unauthorized");
+
+    const second = await flushTaskOutbox({ send });
+    expect(second).toEqual({ acknowledged: 0, retryable: 0, permanent: 0 });
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("classifies 403, 400, and 404 as permanent failures that stay queued", async () => {
+    const cases: Array<[number, string, string]> = [
+      [403, "adult_only", "unauthorized"],
+      [400, "invalid_task_state", "validation"],
+      [404, "unknown-task", "validation"],
+    ];
+
+    for (const [status, reason, category] of cases) {
+      const operationId = `op-permanent-${status}`;
+      enqueueClaim({ operationId });
+      const result = await flushTaskOutbox({
+        send: async () => ({ status, body: errorAck(operationId, { reason }) }),
+      });
+      expect(result.permanent).toBe(1);
+      expect(entryFor(operationId).status).toBe("failed");
+      expect(entryFor(operationId).lastErrorCategory).toBe(category);
+      removeTaskOutboxEntry(operationId);
+    }
+  });
+
+  it("keeps the entry in place when adoption throws", async () => {
+    enqueueClaim();
+    const result = await flushTaskOutbox({
+      send: respond(200, ack("op-claim-1")),
+      onAcknowledged: () => {
+        throw new Error("store write failed");
+      },
+    });
+    expect(result).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
+    expect(listTaskOutbox()).toHaveLength(1);
+  });
+});
+
+describe("backoff and retry", () => {
+  it("schedules a bounded exponential next attempt for a 5xx", async () => {
+    enqueueClaim();
+    const before = Date.now();
+    const result = await flushTaskOutbox({
+      send: respond(503, errorAck("op-claim-1", { reason: "task_store_unavailable", retryable: true })),
+    });
+
+    expect(result).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
+    const entry = entryFor("op-claim-1");
+    expect(entry.status).toBe("retrying");
+    expect(entry.attemptCount).toBe(1);
+    expect(entry.lastErrorCategory).toBe("server");
+    expect(Date.parse(entry.nextAttemptAt ?? "")).toBeGreaterThanOrEqual(before + TASK_OUTBOX_BASE_BACKOFF_MS);
+  });
+
+  it("does not resend before nextAttemptAt and resends once it is due", async () => {
+    enqueueClaim();
+    await flushTaskOutbox({
+      send: respond(503, errorAck("op-claim-1", { reason: "task_store_unavailable", retryable: true })),
+    });
+
+    const blocked = vi.fn(async () => ({ status: 200, body: ack("op-claim-1") }));
+    const skipped = await flushTaskOutbox({ send: blocked });
+    expect(skipped).toEqual({ acknowledged: 0, retryable: 0, permanent: 0 });
+    expect(blocked).not.toHaveBeenCalled();
+
+    expireBackoff("op-claim-1");
+    const allowed = await flushTaskOutbox({ send: blocked });
+    expect(allowed).toEqual({ acknowledged: 1, retryable: 0, permanent: 0 });
+    expect(blocked).toHaveBeenCalledTimes(1);
+    expect(listTaskOutbox()).toHaveLength(0);
+  });
+
+  it("retries a thrown network failure within the backoff cap", async () => {
+    enqueueClaim();
+    const result = await flushTaskOutbox({
+      send: async () => {
+        throw new TypeError("Failed to fetch");
+      },
+    });
+
+    expect(result).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
+    const entry = entryFor("op-claim-1");
+    expect(entry.lastErrorCategory).toBe("network");
+    expect(entry.status).toBe("retrying");
+    expect(taskOutboxBackoffMs(entry.attemptCount)).toBeLessThanOrEqual(TASK_OUTBOX_MAX_BACKOFF_MS);
+  });
+
+  it("gives up after the bounded attempt budget instead of retrying forever", async () => {
+    enqueueClaim();
+    const send = vi.fn(async () => ({
+      status: 503,
+      body: errorAck("op-claim-1", { reason: "task_store_unavailable", retryable: true }),
+    }));
+
+    for (let index = 0; index < TASK_OUTBOX_MAX_ATTEMPTS - 1; index += 1) {
+      if (entryFor("op-claim-1").nextAttemptAt) expireBackoff("op-claim-1");
+      const result = await flushTaskOutbox({ send });
+      expect(result).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
+    }
+    expireBackoff("op-claim-1");
+    const final = await flushTaskOutbox({ send });
+    expect(final).toEqual({ acknowledged: 0, retryable: 0, permanent: 1 });
+
+    expect(send).toHaveBeenCalledTimes(TASK_OUTBOX_MAX_ATTEMPTS);
+    expect(entryFor("op-claim-1").status).toBe("failed");
+    expect(entryFor("op-claim-1").nextAttemptAt).toBeUndefined();
+
+    const again = await flushTaskOutbox({ send });
+    expect(again).toEqual({ acknowledged: 0, retryable: 0, permanent: 0 });
+    expect(send).toHaveBeenCalledTimes(TASK_OUTBOX_MAX_ATTEMPTS);
+  });
+
+  it("grows the backoff exponentially and stays capped", () => {
+    expect(taskOutboxBackoffMs(1)).toBe(TASK_OUTBOX_BASE_BACKOFF_MS);
+    expect(taskOutboxBackoffMs(2)).toBe(TASK_OUTBOX_BASE_BACKOFF_MS * 2);
+    expect(taskOutboxBackoffMs(3)).toBe(TASK_OUTBOX_BASE_BACKOFF_MS * 4);
+    expect(taskOutboxBackoffMs(40)).toBe(TASK_OUTBOX_MAX_BACKOFF_MS);
+  });
+});
+
+describe("single in-flight flush and cross-tab subscription", () => {
+  it("shares one in-flight flush across concurrent callers", async () => {
+    enqueueClaim();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const send = vi.fn(async (entry: TaskOutboxEntry) => {
+      await gate;
+      return { status: 200, body: ack(entry.operationId) };
+    });
+
+    const first = flushTaskOutbox({ send });
+    const second = flushTaskOutbox({ send });
+    expect(second).toBe(first);
+
+    release();
+    await Promise.all([first, second]);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(listTaskOutbox()).toHaveLength(0);
+  });
+
+  it("notifies subscribers on a local enqueue and on another tab's write", () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeTaskOutbox(listener);
+
+    enqueueClaim();
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    const tabEntry = {
+      version: 1,
+      operationId: "op-other-tab",
+      route: "/api/tasks/manage",
+      action: "delete",
+      payload: { taskId: 5 },
+      createdAt: new Date().toISOString(),
+      attemptCount: 0,
+      status: "queued",
+      displayTarget: { taskId: 5, kind: "task" },
+    };
+    const tabValue = JSON.stringify([tabEntry]);
+    window.localStorage.setItem(TASK_OUTBOX_STORAGE_KEY, tabValue);
+    window.dispatchEvent(
+      new StorageEvent("storage", {
+        key: TASK_OUTBOX_STORAGE_KEY,
+        newValue: tabValue,
+        storageArea: window.localStorage,
+      }),
+    );
+
+    expect(listener).toHaveBeenCalledTimes(2);
+    expect(listTaskOutbox().map((entry) => entry.operationId)).toEqual(["op-other-tab"]);
+
+    unsubscribe();
+    enqueueClaim();
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns a stable snapshot reference and a frozen server snapshot", () => {
+    expect(getTaskOutboxSnapshot()).toBe(getTaskOutboxSnapshot());
+    expect(getTaskOutboxServerSnapshot()).toBe(getTaskOutboxServerSnapshot());
+    expect(getTaskOutboxServerSnapshot()).toHaveLength(0);
+  });
+
+  it("short-circuits a flush with nothing queued through the driver seam", async () => {
+    const send = vi.fn();
+    setTaskOutboxDriver({ send: send as never });
+    await expect(requestTaskOutboxFlush()).resolves.toEqual({ acknowledged: 0, retryable: 0, permanent: 0 });
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe("explicit cancel", () => {
+  it("cancels a non-applied entry and refuses one the server already applied", async () => {
+    enqueueClaim();
+    expect(cancelTaskOutboxEntry("op-claim-1")).toBe(true);
+    expect(listTaskOutbox()).toHaveLength(0);
+
+    enqueueClaim();
+    await flushTaskOutbox({ send: respond(202, { operationId: "op-claim-1", reconciled: false }) });
+    expect(entryFor("op-claim-1").status).toBe("reconciling");
+    expect(cancelTaskOutboxEntry("op-claim-1")).toBe(false);
+    expect(listTaskOutbox()).toHaveLength(1);
+  });
+});
+
+describe("route and action specific snapshot proof", () => {
+  const cases: Array<{
+    name: string;
+    entry: TaskOutboxEntry;
+    proving: Record<string, unknown>[][];
+    notProving: Record<string, unknown>[][];
+    provingExtra?: Record<string, unknown>;
+  }> = [
+    {
+      name: "approve",
+      entry: enqueueTaskOperation({
+        operationId: "op-approve-1",
+        route: "/api/tasks/approve",
+        action: "approve",
+        payload: { taskId: 42, memberName: "Alex" },
+        displayTarget: { taskId: 42, kind: "approval" },
+      }),
+      proving: [[canonicalTask({ completed: true })]],
+      notProving: [
+        [canonicalTask({ completed: true, pendingApproval: { byName: "Caspian", at: "now", points: 5 } })],
+        [canonicalTask({ id: 43, title: "Trash", completed: true })],
+      ],
+    },
+    {
+      name: "approve-all",
+      entry: enqueueTaskOperation({
+        operationId: "op-approve-all-1",
+        route: "/api/tasks/approve",
+        action: "approve-all",
+        payload: { taskIds: [42, 43], memberName: "Alex" },
+        displayTarget: { kind: "approval" },
+      }),
+      proving: [
+        [canonicalTask({ completed: true }), canonicalTask({ id: 43, title: "Trash", completed: true })],
+      ],
+      notProving: [
+        [canonicalTask({ completed: true })],
+        [
+          canonicalTask({ completed: true }),
+          canonicalTask({ id: 43, title: "Trash", completed: true, pendingApproval: { byName: "Caspian", at: "now", points: 5 } }),
+        ],
+      ],
+    },
+    {
+      name: "send-back",
+      entry: enqueueTaskOperation({
+        operationId: "op-send-back-1",
+        route: "/api/tasks/approve",
+        action: "send-back",
+        payload: { taskId: 42, memberName: "Alex" },
+        displayTarget: { taskId: 42, kind: "approval" },
+      }),
+      proving: [[canonicalTask({ completed: false, sentBackAt: "2026-09-25T10:00:00.000Z" })]],
+      notProving: [
+        [canonicalTask({ completed: false })],
+        [canonicalTask({ completed: true, sentBackAt: "2026-09-25T10:00:00.000Z" })],
+      ],
+    },
+    {
+      name: "claim that lands as a kid pending tap",
+      entry: enqueueClaim(),
+      proving: [
+        [
+          canonicalTask({
+            completed: true,
+            pendingApproval: { byName: "Caspian", at: "2026-09-25T10:00:00.000Z", points: 5 },
+          }),
+        ],
+      ],
+      notProving: [[canonicalTask({ completed: false })], []],
+    },
+    {
+      name: "claim that lands an adult earn line",
+      entry: enqueueClaim(),
+      proving: [[canonicalTask({ completed: true })]],
+      notProving: [[canonicalTask({ completed: false })]],
+      provingExtra: {
+        weekData: {
+          weekStart: "2026-09-21",
+          points: {},
+          streak: {},
+          lastActive: {},
+          history: [{ id: 1, type: "earn", taskId: 42, member: "Caspian", amount: 5 }],
+        },
+      },
+    },
+    {
+      name: "undo that reopens the row",
+      entry: enqueueClaim({ action: "undo" }),
+      proving: [[canonicalTask({ completed: false })]],
+      notProving: [[canonicalTask({ completed: true })]],
+    },
+    {
+      name: "crew-join that records the member",
+      entry: enqueueClaim({ action: "crew-join" }),
+      proving: [
+        [
+          canonicalTask({
+            crewSize: 3,
+            crew: { members: [{ name: "Caspian", emoji: "\ud83e\uddd2", joinedAt: "2026-09-25T10:00:00.000Z" }] },
+          }),
+        ],
+      ],
+      notProving: [[canonicalTask({ crewSize: 3, crew: { members: [] } })]],
+    },
+    {
+      name: "crew-checkin that stamps the member",
+      entry: enqueueClaim({ action: "crew-checkin" }),
+      proving: [
+        [
+          canonicalTask({
+            crewSize: 3,
+            crew: {
+              members: [
+                {
+                  name: "Caspian",
+                  emoji: "\ud83e\uddd2",
+                  joinedAt: "2026-09-25T10:00:00.000Z",
+                  checkedInAt: "2026-09-25T10:05:00.000Z",
+                },
+              ],
+            },
+          }),
+        ],
+      ],
+      notProving: [
+        [
+          canonicalTask({
+            crewSize: 3,
+            crew: { members: [{ name: "Caspian", emoji: "\ud83e\uddd2", joinedAt: "2026-09-25T10:00:00.000Z" }] },
+          }),
+        ],
+      ],
+    },
+    {
+      name: "crew-remove that drops the member",
+      entry: enqueueClaim({
+        action: "crew-remove",
+        payload: { taskId: 42, memberName: "Alex", targetName: "Bailey" },
+      }),
+      proving: [[canonicalTask({ crewSize: 3, crew: { members: [], removed: ["Bailey"] } })]],
+      notProving: [
+        [
+          canonicalTask({
+            crewSize: 3,
+            crew: { members: [{ name: "Bailey", emoji: "\ud83d\udc3b", joinedAt: "2026-09-25T10:00:00.000Z" }] },
+          }),
+        ],
+      ],
+    },
+    {
+      name: "manage add that creates the row",
+      entry: enqueueTaskOperation({
+        operationId: "op-manage-add-1",
+        route: "/api/tasks/manage",
+        action: "add",
+        payload: { task: { title: "Recycle", assignee: "Bailey", points: 10 } },
+        displayTarget: { temporaryId: 5150, title: "Recycle", kind: "task" },
+      }),
+      proving: [[canonicalTask({ id: 99, title: "Recycle", assignee: "Bailey" })]],
+      notProving: [[canonicalTask({ id: 99, title: "Recycle", assignee: "Caspian" })], []],
+    },
+    {
+      name: "manage update that writes the fields",
+      entry: enqueueTaskOperation({
+        operationId: "op-manage-update-1",
+        route: "/api/tasks/manage",
+        action: "update",
+        payload: { taskId: 42, patch: { title: "Trash", points: 12 } },
+        displayTarget: { taskId: 42, kind: "task" },
+      }),
+      proving: [[canonicalTask({ title: "Trash", points: 12 })]],
+      notProving: [[canonicalTask({ title: "Trash", points: 5 })], []],
+    },
+    {
+      name: "manage delete that removes the row",
+      entry: enqueueTaskOperation({
+        operationId: "op-manage-delete-1",
+        route: "/api/tasks/manage",
+        action: "delete",
+        payload: { taskId: 42 },
+        displayTarget: { taskId: 42, kind: "task" },
+      }),
+      proving: [[], [canonicalTask({ id: 43 })]],
+      notProving: [[canonicalTask()]],
+    },
+  ];
+
+  for (const testCase of cases) {
+    it(`proves ${testCase.name} only from matching authoritative state`, () => {
+      for (const tasks of testCase.proving) {
+        expect(
+          snapshotProvesResolved(testCase.entry, snapshotOf(tasks, testCase.provingExtra)),
+        ).toBe(true);
+        expect(
+          snapshotProvesResolved(testCase.entry, snapshotOf(tasks)),
+          testCase.provingExtra ? `${testCase.name} proved without its evidence` : "",
+        ).toBe(testCase.provingExtra ? false : true);
+      }
+      for (const tasks of testCase.notProving) {
+        expect(
+          snapshotProvesResolved(testCase.entry, snapshotOf(tasks, testCase.provingExtra)),
+        ).toBe(false);
+      }
+      expect(snapshotProvesResolved(testCase.entry, { snapshot: null })).toBe(false);
+      expect(snapshotProvesResolved(testCase.entry, { snapshot: {} })).toBe(false);
+    });
+  }
+
+  it("honours a delete tombstone when proving a manage delete", () => {
+    const entry = enqueueTaskOperation({
+      operationId: "op-manage-delete-tombstone",
+      route: "/api/tasks/manage",
+      action: "delete",
+      payload: { taskId: 42 },
+      displayTarget: { taskId: 42, kind: "task" },
+    });
+    const read: SnapshotRead = {
+      snapshot: { tasks: [canonicalTask()], deletedTaskIds: [42] } as unknown as SnapshotData,
+    };
+    expect(snapshotProvesResolved(entry, read)).toBe(true);
+  });
+
+  it("proves config replace, upsert, and delete from the stamped snapshot legs", () => {
+    const replace = enqueueTaskOperation({
+      operationId: "op-config-replace-1",
+      route: "/api/tasks/config",
+      action: "replace",
+      payload: {
+        kind: "rewards",
+        updatedAt: "2026-09-25T10:00:00.000Z",
+        items: [{ name: "Ice cream", emoji: "\ud83c\udf66", cost: 40 }],
+      },
+      displayTarget: { kind: "config" },
+    });
+    const upsert = enqueueTaskOperation({
+      operationId: "op-config-upsert-1",
+      route: "/api/tasks/config",
+      action: "upsert",
+      payload: {
+        kind: "penalties",
+        updatedAt: "2026-09-25T10:00:00.000Z",
+        item: { name: "Late", emoji: "\u23f0", points: 5 },
+      },
+      displayTarget: { kind: "config" },
+    });
+    const remove = enqueueTaskOperation({
+      operationId: "op-config-delete-1",
+      route: "/api/tasks/config",
+      action: "delete",
+      payload: { kind: "weekly-prizes", updatedAt: "2026-09-25T10:00:00.000Z", itemId: "prize-2" },
+      displayTarget: { kind: "config" },
+    });
+
+    const legs = {
+      rewards: [{ id: "a", name: "Ice cream", emoji: "\ud83c\udf66", cost: 40 }],
+      rewardsUpdatedAt: "2026-09-25T10:00:00.000Z",
+      penalties: [{ id: "b", name: "Late", emoji: "\u23f0", points: 5 }],
+      penaltiesUpdatedAt: "2026-09-25T10:00:00.000Z",
+      weeklyPrizes: [{ id: "prize-1", rank: 1, emoji: "\ud83c\udfc7", text: "Movie" }],
+      weeklyPrizesStamp: "2026-09-25T10:00:00.000Z",
+    };
+    const staleLegs = {
+      ...legs,
+      rewardsUpdatedAt: "2026-09-24T10:00:00.000Z",
+      penaltiesUpdatedAt: "2026-09-24T10:00:00.000Z",
+      weeklyPrizesStamp: "2026-09-24T10:00:00.000Z",
+    };
+
+    expect(snapshotProvesResolved(replace, snapshotOf([], legs))).toBe(true);
+    expect(snapshotProvesResolved(replace, snapshotOf([], staleLegs))).toBe(false);
+    expect(snapshotProvesResolved(upsert, snapshotOf([], legs))).toBe(true);
+    expect(snapshotProvesResolved(remove, snapshotOf([], legs))).toBe(true);
+    expect(
+      snapshotProvesResolved(
+        remove,
+        snapshotOf([], {
+          weeklyPrizes: [{ id: "prize-2", rank: 2, emoji: "\ud83c\udfc8", text: "Dessert" }],
+          weeklyPrizesStamp: "2026-09-25T10:00:00.000Z",
+        }),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("real route request bodies with an ephemeral PIN", () => {
+  const cases: Array<{ name: string; entry: TaskOutboxEntry; accepted: (body: unknown) => boolean }> = [
+    {
+      name: "claim complete",
+      entry: enqueueClaim({ operationId: "op-body-claim", action: "complete" }),
+      accepted: (body) => !("error" in parseClaimCommand(body)),
+    },
+    {
+      name: "claim crew-remove",
+      entry: enqueueClaim({
+        operationId: "op-body-crew-remove",
+        action: "crew-remove",
+        payload: { taskId: 42, memberName: "Alex", targetName: "Bailey" },
+      }),
+      accepted: (body) => !("error" in parseClaimCommand(body)),
+    },
+    {
+      name: "approve",
+      entry: enqueueTaskOperation({
+        operationId: "op-body-approve",
+        route: "/api/tasks/approve",
+        action: "approve",
+        payload: { taskId: 42, memberName: "Alex" },
+        displayTarget: { taskId: 42, kind: "approval" },
+      }),
+      accepted: (body) => !("error" in parseApproveCommand(body)),
+    },
+    {
+      name: "approve-all",
+      entry: enqueueTaskOperation({
+        operationId: "op-body-approve-all",
+        route: "/api/tasks/approve",
+        action: "approve-all",
+        payload: { taskIds: [42, 43], memberName: "Alex" },
+        displayTarget: { kind: "approval" },
+      }),
+      accepted: (body) => !("error" in parseApproveCommand(body)),
+    },
+    {
+      name: "manage add",
+      entry: enqueueTaskOperation({
+        operationId: "op-body-manage-add",
+        route: "/api/tasks/manage",
+        action: "add",
+        payload: {
+          task: {
+            title: "Recycle",
+            assignee: "Bailey",
+            assigneeEmoji: "🐻",
+            due: "2026-09-27",
+            points: 10,
+            category: "chores",
+            priority: "high",
+          },
+        },
+        displayTarget: { temporaryId: 5150, title: "Recycle", kind: "task" },
+      }),
+      accepted: (body) => !("error" in parseManageTaskCommand(body)),
+    },
+    {
+      name: "manage update",
+      entry: enqueueTaskOperation({
+        operationId: "op-body-manage-update",
+        route: "/api/tasks/manage",
+        action: "update",
+        payload: { taskId: 42, patch: { title: "Trash", points: 12 } },
+        displayTarget: { taskId: 42, kind: "task" },
+      }),
+      accepted: (body) => !("error" in parseManageTaskCommand(body)),
+    },
+    {
+      name: "manage delete",
+      entry: enqueueTaskOperation({
+        operationId: "op-body-manage-delete",
+        route: "/api/tasks/manage",
+        action: "delete",
+        payload: { taskId: 42 },
+        displayTarget: { taskId: 42, kind: "task" },
+      }),
+      accepted: (body) => !("error" in parseManageTaskCommand(body)),
+    },
+    {
+      name: "config replace",
+      entry: enqueueTaskOperation({
+        operationId: "op-body-config",
+        route: "/api/tasks/config",
+        action: "replace",
+        payload: {
+          kind: "rewards",
+          updatedAt: "2026-09-25T10:00:00.000Z",
+          items: [{ name: "Ice cream", emoji: "🍦", cost: 40 }],
+        },
+        displayTarget: { kind: "config" },
+      }),
+      accepted: (body) => !("error" in parseTaskConfigCommand(body, (value) => value)),
+    },
+  ];
+
+  it("builds a body every real route parser accepts, with the PIN supplied only at send time", () => {
+    for (const testCase of cases) {
+      const body = buildTaskOperationRequestBody(testCase.entry, PIN);
+      expect(testCase.accepted(body), `${testCase.name} body rejected`).toBe(true);
+      expect(body).not.toHaveProperty("displayTarget");
+      expect(JSON.stringify(testCase.entry.payload)).not.toContain(PIN);
+      expect(storedRaw()).not.toContain(PIN);
+    }
+  });
+
+  it("omits the PIN from the body when no credential is available", () => {
+    const body = buildTaskOperationRequestBody(enqueueClaim(), undefined);
+    expect(body).toEqual({
+      taskId: 42,
+      memberName: "Caspian",
+      action: "complete",
+      operationId: "op-claim-1",
+    });
+  });
+
+  it("never sends a PIN-gated operation it has no credential for", async () => {
+    enqueueClaim({ operationId: "op-needs-pin", action: "claim" });
+    const send = vi.fn();
+
+    const result = await flushTaskOutbox({ send: send as never });
+    expect(send).not.toHaveBeenCalled();
+    expect(result).toEqual({ acknowledged: 0, retryable: 0, permanent: 1 });
+    expect(entryFor("op-needs-pin").status).toBe("auth-required");
+
+    const withCredential = await flushTaskOutbox({
+      send: respond(200, ack("op-needs-pin")),
+      getCredential: () => PIN,
+    });
+    expect(withCredential).toEqual({ acknowledged: 1, retryable: 0, permanent: 0 });
+    expect(listTaskOutbox()).toHaveLength(0);
+  });
+
+  it("sends the ephemeral credential over the real request path and never stores it", async () => {
+    const entry = enqueueClaim({ operationId: "op-real-fetch" });
+    const fetchMock = vi.fn(async () => ({
+      status: 200,
+      json: async () => ({ operationId: "op-real-fetch", reconciled: true }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await sendTaskOperationRequest(entry, PIN);
+
+    expect(response.status).toBe(200);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/tasks/claim");
+    expect(init.method).toBe("POST");
+    const body = JSON.parse(String(init.body));
+    expect(body.pin).toBe(PIN);
+    expect(body.operationId).toBe("op-real-fetch");
+    expect(storedRaw()).not.toContain(PIN);
+    vi.unstubAllGlobals();
+  });
+
+  it("reads the authoritative snapshot document over the real sync route", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, reconciled: true, snapshot: { tasks: [canonicalTask({ completed: true })] } }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const read = await pullTaskSnapshotDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/tasks/sync", { cache: "no-store" });
+    expect(
+      snapshotProvesResolved(
+        enqueueClaim({ operationId: "op-pull" }),
+        read,
+      ),
+    ).toBe(false);
+    const resolved = await pullTaskSnapshotDocument();
+    expect(
+      snapshotProvesResolved(
+        enqueueClaim({ operationId: "op-pull" }),
+        {
+          ...resolved,
+          snapshot: {
+            tasks: [canonicalTask({ completed: true, completedBy: "Caspian" })],
+          } as unknown as SnapshotData,
+        },
+      ),
+    ).toBe(true);
+    vi.unstubAllGlobals();
+  });
+});
+
+describe("useTaskOperationOutbox", () => {
+  let root: Root | null = null;
+  let latest: UseTaskOperationOutboxResult | null = null;
+
+  function Probe(props: { options?: Parameters<typeof useTaskOperationOutbox>[0] }) {
+    latest = useTaskOperationOutbox(props.options);
+    return null;
+  }
+
+  function mountHook(options?: Parameters<typeof useTaskOperationOutbox>[0]): void {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    act(() => {
+      root!.render(createElement(Probe, { options }));
+    });
+  }
+
+  function stubRoutes(handlers: {
+    claim?: () => Promise<unknown>;
+    sync?: () => Promise<unknown>;
+  } = {}): ReturnType<typeof vi.fn> {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "/api/tasks/claim") {
+        const extra = (await handlers.claim?.()) as Record<string, unknown> | undefined;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ operationId: "op-claim-1", reconciled: true, ...extra }),
+        };
+      }
+      if (url === "/api/tasks/sync") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () =>
+            handlers.sync
+              ? await handlers.sync()
+              : { ok: true, reconciled: true, snapshot: snapshotOf([]).snapshot },
+        };
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  afterEach(() => {
+    act(() => {
+      root?.unmount();
+    });
+    root = null;
+    latest = null;
+    document.body.innerHTML = "";
+  });
+
+  it("sends a queued claim through the real route and adopts the authoritative row", async () => {
+    const fetchMock = stubRoutes({
+      claim: async () => ({
+        reconciled: true,
+        task: canonicalTask({ completed: true, pendingApproval: { byName: "Caspian", at: "now", points: 5 } }),
+      }),
+    });
+    enqueueClaim();
+
+    mountHook();
+
+    await vi.waitFor(() => expect(listTaskOutbox()).toHaveLength(0));
+    const claimCall = fetchMock.mock.calls.find(([url]) => url === "/api/tasks/claim");
+    expect(claimCall).toBeDefined();
+    expect(JSON.parse(String((claimCall![1] as RequestInit).body)).operationId).toBe("op-claim-1");
+    expect(loadTasks().some((task) => task.id === 42)).toBe(true);
+  });
+
+  it("flushes on the online event and on a visibility return", async () => {
+    const fetchMock = stubRoutes();
+    mountHook({ autoFlush: false });
+
+    enqueueClaim();
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+    });
+    await vi.waitFor(() => expect(listTaskOutbox()).toHaveLength(0));
+    const afterOnline = fetchMock.mock.calls.length;
+
+    enqueueClaim({ operationId: "op-claim-2", payload: { taskId: 43, memberName: "Caspian" } });
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await vi.waitFor(() => expect(listTaskOutbox()).toHaveLength(0));
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(afterOnline);
+  });
+
+  it("pulls the tasks sync route when a 202 needs authoritative proof", async () => {
+    const fetchMock = stubRoutes({
+      claim: async () => ({ reconciled: false, repairRequired: true }),
+      sync: async () => ({
+        ok: true,
+        reconciled: true,
+        snapshot: snapshotOf([
+          canonicalTask({ completed: true, pendingApproval: { byName: "Caspian", at: "now", points: 5 } }),
+        ]).snapshot,
+      }),
+    });
+    enqueueClaim();
+
+    mountHook();
+
+    await vi.waitFor(() => expect(listTaskOutbox()).toHaveLength(0));
+    expect(fetchMock.mock.calls.some(([url]) => url === "/api/tasks/sync")).toBe(true);
+  });
+
+  it("reports status counts and only cancels a non-applied entry", async () => {
+    stubRoutes();
+    enqueueClaim({ operationId: "op-live" });
+    enqueueClaim({ operationId: "op-doomed", action: "claim" });
+    mountHook({ getCredential: () => PIN, autoFlush: false });
+
+    await vi.waitFor(() => expect(latest?.pending).toBe(2));
+    expect(latest?.queued).toBe(2);
+    expect(latest?.reconciling).toBe(0);
+    expect(latest?.authRequired).toBe(0);
+    expect(latest?.failed).toBe(0);
+
+    expect(latest?.cancel("op-live")).toBe(true);
+    expect(listTaskOutbox().map((entry) => entry.operationId)).toEqual(["op-doomed"]);
+
+    await act(async () => {
+      await latest?.flush();
+    });
+    expect(listTaskOutbox()).toHaveLength(0);
+  });
+
+  it("never posts a PIN-gated operation until a credential is supplied", async () => {
+    const fetchMock = stubRoutes();
+    let credential: string | undefined;
+    enqueueClaim({ operationId: "op-claim-gated", action: "claim" });
+    mountHook({ autoFlush: false, getCredential: () => credential });
+
+    await act(async () => {
+      await latest?.flush();
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(entryFor("op-claim-gated").status).toBe("auth-required");
+    expect(entryFor("op-claim-gated").lastErrorReason).toBe("credential_missing");
+
+    credential = PIN;
+    await act(async () => {
+      await latest?.flush();
+    });
+
+    expect(listTaskOutbox()).toHaveLength(0);
+    const claimCall = fetchMock.mock.calls.find(([url]) => url === "/api/tasks/claim");
+    expect(claimCall).toBeDefined();
+    const body = JSON.parse(String((claimCall![1] as RequestInit).body));
+    expect(body.pin).toBe(PIN);
+    expect(window.localStorage.getItem(TASK_OUTBOX_STORAGE_KEY)).not.toContain(PIN);
+  });
+});
