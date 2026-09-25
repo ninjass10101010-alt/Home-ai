@@ -156,6 +156,8 @@ vi.mock("@/hooks/useAtmosphericTheme", () => ({
   }),
 }));
 
+import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-operation-outbox";
+import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 import KidHome from "@/modes/kid/KidHome";
 import RewardsShop from "@/modes/kid/RewardsShop";
 
@@ -217,6 +219,8 @@ describe("KidHome — honest error paths on the quest PIN gate", () => {
     store.tasks = [{ ...QUEST }];
     store.week = { weekStart: "2026-09-01", points: { Caspian: 20 }, streak: {}, lastActive: {}, history: [] };
     store.saveTasks.mockReset();
+    __resetTaskOutboxForTests();
+    __resetTaskCommandCredentialsForTests();
     store.saveWeekData.mockReset();
     store.syncTasksToPB.mockClear();
     store.syncWeekDataToPB.mockClear();
@@ -236,35 +240,37 @@ describe("KidHome — honest error paths on the quest PIN gate", () => {
     vi.unstubAllGlobals();
   });
 
-  it("a SERVER ERROR (500) no longer blocks an under-10 kid quest — the tap lands pending with zero verify traffic", async () => {
+  it("a SERVER ERROR (500) no longer blocks an under-10 kid quest — the command is queued, with zero verify traffic", async () => {
     const spyFetch = vi.fn(async (..._args: any[]) => ({ ok: false, status: 500, json: async () => ({}) }));
     vi.stubGlobal("fetch", spyFetch);
     const el = await renderAsync(<KidHome />);
     await settle();
     await tapQuest(el, "Feed the dog");
 
-    // Pending contract: done-but-unpaid even when the server errors — the
-    // under-10 path performs no network round trip at all (syncTasksToPB is
-    // the mocked store seam), so the 500 is never even observed.
-    expect(store.saveTasks).toHaveBeenCalled();
-    const saved = store.saveTasks.mock.calls[0][0];
-    expect(saved.find((t: any) => t.id === 7)?.pendingApproval).toMatchObject({ byName: "Caspian", points: 10 });
+    // A 5xx can never strand or lose the tap: the command is durable and the
+    // celebration still fires. The local task store is untouched — the
+    // acknowledgment writes it.
+    expect(listTaskOutbox()[0]).toMatchObject({
+      route: "/api/tasks/claim",
+      action: "complete",
+      payload: { taskId: 7 },
+    });
+    expect(store.saveTasks).not.toHaveBeenCalled();
     expect(spyFetch.mock.calls.filter((call) => String(call[0]).includes("/api/members/verify"))).toHaveLength(0);
     expect(store.saveWeekData).not.toHaveBeenCalled();
     expect(store.week.history).toHaveLength(0);
     expect(document.querySelector('[aria-label^="Congratulations"]')).not.toBeNull();
   });
 
-  it("a NETWORK REJECTION no longer blocks an under-10 kid quest — it lands pending, not unreachable", async () => {
+  it("a NETWORK REJECTION no longer blocks an under-10 kid quest — the command survives, nothing is lost", async () => {
     const spyFetch = vi.fn(async (..._args: any[]) => { throw new TypeError("Failed to fetch"); });
     vi.stubGlobal("fetch", spyFetch);
     const el = await renderAsync(<KidHome />);
     await settle();
     await tapQuest(el, "Feed the dog");
 
-    expect(store.saveTasks).toHaveBeenCalled();
-    const saved = store.saveTasks.mock.calls[0][0];
-    expect(saved.find((t: any) => t.id === 7)?.pendingApproval).toMatchObject({ byName: "Caspian", points: 10 });
+    expect(listTaskOutbox()[0]).toMatchObject({ route: "/api/tasks/claim", action: "complete", payload: { taskId: 7 } });
+    expect(store.saveTasks).not.toHaveBeenCalled();
     expect(spyFetch.mock.calls.filter((call) => String(call[0]).includes("/api/members/verify"))).toHaveLength(0);
     expect(store.saveWeekData).not.toHaveBeenCalled();
     expect(store.week.history).toHaveLength(0);
@@ -290,7 +296,7 @@ describe("KidHome — honest error paths on the quest PIN gate", () => {
     expect(document.querySelector('[aria-label^="Congratulations"]')).toBeNull();
   });
 
-  it("an OFFLINE kid quest still lands pending locally (syncs when the connection returns)", async () => {
+  it("an OFFLINE kid quest is still queued durably (drains when the connection returns)", async () => {
     Object.defineProperty(window.navigator, "onLine", { value: false, configurable: true });
     const spyFetch = vi.fn(async (..._args: any[]) => { throw new TypeError("Failed to fetch"); });
     vi.stubGlobal("fetch", spyFetch);
@@ -298,10 +304,10 @@ describe("KidHome — honest error paths on the quest PIN gate", () => {
     await settle();
     await tapQuest(el, "Feed the dog");
 
-    // Local-first pending write: no network needed, no verify, no earn.
-    expect(store.saveTasks).toHaveBeenCalled();
-    const saved = store.saveTasks.mock.calls[0][0];
-    expect(saved.find((t: any) => t.id === 7)?.pendingApproval).toMatchObject({ byName: "Caspian", points: 10 });
+    // The command is persisted before the first request, so an offline tap
+    // survives a reload instead of living only in this tab's memory.
+    expect(listTaskOutbox()[0]).toMatchObject({ route: "/api/tasks/claim", action: "complete", payload: { taskId: 7 } });
+    expect(store.saveTasks).not.toHaveBeenCalled();
     expect(spyFetch.mock.calls.filter((call) => String(call[0]).includes("/api/members/verify"))).toHaveLength(0);
     expect(store.saveWeekData).not.toHaveBeenCalled();
     expect(store.week.history).toHaveLength(0);
@@ -309,7 +315,7 @@ describe("KidHome — honest error paths on the quest PIN gate", () => {
     expect(document.querySelector('[aria-label^="Congratulations"]')).not.toBeNull();
   });
 
-  it("a NETWORK REJECTION on the claim POST is caught (was: escaped the onClick, silent)", async () => {
+  it("a NETWORK REJECTION on the claim command is queued, not silently dropped", async () => {
     store.tasks = [{ ...UNIVERSAL }];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       if (String(input).includes("/api/tasks/claim")) throw new TypeError("Failed to fetch");
@@ -330,13 +336,15 @@ describe("KidHome — honest error paths on the quest PIN gate", () => {
     await act(async () => { buttonByText("Complete")!.click(); });
     await settle();
 
+    // The claim is durable and honest: nothing local is written, the outbox
+    // keeps the command, and the kid still gets the "on the way" celebration
+    // because the command WILL land — with no "Wrong PIN" lie.
     const text = document.body.textContent || "";
-    expect(text).toContain("Couldn't reach Consuela");
     expect(text).not.toContain("Wrong PIN");
-    // No silent success: nothing persisted, no celebration, spinner released.
+    expect(listTaskOutbox()[0]).toMatchObject({ route: "/api/tasks/claim", action: "claim", payload: { taskId: 9 } });
     expect(store.saveTasks).not.toHaveBeenCalled();
     expect(store.syncTasksToPB).not.toHaveBeenCalled();
-    expect(document.querySelector('[aria-label^="Congratulations"]')).toBeNull();
+    expect(document.querySelector('[aria-label^="Congratulations"]')).not.toBeNull();
     const completeBtn = buttonByText("Complete")!;
     expect(completeBtn.querySelector('[class*="animate-spin"]')).toBeNull();
     // PIN cleared from state.

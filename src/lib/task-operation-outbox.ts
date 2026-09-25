@@ -47,6 +47,11 @@ export interface TaskOutboxDisplayTarget {
   kind: "task" | "claim" | "approval" | "crew" | "undo" | "config";
 }
 
+export interface TaskOutboxCredential {
+  pin?: string;
+  parentPin?: string;
+}
+
 export interface TaskOutboxEntry {
   version: 1;
   operationId: string;
@@ -88,8 +93,9 @@ export interface SnapshotRead {
 export type TaskOutboxSendResult = { status: number; body: TaskOutboxAcknowledgement };
 
 export interface TaskOutboxDriver {
-  send: (entry: TaskOutboxEntry, credential?: string) => Promise<TaskOutboxSendResult>;
-  getCredential?: (entry: TaskOutboxEntry) => string | undefined;
+  send: (entry: TaskOutboxEntry, credential?: TaskOutboxCredential) => Promise<TaskOutboxSendResult>;
+  getCredential?: (entry: TaskOutboxEntry) => TaskOutboxCredential | string | undefined;
+  releaseCredential?: (operationId: string) => void;
   pullSnapshot?: () => Promise<SnapshotRead>;
   adoptSnapshot?: (read: SnapshotRead) => void | Promise<void>;
   onAcknowledged?: (acknowledgement: TaskOutboxAcknowledgement) => void | Promise<void>;
@@ -196,6 +202,11 @@ const CONFIG_KIND_LEGS: Record<string, { items: string; stamp: string }> = {
 };
 
 const CREDENTIAL_ACCEPTING_ROUTES = new Set<string>(["/api/tasks/claim", "/api/tasks/approve"]);
+
+const CREDENTIAL_BODY_KEYS: Record<string, readonly (keyof TaskOutboxCredential)[]> = {
+  "/api/tasks/claim": ["pin"],
+  "/api/tasks/approve": ["pin"],
+};
 
 const CREDENTIAL_REQUIRED_ACTIONS: Record<string, Set<string>> = {
   "/api/tasks/approve": new Set(["approve", "approve-all", "send-back"]),
@@ -487,9 +498,28 @@ function readRaw(): TaskOutboxEntry[] {
   const loaded = loadStoredEntries(index);
   orphanIds = loaded.orphanIds;
   const merged = mergeByOperationId(loaded.entries, extras);
-  cache = boundEntries(merged);
+  const bounded = boundEntries(merged);
+  pruneEvictedEntryKeys(merged, bounded);
+  cache = bounded;
   cacheIndexRaw = raw;
   return cache;
+}
+
+function pruneEvictedEntryKeys(
+  merged: TaskOutboxEntry[],
+  bounded: TaskOutboxEntry[],
+): void {
+  if (merged.length === bounded.length) return;
+  const kept = new Set(bounded.map((entry) => entry.operationId));
+  for (const entry of merged) {
+    if (kept.has(entry.operationId)) continue;
+    unpersisted.delete(entry.operationId);
+    try {
+      window.localStorage.removeItem(taskOutboxEntryStorageKey(entry.operationId));
+    } catch {
+      /* storage unavailable — the index prune on the next write still wins */
+    }
+  }
 }
 
 function migrateLegacyIndex(): void {
@@ -650,6 +680,54 @@ export function createTaskOperationId(): string {
   return `task-op-${time}-${random}`.slice(0, 200);
 }
 
+const ephemeralCredentials = new Map<string, TaskOutboxCredential>();
+
+function normalizeCredentialBundle(value: TaskOutboxCredential | undefined): TaskOutboxCredential | null {
+  if (!value || typeof value !== "object") return null;
+  const pin = typeof value.pin === "string" && value.pin.trim() ? value.pin.trim() : "";
+  const parentPin =
+    typeof value.parentPin === "string" && value.parentPin.trim() ? value.parentPin.trim() : "";
+  if (!pin && !parentPin) return null;
+  return { ...(pin ? { pin } : {}), ...(parentPin ? { parentPin } : {}) };
+}
+
+export function rememberTaskCommandCredential(
+  operationId: string,
+  credential?: TaskOutboxCredential,
+): TaskOutboxCredential | undefined {
+  const normalized = normalizeCredentialBundle(credential);
+  if (!normalized) {
+    ephemeralCredentials.delete(operationId);
+    return undefined;
+  }
+  ephemeralCredentials.set(operationId, normalized);
+  return normalized;
+}
+
+export function readTaskCommandCredential(
+  operationId: string,
+): TaskOutboxCredential | undefined {
+  return ephemeralCredentials.get(operationId);
+}
+
+export function forgetTaskCommandCredential(operationId: string): boolean {
+  return ephemeralCredentials.delete(operationId);
+}
+
+export function listTaskCommandCredentialIds(): string[] {
+  return [...ephemeralCredentials.keys()];
+}
+
+export function resolveTaskOutboxCredential(
+  entry: Pick<TaskOutboxEntry, "operationId">,
+): TaskOutboxCredential | undefined {
+  return ephemeralCredentials.get(entry.operationId);
+}
+
+export function __resetTaskCommandCredentialsForTests(): void {
+  ephemeralCredentials.clear();
+}
+
 export function enqueueTaskOperation(
   input: Omit<TaskOutboxEntry, "version" | "createdAt" | "attemptCount" | "status">,
 ): TaskOutboxEntry {
@@ -691,7 +769,9 @@ export function cancelTaskOutboxEntry(operationId: string): boolean {
   const entry = readRaw().find((candidate) => candidate.operationId === operationId);
   if (!entry) return false;
   if (entry.status === "reconciling") return false;
-  return removeTaskOutboxEntry(operationId);
+  const removed = removeTaskOutboxEntry(operationId);
+  if (removed) forgetTaskCommandCredential(operationId);
+  return removed;
 }
 
 function patchEntry(operationId: string, patch: Partial<TaskOutboxEntry>): TaskOutboxEntry | null {
@@ -820,6 +900,11 @@ async function acknowledge(
     return markRetryable(entry, "projection", "adoption_failed");
   }
   removeTaskOutboxEntry(entry.operationId);
+  try {
+    options.releaseCredential?.(entry.operationId);
+  } catch {
+    /* the credential registry is best-effort cleanup */
+  }
   return { acknowledged: 1, retryable: 0, permanent: 0 };
 }
 
@@ -1123,25 +1208,39 @@ export function snapshotProvesResolved(
   return false;
 }
 
+function normalizeCredential(
+  route: string,
+  value: TaskOutboxCredential | string | undefined,
+): TaskOutboxCredential {
+  const source: TaskOutboxCredential =
+    typeof value === "string" ? { pin: value } : (value ?? {});
+  const allowed = CREDENTIAL_ACCEPTING_ROUTES.has(route)
+    ? (CREDENTIAL_BODY_KEYS[route] ?? [])
+    : [];
+  const normalized: TaskOutboxCredential = {};
+  for (const key of allowed) {
+    const candidate = source[key];
+    if (typeof candidate === "string" && candidate.trim()) normalized[key] = candidate.trim();
+  }
+  return normalized;
+}
+
 export function buildTaskOperationRequestBody(
   entry: TaskOutboxEntry,
-  credential?: string,
+  credential?: TaskOutboxCredential | string,
 ): Record<string, unknown> {
-  const pin =
-    CREDENTIAL_ACCEPTING_ROUTES.has(entry.route) && typeof credential === "string" && credential.trim()
-      ? credential.trim()
-      : "";
+  const resolved = normalizeCredential(entry.route, credential);
   return {
     ...entry.payload,
     action: entry.action,
     operationId: entry.operationId,
-    ...(pin ? { pin } : {}),
+    ...resolved,
   };
 }
 
 export async function sendTaskOperationRequest(
   entry: TaskOutboxEntry,
-  credential?: string,
+  credential?: TaskOutboxCredential | string,
   requestTimeoutMs: number = TASK_OUTBOX_REQUEST_TIMEOUT_MS,
 ): Promise<TaskOutboxSendResult> {
   const response = await fetch(entry.route, {
@@ -1205,7 +1304,9 @@ export async function adoptTaskOutboxAcknowledgement(
     if (merged.weekChanged) stores.saveWeekData(merged.weekData);
   }
   if (acknowledgement.weekData) {
-    stores.saveWeekData(stores.adoptServerWeekData(stores.loadWeekData(), acknowledgement.weekData));
+    stores.saveWeekData(
+      stores.adoptAuthoritativeWeekData(stores.loadWeekData(), acknowledgement.weekData),
+    );
   }
 }
 
@@ -1217,7 +1318,8 @@ export function createFetchTaskOutboxDriver(
     send:
       overrides.send ??
       ((entry, credential) => sendTaskOperationRequest(entry, credential, requestTimeoutMs)),
-    ...(overrides.getCredential ? { getCredential: overrides.getCredential } : {}),
+    getCredential: overrides.getCredential ?? resolveTaskOutboxCredential,
+    releaseCredential: overrides.releaseCredential ?? forgetTaskCommandCredential,
     pullSnapshot: overrides.pullSnapshot ?? (() => pullTaskSnapshotDocument(requestTimeoutMs)),
     adoptSnapshot: overrides.adoptSnapshot ?? adoptTaskOutboxSnapshot,
     onAcknowledged: overrides.onAcknowledged ?? adoptTaskOutboxAcknowledgement,
@@ -1225,6 +1327,7 @@ export function createFetchTaskOutboxDriver(
 }
 
 const driverStack: TaskOutboxDriver[] = [];
+let fallbackDriver: TaskOutboxDriver | null = null;
 
 export function registerTaskOutboxDriver(driver: Partial<TaskOutboxDriver>): () => void {
   const resolved = createFetchTaskOutboxDriver(driver);
@@ -1236,7 +1339,10 @@ export function registerTaskOutboxDriver(driver: Partial<TaskOutboxDriver>): () 
 }
 
 export function getTaskOutboxDriver(): TaskOutboxDriver {
-  return driverStack[driverStack.length - 1] ?? createFetchTaskOutboxDriver();
+  const top = driverStack[driverStack.length - 1];
+  if (top) return top;
+  fallbackDriver ??= createFetchTaskOutboxDriver();
+  return fallbackDriver;
 }
 
 export function warnTaskOutboxFlushFailure(error: unknown): void {
@@ -1291,13 +1397,14 @@ async function processEntry(
   entry: TaskOutboxEntry,
   options: FlushTaskOutboxOptions,
 ): Promise<FlushTaskOutboxResult> {
-  let credential: string | undefined;
+  let rawCredential: TaskOutboxCredential | string | undefined;
   try {
-    credential = options.getCredential?.(entry);
+    rawCredential = options.getCredential?.(entry);
   } catch {
     return markRetryable(entry, "network", "credential_resolver_failed");
   }
-  if (requiresCredential(entry) && !credential) {
+  const credential = normalizeCredential(entry.route, rawCredential);
+  if (requiresCredential(entry) && !credential.pin) {
     return markAuthRequired(entry, "credential_missing", false);
   }
 
@@ -1398,5 +1505,6 @@ export function __resetTaskOutboxForTests(): void {
   unpersisted = new Map<string, TaskOutboxEntry>();
   inFlightByDriver = new WeakMap<TaskOutboxDriver, Promise<FlushTaskOutboxResult>>();
   driverStack.length = 0;
+  fallbackDriver = null;
   listeners.clear();
 }

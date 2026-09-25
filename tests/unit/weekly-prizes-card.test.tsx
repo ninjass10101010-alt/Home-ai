@@ -21,6 +21,8 @@ import {
   DEFAULT_WEEKLY_PRIZES,
   WEEKLY_PRIZES_KEY,
 } from "@/lib/task-utils";
+import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-operation-outbox";
+import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 
 const showToast = vi.fn();
 const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
@@ -80,6 +82,8 @@ function typeInto(el: HTMLInputElement, value: string) {
 
 beforeEach(() => {
   localStorage.clear();
+  __resetTaskOutboxForTests();
+  __resetTaskCommandCredentialsForTests();
   mockAuth.currentUser = null;
   fetchMock.mockClear();
   showToast.mockClear();
@@ -162,33 +166,32 @@ describe("WeeklyPrizesCard", () => {
     expect(button(el, "Remove prize 2")).toBeTruthy();
   });
 
-  it("Save posts one replacement command, adopts its response, and toasts", async () => {
+  it("Save sends one replacement command and never writes a local success first", async () => {
     mockAuth.currentUser = { name: "Rebecca", role: "parent" };
     const el = mount();
 
     const save = buttonByText(el, "Save prizes");
     expect(save).toBeTruthy();
     await act(async () => { save!.click(); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 150)); });
 
-    expect(loadWeeklyPrizes().map((p) => [p.rank, p.emoji, p.text])).toEqual(
-      DEFAULT_WEEKLY_PRIZES.map((p) => [p.rank, p.emoji, p.text])
-    );
-    expect(readWeeklyPrizesStamp()).toBeTruthy();
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/tasks/config",
-      expect.objectContaining({ method: "POST" }),
-    );
+    // The prize list is a durable config command: it is persisted before the
+    // first request and the authoritative catalog is the acknowledgment's to
+    // deliver (via the cross-device pull), never a local "saved" write.
+    expect(listTaskOutbox()).toHaveLength(0);
+    // The component never writes the catalog itself: an acknowledgment that
+    // carries no prize leg changes nothing locally, and the next cross-device
+    // pull is what lands the authoritative list.
+    expect(readWeeklyPrizesStamp()).toBe("");
     expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
       kind: "weekly-prizes",
       action: "replace",
       items: DEFAULT_WEEKLY_PRIZES,
     });
-    expect(showToast).toHaveBeenCalledWith("🏆 Weekly prizes saved");
+    expect(showToast).toHaveBeenCalledWith("🏆 Saving the weekly prizes…");
   });
 
-  it("keeps local prizes and shows no success after a network rejection", async () => {
+  it("keeps the prizes queued after a network rejection instead of losing the edit", async () => {
     mockAuth.currentUser = { name: "Rebecca", role: "parent" };
     const existing = [{ id: "p1", rank: 1 as const, emoji: "🥇", text: "Existing" }];
     seedPrizes(existing);
@@ -196,13 +199,15 @@ describe("WeeklyPrizesCard", () => {
     fetchMock.mockRejectedValueOnce(new TypeError("network unavailable"));
 
     await act(async () => { buttonByText(el, "Save prizes")!.click(); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 150)); });
 
     expect(loadWeeklyPrizes()).toEqual(existing);
-    expect(showToast).toHaveBeenCalledWith("Couldn't save the prizes. Check the connection and try again.");
+    expect(listTaskOutbox()[0]).toMatchObject({ route: "/api/tasks/config", action: "replace" });
+    expect(showToast).toHaveBeenCalledWith("🏆 Saving the weekly prizes…");
     expect(showToast).not.toHaveBeenCalledWith("🏆 Weekly prizes saved");
   });
 
-  it("keeps local prizes and shows no success after a 502", async () => {
+  it("keeps the prizes queued after a 502 instead of losing the edit", async () => {
     mockAuth.currentUser = { name: "Rebecca", role: "parent" };
     const existing = [{ id: "p1", rank: 1 as const, emoji: "🥇", text: "Existing" }];
     seedPrizes(existing);
@@ -214,13 +219,14 @@ describe("WeeklyPrizesCard", () => {
     } as any);
 
     await act(async () => { buttonByText(el, "Save prizes")!.click(); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 150)); });
 
     expect(loadWeeklyPrizes()).toEqual(existing);
-    expect(showToast).toHaveBeenCalledWith("Couldn't save the prizes. Check the connection and try again.");
+    expect(listTaskOutbox()[0]).toMatchObject({ route: "/api/tasks/config", action: "replace" });
     expect(showToast).not.toHaveBeenCalledWith("🏆 Weekly prizes saved");
   });
 
-  it("edit round-trip: typing into a text field and saving persists the new text", async () => {
+  it("edit round-trip: the typed text rides the command, not a local write", async () => {
     mockAuth.currentUser = { name: "Rebecca", role: "parent" };
     const el = mount();
 
@@ -229,9 +235,9 @@ describe("WeeklyPrizesCard", () => {
     act(() => { typeInto(first, "Picks the weekend road trip"); });
 
     await act(async () => { buttonByText(el, "Save prizes")!.click(); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 150)); });
 
-    expect(loadWeeklyPrizes()[0].text).toBe("Picks the weekend road trip");
-    expect(loadWeeklyPrizes()[1].text).toBe("Chooses the dessert night");
+    expect(loadWeeklyPrizes()[0]?.text).not.toBe("Picks the weekend road trip");
     expect(JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body))).toMatchObject({
       kind: "weekly-prizes",
       action: "replace",

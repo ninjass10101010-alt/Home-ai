@@ -28,6 +28,8 @@ vi.mock("@/db", () => ({
 
 import RewardSection from "@/components/settings/RewardSection";
 import { REWARDS_KEY, loadRewards } from "@/lib/task-utils";
+import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-operation-outbox";
+import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 
 const LEGACY_KEY = "consuela-rewards-catalog";
 
@@ -44,6 +46,8 @@ function mount(showToast = vi.fn()) {
 
 beforeEach(() => {
   localStorage.clear();
+  __resetTaskOutboxForTests();
+  __resetTaskCommandCredentialsForTests();
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: true,
     media: query,
@@ -115,7 +119,7 @@ describe("RewardSection — one rewards catalog (task-utils REWARDS_KEY)", () =>
     expect(localStorage.getItem(LEGACY_KEY)).toBe(staleJson);
   });
 
-  it("round-trip: a Settings save posts to the config route and adopts the response", async () => {
+  it("round-trip: a Settings save rides a durable config command, not a local write", async () => {
     mount();
 
     const addBtn = Array.from(document.querySelectorAll("button")).find((b) => b.textContent === "Add reward")!;
@@ -135,10 +139,12 @@ describe("RewardSection — one rewards catalog (task-utils REWARDS_KEY)", () =>
       await Promise.resolve();
     });
 
-    const stored = loadRewards<any[]>([]);
-    expect(stored).toHaveLength(1);
-    expect(stored[0].name).toBe("30 min screen time");
-    expect(stored[0].cost).toBe(25);
+    await act(async () => { await new Promise((r) => setTimeout(r, 150)); });
+    // The catalog is the acknowledgment's to write: this component never
+    // persists a "success" first, so a lost command loses nothing silently
+    // and a phantom entry can never appear.
+    expect(loadRewards<any[]>([])).toEqual([]);
+    expect(listTaskOutbox()).toHaveLength(0);
     expect(localStorage.getItem(LEGACY_KEY)).toBeNull();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/tasks/config",
@@ -151,7 +157,7 @@ describe("RewardSection — one rewards catalog (task-utils REWARDS_KEY)", () =>
     });
   });
 
-  it("delete writes the authoritative response through the config route", async () => {
+  it("delete sends the shorter list as a durable config command", async () => {
     localStorage.setItem(REWARDS_KEY, JSON.stringify([{ id: 1, name: "Ice cream", emoji: "🍦", cost: 15 }]));
     mount();
 
@@ -162,7 +168,9 @@ describe("RewardSection — one rewards catalog (task-utils REWARDS_KEY)", () =>
       await Promise.resolve();
     });
 
-    expect(loadRewards<any[]>([])).toEqual([]);
+    await act(async () => { await new Promise((r) => setTimeout(r, 150)); });
+    expect(loadRewards<any[]>([])).toHaveLength(1);
+    expect(listTaskOutbox()).toHaveLength(0);
     expect(JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body))).toMatchObject({
       kind: "rewards",
       action: "delete",
@@ -170,7 +178,7 @@ describe("RewardSection — one rewards catalog (task-utils REWARDS_KEY)", () =>
     });
   });
 
-  it("keeps the local catalog and shows no success after a 502", async () => {
+  it("keeps the delete queued after a 502 instead of losing it", async () => {
     const existing = [{ id: 1, name: "Ice cream", emoji: "🍦", cost: 15 }];
     localStorage.setItem(REWARDS_KEY, JSON.stringify(existing));
     const showToast = vi.fn();
@@ -187,12 +195,13 @@ describe("RewardSection — one rewards catalog (task-utils REWARDS_KEY)", () =>
       await Promise.resolve();
     });
 
+    await act(async () => { await new Promise((r) => setTimeout(r, 150)); });
     expect(loadRewards<any[]>([])).toEqual(existing);
-    expect(showToast).toHaveBeenCalledWith("Couldn't remove the reward. Check the connection and try again.");
-    expect(showToast).not.toHaveBeenCalledWith(expect.stringContaining("Removed"));
+    expect(listTaskOutbox()[0]).toMatchObject({ route: "/api/tasks/config", action: "delete" });
+    expect(showToast).toHaveBeenCalledWith('🗑️ Removing "Ice cream"…');
   });
 
-  it("keeps an add form open with no local success after a network rejection", async () => {
+  it("keeps the add queued after a network rejection instead of losing it", async () => {
     const showToast = vi.fn();
     mount(showToast);
     const add = Array.from(document.querySelectorAll("button")).find((button) => button.textContent === "Add reward")!;
@@ -211,9 +220,10 @@ describe("RewardSection — one rewards catalog (task-utils REWARDS_KEY)", () =>
       await Promise.resolve();
     });
 
+    await act(async () => { await new Promise((r) => setTimeout(r, 150)); });
     expect(loadRewards<any[]>([])).toEqual([]);
     expect(document.body.textContent).toContain("Add reward");
-    expect(showToast).toHaveBeenCalledWith("Couldn't save the reward. Check the connection and try again.");
-    expect(showToast).not.toHaveBeenCalledWith(expect.stringContaining("Added"));
+    expect(listTaskOutbox()[0]).toMatchObject({ route: "/api/tasks/config", action: "upsert" });
+    expect(showToast).toHaveBeenCalledWith('✅ Adding "Movie"…');
   });
 });

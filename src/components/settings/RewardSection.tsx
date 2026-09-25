@@ -1,15 +1,14 @@
 "use client";
 
 import { useState, useEffect, useSyncExternalStore } from "react";
+import { queueTaskCommandAndFlush } from "@/lib/task-command-queue";
 import SoftButton from "@/components/ui/SoftButton";
 import IconButton from "@/components/ui/IconButton";
 import Modal from "@/components/ui/Modal";
 import ListRow from "@/components/ui/ListRow";
 import EmptyState from "@/components/ui/EmptyState";
 import FormField from "@/components/patterns/FormField";
-import { REWARDS_KEY, loadRewards, saveRewards } from "@/lib/task-utils";
-import { writeRewardsStamp } from "@/modes/kid/kid-store";
-import type { TaskConfigResponse } from "@/lib/task-config";
+import { REWARDS_KEY, loadRewards } from "@/lib/task-utils";
 
 // Retired Settings-only key. The live shop (RewardsShop) and the Tasks page
 // read/write REWARDS_KEY via task-utils — one catalog, one source.
@@ -61,21 +60,13 @@ function emitRewardsUpdate(): void {
   window.dispatchEvent(new Event(REWARDS_UPDATED_EVENT));
 }
 
-function configOperationId(action: "replace" | "upsert" | "delete"): string {
-  return `config-rewards-${action}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-async function postRewardCommand(command: Record<string, unknown>): Promise<TaskConfigResponse> {
-  const response = await fetch("/api/tasks/config", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(command),
+function queueRewardsCommand(action: "replace" | "upsert" | "delete", rest: Record<string, unknown>): void {
+  queueTaskCommandAndFlush({
+    route: "/api/tasks/config",
+    action,
+    payload: { kind: "rewards", updatedAt: new Date().toISOString(), ...rest },
+    displayTarget: { kind: "config" },
   });
-  const body = await response.json();
-  if (!response.ok || !body?.success || !Array.isArray(body.items)) {
-    throw new Error("config_write_failed");
-  }
-  return body as TaskConfigResponse;
 }
 
 export default function RewardSection({ showToast }: RewardSectionProps) {
@@ -110,61 +101,26 @@ export default function RewardSection({ showToast }: RewardSectionProps) {
     setModalOpen(true);
   };
 
-  const save = async () => {
+  // Every catalog write is a durable config command queued BEFORE the local
+  // list changes. The outbox acknowledgment adopts the authoritative list —
+  // this component never writes a "success" into localStorage first, and the
+  // edit survives a reload or a dead NAS because the command is persisted.
+  const save = () => {
     if (!form.name.trim()) return;
     const reward = { ...form, name: form.name.trim(), id: editing?.id || `reward-${Date.now()}` };
-    try {
-      const result = await postRewardCommand({
-        operationId: configOperationId("upsert"),
-        kind: "rewards",
-        action: "upsert",
-        updatedAt: new Date().toISOString(),
-        item: reward,
-      });
-      saveRewards(result.items);
-      writeRewardsStamp(result.updatedAt);
-      emitRewardsUpdate();
-      showToast(editing ? `✅ Updated "${reward.name}"` : `✅ Added "${reward.name}"`);
-      setModalOpen(false);
-    } catch {
-      showToast("Couldn't save the reward. Check the connection and try again.");
-    }
+    queueRewardsCommand("upsert", { item: reward });
+    showToast(editing ? `✅ Updating "${reward.name}"…` : `✅ Adding "${reward.name}"…`);
+    setModalOpen(false);
   };
 
-  const remove = async (reward: any) => {
-    try {
-      const result = await postRewardCommand({
-        operationId: configOperationId("delete"),
-        kind: "rewards",
-        action: "delete",
-        updatedAt: new Date().toISOString(),
-        itemId: reward.id,
-      });
-      saveRewards(result.items);
-      writeRewardsStamp(result.updatedAt);
-      emitRewardsUpdate();
-      showToast(`🗑️ Removed "${reward.name}"`);
-    } catch {
-      showToast("Couldn't remove the reward. Check the connection and try again.");
-    }
+  const remove = (reward: any) => {
+    queueRewardsCommand("delete", { itemId: reward.id });
+    showToast(`🗑️ Removing "${reward.name}"…`);
   };
 
-  const resetDefaults = async () => {
-    try {
-      const result = await postRewardCommand({
-        operationId: configOperationId("replace"),
-        kind: "rewards",
-        action: "replace",
-        updatedAt: new Date().toISOString(),
-        items: [],
-      });
-      saveRewards(result.items);
-      writeRewardsStamp(result.updatedAt);
-      emitRewardsUpdate();
-      showToast("✅ Rewards cleared — the shop starts empty");
-    } catch {
-      showToast("Couldn't clear the rewards. Check the connection and try again.");
-    }
+  const resetDefaults = () => {
+    queueRewardsCommand("replace", { items: [] });
+    showToast("✅ Clearing the rewards…");
   };
 
   return (

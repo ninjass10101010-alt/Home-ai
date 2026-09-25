@@ -1,9 +1,8 @@
 import { db } from "@/db";
 import { upsertGroceryItem } from "./grocery-service";
 import { saveOrQueue } from "./pending-writes";
-import { saveRewards } from "./task-utils";
-import { writeRewardsStamp } from "@/modes/kid/kid-store";
-import type { TaskConfigResponse } from "./task-config";
+import { queueTaskCommand } from "./task-command-queue";
+import { requestTaskOutboxFlush } from "./task-operation-outbox";
 
 export type LocalActionType =
   | "event"
@@ -259,30 +258,23 @@ export async function runAction(action: ActionCard): Promise<{ success: boolean;
       }
       case "reward": {
         const points = parseInt(action.detail?.match(/(\d+)/)?.[1] || "50");
-        const updatedAt = new Date().toISOString();
-        const response = await fetch("/api/tasks/config", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            operationId: `config-rewards-upsert-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        // The reward catalog is a durable config command, not a fire-and-forget
+        // POST: it is persisted BEFORE the first request, survives a reload or
+        // a dead NAS, and the authoritative list arrives with the
+        // acknowledgment. Nothing is written to localStorage as a "success"
+        // first.
+        queueTaskCommand({
+          route: "/api/tasks/config",
+          action: "upsert",
+          payload: {
             kind: "rewards",
-            action: "upsert",
-            updatedAt,
-            item: { id: Date.now(), name: action.title, emoji: action.emoji || "🎁", cost: points },
-          }),
+            updatedAt: new Date().toISOString(),
+            item: { id: Date.now(), name: action.title, emoji: action.emoji || "\u{1F381}", cost: points },
+          },
+          displayTarget: { kind: "config", title: action.title },
         });
-        const result = await response.json() as Partial<TaskConfigResponse>;
-        if (
-          !response.ok ||
-          !result.success ||
-          !Array.isArray(result.items) ||
-          typeof result.updatedAt !== "string"
-        ) {
-          return { success: false, message: `Couldn't add reward "${action.title}"` };
-        }
-        saveRewards(result.items);
-        writeRewardsStamp(result.updatedAt);
-        return { success: true, message: `Added reward "${action.title}" (${points}pts)` };
+        await requestTaskOutboxFlush();
+        return { success: true, message: `Added reward "${action.title}" (${points}pts) — saving to the family server…` };
       }
       case "clear": {
         if (typeof window !== "undefined") {

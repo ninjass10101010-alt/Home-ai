@@ -153,7 +153,7 @@ beforeEach(() => {
 });
 
 describe("task config actual keyed-lock serialization", () => {
-  it("serializes a config command before a concurrent legacy full sync", async () => {
+  it("rejects the retired legacy full sync while the config command still wins", async () => {
     const state = makeLive();
     mocks.withAdmin.mockImplementation((fn: any) => fn(state.pb));
     const t1 = new Date().toISOString();
@@ -186,14 +186,19 @@ describe("task config actual keyed-lock serialization", () => {
     state.live.park.resolve();
     const [configResponse, syncResponse] = await Promise.all([configPromise, syncPromise]);
 
+    // The browser is no longer a writer: the retired full-sync POST is refused
+    // with 410 and changes nothing, while the config command — serialized
+    // against the same snapshot lock — lands exactly as asked.
     expect(configResponse.status).toBe(200);
-    expect(syncResponse.status).toBe(200);
+    expect(syncResponse.status).toBe(410);
     expect(state.live.maxActiveSnapshotReads).toBe(1);
     expect(state.live.row.data.revision).toBe("5");
     expect(state.live.row.data.rewards).toEqual([
       { name: "Movie", emoji: "🎬", cost: 50 },
     ]);
     expect(state.live.row.data.rewardsUpdatedAt).toBe(t1);
+    // The refused sync's "evil" legs never reached the snapshot.
+    expect(state.live.row.data.tasks).toEqual([{ id: 1, title: "Old" }]);
     expect(state.live.row.data.penalties).toEqual([]);
     expect(state.live.row.data.weeklyPrizes).toEqual([]);
     expect(state.live.row.data.operationReceipts).toEqual({

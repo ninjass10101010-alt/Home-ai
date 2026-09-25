@@ -40,10 +40,7 @@ import Link from "next/link";
 import { db } from "@/db";
 import {
   loadTasks,
-  saveTasks,
   loadWeekData,
-  saveWeekData,
-  addTransaction,
   weekKey,
   getThisWeeksCompletedTasks,
   getThisWeeksCompletedDates,
@@ -51,11 +48,9 @@ import {
   getMemberAllTimePoints,
   completesWithoutPin,
   completesWithPendingApproval,
-  tapCompletePending,
   isSnatchable,
   resolveMemberName,
   isPendingApproval,
-  sendBackPendingCompletion,
   raceGap,
   prizeForRank,
   isCrewTask,
@@ -65,6 +60,7 @@ import {
   crewCheckinProgress,
   getDaysUntilWeekReset,
 } from "@/lib/task-utils";
+import { useTaskCommandQueue } from "@/hooks/useTaskCommandQueue";
 import { kidRaceLine } from "./quest-labels";
 import KidCrewBoard from "./KidCrewBoard";
 import { splitKidBoard } from "./kid-board";
@@ -74,7 +70,7 @@ import LevelBar from "./LevelBar";
 import CelebrationBurst from "./CelebrationBurst";
 import KidProfileSheet from "@/components/modes/kid/KidProfileSheet";
 import WeeklyWinModal from "@/components/leaderboard/WeeklyWinModal";
-import { ledgerKey, pointsFor, currentWeekPoints, unreachableCopy, verifyPinRemote } from "./kid-store";
+import { ledgerKey, pointsFor, unreachableCopy, verifyPinRemote } from "./kid-store";
 import SpotifyWidget from "@/components/integrations/SpotifyWidget";
 import AllowanceWidget from "@/components/integrations/AllowanceWidget";
 import LearningWidget from "@/components/integrations/LearningWidget";
@@ -276,23 +272,27 @@ export default function KidHome() {
   const [dataVersion, setDataVersion] = useState(0);
   // Kid profile sheet (tap the hero avatar) — shared by bedtime + normal flows.
   const [profileSheetOpen, setProfileSheetOpen] = useState(false);
-  // Claim outbox (2026-09-23 review, Critical #2): a fire-and-forget claim
-  // POST that fails (network / 5xx / expired 15-min kid session) used to
-  // strand the kid's completion FOREVER — the parent queue reads the server
-  // snapshot, the local pending row never reached it, re-tap was blocked,
-  // and kids can't reach the /tasks self-cancel. Failed claims stay queued
-  // here and re-POST on every refresh tick until the server confirms;
-  // entries the session can never deliver (401 without a usable PIN) go
-  // `stalled` and surface an honest ask-a-grown-up notice instead.
-  // Ref-held + version counter: the retry effect must key on dataVersion,
-  // never on outbox mutations (that would loop).
-  const claimOutboxRef = useRef<Record<number, { memberName: string; pin?: string; stalled?: boolean }>>({});
-  const [claimOutboxVersion, setClaimOutboxVersion] = useState(0);
-  const [claimOutboxSnapshot, setClaimOutboxSnapshot] = useState<Record<number, { memberName: string; pin?: string; stalled?: boolean }>>({});
-  const bumpClaimOutbox = useCallback(() => {
-    setClaimOutboxVersion((value) => value + 1);
-    setClaimOutboxSnapshot({ ...claimOutboxRef.current });
+  // The ONE durable write seam for the kid surface. Every quest completion,
+  // crew action, claim and self-cancel is queued in the shared outbox BEFORE
+  // any local state change; a command that fails (network / 5xx / an expired
+  // 15-min kid session) survives a reload and is retried until the family
+  // server confirms, so a tap can never be stranded. The PIN (10+ only) rides
+  // the ephemeral credential registry — never localStorage.
+  const adoptStores = useCallback(() => {
+    setDataVersion((value) => value + 1);
   }, []);
+  const {
+    queue: queueCommand,
+    counts: outboxCounts,
+    entries: outboxEntries,
+    cancel: cancelQueuedOperation,
+  } = useTaskCommandQueue({ onAdopted: adoptStores });
+  // Display-only optimism: the quests a queued command is about to land. Never
+  // persisted — the outbox acknowledgment is the only thing that writes a row.
+  const [optimisticQuests, setOptimisticQuests] = useState<Record<number, "pending" | "cancelling">>({});
+  useEffect(() => {
+    if (outboxCounts.pending === 0) setOptimisticQuests({});
+  }, [outboxCounts.pending]);
 
   const { currentUser, logout, sessionWarning, sessionRemainingMs } = useAuth();
   const { isBedtime, isWeekend } = useDashboardMode();
@@ -313,133 +313,12 @@ export default function KidHome() {
     };
   }, []);
 
-  // The ONE claim-POST seam for kid completions (under-10 no-pin + 10+ with
-  // pin): same body shapes the route contract pins, plus outbox bookkeeping —
-  // success/409/404 clears the entry, anything else keeps it for the retry
-  // tick, and a 401 an entry can never recover from (no usable PIN) stalls it
-  // with an honest notice. The optimistic row + celebration are unaffected
-  // (500s never block the kid flow — kid-pin-error-paths contract).
-  const postClaimComplete = useCallback(
-    async (args: { taskId: number; memberName: string; pin?: string; assigneeEmoji?: string }) => {
-      const enqueue = (stalled = false) => {
-        claimOutboxRef.current[args.taskId] = {
-          memberName: args.memberName,
-          ...(args.pin ? { pin: args.pin } : {}),
-          ...(stalled ? { stalled: true } : {}),
-        };
-        bumpClaimOutbox();
-      };
-      const clear = () => {
-        if (args.taskId in claimOutboxRef.current) {
-          delete claimOutboxRef.current[args.taskId];
-          bumpClaimOutbox();
-        }
-      };
-      try {
-        const res = await fetch("/api/tasks/claim", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "complete",
-            taskId: args.taskId,
-            memberName: args.memberName,
-            ...(args.pin ? { pin: args.pin } : {}),
-            ...(args.assigneeEmoji !== undefined ? { assigneeEmoji: args.assigneeEmoji } : {}),
-          }),
-        });
-        if (res.ok) { clear(); return; }
-        if (res.status === 409 || res.status === 404) { clear(); return; } // server already knows
-        // 401: this session can't deliver the claim (expired, or the pin is
-        // no longer accepted) — no point hammering; stall with the notice.
-        enqueue(res.status === 401);
-      } catch {
-        enqueue(); // network — retry on the next refresh tick
-      }
-    },
-    [bumpClaimOutbox]
-  );
-
-  // Retry tick: re-POST every non-stalled outbox entry whose row is still
-  // pending locally. Runs on mount and every dataVersion bump (completions +
-  // the 60s consuela-data-refreshed pull) — an orphan from a FAILED POST, or
-  // a legacy pre-server-handoff tap living only in this device's localStorage,
-  // self-heals here instead of stranding forever.
-  useEffect(() => {
-    if (!currentUser) return;
-    const tasks = loadTasks();
-    // Legacy-orphan adoption: a pending row older than two minutes whose
-    // claim never reached the server (a tap from before the server handoff
-    // shipped, or a failure from before this outbox existed) lives ONLY in
-    // this device's localStorage — the parent queue reads the server
-    // snapshot, so it never surfaces. Adopt it into the outbox and let the
-    // first retry tick deliver it: 200 clears it, 409 (already completed /
-    // already claimed) also clears. The two-minute floor keeps a claim
-    // whose POST is still in flight from being double-POSTed by the scan.
-    const LEGACY_AGE_MS = 2 * 60 * 1000;
-    const nowMs = Date.now();
-    let adopted = 0;
-    for (const t of tasks) {
-      if (!isPendingApproval(t) || !(t as any).pendingApproval?.at) continue;
-      if (t.id in claimOutboxRef.current) continue;
-      const age = nowMs - Date.parse(String((t as any).pendingApproval.at));
-      if (Number.isNaN(age) || age < LEGACY_AGE_MS) continue;
-      claimOutboxRef.current[t.id] = {
-        memberName: (t as any).pendingApproval.byName || resolveMemberName(db.selectMembers(), currentUser.name),
-      };
-      adopted += 1;
-    }
-    if (adopted) bumpClaimOutbox();
-
-    const entries = Object.entries(claimOutboxRef.current).filter(([, v]) => !v.stalled);
-    if (!entries.length) return;
-    for (const [taskIdStr, entry] of entries) {
-      const taskId = Number(taskIdStr);
-      const row = tasks.find((t: any) => t.id === taskId);
-      if (!row || !row.pendingApproval) {
-        // Resolved elsewhere (approved / sent back / deleted) — drop it.
-        if (taskId in claimOutboxRef.current) {
-          delete claimOutboxRef.current[taskId];
-          bumpClaimOutbox();
-        }
-        continue;
-      }
-      void postClaimComplete({
-        taskId,
-        memberName: entry.memberName,
-        ...(entry.pin ? { pin: entry.pin } : {}),
-        ...(row.assigneeEmoji !== undefined ? { assigneeEmoji: row.assigneeEmoji } : {}),
-      });
-    }
-  }, [dataVersion, currentUser, postClaimComplete, bumpClaimOutbox]);
-
-  // Outbox notice state: queued claims are still being re-sent; stalled ones
-  // (401 — this session can't deliver them) ask a grown-up. Both are honest,
-  // non-blocking, and clear themselves the moment the server confirms.
-  const claimOutboxSummary = useMemo(() => {
-    const entries = Object.values(claimOutboxSnapshot);
-    return {
-      total: entries.length,
-      queued: entries.filter((e) => !e.stalled).length,
-      stalled: entries.filter((e) => e.stalled).length,
-    };
-    // claimOutboxVersion is the outbox mutation signal (the ref itself never
-    // re-renders the component).
-  }, [claimOutboxSnapshot]);
-
-  // Kid self-cancel (PIN-free, same contract as the /tasks page's tapping-kid
-  // cancel): a pending tap reopens with the durable sentBackAt proof — the
-  // same stamp the parent send-back uses, so the snapshot pull's timestamp
-  // gates and the sync route's push guard both honour the clear instead of
-  // resurrecting the pending row.
-  const cancelQuestTap = useCallback((taskId: number) => {
-    const tasks = sendBackPendingCompletion(loadTasks(), taskId);
-    saveTasks(tasks);
-    if (taskId in claimOutboxRef.current) {
-      delete claimOutboxRef.current[taskId];
-      bumpClaimOutbox();
-    }
-    setDataVersion((v) => v + 1);
-  }, [bumpClaimOutbox]);
+  const markOptimistic = useCallback((taskId: number, state: "pending" | "cancelling") => {
+    setOptimisticQuests((prev) => ({ ...prev, [taskId]: state }));
+  }, []);
+  // A `reconciling` command has already been applied server-side, so offering
+  // a cancel would be a lie.
+  const cancellableEntries = outboxEntries.filter((entry) => entry.status !== "reconciling");
 
   useEffect(() => {
     (async () => {
@@ -561,60 +440,51 @@ export default function KidHome() {
     setTimeout(() => setCelebration(null), 1500);
   }, []);
 
-  // Crew join/check-in against the server-authoritative route. Under-10 kids
-  // pass an empty PIN (the route trusts the session-derived identity only for
-  // child+age<10, exactly like quick-login).
+  // Kid self-cancel (PIN-free, same contract as the /tasks page's tapping-kid
+  // cancel): the reopen is a durable server undo queued FIRST with no
+  // credential (for an under-10 tap the session IS the identity). The pending
+  // row is NEVER cleared locally — a lost command would silently erase the
+  // tap, which is exactly the failure this queue exists to prevent.
+  const cancelQuestTap = useCallback((taskId: number) => {
+    const myName = resolveMemberName(db.selectMembers(), currentUser?.name ?? "");
+    queueCommand({
+      route: "/api/tasks/claim",
+      action: "undo",
+      payload: { taskId, memberName: myName },
+      displayTarget: { kind: "undo", taskId },
+    });
+    markOptimistic(taskId, "cancelling");
+  }, [currentUser?.name, markOptimistic, queueCommand]);
+
+  // Crew join/check-in is ONE durable command for every age. Under-10 kids
+  // queue it with NO credential (the route trusts the session-derived
+  // identity for child+age<10, exactly like quick-login); 10+ kids carry the
+  // verified PIN ephemerally. Nothing is mirrored onto the local row — the
+  // acknowledgment is the only writer.
   const runCrewAction = useCallback(
     async (task: any, action: "crew-join" | "crew-checkin", pin: string) => {
       if (!user) return;
       setQuestPinBusy(true);
       try {
-        const res = await fetch("/api/tasks/claim", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action, taskId: task.id, memberName: user.name, pin }),
+        const memberName = resolveMemberName(db.selectMembers(), user.name);
+        queueCommand({
+          route: "/api/tasks/claim",
+          action,
+          payload: { taskId: task.id, memberName, assigneeEmoji: task.assigneeEmoji },
+          displayTarget: { kind: "crew", taskId: task.id, title: task.title },
+          ...(pin ? { credential: { pin } } : {}),
         });
-        const data = await res.json().catch(() => null);
-        if (!res.ok || !data?.success || !data?.task) {
-          const err =
-            res.status === 409 && data?.reason === "crew_full" ? "That crew just filled up!"
-              : res.status === 403 && data?.reason === "not_in_crew" ? "You're not on this crew yet."
-              : res.status === 401 ? "Wrong PIN. Try again."
-              : unreachableCopy();
-          setQuestPinError(err);
-          setQuestPin("");
-          return;
-        }
-        // Mirror the server's crew + approval state onto the local row.
-        const updated = data.task;
-        const tasks = loadTasks().map((t: any) =>
-          t.id === task.id
-            ? {
-                ...t,
-                crew: updated.crew ?? t.crew,
-                completed: !!updated.completed,
-                completedBy: updated.completedBy ?? t.completedBy,
-                completedAt: updated.completedAt ?? t.completedAt,
-                completedInWeek: updated.completedInWeek ?? t.completedInWeek,
-                pendingApproval: updated.pendingApproval ?? t.pendingApproval,
-              }
-            : t
-        );
-        saveTasks(tasks);
+        markOptimistic(task.id, "pending");
         setQuestPinTask(null);
         setQuestCrewAction(null);
         setQuestPin("");
         setDataVersion((v) => v + 1);
-      } catch {
-        setQuestPinError(unreachableCopy());
-        setQuestPin("");
       } finally {
         setQuestPinBusy(false);
       }
     },
-    [user]
+    [user, markOptimistic, queueCommand],
   );
-
 
   // Tap a quest. Under-10 kids skip the gate entirely on ASSIGNED quests
   // (one tap → pending approval, same shape as the Tasks page); everyone else
@@ -650,20 +520,20 @@ export default function KidHome() {
       // page): a row already completed this week lands nothing, not even a
       // second pending stamp.
       if (task.completedInWeek === weekKey()) return;
-      const now = new Date().toISOString();
       const myName = resolveMemberName(db.selectMembers(), user!.name);
       const week = loadWeekData();
       const before = pointsFor(week.points, myName);
-      const tasks = loadTasks().map((t: any) => (t.id === task.id ? tapCompletePending(t, myName, now, weekKey()) : t));
-      saveTasks(tasks);
-      // Server-authoritative handoff (same seam as Tasks persistServerComplete):
-      // local pending alone never reaches parent approval — the claim route
-      // writes pendingApproval into the snapshot. Fire-and-forget; a failure
-      // queues in the claim outbox for the refresh-tick retry (never blocks
-      // the celebration).
-      void postClaimComplete({ taskId: task.id, memberName: myName, assigneeEmoji: task.assigneeEmoji });
+      // PIN-free durable completion: the session IS the identity, so the
+      // command carries NO credential at all. Points still land only on parent
+      // approval, and the celebration never waits on the network.
+      queueCommand({
+        route: "/api/tasks/claim",
+        action: "complete",
+        payload: { taskId: task.id, memberName: myName, assigneeEmoji: task.assigneeEmoji },
+        displayTarget: { kind: "claim", taskId: task.id, title: task.title },
+      });
+      markOptimistic(task.id, "pending");
       celebrate(task.points || 0, before, { pending: true });
-      setDataVersion((v) => v + 1);
       return;
     }
     // 10+ kids (and age-unknown sessions — completesWithoutPin fails closed)
@@ -674,7 +544,7 @@ export default function KidHome() {
     setQuestPinTask(task);
     setQuestPin("");
     setQuestPinError("");
-  }, [user, celebrate, runCrewAction, postClaimComplete]);
+  }, [user, celebrate, runCrewAction, markOptimistic, queueCommand]);
 
   const closeQuestPin = useCallback(() => {
     setQuestPinTask(null);
@@ -711,50 +581,23 @@ export default function KidHome() {
         // keep the server-authoritative claim route — the same branch the Tasks
         // page uses, so both surfaces agree for every task shape.
         if (task.universal || isSnatchable(task)) {
-          // Server-authoritative claim (same route the Tasks page uses):
-          // exactly one family member wins the race, points land on the server.
-          const before = currentWeekPoints(user.name).points;
-          const claimNow = new Date().toISOString();
-          const res = await fetch("/api/tasks/claim", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              taskId: task.id,
-              claimantName: user.name,
-              claimantPin: questPin,
-              completedAt: claimNow,
-              title: task.title,
-              points: task.points,
-            }),
-          });
-          const data = await res.json().catch(() => null);
-          if (!res.ok || !data?.success) {
-            const err =
-              res.status === 401 ? "Wrong PIN. Try again."
-                : res.status === 409 && data?.claimedBy ? `🤝 ${String(data.claimedBy).split(" ")[0]} already grabbed that one!`
-                : res.status === 409 ? "That task was already claimed."
-                : "Couldn't claim it — try again.";
-            setQuestPinError(err);
-            setQuestPin("");
-            return { ok: false, error: err };
-          }
-          if (data?.weekData?.weekStart === weekKey()) saveWeekData(data.weekData);
+          // Competitive completions (universal claims AND stealable-late
+          // snatches) are ONE durable claim command: exactly one family member
+          // wins the race, the points land on the server, and the winner's
+          // weekData is adopted through the outbox acknowledgment. A kid
+          // claimant's answer is done-but-unpaid — the celebration says
+          // "on the way" and points land on parent approval.
+          const before = pointsFor(loadWeekData().points, user.name);
           const claimantIsChild = user?.role === "child";
-          const tasks = loadTasks().map((t: any) =>
-            t.id === task.id
-              // claimedBy is the server-normalized FULL name (same as the
-              // non-universal branch's verified.name) — a first name here
-              // would split the ledger key. A kid claimant mirrors the route's
-              // pendingApproval answer: done-but-unpaid, NO local earn tx (the
-              // route never touched week_data); points land on parent approval.
-              ? claimantIsChild
-                ? tapCompletePending(t, data?.claimedBy || user.name, claimNow, weekKey())
-                : { ...t, completed: true, completedBy: data?.claimedBy || user.name, completedAt: claimNow, completedInWeek: weekKey() }
-              : t
-          );
-          saveTasks(tasks);
-          // A kid claim is done-but-UNPAID (the route held the earn for parent
-          // approval) — the celebration copy must say "on the way".
+          const myName = resolveMemberName(db.selectMembers(), user.name);
+          queueCommand({
+            route: "/api/tasks/claim",
+            action: "claim",
+            payload: { taskId: task.id, memberName: myName, assigneeEmoji: task.assigneeEmoji },
+            displayTarget: { kind: "claim", taskId: task.id, title: task.title },
+            credential: { pin: questPin },
+          });
+          markOptimistic(task.id, "pending");
           celebrate(task.points || 0, before, { pending: claimantIsChild });
         } else if (completesWithPendingApproval(user?.role, task)) {
           // 10+ kids (and age-unknown sessions, which fail closed to this gate):
@@ -780,22 +623,20 @@ export default function KidHome() {
             setQuestPin("");
             return { ok: false, error: err };
           }
-          const now = new Date().toISOString();
-          const currentWeek = weekKey();
           const myName = resolveMemberName(db.selectMembers(), result.member?.name || user.name);
           const week = loadWeekData();
           const before = pointsFor(week.points, myName);
-          const tasks = loadTasks().map((t: any) =>
-            t.id === task.id ? tapCompletePending(t, myName, now, currentWeek) : t
-          );
-          saveTasks(tasks);
-          // Server-authoritative handoff (same as under-10 + Tasks page):
-          // verified PIN already checked via verifyPinRemote — this POST
-          // persists pendingApproval to the snapshot for parent approval.
-          // Fire-and-forget; a failure queues in the claim outbox (the pin
-          // lives only in this in-memory entry, never persisted) and retries
-          // on the refresh tick.
-          void postClaimComplete({ taskId: task.id, memberName: myName, pin: questPin, assigneeEmoji: task.assigneeEmoji });
+          // The verified PIN rides the ephemeral credential registry keyed by
+          // the operation id — it is never written to the outbox entry or to
+          // localStorage, and the outbox releases it on acknowledgment.
+          queueCommand({
+            route: "/api/tasks/claim",
+            action: "complete",
+            payload: { taskId: task.id, memberName: myName, assigneeEmoji: task.assigneeEmoji },
+            displayTarget: { kind: "claim", taskId: task.id, title: task.title },
+            credential: { pin: questPin },
+          });
+          markOptimistic(task.id, "pending");
           celebrate(task.points || 0, before, { pending: true });
         } else {
           // Neither branch owns this shape (a non-child session somehow reached
@@ -821,7 +662,7 @@ export default function KidHome() {
         setQuestPinBusy(false);
       }
     },
-    [questPinTask, questCrewAction, runCrewAction, user, celebrate, postClaimComplete]
+    [questPinTask, questCrewAction, runCrewAction, user, celebrate, markOptimistic, queueCommand]
   );
 
   const submitQuestPin = async () => {
@@ -1124,9 +965,19 @@ export default function KidHome() {
               <p className="text-sm text-text-secondary px-1">Nothing assigned to you right now — pick a quest above! 👆</p>
             ) : (
               <div className="space-y-2.5">
-                {pendingTasks.map((task) => (
-                  <QuestCard key={task.id} task={task} onComplete={openQuestPin} />
-                ))}
+                {pendingTasks
+                  .filter((task) => optimisticQuests[task.id] !== "pending")
+                  .map((task) => (
+                    <QuestCard
+                      key={task.id}
+                      task={
+                        optimisticQuests[task.id] === "cancelling"
+                          ? { ...task, emoji: "\u23F3" }
+                          : task
+                      }
+                      onComplete={openQuestPin}
+                    />
+                  ))}
               </div>
             )}
           </div>
@@ -1173,10 +1024,11 @@ export default function KidHome() {
             </div>
           )}
 
-          {/* Claim outbox notice (2026-09-23 review): honest, non-blocking,
-              self-clearing when the server confirms the claim. */}
-          {claimOutboxSummary.total > 0 && (
+          {/* Queue notice (Task 10): honest, non-blocking, self-clearing when
+              the family server confirms each command. */}
+          {outboxCounts.pending > 0 && (
             <div
+              data-testid="kid-command-queue"
               className="rounded-xl px-3 py-2"
               style={{
                 background: "color-mix(in srgb, var(--color-accent-amber) 10%, transparent)",
@@ -1184,13 +1036,68 @@ export default function KidHome() {
               }}
             >
               <p className="text-[11px] font-semibold text-[var(--color-accent-amber)]">
-                {claimOutboxSummary.stalled > 0
-                  ? `⏳ Couldn't send ${claimOutboxSummary.stalled} chore${claimOutboxSummary.stalled !== 1 ? "s" : ""} — ask a grown-up to check your chores.`
-                  : `⏳ Still sending ${claimOutboxSummary.queued} chore${claimOutboxSummary.queued !== 1 ? "s" : ""} to the family server…`}
-                {claimOutboxSummary.stalled > 0 && claimOutboxSummary.queued > 0
-                  ? ` (${claimOutboxSummary.queued} still sending…)`
+                {outboxCounts.queued > 0
+                  ? `⏳ Still sending ${outboxCounts.queued} chore${outboxCounts.queued !== 1 ? "s" : ""} to the family server…`
+                  : ""}
+                {outboxCounts.authRequired > 0
+                  ? `${outboxCounts.queued > 0 ? " " : ""}🔒 ${outboxCounts.authRequired} waiting on a PIN.`
+                  : ""}
+                {outboxCounts.reconciling > 0
+                  ? `${outboxCounts.queued > 0 || outboxCounts.authRequired > 0 ? " " : ""}⏳ ${outboxCounts.reconciling} finishing up.`
+                  : ""}
+                {outboxCounts.failed > 0
+                  ? `${outboxCounts.queued > 0 || outboxCounts.authRequired > 0 || outboxCounts.reconciling > 0 ? " " : ""}⚠️ ${outboxCounts.failed} couldn't be sent — ask a grown-up to check your chores.`
                   : ""}
               </p>
+              {cancellableEntries.length > 0 && (
+                <ul className="mt-1 space-y-1">
+                  {cancellableEntries.map((entry) => (
+                    <li key={entry.operationId} className="flex items-center gap-2">
+                      <span className="text-[11px] text-text-secondary">
+                        {entry.displayTarget.title || entry.action}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={`Cancel queued ${entry.displayTarget.title || entry.action}`}
+                        onClick={() => cancelQueuedOperation(entry.operationId)}
+                        className="tap-sm text-[11px] font-semibold text-[var(--color-accent-rose)]"
+                      >
+                        Cancel
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {/* Display-only optimism: quests a queued command is about to land.
+              Nothing here is persisted — the acknowledgment is the only writer. */}
+          {Object.entries(optimisticQuests).filter(([, state]) => state === "pending").length > 0 && (
+            <div className="space-y-2.5">
+              {Object.entries(optimisticQuests)
+                .filter(([, state]) => state === "pending")
+                .map(([taskId]) => {
+                  const quest = pendingTasks.find((row: any) => row.id === Number(taskId));
+                  if (!quest) return null;
+                  return (
+                    <div
+                      key={`optimistic-${taskId}`}
+                      data-testid="optimistic-quest"
+                      className="flex items-center gap-2.5 rounded-2xl px-3 py-2.5"
+                      style={{
+                        background: "color-mix(in srgb, var(--color-accent-amber) 8%, transparent)",
+                        border: "1px solid color-mix(in srgb, var(--color-accent-amber) 22%, transparent)",
+                      }}
+                    >
+                      <span className="text-sm">⏳</span>
+                      <span className="text-sm font-semibold text-text-secondary">
+                        {quest.title}
+                        <span className="ml-1 text-[11px] font-semibold text-[var(--color-accent-amber)]">on the way</span>
+                      </span>
+                    </div>
+                  );
+                })}
             </div>
           )}
 

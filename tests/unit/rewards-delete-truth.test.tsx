@@ -12,6 +12,8 @@ import type { ReactElement } from "react";
 import TasksPage from "@/app/tasks/page";
 import RewardSection from "@/components/settings/RewardSection";
 import { PENALTIES_KEY, REWARDS_KEY, loadPenalties, loadRewards } from "@/lib/task-utils";
+import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-operation-outbox";
+import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 import { REWARDS_STAMP_KEY } from "@/modes/kid/kid-store";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -52,6 +54,7 @@ const server = vi.hoisted(() => ({
   dbWrites: [] as Array<{ method: string; data: any }>,
   fetchMock: null as ReturnType<typeof vi.fn> | null,
   configFailure: null as null | "network" | "502",
+  manageRequests: [] as any[],
 }));
 
 let activeRoot: Root | null = null;
@@ -87,6 +90,9 @@ describe("Rewards delete truth — snapshot restore must not resurrect", () => {
     server.posts = [];
     server.dbWrites = [];
     server.fetchMock = null;
+    server.manageRequests = [];
+    __resetTaskOutboxForTests();
+    __resetTaskCommandCredentialsForTests();
     server.configFailure = null;
     server.snapshot = null;
     mockAuth.currentUser = null;
@@ -138,6 +144,10 @@ describe("Rewards delete truth — snapshot restore must not resurrect", () => {
               applied: true,
             }),
           };
+        }
+        if (String(input) === "/api/tasks/manage") {
+          server.manageRequests.push(JSON.parse(String(init?.body)));
+          return { ok: true, status: 200, json: async () => ({ success: true }) };
         }
         if (String(input).includes("/api/tasks/sync")) {
           if (String(init?.method || "GET").toUpperCase() === "POST") {
@@ -201,19 +211,20 @@ describe("Rewards delete truth — snapshot restore must not resurrect", () => {
     expect(loadRewards<any[]>([]).map((r) => r.name)).toEqual(["Ice cream", "Screen time"]);
   });
 
-  it("the snapshot push carries the rewards list WITH its stamp", async () => {
+  it("never pushes the rewards list to the retired snapshot writer", async () => {
     localStorage.setItem(REWARDS_KEY, JSON.stringify([A, B]));
     localStorage.setItem(REWARDS_STAMP_KEY, T_NEW);
     server.snapshot = { tasks: [], weekData: null, rewards: [], rewardsUpdatedAt: T_NEW };
 
     await renderAsync(<TasksPage />);
-    // Past the 2s snapshot debounce.
+    // Well past the old 2s snapshot debounce.
     await settle(2300);
 
-    const push = server.posts.find((p) => Array.isArray(p.rewards));
-    expect(push).toBeTruthy();
-    expect(push.rewards.map((r: any) => r.name)).toEqual(["Ice cream", "Screen time"]);
-    expect(push.rewardsUpdatedAt).toBe(T_NEW);
+    // The browser is no longer a writer: the catalog only ever travels as a
+    // durable /api/tasks/config command, so a stale snapshot can never
+    // resurrect a deleted reward by being pushed back.
+    expect(server.posts).toHaveLength(0);
+    expect(loadRewards<any[]>([]).map((r) => r.name)).toEqual(["Ice cream", "Screen time"]);
   });
 
   it("saves a Tasks-page reward through the config route", async () => {
@@ -258,7 +269,7 @@ describe("Rewards delete truth — snapshot restore must not resurrect", () => {
     });
   });
 
-  it("rolls back a Tasks-page reward edit after a network rejection", async () => {
+  it("keeps the reward edit queued after a network rejection and writes no local success", async () => {
     localStorage.setItem(REWARDS_KEY, JSON.stringify([A]));
     mockAuth.currentUser = { name: "Rebecca", role: "parent" };
     mockAuth.isLoggedIn = true;
@@ -290,11 +301,11 @@ describe("Rewards delete truth — snapshot restore must not resurrect", () => {
     });
 
     expect(loadRewards<any[]>([])).toEqual([A]);
-    expect(document.body.textContent).toContain("Couldn't save the reward");
-    expect(document.body.textContent).toContain("Add Reward");
+    expect(listTaskOutbox()[0]).toMatchObject({ route: "/api/tasks/config", action: "upsert" });
+    expect(document.body.textContent).toContain("Add");
   });
 
-  it("rolls back a Tasks-page penalty edit after a 502", async () => {
+  it("keeps the penalty edit queued after a 502 and writes no local success", async () => {
     const existing = [{ id: 1, name: "Mess", emoji: "⚠️", points: 5 }];
     localStorage.setItem(PENALTIES_KEY, JSON.stringify(existing));
     mockAuth.currentUser = { name: "Rebecca", role: "parent" };
@@ -327,11 +338,12 @@ describe("Rewards delete truth — snapshot restore must not resurrect", () => {
     });
 
     expect(loadPenalties<any[]>([])).toEqual(existing);
-    expect(document.body.textContent).toContain("Couldn't save the penalty");
-    expect(document.body.textContent).toContain("Add Penalty");
+    expect(listTaskOutbox()[0]).toMatchObject({ route: "/api/tasks/config", action: "upsert" });
+    expect(document.body.textContent).toContain("Add");
   });
 
-  it("config-only reward and penalty edits schedule no task/week sync while a task edit still syncs", { timeout: 45000 }, async () => {
+  it("config-only reward and penalty edits queue config commands, and a task edit queues a manage command", async () => {
+    server.configFailure = "502";
     mockAuth.currentUser = { name: "Rebecca", role: "parent" };
     mockAuth.isLoggedIn = true;
     mockMembers.current = [{ id: "parent-1", name: "Rebecca", fullName: "Rebecca", role: "parent", emoji: "👩", color: "#22c55e" }];
@@ -345,14 +357,10 @@ describe("Rewards delete truth — snapshot restore must not resurrect", () => {
     };
 
     await renderAsync(<TasksPage />);
-    await settle(5700);
-    expect(server.posts.length).toBeGreaterThan(0);
-    expect(server.dbWrites.length).toBeGreaterThan(0);
-    server.posts = [];
-    server.dbWrites = [];
+    await settle(200);
 
     const leaderboard = Array.from(document.querySelectorAll("button"))
-      .find((button) => button.textContent?.includes("Leaderboard")) as HTMLButtonElement;
+      .find((button) => (button.textContent || "").includes("Leaderboard")) as HTMLButtonElement;
     act(() => { leaderboard.click(); });
     await settle();
     const rewardsCard = Array.from(document.querySelectorAll("h2, h3"))
@@ -367,9 +375,8 @@ describe("Rewards delete truth — snapshot restore must not resurrect", () => {
         .find((button) => button.textContent?.trim() === "Save") as HTMLButtonElement).click();
       await Promise.resolve();
     });
-    await settle(5700);
-    expect(server.posts).toHaveLength(0);
-    expect(server.dbWrites).toHaveLength(0);
+    await settle(200);
+    expect(listTaskOutbox()[0]).toMatchObject({ route: "/api/tasks/config", action: "upsert" });
 
     const penaltiesCard = Array.from(document.querySelectorAll("h2, h3"))
       .find((element) => element.textContent === "Penalties")!.closest(".widget-card") as HTMLElement;
@@ -383,33 +390,58 @@ describe("Rewards delete truth — snapshot restore must not resurrect", () => {
         .find((button) => button.textContent?.trim() === "Save") as HTMLButtonElement).click();
       await Promise.resolve();
     });
-    await settle(5700);
+    await settle(200);
+    expect(listTaskOutbox().map((entry) => entry.action)).toEqual(["upsert", "upsert"]);
+    expect(listTaskOutbox().every((entry) => entry.route === "/api/tasks/config")).toBe(true);
+    expect((listTaskOutbox()[0].payload as any).kind).toBe("rewards");
+    expect((listTaskOutbox()[1].payload as any).kind).toBe("penalties");
+
+    // No catalog write ever reaches the retired snapshot writer.
     expect(server.posts).toHaveLength(0);
     expect(server.dbWrites).toHaveLength(0);
+  });
 
-    const tasksTab = Array.from(document.querySelectorAll("button"))
-      .find((button) => button.textContent?.trim() === "Tasks") as HTMLButtonElement;
-    act(() => { tasksTab.click(); });
-    await settle();
+  it("a task edit queues a manage command and never a snapshot push", async () => {
+    mockAuth.currentUser = { name: "Rebecca", role: "parent" };
+    mockAuth.isLoggedIn = true;
+    mockMembers.current = [{ id: "parent-1", name: "Rebecca", fullName: "Rebecca", role: "parent", emoji: "👩", color: "#22c55e" }];
+    server.snapshot = { tasks: [], weekData: null };
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+
+    await renderAsync(<TasksPage />);
+    await settle(200);
     act(() => {
       (document.querySelector('button[aria-label="Add task"]') as HTMLButtonElement).click();
     });
-    setInput(document.querySelector('input[placeholder="Task title"]') as HTMLInputElement, "Real task change");
+    await settle();
+    const title = document.querySelector('input[placeholder="Task title"]') as HTMLInputElement;
+    act(() => {
+      setter.call(title, "Real task change");
+      title.dispatchEvent(new Event("input", { bubbles: true }));
+    });
     await act(async () => {
       (Array.from(document.querySelectorAll("button"))
         .find((button) => button.textContent?.trim() === "Save") as HTMLButtonElement).click();
       await Promise.resolve();
     });
-    await settle(5700);
-    expect(server.posts).toHaveLength(1);
-    expect(server.dbWrites.length).toBeGreaterThan(0);
+    await settle(200);
+
+    // The add traveled as a durable manage command and was acknowledged, so
+    // the outbox is empty and the row is the server's to create.
+    expect(listTaskOutbox()).toHaveLength(0);
+    expect(server.manageRequests).toHaveLength(1);
+    expect(server.manageRequests[0]).toMatchObject({ action: "add" });
+    expect(server.manageRequests[0].task.title).toBe("Real task change");
+    expect(server.posts).toHaveLength(0);
+    expect(server.dbWrites).toHaveLength(0);
   });
 });
-
 describe("RewardSection — every catalog write stamps the list", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
     localStorage.clear();
+    __resetTaskOutboxForTests();
+    __resetTaskCommandCredentialsForTests();
     vi.stubGlobal("matchMedia", (query: string) => ({
       matches: true,
       media: query,
@@ -421,6 +453,7 @@ describe("RewardSection — every catalog write stamps the list", () => {
       dispatchEvent: vi.fn(),
     }));
     vi.stubGlobal("fetch", vi.fn(async (_input: any, init?: any) => {
+      if (!init?.body) return { ok: true, status: 200, json: async () => ({ snapshot: null, reconciled: true }) };
       const command = JSON.parse(String(init?.body));
       let items = loadRewards<any[]>([]);
       if (command.action === "replace") items = command.items;
@@ -465,7 +498,9 @@ describe("RewardSection — every catalog write stamps the list", () => {
     return container;
   }
 
-  it("delete writes the shorter list through the config route and adopts its stamp", async () => {
+  it("delete queues the shorter list as a durable command and writes no local removal", async () => {
+    __resetTaskOutboxForTests();
+    __resetTaskCommandCredentialsForTests();
     localStorage.setItem(REWARDS_KEY, JSON.stringify([A, B]));
     localStorage.setItem(REWARDS_STAMP_KEY, T_OLD);
     mount();
@@ -476,9 +511,15 @@ describe("RewardSection — every catalog write stamps the list", () => {
       del.click();
       await Promise.resolve();
     });
+    await act(async () => { await new Promise((r) => setTimeout(r, 150)); });
 
-    expect(loadRewards<any[]>([]).map((r) => r.name)).toEqual(["Screen time"]);
-    expect(localStorage.getItem(REWARDS_STAMP_KEY)).toBeTruthy();
+    // The delete traveled as a durable config command and was acknowledged, so
+    // the outbox is empty. The catalog is NOT shortened here: an empty ack
+    // carries no catalog leg, so the shorter list arrives on the next pull —
+    // a lost command can never leave a phantom deletion behind, and a failed
+    // one can never delete.
+    expect(listTaskOutbox()).toHaveLength(0);
+    expect(loadRewards<any[]>([]).map((r) => r.name)).toEqual(["Ice cream", "Screen time"]);
     expect(JSON.parse(String((globalThis.fetch as any).mock.calls.at(-1)?.[1]?.body))).toMatchObject({
       kind: "rewards",
       action: "delete",
@@ -486,7 +527,9 @@ describe("RewardSection — every catalog write stamps the list", () => {
     });
   });
 
-  it("clear-all posts a replacement and adopts the authoritative empty catalog", async () => {
+  it("clear-all queues a replacement that the family server adopts", async () => {
+    __resetTaskOutboxForTests();
+    __resetTaskCommandCredentialsForTests();
     localStorage.setItem(REWARDS_KEY, JSON.stringify([A]));
     mount();
 
@@ -496,13 +539,13 @@ describe("RewardSection — every catalog write stamps the list", () => {
       clear.click();
       await Promise.resolve();
     });
+    await act(async () => { await new Promise((r) => setTimeout(r, 150)); });
 
-    expect(loadRewards<any[]>([])).toEqual([]);
+    expect(listTaskOutbox()).toHaveLength(0);
     expect(JSON.parse(String((globalThis.fetch as any).mock.calls.at(-1)?.[1]?.body))).toMatchObject({
       kind: "rewards",
       action: "replace",
       items: [],
     });
-    expect(localStorage.getItem(REWARDS_STAMP_KEY)).toBeTruthy();
   });
 });
