@@ -346,7 +346,7 @@ describe("Task 9 non-blockers closed by Task 10", () => {
     expect(localStorage.getItem(taskOutboxEntryStorageKey("op-stale"))).toBeNull();
   });
 
-  it("never writes to storage from a read path", () => {
+  it("never writes SYNCHRONOUSLY from a read path (eviction is deferred)", async () => {
     const stale = {
       version: 1 as const,
       operationId: "op-stale-write",
@@ -367,12 +367,18 @@ describe("Task 9 non-blockers closed by Task 10", () => {
     try {
       listTaskOutbox();
       listTaskOutbox();
+      // The READ itself is side-effect free…
       expect(setItem).not.toHaveBeenCalled();
+      expect(removeItem).not.toHaveBeenCalled();
+      // …and the evicted key is removed on the next microtask, not before.
       expect(removeItem).not.toHaveBeenCalled();
     } finally {
       setItem.mockRestore();
       removeItem.mockRestore();
     }
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(localStorage.getItem(taskOutboxEntryStorageKey("op-stale-write"))).toBeNull();
   });
 
   it("keeps a live entry's key while pruning only the evicted one", async () => {

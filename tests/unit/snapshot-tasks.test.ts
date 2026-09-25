@@ -583,3 +583,141 @@ describe("snapshot revisions and receipts", () => {
     }
   });
 });
+
+describe("ledger repair markers survive the sanitizer and the mutation boundary", () => {
+  const baseSnapshot = (markers: unknown[]) => ({
+    revision: "1",
+    taskWeekStart: "2026-09-21",
+    tasks: [],
+    deletedTaskIds: [],
+    operationReceipts: {},
+    configOperationReceipts: {},
+    pendingProjectionRepairs: markers,
+    weekData: { weekStart: "2026-09-21", points: {}, streak: {}, lastActive: {}, history: [] },
+  });
+
+  const ledgerMarker = (action: "penalty" | "adjust", operationId: string) => ({
+    operationId,
+    taskIds: [],
+    action,
+    actorId: "parent-1",
+    fingerprint: "a".repeat(64),
+    createdAt: "2026-09-24T10:01:00.000Z",
+  });
+
+  function snapshotHarness(initial: unknown[]) {
+    let stored: any = {
+      id: "snap-1",
+      key: "tasks-snapshot",
+      data: JSON.stringify(baseSnapshot(initial)),
+    };
+    const written: any[] = [];
+    const pb = {
+      collection: (name: string) => {
+        if (name !== "consuela_data_snapshots") throw new Error("unexpected collection " + name);
+        return {
+          getFullList: async () => [structuredClone(stored)],
+          update: async (id: string, payload: any) => {
+            written.push(structuredClone(payload));
+            stored = { ...stored, ...structuredClone(payload) };
+            return stored;
+          },
+          create: async (payload: any) => {
+            written.push(structuredClone(payload));
+            stored = { id: "snap-1", ...structuredClone(payload) };
+            return stored;
+          },
+        };
+      },
+    } as any;
+    return {
+      pb,
+      written,
+      data: () => (typeof stored.data === "string" ? JSON.parse(stored.data) : structuredClone(stored.data)),
+    };
+  }
+
+  it("persists a penalty marker with an empty taskIds through a real snapshot write", async () => {
+    const harness = snapshotHarness([ledgerMarker("penalty", "op-pen-persist")]);
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+
+    // A 202 ledger command raises the marker, then the projection retries: the
+    // write must not silently erase the record that it is unprojected.
+    await mutateSnapshotWithMeta((data) => ({
+      data: { ...data, revision: String(Number(data.revision ?? 0) + 1) },
+      result: null,
+    }));
+
+    const persisted = harness.written.at(-1)!.data;
+    const markers = JSON.parse(
+      typeof persisted === "string" ? persisted : JSON.stringify(persisted),
+    ).pendingProjectionRepairs;
+    expect(markers).toEqual([ledgerMarker("penalty", "op-pen-persist")]);
+  });
+
+  it("persists an adjust marker with an empty taskIds, preserving every field", async () => {
+    const harness = snapshotHarness([ledgerMarker("adjust", "op-adj-persist")]);
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+
+    await mutateSnapshotWithMeta((data) => ({ data: { ...data }, result: null }));
+
+    const markers = harness.data().pendingProjectionRepairs;
+    expect(markers).toHaveLength(1);
+    expect(markers[0]).toMatchObject({
+      operationId: "op-adj-persist",
+      taskIds: [],
+      action: "adjust",
+      actorId: "parent-1",
+      fingerprint: "a".repeat(64),
+      createdAt: "2026-09-24T10:01:00.000Z",
+    });
+  });
+
+  it("reads a hand-written ledger marker back off the blob", async () => {
+    const harness = snapshotHarness([ledgerMarker("penalty", "op-pen-read")]);
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+
+    const state = await readSnapshotWithRevision();
+    expect(state.data.pendingProjectionRepairs).toEqual([
+      ledgerMarker("penalty", "op-pen-read"),
+    ]);
+  });
+
+  it("still drops an APPROVAL marker that carries no task id", async () => {
+    const harness = snapshotHarness([
+      { operationId: "op-approve-empty", taskIds: [], action: "approve", createdAt: "2026-09-24T10:01:00.000Z" },
+    ]);
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+
+    const state = await readSnapshotWithRevision();
+    expect(state.data.pendingProjectionRepairs).toEqual([]);
+  });
+
+  it("still validates a ledger marker's operationId, createdAt and action", async () => {
+    const harness = snapshotHarness([
+      { operationId: "", taskIds: [], action: "penalty", createdAt: "2026-09-24T10:01:00.000Z" },
+      { operationId: "op-bad-time", taskIds: [], action: "penalty", createdAt: "not-a-time" },
+      { operationId: "op-bad-action", taskIds: [], action: "explode", createdAt: "2026-09-24T10:01:00.000Z" },
+      { operationId: "op-good", taskIds: [], action: "adjust", createdAt: "2026-09-24T10:01:00.000Z" },
+    ]);
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+
+    const state = await readSnapshotWithRevision();
+    expect(state.data.pendingProjectionRepairs).toEqual([
+      { operationId: "op-good", taskIds: [], action: "adjust", createdAt: "2026-09-24T10:01:00.000Z" },
+    ]);
+  });
+
+  it("a ledger marker survives a write that ALSO carries an approval marker", async () => {
+    const harness = snapshotHarness([
+      ledgerMarker("penalty", "op-pen-mixed"),
+      { operationId: "op-approve-1", taskIds: [42], action: "approve", actorId: "parent-1", createdAt: "2026-09-24T10:02:00.000Z" },
+    ]);
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+
+    await mutateSnapshotWithMeta((data) => ({ data: { ...data }, result: null }));
+
+    const markers = harness.data().pendingProjectionRepairs;
+    expect(markers.map((m: any) => m.operationId).sort()).toEqual(["op-approve-1", "op-pen-mixed"]);
+  });
+});
