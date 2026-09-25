@@ -61,6 +61,8 @@ const server = vi.hoisted(() => ({
   approveBody: null as null | any,
   snapshot: null as any,
   verifyOk: true,
+  redeemBody: null as null | any,
+  ledgerBody: null as null | any,
   echoReceipt: false,
   approveSeen: false,
 }));
@@ -117,6 +119,14 @@ function installFetch() {
         // pre-resolve the approval it is about to command.
         const visible = server.approveSeen ? server.snapshot : { tasks: [], weekData: null };
         return { ok: true, status: 200, json: async () => ({ snapshot: visible, reconciled: true }) };
+      }
+      if (url === "/api/rewards/redeem") {
+        server.requests.push({ route: url, body });
+        return { ok: true, status: 200, json: async () => server.redeemBody ?? { ok: true } };
+      }
+      if (url === "/api/tasks/ledger") {
+        server.requests.push({ route: url, body });
+        return { ok: true, status: 200, json: async () => server.ledgerBody ?? { success: true } };
       }
       if (url === "/api/tasks/claim" || url === "/api/tasks/approve" || url === "/api/tasks/manage" || url === "/api/tasks/config") {
         server.requests.push({ route: url, body });
@@ -210,6 +220,16 @@ function dialogButton(text: string): HTMLButtonElement {
   ) as HTMLButtonElement | undefined;
   expect(found).toBeTruthy();
   return found!;
+}
+
+async function setField(label: string, value: string) {
+  const input = document.querySelector(`input[aria-label="${label}"]`) as HTMLInputElement;
+  expect(input).toBeTruthy();
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, value.includes("-") ? "value" : "value")!.set!;
+    setter.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
 }
 
 async function click(label: string) {
@@ -751,6 +771,283 @@ describe("display-only optimism is visible but never persisted", () => {
     // Parent-only Add/Edit/Delete with a confirm first (the P0 gate).
     expect(storedTasks()).toHaveLength(1);
     expect(listTaskOutbox()).toHaveLength(0);
+  });
+});
+
+describe("reward redemption, penalty and manual adjust are server commands", () => {
+  it("queues a redemption with the member PIN and adopts the server weekData", async () => {
+    const REDEEM = { id: 7, name: "Movie night", emoji: "🎬", cost: 25 };
+    localStorage.setItem("consuela-rewards", JSON.stringify([REDEEM]));
+    server.redeemBody = {
+      ok: true,
+      weekData: {
+        weekStart: MONDAY,
+        points: { "Rebecca Mom": 25 },
+        streak: {},
+        lastActive: {},
+        history: [{
+          id: 5,
+          timestamp: new Date().toISOString(),
+          member: "Rebecca Mom",
+          type: "redeem",
+          amount: -25,
+          description: "Redeemed: Movie night (-25pts)",
+        }],
+      },
+    };
+    seed([], { points: { "Rebecca Mom": 50 }, streak: {}, lastActive: {}, history: [] });
+    const el = await renderAsync(<TasksPage />);
+    await settle();
+    const leaderboard = Array.from(document.querySelectorAll("button")).find((button) =>
+      (button.textContent || "").includes("Leaderboard"),
+    ) as HTMLButtonElement;
+    await act(async () => { leaderboard.click(); });
+    await settle();
+    await click(`Redeem Movie night`);
+    await typePin("4-digit PIN", PARENT_PIN);
+    await act(async () => { dialogButton("Submit").click(); });
+    await settle(150);
+
+    // The real request body: the reward id and the member PIN, no cost.
+    const posted = requestsFor("/api/rewards/redeem");
+    expect(posted).toHaveLength(1);
+    expect(posted[0].body).toMatchObject({
+      action: "redeem",
+      rewardId: 7,
+      memberName: "Rebecca Mom",
+      pin: PARENT_PIN,
+    });
+    expect(posted[0].body.cost).toBeUndefined();
+    // The deduction is the server's ledger, adopted through the acknowledgment.
+    expect(storedWeek().points["Rebecca Mom"]).toBe(25);
+    expect(storedWeek().history).toHaveLength(1);
+  });
+
+  it("sends BOTH pins for a high-cost redemption", async () => {
+    const EXPENSIVE = { id: 9, name: "Trip", emoji: "🎡", cost: 250 };
+    localStorage.setItem("consuela-rewards", JSON.stringify([EXPENSIVE]));
+    server.redeemBody = { ok: true, weekData: { weekStart: MONDAY, points: {}, streak: {}, lastActive: {}, history: [] } };
+    seed([], { points: { "Rebecca Mom": 500 }, streak: {}, lastActive: {}, history: [] });
+    const el = await renderAsync(<TasksPage />);
+    await settle();
+    const leaderboard = Array.from(document.querySelectorAll("button")).find((button) =>
+      (button.textContent || "").includes("Leaderboard"),
+    ) as HTMLButtonElement;
+    await act(async () => { leaderboard.click(); });
+    await settle();
+    await click("Redeem Trip");
+    await typePin("Parent PIN", KID_PIN);
+    await act(async () => { dialogButton("Approve").click(); });
+    await settle();
+    // The member then confirms with their own PIN; the parent's travels with it.
+    await typePin("4-digit PIN", PARENT_PIN);
+    await act(async () => { dialogButton("Submit").click(); });
+    await settle(150);
+
+    const posted = requestsFor("/api/rewards/redeem");
+    expect(posted).toHaveLength(1);
+    expect(posted[0].body).toMatchObject({ pin: PARENT_PIN, parentPin: KID_PIN });
+    const dump = Object.keys(localStorage)
+      .map((key) => `${key}=${localStorage.getItem(key) ?? ""}`)
+      .join("\n");
+    expect(dump).not.toContain(KID_PIN);
+  });
+
+  it("queues a penalty with the catalog id and the parent PIN, never a point value", async () => {
+    const PENALTY = { id: 3, name: "Mess", emoji: "⚠️", points: 15 };
+    localStorage.setItem("consuela-penalties", JSON.stringify([PENALTY]));
+    server.ledgerBody = {
+      success: true,
+      action: "penalty",
+      member: "Caspian Garcia",
+      weekData: {
+        weekStart: MONDAY,
+        points: { "Caspian Garcia": 5 },
+        streak: {},
+        lastActive: {},
+        history: [{
+          id: 6,
+          timestamp: new Date().toISOString(),
+          member: "Caspian Garcia",
+          type: "penalty",
+          amount: -15,
+          description: "Penalty: Mess (-15pts)",
+        }],
+      },
+      reconciled: true,
+    };
+    seed([], { points: { "Caspian Garcia": 20 }, streak: {}, lastActive: {}, history: [] });
+    const el = await renderAsync(<TasksPage />);
+    await settle();
+    const leaderboard = Array.from(document.querySelectorAll("button")).find((button) =>
+      (button.textContent || "").includes("Leaderboard"),
+    ) as HTMLButtonElement;
+    await act(async () => { leaderboard.click(); });
+    await settle();
+    await click("Apply penalty");
+    await settle();
+    const applyTo = document.querySelector('[role="dialog"] select') as HTMLSelectElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value")!.set!;
+      setter.call(applyTo, "Caspian Garcia");
+      applyTo.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await typePin("4-digit PIN", KID_PIN);
+    await act(async () => { dialogButton("Deduct").click(); });
+    await settle(150);
+
+    const posted = requestsFor("/api/tasks/ledger");
+    expect(posted).toHaveLength(1);
+    expect(posted[0].body).toMatchObject({
+      action: "penalty",
+      memberName: "Caspian Garcia",
+      itemId: 3,
+      pin: KID_PIN,
+    });
+    expect(posted[0].body.points).toBeUndefined();
+    expect(storedWeek().points["Caspian Garcia"]).toBe(5);
+  });
+
+  it("queues a manual adjust with the signed amount and adopts the server week", async () => {
+    server.ledgerBody = {
+      success: true,
+      action: "adjust",
+      member: "Caspian Garcia",
+      weekData: {
+        weekStart: MONDAY,
+        points: { "Caspian Garcia": 25 },
+        streak: {},
+        lastActive: {},
+        history: [{
+          id: 7,
+          timestamp: new Date().toISOString(),
+          member: "Caspian Garcia",
+          type: "adjust",
+          amount: 20,
+          description: "Manual adjust: +20pts (helped out)",
+        }],
+      },
+      reconciled: true,
+    };
+    seed([], { points: { "Caspian Garcia": 5 }, streak: {}, lastActive: {}, history: [] });
+    const el = await renderAsync(<TasksPage />);
+    await settle();
+    // The adjust control lives on a leaderboard row, so switch to that tab.
+    const leaderboard = Array.from(document.querySelectorAll("button")).find((button) =>
+      (button.textContent || "").includes("Leaderboard"),
+    ) as HTMLButtonElement;
+    await act(async () => { leaderboard.click(); });
+    await settle();
+    await click("Adjust points for Caspian Garcia");
+    await setField("Adjustment amount", "20");
+    await click("Add points");
+    await act(async () => {
+      const pin = document.querySelector('input[aria-label="Parent PIN"]') as HTMLInputElement;
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+      setter.call(pin, PARENT_PIN);
+      pin.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => { dialogButton("Apply").click(); });
+    await settle(150);
+
+    const posted = requestsFor("/api/tasks/ledger");
+    expect(posted).toHaveLength(1);
+    expect(posted[0].body).toMatchObject({
+      action: "adjust",
+      memberName: "Caspian Garcia",
+      pin: PARENT_PIN,
+    });
+    expect(typeof posted[0].body.amount).toBe("number");
+    expect(posted[0].body.points).toBeUndefined();
+    expect(storedWeek().points["Caspian Garcia"]).toBe(25);
+  });
+});
+
+describe("optimism is per operation, and a temp row can never be acted on", () => {
+  it("releasing ONE operation's optimism leaves the other's row in place", async () => {
+    server.claimStatus = 503;
+    const SECOND = { ...ASSIGNED_TASK, id: 104, title: "Feed the cat" };
+    mockAuth.currentUser = { name: "Jasmine", role: "child", age: 11 };
+    seed([ASSIGNED_TASK, SECOND]);
+    const el = await renderAsync(<TasksPage />);
+    await settle();
+
+    // Two independent completion commands, both still in flight.
+    await click("Complete Make bed");
+    await typePin("4-digit PIN", KID_PIN);
+    await act(async () => { dialogButton("Submit").click(); });
+    await settle(120);
+    await click("Complete Feed the cat");
+    await typePin("4-digit PIN", KID_PIN);
+    await act(async () => { dialogButton("Submit").click(); });
+    await settle(120);
+
+    expect(listTaskOutbox()).toHaveLength(2);
+    const rows = el.querySelectorAll('[data-testid="optimistic-task-row"]');
+    expect(rows).toHaveLength(2);
+
+    // Release exactly ONE operation. The other row must survive: a global
+    // "queue is not empty" reset would have wiped both.
+    const [first] = listTaskOutbox();
+    const cancel = el.querySelector('[aria-label="Cancel queued Make bed"]') as HTMLElement;
+    expect(cancel).toBeTruthy();
+    await act(async () => { cancel.click(); });
+    await settle(150);
+
+    expect(listTaskOutbox().map((entry) => entry.operationId)).not.toContain(first.operationId);
+    expect(listTaskOutbox()).toHaveLength(1);
+    expect(el.querySelectorAll('[data-testid="optimistic-task-row"]')).toHaveLength(1);
+    expect(el.textContent || "").toContain("Feed the cat");
+  });
+
+  it("a queued add row renders inert — no complete, edit or delete control", async () => {
+    server.manageStatus = 503;
+    seed([]);
+    const el = await renderAsync(<TasksPage />);
+    await settle();
+    await click("Add task");
+    const input = document.querySelector('input[placeholder="Task title"]') as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+      setter.call(input, "Rake leaves");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => { dialogButton("Save").click(); });
+    await settle(120);
+
+    const row = el.querySelector('[data-testid="optimistic-add-row"]');
+    expect(row).not.toBeNull();
+    expect(row!.textContent).toContain("Rake leaves");
+    // Inert: no role=button row, no complete label, nothing clickable.
+    expect(row!.querySelector('[role="button"]')).toBeNull();
+    expect(row!.querySelector("button")).toBeNull();
+    expect(el.querySelector('[aria-label="Complete Rake leaves"]')).toBeNull();
+    // And the queued add is the only command — nothing was sent for a temp id.
+    expect(listTaskOutbox()[0]).toMatchObject({ route: "/api/tasks/manage", action: "add" });
+    expect(JSON.stringify(requestsFor("/api/tasks/manage"))).not.toContain("delete");
+  });
+
+  it("a delete of a temporary row is refused, never sent as an unknown id", async () => {
+    server.manageStatus = 503;
+    seed([]);
+    const el = await renderAsync(<TasksPage />);
+    await settle();
+    await click("Add task");
+    const input = document.querySelector('input[placeholder="Task title"]') as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+      setter.call(input, "Rake leaves");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => { dialogButton("Save").click(); });
+    await settle(120);
+
+    // Reaching the delete handler for a row the server has never seen (the
+    // temporary id) must refuse rather than send it.
+    const temporaryId = (listTaskOutbox()[0].displayTarget as any).temporaryId;
+    expect(typeof temporaryId).toBe("number");
+    const del = el.querySelector(`[aria-label="Delete Rake leaves"]`);
+    expect(del).toBeNull();
   });
 });
 

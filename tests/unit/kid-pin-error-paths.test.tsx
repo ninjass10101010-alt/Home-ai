@@ -315,7 +315,7 @@ describe("KidHome — honest error paths on the quest PIN gate", () => {
     expect(document.querySelector('[aria-label^="Congratulations"]')).not.toBeNull();
   });
 
-  it("a NETWORK REJECTION on the claim command is queued, not silently dropped", async () => {
+  it("a claim whose PIN cannot be verified is refused, never queued", async () => {
     store.tasks = [{ ...UNIVERSAL }];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       if (String(input).includes("/api/tasks/claim")) throw new TypeError("Failed to fetch");
@@ -336,15 +336,16 @@ describe("KidHome — honest error paths on the quest PIN gate", () => {
     await act(async () => { buttonByText("Complete")!.click(); });
     await settle();
 
-    // The claim is durable and honest: nothing local is written, the outbox
-    // keeps the command, and the kid still gets the "on the way" celebration
-    // because the command WILL land — with no "Wrong PIN" lie.
+    // A claim is PIN-gated for every age, so the typed PIN is verified BEFORE
+    // anything is queued. A 401 verify means a wrong PIN: nothing is queued,
+    // nothing is written, and the kid is told the truth instead of seeing a
+    // celebration for a claim the server will never accept.
     const text = document.body.textContent || "";
-    expect(text).not.toContain("Wrong PIN");
-    expect(listTaskOutbox()[0]).toMatchObject({ route: "/api/tasks/claim", action: "claim", payload: { taskId: 9 } });
+    expect(text).toContain("Wrong PIN");
+    expect(listTaskOutbox()).toHaveLength(0);
     expect(store.saveTasks).not.toHaveBeenCalled();
     expect(store.syncTasksToPB).not.toHaveBeenCalled();
-    expect(document.querySelector('[aria-label^="Congratulations"]')).not.toBeNull();
+    expect(document.querySelector('[aria-label^="Congratulations"]')).toBeNull();
     const completeBtn = buttonByText("Complete")!;
     expect(completeBtn.querySelector('[class*="animate-spin"]')).toBeNull();
     // PIN cleared from state.

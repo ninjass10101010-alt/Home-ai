@@ -23,7 +23,9 @@ export type TaskOperationRoute =
   | "/api/tasks/claim"
   | "/api/tasks/approve"
   | "/api/tasks/manage"
-  | "/api/tasks/config";
+  | "/api/tasks/config"
+  | "/api/tasks/ledger"
+  | "/api/rewards/redeem";
 
 export type TaskOutboxErrorCategory =
   | "network"
@@ -118,6 +120,8 @@ const ROUTES = new Set<string>([
   "/api/tasks/approve",
   "/api/tasks/manage",
   "/api/tasks/config",
+  "/api/tasks/ledger",
+  "/api/rewards/redeem",
 ]);
 
 const STATUSES = new Set<string>(["queued", "retrying", "auth-required", "reconciling", "failed"]);
@@ -146,6 +150,18 @@ const APPROVE_PAYLOAD_KEYS: Record<string, readonly string[]> = {
   approve: ["taskId", "memberName"],
   "approve-all": ["taskIds", "memberName"],
   "send-back": ["taskId", "memberName"],
+};
+
+// A parent-authoritative point movement: a catalog penalty or a manual adjust.
+// The amount and reason are part of the command; the BALANCE is never a client
+// input — the server re-derives it under the week-ledger lock.
+const LEDGER_PAYLOAD_KEYS: Record<string, readonly string[]> = {
+  penalty: ["memberName", "itemId", "points"],
+  adjust: ["memberName", "amount", "reason"],
+};
+
+const REDEEM_PAYLOAD_KEYS: Record<string, readonly string[]> = {
+  redeem: ["rewardId", "memberName"],
 };
 
 const MANAGE_PAYLOAD_KEYS: Record<string, readonly string[]> = {
@@ -201,18 +217,30 @@ const CONFIG_KIND_LEGS: Record<string, { items: string; stamp: string }> = {
   "weekly-prizes": { items: "weeklyPrizes", stamp: "weeklyPrizesStamp" },
 };
 
-const CREDENTIAL_ACCEPTING_ROUTES = new Set<string>(["/api/tasks/claim", "/api/tasks/approve"]);
-
+// Which credential fields each route's own parser accepts on the wire. A
+// bundle field that is NOT listed here can never reach the network, so a
+// parent PIN cannot leak into a route that would reject the unknown key.
 const CREDENTIAL_BODY_KEYS: Record<string, readonly (keyof TaskOutboxCredential)[]> = {
   "/api/tasks/claim": ["pin"],
   "/api/tasks/approve": ["pin"],
+  "/api/tasks/ledger": ["pin"],
+  "/api/rewards/redeem": ["pin", "parentPin"],
 };
 
+// A credential is required only when the server ALWAYS needs a PIN. `undo` is
+// deliberately absent from the claim set: a kid taking back their own PENDING
+// tap is a session-only self-cancel that never moved points, and forcing a PIN
+// for it is what used to strand under-10 taps. The server owns the real rule —
+// it refuses a PAID undo (a ledger reversal) without the member PIN, for a
+// parent and for a child alike — so a session undo that should have needed a
+// PIN is refused there, not here.
 const CREDENTIAL_REQUIRED_ACTIONS: Record<string, Set<string>> = {
   "/api/tasks/approve": new Set(["approve", "approve-all", "send-back"]),
-  "/api/tasks/claim": new Set(["claim", "undo", "crew-remove"]),
+  "/api/tasks/claim": new Set(["claim", "crew-remove"]),
   "/api/tasks/manage": new Set(),
   "/api/tasks/config": new Set(),
+  "/api/tasks/ledger": new Set(["penalty", "adjust"]),
+  "/api/rewards/redeem": new Set(),
 };
 
 const RETRYABLE_REASONS = new Set([
@@ -227,7 +255,7 @@ const RETRYABLE_REASONS = new Set([
   "projection_reconcile_pending",
 ]);
 
-const PERMANENT_REASONS = new Set(["operation_conflict"]);
+const PERMANENT_REASONS = new Set(["operation_conflict", "stale_config"]);
 
 const DUPLICATE_REASONS = new Set([
   "semantic_duplicate",
@@ -252,17 +280,19 @@ const hasOwn = (value: Record<string, unknown>, key: string): boolean =>
 
 const configItemKeysFor = (kind: string): readonly string[] | undefined => CONFIG_ITEM_KEYS[kind];
 
+const PAYLOAD_TABLES: Record<string, Record<string, readonly string[]>> = {
+  "/api/tasks/claim": CLAIM_PAYLOAD_KEYS,
+  "/api/tasks/approve": APPROVE_PAYLOAD_KEYS,
+  "/api/tasks/manage": MANAGE_PAYLOAD_KEYS,
+  "/api/tasks/config": CONFIG_PAYLOAD_KEYS,
+  "/api/tasks/ledger": LEDGER_PAYLOAD_KEYS,
+  "/api/rewards/redeem": REDEEM_PAYLOAD_KEYS,
+};
+
 export function isSupportedTaskOperation(route: unknown, action: unknown): boolean {
   if (typeof route !== "string" || !ROUTES.has(route) || typeof action !== "string") return false;
-  const table =
-    route === "/api/tasks/claim"
-      ? CLAIM_PAYLOAD_KEYS
-      : route === "/api/tasks/approve"
-        ? APPROVE_PAYLOAD_KEYS
-        : route === "/api/tasks/manage"
-          ? MANAGE_PAYLOAD_KEYS
-          : CONFIG_PAYLOAD_KEYS;
-  return hasOwn(table, action);
+  const table = PAYLOAD_TABLES[route];
+  return table !== undefined && hasOwn(table, action);
 }
 
 function pickKeys(value: unknown, keys: readonly string[]): Record<string, unknown> {
@@ -300,6 +330,8 @@ export function sanitizeTaskOperationPayload(
     return picked;
   }
   if (route === "/api/tasks/config") return sanitizeConfigPayload(action, payload);
+  if (route === "/api/tasks/ledger") return pickKeys(payload, LEDGER_PAYLOAD_KEYS[action] ?? []);
+  if (route === "/api/rewards/redeem") return pickKeys(payload, REDEEM_PAYLOAD_KEYS[action] ?? []);
   return {};
 }
 
@@ -488,6 +520,29 @@ function loadStoredEntries(index: TaskOutboxIndex): {
 }
 
 let orphanIds: string[] = [];
+let evictedEntryIds: string[] = [];
+let evictionPruneScheduled = false;
+
+function scheduleEvictionPrune(): void {
+  if (evictionPruneScheduled || typeof window === "undefined") return;
+  evictionPruneScheduled = true;
+  const run = () => {
+    evictionPruneScheduled = false;
+    const ids = evictedEntryIds;
+    evictedEntryIds = [];
+    if (!ids.length) return;
+    try {
+      for (const id of ids) {
+        unpersisted.delete(id);
+        window.localStorage.removeItem(taskOutboxEntryStorageKey(id));
+      }
+    } catch {
+      /* storage unavailable — the index prune on the next write still wins */
+    }
+  };
+  if (typeof queueMicrotask === "function") queueMicrotask(run);
+  else Promise.resolve().then(run);
+}
 
 function readRaw(): TaskOutboxEntry[] {
   if (!isBrowser()) return EMPTY_SERVER_SNAPSHOT;
@@ -499,27 +554,44 @@ function readRaw(): TaskOutboxEntry[] {
   orphanIds = loaded.orphanIds;
   const merged = mergeByOperationId(loaded.entries, extras);
   const bounded = boundEntries(merged);
-  pruneEvictedEntryKeys(merged, bounded);
+  const evicted = collectEvictedEntryIds(merged, bounded);
+  releaseEvictedCredentials(merged, bounded);
+  if (evicted.length > 0) {
+    // A bounded list is re-anchored through the normal write path so the index
+    // and the per-entry keys agree again. It is coalesced behind the cached
+    // index so a read loop cannot turn into a write loop.
+    evictedEntryIds = [...new Set([...evictedEntryIds, ...evicted])];
+    scheduleEvictionPrune();
+  }
   cache = bounded;
   cacheIndexRaw = raw;
   return cache;
 }
 
-function pruneEvictedEntryKeys(
-  merged: TaskOutboxEntry[],
-  bounded: TaskOutboxEntry[],
-): void {
+// The credential for an evicted entry must die with it, or a tab that ages
+// entries out would keep PINs in memory forever.
+function releaseEvictedCredentials(merged: TaskOutboxEntry[], bounded: TaskOutboxEntry[]): void {
   if (merged.length === bounded.length) return;
   const kept = new Set(bounded.map((entry) => entry.operationId));
   for (const entry of merged) {
-    if (kept.has(entry.operationId)) continue;
-    unpersisted.delete(entry.operationId);
-    try {
-      window.localStorage.removeItem(taskOutboxEntryStorageKey(entry.operationId));
-    } catch {
-      /* storage unavailable — the index prune on the next write still wins */
-    }
+    if (!kept.has(entry.operationId)) forgetTaskCommandCredential(entry.operationId);
   }
+}
+
+/**
+ * A READ must not write to storage. The evicted per-entry keys are therefore
+ * not removed here; they are removed by the next real mutation (commitEntries
+ * already diffs against the bounded list), and the ids are REPORTED so a
+ * caller can decide. A `getSnapshot()` that deleted keys would be a write
+ * disguised as a read — including in a render path.
+ */
+function collectEvictedEntryIds(
+  merged: TaskOutboxEntry[],
+  bounded: TaskOutboxEntry[],
+): string[] {
+  if (merged.length === bounded.length) return [];
+  const kept = new Set(bounded.map((entry) => entry.operationId));
+  return merged.filter((entry) => !kept.has(entry.operationId)).map((entry) => entry.operationId);
 }
 
 function migrateLegacyIndex(): void {
@@ -627,6 +699,33 @@ function mutateOutbox(reducer: (fresh: TaskOutboxEntry[]) => TaskOutboxEntry[]):
   rememberUnpersisted(next);
   notify();
   return next;
+}
+
+// Acknowledgment events live here, next to the code that raises them, so a
+// caller can observe "operation X landed" without mounting the React hook.
+export interface TaskOutboxAcknowledgedEvent {
+  operationId?: string;
+}
+
+const acknowledgmentListeners = new Set<(event: TaskOutboxAcknowledgedEvent) => void>();
+
+export function onTaskOutboxAcknowledged(
+  listener: (event: TaskOutboxAcknowledgedEvent) => void,
+): () => void {
+  acknowledgmentListeners.add(listener);
+  return () => {
+    acknowledgmentListeners.delete(listener);
+  };
+}
+
+function notifyAcknowledged(event: TaskOutboxAcknowledgedEvent): void {
+  for (const listener of [...acknowledgmentListeners]) {
+    try {
+      listener(event);
+    } catch {
+      continue;
+    }
+  }
 }
 
 const listeners = new Set<() => void>();
@@ -749,8 +848,8 @@ export function enqueueTaskOperation(
     ...(input.lastErrorCategory ? { lastErrorCategory: input.lastErrorCategory } : {}),
     ...(input.nextAttemptAt ? { nextAttemptAt: input.nextAttemptAt } : {}),
   };
-  mutateOutbox((fresh) => [
-    ...fresh.filter((candidate) => candidate.operationId !== operationId),
+  mutateOutbox((current) => [
+    ...current.filter((candidate) => candidate.operationId !== operationId),
     entry,
   ]);
   return entry;
@@ -770,7 +869,10 @@ export function cancelTaskOutboxEntry(operationId: string): boolean {
   if (!entry) return false;
   if (entry.status === "reconciling") return false;
   const removed = removeTaskOutboxEntry(operationId);
-  if (removed) forgetTaskCommandCredential(operationId);
+  if (removed) {
+    forgetTaskCommandCredential(operationId);
+    notifyAcknowledged({ operationId });
+  }
   return removed;
 }
 
@@ -899,12 +1001,17 @@ async function acknowledge(
   } catch {
     return markRetryable(entry, "projection", "adoption_failed");
   }
-  removeTaskOutboxEntry(entry.operationId);
+  // Release the credential BEFORE announcing the landing, and before the
+  // entry is observable as gone: a reader that sees an empty outbox must
+  // never still be holding a PIN.
   try {
     options.releaseCredential?.(entry.operationId);
   } catch {
     /* the credential registry is best-effort cleanup */
   }
+  forgetTaskCommandCredential(entry.operationId);
+  removeTaskOutboxEntry(entry.operationId);
+  notifyAcknowledged({ operationId: entry.operationId });
   return { acknowledged: 1, retryable: 0, permanent: 0 };
 }
 
@@ -1214,9 +1321,7 @@ function normalizeCredential(
 ): TaskOutboxCredential {
   const source: TaskOutboxCredential =
     typeof value === "string" ? { pin: value } : (value ?? {});
-  const allowed = CREDENTIAL_ACCEPTING_ROUTES.has(route)
-    ? (CREDENTIAL_BODY_KEYS[route] ?? [])
-    : [];
+  const allowed = CREDENTIAL_BODY_KEYS[route] ?? [];
   const normalized: TaskOutboxCredential = {};
   for (const key of allowed) {
     const candidate = source[key];
@@ -1291,9 +1396,36 @@ export async function adoptTaskOutboxSnapshot(read: SnapshotRead): Promise<void>
   stores.applyTasksSnapshotToStores(read.snapshot);
 }
 
+/**
+ * A config acknowledgment is the catalog: adopt its items into the matching
+ * local cache (with the stamp it carries) BEFORE the entry is removed, so the
+ * list a parent sees is always the one the server accepted — and a stale 409,
+ * which carries the same authoritative body, still repairs this device.
+ */
+async function adoptConfigAcknowledgement(acknowledgement: TaskOutboxAcknowledgement): Promise<void> {
+  const kind = typeof acknowledgement.kind === "string" ? acknowledgement.kind : "";
+  const items = Array.isArray(acknowledgement.items) ? acknowledgement.items : null;
+  if (!items || (kind !== "rewards" && kind !== "penalties" && kind !== "weekly-prizes")) return;
+  const updatedAt = typeof acknowledgement.updatedAt === "string" ? acknowledgement.updatedAt : "";
+  const stores = await import("@/lib/task-utils");
+  if (kind === "rewards") {
+    stores.saveRewards(items);
+    if (updatedAt) stores.writeRewardsStamp(updatedAt);
+    return;
+  }
+  if (kind === "penalties") {
+    stores.savePenalties(items);
+    if (updatedAt) stores.writePenaltiesStamp(updatedAt);
+    return;
+  }
+  stores.saveWeeklyPrizes(items as never);
+  if (updatedAt) stores.writeWeeklyPrizesStamp(updatedAt);
+}
+
 export async function adoptTaskOutboxAcknowledgement(
   acknowledgement: TaskOutboxAcknowledgement,
 ): Promise<void> {
+  await adoptConfigAcknowledgement(acknowledgement);
   if (!acknowledgement.task && !acknowledgement.weekData) return;
   const stores = await import("@/lib/task-utils");
   if (acknowledgement.task) {
@@ -1502,9 +1634,12 @@ export function requestTaskOutboxFlush(): Promise<FlushTaskOutboxResult> {
 export function __resetTaskOutboxForTests(): void {
   cache = null;
   cacheIndexRaw = null;
+  evictedEntryIds = [];
+  evictionPruneScheduled = false;
   unpersisted = new Map<string, TaskOutboxEntry>();
   inFlightByDriver = new WeakMap<TaskOutboxDriver, Promise<FlushTaskOutboxResult>>();
   driverStack.length = 0;
   fallbackDriver = null;
   listeners.clear();
+  acknowledgmentListeners.clear();
 }

@@ -56,8 +56,6 @@ import {
   isCrewTask,
   crewFull,
   crewHasMember,
-  crewMemberCount,
-  crewCheckinProgress,
   getDaysUntilWeekReset,
 } from "@/lib/task-utils";
 import { useTaskCommandQueue } from "@/hooks/useTaskCommandQueue";
@@ -286,13 +284,13 @@ export default function KidHome() {
     counts: outboxCounts,
     entries: outboxEntries,
     cancel: cancelQueuedOperation,
+    onAcknowledged: onOutboxAcknowledged,
   } = useTaskCommandQueue({ onAdopted: adoptStores });
   // Display-only optimism: the quests a queued command is about to land. Never
   // persisted — the outbox acknowledgment is the only thing that writes a row.
-  const [optimisticQuests, setOptimisticQuests] = useState<Record<number, "pending" | "cancelling">>({});
-  useEffect(() => {
-    if (outboxCounts.pending === 0) setOptimisticQuests({});
-  }, [outboxCounts.pending]);
+  const [optimisticQuests, setOptimisticQuests] = useState<
+    Record<string, { taskId: number; state: "pending" | "cancelling" }>
+  >({});
 
   const { currentUser, logout, sessionWarning, sessionRemainingMs } = useAuth();
   const { isBedtime, isWeekend } = useDashboardMode();
@@ -313,12 +311,47 @@ export default function KidHome() {
     };
   }, []);
 
-  const markOptimistic = useCallback((taskId: number, state: "pending" | "cancelling") => {
-    setOptimisticQuests((prev) => ({ ...prev, [taskId]: state }));
-  }, []);
+  // Display-only optimism keyed by OPERATION ID, so one command landing never
+  // clears another's note, and a retrying command keeps its honest row.
+  const markOptimistic = useCallback(
+    (operationId: string, taskId: number, state: "pending" | "cancelling") => {
+      setOptimisticQuests((prev) => ({ ...prev, [operationId]: { taskId, state } }));
+    },
+    [],
+  );
   // A `reconciling` command has already been applied server-side, so offering
   // a cancel would be a lie.
   const cancellableEntries = outboxEntries.filter((entry) => entry.status !== "reconciling");
+  const optimisticQuestList = useMemo(
+    () => Object.values(optimisticQuests),
+    [optimisticQuests],
+  );
+  const optimisticTaskIds = useMemo(
+    () => new Set(optimisticQuestList.filter((mark) => mark.state === "pending").map((mark) => mark.taskId)),
+    [optimisticQuestList],
+  );
+  // A CANCELLING mark suppresses that task's own "on the way" note: the reopen
+  // is already shown, so both must not render at once.
+  const optimisticCancellingIds = useMemo(
+    () => new Set(optimisticQuestList.filter((mark) => mark.state === "cancelling").map((mark) => mark.taskId)),
+    [optimisticQuestList],
+  );
+  const optimisticPendingQuests = useMemo(
+    () => optimisticQuestList.filter((mark) => mark.state === "pending" && !optimisticCancellingIds.has(mark.taskId)),
+    [optimisticQuestList, optimisticCancellingIds],
+  );
+  useEffect(() => {
+    onOutboxAcknowledged((acknowledged) => {
+      const operationId = acknowledged?.operationId;
+      if (!operationId) return;
+      setOptimisticQuests((prev) => {
+        if (!(operationId in prev)) return prev;
+        const next = { ...prev };
+        delete next[operationId];
+        return next;
+      });
+    });
+  }, [onOutboxAcknowledged]);
 
   useEffect(() => {
     (async () => {
@@ -447,13 +480,13 @@ export default function KidHome() {
   // tap, which is exactly the failure this queue exists to prevent.
   const cancelQuestTap = useCallback((taskId: number) => {
     const myName = resolveMemberName(db.selectMembers(), currentUser?.name ?? "");
-    queueCommand({
+    const undo = queueCommand({
       route: "/api/tasks/claim",
       action: "undo",
       payload: { taskId, memberName: myName },
       displayTarget: { kind: "undo", taskId },
     });
-    markOptimistic(taskId, "cancelling");
+    markOptimistic(undo.operationId, taskId, "cancelling");
   }, [currentUser?.name, markOptimistic, queueCommand]);
 
   // Crew join/check-in is ONE durable command for every age. Under-10 kids
@@ -467,14 +500,24 @@ export default function KidHome() {
       setQuestPinBusy(true);
       try {
         const memberName = resolveMemberName(db.selectMembers(), user.name);
-        queueCommand({
+        // Under-10 crew actions are session-only (no credential at all); a 10+
+        // kid's typed PIN rides the ephemeral registry.
+        if (pin) {
+          const verified = await verifyPinRemote(user.name, pin);
+          if (verified.status !== "ok") {
+            setQuestPinError(verified.status === "unreachable" ? unreachableCopy() : "Wrong PIN. Try again.");
+            setQuestPin("");
+            return;
+          }
+        }
+        const crew = queueCommand({
           route: "/api/tasks/claim",
           action,
           payload: { taskId: task.id, memberName, assigneeEmoji: task.assigneeEmoji },
           displayTarget: { kind: "crew", taskId: task.id, title: task.title },
           ...(pin ? { credential: { pin } } : {}),
         });
-        markOptimistic(task.id, "pending");
+        markOptimistic(crew.operationId, task.id, "pending");
         setQuestPinTask(null);
         setQuestCrewAction(null);
         setQuestPin("");
@@ -526,13 +569,13 @@ export default function KidHome() {
       // PIN-free durable completion: the session IS the identity, so the
       // command carries NO credential at all. Points still land only on parent
       // approval, and the celebration never waits on the network.
-      queueCommand({
+      const complete = queueCommand({
         route: "/api/tasks/claim",
         action: "complete",
         payload: { taskId: task.id, memberName: myName, assigneeEmoji: task.assigneeEmoji },
         displayTarget: { kind: "claim", taskId: task.id, title: task.title },
       });
-      markOptimistic(task.id, "pending");
+      markOptimistic(complete.operationId, task.id, "pending");
       celebrate(task.points || 0, before, { pending: true });
       return;
     }
@@ -582,22 +625,32 @@ export default function KidHome() {
         // page uses, so both surfaces agree for every task shape.
         if (task.universal || isSnatchable(task)) {
           // Competitive completions (universal claims AND stealable-late
-          // snatches) are ONE durable claim command: exactly one family member
-          // wins the race, the points land on the server, and the winner's
-          // weekData is adopted through the outbox acknowledgment. A kid
-          // claimant's answer is done-but-unpaid — the celebration says
-          // "on the way" and points land on parent approval.
+          // snatches) are PIN-gated for EVERY age, so the typed PIN is verified
+          // server-side FIRST: a wrong PIN must never become a queued claim
+          // (the queue would retry a bad credential and the outbox entry would
+          // sit there forever). Only a verified PIN is queued, ephemerally.
+          const verifiedClaim = await verifyPinRemote(user.name, questPin);
+          if (verifiedClaim.status !== "ok") {
+            const err = verifiedClaim.status === "unreachable" ? unreachableCopy() : "Wrong PIN. Try again.";
+            setQuestPinError(err);
+            setQuestPin("");
+            return { ok: false, error: err };
+          }
+          // Exactly one family member wins the race, the points land on the
+          // server, and the winner's weekData is adopted through the outbox
+          // acknowledgment. A kid claimant's answer is done-but-unpaid — the
+          // celebration says "on the way" and points land on parent approval.
           const before = pointsFor(loadWeekData().points, user.name);
           const claimantIsChild = user?.role === "child";
           const myName = resolveMemberName(db.selectMembers(), user.name);
-          queueCommand({
+          const claim = queueCommand({
             route: "/api/tasks/claim",
             action: "claim",
             payload: { taskId: task.id, memberName: myName, assigneeEmoji: task.assigneeEmoji },
             displayTarget: { kind: "claim", taskId: task.id, title: task.title },
             credential: { pin: questPin },
           });
-          markOptimistic(task.id, "pending");
+          markOptimistic(claim.operationId, task.id, "pending");
           celebrate(task.points || 0, before, { pending: claimantIsChild });
         } else if (completesWithPendingApproval(user?.role, task)) {
           // 10+ kids (and age-unknown sessions, which fail closed to this gate):
@@ -629,14 +682,14 @@ export default function KidHome() {
           // The verified PIN rides the ephemeral credential registry keyed by
           // the operation id — it is never written to the outbox entry or to
           // localStorage, and the outbox releases it on acknowledgment.
-          queueCommand({
+          const complete = queueCommand({
             route: "/api/tasks/claim",
             action: "complete",
             payload: { taskId: task.id, memberName: myName, assigneeEmoji: task.assigneeEmoji },
             displayTarget: { kind: "claim", taskId: task.id, title: task.title },
             credential: { pin: questPin },
           });
-          markOptimistic(task.id, "pending");
+          markOptimistic(complete.operationId, task.id, "pending");
           celebrate(task.points || 0, before, { pending: true });
         } else {
           // Neither branch owns this shape (a non-child session somehow reached
@@ -966,14 +1019,12 @@ export default function KidHome() {
             ) : (
               <div className="space-y-2.5">
                 {pendingTasks
-                  .filter((task) => optimisticQuests[task.id] !== "pending")
+                  .filter((task) => !optimisticTaskIds.has(task.id))
                   .map((task) => (
                     <QuestCard
                       key={task.id}
                       task={
-                        optimisticQuests[task.id] === "cancelling"
-                          ? { ...task, emoji: "\u23F3" }
-                          : task
+                        optimisticCancellingIds.has(task.id) ? { ...task, emoji: "\u23F3" } : task
                       }
                       onComplete={openQuestPin}
                     />
@@ -1073,16 +1124,15 @@ export default function KidHome() {
 
           {/* Display-only optimism: quests a queued command is about to land.
               Nothing here is persisted — the acknowledgment is the only writer. */}
-          {Object.entries(optimisticQuests).filter(([, state]) => state === "pending").length > 0 && (
+          {optimisticPendingQuests.length > 0 && (
             <div className="space-y-2.5">
-              {Object.entries(optimisticQuests)
-                .filter(([, state]) => state === "pending")
-                .map(([taskId]) => {
-                  const quest = pendingTasks.find((row: any) => row.id === Number(taskId));
+              {optimisticPendingQuests
+                .map((mark) => {
+                  const quest = pendingTasks.find((row: any) => row.id === mark.taskId);
                   if (!quest) return null;
                   return (
                     <div
-                      key={`optimistic-${taskId}`}
+                      key={`optimistic-${mark.taskId}`}
                       data-testid="optimistic-quest"
                       className="flex items-center gap-2.5 rounded-2xl px-3 py-2.5"
                       style={{

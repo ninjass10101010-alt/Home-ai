@@ -31,10 +31,36 @@ function parseJSON<T>(value: unknown, fallback: T): T {
 // Mirrors the planner/apply adjustment dedupe idiom.
 const REDEEM_DEDUPE_WINDOW_MS = 60_000;
 
+// A reward above this cost needs a grown-up's say-so. The threshold was
+// previously enforced ONLY in the browser, so any caller could skip it; the
+// gate now lives here, and `parentPin` is the credential that satisfies it.
+const PARENT_APPROVAL_MIN_COST = 100;
+
+async function verifiedParent(parentPin: string): Promise<boolean> {
+  try {
+    const roster = await pbMembers();
+    for (const member of roster) {
+      if (String(member.role).trim().toLowerCase() !== "parent") continue;
+      const verified = await verifyPinFromPB(member.name, parentPin);
+      if (verified) return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+async function pbMembers(): Promise<Array<{ name: string; role: string }>> {
+  return withAdmin(async (pb) => {
+    const rows = await pb.collection("members").getFullList({ requestKey: null });
+    return (Array.isArray(rows) ? rows : []) as unknown as Array<{ name: string; role: string }>;
+  });
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { rewardId, rewardName, memberName, pin } = body || {};
+    const { rewardId, rewardName, memberName, pin, parentPin } = body || {};
 
     if (rewardId === undefined || rewardId === null || !memberName) {
       return NextResponse.json({ error: "rewardId and memberName are required" }, { status: 400 });
@@ -75,6 +101,15 @@ export async function POST(request: NextRequest) {
       const cost = Number(reward.cost ?? reward.points) || 0;
       const title = reward.name || "reward";
       const description = `Redeemed: ${title} (-${cost}pts)`;
+
+      if (cost > PARENT_APPROVAL_MIN_COST) {
+        const parentApproved = typeof parentPin === "string" && parentPin.trim()
+          ? await verifiedParent(parentPin.trim())
+          : false;
+        if (!parentApproved) {
+          return { ok: false, reason: "parent_pin_required" } as const;
+        }
+      }
 
       // One read-modify-write attempt, followed by a post-write verification
       // read. PocketBase has no conditional update, so two concurrent redeems
@@ -167,7 +202,10 @@ export async function POST(request: NextRequest) {
     );
 
     if (!result.ok) {
-      const status = result.reason === "unknown-reward" ? 404 : result.reason === "insufficient" ? 400 : 409;
+      const status = result.reason === "unknown-reward" ? 404
+        : result.reason === "insufficient" ? 400
+        : result.reason === "parent_pin_required" ? 401
+        : 409;
       return NextResponse.json(
         { ok: false, reason: result.reason, error: (result as any).error },
         { status }

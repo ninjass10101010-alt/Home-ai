@@ -53,6 +53,24 @@ export function queueTaskCommand(input: QueueTaskCommandInput): TaskOutboxEntry 
 // visibility flushes remain the durability backstop when the send fails.
 export function queueTaskCommandAndFlush(input: QueueTaskCommandInput): TaskOutboxEntry {
   const entry = queueTaskCommand(input);
-  void requestTaskOutboxFlush().catch(() => {});
+  // Drain on the next macrotask rather than inline: the caller is usually a
+  // click handler inside an act() scope, and an inline flush would resolve
+  // before React has finished committing the enqueue.
+  scheduleFlush();
   return entry;
+}
+
+let flushScheduled = false;
+
+function scheduleFlush(): void {
+  if (flushScheduled || typeof queueMicrotask !== "function") {
+    if (flushScheduled) return;
+    void requestTaskOutboxFlush().catch(() => {});
+    return;
+  }
+  flushScheduled = true;
+  queueMicrotask(() => {
+    flushScheduled = false;
+    void requestTaskOutboxFlush().catch(() => {});
+  });
 }

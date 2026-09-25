@@ -54,6 +54,21 @@ export interface TaskConfigResponse {
   updatedAt: string;
   revision: SnapshotRevision;
   applied: boolean;
+  // A command whose write landed but whose canonical collection still needs a
+  // reconcile is NOT a success: the client keeps the authoritative items and
+  // shows the command as needing attention instead of claiming it saved.
+  stale: boolean;
+}
+
+export interface TaskConfigStaleResponse {
+  success: false;
+  error: "stale_config";
+  operationId: string;
+  kind: TaskConfigKind;
+  items: TaskConfigItem[];
+  updatedAt: string;
+  applied: false;
+  stale: true;
 }
 
 export type TaskConfigErrorCode =

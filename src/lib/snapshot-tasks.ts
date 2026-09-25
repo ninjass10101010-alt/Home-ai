@@ -82,7 +82,7 @@ export interface SnapshotConfigMutationResult {
 export interface SnapshotProjectionRepair {
   operationId: string;
   taskIds: number[];
-  action?: "approve" | "approve-all" | "send-back";
+  action?: "approve" | "approve-all" | "send-back" | "penalty" | "adjust";
   actorId?: string;
   fingerprint?: string;
   createdAt: string;

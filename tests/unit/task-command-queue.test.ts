@@ -17,6 +17,7 @@ import {
   getTaskOutboxDriver,
   listTaskOutbox,
   registerTaskOutboxDriver,
+  onTaskOutboxAcknowledged,
   taskOutboxEntryStorageKey,
   type TaskOutboxDriver,
 } from "@/lib/task-operation-outbox";
@@ -239,6 +240,42 @@ describe("credential lifecycle against the outbox", () => {
     expect(readTaskCommandCredential("op-undo-2")).toEqual({ pin: "1234" });
   });
 
+  it("releases the credential BEFORE the outbox reports the entry as gone", async () => {
+    // The release must be observable from inside the acknowledgment: a reader
+    // that sees an empty outbox must never still be holding a PIN.
+    const unregister = registerTaskOutboxDriver(
+      credentialDriver(async () => ({ status: 200, body: { operationId: "op-undo-9" } })),
+    );
+    const seen: Array<{ queued: number; pinned: boolean }> = [];
+    const unlisten = onTaskOutboxAcknowledged(() => {
+      seen.push({
+        queued: listTaskOutbox().length,
+        pinned: readTaskCommandCredential("op-undo-9") !== undefined,
+      });
+    });
+    queueTaskCommand({
+      operationId: "op-undo-9",
+      route: "/api/tasks/claim",
+      action: "undo",
+      payload: { taskId: 1, memberName: "Bailey" },
+      displayTarget: { kind: "undo", taskId: 1 },
+      credential: { pin: "1234" },
+    });
+
+    await flushTaskOutbox(getTaskOutboxDriver());
+    unregister();
+    unlisten();
+
+    expect(seen.length).toBeGreaterThan(0);
+    // By the time the acknowledgment is announced, the entry is already gone
+    // AND the credential has already been released.
+    for (const sample of seen) {
+      expect(sample.pinned).toBe(false);
+    }
+    expect(listTaskOutbox()).toHaveLength(0);
+    expect(readTaskCommandCredential("op-undo-9")).toBeUndefined();
+  });
+
   it("clears the ephemeral pin when the user cancels the queued operation", () => {
     queueTaskCommand({
       operationId: "op-undo-3",
@@ -262,7 +299,7 @@ describe("Task 9 non-blockers closed by Task 10", () => {
     expect(second).toBe(first);
   });
 
-  it("prunes the per-entry storage key of an operation evicted by the retention bound", () => {
+  it("prunes the per-entry storage key of an operation evicted by the retention bound", async () => {
     const stale = {
       version: 1 as const,
       operationId: "op-stale",
@@ -281,11 +318,45 @@ describe("Task 9 non-blockers closed by Task 10", () => {
     );
     __resetTaskOutboxForTests();
 
+    // A READ reports the eviction but never writes: the key is still there
+    // until the prune is flushed.
     expect(listTaskOutbox()).toHaveLength(0);
+    expect(localStorage.getItem(taskOutboxEntryStorageKey("op-stale"))).not.toBeNull();
+    await Promise.resolve();
+    await Promise.resolve();
     expect(localStorage.getItem(taskOutboxEntryStorageKey("op-stale"))).toBeNull();
   });
 
-  it("keeps a live entry's key while pruning only the evicted one", () => {
+  it("never writes to storage from a read path", () => {
+    const stale = {
+      version: 1 as const,
+      operationId: "op-stale-write",
+      route: "/api/tasks/claim" as const,
+      action: "complete",
+      payload: { taskId: 1, memberName: "Bailey" },
+      createdAt: "2020-01-01T00:00:00.000Z",
+      attemptCount: 0,
+      status: "queued" as const,
+      displayTarget: { kind: "claim" as const, taskId: 1 },
+    };
+    localStorage.setItem(taskOutboxEntryStorageKey("op-stale-write"), JSON.stringify(stale));
+    localStorage.setItem("consuela-task-operation-outbox-v1", JSON.stringify({ rev: 1, ids: ["op-stale-write"] }));
+    __resetTaskOutboxForTests();
+
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
+    const removeItem = vi.spyOn(Storage.prototype, "removeItem");
+    try {
+      listTaskOutbox();
+      listTaskOutbox();
+      expect(setItem).not.toHaveBeenCalled();
+      expect(removeItem).not.toHaveBeenCalled();
+    } finally {
+      setItem.mockRestore();
+      removeItem.mockRestore();
+    }
+  });
+
+  it("keeps a live entry's key while pruning only the evicted one", async () => {
     const live = enqueueTaskOperation({
       operationId: "op-live",
       route: "/api/tasks/claim",
@@ -312,8 +383,31 @@ describe("Task 9 non-blockers closed by Task 10", () => {
     __resetTaskOutboxForTests();
 
     expect(listTaskOutbox().map((entry) => entry.operationId)).toEqual(["op-live"]);
+    await Promise.resolve();
+    await Promise.resolve();
     expect(localStorage.getItem(taskOutboxEntryStorageKey("op-stale-2"))).toBeNull();
     expect(localStorage.getItem(taskOutboxEntryStorageKey("op-live"))).not.toBeNull();
+  });
+
+  it("releases the ephemeral credential of an evicted operation with the entry", async () => {
+    const stale = {
+      version: 1 as const,
+      operationId: "op-stale-cred",
+      route: "/api/tasks/claim" as const,
+      action: "claim",
+      payload: { taskId: 1, memberName: "Bailey" },
+      createdAt: "2020-01-01T00:00:00.000Z",
+      attemptCount: 0,
+      status: "queued" as const,
+      displayTarget: { kind: "claim" as const, taskId: 1 },
+    };
+    localStorage.setItem(taskOutboxEntryStorageKey("op-stale-cred"), JSON.stringify(stale));
+    localStorage.setItem("consuela-task-operation-outbox-v1", JSON.stringify({ rev: 1, ids: ["op-stale-cred"] }));
+    rememberTaskCommandCredential("op-stale-cred", { pin: "1234" });
+    __resetTaskOutboxForTests();
+
+    expect(listTaskOutbox()).toHaveLength(0);
+    expect(readTaskCommandCredential("op-stale-cred")).toBeUndefined();
   });
 });
 

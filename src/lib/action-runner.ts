@@ -273,8 +273,20 @@ export async function runAction(action: ActionCard): Promise<{ success: boolean;
           },
           displayTarget: { kind: "config", title: action.title },
         });
-        await requestTaskOutboxFlush();
-        return { success: true, message: `Added reward "${action.title}" (${points}pts) — saving to the family server…` };
+        // Report the QUEUE, never a save this call has not seen. The command
+        // is durable before this line, so a flush failure must not escape as a
+        // throw (it would report a failure for a write that is already safely
+        // queued and will be retried by the mount/interval/visibility flush).
+        // Only a real acknowledgment lets us say the server took it.
+        let acknowledged = false;
+        try {
+          acknowledged = (await requestTaskOutboxFlush()).acknowledged > 0;
+        } catch {
+          acknowledged = false;
+        }
+        return acknowledged
+          ? { success: true, message: `Added reward "${action.title}" (${points}pts)` }
+          : { success: true, message: `Queued reward "${action.title}" (${points}pts) — the family server will confirm it shortly.` };
       }
       case "clear": {
         if (typeof window !== "undefined") {

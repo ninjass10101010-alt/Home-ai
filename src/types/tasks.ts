@@ -60,14 +60,23 @@ export type LedgerOperationSource =
   | "reward-redeem"
   | "planner-adjust"
   | "task-undo"
+  | "task-penalty"
+  | "manual-adjust"
   | "legacy-migration";
+
+export type LedgerOperationAction =
+  | "approve"
+  | "approve-all"
+  | "send-back"
+  | "penalty"
+  | "adjust";
 
 export interface LedgerOperationMeta {
   operationId: string;
   source: LedgerOperationSource;
   fingerprint?: string;
   actorId?: string;
-  action?: "approve" | "approve-all" | "send-back";
+  action?: LedgerOperationAction;
   taskIds?: number[];
 }
 
@@ -97,7 +106,7 @@ export interface LedgerOperationInput {
   source: LedgerOperationSource;
   fingerprint?: string;
   actorId?: string;
-  action?: "approve" | "approve-all" | "send-back";
+  action?: LedgerOperationAction;
   taskIds?: number[];
   entries: LedgerEntryInput[];
 }

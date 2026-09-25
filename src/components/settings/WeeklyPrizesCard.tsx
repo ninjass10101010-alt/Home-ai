@@ -10,6 +10,7 @@ import {
   DEFAULT_WEEKLY_PRIZES,
 } from "@/lib/task-utils";
 import { queueTaskCommandAndFlush } from "@/lib/task-command-queue";
+import { useTaskCommandQueue } from "@/hooks/useTaskCommandQueue";
 import type { WeeklyPrize } from "@/types/tasks";
 
 const MEDALS = ["🥇", "🥈", "🥉"] as const;
@@ -30,6 +31,11 @@ interface WeeklyPrizesCardProps {
 
 export default function WeeklyPrizesCard({ showToast }: WeeklyPrizesCardProps) {
   const { currentUser } = useAuth();
+  // The Settings surface owns its own queue counters (never mounted alongside
+  // Tasks or KidHome), so a parent sees the save is still in flight — and a
+  // refusal (a stale catalog, a dead server) is visible instead of swallowed.
+  const { entries, counts, cancel } = useTaskCommandQueue();
+  const failedEntries = entries.filter((entry) => entry.status === "failed");
   const [prizes, setPrizes] = useState<WeeklyPrize[]>(() => loadWeeklyPrizes());
   const [saving, setSaving] = useState(false);
   // Dirty seam: while the parent has unsaved in-field edits, the 60s pulse
@@ -99,6 +105,41 @@ export default function WeeklyPrizesCard({ showToast }: WeeklyPrizesCardProps) {
       tone="#f59e0b"
       headingLevel="h2"
     >
+      {counts.pending > 0 && (
+        <div
+          data-testid="prizes-command-queue"
+          className="mb-3 rounded-xl px-3 py-2 text-[11px] font-semibold"
+          style={{
+            background: "color-mix(in srgb, var(--color-accent-amber) 10%, transparent)",
+            border: "1px solid color-mix(in srgb, var(--color-accent-amber) 25%, transparent)",
+            color: "var(--color-accent-amber)",
+          }}
+        >
+          {counts.queued > 0
+            ? `⏳ Sending ${counts.queued} change${counts.queued !== 1 ? "s" : ""} to the family server…`
+            : ""}
+          {counts.authRequired > 0 ? " 🔒 Waiting on a PIN." : ""}
+          {counts.reconciling > 0 ? " ⏳ Finishing up." : ""}
+          {counts.failed > 0 ? " ⚠️ Couldn't be saved." : ""}
+        </div>
+      )}
+      {counts.failed > 0 && (
+        <ul data-testid="prizes-command-failures" className="mb-3 space-y-1">
+          {failedEntries.map((entry) => (
+            <li key={entry.operationId} className="flex items-center gap-2">
+              <span className="text-[11px] text-text-secondary">Weekly prizes</span>
+              <button
+                type="button"
+                aria-label="Discard unsaved weekly prizes"
+                onClick={() => cancel(entry.operationId)}
+                className="tap-sm text-[11px] font-semibold text-[var(--color-accent-rose)]"
+              >
+                Discard
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="space-y-3">
         {prizes.map((p, i) => {
           const rank = i + 1;

@@ -311,9 +311,24 @@ function isUnderTenChild(member: { role: string; age?: number }): boolean {
     age < PIN_FREE_MAX_AGE;
 }
 
+/**
+ * A session-only undo is ONE thing and one thing only: a kid taking back their
+ * own PENDING tap, which never moved any points. A PAID undo reverses real
+ * ledger entries, so it is a different command with real consequences and it
+ * must never be reachable without the member PIN — not for a parent, and not
+ * for a child of any age. The check is explicit here (rather than being left to
+ * a later ownership comparison) so the client is told the truth: a PIN is
+ * required, not "you do not own this".
+ */
+function sessionUndoAllows(actor: ClaimActor, task: SnapshotTask): boolean {
+  if (actor.authentication !== "session") return true;
+  if (actor.role.trim().toLowerCase() !== "child") return false;
+  return pendingApproval(task) !== null;
+}
+
 function sessionPolicyAllows(actor: ClaimActor, task: SnapshotTask, action: ClaimAction): boolean {
   if (actor.authentication !== "session") return true;
-  if (action === "undo") return actor.role.trim().toLowerCase() === "child";
+  if (action === "undo") return sessionUndoAllows(actor, task);
   if (!isUnderTenChild(actor)) return false;
   if (action === "crew-join" || action === "crew-checkin") return true;
   return action === "complete" && task.universal === false && !isCrewTask(task as unknown as Task);

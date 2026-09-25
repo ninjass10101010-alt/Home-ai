@@ -1,14 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import {
-  queueTaskCommand,
-  type QueueTaskCommandInput,
-} from "@/lib/task-command-queue";
-import {
-  useTaskOperationOutbox,
-  type UseTaskOperationOutboxResult,
-} from "@/hooks/useTaskOperationOutbox";
+import { queueTaskCommand, type QueueTaskCommandInput } from "@/lib/task-command-queue";
+import { useTaskOperationOutbox } from "@/hooks/useTaskOperationOutbox";
 import type { FlushTaskOutboxResult, TaskOutboxEntry } from "@/lib/task-operation-outbox";
 
 export interface UseTaskCommandQueueOptions {
@@ -16,18 +10,23 @@ export interface UseTaskCommandQueueOptions {
   autoFlush?: boolean;
 }
 
+export interface TaskCommandCounts {
+  pending: number;
+  queued: number;
+  reconciling: number;
+  authRequired: number;
+  failed: number;
+}
+
+export type TaskOutboxAcknowledgementListener = (acknowledgement: { operationId?: string }) => void;
+
 export interface TaskCommandQueue {
   queue: (input: QueueTaskCommandInput) => TaskOutboxEntry;
   entries: TaskOutboxEntry[];
-  counts: UseTaskOperationOutboxResult extends never ? never : {
-    pending: number;
-    queued: number;
-    reconciling: number;
-    authRequired: number;
-    failed: number;
-  };
+  counts: TaskCommandCounts;
   flush: () => Promise<FlushTaskOutboxResult>;
   cancel: (operationId: string) => boolean;
+  onAcknowledged: (listener: TaskOutboxAcknowledgementListener) => () => void;
 }
 
 export function useTaskCommandQueue(
@@ -38,8 +37,17 @@ export function useTaskCommandQueue(
     onAdoptedRef.current = options.onAdopted;
   });
 
-  const { entries, pending, queued, reconciling, authRequired, failed, flush, cancel } =
-    useTaskOperationOutbox({ autoFlush: options.autoFlush });
+  const {
+    entries,
+    pending,
+    queued,
+    reconciling,
+    authRequired,
+    failed,
+    flush,
+    cancel,
+    onAcknowledged,
+  } = useTaskOperationOutbox({ autoFlush: options.autoFlush });
 
   const runFlush = useCallback(async () => {
     const result = await flush();
@@ -63,7 +71,19 @@ export function useTaskCommandQueue(
       counts: { pending, queued, reconciling, authRequired, failed },
       flush: runFlush,
       cancel,
+      onAcknowledged,
     }),
-    [queue, entries, pending, queued, reconciling, authRequired, failed, runFlush, cancel],
+    [
+      queue,
+      entries,
+      pending,
+      queued,
+      reconciling,
+      authRequired,
+      failed,
+      runFlush,
+      cancel,
+      onAcknowledged,
+    ],
   );
 }

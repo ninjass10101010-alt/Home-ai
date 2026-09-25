@@ -30,8 +30,8 @@ import type { Task, LeaderboardEntry, Reward, Penalty, WeekData, CrewMember, Hal
 import { getLevel, BADGES } from "@/types/tasks";
 import {
   TASKS_STORAGE_KEY, REWARDS_KEY, PENALTIES_KEY,
-  todayMondayISO, weekKey, emptyWeekData,
-  loadWeekData, saveWeekData, addTransaction,
+  weekKey, emptyWeekData,
+  loadWeekData, saveWeekData,
   calculateRealStreak,
   getThisWeeksCompletedDates, getThisWeeksCompletedTasks,
   loadTasks, saveTasks,
@@ -44,11 +44,11 @@ import {
   readWeeklyPrizesStamp, writeWeeklyPrizesStamp,
   pickDefaultClaimMember, isSnatchable, isPendingApproval,
   completesWithoutPin, completesWithPendingApproval,
-  tapCompletePending, resolveMemberName,
+  resolveMemberName,
   mergeTasksSnapshot, getDaysUntilWeekReset,
   saveDeletedTaskIds,
   isCrewTask, crewMembers, crewMemberCount, crewFull, crewHasMember,
-  crewMemberCheckedIn, crewCheckinProgress, crewAllCheckedIn, canJoinCrew,
+  crewMemberCheckedIn, crewCheckinProgress,
   normalizeSpeedBonus,
 } from "@/lib/task-utils";
 import { useTaskCommandQueue } from "@/hooks/useTaskCommandQueue";
@@ -416,6 +416,11 @@ export default function TasksPage() {
   const [parentApprovalReward, setParentApprovalReward] = useState<Reward | null>(null);
   const [parentApprovalPin, setParentApprovalPin] = useState("");
   const [parentApprovalError, setParentApprovalError] = useState("");
+  // A high-cost redemption needs BOTH PINs on the wire (the member's, and the
+  // grown-up's who approved it). The parent PIN lives only in this ref between
+  // the approval step and the redemption command, and is cleared the moment the
+  // command is queued — it is never React state, storage, or a render value.
+  const parentApprovalPinRef = useRef<string>("");
   const [approvalTaskId, setApprovalTaskId] = useState<number | null>(null);
   const [approvalMode, setApprovalMode] = useState<"approve" | "sendback" | "approve-all">("approve");
   // P0: deleting a family chore is destructive + cross-device — confirm first
@@ -437,34 +442,49 @@ export default function TasksPage() {
   // points, ledger and task rows actually move. `onAdopted` re-reads the stores
   // the acknowledgment just wrote — the only path that can change the visible
   // task/week state.
+  // One display-only mark per queued command: the row it is about to create,
+  // the row it is about to hide, or the "on the way" / "taking it back" note.
+  type OptimisticRow =
+    | { kind: "add"; task: Task }
+    | { kind: "remove"; taskId: number }
+    | { kind: "pending"; taskId: number }
+    | { kind: "cancelling"; taskId: number };
+  const [optimisticRows, setOptimisticRows] = useState<Record<string, OptimisticRow>>({});
   const adoptStores = useCallback(() => {
     setTasks(loadTasks());
     setWeekData(loadWeekData());
     setRewards(loadFromStorage(REWARDS_KEY, []));
     setPenalties(loadFromStorage(PENALTIES_KEY, []));
   }, []);
+  // Display-only optimism, keyed by OPERATION ID. A mark is created when a
+  // command is queued and released when THAT command leaves the outbox (an
+  // acknowledgment, a cancel, or a terminal failure) — never by a global queue
+  // count, so one operation's landing can never clear another's optimism and a
+  // retrying command keeps its honest "still sending" row.
+  const addOptimisticRow = useCallback((operationId: string, row: OptimisticRow) => {
+    setOptimisticRows((prev) => ({ ...prev, [operationId]: row }));
+  }, []);
+  const onAcknowledged = useCallback((acknowledged: { operationId?: string }) => {
+    const operationId = acknowledged?.operationId;
+    if (!operationId) return;
+    setOptimisticRows((prev) => {
+      if (!(operationId in prev)) return prev;
+      const next = { ...prev };
+      delete next[operationId];
+      return next;
+    });
+  }, []);
   const {
     queue: queueCommand,
     counts: outboxCounts,
     entries: outboxEntries,
     cancel: cancelQueuedOperation,
+    onAcknowledged: onOutboxAcknowledged,
   } = useTaskCommandQueue({ onAdopted: adoptStores });
-  // Display-only optimism: the rows a queued command is about to create/change,
-  // so the tap reads as responsive. Never persisted — the outbox owns the truth.
-  const [optimisticTasks, setOptimisticTasks] = useState<Task[]>([]);
-  const [optimisticRemoved, setOptimisticRemoved] = useState<number[]>([]);
-  const [optimisticPending, setOptimisticPending] = useState<number[]>([]);
-  const [optimisticCancelling, setOptimisticCancelling] = useState<number[]>([]);
-  // The display-only marks clear the moment the queue DRAINS (an
-  // acknowledgment landed), never when it merely grows — otherwise the first
-  // enqueue would wipe the very row it just created.
   useEffect(() => {
-    if (outboxCounts.pending > 0) return;
-    setOptimisticTasks([]);
-    setOptimisticRemoved([]);
-    setOptimisticPending([]);
-    setOptimisticCancelling([]);
-  }, [outboxCounts.pending]);
+    if (typeof onOutboxAcknowledged !== "function") return;
+    onOutboxAcknowledged(onAcknowledged);
+  }, [onOutboxAcknowledged, onAcknowledged]);
 
   // Restore tasks state from PocketBase snapshot on mount (bridges container restarts)
   const restoreAttempted = useRef(false);
@@ -579,6 +599,10 @@ export default function TasksPage() {
 
   const startEdit = (task: Task) => {
     if (!isParent) return; // P0 gate — kids/guests can never edit family chores
+    if (!tasks.some((row) => row.id === task.id)) {
+      showToast("That chore is still being saved — try again in a moment.");
+      return;
+    }
     setEditingId(task.id);
     setEditForm({ ...task });
     setIsAdding(false);
@@ -611,37 +635,42 @@ export default function TasksPage() {
         : { ...editForm, crewSize: null, crew: null, speedBonus: undefined, universal: false };
     if (isAdding) {
       const temporaryId = uid();
-      queueCommand({
+      const added = queueCommand({
         route: "/api/tasks/manage",
         action: "add",
         payload: { task: { ...normalized } },
         displayTarget: { kind: "task", temporaryId, title: normalized.title },
       });
-      setOptimisticTasks(prev => [...prev, { ...normalized, id: temporaryId }]);
+      addOptimisticRow(added.operationId, { kind: "add", task: { ...normalized, id: temporaryId } });
     } else {
-      queueCommand({
+      const updated = queueCommand({
         route: "/api/tasks/manage",
         action: "update",
         payload: { taskId: editingId, patch: { ...normalized } },
         displayTarget: { kind: "task", taskId: editingId ?? undefined, title: normalized.title },
       });
-      setOptimisticRemoved(prev => (prev.includes(editingId as number) ? prev : [...prev, editingId as number]));
-      setOptimisticTasks(prev => [...prev.filter((row) => row.id !== editingId), { ...normalized, id: editingId as number }]);
+      addOptimisticRow(updated.operationId, { kind: "add", task: { ...normalized, id: editingId as number } });
     }
     setEditingId(null);
     setIsAdding(false);
   };
 
+  // A delete is only ever queued for a row the SERVER already has. A
+  // temporary (not-yet-acknowledged) add row is inert: it renders as text, and
+  // delete/edit/complete on it can never send an id the server has never seen.
   const deleteTask = (id: number) => {
-    const row = tasks.find((t) => t.id === id) ?? optimisticTasks.find((t) => t.id === id);
-    queueCommand({
+    const row = tasks.find((t) => t.id === id);
+    if (!row) {
+      showToast("That chore is still being saved — try again in a moment.");
+      return;
+    }
+    const removed = queueCommand({
       route: "/api/tasks/manage",
       action: "delete",
       payload: { taskId: id },
-      displayTarget: { kind: "task", taskId: id, title: row?.title },
+      displayTarget: { kind: "task", taskId: id, title: row.title },
     });
-    setOptimisticTasks(prev => prev.filter((t) => t.id !== id));
-    setOptimisticRemoved(prev => (prev.includes(id) ? prev : [...prev, id]));
+    addOptimisticRow(removed.operationId, { kind: "remove", taskId: id });
     setEditingId(null);
     setIsAdding(false);
   };
@@ -702,13 +731,13 @@ export default function TasksPage() {
 
   const adoptSuggestion = (suggestion: Task) => {
     const temporaryId = uid();
-    queueCommand({
+    const adopted = queueCommand({
       route: "/api/tasks/manage",
       action: "add",
       payload: { task: { ...suggestion } },
       displayTarget: { kind: "task", temporaryId, title: suggestion.title },
     });
-    setOptimisticTasks(prev => [...prev, { ...suggestion, id: temporaryId }]);
+    addOptimisticRow(adopted.operationId, { kind: "add", task: { ...suggestion, id: temporaryId } });
     setAiSuggestions(prev => prev.filter(s => s.title !== suggestion.title));
   };
 
@@ -717,8 +746,13 @@ export default function TasksPage() {
   };
 
   const openPinEntry = (taskId: number) => {
+    // A temporary row is not a task yet: there is nothing on the server to
+    // complete, so this can only be a stale click on a queued add.
     const task = tasks.find((x) => x.id === taskId);
-    if (!task) return;
+    if (!task) {
+      showToast("That chore is still being saved — try again in a moment.");
+      return;
+    }
     if (task.completed) {
       if (isPendingApproval(task) && isLoggedIn && currentUser?.role === "child" && resolveMemberName(membersData, task.pendingApproval?.byName) === resolveMemberName(membersData, currentUser.name)) {
         // The kid who tapped can take it back PIN-free: nothing was verified,
@@ -728,13 +762,13 @@ export default function TasksPage() {
         // Names are compared in the resolved-ledger space — a session first
         // name and a fullName byName are the same kid.
         const me = resolveMemberName(membersData, currentUser.name);
-        queueCommand({
+        const undo = queueCommand({
           route: "/api/tasks/claim",
           action: "undo",
           payload: { taskId, memberName: me, assigneeEmoji: task.assigneeEmoji },
           displayTarget: { kind: "undo", taskId, title: task.title },
         });
-        setOptimisticCancelling(prev => (prev.includes(taskId) ? prev : [...prev, taskId]));
+        addOptimisticRow(undo.operationId, { kind: "cancelling", taskId });
         showToast("Taking it back — asking the family server to reopen it.");
         return;
       }
@@ -773,13 +807,13 @@ export default function TasksPage() {
       // move only when a parent approves, and only through the outbox.
       if (task.completedInWeek === weekKey()) return;
       const me = resolveMemberName(membersData, currentUser!.name);
-      queueCommand({
+      const complete = queueCommand({
         route: "/api/tasks/claim",
         action: "complete",
         payload: { taskId, memberName: me, assigneeEmoji: task.assigneeEmoji },
         displayTarget: { kind: "claim", taskId, title: task.title },
       });
-      setOptimisticPending(prev => (prev.includes(taskId) ? prev : [...prev, taskId]));
+      addOptimisticRow(complete.operationId, { kind: "pending", taskId });
       triggerConfetti();
       showToast(`Done! +${task.points}pts on the way — a parent approves.`);
       return;
@@ -850,6 +884,7 @@ export default function TasksPage() {
         setTimeout(() => setParentApprovalError(""), 2500);
         return;
       }
+      parentApprovalPinRef.current = parentApprovalPin;
       setPinReward(parentApprovalReward);
       setParentApprovalReward(null);
       setParentApprovalPin("");
@@ -900,7 +935,6 @@ export default function TasksPage() {
           displayTarget: { kind: "approval", title: `${taskIds.length} tapped tasks` },
           credential: { pin: approvalPin },
         });
-        setOptimisticCancelling(prev => [...prev]);
         showToast(
           `Approving ${taskIds.length} tapped task${taskIds.length !== 1 ? "s" : ""} — points land when the family server confirms.`,
         );
@@ -922,16 +956,14 @@ export default function TasksPage() {
         );
       } else if (approvalTaskId !== null) {
         const target = tasks.find((x) => x.id === approvalTaskId);
-        queueCommand({
+        const sendBack = queueCommand({
           route: "/api/tasks/approve",
           action: "send-back",
           payload: { taskId: approvalTaskId, memberName: parentName },
           displayTarget: { kind: "approval", taskId: approvalTaskId, title: target?.title },
           credential: { pin: approvalPin },
         });
-        setOptimisticCancelling(prev =>
-          prev.includes(approvalTaskId) ? prev : [...prev, approvalTaskId],
-        );
+        addOptimisticRow(sendBack.operationId, { kind: "cancelling", taskId: approvalTaskId });
         showToast(
           target && isCrewTask(target)
             ? "Sending back — the whole crew reopens, no points given."
@@ -1035,14 +1067,14 @@ export default function TasksPage() {
       // No local point reversal, no local reopen, no legacy POST: the outbox
       // command is queued first and the family's ledger moves only when it is
       // acknowledged.
-      queueCommand({
+      const undo = queueCommand({
         route: "/api/tasks/claim",
         action: "undo",
         payload: { taskId: task.id, memberName: normalizedName, assigneeEmoji: task.assigneeEmoji },
         displayTarget: { kind: "undo", taskId: task.id, title: task.title },
         credential: { pin: undoPin },
       });
-      setOptimisticCancelling(prev => (prev.includes(task.id) ? prev : [...prev, task.id]));
+      addOptimisticRow(undo.operationId, { kind: "cancelling", taskId: task.id });
       showToast(
         isPendingApproval(task)
           ? "Reopening — no points were given."
@@ -1079,15 +1111,26 @@ export default function TasksPage() {
           setTimeout(() => setPinError(""), 2500);
           return;
         }
-        setWeekData(prev => {
-          const current = prev.points[normalizedName] || 0;
-          if (current < cost) return prev;
-          const updated = { ...prev, points: { ...prev.points, [normalizedName]: current - cost } };
-          return addTransaction(updated, "redeem", -cost, `Redeemed: ${pinReward.name} (-${cost}pts)`, normalizedName);
+        // The redemption is a durable command against the server-authoritative
+        // route: the stored reward row decides the cost, the ledger entry is
+        // written under the week lock, and a reward over 100pts carries the
+        // parent's PIN so the server can gate it. Nothing is deducted locally.
+        queueCommand({
+          route: "/api/rewards/redeem",
+          action: "redeem",
+          payload: { rewardId: pinReward.id, memberName: normalizedName },
+          displayTarget: { kind: "config", title: pinReward.name },
+          credential: {
+            pin: pinInput,
+            ...(parentApprovalPinRef.current ? { parentPin: parentApprovalPinRef.current } : {}),
+          },
         });
+        parentApprovalPinRef.current = "";
         setPinInput("");
-        setPinSuccess(`${pinReward.emoji} ${normalizedName.split(" ")[0]} redeemed ${pinReward.name}! -${cost}pts`);
-        setTimeout(() => { setPinReward(null); setPinSuccess(""); }, 1500);
+        setPinSuccess(
+          `${pinReward.emoji} ${normalizedName.split(" ")[0]} redeeming ${pinReward.name} — the family server confirms the ${cost}pts.`,
+        );
+        setTimeout(() => { setPinReward(null); setPinSuccess(""); }, 1800);
       } else {
         setPinError(result.status === "unreachable" ? unreachableCopy() : "Wrong code for selected member. Try again.");
         setPinInput("");
@@ -1114,13 +1157,19 @@ export default function TasksPage() {
       if (result.status === "ok") {
         const normalizedName = membersData.find((m: any) => m.fullName === penaltyForMember)?.fullName || penaltyForMember;
         const penaltyPoints = pinPenalty?.points ?? 0;
-        setWeekData(prev => {
-          const updated = { ...prev, points: { ...prev.points, [normalizedName]: Math.max(0, (prev.points[normalizedName] || 0) - penaltyPoints) } };
-          return addTransaction(updated, "penalty", -penaltyPoints, `Penalty: ${pinPenalty.name} (-${penaltyPoints}pts)`, normalizedName);
+        // The catalog penalty id travels, never a client-chosen point value:
+        // the server reads the canonical penalty and refuses a body that tries
+        // to set its own amount.
+        queueCommand({
+          route: "/api/tasks/ledger",
+          action: "penalty",
+          payload: { memberName: normalizedName, itemId: pinPenalty.id },
+          displayTarget: { kind: "config", title: pinPenalty.name },
+          credential: { pin: pinInput },
         });
         setPinInput("");
-        setPinSuccess(`-${penaltyPoints}pts from ${normalizedName.split(" ")[0]}`);
-        setTimeout(() => { setPinPenalty(null); setPinSuccess(""); }, 1500);
+        setPinSuccess(`-${penaltyPoints}pts from ${normalizedName.split(" ")[0]} — the family server confirms.`);
+        setTimeout(() => { setPinPenalty(null); setPinSuccess(""); }, 1800);
       } else {
         setPinError(result.status === "unreachable" ? unreachableCopy() : "Wrong PIN. Try again.");
         setPinInput("");
@@ -1140,8 +1189,7 @@ export default function TasksPage() {
       }
       const result = await verifyPinRemote(memberName, pinInput);
       if (result.status === "ok") {
-        const verified = result.member;
-        const normalizedName = normalizeName((verified as any).name);
+        const normalizedName = normalizeName(result.member.name);
         const claimantEmoji = membersData.find((m: any) => m.fullName === normalizedName)?.emoji;
         queueCommand({
           route: "/api/tasks/claim",
@@ -1195,14 +1243,14 @@ export default function TasksPage() {
         // Exactly one family member wins the race and the points land on the
         // server — the browser queues the claim and adopts the winning
         // weekData. No local earn, no local rollback snapshot.
-        queueCommand({
+        const claim = queueCommand({
           route: "/api/tasks/claim",
           action: "claim",
           payload: { taskId: task.id, memberName: normalizedName, assigneeEmoji: claimantEmoji },
           displayTarget: { kind: "claim", taskId: task.id, title: task.title },
           credential: { pin: pinInput },
         });
-        setOptimisticPending(prev => (prev.includes(task.id) ? prev : [...prev, task.id]));
+        addOptimisticRow(claim.operationId, { kind: "pending", taskId: task.id });
         const pointsMsg = earnAmount > 0 ? `+${earnAmount}pts` : "";
         setPinInput("");
         setPinSuccess(kidClaim
@@ -1225,7 +1273,7 @@ export default function TasksPage() {
       // One durable completion command for BOTH shapes — the server owns the
       // ledger and the pending/completed decision. The browser keeps only
       // display-only optimism; the points line appears only on acknowledgment.
-      queueCommand({
+      const complete = queueCommand({
         route: "/api/tasks/claim",
         action: "complete",
         payload: { taskId: task.id, memberName: normalizedName, assigneeEmoji: task.assigneeEmoji },
@@ -1234,7 +1282,7 @@ export default function TasksPage() {
       });
       if (completesWithPendingApproval((verified as any).role, task)) {
         // Identity verified by PIN; the parent verifies the work. Points wait.
-        setOptimisticPending(prev => (prev.includes(task.id) ? prev : [...prev, task.id]));
+        addOptimisticRow(complete.operationId, { kind: "pending", taskId: task.id });
         triggerConfetti();
         setPinInput("");
         setPinSuccess(`⏳ ${normalizedName.split(" ")[0]} — done! +${task.points}pts on the way.`);
@@ -1360,32 +1408,68 @@ export default function TasksPage() {
       }
       const delta = parseInt(adjustAmount) || 0;
       const change = adjustDir === "+" ? delta : -delta;
-      setWeekData(prev => {
-        const updated = { ...prev, points: { ...prev.points, [adjustMember]: Math.max(0, (prev.points[adjustMember] || 0) + change) } };
-        const reason = adjustReason ? ` (${adjustReason})` : "";
-        return addTransaction(updated, "adjust", change, `Manual adjust: ${change > 0 ? "+" : ""}${change}pts${reason}`, adjustMember, undefined, parent.fullName);
+      // A manual adjust is a parent-PIN ledger command like any other: the
+      // amount and reason travel, the balance never does, and the server writes
+      // the entry under the week lock with a non-negative floor.
+      queueCommand({
+        route: "/api/tasks/ledger",
+        action: "adjust",
+        payload: { memberName: adjustMember, amount: change, reason: adjustReason },
+        displayTarget: { kind: "config", title: adjustMember },
+        credential: { pin: adjustPin },
       });
       const label = adjustDir === "+" ? `+${delta}` : `-${delta}`;
-      setAdjustSuccess(`${label} pts applied to ${adjustMember.split(" ")[0]}!`);
-      setTimeout(() => { setAdjustMember(null); setAdjustSuccess(""); }, 1500);
+      setAdjustSuccess(`${label} pts for ${adjustMember.split(" ")[0]} — the family server confirms.`);
+      setTimeout(() => { setAdjustMember(null); setAdjustSuccess(""); }, 1800);
     } finally {
       setPinBusy(false);
     }
   };
 
-  // Display-only optimism: the outbox owns the truth, so these lists add the
-  // rows a queued command is about to create and hide the rows it is about to
-  // remove — nothing here is written to the store.
+  // Display-only optimism, derived from the per-operation mark map: a queued
+  // ADD contributes its temporary row, a queued DELETE hides its row, and a
+  // queued completion / reopen contributes an honest note. Nothing here is
+  // written to the store.
+  const optimisticRowsList = Object.values(optimisticRows);
+  const optimisticRemoved = optimisticRowsList
+    .filter((row): row is Extract<OptimisticRow, { kind: "remove" }> => row.kind === "remove")
+    .map((row) => row.taskId);
+  const optimisticTasks = optimisticRowsList
+    .filter((row): row is Extract<OptimisticRow, { kind: "add" }> => row.kind === "add")
+    .map((row) => row.task)
+    .filter((task) => !optimisticRemoved.includes(task.id));
+  // A CANCELLING mark suppresses the row's own pending note (H4: the reopen is
+  // already shown, so the "on the way" copy must not also render).
+  const optimisticCancelling = optimisticRowsList
+    .filter((row): row is Extract<OptimisticRow, { kind: "cancelling" }> => row.kind === "cancelling")
+    .map((row) => row.taskId);
+  const optimisticPending = optimisticRowsList
+    .filter((row): row is Extract<OptimisticRow, { kind: "pending" }> => row.kind === "pending")
+    .map((row) => row.taskId)
+    .filter((taskId) => !optimisticCancelling.includes(taskId));
+  // The interactive lists NEVER contain a temporary row: a queued add is
+  // rendered inert (below) so complete/edit/delete cannot send an id the server
+  // has never assigned. `optimisticVisible` is a LOOKUP table only.
   const optimisticVisible = useMemo(
     () => [...tasks.filter((t) => !optimisticRemoved.includes(t.id)), ...optimisticTasks],
     [tasks, optimisticRemoved, optimisticTasks],
+  );
+  const serverTasks = useMemo(
+    () => tasks.filter((t) => !optimisticRemoved.includes(t.id)),
+    [tasks, optimisticRemoved],
   );
   const optimisticPendingSet = useMemo(
     () => new Set([...optimisticPending, ...optimisticCancelling]),
     [optimisticPending, optimisticCancelling],
   );
+  // The pending list never shows a row whose completion is already queued, and
+  // never shows a row a queued delete is about to remove.
+  const hiddenByQueuedCommand = useMemo(
+    () => new Set([...optimisticPending, ...optimisticRemoved]),
+    [optimisticPending, optimisticRemoved],
+  );
 
-  const filtered = optimisticVisible.filter((t) => {
+  const filtered = serverTasks.filter((t) => {
     if (filterMember === "Open") {
       // Open + late-stealable rows and crew tasks with space.
       return ((t.universal || isSnatchable(t)) || (isCrewTask(t) && !crewFull(t))) && (showCompleted ? true : !t.completed);
@@ -1402,9 +1486,7 @@ export default function TasksPage() {
     return memberMatch && completedMatch;
   });
 
-  const pending = filtered.filter(
-    (t) => !t.completed && !optimisticPending.includes(t.id),
-  );
+  const pending = filtered.filter((t) => !t.completed && !hiddenByQueuedCommand.has(t.id));
   const pendingApprovals = tasks.filter(isPendingApproval);
   // The Open board: unclaimed "up for grabs" tasks (universal or late-stealable)
   // PLUS crew tasks with space — shown only when the viewer isn't on a
@@ -1414,7 +1496,7 @@ export default function TasksPage() {
   const openBoard = (() => {
     if (filterMember !== "All" && filterMember !== "My Tasks" && filterMember !== "Open") return [] as Task[];
     const me = isLoggedIn && currentUser ? resolveMemberName(membersData, currentUser.name) : "";
-    return tasks
+    return serverTasks
       .filter((t) => {
         if (t.completed) return false;
         if ((t.universal || isSnatchable(t)) && !isCrewTask(t)) return true;
@@ -1877,6 +1959,32 @@ export default function TasksPage() {
             })()}
 
             <SectionCard title="Pending" description={`${pending.length} open tasks`} icon="📋">
+              {optimisticTasks.length > 0 && (
+                <div className="mb-2 space-y-2">
+                  {optimisticTasks.map((row) => (
+                    <div
+                      key={`optimistic-add-${row.id}`}
+                      data-testid="optimistic-add-row"
+                      className="flex items-center gap-2.5 px-3 py-2 rounded-2xl"
+                      style={{
+                        background: "color-mix(in srgb, var(--color-accent-amber) 8%, transparent)",
+                        border: "1px solid color-mix(in srgb, var(--color-accent-amber) 22%, transparent)",
+                      }}
+                    >
+                      <span className="text-sm">⏳</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm text-text-primary">{row.title}</div>
+                        <div className="truncate text-xs text-text-secondary">
+                          adding — {row.assignee}
+                        </div>
+                      </div>
+                      <span className="shrink-0 text-[11px] font-semibold text-[var(--color-accent-amber)]">
+                        Saving
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
               {optimisticPendingSet.size > 0 && (
                 <div className="mb-2 space-y-2">
                   {[...optimisticPendingSet].map((taskId) => {
@@ -2405,7 +2513,7 @@ export default function TasksPage() {
                         <div className="text-sm font-semibold text-text-primary">{reward.name}</div>
                         <div className="text-xs text-text-muted">{reward.cost} pts {reward.cost > 100 && <span className="ml-1" style={{ color: "var(--color-accent-amber)" }}>· needs parent</span>}</div>
                       </div>
-                      <SoftButton size="sm" variant="secondary" onClick={() => openRewardPin(reward)}>Redeem</SoftButton>
+                      <SoftButton size="sm" variant="secondary" aria-label={`Redeem ${reward.name}`} onClick={() => openRewardPin(reward)}>Redeem</SoftButton>
                       <IconButton size="sm" variant="ghost" aria-label="Edit reward" className="hit-44" onClick={() => startEditReward(reward)}>✎</IconButton>
                     </div>
                   </Surface>
@@ -2629,19 +2737,19 @@ export default function TasksPage() {
           <div className="space-y-4">
             <label className="block">
               <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Amount</span>
-              <input type="number" value={adjustAmount} onChange={(e) => setAdjustAmount(e.target.value)} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none" />
+              <input type="number" aria-label="Adjustment amount" value={adjustAmount} onChange={(e) => setAdjustAmount(e.target.value)} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none" />
             </label>
             <div className="grid gap-2 sm:grid-cols-2">
-              <SoftButton variant={adjustDir === "+" ? "success" : "secondary"} onClick={() => setAdjustDir("+")}>Add points</SoftButton>
+              <SoftButton aria-label="Add points" variant={adjustDir === "+" ? "success" : "secondary"} onClick={() => setAdjustDir("+")}>Add points</SoftButton>
               <SoftButton variant={adjustDir === "-" ? "danger" : "secondary"} onClick={() => setAdjustDir("-")}>Remove points</SoftButton>
             </div>
             <label className="block">
               <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Reason</span>
-              <input value={adjustReason} onChange={(e) => setAdjustReason(e.target.value)} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none" placeholder="Why?" />
+              <input aria-label="Adjustment reason" value={adjustReason} onChange={(e) => setAdjustReason(e.target.value)} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none" placeholder="Why?" />
             </label>
             <label className="block">
               <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Parent PIN</span>
-              <input type="password" inputMode="numeric" maxLength={4} value={adjustPin} onChange={(e) => { setAdjustPin(e.target.value.replace(/[^0-9]/g, "")); setAdjustError(""); }} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted" placeholder="0000" />
+              <input type="password" aria-label="Parent PIN" inputMode="numeric" maxLength={4} value={adjustPin} onChange={(e) => { setAdjustPin(e.target.value.replace(/[^0-9]/g, "")); setAdjustError(""); }} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted" placeholder="0000" />
             </label>
             {adjustError && <p className="text-center text-sm text-[var(--color-accent-rose)]">{adjustError}</p>}
             {adjustSuccess && <p className="text-center text-sm text-[var(--color-accent-selected)]">{adjustSuccess}</p>}

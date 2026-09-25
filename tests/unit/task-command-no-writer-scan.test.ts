@@ -49,15 +49,31 @@ describe("no-writer scan — tasks page", () => {
     expect(lineNumbers(source, /updated\.crew\s*\?\?\s*x\.crew/)).toEqual([]);
   });
 
-  it("never reverses points locally on an undo", () => {
-    // The paid-undo reversal is a server command; the local ledger is the
-    // server's. `addTransaction` may only survive on the reward-redeem,
-    // penalty and manual-adjust paths, which have no outbox route.
-    const adjustHits = lineNumbers(source, /addTransaction\(/);
-    const lines = source.split("\n");
-    const contexts = adjustHits.map((n) => lines[n - 1]);
-    expect(contexts.some((line) => /Undo:/.test(line))).toBe(false);
-    expect(contexts.some((line) => /earn/.test(line))).toBe(false);
+  it("has NO local point writer left at all", () => {
+    // Every point movement — an earn, a redemption, a penalty, a manual
+    // adjust and a reversal — is a durable command now. There is no
+    // `addTransaction` left on this page, and no direct mutation of
+    // `weekData.points` outside the adoption callback that re-reads the store.
+    expect(lineNumbers(source, /addTransaction\(/)).toEqual([]);
+    expect(lineNumbers(source, /points:\s*\{[^}]*\[normalizedName\]/)).toEqual([]);
+    expect(lineNumbers(source, /Math\.max\(0,\s*\(prev\.points/)).toEqual([]);
+    expect(lineNumbers(source, /currentWeekPoints/)).toEqual([]);
+  });
+
+  it("routes reward redemption, penalty and manual adjust through the outbox", () => {
+    expect(lineNumbers(source, /route:\s*"\/api\/rewards\/redeem"/).length).toBeGreaterThanOrEqual(1);
+    const ledgerRoutes = lineNumbers(source, /route:\s*"\/api\/tasks\/ledger"/);
+    expect(ledgerRoutes).toHaveLength(2);
+    const ledgerBodies = source.split('route: "/api/tasks/ledger"');
+    expect(ledgerBodies[1]).toContain('action: "penalty"');
+    expect(ledgerBodies[2]).toContain('action: "adjust"');
+  });
+
+  it("sends the parent PIN only on a high-cost redemption", () => {
+    // The parent PIN is a ref between the approval step and the command, and
+    // is cleared the moment the command is queued.
+    expect(source).toContain("parentApprovalPinRef");
+    expect(source).toContain('parentApprovalPinRef.current = "";');
   });
 
   it("enqueues every command through the durable queue", () => {
@@ -77,6 +93,23 @@ describe("no-writer scan — kid home", () => {
     expect(lineNumbers(source, /saveTasks\(/)).toEqual([]);
     expect(lineNumbers(source, /saveWeekData\(/)).toEqual([]);
     expect(lineNumbers(source, /addTransaction\(/)).toEqual([]);
+  });
+
+  it("verifies a PIN-gated claim BEFORE queueing it", () => {
+    // A 10+ claim is PIN-gated for every age, so a wrong PIN must never
+    // become a queued (and forever-retried) command.
+    const claimBranch = source.slice(source.indexOf("if (task.universal || isSnatchable(task)) {"));
+    const verifyAt = claimBranch.indexOf("verifyPinRemote");
+    const queueAt = claimBranch.indexOf("queueCommand");
+    expect(verifyAt).toBeGreaterThanOrEqual(0);
+    expect(queueAt).toBeGreaterThan(verifyAt);
+  });
+
+  it("queues an under-10 tap with NO credential at all", () => {
+    const tapBranch = source.slice(source.indexOf("completesWithoutPin(user?.role, user?.age, task) && !task.universal"));
+    const body = tapBranch.slice(0, tapBranch.indexOf("markOptimistic("));
+    expect(body).toContain('action: "complete"');
+    expect(body).not.toMatch(/credential:/);
   });
 });
 
@@ -138,8 +171,42 @@ describe("no-writer scan — the heuristic is gone", () => {
     const source = read("lib/task-utils.ts");
     expect(source).not.toContain("adoptServerWeekData");
     expect(source).toContain("adoptAuthoritativeWeekData");
+    // BOTH shapes: the ">=" form in the ack path and the ">" form in the
+    // snapshot-merge path.
     expect(
       lineNumbers(source, /history\?\.length\s*\|\|\s*0\)\s*>=\s*\(prev\.history/),
     ).toEqual([]);
+    expect(
+      lineNumbers(source, /history\?\.length\s*\|\|\s*0\)\s*>\s*\(currentWeekData\.history/),
+    ).toEqual([]);
+  });
+
+  it("the outbox never compares history length to decide adoption", () => {
+    const source = read("lib/task-operation-outbox.ts");
+    expect(lineNumbers(source, /history\.length\s*[<>]=?/)).toEqual([]);
+  });
+});
+
+describe("no-writer scan — the server owns the ledger", () => {
+  it("the ledger command reads the canonical penalty, never a client amount", () => {
+    const source = read("lib/task-ledger-command.ts");
+    // A penalty carries an item id only; the points come from the catalog leg.
+    expect(source).toContain("readCatalogPenalty");
+    const penaltyParse = source.slice(source.indexOf('if (action === "penalty") {'));
+    expect(penaltyParse).not.toContain("value.points");
+  });
+
+  it("the ledger command writes under the shared week lock with a fingerprint", () => {
+    const source = read("lib/task-ledger-command.ts");
+    expect(source).toContain("withWeekLedgerLock");
+    expect(source).toContain("applyWeekLedgerOperationLocked");
+    expect(source).toContain("ledgerCommandFingerprint");
+    expect(source).toContain('source = command.action === "penalty" ? "task-penalty" : "manual-adjust"');
+  });
+
+  it("the ledger sources are registered in the canonical list", () => {
+    const source = read("lib/task-ledger.ts");
+    expect(source).toContain('"task-penalty"');
+    expect(source).toContain('"manual-adjust"');
   });
 });
