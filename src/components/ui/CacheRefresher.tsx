@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react';
 import { usePathname } from 'next/navigation';
 import { db } from '@/db';
 import { flushPendingWrites } from '@/lib/pending-writes';
-import { requestTaskOutboxFlush } from '@/lib/task-operation-outbox';
+import { requestTaskOutboxFlush, warnTaskOutboxFlushFailure } from '@/lib/task-operation-outbox';
 
 const REFRESH_INTERVAL_MS = 60_000;
 
@@ -17,12 +17,9 @@ export function CacheRefresher({ children }: { children: React.ReactNode }) {
     // that polls its own exempt endpoint — gateway polling there is 401 spam.
     if (pathname.startsWith('/screensaver')) return;
 
-    // Durable task/config operations first, so the cache refresh that follows
-    // reads back everything the server now holds. The outbox module owns the
-    // single in-flight flush — this only requests one and never reads a ref at
-    // render time.
     const refresh = () => {
       void requestTaskOutboxFlush()
+        .catch(warnTaskOutboxFlushFailure)
         .then(() => flushPendingWrites())
         .then(() => db.refreshCaches());
     };

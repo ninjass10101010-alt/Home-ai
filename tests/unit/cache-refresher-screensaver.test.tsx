@@ -11,10 +11,12 @@ vi.mock("next/navigation", () => ({ usePathname: () => pathnameRef.current }));
 const refreshCaches = vi.fn(async () => {});
 const flushPendingWrites = vi.fn(async () => {});
 const requestTaskOutboxFlush = vi.fn(async () => ({ acknowledged: 0, retryable: 0, permanent: 0 }));
+const warnTaskOutboxFlushFailure = vi.fn((error: unknown) => error);
 vi.mock("@/db", () => ({ db: { refreshCaches: () => refreshCaches() } }));
 vi.mock("@/lib/pending-writes", () => ({ flushPendingWrites: () => flushPendingWrites() }));
 vi.mock("@/lib/task-operation-outbox", () => ({
   requestTaskOutboxFlush: () => requestTaskOutboxFlush(),
+  warnTaskOutboxFlushFailure: (error: unknown) => warnTaskOutboxFlushFailure(error),
 }));
 
 import { CacheRefresher } from "@/components/ui/CacheRefresher";
@@ -41,6 +43,7 @@ beforeEach(() => {
   refreshCaches.mockClear();
   flushPendingWrites.mockClear();
   requestTaskOutboxFlush.mockClear();
+  warnTaskOutboxFlushFailure.mockClear();
 });
 
 afterEach(() => {
@@ -147,6 +150,34 @@ it("drains the durable task outbox before replaying pending writes on every refr
     document.dispatchEvent(new Event("visibilitychange"));
     await vi.advanceTimersByTimeAsync(0);
     expect(requestTaskOutboxFlush).toHaveBeenCalledTimes(3);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("still replays pending writes and refreshes caches when the outbox flush rejects", async () => {
+  const failure = new Error("outbox exploded");
+  requestTaskOutboxFlush.mockImplementationOnce(async () => {
+    throw failure;
+  });
+  pathnameRef.current = "/";
+  vi.useFakeTimers();
+  try {
+    render(
+      <CacheRefresher>
+        <p>home</p>
+      </CacheRefresher>
+    );
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(warnTaskOutboxFlushFailure).toHaveBeenCalledWith(failure);
+    expect(flushPendingWrites).toHaveBeenCalledTimes(1);
+    expect(refreshCaches).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(requestTaskOutboxFlush).toHaveBeenCalledTimes(2);
+    expect(flushPendingWrites).toHaveBeenCalledTimes(2);
+    expect(refreshCaches).toHaveBeenCalledTimes(2);
   } finally {
     vi.useRealTimers();
   }

@@ -1,23 +1,23 @@
 import { isRecord, normalizeOperationId } from "@/lib/task-operation-contract";
-import type { SnapshotData, SnapshotRevision } from "@/lib/snapshot-tasks";
+import type {
+  SnapshotConfigOperationReceipt,
+  SnapshotData,
+  SnapshotOperationReceipt,
+  SnapshotRevision,
+} from "@/lib/snapshot-tasks";
 import type { Task, WeekData } from "@/types/tasks";
 
-/**
- * Durable client outbox for the four server-authoritative task write routes.
- *
- * Every task/config write is persisted BEFORE its first request, carries a
- * stable operation ID so a replayed request is idempotent on the server, and
- * is only removed once the authoritative state proves it landed. Entries are
- * credential-free: an ephemeral PIN is supplied by the caller at send time
- * (TaskOutboxDriver.getCredential) and never written to storage.
- */
-
 export const TASK_OUTBOX_STORAGE_KEY = "consuela-task-operation-outbox-v1";
+export const TASK_OUTBOX_ENTRY_PREFIX = `${TASK_OUTBOX_STORAGE_KEY}:entry:`;
 export const TASK_OUTBOX_MAX_ENTRIES = 50;
 export const TASK_OUTBOX_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 export const TASK_OUTBOX_MAX_ATTEMPTS = 8;
 export const TASK_OUTBOX_BASE_BACKOFF_MS = 2_000;
 export const TASK_OUTBOX_MAX_BACKOFF_MS = 5 * 60_000;
+export const TASK_OUTBOX_MAX_AUTH_ATTEMPTS = 3;
+export const TASK_OUTBOX_AUTH_BACKOFF_MS = 30_000;
+export const TASK_OUTBOX_REQUEST_TIMEOUT_MS = 30_000;
+export const TASK_OUTBOX_STORAGE_WRITE_ATTEMPTS = 2;
 
 export type TaskOperationRoute =
   | "/api/tasks/claim"
@@ -55,6 +55,7 @@ export interface TaskOutboxEntry {
   payload: Record<string, unknown>;
   createdAt: string;
   attemptCount: number;
+  authAttemptCount?: number;
   lastErrorCategory?: TaskOutboxErrorCategory;
   lastErrorReason?: string;
   nextAttemptAt?: string;
@@ -70,7 +71,7 @@ export interface TaskOutboxAcknowledgement {
   paid?: number;
   cleared?: number;
   skipped?: number;
-  reconciled: boolean;
+  reconciled?: boolean;
   [key: string]: unknown;
 }
 
@@ -79,6 +80,8 @@ export interface SnapshotRead {
   reconciled?: boolean;
   revision?: SnapshotRevision;
   weekData?: WeekData;
+  operationReceipts?: Record<string, SnapshotOperationReceipt[]>;
+  configOperationReceipts?: Record<string, SnapshotConfigOperationReceipt>;
 }
 
 export type TaskOutboxSendResult = { status: number; body: TaskOutboxAcknowledgement };
@@ -88,6 +91,10 @@ export interface TaskOutboxDriver {
   getCredential?: (entry: TaskOutboxEntry) => string | undefined;
   pullSnapshot?: () => Promise<SnapshotRead>;
   onAcknowledged?: (acknowledgement: TaskOutboxAcknowledgement) => void | Promise<void>;
+}
+
+export interface TaskOutboxFetchDriverOptions extends Partial<TaskOutboxDriver> {
+  requestTimeoutMs?: number;
 }
 
 export type FlushTaskOutboxOptions = TaskOutboxDriver;
@@ -196,7 +203,6 @@ const CREDENTIAL_REQUIRED_ACTIONS: Record<string, Set<string>> = {
 };
 
 const RETRYABLE_REASONS = new Set([
-  "operation_conflict",
   "member_roster_unavailable",
   "ledger_unavailable",
   "snapshot_write_failed",
@@ -207,6 +213,8 @@ const RETRYABLE_REASONS = new Set([
   "snapshot_unavailable",
   "projection_reconcile_pending",
 ]);
+
+const PERMANENT_REASONS = new Set(["operation_conflict"]);
 
 const DUPLICATE_REASONS = new Set([
   "semantic_duplicate",
@@ -219,13 +227,31 @@ const DUPLICATE_REASONS = new Set([
 
 const EMPTY_SERVER_SNAPSHOT: TaskOutboxEntry[] = Object.freeze<TaskOutboxEntry[]>([]) as TaskOutboxEntry[];
 
+const AUTH_BLOCKED: FlushTaskOutboxResult = { acknowledged: 0, retryable: 1, permanent: 0 };
+
+const hasOwn = (value: Record<string, unknown>, key: string): boolean =>
+  Object.prototype.hasOwnProperty.call(value, key);
+
 const configItemKeysFor = (kind: string): readonly string[] | undefined => CONFIG_ITEM_KEYS[kind];
+
+export function isSupportedTaskOperation(route: unknown, action: unknown): boolean {
+  if (typeof route !== "string" || !ROUTES.has(route) || typeof action !== "string") return false;
+  const table =
+    route === "/api/tasks/claim"
+      ? CLAIM_PAYLOAD_KEYS
+      : route === "/api/tasks/approve"
+        ? APPROVE_PAYLOAD_KEYS
+        : route === "/api/tasks/manage"
+          ? MANAGE_PAYLOAD_KEYS
+          : CONFIG_PAYLOAD_KEYS;
+  return hasOwn(table, action);
+}
 
 function pickKeys(value: unknown, keys: readonly string[]): Record<string, unknown> {
   if (!isRecord(value)) return {};
   const picked: Record<string, unknown> = {};
   for (const key of keys) {
-    if (Object.prototype.hasOwnProperty.call(value, key)) picked[key] = value[key];
+    if (hasOwn(value, key)) picked[key] = value[key];
   }
   return picked;
 }
@@ -292,12 +318,16 @@ function parseEntry(value: unknown): TaskOutboxEntry | null {
   const route = String(value.route ?? "");
   const action = String(value.action ?? "").trim();
   const createdAt = normalizeIso(value.createdAt);
-  if (!operationId || !ROUTES.has(route) || !action || !createdAt) return null;
+  if (!operationId || !createdAt || !isSupportedTaskOperation(route, action)) return null;
   const status = STATUSES.has(String(value.status)) ? (value.status as TaskOutboxStatus) : "queued";
   const attemptCount = Math.max(
     0,
     Math.min(1_000, Math.floor(typeof value.attemptCount === "number" ? value.attemptCount : 0)),
   );
+  const authAttemptCount =
+    typeof value.authAttemptCount === "number" && Number.isFinite(value.authAttemptCount)
+      ? Math.max(0, Math.min(1_000, Math.floor(value.authAttemptCount)))
+      : undefined;
   const category = ERROR_CATEGORIES.has(String(value.lastErrorCategory))
     ? (value.lastErrorCategory as TaskOutboxErrorCategory)
     : undefined;
@@ -310,6 +340,7 @@ function parseEntry(value: unknown): TaskOutboxEntry | null {
     payload: sanitizeTaskOperationPayload(route, action, value.payload),
     createdAt,
     attemptCount,
+    ...(authAttemptCount !== undefined ? { authAttemptCount } : {}),
     ...(category ? { lastErrorCategory: category } : {}),
     ...(optionalText(value.lastErrorReason) ? { lastErrorReason: optionalText(value.lastErrorReason) } : {}),
     ...(nextAttemptAt ? { nextAttemptAt } : {}),
@@ -333,74 +364,228 @@ function boundEntries(entries: TaskOutboxEntry[]): TaskOutboxEntry[] {
     : kept;
 }
 
+function mergeByOperationId(
+  stored: TaskOutboxEntry[],
+  extras: TaskOutboxEntry[],
+): TaskOutboxEntry[] {
+  if (!extras.length) return stored;
+  const extrasById = new Map(extras.map((entry) => [entry.operationId, entry]));
+  const kept = stored.filter((entry) => !extrasById.has(entry.operationId));
+  return boundEntries([...kept, ...extras]);
+}
+
+interface TaskOutboxIndex {
+  rev: number;
+  ids: string[];
+  legacy: boolean;
+}
+
 let cache: TaskOutboxEntry[] | null = null;
-let cacheRaw: string | null = null;
-let cacheDirty = false;
+let cacheIndexRaw: string | null = null;
+let unpersisted = new Map<string, TaskOutboxEntry>();
 let inFlight: Promise<FlushTaskOutboxResult> | null = null;
 
 function isBrowser(): boolean {
   return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
 }
 
-function readRaw(): TaskOutboxEntry[] {
-  if (!isBrowser()) return EMPTY_SERVER_SNAPSHOT;
-  if (cache && cacheDirty) return cache;
-  let raw: string | null = null;
+export function taskOutboxEntryStorageKey(operationId: string): string {
+  return `${TASK_OUTBOX_ENTRY_PREFIX}${operationId}`;
+}
+
+function isEntryKey(key: string | null | undefined): boolean {
+  return typeof key === "string" && key.startsWith(TASK_OUTBOX_ENTRY_PREFIX);
+}
+
+function readIndexRaw(): string | null {
+  if (!isBrowser()) return null;
   try {
-    raw = window.localStorage.getItem(TASK_OUTBOX_STORAGE_KEY);
+    return window.localStorage.getItem(TASK_OUTBOX_STORAGE_KEY);
   } catch {
-    return cache ?? EMPTY_SERVER_SNAPSHOT;
+    return null;
   }
-  if (cache && !cacheDirty && raw === cacheRaw) return cache;
+}
+
+function parseIndex(raw: string | null): TaskOutboxIndex {
+  if (!raw) return { rev: 0, ids: [], legacy: false };
   let parsed: unknown = null;
   try {
-    parsed = raw ? JSON.parse(raw) : [];
+    parsed = JSON.parse(raw);
   } catch {
-    parsed = [];
+    return { rev: 0, ids: [], legacy: false };
   }
-  const entries = boundEntries(
-    (Array.isArray(parsed) ? parsed : []).map(parseEntry).filter((entry): entry is TaskOutboxEntry => Boolean(entry)),
-  );
-  cache = entries;
-  cacheRaw = raw;
-  cacheDirty = false;
+  if (Array.isArray(parsed)) {
+    const legacy = parsed
+      .map((value) => parseEntry(value))
+      .filter((entry): entry is TaskOutboxEntry => Boolean(entry));
+    return {
+      rev: 1,
+      ids: [...new Set(legacy.map((entry) => entry.operationId))],
+      legacy: true,
+    };
+  }
+  if (!isRecord(parsed)) return { rev: 0, ids: [], legacy: false };
+  const rev = Number.isSafeInteger(parsed.rev) ? Number(parsed.rev) : 0;
+  const ids = Array.isArray(parsed.ids)
+    ? parsed.ids
+        .map((value) => normalizeOperationId(value))
+        .filter((value): value is string => Boolean(value))
+    : [];
+  return { rev, ids: [...new Set(ids)], legacy: false };
+}
+
+function readStoredEntry(operationId: string): TaskOutboxEntry | null {
+  if (!isBrowser()) return null;
+  let raw: string | null = null;
+  try {
+    raw = window.localStorage.getItem(taskOutboxEntryStorageKey(operationId));
+  } catch {
+    return null;
+  }
+  if (!raw) return null;
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  return parseEntry(parsed);
+}
+
+function loadStoredEntries(index: TaskOutboxIndex): TaskOutboxEntry[] {
+  const entries: TaskOutboxEntry[] = [];
+  for (const id of index.ids) {
+    const entry = readStoredEntry(id);
+    if (entry) entries.push(entry);
+  }
   return entries;
 }
 
-function writeRaw(entries: TaskOutboxEntry[]): void {
-  if (!isBrowser()) return;
-  const bounded = boundEntries(entries);
-  cache = bounded;
-  cacheDirty = true;
-  const serialized = JSON.stringify(bounded);
-  try {
-    window.localStorage.setItem(TASK_OUTBOX_STORAGE_KEY, serialized);
-    cacheRaw = serialized;
-    cacheDirty = false;
-  } catch {
-    cacheRaw = null;
-  }
-  notify();
+function readRaw(): TaskOutboxEntry[] {
+  if (!isBrowser()) return EMPTY_SERVER_SNAPSHOT;
+  const raw = readIndexRaw();
+  if (cache && raw === cacheIndexRaw) return cache;
+  const index = parseIndex(raw);
+  const extras = index.legacy && cache ? [...cache, ...unpersisted.values()] : [...unpersisted.values()];
+  const merged = mergeByOperationId(loadStoredEntries(index), extras);
+  cache = boundEntries(merged);
+  cacheIndexRaw = raw;
+  return cache;
 }
 
-const listeners = new Set<() => void>();
-let storageAttached = false;
+function migrateLegacyIndex(): void {
+  if (!isBrowser()) return;
+  let parsed: unknown = null;
+  try {
+    const raw = readIndexRaw();
+    parsed = raw ? JSON.parse(raw) : null;
+  } catch {
+    return;
+  }
+  if (!Array.isArray(parsed)) return;
+  for (const value of parsed) {
+    const entry = parseEntry(value);
+    if (!entry) continue;
+    try {
+      window.localStorage.setItem(taskOutboxEntryStorageKey(entry.operationId), JSON.stringify(entry));
+      unpersisted.delete(entry.operationId);
+    } catch {
+      unpersisted.set(entry.operationId, entry);
+    }
+  }
+}
+
+function rememberUnpersisted(entries: TaskOutboxEntry[]): void {
+  for (const entry of entries) unpersisted.set(entry.operationId, entry);
+}
+
+function sameStoredShape(left: TaskOutboxEntry, right: TaskOutboxEntry): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function commitEntries(next: TaskOutboxEntry[], previous: TaskOutboxEntry[]): boolean {
+  const previousById = new Map(previous.map((entry) => [entry.operationId, entry]));
+  const previousIds = new Set(previousById.keys());
+  const nextIds = new Set(next.map((entry) => entry.operationId));
+  try {
+    for (const entry of next) {
+      const before = previousById.get(entry.operationId);
+      if (before && sameStoredShape(before, entry)) continue;
+      window.localStorage.setItem(taskOutboxEntryStorageKey(entry.operationId), JSON.stringify(entry));
+      unpersisted.delete(entry.operationId);
+    }
+    for (const id of previousIds) {
+      if (!nextIds.has(id)) window.localStorage.removeItem(taskOutboxEntryStorageKey(id));
+    }
+    const removed = [...previousIds].filter((id) => !nextIds.has(id));
+    const fresh = parseIndex(readIndexRaw());
+    const ids = [...new Set([...fresh.ids, ...nextIds])].filter((id) => !removed.includes(id));
+    window.localStorage.setItem(
+      TASK_OUTBOX_STORAGE_KEY,
+      JSON.stringify({ rev: fresh.rev + 1, ids }),
+    );
+  } catch {
+    cache = next;
+    cacheIndexRaw = null;
+    rememberUnpersisted(next);
+    return false;
+  }
+  cache = next;
+  cacheIndexRaw = null;
+  return true;
+}
+
+function writeSurvived(next: TaskOutboxEntry[]): boolean {
+  const stored = parseIndex(readIndexRaw());
+  const storedIds = new Set(stored.ids);
+  return next.every((entry) => storedIds.has(entry.operationId) && readStoredEntry(entry.operationId));
+}
 
 function notify(): void {
   for (const listener of [...listeners]) {
     try {
       listener();
     } catch {
-      // A throwing subscriber must never break an outbox write.
+      return;
     }
   }
 }
 
+function mutateOutbox(reducer: (fresh: TaskOutboxEntry[]) => TaskOutboxEntry[]): TaskOutboxEntry[] {
+  if (!isBrowser()) return EMPTY_SERVER_SNAPSHOT;
+  migrateLegacyIndex();
+  let next: TaskOutboxEntry[] = cache ?? EMPTY_SERVER_SNAPSHOT;
+  let previous: TaskOutboxEntry[] = cache ?? EMPTY_SERVER_SNAPSHOT;
+  for (let attempt = 0; attempt < TASK_OUTBOX_STORAGE_WRITE_ATTEMPTS; attempt += 1) {
+    previous = readRaw();
+    next = boundEntries(reducer(previous));
+    if (!commitEntries(next, previous)) {
+      notify();
+      return cache ?? next;
+    }
+    if (writeSurvived(next)) {
+      cacheIndexRaw = null;
+      notify();
+      return readRaw();
+    }
+  }
+  cache = next;
+  cacheIndexRaw = null;
+  rememberUnpersisted(next);
+  notify();
+  return next;
+}
+
+const listeners = new Set<() => void>();
+let storageAttached = false;
+
 function onStorageEvent(event: StorageEvent): void {
-  if (event.key !== null && event.key !== TASK_OUTBOX_STORAGE_KEY) return;
+  if (event.key !== null && event.key !== TASK_OUTBOX_STORAGE_KEY && !isEntryKey(event.key)) {
+    return;
+  }
+  if (event.storageArea && isBrowser() && event.storageArea !== window.localStorage) return;
   cache = null;
-  cacheRaw = null;
-  cacheDirty = false;
+  cacheIndexRaw = null;
   notify();
 }
 
@@ -431,15 +616,6 @@ export function getTaskOutboxServerSnapshot(): TaskOutboxEntry[] {
   return EMPTY_SERVER_SNAPSHOT;
 }
 
-export function __resetTaskOutboxForTests(): void {
-  cache = null;
-  cacheRaw = null;
-  cacheDirty = false;
-  inFlight = null;
-  activeDriver = createFetchTaskOutboxDriver();
-  listeners.clear();
-}
-
 export function createTaskOperationId(): string {
   const time = Date.now().toString(36);
   let random = "";
@@ -454,8 +630,11 @@ export function createTaskOperationId(): string {
 export function enqueueTaskOperation(
   input: Omit<TaskOutboxEntry, "version" | "createdAt" | "attemptCount" | "status">,
 ): TaskOutboxEntry {
+  const action = String(input.action ?? "").trim();
+  if (!isSupportedTaskOperation(input.route, action)) {
+    throw new TypeError(`unsupported_task_operation:${String(input.route)}:${action}`);
+  }
   const operationId = normalizeOperationId(input.operationId) ?? createTaskOperationId();
-  const action = String(input.action ?? "").trim() || "unknown";
   const entry: TaskOutboxEntry = {
     version: 1,
     operationId,
@@ -469,17 +648,20 @@ export function enqueueTaskOperation(
     ...(input.lastErrorCategory ? { lastErrorCategory: input.lastErrorCategory } : {}),
     ...(input.nextAttemptAt ? { nextAttemptAt: input.nextAttemptAt } : {}),
   };
-  const existing = readRaw().filter((candidate) => candidate.operationId !== operationId);
-  writeRaw([...existing, entry]);
+  mutateOutbox((fresh) => [
+    ...fresh.filter((candidate) => candidate.operationId !== operationId),
+    entry,
+  ]);
   return entry;
 }
 
 export function removeTaskOutboxEntry(operationId: string): boolean {
-  const entries = readRaw();
-  const remaining = entries.filter((entry) => entry.operationId !== operationId);
-  if (remaining.length === entries.length) return false;
-  writeRaw(remaining);
-  return true;
+  let removed = false;
+  mutateOutbox((fresh) => {
+    removed = fresh.some((entry) => entry.operationId === operationId);
+    return fresh.filter((entry) => entry.operationId !== operationId);
+  });
+  return removed;
 }
 
 export function cancelTaskOutboxEntry(operationId: string): boolean {
@@ -490,15 +672,14 @@ export function cancelTaskOutboxEntry(operationId: string): boolean {
 }
 
 function patchEntry(operationId: string, patch: Partial<TaskOutboxEntry>): TaskOutboxEntry | null {
-  const entries = readRaw();
   let updated: TaskOutboxEntry | null = null;
-  const next = entries.map((entry) => {
-    if (entry.operationId !== operationId) return entry;
-    updated = { ...entry, ...patch };
-    return updated;
-  });
-  if (!updated) return null;
-  writeRaw(next);
+  mutateOutbox((fresh) =>
+    fresh.map((entry) => {
+      if (entry.operationId !== operationId) return entry;
+      updated = { ...entry, ...patch };
+      return updated;
+    }),
+  );
   return updated;
 }
 
@@ -516,7 +697,11 @@ function requiresCredential(entry: TaskOutboxEntry): boolean {
   return CREDENTIAL_REQUIRED_ACTIONS[entry.route]?.has(entry.action) ?? false;
 }
 
-function markRetryable(entry: TaskOutboxEntry, category: TaskOutboxErrorCategory, reason: string): FlushTaskOutboxResult {
+function markRetryable(
+  entry: TaskOutboxEntry,
+  category: TaskOutboxErrorCategory,
+  reason: string,
+): FlushTaskOutboxResult {
   const attemptCount = entry.attemptCount + 1;
   if (attemptCount >= TASK_OUTBOX_MAX_ATTEMPTS) return markFailed(entry, category, reason);
   patchEntry(entry.operationId, {
@@ -543,7 +728,11 @@ function markFailed(
   return { acknowledged: 0, retryable: 0, permanent: 1 };
 }
 
-function markAuthRequired(entry: TaskOutboxEntry, reason: string, deferred: boolean): FlushTaskOutboxResult {
+function markAuthRequired(
+  entry: TaskOutboxEntry,
+  reason: string,
+  deferred: boolean,
+): FlushTaskOutboxResult {
   if (!deferred) {
     patchEntry(entry.operationId, {
       status: "auth-required",
@@ -551,20 +740,20 @@ function markAuthRequired(entry: TaskOutboxEntry, reason: string, deferred: bool
       lastErrorReason: reason,
       nextAttemptAt: undefined,
     });
-    return { acknowledged: 0, retryable: 0, permanent: 1 };
+    return AUTH_BLOCKED;
   }
-  const attemptCount = entry.attemptCount + 1;
-  if (attemptCount >= TASK_OUTBOX_MAX_ATTEMPTS) {
+  const authAttemptCount = (entry.authAttemptCount ?? 0) + 1;
+  if (authAttemptCount >= TASK_OUTBOX_MAX_AUTH_ATTEMPTS) {
     return markFailed(entry, "unauthorized", reason || "unauthorized");
   }
   patchEntry(entry.operationId, {
-    attemptCount,
     status: "auth-required",
     lastErrorCategory: "unauthorized",
     lastErrorReason: reason,
-    nextAttemptAt: new Date(Date.now() + taskOutboxBackoffMs(attemptCount)).toISOString(),
+    authAttemptCount,
+    nextAttemptAt: new Date(Date.now() + TASK_OUTBOX_AUTH_BACKOFF_MS).toISOString(),
   });
-  return { acknowledged: 0, retryable: 0, permanent: 1 };
+  return AUTH_BLOCKED;
 }
 
 function markReconciling(entry: TaskOutboxEntry, reason: string): FlushTaskOutboxResult {
@@ -590,7 +779,7 @@ async function acknowledge(
   try {
     await options.onAcknowledged?.(body);
   } catch {
-    return markRetryable(entry, "network", "adoption_failed");
+    return markRetryable(entry, "projection", "adoption_failed");
   }
   removeTaskOutboxEntry(entry.operationId);
   return { acknowledged: 1, retryable: 0, permanent: 0 };
@@ -600,6 +789,9 @@ function classifyConflict(entry: TaskOutboxEntry, body: TaskOutboxAcknowledgemen
   const reason = reasonOf(body);
   if (body.retryable === true || RETRYABLE_REASONS.has(reason)) {
     return markRetryable(entry, "server", reason || "retryable_conflict");
+  }
+  if (PERMANENT_REASONS.has(reason)) {
+    return markFailed(entry, "validation", reason);
   }
   if (body.semanticDuplicate === true || DUPLICATE_REASONS.has(reason)) {
     return markFailed(entry, "semantic-duplicate", reason || "semantic_duplicate");
@@ -628,6 +820,8 @@ interface SnapshotView {
   hasTasks: boolean;
   tasks: Record<string, unknown>[];
   history: Record<string, unknown>[];
+  receipts: Record<string, SnapshotOperationReceipt[]>;
+  configReceipts: Record<string, SnapshotConfigOperationReceipt>;
   legs: Record<string, unknown>;
 }
 
@@ -639,19 +833,33 @@ function snapshotView(read: SnapshotRead | null | undefined): SnapshotView | nul
     (Array.isArray(data.deletedTaskIds) ? data.deletedTaskIds : []).map((value) => Number(value)),
   );
   const tasks = hasTasks
-    ? (data.tasks as unknown[]).filter(
+    ? ((data.tasks as unknown[]).filter(
         (task) => isRecord(task) && !deleted.has(Number((task as Record<string, unknown>).id)),
-      ) as Record<string, unknown>[]
+      ) as Record<string, unknown>[])
     : [];
-  const weekData = isRecord(data.weekData)
-    ? data.weekData
-    : isRecord(read?.weekData)
-      ? read.weekData
+  const weekData = isRecord(read?.weekData)
+    ? read.weekData
+    : isRecord(data.weekData)
+      ? data.weekData
       : null;
+  const receipts = isRecord(read?.operationReceipts)
+    ? (read.operationReceipts as Record<string, SnapshotOperationReceipt[]>)
+    : isRecord(data.operationReceipts)
+      ? (data.operationReceipts as Record<string, SnapshotOperationReceipt[]>)
+      : {};
+  const configReceipts = isRecord(read?.configOperationReceipts)
+    ? (read.configOperationReceipts as Record<string, SnapshotConfigOperationReceipt>)
+    : isRecord(data.configOperationReceipts)
+      ? (data.configOperationReceipts as Record<string, SnapshotConfigOperationReceipt>)
+      : {};
   return {
     hasTasks,
     tasks,
-    history: Array.isArray(weekData?.history) ? (weekData.history as Record<string, unknown>[]) : [],
+    history: Array.isArray(weekData?.history)
+      ? (weekData.history as Record<string, unknown>[])
+      : [],
+    receipts,
+    configReceipts,
     legs: data,
   };
 }
@@ -668,11 +876,16 @@ function crewMembers(task: Record<string, unknown>): Record<string, unknown>[] {
   return crew.members.filter(isRecord);
 }
 
-function sameMember(left: unknown, right: unknown): boolean {
+function crewRemoved(task: Record<string, unknown>): string[] {
+  const crew = task.crew;
+  if (!isRecord(crew) || !Array.isArray(crew.removed)) return [];
+  return crew.removed.filter((name): name is string => typeof name === "string");
+}
+
+function sameName(left: unknown, right: unknown): boolean {
   const a = String(left ?? "").trim().toLowerCase();
   const b = String(right ?? "").trim().toLowerCase();
-  if (!a || !b) return false;
-  return a === b || a.includes(b) || b.includes(a);
+  return Boolean(a) && a === b;
 }
 
 function sameField(left: unknown, right: unknown): boolean {
@@ -688,14 +901,59 @@ function sameField(left: unknown, right: unknown): boolean {
   return false;
 }
 
-function hasEarnLine(view: SnapshotView, taskId: unknown): boolean {
+function hasExactEarnLine(
+  view: SnapshotView,
+  taskId: unknown,
+  memberName: unknown,
+): boolean {
   const id = Number(taskId);
+  const member = typeof memberName === "string" ? memberName : "";
   return view.history.some(
     (transaction) =>
       isRecord(transaction) &&
       transaction.type === "earn" &&
-      Number(transaction.taskId) === id,
+      Number(transaction.taskId) === id &&
+      (!member || sameName(transaction.member, member)),
   );
+}
+
+function receiptsFor(view: SnapshotView, operationId: string): SnapshotOperationReceipt[] {
+  const stored = view.receipts[operationId];
+  return Array.isArray(stored) ? stored.filter(isRecord) : [];
+}
+
+function receiptTaskIds(receipt: SnapshotOperationReceipt): number[] {
+  const ids = Array.isArray(receipt.taskIds)
+    ? receipt.taskIds.map(Number).filter((id) => Number.isSafeInteger(id))
+    : [];
+  const own = Number(receipt.taskId);
+  if (Number.isSafeInteger(own) && !ids.includes(own)) ids.push(own);
+  return ids;
+}
+
+function receiptProvesResolved(entry: TaskOutboxEntry, view: SnapshotView): boolean {
+  if (entry.route === "/api/tasks/config") {
+    const receipt = view.configReceipts[entry.operationId];
+    if (!isRecord(receipt)) return false;
+    return receipt.action === entry.action && receipt.kind === entry.payload.kind;
+  }
+  const receipts = receiptsFor(view, entry.operationId).filter(
+    (receipt) => receipt.action === entry.action,
+  );
+  if (!receipts.length) return false;
+  if (entry.route === "/api/tasks/manage" && entry.action === "add") {
+    return receipts.some((receipt) => Number.isSafeInteger(Number(receipt.taskId)));
+  }
+  const requested = Array.isArray(entry.payload.taskIds)
+    ? entry.payload.taskIds.map(Number)
+    : [Number(entry.payload.taskId)];
+  if (!requested.every((id) => Number.isSafeInteger(id) && id > 0)) return false;
+  const covered = new Set(receipts.flatMap((receipt) => receiptTaskIds(receipt)));
+  if (!requested.every((id) => covered.has(id))) return false;
+  if (entry.action === "delete") {
+    return receipts.every((receipt) => receipt.deleted === true);
+  }
+  return true;
 }
 
 function approveProvesResolved(entry: TaskOutboxEntry, view: SnapshotView): boolean {
@@ -719,47 +977,59 @@ function claimProvesResolved(entry: TaskOutboxEntry, view: SnapshotView): boolea
   if (!task) return false;
   const memberName = entry.payload.memberName;
   const crew = crewMembers(task);
-  const removed = isRecord(task.crew) && Array.isArray((task.crew as Record<string, unknown>).removed)
-    ? ((task.crew as Record<string, unknown>).removed as unknown[]).filter((name) => typeof name === "string")
-    : [];
+  const removed = crewRemoved(task);
 
   if (entry.action === "crew-join") {
-    return crew.some((member) => sameMember(member.name, memberName));
+    return crew.some((member) => sameName(member.name, memberName));
   }
   if (entry.action === "crew-checkin") {
     return crew.some(
       (member) =>
-        sameMember(member.name, memberName) &&
+        sameName(member.name, memberName) &&
         typeof member.checkedInAt === "string" &&
         member.checkedInAt.trim().length > 0,
     );
   }
   if (entry.action === "crew-remove") {
     const target = entry.payload.targetName ?? memberName;
-    if (removed.some((name) => sameMember(name, target))) return true;
-    return !crew.some((member) => sameMember(member.name, target));
+    if (removed.some((name) => sameName(name, target))) return true;
+    return !crew.some((member) => sameName(member.name, target));
   }
   if (entry.action === "undo") {
     return task.completed !== true && !isRecord(task.pendingApproval);
   }
   if (task.completed !== true) return false;
   if (isRecord(task.pendingApproval)) return true;
-  if (hasEarnLine(view, task.id)) return true;
-  return Boolean(memberName) && sameMember(task.completedBy, memberName);
+  if (hasExactEarnLine(view, task.id, memberName)) return true;
+  return Boolean(memberName) && sameName(task.completedBy, memberName);
 }
 
-function manageProvesResolved(entry: TaskOutboxEntry, view: SnapshotView): boolean {
+function manageAddProvesResolved(
+  entry: TaskOutboxEntry,
+  acknowledgement: TaskOutboxAcknowledgement | undefined,
+): boolean {
+  const expected = entry.payload.task;
+  const authoritative = isRecord(acknowledgement?.task) ? acknowledgement.task : null;
+  if (!isRecord(expected) || !authoritative) return false;
+  const id = Number(authoritative.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return false;
+  const temporaryId = Number(entry.displayTarget.temporaryId ?? 0);
+  if (Number.isSafeInteger(temporaryId) && temporaryId > 0 && id === temporaryId) return false;
+  return MANAGE_ADD_TASK_KEYS.every(
+    (key) => !hasOwn(expected, key) || sameField(authoritative[key], expected[key]),
+  );
+}
+
+function manageProvesResolved(
+  entry: TaskOutboxEntry,
+  view: SnapshotView,
+  acknowledgement: TaskOutboxAcknowledgement | undefined,
+): boolean {
   if (entry.action === "delete") {
     return findTask(view, entry.payload.taskId) === null;
   }
   if (entry.action === "add") {
-    const task = entry.payload.task;
-    if (!isRecord(task) || typeof task.title !== "string") return false;
-    return view.tasks.some(
-      (row) =>
-        sameField(row.title, task.title) &&
-        (task.assignee === undefined || sameMember(row.assignee ?? row.assigned, task.assignee)),
-    );
+    return manageAddProvesResolved(entry, acknowledgement);
   }
   const row = findTask(view, entry.payload.taskId);
   if (!row) return false;
@@ -770,9 +1040,13 @@ function manageProvesResolved(entry: TaskOutboxEntry, view: SnapshotView): boole
   return fields.every((field) => sameField(row[field], patch[field]));
 }
 
-function configItemMatches(candidate: unknown, expected: Record<string, unknown>, keys: readonly string[]): boolean {
+function configItemMatches(
+  candidate: unknown,
+  expected: Record<string, unknown>,
+  keys: readonly string[],
+): boolean {
   if (!isRecord(candidate)) return false;
-  return keys.every((key) => !(key in expected) || sameField(candidate[key], expected[key]));
+  return keys.every((key) => !hasOwn(expected, key) || sameField(candidate[key], expected[key]));
 }
 
 function configProvesResolved(entry: TaskOutboxEntry, view: SnapshotView): boolean {
@@ -810,14 +1084,18 @@ function configProvesResolved(entry: TaskOutboxEntry, view: SnapshotView): boole
 export function snapshotProvesResolved(
   entry: TaskOutboxEntry,
   read: SnapshotRead | null | undefined,
+  acknowledgement?: TaskOutboxAcknowledgement,
 ): boolean {
   const view = snapshotView(read);
   if (!view) return false;
+  if (receiptProvesResolved(entry, view)) return true;
   if (entry.route === "/api/tasks/config") return configProvesResolved(entry, view);
   if (!view.hasTasks) return false;
   if (entry.route === "/api/tasks/approve") return approveProvesResolved(entry, view);
   if (entry.route === "/api/tasks/claim") return claimProvesResolved(entry, view);
-  if (entry.route === "/api/tasks/manage") return manageProvesResolved(entry, view);
+  if (entry.route === "/api/tasks/manage") {
+    return manageProvesResolved(entry, view, acknowledgement);
+  }
   return false;
 }
 
@@ -840,49 +1118,84 @@ export function buildTaskOperationRequestBody(
 export async function sendTaskOperationRequest(
   entry: TaskOutboxEntry,
   credential?: string,
+  requestTimeoutMs: number = TASK_OUTBOX_REQUEST_TIMEOUT_MS,
 ): Promise<TaskOutboxSendResult> {
   const response = await fetch(entry.route, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(buildTaskOperationRequestBody(entry, credential)),
+    signal: AbortSignal.timeout(requestTimeoutMs),
   });
   const body = await response.json().catch(() => ({}));
   return {
     status: response.status,
-    body: { operationId: entry.operationId, reconciled: false, ...(isRecord(body) ? body : {}) },
+    body: { operationId: entry.operationId, ...(isRecord(body) ? body : {}) } as TaskOutboxAcknowledgement,
   };
 }
 
-export async function pullTaskSnapshotDocument(): Promise<SnapshotRead> {
-  const response = await fetch("/api/tasks/sync", { cache: "no-store" });
+export async function pullTaskSnapshotDocument(
+  requestTimeoutMs: number = TASK_OUTBOX_REQUEST_TIMEOUT_MS,
+): Promise<SnapshotRead> {
+  const response = await fetch("/api/tasks/sync", {
+    cache: "no-store",
+    signal: AbortSignal.timeout(requestTimeoutMs),
+  });
   if (!response.ok) throw new Error(`tasks_sync_${response.status}`);
   const body = await response.json().catch(() => ({}));
   const record = isRecord(body) ? body : {};
+  const snapshot = isRecord(record.snapshot) ? (record.snapshot as SnapshotData) : null;
+  const weekData = isRecord(snapshot?.weekData)
+    ? (snapshot.weekData as unknown as WeekData)
+    : undefined;
+  const operationReceipts = isRecord(snapshot?.operationReceipts)
+    ? (snapshot.operationReceipts as Record<string, SnapshotOperationReceipt[]>)
+    : undefined;
+  const configOperationReceipts = isRecord(snapshot?.configOperationReceipts)
+    ? (snapshot.configOperationReceipts as Record<string, SnapshotConfigOperationReceipt>)
+    : undefined;
   return {
-    snapshot: isRecord(record.snapshot) ? (record.snapshot as SnapshotData) : null,
+    snapshot,
     reconciled: record.reconciled === true,
+    ...(weekData ? { weekData } : {}),
+    ...(operationReceipts ? { operationReceipts } : {}),
+    ...(configOperationReceipts ? { configOperationReceipts } : {}),
   };
 }
 
 export function createFetchTaskOutboxDriver(
-  overrides: Partial<TaskOutboxDriver> = {},
+  overrides: TaskOutboxFetchDriverOptions = {},
 ): TaskOutboxDriver {
+  const requestTimeoutMs = overrides.requestTimeoutMs ?? TASK_OUTBOX_REQUEST_TIMEOUT_MS;
   return {
-    send: overrides.send ?? sendTaskOperationRequest,
+    send:
+      overrides.send ??
+      ((entry, credential) => sendTaskOperationRequest(entry, credential, requestTimeoutMs)),
     ...(overrides.getCredential ? { getCredential: overrides.getCredential } : {}),
-    ...(overrides.pullSnapshot ? { pullSnapshot: overrides.pullSnapshot } : {}),
+    pullSnapshot:
+      overrides.pullSnapshot ?? (() => pullTaskSnapshotDocument(requestTimeoutMs)),
     ...(overrides.onAcknowledged ? { onAcknowledged: overrides.onAcknowledged } : {}),
   };
 }
 
-let activeDriver: TaskOutboxDriver = createFetchTaskOutboxDriver();
+const driverStack: TaskOutboxDriver[] = [];
 
-export function setTaskOutboxDriver(driver: TaskOutboxDriver | null): void {
-  activeDriver = driver ?? createFetchTaskOutboxDriver();
+export function registerTaskOutboxDriver(driver: Partial<TaskOutboxDriver>): () => void {
+  const resolved = createFetchTaskOutboxDriver(driver);
+  driverStack.push(resolved);
+  return () => {
+    const index = driverStack.indexOf(resolved);
+    if (index >= 0) driverStack.splice(index, 1);
+  };
 }
 
 export function getTaskOutboxDriver(): TaskOutboxDriver {
-  return activeDriver;
+  return driverStack[driverStack.length - 1] ?? createFetchTaskOutboxDriver();
+}
+
+export function warnTaskOutboxFlushFailure(error: unknown): void {
+  if (typeof console === "undefined") return;
+  const name = error instanceof Error && error.name ? error.name : "unknown";
+  console.warn("[task-outbox] flush failed", name);
 }
 
 async function proveFromSnapshot(
@@ -897,7 +1210,7 @@ async function proveFromSnapshot(
   } catch {
     return null;
   }
-  if (!snapshotProvesResolved(entry, read)) return null;
+  if (!snapshotProvesResolved(entry, read, body)) return null;
   return { ...body, reconciled: true };
 }
 
@@ -905,13 +1218,18 @@ async function processEntry(
   entry: TaskOutboxEntry,
   options: FlushTaskOutboxOptions,
 ): Promise<FlushTaskOutboxResult> {
-  const credential = options.getCredential?.(entry);
+  let credential: string | undefined;
+  try {
+    credential = options.getCredential?.(entry);
+  } catch {
+    return markRetryable(entry, "network", "credential_resolver_failed");
+  }
   if (requiresCredential(entry) && !credential) {
     return markAuthRequired(entry, "credential_missing", false);
   }
 
   let status = 0;
-  let body: TaskOutboxAcknowledgement = { operationId: entry.operationId, reconciled: false };
+  let body: TaskOutboxAcknowledgement = { operationId: entry.operationId };
   try {
     const response = await options.send(entry, credential);
     status = Number(response?.status ?? 0);
@@ -920,45 +1238,70 @@ async function processEntry(
     return markRetryable(entry, "network", "send_failed");
   }
 
-  if (status === 200 && body.reconciled !== false) {
-    return acknowledge(entry, body, options);
+  try {
+    if (status === 200 && body.reconciled !== false) {
+      return await acknowledge(entry, body, options);
+    }
+    if (status === 200 || status === 202 || status === 409) {
+      const proof = await proveFromSnapshot(entry, body, options);
+      if (proof) return await acknowledge(entry, proof, options);
+      if (status === 409) return classifyConflict(entry, body);
+      if (status === 200) return markRetryable(entry, "projection", "unreconciled_success");
+      return markReconciling(entry, reasonOf(body) || "projection_pending");
+    }
+    return classifyFailure(entry, status, body);
+  } catch {
+    return markRetryable(entry, "network", "acknowledgement_failed");
   }
-  if (status === 200 || status === 202 || status === 409) {
-    const proof = await proveFromSnapshot(entry, body, options);
-    if (proof) return acknowledge(entry, proof, options);
-    if (status === 409) return classifyConflict(entry, body);
-    if (status === 200) return markRetryable(entry, "projection", "unreconciled_success");
-    return markReconciling(entry, reasonOf(body) || "projection_pending");
-  }
-  return classifyFailure(entry, status, body);
+}
+
+function mergeResults(
+  target: FlushTaskOutboxResult,
+  outcome: FlushTaskOutboxResult,
+): void {
+  target.acknowledged += outcome.acknowledged;
+  target.retryable += outcome.retryable;
+  target.permanent += outcome.permanent;
 }
 
 async function runFlush(options: FlushTaskOutboxOptions): Promise<FlushTaskOutboxResult> {
   const result: FlushTaskOutboxResult = { acknowledged: 0, retryable: 0, permanent: 0 };
-  const entries = readRaw();
-  if (!entries.length) return result;
+  let entries: TaskOutboxEntry[] = [];
+  try {
+    entries = readRaw();
+  } catch {
+    return result;
+  }
   for (const entry of entries) {
-    if (entry.status === "failed") continue;
-    if (
-      entry.status === "auth-required" &&
-      !(requiresCredential(entry) && options.getCredential?.(entry))
-    ) {
+    try {
+      if (entry.status === "failed") continue;
+      if (
+        entry.status === "auth-required" &&
+        entry.lastErrorReason === "credential_missing" &&
+        !options.getCredential?.(entry)
+      ) {
+        continue;
+      }
+      if (entry.nextAttemptAt) {
+        const due = Date.parse(entry.nextAttemptAt);
+        if (Number.isFinite(due) && Date.now() < due) continue;
+      }
+      let outcome: FlushTaskOutboxResult;
+      try {
+        outcome = await processEntry(entry, options);
+      } catch {
+        outcome = markRetryable(entry, "network", "entry_failed");
+      }
+      mergeResults(result, outcome);
+    } catch {
       continue;
     }
-    if (entry.nextAttemptAt) {
-      const due = Date.parse(entry.nextAttemptAt);
-      if (Number.isFinite(due) && Date.now() < due) continue;
-    }
-    const outcome = await processEntry(entry, options);
-    result.acknowledged += outcome.acknowledged;
-    result.retryable += outcome.retryable;
-    result.permanent += outcome.permanent;
   }
   return result;
 }
 
 export function flushTaskOutbox(
-  options: FlushTaskOutboxOptions = activeDriver,
+  options: FlushTaskOutboxOptions = getTaskOutboxDriver(),
 ): Promise<FlushTaskOutboxResult> {
   if (inFlight) return inFlight;
   const running = runFlush(options);
@@ -970,5 +1313,14 @@ export function flushTaskOutbox(
 }
 
 export function requestTaskOutboxFlush(): Promise<FlushTaskOutboxResult> {
-  return flushTaskOutbox(activeDriver);
+  return flushTaskOutbox(getTaskOutboxDriver());
+}
+
+export function __resetTaskOutboxForTests(): void {
+  cache = null;
+  cacheIndexRaw = null;
+  unpersisted = new Map<string, TaskOutboxEntry>();
+  inFlight = null;
+  driverStack.length = 0;
+  listeners.clear();
 }
