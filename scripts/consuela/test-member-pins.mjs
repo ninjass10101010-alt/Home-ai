@@ -11,11 +11,25 @@
 // 3. The fallback member list carries NO pin fields at all (nothing real
 //      ships in the client bundle)
 //   4. mergeMemberFallbacks keeps live pins when PB covers everyone, appends
-//      fallbacks missing from PB, and covers an empty PB instance
+//      fallbacks missing from PB, and covers an empty PB instance — for the
+//      non-production opt-in only. The last step pins the production behavior:
+//      with no opt-in (or under NODE_ENV=production) an empty PB resolves to
+//      NO members at all.
 //   5. Seed-side defaults exist server-only (pb-seed.ts) and agree with the
 //      known family first names
 
 import assert from "node:assert/strict";
+
+// The merge steps below run in the opt-in world (a dev/integration instance).
+// The gate is read per call by canonicalMemberFallbacksEnabled(), so setting
+// the env before the imports is enough; the final step deletes it again to
+// prove the ungated/production path. NODE_ENV is cleared for the same reason —
+// a shell that happens to export "production" must not silently disable the
+// opt-in these steps describe. Both are restored before the script exits.
+const OPT_IN = "NEXT_PUBLIC_CANONICAL_MEMBER_FALLBACKS";
+const CALLER_NODE_ENV = process.env.NODE_ENV;
+process.env[OPT_IN] = "true";
+delete process.env.NODE_ENV;
 
 const { resolveMemberPin, memberPinMatches } = await import(
   "../../src/lib/member-pins.ts"
@@ -80,10 +94,33 @@ await step("mergeMemberFallbacks appends fallbacks missing from PB", () => {
   assert.ok(merged.some((m) => m.name === "Caspian" && !("pin" in m)));
 });
 
-await step("mergeMemberFallbacks returns all fallbacks for an empty PB (dev env regression)", () => {
+await step("mergeMemberFallbacks returns all fallbacks for an empty PB (dev opt-in)", () => {
   const merged = mergeMemberFallbacks([]);
   assert.equal(merged.length, 9);
   assert.ok(merged.every((m) => !("pin" in m)));
+});
+
+await step("mergeMemberFallbacks invents nobody without the opt-in (production path)", () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  try {
+    delete process.env[OPT_IN];
+    // No opt-in (a bare dev shell) and NODE_ENV=production must both resolve
+    // an empty PocketBase roster to zero members — never the built-in family.
+    assert.deepEqual(mergeMemberFallbacks([]), []);
+    assert.deepEqual(mergeMemberFallbacks([{ name: "   " }]), []);
+
+    process.env.NODE_ENV = "production";
+    process.env[OPT_IN] = "true";
+    assert.deepEqual(mergeMemberFallbacks([]), []);
+
+    // A live PocketBase roster is still the only source once the gate is off.
+    const live = [{ name: "Rebecca (Mom)", pin: "1111" }];
+    assert.deepEqual(mergeMemberFallbacks(live), live);
+  } finally {
+    process.env[OPT_IN] = "true";
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
+  }
 });
 
 await step("seed-side defaults cover the family and are server-resolved only", () => {
@@ -95,6 +132,11 @@ await step("seed-side defaults cover the family and are server-resolved only", (
   // The seed-side map must never leak into the client-reachable libs.
   assert.ok(!JSON.stringify(memberFallbacks).includes(Object.values(MEMBER_DEFAULT_PINS)[0]));
 });
+
+// Restore the caller's env so importing this script has no side effects.
+if (CALLER_NODE_ENV === undefined) delete process.env.NODE_ENV;
+else process.env.NODE_ENV = CALLER_NODE_ENV;
+delete process.env[OPT_IN];
 
 if (failures > 0) {
   console.error(`\n${failures} step(s) failed`);

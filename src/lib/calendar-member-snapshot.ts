@@ -1,11 +1,12 @@
 import { db } from "@/db";
+import { canonicalMemberFallbacksEnabled } from "@/lib/member-fallback";
 
 /**
  * Calendar member-chip roster snapshot — the getSnapshot/subscribe pair for
  * the page's useSyncExternalStore.
  *
  * Hydration safety: the server snapshot is always the deterministic fallback
- * list (never the live roster cache), so SSR HTML and the client's first
+ * (never the live roster cache), so SSR HTML and the client's first
  * render are identical; the live roster swaps in via the
  * `consuela-members-updated` window event (dispatched by db.refreshMembersCache
  * / patchMemberLocal) AND via a priming read at subscribe time — events that
@@ -13,6 +14,14 @@ import { db } from "@/db";
  * previous implementation listened for `storage`
  * events on the "consuela-members" key — dead: nothing in the codebase writes
  * that key, and storage events never fire cross-device anyway.
+ *
+ * Fallback gate (same seam as the server roster — src/lib/member-fallback.ts):
+ * the fabricated roster below is a NON-PRODUCTION opt-in only. In production a
+ * missing/unreadable PocketBase renders an EMPTY chip strip rather than
+ * painting an invented family onto the dashboard; the "All" chip is hardcoded
+ * in the page and every real name comes from the live PB roster. Both branches
+ * return a module-level constant, so the snapshot identity is stable and
+ * useSyncExternalStore never re-renders on a fresh array.
  */
 
 export const DEFAULT_CALENDAR_MEMBERS = [
@@ -26,10 +35,19 @@ export const DEFAULT_CALENDAR_MEMBERS = [
   { name: "Caspian", color: "cyan", emoji: "🧒" },
 ];
 
-let cachedMembersSnapshot = DEFAULT_CALENDAR_MEMBERS;
+/** Stable empty roster — a module constant so the snapshot identity never churns. */
+const NO_CALENDAR_MEMBERS: typeof DEFAULT_CALENDAR_MEMBERS = [];
+
+function fallbackMembersSnapshot() {
+  return canonicalMemberFallbacksEnabled()
+    ? DEFAULT_CALENDAR_MEMBERS
+    : NO_CALENDAR_MEMBERS;
+}
+
+let cachedMembersSnapshot = fallbackMembersSnapshot();
 
 export function getServerMembersSnapshot() {
-  return DEFAULT_CALENDAR_MEMBERS;
+  return fallbackMembersSnapshot();
 }
 
 export function getClientMembersSnapshot() {
@@ -55,5 +73,5 @@ export function subscribeMembersSnapshot(onStoreChange: () => void) {
 
 /** Test-only: reset the module-level cache between tests. */
 export function resetClientMembersSnapshotForTests() {
-  cachedMembersSnapshot = DEFAULT_CALENDAR_MEMBERS;
+  cachedMembersSnapshot = fallbackMembersSnapshot();
 }

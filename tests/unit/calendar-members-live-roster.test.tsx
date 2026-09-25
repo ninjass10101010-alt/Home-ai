@@ -7,6 +7,7 @@ import {
   resetClientMembersSnapshotForTests,
   subscribeMembersSnapshot,
 } from "@/lib/calendar-member-snapshot";
+import { NEXT_PUBLIC_CANONICAL_MEMBER_FALLBACKS } from "@/lib/member-fallback";
 
 const rosterMock = vi.hoisted(() => ({ members: [] as any[] }));
 vi.mock("@/db", () => ({
@@ -17,6 +18,10 @@ vi.mock("@/db", () => ({
 
 describe("calendar member snapshot (live roster via priming + consuela-members-updated)", () => {
   beforeEach(() => {
+    // The DEFAULT fallback list is a non-production opt-in only, so these cases
+    // describe the opt-in world. The production gate has its own suite in
+    // calendar-member-snapshot-production.test.tsx.
+    vi.stubEnv(NEXT_PUBLIC_CANONICAL_MEMBER_FALLBACKS, "true");
     rosterMock.members = [
       { name: "All", color: "green", emoji: "👨‍👩‍👧‍👦" },
       { name: "Rebecca", color: "green", emoji: "🐱" },
@@ -26,6 +31,7 @@ describe("calendar member snapshot (live roster via priming + consuela-members-u
 
   afterEach(() => {
     resetClientMembersSnapshotForTests();
+    vi.unstubAllEnvs();
   });
 
   it("server snapshot stays the deterministic fallback (SSR/hydration safe)", () => {
