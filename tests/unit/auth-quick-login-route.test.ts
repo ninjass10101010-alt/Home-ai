@@ -10,13 +10,9 @@ vi.mock("@/lib/server-auth", () => ({
   },
   sanitizeMember: (m: any) => ({ ...m, pin: undefined }),
 }));
-vi.mock("@/lib/session", () => ({
-  signSession: async () => "v1.token.sig",
-  SESSION_COOKIE: "consuela_session",
-  SESSION_TTL_SECONDS: 604800,
-}));
 
 import { POST } from "@/app/api/auth/quick-login/route";
+import { SESSION_COOKIE, verifySession } from "@/lib/session";
 
 function req(body: any) {
   return new NextRequest("http://localhost/api/auth/quick-login", {
@@ -41,10 +37,24 @@ describe("POST /api/auth/quick-login", () => {
   it("signs in an under-10 child and sets the session cookie", async () => {
     const res = await POST(req({ memberName: "Caspian" }));
     expect(res.status).toBe(200);
-    expect(res.cookies.get("consuela_session")?.value).toBe("v1.token.sig");
+    const token = res.cookies.get(SESSION_COOKIE)?.value;
+    expect(token).toBeTruthy();
+    expect(await verifySession(token)).toMatchObject({
+      memberId: "a",
+      name: "Caspian",
+      role: "child",
+    });
     const body = await res.json();
     expect(body.member.name).toBe("Caspian");
     expect(body.member.pin).toBeUndefined();
+  });
+  it("sets the child role's 900 second Max-Age on the session cookie", async () => {
+    const res = await POST(req({ memberName: "Caspian" }));
+    const setCookie = res.headers.get("set-cookie")!;
+    expect(setCookie).toContain("Max-Age=900");
+    expect(setCookie).toContain("HttpOnly");
+    expect(setCookie.toLowerCase()).toContain("samesite=lax");
+    expect(setCookie).toContain("Path=/");
   });
   it("rejects a 10-year-old (strictly under 10)", async () => {
     expect((await POST(req({ memberName: "Jasmine" }))).status).toBe(403);
@@ -65,6 +75,6 @@ describe("POST /api/auth/quick-login", () => {
     const res = await POST(req({ memberName: "Caspian" }));
     expect(res.status).toBe(403);
     expect((await res.json()).error).toBe("pin_required");
-    expect(res.cookies.get("consuela_session")).toBeUndefined();
+    expect(res.cookies.get(SESSION_COOKIE)).toBeUndefined();
   });
 });

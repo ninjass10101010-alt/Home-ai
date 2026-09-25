@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { middleware, isAdultOnlyPath } from "../../src/middleware";
 import { signSession, SESSION_COOKIE } from "../../src/lib/session";
+import type { SessionRole } from "../../src/lib/session-policy";
 
 function req(path: string, cookie?: string): NextRequest {
   return new NextRequest(`http://localhost${path}`, {
@@ -19,7 +20,7 @@ const childCookie = async () =>
 const petCookie = async () =>
   `${SESSION_COOKIE}=${await signSession({ memberId: "m8", name: "Rocco", role: "pet" })}`;
 const unknownRoleCookie = async () =>
-  `${SESSION_COOKIE}=${await signSession({ memberId: "m9", name: "X", role: "guest-admin" })}`;
+  `${SESSION_COOKIE}=${await signSession({ memberId: "m9", name: "X", role: "guest-admin" as SessionRole })}`;
 
 beforeEach(() => vi.stubEnv("SESSION_SECRET", "test-secret-0123456789"));
 afterEach(() => vi.unstubAllEnvs());

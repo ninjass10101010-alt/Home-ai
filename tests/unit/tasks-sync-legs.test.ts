@@ -9,6 +9,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { signSession, SESSION_COOKIE } from "@/lib/session";
+import type { SessionRole } from "@/lib/session-policy";
 
 const db = {
   rows: [] as any[],
@@ -49,11 +50,11 @@ vi.mock("@/lib/task-projection-reconciler", () => ({
 
 import { GET, LEGACY_SYNC_WRITE_ERROR, POST } from "@/app/api/tasks/sync/route";
 
-async function post(body: unknown, role?: string) {
+async function post(body: unknown, role?: SessionRole) {
   return postRaw(JSON.stringify(body), role);
 }
 
-async function postRaw(rawBody: string, role?: string) {
+async function postRaw(rawBody: string, role?: SessionRole) {
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (role) {
     const token = await signSession({ memberId: "m1", name: "Kid", role });

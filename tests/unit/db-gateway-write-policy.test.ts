@@ -6,6 +6,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { signSession, SESSION_COOKIE } from "@/lib/session";
+import type { SessionRole } from "@/lib/session-policy";
 
 const mocks = vi.hoisted(() => ({ withAdmin: vi.fn(), requireLiveSession: vi.fn() }));
 vi.mock("@/lib/pb-auth", () => ({ withAdmin: (fn: any) => mocks.withAdmin(fn) }));
@@ -63,7 +64,7 @@ function makeCollectionMocks() {
 let col = makeCollectionMocks();
 const pbOk = { collection: (_name?: string) => col };
 
-async function req(url: string, role: string | undefined, init?: RequestInit): Promise<NextRequest> {
+async function req(url: string, role: SessionRole | undefined, init?: RequestInit): Promise<NextRequest> {
   // Cookies must be present at construction — NextRequest.cookies is parsed
   // from the initial headers; a later headers.set() does not update it.
   const headers: Record<string, string> = { ...((init?.headers as Record<string, string>) || {}) };

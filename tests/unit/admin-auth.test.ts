@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { SessionRole } from "@/lib/session-policy";
 
 // Credential order is exact: server bearer -> live parent session -> a present
 // session's failure -> parent x-admin-pin. The bearer and PIN paths must never
@@ -26,7 +27,7 @@ function req(headers: Record<string, string> = {}): Request {
   return new Request("http://localhost/api/admin/x", { headers });
 }
 
-async function sessionCookie(role: string): Promise<string> {
+async function sessionCookie(role: SessionRole): Promise<string> {
   const { signSession, SESSION_COOKIE } = await import("../../src/lib/session");
   const token = await signSession({ memberId: `m-${role}`, name: `N-${role}`, role });
   return `${SESSION_COOKIE}=${token}`;

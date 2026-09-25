@@ -1,12 +1,42 @@
+import { sessionTtlSeconds, type SessionRole } from "./session-policy";
+
 export const SESSION_COOKIE = "consuela_session";
-export const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
 
 export interface SessionPayload {
   memberId: string;
   name: string;
-  role: string;
+  role: SessionRole;
   iat?: number;
   exp: number;
+}
+
+// The dashboard is served over plain HTTP on the LAN (http://192.168.0.28:3000).
+// Browsers refuse to send Secure cookies over http, so a hardcoded
+// `secure: NODE_ENV === "production"` silently killed every session-gated call
+// in the NAS deployment (recipes wouldn't save, chat tools 401'd, etc.).
+// Default stays secure in production; set SESSION_COOKIE_SECURE=false for
+// HTTP-only LAN deployments.
+export function sessionCookieSecure(): boolean {
+  return process.env.NODE_ENV === "production" && process.env.SESSION_COOKIE_SECURE !== "false";
+}
+
+export function sessionCookieOptions(
+  role: SessionRole,
+  maxAge?: number
+): {
+  httpOnly: true;
+  sameSite: "lax";
+  secure: boolean;
+  path: "/";
+  maxAge: number;
+} {
+  return {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: sessionCookieSecure(),
+    path: "/",
+    maxAge: maxAge ?? sessionTtlSeconds(role),
+  };
 }
 
 const enc = new TextEncoder();
@@ -43,13 +73,13 @@ function secret(): string {
 
 export async function signSession(
   payload: Omit<SessionPayload, "iat" | "exp">,
-  ttlSeconds: number = SESSION_TTL_SECONDS
+  ttlSeconds: number = sessionTtlSeconds(payload.role)
 ): Promise<string> {
   const s = secret();
+  if (!s) throw new Error("SESSION_SECRET is not configured");
   const now = Math.floor(Date.now() / 1000);
   const full: SessionPayload = { ...payload, iat: now, exp: now + ttlSeconds };
   const body = b64url(enc.encode(JSON.stringify(full)));
-  if (!s) return `v1.${body}.`;
   const sig = await crypto.subtle.sign("HMAC", await key(s), enc.encode(`v1.${body}`));
   return `v1.${body}.${b64url(sig)}`;
 }

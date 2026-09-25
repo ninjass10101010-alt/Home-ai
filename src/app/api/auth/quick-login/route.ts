@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { findMemberByName, sanitizeMember } from "@/lib/server-auth";
-import { signSession, SESSION_COOKIE, SESSION_TTL_SECONDS } from "@/lib/session";
+import { SESSION_COOKIE, sessionCookieOptions, signSession } from "@/lib/session";
 import { PIN_FREE_MAX_AGE } from "@/lib/task-utils";
-import { sessionCookieSecure } from "../login/route";
 
 export const dynamic = "force-dynamic";
 
@@ -36,13 +35,7 @@ export async function POST(request: NextRequest) {
     }
     const token = await signSession({ memberId: member.id, name: member.name, role: member.role });
     const res = NextResponse.json({ success: true, member: sanitizeMember(member) });
-    res.cookies.set(SESSION_COOKIE, token, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: sessionCookieSecure(),
-      path: "/",
-      maxAge: SESSION_TTL_SECONDS,
-    });
+    res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions(member.role));
     return res;
   } catch (err) {
     console.error("[auth/quick-login] failed:", err instanceof Error ? err.message : String(err));

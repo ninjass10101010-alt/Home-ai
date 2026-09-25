@@ -19,8 +19,7 @@ vi.mock("@/lib/server-auth", () => ({
 import { POST as loginPOST } from "@/app/api/auth/login/route";
 import { GET as whoamiGET } from "@/app/api/auth/whoami/route";
 import { POST as logoutPOST } from "@/app/api/auth/logout/route";
-import { sessionCookieSecure } from "@/app/api/auth/login/route";
-import { verifySession } from "@/lib/session";
+import { sessionCookieSecure, verifySession } from "@/lib/session";
 
 function req(url: string, init?: RequestInit): NextRequest {
   return new NextRequest(url, init as any);
@@ -53,7 +52,40 @@ describe("POST /api/auth/login", () => {
     expect(setCookie).toContain("consuela_session=");
     expect(setCookie).toContain("HttpOnly");
     expect(setCookie.toLowerCase()).toContain("samesite=lax");
+    expect(setCookie).toContain("Path=/");
     expect((await res.json()).member.pin).toBeUndefined();
+  });
+
+  it("sets the role-aware Max-Age on the session cookie", async () => {
+    mocks.verifyPinFromPB.mockResolvedValue({ id: "m1", name: "Rebecca", role: "parent", pin: "9999" });
+    const parent = await loginPOST(req("http://x/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ memberName: "Rebecca", pin: "1234" }),
+    }));
+    expect(parent.headers.get("set-cookie")).toContain("Max-Age=1800");
+
+    mocks.verifyPinFromPB.mockResolvedValue({ id: "m-kid", name: "Caspian", role: "child", pin: "1010" });
+    const child = await loginPOST(req("http://x/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ memberName: "Caspian", pin: "1010" }),
+    }));
+    expect(child.headers.get("set-cookie")).toContain("Max-Age=900");
+  });
+
+  it("refuses a PocketBase role outside the session vocabulary and sets NO cookie", async () => {
+    mocks.verifyPinFromPB.mockResolvedValue({ id: "m9", name: "Guest Admin", role: "guest-admin", pin: "1234" });
+
+    const res = await loginPOST(req("http://x/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ memberName: "Guest Admin", pin: "1234" }),
+    }));
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "unsupported_role" });
+    expect(res.headers.get("set-cookie")).toBeNull();
   });
 
   it("returns 401 on invalid PIN and 400 on missing fields", async () => {
@@ -130,5 +162,34 @@ describe("POST /api/auth/logout", () => {
   it("clears the cookie", async () => {
     const res = await logoutPOST(req("http://x/api/auth/logout", { method: "POST" }));
     expect(res.headers.get("set-cookie")).toContain("Max-Age=0");
+  });
+
+  it("expires the cookie with the same attributes the login route issues", async () => {
+    mocks.verifyPinFromPB.mockResolvedValue({ id: "m1", name: "Rebecca", role: "parent", pin: "9999" });
+    const login = await loginPOST(req("http://x/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ memberName: "Rebecca", pin: "1234" }),
+    }));
+    const logout = await logoutPOST(req("http://x/api/auth/logout", { method: "POST" }));
+
+    const attributes = (value: string) =>
+      value
+        .split(";")
+        .map((part) => part.trim())
+        .filter(
+          (part) =>
+            !part.startsWith("Max-Age") &&
+            !part.startsWith("Expires=") &&
+            !part.startsWith("consuela_session="),
+        )
+        .sort();
+
+    expect(attributes(logout.headers.get("set-cookie")!)).toEqual(
+      attributes(login.headers.get("set-cookie")!),
+    );
+    expect(attributes(logout.headers.get("set-cookie")!)).toContain("HttpOnly");
+    expect(attributes(logout.headers.get("set-cookie")!)).toContain("Path=/");
+    expect(logout.headers.get("set-cookie")).toContain("Max-Age=0");
   });
 });

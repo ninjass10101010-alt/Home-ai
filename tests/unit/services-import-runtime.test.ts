@@ -24,6 +24,7 @@ vi.mock("@/lib/server-auth", async (importOriginal) => {
 import { POST as importPOST } from "@/app/api/services/import/route";
 import { GET as runtimeGET } from "@/app/api/services/runtime/route";
 import { signSession, SESSION_COOKIE } from "@/lib/session";
+import type { SessionRole } from "@/lib/session-policy";
 
 function pbForRows(rows: any[]) {
   const store = [...rows];
@@ -47,7 +48,7 @@ function pbForRows(rows: any[]) {
   };
 }
 
-async function cookie(role = "parent"): Promise<string> {
+async function cookie(role: SessionRole = "parent"): Promise<string> {
   const token = await signSession({ memberId: "m1", name: "Rebecca", role });
   mocks.liveRole = role;
   return `${SESSION_COOKIE}=${token}`;

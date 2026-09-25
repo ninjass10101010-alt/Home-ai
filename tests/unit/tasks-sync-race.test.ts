@@ -11,6 +11,7 @@
 // the kid writes its stale merge LAST — the resurrection direction.
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
+import type { SessionRole } from "@/lib/session-policy";
 import { signSession, SESSION_COOKIE } from "@/lib/session";
 
 type Deferred = { resolved: boolean; resolve: (v: unknown) => void; compute: () => unknown };
@@ -76,7 +77,7 @@ vi.mock("@/lib/server-auth", () => ({ requireLiveSession: mocks.requireLiveSessi
 import { LEGACY_SYNC_WRITE_ERROR, POST } from "@/app/api/tasks/sync/route";
 import { __resetKeyedLockForTests } from "@/lib/keyed-lock";
 
-async function post(body: unknown, role: string) {
+async function post(body: unknown, role: SessionRole) {
   const token = await signSession({ memberId: "m1", name: "Poster", role });
   const r = new NextRequest("http://x/api/tasks/sync", {
     method: "POST",

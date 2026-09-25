@@ -20,12 +20,13 @@ vi.mock("@/lib/server-auth", async (importOriginal) => {
 });
 
 import { authorizeAdminRequest } from "@/lib/admin-auth";
+import type { SessionRole } from "@/lib/session-policy";
 
 function req(headers: Record<string, string> = {}): Request {
   return new Request("http://localhost/api/admin/x", { headers });
 }
 
-async function sessionCookie(role: string): Promise<string> {
+async function sessionCookie(role: SessionRole): Promise<string> {
   const { signSession, SESSION_COOKIE } = await import("@/lib/session");
   const token = await signSession({ memberId: `m-${role}`, name: `N-${role}`, role });
   return `${SESSION_COOKIE}=${token}`;
