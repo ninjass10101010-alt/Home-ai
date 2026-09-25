@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { middleware, isAdultOnlyPath } from "../../src/middleware";
-import { signSession, SESSION_COOKIE } from "../../src/lib/session";
+import { signSession, SESSION_COOKIE, verifySession } from "../../src/lib/session";
 import type { SessionRole } from "../../src/lib/session-policy";
 
 function req(path: string, cookie?: string): NextRequest {
@@ -19,8 +19,15 @@ const childCookie = async () =>
 // regression the original `role === "child"` deny let through.
 const petCookie = async () =>
   `${SESSION_COOKIE}=${await signSession({ memberId: "m8", name: "Rocco", role: "pet" })}`;
-const unknownRoleCookie = async () =>
-  `${SESSION_COOKIE}=${await signSession({ memberId: "m9", name: "X", role: "guest-admin" as SessionRole })}`;
+// The explicit ttl matters: the role-aware default looks the TTL up in
+// SESSION_TTL_SECONDS_BY_ROLE, so an out-of-vocabulary role yields no TTL at all
+// and the token would fail verification (exp: null) — the middleware would then
+// refuse it on the `!session` branch and the case would stop proving the
+// allowlist. With a real TTL this is a genuine valid-HMAC session whose only
+// defect is the role, so the refusal can only come from the role allowlist.
+const unknownRoleToken = () =>
+  signSession({ memberId: "m9", name: "X", role: "guest-admin" as SessionRole }, 1800);
+const unknownRoleCookie = async () => `${SESSION_COOKIE}=${await unknownRoleToken()}`;
 
 beforeEach(() => vi.stubEnv("SESSION_SECRET", "test-secret-0123456789"));
 afterEach(() => vi.unstubAllEnvs());
@@ -76,8 +83,12 @@ describe("ledger adult gate", () => {
   });
 
   it("403s an unknown role on /api/data/dashboard (allowlist fails closed)", async () => {
-    const res = await middleware(req("/api/data/dashboard", await unknownRoleCookie()));
+    const token = await unknownRoleToken();
+    expect(await verifySession(token)).toMatchObject({ role: "guest-admin" });
+
+    const res = await middleware(req("/api/data/dashboard", `${SESSION_COOKIE}=${token}`));
     expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe("adult_only");
   });
 
   it("403s a pet on /assets/ and /ledger-app/", async () => {

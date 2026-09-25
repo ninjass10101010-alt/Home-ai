@@ -39,6 +39,19 @@ export function sessionCookieOptions(
   };
 }
 
+// Logout has no member — it only expires the cookie, and the role argument is
+// never consulted once maxAge is supplied (the pinned test proves every role
+// produces the same clear options). The literal only satisfies the signature.
+export function sessionCookieClearOptions(): {
+  httpOnly: true;
+  sameSite: "lax";
+  secure: boolean;
+  path: "/";
+  maxAge: number;
+} {
+  return sessionCookieOptions("parent", 0);
+}
+
 const enc = new TextEncoder();
 
 function b64url(bytes: ArrayBuffer | Uint8Array): string {

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
+  sessionCookieClearOptions,
   sessionCookieOptions,
   signSession,
   verifySession,
@@ -45,8 +46,8 @@ describe("session tokens", () => {
   });
 
   it("lets an explicit ttl override the role default", async () => {
-    const token = await signSession({ memberId: "p", name: "Parent One", role: "parent" }, -10);
-    expect(await verifySession(token)).toBeNull();
+    const token = await signSession({ memberId: "p", name: "Parent One", role: "parent" }, 45);
+    expect(await lifetimeSeconds(token)).toBe(45);
   });
 
   it("rejects tampered payloads", async () => {
@@ -117,5 +118,26 @@ describe("sessionCookieOptions", () => {
     expect(sessionCookieOptions("parent").secure).toBe(true);
     vi.stubEnv("SESSION_COOKIE_SECURE", "false");
     expect(sessionCookieOptions("parent").secure).toBe(false);
+  });
+});
+
+describe("sessionCookieClearOptions", () => {
+  it("expires the cookie with the same attributes for every role", () => {
+    expect(sessionCookieClearOptions()).toEqual({
+      httpOnly: true,
+      sameSite: "lax",
+      secure: false,
+      path: "/",
+      maxAge: 0,
+    });
+    for (const role of ["parent", "child", "pet"] as const) {
+      expect(sessionCookieClearOptions()).toEqual(sessionCookieOptions(role, 0));
+    }
+  });
+
+  it("carries the Secure attribute in production like every other session cookie", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SESSION_COOKIE_SECURE", "");
+    expect(sessionCookieClearOptions().secure).toBe(true);
   });
 });

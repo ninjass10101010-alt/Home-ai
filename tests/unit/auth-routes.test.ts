@@ -25,6 +25,23 @@ function req(url: string, init?: RequestInit): NextRequest {
   return new NextRequest(url, init as any);
 }
 
+// A cookie's ATTRIBUTES, independent of its value and of the lifetime Next
+// derives from maxAge. Two session cookies that differ only here would still be
+// the same cookie to a browser — and one that is missing an attribute (Secure)
+// is a DIFFERENT cookie, so the parity assertions below are meaningful.
+function attributes(setCookie: string): string[] {
+  return setCookie
+    .split(";")
+    .map((part) => part.trim())
+    .filter(
+      (part) =>
+        !part.startsWith("Max-Age") &&
+        !part.startsWith("Expires=") &&
+        !part.startsWith("consuela_session="),
+    )
+    .sort();
+}
+
 beforeEach(async () => {
   vi.stubEnv("SESSION_SECRET", "test-secret-0123456789");
   mocks.verifyPinFromPB.mockReset();
@@ -173,23 +190,31 @@ describe("POST /api/auth/logout", () => {
     }));
     const logout = await logoutPOST(req("http://x/api/auth/logout", { method: "POST" }));
 
-    const attributes = (value: string) =>
-      value
-        .split(";")
-        .map((part) => part.trim())
-        .filter(
-          (part) =>
-            !part.startsWith("Max-Age") &&
-            !part.startsWith("Expires=") &&
-            !part.startsWith("consuela_session="),
-        )
-        .sort();
-
     expect(attributes(logout.headers.get("set-cookie")!)).toEqual(
       attributes(login.headers.get("set-cookie")!),
     );
     expect(attributes(logout.headers.get("set-cookie")!)).toContain("HttpOnly");
     expect(attributes(logout.headers.get("set-cookie")!)).toContain("Path=/");
     expect(logout.headers.get("set-cookie")).toContain("Max-Age=0");
+  });
+
+  it("expires the Secure cookie identically in production", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("SESSION_COOKIE_SECURE", "");
+    mocks.verifyPinFromPB.mockResolvedValue({ id: "m1", name: "Rebecca", role: "parent", pin: "9999" });
+
+    const login = await loginPOST(req("http://x/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ memberName: "Rebecca", pin: "1234" }),
+    }));
+    const logout = await logoutPOST(req("http://x/api/auth/logout", { method: "POST" }));
+
+    const loginSetCookie = login.headers.get("set-cookie")!;
+    const logoutSetCookie = logout.headers.get("set-cookie")!;
+    expect(loginSetCookie).toContain("Secure");
+    expect(logoutSetCookie).toContain("Secure");
+    expect(attributes(logoutSetCookie)).toEqual(attributes(loginSetCookie));
+    expect(logoutSetCookie).toContain("Max-Age=0");
   });
 });
