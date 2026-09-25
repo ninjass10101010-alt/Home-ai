@@ -27,7 +27,7 @@ vi.mock("@/db", () => ({
   },
 }));
 
-import { archiveWeekIfMissing, syncArchiveToPB, emptyWeekData } from "@/lib/task-utils";
+import { archiveWeekIfMissing, emptyWeekData } from "@/lib/task-utils";
 import type { WeekData } from "@/types/tasks";
 
 function finishedWeek(): WeekData {
@@ -150,24 +150,5 @@ describe("archiveWeekIfMissing", () => {
 
     expect(wrote).toBe(false);
     expect(dbMocks.archiveWeek).not.toHaveBeenCalled();
-  });
-});
-
-describe("syncArchiveToPB", () => {
-  it("keeps exactly one row per weekStart across repeated rollover passes", async () => {
-    const archive = {
-      "2026-08-24": { ...emptyWeekData("2026-08-24"), points: { "Emily G": 5 } },
-      "2026-08-31": finishedWeek(),
-    } as any;
-
-    // Production read-failure mode: every pre-read resolves [] (never rejects),
-    // so only the DB upsert can prevent duplicates across passes.
-    dbMocks.listArchivedWeeks.mockResolvedValue([]);
-
-    await syncArchiveToPB(archive);
-    await syncArchiveToPB(archive);
-
-    expect(dbMocks.weekArchive.filter((r) => r.weekStart === "2026-08-24")).toHaveLength(1);
-    expect(dbMocks.weekArchive.filter((r) => r.weekStart === "2026-08-31")).toHaveLength(1);
   });
 });

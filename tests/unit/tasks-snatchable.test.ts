@@ -1,10 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 import type { Task } from "@/types/tasks";
 
-vi.mock("@/db", () => ({ db: { upsertTask: vi.fn(async () => ({})) } }));
+vi.mock("@/db", () => ({ db: {} }));
 
-import { db } from "@/db";
-import { isSnatchable, syncTasksToPB } from "@/lib/task-utils";
+import { isSnatchable } from "@/lib/task-utils";
+import { taskProjectionRecord } from "@/lib/snapshot-tasks";
 
 function t(over: Partial<Task>): Task {
   return {
@@ -42,14 +42,9 @@ describe("isSnatchable", () => {
   });
 });
 
-describe("syncTasksToPB stealable persistence", () => {
-  it("writes stealable:true when set, false otherwise", async () => {
-    await syncTasksToPB([
-      t({ stealable: true }),
-      t({ id: 2, title: "No flag" }),
-    ]);
-    const calls = vi.mocked(db.upsertTask).mock.calls;
-    expect(calls[0][0].stealable).toBe(true);
-    expect(calls[1][0].stealable).toBe(false);
+describe("stealable persistence — the server task projection", () => {
+  it("writes stealable:true when set, false otherwise", () => {
+    expect(taskProjectionRecord(t({ stealable: true }) as any).stealable).toBe(true);
+    expect(taskProjectionRecord(t({}) as any).stealable).toBe(false);
   });
 });

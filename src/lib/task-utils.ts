@@ -1,8 +1,7 @@
 import { db } from "@/db";
 import { localTodayISO, localWeekStartISO } from "@/lib/local-date";
-import { persistedTaskEmoji, persistedCrewEmoji } from "@/lib/task-emoji";
 import { isRecord } from "@/lib/task-operation-contract";
-import type { Task, WeekData, Transaction, WeekArchive, FamilyGoal, HallOfFameEntry, Reward, Penalty, WeeklyPrize, CrewMember } from "@/types/tasks";
+import type { Task, WeekData, Transaction, WeekArchive, FamilyGoal, HallOfFameEntry, WeeklyPrize, CrewMember } from "@/types/tasks";
 
 export const TASKS_STORAGE_KEY = "consuela-tasks";
 export const WEEK_DATA_KEY = "consuela-week-data";
@@ -1246,51 +1245,6 @@ export function emptyTask(firstMember?: { name?: string; emoji?: string }): Task
 
 // === PocketBase sync helpers ===
 
-export async function syncTasksToPB(tasks: Task[]): Promise<void> {
-  for (const task of tasks) {
-    await db.upsertTask({
-      taskId: task.id,
-      title: task.title,
-      assignee: task.assignee,
-      // PB tasks.assigneeEmoji is text max=5000 — photo avatars (base64 data
-      // URLs from members.emoji) must never reach the collection raw.
-      assigneeEmoji: persistedTaskEmoji(task.assigneeEmoji),
-      // Home widget's selectPendingTasks reads `assigned` + `status` —
-      // without these the row is invisible to the pending-tasks reader.
-      assigned: task.assignee,
-      status: task.completed ? "done" : "pending",
-      due: task.due,
-      points: task.points,
-      recurring: task.recurring,
-      category: task.category,
-      priority: task.priority,
-      universal: task.universal || false,
-      stealable: task.stealable || false,
-      pendingApproval: task.pendingApproval ?? null,
-      sentBackAt: task.sentBackAt ?? null,
-      completedInWeek: task.completedInWeek ?? null,
-      completedAt: task.completedAt ?? null,
-      crewSize: task.crewSize ?? null,
-      // Crew member emojis ride the same PB write — photo avatars from
-      // members.emoji must be gated exactly like assigneeEmoji.
-      crew: persistedCrewEmoji(task.crew as any),
-      speedBonus: task.speedBonus ?? null,
-    }).catch((e) => {
-      // Surface the FULL rejection (PB validation bodies carry the field name
-      // in `data`, not just `message`) — a swallowed gateway error reads as
-      // "the task never landed" with zero log trail.
-      console.warn(
-        `syncTasksToPB failed for "${task.title}" — run \`npm run pb:seed\` if the tasks schema is stale.`,
-        e?.data ?? e?.message ?? e
-      );
-    });
-  }
-}
-
-export async function syncWeekDataToPB(data: WeekData): Promise<void> {
-  await db.upsertWeekData(data).catch(() => {});
-}
-
 /**
  * Persist a finished week into PocketBase's `week_archive` collection exactly
  * once. The archive step used to write only `week_data`, so `week_archive`
@@ -1307,8 +1261,8 @@ export async function syncWeekDataToPB(data: WeekData): Promise<void> {
  * Returns whether a row was written. A write that silently fails (adapters
  * return `null`) reports `false` — never a false "wrote it".
  *
- * `existingWeekStarts` lets a batch caller (syncArchiveToPB) share one read;
- * when omitted the helper reads the archive itself.
+ * `existingWeekStarts` lets a batch caller share one read; when omitted the
+ * helper reads the archive itself.
  */
 export async function archiveWeekIfMissing(
   weekData: WeekData,
@@ -1337,46 +1291,6 @@ export async function archiveWeekIfMissing(
   }
 }
 
-export async function syncArchiveToPB(archive: WeekArchive): Promise<void> {
-  const existing = await db.listArchivedWeeks().catch(() => [] as any[]);
-  const existingStarts = new Set((existing || []).map((r: any) => String(r?.weekStart)));
-  for (const [weekStart, weekData] of Object.entries(archive)) {
-    if (existingStarts.has(weekStart)) continue;
-    const wrote = await archiveWeekIfMissing({ ...weekData, weekStart }, existingStarts);
-    if (wrote) existingStarts.add(weekStart);
-  }
-}
-
-export async function syncRewardsToPB(rewards: Reward[]): Promise<void> {
-  for (const r of rewards) {
-    await db.upsertReward({
-      name: r.name,
-      emoji: r.emoji,
-      cost: r.cost,
-    }).catch(() => {});
-  }
-}
-
-export async function syncWeeklyPrizesToPB(prizes: WeeklyPrize[]): Promise<void> {
-  for (const p of prizes) {
-    await db.upsertWeeklyPrize({
-      rank: p.rank,
-      emoji: p.emoji,
-      text: p.text,
-    }).catch(() => {});
-  }
-}
-
-export async function syncPenaltiesToPB(penalties: Penalty[]): Promise<void> {
-  for (const p of penalties) {
-    await db.upsertPenalty({
-      name: p.name,
-      emoji: p.emoji,
-      points: p.points,
-    }).catch(() => {});
-  }
-}
-
 export async function syncFamilyGoalToPB(goal: FamilyGoal | null): Promise<void> {
   if (goal) {
     await db.upsertFamilyGoal({
@@ -1386,29 +1300,6 @@ export async function syncFamilyGoalToPB(goal: FamilyGoal | null): Promise<void>
       reward: goal.reward,
       weekStart: goal.weekStart,
       active: true,
-    }).catch(() => {});
-  }
-}
-
-export async function syncHallOfFameToPB(entries: HallOfFameEntry[]): Promise<void> {
-  // Idempotent sync: skip entries whose member + weekStart already exist in
-  // PB (insertHallOfFameEntry always creates — re-inserting would duplicate).
-  const existing = await db.selectHallOfFame().catch(() => [] as any[]);
-  for (const e of entries) {
-    const alreadySynced = existing.some(
-      (row: any) => row.member === e.member && row.weekStart === e.weekStart
-    );
-    if (alreadySynced) continue;
-    await db.insertHallOfFameEntry({
-      member: e.member,
-      emoji: e.emoji,
-      weekStart: e.weekStart,
-      points: e.points,
-      rank: e.rank,
-      // Prize + celebration state ride the row — without them the server can
-      // never host the win ceremony (the celebrate route 404'd on every call).
-      prize: e.prize ?? null,
-      celebrated: e.celebrated ?? false,
     }).catch(() => {});
   }
 }
@@ -1443,26 +1334,6 @@ export async function loadHallOfFameMerged(): Promise<HallOfFameEntry[]> {
   const server = [...byKey.values()];
   saveHallOfFame(server);
   return server;
-}
-
-export async function syncAllTasksToPB(
-  tasks: Task[],
-  weekData: WeekData,
-  archive: WeekArchive,
-  rewards: Reward[],
-  penalties: Penalty[],
-  hallOfFame: HallOfFameEntry[],
-  weeklyPrizes: WeeklyPrize[] = []
-): Promise<void> {
-  await Promise.allSettled([
-    syncTasksToPB(tasks),
-    syncWeekDataToPB(weekData),
-    syncArchiveToPB(archive),
-    syncRewardsToPB(rewards),
-    syncPenaltiesToPB(penalties),
-    syncHallOfFameToPB(hallOfFame),
-    syncWeeklyPrizesToPB(weeklyPrizes),
-  ]);
 }
 
 export function getWeekGraph(memberName: string, weekData: WeekData): { day: string; points: number }[] {

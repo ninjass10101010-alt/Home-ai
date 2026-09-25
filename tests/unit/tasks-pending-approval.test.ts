@@ -1,12 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
 import type { Task, WeekData } from "@/types/tasks";
 
-vi.mock("@/db", () => ({ db: { upsertTask: vi.fn(async () => ({})) } }));
+vi.mock("@/db", () => ({ db: {} }));
 
 import {
   isPendingApproval, pendingApprovals, pendingPointsFor, completesWithoutPin,
   tapCompletePending, approvePendingCompletion, sendBackPendingCompletion, adoptAuthoritativeWeekData,
 } from "@/lib/task-utils";
+import { taskProjectionRecord } from "@/lib/snapshot-tasks";
 
 function t(over: Partial<Task>): Task {
   return {
@@ -139,26 +140,17 @@ describe("sendBackPendingCompletion", () => {
   });
 });
 
-describe("syncTasksToPB pendingApproval persistence", () => {
-  it("writes the pending record when set, null otherwise", async () => {
-    const { syncTasksToPB } = await import("@/lib/task-utils");
-    const { db } = await import("@/db");
-    await syncTasksToPB([
-      t({ completed: true, pendingApproval: { byName: "Jasmine", at: NOW, points: 5 } }),
-      t({ id: 2, title: "No pending" }),
-    ]);
-    const calls = vi.mocked(db.upsertTask).mock.calls;
-    expect(calls[0][0].pendingApproval).toEqual({ byName: "Jasmine", at: NOW, points: 5 });
-    expect(calls[1][0].pendingApproval).toBeNull();
+describe("pendingApproval persistence — the server task projection", () => {
+  it("writes the pending record when set, null otherwise", () => {
+    const record = taskProjectionRecord(
+      t({ completed: true, pendingApproval: { byName: "Jasmine", at: NOW, points: 5 } }) as any,
+    );
+    expect(record.pendingApproval).toEqual({ byName: "Jasmine", at: NOW, points: 5 });
+    expect(taskProjectionRecord(t({ id: 2, title: "No pending" }) as any).pendingApproval).toBeNull();
   });
 
-  it("carries sentBackAt to the PB row (cross-device send-back proof rides existing rails)", async () => {
-    const { syncTasksToPB } = await import("@/lib/task-utils");
-    const { db } = await import("@/db");
-    await syncTasksToPB([t({ sentBackAt: NOW })]);
-    // mock.calls accumulates across tests in this file — read the latest call.
-    const calls = vi.mocked(db.upsertTask).mock.calls;
-    expect(calls.at(-1)![0].sentBackAt).toBe(NOW);
+  it("carries sentBackAt to the PB row (cross-device send-back proof rides existing rails)", () => {
+    expect(taskProjectionRecord(t({ sentBackAt: NOW }) as any).sentBackAt).toBe(NOW);
   });
 });
 

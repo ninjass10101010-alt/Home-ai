@@ -24,9 +24,18 @@ function sourceFilesToString(relative: string[]): string {
 }
 
 function lineNumbers(source: string, pattern: RegExp): number[] {
-  return source
-    .split("\n")
-    .flatMap((line, index) => (pattern.test(line) ? [index + 1] : []));
+  // Matched against the whole source, not line by line, so a pattern that spans
+  // a line break still reports the line the call starts on.
+  const scanner = new RegExp(
+    pattern.source,
+    pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`,
+  );
+  const hits: number[] = [];
+  for (let match = scanner.exec(source); match; match = scanner.exec(source)) {
+    hits.push(source.slice(0, match.index).split("\n").length);
+    if (match[0].length === 0) scanner.lastIndex += 1;
+  }
+  return hits;
 }
 
 const NORMAL_SURFACES = [
@@ -38,16 +47,24 @@ const NORMAL_SURFACES = [
 const RETIRED_SNAPSHOT_ERROR = ["task", "snapshot", "write", "retired"].join("_");
 const TASK_LEDGER_ERROR = ["task", "ledger", "write", "requires", "command"].join("_");
 
+// DotAll so a call whose collection argument is split across lines still
+// matches; the lazy bounded gap keeps the match inside that one call. Built
+// through `RegExp` (not a literal) because the project target is ES2017 and a
+// literal `s` flag is a type error there — the flag itself is applied at run
+// time, which is what makes the multi-line form observable.
+const browserWrite = (fn: string, collection: string) =>
+  new RegExp(`${fn}(.{0,80}?)["']${collection}["']`, "s");
+
 const BROWSER_TASK_WRITERS: Array<[string, RegExp]> = [
-  ["create tasks", /gatewayCreate\(\s*["']tasks["']/],
-  ["update tasks", /gatewayUpdate\(\s*["']tasks["']/],
-  ["delete tasks", /gatewayDeleteOk\(\s*["']tasks["']/],
-  ["delete tasks", /gatewayDelete\(\s*["']tasks["']/],
-  ["create week_data", /gatewayCreate\(\s*["']week_data["']/],
-  ["update week_data", /gatewayUpdate\(\s*["']week_data["']/],
-  ["create week_archive", /gatewayCreate\(\s*["']week_archive["']/],
-  ["update week_archive", /gatewayUpdate\(\s*["']week_archive["']/],
-  ["delete week_archive", /gatewayDeleteOk\(\s*["']week_archive["']/],
+  ["create tasks", browserWrite("gatewayCreate", "tasks")],
+  ["update tasks", browserWrite("gatewayUpdate", "tasks")],
+  ["delete tasks", browserWrite("gatewayDeleteOk", "tasks")],
+  ["delete tasks", browserWrite("gatewayDelete", "tasks")],
+  ["create week_data", browserWrite("gatewayCreate", "week_data")],
+  ["update week_data", browserWrite("gatewayUpdate", "week_data")],
+  ["create week_archive", browserWrite("gatewayCreate", "week_archive")],
+  ["update week_archive", browserWrite("gatewayUpdate", "week_archive")],
+  ["delete week_archive", browserWrite("gatewayDeleteOk", "week_archive")],
 ];
 
 const LEDGER_WRITE_METHODS = [
@@ -90,7 +107,7 @@ describe("no browser db task/week/archive writer", () => {
     expect(found).toEqual([]);
   });
 
-  it("every task/week/archive write method refuses the browser first", () => {
+  it("every task/week/archive write method refuses the browser as its first statement", () => {
     const missing: string[] = [];
     for (const name of LEDGER_WRITE_METHODS) {
       const at = source.indexOf(`${name}: async`);
@@ -98,8 +115,15 @@ describe("no browser db task/week/archive writer", () => {
         missing.push(`${name} (method not found)`);
         continue;
       }
-      const head = source.slice(at, at + 200);
-      if (!/if \(!isServer\(\)\) refuseTaskLedgerWrite\(\)/.test(head)) missing.push(name);
+      const arrow = source.indexOf("=>", at);
+      const open = arrow === -1 ? -1 : source.indexOf("{", arrow);
+      if (open === -1) {
+        missing.push(`${name} (method body not found)`);
+        continue;
+      }
+      if (!/^\s*if \(!isServer\(\)\) refuseTaskLedgerWrite\(\);/.test(source.slice(open + 1))) {
+        missing.push(name);
+      }
     }
     expect(missing).toEqual([]);
   });
