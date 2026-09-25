@@ -446,6 +446,7 @@ export default function TasksPage() {
   // the row it is about to hide, or the "on the way" / "taking it back" note.
   type OptimisticRow =
     | { kind: "add"; task: Task }
+    | { kind: "update"; task: Task }
     | { kind: "remove"; taskId: number }
     | { kind: "pending"; taskId: number }
     | { kind: "cancelling"; taskId: number };
@@ -649,7 +650,7 @@ export default function TasksPage() {
         payload: { taskId: editingId, patch: { ...normalized } },
         displayTarget: { kind: "task", taskId: editingId ?? undefined, title: normalized.title },
       });
-      addOptimisticRow(updated.operationId, { kind: "add", task: { ...normalized, id: editingId as number } });
+      addOptimisticRow(updated.operationId, { kind: "update", task: { ...normalized, id: editingId as number } });
     }
     setEditingId(null);
     setIsAdding(false);
@@ -1431,13 +1432,29 @@ export default function TasksPage() {
   // queued completion / reopen contributes an honest note. Nothing here is
   // written to the store.
   const optimisticRowsList = Object.values(optimisticRows);
+  // The interactive lists NEVER contain a temporary row: a queued add renders
+  // inert (below) so complete/edit/delete cannot send an id the server has never
+  // assigned. `serverTasks` is the server's rows only.
+  const serverTasks = useMemo(
+    () => tasks.filter((t) => !optimisticRowsList.some(
+      (row) => row.kind === "remove" && row.taskId === t.id,
+    )),
+    [tasks, optimisticRowsList],
+  );
   const optimisticRemoved = optimisticRowsList
     .filter((row): row is Extract<OptimisticRow, { kind: "remove" }> => row.kind === "remove")
     .map((row) => row.taskId);
+  // Only a queued ADD contributes a row the server does not have yet. A queued
+  // UPDATE replaces the existing row's copy in place, so an edited chore can
+  // never render twice and can never show the pre-edit text.
+  const optimisticUpdates = optimisticRowsList
+    .filter((row): row is Extract<OptimisticRow, { kind: "update" }> => row.kind === "update")
+    .map((row) => row.task);
+  const optimisticUpdatedIds = optimisticUpdates.map((task) => task.id);
   const optimisticTasks = optimisticRowsList
     .filter((row): row is Extract<OptimisticRow, { kind: "add" }> => row.kind === "add")
     .map((row) => row.task)
-    .filter((task) => !optimisticRemoved.includes(task.id));
+    .filter((task) => !optimisticRemoved.includes(task.id) && !optimisticUpdatedIds.includes(task.id));
   // A CANCELLING mark suppresses the row's own pending note (H4: the reopen is
   // already shown, so the "on the way" copy must not also render).
   const optimisticCancelling = optimisticRowsList
@@ -1447,29 +1464,35 @@ export default function TasksPage() {
     .filter((row): row is Extract<OptimisticRow, { kind: "pending" }> => row.kind === "pending")
     .map((row) => row.taskId)
     .filter((taskId) => !optimisticCancelling.includes(taskId));
-  // The interactive lists NEVER contain a temporary row: a queued add is
-  // rendered inert (below) so complete/edit/delete cannot send an id the server
-  // has never assigned. `optimisticVisible` is a LOOKUP table only.
-  const optimisticVisible = useMemo(
-    () => [...tasks.filter((t) => !optimisticRemoved.includes(t.id)), ...optimisticTasks],
-    [tasks, optimisticRemoved, optimisticTasks],
-  );
-  const serverTasks = useMemo(
-    () => tasks.filter((t) => !optimisticRemoved.includes(t.id)),
-    [tasks, optimisticRemoved],
-  );
   const optimisticPendingSet = useMemo(
     () => new Set([...optimisticPending, ...optimisticCancelling]),
     [optimisticPending, optimisticCancelling],
   );
   // The pending list never shows a row whose completion is already queued, and
   // never shows a row a queued delete is about to remove.
+  // The rows the interactive lists render. A queued UPDATE replaces its row's
+  // copy in place (the id is a real server id, so completing or editing it is
+  // still safe), while a queued ADD is a temporary row and stays OUT of here —
+  // it renders inert below so nothing can send an id the server never assigned.
+  const interactiveRows = useMemo(
+    () => [
+      ...serverTasks.filter((t) => !optimisticUpdatedIds.includes(t.id)),
+      ...optimisticUpdates,
+    ],
+    [serverTasks, optimisticUpdatedIds, optimisticUpdates],
+  );
+  // The inert lookup table: the same rows PLUS the temporary ones, used only to
+  // resolve a queued command's display target to a title.
+  const optimisticVisible = useMemo(
+    () => [...interactiveRows, ...optimisticTasks],
+    [interactiveRows, optimisticTasks],
+  );
   const hiddenByQueuedCommand = useMemo(
     () => new Set([...optimisticPending, ...optimisticRemoved]),
     [optimisticPending, optimisticRemoved],
   );
 
-  const filtered = serverTasks.filter((t) => {
+  const filtered = interactiveRows.filter((t) => {
     if (filterMember === "Open") {
       // Open + late-stealable rows and crew tasks with space.
       return ((t.universal || isSnatchable(t)) || (isCrewTask(t) && !crewFull(t))) && (showCompleted ? true : !t.completed);
@@ -1496,7 +1519,7 @@ export default function TasksPage() {
   const openBoard = (() => {
     if (filterMember !== "All" && filterMember !== "My Tasks" && filterMember !== "Open") return [] as Task[];
     const me = isLoggedIn && currentUser ? resolveMemberName(membersData, currentUser.name) : "";
-    return serverTasks
+    return interactiveRows
       .filter((t) => {
         if (t.completed) return false;
         if ((t.universal || isSnatchable(t)) && !isCrewTask(t)) return true;

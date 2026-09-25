@@ -155,11 +155,18 @@ const APPROVE_PAYLOAD_KEYS: Record<string, readonly string[]> = {
 // A parent-authoritative point movement: a catalog penalty or a manual adjust.
 // The amount and reason are part of the command; the BALANCE is never a client
 // input — the server re-derives it under the week-ledger lock.
+// A parent-authoritative point movement: a catalog penalty carries an item id
+// only (the server reads the canonical points — the route refuses a client
+// `points` outright, so allowing it here would advertise a field that can never
+// be honoured), and a manual adjust carries the signed amount and reason. The
+// BALANCE is never a client input.
 const LEDGER_PAYLOAD_KEYS: Record<string, readonly string[]> = {
-  penalty: ["memberName", "itemId", "points"],
+  penalty: ["memberName", "itemId"],
   adjust: ["memberName", "amount", "reason"],
 };
 
+// A redemption names the reward and the member; the stored reward row decides
+// the cost, so there is no amount key here either.
 const REDEEM_PAYLOAD_KEYS: Record<string, readonly string[]> = {
   redeem: ["rewardId", "memberName"],
 };

@@ -1010,6 +1010,50 @@ describe("optimism is per operation, and a temp row can never be acted on", () =
     expect(el.textContent || "").toContain("Feed the cat");
   });
 
+  it("an edited chore renders ONCE, with the new copy, while its command is queued", async () => {
+    server.manageStatus = 503;
+    const existing = { ...ASSIGNED_TASK, title: "Old title", assignee: "Rebecca Mom" };
+    seed([existing]);
+    const el = await renderAsync(<TasksPage />);
+    await settle();
+    // Edit is the parent-only LEFT SWIPE on the row (there is no Edit button).
+    const row = el.querySelector(`[aria-label="Complete Old title"]`) as HTMLElement;
+    expect(row).toBeTruthy();
+    const opts = (x: number) => ({ bubbles: true, pointerId: 1, clientX: x });
+    await act(async () => {
+      const event = window.PointerEvent || window.Event;
+      row.dispatchEvent(new event("pointerdown", opts(300) as never));
+      row.dispatchEvent(new event("pointermove", opts(180) as never));
+      row.dispatchEvent(new event("pointerup", opts(160) as never));
+    });
+    await settle();
+    const title = document.querySelector('input[placeholder="Task title"]') as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+      setter.call(title, "New title");
+      title.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => { dialogButton("Save").click(); });
+    await settle(120);
+
+    // The queued command is an UPDATE, not an add…
+    const [entry] = listTaskOutbox();
+    expect(entry).toMatchObject({ route: "/api/tasks/manage", action: "update" });
+    expect(JSON.stringify(requestsFor("/api/tasks/manage"))).not.toContain('"add"');
+
+    // …the pending list carries the row exactly once, with the NEW copy (the
+    // queue notice naming the command is counted separately)…
+    const pendingCard = Array.from(el.querySelectorAll("h2, h3"))
+      .find((heading) => heading.textContent === "Pending")!
+      .closest(".widget-card") as HTMLElement;
+    expect((pendingCard.textContent || "").match(/New title/g) ?? []).toHaveLength(1);
+    expect(pendingCard.textContent || "").not.toContain("Old title");
+    // …and it is still the server's row, not a temporary one.
+    expect(el.querySelector('[aria-label="Complete New title"]')).not.toBeNull();
+    expect(el.querySelector('[data-testid="optimistic-add-row"]')).toBeNull();
+    expect(storedTasks()[0].title).toBe("Old title");
+  });
+
   it("a queued add row renders inert — no complete, edit or delete control", async () => {
     server.manageStatus = 503;
     seed([]);
