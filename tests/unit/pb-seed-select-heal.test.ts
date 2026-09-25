@@ -27,7 +27,7 @@ function seedKindValues() {
 
 /** Live PB field defs for every seed schema field; select-field `values` can be
  * overridden per field name to simulate live drift. */
-function liveFieldsFor(schema: any[], selectOverrides: Record<string, string[]> = {}): any[] {
+function liveFieldsFor(schema: readonly any[], selectOverrides: Record<string, string[]> = {}): any[] {
   const seen = new Set<string>();
   const fields: any[] = schema.map((s: any) => {
     seen.add(s.name);
@@ -45,12 +45,23 @@ function liveFieldsFor(schema: any[], selectOverrides: Record<string, string[]> 
   return fields;
 }
 
+/** Reads reflect writes: the seed's own create/patch calls must be visible to
+ *  the final contract verification. */
 function makePb(existing: any[] = []) {
+  const state = [...existing];
   return {
     collections: {
-      getFullList: vi.fn(async () => existing),
-      create: vi.fn(async (payload: any) => ({ id: `new_${payload.name}`, ...payload })),
-      update: vi.fn(async (id: string, body: any) => ({ id, ...body })),
+      getFullList: vi.fn(async () => state),
+      create: vi.fn(async (payload: any) => {
+        const record = { id: `new_${payload.name}`, ...payload };
+        state.push(record);
+        return record;
+      }),
+      update: vi.fn(async (id: string, body: any) => {
+        const record = state.find((c) => c.id === id);
+        if (record) Object.assign(record, body);
+        return { id, ...body };
+      }),
     },
   };
 }

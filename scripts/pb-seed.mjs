@@ -3,7 +3,8 @@
 // seedCollections() in src/lib/pb-seed.ts (single source of truth for all
 // app collections, LOCKED_RULES admin-only enforcement, schema/index
 // self-heal). Idempotent: safe to re-run after any feature that adds
-// collections or fields.
+// collections or fields. Exits nonzero unless the final live state
+// matches the seed contract.
 //
 // Usage:
 //   npm run pb:seed                      (loads .env.local automatically)
@@ -39,17 +40,18 @@ if (missing.length > 0) {
 // Import AFTER env resolution — pb.ts/pb-auth.ts capture env at module load.
 const { seedCollections, seedNotifyPrefsAdmin, seedWeeklyPrizesAdmin } = await import("../src/lib/pb-seed.ts");
 
-console.log(`Seeding PocketBase at ${process.env.NEXT_PUBLIC_PB_URL} …`);
+// No env values, credentials or field values are ever printed here: the seed
+// reports the verified collection count and the contract issues (field NAMES
+// only). seedCollections() throws unless the final live state matches the
+// contract, so any drift exits nonzero below.
 try {
   const created = await seedCollections();
-  console.log(`\nDone! ${created.length} collections ready.`);
+  console.log(`PocketBase collections verified: ${created.length}`);
   await seedNotifyPrefsAdmin();
-  console.log("Notify prefs ready (briefing/weather/calendar, default OFF).");
   await seedWeeklyPrizesAdmin();
-  console.log("Weekly prizes ready (ranks 1–3, create-if-absent).");
+  console.log("Row seed complete (notify prefs default OFF, weekly prizes create-if-absent).");
 } catch (err) {
   console.error("Seed failed:", err?.message ?? err);
   if (err?.response?.data) console.error("Details:", JSON.stringify(err.response.data, null, 2));
-  if (err?.url) console.error("URL:", err.url);
   process.exit(1);
 }

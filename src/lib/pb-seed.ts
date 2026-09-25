@@ -23,7 +23,51 @@ export function resolveDefaultMemberPin(name?: string): string {
   return MEMBER_DEFAULT_PINS[firstName] || "";
 }
 
-export const COLLECTIONS = [
+export type PbFieldType =
+  | "text"
+  | "bool"
+  | "number"
+  | "select"
+  | "json"
+  | "date"
+  | "autodate";
+
+export interface PbSchemaFieldContract {
+  name: string;
+  type: PbFieldType;
+  required?: boolean;
+  options?: {
+    max?: number;
+    min?: number;
+    maxSelect?: number;
+    values?: readonly string[];
+    onCreate?: boolean;
+    onUpdate?: boolean;
+  };
+}
+
+export interface PbCollectionContract {
+  name: string;
+  schema: readonly PbSchemaFieldContract[];
+  indexes?: readonly string[];
+}
+
+type LiveFieldRecord = Record<string, unknown> & { name?: string };
+type LiveCollectionRecord = Record<string, unknown> & {
+  name?: string;
+  fields?: LiveFieldRecord[];
+  indexes?: unknown[];
+};
+type FieldDrift = { schemaField: PbSchemaFieldContract; liveField: any };
+
+/** The slice of the PocketBase client the contract verifier reads. */
+export type CollectionContractClient = {
+  collections: {
+    getFullList: (args?: unknown) => Promise<LiveCollectionRecord[]>;
+  };
+};
+
+export const COLLECTIONS: readonly PbCollectionContract[] = [
   {
     name: "members",
     schema: [
@@ -819,7 +863,9 @@ export const COLLECTIONS = [
 // no collection needs public API rules. null = only PB superusers (the
 // server-side withAdmin path) may access; "" would mean publicly open.
 // All app collections are locked to admin-only and seedCollections() enforces
-// that state on every run — any rule drifted away from null is patched back.
+// that state on every run — any rule drifted away from null is patched back,
+// then the final live state is verified (assertCollectionContract) so a heal
+// that never landed fails the run instead of passing quietly.
 const LOCKED_RULES = {
   listRule: null,
   viewRule: null,
@@ -828,27 +874,47 @@ const LOCKED_RULES = {
   deleteRule: null,
 };
 
+const CONTRACT_RULES = [
+  "listRule",
+  "viewRule",
+  "createRule",
+  "updateRule",
+  "deleteRule",
+] as const;
+
 // Every app collection carries the PB-standard created/updated autodate
 // fields. The /api/db gateway sorts by -created by default and client code
 // relies on record timestamps — a collection without these fields makes
 // every sorted read fail (PB 400 → gateway 500 → silent client fallback).
-const AUTODATE_CREATED = { name: "created", type: "autodate", onCreate: true };
-const AUTODATE_UPDATED = { name: "updated", type: "autodate", onCreate: true, onUpdate: true };
+const AUTODATE_CREATED: PbSchemaFieldContract = {
+  name: "created",
+  type: "autodate",
+  options: { onCreate: true },
+};
+const AUTODATE_UPDATED: PbSchemaFieldContract = {
+  name: "updated",
+  type: "autodate",
+  options: { onCreate: true, onUpdate: true },
+};
 
-function withAutodate(schema: any[]): any[] {
-  const has = (n: string) => schema.some((f: any) => f.name === n);
-  const extra: any[] = [];
+/** A collection's seed fields: its declared schema plus the autodate pair the
+ *  /api/db gateway's sorted reads depend on (never duplicated). */
+export function collectionFieldsForSeed(
+  contract: PbCollectionContract
+): PbSchemaFieldContract[] {
+  const has = (name: string) => contract.schema.some((f) => f.name === name);
+  const extra: PbSchemaFieldContract[] = [];
   if (!has("created")) extra.push({ ...AUTODATE_CREATED });
   if (!has("updated")) extra.push({ ...AUTODATE_UPDATED });
-  return extra.length ? [...schema, ...extra] : schema;
+  return [...contract.schema, ...extra];
 }
 
-/** Field builder shared by the create and patch paths. */
-function buildField(s: any): any {
-  const base: any = { name: s.name, type: s.type };
+/** Field builder shared by the create and patch paths — the only serializer. */
+function buildField(s: PbSchemaFieldContract): Record<string, unknown> {
+  const base: Record<string, unknown> = { name: s.name, type: s.type };
   if (s.type === "autodate") {
-    base.onCreate = s.onCreate !== false;
-    if (s.onUpdate) base.onUpdate = true;
+    base.onCreate = s.options?.onCreate !== false;
+    if (s.options?.onUpdate) base.onUpdate = true;
     return base;
   }
   base.required = s.required || false;
@@ -866,14 +932,128 @@ function buildField(s: any): any {
   return base;
 }
 
+/** Index name out of a seed index spec (`CREATE [UNIQUE] INDEX name ON ...`). */
+function expectedIndexName(spec: string): string {
+  const match = spec.match(/INDEX\s+(\S+)\s+ON/i);
+  return match ? match[1] : spec;
+}
+
+/** The same name out of what PocketBase reports back (a name or full SQL). */
+function liveIndexName(index: unknown): string {
+  if (typeof index === "string") return expectedIndexName(index);
+  const name = (index as { name?: unknown } | null)?.name;
+  return typeof name === "string" ? name : "";
+}
+
+/** A live field's min/max, read from the typed-field shape PocketBase returns
+ *  (top level) with a fallback to the legacy `options` bag the seeder writes. */
+function liveBound(field: LiveFieldRecord, key: "min" | "max"): number | undefined {
+  const direct = field[key];
+  if (typeof direct === "number") return direct;
+  const options = field.options as Record<string, unknown> | undefined;
+  const nested = options?.[key];
+  return typeof nested === "number" ? nested : undefined;
+}
+
+function liveValues(field: LiveFieldRecord): string[] {
+  const values = field.values;
+  return Array.isArray(values) ? values.map((value) => String(value)) : [];
+}
+
+function sameValues(live: string[], expected: readonly string[]): boolean {
+  if (live.length !== expected.length) return false;
+  const sortedLive = [...live].sort();
+  const sortedExpected = [...expected].sort();
+  return sortedLive.every((value, idx) => value === sortedExpected[idx]);
+}
+
 function rulesMatch(live: any): boolean {
-  return (
-    live.listRule === null &&
-    live.viewRule === null &&
-    live.createRule === null &&
-    live.updateRule === null &&
-    live.deleteRule === null
+  return CONTRACT_RULES.every((rule) => live[rule] === null);
+}
+
+/** Every way the final live state can disagree with the contract, named in
+ *  `collection.field` terms. Never carries a live rule expression, a field
+ *  value or any credential — only names. */
+export async function verifyCollectionContract(
+  pb: CollectionContractClient,
+  contracts: readonly PbCollectionContract[] = COLLECTIONS
+): Promise<string[]> {
+  const live = await pb.collections.getFullList();
+  const liveByName = new Map(
+    live.map((collection) => [String(collection?.name ?? ""), collection])
   );
+  const issues: string[] = [];
+
+  for (const contract of contracts) {
+    const collection = liveByName.get(contract.name);
+    if (!collection) {
+      issues.push(`missing collection: ${contract.name}`);
+      continue;
+    }
+    for (const rule of CONTRACT_RULES) {
+      if (collection[rule] !== null) {
+        issues.push(`${contract.name}.${rule}: must be null`);
+      }
+    }
+
+    const liveFields = new Map(
+      (collection.fields ?? []).map((field) => [String(field?.name ?? ""), field])
+    );
+    for (const field of contract.schema) {
+      const liveField = liveFields.get(field.name);
+      if (!liveField) {
+        issues.push(`${contract.name}.${field.name}: field missing`);
+        continue;
+      }
+      if (String(liveField.type ?? "") !== field.type) {
+        issues.push(`${contract.name}.${field.name}: expected type ${field.type}`);
+      }
+      if (field.required !== undefined && !!liveField.required !== !!field.required) {
+        issues.push(
+          `${contract.name}.${field.name}: must be ${field.required ? "required" : "optional"}`
+        );
+      }
+      if (field.type === "text" && field.options?.max !== undefined) {
+        if (liveBound(liveField, "max") !== field.options.max) {
+          issues.push(`${contract.name}.${field.name}: text max mismatch`);
+        }
+      }
+      if (field.type === "number" || field.type === "date") {
+        if (field.options?.min !== undefined && liveBound(liveField, "min") !== field.options.min) {
+          issues.push(`${contract.name}.${field.name}: ${field.type} min mismatch`);
+        }
+        if (field.options?.max !== undefined && liveBound(liveField, "max") !== field.options.max) {
+          issues.push(`${contract.name}.${field.name}: ${field.type} max mismatch`);
+        }
+      }
+      if (field.type === "select" && field.options?.values) {
+        if (!sameValues(liveValues(liveField), field.options.values)) {
+          issues.push(`${contract.name}.${field.name}: select values mismatch`);
+        }
+      }
+    }
+
+    const liveIndexNames = new Set((collection.indexes ?? []).map(liveIndexName));
+    for (const index of contract.indexes ?? []) {
+      const name = expectedIndexName(index);
+      if (!liveIndexNames.has(name)) {
+        issues.push(`${contract.name}: missing index ${name}`);
+      }
+    }
+  }
+
+  return issues;
+}
+
+/** Fail the seed run unless the final live state actually matches the contract. */
+export async function assertCollectionContract(
+  pb: CollectionContractClient,
+  contracts: readonly PbCollectionContract[] = COLLECTIONS
+): Promise<void> {
+  const issues = await verifyCollectionContract(pb, contracts);
+  if (issues.length > 0) {
+    throw new Error(`PocketBase contract verification failed: ${issues.join("; ")}`);
+  }
 }
 
 export const NOTIFY_PREF_DEFAULTS: Array<{ key: string; enabled: boolean }> = [
@@ -992,7 +1172,7 @@ export async function seedCollections() {
     const created: string[] = [];
 
     for (const col of COLLECTIONS) {
-      const schema = withAutodate(col.schema);
+      const schema = collectionFieldsForSeed(col);
       if (existing.includes(col.name)) {
         const live = (await pb.collections.getFullList()).find((c: any) => c.name === col.name);
         if (!live) {
@@ -1000,7 +1180,7 @@ export async function seedCollections() {
           continue;
         }
         const liveFieldNames = new Set((live.fields || []).map((f: any) => f.name));
-        const missingFields = schema.filter((s: any) => !liveFieldNames.has(s.name));
+        const missingFields = schema.filter((s) => !liveFieldNames.has(s.name));
 
         // Field-option drift: fields that exist live but whose options differ
         // from the seed (e.g. members.emoji max — PocketBase treats a text
@@ -1012,9 +1192,9 @@ export async function seedCollections() {
         // the source of truth, so any live drift (out-of-band additions,
         // missing values like proactive_suggestions.kind's
         // grocery_store_optimization) is patched back to the seed's values.
-        const fieldDrift: any[] = schema
-          .filter((s: any) => liveFieldNames.has(s.name))
-          .map((s: any) => {
+        const fieldDrift: FieldDrift[] = schema
+          .filter((s) => liveFieldNames.has(s.name))
+          .map((s) => {
             const liveField = (live.fields || []).find((f: any) => f.name === s.name);
             if (!liveField) return null;
             // Required drift heals for ANY field type: a legacy live field
@@ -1030,31 +1210,18 @@ export async function seedCollections() {
             }
             if (s.type === "select" && s.options?.values) {
               const seedValues = s.options.values;
-              const liveValues = liveField.values || [];
-              const valuesDrift =
-                liveValues.length !== seedValues.length ||
-                seedValues.some((v: any, idx: number) => liveValues[idx] !== v);
+              const values = liveField.values || [];
+              const valuesDrift = !sameValues(values.map((v: any) => String(v)), seedValues);
               return valuesDrift ? { schemaField: s, liveField } : null;
             }
             return null;
           })
-          .filter(Boolean);
+          .filter((d): d is FieldDrift => d !== null);
 
-        const liveIndexNames = new Set(
-          (live.indexes || []).map((i: any) => {
-            if (typeof i === "string") {
-              const match = i.match(/INDEX\s+(\S+)\s+ON/i);
-              return match ? match[1] : i;
-            }
-            return i.name;
-          })
+        const liveIndexNames = new Set((live.indexes || []).map(liveIndexName));
+        const missingIndexes = (col.indexes || []).filter(
+          (index) => !liveIndexNames.has(expectedIndexName(index))
         );
-        const missingIndexes = (col.indexes || []).filter((i: any) => {
-          const name = typeof i === "string"
-            ? ((i.match(/INDEX\s+(\S+)\s+ON/i) || [])[1] || i)
-            : i.name;
-          return !liveIndexNames.has(name);
-        });
 
         if (missingFields.length || missingIndexes.length || fieldDrift.length) {
           const parts: string[] = [];
@@ -1067,7 +1234,7 @@ export async function seedCollections() {
               const lf = mergedFields.find((f: any) => f.name === d.schemaField.name);
               if (lf) {
                 if (d.schemaField.type === "select") {
-                  lf.values = d.schemaField.options.values;
+                  lf.values = d.schemaField.options?.values;
                 } else {
                   if (d.schemaField.options?.max !== undefined) lf.max = d.schemaField.options.max;
                   if (d.schemaField.required !== undefined) lf.required = !!d.schemaField.required;
@@ -1076,10 +1243,10 @@ export async function seedCollections() {
             }
             await pb.collections.update(live.id, { fields: mergedFields });
             if (missingFields.length) {
-              parts.push(`+${missingFields.length} fields: ${missingFields.map((m: any) => m.name).join(", ")}`);
+              parts.push(`+${missingFields.length} fields: ${missingFields.map((m) => m.name).join(", ")}`);
             }
             if (fieldDrift.length) {
-              parts.push(`+${fieldDrift.length} field options (${fieldDrift.map((d: any) => d.schemaField.name).join(", ")})`);
+              parts.push(`+${fieldDrift.length} field options (${fieldDrift.map((d) => d.schemaField.name).join(", ")})`);
             }
           }
           if (missingIndexes.length) {
@@ -1096,7 +1263,7 @@ export async function seedCollections() {
               }
             }
             await pb.collections.update(live.id, { indexes: [...(live.indexes || []), ...missingIndexes] });
-            parts.push(`+${missingIndexes.length} indexes: ${missingIndexes.map((i: any) => typeof i === "string" ? ((i.match(/INDEX\s+(\S+)\s+ON/i) || [])[1] || i) : i.name).join(", ")}`);
+            parts.push(`+${missingIndexes.length} indexes: ${missingIndexes.map(expectedIndexName).join(", ")}`);
           }
           created.push(`${col.name} (patched ${parts.join(", ")})`);
         } else {
@@ -1118,6 +1285,7 @@ export async function seedCollections() {
       created.push(col.name);
     }
 
+    await assertCollectionContract(pb as unknown as CollectionContractClient);
     return created;
   });
 

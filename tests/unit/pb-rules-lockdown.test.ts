@@ -16,12 +16,35 @@ const LOCKED = {
   deleteRule: null,
 };
 
+/** Live PB field defs for a seed schema: the typed-field shape PocketBase
+ *  returns, so a state the seed leaves alone verifies clean. */
+function liveFieldsFor(schema: readonly any[]): any[] {
+  return schema.map((s: any) => {
+    const field: any = { name: s.name, type: s.type || "text", required: !!s.required };
+    if (s.type === "select") field.values = [...(s.options?.values ?? [])];
+    if (s.options?.max !== undefined) field.max = s.options.max;
+    if (s.options?.min !== undefined) field.min = s.options.min;
+    return field;
+  });
+}
+
+/** Reads reflect writes: the seed's own create/patch calls must be visible to
+ *  the final contract verification. */
 function makePb(existing: any[] = []) {
+  const state = [...existing];
   return {
     collections: {
-      getFullList: vi.fn(async () => existing),
-      create: vi.fn(async (payload: any) => ({ id: `new_${payload.name}`, ...payload })),
-      update: vi.fn(async (id: string, body: any) => ({ id, ...body })),
+      getFullList: vi.fn(async () => state),
+      create: vi.fn(async (payload: any) => {
+        const record = { id: `new_${payload.name}`, ...payload };
+        state.push(record);
+        return record;
+      }),
+      update: vi.fn(async (id: string, body: any) => {
+        const record = state.find((c) => c.id === id);
+        if (record) Object.assign(record, body);
+        return { id, ...body };
+      }),
     },
   };
 }
@@ -60,7 +83,7 @@ describe("pb rules lockdown", () => {
     const live = {
       id: "evt_live_1",
       name: "events",
-      fields: eventsDef!.schema.map((s: any) => ({ name: s.name, type: s.type || "text", max: s.options?.max ?? 0, required: !!s.required })),
+      fields: liveFieldsFor(eventsDef!.schema),
       indexes: [],
       // pre-lockdown state: publicly open
       listRule: "",
@@ -87,10 +110,11 @@ describe("pb rules lockdown", () => {
       // Include the autodate fields the seeder self-heals so this collection
       // is genuinely up-to-date and needs no patch.
       fields: [
-        ...eventsDef.schema.map((s: any) => ({ name: s.name, type: s.type || "text", max: s.options?.max ?? 0, required: !!s.required })),
-        { name: "created" },
-        { name: "updated" },
+        ...liveFieldsFor(eventsDef!.schema),
+        { name: "created", type: "autodate", onCreate: true },
+        { name: "updated", type: "autodate", onCreate: true, onUpdate: true },
       ],
+
       indexes: [],
       listRule: null,
       viewRule: null,
