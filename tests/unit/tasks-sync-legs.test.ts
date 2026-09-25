@@ -199,6 +199,47 @@ describe("tasks/sync leg gating", () => {
     expect(db.creates).toHaveLength(0);
   });
 
+  it("a body that merely OWNS tasks — even set to null — is 410, not 400", async () => {
+    db.rows = [{ id: "row1", data: EXISTING }];
+    for (const role of ["parent", "child", "pet"] as const) {
+      const res = await post({ tasks: null }, role);
+      expect(res.status).toBe(410);
+      expect(await res.json()).toEqual({ ok: false, error: LEGACY_SYNC_WRITE_ERROR });
+    }
+    expect(mocks.withAdmin).not.toHaveBeenCalled();
+    expect(db.updates).toHaveLength(0);
+    expect(db.creates).toHaveLength(0);
+  });
+
+  it("a body that merely OWNS weekData — even set to null — is 410, not 400", async () => {
+    db.rows = [{ id: "row1", data: EXISTING }];
+    for (const role of ["parent", "child", "pet"] as const) {
+      const res = await post({ weekData: null }, role);
+      expect(res.status).toBe(410);
+      expect(await res.json()).toEqual({ ok: false, error: LEGACY_SYNC_WRITE_ERROR });
+    }
+    expect(mocks.withAdmin).not.toHaveBeenCalled();
+    expect(db.updates).toHaveLength(0);
+    expect(db.creates).toHaveLength(0);
+  });
+
+  it("null task/week keys beside other legs are still 410 with no partial import", async () => {
+    db.rows = [{ id: "row1", data: EXISTING }];
+    const res = await post({ tasks: null, weekData: null, rewards: POISONED.rewards }, "parent");
+    expect(res.status).toBe(410);
+    expect(await res.json()).toEqual({ ok: false, error: LEGACY_SYNC_WRITE_ERROR });
+    expect(mocks.withAdmin).not.toHaveBeenCalled();
+    expect(db.updates).toHaveLength(0);
+    expect(db.creates).toHaveLength(0);
+  });
+
+  it("a live session is still required before the legacy leg is judged", async () => {
+    const res = await post({ tasks: null }, undefined);
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ ok: false, error: "unauthorized" });
+    expect(mocks.withAdmin).not.toHaveBeenCalled();
+  });
+
   it("malformed sync JSON is 400 invalid_body with zero snapshot access", async () => {
     db.rows = [{ id: "row1", data: EXISTING }];
     const res = await postRaw("not-json", "parent");

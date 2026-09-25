@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withAdmin } from "@/lib/pb-auth";
 import { requireLiveSession } from "@/lib/server-auth";
-import { isGatewayCollection, sanitizeClientRow, canWrite } from "@/lib/db-gateway";
+import { isGatewayCollection, sanitizeClientRow, canWrite, writePolicy } from "@/lib/db-gateway";
 
 export const dynamic = "force-dynamic";
 
@@ -32,8 +32,12 @@ export async function GET(_request: NextRequest, ctx: Ctx) {
 
 export async function PATCH(request: NextRequest, ctx: Ctx) {
   const { collection, id } = await ctx.params;
-  if (!isGatewayCollection(collection)) {
+  const policy = writePolicy(collection);
+  if (!policy) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+  if (policy === "command") {
+    return NextResponse.json({ error: "command_only" }, { status: 403 });
   }
   // Middleware already 401s guests, but authorization must also live in the
   // route: writes are role-gated per collection (F2).
@@ -61,8 +65,12 @@ export async function PATCH(request: NextRequest, ctx: Ctx) {
 
 export async function DELETE(request: NextRequest, ctx: Ctx) {
   const { collection, id } = await ctx.params;
-  if (!isGatewayCollection(collection)) {
+  const policy = writePolicy(collection);
+  if (!policy) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+  if (policy === "command") {
+    return NextResponse.json({ error: "command_only" }, { status: 403 });
   }
   const live = await requireLiveSession(request);
   if (!live.ok) {

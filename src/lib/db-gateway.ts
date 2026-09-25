@@ -1,3 +1,5 @@
+import type { SessionRole } from "./session-policy";
+
 export const DB_GATEWAY_COLLECTIONS: ReadonlySet<string> = new Set([
   "grocery_list_items", "pantry_items", "meal_plan_entries", "meal_week_archive",
   "recipes", "events", "schedules", "tasks", "week_data", "week_archive",
@@ -54,23 +56,37 @@ export function sanitizeClientRow(row: Record<string, unknown>): Record<string, 
 
 export const MAX_LIST_LIMIT = 500;
 
-// F2 — writes are role-gated per collection. Collections carrying points,
-// ledger, roster, or household configuration are parent-only; the shared
-// household surfaces kids already toggle in the UI (tasks, grocery, pantry)
-// accept any signed-in session. Reads stay session-level (any role may read an
-// allowlisted collection); a missing session is still 401 at middleware.
-export const WRITE_POLICY: Record<string, "parent" | "session"> = {
-  week_data: "parent", week_archive: "parent", rewards: "parent", penalties: "parent",
+// F2 — writes are gated per collection, and the gate is decided BEFORE the body
+// is read so a refused write never reaches PocketBase. Collections carrying
+// points, ledger, roster, or household configuration are parent-only; the
+// shared household surfaces kids already toggle in the UI (grocery, pantry)
+// accept any signed-in session; and the task/ledger collections are
+// command-only — the browser writers are retired, so every role (a parent
+// included) is refused `403 command_only` and must use the command routes.
+// Reads stay session-level (any role may read an allowlisted collection); a
+// missing session is still 401 at middleware.
+export type GatewayWritePolicy = "command" | "parent" | "session";
+
+export const WRITE_POLICY: Record<string, GatewayWritePolicy> = {
+  tasks: "command", week_data: "command", week_archive: "command",
+  rewards: "parent", penalties: "parent",
   hall_of_fame: "parent", weekly_prizes: "parent", family_goals: "parent", emergency_contacts: "parent",
   chat_messages: "parent", morning_briefing: "parent", proactive_suggestions: "parent",
   consuela_state: "parent", events: "parent", schedules: "parent",
   meal_plan_entries: "parent", recipes: "parent", meal_week_archive: "parent",
-  tasks: "session", grocery_list_items: "session", pantry_items: "session",
+  grocery_list_items: "session", pantry_items: "session",
 };
 
-export function canWrite(collection: string, role: string | undefined | null): boolean {
-  const policy = WRITE_POLICY[collection];
+export function writePolicy(collection: string): GatewayWritePolicy | undefined {
+  return Object.prototype.hasOwnProperty.call(WRITE_POLICY, collection)
+    ? WRITE_POLICY[collection]
+    : undefined;
+}
+
+export function canWrite(collection: string, role: SessionRole | undefined): boolean {
+  const policy = writePolicy(collection);
   if (!policy) return false;
+  if (policy === "command") return false;
   if (policy === "parent") return role === "parent";
   return role === "parent" || role === "child" || role === "pet";
 }

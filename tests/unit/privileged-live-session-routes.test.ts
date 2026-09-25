@@ -552,25 +552,41 @@ describe("positive paths stay open for a live identity", () => {
   it("live child POST /api/db/[collection] on a shared household collection writes", async () => {
     const response = await dbPOST(
       jsonRequest(
-        "http://localhost/api/db/tasks",
-        { method: "POST", body: JSON.stringify({ title: "Dishes" }) },
+        "http://localhost/api/db/pantry_items",
+        { method: "POST", body: JSON.stringify({ name: "Rice" }) },
         await sessionCookie({ memberId: "m-kid", name: "Caspian", role: "child" }),
       ),
-      collectionCtx("tasks"),
+      collectionCtx("pantry_items"),
     );
 
     expect(response.status).toBe(200);
     expect(pbWrites.create).toHaveBeenCalledTimes(1);
   });
 
+  it("live parent POST /api/db/[collection] on a command-owned collection is 403 command_only with no PocketBase write", async () => {
+    const response = await dbPOST(
+      jsonRequest(
+        "http://localhost/api/db/tasks",
+        { method: "POST", body: JSON.stringify({ title: "Dishes" }) },
+        await sessionCookie({ memberId: "m-parent", name: "Rebecca", role: "parent" }),
+      ),
+      collectionCtx("tasks"),
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "command_only" });
+    expect(pbWrites.create).not.toHaveBeenCalled();
+    expect(mocks.withAdmin).not.toHaveBeenCalled();
+  });
+
   it("live child on a parent collection is still 403 adult_only", async () => {
     const response = await dbPOST(
       jsonRequest(
-        "http://localhost/api/db/week_data",
-        { method: "POST", body: JSON.stringify({ weekStart: "2026-09-14" }) },
+        "http://localhost/api/db/emergency_contacts",
+        { method: "POST", body: JSON.stringify({ name: "Neighbor" }) },
         await sessionCookie({ memberId: "m-kid", name: "Caspian", role: "child" }),
       ),
-      collectionCtx("week_data"),
+      collectionCtx("emergency_contacts"),
     );
 
     expect(response.status).toBe(403);
@@ -838,14 +854,32 @@ describe("every gate consumes the shared live-session contract", () => {
 
     await dbPOST(
       jsonRequest(
-        "http://localhost/api/db/tasks",
-        { method: "POST", body: JSON.stringify({ title: "Dishes" }) },
+        "http://localhost/api/db/pantry_items",
+        { method: "POST", body: JSON.stringify({ name: "Rice" }) },
         await sessionCookie({ memberId: "m-kid", name: "Caspian", role: "child" }),
       ),
-      collectionCtx("tasks"),
+      collectionCtx("pantry_items"),
     );
 
     expect(mocks.requireLiveSession.mock.calls[0][1]).toBeUndefined();
+  });
+
+  it("a command-owned collection is refused without resolving an identity at all", async () => {
+    mocks.requireLiveSession.mockResolvedValue(LIVE_PARENT);
+
+    const response = await dbPOST(
+      jsonRequest(
+        "http://localhost/api/db/week_data",
+        { method: "POST", body: JSON.stringify({ weekStart: "2026-09-21", points: { Alex: 9999 } }) },
+        await sessionCookie({ memberId: "m-parent", name: "Rebecca", role: "parent" }),
+      ),
+      collectionCtx("week_data"),
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "command_only" });
+    expect(mocks.requireLiveSession).not.toHaveBeenCalled();
+    expect(mocks.withAdmin).not.toHaveBeenCalled();
   });
 
   it("member admin GET accepts any live identity and never asks for a role", async () => {
