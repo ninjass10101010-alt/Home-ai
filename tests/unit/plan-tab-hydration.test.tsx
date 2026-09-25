@@ -15,6 +15,10 @@ import { describe, it, expect, vi } from "vitest";
 import React from "react";
 import { renderToString } from "react-dom/server";
 
+vi.hoisted(() => {
+  process.env.NEXT_PUBLIC_CANONICAL_MEMBER_FALLBACKS = "true";
+});
+
 const { pbMembers } = vi.hoisted(() => ({
   pbMembers: [
     { id: "pb1", name: "Rebecca (Mom)", role: "parent", emoji: "🐱", pin: "" },

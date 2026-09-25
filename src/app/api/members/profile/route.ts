@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withAdmin } from "@/lib/pb-auth";
-import { verifyPinFromPB, sanitizeMember, findOrCreateMemberRecord } from "@/lib/server-auth";
+import { verifyPinFromPB, sanitizeMember, updateMemberRecordByActorId } from "@/lib/server-auth";
 import { verifySession, SESSION_COOKIE } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
         const record = await pb.collection("members").getOne(session.memberId).catch(() => null);
         if (!record) return null;
         // Belt: always true after getOne(session.memberId) — the REAL
-        // cross-member seam is findOrCreateMemberRecord's name resolution.
+        // cross-member seam is updateMemberRecordByActorId's id match.
         if (record.id !== session.memberId) return null;
         return { ...record, name: session.name };
       });
@@ -83,8 +83,12 @@ export async function POST(request: NextRequest) {
     }
 
     const updated = await withAdmin(async (pb) => {
-      return findOrCreateMemberRecord(pb, actor, clean);
+      return updateMemberRecordByActorId(pb, actor, clean);
     });
+
+    if (!updated) {
+      return NextResponse.json({ error: "identity_unavailable" }, { status: 401 });
+    }
 
     return NextResponse.json({ success: true, member: sanitizeMember(updated) });
   } catch (error) {

@@ -8,6 +8,10 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
 
+vi.hoisted(() => {
+  process.env.NEXT_PUBLIC_CANONICAL_MEMBER_FALLBACKS = "true";
+});
+
 const { resolveRoster, rosterMembers } = vi.hoisted(() => {
   let resolveRoster!: (members: any[]) => void;
   const gate = new Promise<any[]>((r) => { resolveRoster = r; });

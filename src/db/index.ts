@@ -2,7 +2,7 @@ import { db as pbDb } from "./pb-db";
 import { gatewayList, gatewayCreate, gatewayUpdate, gatewayDelete } from "./gateway-client";
 import { defaultMeals, mealIdeas, initialGroceryItems } from "../data/meals";
 import { memberPinMatches } from "@/lib/member-pins";
-import { memberFallbacks, mergeMemberFallbacks } from "@/lib/member-fallback";
+import { canonicalMemberFallbacksEnabled, memberFallbacks, mergeMemberFallbacks } from "@/lib/member-fallback";
 import { mapMealRows, mapRecipeRows } from "@/lib/meal-rows";
 import { applyTasksSnapshotToStores } from "@/lib/task-utils";
 import { scheduleCoversWeekday, scheduleTimeMinutes, formatScheduleTime12h } from "@/lib/schedule-time";
@@ -232,7 +232,12 @@ async function refreshCache(name: string, fetcher: () => Promise<any[]>, cache: 
   }
 }
 
-const membersFallback = memberFallbacks;
+// The canonical fallback family is a non-production opt-in only. In production
+// it is never initialized into these caches, so a PocketBase read failure or an
+// empty roster leaves the browser with no synthesized members at all.
+const membersFallback: any[] = canonicalMemberFallbacksEnabled()
+  ? (memberFallbacks as any[])
+  : [];
 
 // Dual-mode cache fetchers: browser → sessioned gateway, server → pb-db.
 // Used by the module-level hydrate and refreshCaches.

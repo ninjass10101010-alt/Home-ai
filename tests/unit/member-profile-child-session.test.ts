@@ -4,7 +4,7 @@ import { NextRequest } from "next/server";
 const mocks = vi.hoisted(() => ({
   withAdmin: vi.fn(),
   verifyPinFromPB: vi.fn(),
-  findOrCreateMemberRecord: vi.fn(),
+  updateMemberRecordByActorId: vi.fn(),
   verifySession: vi.fn(),
 }));
 
@@ -14,7 +14,7 @@ vi.mock("@/lib/pb-auth", () => ({
 
 vi.mock("@/lib/server-auth", () => ({
   verifyPinFromPB: mocks.verifyPinFromPB,
-  findOrCreateMemberRecord: mocks.findOrCreateMemberRecord,
+  updateMemberRecordByActorId: mocks.updateMemberRecordByActorId,
   sanitizeMember: (m: any) => {
     const { pin, ...rest } = m;
     return rest;
@@ -62,7 +62,7 @@ describe("POST /api/members/profile — child-session avatar-only path", () => {
     mocks.verifySession.mockResolvedValue(CHILD_SESSION);
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pbWithGetOne(CHILD_RECORD)));
     let saved: any = null;
-    mocks.findOrCreateMemberRecord.mockImplementation(
+    mocks.updateMemberRecordByActorId.mockImplementation(
       async (_pb: unknown, actor: any, clean: Record<string, unknown>) => {
         saved = { ...actor, ...clean };
         return saved;
@@ -89,7 +89,7 @@ describe("POST /api/members/profile — child-session avatar-only path", () => {
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "Avatar fields only on a child session" });
     expect(mocks.verifyPinFromPB).not.toHaveBeenCalled();
-    expect(mocks.findOrCreateMemberRecord).not.toHaveBeenCalled();
+    expect(mocks.updateMemberRecordByActorId).not.toHaveBeenCalled();
   });
 
   it("3. child session + name field → 401", async () => {
@@ -99,7 +99,7 @@ describe("POST /api/members/profile — child-session avatar-only path", () => {
 
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "Avatar fields only on a child session" });
-    expect(mocks.findOrCreateMemberRecord).not.toHaveBeenCalled();
+    expect(mocks.updateMemberRecordByActorId).not.toHaveBeenCalled();
   });
 
   it("4. child session + pin field (attempt to change PIN via profile) → 401", async () => {
@@ -109,7 +109,7 @@ describe("POST /api/members/profile — child-session avatar-only path", () => {
 
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "Avatar fields only on a child session" });
-    expect(mocks.findOrCreateMemberRecord).not.toHaveBeenCalled();
+    expect(mocks.updateMemberRecordByActorId).not.toHaveBeenCalled();
   });
 
   it("5. child session + valid patch BUT the resolved record is not the session's member → 401", async () => {
@@ -122,7 +122,7 @@ describe("POST /api/members/profile — child-session avatar-only path", () => {
 
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "Invalid session" });
-    expect(mocks.findOrCreateMemberRecord).not.toHaveBeenCalled();
+    expect(mocks.updateMemberRecordByActorId).not.toHaveBeenCalled();
   });
 
   it("6. parent session, NO PIN in body → 401 (PIN gate must survive for adults)", async () => {
@@ -133,7 +133,7 @@ describe("POST /api/members/profile — child-session avatar-only path", () => {
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "Invalid PIN" });
     expect(mocks.verifyPinFromPB).not.toHaveBeenCalled();
-    expect(mocks.findOrCreateMemberRecord).not.toHaveBeenCalled();
+    expect(mocks.updateMemberRecordByActorId).not.toHaveBeenCalled();
   });
 
   it("7. no session, no PIN → 401", async () => {
@@ -144,13 +144,13 @@ describe("POST /api/members/profile — child-session avatar-only path", () => {
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "Invalid PIN" });
     expect(mocks.verifyPinFromPB).not.toHaveBeenCalled();
-    expect(mocks.findOrCreateMemberRecord).not.toHaveBeenCalled();
+    expect(mocks.updateMemberRecordByActorId).not.toHaveBeenCalled();
   });
 
   it("8. legacy PIN path unchanged: valid PIN + {color: 'red'} → 200", async () => {
     mocks.verifyPinFromPB.mockResolvedValue({ id: "m1", name: "Rebecca", role: "parent", color: "violet", pin: "9999" });
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn({ collection: () => ({}) }));
-    mocks.findOrCreateMemberRecord.mockImplementation(
+    mocks.updateMemberRecordByActorId.mockImplementation(
       async (_pb: unknown, actor: any, clean: Record<string, unknown>) => ({ ...actor, ...clean }),
     );
 
@@ -174,7 +174,7 @@ describe("POST /api/members/profile — child-session avatar-only path", () => {
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "Invalid PIN" });
     expect(mocks.verifySession).not.toHaveBeenCalled();
-    expect(mocks.findOrCreateMemberRecord).not.toHaveBeenCalled();
+    expect(mocks.updateMemberRecordByActorId).not.toHaveBeenCalled();
   });
 
   it("10. avatarSize outside the vocabulary (xxl) on child path → field dropped; nothing valid remains → 400", async () => {
@@ -185,6 +185,6 @@ describe("POST /api/members/profile — child-session avatar-only path", () => {
 
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "No valid fields to update" });
-    expect(mocks.findOrCreateMemberRecord).not.toHaveBeenCalled();
+    expect(mocks.updateMemberRecordByActorId).not.toHaveBeenCalled();
   });
 });

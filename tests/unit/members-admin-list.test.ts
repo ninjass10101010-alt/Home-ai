@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 
 const mocks = vi.hoisted(() => ({ withAdmin: vi.fn() }));
 
@@ -10,6 +10,11 @@ import { listMembersSanitized } from "@/lib/server-auth";
 
 beforeEach(() => {
   mocks.withAdmin.mockReset();
+  vi.stubEnv("NEXT_PUBLIC_CANONICAL_MEMBER_FALLBACKS", "true");
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe("listMembersSanitized", () => {

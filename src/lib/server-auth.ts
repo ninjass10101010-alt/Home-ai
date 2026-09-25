@@ -1,6 +1,9 @@
 import { withAdmin } from "./pb-auth";
-import { memberPinMatches, resolveMemberPin } from "./member-pins";
-import { mergeMemberFallbacks } from "./member-fallback";
+import { memberPinMatches } from "./member-pins";
+import {
+  canonicalMemberFallbacksEnabled,
+  mergeMemberFallbacks,
+} from "./member-fallback";
 import { resolveDefaultMemberPin } from "./pb-seed";
 
 export interface ServerMember {
@@ -16,6 +19,15 @@ export interface ServerMember {
   email?: string;
 }
 
+export interface PBClient {
+  collection: (name: string) => {
+    getFullList: (options?: any) => Promise<any[]>;
+    update: (id: string, patch: Record<string, unknown>) => Promise<any>;
+  };
+}
+
+export type ServerMemberRecord = Record<string, unknown> & { id: string };
+
 export function namesMatch(recordName: string, query: string): boolean {
   const firstName = query.split(" ")[0];
   return (
@@ -27,13 +39,11 @@ export function namesMatch(recordName: string, query: string): boolean {
   );
 }
 
-// The client-side cache composes live PB members with the built-in fallbacks
-// that PB doesn't have (e.g. a fresh dev/integration instance with an empty
-// members collection). Mirror that here so server-side PIN verification sees
-// the same member universe as the client. Fallback rows carry no pins, so
-// members whose PB record has no stored pin yet resolve against the seed-side
-// defaults — server-only, never shipped to the browser.
+// Resolved default credentials are a non-production opt-in only: in production
+// PocketBase is the sole identity source, so a member row with no stored pin
+// stays unpinned and can never be matched by a synthesized credential.
 function withResolvedPins(members: any[]): any[] {
+  if (!canonicalMemberFallbacksEnabled()) return members;
   return members.map((m: any) =>
     m.pin ? m : { ...m, pin: resolveDefaultMemberPin(m.name) }
   );
@@ -48,9 +58,10 @@ export async function findMemberByName(name: string): Promise<any | null> {
   });
 }
 
-// Full merged member universe, sanitized: PB rows win, built-in fallbacks fill
-// gaps (fresh dev/integration instances), and every pin — stored or seed-side
-// default — is stripped before anything leaves the server.
+// Full merged member universe, sanitized: PB rows win, the canonical fallbacks
+// fill gaps only for a non-production opt-in instance, and every pin — stored
+// or (opt-in only) seed-side default — is stripped before anything leaves the
+// server.
 export async function listMembersSanitized(): Promise<any[]> {
   return withAdmin(async (pb) => {
     const records = await pb.collection("members").getFullList({ requestKey: null });
@@ -127,8 +138,9 @@ export async function verifyPinFromPB(name: string, pin: string): Promise<any | 
 
 // Verify a PIN against ANY family member's stored PIN (PB is the source of
 // truth). Used by routes that only carry a pin (e.g. x-consuela-pin header) —
-// mirrors the /api/emergency "verify against any member" convention. Merges
-// the built-in fallbacks so pin-less / empty PB instances still verify.
+// mirrors the /api/emergency "verify against any member" convention. Only rows
+// PocketBase actually returned are considered: neither the canonical fallbacks
+// nor a synthesized default credential can satisfy a production PIN.
 export async function verifyPinAgainstAnyMember(pin: string): Promise<any | null> {
   if (!pin) return null;
   const key = pinThrottleKey(undefined);
@@ -146,27 +158,23 @@ export async function verifyPinAgainstAnyMember(pin: string): Promise<any | null
   });
 }
 
-// Upsert a member record in PB. When the verified member only exists in the
-// built-in fallbacks (dev/integration instances with an empty members
-// collection), the record is created so profile/PIN changes persist. The
-// resolved PIN is stored too, making PB the source of truth from then on.
-export async function findOrCreateMemberRecord(
-  pb: ReturnType<typeof import("./pb").getAdminPB>,
-  actor: any,
+// Update the member record the actor actually owns. The actor's own id is
+// matched against PocketBase BEFORE the write, so a deleted (or never-stored)
+// actor resolves to null instead of being recreated under its name. Explicit
+// creation lives only in createMemberRecord.
+export async function updateMemberRecordByActorId(
+  pb: PBClient,
+  actor: Pick<ServerMember, "id" | "name" | "role" | "emoji">,
   patch: Record<string, unknown>
-): Promise<any> {
+): Promise<ServerMemberRecord | null> {
+  const actorId = String(actor?.id ?? "");
+  if (!actorId) return null;
   const records = await pb.collection("members").getFullList({ requestKey: null });
-  const existing = records.find((r: any) => namesMatch(r.name, actor.name));
-  if (existing) {
-    return pb.collection("members").update(existing.id, patch);
-  }
-  return pb.collection("members").create({
-    name: actor.name,
-    pin: resolveMemberPin(actor) || resolveDefaultMemberPin(actor.name),
-    emoji: actor.emoji || "😊",
-    role: actor.role || "member",
-    ...patch,
-  });
+  const existing = records.find(
+    (r: any) => String(r?.id ?? "") === actorId
+  );
+  if (!existing) return null;
+  return pb.collection("members").update(existing.id, patch);
 }
 
 export function sanitizeMember(member: any): ServerMember {
@@ -175,11 +183,11 @@ export function sanitizeMember(member: any): ServerMember {
 }
 
 // Create a brand-new member row (Settings → Family Members "Add member").
-// Mirrors findOrCreateMemberRecord's PIN handling: the request may never carry
-// a pin — any client-supplied value is dropped and the seed-side default for
-// the name is resolved server-side (MEMBER_DEFAULT_PINS) so the new member can
-// log in immediately. Returns null when an existing PB record matches the name
-// (the caller maps that to 409 duplicate).
+// The request may never carry a pin — any client-supplied value is dropped and
+// the seed-side default for the name is resolved server-side (MEMBER_DEFAULT_PINS)
+// so the new member can log in immediately. This is the ONLY member-creation
+// path; updateMemberRecordByActorId never creates. Returns null when an existing
+// PB record matches the name (the caller maps that to 409 duplicate).
 export async function createMemberRecord(
   fields: Record<string, unknown>
 ): Promise<any | null> {
