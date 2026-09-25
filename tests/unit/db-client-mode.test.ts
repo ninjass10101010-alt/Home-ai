@@ -53,12 +53,14 @@ vi.mock("@/db/pb-db", () => {
   return { db };
 });
 
+const LEDGER_ERROR = ["task", "ledger", "write", "requires", "command"].join("_");
+
 let fetchMock: ReturnType<typeof vi.fn>;
 
 async function loadDb() {
   const mod = await import("@/db/index");
   const pb = (await import("@/db/pb-db")).db;
-  return { mod: mod.db, pb };
+  return { mod: mod.db, pb, ledgerError: mod.TASK_LEDGER_WRITE_ERROR };
 }
 
 beforeEach(() => {
@@ -107,43 +109,53 @@ describe("db/index client mode (browser)", () => {
     expect(meals[0].tags).toEqual(["dinner"]);
   });
 
-  it("archiveWeek upserts by weekStart in browser mode (updates, never duplicates)", async () => {
-    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
-      if (String(url).startsWith("/api/db/week_archive?") && !init) {
-        return { ok: true, json: async () => ({ items: [{ id: "wa1", weekStart: "2026-08-31" }] }) };
-      }
-      return { ok: true, json: async () => ({ id: "wa1", weekStart: "2026-08-31" }) };
-    });
-    const { mod } = await loadDb();
-    await mod.archiveWeek({ weekStart: "2026-08-31", points: { A: 42 } });
-
-    const patched = fetchMock.mock.calls.some(
-      ([u, i]: any[]) => String(u) === "/api/db/week_archive/wa1" && i?.method === "PATCH"
-    );
-    const posted = fetchMock.mock.calls.some(
-      ([u, i]: any[]) => String(u) === "/api/db/week_archive" && i?.method === "POST"
-    );
-    expect(patched).toBe(true);
-    expect(posted).toBe(false);
+  it("archiveWeek refuses the browser with the stable task-ledger error", async () => {
+    const { mod, ledgerError } = await loadDb();
+    expect(ledgerError).toBe(LEDGER_ERROR);
+    fetchMock.mockClear();
+    await expect(
+      mod.archiveWeek({ weekStart: "2026-08-31", points: { A: 42 } })
+    ).rejects.toThrow(LEDGER_ERROR);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("upsertTask updates an existing row by taskId instead of duplicating", async () => {
-    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
-      if (!init) {
-        return {
-          ok: true,
-          json: async () => ({ items: [{ id: "t1", taskId: 42, title: "Old" }] }),
-        };
-      }
-      return { ok: true, json: async () => ({ id: "t1", taskId: 42, title: "New" }) };
-    });
-    const { mod, pb } = await loadDb();
-    await mod.upsertTask({ taskId: 42, title: "New" });
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/db/tasks/t1",
-      expect.objectContaining({ method: "PATCH" })
-    );
+  it("every browser task/week/archive write refuses with the stable error", async () => {
+    const { mod, pb, ledgerError } = await loadDb();
+    expect(ledgerError).toBe(LEDGER_ERROR);
+    fetchMock.mockClear();
+    await expect(mod.upsertTask({ taskId: 42, title: "New" })).rejects.toThrow(LEDGER_ERROR);
+    await expect(mod.insertTask({ title: "New" })).rejects.toThrow(LEDGER_ERROR);
+    await expect(mod.updateTask("t1", { title: "New" })).rejects.toThrow(LEDGER_ERROR);
+    await expect(mod.deleteTask("t1")).rejects.toThrow(LEDGER_ERROR);
+    await expect(mod.deleteTaskByTaskId(42)).rejects.toThrow(LEDGER_ERROR);
+    await expect(mod.upsertWeekData({ weekStart: "2026-08-31" })).rejects.toThrow(LEDGER_ERROR);
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(pb.upsertTask).not.toHaveBeenCalled();
+    expect(pb.insertTask).not.toHaveBeenCalled();
+    expect(pb.updateTask).not.toHaveBeenCalled();
+    expect(pb.deleteTask).not.toHaveBeenCalled();
+    expect(pb.deleteTaskByTaskId).not.toHaveBeenCalled();
+    expect(pb.upsertWeekData).not.toHaveBeenCalled();
+    expect(pb.archiveWeek).not.toHaveBeenCalled();
+  });
+
+  it("the refusal carries the stable code, not a message-shaped free string", async () => {
+    const { mod } = await loadDb();
+    const error = await mod.upsertWeekData({ weekStart: "2026-08-31" }).catch((e: any) => e);
+    expect(error.code).toBe(LEDGER_ERROR);
+    expect(error.message).toBe(LEDGER_ERROR);
+  });
+
+  it("task/week/archive READS still ride the gateway", async () => {
+    const { mod } = await loadDb();
+    fetchMock.mockClear();
+    await mod.selectAllTasks();
+    await mod.getWeekData("2026-08-31");
+    await mod.listArchivedWeeks();
+    const urls = fetchMock.mock.calls.map(([u]: unknown[]) => String(u));
+    expect(urls.some((u) => u.startsWith("/api/db/tasks"))).toBe(true);
+    expect(urls.some((u) => u.startsWith("/api/db/week_data"))).toBe(true);
+    expect(urls.some((u) => u.startsWith("/api/db/week_archive"))).toBe(true);
   });
 
   // MF-2 — the browser members cache must refresh via the sessioned
@@ -179,6 +191,36 @@ describe("db/index server mode", () => {
     const rows = await mod.selectGrocery();
     expect(pb.selectGrocery).toHaveBeenCalledTimes(1);
     expect(rows).toEqual([{ id: "g9" }]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("server-side task/week/archive writers still delegate to pb-db", async () => {
+    vi.stubGlobal("window", undefined);
+    vi.resetModules();
+    const { mod, pb } = await loadDb();
+    (pb.insertTask as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    (pb.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    (pb.deleteTask as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+    (pb.upsertTask as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "s2" });
+    (pb.deleteTaskByTaskId as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+    (pb.upsertWeekData as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "w1" });
+    (pb.archiveWeek as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "a1" });
+
+    await mod.insertTask({ title: "Dishes" });
+    await mod.upsertTask({ taskId: 42, title: "Dishes" });
+    await mod.updateTask("s1", { title: "Dishes" });
+    await mod.deleteTask("s1");
+    await mod.deleteTaskByTaskId(42);
+    await mod.upsertWeekData({ weekStart: "2026-08-31" });
+    await mod.archiveWeek({ weekStart: "2026-08-31" });
+
+    const spies = pb as unknown as Record<string, ReturnType<typeof vi.fn>>;
+    for (const name of [
+      "insertTask", "upsertTask", "updateTask", "deleteTask",
+      "deleteTaskByTaskId", "upsertWeekData", "archiveWeek",
+    ]) {
+      expect({ name, called: spies[name].mock.calls.length > 0 }).toEqual({ name, called: true });
+    }
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

@@ -9,20 +9,7 @@ export const dynamic = "force-dynamic";
 
 const KEY = "tasks-snapshot";
 const COLLECTION = "consuela_data_snapshots";
-const IGNORED_COMPATIBILITY_LEGS = [
-  "weekData",
-  "rewards",
-  "rewardsUpdatedAt",
-  "penalties",
-  "penaltiesUpdatedAt",
-  "weeklyPrizes",
-  "weeklyPrizesStamp",
-  "configOperationReceipts",
-  "revision",
-  "operationReceipts",
-  "pendingProjectionRepairs",
-  "taskWeekStart",
-];
+export const LEGACY_SYNC_WRITE_ERROR = "legacy_sync_write_disabled";
 
 async function readSnapshot() {
   return withAdmin(async (pb) => {
@@ -138,9 +125,9 @@ export async function POST(req: NextRequest) {
   const record = body as Record<string, unknown>;
   if (Object.prototype.hasOwnProperty.call(record, "tasks") || Object.prototype.hasOwnProperty.call(record, "weekData")) {
     return NextResponse.json(
-      { ok: false, error: "task_snapshot_write_retired" },
+      { ok: false, error: LEGACY_SYNC_WRITE_ERROR },
       { status: 410 },
     );
   }
-  return NextResponse.json({ ok: true, saved: false, ignoredLegs: IGNORED_COMPATIBILITY_LEGS });
+  return NextResponse.json({ ok: false, error: "invalid_body" }, { status: 400 });
 }
