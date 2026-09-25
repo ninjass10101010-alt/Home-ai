@@ -1348,7 +1348,7 @@ parent PIN). Non-gateway routes with meaningfully different gates:
 | `/api/ai/providers` | GET | Session (any signed-in member; key previews only — 2-char suffix, decrypted key never leaves the server) |
 | `/api/ai/providers` | PUT/DELETE | Parent session (`authorizeAdminRequest`) |
 | `/api/ai/models` | POST | Parent session (`authorizeAdminRequest`) — server-side `/v1/models` listing with the stored key |
-| `/api/db/[collection]`, `/api/db/[collection]/[id]` | POST/PATCH/DELETE | Session + per-collection write policy (parent-only vs session) — see §5.6 |
+| `/api/db/[collection]`, `/api/db/[collection]/[id]` | POST/PATCH/DELETE | Live session + per-collection write policy (`command` / `parent` / `session`) — see §5.6. `tasks`, `week_data` and `week_archive` are command-only: `403 command_only` for every role |
 | `/api/tasks/sync` | POST | Session; **no browser writes** — a `tasks`/`weekData` body is 410 `legacy_sync_write_disabled`, any other body 400 `invalid_body` (GET is the read: rollover + reconcile + snapshot) |
 | `/api/tasks/quarantine` | POST | Parent session **and** a live PocketBase `role === "parent"` row (`verifyLiveParentSession`; 401 `unauthorized`/`member_missing`, 403 `adult_only`, 503 `member_lookup_failed`); takes no PIN because it writes nothing to the server — `dry-run` returns the match report only, `export` writes one JSON file to `local-quarantine/`. PB is read-only here (snapshot → `week_data` fallback, `getFullList` only; 503 `canonical_week_unavailable`) |
 | `/api/consuela/briefing` | GET/PATCH | Session (no longer middleware-exempt); PATCH stamps `acknowledgedBy` |
@@ -1625,16 +1625,19 @@ Full explanation of all 52 tools available (reads incl. calendar ranges/routines
 `src/lib/db-gateway.ts`). Reads are unchanged (any session); a missing session is
 still 401 at middleware, and a wrong role is 403 `adult_only`.
 
-- **Parent-only writes** (`role === "parent"`): `week_data`, `week_archive`,
-  `rewards`, `penalties`, `hall_of_fame`, `family_goals`, `emergency_contacts`,
+- **Command-only writes** (`policy === "command"`): `tasks`, `week_data`,
+  `week_archive` — refused `403 command_only` for **every** role including parent,
+  before any body parse or PocketBase call. The browser no longer writes these at
+  all; they mutate only through the command routes.
+- **Parent-only writes** (`role === "parent"`): `rewards`, `penalties`,
+  `hall_of_fame`, `weekly_prizes`, `family_goals`, `emergency_contacts`,
   `events`, `schedules`, `meal_plan_entries`, `recipes`, `meal_week_archive`,
   `chat_messages`, `morning_briefing`, `proactive_suggestions`, `consuela_state`.
   Points, the family calendar, the emergency roster and the shared thread are
   adult-controlled.
-- **Shared session writes** (`parent | child | pet`): `tasks`,
-  `grocery_list_items`, `pantry_items` — what the household already toggles in
-  the UI. The gateway `sort` param is whitelisted (field lists only; else 400
-  `invalid_sort`).
+- **Shared session writes** (`parent | child | pet`): `grocery_list_items`,
+  `pantry_items` — what the household already toggles in the UI. The gateway
+  `sort` param is whitelisted (field lists only; else 400 `invalid_sort`).
 - `POST /api/tasks/sync` takes **no browser writes at all**: a body carrying
   `tasks` or `weekData` is refused 410 `legacy_sync_write_disabled`, and every
   other body is 400 `invalid_body`. Task, ledger and config writes go through the
