@@ -158,4 +158,27 @@ describe("useAuth.login — server-side authentication", () => {
 
     vi.unstubAllGlobals();
   });
+
+  // D4 — the role is what selects the window. A role outside the session
+  // vocabulary must fail closed instead of hydrating a NaN deadline.
+  it("refuses a member whose role is outside the session vocabulary", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ success: true, member: { ...SANITIZED_MEMBER, role: "guest-admin" } }),
+      { status: 200 }
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderProvider();
+    let outcome: { success: boolean; error?: string } | undefined;
+    await act(async () => {
+      outcome = await ctxRef.current!.login("Caspian", "1010");
+    });
+
+    expect(outcome?.success).toBe(false);
+    expect(ctxRef.current!.isLoggedIn).toBe(false);
+    expect(ctxRef.current!.currentUser).toBeNull();
+    expect(localStorage.getItem("consuela-auth-user")).toBeNull();
+
+    vi.unstubAllGlobals();
+  });
 });

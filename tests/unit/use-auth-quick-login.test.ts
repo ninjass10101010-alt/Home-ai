@@ -82,4 +82,17 @@ describe("useAuth.quickLogin — PIN-free sign-in for under-10 kids", () => {
     expect(fetchMock.mock.calls.some(([u]: any) => u === "/api/auth/touch")).toBe(false);
     vi.unstubAllGlobals();
   });
+
+  // The shared post-sign-in funnel must refuse a role outside the session
+  // vocabulary, exactly as hydration does.
+  it("a quick-login member with an unusable role never signs in", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ success: true, member: { id: "7", name: "Caspian", role: "guest-admin", emoji: "🧒", color: "green", age: 5 } }) })) as any);
+    const { result } = renderAuthHook();
+    let outcome: { success: boolean } | undefined;
+    await act(async () => { outcome = await result.current!.quickLogin("Caspian"); });
+    expect(outcome?.success).toBe(false);
+    expect(result.current!.currentUser).toBeNull();
+    expect(localStorage.getItem("consuela-auth-user")).toBeNull();
+    vi.unstubAllGlobals();
+  });
 });

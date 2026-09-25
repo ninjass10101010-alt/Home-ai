@@ -33,6 +33,7 @@ import { sessionTtlSeconds, type SessionRole } from "@/lib/session-policy";
 const TOUCH_URL = "/api/auth/touch";
 const AUTH_KEY = "consuela-auth-user";
 const TOUCH_THROTTLE_MS = 60_000;
+const TOUCH_ATTEMPT_FLOOR_MS = 10_000;
 const MEMBER_BY_ROLE: Record<SessionRole, { name: string; emoji: string; color: string; id: number }> = {
   parent: { name: "Rebecca (Mom)", emoji: "👩", color: "violet", id: 1 },
   child: { name: "Caspian Garcia", emoji: "🧒", color: "cyan", id: 6 },
@@ -65,10 +66,12 @@ function touchOk(role: SessionRole, expiresIn = sessionTtlSeconds(role)): Reply 
 
 let touchReply: () => Reply = () => touchOk("child");
 let touchGate: Promise<void> | null = null;
+let touchRejects = false;
 
 const fetchMock = vi.fn(async (input: unknown) => {
   if (String(input) === TOUCH_URL) {
     if (touchGate) await touchGate;
+    if (touchRejects) throw new TypeError("Failed to fetch");
     return jsonReply(touchReply());
   }
   return jsonReply({ status: 200, body: { ok: true } });
@@ -158,10 +161,12 @@ function storedRole(): string | null {
 }
 
 let consoleErrors: unknown[][] = [];
+const originalConsoleError = console.error;
 
 beforeEach(() => {
   consoleErrors = [];
   vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+    originalConsoleError(...args);
     consoleErrors.push(args);
   });
   document.body.innerHTML = "";
@@ -170,6 +175,7 @@ beforeEach(() => {
   fetchMock.mockClear();
   touchReply = () => touchOk("child");
   touchGate = null;
+  touchRejects = false;
   vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {} })));
   vi.stubGlobal("fetch", fetchMock);
   vi.useFakeTimers();
@@ -250,8 +256,68 @@ describe("AuthProvider — throttled session touch", () => {
     expect(touchCalls()).toHaveLength(1);
 
     await act(async () => { open(); await touchGate; });
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOUCH_ATTEMPT_FLOOR_MS); });
     await activity();
     expect(touchCalls()).toHaveLength(2);
+  });
+
+  it("bounds a failing endpoint to one request per floor, not one per activity event", async () => {
+    seedStored("child");
+    touchReply = () => ({ status: 503, body: { error: "unreachable" } });
+
+    await renderProvider();
+    for (let i = 0; i < 50; i++) {
+      await activity();
+    }
+    expect(touchCalls()).toHaveLength(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOUCH_ATTEMPT_FLOOR_MS - 1_000); });
+    await activity();
+    expect(touchCalls()).toHaveLength(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await activity();
+    expect(touchCalls()).toHaveLength(2);
+
+    for (let i = 0; i < 50; i++) {
+      await activity();
+    }
+    expect(touchCalls()).toHaveLength(2);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOUCH_ATTEMPT_FLOOR_MS * 6); });
+    await activity();
+    expect(touchCalls()).toHaveLength(3);
+  });
+
+  it("a hung request never stacks", async () => {
+    seedStored("child");
+    touchGate = new Promise<void>(() => {});
+
+    await renderProvider();
+    for (let i = 0; i < 20; i++) {
+      await activity();
+    }
+    expect(touchCalls()).toHaveLength(1);
+  });
+
+  it("bounds a rejected fetch to the same floor as a failed response", async () => {
+    seedStored("child");
+    touchRejects = true;
+
+    await renderProvider();
+    for (let i = 0; i < 30; i++) {
+      await activity();
+    }
+    expect(touchCalls()).toHaveLength(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOUCH_ATTEMPT_FLOOR_MS - 1_000); });
+    await activity();
+    expect(touchCalls()).toHaveLength(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await activity();
+    expect(touchCalls()).toHaveLength(2);
+    expect(ctxRef.current?.isLoggedIn).toBe(true);
   });
 
   it("signs nobody in is never rotated", async () => {
@@ -360,21 +426,36 @@ describe("AuthProvider — a rotation the server refuses", () => {
     expect(localStorage.getItem(AUTH_KEY)).toBeNull();
   });
 
-  it("keeps a rejected rotation out of the throttle ledger", async () => {
+  it("a refused rotation buys the short attempt floor, never the 60s success cooldown", async () => {
     seedStored("child");
     touchReply = () => ({ status: 503, body: { error: "unreachable" } });
 
     await renderProvider();
     await activity();
     await activity();
+    expect(touchCalls()).toHaveLength(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOUCH_ATTEMPT_FLOOR_MS); });
+    await activity();
+    expect(touchCalls()).toHaveLength(2);
+    await activity();
     expect(touchCalls()).toHaveLength(2);
 
     touchReply = () => touchOk("child", 900);
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOUCH_ATTEMPT_FLOOR_MS); });
     await activity();
     expect(touchCalls()).toHaveLength(3);
 
     await activity();
     expect(touchCalls()).toHaveLength(3);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOUCH_THROTTLE_MS - 1_000); });
+    await activity();
+    expect(touchCalls()).toHaveLength(3);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    await activity();
+    expect(touchCalls()).toHaveLength(4);
   });
 });
 

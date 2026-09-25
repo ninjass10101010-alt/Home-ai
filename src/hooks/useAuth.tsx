@@ -11,6 +11,7 @@ import {
 
 const AUTH_STORAGE_KEY = 'consuela-auth-user';
 const TOUCH_THROTTLE_MS = 60 * 1000;
+const TOUCH_ATTEMPT_FLOOR_MS = 10 * 1000;
 const DEFAULT_REMAINING_MS = sessionTtlSeconds('parent') * 1000;
 // Kids warn for a full 5 minutes instead of 30s so the flip never surprises a
 // child.
@@ -73,6 +74,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const currentUserRef = useRef<AuthUser | null>(null);
   const lastActivityAtRef = useRef<number>(0);
   const lastSuccessfulTouchAtRef = useRef<number>(0);
+  const lastAttemptAtRef = useRef<number>(0);
+  const lastAttemptFailedRef = useRef<boolean>(false);
   const touchInFlightRef = useRef<boolean>(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -92,6 +95,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setCurrentUser(null);
     currentUserRef.current = null;
     lastSuccessfulTouchAtRef.current = 0;
+    lastAttemptAtRef.current = 0;
+    lastAttemptFailedRef.current = false;
     localStorage.removeItem(AUTH_STORAGE_KEY);
     setSessionWarning(false);
     setSessionRemainingMs(DEFAULT_REMAINING_MS);
@@ -117,13 +122,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const touchSession = useCallback(async (force = false) => {
     if (!currentUserRef.current) return;
     if (touchInFlightRef.current) return;
-    if (!force && Date.now() - lastSuccessfulTouchAtRef.current < TOUCH_THROTTLE_MS) return;
+    const now = Date.now();
+    if (!force && now - lastSuccessfulTouchAtRef.current < TOUCH_THROTTLE_MS) return;
+    if (!force && lastAttemptFailedRef.current && now - lastAttemptAtRef.current < TOUCH_ATTEMPT_FLOOR_MS) return;
 
+    lastAttemptAtRef.current = now;
+    lastAttemptFailedRef.current = true;
     touchInFlightRef.current = true;
     try {
       const response = await fetch("/api/auth/touch", { method: "POST" });
       if (response.status === 200) {
         lastSuccessfulTouchAtRef.current = Date.now();
+        lastAttemptFailedRef.current = false;
         setSessionWarning(false);
         const body = await response.json().catch(() => null) as { member?: { role?: unknown } } | null;
         const touchedRole = body?.member?.role;
@@ -154,6 +164,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     lastActivityAtRef.current = Date.now();
     lastSuccessfulTouchAtRef.current = 0;
+    lastAttemptAtRef.current = 0;
+    lastAttemptFailedRef.current = false;
 
     try {
       const stored = localStorage.getItem(AUTH_STORAGE_KEY);
@@ -257,6 +269,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   // Factored verbatim out of login's original success block — same fields
   // stored, same session/flush side effects — so the two paths can never drift.
   const finishLogin = useCallback((member: any): { success: boolean; error?: string } => {
+    if (!member?.name || !isSessionRole(member?.role)) {
+      return { success: false, error: 'Sign-in failed' };
+    }
+
     const authUser: AuthUser = {
       id: Number(member.id) || 0,
       name: member.name,
@@ -274,6 +290,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     currentUserRef.current = authUser;
     lastActivityAtRef.current = Date.now();
     lastSuccessfulTouchAtRef.current = 0;
+    lastAttemptAtRef.current = 0;
+    lastAttemptFailedRef.current = false;
     setSessionRemainingMs(sessionTtlSeconds(authUser.role) * 1000);
     setSessionWarning(false);
 
