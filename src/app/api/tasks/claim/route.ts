@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getLiveMemberById, type LiveMember } from "@/lib/live-member";
-import { verifyPinFromPB } from "@/lib/server-auth";
-import { SESSION_COOKIE, verifySession } from "@/lib/session";
+import { getLiveMemberById } from "@/lib/live-member";
+import { requireLiveSession, verifyPinFromPB } from "@/lib/server-auth";
 import { executeInternalTaskCommand } from "@/lib/task-commands";
 import {
   ensureTaskClaimHandlersRegistered,
@@ -44,6 +43,7 @@ function statusForReason(reason: ClaimFailureReason | string): number {
   if (
     reason === "not_allowed" ||
     reason === "adult_only" ||
+    reason === "session_role_changed" ||
     reason === "unknown_actor" ||
     reason === "unknown_task_owner" ||
     reason === "not_task_owner" ||
@@ -107,7 +107,10 @@ async function authenticate(
     try {
       const live = await getLiveMemberById(memberId);
       if (!live) return { ok: false, status: 401, reason: "unauthorized" };
-      return { ok: true, actor: liveActor(live, "pin", memberName) };
+      return {
+        ok: true,
+        actor: liveActor({ memberId: live.id, name: live.name, role: live.role }, "pin", memberName),
+      };
     } catch {
       return { ok: false, status: 503, reason: "member_roster_unavailable" };
     }
@@ -116,26 +119,20 @@ async function authenticate(
   if (!(["complete", "undo", "crew-join", "crew-checkin"] as string[]).includes(action)) {
     return { ok: false, status: 401, reason: "pin_required" };
   }
-  try {
-    const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
-    if (!session || typeof session.memberId !== "string" || !session.memberId.trim()) {
-      return { ok: false, status: 401, reason: "unauthorized" };
-    }
-    const live = await getLiveMemberById(session.memberId);
-    if (!live) return { ok: false, status: 401, reason: "unauthorized" };
-    return { ok: true, actor: liveActor(live, "session", memberName) };
-  } catch {
-    return { ok: false, status: 503, reason: "member_roster_unavailable" };
+  const live = await requireLiveSession(request);
+  if (!live.ok) {
+    return { ok: false, status: live.status, reason: live.error };
   }
+  return { ok: true, actor: liveActor(live.identity, "session", memberName) };
 }
 
 function liveActor(
-  member: LiveMember,
+  member: { memberId: string; name: string; role: string },
   authentication: "pin" | "session",
   requestedName?: string,
 ): ClaimActor {
   return {
-    memberId: member.id,
+    memberId: member.memberId,
     name: member.name,
     role: member.role,
     authentication,

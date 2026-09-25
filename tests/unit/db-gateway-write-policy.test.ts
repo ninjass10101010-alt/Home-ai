@@ -7,8 +7,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { signSession, SESSION_COOKIE } from "@/lib/session";
 
-const mocks = vi.hoisted(() => ({ withAdmin: vi.fn() }));
+const mocks = vi.hoisted(() => ({ withAdmin: vi.fn(), requireLiveSession: vi.fn() }));
 vi.mock("@/lib/pb-auth", () => ({ withAdmin: (fn: any) => mocks.withAdmin(fn) }));
+
+vi.mock("@/lib/server-auth", () => ({ requireLiveSession: mocks.requireLiveSession }));
 
 import { WRITE_POLICY, canWrite, isValidSort } from "@/lib/db-gateway";
 import { POST as createPOST } from "@/app/api/db/[collection]/route";
@@ -69,6 +71,11 @@ async function req(url: string, role: string | undefined, init?: RequestInit): P
     const token = await signSession({ memberId: "m1", name: "N", role });
     headers.cookie = `${SESSION_COOKIE}=${token}`;
   }
+  mocks.requireLiveSession.mockResolvedValue(
+    role
+      ? { ok: true, identity: { memberId: "m1", name: "N", role } }
+      : { ok: false, status: 401, error: "unauthorized" },
+  );
   return new NextRequest(url, { ...(init as any), headers }) as NextRequest;
 }
 
@@ -86,6 +93,7 @@ describe("db gateway role enforcement", () => {
     col = makeCollectionMocks();
     mocks.withAdmin.mockReset();
     mocks.withAdmin.mockImplementation((fn: any) => fn(pbOk));
+    mocks.requireLiveSession.mockReset();
   });
 
   it("guest POST → 401 unauthorized, PB untouched", async () => {

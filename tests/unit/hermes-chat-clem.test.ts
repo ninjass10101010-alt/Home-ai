@@ -10,11 +10,18 @@ const mocks = vi.hoisted(() => ({
   ]),
   resetAiTargetsForTests: vi.fn(),
   buildMemoryContext: vi.fn(async () => ""),
+  requireLiveSession: vi.fn(),
 }));
 
 vi.mock("@/lib/hermes-tools", () => ({
   buildToolsForOpenAI: mocks.buildToolsForOpenAI,
   getTool: mocks.getTool,
+}));
+
+vi.mock("@/lib/server-auth", () => ({
+  readSessionCookie: (request: Request) =>
+    request.headers.get("cookie")?.match(/consuela_session=([^;]+)/)?.[1],
+  requireLiveSession: mocks.requireLiveSession,
 }));
 
 vi.mock("@/lib/ai/targets", () => ({
@@ -51,7 +58,7 @@ async function post(body: Record<string, unknown>, cookie?: string) {
   );
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   resetAiChatForTests();
   vi.stubEnv("SESSION_SECRET", "test-secret-0123456789");
   vi.stubGlobal("fetch", vi.fn(async () => hermesReply()));
@@ -61,6 +68,19 @@ beforeEach(() => {
   mocks.resolveChatTargets.mockReset().mockImplementation(async () => [
     { url: "http://brain.local", key: "test-key", model: "test-model", provider: "test", fallback: false },
   ]);
+  const { verifySession } = await import("@/lib/session");
+  mocks.requireLiveSession.mockReset().mockImplementation(async (request: Request, options?: { requireRole?: string }) => {
+    const token = request.headers.get("cookie")?.match(/consuela_session=([^;]+)/)?.[1];
+    const signed = await verifySession(token);
+    if (!signed) return { ok: false as const, status: 401 as const, error: "unauthorized" as const };
+    if (options?.requireRole && signed.role !== options.requireRole) {
+      return { ok: false as const, status: 403 as const, error: "adult_only" as const };
+    }
+    return {
+      ok: true as const,
+      identity: { memberId: signed.memberId, name: signed.name, role: signed.role },
+    };
+  });
   // Default tools: include both clem and non-clem to verify filtering.
   // Role-aware (mirrors the real contract): role "child" → KID_TOOL_NAMES
   // reads only; otherwise the full adult surface minus nothing (houseControl

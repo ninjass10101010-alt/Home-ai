@@ -33,8 +33,10 @@ const mocks = vi.hoisted(() => ({
   withAdmin: vi.fn(),
   ensureCurrentTaskWeek: vi.fn(),
   reconcileTaskProjectionLocked: vi.fn(),
+  requireLiveSession: vi.fn(),
 }));
 vi.mock("@/lib/pb-auth", () => ({ withAdmin: (fn: any) => mocks.withAdmin(fn) }));
+vi.mock("@/lib/server-auth", () => ({ requireLiveSession: mocks.requireLiveSession }));
 vi.mock("@/lib/task-week-rollover", () => ({
   ensureCurrentTaskWeek: mocks.ensureCurrentTaskWeek,
 }));
@@ -120,6 +122,17 @@ beforeEach(() => {
   mocks.withAdmin.mockImplementation((fn: any) => fn(makePb()));
   mocks.ensureCurrentTaskWeek.mockReset();
   mocks.reconcileTaskProjectionLocked.mockReset();
+  mocks.requireLiveSession.mockReset();
+  mocks.requireLiveSession.mockImplementation(async (request: Request) => {
+    const { verifySession } = await import("@/lib/session");
+    const token = request.headers.get("cookie")?.match(/consuela_session=([^;]+)/)?.[1];
+    const signed = await verifySession(token);
+    if (!signed) return { ok: false as const, status: 401 as const, error: "unauthorized" as const };
+    return {
+      ok: true as const,
+      identity: { memberId: signed.memberId, name: signed.name, role: signed.role },
+    };
+  });
   mocks.ensureCurrentTaskWeek.mockResolvedValue({
     reconciled: true,
     weekStart: "2026-09-21",

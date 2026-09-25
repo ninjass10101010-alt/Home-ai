@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildToolsForOpenAI, getTool } from "@/lib/hermes-tools";
 import { db } from "@/db";
-import { verifySession, SESSION_COOKIE } from "@/lib/session";
+import { readSessionCookie, requireLiveSession } from "@/lib/server-auth";
+import type { SessionIdentity } from "@/lib/session-policy";
 import { buildClemSystemPrompt, buildConsuelaSystemPrompt, buildKidSystemPrompt, HOUSE_CONTROL_PROMPT_ADDENDUM } from "@/lib/consuela-prompts";
 import { buildMemoryContext } from "@/lib/family-memory";
 import { MEMORY_USER_ID, MEMORY_FAMILY_ID } from "@/lib/memory-ids";
@@ -338,22 +339,35 @@ interface ChatRequestBody {
   intent?: string; options?: any;
 }
 
+type LiveChatSession =
+  | { state: "absent" }
+  | { state: "live"; identity: SessionIdentity }
+  | { state: "refused"; status: number; error: string };
+
+async function liveChatSession(request: NextRequest): Promise<LiveChatSession> {
+  if (readSessionCookie(request) === undefined) return { state: "absent" };
+  const live = await requireLiveSession(request);
+  return live.ok
+    ? { state: "live", identity: live.identity }
+    : { state: "refused", status: live.status, error: live.error };
+}
+
 /**
  * Shared preamble for both chat modes: session-derived role, agent routing,
  * tool scoping, and the message stack. Used by the buffered POST and the
  * streamed handler so the two paths can never drift.
  */
-async function buildChatContext(request: NextRequest, body: ChatRequestBody) {
+async function buildChatContext(request: NextRequest, body: ChatRequestBody, gate: LiveChatSession) {
   const { history = [], system, agent } = body;
   const message = body.message ?? "";
-  // MF-3 — role comes from the signed session cookie only; body.role is
-  // ignored entirely (any kid could otherwise post role:"parent"). No valid
-  // session → child-role default: no house-control tools.
+  // MF-3 — role comes from the session cookie only; body.role is ignored
+  // entirely (any kid could otherwise post role:"parent"). No cookie at all is
+  // the guest/child default: no house-control tools.
   // F3 — PARENT ALLOWLIST (the Ledger-gate idiom): the roster's third role
   // "pet" (Rocco/Rico, default PIN 0000) is NOT an adult. Everything that
-  // isn't a parent session — child, pet, guest — gets the kid soul and the
-  // kid tool surface exactly as child sessions do today.
-  const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
+  // isn't a live parent session — child, pet, guest — gets the kid soul and
+  // the kid tool surface exactly as child sessions do today.
+  const session = gate.state === "live" ? gate.identity : null;
   const isAdult = session?.role === "parent";
   const role = isAdult ? "parent" : "child";
   const houseControl = isAdult;
@@ -400,7 +414,7 @@ async function buildChatContext(request: NextRequest, body: ChatRequestBody) {
   return { message, isClem, targets, tools, messages, role, sessionName: session?.name };
 }
 
-async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): Promise<Response> {
+async function handleStreamedChat(request: NextRequest, body: ChatRequestBody, gate: LiveChatSession): Promise<Response> {
   const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
   const writer = writable.getWriter();
   const enc = new TextEncoder();
@@ -419,7 +433,7 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
     // Health-recorder context hoisted so the catch path records rounds/brain too.
     const ctx = { agent: body.agent || "consuela", rounds: 0, brain: null as string | null, targets: 0 };
     try {
-      const { message, isClem, targets, tools, messages, sessionName } = await buildChatContext(request, body);
+      const { message, isClem, targets, tools, messages, sessionName } = await buildChatContext(request, body, gate);
       ctx.brain = targets.length ? `${targets[0].provider}/${targets[0].model}` : null;
       ctx.targets = targets.length;
       let finalContent = "";
@@ -540,8 +554,8 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
  * then an honest {ok:false, reason}.
  */
 async function handlePlanner(request: NextRequest, body: ChatRequestBody) {
-  const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
-  if (session?.role !== "parent") {
+  const live = await requireLiveSession(request, { requireRole: "parent" });
+  if (!live.ok) {
     return NextResponse.json({ ok: false, reason: "unauthorized" }, { status: 401 });
   }
   const intent = String(body.intent || "");
@@ -604,13 +618,18 @@ export async function POST(request: NextRequest) {
   // never reaches persistChatPair.
   if (body.agent === "planner") return handlePlanner(request, body);
 
+  const gate = await liveChatSession(request);
+  if (gate.state === "refused") {
+    return NextResponse.json({ error: gate.error }, { status: gate.status });
+  }
+
   const { message } = body;
   if (!message || !message.trim()) {
     return NextResponse.json({ error: "Message is required" }, { status: 400 });
   }
 
   if (body.stream === true) {
-    return handleStreamedChat(request, body);
+    return handleStreamedChat(request, body, gate);
   }
 
   const bufferedStartedAt = Date.now();
@@ -618,7 +637,7 @@ export async function POST(request: NextRequest) {
   // carry the REAL rounds/brain/agent instead of zeroed placeholders.
   const ctx = { agent: body.agent || "consuela", rounds: 0, brain: null as string | null, targets: 0 };
   try {
-    const { isClem, targets, tools, messages, role, sessionName } = await buildChatContext(request, body);
+    const { isClem, targets, tools, messages, role, sessionName } = await buildChatContext(request, body, gate);
     ctx.brain = targets.length ? `${targets[0].provider}/${targets[0].model}` : null;
     ctx.targets = targets.length;
     console.log(`[ai] agent=${body.agent || "consuela"} isClem=${isClem} brain=${targets[0]?.provider}/${targets[0]?.model} role=${role}`);

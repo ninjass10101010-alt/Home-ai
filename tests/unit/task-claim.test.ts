@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   withAdmin: vi.fn(),
   verifyPinFromPB: vi.fn(),
   verifySession: vi.fn(),
+  requireLiveSession: vi.fn(),
   findMemberByName: vi.fn(),
   getLiveMemberById: vi.fn(),
   getLiveMembers: vi.fn(),
@@ -28,6 +29,7 @@ vi.mock("@/lib/server-auth", () => ({
   verifyPinFromPB: mocks.verifyPinFromPB,
   findMemberByName: mocks.findMemberByName,
   namesMatch: mocks.namesMatch,
+  requireLiveSession: mocks.requireLiveSession,
 }));
 
 vi.mock("@/lib/session", () => ({
@@ -279,10 +281,30 @@ beforeEach(() => {
     defaultLiveMembers.find((member) => member.id === id) ?? null
   );
   mocks.verifyPinFromPB.mockImplementation(async (name: string) => {
-    const member = defaultLiveMembers.find((candidate) =>
+    const member = defaultLiveMembers.find((candidate: any) =>
       candidate.name === name || candidate.name.split(" ")[0] === name
     );
     return member ?? null;
+  });
+  // The PIN-free session path revalidates the cookie against the LIVE roster:
+  // the same contract as requireLiveSession, built from this suite's own
+  // verifySession + getLiveMemberById seams.
+  mocks.requireLiveSession.mockReset().mockImplementation(async (request: NextRequest, options?: { requireRole?: string }) => {
+    const token = request.headers.get("cookie")?.match(/consuela_session=([^;]+)/)?.[1];
+    const signed = await mocks.verifySession(token);
+    if (!signed) return { ok: false as const, status: 401 as const, error: "unauthorized" as const };
+    const live = await mocks.getLiveMemberById(signed.memberId);
+    if (!live) return { ok: false as const, status: 401 as const, error: "unauthorized" as const };
+    if (live.role !== signed.role) {
+      return { ok: false as const, status: 403 as const, error: "session_role_changed" as const };
+    }
+    if (options?.requireRole && live.role !== options.requireRole) {
+      return { ok: false as const, status: 403 as const, error: "adult_only" as const };
+    }
+    return {
+      ok: true as const,
+      identity: { memberId: live.id, name: live.name, role: live.role },
+    };
   });
 });
 

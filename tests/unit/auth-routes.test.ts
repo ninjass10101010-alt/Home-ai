@@ -1,10 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-const mocks = vi.hoisted(() => ({ verifyPinFromPB: vi.fn(), findMemberByName: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  verifyPinFromPB: vi.fn(),
+  findMemberByName: vi.fn(),
+  requireLiveSession: vi.fn(),
+}));
 vi.mock("@/lib/server-auth", () => ({
   verifyPinFromPB: mocks.verifyPinFromPB,
   findMemberByName: mocks.findMemberByName,
+  requireLiveSession: mocks.requireLiveSession,
   sanitizeMember: (m: any) => {
     const { pin, ...rest } = m;
     return rest;
@@ -15,14 +20,24 @@ import { POST as loginPOST } from "@/app/api/auth/login/route";
 import { GET as whoamiGET } from "@/app/api/auth/whoami/route";
 import { POST as logoutPOST } from "@/app/api/auth/logout/route";
 import { sessionCookieSecure } from "@/app/api/auth/login/route";
+import { verifySession } from "@/lib/session";
 
 function req(url: string, init?: RequestInit): NextRequest {
   return new NextRequest(url, init as any);
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.stubEnv("SESSION_SECRET", "test-secret-0123456789");
   mocks.verifyPinFromPB.mockReset();
+  mocks.requireLiveSession.mockReset().mockImplementation(async (request: Request) => {
+    const token = request.headers.get("cookie")?.match(/consuela_session=([^;]+)/)?.[1];
+    const signed = await verifySession(token);
+    if (!signed) return { ok: false as const, status: 401 as const, error: "unauthorized" as const };
+    return {
+      ok: true as const,
+      identity: { memberId: signed.memberId, name: signed.name, role: signed.role },
+    };
+  });
 });
 
 describe("POST /api/auth/login", () => {
@@ -86,17 +101,28 @@ describe("sessionCookieSecure", () => {
 });
 
 describe("GET /api/auth/whoami", () => {
-  it("returns the member from a valid session cookie", async () => {
+  it("returns the live member identity for a valid session cookie", async () => {
     const { signSession } = await import("@/lib/session");
     const token = await signSession({ memberId: "m1", name: "Rebecca", role: "parent" });
-    mocks.findMemberByName.mockResolvedValue({ id: "m1", name: "Rebecca", role: "parent", pin: "9999" });
     const res = await whoamiGET(req("http://x/api/auth/whoami", { headers: { cookie: `consuela_session=${token}` } }));
     expect(res.status).toBe(200);
-    expect((await res.json()).member.name).toBe("Rebecca");
+    const member = (await res.json()).member;
+    expect(member.name).toBe("Rebecca");
+    expect(member.memberId).toBe("m1");
+    expect(member.role).toBe("parent");
   });
 
   it("returns 401 without a cookie", async () => {
     expect((await whoamiGET(req("http://x/api/auth/whoami"))).status).toBe(401);
+  });
+
+  it("returns 403 session_role_changed when the live row drifted from the signed role", async () => {
+    const { signSession } = await import("@/lib/session");
+    const token = await signSession({ memberId: "m1", name: "Rebecca", role: "parent" });
+    mocks.requireLiveSession.mockResolvedValue({ ok: false, status: 403, error: "session_role_changed" });
+    const res = await whoamiGET(req("http://x/api/auth/whoami", { headers: { cookie: `consuela_session=${token}` } }));
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "session_role_changed" });
   });
 });
 

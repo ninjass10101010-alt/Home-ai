@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTool } from "@/lib/hermes-tools";
-import { verifyPinAgainstAnyMember } from "@/lib/server-auth";
+import { requireLiveSession, verifyPinAgainstAnyMember } from "@/lib/server-auth";
 import { withAdmin } from "@/lib/pb-auth";
 import { weekKey } from "@/lib/task-utils";
 import { liveMembers, parseJSON } from "@/lib/consuela/live-reads";
@@ -143,6 +143,10 @@ function isRealCalendarDate(s: string): boolean {
 }
 
 export async function POST(request: NextRequest) {
+  const live = await requireLiveSession(request, { requireRole: "parent" });
+  if (!live.ok) {
+    return NextResponse.json({ error: live.error }, { status: live.status });
+  }
   const auth = await authorizePin(request);
   if (auth === "missing") {
     return NextResponse.json({ error: "pin required" }, { status: 401 });

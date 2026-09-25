@@ -69,8 +69,9 @@ const h = vi.hoisted(() => {
   return { live, resolveOne, snapshot, pb, count };
 });
 
-const mocks = vi.hoisted(() => ({ withAdmin: vi.fn() }));
+const mocks = vi.hoisted(() => ({ withAdmin: vi.fn(), requireLiveSession: vi.fn() }));
 vi.mock("@/lib/pb-auth", () => ({ withAdmin: (fn: any) => mocks.withAdmin(fn) }));
+vi.mock("@/lib/server-auth", () => ({ requireLiveSession: mocks.requireLiveSession }));
 
 import { LEGACY_SYNC_WRITE_ERROR, POST } from "@/app/api/tasks/sync/route";
 import { __resetKeyedLockForTests } from "@/lib/keyed-lock";
@@ -117,6 +118,11 @@ beforeEach(() => {
   };
   mocks.withAdmin.mockReset();
   mocks.withAdmin.mockImplementation((fn: any) => fn(h.pb));
+  mocks.requireLiveSession.mockReset();
+  mocks.requireLiveSession.mockImplementation(async () => ({
+    ok: true,
+    identity: { memberId: "m1", name: "Poster", role: "parent" },
+  }));
   __resetKeyedLockForTests();
 });
 

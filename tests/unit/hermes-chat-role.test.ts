@@ -11,6 +11,13 @@ const mocks = vi.hoisted(() => ({
   resolveChatTargets: vi.fn(async () => [testTarget()]),
   resetAiTargetsForTests: vi.fn(),
   buildMemoryContext: vi.fn(async () => ""),
+  requireLiveSession: vi.fn(),
+}));
+
+vi.mock("@/lib/server-auth", () => ({
+  readSessionCookie: (request: Request) =>
+    request.headers.get("cookie")?.match(/consuela_session=([^;]+)/)?.[1],
+  requireLiveSession: mocks.requireLiveSession,
 }));
 
 vi.mock("@/lib/hermes-tools", () => ({
@@ -66,7 +73,7 @@ async function post(body: Record<string, unknown>, cookie?: string) {
   );
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   resetAiChatForTests();
   vi.stubEnv("SESSION_SECRET", "test-secret-0123456789");
   vi.stubGlobal("fetch", vi.fn(async () => hermesReply()));
@@ -75,6 +82,19 @@ beforeEach(() => {
   mocks.insertChatMessage.mockClear();
   mocks.buildMemoryContext.mockClear();
   mocks.resolveChatTargets.mockReset().mockImplementation(async () => [testTarget()]);
+  const { verifySession } = await import("@/lib/session");
+  mocks.requireLiveSession.mockReset().mockImplementation(async (request: Request, options?: { requireRole?: string }) => {
+    const token = request.headers.get("cookie")?.match(/consuela_session=([^;]+)/)?.[1];
+    const signed = await verifySession(token);
+    if (!signed) return { ok: false as const, status: 401 as const, error: "unauthorized" as const };
+    if (options?.requireRole && signed.role !== options.requireRole) {
+      return { ok: false as const, status: 403 as const, error: "adult_only" as const };
+    }
+    return {
+      ok: true as const,
+      identity: { memberId: signed.memberId, name: signed.name, role: signed.role },
+    };
+  });
 });
 
 afterEach(() => {

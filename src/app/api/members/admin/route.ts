@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withAdmin } from "@/lib/pb-auth";
-import { createMemberRecord, findMemberByName, listMembersSanitized, sanitizeMember } from "@/lib/server-auth";
-import { verifySession, SESSION_COOKIE } from "@/lib/session";
+import { createMemberRecord, findMemberByName, listMembersSanitized, requireLiveSession, sanitizeMember } from "@/lib/server-auth";
 import { authorizeAdminRequest } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
@@ -20,9 +19,9 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
-    const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
-    if (!session) {
-      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    const live = await requireLiveSession(request);
+    if (!live.ok) {
+      return NextResponse.json({ error: live.error }, { status: live.status });
     }
     const members = await listMembersSanitized();
     return NextResponse.json({ members });

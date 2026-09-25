@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   listMembersSanitized: vi.fn(),
   createMemberRecord: vi.fn(),
   verifySession: vi.fn(),
+  requireLiveSession: vi.fn(),
   authorizeAdminRequest: vi.fn(),
 }));
 
@@ -30,6 +31,7 @@ vi.mock("@/lib/server-auth", () => ({
   findMemberByName: mocks.findMemberByName,
   listMembersSanitized: mocks.listMembersSanitized,
   createMemberRecord: mocks.createMemberRecord,
+  requireLiveSession: mocks.requireLiveSession,
   sanitizeMember: (m: any) => {
     const { pin, ...rest } = m;
     return rest;
@@ -63,6 +65,15 @@ const CHILD = { ok: false, status: 403, error: "adult_only" };
 
 beforeEach(() => {
   for (const m of Object.values(mocks)) m.mockReset();
+  mocks.requireLiveSession.mockImplementation(async (request: Request) => {
+    const token = request.headers.get("cookie")?.match(/consuela_session=([^;]+)/)?.[1];
+    const signed = await mocks.verifySession(token);
+    if (!signed) return { ok: false as const, status: 401 as const, error: "unauthorized" as const };
+    return {
+      ok: true as const,
+      identity: { memberId: signed.memberId, name: signed.name, role: signed.role },
+    };
+  });
 });
 
 describe("GET /api/members/admin", () => {
@@ -72,6 +83,20 @@ describe("GET /api/members/admin", () => {
     const res = await GET(req());
 
     expect(res.status).toBe(401);
+    expect(mocks.listMembersSanitized).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 session_role_changed when the live row drifted from the signed role", async () => {
+    mocks.requireLiveSession.mockResolvedValue({
+      ok: false,
+      status: 403,
+      error: "session_role_changed",
+    });
+
+    const res = await GET(req({ cookie: "token" }));
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "session_role_changed" });
     expect(mocks.listMembersSanitized).not.toHaveBeenCalled();
   });
 

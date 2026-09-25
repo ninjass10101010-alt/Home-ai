@@ -5,10 +5,15 @@ const mocks = vi.hoisted(() => ({
   withAdmin: vi.fn(),
   verifyLiveParentSession: vi.fn(),
   verifySession: vi.fn(),
+  requireLiveSession: vi.fn(),
 }));
 
 vi.mock("@/lib/pb-auth", () => ({
   withAdmin: (fn: (pb: unknown) => Promise<unknown>) => mocks.withAdmin(fn),
+}));
+
+vi.mock("@/lib/server-auth", () => ({
+  requireLiveSession: mocks.requireLiveSession,
 }));
 
 vi.mock("@/lib/live-member", () => ({
@@ -140,6 +145,10 @@ beforeEach(() => {
   mocks.withAdmin.mockReset();
   mocks.verifyLiveParentSession.mockReset();
   mocks.verifySession.mockReset();
+  mocks.requireLiveSession.mockReset().mockResolvedValue({
+    ok: true,
+    identity: { memberId: "parent-live", name: "Live Parent", role: "parent" },
+  });
   __resetKeyedLockForTests();
   mocks.verifyLiveParentSession.mockResolvedValue({
     ok: true,

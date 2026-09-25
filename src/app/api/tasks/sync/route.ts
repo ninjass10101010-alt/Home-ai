@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withAdmin } from "@/lib/pb-auth";
-import { verifySession, SESSION_COOKIE } from "@/lib/session";
+import { requireLiveSession } from "@/lib/server-auth";
 import { ensureCurrentTaskWeek } from "@/lib/task-week-rollover";
 import { reconcileTaskProjectionLocked } from "@/lib/task-projection-reconciler";
 import { repairCategories } from "@/lib/task-repair-categories";
@@ -110,8 +110,10 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await verifySession(req.cookies.get(SESSION_COOKIE)?.value);
-  if (!session) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  const live = await requireLiveSession(req);
+  if (!live.ok) {
+    return NextResponse.json({ ok: false, error: live.error }, { status: live.status });
+  }
 
   let body: unknown;
   try {
