@@ -15,13 +15,6 @@ import { parseCanonicalTransactions, recomputeWeekPoints } from "@/lib/task-ledg
 
 type PB = ReturnType<typeof import("@/lib/pb").getAdminPB>;
 
-function parseMaybeJSON<T>(value: unknown, fallback: T): T {
-  if (typeof value === "string") {
-    try { return JSON.parse(value) as T; } catch { return fallback; }
-  }
-  return (value as T) ?? fallback;
-}
-
 /**
  * Pure: the Hall of Fame rows for one finished week. Mirrors the client's
  * `rankedEntriesFromWeek` + `archiveWeekWinner` semantics exactly:
@@ -66,6 +59,9 @@ export async function ensureArchivedWeeksEnshrined(pb: PB): Promise<number> {
     pb.collection("members").getFullList({ requestKey: null }),
     pb.collection("weekly_prizes").getFullList({ requestKey: null }),
   ]);
+  if (![archiveRows, hallRows, memberRows, prizeRows].every(Array.isArray)) {
+    throw new Error("hall_of_fame_read_failed");
+  }
 
   const emojis: Record<string, string> = {};
   for (const member of memberRows as any[]) {
@@ -81,52 +77,51 @@ export async function ensureArchivedWeeksEnshrined(pb: PB): Promise<number> {
     ? [...prizeByRank].map(([rank, text]) => ({ rank: rank as 1 | 2 | 3, text }))
     : DEFAULT_WEEKLY_PRIZES.map((prize) => ({ rank: prize.rank, text: prize.text }));
   const byKey = new Map<string, any[]>();
-  for (const row of hallRows as any[]) {
+  for (const row of [...(hallRows as any[])].sort((left, right) => String(left.id).localeCompare(String(right.id)))) {
     const key = `${String(row.member ?? "")}\u0000${String(row.weekStart ?? "")}`;
     byKey.set(key, [...(byKey.get(key) ?? []), row]);
   }
-  const archivedWeeks = (archiveRows as any[])
-    .map((row) => String(row?.weekStart || ""))
-    .filter(Boolean)
-    .sort();
+  const archiveData = (archiveRows as any[]).map((row) => {
+    const weekStart = String(row?.weekStart || "");
+    if (!weekStart) throw new Error("invalid_archive_week");
+    if (row.history === undefined || row.history === null || row.history === "") {
+      throw new Error("invalid_archive_history");
+    }
+    const history = parseCanonicalTransactions(row.history);
+    if (!history) throw new Error("invalid_archive_history");
+    return { row, weekStart, points: recomputeWeekPoints(history) };
+  });
+  const archivedWeeks = archiveData.map(({ weekStart }) => weekStart).sort();
   const latestArchivedWeek = archivedWeeks.at(-1) ?? "";
   const expected = new Map<string, HallOfFameEntry>();
   let changed = 0;
 
-  for (const row of archiveRows as any[]) {
-    const weekStart = String(row?.weekStart || "");
-    if (!weekStart) continue;
-    const points = parseMaybeJSON<Record<string, number>>(row?.points, {});
-    const historyValue = row?.history;
-    let canonicalPoints = points;
-    if (historyValue !== undefined && historyValue !== null && historyValue !== "") {
-      const history = parseCanonicalTransactions(historyValue);
-      if (!history) throw new Error("invalid_archive_history");
-      canonicalPoints = recomputeWeekPoints(history);
-    }
-    const entries = hallEntriesForWeek(canonicalPoints, weekStart, emojis, prizeCatalog);
-    const history = weekStart !== latestArchivedWeek;
+  const coreMatches = (row: any, entry: HallOfFameEntry) =>
+    Number(row.points) === entry.points &&
+    Number(row.rank) === entry.rank &&
+    String(row.emoji || "") === entry.emoji &&
+    String(row.prize || "") === String(entry.prize || "");
+
+  for (const { weekStart, points } of archiveData) {
+    const entries = hallEntriesForWeek(points, weekStart, emojis, prizeCatalog);
+    const historical = weekStart !== latestArchivedWeek;
     for (const entry of entries) {
       const key = `${entry.member}\u0000${entry.weekStart}`;
       expected.set(key, entry);
       const rows = byKey.get(key) ?? [];
-      const celebrated = rows.some((candidate) => candidate.celebrated === true);
+      const validRows = rows.filter((row) => coreMatches(row, entry));
+      const celebrated = validRows.some((candidate) => candidate.celebrated === true);
       if (rows.length === 0) {
         await pb.collection("hall_of_fame").create({
           ...entry,
-          ...(history ? { celebrated: true } : {}),
+          ...(historical ? { celebrated: true } : {}),
         }, { requestKey: null });
         changed += 1;
         continue;
       }
-      for (const candidate of rows) {
-        const matches =
-          Number(candidate.points) === entry.points &&
-          Number(candidate.rank) === entry.rank &&
-          String(candidate.emoji || "") === entry.emoji &&
-          String(candidate.prize || "") === String(entry.prize || "");
-        if (matches) continue;
-        await pb.collection("hall_of_fame").update(candidate.id, {
+      const primary = rows[0];
+      if (!coreMatches(primary, entry)) {
+        await pb.collection("hall_of_fame").update(primary.id, {
           member: entry.member,
           weekStart: entry.weekStart,
           emoji: entry.emoji,
@@ -137,25 +132,42 @@ export async function ensureArchivedWeeksEnshrined(pb: PB): Promise<number> {
         }, { requestKey: null });
         changed += 1;
       }
+      const verified = await pb.collection("hall_of_fame").getFullList({ requestKey: null });
+      const verifiedRows = (Array.isArray(verified) ? verified : []).filter((row: any) =>
+        String(row.id) === String(primary.id),
+      );
+      if (verifiedRows.length !== 1 || !coreMatches(verifiedRows[0], entry)) {
+        throw new Error("hall_of_fame_primary_verification_failed");
+      }
+      for (const duplicate of rows.slice(1)) {
+        await pb.collection("hall_of_fame").delete(duplicate.id, { requestKey: null });
+        changed += 1;
+      }
     }
   }
 
+  for (const row of [...(hallRows as any[])].sort((left, right) => String(left.id).localeCompare(String(right.id)))) {
+    const key = `${String(row.member ?? "")}\u0000${String(row.weekStart ?? "")}`;
+    if (expected.has(key)) continue;
+    await pb.collection("hall_of_fame").delete(row.id, { requestKey: null });
+    changed += 1;
+  }
+
   const verifiedRows = await pb.collection("hall_of_fame").getFullList({ requestKey: null });
-  for (const entry of expected.values()) {
-    const matches = (verifiedRows as any[]).filter(
-      (row) => row.member === entry.member && row.weekStart === entry.weekStart,
-    );
-    if (matches.length === 0) throw new Error("hall_of_fame_write_missing");
-    for (const row of matches) {
-      if (
-        Number(row.points) !== entry.points ||
-        Number(row.rank) !== entry.rank ||
-        String(row.emoji || "") !== entry.emoji ||
-        String(row.prize || "") !== String(entry.prize || "")
-      ) {
-        throw new Error("hall_of_fame_write_mismatch");
-      }
+  if (!Array.isArray(verifiedRows)) throw new Error("hall_of_fame_read_failed");
+  const verifiedByKey = new Map<string, any[]>();
+  for (const row of verifiedRows) {
+    const key = `${String(row.member ?? "")}\u0000${String(row.weekStart ?? "")}`;
+    verifiedByKey.set(key, [...(verifiedByKey.get(key) ?? []), row]);
+  }
+  for (const [key, entry] of expected) {
+    const rows = verifiedByKey.get(key) ?? [];
+    if (rows.length !== 1 || !coreMatches(rows[0], entry)) {
+      throw new Error("hall_of_fame_write_verification_failed");
     }
+  }
+  for (const key of verifiedByKey.keys()) {
+    if (!expected.has(key)) throw new Error("hall_of_fame_stale_row");
   }
   return changed;
 }

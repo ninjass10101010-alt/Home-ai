@@ -69,8 +69,21 @@ function makePb(opts?: {
   hall?: Record<string, any>[];
   members?: Record<string, any>[];
   prizes?: Record<string, any>[];
+  preserveMissingHistory?: boolean;
 }) {
-  const archive = opts?.archive ?? [];
+  const archive = (opts?.archive ?? []).map((row) => {
+    if (row.history !== undefined || opts?.preserveMissingHistory) return row;
+    const rawPoints = typeof row.points === "string" ? JSON.parse(row.points) : row.points ?? {};
+    const history = Object.entries(rawPoints as Record<string, number>).map(([member, amount], index) => ({
+      id: index + 1,
+      timestamp: `2026-09-07T10:00:0${index}.000Z`,
+      member,
+      type: "earn",
+      amount,
+      description: "Fixture",
+    }));
+    return { ...row, history };
+  });
   const hall = opts?.hall ?? [];
   const members = opts?.members ?? [{ name: "Aurora", emoji: "🌈" }];
   const prizes = opts?.prizes ?? [];
@@ -97,6 +110,11 @@ function makePb(opts?: {
         if (index >= 0) hall[index] = { ...hall[index], ...payload };
         updates.push({ id, payload });
         return hall[index] ?? payload;
+      },
+      delete: async (id: string) => {
+        const index = hall.findIndex((row) => row.id === id);
+        if (index >= 0) hall.splice(index, 1);
+        return true;
       },
     }),
   };
@@ -138,7 +156,7 @@ describe("ensureArchivedWeeksEnshrined", () => {
     expect(latest.celebrated).toBeUndefined();
   });
 
-  it("repairs stale existing fields and preserves celebration state", async () => {
+  it("repairs stale existing fields without trusting stale celebration state", async () => {
     const { pb, creates, updates, hall } = makePb({
       archive: [{ weekStart: "2026-09-07", points: JSON.stringify({ Aurora: 13 }) }],
       hall: [{ id: "hall-1", member: "Aurora", emoji: "stale", weekStart: "2026-09-07", points: 1, rank: 3, prize: "stale", celebrated: true }],
@@ -157,9 +175,31 @@ describe("ensureArchivedWeeksEnshrined", () => {
       points: 13,
       rank: 1,
       prize: "Movie night",
-      celebrated: true,
+       celebrated: false,
+
     });
     expect(hall[0]).toMatchObject({ points: 13, rank: 1, prize: "Movie night" });
+  });
+
+  it("retains celebration only from a valid same-key hall row", async () => {
+    const { pb, hall } = makePb({
+      archive: [{
+        weekStart: "2026-09-07",
+        history: [
+          { id: 1, timestamp: "2026-09-07T10:00:00.000Z", member: "Aurora", type: "earn", amount: 5, description: "Done" },
+        ],
+      }],
+      hall: [
+        { id: "hall-stale", member: "Aurora", emoji: "🌈", weekStart: "2026-09-07", points: 999, rank: 1, prize: "Movie night", celebrated: true },
+        { id: "hall-valid", member: "Aurora", emoji: "🌈", weekStart: "2026-09-07", points: 5, rank: 1, prize: "Movie night", celebrated: true },
+      ],
+      prizes: [{ id: "p1", rank: 1, text: "Movie night" }],
+    });
+
+    await ensureArchivedWeeksEnshrined(pb as any);
+
+    expect(hall).toHaveLength(1);
+    expect(hall[0]).toMatchObject({ id: "hall-stale", points: 5, celebrated: true });
   });
 
   it("recomputes archive balances from canonical history before enshrining", async () => {
@@ -177,6 +217,37 @@ describe("ensureArchivedWeeksEnshrined", () => {
     await ensureArchivedWeeksEnshrined(pb as any);
 
     expect(creates[0]).toMatchObject({ member: "Aurora", points: 5 });
+  });
+
+  it("rejects a stale-points archive with no canonical history", async () => {
+    const { pb, creates } = makePb({
+      archive: [{ weekStart: "2026-09-07", points: { Aurora: 999 } }],
+      prizes: [],
+      preserveMissingHistory: true,
+    });
+
+    await expect(ensureArchivedWeeksEnshrined(pb as any)).rejects.toThrow("invalid_archive_history");
+    expect(creates).toHaveLength(0);
+  });
+
+  it("removes hall rows absent from canonical expected entries", async () => {
+    const { pb, hall } = makePb({
+      archive: [{
+        weekStart: "2026-09-07",
+        points: {},
+        history: [
+          { id: 1, timestamp: "2026-09-07T10:00:00.000Z", member: "Aurora", type: "earn", amount: 5, description: "Done" },
+        ],
+      }],
+      hall: [
+        { id: "hall-stale", member: "Stale", emoji: "🧒", weekStart: "2026-09-07", points: 5, rank: 1 },
+      ],
+      prizes: [],
+    });
+
+    await ensureArchivedWeeksEnshrined(pb as any);
+
+    expect(hall.some((row) => row.member === "Stale")).toBe(false);
   });
 
   it("is idempotent — already-enshrined weeks create nothing", async () => {

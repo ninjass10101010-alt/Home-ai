@@ -114,7 +114,11 @@ function sameTransaction(left: Transaction, right: Transaction): boolean {
     left.taskId === right.taskId &&
     left.appliedBy === right.appliedBy &&
     left.meta?.operationId === right.meta?.operationId &&
-    left.meta?.source === right.meta?.source
+    left.meta?.source === right.meta?.source &&
+    left.meta?.fingerprint === right.meta?.fingerprint &&
+    left.meta?.actorId === right.meta?.actorId &&
+    left.meta?.action === right.meta?.action &&
+    JSON.stringify(left.meta?.taskIds ?? []) === JSON.stringify(right.meta?.taskIds ?? [])
   );
 }
 

@@ -116,7 +116,12 @@ beforeEach(() => {
   mocks.withAdmin.mockImplementation((fn: any) => fn(makePb()));
   mocks.ensureCurrentTaskWeek.mockReset();
   mocks.reconcileTaskProjectionLocked.mockReset();
-  mocks.ensureCurrentTaskWeek.mockResolvedValue({ reconciled: true, weekStart: "2026-09-21" });
+  mocks.ensureCurrentTaskWeek.mockResolvedValue({
+    reconciled: true,
+    weekStart: "2026-09-21",
+    revision: { revision: "1", updatedAt: "" },
+    currentWeekData: { weekStart: "2026-09-21", points: {}, streak: {}, lastActive: {}, history: [] },
+  });
   mocks.reconcileTaskProjectionLocked.mockResolvedValue({
     ok: true,
     reconciled: true,

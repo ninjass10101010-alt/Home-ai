@@ -16,6 +16,7 @@ vi.mock("@/lib/task-week-rollover", () => ({
 }));
 
 import { approvalCommandFingerprint } from "@/lib/task-approval";
+import { replaceSnapshotWeekData } from "@/lib/snapshot-tasks";
 import { reconcileTaskProjection } from "@/lib/task-projection-reconciler";
 
 const WEEK = "2026-09-21";
@@ -83,6 +84,7 @@ function makeHarness(options: {
   failTaskWriteAt?: number;
   failSnapshotWriteAt?: number;
   failWeekWriteAt?: number;
+  silentWeekUpdateIds?: string[];
 } = {}) {
   const snapshot: Row = {
     id: "snapshot-test",
@@ -119,6 +121,8 @@ function makeHarness(options: {
     snapshotWrites: 0,
     weekWrites: 0,
     taskWrites: 0,
+    activeTaskReads: 0,
+    maxTaskReads: 0,
   };
   const fail = (kind: "task" | "snapshot" | "week", at?: number) => {
     if (!at) return;
@@ -131,7 +135,13 @@ function makeHarness(options: {
       if (name === "consuela_data_snapshots") return [clone(snapshot)];
       if (name === "week_data") return clone(weekRows);
       if (name === "week_archive") return clone(archiveRows);
-      if (name === "tasks") return clone(taskRows);
+      if (name === "tasks") {
+        state.activeTaskReads += 1;
+        state.maxTaskReads = Math.max(state.maxTaskReads, state.activeTaskReads);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        state.activeTaskReads -= 1;
+        return clone(taskRows);
+      }
       if (name === "members") return clone(members);
       return [];
     },
@@ -173,6 +183,7 @@ function makeHarness(options: {
       if (name === "week_data") {
         state.weekWrites += 1;
         fail("week", options.failWeekWriteAt);
+        if (options.silentWeekUpdateIds?.includes(String(id))) return { id, ...clone(payload) };
         const row = weekRows.find((candidate) => candidate.id === id);
         if (row) Object.assign(row, clone(payload));
         return clone(row ?? payload);
@@ -388,7 +399,14 @@ describe("task projection reconciler", () => {
       PARENT_ID,
     );
     const archived = transaction(46, CHILD_NAME, 5, {
-      meta: { operationId, source: "task-approval", fingerprint },
+      meta: {
+        operationId,
+        source: "task-approval",
+        fingerprint,
+        actorId: PARENT_ID,
+        action: "approve",
+        taskIds: [46],
+      },
     });
     const harness = makeHarness({
       snapshot: {
@@ -396,7 +414,7 @@ describe("task projection reconciler", () => {
         taskWeekStart: WEEK,
         tasks: [],
         deletedTaskIds: [46],
-        pendingProjectionRepairs: [{ operationId, taskIds: [46], createdAt: `${WEEK}T10:01:00.000Z` }],
+        pendingProjectionRepairs: [{ operationId, taskIds: [46], action: "approve", actorId: PARENT_ID, fingerprint, createdAt: `${WEEK}T10:01:00.000Z` }],
         weekData: { weekStart: WEEK, points: {}, streak: {}, lastActive: {}, history: [] },
       },
       taskRows: [{ id: "pb-46", taskId: 46, title: "Approved" }],
@@ -471,6 +489,7 @@ describe("task projection reconciler", () => {
     expect(second.reconciled).toBe(true);
     expect(harness.taskRows).toHaveLength(1);
     expect(harness.taskRows[0].completed).toBe(false);
+    expect(harness.state.maxTaskReads).toBe(1);
   });
 
   it("keeps a verified approval marker pending when its first snapshot write fails", async () => {
@@ -480,7 +499,14 @@ describe("task projection reconciler", () => {
       PARENT_ID,
     );
     const paid = transaction(54, CHILD_NAME, 5, {
-      meta: { operationId, source: "task-approval", fingerprint },
+      meta: {
+        operationId,
+        source: "task-approval",
+        fingerprint,
+        actorId: PARENT_ID,
+        action: "approve",
+        taskIds: [54],
+      },
     });
     const pending = task(54, {
       completed: true,
@@ -494,7 +520,7 @@ describe("task projection reconciler", () => {
       taskWeekStart: WEEK,
       tasks: [pending],
       deletedTaskIds: [],
-      pendingProjectionRepairs: [{ operationId, taskIds: [54], createdAt: `${WEEK}T10:01:00.000Z` }],
+      pendingProjectionRepairs: [{ operationId, taskIds: [54], action: "approve", actorId: PARENT_ID, fingerprint, createdAt: `${WEEK}T10:01:00.000Z` }],
       weekData: { weekStart: WEEK, points: {}, streak: {}, lastActive: {}, history: [paid] },
     };
     const first = makeHarness({
@@ -508,6 +534,16 @@ describe("task projection reconciler", () => {
     const failed = await reconcileTaskProjection({ pb: first.pb as any, weekStart: WEEK });
     expect(failed.reconciled).toBe(false);
     expect(first.snapshot.data.pendingProjectionRepairs).toHaveLength(1);
+    mocks.ensureCurrentTaskWeek.mockResolvedValue({
+      weekStart: WEEK,
+      previousWeekStart: null,
+      archived: false,
+      tasksReset: false,
+      hallOfFameRecorded: false,
+      currentWeekData: { weekStart: WEEK, points: {}, streak: {}, lastActive: {}, history: [] },
+      revision: { revision: "3", updatedAt: "" },
+      reconciled: true,
+    });
 
     const second = makeHarness({
       snapshot: clone(first.snapshot.data),
@@ -527,7 +563,14 @@ describe("task projection reconciler", () => {
       PARENT_ID,
     );
     const paid = transaction(56, CHILD_NAME, 5, {
-      meta: { operationId, source: "task-approval", fingerprint },
+      meta: {
+        operationId,
+        source: "task-approval",
+        fingerprint,
+        actorId: PARENT_ID,
+        action: "approve",
+        taskIds: [56],
+      },
     });
     const pendingTask = task(56, {
       completed: true,
@@ -542,7 +585,7 @@ describe("task projection reconciler", () => {
         taskWeekStart: WEEK,
         tasks: [pendingTask],
         deletedTaskIds: [],
-        pendingProjectionRepairs: [{ operationId, taskIds: [56], createdAt: `${WEEK}T10:01:00.000Z` }],
+        pendingProjectionRepairs: [{ operationId, taskIds: [56], action: "approve", actorId: PARENT_ID, fingerprint, createdAt: `${WEEK}T10:01:00.000Z` }],
         weekData: { weekStart: WEEK, points: {}, streak: {}, lastActive: {}, history: [paid] },
       },
       taskRows: [{ ...pendingTask, id: "pb-56", taskId: 56 }],
@@ -551,6 +594,22 @@ describe("task projection reconciler", () => {
     mocks.withAdmin.mockImplementation(async (fn: any) => fn(harness.pb));
 
     const first = await reconcileTaskProjection({ pb: harness.pb as any, weekStart: WEEK, operationId });
+    mocks.ensureCurrentTaskWeek.mockResolvedValue({
+      weekStart: WEEK,
+      previousWeekStart: null,
+      archived: false,
+      tasksReset: false,
+      hallOfFameRecorded: false,
+      currentWeekData: {
+        weekStart: WEEK,
+        points: {},
+        streak: {},
+        lastActive: {},
+        history: [],
+      },
+      revision: { revision: "3", updatedAt: "" },
+      reconciled: true,
+    });
     const second = await reconcileTaskProjection({ pb: harness.pb as any, weekStart: WEEK, operationId });
 
     expect(first.repaired.length).toBeGreaterThan(0);
@@ -584,7 +643,7 @@ describe("task projection reconciler", () => {
         tasks: [pendingTask],
         deletedTaskIds: [],
         operationReceipts: {
-          [operationId]: [{ operationId, action: "send-back", taskId: 55, fingerprint, createdAt: `${WEEK}T10:01:00.000Z` }],
+          [operationId]: [{ operationId, action: "send-back", taskId: 55, actorId: PARENT_ID, taskIds: [55], fingerprint, createdAt: `${WEEK}T10:01:00.000Z` }],
         },
         pendingProjectionRepairs: [{ operationId, taskIds: [55], createdAt: `${WEEK}T10:01:00.000Z` }],
         weekData: { weekStart: WEEK, points: {}, streak: {}, lastActive: {}, history: [] },
@@ -604,6 +663,313 @@ describe("task projection reconciler", () => {
     expect(harness.snapshot.data.pendingProjectionRepairs).toHaveLength(0);
   });
 
+  it("does not append a missing crew payee during replay repair", async () => {
+    const operationId = "op-crew-missing-proof";
+    const fingerprint = approvalCommandFingerprint(
+      { operationId, action: "approve", taskId: 57 },
+      PARENT_ID,
+    );
+    const memberA = `${CHILD_NAME} A`;
+    const memberB = `${CHILD_NAME} B`;
+    const crewTask = task(57, {
+      completed: true,
+      completedBy: "Crew",
+      completedAt: `${WEEK}T10:00:00.000Z`,
+      completedInWeek: WEEK,
+      crewSize: 2,
+      crew: {
+        members: [
+          { name: memberA, emoji: "🧒", joinedAt: `${WEEK}T08:00:00.000Z`, checkedInAt: `${WEEK}T09:00:00.000Z` },
+          { name: memberB, emoji: "🧒", joinedAt: `${WEEK}T08:00:00.000Z`, checkedInAt: `${WEEK}T09:00:00.000Z` },
+        ],
+        removed: [],
+      },
+      pendingApproval: {
+        byName: "Crew",
+        at: `${WEEK}T10:00:00.000Z`,
+        points: 5,
+        crew: [memberA, memberB],
+      },
+    });
+    const paidA = transaction(57, memberA, 5, {
+      meta: {
+        operationId,
+        source: "task-approval",
+        fingerprint,
+        actorId: PARENT_ID,
+        action: "approve",
+        taskIds: [57],
+      },
+    });
+    const harness = makeHarness({
+      snapshot: {
+        revision: "1",
+        taskWeekStart: WEEK,
+        tasks: [crewTask],
+        deletedTaskIds: [],
+        pendingProjectionRepairs: [{ operationId, taskIds: [57], createdAt: `${WEEK}T10:01:00.000Z` }],
+        weekData: { weekStart: WEEK, points: {}, streak: {}, lastActive: {}, history: [paidA] },
+      },
+      taskRows: [{ ...crewTask, id: "pb-57", taskId: 57 }],
+      weekRows: [{ id: "week-current", weekStart: WEEK, points: {}, streak: {}, lastActive: {}, history: [paidA] }],
+    });
+    mocks.withAdmin.mockImplementation(async (fn: any) => fn(harness.pb));
+
+    const result = await reconcileTaskProjection({ pb: harness.pb as any, weekStart: WEEK });
+
+    expect(result.reconciled).toBe(false);
+    expect(harness.weekRows[0].history).toHaveLength(1);
+    expect(harness.snapshot.data.pendingProjectionRepairs).toHaveLength(1);
+  });
+
+  it("recovers approval intent from canonical metadata when the marker is lost", async () => {
+    const operationId = "op-marker-loss";
+    const fingerprint = approvalCommandFingerprint(
+      { operationId, action: "approve", taskId: 58 },
+      PARENT_ID,
+    );
+    const paid = transaction(58, CHILD_NAME, 5, {
+      meta: {
+        operationId,
+        source: "task-approval",
+        fingerprint,
+        actorId: PARENT_ID,
+        action: "approve",
+        taskIds: [58],
+      },
+    });
+    const pendingTask = task(58, {
+      completed: true,
+      completedBy: CHILD_NAME,
+      completedAt: `${WEEK}T10:00:00.000Z`,
+      completedInWeek: WEEK,
+      pendingApproval: { byName: CHILD_NAME, at: `${WEEK}T10:00:00.000Z`, points: 5 },
+    });
+    const harness = makeHarness({
+      snapshot: {
+        revision: "1",
+        taskWeekStart: WEEK,
+        tasks: [pendingTask],
+        deletedTaskIds: [],
+        weekData: { weekStart: WEEK, points: {}, streak: {}, lastActive: {}, history: [paid] },
+      },
+      taskRows: [{ ...pendingTask, id: "pb-58", taskId: 58 }],
+      weekRows: [{ id: "week-current", weekStart: WEEK, points: {}, streak: {}, lastActive: {}, history: [paid] }],
+    });
+    mocks.withAdmin.mockImplementation(async (fn: any) => fn(harness.pb));
+
+    const result = await reconcileTaskProjection({ pb: harness.pb as any, weekStart: WEEK });
+
+    expect(result.reconciled).toBe(true);
+    expect(harness.snapshot.data.tasks[0].pendingApproval).toBeNull();
+    expect(harness.weekRows[0].history).toHaveLength(1);
+  });
+
+  it("rejects duplicate live snapshot task ids as ambiguous", async () => {
+    const harness = makeHarness({
+      snapshot: {
+        revision: "1",
+        taskWeekStart: WEEK,
+        tasks: [task(59, { title: "First" }), task(59, { title: "Second" })],
+        deletedTaskIds: [],
+        weekData: { weekStart: WEEK, points: {}, streak: {}, lastActive: {}, history: [] },
+      },
+      taskRows: [{ ...task(59), id: "pb-59", taskId: 59 }],
+    });
+    mocks.withAdmin.mockImplementation(async (fn: any) => fn(harness.pb));
+
+    const result = await reconcileTaskProjection({ pb: harness.pb as any, weekStart: WEEK });
+
+    expect(result.reconciled).toBe(false);
+    expect(result.failed).toContain("task:59:ambiguous");
+    expect(harness.taskRows).toHaveLength(1);
+  });
+
+  it("fails closed when rollover revision changes before the locked reread", async () => {
+    const harness = makeHarness({
+      snapshot: {
+        revision: "1",
+        taskWeekStart: WEEK,
+        tasks: [task(61)],
+        deletedTaskIds: [],
+        weekData: { weekStart: WEEK, points: {}, streak: {}, lastActive: {}, history: [] },
+      },
+      taskRows: [{ ...task(61), id: "pb-61", taskId: 61 }],
+    });
+    mocks.withAdmin.mockImplementation(async (fn: any) => fn(harness.pb));
+    mocks.ensureCurrentTaskWeek.mockImplementation(async () => {
+      harness.snapshot.data.revision = "2";
+      return {
+        weekStart: WEEK,
+        previousWeekStart: null,
+        archived: false,
+        tasksReset: false,
+        hallOfFameRecorded: false,
+        currentWeekData: { weekStart: WEEK, points: {}, streak: {}, lastActive: {}, history: [] },
+        revision: { revision: "1", updatedAt: "" },
+        reconciled: true,
+      };
+    });
+
+    const result = await reconcileTaskProjection({ pb: harness.pb as any, weekStart: WEEK });
+
+    expect(result.reconciled).toBe(false);
+    expect(result.failed).toContain("rollover:changed");
+    expect(harness.taskRows[0].completed).toBe(false);
+  });
+
+  it("returns an explicit failure when task discovery cannot be read", async () => {
+    const harness = makeHarness();
+    const originalCollection = harness.pb.collection;
+    harness.pb.collection = ((name: string) => {
+      if (name === "tasks") return { getFullList: async () => { throw new Error("task read failed"); } };
+      return originalCollection(name);
+    }) as any;
+    mocks.withAdmin.mockImplementation(async (fn: any) => fn(harness.pb));
+
+    const result = await reconcileTaskProjection({ pb: harness.pb as any, weekStart: WEEK });
+
+    expect(result.reconciled).toBe(false);
+    expect(result.failed).toContain("tasks:read");
+  });
+
+  it("returns explicit failures for snapshot and ledger discovery read errors", async () => {
+    const snapshotHarness = makeHarness();
+    const originalSnapshotCollection = snapshotHarness.pb.collection;
+    snapshotHarness.pb.collection = ((name: string) => {
+      if (name === "consuela_data_snapshots") return { getFullList: async () => { throw new Error("snapshot read failed"); } };
+      return originalSnapshotCollection(name);
+    }) as any;
+    mocks.withAdmin.mockImplementation(async (fn: any) => fn(snapshotHarness.pb));
+    const snapshotResult = await reconcileTaskProjection({ pb: snapshotHarness.pb as any, weekStart: WEEK });
+    expect(snapshotResult.failed).toContain("snapshot:read");
+
+    const ledgerHarness = makeHarness();
+    const originalLedgerCollection = ledgerHarness.pb.collection;
+    ledgerHarness.pb.collection = ((name: string) => {
+      if (name === "week_data") return { getFullList: async () => { throw new Error("ledger read failed"); } };
+      return originalLedgerCollection(name);
+    }) as any;
+    mocks.withAdmin.mockImplementation(async (fn: any) => fn(ledgerHarness.pb));
+    const ledgerResult = await reconcileTaskProjection({ pb: ledgerHarness.pb as any, weekStart: WEEK });
+    expect(ledgerResult.failed).toContain("week:read");
+  });
+
+  it("refuses to replace a newer snapshot week with an older canonical week", async () => {
+    const newer = "2026-09-28";
+    const harness = makeHarness({
+      snapshot: {
+        revision: "1",
+        taskWeekStart: newer,
+        tasks: [],
+        deletedTaskIds: [],
+        weekData: { weekStart: newer, points: {}, streak: {}, lastActive: {}, history: [] },
+      },
+    });
+
+    const result = await replaceSnapshotWeekData(harness.pb as any, {
+      weekStart: WEEK,
+      points: {},
+      streak: {},
+      lastActive: {},
+      history: [],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(harness.state.snapshotWrites).toBe(0);
+  });
+
+  it("does not replay fingerprintless approval evidence", async () => {
+    const operationId = "op-fingerprintless";
+    const pendingTask = task(62, {
+      completed: true,
+      completedBy: CHILD_NAME,
+      completedAt: `${WEEK}T10:00:00.000Z`,
+      completedInWeek: WEEK,
+      pendingApproval: { byName: CHILD_NAME, at: `${WEEK}T10:00:00.000Z`, points: 5 },
+    });
+    const harness = makeHarness({
+      snapshot: {
+        revision: "1",
+        taskWeekStart: WEEK,
+        tasks: [pendingTask],
+        deletedTaskIds: [],
+        pendingProjectionRepairs: [{ operationId, taskIds: [62], createdAt: `${WEEK}T10:01:00.000Z` }],
+        weekData: {
+          weekStart: WEEK,
+          points: {},
+          streak: {},
+          lastActive: {},
+          history: [{ ...transaction(62, CHILD_NAME, 5), meta: { operationId, source: "task-approval" } }],
+        },
+      },
+      taskRows: [{ ...pendingTask, id: "pb-62", taskId: 62 }],
+      weekRows: [{
+        id: "week-current",
+        weekStart: WEEK,
+        points: {},
+        streak: {},
+        lastActive: {},
+        history: [{ ...transaction(62, CHILD_NAME, 5), meta: { operationId, source: "task-approval" } }],
+      }],
+    });
+    mocks.withAdmin.mockImplementation(async (fn: any) => fn(harness.pb));
+
+    const result = await reconcileTaskProjection({ pb: harness.pb as any, weekStart: WEEK, operationId });
+
+    expect(result.reconciled).toBe(false);
+    expect(harness.snapshot.data.tasks[0].pendingApproval).not.toBeNull();
+    expect(harness.weekRows[0].history).toHaveLength(1);
+  });
+
+  it("keeps duplicate week_data rows when primary verification fails", async () => {
+    const harness = makeHarness({
+      weekRows: [
+        { id: "week-primary", weekStart: WEEK, points: {}, streak: {}, lastActive: {}, history: [transaction(1, "Parent Test", 2)] },
+        { id: "week-duplicate", weekStart: WEEK, points: {}, streak: {}, lastActive: {}, history: [] },
+      ],
+      silentWeekUpdateIds: ["week-primary"],
+    });
+    mocks.withAdmin.mockImplementation(async (fn: any) => fn(harness.pb));
+
+    const result = await reconcileTaskProjection({ pb: harness.pb as any, weekStart: WEEK });
+
+    expect(result.reconciled).toBe(false);
+    expect(harness.weekRows).toHaveLength(2);
+  });
+
+  it("rejects send-back repair with a mismatched fingerprint", async () => {
+    const operationId = "op-sendback-mismatch";
+    const pendingTask = task(60, {
+      completed: true,
+      completedBy: CHILD_NAME,
+      completedAt: `${WEEK}T10:00:00.000Z`,
+      completedInWeek: WEEK,
+      pendingApproval: { byName: CHILD_NAME, at: `${WEEK}T10:00:00.000Z`, points: 5 },
+    });
+    const harness = makeHarness({
+      snapshot: {
+        revision: "1",
+        taskWeekStart: WEEK,
+        tasks: [pendingTask],
+        deletedTaskIds: [],
+        operationReceipts: {
+          [operationId]: [{ operationId, action: "send-back", taskId: 60, actorId: PARENT_ID, taskIds: [60], fingerprint: "a".repeat(64), createdAt: `${WEEK}T10:01:00.000Z` }],
+        },
+        pendingProjectionRepairs: [{ operationId, taskIds: [60], createdAt: `${WEEK}T10:01:00.000Z` }],
+        weekData: { weekStart: WEEK, points: {}, streak: {}, lastActive: {}, history: [] },
+      },
+      taskRows: [{ ...pendingTask, id: "pb-60", taskId: 60 }],
+    });
+    mocks.withAdmin.mockImplementation(async (fn: any) => fn(harness.pb));
+
+    const result = await reconcileTaskProjection({ pb: harness.pb as any, weekStart: WEEK });
+
+    expect(result.reconciled).toBe(false);
+    expect(harness.snapshot.data.tasks[0].pendingApproval).not.toBeNull();
+    expect(harness.snapshot.data.pendingProjectionRepairs).toHaveLength(1);
+  });
+
   it("keeps the current snapshot row when an approval replay repairs an edited task", async () => {
     const operationId = "op-edit-replay";
     const fingerprint = approvalCommandFingerprint(
@@ -611,7 +977,14 @@ describe("task projection reconciler", () => {
       PARENT_ID,
     );
     const paid = transaction(52, CHILD_NAME, 5, {
-      meta: { operationId, source: "task-approval", fingerprint },
+      meta: {
+        operationId,
+        source: "task-approval",
+        fingerprint,
+        actorId: PARENT_ID,
+        action: "approve",
+        taskIds: [52],
+      },
     });
     const edited = task(52, {
       title: "Edited title",

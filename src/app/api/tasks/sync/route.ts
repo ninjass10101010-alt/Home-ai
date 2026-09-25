@@ -60,6 +60,8 @@ export async function GET() {
     try {
       reconciliation = await withAdmin((pb) => reconcileTaskProjectionLocked(pb, {
         weekStart: rollover.weekStart,
+        expectedRevision: rollover.revision?.revision,
+        expectedWeekData: rollover.currentWeekData,
       }));
     } catch {
       console.warn("[tasks/sync] projection reconciliation unavailable");
