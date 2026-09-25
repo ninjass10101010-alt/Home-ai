@@ -6,14 +6,25 @@
 // favor of the display name ("Caspian") — so any points recorded while PB
 // was unreachable landed under a key the live roster never reads again.
 // The fallback must carry the SAME fullName convention as live PB rows.
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, afterAll, vi } from "vitest";
 
-vi.hoisted(() => {
-  process.env.NEXT_PUBLIC_CANONICAL_MEMBER_FALLBACKS = "true";
+const optInRestore = vi.hoisted(() => {
+  const key = "NEXT_PUBLIC_CANONICAL_MEMBER_FALLBACKS";
+  const previous = process.env[key];
+  process.env[key] = "true";
+  return { key, previous };
 });
 
 import { db } from "@/db";
 import { memberFallbacks } from "@/lib/member-fallback";
+
+afterAll(() => {
+  if (optInRestore.previous === undefined) {
+    delete process.env[optInRestore.key];
+  } else {
+    process.env[optInRestore.key] = optInRestore.previous;
+  }
+});
 
 describe("member fallback roster — ledger-key alignment", () => {
   it("selectMembersFallback carries each fallback's DECLARED fullName (never the display name)", () => {

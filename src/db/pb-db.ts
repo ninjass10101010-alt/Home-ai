@@ -5,7 +5,7 @@ import { idempotencyHashOf } from "@/lib/consuela/hash";
 import type { NewSuggestion, ProactiveSuggestion, SuggestionStatus } from "@/lib/consuela/types";
 import type { WeeklyPrize } from "@/types/tasks";
 import { scheduleCoversWeekday, scheduleTimeMinutes, formatScheduleTime12h } from "@/lib/schedule-time";
-import { memberFallbacks as membersFallback } from "@/lib/member-fallback";
+import { canonicalMemberFallbacksEnabled, memberFallbacks as membersFallback } from "@/lib/member-fallback";
 import { mapMealRows } from "@/lib/meal-rows";
 import { localTodayISO } from "@/lib/local-date";
 
@@ -92,15 +92,26 @@ async function safeDelete(collection: string, id: string): Promise<boolean> {
 }
 
 
+// A row with no name can never render, match a PIN, or be addressed — drop it
+// so a corrupt record (e.g. a blank member left behind by a failed save) never
+// reaches SSR HTML. Mirrors the sibling seam in lib/member-fallback.
+function usableMemberRows(records: any[]): any[] {
+  return (records || []).filter((r: any) => String(r?.name ?? "").trim());
+}
+
 export const db = {
   async selectMembers() {
-    const records = await safeList<any>("members", []);
-    if (records.length === 0) return membersFallback.map(m => ({
-      id: m.id, name: m.name.split(' ')[0], fullName: m.fullName ?? m.name,
-      role: m.role, color: memberColor(m.id - 1), emoji: m.emoji || "😊",
-      skinColor: m.skinColor, hairColor: m.hairColor, age: m.age,
-    }));
-    return records.map((r: any, i: number) => ({
+    const live = usableMemberRows(await safeList<any>("members", []));
+    if (live.length === 0) {
+      return canonicalMemberFallbacksEnabled()
+        ? membersFallback.map(m => ({
+            id: m.id, name: m.name.split(' ')[0], fullName: m.fullName ?? m.name,
+            role: m.role, color: memberColor(m.id - 1), emoji: m.emoji || "😊",
+            skinColor: m.skinColor, hairColor: m.hairColor, age: m.age,
+          }))
+        : [];
+    }
+    return live.map((r: any, i: number) => ({
       id: r.id, name: r.name.split(' ')[0], fullName: r.name,
       role: r.role || "member", color: memberColor(i), emoji: r.emoji || "😊",
       pin: r.pin, age: (r as any).age ?? undefined,
@@ -108,15 +119,19 @@ export const db = {
   },
 
   async selectMembersDetailed() {
-    const records = await safeList<any>("members", []);
-    if (records.length === 0) return membersFallback.map(m => ({
-      name: m.name, role: m.role === 'parent' ? 'Parent' : m.role === 'pet' ? 'Pet' : 'Child',
-      emoji: m.emoji || "😊", color: memberColor(m.id - 1),
-      age: m.age.toString(), joined: m.joined,
-      skinColor: m.skinColor, hairColor: m.hairColor,
-      avatarSize: (m as any).avatarSize || "md", glow: (m as any).glow || false,
-    }));
-    return records.map((r: any, i: number) => ({
+    const live = usableMemberRows(await safeList<any>("members", []));
+    if (live.length === 0) {
+      return canonicalMemberFallbacksEnabled()
+        ? membersFallback.map(m => ({
+            name: m.name, role: m.role === 'parent' ? 'Parent' : m.role === 'pet' ? 'Pet' : 'Child',
+            emoji: m.emoji || "😊", color: memberColor(m.id - 1),
+            age: m.age.toString(), joined: m.joined,
+            skinColor: m.skinColor, hairColor: m.hairColor,
+            avatarSize: (m as any).avatarSize || "md", glow: (m as any).glow || false,
+          }))
+        : [];
+    }
+    return live.map((r: any, i: number) => ({
       name: r.name, role: r.role || "member", emoji: r.emoji || "😊",
       color: memberColor(i), age: r.age ?? "", joined: r.created || "",
       skinColor: r.skinColor, hairColor: r.hairColor, pin: r.pin || "",

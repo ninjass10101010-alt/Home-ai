@@ -1341,6 +1341,9 @@ parent PIN). Non-gateway routes with meaningfully different gates:
 | `/api/muse/docs` | GET | Public (protocol docs only, no family data) |
 | `/api/muse/settings`, `settings/rotate`, `settings/revoke-tokens`, `/api/muse/log` | GET/PUT/POST | Parent session **or** `ADMIN_SECRET` **or** parent `x-admin-pin` — never the bearer |
 | `/api/rewards/redeem` | POST | Session + member PIN; server-authoritative (reads cost, checks balance, writes the redeem tx) |
+| `/api/members/admin` | GET | Any valid session (adult or child) — sanitized roster, every pin stripped |
+| `/api/members/admin` | POST/PATCH/DELETE | Adults only (`authorizeAdminRequest`); POST creates the member and resolves a server-side default PIN because the body may never carry one; DELETE refuses the last parent-role member |
+| `/api/members/profile`, `/api/members/pin` | POST | Current member's PIN (profile also accepts a child session's own avatar-only patch); update is matched by the actor's own PocketBase id, so a deleted actor is `401 identity_unavailable` and is never re-created |
 | `/api/ai/health` | GET | Session (any signed-in member; metadata-only chat outcomes — never message text) |
 | `/api/ai/providers` | GET | Session (any signed-in member; key previews only — 2-char suffix, decrypted key never leaves the server) |
 | `/api/ai/providers` | PUT/DELETE | Parent session (`authorizeAdminRequest`) |

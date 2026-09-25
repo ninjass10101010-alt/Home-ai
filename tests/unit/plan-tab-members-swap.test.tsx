@@ -3,13 +3,24 @@
 // strip must swap from the deterministic fallbacks to the real roster when the
 // async members cache warms (db/index.ts dispatches consuela-members-updated).
 // Without the PlanTab listener the memo freezes at the fallbacks forever.
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, afterAll, vi } from "vitest";
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
 
-vi.hoisted(() => {
-  process.env.NEXT_PUBLIC_CANONICAL_MEMBER_FALLBACKS = "true";
+const optInRestore = vi.hoisted(() => {
+  const key = "NEXT_PUBLIC_CANONICAL_MEMBER_FALLBACKS";
+  const previous = process.env[key];
+  process.env[key] = "true";
+  return { key, previous };
+});
+
+afterAll(() => {
+  if (optInRestore.previous === undefined) {
+    delete process.env[optInRestore.key];
+  } else {
+    process.env[optInRestore.key] = optInRestore.previous;
+  }
 });
 
 const { resolveRoster, rosterMembers } = vi.hoisted(() => {

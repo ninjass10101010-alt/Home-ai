@@ -11,12 +11,23 @@
 // (pbDb.selectMembers via withAdmin) — exactly the path that warms the cache
 // during SSR. The mocked PB returns the live family roster with Jeffery's
 // customized 😎 emoji.
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, afterAll, vi } from "vitest";
 import React from "react";
 import { renderToString } from "react-dom/server";
 
-vi.hoisted(() => {
-  process.env.NEXT_PUBLIC_CANONICAL_MEMBER_FALLBACKS = "true";
+const optInRestore = vi.hoisted(() => {
+  const key = "NEXT_PUBLIC_CANONICAL_MEMBER_FALLBACKS";
+  const previous = process.env[key];
+  process.env[key] = "true";
+  return { key, previous };
+});
+
+afterAll(() => {
+  if (optInRestore.previous === undefined) {
+    delete process.env[optInRestore.key];
+  } else {
+    process.env[optInRestore.key] = optInRestore.previous;
+  }
 });
 
 const { pbMembers } = vi.hoisted(() => ({
