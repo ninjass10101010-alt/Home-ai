@@ -2,7 +2,6 @@ import { withAdmin } from "@/lib/pb-auth";
 import { localWeekStartISO } from "@/lib/local-date";
 import { ensureArchivedWeeksEnshrined } from "@/lib/hall-of-fame-backfill";
 import {
-  hasUnreversedTaskEarn,
   mergeCanonicalTransactions,
   parseCanonicalTransactions,
   recomputeWeekPoints,
@@ -215,6 +214,10 @@ async function reconcileCanonicalRows(
   }
 }
 
+// A pre-existing current-week row is authoritative: pre-rollover ledger writers
+// (task-claim's ledger operation creates it when missing, task-manage runs under
+// the same week-ledger lock) may act before the rollover, so a row found here is
+// reconciled in place and never reseeded.
 async function ensureCurrentWeekRow(
   pb: AdminPB,
   weekStart: string,
