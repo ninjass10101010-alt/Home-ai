@@ -349,10 +349,7 @@ describe("parent approval is a durable command, not a local pay", () => {
     await act(async () => { dialogButton("Approve").click(); });
     await settle(80);
 
-    console.log("DBG input value", (document.querySelector('input[placeholder="Parent PIN"]') as HTMLInputElement)?.value);
-    console.log("DBG dialog after", document.querySelectorAll('[role="dialog"]').length);
     const queued = listTaskOutbox();
-    console.log("DBG", JSON.stringify(queued), "REQS", JSON.stringify(server.requests), "TOAST", document.body.textContent?.match(/Approving[^\\u2014]*/)?.[0]);
     expect(queued).toHaveLength(1);
     expect(queued[0]).toMatchObject({
       route: "/api/tasks/approve",
@@ -497,7 +494,10 @@ describe("send-back and approve-all are commands too", () => {
 
     const [entry] = listTaskOutbox();
     expect(entry).toMatchObject({ route: "/api/tasks/approve", action: "send-back", payload: { taskId: 101 } });
-    expect(storedTasks()[0].pendingApproval).toBeDefined();
+    // The reopen is the acknowledgment's write: the pending record is still
+    // exactly as it was, byte for byte.
+    expect(storedTasks()[0].pendingApproval).toEqual(PENDING_TASK.pendingApproval);
+    expect(storedTasks()[0].completed).toBe(true);
   });
 
   it("queues approve-all with every requested task id", async () => {
@@ -594,6 +594,15 @@ describe("assigned completion, open claim, crew and undo", () => {
     expect(listTaskOutbox()[0]).toMatchObject({ route: "/api/tasks/claim", action: "undo", payload: { taskId: 102 } });
     expect(storedWeek().points["Rebecca Mom"]).toBe(5);
     expect(storedTasks()[0].completed).toBe(true);
+    // A PAID undo reverses a ledger entry, so the member PIN travels with it —
+    // the server refuses a session-only one.
+    const posted = requestsFor("/api/tasks/claim");
+    expect(posted).toHaveLength(1);
+    expect(posted[0].body).toMatchObject({ action: "undo", taskId: 102, pin: KID_PIN });
+    const dump = Object.keys(localStorage)
+      .map((key) => `${key}=${localStorage.getItem(key) ?? ""}`)
+      .join("\n");
+    expect(dump).not.toContain(KID_PIN);
   });
 
   it("a kid self-cancel queues the server undo and does not clear the pending row locally", async () => {
@@ -612,7 +621,8 @@ describe("assigned completion, open claim, crew and undo", () => {
 
     const entry = listTaskOutbox()[0];
     expect(entry).toMatchObject({ route: "/api/tasks/claim", action: "undo", payload: { taskId: 101 } });
-    expect(storedTasks()[0].pendingApproval).toBeDefined();
+    // Nothing local was cleared — a lost command must never silently erase a tap.
+    expect(storedTasks()[0].pendingApproval).toEqual(PENDING_TASK.pendingApproval);
     expect(storedTasks()[0].completed).toBe(true);
   });
 });

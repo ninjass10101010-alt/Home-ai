@@ -38,6 +38,18 @@ describe("AI endpoints exempt from session auth", () => {
     expect(isExempt("/api/tasks/claim")).toBe(true);
     expect(isExempt("/api/members/verify")).toBe(true);
   });
+  it("the parent-PIN ledger command is exempt (it self-authenticates the PIN)", () => {
+    expect(isExempt("/api/tasks/ledger")).toBe(true);
+  });
+  it("reward redemption is exempt — the member/parent PIN is the credential", () => {
+    // Without this a guest or auto-logged-out device 401s at the middleware
+    // before the PIN is ever checked, so a kid's redemption could never land.
+    expect(isExempt("/api/rewards/redeem")).toBe(true);
+  });
+  it("reward-redemption lookalike siblings stay gated", () => {
+    expect(isExempt("/api/rewards/redeem-history")).toBe(false);
+    expect(isExempt("/api/rewards")).toBe(false);
+  });
   it("exempts /api/tasks/approve — parent PIN is the credential", () => {
     expect(isExempt("/api/tasks/approve")).toBe(true);
     expect(isExempt("/api/tasks/approve/")).toBe(true);

@@ -24,6 +24,7 @@ export interface QueueTaskCommandInput {
   credential?: TaskOutboxCredential;
 }
 
+export { onTaskOutboxAdopted } from "@/lib/task-operation-outbox";
 export {
   forgetTaskCommandCredential,
   listTaskCommandCredentialIds,

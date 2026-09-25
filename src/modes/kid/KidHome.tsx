@@ -24,7 +24,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import PageShell from "@/components/ui/PageShell";
 import Avatar from "@/components/ui/Avatar";
 import EmergencyButton from "@/components/ui/EmergencyButton";
@@ -424,7 +424,6 @@ export default function KidHome() {
   const user = currentUser;
   const firstName = user?.name?.split(" ")[0] || "Buddy";
   const boardMemberName = user ? resolveMemberName(db.selectMembers(), user.name) : "";
-  const level = Math.floor(points / POINTS_PER_LEVEL) + 1;
 
   // ── Hero two-card math: the weekly race + the forever journey ──
   // The hero's race line uses the SAME pure kidRaceLine as the leaderboard

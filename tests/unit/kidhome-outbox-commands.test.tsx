@@ -130,6 +130,12 @@ function storedWeek(): any {
   return JSON.parse(localStorage.getItem("consuela-week-data") || "{}");
 }
 
+const QUEST_SEED_PENDING = {
+  byName: "Caspian Garcia",
+  at: expect.any(String),
+  points: 5,
+};
+
 const QUEST = {
   id: 201,
   title: "Feed the dog",
@@ -356,7 +362,7 @@ describe("self-cancel", () => {
 
     const entry = listTaskOutbox()[0];
     expect(entry).toMatchObject({ route: "/api/tasks/claim", action: "undo", payload: { taskId: 201 } });
-    expect(storedTasks()[0].pendingApproval).toBeDefined();
+    expect(storedTasks()[0].pendingApproval).toEqual(QUEST_SEED_PENDING);
     expect(storedTasks()[0].completed).toBe(true);
   });
 });

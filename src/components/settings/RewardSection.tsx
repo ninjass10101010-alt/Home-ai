@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useSyncExternalStore } from "react";
-import { queueTaskCommandAndFlush } from "@/lib/task-command-queue";
+import { queueTaskCommandAndFlush, onTaskOutboxAdopted } from "@/lib/task-command-queue";
 import { useTaskCommandQueue } from "@/hooks/useTaskCommandQueue";
 import SoftButton from "@/components/ui/SoftButton";
 import IconButton from "@/components/ui/IconButton";
@@ -84,6 +84,11 @@ export default function RewardSection({ showToast }: RewardSectionProps) {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState({ name: "", emoji: "🎁", cost: 25, category: "fun" });
+
+  // An adoption rewrites the canonical catalog, so the rendered list has to be
+  // told to re-read: a REFUSED (stale) command repairs the visible catalog
+  // immediately, at the moment of the refusal, instead of on the next 60s pull.
+  useEffect(() => onTaskOutboxAdopted(emitRewardsUpdate), []);
 
   useEffect(() => {
     // One-time heal: a device whose only catalog is the retired Settings key
