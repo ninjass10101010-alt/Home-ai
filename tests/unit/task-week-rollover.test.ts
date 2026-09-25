@@ -362,6 +362,7 @@ describe("ensureCurrentTaskWeek", () => {
     expect(live.some((task) => task.title === "Done this week" && task.id === 4)).toBe(true);
     expect(live.some((task) => task.title === "Pending prior" && task.id === 5)).toBe(true);
     expect(harness.snapshotData().deletedTaskIds).toEqual(expect.arrayContaining([1, 2, 9]));
+    expect(harness.snapshotData().deletedTaskIds).not.toContain(5);
   });
 
   it("merges duplicate prior week and archive rows without creating another week", async () => {

@@ -1845,21 +1845,8 @@ export async function repairApprovalOperationLocked(
       return failure(operationId, intent.action, "snapshot_write_failed", search.currentWeek);
     }
 
-    const prepared = await (async (): Promise<PreparedCommand | ApprovalFailureReason> => {
-      if (intent.action === "send-back") {
-        return resolveTasks(
-          options.pb,
-          intent.taskIds,
-          command,
-          search.currentWeek,
-          search,
-          intent.fingerprint,
-          roster,
-          snapshot.data,
-          weekStart,
-        );
-      }
-      return resolveTasks(
+    const prepared = await (async (): Promise<PreparedCommand | ApprovalFailureReason> =>
+      resolveTasks(
         options.pb,
         intent.taskIds,
         command,
@@ -1869,8 +1856,7 @@ export async function repairApprovalOperationLocked(
         roster,
         snapshot.data,
         weekStart,
-      );
-    })().catch(() => "ledger_unavailable" as const);
+      ))().catch(() => "ledger_unavailable" as const);
     if (typeof prepared === "string") {
       return failure(operationId, intent.action, prepared, search.currentWeek);
     }
