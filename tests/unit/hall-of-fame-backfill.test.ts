@@ -202,19 +202,28 @@ describe("ensureArchivedWeeksEnshrined", () => {
     expect(hall[0]).toMatchObject({ id: "hall-stale", points: 5, celebrated: true });
   });
 
-  it("rejects non-Monday archive week starts", async () => {
-    const { pb } = makePb({
-      archive: [{
-        weekStart: "2026-09-08",
-        history: [{ id: 1, timestamp: "2026-09-08T10:00:00.000Z", member: "Aurora", type: "earn", amount: 5, description: "Done" }],
-      }],
+  it("skips non-Monday archive week starts without aborting valid weeks", async () => {
+    const { pb, creates } = makePb({
+      archive: [
+        {
+          weekStart: "2026-09-08",
+          history: [{ id: 1, timestamp: "2026-09-08T10:00:00.000Z", member: "Aurora", type: "earn", amount: 5, description: "Done" }],
+        },
+        {
+          weekStart: "2026-09-14",
+          history: [{ id: 2, timestamp: "2026-09-14T10:00:00.000Z", member: "Aurora", type: "earn", amount: 7, description: "Done" }],
+        },
+      ],
     });
 
-    await expect(ensureArchivedWeeksEnshrined(pb as any)).rejects.toThrow("invalid_archive_week");
+    await ensureArchivedWeeksEnshrined(pb as any);
+
+    expect(creates).toHaveLength(1);
+    expect(creates[0]).toMatchObject({ weekStart: "2026-09-14", points: 7 });
   });
 
-  it("rejects conflicting duplicate archive weeks deterministically", async () => {
-    const { pb } = makePb({
+  it("quarantines conflicting duplicate archive weeks deterministically", async () => {
+    const { pb, creates } = makePb({
       archive: [
         {
           weekStart: "2026-09-07",
@@ -224,10 +233,17 @@ describe("ensureArchivedWeeksEnshrined", () => {
           weekStart: "2026-09-07",
           history: [{ id: 2, timestamp: "2026-09-07T11:00:00.000Z", member: "Aurora", type: "earn", amount: 6, description: "Two" }],
         },
+        {
+          weekStart: "2026-09-14",
+          history: [{ id: 3, timestamp: "2026-09-14T10:00:00.000Z", member: "Aurora", type: "earn", amount: 7, description: "Three" }],
+        },
       ],
     });
 
-    await expect(ensureArchivedWeeksEnshrined(pb as any)).rejects.toThrow("duplicate_archive_week");
+    await ensureArchivedWeeksEnshrined(pb as any);
+
+    expect(creates).toHaveLength(1);
+    expect(creates[0]).toMatchObject({ weekStart: "2026-09-14", points: 7 });
   });
 
   it("recomputes archive balances from canonical history before enshrining", async () => {
@@ -247,14 +263,14 @@ describe("ensureArchivedWeeksEnshrined", () => {
     expect(creates[0]).toMatchObject({ member: "Aurora", points: 5 });
   });
 
-  it("rejects a stale-points archive with no canonical history", async () => {
+  it("skips a stale-points archive with no canonical history", async () => {
     const { pb, creates } = makePb({
       archive: [{ weekStart: "2026-09-07", points: { Aurora: 999 } }],
       prizes: [],
       preserveMissingHistory: true,
     });
 
-    await expect(ensureArchivedWeeksEnshrined(pb as any)).rejects.toThrow("invalid_archive_history");
+    await ensureArchivedWeeksEnshrined(pb as any);
     expect(creates).toHaveLength(0);
   });
 

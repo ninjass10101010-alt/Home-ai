@@ -22,7 +22,7 @@ const IGNORED_COMPATIBILITY_LEGS = [
   "pendingProjectionRepairs",
   "taskWeekStart",
 ];
-const REPAIR_CATEGORY = /^(?:approval|projection|rollover|snapshot|week|task):[a-z0-9_-]+(?::[a-z0-9_-]+)?$/i;
+const REPAIR_CATEGORY = /^(?:approval|projection|rollover|snapshot|week|week_archive|task)(?:[:_][a-z0-9_-]+){1,2}$/i;
 
 function repairCategories(values: string[] | undefined): string[] {
   return [...new Set((values ?? []).filter((value) => REPAIR_CATEGORY.test(value)))];
@@ -55,34 +55,36 @@ export async function GET() {
     }, { status: 503 });
   }
 
-  let reconciliation: Awaited<ReturnType<typeof reconcileTaskProjectionLocked>>;
-  if (rollover.reconciled) {
-    try {
-      reconciliation = await withAdmin((pb) => reconcileTaskProjectionLocked(pb, {
-        weekStart: rollover.weekStart,
-        expectedRevision: rollover.revision?.revision,
-        expectedWeekData: rollover.currentWeekData,
-      }));
-    } catch {
-      console.warn("[tasks/sync] projection reconciliation unavailable");
-      return NextResponse.json({
-        ok: false,
-        error: "projection_reconcile_unavailable",
-        reconciled: false,
-        repaired: [],
-        failed: ["projection:unavailable"],
-        snapshot: null,
-      }, { status: 503 });
-    }
-  } else {
-    reconciliation = {
+  const weekStart = rollover.weekStart;
+  if (!weekStart) {
+    console.warn("[tasks/sync] rollover produced no current week");
+    return NextResponse.json({
       ok: false,
+      error: "rollover_unavailable",
       reconciled: false,
       repaired: [],
-      failed: ["rollover:pending"],
-      weekData: rollover.currentWeekData ?? null,
-      revision: rollover.revision,
-    };
+      failed: ["rollover:unavailable"],
+      snapshot: null,
+    }, { status: 503 });
+  }
+
+  let reconciliation: Awaited<ReturnType<typeof reconcileTaskProjectionLocked>>;
+  try {
+    reconciliation = await withAdmin((pb) => reconcileTaskProjectionLocked(pb, {
+      weekStart,
+      expectedRevision: rollover.revision?.revision,
+      expectedWeekData: rollover.currentWeekData,
+    }));
+  } catch {
+    console.warn("[tasks/sync] projection reconciliation unavailable");
+    return NextResponse.json({
+      ok: false,
+      error: "projection_reconcile_unavailable",
+      reconciled: false,
+      repaired: [],
+      failed: ["projection:unavailable"],
+      snapshot: null,
+    }, { status: 503 });
   }
 
   let snapshot: unknown = null;
@@ -94,27 +96,31 @@ export async function GET() {
     console.warn("[tasks/sync] snapshot read unavailable");
   }
 
-  if (snapshotReadFailed || !reconciliation.reconciled || !reconciliation.ok) {
+  if (snapshotReadFailed) {
     const repairedCategories = repairCategories(reconciliation.repaired);
-    const failedCategories = repairCategories(reconciliation.failed);
     return NextResponse.json({
       ok: false,
-      error: "projection_reconcile_pending",
+      error: "snapshot_unavailable",
       reconciled: false,
       repaired: repairedCategories,
-      failed: snapshotReadFailed
-        ? ["snapshot:read"]
-        : failedCategories.length > 0 ? failedCategories : ["projection:pending"],
-      snapshot,
+      failed: ["snapshot:read"],
+      snapshot: null,
     }, { status: 503 });
   }
 
+  const repairedCategories = repairCategories(reconciliation.repaired);
+  const failedCategories = [
+    ...repairCategories(rollover.reconciled ? [] : ["rollover:pending"]),
+    ...repairCategories(reconciliation.failed),
+  ];
+  const reconciled = rollover.reconciled && reconciliation.reconciled && failedCategories.length === 0;
   return NextResponse.json({
-    ok: true,
+    ok: reconciled,
+    ...(reconciled ? {} : { error: "projection_reconcile_pending" }),
     snapshot,
-    reconciled: true,
-    repaired: repairCategories(reconciliation.repaired),
-    failed: [],
+    reconciled,
+    repaired: repairedCategories,
+    failed: failedCategories,
   });
 }
 

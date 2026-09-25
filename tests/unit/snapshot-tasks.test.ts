@@ -16,6 +16,7 @@ import {
   mutateSnapshotWithMeta,
   persistSnapshotWeek,
   getSnapshotOperationReceipts,
+  taskProjectionRecord,
 } from "@/lib/snapshot-tasks";
 
 const t = (id: number, title: string, extra: Record<string, any> = {}) => ({ id, title, ...extra });
@@ -41,6 +42,17 @@ describe("snapshot-tasks pure helpers", () => {
   it("liveSnapshotTasks hides tombstoned rows", () => {
     const data = { tasks: [t(1, "Dishes"), t(2, "Trash")], deletedTaskIds: [2] };
     expect(liveSnapshotTasks(data as any).map((x) => x.id)).toEqual([1]);
+  });
+
+  it("exposes one canonical task projection record with stable defaults", () => {
+    expect(taskProjectionRecord(t(1, "Dishes") as any)).toMatchObject({
+      taskId: 1,
+      title: "Dishes",
+      assignee: "All",
+      status: "pending",
+      completed: false,
+      crew: null,
+    });
   });
 
   it("findSnapshotTask resolves by taskId then exact title", () => {

@@ -5,7 +5,6 @@ import { withWeekLedgerLock } from "@/lib/week-ledger-lock";
 import { ensureCurrentTaskWeek } from "@/lib/task-week-rollover";
 import { repairApprovalOperation } from "@/lib/task-approval";
 import { normalizeOperationId } from "@/lib/task-operation-contract";
-import { persistedCrewEmoji, persistedTaskEmoji } from "@/lib/task-emoji";
 import { recomputeWeekPoints } from "@/lib/task-ledger";
 import {
   liveSnapshotTasks,
@@ -15,6 +14,7 @@ import {
   projectCanonicalTaskToPB,
   readSnapshotStateWithRevision,
   replaceSnapshotWeekData,
+  taskProjectionRecord,
   SNAPSHOT_KEY,
   type AdminPB,
   type SnapshotData,
@@ -58,6 +58,7 @@ interface CanonicalLedger {
   allTransactions: Transaction[];
   approvalIntents: ApprovalLedgerIntent[];
   invalidApprovalOperations: string[];
+  archiveWarnings: string[];
   needsWeekWrite: boolean;
 }
 
@@ -178,12 +179,18 @@ function normalizeCurrentWeekRows(rows: Row[], weekStart: string): WeekData[] {
   });
 }
 
-function normalizeArchiveRows(rows: Row[]): WeekData[] {
-  return rows.map((row) => {
+function normalizeArchiveRows(rows: Row[]): { weeks: WeekData[]; warnings: string[] } {
+  const weeks: WeekData[] = [];
+  const warnings: string[] = [];
+  for (const row of rows) {
     const week = normalizeWeekData(row);
-    if (!week || !validWeekStart(week.weekStart)) throw new Error("invalid_archive_week_data");
-    return week;
-  });
+    if (!week || !validWeekStart(week.weekStart)) {
+      warnings.push("week_archive:invalid");
+      continue;
+    }
+    weeks.push(week);
+  }
+  return { weeks, warnings };
 }
 
 function approvalLedgerIntents(transactions: Transaction[]): {
@@ -250,7 +257,8 @@ async function readCanonicalLedger(pb: AdminPB, weekStart: string): Promise<Cano
   };
   const archiveRows = await pb.collection("week_archive").getFullList({ requestKey: null });
   if (!Array.isArray(archiveRows)) throw new Error("week_archive_read_failed");
-  const archiveWeeks = normalizeArchiveRows(archiveRows as Row[]);
+  const archive = normalizeArchiveRows(archiveRows as Row[]);
+  const archiveWeeks = archive.weeks;
   const allTransactions = mergeHistories([
     history,
     ...archiveWeeks.map((week) => week.history),
@@ -264,6 +272,7 @@ async function readCanonicalLedger(pb: AdminPB, weekStart: string): Promise<Cano
     allTransactions,
     approvalIntents: approvalMetadata.intents,
     invalidApprovalOperations: approvalMetadata.invalid,
+    archiveWarnings: archive.warnings,
     needsWeekWrite,
   };
 }
@@ -338,33 +347,6 @@ function taskProjectionForPB(task: SnapshotTask): SnapshotTask | null {
   };
 }
 
-function projectionRecord(task: SnapshotTask): Record<string, unknown> {
-  return {
-    taskId: task.id,
-    title: task.title,
-    assignee: task.assignee ?? "All",
-    assigneeEmoji: persistedTaskEmoji(task.assigneeEmoji) || "👤",
-    assigned: task.assignee ?? "All",
-    status: task.completed === true ? "done" : "pending",
-    due: task.due ?? null,
-    points: task.points ?? 0,
-    recurring: task.recurring ?? null,
-    category: task.category ?? "chores",
-    priority: task.priority ?? "medium",
-    universal: task.universal === true,
-    stealable: task.stealable === true,
-    completed: task.completed === true,
-    completedBy: task.completedBy ?? null,
-    completedAt: task.completedAt ?? null,
-    completedInWeek: task.completedInWeek ?? null,
-    pendingApproval: task.pendingApproval ?? null,
-    sentBackAt: task.sentBackAt ?? null,
-    crewSize: task.crewSize ?? null,
-    crew: persistedCrewEmoji(task.crew as any),
-    speedBonus: task.speedBonus ?? null,
-  };
-}
-
 function parseProjection(value: unknown): unknown {
   if (typeof value !== "string") return value;
   try {
@@ -390,7 +372,16 @@ function projectionMatches(row: Row, expected: Record<string, unknown>): boolean
   });
 }
 
-async function taskRows(pb: AdminPB, taskId: number): Promise<Row[]> {
+async function taskRows(
+  pb: AdminPB,
+  taskId: number,
+  preloadedRows?: Row[],
+): Promise<Row[]> {
+  if (preloadedRows) {
+    return preloadedRows
+      .filter((row: Row) => Number(row?.taskId) === taskId)
+      .sort((left: Row, right: Row) => String(left.id).localeCompare(String(right.id)));
+  }
   const rows = await pb.collection("tasks").getFullList({ requestKey: null });
   if (!Array.isArray(rows)) throw new Error("tasks_read_failed");
   return rows
@@ -413,21 +404,22 @@ async function projectTask(
   pb: AdminPB,
   taskId: number,
   task: SnapshotTask | null,
+  preloadedRows?: Row[],
 ): Promise<{ ok: boolean; repaired: boolean; category: string }> {
-  const rows = await taskRows(pb, taskId);
+  const rows = await taskRows(pb, taskId, preloadedRows);
   if (task === null) {
     if (rows.length === 0) return { ok: true, repaired: false, category: `task:${taskId}:tombstone` };
-    const ok = await projectCanonicalTaskToPB(pb, null, taskId);
+    const ok = await projectCanonicalTaskToPB(pb, null, taskId, preloadedRows);
     return { ok, repaired: ok, category: `task:${taskId}:tombstone` };
   }
   const projectionTask = taskProjectionForPB(task);
   if (!projectionTask) {
     return { ok: false, repaired: false, category: `task:${taskId}:crew` };
   }
-  const expected = projectionRecord(projectionTask);
+  const expected = taskProjectionRecord(projectionTask);
   const alreadyMatches = rows.length === 1 && projectionMatches(rows[0], expected);
   if (alreadyMatches) return { ok: true, repaired: false, category: `task:${taskId}:projection` };
-  const ok = await projectCanonicalTaskToPB(pb, projectionTask, taskId);
+  const ok = await projectCanonicalTaskToPB(pb, projectionTask, taskId, preloadedRows);
   const category = crewDiffers(expected, rows[0] ?? {})
     ? `task:${taskId}:crew`
     : completionDiffers(expected, rows[0] ?? {})
@@ -449,6 +441,7 @@ async function verifyProjectedTasks(
   pb: AdminPB,
   snapshot: SnapshotData,
   taskIds: number[],
+  preloadedRows?: Row[],
 ): Promise<boolean> {
   if (duplicateLiveTaskIds(snapshot).length > 0) return false;
   const live = liveSnapshotTasks(snapshot);
@@ -456,14 +449,14 @@ async function verifyProjectedTasks(
   for (const taskId of taskIds) {
     const task = live.find((candidate) => Number(candidate.id) === taskId) ?? null;
     if (!task && !tombstones.has(taskId)) return false;
-    const rows = await taskRows(pb, taskId);
+    const rows = await taskRows(pb, taskId, preloadedRows);
     if (!task) {
       if (rows.length !== 0) return false;
       continue;
     }
     const projectionTask = taskProjectionForPB(task);
     if (!projectionTask) return false;
-    const expected = projectionRecord(projectionTask);
+    const expected = taskProjectionRecord(projectionTask);
     if (rows.length !== 1 || !projectionMatches(rows[0], expected)) return false;
   }
   return true;
@@ -731,12 +724,9 @@ export async function reconcileTaskProjectionLocked(
       } catch {
         return failure(["week:ledger"], null, snapshot.revision);
       }
+      if (ledger.archiveWarnings.length > 0) failed.push(...ledger.archiveWarnings);
       if (ledger.invalidApprovalOperations.length > 0) {
-        return failure(
-          ledger.invalidApprovalOperations.map(() => "approval:metadata"),
-          ledger.weekData,
-          snapshot.revision,
-        );
+        failed.push(...ledger.invalidApprovalOperations.map(() => "approval:metadata"));
       }
       const existingSnapshotWeek = normalizeWeekData(snapshot.data.weekData);
       if (snapshot.data.weekData !== undefined && snapshot.data.weekData !== null && !existingSnapshotWeek) {
@@ -747,7 +737,7 @@ export async function reconcileTaskProjectionLocked(
       try {
         const rows = await pb.collection("tasks").getFullList({ requestKey: null });
         if (!Array.isArray(rows)) return failure(["tasks:read"], null, snapshot.revision);
-        postTaskRows = rows;
+        postTaskRows = [...(rows as Row[])];
       } catch {
         return failure(["tasks:read"], null, snapshot.revision);
       }
@@ -849,7 +839,7 @@ export async function reconcileTaskProjectionLocked(
         if (approvalMarker(ledger, snapshot.data, marker.operationId)) {
           let projectionWasCurrent = false;
           try {
-            projectionWasCurrent = await verifyProjectedTasks(pb, snapshot.data, markerTaskIds);
+            projectionWasCurrent = await verifyProjectedTasks(pb, snapshot.data, markerTaskIds, postTaskRows);
           } catch {
             failed.push("approval:read");
             continue;
@@ -864,12 +854,13 @@ export async function reconcileTaskProjectionLocked(
             fingerprint: marker.fingerprint,
             locked: true,
           });
-          const verified = await approvalRepairVerified(
-            pb,
-            marker.operationId,
-            markerTaskIds,
-            repair,
-          );
+    const verified = await approvalRepairVerified(
+      pb,
+      marker.operationId,
+      markerTaskIds,
+      repair,
+    );
+
           if (!verified) {
             failed.push(
               repair.reason === "ledger_unavailable" || repair.reason === "repair_required"
@@ -920,7 +911,7 @@ export async function reconcileTaskProjectionLocked(
           }
           let projected: Awaited<ReturnType<typeof projectTask>>;
           try {
-            projected = await projectTask(pb, taskId, task);
+            projected = await projectTask(pb, taskId, task, postTaskRows);
           } catch {
             allProjected = false;
             failed.push(`task:${taskId}:read`);
@@ -936,7 +927,7 @@ export async function reconcileTaskProjectionLocked(
         let verifiedProjection = false;
         if (allProjected) {
           try {
-            verifiedProjection = await verifyProjectedTasks(pb, snapshot.data, markerTaskIds);
+            verifiedProjection = await verifyProjectedTasks(pb, snapshot.data, markerTaskIds, postTaskRows);
           } catch {
             failed.push("projection:read");
           }
@@ -972,9 +963,9 @@ export async function reconcileTaskProjectionLocked(
         const tombstoned = validTaskIds(snapshot.data.deletedTaskIds).includes(taskId);
         if (!task && !tombstoned) {
           try {
-            const rows = await taskRows(pb, taskId);
+            const rows = await taskRows(pb, taskId, postTaskRows);
             if (rows.length > 0) {
-              const projected = await projectTask(pb, taskId, null);
+              const projected = await projectTask(pb, taskId, null, postTaskRows);
               if (!projected.ok) failed.push(`task:${taskId}:projection`);
               else repaired.push(`task:${taskId}:tombstone`);
             }
@@ -984,7 +975,7 @@ export async function reconcileTaskProjectionLocked(
           continue;
         }
         try {
-          const projected = await projectTask(pb, taskId, task);
+          const projected = await projectTask(pb, taskId, task, postTaskRows);
           if (!projected.ok) failed.push(projected.category);
           else if (projected.repaired) repaired.push(projected.category);
         } catch {
