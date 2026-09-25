@@ -138,10 +138,29 @@ describe("matchLegacyLedgerTransactions", () => {
     const localAdjust = transaction(8, "adjust", "Alex", 3);
     const report = matchLegacyLedgerTransactions(
       weekWithHistory([localRedeem, localAdjust]),
-      weekWithHistory([]),
+      weekWithHistory([transaction(7, "earn", "Alex", 5, 42), transaction(8, "adjust", "Sam", 3)]),
     );
+    expect(report.exactMatches).toEqual([]);
     expect(report.semanticMatches).toEqual([]);
     expect(report.quarantined.map((tx) => tx.id)).toEqual([7, 8]);
+  });
+
+  it("never exact-matches a taskless local row against a taskId'd server row, or the reverse", () => {
+    const tasklessLocal = matchLegacyLedgerTransactions(
+      weekWithHistory([transaction(7, "earn", "Alex", 5)]),
+      weekWithHistory([transaction(7, "earn", "Alex", 5, 42)]),
+    );
+    expect(tasklessLocal.exactMatches).toEqual([]);
+    expect(tasklessLocal.semanticMatches).toEqual([]);
+    expect(tasklessLocal.quarantined.map((tx) => tx.id)).toEqual([7]);
+
+    const tasklessServer = matchLegacyLedgerTransactions(
+      weekWithHistory([transaction(7, "earn", "Alex", 5, 42)]),
+      weekWithHistory([transaction(7, "earn", "Alex", 5)]),
+    );
+    expect(tasklessServer.exactMatches).toEqual([]);
+    expect(tasklessServer.semanticMatches).toEqual([]);
+    expect(tasklessServer.quarantined.map((tx) => tx.id)).toEqual([7]);
   });
 
   it("never re-issues a matched transaction in the quarantine list", () => {

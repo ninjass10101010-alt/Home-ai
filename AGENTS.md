@@ -1347,6 +1347,7 @@ parent PIN). Non-gateway routes with meaningfully different gates:
 | `/api/ai/models` | POST | Parent session (`authorizeAdminRequest`) — server-side `/v1/models` listing with the stored key |
 | `/api/db/[collection]`, `/api/db/[collection]/[id]` | POST/PATCH/DELETE | Session + per-collection write policy (parent-only vs session) — see §5.6 |
 | `/api/tasks/sync` | POST | Session; **no browser writes** — a `tasks`/`weekData` body is 410 `legacy_sync_write_disabled`, any other body 400 `invalid_body` (GET is the read: rollover + reconcile + snapshot) |
+| `/api/tasks/quarantine` | POST | Parent session **and** a live PocketBase `role === "parent"` row (`verifyLiveParentSession`; 401 `unauthorized`/`member_missing`, 403 `adult_only`, 503 `member_lookup_failed`); takes no PIN because it writes nothing to the server — `dry-run` returns the match report only, `export` writes one JSON file to `local-quarantine/`. PB is read-only here (snapshot → `week_data` fallback, `getFullList` only; 503 `canonical_week_unavailable`) |
 | `/api/consuela/briefing` | GET/PATCH | Session (no longer middleware-exempt); PATCH stamps `acknowledgedBy` |
 | `/api/ha/call-service`, `notify-config`, `notify-prefs`, `notify-test` | POST | Parent session (`authorizeAdminRequest`); HA reads stay session-level |
 
@@ -1641,6 +1642,12 @@ still 401 at middleware, and a wrong role is 403 `adult_only`.
 - Kid reward redemption is **not** a gateway write: `POST /api/rewards/redeem` is
   server-authoritative (server-read cost + balance, appends the redeem tx, 60s
   dedupe → 409, unknown → 404, insufficient → 400, wrong/missing PIN → 401).
+- `POST /api/tasks/quarantine` is **read-only against PocketBase** and is not a
+  ledger write: it needs a parent session *and* a live parent PB role
+  (`verifyLiveParentSession`, no PIN), answers `dry-run` with the match report
+  alone, and `export` writes a single JSON file under `local-quarantine/`. It
+  must never grow a `create`/`update`/`delete` against `week_data` or the tasks
+  snapshot — unmatched legacy rows are surfaced and exported, never applied.
 
 **Parent-only admin auth (pets denied).** `authorizeAdminRequest`
 (`src/lib/admin-auth.ts`) is an **allowlist on `role === "parent"`**: a valid

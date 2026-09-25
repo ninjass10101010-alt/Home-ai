@@ -8,6 +8,7 @@ import type { Transaction, WeekData } from "@/types/tasks";
 const NOTICE_TESTID = "task-ledger-quarantine-notice";
 const EXPORT_LABEL = "Export unmatched local ledger rows";
 const DISMISS_LABEL = "Dismiss the local ledger quarantine notice";
+const HANDLED_KEY = "consuela-ledger-quarantine-handled-v1";
 
 const localWeekData: WeekData = {
   weekStart: "2026-09-21",
@@ -110,6 +111,21 @@ describe("TaskLedgerQuarantineNotice", () => {
     const el = await render(<TaskLedgerQuarantineNotice localWeekData={localWeekData} isParent />);
 
     expect(el.querySelector(`[data-testid="${NOTICE_TESTID}"]`)).toBeNull();
+  });
+
+  it("leaves the notice armed after an empty dry run so a later unmatched row still surfaces", async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ ok: true, mode: "dry-run", report: report(0) }));
+    const el = await render(<TaskLedgerQuarantineNotice localWeekData={localWeekData} isParent />);
+
+    expect(el.querySelector(`[data-testid="${NOTICE_TESTID}"]`)).toBeNull();
+    expect(localStorage.getItem(HANDLED_KEY)).toBeNull();
+
+    fetchMock.mockResolvedValue(jsonResponse({ ok: true, mode: "dry-run", report: report(2) }));
+    const later = await render(<TaskLedgerQuarantineNotice localWeekData={localWeekData} isParent />);
+
+    const notice = later.querySelector(`[data-testid="${NOTICE_TESTID}"]`);
+    expect(notice).not.toBeNull();
+    expect(notice!.textContent).toContain("2");
   });
 
   it("shows the exported path once and never offers the notice again", async () => {
