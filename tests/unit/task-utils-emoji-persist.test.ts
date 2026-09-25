@@ -1,18 +1,16 @@
 // @vitest-environment jsdom
 process.env.TZ = "UTC";
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+// The task row the server actually writes is the snapshot projection
+// (`taskProjectionRecord`), so the assigneeEmoji write gate is pinned there:
+// PB tasks.assigneeEmoji is text max=5000 and a raw photo data-URL would fail
+// validation_max_text_constraint and lose the whole row.
+import { describe, it, expect, vi } from "vitest";
 
-vi.mock("@/db", () => ({
-  db: {
-    upsertTask: vi.fn(async () => ({})),
-    selectHallOfFame: vi.fn(async () => []),
-    insertHallOfFameEntry: vi.fn(async () => null),
-  },
-}));
+vi.mock("@/db", () => ({ db: {} }));
 
-import { db } from "@/db";
-import { syncTasksToPB, todayISO, todayMondayISO } from "@/lib/task-utils";
+import { todayISO, todayMondayISO } from "@/lib/task-utils";
+import { taskProjectionRecord } from "@/lib/snapshot-tasks";
 import { PB_TASK_EMOJI_MAX } from "@/lib/task-emoji";
 import type { Task } from "@/types/tasks";
 
@@ -35,36 +33,21 @@ function t(over: Partial<Task> = {}): Task {
   };
 }
 
-beforeEach(() => {
-  vi.mocked(db.upsertTask).mockClear();
-});
-
-describe("syncTasksToPB assigneeEmoji sanitization", () => {
-  it("never forwards a photo data-URL to db.upsertTask (PB text max=5000)", async () => {
-    await syncTasksToPB([t({ assigneeEmoji: PHOTO })]);
-    const row = vi.mocked(db.upsertTask).mock.calls.at(-1)![0];
+describe("task projection assigneeEmoji sanitization", () => {
+  it("never forwards a photo data-URL to the tasks collection (PB text max=5000)", () => {
+    const row = taskProjectionRecord(t({ assigneeEmoji: PHOTO }) as any);
     expect(row.assigneeEmoji).toBe("👤");
     expect(String(row.assigneeEmoji).length).toBeLessThanOrEqual(PB_TASK_EMOJI_MAX);
   });
 
-  it("keeps a short glyph intact", async () => {
-    await syncTasksToPB([t({ assigneeEmoji: "🧒" })]);
-    const row = vi.mocked(db.upsertTask).mock.calls.at(-1)![0];
-    expect(row.assigneeEmoji).toBe("🧒");
+  it("keeps a short glyph intact", () => {
+    expect(taskProjectionRecord(t({ assigneeEmoji: "🧒" }) as any).assigneeEmoji).toBe("🧒");
   });
 
-  it("surfaces a failed upsert instead of swallowing it (Fix 4)", async () => {
-    vi.mocked(db.upsertTask).mockRejectedValueOnce(
-      new Error("Failed to create record: validation_max_text_constraint")
+  it("gates crew member emojis the same way", () => {
+    const row = taskProjectionRecord(
+      t({ crew: { size: 2, members: [{ name: "Bailey", emoji: PHOTO }] } as any }) as any,
     );
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    await expect(syncTasksToPB([t()])).resolves.toBeUndefined();
-    expect(warn).toHaveBeenCalled();
-    const msg = String(warn.mock.calls[0]?.[0] ?? "");
-    expect(msg).toContain("syncTasksToPB failed");
-    // The rejection body must reach the log — a bare message loses the field name.
-    const errArg = warn.mock.calls[0]?.[1];
-    expect(String(errArg)).toContain("validation_max_text_constraint");
-    warn.mockRestore();
+    expect((row.crew as any).members[0].emoji).toBe("👤");
   });
 });

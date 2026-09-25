@@ -25,7 +25,7 @@ import type { WeekData, Transaction } from "@/types/tasks";
  * Background (2026-09-21): the chat task tools used to read/write the PB
  * `tasks` COLLECTION, while the dashboard renders the browser-owned snapshot.
  * The two never met: chat completions/deletes were invisible in the Tasks UI,
- * and the browser's periodic `syncTasksToPB()` re-upserted its snapshot rows
+ * and the browser's periodic full-task re-upsert wrote its snapshot rows
  * back into the collection, resurrecting whatever chat had deleted. These
  * helpers make the chat operate on the SAME store the UI reads.
  *

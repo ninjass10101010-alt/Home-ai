@@ -1346,7 +1346,7 @@ parent PIN). Non-gateway routes with meaningfully different gates:
 | `/api/ai/providers` | PUT/DELETE | Parent session (`authorizeAdminRequest`) |
 | `/api/ai/models` | POST | Parent session (`authorizeAdminRequest`) — server-side `/v1/models` listing with the stored key |
 | `/api/db/[collection]`, `/api/db/[collection]/[id]` | POST/PATCH/DELETE | Session + per-collection write policy (parent-only vs session) — see §5.6 |
-| `/api/tasks/sync` | POST | Session; non-parents sync the tasks leg only (`ignoredLegs`) |
+| `/api/tasks/sync` | POST | Session; **no browser writes** — a `tasks`/`weekData` body is 410 `legacy_sync_write_disabled`, any other body 400 `invalid_body` (GET is the read: rollover + reconcile + snapshot) |
 | `/api/consuela/briefing` | GET/PATCH | Session (no longer middleware-exempt); PATCH stamps `acknowledgedBy` |
 | `/api/ha/call-service`, `notify-config`, `notify-prefs`, `notify-test` | POST | Parent session (`authorizeAdminRequest`); HA reads stay session-level |
 
@@ -1631,9 +1631,13 @@ still 401 at middleware, and a wrong role is 403 `adult_only`.
   `grocery_list_items`, `pantry_items` — what the household already toggles in
   the UI. The gateway `sort` param is whitelisted (field lists only; else 400
   `invalid_sort`).
-- `POST /api/tasks/sync` from a non-parent syncs the **tasks leg only**
-  (`ignoredLegs: ["weekData","rewards","penalties"]`), so a child can never
-  overwrite the shared points snapshot.
+- `POST /api/tasks/sync` takes **no browser writes at all**: a body carrying
+  `tasks` or `weekData` is refused 410 `legacy_sync_write_disabled`, and every
+  other body is 400 `invalid_body`. Task, ledger and config writes go through the
+  command routes (`/api/tasks/approve`, `/api/tasks/claim`, `/api/tasks/ledger`,
+  `/api/tasks/config`, `/api/tasks/manage`, `/api/rewards/redeem`) and the
+  server-side week-ledger lock, so no session — child included — can overwrite the
+  shared points snapshot.
 - Kid reward redemption is **not** a gateway write: `POST /api/rewards/redeem` is
   server-authoritative (server-read cost + balance, appends the redeem tx, 60s
   dedupe → 409, unknown → 404, insufficient → 400, wrong/missing PIN → 401).

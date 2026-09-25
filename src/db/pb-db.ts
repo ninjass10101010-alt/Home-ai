@@ -459,9 +459,9 @@ export const db = {
   // === Hall of Fame ===
   async insertHallOfFameEntry(data: any): Promise<any | null> {
     // UPSERT by (member, weekStart) — the natural key of a win. The old blind
-    // create let two devices that both passed syncHallOfFameToPB's
-    // client-side dedupe land duplicate rows for the same enshrinement (the
-    // pb-seed UNIQUE index is the second net). Mirrors upsertWeeklyPrize, and
+    // create let two devices that both passed the client-side dedupe land
+    // duplicate rows for the same enshrinement (the pb-seed UNIQUE index is
+    // the second net). Mirrors upsertWeeklyPrize, and
     // a celebration is never lost: an existing celebrated:true always
     // survives an incoming false (server authority for the win ceremony).
     const records = await safeList<any>("hall_of_fame", []);
