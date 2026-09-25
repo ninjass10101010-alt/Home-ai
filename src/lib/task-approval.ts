@@ -1493,6 +1493,55 @@ function withTaskLocks<T>(ids: number[], index: number, fn: () => Promise<T>): P
   return withTaskCommandLock(ids[index], () => withTaskLocks(ids, index + 1, fn));
 }
 
+async function executeApprovalCommandUnlocked(
+  command: ApproveCommand,
+  actor: ApprovalActor,
+  authorityWeekStart: string,
+): Promise<ApprovalServiceResult> {
+  const parsed = command;
+  const weekStart = authorityWeekStart;
+  const live = await loadLiveParent(actor);
+  if (typeof live === "string") return failure(command.operationId, parsed.action, live, emptyWeekData(weekStart));
+  const fingerprint = approvalCommandFingerprint(parsed, live.parent.id);
+  let prepared: PreparedCommand | ApprovalFailureReason;
+  try {
+    prepared = await withAdmin(async (pb) => {
+      const search = parsed.action === "send-back"
+        ? {
+            currentWeek: await readWeek(pb, weekStart),
+            currentTransactions: [],
+            archiveTransactions: [],
+            archiveWeeks: [],
+            allTransactions: [],
+          }
+        : await readOperationLedger(pb, weekStart, parsed.operationId);
+      const snapshot = await readSnapshotStateWithRevision(pb);
+      return resolveTasks(
+        pb,
+        approvalTaskIds(parsed),
+        parsed,
+        search.currentWeek,
+        search,
+        fingerprint,
+        live.roster,
+        snapshot.data,
+        weekStart,
+      );
+    });
+  } catch {
+    return failure(command.operationId, parsed.action, "ledger_unavailable", emptyWeekData(weekStart));
+  }
+  if (typeof prepared === "string") {
+    return failure(command.operationId, parsed.action, prepared, emptyWeekData(weekStart));
+  }
+  try {
+    if (parsed.action === "send-back") return await executeSendBack(parsed, prepared);
+    return await executeApproval(parsed, prepared);
+  } catch {
+    return failure(command.operationId, parsed.action, "ledger_unavailable", prepared.week);
+  }
+}
+
 export async function executeApprovalCommand(
   command: ApproveCommand,
   actor: ApprovalActor,
@@ -1531,45 +1580,163 @@ export async function executeApprovalCommand(
       emptyWeekData(localWeekStartISO()),
     ));
   }
-  return withWeekLedgerLock(authorityWeekStart, () => withTaskLocks(ids, 0, async () => {
-    const weekStart = authorityWeekStart;
-    const live = await loadLiveParent(actor);
-    if (typeof live === "string") return failure(command.operationId, parsed.action, live, emptyWeekData(weekStart));
-    const fingerprint = approvalCommandFingerprint(parsed, live.parent.id);
-    let prepared: PreparedCommand | ApprovalFailureReason;
-    try {
-      prepared = await withAdmin(async (pb) => {
-        const search = parsed.action === "send-back"
-          ? {
-              currentWeek: await readWeek(pb, weekStart),
-              currentTransactions: [],
-              archiveTransactions: [],
-              archiveWeeks: [],
-              allTransactions: [],
-            }
-          : await readOperationLedger(pb, weekStart, parsed.operationId);
-        const snapshot = await readSnapshotStateWithRevision(pb);
-        return resolveTasks(pb, ids, parsed, search.currentWeek, search, fingerprint, live.roster, snapshot.data, weekStart);
-      });
-    } catch {
-      return failure(command.operationId, parsed.action, "ledger_unavailable", emptyWeekData(weekStart));
-    }
-    if (typeof prepared === "string") {
-      const week = emptyWeekData(weekStart);
-      return failure(command.operationId, parsed.action, prepared, week);
-    }
-    try {
-      if (parsed.action === "send-back") return await executeSendBack(parsed, prepared);
-      return await executeApproval(parsed, prepared);
-    } catch {
-      return failure(command.operationId, parsed.action, "ledger_unavailable", prepared.week);
-    }
-  })).catch(() => failure(
+  return withWeekLedgerLock(authorityWeekStart, () => withTaskLocks(ids, 0, () =>
+    executeApprovalCommandUnlocked(parsed, actor, authorityWeekStart),
+  )).catch(() => failure(
     command.operationId,
     parsed.action,
     "task_store_unavailable",
     emptyWeekData(authorityWeekStart),
   ));
+}
+
+export interface ApprovalRepairOptions {
+  pb?: AdminPB;
+  weekStart: string;
+  operationId: string;
+  taskIds?: number[];
+  locked?: boolean;
+}
+
+type LockedApprovalRepairOptions = ApprovalRepairOptions & { pb: AdminPB };
+
+async function approvalRepairRoster(pb: AdminPB): Promise<LiveMember[] | null> {
+  const rows = await pb.collection("members").getFullList({ requestKey: null });
+  return normalizeLiveRoster(rows);
+}
+
+function approvalRepairTaskIds(
+  requested: unknown,
+  receipts: SnapshotOperationReceipt[],
+  transactions: Transaction[],
+): number[] {
+  const values = [
+    ...(Array.isArray(requested) ? requested : []),
+    ...receipts.map((receipt) => receipt.taskId),
+    ...transactions.map((transaction) => transaction.taskId),
+  ];
+  return [...new Set(values.filter((value): value is number =>
+    typeof value === "number" && Number.isSafeInteger(value) && value > 0,
+  ))].sort((left, right) => left - right);
+}
+
+export async function repairApprovalOperationLocked(
+  options: LockedApprovalRepairOptions,
+): Promise<ApprovalServiceResult> {
+  const operationId = normalizeOperationId(options?.operationId) ?? "";
+  const weekStart = canonicalWeekStart(options?.weekStart) ?? "";
+  if (!operationId || !weekStart) {
+    return failure(operationId, "approve", "invalid_task_state", emptyWeekData(localWeekStartISO()));
+  }
+
+  try {
+    const search = await readOperationLedger(options.pb, weekStart, operationId);
+    const snapshot = await readSnapshotStateWithRevision(options.pb);
+    const evidence = { pb: options.pb, search, snapshot, receipts: getSnapshotOperationReceipts(snapshot.data, operationId) };
+    const receipts = evidence.receipts;
+    const operationTransactions = evidence.search.allTransactions.filter(
+      (transaction) => transaction.meta?.operationId === operationId,
+    );
+    const hasApprovalLedger = operationTransactions.some(
+      (transaction) => transaction.meta?.source === "task-approval",
+    );
+    const receiptAction = receipts[0]?.action;
+    const action: ApproveAction = receiptAction === "approve-all" || receiptAction === "send-back"
+      ? receiptAction
+      : new Set(receipts.map((receipt) => receipt.action)).has("approve-all") ||
+          operationTransactions.filter((transaction) => transaction.taskId !== undefined).length > 1
+        ? "approve-all"
+        : "approve";
+    if (action !== "send-back" && !hasApprovalLedger) {
+      return failure(operationId, action, "ledger_unavailable", evidence.search.currentWeek);
+    }
+    if (action !== "send-back" && operationTransactions.some(
+      (transaction) =>
+        transaction.type !== "earn" ||
+        transaction.meta?.source !== "task-approval" ||
+        transaction.taskId === undefined,
+    )) {
+      return failure(operationId, action, "operation_conflict", evidence.search.currentWeek);
+    }
+    const taskIds = approvalRepairTaskIds(
+      options.taskIds,
+      receipts,
+      operationTransactions,
+    );
+    if (taskIds.length === 0) {
+      return failure(operationId, action, "unknown_task", evidence.search.currentWeek);
+    }
+    const snapshotTaskIds = new Set(
+      liveSnapshotTasks(evidence.snapshot.data).map((task) => Number(task.id)),
+    );
+    const snapshotTombstoneIds = new Set(
+      (evidence.snapshot.data.deletedTaskIds ?? []).map((taskId) => Number(taskId)),
+    );
+    if (taskIds.some((taskId) => !snapshotTaskIds.has(taskId) && !snapshotTombstoneIds.has(taskId))) {
+      return failure(operationId, action, "snapshot_write_failed", evidence.search.currentWeek);
+    }
+    const fingerprint = receipts.find((receipt) => typeof receipt.fingerprint === "string")?.fingerprint
+      ?? operationTransactions.find((transaction) => typeof transaction.meta?.fingerprint === "string")?.meta?.fingerprint;
+    if (action !== "send-back" && !fingerprint) {
+      return failure(operationId, action, "operation_conflict", evidence.search.currentWeek);
+    }
+    const roster = await approvalRepairRoster(evidence.pb);
+    if (!roster) return failure(operationId, action, "member_roster_unavailable", evidence.search.currentWeek);
+    const parents = roster.filter((member) => member.role.toLowerCase() === "parent");
+    const command = {
+      operationId,
+      action,
+      ...(action === "approve-all" ? { taskIds } : { taskId: taskIds[0] }),
+    } as ApproveCommand;
+    const actor = fingerprint
+      ? parents.find((parent) => approvalCommandFingerprint(command, parent.id) === fingerprint)
+      : parents[0];
+    if (!actor) return failure(operationId, action, "operation_conflict", evidence.search.currentWeek);
+    return executeApprovalCommandUnlocked(
+      command,
+      { memberId: actor.id, name: actor.name, role: actor.role },
+      weekStart,
+    );
+  } catch {
+    return failure(operationId, "approve", "task_store_unavailable", emptyWeekData(localWeekStartISO()));
+  }
+}
+
+export async function repairApprovalOperation(
+  options: ApprovalRepairOptions,
+): Promise<ApprovalServiceResult> {
+  if (options.locked === true) {
+    if (!options.pb) {
+      return failure(normalizeOperationId(options.operationId) ?? "", "approve", "task_store_unavailable", emptyWeekData(canonicalWeekStart(options.weekStart) ?? localWeekStartISO()));
+    }
+    return repairApprovalOperationLocked({ ...options, pb: options.pb });
+  }
+  const operationId = normalizeOperationId(options?.operationId) ?? "";
+  const weekStart = canonicalWeekStart(options?.weekStart) ?? "";
+  if (!operationId || !weekStart) {
+    return failure(operationId, "approve", "invalid_task_state", emptyWeekData(localWeekStartISO()));
+  }
+  try {
+    const taskIds = await withAdmin(async (pb) => {
+      const search = await readOperationLedger(pb, weekStart, operationId);
+      const snapshot = await readSnapshotStateWithRevision(pb);
+      return approvalRepairTaskIds(
+        options.taskIds,
+        getSnapshotOperationReceipts(snapshot.data, operationId),
+        search.allTransactions.filter((transaction) => transaction.meta?.operationId === operationId),
+      );
+    });
+    return withWeekLedgerLock(weekStart, () => withTaskLocks(taskIds, 0, () =>
+      withAdmin((pb) => repairApprovalOperationLocked({
+        pb,
+        weekStart,
+        operationId,
+        taskIds: options.taskIds,
+      })),
+    ));
+  } catch {
+    return failure(operationId, "approve", "task_store_unavailable", emptyWeekData(weekStart));
+  }
 }
 
 export function taskApprovalInternalPayload(command: ApproveCommand): Record<string, unknown> {

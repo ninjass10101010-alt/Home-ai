@@ -162,6 +162,23 @@ describe("ensureArchivedWeeksEnshrined", () => {
     expect(hall[0]).toMatchObject({ points: 13, rank: 1, prize: "Movie night" });
   });
 
+  it("recomputes archive balances from canonical history before enshrining", async () => {
+    const { pb, creates } = makePb({
+      archive: [{
+        weekStart: "2026-09-07",
+        points: { Aurora: 999 },
+        history: [
+          { id: 1, timestamp: "2026-09-07T10:00:00.000Z", member: "Aurora", type: "earn", amount: 5, description: "Done" },
+        ],
+      }],
+      prizes: [],
+    });
+
+    await ensureArchivedWeeksEnshrined(pb as any);
+
+    expect(creates[0]).toMatchObject({ member: "Aurora", points: 5 });
+  });
+
   it("is idempotent — already-enshrined weeks create nothing", async () => {
     const { pb, creates } = makePb({
       archive: [{ weekStart: "2026-09-07", points: JSON.stringify({ Aurora: 13 }) }],
