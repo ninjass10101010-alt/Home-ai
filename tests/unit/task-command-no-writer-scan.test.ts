@@ -161,26 +161,33 @@ describe("no-writer scan — the credential boundary", () => {
   });
 
   it("admit no root key the route's own parser refuses", async () => {
-    // Real parsers, real bodies, real allowlists — not a hand-written copy of
-    // the key list. A body built through the queue + body builder is fed to the
-    // parser the route uses, and every key that survives must be one the parser
-    // itself echoes back.
+    // Real parsers, real bodies, real allowlists — no hand-written key list. A
+    // body built through queueTaskCommand + buildTaskOperationRequestBody is fed
+    // to the parser that route actually uses, and every case is PIN-credentialed
+    // so the credential is part of what is asserted.
     const { queueTaskCommand } = await import("@/lib/task-command-queue");
     const { buildTaskOperationRequestBody, resolveTaskOutboxCredential } =
       await import("@/lib/task-operation-outbox");
     const { parseLedgerCommand } = await import("@/lib/task-ledger-command");
     const { parseClaimCommand } = await import("@/lib/task-claim");
 
+    const MEMBER = "Caspian Garcia";
+    const PIN = "3141";
+    const PARENT_PIN = "9026";
+
+    // `parse` normalises every route parser to one `{ ok }` shape so the
+    // acceptance assertion below is the SAME real assertion for all of them.
     const cases = [
       {
         label: "penalty",
         command: {
           route: "/api/tasks/ledger" as const,
           action: "penalty",
-          payload: { memberName: "Caspian Garcia", itemId: "pen-1", points: 9999, cost: 5, amount: 7 },
+          payload: { memberName: MEMBER, itemId: "pen-1", points: 9999, cost: 5, amount: 7 },
+          credential: { pin: PIN },
         },
         parse: (body: Record<string, unknown>) => parseLedgerCommand(body),
-        accepted: ["operationId", "action", "memberName", "itemId"],
+        accepted: ["operationId", "action", "memberName", "itemId", "pin"],
         rejected: ["points", "cost", "amount"],
       },
       {
@@ -188,10 +195,11 @@ describe("no-writer scan — the credential boundary", () => {
         command: {
           route: "/api/tasks/ledger" as const,
           action: "adjust",
-          payload: { memberName: "Caspian Garcia", amount: -5, reason: "helped out", points: 9999 },
+          payload: { memberName: MEMBER, amount: -5, reason: "helped out", points: 9999 },
+          credential: { pin: PIN },
         },
         parse: (body: Record<string, unknown>) => parseLedgerCommand(body),
-        accepted: ["operationId", "action", "memberName", "amount", "reason"],
+        accepted: ["operationId", "action", "memberName", "amount", "reason", "pin"],
         rejected: ["points"],
       },
       {
@@ -199,17 +207,19 @@ describe("no-writer scan — the credential boundary", () => {
         command: {
           route: "/api/rewards/redeem" as const,
           action: "redeem",
-          payload: { rewardId: 7, memberName: "Caspian Garcia", cost: 1, points: 2 },
-          // A high-cost redemption carries BOTH credentials; the builder is what
-          // decides which of them the route's allowlist puts on the wire.
-          credential: { pin: "3141", parentPin: "9026" },
+          payload: { rewardId: 7, memberName: MEMBER, cost: 1, points: 2 },
+          // A high-cost redemption carries BOTH credentials; the per-route
+          // allowlist in the body builder is what decides what reaches the wire.
+          credential: { pin: PIN, parentPin: PARENT_PIN },
         },
-        parse: (body: Record<string, unknown>) =>
-          // The redeem route is a plain credential route (no strict key parser),
-          // so the alignment that matters is: no client cost/points on the wire.
-          Object.keys(body).every((key) => ["operationId", "action", "rewardId", "memberName", "pin", "parentPin"].includes(key))
-            ? { ok: true as const }
-            : { ok: false as const },
+        // The redeem route is a credential route with no strict key parser, so
+        // the alignment that matters is its accepted-key set: nothing beyond the
+        // documented keys may be on the wire.
+        parse: (body: Record<string, unknown>) => {
+          const allowed = new Set(["operationId", "action", "rewardId", "memberName", "pin", "parentPin"]);
+          const extra = Object.keys(body).filter((key) => !allowed.has(key));
+          return extra.length === 0 ? { ok: true as const, extra } : { ok: false as const, extra };
+        },
         accepted: ["operationId", "action", "rewardId", "memberName", "pin", "parentPin"],
         rejected: ["cost", "points"],
       },
@@ -218,9 +228,14 @@ describe("no-writer scan — the credential boundary", () => {
         command: {
           route: "/api/tasks/claim" as const,
           action: "claim",
-          payload: { taskId: 3, memberName: "Caspian Garcia", points: 9999, claimantName: "Caspian Garcia" },
+          payload: { taskId: 3, memberName: MEMBER, points: 9999, claimantName: MEMBER },
+          credential: { pin: PIN },
         },
-        parse: (body: Record<string, unknown>) => parseClaimCommand(body),
+        // `parseClaimCommand` reports failure as `{ error }`, not `{ ok:false }`.
+        parse: (body: Record<string, unknown>) => {
+          const parsed = parseClaimCommand(body);
+          return "error" in parsed ? { ok: false as const, error: parsed.error } : { ok: true as const };
+        },
         accepted: ["operationId", "action", "taskId", "memberName", "pin"],
         rejected: ["points", "claimantName"],
       },
@@ -233,19 +248,42 @@ describe("no-writer scan — the credential boundary", () => {
       } as Parameters<typeof queueTaskCommand>[0]);
       const body = buildTaskOperationRequestBody(entry, resolveTaskOutboxCredential(entry));
 
-      // Every key the builder emitted is one the parser accepts.
+      // The credential really is on the wire, and every accepted key is present
+      // with a real value.
+      expect(body.pin).toBe(PIN);
       for (const key of testCase.accepted) {
-        if (key === "pin") continue;
-        expect(`${testCase.label} ${key} ${typeof body[key]}`).not.toMatch(/undefined/);
+        expect({ case: testCase.label, key, present: body[key] !== undefined }).toEqual({
+          case: testCase.label,
+          key,
+          present: true,
+        });
       }
-      // Every key it refused is genuinely gone from the body.
+      // Every key the route refuses is genuinely gone.
       for (const key of testCase.rejected) {
-        expect(`${testCase.label} rejected ${key}: ${String(body[key])}`).toContain("undefined");
+        expect(body[key]).toBeUndefined();
       }
-      // And the parser accepts what actually went out.
-      const parsed = testCase.parse(body);
-      expect(`${testCase.label} parse`).not.toMatch(/ok.*false/);
+      // And the route's own parser accepts exactly what went out.
+      expect(testCase.parse(body)).toMatchObject({ ok: true });
     }
+  });
+
+  it("a PIN-free ledger command is refused by the route parser, not silently accepted", async () => {
+    const { queueTaskCommand } = await import("@/lib/task-command-queue");
+    const { buildTaskOperationRequestBody, resolveTaskOutboxCredential } =
+      await import("@/lib/task-operation-outbox");
+    const { parseLedgerCommand } = await import("@/lib/task-ledger-command");
+
+    // The outbox only holds a PIN-free `adjust` when the session is a child's;
+    // the route still refuses it, which is the honest shape of that contract.
+    const entry = queueTaskCommand({
+      route: "/api/tasks/ledger",
+      action: "adjust",
+      payload: { memberName: "Caspian Garcia", amount: 5 },
+      displayTarget: { kind: "config" },
+    });
+    const body = buildTaskOperationRequestBody(entry, resolveTaskOutboxCredential(entry));
+    expect(body.pin).toBeUndefined();
+    expect(parseLedgerCommand(body)).toMatchObject({ ok: false, reason: "unauthorized" });
   });
 
   it("no outbox entry can carry a credential field", () => {

@@ -367,10 +367,9 @@ describe("Task 9 non-blockers closed by Task 10", () => {
     try {
       listTaskOutbox();
       listTaskOutbox();
-      // The READ itself is side-effect free…
+      // The READ itself is side-effect free — the evicted key is not removed
+      // inline, only on the next microtask.
       expect(setItem).not.toHaveBeenCalled();
-      expect(removeItem).not.toHaveBeenCalled();
-      // …and the evicted key is removed on the next microtask, not before.
       expect(removeItem).not.toHaveBeenCalled();
     } finally {
       setItem.mockRestore();
