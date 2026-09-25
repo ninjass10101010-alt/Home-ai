@@ -18,6 +18,7 @@ import {
   SNAPSHOT_KEY,
   type AdminPB,
   type SnapshotData,
+  type SnapshotProjectionRepair,
   type SnapshotRevision,
   type SnapshotTask,
 } from "@/lib/snapshot-tasks";
@@ -42,11 +43,21 @@ export interface ReconcileTaskProjectionResult {
 
 type Row = Record<string, any>;
 
+interface ApprovalLedgerIntent {
+  operationId: string;
+  action: "approve" | "approve-all" | "send-back";
+  actorId: string;
+  fingerprint: string;
+  taskIds: number[];
+}
+
 interface CanonicalLedger {
   weekData: WeekData;
   currentRows: Row[];
   archiveRows: Row[];
   allTransactions: Transaction[];
+  approvalIntents: ApprovalLedgerIntent[];
+  invalidApprovalOperations: string[];
   needsWeekWrite: boolean;
 }
 
@@ -131,11 +142,56 @@ function normalizeArchiveRows(rows: Row[]): WeekData[] {
   });
 }
 
+function approvalLedgerIntents(transactions: Transaction[]): {
+  intents: ApprovalLedgerIntent[];
+  invalid: string[];
+} {
+  const grouped = new Map<string, ApprovalLedgerIntent | null>();
+  for (const transaction of transactions) {
+    const meta = transaction.meta;
+    if (!meta || meta.source !== "task-approval" || !meta.operationId) continue;
+    const valid = meta.actorId &&
+      (meta.action === "approve" || meta.action === "approve-all" || meta.action === "send-back") &&
+      typeof meta.fingerprint === "string" &&
+      Array.isArray(meta.taskIds) &&
+      meta.taskIds.length > 0 &&
+      meta.taskIds.every((taskId) => Number.isSafeInteger(taskId) && taskId > 0);
+    if (!valid) {
+      grouped.set(meta.operationId, null);
+      continue;
+    }
+    const intent: ApprovalLedgerIntent = {
+      operationId: meta.operationId,
+      action: meta.action as ApprovalLedgerIntent["action"],
+      actorId: meta.actorId as string,
+      fingerprint: meta.fingerprint as string,
+      taskIds: [...(meta.taskIds as number[])].sort((left, right) => left - right),
+    };
+    const previous = grouped.get(meta.operationId);
+    if (previous === null) continue;
+    if (previous && !sameValue(previous, intent)) grouped.set(meta.operationId, null);
+    else if (!previous) grouped.set(meta.operationId, intent);
+  }
+  const intents: ApprovalLedgerIntent[] = [];
+  const invalid: string[] = [];
+  for (const [operationId, intent] of grouped) {
+    if (intent) intents.push(intent);
+    else invalid.push(operationId);
+  }
+  intents.sort((left, right) => left.operationId.localeCompare(right.operationId));
+  invalid.sort();
+  return { intents, invalid };
+}
+
 async function readCanonicalLedger(pb: AdminPB, weekStart: string): Promise<CanonicalLedger> {
   const allWeekRows = await pb.collection("week_data").getFullList({ requestKey: null });
-  const currentRows = (Array.isArray(allWeekRows) ? allWeekRows : []).filter(
-    (row: Row) => validWeekStart(row?.weekStart) === weekStart,
-  ) as Row[];
+  if (!Array.isArray(allWeekRows)) throw new Error("week_data_read_failed");
+  if (allWeekRows.some((row: Row) => !validWeekStart(row?.weekStart))) {
+    throw new Error("invalid_week_data");
+  }
+  const currentRows = allWeekRows
+    .filter((row: Row) => validWeekStart(row?.weekStart) === weekStart)
+    .sort((left: Row, right: Row) => String(left.id).localeCompare(String(right.id))) as Row[];
   const currentWeeks = normalizeCurrentWeekRows(currentRows, weekStart);
   const history = mergeHistories(currentWeeks.map((week) => week.history));
   const points = recomputeWeekPoints(history);
@@ -149,17 +205,21 @@ async function readCanonicalLedger(pb: AdminPB, weekStart: string): Promise<Cano
     history,
   };
   const archiveRows = await pb.collection("week_archive").getFullList({ requestKey: null });
-  const archiveWeeks = normalizeArchiveRows((Array.isArray(archiveRows) ? archiveRows : []) as Row[]);
+  if (!Array.isArray(archiveRows)) throw new Error("week_archive_read_failed");
+  const archiveWeeks = normalizeArchiveRows(archiveRows as Row[]);
   const allTransactions = mergeHistories([
     history,
     ...archiveWeeks.map((week) => week.history),
   ]);
+  const approvalMetadata = approvalLedgerIntents(allTransactions);
   const needsWeekWrite = currentRows.length !== 1 || currentWeeks.some((week) => !sameStoredWeek(week, weekData));
   return {
     weekData,
     currentRows,
-    archiveRows: (Array.isArray(archiveRows) ? archiveRows : []) as Row[],
+    archiveRows: archiveRows as Row[],
     allTransactions,
+    approvalIntents: approvalMetadata.intents,
+    invalidApprovalOperations: approvalMetadata.invalid,
     needsWeekWrite,
   };
 }
@@ -178,19 +238,33 @@ async function writeCanonicalWeek(
     lastActive: ledger.weekData.lastActive,
     history: ledger.weekData.history,
   };
+  const verifyPrimary = async (primaryId: string | null): Promise<boolean> => {
+    const verifiedRows = await collection.getFullList({ requestKey: null });
+    if (!Array.isArray(verifiedRows)) return false;
+    const matching = verifiedRows.filter((row: Row) => validWeekStart(row?.weekStart) === ledger.weekData.weekStart);
+    if (primaryId !== null) {
+      const primary = matching.find((row: Row) => String(row.id) === primaryId);
+      if (!primary) return false;
+      const normalized = normalizeWeekData(primary);
+      if (!normalized || !sameWeek(normalized, ledger.weekData)) return false;
+      return matching.length >= 1;
+    }
+    if (matching.length !== 1) return false;
+    const normalized = normalizeWeekData(matching[0]);
+    return Boolean(normalized && sameWeek(normalized, ledger.weekData));
+  };
   if (rows.length === 0) {
     await collection.create(payload, { requestKey: null });
-  } else {
-    await collection.update(rows[0].id, payload, { requestKey: null });
-    for (const duplicate of rows.slice(1)) {
-      await collection.delete(duplicate.id, { requestKey: null });
-    }
+    return verifyPrimary(null);
   }
-  const verifiedRows = (await collection.getFullList({ requestKey: null }) as Row[])
-    .filter((row) => validWeekStart(row?.weekStart) === ledger.weekData.weekStart);
-  if (verifiedRows.length !== 1) return false;
-  const verified = normalizeWeekData(verifiedRows[0]);
-  return Boolean(verified && sameWeek(verified, ledger.weekData));
+  const primaryId = String(rows[0].id);
+  await collection.update(rows[0].id, payload, { requestKey: null });
+  if (!await verifyPrimary(primaryId)) return false;
+  for (const duplicate of rows.slice(1)) {
+    await collection.delete(duplicate.id, { requestKey: null });
+    if (!await verifyPrimary(primaryId)) return false;
+  }
+  return verifyPrimary(null);
 }
 
 function taskProjectionForPB(task: SnapshotTask): SnapshotTask | null {
@@ -276,7 +350,10 @@ function projectionMatches(row: Row, expected: Record<string, unknown>): boolean
 
 async function taskRows(pb: AdminPB, taskId: number): Promise<Row[]> {
   const rows = await pb.collection("tasks").getFullList({ requestKey: null });
-  return (Array.isArray(rows) ? rows : []).filter((row: Row) => Number(row?.taskId) === taskId);
+  if (!Array.isArray(rows)) throw new Error("tasks_read_failed");
+  return rows
+    .filter((row: Row) => Number(row?.taskId) === taskId)
+    .sort((left: Row, right: Row) => String(left.id).localeCompare(String(right.id)));
 }
 
 function completionDiffers(expected: Record<string, unknown>, row: Row): boolean {
@@ -317,11 +394,21 @@ async function projectTask(
   return { ok, repaired: ok, category };
 }
 
+function duplicateLiveTaskIds(data: SnapshotData): number[] {
+  const counts = new Map<number, number>();
+  for (const task of liveSnapshotTasks(data)) {
+    const id = Number(task.id);
+    counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  return [...counts.entries()].filter(([, count]) => count > 1).map(([id]) => id).sort((left, right) => left - right);
+}
+
 async function verifyProjectedTasks(
   pb: AdminPB,
   snapshot: SnapshotData,
   taskIds: number[],
 ): Promise<boolean> {
+  if (duplicateLiveTaskIds(snapshot).length > 0) return false;
   const live = liveSnapshotTasks(snapshot);
   const tombstones = new Set(validTaskIds(snapshot.deletedTaskIds));
   for (const taskId of taskIds) {
@@ -373,6 +460,47 @@ function approvalMarker(
   const receipt = getSnapshotOperationReceipts(snapshot, operationId)[0];
   if (receipt?.action === "approve" || receipt?.action === "approve-all" || receipt?.action === "send-back") return true;
   return !receipt;
+}
+
+function discoveredApprovalMarkers(
+  ledger: CanonicalLedger,
+  snapshot: SnapshotData,
+): SnapshotProjectionRepair[] {
+  const byOperation = new Map<string, SnapshotProjectionRepair>();
+  const invalid = new Set<string>();
+  const add = (intent: ApprovalLedgerIntent) => {
+    if (invalid.has(intent.operationId)) return;
+    const marker: SnapshotProjectionRepair = {
+      operationId: intent.operationId,
+      action: intent.action,
+      actorId: intent.actorId,
+      fingerprint: intent.fingerprint,
+      taskIds: [...intent.taskIds].sort((left, right) => left - right),
+      createdAt: new Date(0).toISOString(),
+    };
+    const previous = byOperation.get(intent.operationId);
+    if (previous && !sameValue(previous, marker)) {
+      byOperation.delete(intent.operationId);
+      invalid.add(intent.operationId);
+    } else if (!previous) {
+      byOperation.set(intent.operationId, marker);
+    }
+  };
+  for (const intent of ledger.approvalIntents) add(intent);
+  for (const operationId of Object.keys(snapshot.operationReceipts ?? {})) {
+    const receipts = getSnapshotOperationReceipts(snapshot, operationId);
+    const first = receipts[0];
+    if (!first || !first.actorId || !first.fingerprint || !first.taskIds?.length) continue;
+    if (first.action !== "approve" && first.action !== "approve-all" && first.action !== "send-back") continue;
+    add({
+      operationId,
+      action: first.action,
+      actorId: first.actorId,
+      fingerprint: first.fingerprint,
+      taskIds: first.taskIds,
+    });
+  }
+  return [...byOperation.values()].sort((left, right) => left.operationId.localeCompare(right.operationId));
 }
 
 async function consumeProjectionMarker(
@@ -447,9 +575,14 @@ function success(
   };
 }
 
+type ReconcileLockedOptions = Omit<ReconcileTaskProjectionOptions, "pb"> & {
+  expectedRevision?: string;
+  expectedWeekData?: WeekData | null;
+};
+
 export async function reconcileTaskProjectionLocked(
   pb: AdminPB,
-  options: Omit<ReconcileTaskProjectionOptions, "pb"> = {},
+  options: ReconcileLockedOptions = {},
 ): Promise<ReconcileTaskProjectionResult> {
   const weekStart = validWeekStart(options.weekStart);
   if (!weekStart) return failure(["week:invalid"], null);
@@ -474,19 +607,40 @@ export async function reconcileTaskProjectionLocked(
     try {
       discoveryLedger = await readCanonicalLedger(pb, weekStart);
     } catch {
-      discoveryLedger = null;
+      return failure(["week:read"], null, discovery.revision);
     }
-    const evidenceIds = requestedOperationId && discoveryLedger
-      ? markerTransactions(discoveryLedger, requestedOperationId)
-        .map((transaction) => transaction.taskId)
-        .filter((taskId): taskId is number => taskId !== undefined)
+    const evidenceIds = discoveryLedger
+      ? [
+          ...markerTransactions(discoveryLedger, requestedOperationId ?? "").map((transaction) => transaction.taskId),
+          ...discoveryLedger.approvalIntents.flatMap((intent) =>
+            !requestedOperationId || intent.operationId === requestedOperationId ? intent.taskIds : [],
+          ),
+        ].filter((taskId): taskId is number => taskId !== undefined)
       : [];
     let pbTaskIds: number[] = [];
     try {
       const rows = await pb.collection("tasks").getFullList({ requestKey: null });
-      pbTaskIds = validTaskIds((Array.isArray(rows) ? rows : []).map((row: Row) => Number(row.taskId)));
+      if (!Array.isArray(rows)) return failure(["tasks:read"], null, discovery.revision);
+      pbTaskIds = validTaskIds(rows.map((row: Row) => Number(row.taskId)));
     } catch {
-      pbTaskIds = [];
+      return failure(["tasks:read"], null, discovery.revision);
+    }
+    const discoveryWeek = normalizeWeekData(discovery.data.weekData);
+    if (
+      discovery.data.taskWeekStart !== weekStart ||
+      !discoveryWeek ||
+      discoveryWeek.weekStart !== weekStart ||
+      (options.expectedRevision !== undefined && discovery.revision.revision !== options.expectedRevision)
+    ) {
+      return failure(["rollover:changed"], null, discovery.revision);
+    }
+    const discoveryDuplicateTasks = duplicateLiveTaskIds(discovery.data);
+    if (discoveryDuplicateTasks.length > 0) {
+      return failure(
+        discoveryDuplicateTasks.map((taskId) => `task:${taskId}:ambiguous`),
+        discoveryLedger.weekData,
+        discovery.revision,
+      );
     }
     const allIds = [...new Set([
       ...discoveryTasks.map((task) => Number(task.id)),
@@ -508,11 +662,55 @@ export async function reconcileTaskProjectionLocked(
       } catch {
         return failure(["snapshot:read"], null, discovery.revision);
       }
+      if (
+        ("tasks" in snapshot.data && snapshot.data.tasks !== undefined && !Array.isArray(snapshot.data.tasks)) ||
+        ("deletedTaskIds" in snapshot.data && snapshot.data.deletedTaskIds !== undefined && !Array.isArray(snapshot.data.deletedTaskIds))
+      ) {
+        return failure(["snapshot:read"], null, snapshot.revision);
+      }
       let ledger: CanonicalLedger;
       try {
         ledger = await readCanonicalLedger(pb, weekStart);
       } catch {
         return failure(["week:ledger"], null, snapshot.revision);
+      }
+      const existingSnapshotWeek = normalizeWeekData(snapshot.data.weekData);
+      if (snapshot.data.weekData !== undefined && snapshot.data.weekData !== null && !existingSnapshotWeek) {
+        return failure(["week:snapshot"], null, snapshot.revision);
+      }
+      const postSnapshotWeek = normalizeWeekData(snapshot.data.weekData);
+      let postTaskRows: Row[];
+      try {
+        const rows = await pb.collection("tasks").getFullList({ requestKey: null });
+        if (!Array.isArray(rows)) return failure(["tasks:read"], null, snapshot.revision);
+        postTaskRows = rows;
+      } catch {
+        return failure(["tasks:read"], null, snapshot.revision);
+      }
+      const postIds = [...new Set([
+        ...liveSnapshotTasks(snapshot.data).map((task) => Number(task.id)),
+        ...validTaskIds(snapshot.data.deletedTaskIds),
+        ...validTaskIds(postTaskRows.map((row) => Number(row.taskId))),
+        ...ledger.approvalIntents.flatMap((intent) => intent.taskIds),
+      ])].filter((id) => Number.isSafeInteger(id) && id > 0).sort((left, right) => left - right);
+      const baselineIds = [...new Set([...allIds, ...requestedTaskIds])].sort((left, right) => left - right);
+      if (
+        snapshot.revision.revision !== discovery.revision.revision ||
+        snapshot.data.taskWeekStart !== weekStart ||
+        !postSnapshotWeek ||
+        postSnapshotWeek.weekStart !== weekStart ||
+        !sameStoredWeek(discoveryLedger.weekData, ledger.weekData) ||
+        !sameValue(postIds, baselineIds)
+      ) {
+        return failure(["tasks:changed"], null, snapshot.revision);
+      }
+      const duplicateTasks = duplicateLiveTaskIds(snapshot.data);
+      if (duplicateTasks.length > 0) {
+        return failure(
+          duplicateTasks.map((taskId) => `task:${taskId}:ambiguous`),
+          ledger.weekData,
+          snapshot.revision,
+        );
       }
       if (ledger.needsWeekWrite) {
         try {
@@ -524,7 +722,6 @@ export async function reconcileTaskProjectionLocked(
         }
       }
 
-      const existingSnapshotWeek = normalizeWeekData(snapshot.data.weekData);
       if (
         !existingSnapshotWeek ||
         !sameStoredWeek(existingSnapshotWeek, ledger.weekData) ||
@@ -541,22 +738,30 @@ export async function reconcileTaskProjectionLocked(
       const storedMarkers = (Array.isArray(snapshot.data.pendingProjectionRepairs)
         ? [...snapshot.data.pendingProjectionRepairs]
         : [])
+        .filter((marker) => !requestedOperationId || marker.operationId === requestedOperationId);
+      const markerByOperation = new Map<string, SnapshotProjectionRepair>();
+      for (const marker of storedMarkers) markerByOperation.set(marker.operationId, marker);
+      for (const marker of discoveredApprovalMarkers(ledger, snapshot.data)) {
+        if (!markerByOperation.has(marker.operationId)) markerByOperation.set(marker.operationId, marker);
+      }
+      if (
+        requestedOperationId &&
+        !markerByOperation.has(requestedOperationId)
+      ) {
+        markerByOperation.set(requestedOperationId, {
+          operationId: requestedOperationId,
+          taskIds: [...new Set([
+            ...requestedTaskIds,
+            ...markerTransactions(ledger, requestedOperationId)
+              .map((transaction) => transaction.taskId)
+              .filter((taskId): taskId is number => taskId !== undefined),
+          ])].sort((left, right) => left - right),
+          createdAt: new Date().toISOString(),
+        });
+      }
+      const markers = [...markerByOperation.values()]
         .filter((marker) => !requestedOperationId || marker.operationId === requestedOperationId)
         .sort((left, right) => left.operationId.localeCompare(right.operationId));
-      const markers = requestedOperationId && !storedMarkers.some(
-        (marker) => marker.operationId === requestedOperationId,
-      )
-        ? [...storedMarkers, {
-            operationId: requestedOperationId,
-            taskIds: [...new Set([
-              ...requestedTaskIds,
-              ...markerTransactions(ledger, requestedOperationId)
-                .map((transaction) => transaction.taskId)
-                .filter((taskId): taskId is number => taskId !== undefined),
-            ])].sort((left, right) => left - right),
-            createdAt: new Date().toISOString(),
-          }].sort((left, right) => left.operationId.localeCompare(right.operationId))
-        : storedMarkers;
       for (const marker of markers) {
         const markerTaskIds = validTaskIds(marker.taskIds);
         const markerWasPresent = Array.isArray(snapshot.data.pendingProjectionRepairs) && snapshot.data.pendingProjectionRepairs.some(
@@ -569,6 +774,9 @@ export async function reconcileTaskProjectionLocked(
             weekStart,
             operationId: marker.operationId,
             taskIds: markerTaskIds,
+            action: marker.action,
+            actorId: marker.actorId,
+            fingerprint: marker.fingerprint,
             locked: true,
           });
           const verified = await approvalRepairVerified(
@@ -578,7 +786,11 @@ export async function reconcileTaskProjectionLocked(
             repair,
           );
           if (!verified) {
-            failed.push(repair.reason === "ledger_unavailable" ? "approval:unproven" : "approval:projection");
+            failed.push(
+              repair.reason === "ledger_unavailable" || repair.reason === "repair_required"
+                ? "approval:unproven"
+                : "approval:projection",
+            );
             continue;
           }
           if (!projectionWasCurrent) repaired.push("approval:projection");
@@ -687,6 +899,8 @@ export async function reconcileTaskProjection(
     taskIds: options.taskIds,
     operationId: options.operationId,
     now: options.now,
+    expectedRevision: rollover.revision?.revision,
+    expectedWeekData: rollover.currentWeekData,
   });
   try {
     return options.pb ? await run(options.pb) : await withAdmin(run);

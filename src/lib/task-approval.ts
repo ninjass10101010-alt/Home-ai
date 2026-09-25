@@ -78,6 +78,7 @@ export type ApprovalFailureReason =
   | "operation_conflict"
   | "semantic_duplicate"
   | "ledger_unavailable"
+  | "repair_required"
   | "snapshot_write_failed"
   | "task_store_unavailable";
 
@@ -559,6 +560,9 @@ interface PreparedCommand {
   tasks: PreparedTask[];
   week: WeekData;
   fingerprint: string;
+  actorId?: string;
+  action?: ApproveAction;
+  taskIds?: number[];
   receipts: Map<number, SnapshotOperationReceipt>;
   search: OperationLedgerSearch;
 }
@@ -941,10 +945,41 @@ function withoutRepairMarker(data: SnapshotData, operationId: string): SnapshotD
   return { ...data, pendingProjectionRepairs: markers };
 }
 
-function withRepairMarker(data: SnapshotData, operationId: string, taskIds: number[]): SnapshotData {
+interface ApprovalIntent {
+  actorId: string;
+  action: ApproveAction;
+  taskIds: number[];
+  fingerprint: string;
+}
+
+function preparedIntent(prepared: PreparedCommand): ApprovalIntent | undefined {
+  if (!prepared.actorId || !prepared.action || !prepared.taskIds || !prepared.fingerprint) return undefined;
+  return {
+    actorId: prepared.actorId,
+    action: prepared.action,
+    taskIds: [...prepared.taskIds].sort((left, right) => left - right),
+    fingerprint: prepared.fingerprint,
+  };
+}
+
+function withRepairMarker(
+  data: SnapshotData,
+  operationId: string,
+  taskIds: number[],
+  intent?: ApprovalIntent,
+): SnapshotData {
   const current = Array.isArray(data.pendingProjectionRepairs) ? data.pendingProjectionRepairs : [];
   const next = current.filter((marker) => marker.operationId !== operationId);
-  next.push({ operationId, taskIds: [...new Set(taskIds)].sort((left, right) => left - right), createdAt: new Date().toISOString() });
+  next.push({
+    operationId,
+    taskIds: [...new Set(taskIds)].sort((left, right) => left - right),
+    ...(intent ? {
+      action: intent.action,
+      actorId: intent.actorId,
+      fingerprint: intent.fingerprint,
+    } : {}),
+    createdAt: new Date().toISOString(),
+  });
   return { ...data, pendingProjectionRepairs: next };
 }
 
@@ -1031,6 +1066,7 @@ async function writeApprovalSnapshot(
   fingerprint: string,
   patches: SnapshotPatch[],
   weekData: WeekData | null,
+  intent?: ApprovalIntent,
 ): Promise<SnapshotWriteOutcome> {
   try {
     if (await snapshotWriteAlreadySatisfied(pb, command, fingerprint, patches, weekData)) {
@@ -1087,6 +1123,8 @@ async function writeApprovalSnapshot(
           action: command.action,
           taskId: patch.id,
           fingerprint,
+          ...(intent?.actorId ? { actorId: intent.actorId } : {}),
+          ...(intent?.taskIds ? { taskIds: intent.taskIds } : {}),
           createdAt: new Date().toISOString(),
         });
       }
@@ -1106,10 +1144,16 @@ async function addRepairMarker(
   pb: AdminPB,
   operationId: string,
   taskIds: number[],
+  intent?: ApprovalIntent,
 ): Promise<boolean> {
   try {
     await mutateSnapshotWithMeta((data) => ({
-      data: withRepairMarker(data, operationId, taskIds),
+      data: withRepairMarker(
+        data,
+        operationId,
+        intent?.taskIds ?? taskIds,
+        intent,
+      ),
       result: null,
     }), pb);
     return true;
@@ -1241,6 +1285,25 @@ function failure(
   };
 }
 
+function repairRequiredFailure(
+  operationId: string,
+  action: ApproveAction,
+  week: WeekData,
+): ApprovalServiceResult {
+  return {
+    ok: false,
+    operationId,
+    action,
+    weekData: week,
+    paid: 0,
+    cleared: 0,
+    skipped: 0,
+    reconciled: false,
+    repairRequired: true,
+    reason: "repair_required",
+  };
+}
+
 function success(
   command: ApproveCommand,
   weekData: WeekData,
@@ -1292,7 +1355,7 @@ async function executeSendBack(
   let outcome = false;
   try {
     outcome = await withAdmin(async (pb) => {
-    const snapshot = await writeApprovalSnapshot(pb, command, prepared.fingerprint, patches, null);
+    const snapshot = await writeApprovalSnapshot(pb, command, prepared.fingerprint, patches, null, preparedIntent(prepared));
     if (!snapshot.ok) {
       snapshotDurable = false;
       projectionFailures = activeItems.map((item) => item.id);
@@ -1311,7 +1374,7 @@ async function executeSendBack(
     }
     if (failed.length > 0) {
       projectionFailures = failed;
-      await addRepairMarker(pb, command.operationId, failed);
+      await addRepairMarker(pb, command.operationId, failed, preparedIntent(prepared));
       return false;
     }
     const current = await readProjectedTask(pb, activeItems[0].id);
@@ -1361,6 +1424,7 @@ async function readProjectedTask(
 async function executeApproval(
   command: ApproveCommand,
   prepared: PreparedCommand,
+  replayOnly = false,
 ): Promise<ApprovalServiceResult> {
   const active = prepared.tasks.filter((item) => !item.skip);
   if (active.length === 0) {
@@ -1381,16 +1445,16 @@ async function executeApproval(
   const project = async (pb: AdminPB, weekData: WeekData): Promise<boolean> => {
     if (!operationEntriesComplete(prepared, command.operationId, expectedEntries, weekData)) {
       projectionFailures = active.map((item) => item.id);
-      await addRepairMarker(pb, command.operationId, projectionFailures);
+      await addRepairMarker(pb, command.operationId, projectionFailures, preparedIntent(prepared));
       return false;
     }
     const patches = active
       .map((item) => approvalPatch(item, false))
       .filter((patch): patch is SnapshotPatch => patch !== null);
-    const snapshot = await writeApprovalSnapshot(pb, command, prepared.fingerprint, patches, weekData);
+    const snapshot = await writeApprovalSnapshot(pb, command, prepared.fingerprint, patches, weekData, preparedIntent(prepared));
     if (!snapshot.ok) {
       projectionFailures = active.map((item) => item.id);
-      await addRepairMarker(pb, command.operationId, projectionFailures);
+      await addRepairMarker(pb, command.operationId, projectionFailures, preparedIntent(prepared));
       return false;
     }
     cleared += snapshot.cleared;
@@ -1403,20 +1467,20 @@ async function executeApproval(
     }
     if (failed.length > 0) {
       projectionFailures = failed;
-      await addRepairMarker(pb, command.operationId, failed);
+      await addRepairMarker(pb, command.operationId, failed, preparedIntent(prepared));
       return false;
     }
     const invalid = active.filter((item) => item.projectionInvalid).map((item) => item.id);
     if (invalid.length > 0) {
       projectionFailures = invalid;
-      await addRepairMarker(pb, command.operationId, invalid);
+      await addRepairMarker(pb, command.operationId, invalid, preparedIntent(prepared));
       return false;
     }
     return true;
   };
 
   let result: Awaited<ReturnType<typeof applyWeekLedgerOperationLocked>> | null = null;
-  if (entries.length > 0) {
+  if (!replayOnly && entries.length > 0) {
     if (hasUnreplayedSemanticDuplicate(prepared.search, command.operationId, expectedEntries)) {
       return failure(command.operationId, command.action, "semantic_duplicate", prepared.week);
     }
@@ -1426,6 +1490,9 @@ async function executeApproval(
         operationId: command.operationId,
         source: "task-approval",
         fingerprint: prepared.fingerprint,
+        actorId: prepared.actorId,
+        action: prepared.action,
+        taskIds: prepared.taskIds,
         entries,
       },
       project: async ({ pb, weekData, semanticDuplicate }) => {
@@ -1447,7 +1514,7 @@ async function executeApproval(
     }
   }
 
-  if (entries.length === 0) {
+  if (replayOnly || entries.length === 0) {
     try {
       await withAdmin((pb) => project(pb, prepared.week));
     } catch {
@@ -1470,10 +1537,10 @@ async function executeApproval(
     }
   }
 
-  const paid = result?.weekData.history.filter(
+  const paid = replayOnly ? 0 : result?.weekData.history.filter(
     (transaction) => transaction.meta?.operationId === command.operationId && !beforeIds.has(transaction.id),
   ).length ?? 0;
-  const skipped = paid === 0 && result?.duplicate ? 0 : Math.max(0, entries.length - paid);
+  const skipped = replayOnly ? 0 : paid === 0 && result?.duplicate ? 0 : Math.max(0, entries.length - paid);
   return success(
     command,
     result?.weekData ?? prepared.week,
@@ -1497,6 +1564,7 @@ async function executeApprovalCommandUnlocked(
   command: ApproveCommand,
   actor: ApprovalActor,
   authorityWeekStart: string,
+  replayOnly = false,
 ): Promise<ApprovalServiceResult> {
   const parsed = command;
   const weekStart = authorityWeekStart;
@@ -1534,9 +1602,12 @@ async function executeApprovalCommandUnlocked(
   if (typeof prepared === "string") {
     return failure(command.operationId, parsed.action, prepared, emptyWeekData(weekStart));
   }
+  prepared.actorId = live.parent.id;
+  prepared.action = parsed.action;
+  prepared.taskIds = approvalTaskIds(parsed);
   try {
     if (parsed.action === "send-back") return await executeSendBack(parsed, prepared);
-    return await executeApproval(parsed, prepared);
+    return await executeApproval(parsed, prepared, replayOnly);
   } catch {
     return failure(command.operationId, parsed.action, "ledger_unavailable", prepared.week);
   }
@@ -1595,6 +1666,9 @@ export interface ApprovalRepairOptions {
   weekStart: string;
   operationId: string;
   taskIds?: number[];
+  action?: ApproveAction;
+  actorId?: string;
+  fingerprint?: string;
   locked?: boolean;
 }
 
@@ -1620,6 +1694,58 @@ function approvalRepairTaskIds(
   ))].sort((left, right) => left - right);
 }
 
+function repairIntentFromEvidence(
+  options: ApprovalRepairOptions,
+  receipts: SnapshotOperationReceipt[],
+  transactions: Transaction[],
+): ApprovalIntent | undefined {
+  const optionActor = typeof options.actorId === "string" && options.actorId.trim() ? options.actorId.trim() : undefined;
+  const optionAction = options.action;
+  const optionFingerprint = typeof options.fingerprint === "string" && /^[a-f0-9]{64}$/.test(options.fingerprint)
+    ? options.fingerprint
+    : undefined;
+  const optionTaskIds = Array.isArray(options.taskIds)
+    ? [...new Set(options.taskIds.filter((id): id is number =>
+      typeof id === "number" && Number.isSafeInteger(id) && id > 0,
+    ))].sort((left, right) => left - right)
+    : [];
+  const evidence = [
+    ...receipts.map((receipt) => ({
+      actorId: receipt.actorId,
+      action: receipt.action === "approve" || receipt.action === "approve-all" || receipt.action === "send-back"
+        ? receipt.action
+        : undefined,
+      fingerprint: typeof receipt.fingerprint === "string" && /^[a-f0-9]{64}$/.test(receipt.fingerprint)
+        ? receipt.fingerprint
+        : undefined,
+      taskIds: Array.isArray(receipt.taskIds) ? [...receipt.taskIds].sort((left, right) => left - right) : undefined,
+    })),
+    ...transactions.map((transaction) => ({
+      actorId: transaction.meta?.actorId,
+      action: transaction.meta?.action,
+      fingerprint: transaction.meta?.fingerprint,
+      taskIds: transaction.meta?.taskIds ? [...transaction.meta.taskIds].sort((left, right) => left - right) : undefined,
+    })),
+  ].filter((value): value is ApprovalIntent =>
+    Boolean(value.actorId && value.action && value.fingerprint && value.taskIds?.length),
+  );
+  const candidate = optionActor && optionAction && optionFingerprint && optionTaskIds.length
+    ? { actorId: optionActor, action: optionAction, fingerprint: optionFingerprint, taskIds: optionTaskIds }
+    : evidence[0];
+  if (!candidate) return undefined;
+  if (evidence.some((value) =>
+    value.actorId !== candidate.actorId ||
+    value.action !== candidate.action ||
+    value.fingerprint !== candidate.fingerprint ||
+    JSON.stringify(value.taskIds) !== JSON.stringify(candidate.taskIds)
+  )) return undefined;
+  if (optionActor && optionActor !== candidate.actorId) return undefined;
+  if (optionAction && optionAction !== candidate.action) return undefined;
+  if (optionFingerprint && optionFingerprint !== candidate.fingerprint) return undefined;
+  if (optionTaskIds.length && JSON.stringify(optionTaskIds) !== JSON.stringify(candidate.taskIds)) return undefined;
+  return candidate;
+}
+
 export async function repairApprovalOperationLocked(
   options: LockedApprovalRepairOptions,
 ): Promise<ApprovalServiceResult> {
@@ -1630,75 +1756,130 @@ export async function repairApprovalOperationLocked(
   }
 
   try {
-    const search = await readOperationLedger(options.pb, weekStart, operationId);
+    const search = options.action === "send-back"
+      ? {
+          currentWeek: await readWeek(options.pb, weekStart),
+          currentTransactions: [],
+          archiveTransactions: [],
+          archiveWeeks: [],
+          allTransactions: [],
+        }
+      : await readOperationLedger(options.pb, weekStart, operationId);
     const snapshot = await readSnapshotStateWithRevision(options.pb);
-    const evidence = { pb: options.pb, search, snapshot, receipts: getSnapshotOperationReceipts(snapshot.data, operationId) };
-    const receipts = evidence.receipts;
-    const operationTransactions = evidence.search.allTransactions.filter(
+    const receipts = getSnapshotOperationReceipts(snapshot.data, operationId);
+    const operationTransactions = search.allTransactions.filter(
       (transaction) => transaction.meta?.operationId === operationId,
     );
-    const hasApprovalLedger = operationTransactions.some(
-      (transaction) => transaction.meta?.source === "task-approval",
-    );
-    const receiptAction = receipts[0]?.action;
-    const action: ApproveAction = receiptAction === "approve-all" || receiptAction === "send-back"
-      ? receiptAction
-      : new Set(receipts.map((receipt) => receipt.action)).has("approve-all") ||
-          operationTransactions.filter((transaction) => transaction.taskId !== undefined).length > 1
-        ? "approve-all"
-        : "approve";
-    if (action !== "send-back" && !hasApprovalLedger) {
-      return failure(operationId, action, "ledger_unavailable", evidence.search.currentWeek);
+    const intent = repairIntentFromEvidence(options, receipts, operationTransactions);
+    if (!intent) {
+      return repairRequiredFailure(operationId, options.action ?? "approve", search.currentWeek);
     }
-    if (action !== "send-back" && operationTransactions.some(
-      (transaction) =>
-        transaction.type !== "earn" ||
+    if (options.taskIds?.length && JSON.stringify([...options.taskIds].sort((left, right) => left - right)) !== JSON.stringify(intent.taskIds)) {
+      return failure(operationId, intent.action, "operation_conflict", search.currentWeek);
+    }
+    if (intent.action === "send-back") {
+      if (operationTransactions.length > 0) {
+        return failure(operationId, intent.action, "operation_conflict", search.currentWeek);
+      }
+      const matchingReceipts = receipts.filter((receipt) =>
+        receipt.action === intent.action &&
+        receipt.fingerprint === intent.fingerprint &&
+        receipt.actorId === intent.actorId &&
+        JSON.stringify(receipt.taskIds ?? []) === JSON.stringify(intent.taskIds),
+      );
+      if (matchingReceipts.length === 0) {
+        return repairRequiredFailure(operationId, intent.action, search.currentWeek);
+      }
+    } else {
+      if (operationTransactions.length === 0) {
+        return repairRequiredFailure(operationId, intent.action, search.currentWeek);
+      }
+      if (operationTransactions.some((transaction) =>
         transaction.meta?.source !== "task-approval" ||
-        transaction.taskId === undefined,
-    )) {
-      return failure(operationId, action, "operation_conflict", evidence.search.currentWeek);
+        transaction.meta?.fingerprint !== intent.fingerprint ||
+        transaction.meta?.actorId !== intent.actorId ||
+        transaction.meta?.action !== intent.action ||
+        JSON.stringify(transaction.meta?.taskIds ?? []) !== JSON.stringify(intent.taskIds) ||
+        transaction.type !== "earn" ||
+        transaction.taskId === undefined
+      )) {
+        return failure(operationId, intent.action, "operation_conflict", search.currentWeek);
+      }
     }
-    const taskIds = approvalRepairTaskIds(
-      options.taskIds,
-      receipts,
-      operationTransactions,
-    );
-    if (taskIds.length === 0) {
-      return failure(operationId, action, "unknown_task", evidence.search.currentWeek);
-    }
-    const snapshotTaskIds = new Set(
-      liveSnapshotTasks(evidence.snapshot.data).map((task) => Number(task.id)),
-    );
-    const snapshotTombstoneIds = new Set(
-      (evidence.snapshot.data.deletedTaskIds ?? []).map((taskId) => Number(taskId)),
-    );
-    if (taskIds.some((taskId) => !snapshotTaskIds.has(taskId) && !snapshotTombstoneIds.has(taskId))) {
-      return failure(operationId, action, "snapshot_write_failed", evidence.search.currentWeek);
-    }
-    const fingerprint = receipts.find((receipt) => typeof receipt.fingerprint === "string")?.fingerprint
-      ?? operationTransactions.find((transaction) => typeof transaction.meta?.fingerprint === "string")?.meta?.fingerprint;
-    if (action !== "send-back" && !fingerprint) {
-      return failure(operationId, action, "operation_conflict", evidence.search.currentWeek);
-    }
-    const roster = await approvalRepairRoster(evidence.pb);
-    if (!roster) return failure(operationId, action, "member_roster_unavailable", evidence.search.currentWeek);
-    const parents = roster.filter((member) => member.role.toLowerCase() === "parent");
+
+    const roster = await approvalRepairRoster(options.pb);
+    if (!roster) return failure(operationId, intent.action, "member_roster_unavailable", search.currentWeek);
+    const actor = roster.find((member) => member.id === intent.actorId && member.role.toLowerCase() === "parent");
+    if (!actor) return failure(operationId, intent.action, "operation_conflict", search.currentWeek);
     const command = {
       operationId,
-      action,
-      ...(action === "approve-all" ? { taskIds } : { taskId: taskIds[0] }),
+      action: intent.action,
+      ...(intent.action === "approve-all" ? { taskIds: intent.taskIds } : { taskId: intent.taskIds[0] }),
     } as ApproveCommand;
-    const actor = fingerprint
-      ? parents.find((parent) => approvalCommandFingerprint(command, parent.id) === fingerprint)
-      : parents[0];
-    if (!actor) return failure(operationId, action, "operation_conflict", evidence.search.currentWeek);
+    if (approvalCommandFingerprint(command, actor.id) !== intent.fingerprint) {
+      return failure(operationId, intent.action, "operation_conflict", search.currentWeek);
+    }
+    const liveTaskIds = new Set(liveSnapshotTasks(snapshot.data).map((task) => Number(task.id)));
+    const tombstoneIds = new Set((snapshot.data.deletedTaskIds ?? []).map((id) => Number(id)));
+    if (intent.taskIds.some((taskId) => !liveTaskIds.has(taskId) && !tombstoneIds.has(taskId))) {
+      return failure(operationId, intent.action, "snapshot_write_failed", search.currentWeek);
+    }
+
+    const prepared = await (async (): Promise<PreparedCommand | ApprovalFailureReason> => {
+      if (intent.action === "send-back") {
+        return resolveTasks(
+          options.pb,
+          intent.taskIds,
+          command,
+          search.currentWeek,
+          search,
+          intent.fingerprint,
+          roster,
+          snapshot.data,
+          weekStart,
+        );
+      }
+      return resolveTasks(
+        options.pb,
+        intent.taskIds,
+        command,
+        search.currentWeek,
+        search,
+        intent.fingerprint,
+        roster,
+        snapshot.data,
+        weekStart,
+      );
+    })().catch(() => "ledger_unavailable" as const);
+    if (typeof prepared === "string") {
+      return failure(operationId, intent.action, prepared, search.currentWeek);
+    }
+    prepared.actorId = intent.actorId;
+    prepared.action = intent.action;
+    prepared.taskIds = intent.taskIds;
+    if (intent.action !== "send-back") {
+      const expected = prepared.tasks.filter((item) => !item.skip).flatMap((item) => item.expectedEntries);
+      const matched = expected.map((entry) => operationTransactions.find((transaction) =>
+        transactionMatchesEntry(transaction, entry) &&
+        transaction.meta?.operationId === operationId &&
+        transaction.meta?.source === "task-approval" &&
+        transaction.meta?.fingerprint === intent.fingerprint &&
+        transaction.meta?.actorId === intent.actorId &&
+        transaction.meta?.action === intent.action &&
+        JSON.stringify(transaction.meta?.taskIds ?? []) === JSON.stringify(intent.taskIds)
+      ));
+      if (matched.some((transaction) => !transaction) || matched.length !== expected.length) {
+        return repairRequiredFailure(operationId, intent.action, search.currentWeek);
+      }
+    }
     return executeApprovalCommandUnlocked(
       command,
       { memberId: actor.id, name: actor.name, role: actor.role },
       weekStart,
+      true,
     );
   } catch {
-    return failure(operationId, "approve", "task_store_unavailable", emptyWeekData(localWeekStartISO()));
+    return failure(operationId, options.action ?? "approve", "task_store_unavailable", emptyWeekData(localWeekStartISO()));
   }
 }
 
@@ -1732,6 +1913,9 @@ export async function repairApprovalOperation(
         weekStart,
         operationId,
         taskIds: options.taskIds,
+        action: options.action,
+        actorId: options.actorId,
+        fingerprint: options.fingerprint,
       })),
     ));
   } catch {

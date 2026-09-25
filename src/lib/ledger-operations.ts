@@ -82,6 +82,9 @@ interface NormalizedLedgerOperation {
   operationId: string;
   source: LedgerOperationSource;
   fingerprint: string;
+  actorId?: string;
+  action?: "approve" | "approve-all" | "send-back";
+  taskIds?: number[];
   entries: NormalizedLedgerEntry[];
 }
 
@@ -222,10 +225,29 @@ function normalizeOperation(value: unknown): NormalizedLedgerOperation | null {
     suppliedFingerprint !== undefined &&
     (typeof suppliedFingerprint !== "string" || !/^[a-f0-9]{64}$/.test(suppliedFingerprint))
   ) return null;
+  const actorId = value.actorId;
+  if (actorId !== undefined && (typeof actorId !== "string" || !actorId.trim())) return null;
+  const action = value.action;
+  if (action !== undefined && action !== "approve" && action !== "approve-all" && action !== "send-back") return null;
+  const taskIds = value.taskIds;
+  if (taskIds !== undefined) {
+    if (!Array.isArray(taskIds) || taskIds.length === 0 || taskIds.some((id) =>
+      typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0,
+    )) return null;
+    if (new Set(taskIds).size !== taskIds.length) return null;
+  }
   const fingerprint = typeof suppliedFingerprint === "string"
     ? suppliedFingerprint
     : operationFingerprint(source as LedgerOperationSource, entries);
-  return { operationId, source: source as LedgerOperationSource, fingerprint, entries };
+  return {
+    operationId,
+    source: source as LedgerOperationSource,
+    fingerprint,
+    ...(typeof actorId === "string" ? { actorId: actorId.trim() } : {}),
+    ...(action !== undefined ? { action } : {}),
+    ...(taskIds !== undefined ? { taskIds: [...taskIds].sort((left, right) => left - right) } : {}),
+    entries,
+  };
 }
 
 interface CanonicalWeek {
@@ -312,7 +334,10 @@ function sameTransaction(left: Transaction, right: Transaction): boolean {
     left.appliedBy === right.appliedBy &&
     left.meta?.operationId === right.meta?.operationId &&
     left.meta?.source === right.meta?.source &&
-    left.meta?.fingerprint === right.meta?.fingerprint
+    left.meta?.fingerprint === right.meta?.fingerprint &&
+    left.meta?.actorId === right.meta?.actorId &&
+    left.meta?.action === right.meta?.action &&
+    JSON.stringify(left.meta?.taskIds ?? []) === JSON.stringify(right.meta?.taskIds ?? [])
   );
 }
 
@@ -401,6 +426,9 @@ function createTransaction(
       operationId: operation.operationId,
       source: operation.source,
       fingerprint: operation.fingerprint,
+      ...(operation.actorId ? { actorId: operation.actorId } : {}),
+      ...(operation.action ? { action: operation.action } : {}),
+      ...(operation.taskIds ? { taskIds: operation.taskIds } : {}),
     },
   };
 }

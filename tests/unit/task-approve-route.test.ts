@@ -743,7 +743,13 @@ describe("POST /api/tasks/approve — action:approve", () => {
       ? JSON.parse(snapshotUpdates().data)
       : snapshotUpdates()?.data;
     expect(markerData.pendingProjectionRepairs).toEqual([
-      expect.objectContaining({ operationId: "op-snapshot-repair", taskIds: [101] }),
+      expect.objectContaining({
+        operationId: "op-snapshot-repair",
+        taskIds: [101],
+        action: "approve",
+        actorId: "parent-rebecca",
+        fingerprint: expect.any(String),
+      }),
     ]);
 
     const second = await POST(jsonReq(request));
@@ -811,7 +817,13 @@ describe("POST /api/tasks/approve — action:approve", () => {
     expect(points()["Caspian Garcia"]).toBe(8);
     const earn = history().find((t: any) => t.type === "earn" && t.taskId === 101);
     expect(earn?.amount).toBe(8);
-    expect(earn?.meta).toMatchObject({ operationId: "op-approval-test", source: "task-approval" });
+    expect(earn?.meta).toMatchObject({
+      operationId: "op-approval-test",
+      source: "task-approval",
+      actorId: "parent-rebecca",
+      action: "approve",
+      taskIds: [101],
+    });
     expect(earn?.meta?.fingerprint).toMatch(/^[a-f0-9]{64}$/);
     expect(JSON.stringify(earn)).not.toContain("0202");
     expect(collectionUpdated()?.pendingApproval).toBeNull();
@@ -1749,6 +1761,13 @@ describe("POST /api/tasks/approve — action:approve-all", () => {
     expect(points()["Caspian Garcia"]).toBe(8);
     expect(points()["Aurora Garcia"]).toBe(5);
     expect(history().filter((t: any) => t.type === "earn")).toHaveLength(2);
+    for (const transaction of history().filter((t: any) => t.type === "earn")) {
+      expect(transaction.meta).toMatchObject({
+        actorId: "parent-rebecca",
+        action: "approve-all",
+        taskIds: [101, 102],
+      });
+    }
   });
 
   it("acquires week then requested task locks in ascending order", async () => {

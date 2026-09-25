@@ -54,6 +54,8 @@ export interface SnapshotOperationReceipt {
   taskId: number;
   deleted?: boolean;
   fingerprint?: string;
+  actorId?: string;
+  taskIds?: number[];
   createdAt: string;
 }
 
@@ -80,6 +82,9 @@ export interface SnapshotConfigMutationResult {
 export interface SnapshotProjectionRepair {
   operationId: string;
   taskIds: number[];
+  action?: "approve" | "approve-all" | "send-back";
+  actorId?: string;
+  fingerprint?: string;
   createdAt: string;
 }
 
@@ -318,12 +323,18 @@ function sanitizeOperationReceipt(value: unknown): SnapshotOperationReceipt | nu
   const fingerprint = typeof value.fingerprint === "string" && /^[a-f0-9]{64}$/.test(value.fingerprint)
     ? value.fingerprint
     : undefined;
+  const actorId = typeof value.actorId === "string" && value.actorId.trim() ? value.actorId.trim() : undefined;
+  const taskIds = Array.isArray(value.taskIds)
+    ? [...new Set(value.taskIds.filter(isPositiveTaskId))].sort((left, right) => left - right)
+    : undefined;
   if (
     !operationId ||
     !action ||
     !isPositiveTaskId(taskId) ||
     !createdAt ||
-    (value.deleted !== undefined && typeof value.deleted !== "boolean")
+    (value.deleted !== undefined && typeof value.deleted !== "boolean") ||
+    (value.actorId !== undefined && !actorId) ||
+    (value.taskIds !== undefined && (!taskIds || taskIds.length === 0))
   ) {
     return null;
   }
@@ -333,6 +344,8 @@ function sanitizeOperationReceipt(value: unknown): SnapshotOperationReceipt | nu
     taskId,
     ...(typeof value.deleted === "boolean" ? { deleted: value.deleted } : {}),
     ...(fingerprint ? { fingerprint } : {}),
+    ...(actorId ? { actorId } : {}),
+    ...(taskIds ? { taskIds } : {}),
     createdAt,
   };
 }
@@ -438,10 +451,24 @@ function sanitizeProjectionRepairs(value: unknown): SnapshotProjectionRepair[] {
           ...new Set(
             candidate.taskIds.filter(isPositiveTaskId),
           ),
-        ]
+        ].sort((left, right) => left - right)
       : [];
+    const action = candidate.action === "approve" || candidate.action === "approve-all" || candidate.action === "send-back"
+      ? candidate.action
+      : undefined;
+    const actorId = typeof candidate.actorId === "string" && candidate.actorId.trim() ? candidate.actorId.trim() : undefined;
+    const fingerprint = typeof candidate.fingerprint === "string" && /^[a-f0-9]{64}$/.test(candidate.fingerprint)
+      ? candidate.fingerprint
+      : undefined;
     if (!operationId || !createdAt || taskIds.length === 0) continue;
-    repairs.push({ operationId, taskIds, createdAt });
+    repairs.push({
+      operationId,
+      taskIds,
+      ...(action ? { action } : {}),
+      ...(actorId ? { actorId } : {}),
+      ...(fingerprint ? { fingerprint } : {}),
+      createdAt,
+    });
   }
 
   return repairs;
@@ -1213,6 +1240,17 @@ export async function replaceSnapshotWeekData(
       currentUpdatedAt = rowUpdatedAt(row, data);
       const incoming = normalizeWeekData(weekData);
       if (!incoming) throw new TypeError("invalid_week_data");
+      const storedWeek = normalizeWeekData(data.weekData);
+      if (
+        (storedWeek && storedWeek.weekStart > incoming.weekStart) ||
+        (typeof data.taskWeekStart === "string" && data.taskWeekStart > incoming.weekStart)
+      ) {
+        return {
+          ok: false,
+          revision: { revision: currentRevision, updatedAt: currentUpdatedAt },
+          error: "snapshot_write_failed",
+        };
+      }
       const revision = nextRevision(data.revision);
       const updatedAt = new Date().toISOString();
       const expectedWeek = {

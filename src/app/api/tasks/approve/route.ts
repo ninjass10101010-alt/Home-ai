@@ -26,6 +26,7 @@ function statusForReason(reason: string | undefined): number {
   if (
     reason === "member_roster_unavailable" ||
     reason === "ledger_unavailable" ||
+    reason === "repair_required" ||
     reason === "snapshot_write_failed" ||
     reason === "task_store_unavailable"
   ) return 503;
@@ -52,6 +53,7 @@ function errorResponse(
     code: reason,
     ...(retryable ? { retryable: true } : {}),
     ...(reason === "semantic_duplicate" ? { duplicate: true, semanticDuplicate: true } : {}),
+    ...(reason === "repair_required" ? { repairRequired: true } : {}),
   }, { status });
 }
 

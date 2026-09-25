@@ -66,6 +66,9 @@ export interface LedgerOperationMeta {
   operationId: string;
   source: LedgerOperationSource;
   fingerprint?: string;
+  actorId?: string;
+  action?: "approve" | "approve-all" | "send-back";
+  taskIds?: number[];
 }
 
 export interface Transaction {
@@ -93,6 +96,9 @@ export interface LedgerOperationInput {
   operationId: string;
   source: LedgerOperationSource;
   fingerprint?: string;
+  actorId?: string;
+  action?: "approve" | "approve-all" | "send-back";
+  taskIds?: number[];
   entries: LedgerEntryInput[];
 }
 

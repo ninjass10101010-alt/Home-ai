@@ -36,16 +36,28 @@ function canonicalLedgerMeta(value: unknown): LedgerOperationMeta | null {
   const operationId = normalizeOperationId(value.operationId);
   const source = value.source;
   const fingerprint = value.fingerprint;
+  const actorId = value.actorId;
+  const action = value.action;
+  const taskIds = value.taskIds;
   if (!operationId || typeof source !== "string" || !ledgerOperationSources.has(source as LedgerOperationSource)) {
     return null;
   }
   if (fingerprint !== undefined && (typeof fingerprint !== "string" || !/^[a-f0-9]{64}$/.test(fingerprint))) {
     return null;
   }
+  if (actorId !== undefined && (typeof actorId !== "string" || !actorId.trim())) return null;
+  if (action !== undefined && action !== "approve" && action !== "approve-all" && action !== "send-back") return null;
+  if (taskIds !== undefined) {
+    if (!Array.isArray(taskIds) || taskIds.length === 0 || taskIds.some((id) => !positiveSafeInteger(id))) return null;
+    if (new Set(taskIds).size !== taskIds.length) return null;
+  }
   return {
     operationId,
     source: source as LedgerOperationSource,
     ...(typeof fingerprint === "string" ? { fingerprint } : {}),
+    ...(typeof actorId === "string" ? { actorId: actorId.trim() } : {}),
+    ...(action !== undefined ? { action } : {}),
+    ...(taskIds !== undefined ? { taskIds: [...taskIds].sort((left, right) => left - right) } : {}),
   };
 }
 

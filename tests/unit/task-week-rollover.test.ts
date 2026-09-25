@@ -81,6 +81,7 @@ function createHarness(options: {
   const state: Record<string, Row[]> = {
     week_data: [],
     week_archive: [],
+    tasks: [],
     consuela_data_snapshots: [],
     hall_of_fame: [],
     members: [{ id: "member-1", name: "Alex", emoji: "🦊" }],
@@ -478,7 +479,7 @@ describe("ensureCurrentTaskWeek", () => {
       rank: 1,
       emoji: "🦊",
       prize: "Pick the movie",
-      celebrated: true,
+      celebrated: false,
     });
   });
 
