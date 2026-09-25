@@ -13,6 +13,7 @@ import {
   seedCollections,
   verifyCollectionContract,
 } from "@/lib/pb-seed";
+import type { PbCollectionContract } from "@/lib/pb-seed";
 
 const LOCKED = {
   listRule: null,
@@ -31,8 +32,17 @@ type StatefulCollections = {
 };
 
 /** A live PocketBase field as the 0.23+ typed-field API echoes it: min/max/values
- *  sit beside name/type rather than inside an `options` bag. */
+ *  sit beside name/type rather than inside an `options` bag, and an autodate's
+ *  onCreate/onUpdate flags are top level beside the type. */
 function liveFieldFrom(field: any): LiveField {
+  if (field.type === "autodate") {
+    return {
+      name: field.name,
+      type: "autodate",
+      onCreate: field.options?.onCreate !== false,
+      ...(field.options?.onUpdate ? { onUpdate: true } : {}),
+    };
+  }
   const live: LiveField = {
     name: field.name,
     type: field.type,
@@ -117,6 +127,37 @@ function fieldNamed(record: any, fieldName: string): any {
   const field = (record.fields as any[]).find((f) => f.name === fieldName);
   if (!field) throw new Error(`no live field ${fieldName}`);
   return field;
+}
+
+const DATE_BOUND_CONTRACT: PbCollectionContract = {
+  name: "probe_dates",
+  schema: [
+    { name: "label", type: "text", required: true },
+    { name: "window", type: "date", options: { min: 1, max: 9 } },
+  ],
+};
+
+function fixtureLivePb(contract: PbCollectionContract, mutate?: (fields: LiveField[]) => void) {
+  const fields = collectionFieldsForSeed(contract).map((field) => liveFieldFrom(field));
+  mutate?.(fields);
+  return makeStatefulPb([
+    {
+      id: `live_${contract.name}`,
+      name: contract.name,
+      type: "base",
+      fields,
+      indexes: [...(contract.indexes ?? [])],
+      ...LOCKED,
+    },
+  ]);
+}
+
+function eventsWithScoreMax(max: number) {
+  return liveCollection("events", {
+    fields: fieldsFromContract("events").map((field) =>
+      field.name === "importanceScore" ? { ...field, max } : field
+    ),
+  });
 }
 
 beforeEach(() => {
@@ -211,6 +252,98 @@ describe("seed contract verification — final live state", () => {
 
     const issues = await verifyCollectionContract(pb);
     expect(issues.join("\n")).toMatch(/events\.importanceScore: number max/);
+  });
+
+  it("reports a date bound that drifted", async () => {
+    const pb = fixtureLivePb(DATE_BOUND_CONTRACT, (fields) => {
+      fields.find((f) => f.name === "window")!.max = 5;
+    });
+
+    expect(await verifyCollectionContract(pb, [DATE_BOUND_CONTRACT])).toEqual([
+      "probe_dates.window: date max mismatch",
+    ]);
+  });
+
+  it("accepts a date bound the live state already matches", async () => {
+    const pb = fixtureLivePb(DATE_BOUND_CONTRACT);
+
+    expect(await verifyCollectionContract(pb, [DATE_BOUND_CONTRACT])).toEqual([]);
+  });
+
+  it("reports a date min bound that drifted", async () => {
+    const pb = fixtureLivePb(DATE_BOUND_CONTRACT, (fields) => {
+      fields.find((f) => f.name === "window")!.min = 4;
+    });
+
+    expect(await verifyCollectionContract(pb, [DATE_BOUND_CONTRACT])).toEqual([
+      "probe_dates.window: date min mismatch",
+    ]);
+  });
+
+  it("reports an autodate field the final state never created", async () => {
+    const pb = await seededPb();
+    mutateLive(pb, "members", (record) => {
+      record.fields = record.fields.filter((f: any) => f.name !== "updated");
+    });
+
+    const issues = await verifyCollectionContract(pb);
+    expect(issues).toContain("members.updated: field missing");
+  });
+
+  it("reports an autodate field whose onCreate flag drifted", async () => {
+    const pb = await seededPb();
+    mutateLive(pb, "members", (record) => {
+      fieldNamed(record, "created").onCreate = false;
+    });
+
+    const issues = await verifyCollectionContract(pb);
+    expect(issues).toContain("members.created: autodate onCreate must be true");
+  });
+
+  it("reports an autodate field whose onUpdate flag drifted", async () => {
+    const pb = await seededPb();
+    mutateLive(pb, "members", (record) => {
+      fieldNamed(record, "updated").onUpdate = false;
+    });
+
+    const issues = await verifyCollectionContract(pb);
+    expect(issues).toContain("members.updated: autodate onUpdate mismatch");
+  });
+
+  it("reports an autodate field whose type drifted", async () => {
+    const pb = await seededPb();
+    mutateLive(pb, "members", (record) => {
+      fieldNamed(record, "created").type = "text";
+    });
+
+    const issues = await verifyCollectionContract(pb);
+    expect(issues).toContain("members.created: expected type autodate");
+  });
+
+  it("heals an out-of-bounds live number field and then passes verification", async () => {
+    const pb = makeStatefulPb([eventsWithScoreMax(50)]);
+
+    await seedCollectionsAgainst(pb);
+
+    const live = pb.state.find((c: any) => c.name === "events");
+    expect(fieldNamed(live, "importanceScore").max).toBe(100);
+    expect(await verifyCollectionContract(pb)).toEqual([]);
+  });
+
+  it("heals an out-of-bounds live number min and then passes verification", async () => {
+    const pb = makeStatefulPb([
+      liveCollection("events", {
+        fields: fieldsFromContract("events").map((field) =>
+          field.name === "importanceScore" ? { ...field, min: 7 } : field
+        ),
+      }),
+    ]);
+
+    await seedCollectionsAgainst(pb);
+
+    const live = pb.state.find((c: any) => c.name === "events");
+    expect(fieldNamed(live, "importanceScore").min).toBe(0);
+    expect(await verifyCollectionContract(pb)).toEqual([]);
   });
 
   it("reports select values that drifted", async () => {
@@ -323,6 +456,49 @@ describe("seed exits nonzero unless the final state matches", () => {
   it("resolves for a seed whose final state is clean", async () => {
     const pb = makeStatefulPb([liveCollection("members")]);
     await expect(seedCollectionsAgainst(pb)).resolves.toBeUndefined();
+  });
+
+  it("throws when a dropped number-bound patch never lands", async () => {
+    const pb = makeStatefulPb([eventsWithScoreMax(50)]);
+    const attempted = vi.fn(async (id: string, body: any) => ({ id, ...body }));
+    pb.collections.update = attempted;
+
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+    await expect(seedCollections()).rejects.toThrow(
+      /events\.importanceScore: number max mismatch/
+    );
+    const bodies = attempted.mock.calls.map((call) => (call[1] as any).fields as any[] | undefined);
+    const healed = bodies.find((fields) => fields?.some((f) => f.name === "importanceScore"));
+    expect(healed).toBeDefined();
+    expect(healed!.find((f) => f.name === "importanceScore").max).toBe(100);
+  });
+
+  it("throws when a failed autodate heal never lands", async () => {
+    const pb = makeStatefulPb([
+      liveCollection("members", {
+        fields: fieldsFromContract("members").map((field) =>
+          field.name === "created" ? { ...field, onUpdate: true } : field
+        ),
+      }),
+    ]);
+    pb.collections.update = vi.fn(async (id: string, body: any) => ({ id, ...body }));
+
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+    await expect(seedCollections()).rejects.toThrow(
+      /members\.created: autodate onUpdate mismatch/
+    );
+  });
+
+  it("throws when a dropped autodate field patch never lands", async () => {
+    const pb = makeStatefulPb([
+      liveCollection("members", {
+        fields: fieldsFromContract("members").filter((field) => field.name !== "updated"),
+      }),
+    ]);
+    pb.collections.update = vi.fn(async (id: string, body: any) => ({ id, ...body }));
+
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+    await expect(seedCollections()).rejects.toThrow(/members\.updated: field missing/);
   });
 });
 

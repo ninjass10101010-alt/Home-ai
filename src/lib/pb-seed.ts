@@ -999,7 +999,7 @@ export async function verifyCollectionContract(
     const liveFields = new Map(
       (collection.fields ?? []).map((field) => [String(field?.name ?? ""), field])
     );
-    for (const field of contract.schema) {
+    for (const field of collectionFieldsForSeed(contract)) {
       const liveField = liveFields.get(field.name);
       if (!liveField) {
         issues.push(`${contract.name}.${field.name}: field missing`);
@@ -1029,6 +1029,14 @@ export async function verifyCollectionContract(
       if (field.type === "select" && field.options?.values) {
         if (!sameValues(liveValues(liveField), field.options.values)) {
           issues.push(`${contract.name}.${field.name}: select values mismatch`);
+        }
+      }
+      if (field.type === "autodate") {
+        if (liveField.onCreate !== true) {
+          issues.push(`${contract.name}.${field.name}: autodate onCreate must be true`);
+        }
+        if ((liveField.onUpdate === true) !== (field.options?.onUpdate === true)) {
+          issues.push(`${contract.name}.${field.name}: autodate onUpdate mismatch`);
         }
       }
     }
@@ -1205,8 +1213,22 @@ export async function seedCollections() {
               return { schemaField: s, liveField };
             }
             if (s.type === "text" && (s.options?.max !== undefined || s.required !== undefined)) {
-              const maxDrift = s.options?.max !== undefined && liveField.max !== s.options.max;
+              const maxDrift = s.options?.max !== undefined && liveBound(liveField, "max") !== s.options.max;
               return maxDrift ? { schemaField: s, liveField } : null;
+            }
+            if (s.type === "number" || s.type === "date") {
+              const minDrift =
+                s.options?.min !== undefined && liveBound(liveField, "min") !== s.options.min;
+              const maxDrift =
+                s.options?.max !== undefined && liveBound(liveField, "max") !== s.options.max;
+              return minDrift || maxDrift ? { schemaField: s, liveField } : null;
+            }
+            if (s.type === "autodate") {
+              const flagsDrift =
+                String(liveField.type ?? "") !== "autodate" ||
+                liveField.onCreate !== true ||
+                (liveField.onUpdate === true) !== (s.options?.onUpdate === true);
+              return flagsDrift ? { schemaField: s, liveField } : null;
             }
             if (s.type === "select" && s.options?.values) {
               const seedValues = s.options.values;
@@ -1231,15 +1253,20 @@ export async function seedCollections() {
               ...missingFields.map(buildField),
             ];
             for (const d of fieldDrift) {
-              const lf = mergedFields.find((f: any) => f.name === d.schemaField.name);
-              if (lf) {
-                if (d.schemaField.type === "select") {
-                  lf.values = d.schemaField.options?.values;
-                } else {
-                  if (d.schemaField.options?.max !== undefined) lf.max = d.schemaField.options.max;
-                  if (d.schemaField.required !== undefined) lf.required = !!d.schemaField.required;
-                }
+              const index = mergedFields.findIndex((f: any) => f.name === d.schemaField.name);
+              if (index < 0) continue;
+              if (d.schemaField.type === "autodate") {
+                mergedFields[index] = buildField(d.schemaField);
+                continue;
               }
+              const lf = mergedFields[index];
+              if (d.schemaField.type === "select") {
+                lf.values = d.schemaField.options?.values;
+                continue;
+              }
+              if (d.schemaField.options?.min !== undefined) lf.min = d.schemaField.options.min;
+              if (d.schemaField.options?.max !== undefined) lf.max = d.schemaField.options.max;
+              if (d.schemaField.required !== undefined) lf.required = !!d.schemaField.required;
             }
             await pb.collections.update(live.id, { fields: mergedFields });
             if (missingFields.length) {

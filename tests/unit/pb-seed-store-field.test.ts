@@ -17,29 +17,37 @@ const LOCKED = {
 };
 
 /** Build a faithful live PB field def from a seed schema field (select fields
- * carry their live `values` so the select-value heal sees them as correct). */
+ *  carry their live `values` so the select-value heal sees them as correct). */
 function liveFieldFor(s: any) {
   if (s.type === "select") {
     return { name: s.name, type: "select", values: [...(s.options?.values ?? [])] };
   }
+  if (s.type === "autodate") {
+    return {
+      name: s.name,
+      type: "autodate",
+      onCreate: s.options?.onCreate !== false,
+      ...(s.options?.onUpdate ? { onUpdate: true } : {}),
+    };
+  }
   return { name: s.name, type: s.type || "text", max: s.options?.max ?? 0, required: !!s.required };
 }
 
-/** Reads reflect writes: the seed's own create/patch calls must be visible to
- *  the final contract verification. */
+/** Reads reflect writes and hand back copies, so the seeder's own in-place field
+ *  mutation can never masquerade as a landed `collections.update` patch. */
 function makePb(existing: any[] = []) {
-  const state = [...existing];
+  const state = structuredClone(existing);
   return {
     collections: {
-      getFullList: vi.fn(async () => state),
+      getFullList: vi.fn(async () => structuredClone(state)),
       create: vi.fn(async (payload: any) => {
-        const record = { id: `new_${payload.name}`, ...payload };
+        const record = { id: `new_${payload.name}`, ...structuredClone(payload) };
         state.push(record);
         return record;
       }),
       update: vi.fn(async (id: string, body: any) => {
-        const record = state.find((c) => c.id === id);
-        if (record) Object.assign(record, body);
+        const record = state.find((c: any) => c.id === id);
+        if (record) Object.assign(record, structuredClone(body));
         return { id, ...body };
       }),
     },
@@ -72,8 +80,8 @@ describe("grocery_list_items.store field", () => {
         ...groceryDef()
           .schema.filter((s: any) => s.name !== "store")
           .map(liveFieldFor),
-        { name: "created" },
-        { name: "updated" },
+        { name: "created", type: "autodate", onCreate: true },
+        { name: "updated", type: "autodate", onCreate: true, onUpdate: true },
       ],
       indexes: [],
       ...LOCKED,

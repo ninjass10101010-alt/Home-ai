@@ -22,27 +22,31 @@ function liveFieldsFor(schema: readonly any[]): any[] {
   return schema.map((s: any) => {
     const field: any = { name: s.name, type: s.type || "text", required: !!s.required };
     if (s.type === "select") field.values = [...(s.options?.values ?? [])];
+    if (s.type === "autodate") {
+      field.onCreate = s.options?.onCreate !== false;
+      if (s.options?.onUpdate) field.onUpdate = true;
+    }
     if (s.options?.max !== undefined) field.max = s.options.max;
     if (s.options?.min !== undefined) field.min = s.options.min;
     return field;
   });
 }
 
-/** Reads reflect writes: the seed's own create/patch calls must be visible to
- *  the final contract verification. */
+/** Reads reflect writes and hand back copies, so the seeder's own in-place field
+ *  mutation can never masquerade as a landed `collections.update` patch. */
 function makePb(existing: any[] = []) {
-  const state = [...existing];
+  const state = structuredClone(existing);
   return {
     collections: {
-      getFullList: vi.fn(async () => state),
+      getFullList: vi.fn(async () => structuredClone(state)),
       create: vi.fn(async (payload: any) => {
-        const record = { id: `new_${payload.name}`, ...payload };
+        const record = { id: `new_${payload.name}`, ...structuredClone(payload) };
         state.push(record);
         return record;
       }),
       update: vi.fn(async (id: string, body: any) => {
-        const record = state.find((c) => c.id === id);
-        if (record) Object.assign(record, body);
+        const record = state.find((c: any) => c.id === id);
+        if (record) Object.assign(record, structuredClone(body));
         return { id, ...body };
       }),
     },

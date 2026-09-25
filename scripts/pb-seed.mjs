@@ -52,6 +52,6 @@ try {
   console.log("Row seed complete (notify prefs default OFF, weekly prizes create-if-absent).");
 } catch (err) {
   console.error("Seed failed:", err?.message ?? err);
-  if (err?.response?.data) console.error("Details:", JSON.stringify(err.response.data, null, 2));
+  console.error("PocketBase error:", err?.response?.status ?? err?.name ?? "unknown");
   process.exit(1);
 }

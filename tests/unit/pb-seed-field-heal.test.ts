@@ -17,21 +17,42 @@ const LOCKED = {
   deleteRule: null,
 };
 
-/** Reads reflect writes: the seed's own create/patch calls must be visible to
- *  the final contract verification. */
+/** The PB-standard autodate pair every seed appends, in contract form. */
+const SEED_AUTODATE = [
+  { name: "created", type: "autodate", options: { onCreate: true } },
+  { name: "updated", type: "autodate", options: { onCreate: true, onUpdate: true } },
+];
+
+/** Live PB field defs for a seed schema, in the typed shape the 0.23+ API
+ *  echoes: min/max beside name/type, an autodate's onCreate/onUpdate flags
+ *  top level. */
+function liveFieldFor(s: any) {
+  if (s.type === "autodate") {
+    return {
+      name: s.name,
+      type: "autodate",
+      onCreate: s.options?.onCreate !== false,
+      ...(s.options?.onUpdate ? { onUpdate: true } : {}),
+    };
+  }
+  return { name: s.name, type: s.type || "text", max: s.options?.max ?? 0, required: !!s.required };
+}
+
+/** Reads reflect writes and hand back copies, so the seeder's own in-place field
+ *  mutation can never masquerade as a landed `collections.update` patch. */
 function makePb(existing: any[] = []) {
-  const state = [...existing];
+  const state = structuredClone(existing);
   return {
     collections: {
-      getFullList: vi.fn(async () => state),
+      getFullList: vi.fn(async () => structuredClone(state)),
       create: vi.fn(async (payload: any) => {
-        const record = { id: `new_${payload.name}`, ...payload };
+        const record = { id: `new_${payload.name}`, ...structuredClone(payload) };
         state.push(record);
         return record;
       }),
       update: vi.fn(async (id: string, body: any) => {
-        const record = state.find((c) => c.id === id);
-        if (record) Object.assign(record, body);
+        const record = state.find((c: any) => c.id === id);
+        if (record) Object.assign(record, structuredClone(body));
         return { id, ...body };
       }),
     },
@@ -54,18 +75,20 @@ describe("members.emoji text-field max", () => {
     const membersDef = COLLECTIONS.find((c) => c.name === "members")!;
     const schema = [
       ...membersDef.schema,
-      { name: "created" },
-      { name: "updated" },
+      ...SEED_AUTODATE,
     ];
     const live = {
       id: "mbr_live_1",
       name: "members",
-      fields: schema.map((s: any) => ({
-        name: s.name,
-        type: s.type || "text",
-        max: s.name === "emoji" ? 0 : (s.options?.max ?? 0),
-        required: !!s.required,
-      })),
+      fields: schema.map((s: any) => {
+        if (s.type === "autodate") return liveFieldFor(s);
+        return {
+          name: s.name,
+          type: s.type || "text",
+          max: s.name === "emoji" ? 0 : (s.options?.max ?? 0),
+          required: !!s.required,
+        };
+      }),
       indexes: [],
       ...LOCKED,
     };
@@ -87,18 +110,20 @@ describe("members.emoji text-field max", () => {
     const membersDef = COLLECTIONS.find((c) => c.name === "members")!;
     const schema = [
       ...membersDef.schema,
-      { name: "created" },
-      { name: "updated" },
+      ...SEED_AUTODATE,
     ];
     const live = {
       id: "mbr_live_2",
       name: "members",
-      fields: schema.map((s: any) => ({
-        name: s.name,
-        type: s.type || "text",
-        max: s.name === "emoji" ? 400000 : (s.options?.max ?? 0),
-        required: !!s.required,
-      })),
+      fields: schema.map((s: any) => {
+        if (s.type === "autodate") return liveFieldFor(s);
+        return {
+          name: s.name,
+          type: s.type || "text",
+          max: s.name === "emoji" ? 400000 : (s.options?.max ?? 0),
+          required: !!s.required,
+        };
+      }),
       indexes: [],
       ...LOCKED,
     };
@@ -212,15 +237,18 @@ describe("members.emoji text-field max", () => {
 
   it("demotes a legacy required field the seed defines optional (schedules.userId live required:true)", async () => {
     const schedDef = COLLECTIONS.find((c) => c.name === "schedules")!;
-    const schema = [...schedDef.schema, { name: "created" }, { name: "updated" }];
+    const schema = [...schedDef.schema, ...SEED_AUTODATE];
     const live = {
       id: "sch_live_1",
       name: "schedules",
-      fields: schema.map((s: any) => ({
-        name: s.name,
-        type: s.type || "text",
-        required: s.name === "userId" ? true : !!s.required,
-      })),
+      fields: schema.map((s: any) => {
+        if (s.type === "autodate") return liveFieldFor(s);
+        return {
+          name: s.name,
+          type: s.type || "text",
+          required: s.name === "userId" ? true : !!s.required,
+        };
+      }),
       indexes: [],
       ...LOCKED,
     };
@@ -243,15 +271,18 @@ describe("members.emoji text-field max", () => {
 
   it("demotes required drift on number fields too (rewards.points legacy required)", async () => {
     const rewDef = COLLECTIONS.find((c) => c.name === "rewards")!;
-    const schema = [...rewDef.schema, { name: "created" }, { name: "updated" }];
+    const schema = [...rewDef.schema, ...SEED_AUTODATE];
     const live = {
       id: "rew_live_1",
       name: "rewards",
-      fields: schema.map((s: any) => ({
-        name: s.name,
-        type: s.type || (s.name === "points" || s.name === "cost" ? "number" : "text"),
-        required: s.name === "points" ? true : !!s.required,
-      })),
+      fields: schema.map((s: any) => {
+        if (s.type === "autodate") return liveFieldFor(s);
+        return {
+          name: s.name,
+          type: s.type || (s.name === "points" || s.name === "cost" ? "number" : "text"),
+          required: s.name === "points" ? true : !!s.required,
+        };
+      }),
       indexes: [],
       ...LOCKED,
     };
