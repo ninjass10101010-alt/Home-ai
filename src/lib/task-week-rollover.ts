@@ -377,6 +377,7 @@ export function resetRecurringTasksForWeek(
       ...task,
       id,
       completed: false,
+      status: "pending",
       completedBy: undefined,
       completedAt: undefined,
       completedInWeek: undefined,
@@ -434,6 +435,7 @@ function taskResetMatches(stored: SnapshotTask | undefined, expected: SnapshotTa
     stored.crewSize === expected.crewSize &&
     stored.speedBonus === expected.speedBonus &&
     stored.completed === false &&
+    stored.status === "pending" &&
     stored.completedBy === undefined &&
     stored.completedAt === undefined &&
     stored.completedInWeek === undefined &&
@@ -455,6 +457,19 @@ export async function ensureCurrentTaskWeek(
 
   return withWeekLedgerLock(weekStart, () =>
     withAdmin(async (pb): Promise<TaskWeekRolloverResult> => {
+      const initialSnapshot = await readSnapshotWithRevision();
+      if (initialSnapshot.rowId != null && !Array.isArray(initialSnapshot.data.tasks)) {
+        return {
+          weekStart,
+          previousWeekStart: null,
+          archived: false,
+          tasksReset: false,
+          hallOfFameRecorded: false,
+          currentWeekData: emptyWeekData(weekStart),
+          revision: initialSnapshot.revision,
+          reconciled: false,
+        };
+      }
       const weekRows = await readRows(pb, "week_data");
       const normalizedRows = weekRows
         .map((row) => ({ row, weekStart: normalizeWeekStart(row.weekStart) }))

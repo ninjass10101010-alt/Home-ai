@@ -52,6 +52,12 @@ export function hallEntriesForWeek(
   return out;
 }
 
+function isMondayWeekStart(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value && date.getUTCDay() === 1;
+}
+
 export async function ensureArchivedWeeksEnshrined(pb: PB): Promise<number> {
   const [archiveRows, hallRows, memberRows, prizeRows] = await Promise.all([
     pb.collection("week_archive").getFullList({ requestKey: null }),
@@ -81,15 +87,24 @@ export async function ensureArchivedWeeksEnshrined(pb: PB): Promise<number> {
     const key = `${String(row.member ?? "")}\u0000${String(row.weekStart ?? "")}`;
     byKey.set(key, [...(byKey.get(key) ?? []), row]);
   }
-  const archiveData = (archiveRows as any[]).map((row) => {
+  const archiveGroups = new Map<string, { row: any; history: any[] }[]>();
+  for (const row of archiveRows as any[]) {
     const weekStart = String(row?.weekStart || "");
-    if (!weekStart) throw new Error("invalid_archive_week");
+    if (!isMondayWeekStart(weekStart)) throw new Error("invalid_archive_week");
     if (row.history === undefined || row.history === null || row.history === "") {
       throw new Error("invalid_archive_history");
     }
     const history = parseCanonicalTransactions(row.history);
     if (!history) throw new Error("invalid_archive_history");
-    return { row, weekStart, points: recomputeWeekPoints(history) };
+    history.sort((left, right) => left.timestamp.localeCompare(right.timestamp) || left.id - right.id);
+    archiveGroups.set(weekStart, [...(archiveGroups.get(weekStart) ?? []), { row, history }]);
+  }
+  const archiveData = [...archiveGroups.entries()].map(([weekStart, group]) => {
+    const first = group[0];
+    if (group.some((candidate) => JSON.stringify(candidate.history) !== JSON.stringify(first.history))) {
+      throw new Error("duplicate_archive_week");
+    }
+    return { row: first.row, weekStart, points: recomputeWeekPoints(first.history) };
   });
   const archivedWeeks = archiveData.map(({ weekStart }) => weekStart).sort();
   const latestArchivedWeek = archivedWeeks.at(-1) ?? "";
