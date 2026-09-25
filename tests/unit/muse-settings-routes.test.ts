@@ -54,9 +54,13 @@ vi.mock("@/lib/pb-auth", () => ({
 }));
 
 const mocks = vi.hoisted(() => ({ verifyPin: vi.fn() }));
-vi.mock("@/lib/server-auth", () => ({
-  verifyPinAgainstAnyMember: (...args: any[]) => mocks.verifyPin(...args),
-}));
+vi.mock("@/lib/server-auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/server-auth")>();
+  return {
+    ...actual,
+    verifyPinAgainstAnyMember: (...args: any[]) => mocks.verifyPin(...args),
+  };
+});
 
 import { GET as settingsGET, PUT as settingsPUT } from "@/app/api/muse/settings/route";
 import { POST as rotatePOST } from "@/app/api/muse/settings/rotate/route";

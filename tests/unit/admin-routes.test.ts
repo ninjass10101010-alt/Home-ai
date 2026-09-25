@@ -12,9 +12,10 @@ vi.mock("@/lib/docker-api", () => ({
   restartContainer: mocks.restartContainer,
 }));
 
-vi.mock("@/lib/server-auth", () => ({
-  verifyPinAgainstAnyMember: mocks.verifyPinAgainstAnyMember,
-}));
+vi.mock("@/lib/server-auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/server-auth")>();
+  return { ...actual, verifyPinAgainstAnyMember: mocks.verifyPinAgainstAnyMember };
+});
 
 // version route reads fs + GitHub; stub both to stay hermetic
 vi.mock("fs/promises", () => ({

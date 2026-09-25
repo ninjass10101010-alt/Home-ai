@@ -4,15 +4,17 @@ import { NextRequest } from "next/server";
 const mocks = vi.hoisted(() => ({
   withAdmin: vi.fn(),
   verifyPinAgainstAnyMember: vi.fn(),
+  liveRole: "parent",
 }));
 
 vi.mock("@/lib/pb-auth", () => ({
   withAdmin: (fn: (pb: unknown) => Promise<unknown>) => mocks.withAdmin(fn),
 }));
 
-vi.mock("@/lib/server-auth", () => ({
-  verifyPinAgainstAnyMember: mocks.verifyPinAgainstAnyMember,
-}));
+vi.mock("@/lib/server-auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/server-auth")>();
+  return { ...actual, verifyPinAgainstAnyMember: mocks.verifyPinAgainstAnyMember };
+});
 
 import { GET, PUT, DELETE } from "@/app/api/services/config/route";
 import { signSession, SESSION_COOKIE } from "@/lib/session";
@@ -23,6 +25,7 @@ function pbForRows(rows: any[]) {
     store,
     pb: {
       collection: () => ({
+        getOne: async (id: string) => ({ id, name: "Rebecca", role: mocks.liveRole }),
         getFullList: async () => store,
         update: async (id: string, payload: any) => {
           const i = store.findIndex((r) => r.id === id);
@@ -45,6 +48,7 @@ function pbForRows(rows: any[]) {
 
 async function sessionCookie(role = "parent"): Promise<string> {
   const token = await signSession({ memberId: "m1", name: "Rebecca", role });
+  mocks.liveRole = role;
   return `${SESSION_COOKIE}=${token}`;
 }
 
@@ -66,6 +70,8 @@ beforeEach(() => {
   vi.stubEnv("CONSUELA_ENCRYPTION_KEY", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa=");
   mocks.withAdmin.mockReset();
   mocks.verifyPinAgainstAnyMember.mockReset();
+  mocks.liveRole = "parent";
+  mocks.withAdmin.mockImplementation((fn: any) => fn(pbForRows([]).pb));
 });
 
 afterEach(() => {

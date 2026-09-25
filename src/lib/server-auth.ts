@@ -2,6 +2,12 @@ import { withAdmin } from "./pb-auth";
 import { memberPinMatches, resolveMemberPin } from "./member-pins";
 import { mergeMemberFallbacks } from "./member-fallback";
 import { resolveDefaultMemberPin } from "./pb-seed";
+import { SESSION_COOKIE, verifySession } from "./session";
+import {
+  isSessionRole,
+  type SessionIdentity,
+  type SessionRole,
+} from "./session-policy";
 
 export interface ServerMember {
   id: string;
@@ -195,4 +201,68 @@ export async function createMemberRecord(
       pin: resolveDefaultMemberPin(name),
     });
   });
+}
+
+export type LiveSessionResult =
+  | { ok: true; identity: SessionIdentity }
+  | { ok: false; status: 401; error: "unauthorized" }
+  | {
+      ok: false;
+      status: 403;
+      error: "adult_only" | "session_role_changed";
+    }
+  | { ok: false; status: 503; error: "identity_unavailable" };
+
+export function readSessionCookie(request: Request): string | undefined {
+  return request.headers
+    .get("cookie")
+    ?.match(new RegExp(`${SESSION_COOKIE}=([^;]+)`))?.[1];
+}
+
+export async function requireLiveSession(
+  request: Request,
+  options?: { requireRole?: SessionRole },
+): Promise<LiveSessionResult> {
+  const token = readSessionCookie(request);
+  const signed = await verifySession(token);
+  if (!signed) {
+    return { ok: false, status: 401, error: "unauthorized" };
+  }
+
+  let member: Record<string, unknown>;
+  try {
+    member = await withAdmin((pb) =>
+      pb.collection("members").getOne(signed.memberId, { requestKey: null }),
+    );
+  } catch (error) {
+    if ((error as { status?: number })?.status === 404) {
+      return { ok: false, status: 401, error: "unauthorized" };
+    }
+    return {
+      ok: false,
+      status: 503,
+      error: "identity_unavailable",
+    };
+  }
+
+  if (!isSessionRole(member.role) || member.role !== signed.role) {
+    return {
+      ok: false,
+      status: 403,
+      error: "session_role_changed",
+    };
+  }
+
+  if (options?.requireRole && member.role !== options.requireRole) {
+    return { ok: false, status: 403, error: "adult_only" };
+  }
+
+  return {
+    ok: true,
+    identity: {
+      memberId: String(member.id),
+      name: String(member.name),
+      role: member.role,
+    },
+  };
 }
