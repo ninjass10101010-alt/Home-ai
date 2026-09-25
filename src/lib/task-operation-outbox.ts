@@ -220,6 +220,18 @@ const CONFIG_KIND_LEGS: Record<string, { items: string; stamp: string }> = {
 // Which credential fields each route's own parser accepts on the wire. A
 // bundle field that is NOT listed here can never reach the network, so a
 // parent PIN cannot leak into a route that would reject the unknown key.
+// The canonical ledger SOURCE each ledger-capable route writes, and the
+// transaction TYPE each action records. A pulled transaction only proves a
+// command when all four fields — operationId, source, member, type, amount —
+// line up, so these are the contract the proof checks against.
+const REDEEM_LEDGER_SOURCE = "reward-redeem";
+
+const LEDGER_ACTION_TYPES: Record<string, string> = {
+  penalty: "penalty",
+  adjust: "adjust",
+  redeem: "redeem",
+};
+
 const CREDENTIAL_BODY_KEYS: Record<string, readonly (keyof TaskOutboxCredential)[]> = {
   "/api/tasks/claim": ["pin"],
   "/api/tasks/approve": ["pin"],
@@ -707,6 +719,30 @@ export interface TaskOutboxAcknowledgedEvent {
   operationId?: string;
 }
 
+// A separate signal from the acknowledgment: the canonical STORES were just
+// rewritten (an acknowledgment, or a refusal that carried the authoritative
+// catalog). A rendered list must re-read on this — a 409 that repaired the
+// cache never acknowledges the operation, so listening only for the
+// acknowledgment would leave the screen stale until the next pull.
+const adoptionListeners = new Set<() => void>();
+
+export function onTaskOutboxAdopted(listener: () => void): () => void {
+  adoptionListeners.add(listener);
+  return () => {
+    adoptionListeners.delete(listener);
+  };
+}
+
+function notifyAdopted(): void {
+  for (const listener of [...adoptionListeners]) {
+    try {
+      listener();
+    } catch {
+      continue;
+    }
+  }
+}
+
 const acknowledgmentListeners = new Set<(event: TaskOutboxAcknowledgedEvent) => void>();
 
 export function onTaskOutboxAcknowledged(
@@ -1001,6 +1037,7 @@ async function acknowledge(
   } catch {
     return markRetryable(entry, "projection", "adoption_failed");
   }
+  notifyAdopted();
   // Release the credential BEFORE announcing the landing, and before the
   // entry is observable as gone: a reader that sees an empty outbox must
   // never still be holding a PIN.
@@ -1015,12 +1052,26 @@ async function acknowledge(
   return { acknowledged: 1, retryable: 0, permanent: 0 };
 }
 
-function classifyConflict(entry: TaskOutboxEntry, body: TaskOutboxAcknowledgement): FlushTaskOutboxResult {
+async function classifyConflict(
+  entry: TaskOutboxEntry,
+  body: TaskOutboxAcknowledgement,
+): Promise<FlushTaskOutboxResult> {
   const reason = reasonOf(body);
   if (body.retryable === true || RETRYABLE_REASONS.has(reason)) {
     return markRetryable(entry, "server", reason || "retryable_conflict");
   }
   if (PERMANENT_REASONS.has(reason)) {
+    // A refused config write still carries the AUTHORITATIVE catalog. Adopt it
+    // BEFORE marking the entry failed, so the list on screen repairs itself at
+    // the moment of the refusal rather than 60s later on the next pull.
+    if (reason === "stale_config") {
+      try {
+        await adoptTaskOutboxAcknowledgement(body);
+        notifyAdopted();
+      } catch {
+        /* the retained entry is the honest signal; adoption is best effort */
+      }
+    }
     return markFailed(entry, "validation", reason);
   }
   if (body.semanticDuplicate === true || DUPLICATE_REASONS.has(reason)) {
@@ -1153,6 +1204,11 @@ function receiptsFor(view: SnapshotView, operationId: string): SnapshotOperation
 }
 
 function receiptProvesResolved(entry: TaskOutboxEntry, view: SnapshotView): boolean {
+  // A ledger command writes NO task receipt, so the ledger proof below is its
+  // only path. Saying so here keeps the two proofs from ever disagreeing.
+  if (entry.route === "/api/tasks/ledger" || entry.route === "/api/rewards/redeem") {
+    return false;
+  }
   if (entry.route === "/api/tasks/config") {
     const receipt = view.configReceipts[entry.operationId];
     if (!isRecord(receipt)) return false;
@@ -1297,6 +1353,43 @@ function configProvesResolved(entry: TaskOutboxEntry, view: SnapshotView): boole
   return false;
 }
 
+/**
+ * A ledger command (`penalty` / `adjust`, and a reward redemption) has no task
+ * row, so its ONLY proof is the canonical ledger: the pulled weekData history
+ * must carry a transaction whose `meta.operationId` IS this entry's operation
+ * id AND whose source, member, type and amount match what the command asked
+ * for. A balance change alone proves nothing — another device could have moved
+ * it — and without this proof an unreconciled 202/409 would sit in the outbox
+ * re-proving itself forever.
+ */
+function ledgerProvesResolved(entry: TaskOutboxEntry, view: SnapshotView): boolean {
+  const expectedSource = entry.route === "/api/tasks/ledger"
+    ? entry.action === "penalty" ? "task-penalty" : "manual-adjust"
+    : REDEEM_LEDGER_SOURCE;
+  if (!expectedSource) return false;
+  const member = entry.payload.memberName;
+  if (typeof member !== "string" || !member) return false;
+  const expectedType = LEDGER_ACTION_TYPES[entry.action];
+  if (!expectedType) return false;
+
+  // Only an `adjust` carries a client-known amount to check against; a
+  // penalty's amount is the catalog's and a redemption's is the stored
+  // reward's, so neither can be proven from the command body alone.
+  const amount = entry.action === "adjust" && typeof entry.payload.amount === "number"
+    ? entry.payload.amount
+    : undefined;
+  if (amount === undefined) return false;
+
+  return view.history.some((transaction) => {
+    const meta = isRecord(transaction.meta) ? transaction.meta : null;
+    if (!meta || meta.operationId !== entry.operationId) return false;
+    if (meta.source !== expectedSource) return false;
+    if (transaction.member !== member) return false;
+    if (transaction.type !== expectedType) return false;
+    return transaction.amount === amount;
+  });
+}
+
 export function snapshotProvesResolved(
   entry: TaskOutboxEntry,
   read: SnapshotRead | null | undefined,
@@ -1306,6 +1399,9 @@ export function snapshotProvesResolved(
   if (!view) return false;
   if (receiptProvesResolved(entry, view)) return true;
   if (entry.route === "/api/tasks/config") return configProvesResolved(entry, view);
+  if (entry.route === "/api/tasks/ledger" || entry.route === "/api/rewards/redeem") {
+    return ledgerProvesResolved(entry, view);
+  }
   if (!view.hasTasks) return false;
   if (entry.route === "/api/tasks/approve") return approveProvesResolved(entry, view);
   if (entry.route === "/api/tasks/claim") return claimProvesResolved(entry, view);
@@ -1558,7 +1654,7 @@ async function processEntry(
       const proof = await resolveSnapshotProof(entry, body, options);
       if (proof.kind === "proven") return await acknowledge(entry, proof.acknowledgement, options);
       if (proof.kind === "blocked") return markReconciling(entry, "projection_pending");
-      if (status === 409) return classifyConflict(entry, body);
+      if (status === 409) return await classifyConflict(entry, body);
       if (status === 200) return markRetryable(entry, "projection", "unreconciled_success");
       return markReconciling(entry, reasonOf(body) || "projection_pending");
     }
@@ -1642,4 +1738,5 @@ export function __resetTaskOutboxForTests(): void {
   fallbackDriver = null;
   listeners.clear();
   acknowledgmentListeners.clear();
+  adoptionListeners.clear();
 }

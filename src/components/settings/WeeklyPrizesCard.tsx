@@ -9,7 +9,7 @@ import {
   loadWeeklyPrizes,
   DEFAULT_WEEKLY_PRIZES,
 } from "@/lib/task-utils";
-import { queueTaskCommandAndFlush } from "@/lib/task-command-queue";
+import { queueTaskCommandAndFlush, onTaskOutboxAdopted } from "@/lib/task-command-queue";
 import { useTaskCommandQueue } from "@/hooks/useTaskCommandQueue";
 import type { WeeklyPrize } from "@/types/tasks";
 
@@ -41,6 +41,19 @@ export default function WeeklyPrizesCard({ showToast }: WeeklyPrizesCardProps) {
   // Dirty seam: while the parent has unsaved in-field edits, the 60s pulse
   // must NOT re-read over them (a peer's edit would wipe mid-typing state).
   const dirtyRef = useRef(false);
+
+  // An acknowledgment adopts the AUTHORITATIVE prize list into the store, so
+  // the card re-reads it the moment the command lands or is refused — a stale
+  // catalog repairs the visible list at once, not 60s later. A parent with
+  // unsaved in-field edits keeps them: the dirty guard is still the last word.
+  useEffect(
+    () =>
+      onTaskOutboxAdopted(() => {
+        if (dirtyRef.current) return;
+        setPrizes(loadWeeklyPrizes());
+      }),
+    [],
+  );
 
   // Re-read on the 60s CacheRefresher pulse so another device's prize edits
   // land — but only when the card is clean (no unsaved edits in flight).

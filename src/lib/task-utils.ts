@@ -1,6 +1,7 @@
 import { db } from "@/db";
 import { localTodayISO, localWeekStartISO } from "@/lib/local-date";
 import { persistedTaskEmoji, persistedCrewEmoji } from "@/lib/task-emoji";
+import { isRecord } from "@/lib/task-operation-contract";
 import type { Task, WeekData, Transaction, WeekArchive, FamilyGoal, HallOfFameEntry, Reward, Penalty, WeeklyPrize, CrewMember } from "@/types/tasks";
 
 export const TASKS_STORAGE_KEY = "consuela-tasks";
@@ -237,7 +238,17 @@ export function adoptAuthoritativeWeekData(prev: WeekData, server: WeekData): We
   const serverStart = String(server?.weekStart ?? "");
   if (!serverStart) return prev;
   if (prevStart && serverStart < prevStart) return prev;
-  return { ...prev, ...server };
+  // REPLACE, not merge: a leg the server did not send is the server's answer
+  // ("empty"), and keeping the local copy of it would resurrect points the
+  // server has already dropped. Each leg is therefore taken from the server
+  // when it carries one, and otherwise reset to its canonical empty shape.
+  return {
+    weekStart: server.weekStart,
+    points: isRecord(server.points) ? server.points : {},
+    streak: isRecord(server.streak) ? server.streak : {},
+    lastActive: isRecord(server.lastActive) ? server.lastActive : {},
+    history: Array.isArray(server.history) ? server.history : [],
+  };
 }
 
 let _txId = Date.now();

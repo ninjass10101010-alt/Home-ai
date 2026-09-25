@@ -18,6 +18,7 @@ import {
   listTaskOutbox,
   registerTaskOutboxDriver,
   onTaskOutboxAcknowledged,
+  snapshotProvesResolved,
   taskOutboxEntryStorageKey,
   type TaskOutboxDriver,
 } from "@/lib/task-operation-outbox";
@@ -479,5 +480,181 @@ describe("sanity: the module under test is a real import", () => {
   it("exposes the queue seam", () => {
     expect(typeof queueTaskCommand).toBe("function");
     expect(vi.isMockFunction(queueTaskCommand)).toBe(false);
+  });
+});
+
+describe("ledgerProvesResolved — the only proof for a point movement", () => {
+  const MEMBER = "Caspian Garcia";
+
+  function ledgerRead(history: unknown[]) {
+    return {
+      snapshot: { tasks: [], weekData: { weekStart: "2026-09-21", points: {}, history }, operationReceipts: {} },
+      reconciled: true,
+      weekData: { weekStart: "2026-09-21", points: {}, history },
+    } as never;
+  }
+
+  function transaction(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 1,
+      timestamp: "2026-09-24T10:00:00.000Z",
+      member: MEMBER,
+      type: "adjust",
+      amount: 20,
+      description: "Manual adjust: +20pts",
+      meta: { operationId: "op-adj-1", source: "manual-adjust" },
+      ...overrides,
+    };
+  }
+
+  const ADJUST = enqueueAdjust();
+
+  function enqueueAdjust() {
+    return enqueueTaskOperation({
+      operationId: "op-adj-1",
+      route: "/api/tasks/ledger",
+      action: "adjust",
+      payload: { memberName: MEMBER, amount: 20, reason: "helped out" },
+      displayTarget: { kind: "config" },
+    });
+  }
+
+  it("proves an adjust from an exactly matching canonical transaction", () => {
+    expect(snapshotProvesResolved(ADJUST, ledgerRead([transaction()]))).toBe(true);
+  });
+
+  it("refuses a different operationId", () => {
+    const entry = transaction({ meta: { operationId: "op-other", source: "manual-adjust" } });
+    expect(snapshotProvesResolved(ADJUST, ledgerRead([entry]))).toBe(false);
+  });
+
+  it("refuses a different source", () => {
+    const entry = transaction({ meta: { operationId: "op-adj-1", source: "planner-adjust" } });
+    expect(snapshotProvesResolved(ADJUST, ledgerRead([entry]))).toBe(false);
+  });
+
+  it("refuses a different member, type or amount", () => {
+    expect(snapshotProvesResolved(ADJUST, ledgerRead([transaction({ member: "Bailey Garcia" })]))).toBe(false);
+    expect(snapshotProvesResolved(ADJUST, ledgerRead([transaction({ type: "penalty" })]))).toBe(false);
+    expect(snapshotProvesResolved(ADJUST, ledgerRead([transaction({ amount: 21 })]))).toBe(false);
+  });
+
+  it("refuses a transaction with no ledger meta at all", () => {
+    const { meta: _ignored, ...withoutMeta } = transaction();
+    expect(snapshotProvesResolved(ADJUST, ledgerRead([withoutMeta]))).toBe(false);
+  });
+
+  it("refuses a penalty or a redemption, whose amount the command body never carries", () => {
+    const penalty = enqueueTaskOperation({
+      operationId: "op-pen-1",
+      route: "/api/tasks/ledger",
+      action: "penalty",
+      payload: { memberName: MEMBER, itemId: "pen-1" },
+      displayTarget: { kind: "config" },
+    });
+    const penaltyTx = transaction({
+      type: "penalty",
+      amount: -15,
+      meta: { operationId: "op-pen-1", source: "task-penalty" },
+    });
+    expect(snapshotProvesResolved(penalty, ledgerRead([penaltyTx]))).toBe(false);
+
+    const redeem = enqueueTaskOperation({
+      operationId: "op-red-1",
+      route: "/api/rewards/redeem",
+      action: "redeem",
+      payload: { rewardId: 7, memberName: MEMBER },
+      displayTarget: { kind: "config" },
+    });
+    const redeemTx = transaction({
+      type: "redeem",
+      amount: -15,
+      meta: { operationId: "op-red-1", source: "reward-redeem" },
+    });
+    expect(snapshotProvesResolved(redeem, ledgerRead([redeemTx]))).toBe(false);
+  });
+
+  it("is never satisfied by a task receipt alone", () => {
+    const read = {
+      snapshot: {
+        tasks: [],
+        weekData: { weekStart: "2026-09-21", points: {}, history: [] },
+        operationReceipts: { "op-adj-1": [{ operationId: "op-adj-1", action: "adjust", createdAt: "t" }] },
+      },
+      reconciled: true,
+    } as never;
+    expect(snapshotProvesResolved(ADJUST, read)).toBe(false);
+  });
+});
+
+describe("an unreconciled ledger 202 is retained until the canonical week proves it", () => {
+  it("keeps a 202 reconciling when no transaction carries this operationId, forever", async () => {
+    const unregister = registerTaskOutboxDriver(credentialDriver(async () => ({
+      status: 202,
+      body: { operationId: "op-adj-2", reconciled: false, repairRequired: true },
+    })));
+    // The default pull returns no canonical transaction for this operation, so
+    // nothing can prove it.
+    queueTaskCommand({
+      operationId: "op-adj-2",
+      route: "/api/tasks/ledger",
+      action: "adjust",
+      payload: { memberName: "Caspian Garcia", amount: 20 },
+      displayTarget: { kind: "config" },
+      credential: { pin: "3141" },
+    });
+
+    const result = await flushTaskOutbox(getTaskOutboxDriver());
+    unregister();
+
+    expect(result.acknowledged).toBe(0);
+    const [entry] = listTaskOutbox();
+    expect(entry.operationId).toBe("op-adj-2");
+    expect(entry.status).toBe("reconciling");
+    expect(typeof entry.nextAttemptAt).toBe("string");
+    // Retained, and honestly not cancellable: a reconciling command has
+    // already been applied server-side, so offering a cancel would be a lie.
+    expect(cancelTaskOutboxEntry("op-adj-2")).toBe(false);
+    expect(listTaskOutbox()).toHaveLength(1);
+  });
+
+  it("adopts and removes once the pulled canonical week carries the operation", async () => {
+    const transaction = {
+      id: 3,
+      timestamp: "2026-09-24T11:00:00.000Z",
+      member: "Caspian Garcia",
+      type: "adjust",
+      amount: 15,
+      description: "Manual adjust: +15pts",
+      meta: { operationId: "op-adj-3", source: "manual-adjust" },
+    };
+    const unregister = registerTaskOutboxDriver({
+      ...credentialDriver(async () => ({
+        status: 202,
+        body: { operationId: "op-adj-3", reconciled: false, repairRequired: true },
+      })),
+      pullSnapshot: async () => ({
+        snapshot: {
+          tasks: [],
+          weekData: { weekStart: "2026-09-21", points: { "Caspian Garcia": 15 }, history: [transaction] },
+          operationReceipts: {},
+        },
+        reconciled: true,
+      }),
+    });
+    queueTaskCommand({
+      operationId: "op-adj-3",
+      route: "/api/tasks/ledger",
+      action: "adjust",
+      payload: { memberName: "Caspian Garcia", amount: 15 },
+      displayTarget: { kind: "config" },
+      credential: { pin: "3141" },
+    });
+
+    const result = await flushTaskOutbox(getTaskOutboxDriver());
+    unregister();
+
+    expect(result.acknowledged).toBe(1);
+    expect(listTaskOutbox()).toHaveLength(0);
   });
 });

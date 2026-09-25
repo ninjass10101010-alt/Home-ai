@@ -26,7 +26,7 @@ import { db } from "@/db";
 import { useAuth } from "@/hooks/useAuth";
 import { useWallMode } from "@/hooks/useWallMode";
 import { useWallConfirm } from "@/hooks/useWallConfirm";
-import type { Task, LeaderboardEntry, Reward, Penalty, WeekData, CrewMember, HallOfFameEntry } from "@/types/tasks";
+import type { Task, LeaderboardEntry, Reward, Penalty, WeekData, HallOfFameEntry } from "@/types/tasks";
 import { getLevel, BADGES } from "@/types/tasks";
 import {
   TASKS_STORAGE_KEY, REWARDS_KEY, PENALTIES_KEY,
@@ -493,15 +493,15 @@ export default function TasksPage() {
   const [guestSyncBlocked, setGuestSyncBlocked] = useState(false);
   // Restore tasks state from a PocketBase snapshot (bridges container restarts
   // and merges another device's changes) via the SHARED pure merge — the same
-  // guards the 60s refresh loop applies to the stores: adopt new tasks,
-  // adopt field changes on known rows only with proof (pending tap / send-back
-  // / richer week history), never clobber a fresh local tap. The old inline
-  // version was ADD-ONLY on known rows, so a kid's tap on another device
-  // never reached this page's Needs-approval queue (and an approval elsewhere
-  // never cleared the stale "On the way" row here). The REWARDS leg is the
-  // exception: "longer wins" is delete-blind (a parent's Settings delete is a
-  // SHORTER, NEWER list), so rewards merge by last-write-wins on the
-  // kid-store stamp — a stale snapshot can never resurrect a deleted reward.
+  // guards the 60s refresh loop applies to the stores: adopt new tasks, and
+  // adopt field changes on known rows only with proof (a pending tap, a
+  // send-back stamp, or an earn that paid the row), never clobber a fresh
+  // local tap. The old inline version was ADD-ONLY on known rows, so a kid's
+  // tap on another device never reached this page's Needs-approval queue (and
+  // an approval elsewhere never cleared the stale "On the way" row here).
+  // The catalog legs (rewards, penalties, weekly prizes) merge by
+  // last-write-wins on their stamp instead, because "a longer list wins" is
+  // delete-blind: a parent's delete is a SHORTER, NEWER list.
   // Latest-state mirrors for the async snapshot restore: the fetch resolves
   // long after commit, and these effects re-sync before any merge runs, so
   // mergeTasksSnapshot always sees the CURRENT state (never a stale closure).

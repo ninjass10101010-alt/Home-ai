@@ -8,7 +8,7 @@ import { act } from "react";
 import type { ReactElement } from "react";
 import { listTaskOutbox, __resetTaskOutboxForTests } from "@/lib/task-operation-outbox";
 import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
-import { REWARDS_KEY, loadRewards } from "@/lib/task-utils";
+import { REWARDS_KEY, loadRewards, readRewardsStamp, loadWeeklyPrizes } from "@/lib/task-utils";
 import { CacheRefresher } from "@/components/ui/CacheRefresher";
 import RewardSection from "@/components/settings/RewardSection";
 import WeeklyPrizesCard from "@/components/settings/WeeklyPrizesCard";
@@ -29,7 +29,11 @@ vi.mock("@/db", () => ({
 }));
 vi.mock("@/lib/pending-writes", () => ({ flushPendingWrites: vi.fn(async () => {}) }));
 
-const server = vi.hoisted(() => ({ configStatus: 200, configRequests: [] as any[] }));
+const server = vi.hoisted(() => ({
+  configStatus: 200,
+  configRequests: [] as any[],
+  configBody: null as null | any,
+}));
 
 let root: Root | null = null;
 
@@ -41,6 +45,9 @@ function installFetch() {
       if (url === "/api/tasks/config") {
         const body = init?.body ? JSON.parse(String(init.body)) : null;
         server.configRequests.push(body);
+        if (server.configBody) {
+          return { ok: false, status: server.configStatus, json: async () => server.configBody };
+        }
         if (server.configStatus === 409) {
           // The real route's stale answer: a stable 409 carrying the
           // authoritative catalog, never a false 200.
@@ -103,6 +110,7 @@ beforeEach(() => {
   __resetTaskCommandCredentialsForTests();
   server.configStatus = 200;
   server.configRequests = [];
+  server.configBody = null;
   mockAuth.currentUser = { name: "Rebecca", role: "parent" };
   vi.stubGlobal("matchMedia", vi.fn(() => ({
     matches: false,
@@ -276,6 +284,87 @@ describe("Settings surfaces report the queue honestly", () => {
     await act(async () => { discard.click(); });
     await settle(150);
     expect(document.querySelector('[data-testid="rewards-command-failures"]')).toBeNull();
+  });
+
+  it("a refused command repairs the VISIBLE RewardSection list immediately", async () => {
+    // The 409 carries the authoritative catalog; the rendered list must show it
+    // at once, not on the next 60s pull.
+    server.configStatus = 409;
+    localStorage.setItem("consuela-rewards", JSON.stringify([{ id: 1, name: "Ghost", emoji: "👻", cost: 5 }]));
+    const el = await mount(<RewardSection showToast={() => {}} />);
+    await settle();
+    expect(el.textContent).toContain("Ghost");
+
+    (Array.from(document.querySelectorAll("button")).find((b) => b.textContent === "Add reward") as HTMLButtonElement).click();
+    await settle();
+    const input = document.querySelector('input[placeholder="e.g., 30 min screen time"]') as HTMLInputElement;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+      setter.call(input, "Movie night");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    // The server answers with a DIFFERENT authoritative list than the harness
+    // default, so the swap is observable.
+    server.configBody = {
+      success: false,
+      error: "stale_config",
+      operationId: "op-1",
+      kind: "rewards",
+      items: [{ id: 7, name: "Server truth", emoji: "🏆", cost: 99 }],
+      updatedAt: "2026-09-24T10:00:00.000Z",
+      applied: false,
+      stale: true,
+    };
+    await act(async () => {
+      (Array.from(document.querySelectorAll("button")).find((b) => b.textContent === "Save") as HTMLButtonElement).click();
+    });
+    await settle(250);
+
+    // Adopted from the ack body, before the entry was marked failed.
+    expect(loadRewards<any[]>([]).map((r) => r.name)).toEqual(["Server truth"]);
+    expect(readRewardsStamp()).toBe("2026-09-24T10:00:00.000Z");
+    // And the list ON SCREEN says so.
+    expect(el.textContent).toContain("Server truth");
+    expect(el.textContent).not.toContain("Ghost");
+    expect(el.querySelector('[data-testid="rewards-command-failures"]')).not.toBeNull();
+  });
+
+  it("a refused command repairs the VISIBLE WeeklyPrizesCard list immediately", async () => {
+    server.configStatus = 409;
+    localStorage.setItem("consuela-weekly-prizes", JSON.stringify([
+      { id: "p1", rank: 1, emoji: "🥇", text: "Stale prize" },
+    ]));
+    const el = await mount(<WeeklyPrizesCard showToast={() => {}} />);
+    await settle();
+    // The prize text lives in a controlled input, so the visible list is read
+    // from the rendered field, not from textContent.
+    const prizeField = () => document.querySelector('input[aria-label="Prize 1 text"]') as HTMLInputElement;
+    expect(prizeField().value).toBe("Stale prize");
+
+    const text = prizeField();
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+      setter.call(text, "Picks the movie");
+      text.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    server.configBody = {
+      success: false,
+      error: "stale_config",
+      operationId: "op-1",
+      kind: "weekly-prizes",
+      items: [{ id: "server-1", rank: 1, emoji: "🏆", text: "Server prize" }],
+      updatedAt: "2026-09-24T10:00:00.000Z",
+      applied: false,
+      stale: true,
+    };
+    await act(async () => {
+      (Array.from(document.querySelectorAll("button")).find((b) => (b.textContent || "").includes("Save prizes")) as HTMLButtonElement).click();
+    });
+    await settle(250);
+
+    expect(loadWeeklyPrizes().map((p) => p.text)).toEqual(["Server prize"]);
+    expect(prizeField().value).toBe("Server prize");
+    expect(el.querySelector('[data-testid="prizes-command-failures"]')).not.toBeNull();
   });
 
   it("WeeklyPrizesCard shows the same honest queue surface", async () => {
