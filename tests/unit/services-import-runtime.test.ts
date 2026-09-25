@@ -4,6 +4,7 @@ import { NextRequest } from "next/server";
 const mocks = vi.hoisted(() => ({
   withAdmin: vi.fn(),
   verifyPinAgainstAnyMember: vi.fn(),
+  authorizeCurrentParentRequest: vi.fn(),
 }));
 
 vi.mock("@/lib/pb-auth", () => ({
@@ -12,6 +13,7 @@ vi.mock("@/lib/pb-auth", () => ({
 
 vi.mock("@/lib/server-auth", () => ({
   verifyPinAgainstAnyMember: mocks.verifyPinAgainstAnyMember,
+  authorizeCurrentParentRequest: mocks.authorizeCurrentParentRequest,
 }));
 
 import { POST as importPOST } from "@/app/api/services/import/route";
@@ -58,6 +60,7 @@ beforeEach(() => {
   vi.stubEnv("CONSUELA_ENCRYPTION_KEY", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa=");
   mocks.withAdmin.mockReset();
   mocks.verifyPinAgainstAnyMember.mockReset();
+  mocks.authorizeCurrentParentRequest.mockReset().mockResolvedValue({ ok: true, member: { name: "Rebecca" } });
 });
 
 afterEach(() => {
@@ -69,10 +72,24 @@ describe("POST /api/services/import", () => {
     expect(
       (await importPOST(req("POST", { entries: [] }))).status
     ).toBe(401);
-    const child = await importPOST(
-      req("POST", { entries: [{ service: "themealdb", key: "MEALDB_KEY", value: "2" }] }, { cookie: await cookie("child") })
-    );
+     mocks.authorizeCurrentParentRequest.mockResolvedValueOnce({ ok: false, status: 403, error: "adult_only" });
+     const child = await importPOST(
+       req("POST", { entries: [{ service: "themealdb", key: "MEALDB_KEY", value: "2" }] }, { cookie: await cookie("child") })
+     );
     expect(child.status).toBe(403);
+  });
+
+  it("attributes imported keys to the current PB parent", async () => {
+    const { pb, store } = pbForRows([]);
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    mocks.authorizeCurrentParentRequest.mockResolvedValueOnce({ ok: true, member: { name: "Current PB Parent" } });
+
+    const res = await importPOST(
+      req("POST", { entries: [{ service: "themealdb", key: "MEALDB_KEY", value: "2" }] }, { cookie: await cookie() })
+    );
+
+    expect(res.status).toBe(200);
+    expect(store[0].updated_by).toBe("Current PB Parent");
   });
 
   it("imports registry pairs (encrypting secrets) and rejects unknown ones", async () => {

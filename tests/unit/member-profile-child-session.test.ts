@@ -4,8 +4,10 @@ import { NextRequest } from "next/server";
 const mocks = vi.hoisted(() => ({
   withAdmin: vi.fn(),
   verifyPinFromPB: vi.fn(),
-  findOrCreateMemberRecord: vi.fn(),
+  verifyPinForMemberId: vi.fn(),
   verifySession: vi.fn(),
+  findOrCreateMemberRecord: vi.fn(),
+  withMemberAdminOperation: vi.fn(),
 }));
 
 vi.mock("@/lib/pb-auth", () => ({
@@ -14,7 +16,10 @@ vi.mock("@/lib/pb-auth", () => ({
 
 vi.mock("@/lib/server-auth", () => ({
   verifyPinFromPB: mocks.verifyPinFromPB,
+  verifyPinForMemberId: mocks.verifyPinForMemberId,
+  verifySession: mocks.verifySession,
   findOrCreateMemberRecord: mocks.findOrCreateMemberRecord,
+  withMemberAdminOperation: mocks.withMemberAdminOperation,
   sanitizeMember: (m: any) => {
     const { pin, ...rest } = m;
     return rest;
@@ -55,6 +60,10 @@ const CHILD_RECORD = { id: "m-kid", name: "Emily Garcia", role: "child", emoji: 
 
 beforeEach(() => {
   for (const m of Object.values(mocks)) m.mockReset();
+  mocks.verifySession.mockResolvedValue(CHILD_SESSION);
+  mocks.verifyPinForMemberId.mockResolvedValue({ id: "m-kid", pbId: "m-kid", name: "Emily", role: "child" });
+  mocks.withAdmin.mockImplementation((fn: (pb: unknown) => Promise<unknown>) => fn(pbWithGetOne(CHILD_RECORD)));
+  mocks.withMemberAdminOperation.mockImplementation((fn: () => Promise<unknown>) => fn());
 });
 
 describe("POST /api/members/profile — child-session avatar-only path", () => {
@@ -73,6 +82,7 @@ describe("POST /api/members/profile — child-session avatar-only path", () => {
 
     expect(res.status).toBe(200);
     expect(mocks.verifySession).toHaveBeenCalledWith("session-token");
+    expect(mocks.withMemberAdminOperation).toHaveBeenCalledTimes(1);
     expect(mocks.verifyPinFromPB).not.toHaveBeenCalled();
     expect(saved.emoji).toBe("🦊");
     const body = await res.json();
@@ -81,6 +91,22 @@ describe("POST /api/members/profile — child-session avatar-only path", () => {
     expect(body.member.pin).toBeUndefined();
   });
 
+  it("binds a parent profile write to the signed session ID, not actorName", async () => {
+    mocks.verifySession.mockResolvedValue({ memberId: "pb-jon", name: "Jon", role: "parent" });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pbWithGetOne({ id: "pb-jon", name: "Jon", role: "parent" })));
+    mocks.verifyPinForMemberId.mockResolvedValue({ id: "pb-jon", pbId: "pb-jon", name: "Jon", role: "parent" });
+    let saved: any = null;
+    mocks.findOrCreateMemberRecord.mockImplementation(async (_pb, actor, patch) => {
+      saved = { actor, patch };
+      return { ...actor, ...patch };
+    });
+
+    const res = await POST(req({ actorName: "Jonathan", actorPin: "0202", patch: { color: "blue" } }, "session-token"));
+
+    expect(res.status).toBe(200);
+    expect(mocks.verifyPinForMemberId).toHaveBeenCalledWith("pb-jon", "0202");
+    expect(saved.actor).toMatchObject({ id: "pb-jon", name: "Jon" });
+  });
   it("2. child session + non-avatar field (color) present → 401", async () => {
     mocks.verifySession.mockResolvedValue(CHILD_SESSION);
 
@@ -120,13 +146,14 @@ describe("POST /api/members/profile — child-session avatar-only path", () => {
 
     const res = await POST(req({ patch: { emoji: "🦊" } }, "session-token"));
 
-    expect(res.status).toBe(401);
-    expect(await res.json()).toEqual({ error: "Invalid session" });
-    expect(mocks.findOrCreateMemberRecord).not.toHaveBeenCalled();
+     expect(res.status).toBe(401);
+     expect(await res.json()).toEqual({ error: "Invalid PIN" });
+     expect(mocks.findOrCreateMemberRecord).not.toHaveBeenCalled();
   });
 
   it("6. parent session, NO PIN in body → 401 (PIN gate must survive for adults)", async () => {
     mocks.verifySession.mockResolvedValue({ memberId: "m1", name: "Rebecca", role: "parent" });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pbWithGetOne({ id: "m1", name: "Rebecca", role: "parent" })));
 
     const res = await POST(req({ patch: { emoji: "🦊" } }, "session-token"));
 
@@ -142,23 +169,25 @@ describe("POST /api/members/profile — child-session avatar-only path", () => {
     const res = await POST(req({ patch: { emoji: "🦊" } }));
 
     expect(res.status).toBe(401);
-    expect(await res.json()).toEqual({ error: "Invalid PIN" });
+    expect(await res.json()).toEqual({ error: "Invalid session" });
     expect(mocks.verifyPinFromPB).not.toHaveBeenCalled();
     expect(mocks.findOrCreateMemberRecord).not.toHaveBeenCalled();
   });
 
-  it("8. legacy PIN path unchanged: valid PIN + {color: 'red'} → 200", async () => {
-    mocks.verifyPinFromPB.mockResolvedValue({ id: "m1", name: "Rebecca", role: "parent", color: "violet", pin: "9999" });
-    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn({ collection: () => ({}) }));
+  it("8. exact session PIN path updates only the signed member", async () => {
+    mocks.verifySession.mockResolvedValue({ memberId: "m1", name: "Rebecca", role: "parent" });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pbWithGetOne({ id: "m1", name: "Rebecca", role: "parent", color: "violet", pin: "9999" })));
+    mocks.verifyPinForMemberId.mockResolvedValue({ id: "m1", pbId: "m1", name: "Rebecca", role: "parent", color: "violet", pin: "9999" });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn({ collection: () => ({ getOne: async () => ({ id: "m1", name: "Rebecca", role: "parent", color: "violet", pin: "9999" }) }) }));
     mocks.findOrCreateMemberRecord.mockImplementation(
       async (_pb: unknown, actor: any, clean: Record<string, unknown>) => ({ ...actor, ...clean }),
     );
 
-    const res = await POST(req({ actorName: "Rebecca", actorPin: "9999", patch: { color: "red" } }, "session-token"));
+    const res = await POST(req({ actorName: "Jonathan", actorPin: "9999", patch: { color: "red" } }, "session-token"));
 
     expect(res.status).toBe(200);
-    expect(mocks.verifyPinFromPB).toHaveBeenCalledWith("Rebecca", "9999");
-    expect(mocks.verifySession).not.toHaveBeenCalled();
+    expect(mocks.verifyPinForMemberId).toHaveBeenCalledWith("m1", "9999");
+    expect(mocks.verifySession).toHaveBeenCalledWith("session-token");
     const body = await res.json();
     expect(body.success).toBe(true);
     expect(body.member.color).toBe("red");
@@ -166,14 +195,14 @@ describe("POST /api/members/profile — child-session avatar-only path", () => {
   });
 
   it("9. invalid PIN presented + valid child session → 401 'Invalid PIN' (explicit PIN errors never fall through to session)", async () => {
-    mocks.verifyPinFromPB.mockResolvedValue(null);
+    mocks.verifyPinForMemberId.mockResolvedValue(null);
     mocks.verifySession.mockResolvedValue(CHILD_SESSION);
 
     const res = await POST(req({ actorName: "Emily", actorPin: "0000", patch: { emoji: "🦊" } }, "session-token"));
 
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "Invalid PIN" });
-    expect(mocks.verifySession).not.toHaveBeenCalled();
+    expect(mocks.verifySession).toHaveBeenCalledWith("session-token");
     expect(mocks.findOrCreateMemberRecord).not.toHaveBeenCalled();
   });
 

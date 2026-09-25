@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withAdmin } from "@/lib/pb-auth";
-import { verifySession, SESSION_COOKIE } from "@/lib/session";
+import { authorizeCurrentMemberRequest } from "@/lib/server-auth";
 import { withKeyedLock } from "@/lib/keyed-lock";
 import { ensureArchivedWeeksEnshrined } from "@/lib/hall-of-fame-backfill";
 import { protectPendingOnPush } from "@/lib/snapshot-tasks";
@@ -46,9 +46,9 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   // Middleware already 401s guests, but the role decision must live here too.
-  const session = await verifySession(req.cookies.get(SESSION_COOKIE)?.value);
-  if (!session) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
-  const isParent = session.role === "parent";
+  const auth = await authorizeCurrentMemberRequest(req);
+  if (!auth.ok) return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status ?? 401 });
+  const isParent = auth.member?.role === "parent";
 
   let body: any;
   try {

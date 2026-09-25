@@ -16,7 +16,7 @@ import { act, createElement } from "react";
 const mockAuth = vi.hoisted(() => ({ currentUser: null as null | { name: string; role: string } }));
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => mockAuth }));
 
-const upsertSpy = vi.hoisted(() => vi.fn(async (_data: any) => null));
+const upsertSpy = vi.hoisted(() => vi.fn(async (_data: { rank: number }): Promise<unknown> => null));
 vi.mock("@/db", () => ({ db: { upsertWeeklyPrize: (data: any) => upsertSpy(data) } }));
 
 import WeeklyPrizesCard from "@/components/settings/WeeklyPrizesCard";
@@ -28,6 +28,20 @@ import {
 } from "@/lib/task-utils";
 
 const showToast = vi.fn();
+const WEEKLY_PRIZES_STAMP_KEY = "consuela-weekly-prizes-stamp";
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
 
 let host: HTMLDivElement | null = null;
 let root: Root | null = null;
@@ -70,7 +84,8 @@ function typeInto(el: HTMLInputElement, value: string) {
 beforeEach(() => {
   localStorage.clear();
   mockAuth.currentUser = null;
-  upsertSpy.mockClear();
+  upsertSpy.mockReset();
+  upsertSpy.mockImplementation(async (data: { rank: number }) => ({ id: `rank-${data.rank}` }));
   showToast.mockClear();
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: true,
@@ -94,6 +109,7 @@ afterEach(() => {
     host = null;
   }
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("WeeklyPrizesCard", () => {
@@ -167,7 +183,130 @@ describe("WeeklyPrizesCard", () => {
     expect(upsertSpy).toHaveBeenNthCalledWith(1, { rank: 1, emoji: "🥇", text: "Picks Friday's family movie" });
     expect(upsertSpy).toHaveBeenNthCalledWith(2, { rank: 2, emoji: "🥈", text: "Chooses the dessert night" });
     expect(upsertSpy).toHaveBeenNthCalledWith(3, { rank: 3, emoji: "🥉", text: "+$2 allowance" });
-    expect(showToast).toHaveBeenCalledWith("🏆 Weekly prizes saved");
+    expect(showToast).toHaveBeenCalledWith("🏆 Weekly prizes saved", "success");
+  });
+
+  it("locks every mutation while a deferred server sync is pending", async () => {
+    mockAuth.currentUser = { name: "Rebecca", role: "parent" };
+    const request = deferred<unknown>();
+    upsertSpy.mockReturnValue(request.promise);
+    const el = mount();
+    act(() => { button(el, "Remove prize 3")!.click(); });
+    act(() => { typeInto(textInputs(el)[0], "Locked save"); });
+
+    const save = buttonByText(el, "Save prizes")!;
+    await act(async () => { save.click(); });
+
+    expect(textInputs(el).every((input) => input.disabled)).toBe(true);
+    expect(emojiInputs(el).every((input) => input.disabled)).toBe(true);
+    expect(button(el, "Remove prize 1")!.disabled).toBe(true);
+    expect(buttonByText(el, "Add prize")!.disabled).toBe(true);
+
+    act(() => {
+      typeInto(textInputs(el)[0], "Late mutation");
+      button(el, "Remove prize 1")!.click();
+      buttonByText(el, "Add prize")!.click();
+    });
+    expect(textInputs(el).map((input) => input.value)).toEqual(["Locked save", DEFAULT_WEEKLY_PRIZES[1].text]);
+
+    await act(async () => {
+      request.resolve({ id: "synced" });
+      await Promise.resolve();
+    });
+    expect(showToast).toHaveBeenCalledWith("🏆 Weekly prizes saved", "success");
+    expect(textInputs(el).every((input) => input.disabled)).toBe(false);
+  });
+
+  it("keeps the list dirty and skips server sync when local list persistence fails", async () => {
+    mockAuth.currentUser = { name: "Rebecca", role: "parent" };
+    const originalSetItem = Storage.prototype.setItem;
+    let failList = true;
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
+      if (failList && key === WEEKLY_PRIZES_KEY) {
+        throw new DOMException("quota exceeded", "QuotaExceededError");
+      }
+      originalSetItem.call(this, key, value);
+    });
+    const el = mount();
+    act(() => { typeInto(textInputs(el)[0], "Unsaved local edit"); });
+
+    await act(async () => { buttonByText(el, "Save prizes")!.click(); });
+
+    expect(upsertSpy).not.toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledWith(
+      "Couldn't save the weekly prize catalog on this device. Try again.",
+      "error",
+    );
+    expect(buttonByText(el, "Save prizes")).toBeTruthy();
+
+    failList = false;
+    seedPrizes([{ id: "peer", rank: 1, emoji: "🥇", text: "Peer catalog" }]);
+    act(() => { window.dispatchEvent(new CustomEvent("consuela-data-refreshed")); });
+    expect(textInputs(el)[0].value).toBe("Unsaved local edit");
+  });
+
+  it("keeps the list dirty and skips server sync when stamp persistence fails", async () => {
+    mockAuth.currentUser = { name: "Rebecca", role: "parent" };
+    const originalSetItem = Storage.prototype.setItem;
+    let failStamp = true;
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
+      if (failStamp && key === WEEKLY_PRIZES_STAMP_KEY) {
+        throw new DOMException("quota exceeded", "QuotaExceededError");
+      }
+      originalSetItem.call(this, key, value);
+    });
+    const el = mount();
+    act(() => { typeInto(textInputs(el)[0], "Locally saved edit"); });
+
+    await act(async () => { buttonByText(el, "Save prizes")!.click(); });
+
+    expect(loadWeeklyPrizes()[0].text).toBe("Locally saved edit");
+    expect(readWeeklyPrizesStamp()).toBe("");
+    expect(upsertSpy).not.toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledWith(
+      "Weekly prize catalog is saved on this device, but its sync marker could not be saved. Try again.",
+      "error",
+    );
+
+    failStamp = false;
+    seedPrizes([{ id: "peer", rank: 1, emoji: "🥇", text: "Peer catalog" }]);
+    act(() => { window.dispatchEvent(new CustomEvent("consuela-data-refreshed")); });
+    expect(textInputs(el)[0].value).toBe("Locally saved edit");
+  });
+
+  it("keeps a partial local save and reports the exact number of rows that did not sync", async () => {
+    mockAuth.currentUser = { name: "Rebecca", role: "parent" };
+    upsertSpy.mockImplementation(async (data: { rank: number }) => {
+      if (data.rank === 2) return null;
+      return { id: `rank-${data.rank}` };
+    });
+    const el = mount();
+
+    await act(async () => { buttonByText(el, "Save prizes")!.click(); });
+
+    expect(loadWeeklyPrizes().map((prize) => prize.text)).toEqual(DEFAULT_WEEKLY_PRIZES.map((prize) => prize.text));
+    expect(upsertSpy).toHaveBeenCalledTimes(3);
+    expect(showToast).toHaveBeenCalledTimes(1);
+    expect(showToast).toHaveBeenCalledWith(
+      "Weekly prize catalog is saved on this device and 1 row did not sync.",
+      "error",
+    );
+  });
+
+  it("keeps a fully local save and reports every row when all server upserts fail", async () => {
+    mockAuth.currentUser = { name: "Rebecca", role: "parent" };
+    upsertSpy.mockRejectedValue(new Error("offline"));
+    const el = mount();
+
+    await act(async () => { buttonByText(el, "Save prizes")!.click(); });
+
+    expect(loadWeeklyPrizes().map((prize) => prize.text)).toEqual(DEFAULT_WEEKLY_PRIZES.map((prize) => prize.text));
+    expect(upsertSpy).toHaveBeenCalledTimes(3);
+    expect(showToast).toHaveBeenCalledTimes(1);
+    expect(showToast).toHaveBeenCalledWith(
+      "Weekly prize catalog is saved on this device and 3 rows did not sync.",
+      "error",
+    );
   });
 
   it("edit round-trip: typing into a text field and saving persists the new text", async () => {

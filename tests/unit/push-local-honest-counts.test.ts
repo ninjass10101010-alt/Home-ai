@@ -14,11 +14,14 @@ const h = vi.hoisted(() => ({
   groceryThrows: false,
   insertedMeals: [] as any[],
   upsertedRecipes: [] as any[],
+  syncAllResult: { pushed: 0, errors: 0 },
+  syncFamilyGoalResult: { pushed: 0, errors: 0 },
 }));
 
 vi.mock("@/db", () => ({
   db: {
     selectMeals: async () => h.meals.map((m) => ({ ...m })),
+    selectMealsAuthoritative: async () => h.meals.map((m) => ({ ...m })),
     insertMeal: async (meal: any) => {
       h.insertedMeals.push(meal);
       return h.insertMealOk ? { ...meal, id: "pb_new" } : null;
@@ -40,8 +43,8 @@ vi.mock("@/db", () => ({
 }));
 
 vi.mock("@/lib/task-utils", () => ({
-  syncAllTasksToPB: async () => ({}),
-  syncFamilyGoalToPB: async () => ({}),
+  syncAllTasksToPB: async () => h.syncAllResult,
+  syncFamilyGoalToPB: async () => h.syncFamilyGoalResult,
 }));
 
 import { pushLocalToPB } from "@/lib/push-local-to-pb";
@@ -55,6 +58,8 @@ beforeEach(() => {
   h.groceryThrows = false;
   h.insertedMeals = [];
   h.upsertedRecipes = [];
+  h.syncAllResult = { pushed: 0, errors: 0 };
+  h.syncFamilyGoalResult = { pushed: 0, errors: 0 };
 });
 
 describe("pushLocalToPB honest counts", () => {
@@ -137,6 +142,17 @@ describe("pushLocalToPB honest counts", () => {
     expect(groceryResult?.errors).toBe(2);
   });
 
+  it("does not report server-owned task or goal state as pushed", async () => {
+    localStorage.setItem("consuela-tasks", JSON.stringify([{ id: 1, title: "Stale task" }]));
+    localStorage.setItem("consuela-week-data", JSON.stringify({ weekStart: "2026-09-21" }));
+    localStorage.setItem("consuela-family-goal", JSON.stringify({ title: "Goal" }));
+
+    const results = await pushLocalToPB();
+
+    expect(results.some((r) => r.collection === "family data")).toBe(false);
+    expect(results.some((r) => r.collection === "family_goals")).toBe(false);
+  });
+
   it("keeps the results-array shape the Settings toast consumes (collection/pushed/errors)", async () => {
     const results = await pushLocalToPB();
     expect(Array.isArray(results)).toBe(true);
@@ -153,9 +169,6 @@ describe("pushLocalToPB honest counts", () => {
       "recipes",
       "events",
       "schedules",
-      "tasks/leaderboard (6 collections)",
-      "family_goals",
-      "emergency_contacts",
     ]);
   });
 });

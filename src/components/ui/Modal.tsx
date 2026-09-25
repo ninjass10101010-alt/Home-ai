@@ -15,13 +15,15 @@ interface ModalProps {
   description?: string;
   children: ReactNode;
   footer?: ReactNode;
+  panelClassName?: string;
 }
 
-export default function Modal({ open, onClose, title, description, children, footer }: ModalProps) {
+export default function Modal({ open, onClose, title, description, children, footer, panelClassName }: ModalProps) {
   const [phase, setPhase] = useState<"closed" | "open" | "closing">("closed");
   const panelRef = useRef<HTMLDivElement | null>(null);
   const lastFocusedRef = useRef<HTMLElement | null>(null);
   const titleId = useId();
+  const descriptionId = useId();
 
   useEffect(() => {
     if (open) {
@@ -63,7 +65,7 @@ export default function Modal({ open, onClose, title, description, children, foo
     if (phase !== "open") return;
     const focusables = () =>
       panelRef.current
-        ? Array.from(panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter((el) => !el.hasAttribute("disabled"))
+        ? Array.from(panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter((el) => !el.matches(":disabled"))
         : [];
     // The trigger was already captured in the open effect above. React's
     // autoFocus commit runs before this effect — if it already placed focus
@@ -116,14 +118,15 @@ export default function Modal({ open, onClose, title, description, children, foo
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        aria-describedby={description ? descriptionId : undefined}
         tabIndex={-1}
-        className="material-thick flex max-h-[85dvh] w-full max-w-lg flex-col rounded-[2rem] border border-white/12 bg-[var(--color-surface-0)]/80 p-5 shadow-2xl backdrop-blur-2xl outline-none sm:pb-safe"
+        className={`material-thick flex max-h-[85dvh] w-full max-w-lg flex-col rounded-[2rem] border border-white/12 bg-[var(--color-surface-0)]/80 p-5 shadow-2xl backdrop-blur-2xl outline-none sm:pb-safe${panelClassName ? ` ${panelClassName}` : ""}`}
         style={{ animation: closing ? `modalExit ${EXIT_MS}ms var(--ease-standard) both` : `modalEnter 0.35s var(--ease-spring) both` }}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="mb-4 shrink-0">
           <h3 id={titleId} className="text-lg font-bold text-text-primary">{title}</h3>
-          {description && <p className="mt-1 text-sm text-text-secondary">{description}</p>}
+          {description && <p id={descriptionId} className="mt-1 text-sm text-text-secondary">{description}</p>}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
         {footer && <div className="mt-5 flex shrink-0 gap-2">{footer}</div>}

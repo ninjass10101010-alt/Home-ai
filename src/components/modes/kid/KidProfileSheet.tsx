@@ -10,11 +10,12 @@ import { useAuth } from "@/hooks/useAuth";
 import { normalizeAvatarSize, AVATAR_SIZE_OPTIONS } from "@/lib/avatar-size";
 import { db } from "@/db";
 
-export default function KidProfileSheet({ open, onClose, member, points }: {
+export default function KidProfileSheet({ open, onClose, member, points, panelClassName }: {
   open: boolean;
   onClose: () => void;
   member: { name: string; color: string; emoji: string; avatarSize?: string; glow?: boolean };
   points?: number;
+  panelClassName?: string;
 }) {
   const { logout } = useAuth();
   const [emoji, setEmoji] = useState(member.emoji);
@@ -53,6 +54,7 @@ export default function KidProfileSheet({ open, onClose, member, points }: {
   return (
     <Modal open={open} onClose={onClose} title={member.name.split(" ")[0]}
       description={points != null ? `${points} points this week — you're on a roll!` : undefined}
+      panelClassName={panelClassName}
       footer={
         signOutArmed ? (
           <>

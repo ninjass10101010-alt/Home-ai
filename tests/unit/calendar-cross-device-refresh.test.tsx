@@ -97,6 +97,82 @@ describe("Calendar page cross-device refresh", () => {
     }
   });
 
+  it("ignores a Google response that started before disconnect", async () => {
+    let release!: (value: unknown) => void;
+    const pending = new Promise((resolve) => { release = resolve; });
+    vi.stubGlobal("fetch", vi.fn(async (input: any) => {
+      if (String(input).includes("/api/google-calendar")) {
+        return { ok: true, status: 200, json: async () => pending as any };
+      }
+      return { ok: true, status: 200, json: async () => ({}) };
+    }));
+    const el = await renderAsync(
+      <ThemeProvider>
+        <WeatherProvider>
+          <AtmosphericProvider>
+            <CalendarPage />
+          </AtmosphericProvider>
+        </WeatherProvider>
+      </ThemeProvider>
+    );
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent("consuela-google-disconnected"));
+      release({
+        ok: true,
+        connected: true,
+        events: [{ google_id: "late", summary: "Late Google Event", start_iso: new Date().toISOString(), end_iso: new Date().toISOString(), all_day: true }],
+      });
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect(el.textContent).not.toContain("Late Google Event");
+  });
+
+  it("labels retained Google rows as stale after a partial refresh", async () => {
+    localStorage.setItem("consuela-events", JSON.stringify([
+      { id: "g-stale", title: "Stale Google Event", time: "All day", member: "Google", day: new Date().getDate(), month: new Date().getMonth(), year: new Date().getFullYear() },
+    ]));
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: false,
+      status: 502,
+      json: async () => ({ ok: false, partial: true, stale: true, error: "calendar_partial_failure" }),
+    })));
+
+    const el = await renderAsync(
+      <ThemeProvider>
+        <WeatherProvider>
+          <AtmosphericProvider>
+            <CalendarPage />
+          </AtmosphericProvider>
+        </WeatherProvider>
+      </ThemeProvider>
+    );
+    await settle();
+
+    expect(el.textContent).toContain("Stale Google Event");
+    expect(el.textContent).toContain("Google Calendar unavailable — showing saved events");
+  });
+
+  it("removes cached Google events when the direct grant is disconnected", async () => {
+    localStorage.setItem("consuela-events", JSON.stringify([
+      { id: "g-stale", title: "Stale Google Event", time: "All day", member: "Google", day: new Date().getDate(), month: new Date().getMonth(), year: new Date().getFullYear() },
+    ]));
+
+    const el = await renderAsync(
+      <ThemeProvider>
+        <WeatherProvider>
+          <AtmosphericProvider>
+            <CalendarPage />
+          </AtmosphericProvider>
+        </WeatherProvider>
+      </ThemeProvider>
+    );
+    await settle();
+
+    expect(el.textContent).not.toContain("Stale Google Event");
+  });
+
   it("merges another device's event when consuela-data-refreshed fires", async () => {
     const el = await renderAsync(
       <ThemeProvider>

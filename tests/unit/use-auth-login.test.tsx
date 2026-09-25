@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { useEffect } from "react";
 import { createRoot } from "react-dom/client";
+import type { Root } from "react-dom/client";
 import { act } from "react";
 import type { ReactElement } from "react";
+
+const memberCache = vi.hoisted(() => ({ value: [] as Array<Record<string, unknown>> }));
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -12,12 +15,12 @@ import type { ReactElement } from "react";
 vi.mock("@/db", () => ({
   db: {
     selectMembers: vi.fn(() => []),
-    selectMembersDetailed: vi.fn(() => []),
+    selectMembersDetailed: vi.fn(() => memberCache.value),
     refreshCaches: vi.fn(async () => {}),
   },
 }));
 
-import { AuthProvider, useAuth } from "@/hooks/useAuth";
+import { AuthProvider, normalizeAuthRole, useAuth } from "@/hooks/useAuth";
 
 const ctxRef: { current: ReturnType<typeof useAuth> | null } = { current: null };
 
@@ -29,11 +32,25 @@ function Probe() {
   return null;
 }
 
-function renderProvider(): HTMLElement {
-  const el = document.createElement("div");
-  document.body.appendChild(el);
-  act(() => createRoot(el).render(<AuthProvider><Probe /></AuthProvider> as ReactElement));
-  return el;
+const mountedRoots: Root[] = [];
+
+function mount(ui: ReactElement): { element: HTMLElement; root: Root } {
+  const element = document.createElement("div");
+  document.body.appendChild(element);
+  const root = createRoot(element);
+  mountedRoots.push(root);
+  act(() => root.render(ui));
+  return { element, root };
+}
+
+function unmountRoot(root: Root) {
+  const index = mountedRoots.indexOf(root);
+  if (index >= 0) mountedRoots.splice(index, 1);
+  act(() => root.unmount());
+}
+
+function renderProvider() {
+  return mount(<AuthProvider><Probe /></AuthProvider> as ReactElement);
 }
 
 const SANITIZED_MEMBER = {
@@ -49,7 +66,16 @@ const SANITIZED_MEMBER = {
 describe("useAuth.login — server-side authentication", () => {
   beforeEach(() => {
     localStorage.clear();
+    memberCache.value = [];
     ctxRef.current = null;
+  });
+
+  afterEach(() => {
+    while (mountedRoots.length > 0) {
+      unmountRoot(mountedRoots[mountedRoots.length - 1]);
+    }
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("POSTs to /api/auth/login and persists the identity WITHOUT a pin", async () => {
@@ -91,7 +117,7 @@ describe("useAuth.login — server-side authentication", () => {
     vi.unstubAllGlobals();
   });
 
-  it("stores nothing when the server rejects the pin", async () => {
+  it("returns Incorrect PIN for a 401 and stores nothing", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(
       JSON.stringify({ error: "Invalid PIN" }),
       { status: 401 }
@@ -104,11 +130,40 @@ describe("useAuth.login — server-side authentication", () => {
       outcome = await ctxRef.current!.login("Caspian", "0000");
     });
 
-    expect(outcome?.success).toBe(false);
+    expect(outcome).toEqual({ success: false, error: "Incorrect PIN" });
     expect(localStorage.getItem("consuela-auth-user")).toBeNull();
     expect(ctxRef.current!.isLoggedIn).toBe(false);
 
     vi.unstubAllGlobals();
+  });
+
+  it("returns a generic retry error for a 500 response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 500 })));
+    renderProvider();
+
+    let outcome: { success: boolean; error?: string } | undefined;
+    await act(async () => {
+      outcome = await ctxRef.current!.login("Caspian", "1010");
+    });
+
+    expect(outcome).toEqual({ success: false, error: "Sign-in failed. Try again." });
+    expect(localStorage.getItem("consuela-auth-user")).toBeNull();
+  });
+
+  it("returns honest offline copy when the login request cannot reach the server", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+    renderProvider();
+
+    let outcome: { success: boolean; error?: string } | undefined;
+    await act(async () => {
+      outcome = await ctxRef.current!.login("Caspian", "1010");
+    });
+
+    expect(outcome).toEqual({
+      success: false,
+      error: "Couldn't reach Consuela — check the connection and try again.",
+    });
+    expect(localStorage.getItem("consuela-auth-user")).toBeNull();
   });
 
   // MF-1 — sign-out must also POST /api/auth/logout so the httpOnly
@@ -134,5 +189,160 @@ describe("useAuth.login — server-side authentication", () => {
     expect(ctxRef.current!.isLoggedIn).toBe(false);
 
     vi.unstubAllGlobals();
+  });
+
+  it("marks auth hydrated only after initial identity reconciliation", () => {
+    memberCache.value = [{ name: "Caspian", emoji: "🧒", color: "green", avatarSize: "md", glow: false }];
+    localStorage.setItem("consuela-auth-user", JSON.stringify({ id: 7, name: "Caspian", role: "child" }));
+    const states: boolean[] = [];
+    const identities: string[] = [];
+    function HydrationProbe() {
+      const { hydrated, currentUser } = useAuth();
+      states.push(hydrated);
+      identities.push(currentUser?.name ?? "");
+      return null;
+    }
+
+    mount(
+      <AuthProvider>
+        <HydrationProbe />
+      </AuthProvider> as ReactElement,
+    );
+
+    expect(states[0]).toBe(false);
+    expect(states[states.length - 1]).toBe(true);
+    expect(identities[identities.length - 1]).toBe("Caspian");
+  });
+
+  it("completes hydration when localStorage getItem and removeItem throw", () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("getItem unavailable");
+    });
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new Error("removeItem unavailable");
+    });
+    const states: boolean[] = [];
+    function HydrationProbe() {
+      states.push(useAuth().hydrated);
+      return null;
+    }
+
+    mount(<AuthProvider><HydrationProbe /></AuthProvider> as ReactElement);
+
+    expect(states[0]).toBe(false);
+    expect(states[states.length - 1]).toBe(true);
+  });
+
+  it("normalizes the hydrated role from the reconciled roster", () => {
+    memberCache.value = [{ name: "Caspian", role: "parent", emoji: "🧒", color: "green", avatarSize: "md", glow: false }];
+    localStorage.setItem("consuela-auth-user", JSON.stringify({ id: 7, name: "Caspian", role: "child" }));
+    renderProvider();
+
+    expect(ctxRef.current?.currentUser?.role).toBe("parent");
+  });
+
+  it("normalizes trimmed case-insensitive auth roles", () => {
+    expect(normalizeAuthRole(" Parent ")).toBe("parent");
+    expect(normalizeAuthRole("CHILD")).toBe("child");
+    expect(normalizeAuthRole(" pet ")).toBe("pet");
+    expect(normalizeAuthRole("admin")).toBeNull();
+  });
+
+  it("uses a normalized stored role when the roster omits its role", () => {
+    memberCache.value = [{ name: "Caspian", emoji: "🧒", color: "green", avatarSize: "md", glow: false }];
+    localStorage.setItem("consuela-auth-user", JSON.stringify({ id: 7, name: "Caspian", role: " Parent " }));
+    renderProvider();
+
+    expect(ctxRef.current?.currentUser?.role).toBe("parent");
+    expect(JSON.parse(localStorage.getItem("consuela-auth-user")!).role).toBe("parent");
+  });
+
+  it("preserves the active role when a roster update omits its role", () => {
+    memberCache.value = [{ name: "Caspian", role: "Child", emoji: "🧒", color: "green", avatarSize: "md", glow: false }];
+    localStorage.setItem("consuela-auth-user", JSON.stringify({ id: 7, name: "Caspian", role: " child " }));
+    renderProvider();
+
+    memberCache.value = [{ name: "Caspian", emoji: "🧒", color: "green", avatarSize: "md", glow: false }];
+    act(() => {
+      window.dispatchEvent(new Event("consuela-members-updated"));
+    });
+
+    expect(ctxRef.current?.currentUser?.role).toBe("child");
+    expect(JSON.parse(localStorage.getItem("consuela-auth-user")!).role).toBe("child");
+  });
+
+  it("signs out when a roster update contains an explicit invalid role", () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ success: true }))));
+    memberCache.value = [{ name: "Caspian", role: "child", emoji: "🧒", color: "green", avatarSize: "md", glow: false }];
+    localStorage.setItem("consuela-auth-user", JSON.stringify({ id: 7, name: "Caspian", role: "child" }));
+    renderProvider();
+
+    memberCache.value = [{ name: "Caspian", role: "admin", emoji: "🧒", color: "green", avatarSize: "md", glow: false }];
+    act(() => {
+      window.dispatchEvent(new Event("consuela-members-updated"));
+    });
+
+    expect(ctxRef.current?.currentUser).toBeNull();
+    expect(localStorage.getItem("consuela-auth-user")).toBeNull();
+  });
+
+  it("keeps role reconciliation when sanitized persistence cannot write", () => {
+    memberCache.value = [{ name: "Caspian", role: "child", emoji: "🧒", color: "green", avatarSize: "md", glow: false }];
+    localStorage.setItem("consuela-auth-user", JSON.stringify({ id: 7, name: "Caspian", role: "child" }));
+    renderProvider();
+
+    memberCache.value = [{ name: "Caspian", role: "Parent", emoji: "🧒", color: "green", avatarSize: "md", glow: false }];
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("storage unavailable");
+    });
+    act(() => {
+      window.dispatchEvent(new Event("consuela-members-updated"));
+    });
+
+    expect(ctxRef.current?.currentUser?.role).toBe("parent");
+  });
+
+  it("rejects an unsupported hydrated role", () => {
+    memberCache.value = [{ name: "Caspian", role: "admin", emoji: "🧒", color: "green", avatarSize: "md", glow: false }];
+    localStorage.setItem("consuela-auth-user", JSON.stringify({ id: 7, name: "Caspian", role: "child" }));
+    renderProvider();
+
+    expect(ctxRef.current?.currentUser).toBeNull();
+    expect(localStorage.getItem("consuela-auth-user")).toBeNull();
+  });
+
+  it("reconciles and persists a roster role when members update", () => {
+    memberCache.value = [{ name: "Caspian", role: "Child", emoji: "🧒", color: "green", avatarSize: "md", glow: false }];
+    localStorage.setItem("consuela-auth-user", JSON.stringify({ id: 7, name: "Caspian", role: " child " }));
+    renderProvider();
+
+    memberCache.value = [{ name: "Caspian", role: "Parent", emoji: "🧒", color: "green", avatarSize: "md", glow: false }];
+    act(() => {
+      window.dispatchEvent(new Event("consuela-members-updated"));
+    });
+
+    expect(ctxRef.current?.currentUser?.role).toBe("parent");
+    expect(JSON.parse(localStorage.getItem("consuela-auth-user")!).role).toBe("parent");
+  });
+
+  it("removes auth listeners and the inactivity interval on unmount", () => {
+    const addListener = vi.spyOn(window, "addEventListener");
+    const removeListener = vi.spyOn(window, "removeEventListener");
+    const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
+    const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval");
+    const { root } = renderProvider();
+    const activityHandler = addListener.mock.calls.find(([event]) => event === "mousemove")?.[1];
+    const membersHandler = addListener.mock.calls.find(([event]) => event === "consuela-members-updated")?.[1];
+    const intervalHandle = setIntervalSpy.mock.results.at(-1)?.value;
+
+    expect(activityHandler).toEqual(expect.any(Function));
+    expect(membersHandler).toEqual(expect.any(Function));
+    expect(intervalHandle).toBeDefined();
+
+    unmountRoot(root);
+
+    expect(removeListener).toHaveBeenCalledWith("mousemove", activityHandler);
+    expect(removeListener).toHaveBeenCalledWith("consuela-members-updated", membersHandler);
+    expect(clearIntervalSpy).toHaveBeenCalledWith(intervalHandle);
   });
 });

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isGoogleConnected, GoogleAuthError } from "@/lib/google/oauth-client";
+import { authorizeAdminRequest } from "@/lib/admin-auth";
+import { isGoogleConnected, GoogleAuthError, mapGoogleAuthError } from "@/lib/google/oauth-client";
 import { ensureGoogleCollections } from "@/lib/google/pb-collections";
-import { getStoredTokens } from "@/lib/google/token-store.ts";
+import { getStoredTokensStrict } from "@/lib/google/token-store.ts";
 import {
   createTask,
   updateTask,
@@ -18,7 +19,41 @@ import {
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+function authErrorResponse(error: unknown) {
+  const mapped = mapGoogleAuthError(error);
+  return NextResponse.json(mapped.body, { status: mapped.status });
+}
+
+function disconnectedResponse() {
+  return NextResponse.json({
+    ok: true,
+    connected: false,
+    tasks: [],
+    reminders: [],
+  });
+}
+
+async function readTokensStrict() {
+  try {
+    const tokens = await getStoredTokensStrict();
+    if (!tokens || tokens.revoked_at) {
+      throw new GoogleAuthError("no_grant", "Google account is not connected");
+    }
+    return tokens;
+  } catch (error) {
+    if (error instanceof GoogleAuthError) throw error;
+    throw new GoogleAuthError("unavailable", "Google token state unavailable");
+  }
+}
+
 export async function GET(req: NextRequest) {
+  const gate = await authorizeAdminRequest(req);
+  if (!gate.ok) {
+    return NextResponse.json({ ok: false, error: gate.error ?? "unauthorized" }, { status: gate.status ?? 401 });
+  }
+  const { searchParams } = new URL(req.url);
+  const sync = searchParams.get("sync");
+
   try {
     await ensureGoogleCollections();
   } catch (e: any) {
@@ -28,24 +63,35 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const { searchParams } = new URL(req.url);
   const resource = searchParams.get("resource") || "all";
-  const sync = searchParams.get("sync");
 
-  if (!(await isGoogleConnected())) {
-    return NextResponse.json({ ok: true, connected: false, tasks: [], reminders: [] });
+  let connected: boolean;
+  try {
+    connected = await isGoogleConnected();
+  } catch (error) {
+    if (error instanceof GoogleAuthError && error.code === "no_grant") {
+      return disconnectedResponse();
+    }
+    return authErrorResponse(error);
+  }
+
+  if (!connected) {
+    return disconnectedResponse();
   }
 
   if (sync === "now") {
     try {
       await syncTasks();
-    } catch (e: any) {
-      console.error("[google-tasks] sync-now failed:", e?.message);
+    } catch (error) {
+      if (error instanceof GoogleAuthError && error.code === "no_grant") {
+        return disconnectedResponse();
+      }
+      return authErrorResponse(error);
     }
   }
 
   try {
-    const tokens = await getStoredTokens();
+    const tokens = await readTokensStrict();
     const hasTasksScope = tokens?.scope?.includes("googleapis.com/auth/tasks");
     if (!hasTasksScope) {
       return NextResponse.json({
@@ -61,16 +107,30 @@ export async function GET(req: NextRequest) {
     const tasks = resource === "reminders" ? [] : await readCachedTasks();
     const reminders = resource === "tasks" ? [] : await readCachedReminders();
     return NextResponse.json({ ok: true, connected: true, tasks, reminders, tasks_scope_granted: true });
-  } catch (e: any) {
-    return NextResponse.json(
-      { ok: false, tasks: [], reminders: [], error: e?.message },
-      { status: 200 },
-    );
+  } catch (error) {
+    if (error instanceof GoogleAuthError && error.code === "no_grant") {
+      return disconnectedResponse();
+    }
+    return authErrorResponse(error);
   }
 }
 
 export async function POST(req: NextRequest) {
-  if (!(await isGoogleConnected())) {
+  const gate = await authorizeAdminRequest(req);
+  if (!gate.ok) {
+    return NextResponse.json(
+      { ok: false, error: gate.error ?? "unauthorized" },
+      { status: gate.status ?? 401 },
+    );
+  }
+
+  let connected: boolean;
+  try {
+    connected = await isGoogleConnected();
+  } catch (error) {
+    return authErrorResponse(error);
+  }
+  if (!connected) {
     return NextResponse.json(
       { ok: false, code: "no_grant", error: "Google account is not connected" },
       { status: 409 },
@@ -166,17 +226,7 @@ export async function POST(req: NextRequest) {
       { ok: false, error: `Unknown action: ${body.action}` },
       { status: 400 },
     );
-  } catch (e: any) {
-    if (e instanceof GoogleAuthError) {
-      return NextResponse.json(
-        { ok: false, code: e.code, error: e.message },
-        { status: e.code === "no_grant" ? 409 : 401 },
-      );
-    }
-    console.error("[google-tasks] action failed:", e);
-    return NextResponse.json(
-      { ok: false, error: e?.message || "Task action failed" },
-      { status: 500 },
-    );
+  } catch (error) {
+    return authErrorResponse(error);
   }
 }

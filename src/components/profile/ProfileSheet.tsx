@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Modal from "@/components/ui/Modal";
 import SoftButton from "@/components/ui/SoftButton";
@@ -14,9 +14,10 @@ interface ProfileSheetProps {
   open: boolean;
   onClose: () => void;
   member: AuthUser;
+  panelClassName?: string;
 }
 
-export default function ProfileSheet({ open, onClose, member }: ProfileSheetProps) {
+export default function ProfileSheet({ open, onClose, member, panelClassName }: ProfileSheetProps) {
   const { logout } = useAuth();
 
   const memberSize = selectableAvatarSize(member.avatarSize);
@@ -34,6 +35,89 @@ export default function ProfileSheet({ open, onClose, member }: ProfileSheetProp
   const [pinSaving, setPinSaving] = useState(false);
   const [pinError, setPinError] = useState<string | null>(null);
   const [pinSuccess, setPinSuccess] = useState(false);
+  const avatarSavedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pinSuccessTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const openRef = useRef(open);
+  const mountedRef = useRef(true);
+  const operationGenerationRef = useRef(0);
+  const operationTokenRef = useRef(0);
+  const activeOperationRef = useRef<number | null>(null);
+
+  const clearTimers = () => {
+    if (avatarSavedTimerRef.current) clearTimeout(avatarSavedTimerRef.current);
+    if (pinSuccessTimerRef.current) clearTimeout(pinSuccessTimerRef.current);
+    avatarSavedTimerRef.current = null;
+    pinSuccessTimerRef.current = null;
+  };
+
+  const resetSensitiveState = () => {
+    clearTimers();
+    setAvatarValue(member.emoji || "😊");
+    setSizeValue(memberSize);
+    setAvatarPin("");
+    setSavingAvatar(false);
+    setAvatarSaved(false);
+    setAvatarError(null);
+    setPinOpen(false);
+    setCurrentPin("");
+    setNewPin("");
+    setConfirmPin("");
+    setPinSaving(false);
+    setPinError(null);
+    setPinSuccess(false);
+  };
+
+  useLayoutEffect(() => {
+    openRef.current = open;
+    operationGenerationRef.current += 1;
+  }, [open]);
+
+  const beginOperation = () => {
+    if (activeOperationRef.current !== null) return null;
+    const token = ++operationTokenRef.current;
+    activeOperationRef.current = token;
+    return { generation: operationGenerationRef.current, token };
+  };
+
+  const isCurrentOperation = (generation: number, token: number) => (
+    mountedRef.current
+    && openRef.current
+    && operationGenerationRef.current === generation
+    && activeOperationRef.current === token
+  );
+
+  const isCurrentGeneration = (generation: number) => (
+    mountedRef.current && openRef.current && operationGenerationRef.current === generation
+  );
+
+  const finishOperation = (generation: number, token: number) => {
+    if (isCurrentOperation(generation, token)) activeOperationRef.current = null;
+  };
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      operationGenerationRef.current += 1;
+      activeOperationRef.current = null;
+      clearTimers();
+    };
+  }, []);
+
+  const handleClose = () => {
+    operationGenerationRef.current += 1;
+    activeOperationRef.current = null;
+    resetSensitiveState();
+    onClose();
+  };
+
+  const closePinEditor = () => {
+    setPinOpen(false);
+    setCurrentPin("");
+    setNewPin("");
+    setConfirmPin("");
+    setPinError(null);
+    setPinSuccess(false);
+  };
 
   const saveAvatar = async () => {
     const emojiChanged = Boolean(avatarValue) && avatarValue !== member.emoji;
@@ -43,6 +127,9 @@ export default function ProfileSheet({ open, onClose, member }: ProfileSheetProp
       setAvatarError("Enter your 4-digit PIN to save.");
       return;
     }
+    const operation = beginOperation();
+    if (!operation) return;
+    const { generation, token } = operation;
     setSavingAvatar(true);
     setAvatarError(null);
     setAvatarSaved(false);
@@ -56,21 +143,34 @@ export default function ProfileSheet({ open, onClose, member }: ProfileSheetProp
         body: JSON.stringify({ actorName: member.name, actorPin: avatarPin, patch }),
       });
       const data = await res.json();
+      if (!isCurrentOperation(generation, token)) return;
       if (!res.ok) {
         setAvatarError(data?.error || "Could not save your avatar. Try again.");
         return;
       }
       await db.refreshCaches();
+      if (!isCurrentOperation(generation, token)) return;
       const localPatch: Record<string, unknown> = {};
       if (emojiChanged) localPatch.emoji = data.member?.emoji || avatarValue;
       if (sizeChanged) localPatch.avatarSize = data.member?.avatarSize || sizeValue;
       db.patchMemberLocal(member.name, localPatch);
       setAvatarSaved(true);
-      setTimeout(() => setAvatarSaved(false), 2000);
+      if (avatarSavedTimerRef.current) clearTimeout(avatarSavedTimerRef.current);
+      let avatarTimer: ReturnType<typeof setTimeout> | null = null;
+      avatarTimer = setTimeout(() => {
+        if (isCurrentGeneration(generation) && avatarSavedTimerRef.current === avatarTimer) {
+          setAvatarSaved(false);
+          avatarSavedTimerRef.current = null;
+        }
+      }, 2000);
+      avatarSavedTimerRef.current = avatarTimer;
     } catch {
-      setAvatarError("Could not reach the dashboard. Check your connection and try again.");
+      if (isCurrentOperation(generation, token)) setAvatarError("Could not reach the dashboard. Check your connection and try again.");
     } finally {
-      setSavingAvatar(false);
+      if (isCurrentOperation(generation, token)) {
+        activeOperationRef.current = null;
+        setSavingAvatar(false);
+      }
     }
   };
 
@@ -85,6 +185,9 @@ export default function ProfileSheet({ open, onClose, member }: ProfileSheetProp
       setPinError("The new PIN and its confirmation don't match.");
       return;
     }
+    const operation = beginOperation();
+    if (!operation) return;
+    const { generation, token } = operation;
     setPinSaving(true);
     try {
       const res = await fetch("/api/members/pin", {
@@ -93,6 +196,7 @@ export default function ProfileSheet({ open, onClose, member }: ProfileSheetProp
         body: JSON.stringify({ actorName: member.name, actorPin: currentPin, newPin }),
       });
       const data = await res.json();
+      if (!isCurrentOperation(generation, token)) return;
       if (!res.ok) {
         setPinError(data?.error || "Could not change your PIN.");
         return;
@@ -101,14 +205,23 @@ export default function ProfileSheet({ open, onClose, member }: ProfileSheetProp
       setCurrentPin("");
       setNewPin("");
       setConfirmPin("");
-      setTimeout(() => {
-        setPinSuccess(false);
-        setPinOpen(false);
+      if (pinSuccessTimerRef.current) clearTimeout(pinSuccessTimerRef.current);
+      let pinTimer: ReturnType<typeof setTimeout> | null = null;
+      pinTimer = setTimeout(() => {
+        if (isCurrentGeneration(generation) && pinSuccessTimerRef.current === pinTimer) {
+          setPinSuccess(false);
+          setPinOpen(false);
+          pinSuccessTimerRef.current = null;
+        }
       }, 1500);
+      pinSuccessTimerRef.current = pinTimer;
     } catch {
-      setPinError("Could not reach the dashboard. Try again.");
+      if (isCurrentOperation(generation, token)) setPinError("Could not reach the dashboard. Try again.");
     } finally {
-      setPinSaving(false);
+      if (isCurrentOperation(generation, token)) {
+        activeOperationRef.current = null;
+        setPinSaving(false);
+      }
     }
   };
 
@@ -118,10 +231,12 @@ export default function ProfileSheet({ open, onClose, member }: ProfileSheetProp
   return (
     <Modal
       open={open}
-      onClose={onClose}
+      onClose={handleClose}
       title="Your profile"
       description={`Signed in as ${member.name.split(" ")[0]}`}
+      panelClassName={panelClassName}
     >
+      <button type="button" aria-label="Close profile" onClick={handleClose} className="float-right -mt-1 rounded-xl px-3 py-2 text-text-secondary hover:text-text-primary">×</button>
       <div className="space-y-5">
         <div className="flex items-center gap-4">
           <Avatar
@@ -196,14 +311,14 @@ export default function ProfileSheet({ open, onClose, member }: ProfileSheetProp
                 <SoftButton onClick={savePin} disabled={pinSaving} className="flex-1">
                   {pinSaving ? "Saving…" : "Save PIN"}
                 </SoftButton>
-                <SoftButton variant="secondary" onClick={() => setPinOpen(false)} className="flex-1">
+                <SoftButton variant="secondary" onClick={closePinEditor} className="flex-1">
                   Cancel
                 </SoftButton>
               </div>
             </div>
           )}
           <div className="mt-2 space-y-2">
-            <Link href="/settings" onClick={onClose}>
+            <Link href="/settings" className="settings-wall-target" onClick={handleClose}>
               <span className="tap flex w-full items-center justify-between rounded-2xl bg-[var(--color-surface-2)] px-4 py-3 text-sm font-semibold text-text-primary">
                 <span>⚙️ Full settings</span>
                 <span className="text-text-muted">›</span>
@@ -213,7 +328,7 @@ export default function ProfileSheet({ open, onClose, member }: ProfileSheetProp
               type="button"
               onClick={() => {
                 logout();
-                onClose();
+                handleClose();
               }}
               className="tap flex w-full items-center justify-between rounded-2xl bg-[var(--color-surface-2)] px-4 py-3 text-sm font-semibold text-[var(--color-accent-rose)]"
             >

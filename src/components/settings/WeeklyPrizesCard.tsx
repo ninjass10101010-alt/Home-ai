@@ -17,8 +17,10 @@ import type { WeeklyPrize } from "@/types/tasks";
 const MEDALS = ["🥇", "🥈", "🥉"] as const;
 const MAX_PRIZES = 3;
 
+type FeedbackTone = "neutral" | "success" | "error";
+
 interface WeeklyPrizesCardProps {
-  showToast: (msg: string) => void;
+  showToast: (msg: string, tone?: FeedbackTone) => void;
 }
 
 export default function WeeklyPrizesCard({ showToast }: WeeklyPrizesCardProps) {
@@ -44,6 +46,7 @@ export default function WeeklyPrizesCard({ showToast }: WeeklyPrizesCardProps) {
   if (currentUser?.role !== "parent") return null;
 
   const updateRow = (id: string, patch: Partial<WeeklyPrize>) => {
+    if (saving) return;
     dirtyRef.current = true;
     setPrizes((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
   };
@@ -52,6 +55,7 @@ export default function WeeklyPrizesCard({ showToast }: WeeklyPrizesCardProps) {
   // up so a save never leaves a hole (PB rows are rank-keyed and there is no
   // delete API, so a compact ladder is what keeps the two stores aligned).
   const removeRow = (id: string) => {
+    if (saving) return;
     dirtyRef.current = true;
     setPrizes((prev) =>
       prev.filter((p) => p.id !== id).map((p, i) => ({ ...p, rank: (i + 1) as 1 | 2 | 3 }))
@@ -59,6 +63,7 @@ export default function WeeklyPrizesCard({ showToast }: WeeklyPrizesCardProps) {
   };
 
   const addRow = () => {
+    if (saving) return;
     dirtyRef.current = true;
     setPrizes((prev) => {
       if (prev.length >= MAX_PRIZES) return prev;
@@ -79,21 +84,39 @@ export default function WeeklyPrizesCard({ showToast }: WeeklyPrizesCardProps) {
         text: p.text.trim(),
       }));
       setPrizes(list);
-      saveWeeklyPrizes(list);
+      if (!saveWeeklyPrizes(list)) {
+        dirtyRef.current = true;
+        showToast("Couldn't save the weekly prize catalog on this device. Try again.", "error");
+        return;
+      }
       // Stamp BEFORE the push — every local save is the family's latest claim
       // of truth, so a peer's snapshot older than this moment loses.
-      touchWeeklyPrizesStamp();
-      for (const p of list) {
-        try {
-          await db.upsertWeeklyPrize({ rank: p.rank, emoji: p.emoji, text: p.text });
-        } catch {
-          // One row's failure never blocks the rest — the next push retries.
-        }
+      if (!touchWeeklyPrizesStamp()) {
+        dirtyRef.current = true;
+        showToast(
+          "Weekly prize catalog is saved on this device, but its sync marker could not be saved. Try again.",
+          "error",
+        );
+        return;
       }
+      // One row's failure never blocks the rest — the next push retries.
+      const results = await Promise.allSettled(
+        list.map((p) => Promise.resolve().then(() => db.upsertWeeklyPrize({ rank: p.rank, emoji: p.emoji, text: p.text }))),
+      );
+      const failedCount = results.filter(
+        (result) => result.status === "rejected" || (result.status === "fulfilled" && !result.value),
+      ).length;
       // Save landed — the card is clean again, so the next refresh pulse may
       // re-read (a peer's newer edit can land after this point).
       dirtyRef.current = false;
-      showToast("🏆 Weekly prizes saved");
+      if (failedCount > 0) {
+        showToast(
+          `Weekly prize catalog is saved on this device and ${failedCount} ${failedCount === 1 ? "row" : "rows"} did not sync.`,
+          "error",
+        );
+      } else {
+        showToast("🏆 Weekly prizes saved", "success");
+      }
     } finally {
       setSaving(false);
     }
@@ -119,12 +142,14 @@ export default function WeeklyPrizesCard({ showToast }: WeeklyPrizesCardProps) {
               <input
                 aria-label={`Prize ${rank} emoji`}
                 value={p.emoji}
+                disabled={saving}
                 onChange={(e) => updateRow(p.id, { emoji: e.target.value })}
                 className="w-11 shrink-0 rounded-xl border border-white/10 bg-[var(--color-surface-2)] px-2 py-2 text-center text-lg text-text-primary outline-none"
               />
               <input
                 aria-label={`Prize ${rank} text`}
                 value={p.text}
+                disabled={saving}
                 placeholder={`What does #${rank} win?`}
                 onChange={(e) => updateRow(p.id, { text: e.target.value })}
                 className="min-w-0 flex-1 rounded-xl border border-white/10 bg-[var(--color-surface-2)] px-3 py-2 text-sm text-text-primary outline-none"
@@ -133,6 +158,7 @@ export default function WeeklyPrizesCard({ showToast }: WeeklyPrizesCardProps) {
                 size="sm"
                 variant="danger"
                 aria-label={`Remove prize ${rank}`}
+                disabled={saving}
                 onClick={() => removeRow(p.id)}
               >
                 ×
@@ -146,7 +172,7 @@ export default function WeeklyPrizesCard({ showToast }: WeeklyPrizesCardProps) {
       </div>
       <div className="mt-4 flex gap-2">
         {prizes.length < MAX_PRIZES && (
-          <SoftButton variant="secondary" onClick={addRow} className="flex-1">Add prize</SoftButton>
+          <SoftButton variant="secondary" onClick={addRow} disabled={saving} className="flex-1">Add prize</SoftButton>
         )}
         <SoftButton onClick={saveAll} disabled={saving} className="flex-1">
           {saving ? "Saving…" : "Save prizes"}

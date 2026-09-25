@@ -92,6 +92,14 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  if (pathname === "/api/emergency/test") {
+    const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
+    if (!session) {
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
+    return NextResponse.next();
+  }
+
   if (pathname.startsWith("/api/") && !isExempt(pathname)) {
     const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
     if (!session) {

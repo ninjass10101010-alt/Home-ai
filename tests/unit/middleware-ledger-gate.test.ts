@@ -118,6 +118,19 @@ describe("ledger adult gate", () => {
     // non-API routes untouched
     expect((await middleware(req("/settings"))).headers.get("x-middleware-next")).toBe("1");
   });
+
+  it("lets any signed role through the emergency-test presence gate", async () => {
+    for (const cookie of [await parentCookie(), await childCookie(), await petCookie(), await unknownRoleCookie()]) {
+      const res = await middleware(req("/api/emergency/test", cookie));
+      expect(res.headers.get("x-middleware-next")).toBe("1");
+    }
+  });
+
+  it("still rejects the emergency-test path without a signed cookie", async () => {
+    const res = await middleware(req("/api/emergency/test"));
+    expect(res.status).toBe(401);
+    expect((await res.json()).error).toBe("unauthorized");
+  });
 });
 
 describe("every proxied path is gated (matcher ↔ rewrite invariant)", () => {

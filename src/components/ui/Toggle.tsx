@@ -7,9 +7,10 @@ interface ToggleProps {
   description?: string;
   disabled?: boolean;
   className?: string;
+  "aria-label"?: string;
 }
 
-export default function Toggle({ checked, onCheckedChange, label, description, disabled = false, className = "" }: ToggleProps) {
+export default function Toggle({ checked, onCheckedChange, label, description, disabled = false, className = "", "aria-label": ariaLabel }: ToggleProps) {
   return (
     <label className={`flex items-center justify-between gap-4 ${className}`}>
       {(label || description) && (
@@ -24,7 +25,7 @@ export default function Toggle({ checked, onCheckedChange, label, description, d
         disabled={disabled}
         onChange={(event) => onCheckedChange(event.target.checked)}
         className="sr-only peer"
-        aria-label={label}
+        aria-label={ariaLabel ?? label}
       />
       <span
         className={`relative h-7 w-12 shrink-0 rounded-full border transition-all duration-200 peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--color-accent-selected)] peer-focus-visible:ring-offset-2 ${

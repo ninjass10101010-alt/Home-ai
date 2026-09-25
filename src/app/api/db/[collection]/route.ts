@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withAdmin } from "@/lib/pb-auth";
-import { verifySession, SESSION_COOKIE } from "@/lib/session";
+import { authorizeCurrentMemberRequest } from "@/lib/server-auth";
 import { isGatewayCollection, isSafeFilter, sanitizeClientRow, canWrite, isValidSort, MAX_LIST_LIMIT } from "@/lib/db-gateway";
 
 export const dynamic = "force-dynamic";
@@ -58,9 +58,9 @@ export async function POST(request: NextRequest, ctx: any) {
   }
   // Middleware already 401s guests, but authorization must also live in the
   // route: writes are role-gated per collection (F2).
-  const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
-  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  if (!canWrite(collection, session.role)) {
+  const auth = await authorizeCurrentMemberRequest(request);
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status ?? 401 });
+  if (!canWrite(collection, auth.member?.role)) {
     return NextResponse.json({ error: "adult_only" }, { status: 403 });
   }
   let parsed: Record<string, unknown>;

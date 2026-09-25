@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withAdmin } from "@/lib/pb-auth";
 import { authorizeAdminRequest } from "@/lib/admin-auth";
-import { verifySession, SESSION_COOKIE } from "@/lib/session";
 import { encryptSecret } from "@/lib/secret-box";
 import { isRegistryPair, isSecretPair } from "@/lib/services/registry";
 import { getServiceConfig } from "@/lib/services/config";
@@ -18,7 +17,6 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
     const body = await request.json();
     const entries = Array.isArray(body?.entries) ? body.entries : [];
     if (entries.length === 0 || entries.length > 100) {
@@ -56,7 +54,7 @@ export async function POST(request: NextRequest) {
           value: isSecret ? encryptSecret(value) : value,
           is_secret: isSecret,
           updated_at: new Date().toISOString(),
-          updated_by: session?.name || "admin-secret",
+          updated_by: auth.member?.name || "admin-secret",
         };
         const rows = (await pb
           .collection("consuela_service_config")

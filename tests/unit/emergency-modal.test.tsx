@@ -93,10 +93,118 @@ describe("EmergencyButton on the shared Modal", () => {
     expect(typeButton("Fire")!.hasAttribute("disabled")).toBe(false);
   });
 
+  it("issues one POST for two same-render activations", async () => {
+    let resolveFetch!: (value: unknown) => void;
+    const pending = new Promise((resolve) => { resolveFetch = resolve; });
+    const fetchMock = vi.fn().mockReturnValue(pending);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await mount();
+    await click(shield());
+    await typePin("1234");
+    await act(async () => {
+      const fire = typeButton("Fire")!;
+      fire.click();
+      fire.click();
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      resolveFetch({ ok: true, status: 200, json: async () => ({ success: true }) });
+      await pending;
+    });
+  });
+
+  it("does not dismiss during a same-render send from Escape, backdrop, or Cancel", async () => {
+    let resolveFetch!: (value: unknown) => void;
+    const pending = new Promise((resolve) => { resolveFetch = resolve; });
+    const fetchMock = vi.fn().mockReturnValue(pending);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await mount();
+    await click(shield());
+    await typePin("1234");
+    await act(async () => {
+      typeButton("Fire")!.click();
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      dialog()?.parentElement?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      typeButton("Cancel")?.click();
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(dialog()).not.toBeNull();
+    await act(async () => {
+      resolveFetch({ ok: true, status: 200, json: async () => ({ success: true }) });
+      await pending;
+    });
+  });
+
+  it("treats a 2xx response without explicit success true as failure", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ message: "Looks sent", details: { successful: 1, total: 1 } }),
+    }));
+
+    await mount();
+    await click(shield());
+    await typePin("1234");
+    await click(typeButton("Fire"));
+
+    expect(dialog()!.textContent).toContain("Alert Failed");
+    expect(typeButton("Try Again")).toBeTruthy();
+  });
+
+  it("treats invalid JSON in a 2xx response as failure", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => { throw new Error("invalid emergency response"); },
+    }));
+
+    await mount();
+    await click(shield());
+    await typePin("1234");
+    await click(typeButton("Fire"));
+
+    expect(dialog()!.textContent).toContain("Alert Failed");
+    expect(typeButton("Try Again")).toBeTruthy();
+  });
+
+  it("shows a stale cached contacts warning alongside delivery details", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        partial: true,
+        message: "Emergency alert partially delivered.",
+        contactsSource: "cache",
+        details: {
+          total: 1,
+          successful: 0,
+          failed: 1,
+          partial: true,
+          contactsSource: "cache",
+          houseAlert: { sent: 1, failed: 0, notes: ["house delivered"] },
+        },
+      }),
+    }));
+
+    await mount();
+    await click(shield());
+    await typePin("1234");
+    await click(typeButton("Fire"));
+
+    expect(dialog()!.textContent).toMatch(/stale cached contacts/i);
+    expect(dialog()!.textContent).toContain("House channels: 1 sent, 0 failed");
+    expect(dialog()!.textContent).toContain("house delivered");
+  });
   it("success is persistent: no auto-close, shows counts + 911 line, Done closes", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ message: "Alert sent", details: { successful: 2, total: 3 } }),
+      status: 200,
+      json: async () => ({ success: true, message: "Alert sent", details: { successful: 2, total: 3 } }),
     }));
     await mount();
     await click(shield());
@@ -115,6 +223,34 @@ describe("EmergencyButton on the shared Modal", () => {
     const call = vi.mocked(fetch).mock.calls[0];
     expect(call[0]).toBe("/api/emergency");
     expect(JSON.parse(String((call[1] as RequestInit).body)).type).toBe("fire");
+  });
+
+  it("shows house-only delivery as partial success with exact house details", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        success: true,
+        partial: true,
+        message: "House channels delivered, but no primary contact confirmed SMS or email.",
+        details: {
+          total: 1,
+          successful: 0,
+          failed: 1,
+          houseAlert: { sent: 2, failed: 0, notes: ["telegram delivered"] },
+        },
+      }),
+    }));
+    await mount();
+    await click(shield());
+    await typePin("1234");
+    await click(typeButton("Fire"));
+
+    expect(dialog()!.textContent).toContain("Alert Partially Sent");
+    expect(dialog()!.textContent).toContain("Primary contacts: 0 of 1");
+    expect(dialog()!.textContent).toContain("House channels: 2 sent, 0 failed");
+    expect(dialog()!.textContent).toContain("telegram delivered");
+    expect(dialog()!.textContent).not.toContain("Sent to 0 of 1 contacts");
+    expect(typeButton("Done")).toBeTruthy();
   });
 
   it("failure keeps Try Again and returns to type selection", async () => {

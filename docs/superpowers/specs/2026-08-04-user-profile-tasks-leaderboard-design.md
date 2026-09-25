@@ -34,9 +34,9 @@ The `members` PB collection already stores everything: `emoji` (unicode emoji OR
 
 ### Server side
 
-- **`src/lib/server-auth.ts`** — `verifyPinFromPB(name, pin)` + `findMemberByName(name)` + `sanitizeMember(member)` using the admin SDK (`withAdmin` from `src/lib/pb-auth.ts`). Name matching mirrors the client's `memberMatchesName` (full name, first name, "(Mom)" suffixes).
-- **`POST /api/members/profile`** — body `{ actorName, actorPin, patch }`. Verifies the actor's PIN, allows only `emoji` (≤400KB), `avatarSize` (xs/sm/md/base/lg), `glow`, `color`. Writes only the actor's own row. Returns sanitized member.
-- **`POST /api/members/pin`** — body `{ actorName, actorPin, newPin }`. Verifies old PIN, requires `^\d{4}$`, updates the actor's PIN.
+- **`src/lib/server-auth.ts`** — `verifyPinFromPB(name, pin)` prefers one normalized exact full-name match and allows fuzzy fallback only when exactly one candidate remains; `verifyPinForMemberId(memberId, pin)` is the exact-session self-service seam; `findMemberByName(name)` and `sanitizeMember(member)` use the admin SDK (`withAdmin` from `src/lib/pb-auth.ts`). Name matching remains unchanged for unrelated task/member consumers.
+- **`POST /api/members/profile`** — body `{ actorPin, patch }` (legacy `actorName` is compatibility input only). The signed `session.memberId` selects the target; the route re-reads that live PB record under the member-admin lock, verifies the current PIN there, and updates only that record. Child sessions may omit the PIN only for avatar-only fields. Allowed fields are `emoji` (≤400KB), `avatarSize` (xs/sm/md/base/lg), `glow`, and `color`.
+- **`POST /api/members/pin`** — body `{ actorPin, newPin }` (legacy `actorName` is compatibility input only). The signed `session.memberId` selects the target; the live PIN is verified and rotated under the member-admin lock with a live/fallback collision check.
 - **`GET /api/members/whoami?name=X`** — sanitized member lookup (fresh server truth for the sheet).
 - **`POST /api/tasks/claim`** — body `{ taskId, claimantName, claimantPin, title, points, assigneeEmoji }`. Verifies claimant PIN, loads the current `week_data` row, checks `history` for an existing `earn` transaction with `taskId` — if present returns **409 `{ reason: "already-claimed", claimedBy }`**; otherwise appends the transaction, adds the points, and reassigns the PB `tasks` row to the claimant. This is the server-authoritative fix for the two-device double-claim race (the old client guard read `completedInWeek` from local state, so both devices could pass within the 5s structured-sync window and the loser silently overwrote the winner's points).
 
@@ -62,8 +62,7 @@ The `members` PB collection already stores everything: `emoji` (unicode emoji OR
 ## Non-goals (unchanged)
 
 - PINs stay plaintext in PB (LAN-only NAS; hashing would touch every PIN flow).
-- No server-side session/cookie auth; PIN-in-memory model preserved.
-- Parents editing other members remains client-side (trusted admins).
+- No PB schema additions; self-service writes remain scoped to the signed member ID, and legacy task/member name matching is not globally changed.
 - No new PB collections; no `/profile` route.
 
 ## Acceptance criteria (verification)

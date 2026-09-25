@@ -1,16 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createDeviceAttempt } from "@/lib/google/device-attempts";
 import { requestDeviceGrant } from "@/lib/google/device-auth";
+import { authorizeAdminRequest } from "@/lib/admin-auth";
 import { ensureGoogleCollections } from "@/lib/google/pb-collections";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-export async function POST(_req: NextRequest) {
+export async function POST(req: NextRequest) {
+  const gate = await authorizeAdminRequest(req);
+  if (!gate.ok) {
+    return NextResponse.json(
+      { ok: false, error: gate.error ?? "unauthorized" },
+      { status: gate.status ?? 401 },
+    );
+  }
   try {
     await ensureGoogleCollections();
     const grant = await requestDeviceGrant();
+    const attemptId = await createDeviceAttempt(grant.device_code);
     return NextResponse.json({
       ok: true,
+      attempt_id: attemptId,
       device_code: grant.device_code,
       user_code: grant.user_code,
       verification_url: grant.verification_url,

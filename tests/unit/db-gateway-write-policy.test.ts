@@ -7,8 +7,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { signSession, SESSION_COOKIE } from "@/lib/session";
 
-const mocks = vi.hoisted(() => ({ withAdmin: vi.fn() }));
+const mocks = vi.hoisted(() => ({ withAdmin: vi.fn(), authorizeCurrentMemberRequest: vi.fn() }));
 vi.mock("@/lib/pb-auth", () => ({ withAdmin: (fn: any) => mocks.withAdmin(fn) }));
+vi.mock("@/lib/server-auth", () => ({ authorizeCurrentMemberRequest: mocks.authorizeCurrentMemberRequest }));
 
 import { WRITE_POLICY, canWrite, isValidSort } from "@/lib/db-gateway";
 import { POST as createPOST } from "@/app/api/db/[collection]/route";
@@ -69,6 +70,7 @@ async function req(url: string, role: string | undefined, init?: RequestInit): P
     const token = await signSession({ memberId: "m1", name: "N", role });
     headers.cookie = `${SESSION_COOKIE}=${token}`;
   }
+  headers["x-test-current-role"] = role || "";
   return new NextRequest(url, { ...(init as any), headers }) as NextRequest;
 }
 
@@ -86,6 +88,12 @@ describe("db gateway role enforcement", () => {
     col = makeCollectionMocks();
     mocks.withAdmin.mockReset();
     mocks.withAdmin.mockImplementation((fn: any) => fn(pbOk));
+    mocks.authorizeCurrentMemberRequest.mockReset();
+    mocks.authorizeCurrentMemberRequest.mockImplementation(async (request: Request) => {
+      const role = request.headers.get("x-test-current-role");
+      if (!role) return { ok: false, status: 401, error: "unauthorized" };
+      return { ok: true, member: { id: "m1", role } };
+    });
   });
 
   it("guest POST → 401 unauthorized, PB untouched", async () => {
@@ -159,6 +167,36 @@ describe("db gateway role enforcement", () => {
     const p = ctx("rewards", "r1");
     expect((await patchOne(await req("http://x/api/db/rewards/r1", "parent", jsonInit("PATCH", { cost: 1 })), p)).status).toBe(200);
     expect((await deleteOne(await req("http://x/api/db/rewards/r1", "parent"), p)).status).toBe(200);
+  });
+
+  it("uses the current PB role for every generic write handler", async () => {
+    mocks.authorizeCurrentMemberRequest.mockImplementation(async (request: Request) => {
+      const role = request.headers.get("x-test-current-role");
+      return role ? { ok: true, member: { id: "m1", role } } : { ok: false, status: 401, error: "unauthorized" };
+    });
+    const parentRequest = await req("http://x/api/db/rewards", "parent", jsonInit("POST", { cost: 1 }));
+    mocks.authorizeCurrentMemberRequest.mockResolvedValueOnce({ ok: true, member: { id: "m1", role: "child" } });
+    expect((await createPOST(parentRequest, ctx("rewards"))).status).toBe(403);
+
+    const childPatch = await req("http://x/api/db/rewards/r1", "parent", jsonInit("PATCH", { cost: 1 }));
+    mocks.authorizeCurrentMemberRequest.mockResolvedValueOnce({ ok: true, member: { id: "m1", role: "child" } });
+    expect((await patchOne(childPatch, ctx("rewards", "r1"))).status).toBe(403);
+
+    const childDelete = await req("http://x/api/db/rewards/r1", "parent");
+    mocks.authorizeCurrentMemberRequest.mockResolvedValueOnce({ ok: true, member: { id: "m1", role: "child" } });
+    expect((await deleteOne(childDelete, ctx("rewards", "r1"))).status).toBe(403);
+
+    mocks.authorizeCurrentMemberRequest.mockResolvedValueOnce({ ok: true, member: { id: "m1", role: "child" } });
+    expect((await createPOST(await req("http://x/api/db/tasks", "parent", jsonInit("POST", { title: "x" })), ctx("tasks"))).status).toBe(200);
+  });
+
+  it("returns 401 for a deleted current member and 503 for PB identity outage", async () => {
+    mocks.authorizeCurrentMemberRequest.mockResolvedValueOnce({ ok: false, status: 401, error: "unauthorized" });
+    expect((await createPOST(await req("http://x/api/db/tasks", "parent", jsonInit("POST", { title: "x" })), ctx("tasks"))).status).toBe(401);
+    mocks.authorizeCurrentMemberRequest.mockResolvedValueOnce({ ok: false, status: 503, error: "identity_unavailable" });
+    expect((await patchOne(await req("http://x/api/db/tasks/r1", "parent", jsonInit("PATCH", { done: true })), ctx("tasks", "r1"))).status).toBe(503);
+    expect(col.create).not.toHaveBeenCalled();
+    expect(col.update).not.toHaveBeenCalled();
   });
 
   it("GET rejects a non-field sort with 400 invalid_sort, PB untouched", async () => {

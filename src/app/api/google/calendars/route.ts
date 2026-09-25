@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isGoogleConnected } from "@/lib/google/oauth-client";
+import { isGoogleConnected, GoogleAuthError, mapGoogleAuthError } from "@/lib/google/oauth-client";
 import {
   listCalendars,
   readCalendarSyncRows,
@@ -7,10 +7,26 @@ import {
   pruneCalendar,
 } from "@/lib/google/calendar";
 import { ensureGoogleCollections } from "@/lib/google/pb-collections";
+import { withGoogleIntegrationOperation } from "@/lib/google/integration-operation";
 import { authorizeAdminRequest } from "@/lib/admin-auth";
+import { authorizeCurrentParentRequest } from "@/lib/server-auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+function authErrorResponse(error: unknown) {
+  const mapped = mapGoogleAuthError(error);
+  return NextResponse.json(mapped.body, { status: mapped.status });
+}
+
+function disconnectedResponse(
+  saved: Awaited<ReturnType<typeof readCalendarSyncRows>>,
+) {
+  const calendars: CalendarEntry[] = saved.map((row) =>
+    mergeEntry(row.calendar_id, row.summary, row.color_rgb, row, false),
+  );
+  return NextResponse.json({ ok: true, connected: false, calendars });
+}
 
 // Multi-calendar selection API (Fix-C).
 //
@@ -48,7 +64,9 @@ function mergeEntry(
   };
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const auth = await authorizeCurrentParentRequest(request);
+  if (!auth.ok) return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status ?? 401 });
   try {
     await ensureGoogleCollections();
   } catch (e: any) {
@@ -59,26 +77,31 @@ export async function GET() {
   }
 
   const saved = await readCalendarSyncRows().catch(() => []);
-  const byId = new Map(saved.map((r) => [r.calendar_id, r]));
-  const connected = await isGoogleConnected();
+  const byId = new Map(saved.map((row) => [row.calendar_id, row]));
+  let connected: boolean;
+  try {
+    connected = await isGoogleConnected();
+  } catch (error) {
+    if (error instanceof GoogleAuthError && error.code === "no_grant") {
+      return disconnectedResponse(saved);
+    }
+    return authErrorResponse(error);
+  }
 
   if (!connected) {
     // Not connected (or a Composio-only setup): serve the saved selection so
     // the card still shows what was opted into; no Google call is made.
-    const calendars: CalendarEntry[] = saved.map((r) =>
-      mergeEntry(r.calendar_id, r.summary, r.color_rgb, r, false),
-    );
-    return NextResponse.json({ ok: true, connected: false, calendars });
+    return disconnectedResponse(saved);
   }
 
   let google;
   try {
     google = await listCalendars();
-  } catch (e: any) {
-    return NextResponse.json(
-      { ok: false, connected: true, calendars: [], error: e?.message || "calendarList failed" },
-      { status: 502 },
-    );
+  } catch (error) {
+    if (error instanceof GoogleAuthError && error.code === "no_grant") {
+      return disconnectedResponse(saved);
+    }
+    return authErrorResponse(error);
   }
 
   const seen = new Set<string>();
@@ -114,44 +137,57 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: "calendars[] is required" }, { status: 400 });
   }
 
-  try {
-    await ensureGoogleCollections();
-  } catch (e: any) {
-    return NextResponse.json(
-      { ok: false, error: "PocketBase not reachable: " + (e?.message || "unknown") },
-      { status: 502 },
-    );
-  }
-
-  const saved = await readCalendarSyncRows().catch(() => []);
-  const byId = new Map(saved.map((r) => [r.calendar_id, r]));
-
-  const pruned: string[] = [];
-  const errors: { id: string; error: string }[] = [];
-  for (const entry of entries) {
-    const id = typeof entry?.id === "string" ? entry.id.trim() : "";
-    if (!id) continue;
-    const selected = !!entry.selected;
+  return withGoogleIntegrationOperation(async () => {
+    let connected: boolean;
     try {
-      const prev = byId.get(id);
-      const { wasSelected } = await setCalendarSelection({
-        calendarId: id,
-        selected,
-        summary: typeof entry.summary === "string" ? entry.summary : prev?.summary || "",
-        colorRgb:
-          typeof entry.colorRgb === "string" ? entry.colorRgb : prev?.color_rgb ?? null,
-      });
-      if (wasSelected && !selected) {
-        await pruneCalendar(id);
-        pruned.push(id);
-      }
-    } catch (e: any) {
-      errors.push({ id, error: e?.message || "selection failed" });
+      connected = await isGoogleConnected();
+    } catch (error) {
+      if (error instanceof GoogleAuthError) return authErrorResponse(error);
+      return NextResponse.json({ ok: false, error: "google_state_unavailable" }, { status: 503 });
     }
-  }
+    if (!connected) {
+      return NextResponse.json({ ok: false, connected: false, error: "Google account is not connected" }, { status: 409 });
+    }
 
-  if (errors.length && errors.length === entries.length) {
-    return NextResponse.json({ ok: false, error: errors[0].error, errors }, { status: 500 });
-  }
-  return NextResponse.json({ ok: true, pruned, errors });
+    try {
+      await ensureGoogleCollections();
+    } catch (e: any) {
+      return NextResponse.json(
+        { ok: false, error: "PocketBase not reachable: " + (e?.message || "unknown") },
+        { status: 502 },
+      );
+    }
+
+    const saved = await readCalendarSyncRows().catch(() => []);
+    const byId = new Map(saved.map((r) => [r.calendar_id, r]));
+
+    const pruned: string[] = [];
+    const errors: { id: string; error: string }[] = [];
+    for (const entry of entries) {
+      const id = typeof entry?.id === "string" ? entry.id.trim() : "";
+      if (!id) continue;
+      const selected = !!entry.selected;
+      try {
+        const prev = byId.get(id);
+        const { wasSelected } = await setCalendarSelection({
+          calendarId: id,
+          selected,
+          summary: typeof entry.summary === "string" ? entry.summary : prev?.summary || "",
+          colorRgb:
+            typeof entry.colorRgb === "string" ? entry.colorRgb : prev?.color_rgb ?? null,
+        });
+        if (wasSelected && !selected) {
+          await pruneCalendar(id);
+          pruned.push(id);
+        }
+      } catch (e: any) {
+        errors.push({ id, error: e?.message || "selection failed" });
+      }
+    }
+
+    if (errors.length && errors.length === entries.length) {
+      return NextResponse.json({ ok: false, error: errors[0].error, errors }, { status: 500 });
+    }
+    return NextResponse.json({ ok: true, pruned, errors });
+  });
 }

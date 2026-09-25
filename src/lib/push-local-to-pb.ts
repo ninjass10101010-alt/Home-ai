@@ -1,5 +1,13 @@
 import { db } from "@/db";
-import { syncAllTasksToPB, syncFamilyGoalToPB } from "@/lib/task-utils";
+
+export const SAFE_LOCAL_PUSH_COLLECTIONS = Object.freeze([
+  "grocery_list_items",
+  "pantry_items",
+  "meal_plan_entries",
+  "recipes",
+  "events",
+  "schedules",
+]);
 
 function loadJSON<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
@@ -9,13 +17,6 @@ function loadJSON<T>(key: string, fallback: T): T {
   } catch {
     return fallback;
   }
-}
-
-function normalizeTaskCollection(data: any): any[] {
-  if (!data) return [];
-  if (Array.isArray(data)) return data;
-  if (data.tasks) return data.tasks;
-  return Object.values(data).filter((v: any) => v && typeof v === "object");
 }
 
 // Runs one item write and reports the outcome honestly. The browser db layer
@@ -69,24 +70,24 @@ export async function pushLocalToPB(): Promise<{ collection: string; pushed: num
   const meals = loadJSON<any[]>("consuela-meals", []);
   pushed = 0; errors = 0;
   if (meals.length) {
-    let existingMeals: any[] = [];
     try {
-      existingMeals = await db.selectMeals();
-    } catch { existingMeals = []; }
-    const existingKeys = new Set(
-      existingMeals.map((m: any) => `${m.name?.toLowerCase()}|${m.weekOf || ""}`)
-    );
-    const outcomes = await Promise.all(
-      meals.map((meal: any) => {
-        const key = `${meal.name?.toLowerCase()}|${meal.weekOf || ""}`;
-        // Deduped meals resolve to null: neither a push nor an error.
-        if (meal.name && existingKeys.has(key)) return Promise.resolve(null);
-        return pushItem(() => db.insertMeal(meal)).then((ok) => (ok ? "pushed" : "error"));
-      })
-    );
-    for (const outcome of outcomes) {
-      if (outcome === "pushed") pushed++;
-      else if (outcome === "error") errors++;
+      const existingMeals = await db.selectMealsAuthoritative();
+      const existingKeys = new Set(
+        existingMeals.map((m: any) => `${m.name?.toLowerCase()}|${m.weekOf || ""}`)
+      );
+      const outcomes = await Promise.all(
+        meals.map((meal: any) => {
+          const key = `${meal.name?.toLowerCase()}|${meal.weekOf || ""}`;
+          if (meal.name && existingKeys.has(key)) return Promise.resolve(null);
+          return pushItem(() => db.insertMeal(meal)).then((ok) => (ok ? "pushed" : "error"));
+        })
+      );
+      for (const outcome of outcomes) {
+        if (outcome === "pushed") pushed++;
+        else if (outcome === "error") errors++;
+      }
+    } catch {
+      errors = 1;
     }
   }
   results.push({ collection: "meal_plan_entries", pushed, errors });
@@ -104,7 +105,7 @@ export async function pushLocalToPB(): Promise<{ collection: string; pushed: num
   results.push({ collection: "recipes", pushed, errors });
 
   // Events (insert — no dedup check; runs once for initial migration)
-  const events = loadJSON<any[]>("consuela-events", []);
+  const events = loadJSON<any[]>("consuela-events", []).filter((event: any) => event?.member !== "Google");
   pushed = 0; errors = 0;
   if (events.length) {
     const outcomes = await Promise.all(
@@ -121,84 +122,29 @@ export async function pushLocalToPB(): Promise<{ collection: string; pushed: num
   const schedules = loadJSON<any[]>("consuela-schedules", []);
   pushed = 0; errors = 0;
   if (schedules.length) {
-    let existingSchedules: any[] = [];
     try {
-      existingSchedules = await db.selectSchedules();
-    } catch { existingSchedules = []; }
-    const existingKeys = new Set(
-      existingSchedules.map((sch: any) =>
-        `${String(sch.title || "").toLowerCase()}|${String(sch.time || "")}|${String(sch.days || "").toLowerCase()}`
-      )
-    );
-    const outcomes = await Promise.all(
-      schedules.map((sch: any) => {
-        const key = `${String(sch.title || "").toLowerCase()}|${String(sch.time || "")}|${String(sch.days || "").toLowerCase()}`;
-        if (existingKeys.has(key)) return Promise.resolve(null);
-        return pushItem(() => db.insertSchedule(sch)).then((ok) => (ok ? "pushed" : "error"));
-      })
-    );
-    for (const outcome of outcomes) {
-      if (outcome === "pushed") pushed++;
-      else if (outcome === "error") errors++;
-    }
-  }
-  results.push({ collection: "schedules", pushed, errors });
-
-  // Tasks / Leaderboard (already has syncAllTasksToPB)
-  const tasks = loadJSON<any>("consuela-tasks", []);
-  const weekData = loadJSON<any>("consuela-week-data", null);
-  const archive = loadJSON<any>("consuela-week-archive", []);
-  const rewards = loadJSON<any>("consuela-rewards", []);
-  const penalties = loadJSON<any>("consuela-penalties", []);
-  const hallOfFame = loadJSON<any>("consuela-hall-of-fame", []);
-  pushed = 0; errors = 0;
-  try {
-    await syncAllTasksToPB(
-      normalizeTaskCollection(tasks),
-      weekData,
-      archive,
-      rewards,
-      penalties,
-      hallOfFame
-    );
-    pushed = 1;
-  } catch {
-    errors = 1;
-  }
-  results.push({ collection: "tasks/leaderboard (6 collections)", pushed, errors });
-
-  // Family Goal (separate upsert)
-  const familyGoal = loadJSON<any>("consuela-family-goal", null);
-  pushed = 0; errors = 0;
-  if (familyGoal) {
-    try {
-      await syncFamilyGoalToPB(familyGoal);
-      pushed = 1;
+      const existingSchedules = await db.selectSchedulesAuthoritative();
+      const existingKeys = new Set(
+        existingSchedules.map((sch: any) =>
+          `${String(sch.title || "").toLowerCase()}|${String(sch.time || "")}|${String(sch.days || "").toLowerCase()}`
+        )
+      );
+      const outcomes = await Promise.all(
+        schedules.map((sch: any) => {
+          const key = `${String(sch.title || "").toLowerCase()}|${String(sch.time || "")}|${String(sch.days || "").toLowerCase()}`;
+          if (existingKeys.has(key)) return Promise.resolve(null);
+          return pushItem(() => db.insertSchedule(sch)).then((ok) => (ok ? "pushed" : "error"));
+        })
+      );
+      for (const outcome of outcomes) {
+        if (outcome === "pushed") pushed++;
+        else if (outcome === "error") errors++;
+      }
     } catch {
       errors = 1;
     }
   }
-  results.push({ collection: "family_goals", pushed, errors });
-
-  // Emergency Contacts
-  const contacts = loadJSON<any[]>("consuela-emergency-contacts", []);
-  pushed = 0; errors = 0;
-  if (contacts.length) {
-    const existing = await db.selectEmergencyContacts();
-    const existingNames = new Set(existing.map((c: any) => c.name?.toLowerCase()));
-    const outcomes = await Promise.all(
-      contacts.map((c: any) => {
-        // Deduped contacts resolve to null: neither a push nor an error.
-        if (existingNames.has(c.name?.toLowerCase())) return Promise.resolve(null);
-        return pushItem(() => db.insertEmergencyContact(c)).then((ok) => (ok ? "pushed" : "error"));
-      })
-    );
-    for (const outcome of outcomes) {
-      if (outcome === "pushed") pushed++;
-      else if (outcome === "error") errors++;
-    }
-  }
-  results.push({ collection: "emergency_contacts", pushed, errors });
+  results.push({ collection: "schedules", pushed, errors });
 
   return results;
 }

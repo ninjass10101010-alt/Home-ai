@@ -19,7 +19,7 @@ vi.mock("@/components/ui/SyncInit", () => ({ default: () => null }));
 
 vi.mock("@/db", () => ({
   db: {
-    refreshMembersCache: vi.fn(async () => {}),
+    refreshMembersCache: vi.fn(async () => true),
     selectMembers: () => [
       { id: 1, name: "Rebecca", fullName: "Rebecca (Mom)", role: "parent", emoji: "👩", color: "violet" },
       { id: 2, name: "Caspian", fullName: "Caspian Garcia", role: "child", age: 5, emoji: "🧒", color: "cyan" },

@@ -2815,4 +2815,38 @@ html[data-wall="true"] .session-pill-warning {
   padding: 0.5rem 1rem;
 }
 
+html[data-wall="true"] [data-settings-surface].settings-launcher {
+  min-height: clamp(18rem, 40vw, 27.5rem);
+}
+
+html[data-wall="true"] [data-settings-surface] :is(
+    button,
+    a,
+    [role="button"],
+    [role="radio"],
+    input:not(.sr-only):not([type="hidden"]),
+    select,
+    textarea,
+    label:has(> input.sr-only)
+  ),
+  html[data-wall="true"] .settings-dialog :is(
+    button,
+    a,
+    [role="button"],
+    [role="radio"],
+    input:not(.sr-only):not([type="hidden"]),
+    select,
+    textarea,
+    label:has(> input.sr-only)
+  ) {
+  min-height: 64px;
+  min-width: 64px;
+}
+
+html[data-wall="true"] .settings-wall-target {
+  display: inline-flex;
+  align-items: center;
+  min-height: 64px;
+  min-width: 64px;
+}
 

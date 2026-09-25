@@ -6,6 +6,7 @@ const h = vi.hoisted(() => ({ meals: [] as any[], inserted: [] as any[] }));
 vi.mock("@/db", () => ({
   db: {
     selectMeals: async () => h.meals.map((m) => ({ ...m })),
+    selectMealsAuthoritative: async () => h.meals.map((m) => ({ ...m })),
     insertMeal: async (meal: any) => {
       h.inserted.push(meal);
       return { ...meal, id: `pb_${h.inserted.length}` };

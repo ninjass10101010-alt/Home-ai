@@ -6,9 +6,11 @@ import { NextRequest } from "next/server";
 // member list that used to be read with db.selectMembers().
 const mocks = vi.hoisted(() => ({
   verifyPinAgainstAnyMember: vi.fn(),
+  resolveGmailCredentials: vi.fn(),
   sendSMSViaEmail: vi.fn(),
   sendEmailAlert: vi.fn(),
   broadcastHouseAlert: vi.fn(),
+  liveEmergencyContacts: vi.fn(),
   selectEmergencyContacts: vi.fn(),
   selectMembers: vi.fn(), // old path — must never be consulted anymore
 }));
@@ -17,7 +19,12 @@ vi.mock("@/lib/server-auth", () => ({
   verifyPinAgainstAnyMember: mocks.verifyPinAgainstAnyMember,
 }));
 
+vi.mock("@/lib/consuela/live-reads", () => ({
+  liveEmergencyContacts: mocks.liveEmergencyContacts,
+}));
+
 vi.mock("@/lib/free-communication", () => ({
+  resolveGmailCredentials: mocks.resolveGmailCredentials,
   sendSMSViaEmail: mocks.sendSMSViaEmail,
   sendEmailAlert: mocks.sendEmailAlert,
 }));
@@ -49,12 +56,14 @@ describe("emergency route — server-side PIN verification", () => {
     vi.stubEnv("GMAIL_APP_PASSWORD", "app-pass");
     vi.stubEnv("EMERGENCY_PIN_BYPASS", "");
     mocks.verifyPinAgainstAnyMember.mockReset();
+    mocks.resolveGmailCredentials.mockReset().mockResolvedValue({ user: "configured@example.com", pass: "configured" });
     mocks.sendSMSViaEmail.mockReset().mockResolvedValue({ success: true });
     mocks.sendEmailAlert.mockReset().mockResolvedValue({ success: true });
-    mocks.broadcastHouseAlert.mockReset().mockResolvedValue({ sent: 0, failed: 0, notes: [] });
-    mocks.selectEmergencyContacts.mockReset().mockReturnValue([
-      { name: "Rebecca", phone: "+15551234567", email: "r@x.com", carrier: "verizon", isPrimary: true },
-    ]);
+     mocks.broadcastHouseAlert.mockReset().mockResolvedValue({ sent: 0, failed: 0, notes: [] });
+     mocks.liveEmergencyContacts.mockReset().mockResolvedValue([
+       { name: "Rebecca", phone: "+15551234567", email: "r@x.com", carrier: "verizon", isPrimary: true },
+     ]);
+     mocks.selectEmergencyContacts.mockReset().mockReturnValue([]);
     // The legacy client-cache path: empty on a fresh PB install. A pin that
     // only verifies against PocketBase would be rejected by the old code.
     mocks.selectMembers.mockReset().mockReturnValue([]);

@@ -1,8 +1,21 @@
+import { withKeyedLock } from "@/lib/keyed-lock";
 import { withAdmin } from "../pb-auth.ts";
 import { encrypt, decrypt } from "./encryption.ts";
 import type { StoredTokens } from "./types.ts";
 
 const COLLECTION = "consuela_google_tokens";
+const TOKEN_LOCK = "google-token-store";
+
+function canonicalTokenRow(rows: any[]): any | null {
+  if (rows.length === 0) return null;
+  const active = rows.filter((row) => !row.revoked_at);
+  const candidates = active.length > 0 ? active : rows;
+  return [...candidates].sort((a, b) => {
+    const aTime = Date.parse(String(a.granted_at || a.created || "")) || 0;
+    const bTime = Date.parse(String(b.granted_at || b.created || "")) || 0;
+    return bTime - aTime || String(b.id || "").localeCompare(String(a.id || ""));
+  })[0];
+}
 
 export interface PublicTokenState {
   connected: boolean;
@@ -40,27 +53,37 @@ function toPublic(row: StoredTokens | null): PublicTokenState {
   };
 }
 
-export async function getStoredTokens(): Promise<StoredTokens | null> {
+export type PublicTokenStateReadResult =
+  | { status: "available"; state: PublicTokenState }
+  | { status: "unavailable"; error: "google_state_unavailable" };
+
+export async function getStoredTokensStrict(): Promise<StoredTokens | null> {
   return withAdmin(async (pb) => {
-    try {
-      const rows = await pb.collection(COLLECTION).getFullList({ requestKey: null });
-      if (rows.length === 0) return null;
-      const row: any = rows[0];
-      return {
-        access_token: decrypt(row.access_token),
-        refresh_token: row.refresh_token ? decrypt(row.refresh_token) : "",
-        scope: row.scope || "",
-        token_type: (row.token_type as "Bearer") || "Bearer",
-        expires_at: row.expires_at ? new Date(row.expires_at).getTime() : 0,
-        account_email: row.account_email || null,
-        granted_at: row.granted_at || "",
-        revoked_at: row.revoked_at || null,
-      };
-    } catch (e: any) {
-      console.error("[google-tokens] getStoredTokens failed:", e.message);
-      return null;
-    }
+    const rows = await pb.collection(COLLECTION).getFullList({ requestKey: null });
+    const row = canonicalTokenRow(rows as any[]);
+    if (!row) return null;
+    const revokedAt = row.revoked_at || null;
+    return {
+      access_token: revokedAt ? "" : decrypt(row.access_token),
+      refresh_token: revokedAt ? "" : row.refresh_token ? decrypt(row.refresh_token) : "",
+      scope: row.scope || "",
+      token_type: (row.token_type as "Bearer") || "Bearer",
+      expires_at: row.expires_at ? new Date(row.expires_at).getTime() : 0,
+      account_email: row.account_email || null,
+      granted_at: row.granted_at || "",
+      revoked_at: revokedAt,
+    };
   });
+}
+
+export async function getStoredTokens(): Promise<StoredTokens | null> {
+  try {
+    const tokens = await getStoredTokensStrict();
+    return tokens?.revoked_at ? null : tokens;
+  } catch (error: any) {
+    console.error("[google-tokens] getStoredTokens failed:", error?.message);
+    return null;
+  }
 }
 
 export async function saveTokens(args: {
@@ -71,14 +94,14 @@ export async function saveTokens(args: {
   expires_in: number;
   account_email: string | null;
 }): Promise<StoredTokens> {
-  return withAdmin(async (pb) => {
+  return withKeyedLock(TOKEN_LOCK, () => withAdmin(async (pb) => {
     const expires_at = new Date(Date.now() + args.expires_in * 1000);
     const granted_at = new Date();
 
     const access_enc = encrypt(args.access_token);
     const refresh_enc = encrypt(args.refresh_token);
 
-    const existing = await pb.collection(COLLECTION).getFullList({ requestKey: null });
+    const existing = [...(await pb.collection(COLLECTION).getFullList({ requestKey: null })) as any[]];
     const payload = {
       access_token: access_enc,
       refresh_token: refresh_enc,
@@ -89,11 +112,16 @@ export async function saveTokens(args: {
       granted_at: granted_at.toISOString(),
       revoked_at: null as string | null,
     };
-    if (existing.length > 0) {
-      const row: any = existing[0];
+    const row = canonicalTokenRow(existing as any[]);
+    if (row) {
       await pb.collection(COLLECTION).update(row.id, payload, { requestKey: null });
     } else {
       await pb.collection(COLLECTION).create(payload, { requestKey: null });
+    }
+    for (const extra of existing as any[]) {
+      if (!row || extra.id !== row.id) {
+        await pb.collection(COLLECTION).delete(extra.id, { requestKey: null });
+      }
     }
 
     return {
@@ -106,20 +134,18 @@ export async function saveTokens(args: {
       granted_at: granted_at.toISOString(),
       revoked_at: null,
     };
-  });
+  }));
 }
 
 export async function updateAccessToken(
   access_token: string,
   expires_in: number,
 ): Promise<void> {
-  return withAdmin(async (pb) => {
+  return withKeyedLock(TOKEN_LOCK, () => withAdmin(async (pb) => {
     const existing = await pb.collection(COLLECTION).getFullList({ requestKey: null });
-    if (existing.length === 0) return;
-    const row: any = existing[0];
-    await pb.collection(
-      COLLECTION,
-    ).update(
+    const row = canonicalTokenRow(existing as any[]);
+    if (!row) return;
+    await pb.collection(COLLECTION).update(
       row.id,
       {
         access_token: encrypt(access_token),
@@ -127,14 +153,14 @@ export async function updateAccessToken(
       },
       { requestKey: null },
     );
-  });
+  }));
 }
 
 export async function revokeTokens(): Promise<boolean> {
-  return withAdmin(async (pb) => {
+  return withKeyedLock(TOKEN_LOCK, () => withAdmin(async (pb) => {
     const existing = await pb.collection(COLLECTION).getFullList({ requestKey: null });
-    if (existing.length === 0) return true;
-    const row: any = existing[0];
+    const row = canonicalTokenRow(existing as any[]);
+    if (!row) return true;
     await pb.collection(COLLECTION).update(
       row.id,
       {
@@ -144,11 +170,45 @@ export async function revokeTokens(): Promise<boolean> {
       },
       { requestKey: null },
     );
+    for (const extra of existing as any[]) {
+      if (extra.id !== row.id) {
+        await pb.collection(COLLECTION).delete(extra.id, { requestKey: null });
+      }
+    }
     return true;
-  });
+  }));
+}
+
+export async function clearDirectGoogleCache(): Promise<boolean> {
+  return withKeyedLock(TOKEN_LOCK, () => withAdmin(async (pb) => {
+    const eventRows = await pb.collection("consuela_google_calendar_events").getFullList({ requestKey: null });
+    for (const row of eventRows as any[]) {
+      await pb.collection("consuela_google_calendar_events").delete(row.id, { requestKey: null });
+    }
+    const calendarRows = await pb.collection("consuela_google_calendar_sync").getFullList({ requestKey: null });
+    for (const row of calendarRows as any[]) {
+      await pb.collection("consuela_google_calendar_sync").delete(row.id, { requestKey: null });
+    }
+    const legacyRows = await pb.collection("consuela_google_sync_state").getFullList({ requestKey: null });
+    for (const row of legacyRows as any[]) {
+      if (row.resource === "calendar") {
+        await pb.collection("consuela_google_sync_state").delete(row.id, { requestKey: null });
+      }
+    }
+    return true;
+  }));
+}
+
+export async function readPublicState(): Promise<PublicTokenStateReadResult> {
+  try {
+    return { status: "available", state: toPublic(await getStoredTokensStrict()) };
+  } catch {
+    return { status: "unavailable", error: "google_state_unavailable" };
+  }
 }
 
 export async function getPublicState(): Promise<PublicTokenState> {
-  const tokens = await getStoredTokens();
-  return toPublic(tokens);
+  const result = await readPublicState();
+  if (result.status === "unavailable") throw new Error(result.error);
+  return result.state;
 }

@@ -31,6 +31,7 @@ function memberMatchesName(member: any, name: string) {
 
 export interface AuthUser {
   id: number;
+  pbId?: string;
   name: string;
   role: 'parent' | 'child' | 'pet';
   emoji: string;
@@ -40,8 +41,39 @@ export interface AuthUser {
   age?: number;
 }
 
+const AUTH_ROLES = ["parent", "child", "pet"] as const;
+
+export function normalizeAuthRole(value: unknown): AuthUser["role"] | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  return AUTH_ROLES.includes(normalized as AuthUser["role"]) ? normalized as AuthUser["role"] : null;
+}
+
+function clearStoredIdentity() {
+  try {
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+  } catch {}
+}
+
+function persistAuthUser(user: AuthUser) {
+  try {
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({
+      id: user.id,
+      pbId: user.pbId,
+      name: user.name,
+      role: user.role,
+      emoji: user.emoji.startsWith('data:') ? '' : user.emoji,
+      color: user.color,
+      avatarSize: user.avatarSize,
+      glow: user.glow,
+      age: user.age,
+    }));
+  } catch {}
+}
+
 interface AuthContextValue {
   currentUser: AuthUser | null;
+  hydrated: boolean;
   isLoggedIn: boolean;
   isParent: boolean;
   login: (memberName: string, pin: string) => Promise<{ success: boolean; error?: string }>;
@@ -64,6 +96,7 @@ export const useAuth = () => {
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [hydrated, setHydrated] = useState(false);
   const [sessionRemainingMs, setSessionRemainingMs] = useState<number>(INACTIVITY_TIMEOUT_MS);
   const [sessionWarning, setSessionWarning] = useState<boolean>(false);
   const currentUserRef = useRef<AuthUser | null>(null);
@@ -90,7 +123,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     setCurrentUser(null);
     currentUserRef.current = null;
-    localStorage.removeItem(AUTH_STORAGE_KEY);
+    clearStoredIdentity();
     setSessionWarning(false);
     setSessionRemainingMs(INACTIVITY_TIMEOUT_MS);
   }, []);
@@ -108,13 +141,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     try {
       const stored = localStorage.getItem(AUTH_STORAGE_KEY);
       if (stored) {
-        const parsed: AuthUser = JSON.parse(stored);
-        const member = db.selectMembersDetailed().find((m: any) => memberMatchesName(m, parsed.name));
-        if (member) {
+        const parsed = JSON.parse(stored) as Partial<AuthUser>;
+        const member = parsed && typeof parsed === "object" && typeof parsed.name === "string"
+          ? db.selectMembersDetailed().find((m: any) => memberMatchesName(m, parsed.name as string))
+          : undefined;
+        const role = member && "role" in member
+          ? normalizeAuthRole(member.role)
+          : normalizeAuthRole(parsed?.role);
+        if (member && role) {
           const hydrated = {
             id: Number(parsed.id) || 0,
-            name: parsed.name,
-            role: parsed.role,
+            ...(typeof (member as any)?.pbId === "string" ? { pbId: (member as any).pbId } : {}),
+            name: parsed.name as string,
+            role,
             emoji: parsed.emoji || member.emoji,
             color: parsed.color || 'amber',
             avatarSize: member.avatarSize || parsed.avatarSize || "md",
@@ -126,12 +165,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           // eslint-disable-next-line react-hooks/set-state-in-effect
           setCurrentUser(hydrated);
           currentUserRef.current = hydrated;
+          persistAuthUser(hydrated);
         } else {
-          localStorage.removeItem(AUTH_STORAGE_KEY);
+          clearStoredIdentity();
         }
       }
     } catch {
-      localStorage.removeItem(AUTH_STORAGE_KEY);
+      clearStoredIdentity();
+    } finally {
+      setHydrated(true);
     }
 
     const events = ['mousemove', 'keydown', 'touchstart', 'scroll', 'click', 'focus'];
@@ -146,8 +188,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         return;
       }
 
+      const role = "role" in member
+        ? normalizeAuthRole(member.role)
+        : activeUser.role;
+      if (!role) {
+        logout();
+        return;
+      }
+
       const updatedUser: AuthUser = {
         ...activeUser,
+        ...(typeof (member as any).pbId === "string" ? { pbId: (member as any).pbId } : {}),
+        role,
         emoji: member.emoji || activeUser.emoji,
         color: member.color || activeUser.color,
         avatarSize: member.avatarSize || activeUser.avatarSize || "md",
@@ -160,16 +212,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       };
       setCurrentUser(updatedUser);
       currentUserRef.current = updatedUser;
-    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({
-      id: updatedUser.id,
-      name: updatedUser.name,
-      role: updatedUser.role,
-      emoji: updatedUser.emoji.startsWith('data:') ? '' : updatedUser.emoji,
-      color: updatedUser.color,
-      avatarSize: updatedUser.avatarSize,
-      glow: updatedUser.glow,
-      age: updatedUser.age,
-    }));
+    persistAuthUser(updatedUser);
     };
     events.forEach((event) => window.addEventListener(event, handleActivity));
     window.addEventListener("consuela-members-updated", handleMembersUpdated);
@@ -191,7 +234,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         currentUserRef.current = null;
         setSessionRemainingMs(0);
         setSessionWarning(false);
-        localStorage.removeItem(AUTH_STORAGE_KEY);
+        clearStoredIdentity();
       }
     }, SESSION_TICK_MS);
 
@@ -206,10 +249,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   // Factored verbatim out of login's original success block — same fields
   // stored, same session/flush side effects — so the two paths can never drift.
   const finishLogin = useCallback((member: any): { success: boolean; error?: string } => {
+    const role = normalizeAuthRole(member.role);
+    if (!role) return { success: false, error: "Login failed" };
+
     const authUser: AuthUser = {
       id: Number(member.id) || 0,
+      ...(typeof member.id === "string" ? { pbId: member.id } : {}),
       name: member.name,
-      role: member.role,
+      role,
       emoji: member.emoji || '😊',
       color: member.color || 'amber',
       avatarSize: member.avatarSize || "md",
@@ -224,18 +271,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     lastActivityRef.current = Date.now();
     setSessionRemainingMs(INACTIVITY_TIMEOUT_MS);
     setSessionWarning(false);
-
-    const stored = {
-      id: authUser.id,
-      name: authUser.name,
-      role: authUser.role,
-      emoji: authUser.emoji.startsWith('data:') ? '' : authUser.emoji,
-      color: authUser.color,
-      avatarSize: authUser.avatarSize,
-      glow: authUser.glow,
-      age: authUser.age,
-    };
-    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(stored));
+    persistAuthUser(authUser);
 
     // Session is now valid: replay any queued meal/recipe writes and pull
     // fresh server data so other devices' changes appear without a reload.
@@ -256,17 +292,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         body: JSON.stringify({ memberName, pin }),
       });
     } catch {
-      return { success: false, error: 'Network error' };
+      return { success: false, error: "Couldn't reach Consuela — check the connection and try again." };
     }
-    if (!res.ok) return { success: false, error: 'Incorrect PIN' };
+    if (!res.ok) {
+      return {
+        success: false,
+        error: res.status === 401 ? "Incorrect PIN" : "Sign-in failed. Try again.",
+      };
+    }
 
     let member: any;
     try {
       ({ member } = await res.json());
     } catch {
-      return { success: false, error: 'Login failed' };
+      return { success: false, error: "Sign-in failed. Try again." };
     }
-    if (!member?.name) return { success: false, error: 'Login failed' };
+    if (!member?.name) return { success: false, error: "Sign-in failed. Try again." };
 
     return finishLogin(member);
   }, [finishLogin]);
@@ -298,6 +339,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     <AuthContext.Provider
       value={{
         currentUser,
+        hydrated,
         isLoggedIn,
         isParent,
         login,

@@ -337,6 +337,7 @@ export default function CalendarPage() {
   const [scheduleFilter, setScheduleFilter] = useState<"all" | "morning" | "afternoon" | "evening" | "night">("all");
   const [toast, setToast] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const calendarDataGenerationRef = useRef(0);
 
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const showToast = (msg: string) => {
@@ -602,11 +603,18 @@ export default function CalendarPage() {
   };
 
   const syncGoogleEvents = async (silent = false) => {
+    const requestGeneration = calendarDataGenerationRef.current;
     setIsSyncing(true);
     try {
       const res = await fetch("/api/google-calendar?sync=now");
       const data = await res.json();
+      if (requestGeneration !== calendarDataGenerationRef.current) return;
+      if (!res.ok || !data || data.ok === false) {
+        showToast("Google Calendar unavailable — showing saved events.");
+        return;
+      }
       if (!data.connected) {
+        setCalEvents((prev) => prev.filter((event: CalEvent) => event.member !== "Google"));
         if (!silent) showToast("Connect Google in Settings → Integrations");
         return;
       }
@@ -642,6 +650,7 @@ export default function CalendarPage() {
         );
       }
     } catch {
+      if (requestGeneration !== calendarDataGenerationRef.current) return;
       if (!silent) showToast("\u274C Sync failed");
     } finally {
       setIsSyncing(false);
@@ -651,8 +660,17 @@ export default function CalendarPage() {
   // Auto-load Google Calendar events on mount so the calendar shows real
   // school/holiday events without requiring a manual Sync tap.
   useEffect(() => {
-    syncGoogleEvents(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const onGoogleDisconnected = () => {
+      calendarDataGenerationRef.current += 1;
+      setCalEvents((prev) => prev.filter((event: CalEvent) => event.member !== "Google"));
+    };
+    window.addEventListener("consuela-google-disconnected", onGoogleDisconnected);
+    return () => window.removeEventListener("consuela-google-disconnected", onGoogleDisconnected);
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void syncGoogleEvents(true); }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   // Pull family-added events from PocketBase so events created on one
@@ -660,10 +678,11 @@ export default function CalendarPage() {
   // creating browser's localStorage). Shared by the mount load and the
   // cross-device refresh listener below.
   const pullFamilyEvents = useCallback(() => {
+    const requestGeneration = calendarDataGenerationRef.current;
     let cancelled = false;
     gatewayList("events")
       .then((rows) => {
-        if (cancelled || !Array.isArray(rows)) return;
+        if (cancelled || requestGeneration !== calendarDataGenerationRef.current || !Array.isArray(rows)) return;
         const mapped = rows.map(dbEventToCalEvent).filter(Boolean) as CalEvent[];
         if (!mapped.length) return;
         setCalEvents((prev) => {
@@ -720,10 +739,11 @@ export default function CalendarPage() {
   // failed PB write vanished silently). Same merge contract as events: adopt
   // server ids for local rows, drop Google-style dupes by title+time+days.
   const pullFamilySchedules = useCallback(() => {
+    const requestGeneration = calendarDataGenerationRef.current;
     let cancelled = false;
     gatewayList("schedules")
       .then((rows) => {
-        if (cancelled || !Array.isArray(rows)) return;
+        if (cancelled || requestGeneration !== calendarDataGenerationRef.current || !Array.isArray(rows)) return;
         const mapped = rows
           .map(dbScheduleToScheduleItem)
           .filter(Boolean) as ScheduleItem[];

@@ -8,15 +8,30 @@ interface FormFieldProps {
   helperText?: ReactNode;
   errorText?: ReactNode;
   className?: string;
+  controlId?: string;
+  helperId?: string;
+  errorId?: string;
 }
 
-export default function FormField({ label, children, helperText, errorText, className = "" }: FormFieldProps) {
+export default function FormField({
+  label,
+  children,
+  helperText,
+  errorText,
+  className = "",
+  controlId,
+  helperId,
+  errorId,
+}: FormFieldProps) {
   return (
-    <label className={`block ${className}`}>
+    <label htmlFor={controlId} className={`block ${className}`}>
       <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">{label}</span>
       {children}
       {(helperText || errorText) && (
-        <span className={`mt-1 block text-xs ${errorText ? "text-[var(--color-accent-rose)]" : "text-text-muted"}`}>
+        <span
+          id={errorText ? errorId : helperId}
+          className={`mt-1 block text-xs ${errorText ? "text-[var(--color-accent-rose)]" : "text-text-muted"}`}
+        >
           {errorText || helperText}
         </span>
       )}

@@ -6,6 +6,7 @@ import PageShell from "@/components/ui/PageShell";
 import TopBar from "@/components/ui/TopBar";
 import Card from "@/components/ui/Card";
 import Skeleton from "@/components/ui/Skeleton";
+import { useAuth } from "@/hooks/useAuth";
 import { db } from "@/db";
 interface EmergencyContact {
   id: number;
@@ -67,6 +68,8 @@ function cleanPhoneForTel(phone: string): string {
 }
 
 export default function EmergencyPage() {
+  const { currentUser, hydrated } = useAuth();
+  const isParent = hydrated && currentUser?.role === "parent";
   const [contacts, setContacts] = useState<EmergencyContact[]>([]);
   const [loading, setLoading] = useState(true);
   const [usingFallback, setUsingFallback] = useState(false);
@@ -84,7 +87,10 @@ export default function EmergencyPage() {
         return r.json();
       })
       .then((data) => {
-        if (data?.contacts) setContacts(data.contacts);
+        if (data?.contacts) {
+          setContacts(data.contacts);
+          setUsingFallback(data.contactsSource === "cache");
+        }
       })
       .catch(() => {
         setContacts(db.selectEmergencyContacts() as EmergencyContact[]);
@@ -95,6 +101,15 @@ export default function EmergencyPage() {
 
   const primaryContacts = contacts.filter(c => c.isPrimary);
   const otherContacts = contacts.filter(c => !c.isPrimary);
+  const safetyActionLabel = isParent
+    ? contacts.length > 0 ? "Manage contacts" : "Add contacts"
+    : "Open safety settings";
+  const emptyContactsDescription = isParent
+    ? "Add or manage emergency contacts to get started."
+    : "Ask a parent to add or manage emergency contacts.";
+  const safetyQuickLinkLabel = isParent
+    ? contacts.length > 0 ? "Manage contacts in Safety" : "Add or manage contacts in Safety"
+    : "Open safety settings";
 
   // Rose stays reserved for genuine alarm moments (top bar + 911 below).
   const alarmGlow = {
@@ -143,9 +158,9 @@ export default function EmergencyPage() {
            <>
             {/* One honest sentence per state: offline-with-contacts says so;
                 genuinely-empty falls through to the empty state below. */}
-            {usingFallback && contacts.length > 0 && (
+            {usingFallback && (
               <p className="text-xs text-text-secondary text-center -mb-2">
-                Showing this device&apos;s saved contacts — sign in to see the live list.
+                Live emergency contacts are unavailable — showing this device&apos;s saved list.
               </p>
             )}
 
@@ -176,12 +191,12 @@ export default function EmergencyPage() {
           <Card className="text-center py-8">
             <div className="text-4xl mb-3">📋</div>
             <p className="text-text-primary font-medium">No emergency contacts yet</p>
-            <p className="text-text-secondary text-sm mt-1">Add contacts in Settings to get started</p>
+            <p className="text-text-secondary text-sm mt-1">{emptyContactsDescription}</p>
             <Link
-              href="/settings"
+              href="/settings/safety"
               className="tap mt-4 inline-flex h-11 items-center justify-center rounded-2xl border border-[var(--color-accent-selected)]/20 bg-[var(--color-accent-button)] px-4 text-sm font-medium text-white shadow-[0_12px_24px_rgba(0,0,0,0.16)]"
             >
-              Go to Settings
+              {safetyActionLabel}
             </Link>
           </Card>
         )}
@@ -204,11 +219,11 @@ export default function EmergencyPage() {
         </section>
 
         {/* Settings quick-link */}
-        <Link href="/settings#emergency" className="block">
+        <Link href="/settings/safety" className="block">
           <Card className="bg-[var(--color-surface-2)] border-dashed text-center cursor-pointer hover:bg-[var(--color-surface-3)] transition-colors" interactive>
             <div className="flex items-center justify-center gap-2">
               <span className="text-lg">⚙️</span>
-              <p className="text-text-secondary text-sm">Edit contacts in Settings</p>
+              <p className="text-text-secondary text-sm">{safetyQuickLinkLabel}</p>
             </div>
           </Card>
         </Link>

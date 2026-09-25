@@ -4,7 +4,7 @@
 
 **Goal:** Ship the approved "Services & Keys" design (spec 2026-08-24) — PB-backed encrypted service registry, resolver-based config reads, Settings UI with per-service tests, localStorage migration, HA bridge reconnect.
 
-**Architecture:** `consuela_service_config` PB collection (LOCKED rules, secrets AES-256-GCM via shared secret-box keyed by CONSUELA_ENCRYPTION_KEY). Code-defined registry whitelist. Resolver precedence PB → env → null, per-request. Session-gated routes; mutations adults-only. Boot-critical six hard-excluded.
+**Architecture:** `consuela_service_config` PB collection (LOCKED rules, secrets AES-256-GCM via shared secret-box keyed by CONSUELA_ENCRYPTION_KEY). Code-defined registry whitelist. Resolver precedence PB → env → null, per-request. Services & Keys manifest and mutations require a current parent session re-read from PB; PB unavailability fails closed. System metadata/provider-test routes, generic DB writes, and task-sync privileged writes use the current live PB role keyed by signed `memberId`; cookie role is never authoritative. Live members retain opaque `pbId` values, Family mutations are ID-first with fallback rows read-only, normalized exact full-name checks govern create/rename, PIN writes share the member-admin lock and reject collisions, Google selection is serialized with the integration operation lock, and `/api/emergency/test` uses signed-cookie middleware presence with an authoritative current-parent route gate.
 
 **Tech Stack:** existing crypto helpers, withAdmin, authorizeAdminRequest, SectionCard UI patterns.
 
@@ -49,9 +49,9 @@
 ### Task 5: Config routes (GET/PUT/DELETE)
 
 **Files:** Create `src/app/api/services/config/route.ts`; Test `tests/unit/services-config-routes.test.ts`.
-- [ ] GET: session required (middleware covers; route still 401s without cookie via verifySession for defense) → `{services:[{id,label,status:{configured,source},fields:[{key,label,secret,required,set,source,preview?}]}]}`; preview = last 2 chars only for set secrets; never includes values.
-- [ ] PUT: authorizeAdminRequest (401 anon / 403 child adult_only); validate isRegistryPair + value string ≤ 2000 chars; upsert withAdmin (encrypt 🔒, updated_by=session.name or "admin-secret"); unknown/excluded → 400 invalid_service_key.
-- [ ] DELETE: same gate; delete row → 200; absent row → 200 idempotent.
+- [ ] GET: current-parent session required (manifest is parent-only; child/pet/guest receive no field metadata); `{services:[{id,label,status:{configured,source},fields:[{key,label,secret,required,set,source,preview?}]}]}`; preview = last 2 chars only for set secrets; never includes values.
+- [ ] PUT: current-parent authorization (401 anon / 403 child adult_only; PB identity re-read required); validate isRegistryPair + value string ≤ 2000 chars; upsert withAdmin (encrypt 🔒, updated_by=current session member name); unknown/excluded → 400 invalid_service_key.
+- [ ] DELETE: same current-parent gate; delete row → 200; absent row → 200 idempotent.
 - [ ] Tests mock @/lib/pb-auth withAdmin + @/lib/admin-auth where appropriate (pattern: admin-routes.test.ts); sign real session cookies for role cases (pattern: auth-routes.test.ts).
 - [ ] Commit: `feat(services): config CRUD routes with masking + adult gate`
 
@@ -59,7 +59,8 @@
 
 **Files:** Create `src/lib/services/tests.ts`; Route `POST /api/services/test/route.ts`; Test `tests/unit/services-test-fns.test.ts`.
 - [ ] `runServiceTest(service): Promise<{ok:boolean;detail:string;ms:number}>` switch on registry testFn id: ha (GET {HA_HOST}/api/ 5s timeout, expect json w/ token ok false acceptable = reachable), telegram_alert+mirror (api.telegram.org/bot<tok>/getMe), gmail (nodemailer createTransport.verify() guarded try), hermes (GET {url}/health or / 5s), instacart (existing connect ping shape from old /api/connections logic), themealdb (search?q=x ping), composio/greenlight/khan (GET provider base w/ key header, accept any HTTP response <500 as reachable). All fetches use AbortSignal.timeout(5000). Unset required creds → {ok:false,detail:"not_configured"} fast.
-- [ ] Route: session-gated; body {service}; unknown → 400. Tests mock global fetch/nodemailer; assert URL shapes + not_configured short-circuit + timeout usage.
+- [ ] **Step 1:** Write the failing test. `POST /api/services/test` requires the current live PB parent before parsing/probing; child/pet 403, deleted identity 401, and PB identity outage 503.
+- [ ] Route: current-parent gate; body {service}; unknown → 400. Tests mock global fetch/nodemailer; assert URL shapes + not_configured short-circuit + timeout usage.
 - [ ] Commit: `feat(services): per-service health test functions + route`
 
 ### Task 7: Import + runtime routes
@@ -85,8 +86,8 @@
 ### Task 10: Settings UI + legacy stack removal
 
 **Files:** Create `src/components/settings/ServicesKeysCard.tsx`; Modify src/app/settings/page.tsx (render card top of Integrations for non-child; import banner state); Delete src/components/settings/ConnectionManager.tsx (if exists), src/lib/connections/store.ts, src/app/api/connections/route.ts; Test `tests/unit/services-keys-ui.test.tsx` (jsdom, pattern ha-settings-ui.test.tsx).
-- [ ] Card: rows per registry service (status dot 🟢tested/🟡configured/🔴unset + source chip), expand → fields (secret=password input with •••hint placeholder), Save per service (PUT changed fields), Test button (POST test → dot update + detail line), Clear-override per overridden field, Reconnect button on home_assistant row, Import banner when localStorage consuela-connections exists → POST import → remove key.
-- [ ] Child role: card hidden (useAuth role check, same as House nav).
+- [ ] Card: parent-only; rows per registry service (status dot 🟢tested/🟡configured/🔴unset + source chip), expand → fields (secret=password input with •••hint placeholder), Save per service (PUT changed fields), Test button (POST test → dot update + detail line), Clear-override per overridden field, Reconnect button on home_assistant row, Import banner when localStorage consuela-connections exists → POST import → remove key.
+- [ ] Child, pet, and guest role: card hidden and manifest API returns no field metadata (useAuth role check, same as House nav).
 - [ ] UI tests render card with mocked fetch: masking shown, save calls PUT payload shape, test updates status, banner imports+clears storage.
 - [ ] Commit: `feat(settings): Services & Keys card; remove legacy connections stack`
 

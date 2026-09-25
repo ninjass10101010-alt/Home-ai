@@ -1,5 +1,10 @@
 import { googleFetch } from "./oauth-client.ts";
 import { withAdmin } from "../pb-auth.ts";
+import {
+  getGoogleIntegrationGeneration,
+  isGoogleIntegrationGenerationCurrent,
+  withGoogleIntegrationOperation,
+} from "./integration-operation.ts";
 import type { GoogleCalendarEvent } from "./types.ts";
 
 const PRIMARY = "primary";
@@ -316,6 +321,7 @@ async function upsertCalendarEvents(
 async function syncOneCalendar(
   calendarId: string,
   summary: string,
+  operationGeneration: number,
 ): Promise<CalendarSyncResult | null> {
   // Re-read `selected`: the list was captured at the top of the run and the
   // selection PUT is not lock-covered — if this calendar was deselected
@@ -341,12 +347,14 @@ async function syncOneCalendar(
     ({ events, nextSyncToken } = await listAllEvents({ calendarId }));
   }
 
+  if (!isGoogleIntegrationGenerationCurrent(operationGeneration)) return null;
   const { upserted, deleted } = await upsertCalendarEvents(calendarId, events);
 
   // Second re-check, right before the write path: the deselect may have
   // landed DURING the pull/upsert (its prune already ran). Undo this
   // calendar's writes instead of saving the token — otherwise the ghost
   // rows are served forever and the deselect transition is consumed.
+  if (!isGoogleIntegrationGenerationCurrent(operationGeneration)) return null;
   if (!(await isCalendarSelected(calendarId))) {
     await pruneCalendar(calendarId);
     return { calendarId, summary, events: 0, deleted: 0, nextSyncToken: null, ok: true };
@@ -369,8 +377,12 @@ export async function syncCalendar(): Promise<SyncOutcome> {
     console.log("[google-sync] sync already in progress, skipping");
     return { skipped: true, reason: "already_in_progress" };
   }
-  const run = (async () => {
+  const operationGeneration = getGoogleIntegrationGeneration();
+  const run = withGoogleIntegrationOperation(async (): Promise<SyncOutcome> => {
     try {
+      if (!isGoogleIntegrationGenerationCurrent(operationGeneration)) {
+        return { skipped: true, reason: "disconnected" };
+      }
       const calendars = await getSelectedCalendars();
       const perCalendar: CalendarSyncResult[] = [];
       let totalEvents = 0;
@@ -380,7 +392,7 @@ export async function syncCalendar(): Promise<SyncOutcome> {
       for (const cal of calendars) {
         const calendarId = cal.calendarId || PRIMARY;
         try {
-          const res = await syncOneCalendar(calendarId, cal.summary);
+          const res = await syncOneCalendar(calendarId, cal.summary, operationGeneration);
           if (!res) continue; // deselected since the list was captured
           perCalendar.push(res);
           totalEvents += res.events;
@@ -396,6 +408,9 @@ export async function syncCalendar(): Promise<SyncOutcome> {
           // Everything else (410-without-token, 5xx, quota, PB hiccup)
           // isolates to this calendar: record it, keep the loop going.
           console.error(`[google-sync] calendar ${calendarId} failed:`, err?.message || err);
+          if (!isGoogleIntegrationGenerationCurrent(operationGeneration)) {
+            return { skipped: true, reason: "disconnected" };
+          }
           await saveCalendarState(calendarId, {
             last_status: "error",
             last_error: err?.message || "Sync failed",
@@ -413,6 +428,9 @@ export async function syncCalendar(): Promise<SyncOutcome> {
         }
       }
 
+      if (!isGoogleIntegrationGenerationCurrent(operationGeneration)) {
+        return { skipped: true, reason: "disconnected" };
+      }
       return {
         events: totalEvents,
         deleted: totalDeleted,
@@ -422,7 +440,7 @@ export async function syncCalendar(): Promise<SyncOutcome> {
     } finally {
       syncInFlight = null;
     }
-  })();
+  });
   syncInFlight = run;
   return run;
 }

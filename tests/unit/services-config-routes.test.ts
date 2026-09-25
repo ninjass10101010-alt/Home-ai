@@ -4,6 +4,7 @@ import { NextRequest } from "next/server";
 const mocks = vi.hoisted(() => ({
   withAdmin: vi.fn(),
   verifyPinAgainstAnyMember: vi.fn(),
+  authorizeCurrentParentRequest: vi.fn(),
 }));
 
 vi.mock("@/lib/pb-auth", () => ({
@@ -12,6 +13,7 @@ vi.mock("@/lib/pb-auth", () => ({
 
 vi.mock("@/lib/server-auth", () => ({
   verifyPinAgainstAnyMember: mocks.verifyPinAgainstAnyMember,
+  authorizeCurrentParentRequest: mocks.authorizeCurrentParentRequest,
 }));
 
 import { GET, PUT, DELETE } from "@/app/api/services/config/route";
@@ -66,6 +68,12 @@ beforeEach(() => {
   vi.stubEnv("CONSUELA_ENCRYPTION_KEY", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa=");
   mocks.withAdmin.mockReset();
   mocks.verifyPinAgainstAnyMember.mockReset();
+  mocks.authorizeCurrentParentRequest.mockReset().mockImplementation(async (request: Request) => {
+    if (!(request.headers.get("cookie") || "").includes("consuela_session=")) {
+      return { ok: false, status: 401, error: "unauthorized" };
+    }
+    return { ok: true, member: { name: "Rebecca" } };
+  });
 });
 
 afterEach(() => {
@@ -76,6 +84,22 @@ describe("GET /api/services/config", () => {
   it("401s without a session", async () => {
     const res = await GET(req("GET"));
     expect(res.status).toBe(401);
+  });
+
+  it("returns no manifest or secret metadata to a current nonparent", async () => {
+    const { pb } = pbForRows([
+      { service: "home_assistant", key: "HA_TOKEN", value: "v1.cipher", is_secret: true },
+    ]);
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    mocks.authorizeCurrentParentRequest.mockResolvedValueOnce({ ok: false, status: 403, error: "adult_only" });
+
+    const res = await GET(req("GET", undefined, { cookie: await sessionCookie("child") }));
+    const body = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(body).toEqual({ error: "adult_only" });
+    expect(JSON.stringify(body)).not.toContain("HA_TOKEN");
+    expect(JSON.stringify(body)).not.toContain("suffix");
   });
 
   it("returns manifest with masked secrets and no raw values", async () => {
@@ -124,6 +148,7 @@ describe("PUT /api/services/config", () => {
     expect((await PUT(req("PUT", { service: "themealdb", key: "MEALDB_KEY", value: "2" }))).status).toBe(401);
 
     mocks.verifyPinAgainstAnyMember.mockResolvedValue(null); // pin path dead
+    mocks.authorizeCurrentParentRequest.mockResolvedValueOnce({ ok: false, status: 403, error: "adult_only" });
     const res = await PUT(
       req("PUT", { service: "themealdb", key: "MEALDB_KEY", value: "2" }, { cookie: await sessionCookie("child") })
     );
@@ -148,6 +173,17 @@ describe("PUT /api/services/config", () => {
     expect(stored.value).not.toContain("123456");
     expect(stored.is_secret).toBe(true);
     expect(stored.updated_by).toBe("Rebecca");
+  });
+
+  it("attributes the write to the current PB parent, not a stale session name", async () => {
+    const { pb, store } = pbForRows([]);
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    mocks.authorizeCurrentParentRequest.mockResolvedValueOnce({ ok: true, member: { name: "Current PB Parent" } });
+
+    const res = await PUT(req("PUT", { service: "telegram_alert", key: "TELEGRAM_BOT_TOKEN", value: "token" }, { cookie: await sessionCookie() }));
+
+    expect(res.status).toBe(200);
+    expect(store[0].updated_by).toBe("Current PB Parent");
   });
 
   it("rejects non-registry pairs with 400", async () => {

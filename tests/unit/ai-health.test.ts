@@ -3,12 +3,14 @@ import { NextRequest } from "next/server";
 
 const mocks = vi.hoisted(() => ({
   verifySession: vi.fn(async (): Promise<{ name: string; role: string } | null> => ({ name: "Jeff", role: "parent" })),
+  authorizeCurrentParentRequest: vi.fn(),
 }));
 
 vi.mock("@/lib/session", () => ({
   verifySession: mocks.verifySession,
   SESSION_COOKIE: "consuela_session",
 }));
+vi.mock("@/lib/server-auth", () => ({ authorizeCurrentParentRequest: mocks.authorizeCurrentParentRequest }));
 
 import {
   recordChatOutcome,
@@ -33,6 +35,7 @@ function entry(overrides: Partial<Parameters<typeof recordChatOutcome>[0]> = {})
 beforeEach(() => {
   clearChatOutcomesForTests();
   mocks.verifySession.mockReset().mockResolvedValue({ name: "Jeff", role: "parent" });
+  mocks.authorizeCurrentParentRequest.mockReset().mockResolvedValue({ ok: true, member: { id: "m1", role: "parent" } });
 });
 
 describe("ai health recorder", () => {
@@ -82,12 +85,28 @@ describe("ai health recorder", () => {
 
 describe("GET /api/ai/health", () => {
   it("401s without a session", async () => {
-    mocks.verifySession.mockResolvedValue(null);
+    mocks.authorizeCurrentParentRequest.mockResolvedValueOnce({ ok: false, status: 401, error: "unauthorized" });
     const res = await GET(new NextRequest("http://localhost/api/ai/health"));
     expect(res.status).toBe(401);
   });
 
-  it("returns outcomes + summary for a signed-in session", async () => {
+  it.each([
+    ["child", 403, "adult_only"],
+    ["pet", 403, "adult_only"],
+    ["deleted", 401, "unauthorized"],
+    ["outage", 503, "identity_unavailable"],
+  ])("rejects %s current-parent access before health reads", async (_label, status, error) => {
+    mocks.authorizeCurrentParentRequest.mockResolvedValueOnce({ ok: false, status, error });
+    recordChatOutcome(entry({ outcome: "ok", ms: 1000 }));
+
+    const res = await GET(new NextRequest("http://localhost/api/ai/health"));
+
+    expect(res.status).toBe(status);
+    expect(await res.json()).toMatchObject({ error });
+    expect(getRecentOutcomes()).toHaveLength(1);
+  });
+
+  it("returns outcomes + summary for a current parent", async () => {
     recordChatOutcome(entry({ outcome: "ok", ms: 1000 }));
     recordChatOutcome(entry({ outcome: "exhausted", ms: 4000 }));
     const res = await GET(new NextRequest("http://localhost/api/ai/health"));

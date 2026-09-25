@@ -4,7 +4,7 @@
 
 **Goal:** Close review findings #1/#3/#4 — server-side session auth on all API routes, PocketBase collections locked to admin-only with all browser access rerouted through an authenticated gateway, and hardcoded family PINs removed from the client bundle.
 
-**Architecture:** HMAC-signed httpOnly session cookie issued by `/api/auth/login` after server-side PIN verification. Next.js middleware rejects unauthenticated `/api/**` calls except routes with their own stronger gates (cron bearer, admin pin/secret, alarm PIN). A generic `/api/db/...` gateway (session-required, collection-allowlisted) replaces direct browser→PocketBase traffic; `src/db/index.ts` gains a client branch that calls the gateway so existing hooks/pages don't change. PB rules flip from public (`""`) to admin-only (`null`) and the seeder enforces the locked state instead of self-healing it open. Login no longer trusts the client: the browser never sees PINs at all.
+**Architecture:** HMAC-signed httpOnly session cookie issued by `/api/auth/login` after server-side PIN verification. Next.js middleware rejects unauthenticated `/api/**` calls except routes with their own stronger gates (cron bearer, admin pin/secret, alarm PIN, public catalog/search surfaces); `/api/emergency/test` has a signed-cookie presence gate and its route performs the authoritative current-parent PB check. A generic `/api/db/...` gateway (session-required, collection-allowlisted) replaces direct browser→PocketBase traffic; `src/db/index.ts` gains a client branch that calls the gateway so existing hooks/pages don't change. PB rules flip from public (`""`) to admin-only (`null`) and the seeder enforces the locked state instead of self-healing it open. Login no longer trusts the client: the browser never sees PINs at all.
 
 **Tech Stack:** Next.js App Router middleware (Web Crypto for edge-safe HMAC verify), node:crypto in server libs, PocketBase admin SDK via existing `withAdmin`, vitest.
 
@@ -12,7 +12,7 @@
 
 - No new npm dependencies — use `node:crypto` (server) and `crypto.subtle` (middleware).
 - `SESSION_SECRET` and existing env vars are required in docker-compose (`${VAR:?}` style) — fail fast.
-- Kid mode behavior must not change: children can log in; role comes from the server session, never the request body.
+- Kid mode behavior must not change: children can log in; role comes from the current live PB member record, never the request body or a stale signed-cookie role.
 - Intent-confirmation PIN prompts (alarm arm/disarm, emergency, suggestions act) stay PIN-typed; they verify server-side via `verifyPinFromPB`/`verifyPinAgainstAnyMember` as today.
 - All existing tests must stay green (suite currently 428 passing).
 - Every task ends with `npx vitest run`, `npm run typecheck`, and a commit.

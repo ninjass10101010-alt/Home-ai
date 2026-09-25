@@ -27,7 +27,9 @@ export function mergeMemberFallbacks(pbMembers: any[]): any[] {
   // or be addressed — drop it here so every consumer (client cache, server
   // auth) is protected and the fallbacks for the missing real members still
   // get merged in.
-  const live = (pbMembers || []).filter((m: any) => (m.name || "").trim());
+  const live = (pbMembers || []).filter((m: any) => (m.name || "").trim()).map((m: any) => (
+    typeof m.id === "string" && !m.pbId ? { ...m, pbId: m.id } : m
+  ));
   const pbFirstNames = new Set(
     live.map((m: any) => m.name.split(" ")[0].toLowerCase())
   );

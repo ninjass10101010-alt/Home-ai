@@ -62,6 +62,12 @@ async function clientListOrEmpty(collection: string): Promise<any[]> {
   }
 }
 
+async function authoritativeClientList(collection: string): Promise<any[]> {
+  const rows = await gatewayList(collection);
+  if (!Array.isArray(rows)) throw new Error(`authoritative_read_invalid:${collection}`);
+  return rows;
+}
+
 // Mirrors pb-db selectMembers' mapped shape for event/task/schedule joins
 // without fetching members over PB (members stay excluded from the gateway).
 function memberJoinList(): any[] {
@@ -182,13 +188,16 @@ async function fetchMembersRoster(): Promise<any[]> {
   return Array.isArray(data?.members) ? data.members : [];
 }
 
-async function refreshMembersCache() {
+async function refreshMembersCache(): Promise<boolean> {
   try {
     const fresh = isServer() ? await pbDb.selectMembers() : await fetchMembersRoster();
     membersCache = mergeMemberFallbacks(fresh || []);
     markRefreshed("members");
     if (!isServer()) window.dispatchEvent(new CustomEvent("consuela-members-updated"));
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // Tasks/week_data live behind the Tasks page's snapshot gateway
@@ -303,7 +312,7 @@ export const db = {
   selectMembers: () => {
     if (membersCache.length === 0) return mappedMembersFallback();
     return membersCache.map((m: any, i: number) => ({
-      id: i + 1, name: m.name?.split(' ')[0] || m.name, fullName: m.name,
+      id: i + 1, ...(typeof m.pbId === "string" && m.pbId ? { pbId: m.pbId } : {}), name: m.name?.split(' ')[0] || m.name, fullName: m.name,
       role: m.role || "member", color: cacheMemberColor(m, i), emoji: m.emoji || "😊",
       pin: m.pin,
     }));
@@ -321,6 +330,7 @@ export const db = {
       avatarSize: (m as any).avatarSize || "md", glow: (m as any).glow || false,
     }));
     return membersCache.map((m: any, i: number) => ({
+      ...(typeof m.pbId === "string" && m.pbId ? { pbId: m.pbId } : {}),
       name: m.name, role: m.role || "member", emoji: m.emoji || "😊",
       color: cacheMemberColor(m, i), age: m.age || "", joined: m.created || "",
       skinColor: (m as any).skinColor, hairColor: (m as any).hairColor,
@@ -522,6 +532,9 @@ export const db = {
   },
 
   selectMeals: async () => dualFetch.meals(),
+  selectMealsAuthoritative: async () => isServer()
+    ? pbDb.selectMealsAuthoritative()
+    : mapMealRows(await authoritativeClientList("meal_plan_entries")),
   selectMealIdeas: () => mealIdeas,
   insertMeal: async (meal: any) => {
     const result = isServer()
@@ -642,6 +655,9 @@ export const db = {
     // === PB pass-through methods for collections without local cache ===
 
   selectSchedules: async () => isServer() ? pbDb.selectSchedules() : clientListOrEmpty("schedules"),
+  selectSchedulesAuthoritative: async () => isServer()
+    ? pbDb.selectSchedulesAuthoritative()
+    : authoritativeClientList("schedules"),
 
   upsertTask: async (task: any) => {
     if (!isServer()) {
@@ -770,6 +786,9 @@ export const db = {
       ? pbDb.insertHallOfFameEntry(data)
       : safeGatewayRow(() => gatewayCreate("hall_of_fame", data)),
   selectHallOfFame: async () => isServer() ? pbDb.selectHallOfFame() : clientListOrEmpty("hall_of_fame"),
+  selectHallOfFameAuthoritative: async () => isServer()
+    ? pbDb.selectHallOfFameAuthoritative()
+    : authoritativeClientList("hall_of_fame"),
   updateHallOfFameEntry: async (id: string, patch: { celebrated: boolean }) =>
     isServer()
       ? pbDb.updateHallOfFameEntry(id, patch)

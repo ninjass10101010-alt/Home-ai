@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   pruneCalendar: vi.fn(),
   ensureGoogleCollections: vi.fn(),
   verifySession: vi.fn(),
+  authorizeCurrentParentRequest: vi.fn(),
+  withGoogleIntegrationOperation: vi.fn(),
 }));
 
 vi.mock("@/lib/google/oauth-client", () => ({
@@ -33,6 +35,10 @@ vi.mock("@/lib/session", () => ({
 
 vi.mock("@/lib/server-auth", () => ({
   verifyPinAgainstAnyMember: vi.fn(async () => null),
+  authorizeCurrentParentRequest: mocks.authorizeCurrentParentRequest,
+}));
+vi.mock("@/lib/google/integration-operation", () => ({
+  withGoogleIntegrationOperation: mocks.withGoogleIntegrationOperation,
 }));
 
 import { GET, PUT } from "@/app/api/google/calendars/route";
@@ -71,7 +77,17 @@ const SAVED_ROWS = [
 
 beforeEach(() => {
   for (const m of Object.values(mocks)) m.mockReset();
+  mocks.verifySession.mockResolvedValue({ memberId: "m0", name: "Jeffery", role: "parent" });
+  mocks.isGoogleConnected.mockResolvedValue(true);
+  mocks.authorizeCurrentParentRequest.mockImplementation(async (request: Request) => {
+    const token = (request.headers.get("cookie") || "").split(";").map((part) => part.trim()).find((part) => part.startsWith("consuela_session="))?.slice("consuela_session=".length) || "";
+    const session = await mocks.verifySession(token);
+    if (!session) return { ok: false, status: 401, error: "unauthorized" };
+    if (session.role !== "parent") return { ok: false, status: 403, error: "adult_only" };
+    return { ok: true };
+  });
   mocks.ensureGoogleCollections.mockResolvedValue([]);
+  mocks.withGoogleIntegrationOperation.mockImplementation((fn: () => Promise<unknown>) => fn());
 });
 
 describe("GET /api/google/calendars", () => {
@@ -80,7 +96,7 @@ describe("GET /api/google/calendars", () => {
     mocks.listCalendars.mockResolvedValue(GOOGLE_CALS);
     mocks.readCalendarSyncRows.mockResolvedValue(SAVED_ROWS);
 
-    const res = await GET();
+    const res = await GET(req({ cookie: "adult-cookie" }));
     const data = await res.json();
 
     expect(res.status).toBe(200);
@@ -111,7 +127,7 @@ describe("GET /api/google/calendars", () => {
     mocks.listCalendars.mockResolvedValue(GOOGLE_CALS);
     mocks.readCalendarSyncRows.mockResolvedValue([]);
 
-    const data = await (await GET()).json();
+    const data = await (await GET(req({ cookie: "adult-cookie" }))).json();
     expect(data.calendars.find((c: any) => c.id === "primary").selected).toBe(true);
     expect(data.calendars.find((c: any) => c.id === FAMILY).selected).toBe(false);
   });
@@ -120,7 +136,7 @@ describe("GET /api/google/calendars", () => {
     mocks.isGoogleConnected.mockResolvedValue(false);
     mocks.readCalendarSyncRows.mockResolvedValue(SAVED_ROWS);
 
-    const data = await (await GET()).json();
+    const data = await (await GET(req({ cookie: "adult-cookie" }))).json();
 
     expect(mocks.listCalendars).not.toHaveBeenCalled();
     expect(data.connected).toBe(false);
@@ -145,6 +161,19 @@ describe("PUT /api/google/calendars", () => {
     expect(res.status).toBe(403);
     expect(mocks.setCalendarSelection).not.toHaveBeenCalled();
     expect(mocks.pruneCalendar).not.toHaveBeenCalled();
+  });
+
+  it("rejects a queued selection after the current grant is disconnected before setup", async () => {
+    mocks.verifySession.mockResolvedValue({ memberId: "m0", name: "Jeffery", role: "parent" });
+    mocks.readCalendarSyncRows.mockResolvedValue([]);
+    mocks.isGoogleConnected.mockResolvedValue(false);
+
+    const res = await PUT(req({ method: "PUT", cookie: "adult-cookie", body: { calendars: [{ id: FAMILY, selected: true }] } }));
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ ok: false, connected: false });
+    expect(mocks.ensureGoogleCollections).not.toHaveBeenCalled();
+    expect(mocks.setCalendarSelection).not.toHaveBeenCalled();
   });
 
   it("saves a newly selected calendar (no prior row → no token → next sync full-pulls)", async () => {

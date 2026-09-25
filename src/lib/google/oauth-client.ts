@@ -1,5 +1,5 @@
 import { refreshAccessToken, revokeGoogleToken } from "./device-auth.ts";
-import { getStoredTokens, updateAccessToken, revokeTokens } from "./token-store.ts";
+import { getStoredTokensStrict, updateAccessToken, revokeTokens } from "./token-store.ts";
 import { recordApiCall } from "./api-quota.ts";
 
 const SAFETY_MARGIN_MS = 60_000;
@@ -8,11 +8,61 @@ const REFRESH_LOCK_MS = 30_000;
 let inflightRefresh: Promise<string> | null = null;
 let lastRefreshAttempt = 0;
 
+export type GoogleAuthErrorCode =
+  | "no_grant"
+  | "unavailable"
+  | "revoked"
+  | "expired"
+  | "refresh_failed"
+  | "config";
+
 export class GoogleAuthError extends Error {
-  code: "no_grant" | "revoked" | "expired" | "refresh_failed" | "config";
-  constructor(code: "no_grant" | "revoked" | "expired" | "refresh_failed" | "config", message: string) {
+  code: GoogleAuthErrorCode;
+  constructor(code: GoogleAuthErrorCode, message: string) {
     super(message);
     this.code = code;
+  }
+}
+
+export interface GoogleAuthErrorResponse {
+  status: 401 | 409 | 500 | 503;
+  body: {
+    ok: false;
+    code: GoogleAuthErrorCode | "unknown";
+    error: string;
+  };
+}
+
+export function mapGoogleAuthError(error: unknown): GoogleAuthErrorResponse {
+  if (error instanceof GoogleAuthError) {
+    const status = error.code === "unavailable"
+      ? 503
+      : error.code === "no_grant"
+        ? 409
+        : 401;
+    return {
+      status,
+      body: { ok: false, code: error.code, error: error.message },
+    };
+  }
+
+  const message = error instanceof Error && error.message
+    ? error.message
+    : typeof error === "string" && error
+      ? error
+      : "Unknown Google auth error";
+  return {
+    status: 500,
+    body: { ok: false, code: "unknown", error: message },
+  };
+}
+
+async function readStoredTokensStrict() {
+  try {
+    return await getStoredTokensStrict();
+  } catch (error) {
+    if (error instanceof GoogleAuthError) throw error;
+    throw new GoogleAuthError("unavailable", "Google token state unavailable");
   }
 }
 
@@ -46,7 +96,7 @@ async function refresh(): Promise<string> {
 
   inflightRefresh = (async () => {
     try {
-      const tokens = await getStoredTokens();
+      const tokens = await readStoredTokensStrict();
       if (!tokens || tokens.revoked_at) {
         throw new GoogleAuthError("no_grant", "Google account is not connected");
       }
@@ -70,7 +120,7 @@ async function refresh(): Promise<string> {
 }
 
 async function getValidAccessToken(): Promise<string> {
-  const tokens = await getStoredTokens();
+  const tokens = await readStoredTokensStrict();
   if (!tokens || tokens.revoked_at) {
     throw new GoogleAuthError("no_grant", "Google account is not connected");
   }
@@ -108,7 +158,7 @@ export async function googleFetch<T = unknown>(
     token = await getValidAccessToken();
   } catch (e: any) {
     if (e instanceof GoogleAuthError) throw e;
-    throw new GoogleAuthError("no_grant", e?.message || "No Google connection");
+    throw new GoogleAuthError("unavailable", e?.message || "Google token state unavailable");
   }
 
   let res = await doFetch(token);
@@ -156,15 +206,16 @@ export async function googleFetch<T = unknown>(
 
 export async function isGoogleConnected(): Promise<boolean> {
   try {
-    const tokens = await getStoredTokens();
+    const tokens = await readStoredTokensStrict();
     return !!(tokens && !tokens.revoked_at && tokens.refresh_token);
-  } catch {
-    return false;
+  } catch (error) {
+    if (error instanceof GoogleAuthError) throw error;
+    throw new GoogleAuthError("unavailable", "Google token state unavailable");
   }
 }
 
 export async function disconnectGoogle(): Promise<void> {
-  const tokens = await getStoredTokens();
+  const tokens = await readStoredTokensStrict();
   if (tokens && !tokens.revoked_at) {
     await revokeGoogleToken(tokens.access_token).catch(() => false);
     if (tokens.refresh_token) {

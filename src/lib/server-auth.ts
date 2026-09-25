@@ -1,10 +1,14 @@
+import { randomInt } from "node:crypto";
+import { withKeyedLock } from "@/lib/keyed-lock";
 import { withAdmin } from "./pb-auth";
-import { memberPinMatches, resolveMemberPin } from "./member-pins";
+import { memberPinMatches } from "./member-pins";
 import { mergeMemberFallbacks } from "./member-fallback";
 import { resolveDefaultMemberPin } from "./pb-seed";
+import { SESSION_COOKIE, verifySession, type SessionPayload } from "./session";
 
 export interface ServerMember {
   id: string;
+  pbId?: string;
   name: string;
   role: string;
   emoji: string;
@@ -16,6 +20,42 @@ export interface ServerMember {
   email?: string;
 }
 
+export interface CurrentParentAuthResult {
+  ok: boolean;
+  status?: number;
+  error?: string;
+  member?: ServerMember;
+  session?: SessionPayload;
+}
+
+function sessionCookieValue(request: Request): string | undefined {
+  const cookie = request.headers.get("cookie") || "";
+  const entry = cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${SESSION_COOKIE}=`));
+  return entry?.slice(SESSION_COOKIE.length + 1) || undefined;
+}
+
+export async function authorizeCurrentMemberRequest(request: Request): Promise<CurrentParentAuthResult> {
+  const session = await verifySession(sessionCookieValue(request));
+  if (!session) return { ok: false, status: 401, error: "unauthorized" };
+  try {
+    const member = await withAdmin((pb) => pb.collection("members").getOne(session.memberId, { requestKey: null }));
+    if (!member) return { ok: false, status: 401, error: "unauthorized" };
+    return { ok: true, member: sanitizeMember(member), session };
+  } catch (error: any) {
+    if (error?.status === 404) return { ok: false, status: 401, error: "unauthorized" };
+    return { ok: false, status: 503, error: "identity_unavailable" };
+  }
+}
+
+export async function authorizeCurrentParentRequest(request: Request): Promise<CurrentParentAuthResult> {
+  const auth = await authorizeCurrentMemberRequest(request);
+  if (!auth.ok) return auth;
+  if (String(auth.member?.role || "").toLowerCase() !== "parent") {
+    return { ok: false, status: 403, error: "adult_only" };
+  }
+  return auth;
+}
+
 export function namesMatch(recordName: string, query: string): boolean {
   const firstName = query.split(" ")[0];
   return (
@@ -25,6 +65,20 @@ export function namesMatch(recordName: string, query: string): boolean {
     recordName === firstName ||
     firstName.startsWith(recordName)
   );
+}
+
+function normalizeMemberName(value: unknown): string {
+  return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function fuzzyMemberNameMatches(recordName: string, query: string): boolean {
+  const normalizedRecord = normalizeMemberName(recordName);
+  const normalizedQuery = normalizeMemberName(query);
+  if (!normalizedRecord || !normalizedQuery) return false;
+  if (namesMatch(normalizedRecord, normalizedQuery)) return true;
+  const recordFirstName = normalizedRecord.split(" ")[0];
+  const queryFirstName = normalizedQuery.split(" ")[0];
+  return recordFirstName.startsWith(queryFirstName) || queryFirstName.startsWith(recordFirstName);
 }
 
 // The client-side cache composes live PB members with the built-in fallbacks
@@ -39,18 +93,87 @@ function withResolvedPins(members: any[]): any[] {
   );
 }
 
+export const MEMBER_ADMIN_LOCK_KEY = "member-admin";
+
+export async function findLiveMemberByName(name: string): Promise<any | null> {
+  if (!name) return null;
+  return withAdmin(async (pb) => {
+    const records = await pb.collection("members").getFullList({ requestKey: null });
+    return records.find((row: any) => namesMatch(row.name, name)) || null;
+  });
+}
+
+export async function findLiveMemberById(id: string | undefined): Promise<any | null> {
+  if (!id) return null;
+  return withAdmin(async (pb) => {
+    try {
+      return await pb.collection("members").getOne(id, { requestKey: null });
+    } catch (error: any) {
+      if (error?.status === 404) return null;
+      throw error;
+    }
+  });
+}
+
+export async function findLiveMemberByExactName(name: string | undefined): Promise<any | null> {
+  if (!name) return null;
+  const normalizedName = normalizeMemberName(name);
+  return withAdmin(async (pb) => {
+    const records = await pb.collection("members").getFullList({ requestKey: null });
+    const matches = records.filter((row: any) => normalizeMemberName(row.name) === normalizedName);
+    return matches.length === 1 ? matches[0] : null;
+  });
+}
+
+export function withMemberAdminOperation<T>(fn: () => Promise<T>): Promise<T> {
+  return withKeyedLock(MEMBER_ADMIN_LOCK_KEY, fn);
+}
+
+export async function isMemberPinAvailable(pin: string, targetId?: string): Promise<boolean> {
+  return withAdmin(async (pb) => {
+    const records = await pb.collection("members").getFullList({ requestKey: null });
+    const credentials = withResolvedPins(mergeMemberFallbacks(records));
+    return !credentials.some((row: any) => String(row.pin) === pin && String(row.id) !== String(targetId));
+  });
+}
+
+export async function verifyPinForMemberId(memberId: string, pin: string): Promise<any | null> {
+  if (!memberId || !pin) return null;
+  const key = pinThrottleKey(undefined, memberId);
+  if (!checkPinThrottle(key)) return null;
+  const member = await findLiveMemberById(memberId);
+  const resolved = member ? withResolvedPins([member])[0] : null;
+  if (!resolved || !memberPinMatches(resolved, pin)) {
+    recordPinFailure(key);
+    return null;
+  }
+  recordPinSuccess(key);
+  return resolved;
+}
+
 export async function findMemberByName(name: string): Promise<any | null> {
   if (!name) return null;
   return withAdmin(async (pb) => {
     const records = await pb.collection("members").getFullList({ requestKey: null });
     const merged = withResolvedPins(mergeMemberFallbacks(records));
-    return merged.find((r: any) => namesMatch(r.name, name)) || null;
+    const normalized = normalizeMemberName(name);
+    const exact = merged.filter((row: any) => normalizeMemberName(row.name) === normalized);
+    if (exact.length === 1) return exact[0];
+    if (exact.length > 1) return null;
+    const fuzzy = merged.filter((row: any) => fuzzyMemberNameMatches(String(row.name || ""), name));
+    return fuzzy.length === 1 ? fuzzy[0] : null;
   });
 }
 
-// Full merged member universe, sanitized: PB rows win, built-in fallbacks fill
-// gaps (fresh dev/integration instances), and every pin — stored or seed-side
-// default — is stripped before anything leaves the server.
+// Live PB member rows, sanitized: fallback-only rows are not returned here, and
+// every pin is stripped before anything leaves the server.
+export async function listLiveMembersSanitized(): Promise<any[]> {
+  return withAdmin(async (pb) => {
+    const records = await pb.collection("members").getFullList({ requestKey: null });
+    return records.map(sanitizeMember);
+  });
+}
+
 export async function listMembersSanitized(): Promise<any[]> {
   return withAdmin(async (pb) => {
     const records = await pb.collection("members").getFullList({ requestKey: null });
@@ -59,10 +182,10 @@ export async function listMembersSanitized(): Promise<any[]> {
 }
 
 // --- PIN attempt throttling (brute-force protection) ---
-// Repeated failed verifications from the same source lock that source out
-// (5 consecutive failures → 30s lockout, extending on further attempts). A
-// successful verification resets the counter. In-memory by design: a restart
-// clears state, which is acceptable protection for a LAN dashboard.
+// Named verification uses the resolved live member ID as its throttle key; the
+// any-member PIN path uses a shared source key. Failed attempts lock that key
+// for 30 seconds after five failures, extending on rejected attempts during
+// lockout, while a successful verification resets it. State is process-local.
 const PIN_MAX_FAILURES = 5;
 const PIN_LOCKOUT_MS = 30_000;
 
@@ -110,9 +233,9 @@ export function __resetPinThrottleForTests(): void {
 
 export async function verifyPinFromPB(name: string, pin: string): Promise<any | null> {
   if (!name || !pin) return null;
-  const key = pinThrottleKey(undefined, String(name));
-  if (!checkPinThrottle(key)) return null;
   const member = await findMemberByName(name);
+  const key = pinThrottleKey(undefined, String(member?.id || name));
+  if (!checkPinThrottle(key)) return null;
   if (!member) {
     recordPinFailure(key);
     return null;
@@ -146,53 +269,57 @@ export async function verifyPinAgainstAnyMember(pin: string): Promise<any | null
   });
 }
 
-// Upsert a member record in PB. When the verified member only exists in the
-// built-in fallbacks (dev/integration instances with an empty members
-// collection), the record is created so profile/PIN changes persist. The
-// resolved PIN is stored too, making PB the source of truth from then on.
+// Update the exact live PB record identified by the actor's pbId/id. Synthetic
+// fallback rows are read-only and cannot be mutated.
 export async function findOrCreateMemberRecord(
   pb: ReturnType<typeof import("./pb").getAdminPB>,
   actor: any,
   patch: Record<string, unknown>
 ): Promise<any> {
-  const records = await pb.collection("members").getFullList({ requestKey: null });
-  const existing = records.find((r: any) => namesMatch(r.name, actor.name));
-  if (existing) {
-    return pb.collection("members").update(existing.id, patch);
-  }
-  return pb.collection("members").create({
-    name: actor.name,
-    pin: resolveMemberPin(actor) || resolveDefaultMemberPin(actor.name),
-    emoji: actor.emoji || "😊",
-    role: actor.role || "member",
-    ...patch,
-  });
+  const actorId = typeof actor?.pbId === "string"
+    ? actor.pbId
+    : typeof actor?.id === "string"
+      ? actor.id
+      : null;
+  if (!actorId) return null;
+  const record = await pb.collection("members").getOne(actorId, { requestKey: null });
+  return pb.collection("members").update(record.id, patch, { requestKey: null });
 }
 
 export function sanitizeMember(member: any): ServerMember {
   const { pin, ...rest } = member;
-  return rest as ServerMember;
+  return {
+    ...rest,
+    ...(typeof member?.id === "string" ? { pbId: member.id } : {}),
+  } as ServerMember;
 }
 
-// Create a brand-new member row (Settings → Family Members "Add member").
-// Mirrors findOrCreateMemberRecord's PIN handling: the request may never carry
-// a pin — any client-supplied value is dropped and the seed-side default for
-// the name is resolved server-side (MEMBER_DEFAULT_PINS) so the new member can
-// log in immediately. Returns null when an existing PB record matches the name
-// (the caller maps that to 409 duplicate).
+function generateUniquePin(used: Set<string>): string {
+  for (let attempt = 0; attempt < 10_000; attempt += 1) {
+    const pin = randomInt(0, 10_000).toString().padStart(4, "0");
+    if (!used.has(pin)) return pin;
+  }
+  throw new Error("member_pin_space_exhausted");
+}
+
 export async function createMemberRecord(
   fields: Record<string, unknown>
 ): Promise<any | null> {
   const { pin: _ignored, ...clean } = fields;
   const name = String(clean.name || "").trim();
   if (!name) return null;
-  return withAdmin(async (pb) => {
+  return withMemberAdminOperation(() => withAdmin(async (pb) => {
     const records = await pb.collection("members").getFullList({ requestKey: null });
-    if (records.some((r: any) => namesMatch(r.name, name))) return null;
+    const normalizedName = normalizeMemberName(name);
+    if (records.some((r: any) => normalizeMemberName(r.name) === normalizedName)) return null;
+    const credentialRows = withResolvedPins(mergeMemberFallbacks(records));
+    const used = new Set(credentialRows.map((r: any) => String(r.pin || "")).filter(Boolean));
+    const seeded = resolveDefaultMemberPin(name);
+    const pin = seeded && !used.has(seeded) ? seeded : generateUniquePin(used);
     return pb.collection("members").create({
       ...clean,
       name,
-      pin: resolveDefaultMemberPin(name),
+      pin,
     });
-  });
+  }));
 }

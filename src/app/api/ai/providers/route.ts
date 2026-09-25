@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authorizeAdminRequest } from "@/lib/admin-auth";
-import { verifySession, SESSION_COOKIE } from "@/lib/session";
+import { authorizeCurrentParentRequest } from "@/lib/server-auth";
 import { listAiProviders, upsertAiProvider, deleteAiProvider } from "@/lib/ai/providers";
 import { resetAiTargetsCache, resolveChatTargets } from "@/lib/ai/targets";
 
@@ -44,8 +44,8 @@ function mask(p: {
 }
 
 export async function GET(request: NextRequest) {
-  const session = await verifySession(request.cookies.get(SESSION_COOKIE)?.value);
-  if (!session) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const auth = await authorizeCurrentParentRequest(request);
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status ?? 401 });
   try {
     const providers = await listAiProviders();
     const withStatus = await Promise.all(

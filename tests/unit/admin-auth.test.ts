@@ -2,10 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   verifyPinAgainstAnyMember: vi.fn(),
+  authorizeCurrentParentRequest: vi.fn(),
 }));
 
 vi.mock("../../src/lib/server-auth", () => ({
   verifyPinAgainstAnyMember: mocks.verifyPinAgainstAnyMember,
+  authorizeCurrentParentRequest: mocks.authorizeCurrentParentRequest,
 }));
 
 import { authorizeAdminRequest } from "../../src/lib/admin-auth";
@@ -16,6 +18,7 @@ function req(headers: Record<string, string> = {}): Request {
 
 beforeEach(() => {
   mocks.verifyPinAgainstAnyMember.mockReset();
+  mocks.authorizeCurrentParentRequest.mockReset().mockResolvedValue({ ok: true });
 });
 
 afterEach(() => {
@@ -61,9 +64,22 @@ describe("authorizeAdminRequest", () => {
     expect(result.ok).toBe(true);
   });
 
+  it("rechecks the current PB parent identity for a session cookie", async () => {
+    const { signSession, SESSION_COOKIE } = await import("../../src/lib/session");
+    vi.stubEnv("SESSION_SECRET", "test-secret-0123456789");
+    const token = await signSession({ memberId: "m1", name: "R", role: "parent" });
+    mocks.authorizeCurrentParentRequest.mockResolvedValueOnce({ ok: false, status: 403, error: "adult_only" });
+
+    const result = await authorizeAdminRequest(req({ cookie: `${SESSION_COOKIE}=${token}` }));
+
+    expect(result).toMatchObject({ ok: false, status: 403, error: "adult_only" });
+    expect(mocks.authorizeCurrentParentRequest).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects a child session cookie with 403", async () => {
     const { signSession, SESSION_COOKIE } = await import("../../src/lib/session");
     vi.stubEnv("SESSION_SECRET", "test-secret-0123456789");
+    mocks.authorizeCurrentParentRequest.mockResolvedValueOnce({ ok: false, status: 403, error: "adult_only" });
     const token = await signSession({ memberId: "m2", name: "Kid", role: "child" });
     const result = await authorizeAdminRequest(req({ cookie: `${SESSION_COOKIE}=${token}` }));
     expect(result.ok).toBe(false);

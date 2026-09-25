@@ -363,7 +363,7 @@ describe("syncAllTasksToPB — weekly prizes leg", () => {
   it("tolerates the legacy 6-arg call (weeklyPrizes defaults to empty — zero gateway traffic)", async () => {
     await expect(
       syncAllTasksToPB([], emptyWeekData(), {}, [], [], [])
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ pushed: 1, errors: 0 });
     expect(callsMatching("weekly_prizes")).toHaveLength(0);
   });
 
@@ -371,7 +371,7 @@ describe("syncAllTasksToPB — weekly prizes leg", () => {
     expect(syncWeeklyPrizesToPB).toBeDefined();
     await expect(
       syncAllTasksToPB([], emptyWeekData(), {}, [], [], [], PRIZES_SNAP)
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ pushed: 3, errors: 0 });
     const creates = callsTo("/api/db/weekly_prizes", "POST");
     expect(creates).toHaveLength(PRIZES_SNAP.length);
     for (const prize of PRIZES_SNAP) {
@@ -388,7 +388,7 @@ describe("syncAllTasksToPB — weekly prizes leg", () => {
       ...PRIZES_SNAP,
       { id: "prize-3", rank: 3 as const, emoji: "🥉", text: "+$2 allowance" },
     ];
-    await expect(syncWeeklyPrizesToPB!(three as any)).resolves.toBeUndefined();
+    await expect(syncWeeklyPrizesToPB!(three as any)).resolves.toEqual({ pushed: 2, errors: 1 });
     expect(callsTo("/api/db/weekly_prizes", "POST")).toHaveLength(3);
   });
 });

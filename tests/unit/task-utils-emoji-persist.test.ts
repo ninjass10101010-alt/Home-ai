@@ -58,7 +58,7 @@ describe("syncTasksToPB assigneeEmoji sanitization", () => {
       new Error("Failed to create record: validation_max_text_constraint")
     );
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    await expect(syncTasksToPB([t()])).resolves.toBeUndefined();
+    await expect(syncTasksToPB([t()])).resolves.toEqual({ pushed: 0, errors: 1 });
     expect(warn).toHaveBeenCalled();
     const msg = String(warn.mock.calls[0]?.[0] ?? "");
     expect(msg).toContain("syncTasksToPB failed");

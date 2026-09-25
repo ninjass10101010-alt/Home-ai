@@ -3,7 +3,7 @@
 // wall-chrome.test.tsx). No existing test renders the full settings page and
 // mocking its whole hook graph would be disproportionate, so the control is
 // extracted to src/components/settings/WallDisplayToggle.tsx (self-contained:
-// localStorage + event dispatch, mounted-gated) and the settings page renders
+// localStorage + event dispatch, mounted-gated) and HomeSettingsSection renders
 // it inside the "Layout & display" SectionCard. The plan's two behavioral
 // assertions are preserved: the control exists in the card (wiring contract
 // test below) and selecting On persists consuela-wall-mode.
@@ -103,9 +103,9 @@ describe("WallDisplayToggle", () => {
   });
 });
 
-describe("settings page wiring contract", () => {
-  it("renders WallDisplayToggle inside the Layout & display card", () => {
-    const src = readFileSync(resolve(__dirname, "../../src/app/settings/page.tsx"), "utf8");
+describe("HomeSettingsSection wiring contract", () => {
+  it("renders WallDisplayToggle inside the standalone Home settings component", () => {
+    const src = readFileSync(resolve(__dirname, "../../src/components/settings/HomeSettingsSection.tsx"), "utf8");
     expect(src).toContain('from "@/components/settings/WallDisplayToggle"');
     expect(src).toContain("<WallDisplayToggle />");
   });

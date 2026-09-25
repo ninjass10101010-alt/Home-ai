@@ -50,6 +50,14 @@ async function safeList<T>(collection: string, fallback: T[]): Promise<T[]> {
   }
 }
 
+async function authoritativeList<T>(collection: string): Promise<T[]> {
+  const client = await pbClient();
+  if (!client) throw new Error(`authoritative_read_failed:${collection}`);
+  const records = await client.collection(collection).getFullList<T>({ requestKey: null });
+  if (!Array.isArray(records)) throw new Error(`authoritative_read_invalid:${collection}`);
+  return records as T[];
+}
+
 async function safeGet<T>(collection: string, id: string, fallback: T | null): Promise<T | null> {
   try {
     const client = await pbClient();
@@ -101,7 +109,7 @@ export const db = {
       skinColor: m.skinColor, hairColor: m.hairColor, age: m.age,
     }));
     return records.map((r: any, i: number) => ({
-      id: r.id, name: r.name.split(' ')[0], fullName: r.name,
+      id: r.id, ...(typeof r.id === "string" ? { pbId: r.id } : {}), name: r.name.split(' ')[0], fullName: r.name,
       role: r.role || "member", color: memberColor(i), emoji: r.emoji || "😊",
       pin: r.pin, age: (r as any).age ?? undefined,
     }));
@@ -117,6 +125,7 @@ export const db = {
       avatarSize: (m as any).avatarSize || "md", glow: (m as any).glow || false,
     }));
     return records.map((r: any, i: number) => ({
+      ...(typeof r.id === "string" ? { pbId: r.id } : {}),
       name: r.name, role: r.role || "member", emoji: r.emoji || "😊",
       color: memberColor(i), age: r.age ?? "", joined: r.created || "",
       skinColor: r.skinColor, hairColor: r.hairColor, pin: r.pin || "",
@@ -278,6 +287,10 @@ export const db = {
     return mapMealRows(meals);
   },
 
+  async selectMealsAuthoritative(): Promise<any[]> {
+    return mapMealRows(await authoritativeList<any>("meal_plan_entries"));
+  },
+
   async insertMeal(meal: any): Promise<any> {
     const data = { ...meal };
     if (Array.isArray(data.ingredients)) data.ingredients = JSON.stringify(data.ingredients);
@@ -339,6 +352,10 @@ export const db = {
   // === Schedules (full list) ===
   async selectSchedules(): Promise<any[]> {
     return safeList<any>("schedules", schedulesFallback);
+  },
+
+  async selectSchedulesAuthoritative(): Promise<any[]> {
+    return authoritativeList<any>("schedules");
   },
 
   // === Auth Sessions ===
@@ -476,6 +493,9 @@ export const db = {
   },
   async selectHallOfFame(): Promise<any[]> {
     return safeList<any>("hall_of_fame", []);
+  },
+  async selectHallOfFameAuthoritative(): Promise<any[]> {
+    return authoritativeList<any>("hall_of_fame");
   },
   async updateHallOfFameEntry(id: string, patch: { celebrated: boolean }): Promise<any | null> {
     return safeUpdate("hall_of_fame", id, patch);

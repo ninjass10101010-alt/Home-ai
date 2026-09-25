@@ -23,7 +23,7 @@ vi.mock("@/components/ui/SyncInit", () => ({ default: () => null }));
 // fullName "Jasmine Rose" — the same key the classic PIN path credits.
 vi.mock("@/db", () => ({
   db: {
-    refreshMembersCache: vi.fn(async () => {}),
+    refreshMembersCache: vi.fn(async () => true),
     selectMembers: () => [
       { id: 1, name: "Rebecca", fullName: "Rebecca (Mom)", role: "parent", emoji: "👩", color: "violet" },
       { id: 2, name: "Jasmine", fullName: "Jasmine Rose", role: "child", age: 10, emoji: "👧", color: "rose" },

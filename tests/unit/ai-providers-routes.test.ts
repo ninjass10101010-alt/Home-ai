@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
     String(raw).trim().replace(/\/+$/, "").replace(/\/v1$/, "")
   ),
   authorizeAdminRequest: vi.fn(async (): Promise<{ ok: boolean; status?: number; error?: string }> => ({ ok: true })),
+  authorizeCurrentParentRequest: vi.fn(async (): Promise<{ ok: boolean; status?: number; error?: string; member?: any }> => ({ ok: true, member: { id: "m1", role: "parent" } })),
   verifySession: vi.fn(async (): Promise<{ name: string; role: string } | null> => ({ name: "Jeff", role: "parent" })),
   resolveChatTargets: vi.fn(async (): Promise<any[]> => []),
 }));
@@ -25,6 +26,7 @@ vi.mock("@/lib/ai/targets", () => ({
   resetAiTargetsCache: vi.fn(),
 }));
 vi.mock("@/lib/admin-auth", () => ({ authorizeAdminRequest: mocks.authorizeAdminRequest }));
+vi.mock("@/lib/server-auth", () => ({ authorizeCurrentParentRequest: mocks.authorizeCurrentParentRequest }));
 vi.mock("@/lib/session", () => ({
   verifySession: mocks.verifySession,
   SESSION_COOKIE: "consuela_session",
@@ -47,7 +49,7 @@ beforeEach(() => {
 
 describe("GET /api/ai/providers", () => {
   it("401s without a session", async () => {
-    mocks.verifySession.mockResolvedValue(null);
+    mocks.authorizeCurrentParentRequest.mockResolvedValueOnce({ ok: false, status: 401, error: "unauthorized" });
     const res = await providersGET(req("http://localhost/api/ai/providers"));
     expect(res.status).toBe(401);
   });

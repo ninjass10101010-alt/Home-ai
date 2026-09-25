@@ -147,6 +147,7 @@ export async function fetchAccountEmail(accessToken: string): Promise<string | n
   try {
     const res = await fetch(GOOGLE_USERINFO_URL, {
       headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(5_000),
     });
     if (!res.ok) return null;
     const data = (await res.json()) as { email?: string };
@@ -193,6 +194,7 @@ export async function revokeGoogleToken(token: string): Promise<boolean> {
     const res = await fetch(`${GOOGLE_REVOKE_URL}?token=${encodeURIComponent(token)}`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      signal: AbortSignal.timeout(5_000),
     });
     return res.ok;
   } catch {

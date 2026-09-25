@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextRequest } from "next/server";
 
 const mocks = vi.hoisted(() => ({
   readCalendarSyncRows: vi.fn(),
   withAdmin: vi.fn(),
+  authorizeCurrentParentRequest: vi.fn(),
 }));
 
 vi.mock("@/lib/google/calendar", () => ({
@@ -12,6 +14,7 @@ vi.mock("@/lib/google/calendar", () => ({
 vi.mock("@/lib/pb-auth", () => ({
   withAdmin: (fn: (pb: unknown) => Promise<unknown>) => mocks.withAdmin(fn),
 }));
+vi.mock("@/lib/server-auth", () => ({ authorizeCurrentParentRequest: mocks.authorizeCurrentParentRequest }));
 
 import { GET } from "@/app/api/google/sync-state/route";
 
@@ -30,10 +33,15 @@ function legacyPb() {
   };
 }
 
+function request() {
+  return new NextRequest("http://localhost/api/google/sync-state", { headers: { cookie: "consuela_session=token" } });
+}
+
 beforeEach(() => {
   mocks.readCalendarSyncRows.mockReset();
   mocks.withAdmin.mockReset();
   mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(legacyPb()));
+  mocks.authorizeCurrentParentRequest.mockResolvedValue({ ok: true, member: { id: "m1", role: "parent" } });
 });
 
 describe("GET /api/google/sync-state — calendar_last_sync_at", () => {
@@ -57,7 +65,7 @@ describe("GET /api/google/sync-state — calendar_last_sync_at", () => {
       },
     ]);
 
-    const data = await (await GET()).json();
+    const data = await (await GET(request())).json();
     expect(data.calendar_last_sync_at).toBe("2026-09-04 12:00:00.000Z");
   });
 
@@ -73,14 +81,14 @@ describe("GET /api/google/sync-state — calendar_last_sync_at", () => {
       },
     ]);
 
-    const data = await (await GET()).json();
+    const data = await (await GET(request())).json();
     expect(data.calendar_last_sync_at).toBeNull();
   });
 
   it("falls back to the legacy row only when NO per-calendar rows exist at all", async () => {
     mocks.readCalendarSyncRows.mockResolvedValue([]);
 
-    const data = await (await GET()).json();
+    const data = await (await GET(request())).json();
     expect(data.calendar_last_sync_at).toBe("2026-08-01 10:00:00.000Z");
     expect(data.tasks_last_sync_at).toBe("2026-08-02 10:00:00.000Z");
   });

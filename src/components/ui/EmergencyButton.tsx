@@ -15,17 +15,78 @@ const emergencyTypes = [
   { id: "general", label: "General", icon: "🚨" },
 ];
 
+type ContactsSource = "live" | "cache";
+
+interface EmergencyResultDetails {
+  successful: number;
+  total: number;
+  failed?: number;
+  partial?: boolean;
+  contactsSource?: ContactsSource;
+  houseAlert?: { sent: number; failed: number; notes: string[] };
+}
+
+interface EmergencyResult {
+  success: boolean;
+  partial: boolean;
+  message: string;
+  contactsSource?: ContactsSource;
+  details?: EmergencyResultDetails;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseContactsSource(value: unknown): ContactsSource | undefined {
+  return value === "live" || value === "cache" ? value : undefined;
+}
+
+function parseEmergencyDetails(value: unknown): EmergencyResultDetails | undefined {
+  if (!isRecord(value)) return undefined;
+  const successful = value.successful;
+  const total = value.total;
+  const failed = value.failed;
+  const contactsSource = parseContactsSource(value.contactsSource);
+  const houseValue = value.houseAlert;
+  const houseAlert = isRecord(houseValue)
+    && typeof houseValue.sent === "number"
+    && typeof houseValue.failed === "number"
+    && Array.isArray(houseValue.notes)
+    && houseValue.notes.every((note) => typeof note === "string")
+    ? { sent: houseValue.sent, failed: houseValue.failed, notes: houseValue.notes }
+    : undefined;
+  if (typeof successful !== "number" || typeof total !== "number") {
+    if (!houseAlert) return undefined;
+    return {
+      successful: 0,
+      total: 0,
+      houseAlert,
+      ...(contactsSource ? { contactsSource } : {}),
+    };
+  }
+  return {
+    successful,
+    total,
+    ...(typeof failed === "number" ? { failed } : {}),
+    ...(value.partial === true ? { partial: true } : {}),
+    ...(contactsSource ? { contactsSource } : {}),
+    ...(houseAlert ? { houseAlert } : {}),
+  };
+}
+
 export default function EmergencyButton({ className = "" }: EmergencyButtonProps) {
   const { wall } = useWallMode();
   const [showModal, setShowModal] = useState(false);
   const [selectedType, setSelectedType] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
-  const [result, setResult] = useState<{success: boolean, message: string, details?: {successful: number, total: number}} | null>(null);
+  const [result, setResult] = useState<EmergencyResult | null>(null);
   const [pinInput, setPinInput] = useState("");
   const pinReady = /^\d{4}$/.test(pinInput);
   const primaryActionRef = useRef<HTMLButtonElement | null>(null);
   const pinInputRef = useRef<HTMLInputElement | null>(null);
   const retryFocusRef = useRef(false);
+  const sendingRef = useRef(false);
 
   // When the result screen replaces the type picker, move focus to its primary
   // action so the dialog's focus trap keeps a live target inside the panel.
@@ -41,7 +102,7 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
   }, [result]);
 
   const closeFlow = () => {
-    if (isSending) return;
+    if (isSending || sendingRef.current) return;
     setShowModal(false);
     setSelectedType(null);
     setResult(null);
@@ -52,7 +113,8 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
   const handleEmergency = async (type: string) => {
     // The PIN is typed by the user here and verified server-side against
     // PocketBase — the client never stores or carries a copy of it.
-    if (!pinReady) return;
+    if (!pinReady || sendingRef.current) return;
+    sendingRef.current = true;
     setSelectedType(type);
     setIsSending(true);
     setResult(null);
@@ -67,23 +129,57 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
         body: JSON.stringify({ type, timestamp: new Date().toISOString(), pin: pinInput }),
       });
 
-      const data = await response.json();
-
-      if (response.ok) {
-        setResult({ success: true, message: data.message, details: data.details });
+      const data = await response.json() as unknown;
+      const payload = isRecord(data) ? data : null;
+      const responseStatus = typeof response.status === "number"
+        ? response.status
+        : response.ok ? 200 : 500;
+      const details = parseEmergencyDetails(payload?.details);
+      const contactsSource = parseContactsSource(payload?.contactsSource) ?? details?.contactsSource;
+      const success = response.ok !== false
+        && responseStatus >= 200
+        && responseStatus < 300
+        && payload?.success === true;
+      const partial = success && (payload?.partial === true || details?.partial === true);
+      if (success) {
+        setResult({
+          success: true,
+          partial,
+          contactsSource,
+          message: typeof payload?.message === "string" ? payload.message : "Emergency alert sent.",
+          details,
+        });
       } else {
-        setResult({ success: false, message: data.error });
+        setResult({
+          success: false,
+          partial: false,
+          contactsSource,
+          message: responseStatus >= 200 && responseStatus < 300
+            ? "Emergency service returned an invalid result. Please try again or call emergency services directly."
+            : typeof payload?.error === "string"
+              ? payload.error
+              : typeof payload?.message === "string"
+                ? payload.message
+                : "Emergency alert failed.",
+          details,
+        });
       }
     } catch (error) {
       console.error("Emergency alert failed:", error);
       setResult({
         success: false,
+        partial: false,
         message: "Network error - emergency alert may not have been sent. Please try again or call emergency services directly."
       });
     } finally {
+      sendingRef.current = false;
       setIsSending(false);
     }
   };
+
+  const resultColor = result?.success
+    ? result.partial ? "var(--color-accent-amber)" : "var(--color-accent-mint)"
+    : "var(--color-accent-rose)";
 
   return (
     <>
@@ -109,10 +205,8 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
             <div
               className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full"
               style={{
-                background: result.success
-                  ? "color-mix(in srgb, var(--color-accent-mint) 15%, transparent)"
-                  : "color-mix(in srgb, var(--color-accent-rose) 15%, transparent)",
-                color: result.success ? "var(--color-accent-mint)" : "var(--color-accent-rose)",
+                background: `color-mix(in srgb, ${resultColor} 15%, transparent)`,
+                color: resultColor,
               }}
             >
               {result.success ? (
@@ -127,16 +221,34 @@ export default function EmergencyButton({ className = "" }: EmergencyButtonProps
             </div>
             <p
               className="mb-2 text-base font-semibold"
-              style={{ color: result.success ? "var(--color-accent-mint)" : "var(--color-accent-rose)" }}
+              style={{ color: resultColor }}
             >
-              {result.success ? "Alert Sent" : "Alert Failed"}
+              {result.success ? result.partial ? "Alert Partially Sent" : "Alert Sent" : "Alert Failed"}
             </p>
             <p className="mb-4 text-sm text-text-secondary">{result.message}</p>
-            {result.success && result.details && (
-              <p className="mb-1 text-sm font-medium text-text-primary">
-                Sent to {result.details.successful} of {result.details.total} contacts
+            {result.contactsSource === "cache" ? (
+              <p
+                role="alert"
+                className="mb-3 rounded-2xl border border-[var(--color-accent-amber)]/30 bg-[var(--color-accent-amber)]/10 p-3 text-sm font-semibold text-[var(--color-accent-amber)]"
+              >
+                Warning: stale cached contacts were used. Recipients may be out of date; verify them before retrying.
               </p>
-            )}
+            ) : null}
+            {result.success && result.details ? (
+              <div className="mb-3 space-y-1 text-sm text-text-primary">
+                <p className="font-medium">
+                  {result.partial
+                    ? `Primary contacts: ${result.details.successful} of ${result.details.total} confirmed.`
+                    : `Sent to ${result.details.successful} of ${result.details.total} contacts`}
+                </p>
+                {result.details.houseAlert ? (
+                  <p>
+                    House channels: {result.details.houseAlert.sent} sent, {result.details.houseAlert.failed} failed.
+                    {result.details.houseAlert.notes.length > 0 ? ` Notes: ${result.details.houseAlert.notes.join("; ")}` : ""}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
             <p className="mb-4 text-xs text-text-secondary">
               If this is a life-threatening emergency, call 911.
             </p>

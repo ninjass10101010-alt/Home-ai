@@ -6,10 +6,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // branch and the x-admin-pin branch.
 const mocks = vi.hoisted(() => ({
   verifyPinAgainstAnyMember: vi.fn(),
+  authorizeCurrentParentRequest: vi.fn(),
 }));
 
 vi.mock("../../src/lib/server-auth", () => ({
   verifyPinAgainstAnyMember: mocks.verifyPinAgainstAnyMember,
+  authorizeCurrentParentRequest: mocks.authorizeCurrentParentRequest,
 }));
 
 import { authorizeAdminRequest } from "../../src/lib/admin-auth";
@@ -26,6 +28,7 @@ async function sessionCookie(role: string): Promise<string> {
 
 beforeEach(() => {
   mocks.verifyPinAgainstAnyMember.mockReset();
+  mocks.authorizeCurrentParentRequest.mockReset().mockResolvedValue({ ok: true });
   vi.stubEnv("ADMIN_SECRET", "");
   vi.stubEnv("SESSION_SECRET", "test-secret-0123456789");
 });
@@ -42,11 +45,13 @@ describe("authorizeAdminRequest — parent allowlist (F7)", () => {
     });
 
     it("rejects a child session with 403 adult_only", async () => {
+      mocks.authorizeCurrentParentRequest.mockResolvedValue({ ok: false, status: 403, error: "adult_only" });
       const result = await authorizeAdminRequest(req({ cookie: await sessionCookie("child") }));
       expect(result).toMatchObject({ ok: false, status: 403, error: "adult_only" });
     });
 
     it("rejects a pet session with 403 adult_only", async () => {
+      mocks.authorizeCurrentParentRequest.mockResolvedValue({ ok: false, status: 403, error: "adult_only" });
       const result = await authorizeAdminRequest(req({ cookie: await sessionCookie("pet") }));
       expect(result).toMatchObject({ ok: false, status: 403, error: "adult_only" });
     });

@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createRoot } from "react-dom/client";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { createRoot, type Root } from "react-dom/client";
 import { act } from "react";
 import type { ReactElement } from "react";
-import SettingsPage from "@/app/settings/page";
+import FamilySettingsSection from "@/components/settings/FamilySettingsSection";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+const mountedRoots: Root[] = [];
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/settings",
@@ -82,10 +83,10 @@ vi.mock("@/hooks/useFogConfig", () => ({
 vi.mock("@/db", () => ({
   db: {
     selectMembersDetailed: () => [
-      { id: 6, name: "Aurora", fullName: "Aurora Garcia", role: "child", age: 7, emoji: "👧", color: "violet", joined: "Mar 2024", avatarSize: "md", glow: false },
+      { pbId: "pb_aurora_01", id: 6, name: "Aurora", fullName: "Aurora Garcia", role: "child", age: 7, emoji: "👧", color: "violet", joined: "Mar 2024", avatarSize: "md", glow: false },
     ],
     selectEmergencyContacts: () => [],
-    refreshMembersCache: vi.fn(async () => {}),
+    refreshMembersCache: vi.fn(async () => true),
   },
 }));
 
@@ -119,8 +120,10 @@ function stubFetch() {
 async function renderAsync(ui: ReactElement): Promise<HTMLElement> {
   const el = document.createElement("div");
   document.body.appendChild(el);
+  const root = createRoot(el);
+  mountedRoots.push(root);
   await act(async () => {
-    createRoot(el).render(ui);
+    root.render(ui);
   });
   return el;
 }
@@ -170,10 +173,18 @@ beforeEach(() => {
   })));
 });
 
+afterEach(async () => {
+  while (mountedRoots.length > 0) {
+    const root = mountedRoots.pop()!;
+    await act(async () => root.unmount());
+  }
+  document.body.innerHTML = "";
+});
+
 describe("Settings member age control", () => {
   it("edit modal carries the member's age and PATCHes the new number", async () => {
     const calls = stubFetch();
-    await renderAsync(<SettingsPage />);
+    await renderAsync(<FamilySettingsSection />);
     await settle();
 
     await openAuroraEditor();
@@ -189,13 +200,14 @@ describe("Settings member age control", () => {
 
     const patch = calls.find((c) => c.url.includes("/api/members/admin") && c.method === "PATCH");
     expect(patch).toBeTruthy();
+    expect(patch!.body.id).toBe("pb_aurora_01");
     expect(patch!.body.name).toBe("Aurora");
     expect(patch!.body.patch.age).toBe(9);
   });
 
   it("blanking the age omits it from the PATCH (blank = leave unchanged, like the PIN field)", async () => {
     const calls = stubFetch();
-    await renderAsync(<SettingsPage />);
+    await renderAsync(<FamilySettingsSection />);
     await settle();
 
     await openAuroraEditor();
@@ -213,7 +225,7 @@ describe("Settings member age control", () => {
 
   it("out-of-range age blocks the save with the inline error", async () => {
     const calls = stubFetch();
-    await renderAsync(<SettingsPage />);
+    await renderAsync(<FamilySettingsSection />);
     await settle();
 
     await openAuroraEditor();

@@ -34,7 +34,7 @@ function makeCollectionMocks() {
   return {
     getFullList: vi.fn(async () => [{ id: "r1", name: "Milk", pin: "SHOULD_NOT_EXIST" }]),
     create: vi.fn(async (row: any, _opts?: unknown) => ({ id: "new1", ...row })),
-    getOne: vi.fn(async () => ({ id: "r1", done: false })),
+    getOne: vi.fn(async () => ({ id: "m1", name: "R", role: "parent", emoji: "😊", color: "violet" })),
     update: vi.fn(async (_id: string, row: any) => ({ id: "r1", ...row })),
     delete: vi.fn(async () => ({})),
   };

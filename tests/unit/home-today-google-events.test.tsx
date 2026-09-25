@@ -85,7 +85,7 @@ function dayFromNow(offsetDays: number): string {
   return localISO(d);
 }
 
-const googleStub = vi.hoisted(() => ({ rows: [] as any[], fail: false }));
+const googleStub = vi.hoisted(() => ({ rows: [] as any[], fail: false, unavailable: false }));
 
 let activeRoot: Root | null = null;
 
@@ -120,10 +120,18 @@ describe("Home Today widget — Google Calendar events merged in", () => {
     familyMock.events = [];
     googleStub.rows = [];
     googleStub.fail = false;
+    googleStub.unavailable = false;
     mockAuth.currentUser = null;
     mockAuth.isLoggedIn = false;
     vi.stubGlobal("fetch", vi.fn(async (input: any) => {
       if (String(input).startsWith("/api/google-calendar")) {
+        if (googleStub.unavailable) {
+          return {
+            ok: false,
+            status: 503,
+            json: async () => ({ ok: false, code: "unavailable", error: "Google token state unavailable" }),
+          };
+        }
         if (googleStub.fail) throw new Error("offline");
         return {
           ok: true,
@@ -144,6 +152,7 @@ describe("Home Today widget — Google Calendar events merged in", () => {
     act(() => { activeRoot?.unmount(); });
     activeRoot = null;
     document.body.innerHTML = "";
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -198,6 +207,87 @@ describe("Home Today widget — Google Calendar events merged in", () => {
     expect(googleIdx).toBeGreaterThanOrEqual(0);
     expect(familyIdx).toBeGreaterThanOrEqual(0);
     expect(googleIdx).toBeLessThan(familyIdx);
+  });
+
+  it("keeps previously loaded Google rows when a later Google read is unavailable", async () => {
+    googleStub.rows = [{
+      google_id: "g-saved",
+      summary: "Saved Google event",
+      start_iso: dayFromNow(0),
+      end_iso: dayFromNow(1),
+      all_day: true,
+      calendar_id: "primary",
+    }];
+    const el = await renderAsync(<HomePage />);
+    await settle();
+    expect(el.textContent).toContain("Saved Google event");
+
+    googleStub.unavailable = true;
+    await act(async () => {
+      window.dispatchEvent(new Event("consuela-data-refreshed"));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    expect(el.textContent).toContain("Saved Google event");
+    expect(el.textContent).toContain("Google Calendar is unavailable");
+    expect(el.textContent).not.toContain("Quiet day");
+  });
+
+  it("re-filters cached Google events at local midnight when refresh is unavailable", async () => {
+    vi.useFakeTimers({ now: new Date("2026-09-24T12:00:00") });
+    googleStub.rows = [{
+      google_id: "g-midnight",
+      summary: "Yesterday's event",
+      start_iso: "2026-09-24",
+      end_iso: "2026-09-25",
+      all_day: true,
+      calendar_id: "primary",
+    }];
+    const el = await renderAsync(<HomePage />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(el.textContent).toContain("Yesterday's event");
+
+    vi.setSystemTime(new Date("2026-09-25T00:05:00"));
+    googleStub.unavailable = true;
+    await act(async () => {
+      window.dispatchEvent(new Event("consuela-data-refreshed"));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(el.textContent).not.toContain("Yesterday's event");
+    expect(el.textContent).toContain("Google Calendar is unavailable");
+    vi.useRealTimers();
+  });
+
+  it("ignores a Google response that started before disconnect", async () => {
+    let release!: (value: unknown) => void;
+    const pending = new Promise((resolve) => { release = resolve; });
+    vi.stubGlobal("fetch", vi.fn(async (input: any) => {
+      if (String(input).startsWith("/api/google-calendar")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => pending as any,
+        };
+      }
+      return { ok: true, status: 200, json: async () => ({}) };
+    }));
+    const el = await renderAsync(<HomePage />);
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent("consuela-google-disconnected"));
+      release({
+        ok: true,
+        events: [{ google_id: "late", summary: "Late Google Event", start_iso: dayFromNow(0), end_iso: dayFromNow(1), all_day: true }],
+      });
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect(el.textContent).not.toContain("Late Google Event");
   });
 
   it("keeps family events when the Google read fails", async () => {

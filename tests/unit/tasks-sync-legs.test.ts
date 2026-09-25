@@ -29,8 +29,9 @@ function makePb() {
   };
 }
 
-const mocks = vi.hoisted(() => ({ withAdmin: vi.fn() }));
+const mocks = vi.hoisted(() => ({ withAdmin: vi.fn(), authorizeCurrentMemberRequest: vi.fn() }));
 vi.mock("@/lib/pb-auth", () => ({ withAdmin: (fn: any) => mocks.withAdmin(fn) }));
+vi.mock("@/lib/server-auth", () => ({ authorizeCurrentMemberRequest: mocks.authorizeCurrentMemberRequest }));
 
 import { GET, POST } from "@/app/api/tasks/sync/route";
 
@@ -40,6 +41,7 @@ async function post(body: unknown, role?: string) {
     const token = await signSession({ memberId: "m1", name: "Kid", role });
     headers.cookie = `${SESSION_COOKIE}=${token}`;
   }
+  headers["x-test-current-role"] = role || "";
   const r = new NextRequest("http://x/api/tasks/sync", {
     method: "POST",
     headers,
@@ -73,6 +75,12 @@ beforeEach(() => {
   db.creates = [];
   mocks.withAdmin.mockReset();
   mocks.withAdmin.mockImplementation((fn: any) => fn(makePb()));
+  mocks.authorizeCurrentMemberRequest.mockReset();
+  mocks.authorizeCurrentMemberRequest.mockImplementation(async (request: Request) => {
+    const role = request.headers.get("x-test-current-role");
+    if (!role) return { ok: false, status: 401, error: "unauthorized" };
+    return { ok: true, member: { id: "m1", role } };
+  });
 });
 
 describe("tasks/sync leg gating", () => {
@@ -126,6 +134,23 @@ describe("tasks/sync leg gating", () => {
     expect(res.status).toBe(401);
     expect((await res.json()).error).toBe("unauthorized");
     expect(mocks.withAdmin).not.toHaveBeenCalled();
+  });
+
+  it("uses the current PB role for the privileged branch", async () => {
+    db.rows = [{ id: "row1", data: EXISTING }];
+    mocks.authorizeCurrentMemberRequest.mockResolvedValueOnce({ ok: true, member: { id: "m1", role: "child" } });
+    const child = await post(POISONED, "parent");
+    expect(child.status).toBe(200);
+    expect(db.updates[0].payload.data.weekData).toEqual(EXISTING.weekData);
+  });
+
+  it("returns 401 for a deleted current member and 503 for identity outage", async () => {
+    mocks.authorizeCurrentMemberRequest.mockResolvedValueOnce({ ok: false, status: 401, error: "unauthorized" });
+    expect((await post(POISONED, "parent")).status).toBe(401);
+    mocks.authorizeCurrentMemberRequest.mockResolvedValueOnce({ ok: false, status: 503, error: "identity_unavailable" });
+    expect((await post(POISONED, "parent")).status).toBe(503);
+    expect(db.updates).toHaveLength(0);
+    expect(db.creates).toHaveLength(0);
   });
 
   it("GET returns the snapshot (unchanged)", async () => {

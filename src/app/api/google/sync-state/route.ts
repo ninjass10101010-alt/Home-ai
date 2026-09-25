@@ -1,11 +1,14 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { authorizeCurrentParentRequest } from "@/lib/server-auth";
 import { withAdmin } from "@/lib/pb-auth";
 import { readCalendarSyncRows } from "@/lib/google/calendar";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const auth = await authorizeCurrentParentRequest(request);
+  if (!auth.ok) return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status ?? 401 });
   try {
     // Per-calendar rows live in consuela_google_calendar_sync (Fix-C). The
     // legacy resource-keyed table still owns the tasks row, and its

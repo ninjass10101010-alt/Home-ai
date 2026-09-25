@@ -1,19 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 import { syncCalendar } from "@/lib/google/calendar";
 import { checkQuota } from "@/lib/google/quota-guard";
-import { isGoogleConnected } from "@/lib/google/oauth-client";
+import { isGoogleConnected, mapGoogleAuthError } from "@/lib/google/oauth-client";
 import { ensureGoogleCollections } from "@/lib/google/pb-collections";
 import { isCronAuthorized } from "@/lib/cron-auth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+function authErrorResponse(error: unknown) {
+  const mapped = mapGoogleAuthError(error);
+  return NextResponse.json(mapped.body, { status: mapped.status });
+}
+
 export async function POST(request: NextRequest) {
   if (!isCronAuthorized(request)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  if (!(await isGoogleConnected())) {
+  let connected: boolean;
+  try {
+    connected = await isGoogleConnected();
+  } catch (error) {
+    return authErrorResponse(error);
+  }
+  if (!connected) {
     return NextResponse.json(
       { ok: false, code: "no_grant", error: "Google account is not connected" },
       { status: 409 },
@@ -34,12 +45,17 @@ export async function POST(request: NextRequest) {
     if (result && "skipped" in result) {
       return NextResponse.json({ ok: false, reason: "already_in_progress" });
     }
+    if (result && "perCalendar" in result && Array.isArray(result.perCalendar) && result.perCalendar.some((entry) => entry.ok === false)) {
+      return NextResponse.json({
+        ok: false,
+        partial: true,
+        error: "calendar_partial_failure",
+        result,
+        quota,
+      }, { status: 502 });
+    }
     return NextResponse.json({ ok: true, result, quota });
-  } catch (e: any) {
-    console.error("[cron/google-sync]", e);
-    return NextResponse.json(
-      { ok: false, code: "unknown", error: e?.message || "Sync failed" },
-      { status: 500 },
-    );
+  } catch (error) {
+    return authErrorResponse(error);
   }
 }

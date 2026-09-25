@@ -111,15 +111,16 @@ export function LayoutProvider({ children }: { children: ReactNode }) {
     const handleRehydrate = () => {
       setConfig(loadLayoutConfig());
     };
-    window.addEventListener("focus", handleRehydrate);
-    document.addEventListener("visibilitychange", () => {
+    const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
         handleRehydrate();
       }
-    });
+    };
+    window.addEventListener("focus", handleRehydrate);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       window.removeEventListener("focus", handleRehydrate);
-      document.removeEventListener("visibilitychange", handleRehydrate);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [mounted, suppressRehydrate]);
 

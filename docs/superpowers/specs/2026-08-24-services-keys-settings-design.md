@@ -22,19 +22,26 @@ Extract AES-256-GCM helpers from `src/lib/google/encryption.ts` into shared `src
 
 `getServiceConfig(service, key)` in `src/lib/services/config.ts`: PB override (withAdmin, decrypt if secret) → `process.env` fallback → null. Per-request reads. Consumers migrated off direct `process.env`: ha/config (+mqtt), free-communication (Telegram+Gmail), telegram/get-updates, hermes/chat (removes hardcoded key default), instacart, themealdb, weather literals (WeatherWidget/FogBackground/AdultHome).
 
-## Routes (all under middleware session gate)
-
-- `GET /api/services/config` — manifest + per-service `{configured, source: db|env|unset, preview}`; secrets never returned (last-2-char hint max)
-- `PUT /api/services/config` `{service,key,value}` — adults-only (authorizeAdminRequest); registry-validated; encrypts 🔒
-- `DELETE /api/services/config` `{service,key}` — adults-only; clears override
-- `POST /api/services/test` `{service}` — registered health check (HA /api/, Telegram getMe, SMTP verify, Hermes ping, Instacart ping, MealDB search ping, Composio auth check) → `{ok, detail, ms}`
-- `POST /api/services/import` — one-time adult-gated ingest of legacy localStorage `consuela-connections` blob; maps known entries to registry keys
-- `GET /api/services/runtime` — non-secret runtime values for client widgets (weather LAT/LON)
+## Routes (current live-PB gates)
+- `GET /api/services/config` — current live PB parent; nonparents receive no field metadata or secret suffix, and secrets never return beyond a last-2-character hint.
+- `GET /api/ai/health`, `GET /api/ai/providers`, and `POST /api/services/test` — current live PB parent before health buffers, masked metadata, provider probes, or credentialed tests.
+- `GET /api/google/state`, `/api/google/sync-state`, `/api/google/calendars`, and `POST /api/google/sync` — current live PB parent before metadata, PB, or Google access; child/pet 403, deleted session 401, identity outage 503.
+- `GET /api/google-calendar` — session-scoped product-event read; `?sync=now` requires the current-parent admin gate before any collection or token work.
+- `GET /api/google-tasks` — current-parent admin gate before every cache or collection read, including plain GET.
+- `GET /api/ha/notify-targets` — current live PB parent before HA/PB metadata reads.
+- `POST /api/emergency/test` — middleware requires a valid signed cookie, while the route's current-parent authorization remains authoritative for the live identity.
+- `PUT`/`DELETE /api/services/config`, `POST /api/services/import` — current-parent authorization with registry validation and encrypted writes.
+- `POST /api/tasks/sync` — current live PB role; non-parent bodies retain only the tasks leg.
+- Generic `/api/db/[collection]` writes use the current live PB role and `WRITE_POLICY`; the signed-cookie role is never authoritative.
+- Family edit/delete targets opaque live PB IDs; fallback-only rows are read-only. Admin/self-service/profile PIN writes share the member-admin lock and reject collisions with `409 pin_collision`.
+- Self-service profile and PIN routes target only the signed `session.memberId`; legacy `actorName` input cannot select a different record. Create/rename duplicate checks use normalized exact full names, so similar names can coexist.
+- Google calendar selection is serialized with `withGoogleIntegrationOperation` through the connection check, collection setup, selection writes, and prune.
 - `POST /api/services/home-assistant/reconnect` — closes HA WS bridge so instrumentation-style restart picks up new credentials on next tick (exported reset handle in ha/bridge)
+- `GET /api/services/runtime` — non-secret runtime values for client widgets; public runtime fields are resolved through the registry without exposing secrets.
 
 ## UI
 
-Settings → Integrations gains **"Services & Keys"** SectionCard (hidden for child role): rows per service with status dot 🟢tested/🟡configured/🔴unset + source chip DB/.env; expand → fields (secrets = password inputs, `•••xy` hint), Save, Test, Clear-override; import banner when legacy localStorage blob present (import → delete blob); HA row gains "Reconnect bridge" button. Removed: ConnectionManager component, connections/store.ts, /api/connections.
+Settings → Integrations gains **"Services & Keys"** SectionCard (parent-only; child, pet, and guest sessions receive no manifest or field metadata): rows per service with status dot 🟢tested/🟡configured/🔴unset + source chip DB/.env; expand → fields (secrets = password inputs, `•••xy` hint), Save, Test, Clear-override; import banner when legacy localStorage blob present (import → delete blob); HA row gains "Reconnect bridge" button. Removed: ConnectionManager component, connections/store.ts, /api/connections.
 
 ## Prerequisite plumbing (Task 1)
 

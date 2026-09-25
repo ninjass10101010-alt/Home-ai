@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   loadWeeklyPrizes, saveWeeklyPrizes, prizeForRank,
   DEFAULT_WEEKLY_PRIZES, WEEKLY_PRIZES_KEY,
   raceGap,
-  applyTasksSnapshotToStores, readWeeklyPrizesStamp, writeWeeklyPrizesStamp,
+  applyTasksSnapshotToStores, readWeeklyPrizesStamp, writeWeeklyPrizesStamp, touchWeeklyPrizesStamp,
 } from "@/lib/task-utils";
 
 beforeEach(() => localStorage.clear());
+afterEach(() => vi.restoreAllMocks());
 
 describe("weekly prizes storage", () => {
   it("returns the defaults when nothing is stored", () => {
@@ -18,6 +19,18 @@ describe("weekly prizes storage", () => {
   it("round-trips saved prizes", () => {
     saveWeeklyPrizes([{ id: "p1", rank: 1, emoji: "🥇", text: "Movie pick" }]);
     expect(loadWeeklyPrizes()).toEqual([{ id: "p1", rank: 1, emoji: "🥇", text: "Movie pick" }]);
+  });
+  it("reports successful list and stamp writes", () => {
+    expect(saveWeeklyPrizes([{ id: "p1", rank: 1, emoji: "🥇", text: "Movie pick" }])).toBe(true);
+    expect(touchWeeklyPrizesStamp()).toBe(true);
+  });
+  it("reports list and stamp write failures without throwing", () => {
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("quota exceeded", "QuotaExceededError");
+    });
+    expect(saveWeeklyPrizes([{ id: "p1", rank: 1, emoji: "🥇", text: "Movie pick" }])).toBe(false);
+    expect(touchWeeklyPrizesStamp()).toBe(false);
+    setItem.mockRestore();
   });
   it("prizeForRank resolves by rank number", () => {
     const prizes = loadWeeklyPrizes();

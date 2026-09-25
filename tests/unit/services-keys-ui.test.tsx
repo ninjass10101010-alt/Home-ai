@@ -3,10 +3,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
 
-const mocks = vi.hoisted(() => ({ currentUser: { role: "parent" as string } }));
+const mocks = vi.hoisted(() => ({
+  auth: { hydrated: true as boolean | undefined, currentUser: { role: "parent" as string } },
+}));
 
 vi.mock("@/hooks/useAuth", () => ({
-  useAuth: () => ({ currentUser: mocks.currentUser }),
+  useAuth: () => mocks.auth,
 }));
 
 import ServicesKeysCard from "@/components/settings/ServicesKeysCard";
@@ -36,6 +38,12 @@ const CONFIG_BODY = {
   ],
 };
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise; });
+  return { promise, resolve };
+}
+
 function stubFetch(respond: (url: string, init?: RequestInit) => any) {
   return vi.stubGlobal(
     "fetch",
@@ -53,6 +61,12 @@ function render(ui: React.ReactElement): HTMLElement {
   return el;
 }
 
+function setInputValue(input: HTMLInputElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+  setter.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
 async function settle() {
   await act(async () => {
     await new Promise((r) => setTimeout(r, 20));
@@ -60,7 +74,8 @@ async function settle() {
 }
 
 beforeEach(() => {
-  mocks.currentUser.role = "parent";
+  mocks.auth.hydrated = true;
+  mocks.auth.currentUser.role = "parent";
   localStorage.removeItem("consuela-connections");
 });
 
@@ -90,14 +105,28 @@ describe("ServicesKeysCard", () => {
     expect(el.textContent).not.toContain("TELEGRAM_BOT_TOKEN_VALUE");
   });
 
-  it("hides entirely for child sessions", async () => {
-    mocks.currentUser.role = "child";
-    stubFetch(() => CONFIG_BODY);
-    const el = render(<ServicesKeysCard />);
-    await settle();
-    expect(el.textContent).toBe("");
+  it("hides entirely for every non-parent role", async () => {
+    for (const role of ["child", "pet", "guest", "Parent", ""]) {
+      mocks.auth.currentUser.role = role;
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      const el = render(<ServicesKeysCard />);
+      await settle();
+      expect(el.textContent).toBe("");
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
   });
 
+  it("does not mount controls until auth hydration is explicitly true", async () => {
+    mocks.auth.hydrated = undefined;
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const el = render(<ServicesKeysCard />);
+    await settle();
+
+    expect(el.textContent).toBe("");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
   it("saves a field via PUT with service/key/value", async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     vi.stubGlobal(
@@ -143,6 +172,125 @@ describe("ServicesKeysCard", () => {
       key: "MEALDB_KEY",
       value: "9",
     });
+  });
+
+  it("keeps a failed clear draft and reports the error", async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      if (String(url).endsWith("/config") && (init?.method ?? "GET") === "GET") {
+        return { ok: true, json: async () => CONFIG_BODY };
+      }
+      if (String(url).endsWith("/config") && init?.method === "DELETE") {
+        return { ok: false, status: 500, json: async () => ({ ok: false, error: "delete_failed" }) };
+      }
+      return { ok: true, json: async () => ({ ok: true, detail: "configured" }) };
+    }));
+    const el = render(<ServicesKeysCard />);
+    await settle();
+    act(() => {
+      el.querySelectorAll("button").forEach((button) => {
+        if (button.textContent?.includes("Telegram Alerts")) button.click();
+      });
+    });
+    const input = el.querySelector<HTMLInputElement>('input[type="password"]')!;
+    await act(async () => setInputValue(input, "replacement-secret"));
+    await act(async () => {
+      Array.from(el.querySelectorAll("button")).find((button) => button.textContent?.trim() === "Use .env")?.click();
+    });
+    await settle();
+
+    expect(input.value).toBe("replacement-secret");
+    expect(el.textContent).toMatch(/clear|override|failed/i);
+    expect(calls.some((call) => call.init?.method === "DELETE")).toBe(true);
+  });
+
+  it("disables field inputs and row controls while a save is pending", async () => {
+    const pending = deferred<{ ok: boolean; json: () => Promise<Record<string, unknown>> }>();
+    vi.stubGlobal("fetch", vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (String(url).endsWith("/config") && (init?.method ?? "GET") === "GET") {
+        return { ok: true, json: async () => CONFIG_BODY };
+      }
+      if (String(url).endsWith("/config") && init?.method === "PUT") return pending.promise;
+      return { ok: true, json: async () => ({ ok: true, detail: "configured" }) };
+    }));
+    const el = render(<ServicesKeysCard />);
+    await settle();
+    act(() => {
+      el.querySelectorAll("button").forEach((button) => {
+        if (button.textContent?.includes("TheMealDB")) button.click();
+      });
+    });
+    const input = el.querySelector<HTMLInputElement>('input[type="text"]')!;
+    await act(async () => setInputValue(input, "9"));
+    await act(async () => {
+      Array.from(el.querySelectorAll("button")).find((button) => button.textContent?.trim() === "Save")?.click();
+    });
+
+    expect(input.disabled).toBe(true);
+    expect(Array.from(el.querySelectorAll("button")).find((button) => button.textContent?.includes("TheMealDB"))?.disabled).toBe(true);
+    expect(Array.from(el.querySelectorAll("button")).find((button) => button.textContent?.trim() === "Test")?.disabled).toBe(true);
+
+    await act(async () => {
+      pending.resolve({ ok: true, json: async () => ({ ok: true }) });
+      await pending.promise;
+    });
+    await settle();
+  });
+
+  it("keeps controls disabled while an automatic test is pending", async () => {
+    const testPending = deferred<any>();
+    vi.stubGlobal("fetch", vi.fn(async (url: RequestInfo | URL) => {
+      if (String(url).endsWith("/config")) return { ok: true, json: async () => CONFIG_BODY };
+      if (String(url).endsWith("/test")) return testPending.promise;
+      return { ok: true, json: async () => ({ ok: true, detail: "configured" }) };
+    }));
+    const el = render(<ServicesKeysCard />);
+    await settle();
+    const rowButton = Array.from(el.querySelectorAll("button")).find((button) => button.textContent?.includes("TheMealDB"));
+    expect(rowButton?.disabled).toBe(true);
+
+    await act(async () => {
+      testPending.resolve({ ok: true, json: async () => ({ ok: true, detail: "passed" }) });
+      await testPending.promise;
+    });
+    await settle();
+    expect(rowButton?.disabled).toBe(false);
+  });
+
+  it("includes rejected test entries in the result denominator", async () => {
+    const body = {
+      services: [
+        {
+          id: "one",
+          displayName: "One",
+          description: "",
+          testFnId: "one",
+          status: [{ key: "ONE_KEY", label: "One", helpText: "", secret: true, required: true, set: true, source: "db", preview: "xy" }],
+        },
+        {
+          id: "two",
+          displayName: "Two",
+          description: "",
+          testFnId: "two",
+          status: [{ key: "TWO_KEY", label: "Two", helpText: "", secret: true, required: true, set: true, source: "db", preview: "xy" }],
+        },
+      ],
+    };
+    vi.stubGlobal("fetch", vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      if (String(url).endsWith("/config")) return { ok: true, json: async () => body };
+      if (String(url).endsWith("/test")) {
+        const service = init?.body ? JSON.parse(String(init.body)).service : "";
+        if (service === "two") return Promise.reject(new Error("test request failed"));
+        return { ok: true, json: async () => ({ ok: true, detail: "passed" }) };
+      }
+      return { ok: true, json: async () => ({ ok: true, detail: "configured" }) };
+    }));
+    const el = render(<ServicesKeysCard />);
+    await settle();
+
+    expect(el.textContent).toMatch(/0\/2|1\/2|2\/2/);
+    expect(el.textContent).not.toMatch(/1\/1 passed/);
   });
 
   it("offers to import legacy keys and clears the blob afterwards", async () => {

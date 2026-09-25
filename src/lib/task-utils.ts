@@ -259,12 +259,14 @@ function loadJSON<T>(key: string, fallback: T): T {
   }
 }
 
-function saveJSON(key: string, data: unknown): void {
-  if (typeof window === "undefined") return;
+function saveJSON(key: string, data: unknown): boolean {
+  if (typeof window === "undefined") return true;
   try {
     localStorage.setItem(key, JSON.stringify(data));
+    return true;
   } catch {
     /* quota exceeded — non-critical */
+    return false;
   }
 }
 
@@ -861,14 +863,14 @@ export const DEFAULT_WEEKLY_PRIZES: WeeklyPrize[] = [
 export function loadWeeklyPrizes(): WeeklyPrize[] {
   return loadJSON<WeeklyPrize[]>(WEEKLY_PRIZES_KEY, DEFAULT_WEEKLY_PRIZES);
 }
-export function saveWeeklyPrizes(prizes: WeeklyPrize[]): void {
-  saveJSON(WEEKLY_PRIZES_KEY, prizes);
+export function saveWeeklyPrizes(prizes: WeeklyPrize[]): boolean {
+  return saveJSON(WEEKLY_PRIZES_KEY, prizes);
 }
 export function prizeForRank(prizes: WeeklyPrize[], rank: number): WeeklyPrize | undefined {
   return prizes.find((p) => p.rank === rank);
 }
-export function touchWeeklyPrizesStamp(): void {
-  saveJSON(WEEKLY_PRIZES_STAMP_KEY, new Date().toISOString());
+export function touchWeeklyPrizesStamp(): boolean {
+  return saveJSON(WEEKLY_PRIZES_STAMP_KEY, new Date().toISOString());
 }
 export function readWeeklyPrizesStamp(): string {
   return loadJSON<string>(WEEKLY_PRIZES_STAMP_KEY, "");
@@ -1184,49 +1186,78 @@ export function emptyTask(firstMember?: { name?: string; emoji?: string }): Task
 
 // === PocketBase sync helpers ===
 
-export async function syncTasksToPB(tasks: Task[]): Promise<void> {
-  for (const task of tasks) {
-    await db.upsertTask({
-      taskId: task.id,
-      title: task.title,
-      assignee: task.assignee,
-      // PB tasks.assigneeEmoji is text max=5000 — photo avatars (base64 data
-      // URLs from members.emoji) must never reach the collection raw.
-      assigneeEmoji: persistedTaskEmoji(task.assigneeEmoji),
-      // Home widget's selectPendingTasks reads `assigned` + `status` —
-      // without these the row is invisible to the pending-tasks reader.
-      assigned: task.assignee,
-      status: task.completed ? "done" : "pending",
-      due: task.due,
-      points: task.points,
-      recurring: task.recurring,
-      category: task.category,
-      priority: task.priority,
-      universal: task.universal || false,
-      stealable: task.stealable || false,
-      pendingApproval: task.pendingApproval ?? null,
-      sentBackAt: task.sentBackAt ?? null,
-      completedInWeek: task.completedInWeek ?? null,
-      completedAt: task.completedAt ?? null,
-      crewSize: task.crewSize ?? null,
-      // Crew member emojis ride the same PB write — photo avatars from
-      // members.emoji must be gated exactly like assigneeEmoji.
-      crew: persistedCrewEmoji(task.crew as any),
-      speedBonus: task.speedBonus ?? null,
-    }).catch((e) => {
-      // Surface the FULL rejection (PB validation bodies carry the field name
-      // in `data`, not just `message`) — a swallowed gateway error reads as
-      // "the task never landed" with zero log trail.
-      console.warn(
-        `syncTasksToPB failed for "${task.title}" — run \`npm run pb:seed\` if the tasks schema is stale.`,
-        e?.data ?? e?.message ?? e
-      );
-    });
+export interface SyncOutcome {
+  pushed: number;
+  errors: number;
+}
+
+function emptySyncOutcome(): SyncOutcome {
+  return { pushed: 0, errors: 0 };
+}
+
+function mergeSyncOutcomes(left: SyncOutcome, right: SyncOutcome): SyncOutcome {
+  return { pushed: left.pushed + right.pushed, errors: left.errors + right.errors };
+}
+
+async function writeOutcome(write: () => Promise<unknown>): Promise<SyncOutcome> {
+  try {
+    const result = await write();
+    return result ? { pushed: 1, errors: 0 } : { pushed: 0, errors: 1 };
+  } catch {
+    return { pushed: 0, errors: 1 };
   }
 }
 
-export async function syncWeekDataToPB(data: WeekData): Promise<void> {
-  await db.upsertWeekData(data).catch(() => {});
+function normalizeSyncOutcome(value: unknown): SyncOutcome {
+  if (!value || typeof value !== "object") return { pushed: 0, errors: 1 };
+  const record = value as { pushed?: unknown; errors?: unknown };
+  if (typeof record.pushed !== "number" || typeof record.errors !== "number") {
+    return { pushed: 0, errors: 1 };
+  }
+  return { pushed: record.pushed, errors: record.errors };
+}
+
+export async function syncTasksToPB(tasks: Task[]): Promise<SyncOutcome> {
+  let outcome = emptySyncOutcome();
+  for (const task of tasks) {
+    try {
+      const result = await db.upsertTask({
+        taskId: task.id,
+        title: task.title,
+        assignee: task.assignee,
+        assigneeEmoji: persistedTaskEmoji(task.assigneeEmoji),
+        assigned: task.assignee,
+        status: task.completed ? "done" : "pending",
+        due: task.due,
+        points: task.points,
+        recurring: task.recurring,
+        category: task.category,
+        priority: task.priority,
+        universal: task.universal || false,
+        stealable: task.stealable || false,
+        pendingApproval: task.pendingApproval ?? null,
+        sentBackAt: task.sentBackAt ?? null,
+        completedInWeek: task.completedInWeek ?? null,
+        completedAt: task.completedAt ?? null,
+        crewSize: task.crewSize ?? null,
+        crew: persistedCrewEmoji(task.crew as any),
+        speedBonus: task.speedBonus ?? null,
+      });
+      outcome = mergeSyncOutcomes(outcome, result ? { pushed: 1, errors: 0 } : { pushed: 0, errors: 1 });
+    } catch (error: any) {
+      outcome = mergeSyncOutcomes(outcome, { pushed: 0, errors: 1 });
+      console.warn(
+        `syncTasksToPB failed for "${task.title}" — run \`npm run pb:seed\` if the tasks schema is stale.`,
+        error?.data ?? error?.message ?? error
+      );
+    }
+  }
+  return outcome;
+}
+
+export async function syncWeekDataToPB(data: WeekData | null): Promise<SyncOutcome> {
+  if (!data) return emptySyncOutcome();
+  return writeOutcome(() => db.upsertWeekData(data));
 }
 
 /**
@@ -1275,80 +1306,93 @@ export async function archiveWeekIfMissing(
   }
 }
 
-export async function syncArchiveToPB(archive: WeekArchive): Promise<void> {
+export async function syncArchiveToPB(archive: WeekArchive): Promise<SyncOutcome> {
   const existing = await db.listArchivedWeeks().catch(() => [] as any[]);
-  const existingStarts = new Set((existing || []).map((r: any) => String(r?.weekStart)));
+  const existingStarts = new Set((existing || []).map((row: any) => String(row?.weekStart)));
+  let outcome = emptySyncOutcome();
   for (const [weekStart, weekData] of Object.entries(archive)) {
     if (existingStarts.has(weekStart)) continue;
     const wrote = await archiveWeekIfMissing({ ...weekData, weekStart }, existingStarts);
+    outcome = mergeSyncOutcomes(outcome, wrote ? { pushed: 1, errors: 0 } : { pushed: 0, errors: 1 });
     if (wrote) existingStarts.add(weekStart);
   }
+  return outcome;
 }
 
-export async function syncRewardsToPB(rewards: Reward[]): Promise<void> {
-  for (const r of rewards) {
-    await db.upsertReward({
-      name: r.name,
-      emoji: r.emoji,
-      cost: r.cost,
-    }).catch(() => {});
+export async function syncRewardsToPB(rewards: Reward[]): Promise<SyncOutcome> {
+  let outcome = emptySyncOutcome();
+  for (const reward of rewards) {
+    outcome = mergeSyncOutcomes(outcome, await writeOutcome(() => db.upsertReward({
+      name: reward.name,
+      emoji: reward.emoji,
+      cost: reward.cost,
+    })));
   }
+  return outcome;
 }
 
-export async function syncWeeklyPrizesToPB(prizes: WeeklyPrize[]): Promise<void> {
-  for (const p of prizes) {
-    await db.upsertWeeklyPrize({
-      rank: p.rank,
-      emoji: p.emoji,
-      text: p.text,
-    }).catch(() => {});
+export async function syncWeeklyPrizesToPB(prizes: WeeklyPrize[]): Promise<SyncOutcome> {
+  let outcome = emptySyncOutcome();
+  for (const prize of prizes) {
+    outcome = mergeSyncOutcomes(outcome, await writeOutcome(() => db.upsertWeeklyPrize({
+      rank: prize.rank,
+      emoji: prize.emoji,
+      text: prize.text,
+    })));
   }
+  return outcome;
 }
 
-export async function syncPenaltiesToPB(penalties: Penalty[]): Promise<void> {
-  for (const p of penalties) {
-    await db.upsertPenalty({
-      name: p.name,
-      emoji: p.emoji,
-      points: p.points,
-    }).catch(() => {});
+export async function syncPenaltiesToPB(penalties: Penalty[]): Promise<SyncOutcome> {
+  let outcome = emptySyncOutcome();
+  for (const penalty of penalties) {
+    outcome = mergeSyncOutcomes(outcome, await writeOutcome(() => db.upsertPenalty({
+      name: penalty.name,
+      emoji: penalty.emoji,
+      points: penalty.points,
+    })));
   }
+  return outcome;
 }
 
-export async function syncFamilyGoalToPB(goal: FamilyGoal | null): Promise<void> {
-  if (goal) {
-    await db.upsertFamilyGoal({
-      title: goal.title,
-      emoji: goal.emoji,
-      targetPoints: goal.targetPoints,
-      reward: goal.reward,
-      weekStart: goal.weekStart,
-      active: true,
-    }).catch(() => {});
+export async function syncFamilyGoalToPB(goal: FamilyGoal | null): Promise<SyncOutcome> {
+  if (!goal) return emptySyncOutcome();
+  return writeOutcome(() => db.upsertFamilyGoal({
+    title: goal.title,
+    emoji: goal.emoji,
+    targetPoints: goal.targetPoints,
+    reward: goal.reward,
+    weekStart: goal.weekStart,
+    active: true,
+  }));
+}
+
+export async function syncHallOfFameToPB(entries: HallOfFameEntry[]): Promise<SyncOutcome> {
+  if (entries.length === 0) return emptySyncOutcome();
+  let existing: any[];
+  try {
+    existing = await db.selectHallOfFameAuthoritative();
+    if (!Array.isArray(existing)) throw new Error("invalid authoritative Hall of Fame read");
+  } catch {
+    return { pushed: 0, errors: 1 };
   }
-}
-
-export async function syncHallOfFameToPB(entries: HallOfFameEntry[]): Promise<void> {
-  // Idempotent sync: skip entries whose member + weekStart already exist in
-  // PB (insertHallOfFameEntry always creates — re-inserting would duplicate).
-  const existing = await db.selectHallOfFame().catch(() => [] as any[]);
-  for (const e of entries) {
+  let outcome = emptySyncOutcome();
+  for (const entry of entries) {
     const alreadySynced = existing.some(
-      (row: any) => row.member === e.member && row.weekStart === e.weekStart
+      (row: any) => row.member === entry.member && row.weekStart === entry.weekStart
     );
     if (alreadySynced) continue;
-    await db.insertHallOfFameEntry({
-      member: e.member,
-      emoji: e.emoji,
-      weekStart: e.weekStart,
-      points: e.points,
-      rank: e.rank,
-      // Prize + celebration state ride the row — without them the server can
-      // never host the win ceremony (the celebrate route 404'd on every call).
-      prize: e.prize ?? null,
-      celebrated: e.celebrated ?? false,
-    }).catch(() => {});
+    outcome = mergeSyncOutcomes(outcome, await writeOutcome(() => db.insertHallOfFameEntry({
+      member: entry.member,
+      emoji: entry.emoji,
+      weekStart: entry.weekStart,
+      points: entry.points,
+      rank: entry.rank,
+      prize: entry.prize ?? null,
+      celebrated: entry.celebrated ?? false,
+    })));
   }
+  return outcome;
 }
 
 /**
@@ -1412,14 +1456,14 @@ export async function loadHallOfFameMerged(): Promise<HallOfFameEntry[]> {
 
 export async function syncAllTasksToPB(
   tasks: Task[],
-  weekData: WeekData,
+  weekData: WeekData | null,
   archive: WeekArchive,
   rewards: Reward[],
   penalties: Penalty[],
   hallOfFame: HallOfFameEntry[],
   weeklyPrizes: WeeklyPrize[] = []
-): Promise<void> {
-  await Promise.allSettled([
+): Promise<SyncOutcome> {
+  const settled = await Promise.allSettled([
     syncTasksToPB(tasks),
     syncWeekDataToPB(weekData),
     syncArchiveToPB(archive),
@@ -1428,6 +1472,10 @@ export async function syncAllTasksToPB(
     syncHallOfFameToPB(hallOfFame),
     syncWeeklyPrizesToPB(weeklyPrizes),
   ]);
+  return settled.reduce((aggregate, result) => {
+    if (result.status === "fulfilled") return mergeSyncOutcomes(aggregate, normalizeSyncOutcome(result.value));
+    return mergeSyncOutcomes(aggregate, { pushed: 0, errors: 1 });
+  }, emptySyncOutcome());
 }
 
 export function getWeekGraph(memberName: string, weekData: WeekData): { day: string; points: number }[] {

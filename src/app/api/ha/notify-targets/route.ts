@@ -1,18 +1,19 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { authorizeCurrentParentRequest } from "@/lib/server-auth";
 import { fetchHADeviceStates } from "@/lib/ha/rest-client";
 import { listHANotifyTargets } from "@/lib/ha/notify";
 import { withAdmin } from "@/lib/pb-auth";
 
-// NOTE: session-level — middleware gates every /api/ha/* route on a valid
-// consuela_session cookie, so a signed-in session is required but this read
-// route needs no adult role. See call-service/route.ts for the fuller note.
+// This read is current-parent gated before HA or PocketBase metadata access.
 
 interface NotifyConfigRow {
   target: string;
   enabled: boolean;
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const auth = await authorizeCurrentParentRequest(request);
+  if (!auth.ok) return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status ?? 401 });
   let liveTargets: string[] = [];
   try {
     liveTargets = listHANotifyTargets(await fetchHADeviceStates());

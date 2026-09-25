@@ -1,14 +1,44 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isGoogleConnected, GoogleAuthError } from "@/lib/google/oauth-client";
+import { authorizeAdminRequest } from "@/lib/admin-auth";
+import { isGoogleConnected, GoogleAuthError, mapGoogleAuthError } from "@/lib/google/oauth-client";
 import { readCachedEvents, syncCalendar, readCalendarSyncRows } from "@/lib/google/calendar";
 import { ensureGoogleCollections } from "@/lib/google/pb-collections";
-import { getStoredTokens } from "@/lib/google/token-store";
+import { getStoredTokensStrict } from "@/lib/google/token-store";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-// calendarId → Google colorRgb, so the client can paint each synced event in
-// its own calendar's color (mapGoogleEvent's colorHex passthrough).
+function authErrorResponse(error: unknown) {
+  const mapped = mapGoogleAuthError(error);
+  return NextResponse.json(mapped.body, { status: mapped.status });
+}
+
+function noGrantResponse() {
+  return NextResponse.json({
+    ok: true,
+    connected: false,
+    source: "none",
+    events: [],
+  });
+}
+
+async function readTokensStrict() {
+  try {
+    const tokens = await getStoredTokensStrict();
+    if (!tokens || tokens.revoked_at) {
+      throw new GoogleAuthError("no_grant", "Google account is not connected");
+    }
+    return tokens;
+  } catch (error) {
+    if (error instanceof GoogleAuthError) throw error;
+    throw new GoogleAuthError("unavailable", "Google token state unavailable");
+  }
+}
+
+// Plain GET remains session-scoped for product calendar events; only `sync=now`
+// enters the parent gate before collection or token work. calendarId → Google
+// colorRgb, so the client can paint each synced event in its own calendar's color
+// (mapGoogleEvent's colorHex passthrough).
 async function calendarColors(): Promise<Record<string, string>> {
   const rows = await readCalendarSyncRows().catch(() => []);
   const map: Record<string, string> = {};
@@ -19,6 +49,12 @@ async function calendarColors(): Promise<Record<string, string>> {
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const sync = searchParams.get("sync");
+  if (sync === "now") {
+    const gate = await authorizeAdminRequest(request);
+    if (!gate.ok) {
+      return NextResponse.json({ ok: false, error: gate.error ?? "unauthorized" }, { status: gate.status ?? 401 });
+    }
+  }
 
   try {
     await ensureGoogleCollections();
@@ -29,50 +65,54 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const connected = await isGoogleConnected();
-
-  if (!connected) {
-    // Composio-backed sync: no direct OAuth grant, but the Drogon/Consuela
-    // cron job populates consuela_google_calendar_events via Composio MCP.
-    // Serve those cached events so the calendar page still shows real data.
-    try {
-      const cached = await readCachedEvents();
-      return NextResponse.json({
-        ok: true,
-        connected: true,
-        source: "composio",
-        account_email: null,
-        last_sync_at: null,
-        calendar_colors: await calendarColors(),
-        events: cached,
-      });
-    } catch (e: any) {
-      return NextResponse.json({
-        ok: true,
-        connected: false,
-        source: "static",
-        events: [],
-      });
+  let connected: boolean;
+  try {
+    connected = await isGoogleConnected();
+  } catch (error) {
+    if (error instanceof GoogleAuthError && error.code === "no_grant") {
+      return noGrantResponse();
     }
+    return authErrorResponse(error);
   }
 
+  if (!connected) {
+    return noGrantResponse();
+  }
+
+  let partialSync = false;
   if (sync === "now") {
     try {
-      await syncCalendar();
-    } catch (e: any) {
-      if (e instanceof GoogleAuthError) {
-        return NextResponse.json(
-          { ok: false, connected: true, code: e.code, error: e.message, events: [] },
-          { status: e.code === "no_grant" ? 409 : 401 },
-        );
+      const result = await syncCalendar();
+      if (result && "skipped" in result) {
+        return NextResponse.json({ ok: false, error: "already_in_progress" }, { status: 409 });
       }
-      console.error("[google-calendar] sync-now failed:", e?.message);
+      if (result && "perCalendar" in result && Array.isArray(result.perCalendar)) {
+        partialSync = result.perCalendar.some((entry) => entry.ok === false);
+      }
+    } catch (error) {
+      if (error instanceof GoogleAuthError && error.code === "no_grant") {
+        return noGrantResponse();
+      }
+      return authErrorResponse(error);
     }
   }
 
   try {
     const events = await readCachedEvents();
-    const tokens = await getStoredTokens();
+    const tokens = await readTokensStrict();
+    if (partialSync) {
+      return NextResponse.json({
+        ok: false,
+        partial: true,
+        stale: true,
+        error: "calendar_partial_failure",
+        source: "google",
+        account_email: tokens?.account_email || null,
+        last_sync_at: tokens?.granted_at || null,
+        calendar_colors: await calendarColors(),
+        events,
+      }, { status: 502 });
+    }
     return NextResponse.json({
       ok: true,
       connected: true,
@@ -82,11 +122,10 @@ export async function GET(request: NextRequest) {
       calendar_colors: await calendarColors(),
       events,
     });
-  } catch (e: any) {
-    console.error("[google-calendar] read failed:", e?.message);
-    return NextResponse.json(
-      { ok: false, connected: true, events: [], error: e?.message },
-      { status: 200 },
-    );
+  } catch (error) {
+    if (error instanceof GoogleAuthError && error.code === "no_grant") {
+      return noGrantResponse();
+    }
+    return authErrorResponse(error);
   }
 }

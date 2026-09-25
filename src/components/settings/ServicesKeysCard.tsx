@@ -42,17 +42,26 @@ function dotTone(svc: ServiceEntry, tested: TestResult | null): { cls: string; l
 }
 
 export default function ServicesKeysCard() {
-  const { currentUser } = useAuth();
+  const { currentUser, hydrated } = useAuth();
   const [services, setServices] = useState<ServiceEntry[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [testedMap, setTestedMap] = useState<Record<string, TestResult | null>>({});
   const [busy, setBusy] = useState(false);
+  const busyCountRef = useRef(0);
+  const beginBusy = useCallback(() => {
+    busyCountRef.current += 1;
+    setBusy(true);
+  }, []);
+  const endBusy = useCallback(() => {
+    busyCountRef.current = Math.max(0, busyCountRef.current - 1);
+    if (busyCountRef.current === 0) setBusy(false);
+  }, []);
   const [notice, setNotice] = useState("");
   const [loadFailed, setLoadFailed] = useState(false);
   const [legacyBlob, setLegacyBlob] = useState<object | string | null>(null);
 
-  const isAdult = currentUser?.role !== "child";
+  const isParent = hydrated === true && currentUser?.role === "parent";
 
   const load = useCallback(async () => {
     try {
@@ -71,19 +80,22 @@ export default function ServicesKeysCard() {
   }, []);
 
   useEffect(() => {
-    if (!isAdult) return;
-    void load();
-    try {
-      const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
-      if (raw) setLegacyBlob(JSON.parse(raw));
-    } catch {
-      /* no legacy blob */
-    }
-  }, [isAdult, load]);
+    if (!isParent) return;
+    const timer = window.setTimeout(() => {
+      void load();
+      try {
+        const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
+        if (raw) setLegacyBlob(JSON.parse(raw));
+      } catch {
+        /* no legacy blob */
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [isParent, load]);
 
   const autoTestedRef = useRef(false);
   const testAll = useCallback(async (showNotice = true) => {
-    if (showNotice) setBusy(true);
+    beginBusy();
     const entries = services.filter((s) => s.status.filter((f) => f.required).every((f) => f.set));
     const results = await Promise.allSettled(
       entries.map(async (svc) => {
@@ -93,25 +105,31 @@ export default function ServicesKeysCard() {
           body: JSON.stringify({ service: svc.id }),
         });
         const body = await res.json().catch(() => null);
-        return { id: svc.id, ok: Boolean(body?.ok), detail: body?.detail ?? "unknown" };
+        return { id: svc.id, ok: res.ok && body?.ok === true, detail: body?.detail ?? "unknown" };
       })
     );
     const map: Record<string, TestResult> = {};
-    for (const r of results) {
-      if (r.status === "fulfilled") map[r.value.id] = { ok: r.value.ok, detail: String(r.value.detail) };
-    }
+    results.forEach((result, index) => {
+      const id = entries[index]?.id;
+      if (!id) return;
+      if (result.status === "fulfilled") {
+        map[id] = { ok: result.value.ok, detail: String(result.value.detail) };
+      } else {
+        map[id] = { ok: false, detail: "Test request failed." };
+      }
+    });
     setTestedMap((m) => ({ ...m, ...map }));
     if (showNotice) setNotice("Connection tests complete.");
-    setBusy(false);
-  }, [services]);
+    endBusy();
+  }, [services, beginBusy, endBusy]);
 
   useEffect(() => {
-    if (!isAdult || autoTestedRef.current || services.length === 0) return;
+    if (!isParent || autoTestedRef.current || services.length === 0) return;
     autoTestedRef.current = true;
     void testAll(false);
-  }, [isAdult, services, testAll]);
+  }, [isParent, services, testAll]);
 
-  if (!isAdult) return null;
+  if (!isParent) return null;
 
   const importLegacy = async () => {
     try {
@@ -136,7 +154,7 @@ export default function ServicesKeysCard() {
         return;
       }
 
-      setBusy(true);
+      beginBusy();
       const res = await fetch("/api/services/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -154,11 +172,11 @@ export default function ServicesKeysCard() {
     } catch {
       setNotice("Import failed.");
     }
-    setBusy(false);
+    endBusy();
   };
 
   const saveService = async (svc: ServiceEntry) => {
-    setBusy(true);
+    beginBusy();
     setNotice("");
     try {
       for (const f of svc.status) {
@@ -171,12 +189,11 @@ export default function ServicesKeysCard() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ service: svc.id, key: f.key, value }),
         });
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({ error: "save_failed" }));
-          setNotice(body.error === "adult_only" ? "Adults only." : "Save failed.");
-          setBusy(false);
-          return;
-        }
+         if (!res.ok) {
+           const body = await res.json().catch(() => ({ error: "save_failed" }));
+           setNotice(body.error === "adult_only" ? "Adults only." : "Save failed.");
+           return;
+         }
       }
       setDrafts((d) => {
         const next = { ...d };
@@ -187,29 +204,41 @@ export default function ServicesKeysCard() {
       await load();
     } catch {
       setNotice("Save failed.");
+    } finally {
+      endBusy();
     }
-    setBusy(false);
   };
 
   const clearField = async (svcId: string, key: string) => {
-    setBusy(true);
-    await fetch("/api/services/config", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ service: svcId, key }),
-    }).catch(() => {});
-    setDrafts((d) => {
-      const next = { ...d };
-      delete next[`${svcId}.${key}`];
-      return next;
-    });
-    setBusy(false);
-    setNotice("Override cleared — .env value applies again.");
-    await load();
+    beginBusy();
+    setNotice("");
+    try {
+      const res = await fetch("/api/services/config", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ service: svcId, key }),
+      });
+      const body = await res.json().catch(() => null) as { ok?: unknown; error?: unknown } | null;
+      if (!res.ok || body?.ok !== true) {
+        setNotice("Couldn't clear the saved override. Try again.");
+        return;
+      }
+      setDrafts((d) => {
+        const next = { ...d };
+        delete next[`${svcId}.${key}`];
+        return next;
+      });
+      setNotice("Override cleared — .env value applies again.");
+      await load();
+    } catch {
+      setNotice("Couldn't clear the saved override. Try again.");
+    } finally {
+      endBusy();
+    }
   };
 
   const testService = async (svcId: string) => {
-    setBusy(true);
+    beginBusy();
     try {
       const res = await fetch("/api/services/test", {
         method: "POST",
@@ -222,11 +251,11 @@ export default function ServicesKeysCard() {
     } catch {
       setNotice("Test failed to run.");
     }
-    setBusy(false);
+    endBusy();
   };
 
   const reconnectBridge = async () => {
-    setBusy(true);
+    beginBusy();
     try {
       const res = await fetch("/api/services/home-assistant/reconnect", { method: "POST" });
       const body = await res.json().catch(() => null);
@@ -234,14 +263,20 @@ export default function ServicesKeysCard() {
     } catch {
       setNotice("Reconnect failed.");
     }
-    setBusy(false);
+    endBusy();
   };
+
+  const eligibleServiceIds = new Set(
+    services.filter((service) => service.status.filter((field) => field.required).every((field) => field.set)).map((service) => service.id),
+  );
+  const testedEntries = Object.entries(testedMap).filter(([id]) => eligibleServiceIds.has(id));
+  const testedPassed = testedEntries.filter(([, result]) => result?.ok).length;
 
   return (
     <SectionCard
       title="Services & Keys"
       icon="🔑"
-      tone="#8b5cf6"
+      tone="var(--color-accent-violet)"
       description="Connect the services Consuela uses. Secrets are encrypted and never shown after saving."
     >
       <div className="space-y-3">
@@ -250,15 +285,15 @@ export default function ServicesKeysCard() {
             <p className="text-xs text-text-secondary">
               Found saved connection keys from an older version.
             </p>
-            <SoftButton size="sm" loading={busy} onClick={() => void importLegacy()}>
-              Import
-            </SoftButton>
+             <SoftButton size="sm" loading={busy} disabled={busy} onClick={() => void importLegacy()}>
+               Import
+             </SoftButton>
           </div>
         )}
 
         {loadFailed && services.length === 0 && (
           <p className="text-sm text-text-secondary">
-            Services config is unreachable right now — check the PocketBase connection and reload.
+            Services config is unreachable right now — check the family server connection and reload.
           </p>
         )}
 
@@ -266,14 +301,15 @@ export default function ServicesKeysCard() {
           <div className="flex items-center justify-between">
             <p className="text-xs text-text-muted">
               {Object.keys(testedMap).length > 0
-                ? `${Object.values(testedMap).filter((v) => v?.ok).length}/${Object.keys(testedMap).length} passed`
+                ? `${testedPassed}/${testedEntries.length} passed`
                 : "Testing…"}
             </p>
             <SoftButton
               size="sm"
               variant="secondary"
-              loading={busy}
-              onClick={() => void testAll(true)}
+               loading={busy}
+               disabled={busy}
+               onClick={() => void testAll(true)}
             >
               Test all
             </SoftButton>
@@ -291,8 +327,9 @@ export default function ServicesKeysCard() {
               <button
                 type="button"
                 className="flex w-full items-center justify-between gap-3 p-3 text-left"
-                onClick={() => setExpanded(open ? null : svc.id)}
-              >
+                 onClick={() => setExpanded(open ? null : svc.id)}
+                 disabled={busy}
+               >
                 <span className="flex items-center gap-2">
                   <span className={`h-2 w-2 rounded-full ${dot.cls}`} aria-hidden />
                   <span className="text-sm font-semibold text-text-primary">{svc.displayName}</span>
@@ -331,8 +368,9 @@ export default function ServicesKeysCard() {
                                     ? ".env value in use — type to override"
                                     : ""
                             }
-                            value={drafts[draftKey] ?? ""}
-                            onChange={(e) =>
+                             value={drafts[draftKey] ?? ""}
+                             disabled={busy}
+                             onChange={(e) =>
                               setDrafts((d) => ({ ...d, [draftKey]: e.target.value }))
                             }
                             className="w-full rounded-xl border border-white/10 bg-surface-2 px-3 py-2 text-sm text-text-primary outline-none focus:border-accent-selected/50"
@@ -359,17 +397,17 @@ export default function ServicesKeysCard() {
                   })}
 
                   <div className="flex flex-wrap items-center gap-2 pt-1">
-                    <SoftButton size="sm" loading={busy} onClick={() => void saveService(svc)} disabled={!hasDrafts}>
-                      Save
-                    </SoftButton>
-                    <SoftButton size="sm" variant="secondary" loading={busy} onClick={() => void testService(svc.id)}>
-                      Test
-                    </SoftButton>
-                    {svc.id === "home_assistant" && (
-                      <SoftButton size="sm" variant="secondary" loading={busy} onClick={() => void reconnectBridge()}>
-                        Reconnect bridge
-                      </SoftButton>
-                    )}
+                     <SoftButton size="sm" loading={busy} onClick={() => void saveService(svc)} disabled={!hasDrafts || busy}>
+                       Save
+                     </SoftButton>
+                     <SoftButton size="sm" variant="secondary" loading={busy} onClick={() => void testService(svc.id)} disabled={busy}>
+                       Test
+                     </SoftButton>
+                     {svc.id === "home_assistant" && (
+                       <SoftButton size="sm" variant="secondary" loading={busy} onClick={() => void reconnectBridge()} disabled={busy}>
+                         Reconnect bridge
+                       </SoftButton>
+                     )}
                   </div>
                 </div>
               )}

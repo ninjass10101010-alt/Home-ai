@@ -1,4 +1,4 @@
-import { verifyPinAgainstAnyMember } from "./server-auth";
+import { authorizeCurrentParentRequest, verifyPinAgainstAnyMember, type ServerMember } from "./server-auth";
 
 // Gate for the destructive /api/admin/* routes (update, restart, containers,
 // version). Three trusted credentials, all fail-closed:
@@ -7,9 +7,10 @@ import { verifyPinAgainstAnyMember } from "./server-auth";
 //                     (the chat tool handlers self-fetch these routes).
 //                     Server-only env; never exposed to the browser.
 //   2. Session cookie — a signed httpOnly consuela_session cookie whose
-//                     payload has role === "parent". Used by the browser UI:
-//                     middleware already gates /api/** on the same cookie,
-//                     so no PIN ever needs to reach the client.
+//                     memberId is re-read from live PB and must currently be
+//                     role "parent". Used by the browser UI: middleware already
+//                     gates /api/** on the same cookie, so no PIN ever needs to
+//                     reach the client.
 //   3. x-admin-pin  — a family-member PIN verified against PocketBase
 //                     (kept for non-session callers). Only role "parent" is
 //                     accepted even with a valid PIN: deploying code /
@@ -26,6 +27,7 @@ export interface AdminAuthResult {
   ok: boolean;
   status?: number;
   error?: string;
+  member?: ServerMember;
 }
 
 export async function authorizeAdminRequest(request: Request): Promise<AdminAuthResult> {
@@ -34,14 +36,9 @@ export async function authorizeAdminRequest(request: Request): Promise<AdminAuth
     return { ok: true };
   }
 
-  // Valid signed session cookie from the browser UI — adults only.
-  const { verifySession, SESSION_COOKIE } = await import("./session");
-  const session = await verifySession(
-    request instanceof Request ? request.headers.get("cookie")?.match(new RegExp(`${SESSION_COOKIE}=([^;]+)`))?.[1] : undefined
-  );
-  if (session) {
-    if (session.role !== "parent") return { ok: false, status: 403, error: "adult_only" };
-    return { ok: true };
+  const hasSessionCookie = (request.headers.get("cookie") || "").includes("consuela_session=");
+  if (hasSessionCookie) {
+    return authorizeCurrentParentRequest(request);
   }
 
   const pin = request.headers.get("x-admin-pin");
@@ -56,5 +53,5 @@ export async function authorizeAdminRequest(request: Request): Promise<AdminAuth
   if (member.role !== "parent") {
     return { ok: false, status: 403, error: "adult_only" };
   }
-  return { ok: true };
+  return { ok: true, member: member as ServerMember };
 }

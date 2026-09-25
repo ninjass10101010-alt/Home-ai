@@ -69,8 +69,9 @@ const h = vi.hoisted(() => {
   return { live, resolveOne, snapshot, pb, count };
 });
 
-const mocks = vi.hoisted(() => ({ withAdmin: vi.fn() }));
+const mocks = vi.hoisted(() => ({ withAdmin: vi.fn(), authorizeCurrentMemberRequest: vi.fn() }));
 vi.mock("@/lib/pb-auth", () => ({ withAdmin: (fn: any) => mocks.withAdmin(fn) }));
+vi.mock("@/lib/server-auth", () => ({ authorizeCurrentMemberRequest: mocks.authorizeCurrentMemberRequest }));
 
 import { POST } from "@/app/api/tasks/sync/route";
 import { __resetKeyedLockForTests } from "@/lib/keyed-lock";
@@ -79,7 +80,7 @@ async function post(body: unknown, role: string) {
   const token = await signSession({ memberId: "m1", name: "Poster", role });
   const r = new NextRequest("http://x/api/tasks/sync", {
     method: "POST",
-    headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${token}` },
+    headers: { "content-type": "application/json", cookie: `${SESSION_COOKIE}=${token}`, "x-test-role": role },
     body: JSON.stringify(body),
   });
   return POST(r);
@@ -117,6 +118,8 @@ beforeEach(() => {
   };
   mocks.withAdmin.mockReset();
   mocks.withAdmin.mockImplementation((fn: any) => fn(h.pb));
+  mocks.authorizeCurrentMemberRequest.mockReset();
+  mocks.authorizeCurrentMemberRequest.mockImplementation(async (request: Request) => ({ ok: true, member: { id: "m1", role: request.headers.get("x-test-role") || "parent" } }));
   __resetKeyedLockForTests();
 });
 

@@ -20,11 +20,20 @@ interface MemberPickerModalProps {
   members: PickerMember[];
   onSelect: (member: PickerMember) => void;
   onClose: () => void;
+  panelClassName?: string;
+  description?: string;
 }
 
-export default function MemberPickerModal({ open, members, onSelect, onClose }: MemberPickerModalProps) {
+export default function MemberPickerModal({
+  open,
+  members,
+  onSelect,
+  onClose,
+  panelClassName,
+  description = "Pick your face — little kids sign right in. Others enter their PIN.",
+}: MemberPickerModalProps) {
   return (
-    <Modal open={open} onClose={onClose} title="Who&apos;s signing in?" description="Pick your face — little kids sign right in. Others enter their PIN.">
+    <Modal open={open} onClose={onClose} title="Who&apos;s signing in?" description={description} panelClassName={panelClassName}>
       <div className="grid max-h-[55vh] grid-cols-3 gap-2 overflow-y-auto pb-1 sm:grid-cols-4">
         {members.map((member) => (
           <button

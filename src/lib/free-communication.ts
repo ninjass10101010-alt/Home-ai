@@ -1,7 +1,7 @@
 import nodemailer from 'nodemailer';
 import { getServiceConfig } from "@/lib/services/config";
 
-async function resolveGmailCreds(): Promise<{ user: string | null; pass: string | null }> {
+export async function resolveGmailCredentials(): Promise<{ user: string | null; pass: string | null }> {
   const [user, pass] = await Promise.all([
     getServiceConfig("gmail_emergency", "GMAIL_USER"),
     getServiceConfig("gmail_emergency", "GMAIL_APP_PASSWORD"),
@@ -31,17 +31,25 @@ export const smsGateways = {
   boost: '@sms.myboostmobile.com',
 };
 
+export const TEST_ALERT_SUBJECT = 'CONSUELA TEST ALERT — Test only. No emergency.';
+
+export interface NotificationDeliveryOptions {
+  testOnly?: boolean;
+  subject?: string;
+}
+
 export async function sendSMSViaEmail(
   phoneNumber: string,
   message: string,
-  carrier?: keyof typeof smsGateways
+  carrier?: keyof typeof smsGateways,
+  options: NotificationDeliveryOptions = {}
 ) {
   // Clean phone number (remove formatting)
   const cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
 
   // If specific carrier provided, try only that one
   if (carrier && smsGateways[carrier]) {
-    return await sendToCarrier(cleanNumber, message, carrier);
+    return await sendToCarrier(cleanNumber, message, carrier, options);
   }
 
   // Try common carriers in order of popularity
@@ -49,7 +57,7 @@ export async function sendSMSViaEmail(
 
   for (const carrierKey of carriersToTry) {
     try {
-      const result = await sendToCarrier(cleanNumber, message, carrierKey);
+      const result = await sendToCarrier(cleanNumber, message, carrierKey, options);
       if (result.success) {
         return result;
       }
@@ -67,13 +75,14 @@ export async function sendSMSViaEmail(
 async function sendToCarrier(
   phoneNumber: string,
   message: string,
-  carrier: keyof typeof smsGateways
+  carrier: keyof typeof smsGateways,
+  options: NotificationDeliveryOptions = {}
 ) {
   const gateway = smsGateways[carrier];
   const emailAddress = `${phoneNumber}${gateway}`;
 
   // Create transporter using Gmail SMTP (free)
-  const { user: gmailUser, pass: gmailPass } = await resolveGmailCreds();
+  const { user: gmailUser, pass: gmailPass } = await resolveGmailCredentials();
   if (!gmailUser || !gmailPass) throw new Error("gmail_not_configured");
   const transporter = nodemailer.createTransport({
     service: 'gmail',
@@ -87,7 +96,7 @@ async function sendToCarrier(
     await transporter.sendMail({
       from: gmailUser,
       to: emailAddress,
-      subject: 'EMERGENCY ALERT',
+      subject: options.subject || (options.testOnly ? TEST_ALERT_SUBJECT : 'EMERGENCY ALERT'),
       text: message.substring(0, 160), // SMS length limit
     });
 
@@ -107,9 +116,14 @@ async function sendToCarrier(
 }
 
 // Alternative: SendGrid for email (100 free/day)
-export async function sendEmailAlert(to: string, subject: string, message: string) {
+export async function sendEmailAlert(
+  to: string,
+  subject: string,
+  message: string,
+  options: NotificationDeliveryOptions = {}
+) {
   // Using nodemailer with Gmail for free option
-  const { user: gmailUser, pass: gmailPass } = await resolveGmailCreds();
+  const { user: gmailUser, pass: gmailPass } = await resolveGmailCredentials();
   if (!gmailUser || !gmailPass) throw new Error("gmail_not_configured");
   const transporter = nodemailer.createTransport({
     service: 'gmail',
@@ -119,17 +133,25 @@ export async function sendEmailAlert(to: string, subject: string, message: strin
     },
   });
 
+  const html = options.testOnly
+    ? `<div style="font-family: Arial, sans-serif; padding: 20px; background: #f8f9fa; border-left: 4px solid #dc3545;">
+        <h2 style="color: #dc3545; margin-top: 0;">${subject}</h2>
+        <p style="font-size: 16px; line-height: 1.5;">${message.replace(/\n/g, '<br>')}</p>
+        <p style="color: #6c757d; font-size: 14px;">This is a test alert; no emergency is active.</p>
+      </div>`
+    : `<div style="font-family: Arial, sans-serif; padding: 20px; background: #f8f9fa; border-left: 4px solid #dc3545;">
+        <h2 style="color: #dc3545; margin-top: 0;">🚨 EMERGENCY ALERT</h2>
+        <p style="font-size: 16px; line-height: 1.5;">${message.replace(/\n/g, '<br>')}</p>
+        <p style="color: #6c757d; font-size: 14px;">This is an automated emergency notification.</p>
+      </div>`;
+
   try {
     await transporter.sendMail({
       from: gmailUser,
       to,
       subject,
       text: message,
-      html: `<div style="font-family: Arial, sans-serif; padding: 20px; background: #f8f9fa; border-left: 4px solid #dc3545;">
-        <h2 style="color: #dc3545; margin-top: 0;">🚨 EMERGENCY ALERT</h2>
-        <p style="font-size: 16px; line-height: 1.5;">${message.replace(/\n/g, '<br>')}</p>
-        <p style="color: #6c757d; font-size: 14px;">This is an automated emergency notification.</p>
-      </div>`,
+      html,
     });
 
     return { success: true };

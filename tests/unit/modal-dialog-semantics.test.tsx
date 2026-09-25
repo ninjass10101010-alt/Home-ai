@@ -21,6 +21,7 @@ vi.stubGlobal("matchMedia", (query: string) => ({
 
 let root: Root | null = null;
 let container: HTMLElement;
+const DEFAULT_MODAL_PANEL_CLASS = "material-thick flex max-h-[85dvh] w-full max-w-lg flex-col rounded-[2rem] border border-white/12 bg-[var(--color-surface-0)]/80 p-5 shadow-2xl backdrop-blur-2xl outline-none sm:pb-safe";
 
 function mount(ui: React.ReactElement) {
   if (!root) {
@@ -65,6 +66,46 @@ describe("Modal dialog semantics", () => {
     expect(heading?.textContent).toBe("Add Task");
   });
 
+  it("keeps the exact default panel class and DOM shape", async () => {
+    await mount(
+      <Modal open onClose={() => {}} title="Default panel">
+        <p>Default body</p>
+      </Modal>
+    );
+    const dialog = panel()!;
+    expect(dialog.className).toBe(DEFAULT_MODAL_PANEL_CLASS);
+    expect(dialog.getAttribute("role")).toBe("dialog");
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(dialog.getAttribute("tabindex")).toBe("-1");
+    expect(dialog.querySelectorAll(":scope > *")).toHaveLength(2);
+    const heading = dialog.querySelector("h3")!;
+    expect(dialog.getAttribute("aria-labelledby")).toBe(heading.id);
+    expect(dialog.textContent).toContain("Default body");
+    expect(dialog.className).not.toContain("settings-dialog");
+  });
+
+  it("adds the opt-in class without changing dialog semantics or focus", async () => {
+    const trigger = document.createElement("button");
+    trigger.textContent = "trigger";
+    document.body.appendChild(trigger);
+    trigger.focus();
+
+    await mount(
+      <Modal open onClose={() => {}} title="Settings panel" panelClassName="settings-dialog">
+        <button id="settings-action">Continue</button>
+      </Modal>
+    );
+    const dialog = panel()!;
+    expect(dialog.className).toBe(`${DEFAULT_MODAL_PANEL_CLASS} settings-dialog`);
+    expect(dialog.getAttribute("role")).toBe("dialog");
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(dialog.getAttribute("tabindex")).toBe("-1");
+    const heading = dialog.querySelector("h3")!;
+    expect(dialog.getAttribute("aria-labelledby")).toBe(heading.id);
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement?.id).toBe("settings-action");
+  });
+
   it("Escape closes the dialog", async () => {
     const onClose = vi.fn();
     await mount(
@@ -102,6 +143,22 @@ describe("Modal dialog semantics", () => {
     // Shift+Tab from the first focusable wraps to the last.
     await pressKey("Tab", true);
     expect(document.activeElement!.id).toBe("c");
+  });
+
+  it("excludes controls disabled by an ancestor fieldset from the focus cycle", async () => {
+    await mount(
+      <Modal open onClose={() => {}} title="Member" footer={<button id="save">Save</button>}>
+        <fieldset disabled>
+          <button id="fieldset-disabled">Unavailable action</button>
+        </fieldset>
+        <button id="enabled">Continue</button>
+      </Modal>
+    );
+
+    expect(document.activeElement?.id).toBe("enabled");
+    (document.getElementById("save") as HTMLElement).focus();
+    await pressKey("Tab");
+    expect(document.activeElement?.id).toBe("enabled");
   });
 
   it("autoFocus inside the panel wins over the first focusable", async () => {

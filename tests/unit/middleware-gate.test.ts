@@ -71,6 +71,19 @@ describe("middleware /api gate", () => {
     expect(res.headers.get("x-middleware-next")).toBe("1");
   });
 
+  it("uses signed-cookie presence for emergency test while leaving the real emergency route exempt", async () => {
+    const anonymous = await middleware(req("/api/emergency/test"));
+    expect(anonymous?.status).toBe(401);
+
+    const childToken = await signSession({ memberId: "m2", name: "Bailey", role: "child" });
+    const child = await middleware(req("/api/emergency/test", `${SESSION_COOKIE}=${childToken}`));
+    expect(child?.headers.get("x-middleware-next")).toBe("1");
+
+    const parentToken = await signSession({ memberId: "m1", name: "Rebecca", role: "parent" });
+    const parent = await middleware(req("/api/emergency/test", `${SESSION_COOKIE}=${parentToken}`));
+    expect(parent?.headers.get("x-middleware-next")).toBe("1");
+  });
+
   it("gates the sibling /api/emergency-contacts route", async () => {
     const res = await middleware(req("/api/emergency-contacts"));
     expect(res?.status ?? 0).toBe(401);

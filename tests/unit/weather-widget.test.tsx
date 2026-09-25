@@ -38,6 +38,7 @@ class FakeResizeObserver {
 
 const roots: ReturnType<typeof createRoot>[] = [];
 const globalsCss = readFileSync(resolve(process.cwd(), "src/app/globals.css"), "utf8");
+const TEST_NOW = new Date("2026-09-24T12:00:00.000Z");
 
 function render(ui: ReactElement): HTMLElement {
   const el = document.createElement("div");
@@ -201,7 +202,7 @@ function makeOpenMeteoPayload(overrides: { isDay?: number; precip?: number; visi
   // length time-of-day dependent (a 1 AM run left only 4 hours and this suite
   // failed every night). Noon UTC = 8 AM family-local = a long, deterministic
   // rest-of-day strip.
-  const now = overrides.startAt ? new Date(overrides.startAt) : new Date();
+  const now = overrides.startAt ? new Date(overrides.startAt) : new Date("2026-09-24T12:00:00.000Z");
   now.setMinutes(0, 0, 0);
   const hourlyTimes: string[] = [];
   for (let i = -1; i < 24; i++) {
@@ -263,7 +264,7 @@ function localApiIso(date: Date): string {
 }
 
 function makeSolarCrossMidnightPayload() {
-  const base = new Date();
+  const base = new Date(TEST_NOW);
   base.setMinutes(0, 0, 0);
   const payload = makeOpenMeteoPayload({ code: 0, cloud: 0, precip: 0 });
   const offsetSeconds = -base.getTimezoneOffset() * 60;
@@ -321,6 +322,7 @@ function mockOpenMeteoSequence(payloads: unknown[]) {
 
 describe("WeatherWidget — Not Boring redesign", () => {
   beforeEach(() => {
+    vi.spyOn(Date, "now").mockReturnValue(TEST_NOW.getTime());
     vi.stubGlobal("requestAnimationFrame", vi.fn((cb: FrameRequestCallback) => setTimeout(() => cb(Date.now()), 0) as unknown as number));
     vi.stubGlobal("ResizeObserver", FakeResizeObserver);
     vi.stubGlobal("matchMedia", vi.fn(() => ({
@@ -338,6 +340,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
     });
     roots.length = 0;
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     document.body.innerHTML = "";
   });
 
@@ -1731,7 +1734,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
     // rain hits the next hour boundary; the family event sits on that hour
     const payload = makeOpenMeteoPayload();
     payload.hourly.precipitation_probability = payload.hourly.precipitation_probability.map((p, i) => (i >= 1 ? 70 : p));
-    const nextHour = new Date();
+    const nextHour = new Date(TEST_NOW);
     nextHour.setHours(nextHour.getHours() + 1, 0, 0, 0);
     const hh = String(nextHour.getHours()).padStart(2, "0");
     const mm = String(nextHour.getMinutes()).padStart(2, "0");

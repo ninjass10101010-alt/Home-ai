@@ -1,36 +1,62 @@
 "use client";
 
 import { useState } from "react";
-import Surface from "@/components/ui/Surface";
 import SegmentedControl from "@/components/ui/SegmentedControl";
+import Toggle from "@/components/ui/Toggle";
 import { useTheme } from "@/hooks/useTheme";
 import { warmGlassAccentOptions } from "@/lib/design-tokens";
-import { defaultAccentHex, type AccentTarget } from "@/lib/theme-config";
+import { defaultAccentHex, type AccentTarget, type ThemeMode } from "@/lib/theme-config";
 
-function normalizeHex(hex: string) {
-  const clean = hex.trim().replace("#", "");
-  if (clean.length === 3) return `#${clean.split("").map((c) => c + c).join("").toLowerCase()}`;
-  return `#${clean.slice(0, 6).toLowerCase()}`;
+const ACCENT_COLOR_ID = "settings-accent-color";
+
+export function normalizeHex(value: unknown) {
+  if (typeof value !== "string") return null;
+  const normalized = value.toLowerCase();
+  if (/^#[0-9a-f]{3}$/.test(normalized)) {
+    return `#${normalized.slice(1).split("").map((character) => character + character).join("")}`;
+  }
+  if (/^#[0-9a-f]{6}$/.test(normalized) || /^#[0-9a-f]{8}$/.test(normalized)) {
+    return normalized;
+  }
+  return null;
 }
 
-function hexToRgb(hex: string) {
-  const normalized = normalizeHex(hex);
-  const m = normalized.match(/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i);
-  if (!m) return "59,130,246";
-  return `${parseInt(m[1], 16)},${parseInt(m[2], 16)},${parseInt(m[3], 16)}`;
+function rgbaToHex(value: unknown) {
+  if (typeof value !== "string") return null;
+  const match = value.trim().match(/^rgba?\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)(?:\s*,\s*(?:\d+(?:\.\d+)?|\.\d+))?\s*\)$/i);
+  if (!match) return null;
+  const channels = match.slice(1, 4).map(Number);
+  if (channels.some((channel) => !Number.isFinite(channel) || channel < 0 || channel > 255)) return null;
+  return `#${channels.map((channel) => Math.round(channel).toString(16).padStart(2, "0")).join("")}`;
+}
+
+function hexToRgb(value: string) {
+  const normalized = normalizeHex(value);
+  if (!normalized) return null;
+  return [1, 3, 5].map((offset) => parseInt(normalized.slice(offset, offset + 2), 16)).join(",");
+}
+
+function targetColor(value: unknown, target: AccentTarget) {
+  const parsed = typeof value === "string" && value.startsWith("#") ? normalizeHex(value) : rgbaToHex(value);
+  if (parsed) return parsed.slice(0, 7);
+  const fallback = defaultAccentHex[target];
+  const fallbackHex = fallback.startsWith("#") ? normalizeHex(fallback) : rgbaToHex(fallback);
+  return (fallbackHex ?? defaultAccentHex.selected).slice(0, 7);
 }
 
 export default function AppearanceSection() {
   const { theme, setMode, setAccentColor, setContrastBoost, setAccentHex } = useTheme();
   const [accentTarget, setAccentTarget] = useState<AccentTarget>("selected");
-  const [customHex, setCustomHex] = useState(defaultAccentHex[accentTarget]);
 
-  const setTargetColor = (target: AccentTarget, value: string) => {
+  const setTargetColor = (target: AccentTarget, value: unknown) => {
     const hex = normalizeHex(value);
-    if (target === "glow") setAccentHex("glow", `rgba(${hexToRgb(hex)},0.28)`);
-    else if (target === "border") setAccentHex("border", `rgba(${hexToRgb(hex)},0.35)`);
-    else setAccentHex(target, hex);
-    setCustomHex(hex);
+    if (!hex) return;
+    const color = hex.slice(0, 7);
+    const rgb = hexToRgb(color);
+    if (!rgb) return;
+    if (target === "glow") setAccentHex("glow", `rgba(${rgb},0.28)`);
+    else if (target === "border") setAccentHex("border", `rgba(${rgb},0.35)`);
+    else setAccentHex(target, color);
   };
 
   return (
@@ -38,7 +64,8 @@ export default function AppearanceSection() {
       <SegmentedControl
         aria-label="Display mode"
         value={theme.mode}
-        onChange={(value) => setMode(value as "light" | "dark" | "system")}
+        onChange={(value) => setMode(value as ThemeMode)}
+        className="w-full min-w-0"
         options={[
           { id: "system", label: "Auto" },
           { id: "light", label: "Day" },
@@ -46,81 +73,75 @@ export default function AppearanceSection() {
         ]}
       />
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-        {warmGlassAccentOptions.map((accent) => (
-          <button
-            key={accent.id}
-            type="button"
-            onClick={() => {
-              setAccentColor(accent.id);
-              setAccentHex("selected", accent.hex);
-              setAccentHex("glow", accent.glow);
-              setAccentHex("button", accent.hex);
-              setAccentHex("border", accent.glow);
-            }}
-            className={`rounded-2xl border p-3 text-left transition ${
-              theme.accentColor === accent.id
-                ? "border-[var(--color-accent-selected)] bg-[var(--color-accent-selected)]/10"
-                : "border-white/10 bg-[var(--color-surface-0)]/30"
-            }`}
-          >
-            <div className="h-10 rounded-xl" style={{ background: accent.hex }} />
-            <div className="mt-2 text-xs font-semibold text-text-primary">{accent.label}</div>
-          </button>
-        ))}
+      <fieldset className="min-w-0 border-0 p-0">
+        <legend className="mb-2 text-sm font-semibold text-text-primary">Accent presets</legend>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+          {warmGlassAccentOptions.map((accent) => (
+            <button
+              key={accent.id}
+              type="button"
+              aria-label={`Use ${accent.label} accent`}
+              aria-pressed={theme.accentColor === accent.id}
+              title={accent.description}
+              onClick={() => {
+                setAccentColor(accent.id);
+                setAccentHex("selected", accent.hex);
+                setAccentHex("glow", accent.glow);
+                setAccentHex("button", accent.hex);
+                setAccentHex("border", accent.glow);
+              }}
+              className={`tap-sm min-h-[44px] rounded-2xl border p-3 text-left ${
+                theme.accentColor === accent.id
+                  ? "border-[var(--color-accent-selected)] bg-[var(--color-accent-selected)]/10"
+                  : "border-[var(--color-border)] bg-[var(--color-surface-0)]/30"
+              }`}
+            >
+              <span className="block h-10 rounded-xl" style={{ background: accent.hex }} aria-hidden="true" />
+              <span className="mt-2 block text-xs font-semibold text-text-primary">{accent.label}</span>
+            </button>
+          ))}
+        </div>
+      </fieldset>
+
+      <div className="border-t-[var(--color-border)] pt-4">
+        <h3 className="mb-3 text-sm font-bold text-text-primary">Accent target</h3>
+        <SegmentedControl
+          compact
+          aria-label="Accent target"
+          value={accentTarget}
+          onChange={(value) => setAccentTarget(value as AccentTarget)}
+          className="w-full"
+          options={[
+            { id: "selected", label: "Selected" },
+            { id: "glow", label: "Glow" },
+            { id: "button", label: "Button" },
+            { id: "border", label: "Border" },
+          ]}
+        />
+        <div className="mt-4 flex min-w-0 flex-wrap items-center gap-3">
+          <input
+            id={ACCENT_COLOR_ID}
+            type="color"
+            value={targetColor(theme.accentHex[accentTarget], accentTarget)}
+            aria-label={`Custom ${accentTarget} accent color`}
+            onChange={(event) => setTargetColor(accentTarget, event.target.value)}
+            className="h-11 min-h-[44px] w-11 min-w-[44px] rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-1"
+          />
+          <label htmlFor={ACCENT_COLOR_ID} className="min-w-0 flex-1">
+            <span className="block text-sm font-semibold text-text-primary">Custom accent</span>
+            <span className="block text-xs text-text-muted">Live updates the selected target.</span>
+          </label>
+        </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Surface variant="glass-subtle" radius="xl" padding="sm">
-          <h4 className="mb-3 text-sm font-bold text-text-primary">Accent target</h4>
-          <SegmentedControl
-            aria-label="Accent target"
-            value={accentTarget}
-            onChange={(value) => {
-              setAccentTarget(value as AccentTarget);
-              setCustomHex(value === "glow" || value === "border" ? "#3b82f6" : defaultAccentHex[value as AccentTarget]);
-            }}
-            options={[
-              { id: "selected", label: "Selected" },
-              { id: "glow", label: "Glow" },
-              { id: "button", label: "Button" },
-              { id: "border", label: "Border" },
-            ]}
-          />
-          <div className="mt-4 flex items-center gap-3">
-            <input
-              type="color"
-              value={normalizeHex(customHex)}
-              onChange={(event) => setTargetColor(accentTarget, event.target.value)}
-              className="h-12 w-12 rounded-2xl border border-white/10 bg-[var(--color-surface-2)] p-1"
-            />
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-semibold text-text-primary">Custom accent</div>
-              <div className="text-xs text-text-muted">Live updates the selected target.</div>
-            </div>
-          </div>
-        </Surface>
-        <Surface variant="glass-subtle" radius="xl" padding="sm">
-          <label className="flex items-center justify-between gap-4">
-            <span className="min-w-0">
-              <span className="block text-sm font-semibold text-text-primary">High contrast</span>
-              <span className="block text-xs text-text-muted mt-0.5">Boosts text and border contrast for easier reading.</span>
-            </span>
-            <Toggle checked={theme.contrastBoost} onCheckedChange={setContrastBoost} />
-          </label>
-        </Surface>
+      <div className="border-t-[var(--color-border)] pt-4">
+        <Toggle
+          checked={theme.contrastBoost}
+          onCheckedChange={setContrastBoost}
+          label="High contrast"
+          description="Boosts text and border contrast for easier reading."
+        />
       </div>
     </div>
-  );
-}
-
-function Toggle({ checked, onCheckedChange }: { checked: boolean; onCheckedChange: (v: boolean) => void }) {
-  return (
-    <label className="relative inline-flex items-center cursor-pointer">
-      <input type="checkbox" checked={checked} onChange={(e) => onCheckedChange(e.target.checked)} className="sr-only peer" />
-      <span className={`relative h-7 w-12 shrink-0 rounded-full border transition-all duration-200 peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--color-accent-selected)] peer-focus-visible:ring-offset-2 ${checked ? "bg-[var(--color-accent-selected)] border-[var(--color-accent-selected)]" : "bg-[var(--color-surface-3)] border-white/10"}`}>
-        <span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-transform duration-200 ${checked ? "left-6" : "left-1"}`} />
-      </span>
-    </label>
   );
 }

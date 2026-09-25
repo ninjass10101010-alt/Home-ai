@@ -113,6 +113,11 @@ export default function HomePage() {
   const [mounted, setMounted] = useState(false);
   const [familyMembers, setFamilyMembers] = useState<any[]>([]);
   const [todayEvents, setTodayEvents] = useState<any[]>([]);
+  const [googleTodayUnavailable, setGoogleTodayUnavailable] = useState(false);
+  const googleTodayRef = useRef<any[]>([]);
+  const googleTodayRawRef = useRef<any[]>([]);
+  const googleTodayColorMapRef = useRef<Record<string, string> | null>(null);
+  const googleTodayRequestRef = useRef(0);
   const [pendingTasks, setPendingTasks] = useState<any[]>([]);
   const [pendingApprovalCount, setPendingApprovalCount] = useState(0);
   const [homeScheduleItems, setHomeScheduleItems] = useState<any[]>([]);
@@ -220,29 +225,43 @@ export default function HomePage() {
     setNow(new Date());
 
     const refreshTodayEvents = async () => {
+      const requestId = ++googleTodayRequestRef.current;
       let family: any[] = [];
       try { family = db.selectTodaysEvents(); } catch {}
-      // Google Calendar rows live in a separate PB collection
-      // (consuela_google_calendar_events) and only the Calendar page merged
-      // them — Home's Today widget never saw Google-only events (e.g. the
-      // all-day "Bailey & Emily at home!" that starts today). Merge the rows
-      // covering TODAY via the shared googleEventCoversDay contract (all-day
-      // end dates exclusive), in the events' own calendar colors.
-      let googleToday: any[] = [];
+      const mapGoogleRows = (rows: any[], colorMap: Record<string, string> | null, todayISO: string) =>
+        rows
+          .filter((row: any) => googleEventCoversDay(row, todayISO))
+          .map((row: any) => mapGoogleEvent(row, colorMap))
+          .filter(Boolean);
+      let googleToday = mapGoogleRows(
+        googleTodayRawRef.current,
+        googleTodayColorMapRef.current,
+        localTodayISO(),
+      );
       try {
         const res = await fetch("/api/google-calendar", { cache: "no-store" });
-        if (res.ok) {
-          const data = await res.json().catch(() => null);
-          const colorMap = data?.calendar_colors || null;
-          const todayISO = localTodayISO();
-          googleToday = (Array.isArray(data?.events) ? data.events : [])
-            .filter((r: any) => googleEventCoversDay(r, todayISO))
-            .map((r: any) => mapGoogleEvent(r, colorMap))
-            .filter(Boolean);
+        const data = await res.json().catch(() => null);
+        if (requestId !== googleTodayRequestRef.current) return;
+        if (!res.ok || !data || data.ok === false) {
+          googleTodayRef.current = googleToday;
+          setGoogleTodayUnavailable(true);
+        } else {
+          const colorMap = data.calendar_colors && typeof data.calendar_colors === "object"
+            ? data.calendar_colors as Record<string, string>
+            : null;
+          googleTodayRawRef.current = Array.isArray(data.events) ? data.events : [];
+          googleTodayColorMapRef.current = colorMap;
+          googleToday = mapGoogleRows(googleTodayRawRef.current, colorMap, localTodayISO());
+          googleTodayRef.current = googleToday;
+          setGoogleTodayUnavailable(false);
         }
       } catch {
-        // Google unreachable or signed out — family rows stand alone.
+        if (requestId === googleTodayRequestRef.current) {
+          googleTodayRef.current = googleToday;
+          setGoogleTodayUnavailable(true);
+        }
       }
+      if (requestId !== googleTodayRequestRef.current) return;
       setTodayEvents(
         [...family, ...googleToday].sort((a: any, b: any) =>
           (a.time === "All day" ? -1 : parseTimeToMinutes(a.time || "")) -
@@ -270,7 +289,19 @@ export default function HomePage() {
       setHomeError("Consuela could not load your family dashboard.");
     }
     window.addEventListener("consuela-data-refreshed", refreshTodayEvents);
-    return () => window.removeEventListener("consuela-data-refreshed", refreshTodayEvents);
+    const onGoogleDisconnected = () => {
+      googleTodayRequestRef.current += 1;
+      googleTodayRawRef.current = [];
+      googleTodayColorMapRef.current = null;
+      googleTodayRef.current = [];
+      setGoogleTodayUnavailable(true);
+      setTodayEvents((current) => current.filter((event: any) => event.member !== "Google"));
+    };
+    window.addEventListener("consuela-google-disconnected", onGoogleDisconnected);
+    return () => {
+      window.removeEventListener("consuela-data-refreshed", refreshTodayEvents);
+      window.removeEventListener("consuela-google-disconnected", onGoogleDisconnected);
+    };
   }, []);
 
   // Tasks + Daily Schedule: the same refresh contract the Week tile uses —
@@ -586,6 +617,11 @@ export default function HomePage() {
                             <Link href="/calendar" className="tap-sm text-xs font-semibold widget-accent-text">+{hiddenEvents} more · See all →</Link>
                           ) : undefined
                         }>
+                        {googleTodayUnavailable && (
+                          <p role="status" className="mb-2 text-xs text-text-secondary">
+                            Google Calendar is unavailable — showing saved events.
+                          </p>
+                        )}
                         <div className="min-h-0 flex-1 overflow-y-auto">
                         <DayLine
                           className="mb-3"
