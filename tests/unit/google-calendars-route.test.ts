@@ -31,9 +31,25 @@ vi.mock("@/lib/session", () => ({
   verifySession: mocks.verifySession,
 }));
 
-vi.mock("@/lib/server-auth", () => ({
-  verifyPinAgainstAnyMember: vi.fn(async () => null),
+// The live PocketBase row mirrors the signed session so these route tests
+// exercise the real live-session gate (same role => same verdict).
+vi.mock("@/lib/pb-auth", () => ({
+  withAdmin: async (fn: (pb: unknown) => Promise<unknown>) =>
+    fn({
+      collection: () => ({
+        getOne: async (id: string) => {
+          const session = await mocks.verifySession("live");
+          if (!session) throw { status: 404 };
+          return { id, name: session.name, role: session.role };
+        },
+      }),
+    }),
 }));
+
+vi.mock("@/lib/server-auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/server-auth")>();
+  return { ...actual, verifyPinAgainstAnyMember: vi.fn(async () => null) };
+});
 
 import { GET, PUT } from "@/app/api/google/calendars/route";
 
