@@ -208,6 +208,68 @@ describe("requireLiveSession", () => {
       identity: { memberId: "m-kid", name: "Kid Live", role: "child" },
     });
   });
+
+  it("returns 401 when only the request body carries an identity", async () => {
+    const result = await requireLiveSession(
+      new Request("http://localhost/api/db/members", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ memberId: "m1", name: "Parent", role: "parent" }),
+      }),
+    );
+
+    expect(result).toEqual({ ok: false, status: 401, error: "unauthorized" });
+    expect(mocks.withAdmin).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 when only the query string carries an identity", async () => {
+    const result = await requireLiveSession(
+      new Request("http://localhost/api/db/members?memberId=m1&role=parent&name=Parent"),
+    );
+
+    expect(result).toEqual({ ok: false, status: 401, error: "unauthorized" });
+    expect(mocks.withAdmin).not.toHaveBeenCalled();
+  });
+
+  it("never logs the session token on either the success or the failure path", async () => {
+    const token = await signSession({
+      memberId: "m1",
+      name: "Parent",
+      role: "parent",
+    });
+    const spies = (["log", "info", "warn", "error", "debug"] as const).map((level) =>
+      vi.spyOn(console, level).mockImplementation(() => {}),
+    );
+
+    try {
+      mocks.withAdmin.mockImplementation((fn) =>
+        fn(pbWithRow({ id: "m1", name: "Parent", role: "parent" })),
+      );
+      const authorized = await requireLiveSession(requestWithToken(token));
+
+      mocks.withAdmin.mockImplementation((fn) =>
+        fn(pbThatThrows(new Error("private database failure"))),
+      );
+      const unavailable = await requireLiveSession(requestWithToken(token));
+
+      expect(authorized).toEqual({
+        ok: true,
+        identity: { memberId: "m1", name: "Parent", role: "parent" },
+      });
+      expect(unavailable).toEqual({
+        ok: false,
+        status: 503,
+        error: "identity_unavailable",
+      });
+      for (const spy of spies) {
+        for (const call of spy.mock.calls) {
+          expect(call.map((arg) => String(arg)).join(" ")).not.toContain(token);
+        }
+      }
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+  });
 });
 
 describe("session policy vocabulary", () => {
