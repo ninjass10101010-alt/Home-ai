@@ -189,6 +189,7 @@ describe("tasks/sync leg gating", () => {
       reconciled: true,
       repaired: [],
       failed: [],
+      warnings: [],
     });
     expect(mocks.reconcileTaskProjectionLocked).toHaveBeenCalledOnce();
   });
@@ -210,6 +211,144 @@ describe("tasks/sync leg gating", () => {
       reconciled: false,
       repaired: ["task:1:completion"],
       failed: ["approval:pending"],
+    });
+  });
+});
+
+describe("tasks/sync repair status contract", () => {
+  it("503 rollover_unavailable when the rollover leg throws", async () => {
+    mocks.ensureCurrentTaskWeek.mockRejectedValue(new Error("pb down"));
+    const res = await GET();
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({
+      ok: false,
+      error: "rollover_unavailable",
+      reconciled: false,
+      failed: ["rollover:unavailable"],
+      snapshot: null,
+    });
+    expect(mocks.reconcileTaskProjectionLocked).not.toHaveBeenCalled();
+  });
+
+  it("503 rollover_unavailable when the rollover leg produces no current week", async () => {
+    mocks.ensureCurrentTaskWeek.mockResolvedValue({
+      reconciled: true,
+      weekStart: "",
+      revision: { revision: "1", updatedAt: "" },
+      currentWeekData: null,
+    });
+    const res = await GET();
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({
+      error: "rollover_unavailable",
+      failed: ["rollover:unavailable"],
+    });
+    expect(mocks.reconcileTaskProjectionLocked).not.toHaveBeenCalled();
+  });
+
+  it("503 projection_reconcile_unavailable when the locked reconciler throws", async () => {
+    mocks.reconcileTaskProjectionLocked.mockRejectedValue(new Error("lock timeout"));
+    const res = await GET();
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({
+      error: "projection_reconcile_unavailable",
+      failed: ["projection:unavailable"],
+      snapshot: null,
+    });
+  });
+
+  it("503 snapshot_unavailable when the snapshot leg cannot be read", async () => {
+    db.rows = [];
+    mocks.withAdmin.mockImplementation((fn: any) => fn({
+      collection: () => ({ getFullList: async () => { throw new Error("snapshot read failed"); } }),
+    }));
+    const res = await GET();
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({
+      error: "snapshot_unavailable",
+      failed: ["snapshot:read"],
+      snapshot: null,
+    });
+  });
+
+  it("200 repair-level: a task collection read failure still serves the snapshot", async () => {
+    db.rows = [{ id: "row1", data: { tasks: [{ id: "t1" }] } }];
+    mocks.reconcileTaskProjectionLocked.mockResolvedValue({
+      ok: false,
+      reconciled: false,
+      repaired: [],
+      failed: ["tasks:read"],
+      weekData: null,
+    });
+    const res = await GET();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: false,
+      error: "projection_reconcile_pending",
+      snapshot: { tasks: [{ id: "t1" }] },
+      reconciled: false,
+      repaired: [],
+      failed: ["tasks:read"],
+      warnings: [],
+    });
+  });
+
+  it("200 repair-level: a concurrent task change is reported as tasks:changed", async () => {
+    db.rows = [{ id: "row1", data: { tasks: [{ id: "t1" }] } }];
+    mocks.reconcileTaskProjectionLocked.mockResolvedValue({
+      ok: false,
+      reconciled: false,
+      repaired: ["approval:projection"],
+      failed: ["tasks:changed"],
+      weekData: null,
+    });
+    const res = await GET();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: false,
+      error: "projection_reconcile_pending",
+      snapshot: { tasks: [{ id: "t1" }] },
+      reconciled: false,
+      repaired: ["approval:projection"],
+      failed: ["tasks:changed"],
+      warnings: [],
+    });
+  });
+
+  it("200 repair-level: an unreconciled rollover leg is surfaced, not a 503", async () => {
+    db.rows = [{ id: "row1", data: { tasks: [{ id: "t1" }] } }];
+    mocks.ensureCurrentTaskWeek.mockResolvedValue({
+      reconciled: false,
+      weekStart: "2026-09-21",
+      revision: { revision: "1", updatedAt: "" },
+      currentWeekData: { weekStart: "2026-09-21", points: {}, streak: {}, lastActive: {}, history: [] },
+    });
+    const res = await GET();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      ok: false,
+      reconciled: false,
+      failed: ["rollover:pending"],
+    });
+    expect(mocks.reconcileTaskProjectionLocked).toHaveBeenCalledOnce();
+  });
+
+  it("200 repair-level: isolated week warnings keep the snapshot available", async () => {
+    db.rows = [{ id: "row1", data: { tasks: [{ id: "t1" }] } }];
+    mocks.reconcileTaskProjectionLocked.mockResolvedValue({
+      ok: true,
+      reconciled: true,
+      repaired: [],
+      failed: [],
+      warnings: ["week:unrelated_row"],
+      weekData: null,
+    });
+    const res = await GET();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      ok: true,
+      reconciled: true,
+      warnings: ["week:unrelated_row"],
     });
   });
 });

@@ -1336,6 +1336,7 @@ function success(
 async function executeSendBack(
   command: ApproveCommand,
   prepared: PreparedCommand,
+  preloadedTaskRows?: Record<string, any>[],
 ): Promise<ApprovalServiceResult> {
   const activeItems = prepared.tasks.filter((item) => !item.skip);
   const patches: SnapshotPatch[] = [];
@@ -1369,6 +1370,7 @@ async function executeSendBack(
         pb,
         projectedTaskForPatch(item, patch),
         item.id,
+        preloadedTaskRows,
       );
       if (!projected) failed.push(item.id);
     }
@@ -1425,6 +1427,7 @@ async function executeApproval(
   command: ApproveCommand,
   prepared: PreparedCommand,
   replayOnly = false,
+  preloadedTaskRows?: Record<string, any>[],
 ): Promise<ApprovalServiceResult> {
   const active = prepared.tasks.filter((item) => !item.skip);
   if (active.length === 0) {
@@ -1462,7 +1465,7 @@ async function executeApproval(
     for (const item of active) {
       const patch = patches.find((candidate) => candidate.id === item.id);
       const target = projectedTaskForPatch(item, patch);
-      const projected = await projectCanonicalTaskToPB(pb, target, item.id);
+      const projected = await projectCanonicalTaskToPB(pb, target, item.id, preloadedTaskRows);
       if (!projected) failed.push(item.id);
     }
     if (failed.length > 0) {
@@ -1565,6 +1568,7 @@ async function executeApprovalCommandUnlocked(
   actor: ApprovalActor,
   authorityWeekStart: string,
   replayOnly = false,
+  preloadedTaskRows?: Record<string, any>[],
 ): Promise<ApprovalServiceResult> {
   const parsed = command;
   const weekStart = authorityWeekStart;
@@ -1606,8 +1610,8 @@ async function executeApprovalCommandUnlocked(
   prepared.action = parsed.action;
   prepared.taskIds = approvalTaskIds(parsed);
   try {
-    if (parsed.action === "send-back") return await executeSendBack(parsed, prepared);
-    return await executeApproval(parsed, prepared, replayOnly);
+    if (parsed.action === "send-back") return await executeSendBack(parsed, prepared, preloadedTaskRows);
+    return await executeApproval(parsed, prepared, replayOnly, preloadedTaskRows);
   } catch {
     return failure(command.operationId, parsed.action, "ledger_unavailable", prepared.week);
   }
@@ -1669,6 +1673,7 @@ export interface ApprovalRepairOptions {
   action?: ApproveAction;
   actorId?: string;
   fingerprint?: string;
+  preloadedTaskRows?: Record<string, any>[];
   locked?: boolean;
 }
 
@@ -1869,6 +1874,7 @@ export async function repairApprovalOperationLocked(
       { memberId: actor.id, name: actor.name, role: actor.role },
       weekStart,
       true,
+      options.preloadedTaskRows,
     );
   } catch {
     return failure(operationId, options.action ?? "approve", "task_store_unavailable", emptyWeekData(localWeekStartISO()));

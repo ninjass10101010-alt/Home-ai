@@ -1,11 +1,11 @@
 // Usage: npx tsx scripts/consuela/reconcile-pending-approvals.mjs
-// Prints one JSON line of repair categories (for example week_mismatch or
-// projection:read) and never echoes store contents or raw error messages.
+// Prints one JSON line of repair categories (for example tasks:read,
+// tasks:changed, week_mismatch, or projection:read) and never echoes store
+// contents or raw error messages.
+import { repairCategories } from "../../src/lib/task-repair-categories";
+
 const envPath = new URL("../../.env.local", import.meta.url).pathname;
 try { process.loadEnvFile(envPath); } catch {}
-
-const categoryPattern = /^(?:approval|projection|rollover|snapshot|week|week_archive|task)(?:[:_][a-z0-9_-]+){1,2}$/i;
-const categories = (values) => [...new Set((Array.isArray(values) ? values : []).filter((value) => typeof value === "string" && categoryPattern.test(value)))];
 
 try {
   const { reconcileTaskProjection } = await import("../../src/lib/task-projection-reconciler");
@@ -13,8 +13,9 @@ try {
   const output = {
     ok: result.ok,
     reconciled: result.reconciled,
-    repaired: categories(result.repaired),
-    failed: categories(result.failed),
+    repaired: repairCategories(result.repaired),
+    failed: repairCategories(result.failed),
+    warnings: repairCategories(result.warnings),
   };
   console.log(JSON.stringify(output));
   if (!output.ok || !output.reconciled) process.exitCode = 1;
@@ -27,6 +28,7 @@ try {
     reconciled: false,
     repaired: [],
     failed: [category],
+    warnings: [],
   }));
   process.exitCode = 1;
 }

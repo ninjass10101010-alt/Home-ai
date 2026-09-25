@@ -437,6 +437,51 @@ describe("task projection reconciler", () => {
     expect(harness.weekRows[0].history).toHaveLength(0);
   });
 
+  it("preloads the task collection once for approval marker replay and verification", async () => {
+    const taskIds = [81, 82, 83];
+    const operationId = "op-marker-replay-read-cost";
+    const fingerprint = approvalCommandFingerprint(
+      { operationId, action: "approve-all", taskIds },
+      PARENT_ID,
+    );
+    const paid = taskIds.map((id, index) => transaction(id, CHILD_NAME, 5, {
+      meta: {
+        operationId,
+        source: "task-approval",
+        fingerprint,
+        actorId: PARENT_ID,
+        action: "approve-all",
+        taskIds,
+      },
+      id: index + 1,
+    }));
+    const pendingTasks = taskIds.map((taskId) => task(taskId, {
+      completed: true,
+      completedBy: CHILD_NAME,
+      completedAt: `${WEEK}T10:00:00.000Z`,
+      completedInWeek: WEEK,
+      pendingApproval: { byName: CHILD_NAME, at: `${WEEK}T10:00:00.000Z`, points: 5 },
+    }));
+    const harness = makeHarness({
+      snapshot: {
+        revision: "1",
+        taskWeekStart: WEEK,
+        tasks: pendingTasks,
+        deletedTaskIds: [],
+        pendingProjectionRepairs: [{ operationId, taskIds, action: "approve-all", actorId: PARENT_ID, fingerprint, createdAt: `${WEEK}T10:01:00.000Z` }],
+        weekData: { weekStart: WEEK, points: {}, streak: {}, lastActive: {}, history: paid },
+      },
+      taskRows: pendingTasks.map((current) => ({ ...current, id: `pb-${current.id}`, taskId: current.id })),
+      weekRows: [{ id: "week-current", weekStart: WEEK, points: {}, streak: {}, lastActive: {}, history: paid }],
+    });
+    mocks.withAdmin.mockImplementation(async (fn: any) => fn(harness.pb));
+
+    const result = await reconcileTaskProjection({ pb: harness.pb as any, weekStart: WEEK });
+
+    expect(result.reconciled).toBe(true);
+    expect(harness.state.taskCollectionReads).toBeLessThanOrEqual(4);
+  });
+
   it("retries a mid-sequence task projection failure and becomes idempotent", async () => {
     const snapshot = {
       revision: "1",
@@ -919,6 +964,101 @@ describe("task projection reconciler", () => {
 
     expect(result.reconciled).toBe(false);
     expect(result.failed).toContain("rollover:changed");
+    expect(harness.taskRows[0].completed).toBe(false);
+  });
+
+  it("skips invalid unrelated week_data rows as warnings instead of failing", async () => {
+    const harness = makeHarness({
+      snapshot: {
+        revision: "1",
+        taskWeekStart: WEEK,
+        tasks: [task(73)],
+        deletedTaskIds: [],
+        weekData: { weekStart: WEEK, points: {}, streak: {}, lastActive: {}, history: [] },
+      },
+      taskRows: [{ ...task(73), id: "pb-73", taskId: 73 }],
+      weekRows: [
+        { id: "week-current", weekStart: WEEK, points: {}, streak: {}, lastActive: {}, history: [] },
+        { id: "week-junk", weekStart: "not-a-week", points: {}, streak: {}, lastActive: {}, history: [] },
+      ],
+    });
+    mocks.withAdmin.mockImplementation(async (fn: any) => fn(harness.pb));
+
+    const result = await reconcileTaskProjection({ pb: harness.pb as any, weekStart: WEEK });
+
+    expect(result.reconciled).toBe(true);
+    expect(result.failed).toEqual([]);
+    expect(result.warnings).toContain("week:unrelated_row");
+    expect(harness.weekRows.some((row: any) => row.id === "week-junk")).toBe(true);
+  });
+
+  it("fails reconciliation when a current week row is malformed", async () => {
+    const harness = makeHarness({
+      snapshot: {
+        revision: "1",
+        taskWeekStart: WEEK,
+        tasks: [task(74)],
+        deletedTaskIds: [],
+        weekData: { weekStart: WEEK, points: {}, streak: {}, lastActive: {}, history: [] },
+      },
+      taskRows: [{ ...task(74), id: "pb-74", taskId: 74 }],
+      weekRows: [
+        { id: "week-current", weekStart: WEEK, points: {}, streak: {}, lastActive: {}, history: [] },
+        { id: "week-broken", weekStart: WEEK, points: "not-json", streak: 7, lastActive: null, history: null },
+      ],
+    });
+    mocks.withAdmin.mockImplementation(async (fn: any) => fn(harness.pb));
+
+    const result = await reconcileTaskProjection({ pb: harness.pb as any, weekStart: WEEK });
+
+    expect(result.reconciled).toBe(false);
+    expect(result.failed).toContain("week:read");
+    expect(harness.taskRows[0].completed).toBe(false);
+  });
+
+  it("fails with week:changed when the expected week no longer matches raw canonical rows", async () => {
+    const history = [transaction(1, "Parent Test", 2)];
+    const harness = makeHarness({
+      snapshot: {
+        revision: "1",
+        taskWeekStart: WEEK,
+        tasks: [task(75)],
+        deletedTaskIds: [],
+        weekData: { weekStart: WEEK, points: { "Parent Test": 2 }, streak: {}, lastActive: {}, history },
+      },
+      taskRows: [{ ...task(75), id: "pb-75", taskId: 75 }],
+      weekRows: [{ id: "week-current", weekStart: WEEK, points: { "Parent Test": 2 }, streak: {}, lastActive: {}, history }],
+    });
+    const originalCollection = harness.pb.collection;
+    let weekReads = 0;
+    harness.pb.collection = ((name: string) => {
+      const collection = originalCollection(name);
+      if (name !== "week_data") return collection;
+      return {
+        ...collection,
+        getFullList: async () => {
+          const rows = await collection.getFullList();
+          weekReads += 1;
+          if (weekReads === 2) rows[0].points = { "Parent Test": 999 };
+          return rows;
+        },
+      };
+    }) as any;
+
+    const result = await reconcileTaskProjectionLocked(harness.pb as any, {
+      weekStart: WEEK,
+      expectedWeekData: {
+        weekStart: WEEK,
+        points: { "Parent Test": 2 },
+        streak: {},
+        lastActive: {},
+        history: history as any,
+      },
+    });
+
+    expect(result.reconciled).toBe(false);
+    expect(result.failed).toContain("week:changed");
+    expect(result.failed).not.toContain("tasks:changed");
     expect(harness.taskRows[0].completed).toBe(false);
   });
 
