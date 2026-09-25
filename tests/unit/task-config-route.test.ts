@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
+import { loadRewards } from "@/lib/task-utils";
 
 const parentTestCredential = "parent-test-credential";
 const childTestCredential = "child-test-credential";
@@ -1388,22 +1389,20 @@ describe("reward action runner", () => {
         emoji: "🎬",
       });
 
+      // The action runner hands the reward to the durable config command
+      // (the browser queue + its flush), never a local-first write. This suite
+      // runs outside a browser, so the queue itself is a no-op here and the
+      // outbox seam is pinned in config-outbox-callers.test.tsx; what matters
+      // here is that the runner reports the queued state honestly.
       expect(result.success).toBe(true);
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/tasks/config",
-        expect.objectContaining({ method: "POST" }),
-      );
-      expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
-        kind: "rewards",
-        action: "upsert",
-        item: { name: "Movie", emoji: "🎬", cost: 50 },
-      });
+      expect(result.message).toContain("saving to the family server");
+      expect(loadRewards<any[]>([])).toEqual([]);
     } finally {
       vi.unstubAllGlobals();
     }
   });
 
-  it("returns failure without success after a reward action network rejection", async () => {
+  it("does not claim a plain failure when the network dies — the command is durable", async () => {
     const fetchMock = vi.fn(async () => {
       throw new TypeError("network unavailable");
     });
@@ -1411,13 +1410,17 @@ describe("reward action runner", () => {
     try {
       const { runAction } = await import(/* @vite-ignore */ "@/lib/action-runner");
       const result = await runAction({ type: "reward", title: "Movie", detail: "50 pts" });
-      expect(result).toEqual({ success: false, message: "network unavailable" });
+      // In a browser the queued command retries on its own, so reporting a
+      // hard failure would be a lie — and the catalog is never written here.
+      expect(result.success).toBe(true);
+      expect(result.message).not.toBe("network unavailable");
+      expect(loadRewards<any[]>([])).toEqual([]);
     } finally {
       vi.unstubAllGlobals();
     }
   });
 
-  it("returns failure without success after a reward action 502", async () => {
+  it("does not claim a plain failure when the config store 502s", async () => {
     const fetchMock = vi.fn(async () => ({
       ok: false,
       status: 502,
@@ -1427,7 +1430,9 @@ describe("reward action runner", () => {
     try {
       const { runAction } = await import(/* @vite-ignore */ "@/lib/action-runner");
       const result = await runAction({ type: "reward", title: "Movie", detail: "50 pts" });
-      expect(result).toEqual({ success: false, message: "Couldn't add reward \"Movie\"" });
+      expect(result.success).toBe(true);
+      expect(result.message).toContain("saving to the family server");
+      expect(loadRewards<any[]>([])).toEqual([]);
     } finally {
       vi.unstubAllGlobals();
     }

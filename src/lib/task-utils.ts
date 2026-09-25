@@ -221,29 +221,23 @@ export function emptyWeekData(startISO?: string): WeekData {
 }
 
 /**
- * Adopt a server-returned weekData (POST /api/tasks/approve 200 body) WITHOUT
- * ever dropping local-only transactions (2026-09-23 review, Critical #3).
+ * Adopt a server-authoritative weekData (an outbox acknowledgment body, or a
+ * pulled snapshot leg) as the truth for the current week.
  *
- * An offline approval's earn tx lives ONLY in the local ledger — the server
- * never saw it. An unconditional `setWeekData(server)` used to erase it on
- * the next online approve, and the re-armed snapshot push then propagated the
- * truncated ledger to every device: permanent point loss. Adoption gates
- * mirror mergeTasksSnapshot's own week-adoption rules:
- *   - server week newer than local (or local empty) → adopt verbatim;
- *   - server week OLDER than local (stale server) → keep local;
- *   - same week → adopt only a server ledger at least as rich as the local
- *     one (server history length >= local). A shorter server ledger means
- *     the local one carries the offline tx the server lacks — keep it; the
- *     next snapshot push uploads it and the server unions by tx id.
+ * There is deliberately NO history-length heuristic here any more. Once every
+ * ledger write is a durable outbox command, a locally recorded earn always has
+ * a queued command behind it, so a shorter server ledger is never "the server
+ * lost my offline transaction" — it is the server's authoritative state and
+ * must win. The only guard left is the week rollover: a strictly OLDER server
+ * week is stale (no device has synced since Monday) and must not resurrect last
+ * week's points into the fresh week.
  */
-export function adoptServerWeekData(prev: WeekData, server: WeekData): WeekData {
+export function adoptAuthoritativeWeekData(prev: WeekData, server: WeekData): WeekData {
   const prevStart = String(prev?.weekStart ?? "");
   const serverStart = String(server?.weekStart ?? "");
   if (!serverStart) return prev;
-  if (!prevStart || serverStart > prevStart) return server;
-  if (serverStart < prevStart) return prev;
-  if ((server.history?.length || 0) >= (prev.history?.length || 0)) return server;
-  return prev;
+  if (prevStart && serverStart < prevStart) return prev;
+  return { ...prev, ...server };
 }
 
 let _txId = Date.now();

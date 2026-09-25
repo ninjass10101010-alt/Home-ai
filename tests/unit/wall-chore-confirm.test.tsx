@@ -48,6 +48,8 @@ vi.mock("@/db", () => ({
 }));
 
 import { useWallConfirm } from "@/hooks/useWallConfirm";
+import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-operation-outbox";
+import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 import TasksPage from "@/app/tasks/page";
 import { todayMondayISO, todayISO } from "@/lib/task-utils";
 
@@ -165,15 +167,26 @@ function seed(tasks: any[]) {
 }
 
 function stubGuestFetches() {
-  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 401, json: async () => ({}) })));
+  vi.stubGlobal("fetch", vi.fn(async (input: any) => {
+    if (String(input) === "/api/tasks/claim") {
+      return { ok: false, status: 503, json: async () => ({}) };
+    }
+    return { ok: false, status: 401, json: async () => ({}) };
+  }));
 }
 
 function stubVerifyMember(member: any) {
+  // The claim command is left un-acknowledged (503) so the suite can assert the
+  // QUEUED command the confirm tap produced — the completion is the
+  // acknowledgment's write, never a local one.
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
     if (String(input).includes("/api/members/verify")) {
       return { ok: true, status: 200, json: async () => ({ member }) };
     }
-    return { ok: true, status: 200, json: async () => ({ snapshot: null }) };
+    if (String(input) === "/api/tasks/claim") {
+      return { ok: false, status: 503, json: async () => ({}) };
+    }
+    return { ok: true, status: 200, json: async () => ({ snapshot: null, reconciled: true }) };
   }));
 }
 
@@ -231,6 +244,8 @@ async function typeAndSubmit(pin = "1234") {
 beforeEach(() => {
   document.body.innerHTML = "";
   localStorage.clear();
+  __resetTaskOutboxForTests();
+  __resetTaskCommandCredentialsForTests();
   vi.unstubAllGlobals();
   probeRoot = null;
   pageRoot = null;
@@ -281,13 +296,13 @@ describe("Tasks page wall chore 2-step confirm (wiring)", () => {
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
     expect(document.querySelector('input[inputMode="numeric"]')).not.toBeNull();
 
-    // And that path is the real one end-to-end: a verified PIN lands the
-    // done-but-unpaid pending record, exactly like the non-wall flow.
+    // And that path is the real one end-to-end: the verified PIN is queued
+    // ephemerally, exactly like the non-wall flow, and the row stays untouched.
     await typeAndSubmit();
+    await settle(120);
     expect(verifyCalls()).toContain("/api/members/verify");
-    const saved = storedTasks();
-    expect(saved[0].completed).toBe(true);
-    expect(saved[0].pendingApproval).toEqual({ byName: "Jasmine Rose", at: expect.any(String), points: 5 });
+    expect(listTaskOutbox()[0]).toMatchObject({ route: "/api/tasks/claim", action: "complete" });
+    expect(storedTasks()[0].completed).toBe(false);
     expect(storedHistory()).toHaveLength(0);
     await settle(1800); // flush the success-copy auto-close portal
   });
@@ -312,13 +327,13 @@ describe("Tasks page wall chore 2-step confirm (wiring)", () => {
     expect(pillIn(el)).toBeTruthy();
     expect(verifyCalls()).not.toContain("/api/members/verify");
 
-    // Confirm tap: the original PIN-free branch fires — done-but-unpaid.
+    // Confirm tap: the original PIN-free branch fires — one durable
+    // credential-free completion command, and no local row.
     const pill = pillIn(el)!;
     await act(async () => { pill.click(); });
-    await settle();
-    const saved = storedTasks();
-    expect(saved[0].completed).toBe(true);
-    expect(saved[0].pendingApproval).toEqual({ byName: "Caspian Garcia", at: expect.any(String), points: 5 });
+    await settle(120);
+    expect(listTaskOutbox()[0]).toMatchObject({ route: "/api/tasks/claim", action: "complete" });
+    expect(storedTasks()[0].completed).toBe(false);
     expect(storedHistory()).toHaveLength(0);
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(verifyCalls()).not.toContain("/api/members/verify");
@@ -358,10 +373,9 @@ describe("Tasks page wall chore 2-step confirm (wiring)", () => {
     // Second swipe gesture on the armed row: the confirm fires — the same
     // PIN-free downstream a tap would drive (done-but-unpaid).
     swipe();
-    await settle();
-    const saved = storedTasks();
-    expect(saved[0].completed).toBe(true);
-    expect(saved[0].pendingApproval).toEqual({ byName: "Caspian Garcia", at: expect.any(String), points: 5 });
+    await settle(120);
+    expect(listTaskOutbox()[0]).toMatchObject({ route: "/api/tasks/claim", action: "complete" });
+    expect(storedTasks()[0].completed).toBe(false);
     expect(storedHistory()).toHaveLength(0);
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     await settle(1800);
@@ -386,9 +400,9 @@ describe("Tasks page wall chore 2-step confirm (wiring)", () => {
     expect(pillIn(el)).toBeUndefined();
 
     await typeAndSubmit();
-    const saved = storedTasks();
-    expect(saved[0].completed).toBe(true);
-    expect(saved[0].pendingApproval).toEqual({ byName: "Jasmine Rose", at: expect.any(String), points: 5 });
+    await settle(120);
+    expect(listTaskOutbox()[0]).toMatchObject({ route: "/api/tasks/claim", action: "complete" });
+    expect(storedTasks()[0].completed).toBe(false);
     await settle(1800);
   });
 });

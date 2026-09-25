@@ -10,6 +10,7 @@ import {
   pullTaskSnapshotDocument,
   registerTaskOutboxDriver,
   requestTaskOutboxFlush,
+  resolveTaskOutboxCredential,
   subscribeTaskOutbox,
   type FlushTaskOutboxResult,
   type SnapshotRead,
@@ -55,7 +56,8 @@ export function useTaskOperationOutbox(
 
   useEffect(() => {
     const unregister = registerTaskOutboxDriver({
-      getCredential: (entry) => optionsRef.current.getCredential?.(entry),
+      getCredential: (entry) =>
+        optionsRef.current.getCredential?.(entry) ?? resolveTaskOutboxCredential(entry),
       pullSnapshot: () =>
         optionsRef.current.pullSnapshot
           ? optionsRef.current.pullSnapshot()

@@ -5,7 +5,7 @@ vi.mock("@/db", () => ({ db: { upsertTask: vi.fn(async () => ({})) } }));
 
 import {
   isPendingApproval, pendingApprovals, pendingPointsFor, completesWithoutPin,
-  tapCompletePending, approvePendingCompletion, sendBackPendingCompletion, adoptServerWeekData,
+  tapCompletePending, approvePendingCompletion, sendBackPendingCompletion, adoptAuthoritativeWeekData,
 } from "@/lib/task-utils";
 
 function t(over: Partial<Task>): Task {
@@ -190,47 +190,47 @@ describe("regenerateRecurringTasks with pending rows", () => {
   });
 });
 
-describe("adoptServerWeekData (guarded server-ledger adoption, 2026-09-23 review)", () => {
+describe("adoptAuthoritativeWeekData (Task 10 \u2014 outbox/snapshot adoption, no history heuristic)", () => {
   const offlineTx = {
     id: 1, timestamp: "2026-09-22T10:00:00.000Z", member: "Jasmine Rose",
     type: "earn", amount: 8, description: "Completed: Dishes (+8pts)", taskId: 101,
   } as any;
 
-  it("same week, server ledger SHORTER than local → local survives (offline approval tx is never dropped)", () => {
-    
+  it("same week, server ledger SHORTER than local \u2192 the server is the truth and wins", () => {
     const prev = wk({ history: [offlineTx] as any });
     const server = wk({ history: [] });
-    expect(adoptServerWeekData(prev, server)).toBe(prev);
+    const adopted = adoptAuthoritativeWeekData(prev, server);
+    expect(adopted.history).toHaveLength(0);
+    expect(adopted).not.toBe(prev);
   });
 
-  it("same week, server ledger at least as long → adopted (the normal online flow)", () => {
-    
+  it("same week, server ledger at least as long \u2192 adopted", () => {
     const prev = wk({ history: [offlineTx] as any });
     const server = wk({
       points: { "Caspian Garcia": 8 },
       history: [offlineTx, { id: 2, timestamp: "2026-09-22T11:00:00.000Z", member: "Caspian Garcia", type: "earn", amount: 8, description: "x", taskId: 102 }] as any,
     });
-    expect(adoptServerWeekData(prev, server)).toBe(server);
+    const adopted = adoptAuthoritativeWeekData(prev, server);
+    expect(adopted.points["Caspian Garcia"]).toBe(8);
+    expect(adopted.history).toHaveLength(2);
   });
 
-  it("server carries a NEWER week → adopted verbatim (Monday rollover)", () => {
-    
+  it("server carries a NEWER week \u2192 adopted (Monday rollover)", () => {
     const prev = wk({ weekStart: "2026-09-01", history: [offlineTx] as any });
     const server = wk({ weekStart: "2026-09-08", history: [] });
-    expect(adoptServerWeekData(prev, server)).toBe(server);
+    expect(adoptAuthoritativeWeekData(prev, server)).toMatchObject({ weekStart: "2026-09-08" });
   });
 
-  it("server carries an OLDER week (stale server) → local kept", () => {
-    
+  it("server carries an OLDER week (stale server) \u2192 local kept", () => {
     const prev = wk({ weekStart: "2026-09-08" });
     const server = wk({ weekStart: "2026-09-01" });
-    expect(adoptServerWeekData(prev, server)).toBe(prev);
+    expect(adoptAuthoritativeWeekData(prev, server)).toBe(prev);
   });
 
-  it("empty/absent server week → local kept; empty local → server adopted", () => {
+  it("empty/absent server week \u2192 local kept; empty local \u2192 server adopted", () => {
     const prev = wk();
-    expect(adoptServerWeekData(prev, {} as WeekData)).toBe(prev);
+    expect(adoptAuthoritativeWeekData(prev, {} as WeekData)).toBe(prev);
     const server = wk();
-    expect(adoptServerWeekData({} as WeekData, server)).toBe(server);
+    expect(adoptAuthoritativeWeekData({} as WeekData, server)).toMatchObject({ weekStart: server.weekStart });
   });
 });

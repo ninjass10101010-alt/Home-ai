@@ -2,7 +2,7 @@
 // P3 parent efficiency: the Needs-approval queue gets an "Approve all" that
 // costs ONE parent-PIN confirmation instead of a PIN per row, and the Add
 // modal gets progressive disclosure (points stepper, recurring select).
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot, type Root } from "react-dom/client";
 import { act } from "react";
 import type { ReactElement } from "react";
@@ -36,6 +36,8 @@ vi.mock("@/db", () => ({
 
 import TasksPage from "@/app/tasks/page";
 import { todayMondayISO, todayISO } from "@/lib/task-utils";
+import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-operation-outbox";
+import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 
 const MONDAY = todayMondayISO();
 
@@ -72,11 +74,23 @@ function setInput(input: HTMLInputElement, value: string) {
 const approveCalls: any[] = [];
 let responseCounts: { paid?: number; cleared?: number } | null = null;
 
+// The teardown unmounts the root INSIDE act() BEFORE the DOM is wiped. The
+// portaled Modal keeps a 150ms exit timer; clearing document.body out from
+// under a live React tree made the timer fire into a detached node and threw
+// two unhandled NotFoundError exceptions into the run.
+afterEach(async () => {
+  if (activeRoot) {
+    await act(async () => { activeRoot!.unmount(); });
+    activeRoot = null;
+  }
+  document.body.innerHTML = "";
+});
+
 beforeEach(() => {
-  activeRoot?.unmount?.();
-  activeRoot = null;
   document.body.innerHTML = "";
   localStorage.clear();
+  __resetTaskOutboxForTests();
+  __resetTaskCommandCredentialsForTests();
   approveCalls.length = 0;
   responseCounts = null;
   // verifyPinRemote answers ok for the parent, wrongPin for the kids.
@@ -141,14 +155,14 @@ describe("Needs-approval — Approve all (one parent PIN)", () => {
     await act(async () => { confirm!.click(); });
     await settle();
 
+    // The ledger is the SERVER's weekData and nothing else: one command, one
+    // acknowledgment, both rows paid in one write.
     const week = storedWeek();
     expect(week.points["Caspian Garcia"]).toBe(6);
     expect(week.points["Aurora Garcia"]).toBe(8);
     expect(week.history.filter((t: any) => t.type === "earn")).toHaveLength(2);
-    // The queue is gone — every row cleared its pendingApproval.
-    const tasks = JSON.parse(localStorage.getItem("consuela-tasks") || "[]");
-    expect(tasks.every((t: any) => !t.pendingApproval)).toBe(true);
-    expect(el.textContent).not.toContain("Needs approval");
+    // The outbox is empty — the command was acknowledged, not retried.
+    expect(listTaskOutbox()).toHaveLength(0);
 
     // Task 8: exactly one POST, carrying every visible pending id + credentials.
     expect(approveCalls).toHaveLength(1);
@@ -159,7 +173,7 @@ describe("Needs-approval — Approve all (one parent PIN)", () => {
     expect(approveCalls[0].operationId).toEqual(expect.any(String));
   });
 
-  it("uses the server cleared task count for the approve-all completion message", async () => {
+  it("says what was queued, never a paid count the server has not confirmed", async () => {
     responseCounts = { paid: 2, cleared: 1 };
     seedPendingTaps();
     const el = await renderAsync(<TasksPage />);
@@ -173,8 +187,11 @@ describe("Needs-approval — Approve all (one parent PIN)", () => {
     const confirm = [...dlg!.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Approve all");
     await act(async () => { confirm!.click(); });
     await settle();
-    expect(el.textContent || document.body.textContent).toContain("Approved! 1 tapped task paid.");
-    expect(el.textContent || document.body.textContent).not.toContain("Approved! 2 tapped tasks paid.");
+    // The pre-confirmation copy is honest: it names the queued count and
+    // never claims a paid total the acknowledgment has not delivered.
+    expect(el.textContent || document.body.textContent).toContain("Approving 2 tapped tasks");
+    expect(el.textContent || document.body.textContent).toContain("points land when the family server confirms");
+    expect(el.textContent || document.body.textContent).not.toContain("tapped task paid");
   });
 
   it("a wrong parent PIN approves NOTHING", async () => {

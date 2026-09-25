@@ -123,7 +123,7 @@ beforeEach(() => {
 });
 
 describe("server-authoritative claims → pending for kid claimants (client mirror)", () => {
-  it("kid claimant success: optimistic row goes PENDING, no earn tx in weekData", async () => {
+  it("kid claimant: the claim is queued and no local row or earn tx is written", async () => {
     mockAuth.currentUser = { name: "Caspian", role: "child", age: 5 };
     mockAuth.isLoggedIn = true;
     seed([VACUUM]);
@@ -137,10 +137,11 @@ describe("server-authoritative claims → pending for kid claimants (client mirr
     await claimViaPinModal();
 
     expect(claimCalls.length).toBe(1); // the server route is still the authority
+    expect(claimCalls[0]).toMatchObject({ action: "claim", taskId: VACUUM.id, memberName: "Caspian Garcia" });
+    // The row is the acknowledgment's to write — the browser never mirrors it.
     const saved = storedTasks();
-    expect(saved[0].completed).toBe(true);
-    expect(saved[0].assignee).toBe("Caspian Garcia");
-    expect(saved[0].pendingApproval).toEqual({ byName: "Caspian Garcia", at: expect.any(String), points: 6 });
+    expect(saved[0].completed).toBe(false);
+    expect(saved[0].pendingApproval).toBeUndefined();
     // Zero points moved: no earn tx, no ledger bump.
     expect(storedWeek().history).toHaveLength(0);
     expect(storedWeek().points["Caspian Garcia"]).toBeUndefined();
@@ -149,7 +150,7 @@ describe("server-authoritative claims → pending for kid claimants (client mirr
     await settle(1800);
   });
 
-  it("adult claimant: byte-identical instant earn, no pending record (regression)", async () => {
+  it("adult claimant: the same single claim command, still no local instant earn", async () => {
     mockAuth.currentUser = { name: "Rebecca", role: "parent" };
     mockAuth.isLoggedIn = true;
     seed([VACUUM]);
@@ -163,14 +164,12 @@ describe("server-authoritative claims → pending for kid claimants (client mirr
     await claimViaPinModal();
 
     expect(claimCalls.length).toBe(1);
+    expect(claimCalls[0]).toMatchObject({ action: "claim", taskId: VACUUM.id, memberName: "Rebecca (Mom)" });
     const saved = storedTasks();
-    expect(saved[0].completed).toBe(true);
+    expect(saved[0].completed).toBe(false);
     expect(saved[0].pendingApproval).toBeUndefined();
-    const history = storedWeek().history;
-    expect(history).toHaveLength(1);
-    expect(history[0].type).toBe("earn");
-    expect(history[0].member).toBe("Rebecca (Mom)");
-    expect(storedWeek().points["Rebecca (Mom)"]).toBe(6);
+    expect(storedWeek().history).toHaveLength(0);
+    expect(storedWeek().points["Rebecca (Mom)"]).toBeUndefined();
     await settle(1800);
   });
 });

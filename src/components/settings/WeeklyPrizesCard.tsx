@@ -7,38 +7,21 @@ import SoftButton from "@/components/ui/SoftButton";
 import IconButton from "@/components/ui/IconButton";
 import {
   loadWeeklyPrizes,
-  saveWeeklyPrizes,
-  writeWeeklyPrizesStamp,
   DEFAULT_WEEKLY_PRIZES,
 } from "@/lib/task-utils";
-import type { TaskConfigResponse } from "@/lib/task-config";
+import { queueTaskCommandAndFlush } from "@/lib/task-command-queue";
 import type { WeeklyPrize } from "@/types/tasks";
 
 const MEDALS = ["🥇", "🥈", "🥉"] as const;
 const MAX_PRIZES = 3;
 
-function weeklyPrizeOperationId(): string {
-  return `config-weekly-prizes-replace-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-async function postWeeklyPrizes(items: WeeklyPrize[]): Promise<TaskConfigResponse> {
-  const updatedAt = new Date().toISOString();
-  const response = await fetch("/api/tasks/config", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      operationId: weeklyPrizeOperationId(),
-      kind: "weekly-prizes",
-      action: "replace",
-      updatedAt,
-      items,
-    }),
+function queueWeeklyPrizes(items: WeeklyPrize[]): void {
+  queueTaskCommandAndFlush({
+    route: "/api/tasks/config",
+    action: "replace",
+    payload: { kind: "weekly-prizes", updatedAt: new Date().toISOString(), items },
+    displayTarget: { kind: "config" },
   });
-  const body = await response.json();
-  if (!response.ok || !body?.success || !Array.isArray(body.items)) {
-    throw new Error("config_write_failed");
-  }
-  return body as TaskConfigResponse;
 }
 
 interface WeeklyPrizesCardProps {
@@ -89,7 +72,11 @@ export default function WeeklyPrizesCard({ showToast }: WeeklyPrizesCardProps) {
     });
   };
 
-  const saveAll = async () => {
+  // The prize list is a durable config command queued BEFORE any local
+  // success: the authoritative catalog arrives with the outbox acknowledgment
+  // (via the cross-device snapshot pull), so a dead NAS or a reload can never
+  // lose the edit or show a catalog the server never accepted.
+  const saveAll = () => {
     if (saving) return;
     setSaving(true);
     const list = prizes.map((p, i) => ({
@@ -98,19 +85,10 @@ export default function WeeklyPrizesCard({ showToast }: WeeklyPrizesCardProps) {
       emoji: p.emoji.trim() || MEDALS[i],
       text: p.text.trim(),
     }));
-    try {
-      const result = await postWeeklyPrizes(list);
-      const authoritative = result.items as WeeklyPrize[];
-      setPrizes(authoritative);
-      saveWeeklyPrizes(authoritative);
-      writeWeeklyPrizesStamp(result.updatedAt);
-      dirtyRef.current = false;
-      showToast("🏆 Weekly prizes saved");
-    } catch {
-      showToast("Couldn't save the prizes. Check the connection and try again.");
-    } finally {
-      setSaving(false);
-    }
+    queueWeeklyPrizes(list);
+    dirtyRef.current = false;
+    showToast("🏆 Saving the weekly prizes…");
+    setSaving(false);
   };
 
   return (

@@ -157,6 +157,8 @@ vi.mock("@/hooks/useAtmosphericTheme", () => ({
   }),
 }));
 
+import { __resetTaskOutboxForTests } from "@/lib/task-operation-outbox";
+import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 import KidHome from "@/modes/kid/KidHome";
 
 const QUEST = { id: 7, title: "Feed the dog", points: 10, assignee: "Caspian", completed: false };
@@ -211,6 +213,8 @@ describe("KidHome quest completion (age predicates: under-10 tap → pending; 10
     store.tasks = [{ ...QUEST }];
     store.week = { weekStart: "2026-09-01", points: { Caspian: 20 }, streak: {}, lastActive: {}, history: [] };
     store.saveTasks.mockReset();
+    __resetTaskOutboxForTests();
+    __resetTaskCommandCredentialsForTests();
     store.saveWeekData.mockReset();
     store.syncTasksToPB.mockClear();
     store.syncWeekDataToPB.mockClear();
@@ -240,15 +244,9 @@ describe("KidHome quest completion (age predicates: under-10 tap → pending; 10
     expect(document.body.textContent || "").not.toContain("Confirm it's you");
     expect(document.querySelector('input[aria-label="Your 4-digit PIN"]')).toBeNull();
 
-    // Pending contract: done-but-unpaid, no earn, no verify round trip.
-    expect(store.saveTasks).toHaveBeenCalled();
-    const saved = store.saveTasks.mock.calls[0][0];
-    const row = saved.find((t: any) => t.id === 7);
-    expect(row.completed).toBe(true);
-    expect(row.completedBy).toBe("Caspian Garcia");
-    expect(row.completedInWeek).toBe("2026-09-01");
-    expect(row.pendingApproval).toMatchObject({ byName: "Caspian Garcia", points: 10 });
-    expect(typeof row.pendingApproval.at).toBe("string");
+    // Durable contract (Task 10): ONE credential-free command, and the local
+    // task store is never written by this surface — the acknowledgment is.
+    expect(store.saveTasks).not.toHaveBeenCalled();
     // No points move until a parent approves: week store untouched.
     expect(store.saveWeekData).not.toHaveBeenCalled();
     expect(store.syncWeekDataToPB).not.toHaveBeenCalled();
@@ -312,17 +310,14 @@ describe("KidHome quest completion (age predicates: under-10 tap → pending; 10
     expect(store.saveTasks).not.toHaveBeenCalled();
     expect(document.body.textContent || "").toContain("Wrong PIN");
 
-    // The verified child's success lands pending — never a local earn.
+    // The verified child's success is a queued command — never a local earn
+    // and never a local row write.
     verifyOk = true;
     await act(async () => { setInputValue(input, "1234"); });
     await act(async () => { completeBtn.click(); });
     await settle();
 
-    expect(store.saveTasks).toHaveBeenCalled();
-    const saved = store.saveTasks.mock.calls.at(-1)![0];
-    const row = saved.find((t: any) => t.id === 7);
-    expect(row.completed).toBe(true);
-    expect(row.pendingApproval).toMatchObject({ byName: "Caspian Garcia", points: 10 });
+    expect(store.saveTasks).not.toHaveBeenCalled();
     expect(store.saveWeekData).not.toHaveBeenCalled();
     expect(store.syncWeekDataToPB).not.toHaveBeenCalled();
     expect(store.week.history).toHaveLength(0);
@@ -396,14 +391,12 @@ describe("KidHome quest completion (age predicates: under-10 tap → pending; 10
     // answer: the row is claimed done-but-unpaid, still with NO earn tx
     // (routing parity with the Tasks page claim modal is unchanged).
     expect(claimFetch).toHaveBeenCalledWith(expect.stringContaining("/api/tasks/claim"), expect.objectContaining({ method: "POST" }));
-    const saved = store.saveTasks.mock.calls.at(-1)![0];
-    const row = saved.find((t: any) => t.id === 11);
-    expect(row.completed).toBe(true);
-    expect(row.pendingApproval).toEqual({ byName: "Caspian Garcia", at: expect.any(String), points: 8 });
+    // A child claimant's done-but-unpaid answer is the acknowledgment's write.
+    expect(store.saveTasks).not.toHaveBeenCalled();
     expect(store.week.history).toHaveLength(0);
   });
 
-  it("a successful universal claim carries completedBy/At/InWeek into the saved local row", async () => {
+  it("a successful universal claim is one durable claim command with no local row write", async () => {
     const claimFetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/api/tasks/claim")) {
@@ -437,12 +430,8 @@ describe("KidHome quest completion (age predicates: under-10 tap → pending; 10
 
     expect(claimFetch).toHaveBeenCalledWith(expect.stringContaining("/api/tasks/claim"), expect.objectContaining({ method: "POST" }));
     expect(store.syncTasksToPB).not.toHaveBeenCalled();
-    const saved = store.saveTasks.mock.calls.at(-1)![0];
-    const row = saved.find((t: any) => t.id === 9);
-    expect(row.completed).toBe(true);
-    expect(row.completedBy).toBe("Caspian Garcia");
-    expect(row.completedInWeek).toBe("2026-09-01");
-    expect(typeof row.completedAt).toBe("string");
+    // An adult claim is the same single command; nothing is mirrored locally.
+    expect(store.saveTasks).not.toHaveBeenCalled();
     // A kid claim is pending — the celebration copy says "on the way".
     const burst = document.querySelector('[aria-label^="Congratulations"]');
     expect(burst!.getAttribute("aria-label")).toContain("on the way");
@@ -504,6 +493,8 @@ describe("KidHome a crew/open board above Your Quests", () => {
     ];
     store.week = { weekStart: "2026-09-01", points: { Caspian: 20 }, streak: {}, lastActive: {}, history: [] };
     store.saveTasks.mockReset();
+    __resetTaskOutboxForTests();
+    __resetTaskCommandCredentialsForTests();
     store.saveWeekData.mockReset();
     store.syncTasksToPB.mockClear();
     store.syncWeekDataToPB.mockClear();

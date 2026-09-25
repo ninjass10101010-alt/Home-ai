@@ -1,12 +1,25 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createRoot } from "react-dom/client";
+// Task 10 — the pending-approval flow, now driven entirely by the durable
+// outbox. A kid tap, a parent approval and a send-back are COMMANDS: nothing
+// writes a local pending row, point line or ledger entry before the family
+// server acknowledges. The PIN is ephemeral and the acknowledgment is the only
+// thing that can move the family's ledger.
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { createRoot, type Root } from "react-dom/client";
 import { act } from "react";
 import type { ReactElement } from "react";
-import { todayMondayISO, todayISO, weekKey, pendingPointsFor } from "@/lib/task-utils";
+import { todayMondayISO, weekKey } from "@/lib/task-utils";
+import {
+  __resetTaskOutboxForTests,
+  listTaskOutbox,
+} from "@/lib/task-operation-outbox";
+import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 import TasksPage from "@/app/tasks/page";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
+const PARENT_PIN = "9026";
+const KID_PIN = "3141";
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/tasks",
@@ -36,25 +49,85 @@ vi.mock("@/db", () => ({
 }));
 
 const MONDAY = todayMondayISO();
-const OPEN = { id: 51, title: "Make bed", assignee: "Jasmine", assigneeEmoji: "👧", due: todayISO(), points: 5, recurring: null, category: "Chores", completed: false, priority: "low" };
+const OPEN = { id: 51, title: "Make bed", assignee: "Jasmine", assigneeEmoji: "👧", due: MONDAY, points: 5, recurring: null, category: "Chores", completed: false, priority: "low" };
+
+const server = vi.hoisted(() => ({
+  claimStatus: 200,
+  approveStatus: 200,
+  claimThrows: false,
+  approveThrows: false,
+  claimBody: null as null | any,
+  approveBody: null as null | any,
+  requests: [] as any[],
+  syncPosts: [] as any[],
+}));
 
 function seed(tasks: any[]) {
   localStorage.setItem("consuela-tasks", JSON.stringify(tasks));
   localStorage.setItem("consuela-week-data", JSON.stringify({ weekStart: MONDAY, points: {}, streak: {}, lastActive: {}, history: [] }));
 }
 
-function stubGuestFetches() {
-  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 401, json: async () => ({}) })));
+function installFetch() {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: any, init?: any) => {
+      const url = String(input);
+      const method = String(init?.method ?? "GET").toUpperCase();
+      const body = init?.body ? safeParse(String(init.body)) : null;
+      if (url.includes("/api/members/verify")) {
+        // The verifier answers with the member the request named, so the
+        // ledger key is the roster-resolved FULL name of the verified person.
+        const asked = String(body?.memberName ?? "Rebecca (Mom)");
+        const rosterName = asked === "Jasmine" || asked === "Jasmine Rose" ? "Jasmine Rose" : "Rebecca (Mom)";
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ member: { name: rosterName, fullName: rosterName, role: rosterName.startsWith("Jasmine") ? "child" : "parent" } }),
+        };
+      }
+      if (url === "/api/tasks/sync" && method === "POST") {
+        server.syncPosts.push(body);
+        return { ok: false, status: 410, json: async () => ({ error: "retired" }) };
+      }
+      if (url === "/api/tasks/sync") {
+        return { ok: true, status: 200, json: async () => ({ snapshot: null, reconciled: true }) };
+      }
+      if (url === "/api/tasks/claim") {
+        server.requests.push({ route: url, body });
+        if (server.claimThrows) throw new TypeError("network unavailable");
+        return { ok: server.claimStatus < 400, status: server.claimStatus, json: async () => server.claimBody ?? { success: true } };
+      }
+      if (url === "/api/tasks/approve") {
+        server.requests.push({ route: url, body });
+        if (server.approveThrows) throw new TypeError("network unavailable");
+        return { ok: server.approveStatus < 400, status: server.approveStatus, json: async () => server.approveBody ?? { success: true } };
+      }
+      return { ok: true, status: 200, json: async () => ({}) };
+    }),
+  );
 }
+
+function safeParse(text: string) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+let root: Root | null = null;
 
 async function renderAsync(ui: ReactElement): Promise<HTMLElement> {
   const el = document.createElement("div");
   document.body.appendChild(el);
-  await act(async () => { createRoot(el).render(ui); });
+  await act(async () => {
+    root = createRoot(el);
+    root.render(ui);
+  });
   return el;
 }
 
-async function settle(ms = 100) {
+async function settle(ms = 80) {
   await act(async () => { await new Promise((r) => setTimeout(r, ms)); });
 }
 
@@ -62,22 +135,62 @@ function storedTasks(): any[] {
   return JSON.parse(localStorage.getItem("consuela-tasks") || "[]");
 }
 
+function storedWeek(): any {
+  return JSON.parse(localStorage.getItem("consuela-week-data") || "{}");
+}
+
 function storedHistory(): any[] {
-  return JSON.parse(localStorage.getItem("consuela-week-data") || "{}").history || [];
+  return storedWeek().history || [];
 }
 
 function verifyCalls(): string {
   return ((globalThis.fetch as any)?.mock?.calls || []).flat().join(" ");
 }
 
-// Bodies POSTed to /api/tasks/approve by submitApproval (Task 7).
-const approveCalls: any[] = [];
+function requestsFor(route: string) {
+  return server.requests.filter((entry) => entry.route === route);
+}
+
+async function typePin(placeholder: string, pin: string) {
+  const input = document.querySelector(`input[placeholder="${placeholder}"]`) as HTMLInputElement;
+  expect(input).not.toBeNull();
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+    setter.call(input, pin);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+function dialogButton(text: string): HTMLButtonElement {
+  const scope = document.querySelector('[role="dialog"]') ?? document;
+  const found = Array.from(scope.querySelectorAll("button")).find(
+    (button) => button.textContent?.trim() === text,
+  ) as HTMLButtonElement | undefined;
+  expect(found).toBeTruthy();
+  return found!;
+}
+
+async function clickByAriaLabel(label: string) {
+  const el = document.querySelector(`[aria-label="${label}"]`) as HTMLElement;
+  expect(el).not.toBeNull();
+  await act(async () => { el.click(); });
+  await settle();
+}
 
 beforeEach(() => {
   document.body.innerHTML = "";
   localStorage.clear();
   vi.unstubAllGlobals();
-  approveCalls.length = 0;
+  __resetTaskOutboxForTests();
+  __resetTaskCommandCredentialsForTests();
+  server.claimStatus = 200;
+  server.approveStatus = 200;
+  server.claimThrows = false;
+  server.approveThrows = false;
+  server.claimBody = null;
+  server.approveBody = null;
+  server.requests = [];
+  server.syncPosts = [];
   mockAuth.currentUser = null;
   mockAuth.isLoggedIn = false;
   vi.stubGlobal("matchMedia", vi.fn(() => ({
@@ -85,29 +198,31 @@ beforeEach(() => {
     addEventListener: () => {}, removeEventListener: () => {},
     addListener: () => {}, removeListener: () => {},
   })));
+  installFetch();
+});
+
+afterEach(async () => {
+  if (root) {
+    await act(async () => { root!.unmount(); });
+    root = null;
+  }
+  vi.unstubAllGlobals();
 });
 
 describe("kid tap-to-complete", () => {
-  it("child (10) tap opens the PIN step; a verified PIN lands done with pending record, zero earn tx", async () => {
+  it("a 10-year-old's tap opens the PIN step and queues a PIN-gated completion with zero local points", async () => {
     // Jasmine is 10 — PIN-free taps are for under-10 only. Identity is still
-    // proved by PIN, but a verified CHILD completion lands done-but-unpaid:
-    // the parent verifies the work before points move.
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input).includes("/api/members/verify")) {
-        return { ok: true, status: 200, json: async () => ({ member: { name: "Jasmine Rose", fullName: "Jasmine Rose", role: "child" } }) };
-      }
-      return { ok: true, status: 200, json: async () => ({ snapshot: null }) };
-    }));
+    // proved by PIN, and the completed row lands through the acknowledgment.
+    server.claimStatus = 503;
     mockAuth.currentUser = { name: "Jasmine", role: "child", age: 10 };
     mockAuth.isLoggedIn = true;
     seed([OPEN]);
     const el = await renderAsync(<TasksPage />);
     await settle();
 
-    // Reach the row through the member tile (filter = roster fullName), the
-    // way the queue resolves: the auth session carries "Jasmine" but the
-    // roster's ledger name is "Jasmine Rose".
-    const jasmineTile = [...el.querySelectorAll(".member-tile-name")].find((s) => (s.textContent || "").trim() === "Jasmine")!.closest("button") as HTMLElement;
+    const jasmineTile = [...el.querySelectorAll(".member-tile-name")]
+      .find((s) => (s.textContent || "").trim() === "Jasmine")!
+      .closest("button") as HTMLElement;
     await act(async () => { jasmineTile.click(); });
     await settle();
 
@@ -117,35 +232,32 @@ describe("kid tap-to-complete", () => {
     await settle();
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
 
-    await typeAndSubmit("4-digit PIN", "Submit");
+    await typePin("4-digit PIN", KID_PIN);
+    await act(async () => { dialogButton("Submit").click(); });
+    await settle(120);
 
-    const saved = storedTasks();
-    expect(saved[0].completed).toBe(true);
-    // The pending record credits the roster-resolved FULL name (the ledger
-    // key), not the raw auth first name — approve posts the earn to the same
-    // key, so points never strand on a split ledger entry.
-    expect(saved[0].pendingApproval).toEqual({ byName: "Jasmine Rose", at: expect.any(String), points: 5 });
-    expect(saved[0].completedBy).toBe("Jasmine Rose");
-    expect(pendingPointsFor("Jasmine Rose", saved)).toBe(5);
-    expect(pendingPointsFor("Jasmine", saved)).toBe(0);
+    const [entry] = listTaskOutbox();
+    expect(entry).toMatchObject({ route: "/api/tasks/claim", action: "complete", payload: { taskId: 51 } });
+    // The roster-resolved FULL name is the ledger key, so approve credits the
+    // same row the tap queued.
+    expect((entry.payload as any).memberName).toBe("Jasmine Rose");
+    // Nothing local moved.
+    expect(storedTasks()[0].completed).toBe(false);
+    expect(storedTasks()[0].pendingApproval).toBeUndefined();
     expect(storedHistory()).toHaveLength(0);
     expect(verifyCalls()).toContain("/api/members/verify");
-    expect(document.body.textContent || "").toContain("on the way");
-    // Flush the success-copy auto-close (1500ms + exit) so the portaled
-    // dialog unmounts inside this test, not after the next teardown wipes
-    // the body out from under the portal.
-    await settle(1800);
   });
 
   it("adult tap still opens a real dialog and writes no pending record", async () => {
-    stubGuestFetches();
     mockAuth.currentUser = { name: "Rebecca (Mom)", role: "parent" };
     mockAuth.isLoggedIn = true;
     seed([OPEN]);
     const el = await renderAsync(<TasksPage />);
     await settle();
 
-    const jasmineTile = [...el.querySelectorAll(".member-tile-name")].find((s) => (s.textContent || "").trim() === "Jasmine")!.closest("button") as HTMLElement;
+    const jasmineTile = [...el.querySelectorAll(".member-tile-name")]
+      .find((s) => (s.textContent || "").trim() === "Jasmine")!
+      .closest("button") as HTMLElement;
     await act(async () => { jasmineTile.click(); });
     await settle();
 
@@ -157,8 +269,7 @@ describe("kid tap-to-complete", () => {
     expect(storedTasks()[0].pendingApproval).toBeUndefined();
   });
 
-  it("guest tap creates no pending record", async () => {
-    stubGuestFetches();
+  it("guest tap creates no pending record and no command", async () => {
     seed([OPEN]);
     await renderAsync(<TasksPage />);
     await settle();
@@ -171,11 +282,18 @@ describe("kid tap-to-complete", () => {
     expect(storedHistory()).toHaveLength(0);
   });
 
-  it("pending rows show On the way and the owner can self-cancel PIN-free", async () => {
-    stubGuestFetches();
+  it("a pending row's owner self-cancel queues the server undo and keeps the row in place", async () => {
+    server.claimStatus = 503;
     mockAuth.currentUser = { name: "Jasmine", role: "child", age: 10 };
     mockAuth.isLoggedIn = true;
-    seed([{ ...OPEN, completed: true, completedBy: "Jasmine Rose", completedAt: new Date().toISOString(), completedInWeek: weekKey(), pendingApproval: { byName: "Jasmine Rose", at: new Date().toISOString(), points: 5 } }]);
+    seed([{
+      ...OPEN,
+      completed: true,
+      completedBy: "Jasmine Rose",
+      completedAt: new Date().toISOString(),
+      completedInWeek: weekKey(),
+      pendingApproval: { byName: "Jasmine Rose", at: new Date().toISOString(), points: 5 },
+    }]);
     const el = await renderAsync(<TasksPage />);
     await settle();
 
@@ -184,14 +302,14 @@ describe("kid tap-to-complete", () => {
     await settle();
 
     expect(el.textContent || "").toContain("On the way");
-    const cancel = el.querySelector('[aria-label="Cancel completion of Make bed"]') as HTMLElement;
-    expect(cancel).not.toBeNull();
-    await act(async () => { cancel.click(); });
-    await settle();
+    await clickByAriaLabel("Cancel completion of Make bed");
+    await settle(120);
 
-    const saved = storedTasks();
-    expect(saved[0].completed).toBe(false);
-    expect(saved[0].pendingApproval).toBeUndefined();
+    const [entry] = listTaskOutbox();
+    expect(entry).toMatchObject({ route: "/api/tasks/claim", action: "undo", payload: { taskId: 51 } });
+    // PIN-free: the cancel never verified anything, so no credential is sent.
+    expect(entry.payload.pin).toBeUndefined();
+    expect(storedTasks()[0].pendingApproval).toBeDefined();
     expect(storedHistory()).toHaveLength(0);
     expect(verifyCalls()).not.toContain("/api/members/verify");
   });
@@ -199,78 +317,57 @@ describe("kid tap-to-complete", () => {
 
 function pendingSeed() {
   return [{
-    ...OPEN, id: 52, completed: true, completedBy: "Jasmine Rose",
-    completedAt: new Date().toISOString(), completedInWeek: weekKey(),
+    ...OPEN,
+    id: 52,
+    completed: true,
+    completedBy: "Jasmine Rose",
+    completedAt: new Date().toISOString(),
+    completedInWeek: weekKey(),
     pendingApproval: { byName: "Jasmine Rose", at: new Date().toISOString(), points: 5 },
   }];
 }
 
-function stubVerifyOk() {
-  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-    if (String(input).includes("/api/members/verify")) {
-      return { ok: true, status: 200, json: async () => ({ member: { name: "Rebecca (Mom)", fullName: "Rebecca (Mom)" } }) };
-    }
-    return { ok: true, status: 200, json: async () => ({ snapshot: null }) };
-  }));
-}
-
-function setInputValue(input: HTMLInputElement, value: string) {
-  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
-  setter.call(input, value);
-  input.dispatchEvent(new Event("input", { bubbles: true }));
-}
-
-function buttonByText(text: string): HTMLButtonElement | undefined {
-  // Scope to the open dialog first: the Needs-approval rows behind the modal
-  // carry identically-labeled buttons ("Approve"/"Send back") that come
-  // earlier in document order (the modal portals to document.body) and would
-  // otherwise win the find and merely reset the modal instead of submitting.
-  const scope = document.querySelector('[role="dialog"]') ?? document;
-  return Array.from(scope.querySelectorAll("button")).find((b) => b.textContent?.includes(text)) as HTMLButtonElement | undefined;
-}
-
-async function clickByAriaLabel(label: string) {
-  const el = document.querySelector(`[aria-label="${label}"]`) as HTMLElement;
-  expect(el).not.toBeNull();
-  await act(async () => { el.click(); });
-  await settle();
-}
-
-async function typeAndSubmit(placeholder: string, buttonText: string, pin = "1234") {
-  const input = document.querySelector(`input[placeholder="${placeholder}"]`) as HTMLInputElement;
-  expect(input).not.toBeNull();
-  await act(async () => { setInputValue(input, pin); });
-  await act(async () => { buttonByText(buttonText)!.click(); });
-  await settle();
-}
-
 describe("needs approval queue", () => {
-  it("hidden for kids, shown for parents", async () => {
-    stubGuestFetches();
+  it("hidden for kids and guests, shown for parents", async () => {
     mockAuth.currentUser = { name: "Jasmine", role: "child", age: 10 };
     mockAuth.isLoggedIn = true;
     seed(pendingSeed());
-    await renderAsync(<TasksPage />);
+    const kidView = await renderAsync(<TasksPage />);
     await settle();
-    expect(document.body.textContent || "").not.toContain("Needs approval");
+    expect(kidView.textContent || "").not.toContain("Needs approval");
 
+    if (root) {
+      await act(async () => { root!.unmount(); });
+      root = null;
+    }
     document.body.innerHTML = "";
     mockAuth.currentUser = { name: "Rebecca (Mom)", role: "parent" };
-    await renderAsync(<TasksPage />);
+    const parentView = await renderAsync(<TasksPage />);
     await settle();
-    expect(document.body.textContent || "").toContain("Needs approval");
+    expect(parentView.textContent || "").toContain("Needs approval");
   });
 
-  it("hidden for signed-out guests too (even with pending rows seeded)", async () => {
-    stubGuestFetches();
-    seed(pendingSeed());
-    await renderAsync(<TasksPage />);
-    await settle();
-    expect(document.body.textContent || "").not.toContain("Needs approval");
-  });
-
-  it("approve with parent PIN awards points and clears the queue", async () => {
-    stubVerifyOk();
+  it("approving with a parent PIN queues the command and awards points only on acknowledgment", async () => {
+    server.approveBody = {
+      success: true,
+      paid: 1,
+      cleared: 1,
+      weekData: {
+        weekStart: MONDAY,
+        points: { "Jasmine Rose": 5 },
+        streak: {},
+        lastActive: {},
+        history: [{
+          id: 1,
+          timestamp: new Date().toISOString(),
+          member: "Jasmine Rose",
+          type: "earn",
+          amount: 5,
+          description: "Completed: Make bed (+5pts)",
+          taskId: 52,
+        }],
+      },
+    };
     mockAuth.currentUser = { name: "Rebecca (Mom)", role: "parent" };
     mockAuth.isLoggedIn = true;
     seed(pendingSeed());
@@ -278,22 +375,20 @@ describe("needs approval queue", () => {
     await settle();
 
     await clickByAriaLabel("Approve Make bed");
-    await settle();
-    expect(document.body.textContent || "").toContain("Approve points");
-    await typeAndSubmit("Parent PIN", "Approve");
+    await typePin("Parent PIN", PARENT_PIN);
+    await act(async () => { dialogButton("Approve").click(); });
+    await settle(150);
 
-    const week = JSON.parse(localStorage.getItem("consuela-week-data") || "{}");
-    // The earn lands on the roster-resolved FULL-name ledger key.
-    expect(week.points["Jasmine Rose"]).toBe(5);
-    expect(week.history).toHaveLength(1);
-    expect(week.history[0].type).toBe("earn");
-    expect(week.history[0].member).toBe("Jasmine Rose");
-    expect(storedTasks()[0].pendingApproval).toBeUndefined();
-    expect(document.body.textContent || "").not.toContain("Needs approval");
+    // Only the server's authoritative weekData lands, and it lands the FULL
+    // ledger key the queue credits.
+    expect(storedWeek().points["Jasmine Rose"]).toBe(5);
+    expect(storedHistory()).toHaveLength(1);
+    expect(storedHistory()[0].type).toBe("earn");
+    expect(listTaskOutbox()).toHaveLength(0);
   });
 
-  it("send-back reopens with zero ledger entries", async () => {
-    stubVerifyOk();
+  it("send-back queues the reopen command with zero ledger entries", async () => {
+    server.approveStatus = 503;
     mockAuth.currentUser = { name: "Rebecca (Mom)", role: "parent" };
     mockAuth.isLoggedIn = true;
     seed(pendingSeed());
@@ -301,202 +396,161 @@ describe("needs approval queue", () => {
     await settle();
 
     await clickByAriaLabel("Send back Make bed");
-    await settle();
-    await typeAndSubmit("Parent PIN", "Send back");
+    await typePin("Parent PIN", PARENT_PIN);
+    await act(async () => { dialogButton("Send back").click(); });
+    await settle(120);
 
-    const saved = storedTasks();
-    expect(saved[0].completed).toBe(false);
-    expect(saved[0].pendingApproval).toBeUndefined();
+    const [entry] = listTaskOutbox();
+    expect(entry).toMatchObject({ route: "/api/tasks/approve", action: "send-back", payload: { taskId: 52 } });
+    expect(storedTasks()[0].pendingApproval).toBeDefined();
     expect(storedHistory()).toHaveLength(0);
   });
 
-  it("wrong parent PIN keeps the queue and says Parent PIN required", async () => {
-    stubGuestFetches();
+  it("a refused parent PIN queues nothing and says Parent PIN required", async () => {
     mockAuth.currentUser = { name: "Rebecca (Mom)", role: "parent" };
     mockAuth.isLoggedIn = true;
     seed(pendingSeed());
+    vi.stubGlobal("fetch", vi.fn(async (input: any, init?: any) => {
+      const url = String(input);
+      if (url.includes("/api/members/verify")) {
+        return { ok: false, status: 401, json: async () => ({ error: "unauthorized" }) };
+      }
+      if (url === "/api/tasks/approve") {
+        return { ok: false, status: 200, json: async () => ({ success: false }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ snapshot: null, reconciled: true }) };
+    }));
     await renderAsync(<TasksPage />);
     await settle();
 
     await clickByAriaLabel("Approve Make bed");
-    await settle();
-    await typeAndSubmit("Parent PIN", "Approve", "0000");
+    await typePin("Parent PIN", "0000");
+    await act(async () => { dialogButton("Approve").click(); });
+    await settle(120);
 
     expect(document.body.textContent || "").toContain("Parent PIN required to review tapped tasks.");
     expect(storedTasks()[0].pendingApproval).toBeDefined();
-    expect(storedHistory()).toHaveLength(0);
+    expect(listTaskOutbox()).toHaveLength(0);
   });
 });
 
-// Task 7: single Approve / Send-back go through POST /api/tasks/approve —
-// optimistic first, adopt server weekData on 200, revert on 4xx, keep the
-// local approval on network failure (D8).
+describe("needs approval → durable command", () => {
+  function approveSeed() {
+    // pendingApproval.points (8) deliberately differs from task.points (6) so
+    // the recorded amount is what the toast names.
+    return [{
+      ...OPEN,
+      id: 101,
+      title: "Dishes",
+      points: 6,
+      completed: true,
+      completedBy: "Jasmine Rose",
+      completedAt: new Date().toISOString(),
+      completedInWeek: weekKey(),
+      pendingApproval: { byName: "Jasmine Rose", at: new Date().toISOString(), points: 8 },
+    }];
+  }
 
-function approveSeed() {
-  // pendingApproval.points (8) deliberately differs from task.points (6) so
-  // the B1 toast / server ledger prove the recorded amount is what pays.
-  return [{
-    ...OPEN, id: 101, title: "Dishes", points: 6,
-    completed: true, completedBy: "Jasmine Rose",
-    completedAt: new Date().toISOString(), completedInWeek: weekKey(),
-    pendingApproval: { byName: "Jasmine Rose", at: new Date().toISOString(), points: 8 },
-  }];
-}
+  function approvedWeek(member: string, amount: number) {
+    return {
+      weekStart: MONDAY,
+      points: { [member]: amount },
+      streak: {},
+      lastActive: {},
+      history: [{
+        id: 1,
+        timestamp: new Date().toISOString(),
+        member,
+        type: "earn",
+        amount,
+        description: `Completed: Dishes (+${amount}pts)`,
+        taskId: 101,
+      }],
+    };
+  }
 
-type ApproveRouteMode = "ok" | "reject" | "offline";
+  async function driveApproval(buttonLabel: string, buttonText: string) {
+    mockAuth.currentUser = { name: "Rebecca (Mom)", role: "parent" };
+    mockAuth.isLoggedIn = true;
+    seed(approveSeed());
+    const el = await renderAsync(<TasksPage />);
+    await settle();
+    await clickByAriaLabel(buttonLabel);
+    await typePin("Parent PIN", PARENT_PIN);
+    await act(async () => { dialogButton(buttonText).click(); });
+    await settle(150);
+    return el;
+  }
 
-function stubApproveRoute(mode: ApproveRouteMode = "ok") {
-  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
-    if (url.includes("/api/members/verify")) {
-      return { ok: true, status: 200, json: async () => ({ member: { name: "Rebecca (Mom)", fullName: "Rebecca (Mom)" } }) } as any;
-    }
-    if (url.includes("/api/tasks/approve")) {
-      const payload = JSON.parse(String(init?.body || "{}"));
-      approveCalls.push(payload);
-      if (mode === "offline") throw new TypeError("Failed to fetch");
-      if (mode === "reject") {
-        return { ok: false, status: 404, json: async () => ({ success: false, reason: "unknown-task" }) } as any;
-      }
-      if (payload.action === "send-back") {
-        return { ok: true, status: 200, json: async () => ({ success: true, paid: 0, cleared: 1, skipped: 0 }) } as any;
-      }
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({
-          success: true,
-          paid: 1,
-          cleared: 1,
-          skipped: 0,
-          weekData: {
-            weekStart: MONDAY,
-            points: { "Caspian Garcia": 8 },
-            streak: {},
-            lastActive: {},
-            history: [{
-              id: 1,
-              timestamp: new Date().toISOString(),
-              member: "Caspian Garcia",
-              type: "earn",
-              amount: 8,
-              description: "Completed: Dishes (+8pts)",
-              taskId: 101,
-            }],
-          },
-        }),
-      } as any;
-    }
-    return { ok: true, status: 200, json: async () => ({ snapshot: null }) } as any;
-  }));
-}
-
-function storedWeek(): any {
-  return JSON.parse(localStorage.getItem("consuela-week-data") || "{}");
-}
-
-async function driveApproval(buttonLabel: string, buttonText: string) {
-  mockAuth.currentUser = { name: "Rebecca (Mom)", role: "parent" };
-  mockAuth.isLoggedIn = true;
-  seed(approveSeed());
-  const el = await renderAsync(<TasksPage />);
-  await settle();
-  await clickByAriaLabel(buttonLabel);
-  await settle();
-  await typeAndSubmit("Parent PIN", buttonText, "0202");
-  return el;
-}
-
-describe("needs approval → server route", () => {
-  it("single Approve POSTs the exact contract body and adopts server weekData", async () => {
-    stubApproveRoute("ok");
+  it("single Approve sends the exact contract body and adopts the server weekData", async () => {
+    server.approveBody = { success: true, paid: 1, cleared: 1, weekData: approvedWeek("Jasmine Rose", 8) };
     const el = await driveApproval("Approve Dishes", "Approve");
 
-    expect(approveCalls).toHaveLength(1);
-    expect(approveCalls[0]).toEqual({
+    const posted = requestsFor("/api/tasks/approve");
+    expect(posted).toHaveLength(1);
+    expect(posted[0].body).toMatchObject({
       action: "approve",
       taskId: 101,
-      operationId: expect.any(String),
       memberName: "Rebecca (Mom)",
-      pin: "0202",
+      pin: PARENT_PIN,
+      operationId: expect.any(String),
     });
-    // Server-adopted ledger: only the route's weekData carries the Caspian
-    // key — local optimistic state would have credited Jasmine Rose instead.
-    expect(storedWeek().points["Caspian Garcia"]).toBe(8);
-    expect(storedWeek().history[0]?.amount).toBe(8);
-    expect(storedTasks()[0].pendingApproval).toBeUndefined();
-    // B1 toast uses the recorded approval amount (8), not task.points (6).
-    expect(document.body.textContent || "").toContain("+8pts");
-    expect(el.textContent || "").not.toContain("Needs approval");
+    expect(storedWeek().points["Jasmine Rose"]).toBe(8);
+    expect(storedHistory()[0]?.amount).toBe(8);
+    expect(listTaskOutbox()).toHaveLength(0);
+    // The recorded approval amount (8), not task.points (6).
+    expect(el.textContent || document.body.textContent || "").toContain("+8pts");
   });
 
-  it("send-back POSTs send-back and reopens the row with sentBackAt", async () => {
-    stubApproveRoute("ok");
+  it("send-back sends send-back and leaves the reopen to the acknowledgment", async () => {
+    server.approveBody = {
+      success: true,
+      cleared: 1,
+      weekData: { weekStart: MONDAY, points: {}, streak: {}, lastActive: {}, history: [] },
+    };
     await driveApproval("Send back Dishes", "Send back");
 
-    expect(approveCalls).toHaveLength(1);
-    expect(approveCalls[0]).toEqual({
-      action: "send-back",
-      taskId: 101,
-      operationId: expect.any(String),
-      memberName: "Rebecca (Mom)",
-      pin: "0202",
-    });
-    const saved = storedTasks();
-    expect(saved[0].completed).toBe(false);
-    expect(saved[0].pendingApproval).toBeUndefined();
-    expect(typeof saved[0].sentBackAt).toBe("string");
+    const posted = requestsFor("/api/tasks/approve");
+    expect(posted).toHaveLength(1);
+    expect(posted[0].body).toMatchObject({ action: "send-back", taskId: 101, pin: PARENT_PIN });
+    // A send-back acknowledgment carries no task row, so the reopen arrives on
+    // the next snapshot PULL — never as a local write. No ledger entry either.
+    expect(listTaskOutbox()).toHaveLength(0);
     expect(storedHistory()).toHaveLength(0);
   });
 
-  it("4xx from the route reverts the optimistic approval", async () => {
-    stubApproveRoute("reject");
+  it("a 404 from the route leaves the command failed and the row waiting", async () => {
+    server.approveStatus = 404;
+    server.approveBody = { success: false, reason: "unknown-task" };
     await driveApproval("Approve Dishes", "Approve");
 
-    expect(approveCalls).toHaveLength(1);
-    // The optimistic pay was rolled back — the row still waits.
+    expect(requestsFor("/api/tasks/approve")).toHaveLength(1);
+    const [entry] = listTaskOutbox();
+    expect(entry.status).toBe("failed");
     expect(storedTasks()[0].pendingApproval).toBeDefined();
-    expect(storedWeek().history).toHaveLength(0);
-    expect(document.body.textContent || "").toContain("no longer waiting");
+    expect(storedHistory()).toHaveLength(0);
   });
 
-  it("network failure KEEPS the local approval (D8 degraded mode)", async () => {
-    stubApproveRoute("offline");
+  it("a network failure keeps the command queued and never pays locally", async () => {
+    server.approveThrows = true;
     await driveApproval("Approve Dishes", "Approve");
 
-    expect(approveCalls).toHaveLength(1);
-    expect(storedTasks()[0].pendingApproval).toBeUndefined();
-    expect(storedWeek().history).toHaveLength(1);
-    expect(document.body.textContent || "").toContain("Approved!");
+    expect(listTaskOutbox()).toHaveLength(1);
+    expect(storedHistory()).toHaveLength(0);
   });
 
-  it("a 5xx from the route keeps the local approval (same class as network failure, never a 4xx revert)", async () => {
-    // 2026-09-23 review: the route pays the snapshot week + clears the row
-    // INSIDE the lock before a later PB write can throw — a 5xx can be a
-    // PARTIAL apply. Reverting fought the next merge's paidElsewhere
-    // adoption (approve → un-approve → re-approve churn). 5xx now takes the
-    // D8 keep-local path.
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.includes("/api/members/verify")) {
-        return { ok: true, status: 200, json: async () => ({ member: { name: "Rebecca (Mom)", fullName: "Rebecca (Mom)" } }) } as any;
-      }
-      if (url.includes("/api/tasks/approve")) {
-        approveCalls.push(JSON.parse(String(init?.body || "{}")));
-        return { ok: false, status: 502, json: async () => ({ error: "db_error" }) } as any;
-      }
-      return { ok: true, status: 200, json: async () => ({ snapshot: null }) } as any;
-    }));
+  it("a 5xx keeps the command queued and never pays locally", async () => {
+    server.approveStatus = 502;
     await driveApproval("Approve Dishes", "Approve");
 
-    expect(approveCalls).toHaveLength(1);
-    // Local optimistic approval SURVIVES the 5xx (no revert — identical to
-    // the offline path)…
-    expect(storedTasks()[0].pendingApproval).toBeUndefined();
-    expect(storedWeek().history).toHaveLength(1);
-    // …and the caller's saved-locally success copy wins, never a 4xx-style
-    // "the server refused" revert toast.
-    expect(document.body.textContent || "").toContain("Approved!");
+    expect(listTaskOutbox()).toHaveLength(1);
+    expect(storedHistory()).toHaveLength(0);
     expect(document.body.textContent || "").not.toContain("refused");
+  });
+
+  it("never posts the retired snapshot writer for any review action", async () => {
+    server.approveStatus = 503;
+    await driveApproval("Approve Dishes", "Approve");
+    expect(server.syncPosts).toHaveLength(0);
   });
 });

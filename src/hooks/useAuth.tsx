@@ -3,6 +3,10 @@
 import { useState, useEffect, useCallback, createContext, useContext, ReactNode, useRef } from 'react';
 import { db } from '@/db';
 import { flushPendingWrites } from '@/lib/pending-writes';
+import {
+  requestTaskOutboxFlush,
+  warnTaskOutboxFlushFailure,
+} from '@/lib/task-operation-outbox';
 
 const AUTH_STORAGE_KEY = 'consuela-auth-user';
 const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;
@@ -237,9 +241,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     };
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(stored));
 
-    // Session is now valid: replay any queued meal/recipe writes and pull
-    // fresh server data so other devices' changes appear without a reload.
-    flushPendingWrites().then(() => db.refreshCaches());
+    // Session is now valid: drain the durable task-command outbox FIRST (a
+    // queued claim/undo/approval/auth-required command has been waiting for a
+    // real session), then replay queued meal/recipe writes and pull fresh
+    // server data so other devices' changes appear without a reload.
+    void requestTaskOutboxFlush()
+      .catch(warnTaskOutboxFlushFailure)
+      .then(() => flushPendingWrites())
+      .then(() => db.refreshCaches());
 
     return { success: true };
   }, []);

@@ -169,6 +169,8 @@ vi.mock("@/hooks/useAtmosphericTheme", () => ({
 }));
 
 
+import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-operation-outbox";
+import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 import KidHome from "@/modes/kid/KidHome";
 
 const QUEST = { id: 7, title: "Feed the dog", points: 10, assignee: "Caspian", completed: false };
@@ -227,17 +229,30 @@ function bumpRefresh() {
   act(() => { window.dispatchEvent(new Event("consuela-data-refreshed")); });
 }
 
-describe("KidHome claim outbox (failed claim → notice → retry → confirm)", () => {
+describe("KidHome commands (durable outbox → notice → retry → confirm)", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
     localStorage.clear();
     vi.unstubAllGlobals();
+    __resetTaskOutboxForTests();
+    __resetTaskCommandCredentialsForTests();
     modeMock.isBedtime = false;
     mockAuth.currentUser = { name: "Caspian", role: "child", age: 5 };
     store.tasks = [{ ...QUEST }];
     store.week = { weekStart: "2026-09-01", points: {}, streak: {}, lastActive: {}, history: [] };
     store.saveTasks.mockClear();
     store.syncTasksToPB.mockClear();
+    // The shared Modal's exit phase reads matchMedia; jsdom has none.
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
   });
 
   afterEach(() => {
@@ -246,92 +261,105 @@ describe("KidHome claim outbox (failed claim → notice → retry → confirm)",
     document.body.innerHTML = "";
   });
 
-  it("a failed claim POST keeps the celebration but surfaces an honest, non-blocking notice", async () => {
+  it("a failed completion keeps the celebration and surfaces an honest, non-blocking notice", async () => {
     const calls = stubFetchWithClaims(["throw"]);
     const el = await renderAsync(<KidHome />);
     await settle();
     await tapQuest(el, QUEST.title);
 
-    // The optimistic row still lands (the kid flow never blocks on a 5xx).
-    expect(store.tasks[0].completed).toBe(true);
-    expect(store.tasks[0].pendingApproval).toBeTruthy();
+    // The command is durable and the celebration is display-only: the local
+    // row is the acknowledgment's write, never the tap's.
+    expect(store.saveTasks).not.toHaveBeenCalled();
+    expect(store.tasks[0].pendingApproval).toBeFalsy();
     expect(claimCallsFor(calls, QUEST.id)).toHaveLength(1);
-    // The exact contract body is unchanged.
-    expect(claimCallsFor(calls, QUEST.id)[0]).toEqual({
+    expect(claimCallsFor(calls, QUEST.id)[0]).toMatchObject({
       action: "complete",
       taskId: QUEST.id,
       memberName: "Caspian Garcia",
-      assigneeEmoji: undefined,
+      operationId: expect.any(String),
     });
+    expect(claimCallsFor(calls, QUEST.id)[0].pin).toBeUndefined();
     expect(el.textContent).toContain("Still sending 1 chore");
   });
 
-  it("the refresh tick re-POSTs the unconfirmed claim and the notice clears once the server confirms", async () => {
-    const calls = stubFetchWithClaims(["throw", 200]);
+  it("a failed command is retained on a backoff and reuses one operation id", async () => {
+    const calls = stubFetchWithClaims(["throw", "throw", 200]);
     const el = await renderAsync(<KidHome />);
     await settle();
     await tapQuest(el, QUEST.title);
     expect(el.textContent).toContain("Still sending 1 chore");
 
-    // One 60s refresh tick later: the outbox retries.
+    const [entry] = listTaskOutbox();
+    expect(entry.status).toBe("retrying");
+    expect(typeof entry.nextAttemptAt).toBe("string");
+
+    // A refresh inside the backoff window is a no-op — the ladder is what
+    // keeps a dead NAS from being hammered.
     bumpRefresh();
     await settle();
-    expect(claimCallsFor(calls, QUEST.id)).toHaveLength(2);
-    // Server confirmed → the notice is gone (self-clearing).
-    await act(async () => { await new Promise((r) => setTimeout(r, 10)); });
-    expect(el.textContent).not.toContain("Still sending");
+    expect(claimCallsFor(calls, QUEST.id)).toHaveLength(1);
+    expect(listTaskOutbox()[0].operationId).toBe(entry.operationId);
   });
 
-  it("a 401 (expired kid session) stalls the retry and asks a grown-up instead of hammering", async () => {
+  it("a 401 (expired kid session) holds the command as auth-required instead of hammering", async () => {
     const calls = stubFetchWithClaims([401]);
     const el = await renderAsync(<KidHome />);
     await settle();
     await tapQuest(el, QUEST.title);
-    expect(el.textContent).toContain("ask a grown-up");
 
-    // A stalled entry never re-POSTs.
-    bumpRefresh();
-    await settle();
+    // A credential-free command is NOT auth-gated, so a 401 lands on the
+    // durable ladder and the notice stays honest until the session works.
+    expect(listTaskOutbox()[0]).toMatchObject({ route: "/api/tasks/claim", action: "complete" });
     expect(claimCallsFor(calls, QUEST.id)).toHaveLength(1);
   });
 
-  it("a legacy orphan pending row (pre-server-handoff tap) is adopted and delivered on mount", async () => {
-    // A pending row that only ever existed in this device's localStorage —
-    // the parent queue reads the server snapshot, so it was invisible forever.
-    store.tasks = [{
-      ...QUEST,
-      completed: true,
-      completedBy: "Caspian Garcia",
-      completedAt: new Date().toISOString(),
-      completedInWeek: "2026-09-01",
-      // Five minutes old — past the two-minute in-flight floor.
-      pendingApproval: { byName: "Caspian Garcia", at: new Date(Date.now() - 5 * 60_000).toISOString(), points: 10 },
-    }];
-    const calls = stubFetchWithClaims([200]);
+  it("a queued command survives a reload with the same operation id", async () => {
+    stubFetchWithClaims(["throw"]);
     const el = await renderAsync(<KidHome />);
     await settle();
+    await tapQuest(el, QUEST.title);
+    const [entry] = listTaskOutbox();
 
-    expect(claimCallsFor(calls, QUEST.id)).toHaveLength(1);
-    expect(claimCallsFor(calls, QUEST.id)[0].memberName).toBe("Caspian Garcia");
-    expect(el.textContent).not.toContain("Still sending");
-  });
-
-  it("a FRESH pending row is not re-POSTed by the legacy scan (in-flight guard)", async () => {
-    store.tasks = [{
-      ...QUEST,
-      completed: true,
-      completedBy: "Caspian Garcia",
-      completedAt: new Date().toISOString(),
-      completedInWeek: "2026-09-01",
-      pendingApproval: { byName: "Caspian Garcia", at: new Date().toISOString(), points: 10 },
-    }];
-    const calls = stubFetchWithClaims([200]);
+    act(() => { activeRoot?.unmount(); });
+    activeRoot = null;
+    document.body.innerHTML = "";
+    __resetTaskOutboxForTests();
     await renderAsync(<KidHome />);
     await settle();
-    expect(claimCallsFor(calls, QUEST.id)).toHaveLength(0);
+
+    expect(listTaskOutbox()[0].operationId).toBe(entry.operationId);
+    expect(listTaskOutbox()[0].payload).toMatchObject({ taskId: QUEST.id });
   });
 
-  it("the kid self-cancel reopens the row with the durable send-back stamp and stops the retry", async () => {
+  it("a 10+ completion keeps its PIN ephemeral across the whole queue lifecycle", async () => {
+    mockAuth.currentUser = { name: "Caspian", role: "child", age: 11 };
+    const calls = stubFetchWithClaims(["throw"]);
+    const el = await renderAsync(<KidHome />);
+    await settle();
+    await tapQuest(el, QUEST.title);
+    const input = document.querySelector('input[aria-label="Your 4-digit PIN"]') as HTMLInputElement;
+    expect(input).toBeTruthy();
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+      setter.call(input, "3141");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const scope = document.querySelector('[role="dialog"]') ?? document;
+    const submit = Array.from(scope.querySelectorAll("button")).find(
+      (b) => b.textContent?.trim() === "Complete",
+    ) as HTMLButtonElement;
+    expect(submit).toBeTruthy();
+    await act(async () => { submit.click(); });
+    await settle();
+
+    expect(claimCallsFor(calls, QUEST.id)[0]?.pin).toBe("3141");
+    const dump = Object.keys(localStorage)
+      .map((key) => `${key}=${localStorage.getItem(key) ?? ""}`)
+      .join("\n");
+    expect(dump).not.toContain("3141");
+  });
+
+  it("the kid self-cancel queues the server undo and leaves the pending row in place", async () => {
     store.tasks = [{
       ...QUEST,
       completed: true,
@@ -351,13 +379,13 @@ describe("KidHome claim outbox (failed claim → notice → retry → confirm)",
     await act(async () => { cancel.click(); });
     await settle();
 
-    // Reopened with the SAME durable proof the parent send-back uses — the
-    // merge gates and the sync push guard both honour it.
-    expect(store.tasks[0].completed).toBe(false);
-    expect(store.tasks[0].pendingApproval).toBeUndefined();
-    expect(typeof store.tasks[0].sentBackAt).toBe("string");
-    expect(el.textContent).not.toContain("on the way");
-    // The cancelled row is never delivered as a claim.
+    // The reopen is a durable server undo queued FIRST. The pending row is
+    // never cleared locally, so a lost command can never silently erase the
+    // tap — the exact failure this queue exists to prevent.
+    const [entry] = listTaskOutbox();
+    expect(entry).toMatchObject({ route: "/api/tasks/claim", action: "undo", payload: { taskId: QUEST.id } });
+    expect(entry.payload.pin).toBeUndefined();
+    expect(store.tasks[0].pendingApproval).toBeTruthy();
     expect(claimCallsFor(calls, QUEST.id)).toHaveLength(0);
   });
 });
