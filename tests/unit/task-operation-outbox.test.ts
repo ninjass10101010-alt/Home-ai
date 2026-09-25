@@ -9,8 +9,10 @@ import type { SnapshotData } from "@/lib/snapshot-tasks";
 import {
   TASK_OUTBOX_BASE_BACKOFF_MS,
   TASK_OUTBOX_MAX_ATTEMPTS,
+  TASK_OUTBOX_MAX_AUTH_ATTEMPTS,
   TASK_OUTBOX_MAX_BACKOFF_MS,
   TASK_OUTBOX_MAX_ENTRIES,
+  TASK_OUTBOX_REQUEST_TIMEOUT_MS,
   TASK_OUTBOX_STORAGE_KEY,
   __resetTaskOutboxForTests,
   buildTaskOperationRequestBody,
@@ -22,13 +24,16 @@ import {
   getTaskOutboxSnapshot,
   listTaskOutbox,
   pullTaskSnapshotDocument,
+  createFetchTaskOutboxDriver,
+  registerTaskOutboxDriver,
   removeTaskOutboxEntry,
+  requestTaskOutboxFlush as requestFlush,
   requestTaskOutboxFlush,
   sendTaskOperationRequest,
-  setTaskOutboxDriver,
   snapshotProvesResolved,
   subscribeTaskOutbox,
   taskOutboxBackoffMs,
+  taskOutboxEntryStorageKey,
   type SnapshotRead,
   type TaskOutboxAcknowledgement,
   type TaskOutboxEntry,
@@ -52,24 +57,61 @@ vi.mock("@/db", () => ({
 const PIN = "test-credential-value";
 const OTHER_PIN = "second-credential-value";
 
-function storedRaw(): string {
-  return window.localStorage.getItem(TASK_OUTBOX_STORAGE_KEY) ?? "";
+function allStoredText(): string {
+  const collected: Record<string, string> = {};
+  for (let index = 0; index < window.localStorage.length; index += 1) {
+    const key = window.localStorage.key(index);
+    if (key !== null) collected[key] = window.localStorage.getItem(key) ?? "";
+  }
+  return JSON.stringify(collected);
 }
 
-function storedEntries(): TaskOutboxEntry[] {
-  return JSON.parse(storedRaw() || "[]") as TaskOutboxEntry[];
+function readStoredEntry(operationId: string): Record<string, unknown> | null {
+  const raw = window.localStorage.getItem(taskOutboxEntryStorageKey(operationId));
+  return raw ? (JSON.parse(raw) as Record<string, unknown>) : null;
+}
+
+function storedIds(): string[] {
+  const raw = window.localStorage.getItem(TASK_OUTBOX_STORAGE_KEY);
+  if (!raw) return [];
+  const parsed = JSON.parse(raw) as { rev?: number; ids?: string[] };
+  return Array.isArray(parsed.ids) ? parsed.ids : [];
+}
+
+function writeForeignEntry(entry: Record<string, unknown>): void {
+  const operationId = String(entry.operationId);
+  window.localStorage.setItem(taskOutboxEntryStorageKey(operationId), JSON.stringify(entry));
+  const ids = storedIds();
+  window.localStorage.setItem(
+    TASK_OUTBOX_STORAGE_KEY,
+    JSON.stringify({ rev: 99, ids: [...new Set([...ids, operationId])] }),
+  );
+  window.dispatchEvent(
+    new StorageEvent("storage", {
+      key: taskOutboxEntryStorageKey(operationId),
+      newValue: JSON.stringify(entry),
+      storageArea: window.localStorage,
+    }),
+  );
+  window.dispatchEvent(
+    new StorageEvent("storage", {
+      key: TASK_OUTBOX_STORAGE_KEY,
+      newValue: window.localStorage.getItem(TASK_OUTBOX_STORAGE_KEY),
+      storageArea: window.localStorage,
+    }),
+  );
 }
 
 function expireBackoff(operationId: string): void {
+  const entry = readStoredEntry(operationId);
+  if (!entry) return;
+  window.localStorage.setItem(
+    taskOutboxEntryStorageKey(operationId),
+    JSON.stringify({ ...entry, nextAttemptAt: new Date(Date.now() - 1_000).toISOString() }),
+  );
   window.localStorage.setItem(
     TASK_OUTBOX_STORAGE_KEY,
-    JSON.stringify(
-      storedEntries().map((entry) =>
-        entry.operationId === operationId
-          ? { ...entry, nextAttemptAt: new Date(Date.now() - 1_000).toISOString() }
-          : entry,
-      ),
-    ),
+    JSON.stringify({ rev: 100, ids: storedIds() }),
   );
 }
 
@@ -159,8 +201,8 @@ describe("storage and sanitization", () => {
 
     expect(listTaskOutbox()).toHaveLength(1);
     expect(entry.operationId).toBe("op-claim-1");
-    expect(storedRaw()).not.toContain(PIN);
-    expect(storedRaw()).not.toContain("pin");
+    expect(allStoredText()).not.toContain(PIN);
+    expect(allStoredText()).not.toContain("pin");
   });
 
   it("never stores credentials, authority, history, or ledger fields", () => {
@@ -181,11 +223,11 @@ describe("storage and sanitization", () => {
       displayTarget: { taskId: 7, kind: "task" },
     });
 
-    const raw = storedRaw();
+    const raw = allStoredText();
     for (const forbidden of [PIN, OTHER_PIN, "token", "secret", "authorization", "history", "weekData", "completedBy"]) {
       expect(raw).not.toContain(forbidden);
     }
-    expect(storedEntries()[0].payload).toEqual({ taskId: 7, patch: { title: "Trash", points: 9 } });
+    expect(readStoredEntry("op-manage-1")?.payload).toEqual({ taskId: 7, patch: { title: "Trash", points: 9 } });
   });
 
   it("keeps legitimate manage and config fields the routes require", () => {
@@ -249,17 +291,20 @@ describe("storage and sanitization", () => {
     expect(restored).toHaveLength(1);
     expect(restored[0].operationId).toBe("op-claim-1");
     expect(restored[0].status).toBe("queued");
-    expect(storedRaw()).not.toContain(PIN);
+    expect(allStoredText()).not.toContain(PIN);
   });
 
   it("treats corrupt or foreign storage contents as an empty outbox", () => {
     window.localStorage.setItem(TASK_OUTBOX_STORAGE_KEY, "{not json");
     expect(listTaskOutbox()).toEqual([]);
 
-    window.localStorage.setItem(TASK_OUTBOX_STORAGE_KEY, JSON.stringify([{ nope: true }]));
+    window.localStorage.setItem(TASK_OUTBOX_STORAGE_KEY, JSON.stringify({ nope: true }));
     expect(listTaskOutbox()).toEqual([]);
 
-    window.localStorage.setItem(TASK_OUTBOX_STORAGE_KEY, JSON.stringify({ entries: [] }));
+    window.localStorage.setItem(
+      TASK_OUTBOX_STORAGE_KEY,
+      JSON.stringify({ rev: 1, ids: ["missing-entry", "toString"] }),
+    );
     expect(listTaskOutbox()).toEqual([]);
   });
 
@@ -296,14 +341,7 @@ describe("storage and sanitization", () => {
 
   it("drops entries past the retention window on read", () => {
     enqueueClaim();
-    const fresh = storedEntries()[0];
-    window.localStorage.setItem(
-      TASK_OUTBOX_STORAGE_KEY,
-      JSON.stringify([
-        { ...fresh, operationId: "op-ancient", createdAt: "2020-01-01T00:00:00.000Z" },
-        fresh,
-      ]),
-    );
+    writeForeignEntry({ ...readStoredEntry("op-claim-1"), operationId: "op-ancient", createdAt: "2020-01-01T00:00:00.000Z" });
 
     expect(listTaskOutbox().map((entry) => entry.operationId)).toEqual(["op-claim-1"]);
   });
@@ -445,9 +483,10 @@ describe("acknowledgement state machine", () => {
     }));
 
     const first = await flushTaskOutbox({ send });
-    expect(first).toEqual({ acknowledged: 0, retryable: 0, permanent: 1 });
+    expect(first).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
     expect(entryFor("op-claim-1").status).toBe("auth-required");
     expect(entryFor("op-claim-1").lastErrorCategory).toBe("unauthorized");
+    expect(entryFor("op-claim-1").authAttemptCount).toBe(1);
 
     const second = await flushTaskOutbox({ send });
     expect(second).toEqual({ acknowledged: 0, retryable: 0, permanent: 0 });
@@ -598,7 +637,7 @@ describe("single in-flight flush and cross-tab subscription", () => {
     enqueueClaim();
     expect(listener).toHaveBeenCalledTimes(1);
 
-    const tabEntry = {
+    writeForeignEntry({
       version: 1,
       operationId: "op-other-tab",
       route: "/api/tasks/manage",
@@ -608,23 +647,18 @@ describe("single in-flight flush and cross-tab subscription", () => {
       attemptCount: 0,
       status: "queued",
       displayTarget: { taskId: 5, kind: "task" },
-    };
-    const tabValue = JSON.stringify([tabEntry]);
-    window.localStorage.setItem(TASK_OUTBOX_STORAGE_KEY, tabValue);
-    window.dispatchEvent(
-      new StorageEvent("storage", {
-        key: TASK_OUTBOX_STORAGE_KEY,
-        newValue: tabValue,
-        storageArea: window.localStorage,
-      }),
-    );
+    });
 
-    expect(listener).toHaveBeenCalledTimes(2);
-    expect(listTaskOutbox().map((entry) => entry.operationId)).toEqual(["op-other-tab"]);
+    expect(listener.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(listTaskOutbox().map((entry) => entry.operationId).sort()).toEqual([
+      "op-claim-1",
+      "op-other-tab",
+    ]);
 
+    const callsBeforeUnsubscribe = listener.mock.calls.length;
     unsubscribe();
     enqueueClaim();
-    expect(listener).toHaveBeenCalledTimes(2);
+    expect(listener).toHaveBeenCalledTimes(callsBeforeUnsubscribe);
   });
 
   it("returns a stable snapshot reference and a frozen server snapshot", () => {
@@ -635,9 +669,24 @@ describe("single in-flight flush and cross-tab subscription", () => {
 
   it("short-circuits a flush with nothing queued through the driver seam", async () => {
     const send = vi.fn();
-    setTaskOutboxDriver({ send: send as never });
+    registerTaskOutboxDriver({ send: send as never });
     await expect(requestTaskOutboxFlush()).resolves.toEqual({ acknowledged: 0, retryable: 0, permanent: 0 });
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it("keeps one hook's driver when another hook unmounts", async () => {
+    const first = vi.fn(async () => ({ status: 200, body: ack("op-claim-1") }));
+    const second = vi.fn(async () => ({ status: 200, body: ack("op-claim-1") }));
+    const releaseFirst = registerTaskOutboxDriver({ send: first as never });
+    const releaseSecond = registerTaskOutboxDriver({ send: second as never });
+
+    releaseSecond();
+    enqueueClaim();
+    await requestTaskOutboxFlush();
+    expect(second).not.toHaveBeenCalled();
+    expect(first).toHaveBeenCalledTimes(1);
+
+    releaseFirst();
   });
 });
 
@@ -662,6 +711,7 @@ describe("route and action specific snapshot proof", () => {
     proving: Record<string, unknown>[][];
     notProving: Record<string, unknown>[][];
     provingExtra?: Record<string, unknown>;
+    provingAck?: TaskOutboxAcknowledgement;
   }> = [
     {
       name: "approve",
@@ -758,7 +808,15 @@ describe("route and action specific snapshot proof", () => {
           }),
         ],
       ],
-      notProving: [[canonicalTask({ crewSize: 3, crew: { members: [] } })]],
+      notProving: [
+        [canonicalTask({ crewSize: 3, crew: { members: [] } })],
+        [
+          canonicalTask({
+            crewSize: 3,
+            crew: { members: [{ name: "Caspianian", emoji: "\ud83e\uddd2", joinedAt: "2026-09-25T10:00:00.000Z" }] },
+          }),
+        ],
+      ],
     },
     {
       name: "crew-checkin that stamps the member",
@@ -804,18 +862,6 @@ describe("route and action specific snapshot proof", () => {
           }),
         ],
       ],
-    },
-    {
-      name: "manage add that creates the row",
-      entry: enqueueTaskOperation({
-        operationId: "op-manage-add-1",
-        route: "/api/tasks/manage",
-        action: "add",
-        payload: { task: { title: "Recycle", assignee: "Bailey", points: 10 } },
-        displayTarget: { temporaryId: 5150, title: "Recycle", kind: "task" },
-      }),
-      proving: [[canonicalTask({ id: 99, title: "Recycle", assignee: "Bailey" })]],
-      notProving: [[canonicalTask({ id: 99, title: "Recycle", assignee: "Caspian" })], []],
     },
     {
       name: "manage update that writes the fields",
@@ -864,6 +910,54 @@ describe("route and action specific snapshot proof", () => {
     });
   }
 
+  it("proves a manage add from the authoritative row the server assigned", () => {
+    const entry = enqueueTaskOperation({
+      operationId: "op-manage-add-1",
+      route: "/api/tasks/manage",
+      action: "add",
+      payload: { task: { title: "Recycle", assignee: "Bailey", points: 10, due: "2026-09-27" } },
+      displayTarget: { temporaryId: 5150, title: "Recycle", kind: "task" },
+    });
+    const authoritative = {
+      operationId: "op-manage-add-1",
+      reconciled: false,
+      task: { id: 99, title: "Recycle", assignee: "Bailey", points: 10, due: "2026-09-27" },
+    } as unknown as TaskOutboxAcknowledgement;
+
+    expect(snapshotProvesResolved(entry, snapshotOf([]), authoritative)).toBe(true);
+    expect(snapshotProvesResolved(entry, snapshotOf([]))).toBe(false);
+    expect(
+      snapshotProvesResolved(entry, snapshotOf([]), {
+        operationId: "op-manage-add-1",
+        task: { id: 5150, title: "Recycle", assignee: "Bailey", points: 10, due: "2026-09-27" },
+      } as unknown as TaskOutboxAcknowledgement),
+    ).toBe(false);
+    expect(
+      snapshotProvesResolved(entry, snapshotOf([]), {
+        operationId: "op-manage-add-1",
+        task: { id: 99, title: "Recycle", assignee: "Caspian", points: 10, due: "2026-09-27" },
+      } as unknown as TaskOutboxAcknowledgement),
+    ).toBe(false);
+  });
+
+  it("requires an exact member on the earn line", () => {
+    const entry = enqueueClaim({ operationId: "op-exact-earn" });
+    const earned = (member: string) =>
+      snapshotOf([canonicalTask({ completed: true })], {
+        weekData: {
+          weekStart: "2026-09-21",
+          points: {},
+          streak: {},
+          lastActive: {},
+          history: [{ id: 1, type: "earn", taskId: 42, member, amount: 5 }],
+        },
+      });
+
+    expect(snapshotProvesResolved(entry, earned("Caspian"))).toBe(true);
+    expect(snapshotProvesResolved(entry, earned("Caspianian"))).toBe(false);
+    expect(snapshotProvesResolved(entry, earned("Bailey"))).toBe(false);
+  });
+
   it("honours a delete tombstone when proving a manage delete", () => {
     const entry = enqueueTaskOperation({
       operationId: "op-manage-delete-tombstone",
@@ -878,7 +972,76 @@ describe("route and action specific snapshot proof", () => {
     expect(snapshotProvesResolved(entry, read)).toBe(true);
   });
 
-  it("proves config replace, upsert, and delete from the stamped snapshot legs", () => {
+  it("proves from the canonical operation receipt before any state guess", () => {
+    const addEntry = enqueueTaskOperation({
+      operationId: "op-receipt-add",
+      route: "/api/tasks/manage",
+      action: "add",
+      payload: { task: { title: "Recycle", assignee: "Bailey" } },
+      displayTarget: { temporaryId: 5150, kind: "task" },
+    });
+    const updateEntry = enqueueTaskOperation({
+      operationId: "op-receipt-update",
+      route: "/api/tasks/manage",
+      action: "update",
+      payload: { taskId: 42, patch: { title: "Trash" } },
+      displayTarget: { taskId: 42, kind: "task" },
+    });
+    const deleteEntry = enqueueTaskOperation({
+      operationId: "op-receipt-delete",
+      route: "/api/tasks/manage",
+      action: "delete",
+      payload: { taskId: 42 },
+      displayTarget: { taskId: 42, kind: "task" },
+    });
+    const claimEntry = enqueueClaim({ operationId: "op-receipt-claim", action: "claim", payload: { taskId: 42, memberName: "Caspian" } });
+    const approveEntry = enqueueTaskOperation({
+      operationId: "op-receipt-approve",
+      route: "/api/tasks/approve",
+      action: "approve",
+      payload: { taskId: 42, memberName: "Alex" },
+      displayTarget: { taskId: 42, kind: "approval" },
+    });
+
+    const receipts = (operationReceipts: SnapshotRead["operationReceipts"]) => ({
+      snapshot: { tasks: [canonicalTask()], deletedTaskIds: [], weekData: { history: [] } } as unknown as SnapshotData,
+      operationReceipts,
+    });
+
+    const addReceipts = {
+      "op-receipt-add": [{ operationId: "op-receipt-add", action: "add", taskId: 99, createdAt: "2026-09-25T10:00:00.000Z" }],
+    };
+    const updateReceipts = {
+      "op-receipt-update": [{ operationId: "op-receipt-update", action: "update", taskId: 42, createdAt: "2026-09-25T10:00:00.000Z" }],
+    };
+    const deleteReceipts = {
+      "op-receipt-delete": [{ operationId: "op-receipt-delete", action: "delete", taskId: 42, deleted: true, createdAt: "2026-09-25T10:00:00.000Z" }],
+    };
+    const claimReceipts = {
+      "op-receipt-claim": [{ operationId: "op-receipt-claim", action: "claim", taskId: 42, createdAt: "2026-09-25T10:00:00.000Z" }],
+    };
+    const approveReceipts = {
+      "op-receipt-approve": [{ operationId: "op-receipt-approve", action: "approve", taskId: 42, createdAt: "2026-09-25T10:00:00.000Z" }],
+    };
+
+    expect(snapshotProvesResolved(addEntry, receipts(addReceipts))).toBe(true);
+    expect(snapshotProvesResolved(updateEntry, receipts(updateReceipts))).toBe(true);
+    expect(snapshotProvesResolved(deleteEntry, receipts(deleteReceipts))).toBe(true);
+    expect(snapshotProvesResolved(claimEntry, receipts(claimReceipts))).toBe(true);
+    expect(snapshotProvesResolved(approveEntry, receipts(approveReceipts))).toBe(true);
+
+    expect(snapshotProvesResolved(addEntry, receipts(updateReceipts))).toBe(false);
+    expect(snapshotProvesResolved(updateEntry, receipts(addReceipts))).toBe(false);
+    expect(snapshotProvesResolved(claimEntry, receipts({ "op-receipt-claim": [{ operationId: "op-receipt-claim", action: "undo", taskId: 42, createdAt: "2026-09-25T10:00:00.000Z" }] }))).toBe(false);
+    expect(
+      snapshotProvesResolved(
+        updateEntry,
+        receipts({ "op-receipt-update": [{ operationId: "op-receipt-update", action: "update", taskId: 43, createdAt: "2026-09-25T10:00:00.000Z" }] }),
+      ),
+    ).toBe(false);
+  });
+
+  it("proves config replace, upsert, and delete from receipts and stamped legs", () => {
     const replace = enqueueTaskOperation({
       operationId: "op-config-replace-1",
       route: "/api/tasks/config",
@@ -937,6 +1100,355 @@ describe("route and action specific snapshot proof", () => {
         }),
       ),
     ).toBe(false);
+
+    const receiptRead: SnapshotRead = {
+      snapshot: { tasks: [] } as unknown as SnapshotData,
+      configOperationReceipts: {
+        "op-config-upsert-1": {
+          kind: "penalties",
+          action: "upsert",
+          updatedAt: "2026-09-25T10:00:00.000Z",
+        },
+      },
+    };
+    expect(snapshotProvesResolved(upsert, receiptRead)).toBe(true);
+    expect(snapshotProvesResolved(replace, receiptRead)).toBe(false);
+  });
+});
+
+describe("auth recovery and classification", () => {
+  it("retries a session-gated 401 on a bounded auth backoff without spending the attempt budget", async () => {
+    enqueueClaim({ operationId: "op-session-401" });
+    const first = await flushTaskOutbox({
+      send: respond(401, errorAck("op-session-401", { reason: "session_required" })),
+    });
+
+    expect(first).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
+    const blocked = entryFor("op-session-401");
+    expect(blocked.status).toBe("auth-required");
+    expect(blocked.attemptCount).toBe(0);
+    expect(blocked.authAttemptCount).toBe(1);
+    expect(Date.parse(blocked.nextAttemptAt ?? "")).toBeGreaterThan(Date.now());
+
+    const skipped = await flushTaskOutbox({ send: respond(200, ack("op-session-401")) });
+    expect(skipped).toEqual({ acknowledged: 0, retryable: 0, permanent: 0 });
+
+    expireBackoff("op-session-401");
+    const recovered = await flushTaskOutbox({ send: respond(200, ack("op-session-401")) });
+    expect(recovered).toEqual({ acknowledged: 1, retryable: 0, permanent: 0 });
+    expect(listTaskOutbox()).toHaveLength(0);
+  });
+
+  it("gives up on a session-gated 401 after the bounded auth budget, not the send budget", async () => {
+    enqueueTaskOperation({
+      operationId: "op-manage-session",
+      route: "/api/tasks/manage",
+      action: "delete",
+      payload: { taskId: 42 },
+      displayTarget: { taskId: 42, kind: "task" },
+    });
+    const send = vi.fn(async () => ({
+      status: 401,
+      body: errorAck("op-manage-session", { reason: "unauthorized" }),
+    }));
+
+    for (let index = 0; index < TASK_OUTBOX_MAX_AUTH_ATTEMPTS; index += 1) {
+      expireBackoff("op-manage-session");
+      await flushTaskOutbox({ send });
+    }
+
+    expect(send).toHaveBeenCalledTimes(TASK_OUTBOX_MAX_AUTH_ATTEMPTS);
+    expect(entryFor("op-manage-session").status).toBe("failed");
+    expect(entryFor("op-manage-session").lastErrorCategory).toBe("unauthorized");
+    expect(entryFor("op-manage-session").attemptCount).toBe(0);
+    expect(entryFor("op-manage-session").nextAttemptAt).toBeUndefined();
+  });
+
+  it("classifies a deterministic operation_conflict as permanent", async () => {
+    enqueueClaim();
+    const result = await flushTaskOutbox({
+      send: respond(409, errorAck("op-claim-1", { reason: "operation_conflict" })),
+      pullSnapshot: async () => snapshotOf([canonicalTask()]),
+    });
+
+    expect(result).toEqual({ acknowledged: 0, retryable: 0, permanent: 1 });
+    expect(entryFor("op-claim-1").status).toBe("failed");
+    expect(entryFor("op-claim-1").lastErrorCategory).toBe("validation");
+    expect(entryFor("op-claim-1").lastErrorReason).toBe("operation_conflict");
+  });
+
+  it("treats a 200 without a reconciled field as a route-declared success", async () => {
+    enqueueClaim();
+    const result = await flushTaskOutbox({
+      send: respond(200, { operationId: "op-claim-1" } as TaskOutboxAcknowledgement),
+    });
+
+    expect(result).toEqual({ acknowledged: 1, retryable: 0, permanent: 0 });
+    expect(listTaskOutbox()).toHaveLength(0);
+  });
+
+  it("never treats a 202 as reconciled, even when the body claims otherwise", async () => {
+    enqueueClaim();
+    await flushTaskOutbox({
+      send: respond(202, { operationId: "op-claim-1", reconciled: true } as TaskOutboxAcknowledgement),
+      pullSnapshot: async () => snapshotOf([canonicalTask()]),
+    });
+
+    expect(listTaskOutbox()).toHaveLength(1);
+    expect(entryFor("op-claim-1").status).toBe("reconciling");
+  });
+
+  it("classifies a throwing credential resolver instead of failing the flush", async () => {
+    enqueueClaim({ operationId: "op-claim-1", action: "claim" });
+    const result = await flushTaskOutbox({
+      send: respond(200, ack("op-claim-1")),
+      getCredential: () => {
+        throw new Error("resolver exploded");
+      },
+    });
+
+    expect(result).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
+    expect(entryFor("op-claim-1").lastErrorReason).toBe("credential_resolver_failed");
+  });
+
+  it("keeps a failed entry instead of dropping it when acknowledgement work throws", async () => {
+    enqueueClaim();
+    const result = await flushTaskOutbox({
+      send: respond(200, ack("op-claim-1")),
+      onAcknowledged: () => {
+        throw new Error("store write failed");
+      },
+    });
+
+    expect(result).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
+    expect(entryFor("op-claim-1").lastErrorCategory).toBe("projection");
+    expect(entryFor("op-claim-1").lastErrorReason).toBe("adoption_failed");
+  });
+});
+
+describe("request timeouts and the in-flight guard", () => {
+  it("releases the in-flight guard when a hung send hits the request timeout", async () => {
+    enqueueClaim();
+    const hung = vi.fn(
+      (_url: string, init?: RequestInit) =>
+        new Promise<never>((_resolve, reject) => {
+          const signal = init?.signal as AbortSignal | undefined;
+          signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+        }),
+    );
+    vi.stubGlobal("fetch", hung);
+
+    const driver = createFetchTaskOutboxDriver({ requestTimeoutMs: 25 });
+    const first = await flushTaskOutbox(driver);
+
+    expect(first).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
+    expect(hung).toHaveBeenCalledTimes(1);
+    expect(entryFor("op-claim-1").lastErrorCategory).toBe("network");
+
+    expireBackoff("op-claim-1");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, status: 200, json: async () => ack("op-claim-1") })),
+    );
+    const second = await flushTaskOutbox(driver);
+    expect(second).toEqual({ acknowledged: 1, retryable: 0, permanent: 0 });
+  });
+
+  it("exports an explicit 30 second default request timeout", () => {
+    expect(TASK_OUTBOX_REQUEST_TIMEOUT_MS).toBe(30_000);
+  });
+});
+
+describe("default production driver", () => {
+  it("pulls the tasks sync route so an unreconciled 202 can be proven", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "/api/tasks/claim") {
+        return {
+          ok: true,
+          status: 202,
+          json: async () => ({ operationId: "op-claim-1", reconciled: false, repairRequired: true }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          reconciled: true,
+          snapshot: {
+            tasks: [canonicalTask({ completed: true, pendingApproval: { byName: "Caspian", at: "now", points: 5 } })],
+            weekData: { weekStart: "2026-09-21", points: {}, streak: {}, lastActive: {}, history: [] },
+            operationReceipts: {
+              "op-claim-1": [
+                { operationId: "op-claim-1", action: "complete", taskId: 42, createdAt: "2026-09-25T10:00:00.000Z" },
+              ],
+            },
+          },
+        }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    enqueueClaim();
+
+    await requestTaskOutboxFlush();
+
+    expect(fetchMock.mock.calls.some(([url]) => url === "/api/tasks/sync")).toBe(true);
+    expect(listTaskOutbox()).toHaveLength(0);
+  });
+
+  it("exposes the canonical week data and receipts from the pulled document", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          reconciled: true,
+          snapshot: {
+            tasks: [],
+            weekData: { weekStart: "2026-09-21", points: {}, streak: {}, lastActive: {}, history: [] },
+            operationReceipts: { "op-1": [] },
+            configOperationReceipts: {},
+          },
+        }),
+      })),
+    );
+
+    const read = await pullTaskSnapshotDocument();
+    expect(read.weekData).toMatchObject({ weekStart: "2026-09-21" });
+    expect(read.operationReceipts).toHaveProperty("op-1");
+    expect(read.configOperationReceipts).toEqual({});
+  });
+});
+
+describe("cross-tab storage coordination", () => {
+  function foreignEntry(operationId: string, taskId: number): Record<string, unknown> {
+    return {
+      version: 1,
+      operationId,
+      route: "/api/tasks/manage",
+      action: "delete",
+      payload: { taskId },
+      createdAt: new Date().toISOString(),
+      attemptCount: 0,
+      status: "queued",
+      displayTarget: { taskId, kind: "task" },
+    };
+  }
+
+  it("merges another tab's per-entry write instead of clobbering the list", () => {
+    enqueueClaim({ operationId: "op-mine" });
+    writeForeignEntry(foreignEntry("op-theirs", 9));
+    enqueueTaskOperation({
+      operationId: "op-third",
+      route: "/api/tasks/manage",
+      action: "delete",
+      payload: { taskId: 11 },
+      displayTarget: { taskId: 11, kind: "task" },
+    });
+
+    expect(listTaskOutbox().map((entry) => entry.operationId).sort()).toEqual([
+      "op-mine",
+      "op-theirs",
+      "op-third",
+    ]);
+  });
+
+  it("keeps an in-memory quota-fallback entry when another tab writes", () => {
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("QuotaExceededError");
+    });
+    enqueueClaim({ operationId: "op-quota" });
+    setItem.mockRestore();
+
+    writeForeignEntry(foreignEntry("op-theirs", 9));
+    expect(listTaskOutbox().map((entry) => entry.operationId).sort()).toEqual([
+      "op-quota",
+      "op-theirs",
+    ]);
+
+    enqueueTaskOperation({
+      operationId: "op-after-quota",
+      route: "/api/tasks/manage",
+      action: "delete",
+      payload: { taskId: 12 },
+      displayTarget: { taskId: 12, kind: "task" },
+    });
+    expect(listTaskOutbox().map((entry) => entry.operationId).sort()).toEqual([
+      "op-after-quota",
+      "op-quota",
+      "op-theirs",
+    ]);
+  });
+
+  it("migrates a legacy whole-array key without losing live entries", () => {
+    enqueueClaim({ operationId: "op-mine" });
+    const legacyEntry = { ...foreignEntry("op-legacy", 21) };
+    window.localStorage.setItem(TASK_OUTBOX_STORAGE_KEY, JSON.stringify([legacyEntry]));
+    window.dispatchEvent(
+      new StorageEvent("storage", {
+        key: TASK_OUTBOX_STORAGE_KEY,
+        newValue: JSON.stringify([legacyEntry]),
+        storageArea: window.localStorage,
+      }),
+    );
+
+    enqueueTaskOperation({
+      operationId: "op-third",
+      route: "/api/tasks/manage",
+      action: "delete",
+      payload: { taskId: 22 },
+      displayTarget: { taskId: 22, kind: "task" },
+    });
+
+    expect(listTaskOutbox().map((entry) => entry.operationId).sort()).toEqual([
+      "op-legacy",
+      "op-mine",
+      "op-third",
+    ]);
+    expect(window.localStorage.getItem(taskOutboxEntryStorageKey("op-legacy"))).toContain("op-legacy");
+  });
+
+  it("clears module state on a storage reset", () => {
+    enqueueClaim({ operationId: "op-before-reset" });
+    const listener = vi.fn();
+    subscribeTaskOutbox(listener);
+
+    window.localStorage.clear();
+    window.dispatchEvent(
+      new StorageEvent("storage", {
+        key: null,
+        newValue: null,
+        storageArea: window.localStorage,
+      }),
+    );
+    __resetTaskOutboxForTests();
+
+    expect(listTaskOutbox()).toHaveLength(0);
+    expect(window.localStorage.getItem(TASK_OUTBOX_STORAGE_KEY)).toBeNull();
+  });
+
+  it("rejects an enqueue for an unknown route or action", () => {
+    expect(() =>
+      enqueueTaskOperation({
+        operationId: "op-bad-action",
+        route: "/api/tasks/claim",
+        action: "not-a-real-action",
+        payload: { taskId: 1 },
+        displayTarget: { kind: "claim" },
+      }),
+    ).toThrow(TypeError);
+    expect(() =>
+      enqueueTaskOperation({
+        operationId: "op-bad-route",
+        route: "/api/tasks/unknown" as never,
+        action: "complete",
+        payload: { taskId: 1 },
+        displayTarget: { kind: "claim" },
+      }),
+    ).toThrow(TypeError);
+    expect(listTaskOutbox()).toHaveLength(0);
   });
 });
 
@@ -1044,7 +1556,7 @@ describe("real route request bodies with an ephemeral PIN", () => {
       expect(testCase.accepted(body), `${testCase.name} body rejected`).toBe(true);
       expect(body).not.toHaveProperty("displayTarget");
       expect(JSON.stringify(testCase.entry.payload)).not.toContain(PIN);
-      expect(storedRaw()).not.toContain(PIN);
+      expect(allStoredText()).not.toContain(PIN);
     }
   });
 
@@ -1064,8 +1576,9 @@ describe("real route request bodies with an ephemeral PIN", () => {
 
     const result = await flushTaskOutbox({ send: send as never });
     expect(send).not.toHaveBeenCalled();
-    expect(result).toEqual({ acknowledged: 0, retryable: 0, permanent: 1 });
+    expect(result).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
     expect(entryFor("op-needs-pin").status).toBe("auth-required");
+    expect(entryFor("op-needs-pin").authAttemptCount).toBeUndefined();
 
     const withCredential = await flushTaskOutbox({
       send: respond(200, ack("op-needs-pin")),
@@ -1077,7 +1590,7 @@ describe("real route request bodies with an ephemeral PIN", () => {
 
   it("sends the ephemeral credential over the real request path and never stores it", async () => {
     const entry = enqueueClaim({ operationId: "op-real-fetch" });
-    const fetchMock = vi.fn(async () => ({
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({
       status: 200,
       json: async () => ({ operationId: "op-real-fetch", reconciled: true }),
     }));
@@ -1089,15 +1602,16 @@ describe("real route request bodies with an ephemeral PIN", () => {
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("/api/tasks/claim");
     expect(init.method).toBe("POST");
+    expect((init.signal as AbortSignal).aborted).toBe(false);
     const body = JSON.parse(String(init.body));
     expect(body.pin).toBe(PIN);
     expect(body.operationId).toBe("op-real-fetch");
-    expect(storedRaw()).not.toContain(PIN);
+    expect(allStoredText()).not.toContain(PIN);
     vi.unstubAllGlobals();
   });
 
   it("reads the authoritative snapshot document over the real sync route", async () => {
-    const fetchMock = vi.fn(async () => ({
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({
       ok: true,
       status: 200,
       json: async () => ({ ok: true, reconciled: true, snapshot: { tasks: [canonicalTask({ completed: true })] } }),
@@ -1105,7 +1619,13 @@ describe("real route request bodies with an ephemeral PIN", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const read = await pullTaskSnapshotDocument();
-    expect(fetchMock).toHaveBeenCalledWith("/api/tasks/sync", { cache: "no-store" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/tasks/sync",
+      expect.objectContaining({ cache: "no-store" }),
+    );
+    const signal = fetchMock.mock.calls[0]![1]!.signal;
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect((signal as AbortSignal).aborted).toBe(false);
     expect(
       snapshotProvesResolved(
         enqueueClaim({ operationId: "op-pull" }),
@@ -1284,6 +1804,53 @@ describe("useTaskOperationOutbox", () => {
     expect(claimCall).toBeDefined();
     const body = JSON.parse(String((claimCall![1] as RequestInit).body));
     expect(body.pin).toBe(PIN);
-    expect(window.localStorage.getItem(TASK_OUTBOX_STORAGE_KEY)).not.toContain(PIN);
+    expect(allStoredText()).not.toContain(PIN);
+  });
+});
+
+function OutboxProbe(props: { options: Parameters<typeof useTaskOperationOutbox>[0] }) {
+  useTaskOperationOutbox(props.options);
+  return null;
+}
+
+describe("useTaskOperationOutbox driver lifecycle", () => {
+  function mountProbe(options: Parameters<typeof useTaskOperationOutbox>[0]): Root {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const mounted = createRoot(host);
+    act(() => {
+      mounted.render(createElement(OutboxProbe, { options }));
+    });
+    return mounted;
+  }
+
+  it("keeps the surviving hook's driver when another hook unmounts", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "/api/tasks/claim") {
+        return { ok: true, status: 200, json: async () => ({ operationId: "op-claim-1", reconciled: true }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ ok: true, reconciled: true, snapshot: { tasks: [] } }) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = mountProbe({ autoFlush: false });
+    const second = mountProbe({ autoFlush: false });
+
+    act(() => {
+      first.unmount();
+    });
+
+    enqueueClaim();
+    await act(async () => {
+      await requestFlush();
+    });
+
+    expect(fetchMock.mock.calls.some(([url]) => url === "/api/tasks/claim")).toBe(true);
+    expect(listTaskOutbox()).toHaveLength(0);
+
+    act(() => {
+      second.unmount();
+    });
+    document.body.innerHTML = "";
   });
 });

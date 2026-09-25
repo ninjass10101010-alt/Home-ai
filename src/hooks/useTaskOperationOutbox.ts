@@ -13,11 +13,11 @@ import {
 } from "@/lib/task-utils";
 import {
   cancelTaskOutboxEntry,
-  createFetchTaskOutboxDriver,
+  pullTaskSnapshotDocument,
   getTaskOutboxServerSnapshot,
   getTaskOutboxSnapshot,
+  registerTaskOutboxDriver,
   requestTaskOutboxFlush,
-  setTaskOutboxDriver,
   subscribeTaskOutbox,
   type FlushTaskOutboxResult,
   type SnapshotRead,
@@ -28,6 +28,7 @@ import {
 export interface UseTaskOperationOutboxOptions {
   getCredential?: (entry: TaskOutboxEntry) => string | undefined;
   onAcknowledged?: (acknowledgement: TaskOutboxAcknowledgement) => void | Promise<void>;
+  pullSnapshot?: () => Promise<SnapshotRead>;
   autoFlush?: boolean;
 }
 
@@ -42,17 +43,13 @@ export interface UseTaskOperationOutboxResult {
   cancel: (operationId: string) => boolean;
 }
 
-async function pullAuthoritativeSnapshot(): Promise<SnapshotRead> {
-  const response = await fetch("/api/tasks/sync", { cache: "no-store" });
-  if (!response.ok) throw new Error(`tasks_sync_${response.status}`);
-  const body = await response.json().catch(() => ({}));
-  const record = isRecord(body) ? body : {};
-  const snapshot = isRecord(record.snapshot) ? record.snapshot : null;
-  if (snapshot) applyTasksSnapshotToStores(snapshot);
-  return { snapshot, reconciled: record.reconciled === true };
+export async function pullAdoptedTaskSnapshot(): Promise<SnapshotRead> {
+  const read = await pullTaskSnapshotDocument();
+  if (read.snapshot) applyTasksSnapshotToStores(read.snapshot);
+  return read;
 }
 
-function adoptAuthoritativeAcknowledgement(acknowledgement: TaskOutboxAcknowledgement): void {
+export function adoptAuthoritativeAcknowledgement(acknowledgement: TaskOutboxAcknowledgement): void {
   if (acknowledgement.task) {
     const merged = mergeTasksSnapshot(loadTasks(), loadWeekData(), {
       tasks: [acknowledgement.task],
@@ -81,24 +78,25 @@ export function useTaskOperationOutbox(
   }, [options]);
 
   useEffect(() => {
-    setTaskOutboxDriver(
-      createFetchTaskOutboxDriver({
-        getCredential: (entry) => optionsRef.current.getCredential?.(entry),
-        pullSnapshot: pullAuthoritativeSnapshot,
-        onAcknowledged: (acknowledgement) =>
-          (optionsRef.current.onAcknowledged ?? adoptAuthoritativeAcknowledgement)(acknowledgement),
-      }),
-    );
-    return () => setTaskOutboxDriver(null);
+    const unregister = registerTaskOutboxDriver({
+      getCredential: (entry) => optionsRef.current.getCredential?.(entry),
+      pullSnapshot: () => {
+        const override = optionsRef.current.pullSnapshot;
+        return override ? override() : pullAdoptedTaskSnapshot();
+      },
+      onAcknowledged: (acknowledgement) =>
+        (optionsRef.current.onAcknowledged ?? adoptAuthoritativeAcknowledgement)(acknowledgement),
+    });
+    return unregister;
   }, []);
 
   useEffect(() => {
     if (autoFlush) void requestTaskOutboxFlush();
     const onOnline = () => {
-      void requestTaskOutboxFlush();
+      void requestTaskOutboxFlush().catch(() => {});
     };
     const onVisible = () => {
-      if (document.visibilityState === "visible") void requestTaskOutboxFlush();
+      if (document.visibilityState === "visible") void requestTaskOutboxFlush().catch(() => {});
     };
     window.addEventListener("online", onOnline);
     document.addEventListener("visibilitychange", onVisible);
