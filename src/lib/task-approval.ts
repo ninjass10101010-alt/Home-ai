@@ -1756,15 +1756,7 @@ export async function repairApprovalOperationLocked(
   }
 
   try {
-    const search = options.action === "send-back"
-      ? {
-          currentWeek: await readWeek(options.pb, weekStart),
-          currentTransactions: [],
-          archiveTransactions: [],
-          archiveWeeks: [],
-          allTransactions: [],
-        }
-      : await readOperationLedger(options.pb, weekStart, operationId);
+    const search = await readOperationLedger(options.pb, weekStart, operationId);
     const snapshot = await readSnapshotStateWithRevision(options.pb);
     const receipts = getSnapshotOperationReceipts(snapshot.data, operationId);
     const operationTransactions = search.allTransactions.filter(

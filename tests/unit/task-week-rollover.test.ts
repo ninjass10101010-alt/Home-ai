@@ -347,6 +347,7 @@ describe("ensureCurrentTaskWeek", () => {
       completed: false,
       due: CURRENT,
     });
+    expect(assigned.status).toBe("pending");
     expect(assigned.completedBy).toBeUndefined();
     expect(assigned.completedAt).toBeUndefined();
     expect(assigned.completedInWeek).toBeUndefined();
@@ -631,6 +632,21 @@ describe("ensureCurrentTaskWeek", () => {
     expect(result.currentWeekData.points).toEqual({ Alex: 9 });
     expect(result.currentWeekData.history.map((tx) => tx.id)).toEqual([501]);
     expect(harness.calls.week_data.create).toHaveLength(0);
+  });
+
+  it("fails closed when the canonical snapshot task list is malformed", async () => {
+    const harness = createHarness();
+    harness.state.consuela_data_snapshots = [{
+      id: "snapshot-malformed",
+      data: { revision: "3", taskWeekStart: CURRENT, weekData: emptyWeek(CURRENT), tasks: {}, deletedTaskIds: [] },
+      updated_at: "2026-09-28T12:00:00.000Z",
+    }];
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const result = await ensureCurrentTaskWeek({ now: NOW });
+
+    expect(result.reconciled).toBe(false);
+    expect(harness.state.consuela_data_snapshots[0].data.tasks).toEqual({});
   });
 
   it("reports reconciled false for malformed current-week state without overwriting it", async () => {

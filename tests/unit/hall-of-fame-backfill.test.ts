@@ -202,6 +202,34 @@ describe("ensureArchivedWeeksEnshrined", () => {
     expect(hall[0]).toMatchObject({ id: "hall-stale", points: 5, celebrated: true });
   });
 
+  it("rejects non-Monday archive week starts", async () => {
+    const { pb } = makePb({
+      archive: [{
+        weekStart: "2026-09-08",
+        history: [{ id: 1, timestamp: "2026-09-08T10:00:00.000Z", member: "Aurora", type: "earn", amount: 5, description: "Done" }],
+      }],
+    });
+
+    await expect(ensureArchivedWeeksEnshrined(pb as any)).rejects.toThrow("invalid_archive_week");
+  });
+
+  it("rejects conflicting duplicate archive weeks deterministically", async () => {
+    const { pb } = makePb({
+      archive: [
+        {
+          weekStart: "2026-09-07",
+          history: [{ id: 1, timestamp: "2026-09-07T10:00:00.000Z", member: "Aurora", type: "earn", amount: 5, description: "One" }],
+        },
+        {
+          weekStart: "2026-09-07",
+          history: [{ id: 2, timestamp: "2026-09-07T11:00:00.000Z", member: "Aurora", type: "earn", amount: 6, description: "Two" }],
+        },
+      ],
+    });
+
+    await expect(ensureArchivedWeeksEnshrined(pb as any)).rejects.toThrow("duplicate_archive_week");
+  });
+
   it("recomputes archive balances from canonical history before enshrining", async () => {
     const { pb, creates } = makePb({
       archive: [{
