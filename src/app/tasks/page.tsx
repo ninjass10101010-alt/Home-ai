@@ -1447,10 +1447,21 @@ export default function TasksPage() {
   // Only a queued ADD contributes a row the server does not have yet. A queued
   // UPDATE replaces the existing row's copy in place, so an edited chore can
   // never render twice and can never show the pre-edit text.
-  const optimisticUpdates = optimisticRowsList
-    .filter((row): row is Extract<OptimisticRow, { kind: "update" }> => row.kind === "update")
-    .map((row) => row.task);
-  const optimisticUpdatedIds = optimisticUpdates.map((task) => task.id);
+  // LAST WINS: two queued updates to the same chore (double-tap on Save, or an
+  // edit the parent retried) collapse to ONE substituted row carrying the
+  // newest copy, so the list can never show the same chore twice.
+  const optimisticUpdates = useMemo(() => {
+    const byId = new Map<number, Task>();
+    for (const row of optimisticRowsList) {
+      if (row.kind !== "update") continue;
+      byId.set(row.task.id, row.task);
+    }
+    return [...byId.values()];
+  }, [optimisticRowsList]);
+  const optimisticUpdatedIds = useMemo(
+    () => optimisticUpdates.map((task) => task.id),
+    [optimisticUpdates],
+  );
   const optimisticTasks = optimisticRowsList
     .filter((row): row is Extract<OptimisticRow, { kind: "add" }> => row.kind === "add")
     .map((row) => row.task)
@@ -1533,7 +1544,11 @@ export default function TasksPage() {
       .sort((a, b) => b.points - a.points);
   })();
   const completed = filtered.filter((t) => t.completed);
-  const thisWeeksCompleted = getThisWeeksCompletedTasks(tasks);
+  // Everything that reads "the family's chores" reads the SUBSTITUTED copy, so
+  // a queued edit is reflected on the completed list, the streaks, the leaderboard
+  // and the member sheet until the acknowledgment replaces it with the real row.
+  const visibleTasks = interactiveRows;
+  const thisWeeksCompleted = getThisWeeksCompletedTasks(visibleTasks);
   const thisWeeksCompletedCount = thisWeeksCompleted.length;
 
   const dynamicLeaderboard: LeaderboardEntry[] = useMemo(() => {
@@ -1543,10 +1558,10 @@ export default function TasksPage() {
         const name = m.fullName;
         const weeklyPoints = weekData.points[name] || 0;
         const allTimePoints = getMemberAllTimePoints(name, weekData);
-        const allTimeComps = getMemberAllTimeCompletions(name, tasks, weekData);
+        const allTimeComps = getMemberAllTimeCompletions(name, visibleTasks, weekData);
         // Streaks are per-member: filter this week's completion dates to this
         // member before walking back consecutive days.
-        const streak = calculateRealStreak(name, weekData, getThisWeeksCompletedDates(tasks, name));
+        const streak = calculateRealStreak(name, weekData, getThisWeeksCompletedDates(visibleTasks, name));
         const { level, title, emoji, progress } = getLevel(allTimePoints);
         const earnedBadges = BADGES.filter(b => b.condition(allTimePoints, streak, allTimeComps)).map(b => b.emoji);
         // Weekly Champ history is out-of-band (BADGES.week_champ condition
@@ -1555,7 +1570,7 @@ export default function TasksPage() {
           earnedBadges.push("🥇");
         }
         const currentMonday = weekData.weekStart;
-        const completedInWeek = tasks.filter(
+        const completedInWeek = visibleTasks.filter(
           t => t.completed && t.completedBy === name && (
             t.completedInWeek === currentMonday ||
             (!t.completedInWeek && t.completedAt && t.completedAt >= currentMonday)
@@ -1586,7 +1601,7 @@ export default function TasksPage() {
       ...e,
       rank: i > 0 && e.points === entries[i - 1].points ? entries[i - 1].rank : i + 1,
     }));
-  }, [weekData, membersData, tasks, hallOfFame]);
+  }, [weekData, membersData, visibleTasks, hallOfFame]);
 
   const topScorer = dynamicLeaderboard[0];
   const familyTotal = dynamicLeaderboard.reduce((sum, entry) => sum + entry.points, 0);
@@ -1639,19 +1654,19 @@ export default function TasksPage() {
 
   const myPendingQuests = useMemo(() => {
     if (!isLoggedIn || !currentUser) return [];
-    return tasks
+    return visibleTasks
       .filter(t => !t.completed && (t.assignee === currentUser.name || t.assignee.startsWith(currentUser.name) || t.universal))
       .sort((a, b) => a.points - b.points)
       .slice(0, 3);
-  }, [tasks, isLoggedIn, currentUser]);
+  }, [visibleTasks, isLoggedIn, currentUser]);
 
   const needsStreakSave = useMemo(() => {
     if (!isLoggedIn || !currentUser) return false;
     const myEntry = dynamicLeaderboard.find(e => e.name === currentUser.name || e.name.startsWith(currentUser.name));
     if (!myEntry || myEntry.streak < 2) return false;
     const today = localTodayISO();
-    return !tasks.some(t => t.completed && t.completedBy === currentUser.name && t.completedAt && t.completedAt.split("T")[0] === today);
-  }, [dynamicLeaderboard, tasks, isLoggedIn, currentUser]);
+    return !visibleTasks.some(t => t.completed && t.completedBy === currentUser.name && t.completedAt && t.completedAt.split("T")[0] === today);
+  }, [dynamicLeaderboard, visibleTasks, isLoggedIn, currentUser]);
 
   const myEntry = isLoggedIn && currentUser ? dynamicLeaderboard.find(e => e.name === currentUser.name || e.name.startsWith(currentUser.name)) : null;
   const aheadEntry = myEntry && myEntry.rank > 1 ? dynamicLeaderboard[myEntry.rank - 2] : undefined;
@@ -1945,7 +1960,7 @@ export default function TasksPage() {
             )}
 
             {isLoggedIn && currentUser?.role === "parent" && (() => {
-              const crews = tasks.filter((t) => isCrewTask(t) && !t.completed && !t.pendingApproval);
+              const crews = visibleTasks.filter((t) => isCrewTask(t) && !t.completed && !t.pendingApproval);
               if (crews.length === 0) return null;
               return (
                 <SectionCard title="🤝 Crew tasks" description="Manage who's on each crew." icon="🤝">
@@ -2432,9 +2447,9 @@ export default function TasksPage() {
                 entry={sheetEntry}
                 hasWeeklyChamp={hallOfFame.some(h => h.member === sheetEntry.name && h.rank === 1)}
                 allTimePoints={getMemberAllTimePoints(sheetEntry.name, weekData)}
-                allTimeComps={getMemberAllTimeCompletions(sheetEntry.name, tasks, weekData)}
+                allTimeComps={getMemberAllTimeCompletions(sheetEntry.name, visibleTasks, weekData)}
                 weeklyPoints={sheetEntry.points}
-                pendingTasks={tasks.filter(t => !t.completed && (t.assignee === sheetEntry.name || t.universal))}
+                pendingTasks={visibleTasks.filter(t => !t.completed && (t.assignee === sheetEntry.name || t.universal))}
                 affordableRewards={rewards.filter(r => r.cost <= sheetEntry.points)}
                 weekGraph={["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(day => ({
                   day,
@@ -2466,7 +2481,7 @@ export default function TasksPage() {
                         <AchievementWall
                           allTimePoints={myAllTime}
                           streak={dynamicLeaderboard.find(e => e.name === currentUser.name || e.name.startsWith(currentUser.name))?.streak ?? 0}
-                          completions={getMemberAllTimeCompletions(currentUser.name, tasks, weekData)}
+                          completions={getMemberAllTimeCompletions(currentUser.name, visibleTasks, weekData)}
                         />
                       </div>
                     </SectionCard>

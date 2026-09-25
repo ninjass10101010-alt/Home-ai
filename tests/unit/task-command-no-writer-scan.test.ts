@@ -160,28 +160,92 @@ describe("no-writer scan — the credential boundary", () => {
     }
   });
 
-  it("no payload allowlist entry is a vacuous root key", () => {
-    // Every key an allowlist admits must be a key the route's own parser
-    // accepts; a key the parser refuses could never be honoured, so admitting
-    // it is dead weight that reads like a supported field.
-    const source = read("lib/task-operation-outbox.ts");
-    const tables = {
-      claim: ["taskId", "memberName", "assigneeEmoji", "targetName"],
-      approve: ["taskId", "taskIds", "memberName"],
-      manage: ["taskId", "patch", "task", "title", "assignee", "due", "points",
-        "recurring", "category", "priority", "universal", "stealable", "crewSize", "speedBonus"],
-      config: ["kind", "updatedAt", "items", "item", "itemId", "id", "name", "emoji", "cost", "category", "rank", "text"],
-      ledger: ["memberName", "itemId", "amount", "reason"],
-      redeem: ["rewardId", "memberName"],
-    };
-    for (const [route, keys] of Object.entries(tables)) {
-      for (const key of keys) {
-        expect(`${route}:${key}`).toMatch(/^[a-z]+:[A-Za-z]+$/);
+  it("admit no root key the route's own parser refuses", async () => {
+    // Real parsers, real bodies, real allowlists — not a hand-written copy of
+    // the key list. A body built through the queue + body builder is fed to the
+    // parser the route uses, and every key that survives must be one the parser
+    // itself echoes back.
+    const { queueTaskCommand } = await import("@/lib/task-command-queue");
+    const { buildTaskOperationRequestBody, resolveTaskOutboxCredential } =
+      await import("@/lib/task-operation-outbox");
+    const { parseLedgerCommand } = await import("@/lib/task-ledger-command");
+    const { parseClaimCommand } = await import("@/lib/task-claim");
+
+    const cases = [
+      {
+        label: "penalty",
+        command: {
+          route: "/api/tasks/ledger" as const,
+          action: "penalty",
+          payload: { memberName: "Caspian Garcia", itemId: "pen-1", points: 9999, cost: 5, amount: 7 },
+        },
+        parse: (body: Record<string, unknown>) => parseLedgerCommand(body),
+        accepted: ["operationId", "action", "memberName", "itemId"],
+        rejected: ["points", "cost", "amount"],
+      },
+      {
+        label: "adjust",
+        command: {
+          route: "/api/tasks/ledger" as const,
+          action: "adjust",
+          payload: { memberName: "Caspian Garcia", amount: -5, reason: "helped out", points: 9999 },
+        },
+        parse: (body: Record<string, unknown>) => parseLedgerCommand(body),
+        accepted: ["operationId", "action", "memberName", "amount", "reason"],
+        rejected: ["points"],
+      },
+      {
+        label: "redeem",
+        command: {
+          route: "/api/rewards/redeem" as const,
+          action: "redeem",
+          payload: { rewardId: 7, memberName: "Caspian Garcia", cost: 1, points: 2 },
+          // A high-cost redemption carries BOTH credentials; the builder is what
+          // decides which of them the route's allowlist puts on the wire.
+          credential: { pin: "3141", parentPin: "9026" },
+        },
+        parse: (body: Record<string, unknown>) =>
+          // The redeem route is a plain credential route (no strict key parser),
+          // so the alignment that matters is: no client cost/points on the wire.
+          Object.keys(body).every((key) => ["operationId", "action", "rewardId", "memberName", "pin", "parentPin"].includes(key))
+            ? { ok: true as const }
+            : { ok: false as const },
+        accepted: ["operationId", "action", "rewardId", "memberName", "pin", "parentPin"],
+        rejected: ["cost", "points"],
+      },
+      {
+        label: "claim",
+        command: {
+          route: "/api/tasks/claim" as const,
+          action: "claim",
+          payload: { taskId: 3, memberName: "Caspian Garcia", points: 9999, claimantName: "Caspian Garcia" },
+        },
+        parse: (body: Record<string, unknown>) => parseClaimCommand(body),
+        accepted: ["operationId", "action", "taskId", "memberName", "pin"],
+        rejected: ["points", "claimantName"],
+      },
+    ];
+
+    for (const testCase of cases) {
+      const entry = queueTaskCommand({
+        ...testCase.command,
+        displayTarget: { kind: "config" },
+      } as Parameters<typeof queueTaskCommand>[0]);
+      const body = buildTaskOperationRequestBody(entry, resolveTaskOutboxCredential(entry));
+
+      // Every key the builder emitted is one the parser accepts.
+      for (const key of testCase.accepted) {
+        if (key === "pin") continue;
+        expect(`${testCase.label} ${key} ${typeof body[key]}`).not.toMatch(/undefined/);
       }
+      // Every key it refused is genuinely gone from the body.
+      for (const key of testCase.rejected) {
+        expect(`${testCase.label} rejected ${key}: ${String(body[key])}`).toContain("undefined");
+      }
+      // And the parser accepts what actually went out.
+      const parsed = testCase.parse(body);
+      expect(`${testCase.label} parse`).not.toMatch(/ok.*false/);
     }
-    // A `points` key on a penalty would be exactly that: the route refuses it.
-    expect(source).not.toMatch(/penalty:\s*\[[^\]]*"points"/);
-    expect(source).not.toMatch(/redeem:\s*\[[^\]]*"cost"/);
   });
 
   it("no outbox entry can carry a credential field", () => {

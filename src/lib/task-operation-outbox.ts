@@ -153,13 +153,11 @@ const APPROVE_PAYLOAD_KEYS: Record<string, readonly string[]> = {
 };
 
 // A parent-authoritative point movement: a catalog penalty or a manual adjust.
-// The amount and reason are part of the command; the BALANCE is never a client
-// input — the server re-derives it under the week-ledger lock.
-// A parent-authoritative point movement: a catalog penalty carries an item id
-// only (the server reads the canonical points — the route refuses a client
-// `points` outright, so allowing it here would advertise a field that can never
-// be honoured), and a manual adjust carries the signed amount and reason. The
-// BALANCE is never a client input.
+// A penalty carries an item id ONLY — the route refuses a client `points`
+// outright and reads the canonical value from the config leg, so admitting the
+// key here would advertise a field that can never be honoured. An adjust
+// carries the signed amount and its reason. The resulting BALANCE is never a
+// client input: the server re-derives it under the week-ledger lock.
 const LEDGER_PAYLOAD_KEYS: Record<string, readonly string[]> = {
   penalty: ["memberName", "itemId"],
   adjust: ["memberName", "amount", "reason"],
@@ -598,11 +596,12 @@ function releaseEvictedCredentials(merged: TaskOutboxEntry[], bounded: TaskOutbo
 }
 
 /**
- * A READ must not write to storage. The evicted per-entry keys are therefore
- * not removed here; they are removed by the next real mutation (commitEntries
- * already diffs against the bounded list), and the ids are REPORTED so a
- * caller can decide. A `getSnapshot()` that deleted keys would be a write
- * disguised as a read — including in a render path.
+ * A READ must not write SYNCHRONOUSLY. The evicted per-entry keys are therefore
+ * not removed inline; the ids are collected here and the removal is DEFERRED to
+ * a microtask (see scheduleEvictionPrune), coalesced behind the cached index so
+ * a read loop cannot turn into a write loop. The next real mutation also drops
+ * them, because commitEntries diffs against the bounded list — so the deferred
+ * prune is a promptness fix, not a correctness one.
  */
 function collectEvictedEntryIds(
   merged: TaskOutboxEntry[],

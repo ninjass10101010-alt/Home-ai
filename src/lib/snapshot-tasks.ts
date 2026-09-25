@@ -437,6 +437,8 @@ function sanitizeConfigOperationReceipts(
   return receipts;
 }
 
+const REPAIR_ACTIONS = new Set(["approve", "approve-all", "send-back", "penalty", "adjust"]);
+
 function sanitizeProjectionRepairs(value: unknown): SnapshotProjectionRepair[] {
   const parsed = parseJSON<unknown>(value, []);
   if (!Array.isArray(parsed)) return [];
@@ -453,14 +455,19 @@ function sanitizeProjectionRepairs(value: unknown): SnapshotProjectionRepair[] {
           ),
         ].sort((left, right) => left - right)
       : [];
-    const action = candidate.action === "approve" || candidate.action === "approve-all" || candidate.action === "send-back"
-      ? candidate.action
+    const action = REPAIR_ACTIONS.has(String(candidate.action))
+      ? candidate.action as SnapshotProjectionRepair["action"]
       : undefined;
     const actorId = typeof candidate.actorId === "string" && candidate.actorId.trim() ? candidate.actorId.trim() : undefined;
     const fingerprint = typeof candidate.fingerprint === "string" && /^[a-f0-9]{64}$/.test(candidate.fingerprint)
       ? candidate.fingerprint
       : undefined;
-    if (!operationId || !createdAt || taskIds.length === 0) continue;
+    if (!operationId || !createdAt) continue;
+    // A penalty/adjust marker projects the WEEK leg and legitimately has no
+    // task rows, so requiring an id there would silently erase the very marker
+    // that records an unprojected ledger command. An approval marker with no
+    // task id is meaningless and is still dropped.
+    if (taskIds.length === 0 && action !== "penalty" && action !== "adjust") continue;
     repairs.push({
       operationId,
       taskIds,

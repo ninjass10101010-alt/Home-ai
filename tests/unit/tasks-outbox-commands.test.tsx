@@ -1054,6 +1054,49 @@ describe("optimism is per operation, and a temp row can never be acted on", () =
     expect(storedTasks()[0].title).toBe("Old title");
   });
 
+  it("two queued updates to the same chore collapse to ONE row carrying the newest copy", async () => {
+    server.manageStatus = 503;
+    const existing = { ...ASSIGNED_TASK, title: "Original", assignee: "Rebecca Mom" };
+    seed([existing]);
+    const el = await renderAsync(<TasksPage />);
+    await settle();
+
+    async function editTo(title: string) {
+      const row = el.querySelector('[aria-label^="Complete "]') as HTMLElement;
+      expect(row).toBeTruthy();
+      const opts = (x: number) => ({ bubbles: true, pointerId: 1, clientX: x });
+      await act(async () => {
+        const event = window.PointerEvent || window.Event;
+        row.dispatchEvent(new event("pointerdown", opts(300) as never));
+        row.dispatchEvent(new event("pointermove", opts(180) as never));
+        row.dispatchEvent(new event("pointerup", opts(160) as never));
+      });
+      await settle();
+      const field = document.querySelector('input[placeholder="Task title"]') as HTMLInputElement;
+      await act(async () => {
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+        setter.call(field, title);
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await act(async () => { dialogButton("Save").click(); });
+      await settle(120);
+    }
+
+    await editTo("First edit");
+    await editTo("Second edit");
+
+    // Two commands, ONE rendered row, and it is the newest copy.
+    expect(listTaskOutbox().filter((entry) => entry.action === "update")).toHaveLength(2);
+    const pendingCard = Array.from(el.querySelectorAll("h2, h3"))
+      .find((heading) => heading.textContent === "Pending")!
+      .closest(".widget-card") as HTMLElement;
+    const rendered = pendingCard.textContent || "";
+    expect(rendered.match(/Second edit/g) ?? []).toHaveLength(1);
+    expect(rendered).not.toContain("First edit");
+    expect(rendered).not.toContain("Original");
+    expect(el.querySelectorAll('[aria-label="Complete Second edit"]')).toHaveLength(1);
+  });
+
   it("a queued add row renders inert — no complete, edit or delete control", async () => {
     server.manageStatus = 503;
     seed([]);
