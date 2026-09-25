@@ -523,6 +523,7 @@ describe("POST /api/tasks/approve — action:approve", () => {
       success: true,
       reconciled: false,
       repairRequired: true,
+      retryable: true,
       paid: 0,
     });
     expect(rolloverBeforeLock).toBe(true);

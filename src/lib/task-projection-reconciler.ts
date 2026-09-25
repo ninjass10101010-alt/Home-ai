@@ -5,7 +5,7 @@ import { withWeekLedgerLock } from "@/lib/week-ledger-lock";
 import { ensureCurrentTaskWeek } from "@/lib/task-week-rollover";
 import { repairApprovalOperation } from "@/lib/task-approval";
 import { normalizeOperationId } from "@/lib/task-operation-contract";
-import { recomputeWeekPoints } from "@/lib/task-ledger";
+import { mergeCanonicalTransactions, recomputeWeekPoints } from "@/lib/task-ledger";
 import {
   liveSnapshotTasks,
   getSnapshotOperationReceipts,
@@ -16,7 +16,9 @@ import {
   replaceSnapshotWeekData,
   taskProjectionRecord,
   SNAPSHOT_KEY,
+  createTaskRowCache,
   type AdminPB,
+  type TaskRowCache,
   type SnapshotData,
   type SnapshotProjectionRepair,
   type SnapshotRevision,
@@ -98,24 +100,6 @@ function stableValue(value: unknown): unknown {
 
 function sameValue(left: unknown, right: unknown): boolean {
   return JSON.stringify(stableValue(left)) === JSON.stringify(stableValue(right));
-}
-
-function mergeHistories(histories: Transaction[][]): Transaction[] {
-  const byId = new Map<number, Transaction>();
-  const result: Transaction[] = [];
-  const candidates = histories
-    .flat()
-    .sort((left, right) => left.timestamp.localeCompare(right.timestamp) || left.id - right.id);
-  for (const transaction of candidates) {
-    const previous = byId.get(transaction.id);
-    if (previous) {
-      if (!sameValue(previous, transaction)) throw new Error("conflicting_transaction");
-      continue;
-    }
-    byId.set(transaction.id, transaction);
-    result.push(transaction);
-  }
-  return result;
 }
 
 function sameWeek(left: WeekData, right: WeekData): boolean {
@@ -262,7 +246,7 @@ async function readCanonicalLedger(pb: AdminPB, weekStart: string): Promise<Cano
   }
   currentRows.sort((left: Row, right: Row) => String(left.id).localeCompare(String(right.id)));
   const currentWeeks = normalizeCurrentWeekRows(currentRows, weekStart);
-  const history = mergeHistories(currentWeeks.map((week) => week.history));
+  const history = mergeCanonicalTransactions(currentWeeks.map((week) => week.history));
   const points = recomputeWeekPoints(history);
   const streak = Object.assign({}, ...currentWeeks.map((week) => week.streak));
   const lastActive = Object.assign({}, ...currentWeeks.map((week) => week.lastActive));
@@ -277,7 +261,7 @@ async function readCanonicalLedger(pb: AdminPB, weekStart: string): Promise<Cano
   if (!Array.isArray(archiveRows)) throw new Error("week_archive_read_failed");
   const archive = normalizeArchiveRows(archiveRows as Row[]);
   const archiveWeeks = archive.weeks;
-  const allTransactions = mergeHistories([
+  const allTransactions = mergeCanonicalTransactions([
     history,
     ...archiveWeeks.map((week) => week.history),
   ]);
@@ -394,10 +378,10 @@ function projectionMatches(row: Row, expected: Record<string, unknown>): boolean
 async function taskRows(
   pb: AdminPB,
   taskId: number,
-  preloadedRows?: Row[],
+  taskCache?: TaskRowCache,
 ): Promise<Row[]> {
-  if (preloadedRows) {
-    return preloadedRows
+  if (taskCache) {
+    return taskCache.rows
       .filter((row: Row) => Number(row?.taskId) === taskId)
       .sort((left: Row, right: Row) => String(left.id).localeCompare(String(right.id)));
   }
@@ -423,12 +407,12 @@ async function projectTask(
   pb: AdminPB,
   taskId: number,
   task: SnapshotTask | null,
-  preloadedRows?: Row[],
+  taskCache?: TaskRowCache,
 ): Promise<{ ok: boolean; repaired: boolean; category: string }> {
-  const rows = await taskRows(pb, taskId, preloadedRows);
+  const rows = await taskRows(pb, taskId, taskCache);
   if (task === null) {
     if (rows.length === 0) return { ok: true, repaired: false, category: `task:${taskId}:tombstone` };
-    const ok = await projectCanonicalTaskToPB(pb, null, taskId, preloadedRows);
+    const ok = await projectCanonicalTaskToPB(pb, null, taskId, taskCache);
     return { ok, repaired: ok, category: `task:${taskId}:tombstone` };
   }
   const projectionTask = taskProjectionForPB(task);
@@ -438,7 +422,7 @@ async function projectTask(
   const expected = taskProjectionRecord(projectionTask);
   const alreadyMatches = rows.length === 1 && projectionMatches(rows[0], expected);
   if (alreadyMatches) return { ok: true, repaired: false, category: `task:${taskId}:projection` };
-  const ok = await projectCanonicalTaskToPB(pb, projectionTask, taskId, preloadedRows);
+  const ok = await projectCanonicalTaskToPB(pb, projectionTask, taskId, taskCache);
   const category = crewDiffers(expected, rows[0] ?? {})
     ? `task:${taskId}:crew`
     : completionDiffers(expected, rows[0] ?? {})
@@ -460,7 +444,7 @@ async function verifyProjectedTasks(
   pb: AdminPB,
   snapshot: SnapshotData,
   taskIds: number[],
-  preloadedRows?: Row[],
+  taskCache?: TaskRowCache,
 ): Promise<boolean> {
   if (duplicateLiveTaskIds(snapshot).length > 0) return false;
   const live = liveSnapshotTasks(snapshot);
@@ -468,7 +452,7 @@ async function verifyProjectedTasks(
   for (const taskId of taskIds) {
     const task = live.find((candidate) => Number(candidate.id) === taskId) ?? null;
     if (!task && !tombstones.has(taskId)) return false;
-    const rows = await taskRows(pb, taskId, preloadedRows);
+    const rows = await taskRows(pb, taskId, taskCache);
     if (!task) {
       if (rows.length !== 0) return false;
       continue;
@@ -500,14 +484,14 @@ async function approvalRepairVerified(
     noCurrentTask?: boolean;
     projectionFailures?: number[];
   },
-  preloadedRows?: Row[],
+  taskCache?: TaskRowCache,
 ): Promise<boolean> {
   if (!repair.ok || ((repair.projectionFailures?.length ?? 0) > 0 && repair.noCurrentTask !== true)) return false;
   try {
     const state = await snapshotRead(pb);
     const receipts = getSnapshotOperationReceipts(state.data, operationId);
     if (receipts.length === 0) return false;
-    if (!await verifyProjectedTasks(pb, state.data, taskIds, preloadedRows)) return false;
+    if (!await verifyProjectedTasks(pb, state.data, taskIds, taskCache)) return false;
     if (repair.reconciled) return true;
     return repair.noCurrentTask === true;
   } catch {
@@ -759,18 +743,18 @@ export async function reconcileTaskProjectionLocked(
         return failure(["week:snapshot"], null, snapshot.revision);
       }
       const postSnapshotWeek = normalizeWeekData(snapshot.data.weekData);
-      let postTaskRows: Row[];
+      let postTaskRows: TaskRowCache;
       try {
         const rows = await pb.collection("tasks").getFullList({ requestKey: null });
         if (!Array.isArray(rows)) return failure(["tasks:read"], null, snapshot.revision);
-        postTaskRows = [...(rows as Row[])];
+        postTaskRows = createTaskRowCache(rows as Row[]);
       } catch {
         return failure(["tasks:read"], null, snapshot.revision);
       }
       const allPostIds = [...new Set([
         ...liveSnapshotTasks(snapshot.data).map((task) => Number(task.id)),
         ...validTaskIds(snapshot.data.deletedTaskIds),
-        ...validTaskIds(postTaskRows.map((row) => Number(row.taskId))),
+        ...validTaskIds(postTaskRows.rows.map((row) => Number(row.taskId))),
         ...ledger.approvalIntents.flatMap((intent) => intent.taskIds),
       ])].filter((id) => Number.isSafeInteger(id) && id > 0).sort((left, right) => left - right);
       const postIds = scopedTaskIds
@@ -884,11 +868,11 @@ export async function reconcileTaskProjectionLocked(
             preloadedTaskRows: postTaskRows,
             locked: true,
           });
-          let repairedRows: Row[] | null = null;
+          let repairedRows: TaskRowCache | null = null;
           try {
             const rows = await pb.collection("tasks").getFullList({ requestKey: null });
             if (!Array.isArray(rows)) throw new Error("tasks_read_failed");
-            repairedRows = [...(rows as Row[])];
+            repairedRows = createTaskRowCache(rows as Row[]);
           } catch {
             failed.push("approval:read");
             continue;

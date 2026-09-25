@@ -26,7 +26,6 @@ function statusForReason(reason: string | undefined): number {
   if (
     reason === "member_roster_unavailable" ||
     reason === "ledger_unavailable" ||
-    reason === "repair_required" ||
     reason === "snapshot_write_failed" ||
     reason === "task_store_unavailable"
   ) return 503;
@@ -43,7 +42,6 @@ function errorResponse(
   const retryable = reason === "task_store_unavailable" ||
     reason === "member_roster_unavailable" ||
     reason === "ledger_unavailable" ||
-    reason === "repair_required" ||
     reason === "snapshot_write_failed";
   return NextResponse.json({
     success: false,
@@ -54,7 +52,6 @@ function errorResponse(
     code: reason,
     ...(retryable ? { retryable: true } : {}),
     ...(reason === "semantic_duplicate" ? { duplicate: true, semanticDuplicate: true } : {}),
-    ...(reason === "repair_required" ? { repairRequired: true } : {}),
   }, { status });
 }
 
@@ -134,6 +131,7 @@ export async function POST(request: NextRequest) {
     return errorResponse(result.operationId || parsed.operationId, reason, statusForReason(reason), parsed.action);
   }
 
+  const reconciled = result.reconciled === true;
   return NextResponse.json({
     success: true,
     operationId: result.operationId,
@@ -142,11 +140,12 @@ export async function POST(request: NextRequest) {
     paid: result.paid,
     cleared: result.cleared,
     skipped: result.skipped,
-    reconciled: result.reconciled,
-    repairRequired: result.repairRequired,
+    reconciled,
+    repairRequired: !reconciled || result.repairRequired === true,
+    ...(reconciled ? {} : { retryable: true }),
     ...(result.projectionFailures?.length ? { projectionFailures: result.projectionFailures } : {}),
     ...(result.duplicate ? { duplicate: true } : {}),
     ...(result.task !== undefined ? { task: result.task } : {}),
     ...(result.noCurrentTask ? { noCurrentTask: true } : {}),
-  }, { status: result.reconciled ? 200 : 202 });
+  }, { status: reconciled ? 200 : 202 });
 }

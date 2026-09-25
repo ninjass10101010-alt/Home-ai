@@ -17,6 +17,8 @@ import {
   persistSnapshotWeek,
   getSnapshotOperationReceipts,
   taskProjectionRecord,
+  projectCanonicalTaskToPB,
+  createTaskRowCache,
 } from "@/lib/snapshot-tasks";
 
 const t = (id: number, title: string, extra: Record<string, any> = {}) => ({ id, title, ...extra });
@@ -53,6 +55,32 @@ describe("snapshot-tasks pure helpers", () => {
       completed: false,
       crew: null,
     });
+  });
+
+  it("keeps caller-owned preloaded arrays untouched while the cache tracks writes", async () => {
+    const stored: Record<string, any>[] = [{ id: "pb-1", taskId: 1, title: "Old title" }];
+    const collection = {
+      getFullList: vi.fn(async () => stored.map((row) => ({ ...row }))),
+      update: vi.fn(async (id: string, payload: Record<string, unknown>) => ({ id, ...payload })),
+      create: vi.fn(async (payload: Record<string, unknown>) => ({ id: "created", ...payload })),
+      delete: vi.fn(async () => true),
+    };
+    const pb = { collection: vi.fn(() => collection) } as any;
+    const callerRows = [{ id: "pb-1", taskId: 1, title: "Old title" }];
+    const cache = createTaskRowCache(callerRows);
+
+    const projected = await projectCanonicalTaskToPB(
+      pb,
+      t(1, "New title") as any,
+      1,
+      cache,
+    );
+    const deleted = await projectCanonicalTaskToPB(pb, null, 1, cache);
+
+    expect(projected).toBe(true);
+    expect(deleted).toBe(true);
+    expect(callerRows).toEqual([{ id: "pb-1", taskId: 1, title: "Old title" }]);
+    expect(cache.rows).toEqual([]);
   });
 
   it("findSnapshotTask resolves by taskId then exact title", () => {

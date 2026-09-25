@@ -16,6 +16,7 @@ import {
   resetRecurringTasksForWeek,
 } from "@/lib/task-week-rollover";
 import { __resetWeekLedgerLockForTests } from "@/lib/week-ledger-lock";
+import { reconcileTaskProjection } from "@/lib/task-projection-reconciler";
 
 const PRIOR = "2026-09-21";
 const CURRENT = "2026-09-28";
@@ -727,6 +728,54 @@ describe("resetRecurringTasksForWeek", () => {
 });
 
 describe("GET /api/tasks/sync", () => {
+  it("keeps rollover and reconciler histories in parity for a duplicate unreversed earn", async () => {
+    const duplicatedEarn = {
+      id: 301,
+      timestamp: `${CURRENT}T10:00:00.000Z`,
+      member: "Alex",
+      type: "earn",
+      amount: 5,
+      description: "Completed: Dishes",
+      taskId: 7,
+    };
+    const replayedEarn = { ...duplicatedEarn, id: 302, timestamp: `${CURRENT}T10:05:00.000Z` };
+    const harness = createHarness();
+    harness.state.week_data.push({
+      id: "current-1",
+      weekStart: CURRENT,
+      points: { Alex: 10 },
+      streak: {},
+      lastActive: {},
+      history: [duplicatedEarn, replayedEarn],
+    });
+    harness.state.consuela_data_snapshots.push({
+      id: "snapshot-1",
+      data: {
+        revision: "1",
+        taskWeekStart: CURRENT,
+        weekData: {
+          weekStart: CURRENT,
+          points: { Alex: 10 },
+          streak: {},
+          lastActive: {},
+          history: [duplicatedEarn, replayedEarn],
+        },
+        tasks: [],
+        deletedTaskIds: [],
+      },
+    });
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(harness.pb));
+
+    const first = await reconcileTaskProjection({ pb: harness.pb as never, now: NOW });
+    const second = await reconcileTaskProjection({ pb: harness.pb as never, now: NOW });
+
+    expect(first.reconciled).toBe(true);
+    expect(first.failed).not.toContain("week:changed");
+    expect(second.reconciled).toBe(true);
+    expect(second.failed).not.toContain("week:changed");
+    expect(harness.state.week_data[0].history).toHaveLength(1);
+  });
+
   it("runs rollover before returning the snapshot", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);

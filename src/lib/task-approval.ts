@@ -21,6 +21,7 @@ import {
   type SnapshotData,
   type SnapshotOperationReceipt,
   type SnapshotTask,
+  type TaskRowCache,
 } from "@/lib/snapshot-tasks";
 import {
   isRecord,
@@ -1336,7 +1337,7 @@ function success(
 async function executeSendBack(
   command: ApproveCommand,
   prepared: PreparedCommand,
-  preloadedTaskRows?: Record<string, any>[],
+  preloadedTaskRows?: TaskRowCache,
 ): Promise<ApprovalServiceResult> {
   const activeItems = prepared.tasks.filter((item) => !item.skip);
   const patches: SnapshotPatch[] = [];
@@ -1427,7 +1428,7 @@ async function executeApproval(
   command: ApproveCommand,
   prepared: PreparedCommand,
   replayOnly = false,
-  preloadedTaskRows?: Record<string, any>[],
+  preloadedTaskRows?: TaskRowCache,
 ): Promise<ApprovalServiceResult> {
   const active = prepared.tasks.filter((item) => !item.skip);
   if (active.length === 0) {
@@ -1568,7 +1569,7 @@ async function executeApprovalCommandUnlocked(
   actor: ApprovalActor,
   authorityWeekStart: string,
   replayOnly = false,
-  preloadedTaskRows?: Record<string, any>[],
+  preloadedTaskRows?: TaskRowCache,
 ): Promise<ApprovalServiceResult> {
   const parsed = command;
   const weekStart = authorityWeekStart;
@@ -1673,7 +1674,7 @@ export interface ApprovalRepairOptions {
   action?: ApproveAction;
   actorId?: string;
   fingerprint?: string;
-  preloadedTaskRows?: Record<string, any>[];
+  preloadedTaskRows?: TaskRowCache;
   locked?: boolean;
 }
 
