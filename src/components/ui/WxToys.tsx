@@ -30,11 +30,12 @@ export function SunOrb({ night = false }: { night?: boolean }) {
 }
 
 // Three overlapping blobs = chunky toy cloud. Pastel, with soft undershadow.
-export function CloudPuff({ className = "", style, tone = "day", layer }: {
+export function CloudPuff({ className = "", style, tone = "day", layer, character = false }: {
   className?: string;
   style?: CSSProperties;
   tone?: "day" | "poster" | "night" | "heavy-snow";
   layer?: "front" | "back";
+  character?: boolean;
 }) {
   const blob = tone === "poster"
     ? "absolute rounded-full bg-gradient-to-b from-[#e9fffc] via-[#b9eee8] to-[#82d8d0] " +
@@ -47,12 +48,22 @@ export function CloudPuff({ className = "", style, tone = "day", layer }: {
           "shadow-[inset_0_-6px_10px_rgba(42,58,82,.34),inset_0_3px_6px_rgba(255,255,255,.95)]"
         : "absolute rounded-full bg-gradient-to-b from-white to-[#e8edf7] " +
           "shadow-[inset_0_-6px_10px_rgba(150,165,200,.35),inset_0_3px_6px_rgba(255,255,255,1)]";
+  const faceInk = tone === "night" ? "#34385F" : tone === "heavy-snow" ? "#3D4D66" : "#174F59";
   return (
     <div aria-hidden="true" className={`relative h-14 w-24 ${className}`} style={style} data-cloud-form={tone} data-cloud-layer={layer}>
       <div className={`${blob} left-0 bottom-0 h-10 w-10`} />
       <div className={`${blob} left-6 bottom-0 h-14 w-14`} />
       <div className={`${blob} right-0 bottom-0 h-9 w-9`} />
       <div className={`absolute -bottom-2 left-3 right-3 h-3 rounded-full blur-md ${tone === "poster" ? "bg-[#2aa6a4]/20" : tone === "night" ? "bg-[#45486f]/25" : tone === "heavy-snow" ? "bg-[#344963]/30" : "bg-slate-500/15"}`} />
+      {character && (
+        <svg data-weather-character="cloud" className="absolute inset-0 h-full w-full" viewBox="0 0 96 56" fill="none">
+          <circle cx="41" cy="34" r="2" fill={faceInk} />
+          <circle cx="56" cy="34" r="2" fill={faceInk} />
+          <path d="M43 42Q48.5 46 54 42" stroke={faceInk} strokeWidth="2" strokeLinecap="round" />
+          <circle cx="36" cy="39" r="2" fill="#E98279" opacity="0.7" />
+          <circle cx="61" cy="39" r="2" fill="#E98279" opacity="0.7" />
+        </svg>
+      )}
     </div>
   );
 }
@@ -161,7 +172,12 @@ function PosterAccents({ scene, heavySnow = false, motionOk, sunProgress, cloudC
     >
       {scene === "clear" && sun && (
         <>
-          <circle data-weather-shape="sun" cx={sun.x} cy={sun.y} r="19" fill={WX_POSTER.sun} opacity="0.82" />
+          <g data-weather-character="sun">
+            <circle data-weather-shape="sun" cx={sun.x} cy={sun.y} r="19" fill={WX_POSTER.sun} opacity="0.92" />
+            <circle cx={sun.x - 6} cy={sun.y - 2} r="1.8" fill="#6A452A" />
+            <circle cx={sun.x + 6} cy={sun.y - 2} r="1.8" fill="#6A452A" />
+            <path d={`M${sun.x - 6} ${sun.y + 5}Q${sun.x} ${sun.y + 10} ${sun.x + 6} ${sun.y + 5}`} fill="none" stroke="#6A452A" strokeWidth="1.8" strokeLinecap="round" />
+          </g>
           <path data-weather-shape="sun-rays" d={`M${sun.x} ${sun.y - 30}v8M${sun.x} ${sun.y + 22}v8M${sun.x - 30} ${sun.y}h8M${sun.x + 22} ${sun.y}h8M${sun.x - 21} ${sun.y - 21}l6 6M${sun.x + 15} ${sun.y + 15}l6 6M${sun.x + 15} ${sun.y - 21}l-6 6M${sun.x - 21} ${sun.y + 15}l-6 6`} stroke={WX_POSTER.sun} strokeWidth="4" strokeLinecap="round" opacity="0.72" />
           {horizon && <path data-weather-shape="poster-horizon" d={horizon} fill={WX_POSTER.cloudMid} opacity="0.2" />}
         </>
@@ -186,7 +202,12 @@ function PosterAccents({ scene, heavySnow = false, motionOk, sunProgress, cloudC
         </g>
       )}
       {scene === "night" && (
-        <path data-weather-shape="night-orbit" d="M246 20a25 25 0 1 0 18 39 28 28 0 0 1-18-39Z" fill={WX_POSTER.cloudLight} opacity="0.28" />
+        <g data-weather-character="moon">
+          <path data-weather-shape="night-orbit" d="M246 20a25 25 0 1 0 18 39 28 28 0 0 1-18-39Z" fill={WX_POSTER.cloudLight} opacity="0.86" />
+          <circle cx="250" cy="38" r="1.8" fill="#62658D" />
+          <circle cx="260" cy="38" r="1.8" fill="#62658D" />
+          <path d="M251 46Q255 49 259 46" fill="none" stroke="#62658D" strokeWidth="1.8" strokeLinecap="round" />
+        </g>
       )}
     </svg>
   );
@@ -266,6 +287,7 @@ export function SceneLayers({ scene, heavySnow = false, showFog = false, fogCode
         <CloudPuff
           layer="front"
           tone={cloudTone}
+          character={scene !== "storm" && !heavySnow && frontCloudOpacity >= 0.25}
           className="absolute top-12 left-[-12px] -rotate-6 scale-[1.35]"
           style={{ opacity: frontCloudOpacity, visibility: frontCloudOpacity > 0 ? "visible" : "hidden", ...(driftAnimation && driftDuration != null ? { animation: `wxCloudDrift ${driftDuration}s ease-in-out infinite alternate` } : {}) }}
         />
@@ -451,23 +473,21 @@ export function Sun({ size = 64 }: { size?: number }) {
   );
 }
 
-export function Moon({ size = 64 }: { size?: number }) {
-  const moonClay = clay("#fffbef", "#dcd4ff", "rgba(120,110,200,.4)");
+function NightStars({ size = 64 }: { size?: number }) {
   return (
-    <div aria-hidden="true" className="relative" style={{ width: size, height: size }} data-testid="wx-moon">
-      {/* faint earthshine disc beneath */}
-      <div className="absolute inset-0 rounded-full" style={{ ...moonClay, opacity: 0.28 }} />
-      {/* bright crescent: mask bites the upper-right — no background knowledge needed */}
-      <div
-        className="absolute inset-0 rounded-full"
-        style={{
-          background: moonClay.background,
-          boxShadow: moonClay.boxShadow,
-          WebkitMaskImage: `radial-gradient(circle at ${size * 0.82}px ${size * -0.04}px, transparent ${size * 0.52}px, black ${size * 0.53}px)`,
-          maskImage: `radial-gradient(circle at ${size * 0.82}px ${size * -0.04}px, transparent ${size * 0.52}px, black ${size * 0.53}px)`,
-        }}
-      />
-    </div>
+    <svg
+      data-weather-icon="night-stars"
+      aria-hidden="true"
+      width={size}
+      height={size}
+      viewBox="0 0 48 48"
+      fill="none"
+    >
+      <path d="m18 6 2.4 7.2L28 16l-7.6 2.8L18 26l-2.4-7.2L8 16l7.6-2.8L18 6Z" fill="#FFF9E6" />
+      <path d="m34 23 1.6 4.8L41 30l-5.4 2.2L34 37l-1.6-4.8L27 30l5.4-2.2L34 23Z" fill="#F6D7A8" />
+      <circle cx="12" cy="34" r="2" fill="#FFF9E6" />
+      <circle cx="29" cy="10" r="1.5" fill="#FFF9E6" />
+    </svg>
   );
 }
 
@@ -597,9 +617,9 @@ export function Condition({ code, size = 80 }: { code: ConditionCode; size?: num
       );
     case "partly-night":
       return (
-        <div className="relative" style={{ width: size, height: size * 0.75 }}>
+        <div data-weather-icon="partly-night" className="relative" style={{ width: size, height: size * 0.75 }}>
           <div className="absolute top-0 right-2">
-            <Moon size={size * 0.5} />
+            <NightStars size={size * 0.5} />
           </div>
           <div className="absolute bottom-0 left-0">
             <Cloud size={size * 0.85} tone="night" />
@@ -640,6 +660,6 @@ export function Condition({ code, size = 80 }: { code: ConditionCode; size?: num
     case "fog":
       return <Fog width={size} />;
     case "night":
-      return <Moon size={size * 0.8} />;
+      return <NightStars size={size * 0.8} />;
   }
 }

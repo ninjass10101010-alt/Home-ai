@@ -1008,7 +1008,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
   // Family-language line: rain timing wins; otherwise the wear answer
   // ("Coats this morning" / "Sunglasses this afternoon") for the 5–14 crowd.
   const wearLine = useMemo(() => {
-    if (!weatherData || weatherData.temp == null) return null;
+    if (!weatherData || weatherData.temp == null || !sceneIsDay) return null;
     const feels = weatherData.feelsLike ?? weatherData.temp;
     const wetHour = weatherData.rainHourISO
       ? weatherData.hours.find((h) => h.time === weatherData.rainHourISO)
@@ -1018,7 +1018,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
       SNOW_CODES.has(weatherData.code) ||
       weatherData.hours.some((hour) => RAIN_CODES.has(hour.code) || SNOW_CODES.has(hour.code));
     return wearAdvice(feels, wetHour?.precip ?? null, isKid, knownWet);
-  }, [weatherData, isKid]);
+  }, [weatherData, isKid, sceneIsDay]);
 
   // Calendar fusion — "Rain around Soccer Practice": the one thing only
   // Consuela can say. Only when a rain hit and a same-day event line up.

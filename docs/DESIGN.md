@@ -23,6 +23,8 @@ Warm glass remains the frame for every Home widget. Weather is the one full-blee
 - One shared timeline: card day-strip preview and modal scrubber render through the same hour-state path.
 - Minimal chrome; details live in dotted-leader rows (`HUMIDITY ··· 62%`) with tracked-uppercase labels and rounded metric pills.
 - One accent per state: the skin's accent colors the active clay hourly cell, precipitation labels, and interactive elements only.
+- **Geometric weather characters:** a friendly face is integrated into the measured poster sun, visible front cloud, or single poster moon. Cloud characters appear only when measured cover makes the front cloud visible; storm and heavy-snow scenes remain character-free and serious. The small night condition glyph is stars (or cloud-and-stars), leaving the poster moon as the sole moon.
+- **Wear advice is daytime-only:** suppress sunwear/jacket advice after the Weather scene transitions to night. Rain timing and severe-weather guidance remain available after dark.
 
 ### Palettes
 - **Clear and partly cloudy daytime — the poster signature:** sky blue `#55BCE8 → #8FD8F1 → #D8F2F4`, turquoise poster clouds, and the yellow sun accent. This deliberate canvas is not overridden by the season selector.
@@ -1247,4 +1249,3 @@ See files:
 - Controlled by `useTheme` hook (`src/hooks/useTheme.tsx`) and inline anti-FOUC script in `layout.tsx`
 
 Settings page is the single place users change this. Changes are instant across the entire app.
-

@@ -760,6 +760,16 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(el.textContent).not.toContain("Sunglasses weather");
   });
 
+  it("suppresses daytime wear advice after sunset", async () => {
+    mockOpenMeteo(makeOpenMeteoPayload({ code: 0, cloud: 0, precip: 0, isDay: 0 }));
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    expect(el.querySelector('[data-testid="wx-scene-layers"]')?.getAttribute("data-scene")).toBe("night");
+    expect(el.textContent).not.toContain("Sunglasses weather");
+    expect(el.textContent).not.toContain("No jacket needed");
+  });
+
   it.each([
     { code: 61, condition: "Rainy" },
     { code: 71, condition: "Snowy" },
@@ -1952,15 +1962,27 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(el.querySelector('[data-testid="wx-fog"]')).toBeNull();
   });
 
-  it("renders the clay crescent moon in the night scene", async () => {
+  it("renders one illustrated moon in the night poster and a distinct night glyph", async () => {
     mockOpenMeteo(makeOpenMeteoPayload({ isDay: 0 }));
     const el = render(<WeatherWidget />);
     await settle();
-    // The card hero is a clay crescent now (disc + sky-colored offset
-    // bite), not the WeatherScene terminator path (the modal keeps that).
-    const moon = el.querySelector('[data-testid="wx-moon"]');
-    expect(moon).toBeTruthy();
-    expect(moon!.querySelectorAll("div").length).toBe(2);
+    const scene = el.querySelector('[data-testid="wx-scene-layers"]');
+    const posterMoons = scene?.querySelectorAll('[data-weather-character="moon"]');
+    expect(posterMoons).toHaveLength(1);
+    expect(el.querySelector('[data-testid="wx-hero-icon"] [data-testid="wx-moon"]')).toBeNull();
+    expect(el.querySelector('[data-testid="wx-hero-icon"] [data-weather-icon="night-stars"]')).toBeTruthy();
+  });
+
+  it("gives condition-backed poster scenes friendly geometric weather characters", async () => {
+    mockOpenMeteo(makeOpenMeteoPayload({ code: 0, cloud: 0, precip: 0 }));
+    const clear = render(<WeatherWidget />);
+    await settle();
+    expect(clear.querySelector('[data-testid="wx-scene-layers"] [data-weather-character="sun"]')).toBeTruthy();
+
+    mockOpenMeteo(makeOpenMeteoPayload({ code: 61, cloud: 86, precip: 72 }));
+    const rainy = render(<WeatherWidget />);
+    await settle();
+    expect(rainy.querySelector('[data-testid="wx-poster-clouds"] [data-weather-character="cloud"]')).toBeTruthy();
   });
 
   it("maps clear-sky cloud visibility to 0% and 100% cover", () => {
@@ -2163,12 +2185,13 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(sun.style.background).toContain("linear-gradient");
   });
 
-  it("hero shows the clay moon after dark", async () => {
+  it("hero uses the star glyph when the poster already carries the single night moon", async () => {
     mockOpenMeteo(makeOpenMeteoPayload({ code: 0, isDay: 0 }));
     const el = render(<WeatherWidget />);
     await settle();
     const icon = el.querySelector('[data-testid="wx-hero-icon"]');
-    expect(icon?.querySelector('[data-testid="wx-moon"]')).toBeTruthy();
+    expect(icon?.querySelector('[data-weather-icon="night-stars"]')).toBeTruthy();
+    expect(icon?.querySelector('[data-testid="wx-moon"]')).toBeNull();
   });
 
   it("hero shows thunder: clay bolt plus lightning flash on storm codes", async () => {
