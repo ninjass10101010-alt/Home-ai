@@ -342,6 +342,26 @@ describe("ensureArchivedWeeksEnshrined", () => {
     expect(hall.some((row) => row.id === "hall-week-keep")).toBe(true);
   });
 
+  it("never deletes a hall row whose week has no archive row at all", async () => {
+    const { pb, deletes, hall, creates } = makePb({
+      archive: [{
+        weekStart: "2026-09-14",
+        history: [{ id: 4, timestamp: "2026-09-14T10:00:00.000Z", member: "Aurora", type: "earn", amount: 7, description: "Done" }],
+      }],
+      hall: [
+        { id: "hall-orphan", member: "Bailey", emoji: "👧", weekStart: "2026-07-06", points: 9, rank: 1, celebrated: true },
+      ],
+      prizes: [],
+    });
+
+    await ensureArchivedWeeksEnshrined(pb as any);
+
+    expect(deletes).not.toContain("hall-orphan");
+    expect(hall.some((row) => row.id === "hall-orphan")).toBe(true);
+    expect(creates).toHaveLength(1);
+    expect(creates[0]).toMatchObject({ weekStart: "2026-09-14" });
+  });
+
   it("keeps celebration from a valid duplicate core when the primary row is stale", async () => {
     const { pb, hall } = makePb({
       archive: [{

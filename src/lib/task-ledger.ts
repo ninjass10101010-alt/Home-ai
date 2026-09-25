@@ -121,6 +121,36 @@ export function parseCanonicalTransactions(value: unknown): Transaction[] | null
   return transactions;
 }
 
+export function mergeCanonicalTransactions(histories: Transaction[][]): Transaction[] {
+  const candidates = histories
+    .flat()
+    .sort(
+      (left, right) =>
+        left.timestamp.localeCompare(right.timestamp) || left.id - right.id,
+    );
+  const byId = new Map<number, Transaction>();
+  const history: Transaction[] = [];
+  for (const transaction of candidates) {
+    const existing = byId.get(transaction.id);
+    if (existing) {
+      if (JSON.stringify(existing) !== JSON.stringify(transaction)) {
+        throw new TypeError("conflicting_transaction_id");
+      }
+      continue;
+    }
+    if (
+      transaction.type === "earn" &&
+      transaction.taskId !== undefined &&
+      hasUnreversedTaskEarn(history, transaction.taskId, transaction.member)
+    ) {
+      continue;
+    }
+    byId.set(transaction.id, transaction);
+    history.push(transaction);
+  }
+  return history;
+}
+
 export function recomputeWeekPoints(history: Transaction[]): Record<string, number> {
   const canonicalHistory = parseCanonicalTransactions(history);
   if (!canonicalHistory) throw new TypeError("invalid_transaction_history");

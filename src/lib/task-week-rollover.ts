@@ -3,6 +3,7 @@ import { localWeekStartISO } from "@/lib/local-date";
 import { ensureArchivedWeeksEnshrined } from "@/lib/hall-of-fame-backfill";
 import {
   hasUnreversedTaskEarn,
+  mergeCanonicalTransactions,
   parseCanonicalTransactions,
   recomputeWeekPoints,
 } from "@/lib/task-ledger";
@@ -138,35 +139,8 @@ function sameWeek(left: WeekData, right: WeekData): boolean {
     sameHistory(left.history, right.history)
   );
 }
-
 function mergeHistory(rowWeeks: WeekData[]): Transaction[] {
-  const candidates = rowWeeks
-    .flatMap((week) => week.history)
-    .sort(
-      (left, right) =>
-        left.timestamp.localeCompare(right.timestamp) || left.id - right.id,
-    );
-  const byId = new Map<number, Transaction>();
-  const history: Transaction[] = [];
-  for (const transaction of candidates) {
-    const existing = byId.get(transaction.id);
-    if (existing) {
-      if (!sameTransaction(existing, transaction)) {
-        throw new TypeError("conflicting_transaction_id");
-      }
-      continue;
-    }
-    if (
-      transaction.type === "earn" &&
-      transaction.taskId !== undefined &&
-      hasUnreversedTaskEarn(history, transaction.taskId, transaction.member)
-    ) {
-      continue;
-    }
-    byId.set(transaction.id, transaction);
-    history.push(transaction);
-  }
-  return history;
+  return mergeCanonicalTransactions(rowWeeks.map((week) => week.history));
 }
 
 function canonicalizeRows(rows: Row[], weekStart: string): CanonicalRows {

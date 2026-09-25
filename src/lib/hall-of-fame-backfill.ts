@@ -121,6 +121,8 @@ export async function ensureArchivedWeeksEnshrined(pb: PB): Promise<number> {
     archiveData.push({ row: first.row, weekStart, points: recomputeWeekPoints(first.history) });
   }
   const archivedWeeks = archiveData.map(({ weekStart }) => weekStart).sort();
+  const canonicalWeeks = new Set(archivedWeeks);
+  protectedWeeks.forEach((weekStart) => canonicalWeeks.delete(weekStart));
   const latestArchivedWeek = archivedWeeks.at(-1) ?? "";
   const expected = new Map<string, HallOfFameEntry>();
   let changed = 0;
@@ -188,7 +190,7 @@ export async function ensureArchivedWeeksEnshrined(pb: PB): Promise<number> {
   for (const row of [...(hallRows as any[])].sort((left, right) => String(left.id).localeCompare(String(right.id)))) {
     const key = `${String(row.member ?? "")}\u0000${String(row.weekStart ?? "")}`;
     if (expected.has(key)) continue;
-    if (protectedWeeks.has(String(row.weekStart ?? ""))) continue;
+    if (!canonicalWeeks.has(String(row.weekStart ?? ""))) continue;
     await pb.collection("hall_of_fame").delete(row.id, { requestKey: null });
     changed += 1;
   }
@@ -208,7 +210,7 @@ export async function ensureArchivedWeeksEnshrined(pb: PB): Promise<number> {
   }
   for (const [key, rows] of verifiedByKey) {
     if (expected.has(key)) continue;
-    if (protectedWeeks.has(String(rows[0]?.weekStart ?? ""))) continue;
+    if (!canonicalWeeks.has(String(rows[0]?.weekStart ?? ""))) continue;
     throw new Error("hall_of_fame_stale_row");
   }
   return changed;

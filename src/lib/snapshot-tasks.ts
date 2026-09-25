@@ -846,16 +846,24 @@ function taskProjectionMatches(row: Record<string, any>, expected: Record<string
   });
 }
 
+export interface TaskRowCache {
+  rows: Record<string, any>[];
+}
+
+export function createTaskRowCache(rows: Record<string, any>[]): TaskRowCache {
+  return { rows: [...rows] };
+}
+
 export async function projectCanonicalTaskToPB(
   pb: AdminPB,
   task: SnapshotTask | null,
   taskId: number,
-  preloadedRows?: Record<string, any>[],
+  cache?: TaskRowCache,
 ): Promise<boolean> {
   if (!isPositiveTaskId(taskId)) return false;
   try {
     const collection = pb.collection("tasks");
-    let loadedRows: Record<string, any>[] | null = preloadedRows ?? null;
+    let loadedRows: Record<string, any>[] | null = cache ? cache.rows : null;
     const allRows = async () => {
       if (!loadedRows) {
         const value = await collection.getFullList({ requestKey: null });
