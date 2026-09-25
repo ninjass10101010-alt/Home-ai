@@ -273,8 +273,12 @@ describe("no-writer scan — the credential boundary", () => {
       await import("@/lib/task-operation-outbox");
     const { parseLedgerCommand } = await import("@/lib/task-ledger-command");
 
-    // The outbox only holds a PIN-free `adjust` when the session is a child's;
-    // the route still refuses it, which is the honest shape of that contract.
+    // Defense in depth. The OUTBOX never sends a PIN-free ledger command:
+    // `adjust` is credential-required, so it is marked `auth-required` BEFORE
+    // any request is made. This case therefore pins the ROUTE's own refusal of a
+    // body that arrives with no credential — a hand-crafted request or a foreign
+    // client bypassing this outbox entirely — so the route does not rely on the
+    // client having done the right thing.
     const entry = queueTaskCommand({
       route: "/api/tasks/ledger",
       action: "adjust",
