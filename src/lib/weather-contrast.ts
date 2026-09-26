@@ -4,6 +4,14 @@
 // so contrast is machine-testable.
 
 import type { WxScene } from "@/components/ui/WxToys";
+import type { SkyPhase } from "@/lib/weather-scene-params";
+
+// Machine-verified 2026-09-25 against WCAG AA (≥ 4.5:1) for slate-800 #1E293B:
+//   dawn 4.55 | 7.16 | 10.85    dusk 4.57 | 4.59 | 8.15
+// Dark at top → cream at bottom so the slate-800 hero ink holds end-to-end
+// (white fails at 1.12 on the cream stops — there is deliberately no fallback).
+const DAWN_STOPS = ["#898CBB", "#E8A2B6", "#FFD8A0"];
+const DUSK_STOPS = ["#8C8DB1", "#CE73A1", "#FFB072"];
 
 export type Rgb = [number, number, number];
 
@@ -65,23 +73,29 @@ export function mixHex(a: string, b: string, t: number): string {
   return `#${[ch(16), ch(8), ch(0)].map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
 }
 
-// ↓ verbatim from WeatherWidget.tsx:180-188
-export function posterTextSurface(scene: WxScene, heavySnow = false): string[] {
-  if (scene === "clear") return ["#55BCE8", "#8FD8F1", "#D8F2F4"];
-  if (scene === "cloudy") return ["#DFE4EE", "#EEF1F6", "#D9E6F5"];
+export function posterTextSurface(scene: WxScene, heavySnow = false, skyPhase: SkyPhase = "day"): string[] {
+  if (scene === "clear" || scene === "cloudy") {
+    if (skyPhase === "dawn") return [...DAWN_STOPS];
+    if (skyPhase === "dusk") return [...DUSK_STOPS];
+    if (scene === "clear") return ["#55BCE8", "#8FD8F1", "#D8F2F4"];
+    return ["#DFE4EE", "#EEF1F6", "#D9E6F5"];
+  }
   if (scene === "rain") return ["#B9C4D8", "#C9D7EA", "#D8D3F0"];
-  if (scene === "snow" && heavySnow) return ["#5D6F8C", "#465A78", "#354861"];
-  if (scene === "snow") return ["#F4F7FB", "#E6EFFF", "#EFE6FB"];
+  if (scene === "snow") return heavySnow ? ["#5D6F8C", "#465A78", "#354861"] : ["#F4F7FB", "#E6EFFF", "#EFE6FB"];
   if (scene === "storm") return ["#6A6F96", "#5D5B8F", "#4D4770"];
-  return ["#6F74A8", "#A29DC9", "#E2DBF2"];
+  return ["#6F74A8", "#A29DC9", "#E2DBF2"]; // night
 }
 
-// ↓ verbatim from WeatherWidget.tsx:190-201
-export function weatherHeaderTextSurfaces(scene: WxScene, failedFetch = false, heavySnow = false): string[] {
+export function weatherHeaderTextSurfaces(
+  scene: WxScene,
+  failedFetch = false,
+  heavySnow = false,
+  skyPhase: SkyPhase = "day",
+): string[] {
   const glassAlpha = scene === "storm" ? 0.4 : 0.3;
   const sheenAlpha = 0.4;
   const surfaceAlpha = glassAlpha + sheenAlpha * (1 - glassAlpha);
-  const baseSurfaces = posterTextSurface(scene, heavySnow);
+  const baseSurfaces = posterTextSurface(scene, heavySnow, skyPhase);
   const surfaces = failedFetch
     ? baseSurfaces.map((surface) => mixHex(surface, "#788091", 0.38))
     : baseSurfaces;
