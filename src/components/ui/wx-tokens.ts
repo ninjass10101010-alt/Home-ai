@@ -18,6 +18,8 @@ export const WX_POSTER = {
 
 export const SKY: Record<string, string> = {
   clear: "from-[#55bce8] via-[#8fd8f1] to-[#d8f2f4]",
+  dawn: "from-[#898cbb] via-[#e8a2b6] to-[#ffd8a0]", // machine-verified AA vs slate-800 (4.55/7.16/10.85)
+  dusk: "from-[#8c8db1] via-[#ce73a1] to-[#ffb072]", // machine-verified AA vs slate-800 (4.57/4.59/8.15)
   cloudy: "from-[#dfe4ee] via-[#eef1f6] to-[#d9e6f5]", // pearl grey → powder blue
   rain: "from-[#b9c4d8] via-[#c9d7ea] to-[#d8d3f0]", // slate → lilac
   snow: "from-[#f4f7fb] via-[#e6efff] to-[#efe6fb]", // near-white → lavender

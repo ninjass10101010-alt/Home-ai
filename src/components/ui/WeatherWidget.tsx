@@ -11,6 +11,7 @@ import Skeleton from "@/components/ui/Skeleton";
 import { db } from "@/db";
 import { moonPhase, moonPhaseName } from "@/lib/weather-astro";
 import { mixHex, posterTextSurface, weatherHeaderTextSurfaces } from "@/lib/weather-contrast";
+import { skyPhase, skySceneKey } from "@/lib/weather-scene-params";
 import { SKY, INK, GLASS, GLASS_NIGHT } from "./wx-tokens";
 import { SceneLayers, Condition, wmoToScene, dayCondition, conditionPresentation, wmoCondition, useWxMotionOk } from "./WxToys";
 import { getWeatherSkin, cardinalFromDegrees, SeasonKey, severeFamily, resolveAccent, contrastSafeTextAccent, accentForeground } from "./WeatherSkins";
@@ -882,7 +883,6 @@ export default function WeatherWidget({ className = "" }: { className?: string }
   // code + day flag the old scene used (active hour while previewing).
   const heroScene = isPaused ? "cloudy" : wmoToScene(sceneCode, sceneIsDay);
   const heroHeavySnow = heroScene === "snow" && severeFamily(sceneCode) === "snow";
-  const heroSkyScene = heroHeavySnow ? "heavySnow" : heroScene;
   const heroCloud = activeHour ? activeHour.cloud : weatherData?.cloud ?? null;
   const heroPresentation = isPaused
     ? { label: "Weather unavailable", icon: "cloudy" as const }
@@ -900,6 +900,19 @@ export default function WeatherWidget({ className = "" }: { className?: string }
     heroSolar?.sunriseISO ?? null,
     heroSolar?.sunsetISO ?? null
   );
+  // Sky phase anchors to the same shared timeline as the strip preview — the
+  // scrubbed hour when previewing, else the payload's own current hour.
+  // Wall-clock `new Date()` is deliberately NOT used: it would make sky
+  // selection depend on the test runner's clock against payload-pinned solar
+  // windows. Null solar ⇒ null progress ⇒ no dawn/dusk (data-truth contract).
+  const heroPhaseAnchorISO = activeHour?.time ?? weatherData?.hours[0]?.time ?? null;
+  const heroSkyPhase = skyPhase(
+    heroPhaseAnchorISO == null
+      ? null
+      : sunProgressAt(heroPhaseAnchorISO, heroSolar?.sunriseISO ?? null, heroSolar?.sunsetISO ?? null),
+    sceneIsDay
+  );
+  const heroSkyScene = skySceneKey(heroScene, heroSkyPhase, heroHeavySnow);
   const heroFogCode = sceneCode === 45 || sceneCode === 48;
   const heroFogMeasurement = (heroVis != null && heroVis < 8000) || (heroVis == null && heroHumidity != null && heroHumidity >= 82);
   const heroFog = heroFogCode || heroFogMeasurement;
@@ -917,7 +930,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
   // Severity owns the card: storms and heavy snow never borrow the holiday
   // party accent, and the celebratory layers stay home until it passes.
   const accent = resolveAccent(rawSkin, holidayStyle?.accent);
-  const headerSurfaces = weatherHeaderTextSurfaces(heroScene, isPaused, heroHeavySnow);
+  const headerSurfaces = weatherHeaderTextSurfaces(heroScene, isPaused, heroHeavySnow, heroSkyPhase);
   const chromeInk = contrastSafeTextAccent(accent, headerSurfaces, "#1E293B");
   const holidayBadgeInk = holidayStyle
     ? contrastSafeTextAccent(
@@ -926,7 +939,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
         chromeInk
       )
     : chromeInk;
-  const cardTextSurfaces = posterTextSurface(heroScene, heroHeavySnow);
+  const cardTextSurfaces = posterTextSurface(heroScene, heroHeavySnow, heroSkyPhase);
   const cardTextAccent = contrastSafeTextAccent(accent, cardTextSurfaces, heroScene === "storm" || heroHeavySnow ? "#FFFFFF" : "#1E293B");
   const selectedCellTextAccent = contrastSafeTextAccent(
     accent,
@@ -1382,7 +1395,6 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
   const mCode = scrubHour?.code ?? data.code;
   const mScene = wmoToScene(mCode, mIsDay);
   const mHeavySnow = mScene === "snow" && severeFamily(mCode) === "snow";
-  const mSkyScene = mHeavySnow ? "heavySnow" : mScene;
   const mStorm = mScene === "storm";
   const mSkin = {
     ...getWeatherSkin(season, !mIsDay, mCode),
@@ -1408,6 +1420,8 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
   const mPresentation = conditionPresentation(mScene, mCode, mCloud, mIsDay);
   const mCond = mPresentation.icon;
   const mSunProgress = sunProgressAt(scrubHour?.time ?? new Date().toISOString(), mSolar?.sunriseISO ?? null, mSolar?.sunsetISO ?? null);
+  const mSkyPhase = skyPhase(mSunProgress, mIsDay);
+  const mSkyScene = skySceneKey(mScene, mSkyPhase, mHeavySnow);
   const mBirds =
     !fetchError &&
     mIsDay &&

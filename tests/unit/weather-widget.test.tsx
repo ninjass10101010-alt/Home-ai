@@ -546,6 +546,8 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(SKY.snow).toBe("from-[#f4f7fb] via-[#e6efff] to-[#efe6fb]");
     expect(SKY.storm).toBe("from-[#6a6f96] via-[#5d5b8f] to-[#4d4770]");
     expect(SKY.night).toBe("from-[#6f74a8] via-[#a29dc9] to-[#e2dbf2]");
+    expect(SKY.dawn).toBe("from-[#898cbb] via-[#e8a2b6] to-[#ffd8a0]");
+    expect(SKY.dusk).toBe("from-[#8c8db1] via-[#ce73a1] to-[#ffb072]");
   });
 
   it("crossfades the card scene while preserving the day-strip preview contract", async () => {
@@ -573,6 +575,34 @@ describe("WeatherWidget — Not Boring redesign", () => {
     await settle();
     expect(strip.getAttribute("aria-valuenow")).toBe("0");
     expect(el.querySelector('[data-testid="wx-scene-layers"]')?.getAttribute("data-scene")).toBe("clear");
+  });
+
+  it("selects the dawn sky inside the 12% sunrise window", async () => {
+    const payload = makeOpenMeteoPayload({ code: 0, cloud: 10 });
+    // hours[0] is pinned to TEST_NOW (12:00Z). Pull sunrise to 11:50Z and
+    // sunset to 21:50Z so the anchored current hour sits at progress 0.017.
+    payload.daily.sunrise = payload.daily.sunrise.map(() => "2026-09-24T11:50:00.000Z");
+    payload.daily.sunset = payload.daily.sunset.map(() => "2026-09-24T21:50:00.000Z");
+    mockOpenMeteo(payload);
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    expect(el.querySelector('[data-testid="wx-scene-layers"]')?.getAttribute("data-scene")).toBe("clear");
+    const activeSky = el.querySelector('.wx-sky[data-active="true"]') as HTMLElement;
+    expect(activeSky.className).toContain("from-[#898cbb]");
+  });
+
+  it("selects the dusk sky past 88% of the daylight arc", async () => {
+    const payload = makeOpenMeteoPayload({ code: 0, cloud: 10 });
+    // 12:00Z anchored current hour at progress 0.9375: sunrise 07:00Z, sunset 12:20Z.
+    payload.daily.sunrise = payload.daily.sunrise.map(() => "2026-09-24T07:00:00.000Z");
+    payload.daily.sunset = payload.daily.sunset.map(() => "2026-09-24T12:20:00.000Z");
+    mockOpenMeteo(payload);
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    const activeSky = el.querySelector('.wx-sky[data-active="true"]') as HTMLElement;
+    expect(activeSky.className).toContain("from-[#8c8db1]");
   });
 
   it("drives poster geometry and weather layers from measured inputs", () => {
