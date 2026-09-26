@@ -565,19 +565,39 @@ describe("POST /api/consuela/planner/apply — adjust_points (canonical ledger s
     expect(ledger.calls).toHaveLength(0);
   });
 
-  it("insufficient balance → 400 with the honest gap, no second attempt", async () => {
+  it("insufficient balance on a DEDUCTION → 400 with the honest gap, no second attempt", async () => {
     parentPin();
     roster();
     ledger.result = adjustFailure("insufficient_balance", {
       weekData: weekFixture({ points: { "Emily G": 3 } }),
     });
 
+    const res = await post(
+      adjustBody({ args: { ...ADJUST_ARGS, delta: -10 } }),
+      { pin: PARENT_PIN },
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body).toMatchObject({ ok: false, operationId: OPERATION_ID });
+    expect(String(body.error)).toMatch(/3 pts/);
+    expect(String(body.error)).toMatch(/deduction/i);
+    expect(ledger.calls).toHaveLength(1);
+  });
+
+  it("a BONUS refused by the ledger never claims a deduction happened", async () => {
+    parentPin();
+    roster();
+    ledger.result = adjustFailure("insufficient_balance", {
+      weekData: weekFixture({ points: { "Emily G": -3 } }),
+    });
+
     const res = await post(adjustBody(), { pin: PARENT_PIN });
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body).toMatchObject({ ok: false, operationId: OPERATION_ID });
-    expect(String(body.error)).toMatch(/points/i);
-    expect(ledger.calls).toHaveLength(1);
+    expect(String(body.error)).not.toMatch(/deduction/i);
+    expect(String(body.error)).toMatch(/out of balance|balance/i);
+    expect(String(body.error)).not.toMatch(/point moves|points moved/i);
   });
 
   it("a conflicting operation id → 409, so a client can tell a replay from a clash", async () => {

@@ -5,7 +5,6 @@ import Modal from "@/components/ui/Modal";
 import SoftButton from "@/components/ui/SoftButton";
 import Toast from "@/components/ui/Toast";
 import { verifyPinRemote, unreachableCopy } from "@/modes/kid/kid-store";
-import { createTaskOperationId } from "@/lib/task-operation-outbox";
 
 // Task 15 — the ONLY way a chat point adjustment becomes real: a parent taps
 // this chip and lands their PIN. Chat NEVER moves points directly; the tool
@@ -17,7 +16,7 @@ import { createTaskOperationId } from "@/lib/task-operation-outbox";
 
 export interface PointAdjustmentProposal {
   tool: "adjust_points";
-  operationId?: string;
+  operationId: string;
   args: { member: string; delta: number; reason: string };
 }
 
@@ -26,6 +25,8 @@ export function isPointAdjustmentProposal(value: unknown): value is PointAdjustm
   return (
     !!p &&
     p.tool === "adjust_points" &&
+    typeof p.operationId === "string" &&
+    p.operationId.trim() !== "" &&
     !!p.args &&
     typeof p.args.member === "string" &&
     p.args.member.trim() !== "" &&
@@ -42,11 +43,8 @@ export default function AdjustPointsChip({
   actorName: string | null;
 }) {
   const { member, delta, reason } = proposal.args;
-  const [fallbackOperationId] = useState(() => createTaskOperationId());
   const operationId =
-    typeof proposal.operationId === "string" && proposal.operationId.trim()
-      ? proposal.operationId.trim()
-      : fallbackOperationId;
+    typeof proposal.operationId === "string" ? proposal.operationId.trim() : "";
   const [open, setOpen] = useState(false);
   const [pinValue, setPinValue] = useState("");
   const [pinError, setPinError] = useState<string | null>(null);
@@ -80,6 +78,10 @@ export default function AdjustPointsChip({
     const pin = pinValue;
     setPinValue("");
     if (pin.length < 4) return;
+    if (!operationId) {
+      setPinError("This adjustment is out of date — ask Consuela for a fresh proposal.");
+      return;
+    }
     if (!actorName) {
       setPinError("Sign in with a parent PIN to confirm this adjustment.");
       return;
