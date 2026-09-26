@@ -567,7 +567,7 @@ describe("POST /api/tasks/claim — crew actions", () => {
   it("crew-join gates a photo avatar down to the fallback glyph (PB json field, same class as assigneeEmoji)", async () => {
     // 2026-09-23 review: crew members' emojis come from members.emoji — a
     // photo member there is a 100KB+ base64 data URL. crewJoin stored it
-    // verbatim into the PB tasks row (and the crew rides syncTasksToPB /
+    // verbatim into the PB tasks row (and the crew rides the snapshot write /
     // mirrorTaskToCollection raw), the same photo-bloat class the emoji gate
     // closed for assigneeEmoji.
     const photo = `data:image/webp;base64,${"A".repeat(80_000)}`;

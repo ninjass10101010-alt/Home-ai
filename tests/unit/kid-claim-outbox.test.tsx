@@ -50,8 +50,6 @@ const store = vi.hoisted(() => ({
   week: { weekStart: "2026-09-01", points: {} as Record<string, number>, streak: {}, lastActive: {}, history: [] as any[] },
   saveTasks: vi.fn(async (tasks: any[]) => { store.tasks = tasks.map((t: any) => ({ ...t })); }),
   saveWeekData: vi.fn(async (_week: any) => {}),
-  syncTasksToPB: vi.fn(async (_tasks: any[]) => {}),
-  syncWeekDataToPB: vi.fn(async (_week: any) => {}),
 }));
 
 vi.mock("@/lib/task-utils", () => ({
@@ -67,8 +65,6 @@ vi.mock("@/lib/task-utils", () => ({
   getThisWeeksCompletedTasks: (tasks: any[]) => tasks.filter((t) => t.completed),
   getThisWeeksCompletedDates: () => [],
   calculateRealStreak: () => 0,
-  syncTasksToPB: store.syncTasksToPB,
-  syncWeekDataToPB: store.syncWeekDataToPB,
   // The REAL age predicates (mirrored here the way the old pre-age seam
   // mirror did): under-10 + child + open + assigned + never
   // snatchable completes PIN-free; every child completion still lands
@@ -241,7 +237,6 @@ describe("KidHome commands (durable outbox → notice → retry → confirm)", (
     store.tasks = [{ ...QUEST }];
     store.week = { weekStart: "2026-09-01", points: {}, streak: {}, lastActive: {}, history: [] };
     store.saveTasks.mockClear();
-    store.syncTasksToPB.mockClear();
     // The shared Modal's exit phase reads matchMedia; jsdom has none.
     vi.stubGlobal("matchMedia", (query: string) => ({
       matches: true,

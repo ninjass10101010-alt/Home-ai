@@ -52,8 +52,6 @@ const store = vi.hoisted(() => ({
   week: { weekStart: "2026-09-01", points: {} as Record<string, number>, streak: {}, lastActive: {}, history: [] as any[] },
   saveTasks: vi.fn(async (_tasks: any[]) => {}),
   saveWeekData: vi.fn(async (_week: any) => {}),
-  syncTasksToPB: vi.fn(async (_tasks: any[]) => {}),
-  syncWeekDataToPB: vi.fn(async (_week: any) => {}),
 }));
 
 vi.mock("@/lib/task-utils", () => ({
@@ -69,8 +67,6 @@ vi.mock("@/lib/task-utils", () => ({
   getThisWeeksCompletedTasks: (tasks: any[]) => tasks.filter((t) => t.completed),
   getThisWeeksCompletedDates: () => [],
   calculateRealStreak: () => 0,
-  syncTasksToPB: store.syncTasksToPB,
-  syncWeekDataToPB: store.syncWeekDataToPB,
   // The REAL age predicates (mirrored from the safety-test harness):
   completesWithoutPin: (role: string | undefined, age: number | undefined, task: any) =>
     role === "child" &&
@@ -163,6 +159,7 @@ import KidHome from "@/modes/kid/KidHome";
 const QUEST = { id: 7, title: "Feed the dog", points: 10, assignee: "Caspian", completed: false };
 
 let activeRoot: Root | null = null;
+let fetchMock = vi.fn();
 
 async function renderAsync(ui: ReactElement): Promise<HTMLElement> {
   const el = document.createElement("div");
@@ -215,6 +212,14 @@ function verifyFetch(ok: boolean) {
   });
 }
 
+function expectNoStructuredTaskPush() {
+  const writes = (fetchMock.mock.calls as Array<[RequestInfo | URL, RequestInit | undefined]>)
+    .filter(([, init]) => init?.method && !["GET", "HEAD"].includes(String(init.method).toUpperCase()))
+    .map(([input, init]) => `${String(init!.method).toUpperCase()} ${String(input)}`);
+  expect(writes.filter((w) => /\/api\/tasks\/sync|\/api\/db\//.test(w))).toEqual([]);
+  expect(writes.filter((w) => !/^POST \/api\/(tasks\/|members\/verify$)/.test(w))).toEqual([]);
+}
+
 describe("KidHome on the wall (spec §6 amendment)", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
@@ -229,14 +234,13 @@ describe("KidHome on the wall (spec §6 amendment)", () => {
     __resetTaskOutboxForTests();
     __resetTaskCommandCredentialsForTests();
     store.saveWeekData.mockReset();
-    store.syncTasksToPB.mockClear();
-    store.syncWeekDataToPB.mockClear();
     vi.stubGlobal("matchMedia", vi.fn(() => ({
       matches: false,
       addEventListener: () => {}, removeEventListener: () => {},
       addListener: () => {}, removeListener: () => {},
     })));
-    vi.stubGlobal("fetch", verifyFetch(true));
+    fetchMock = verifyFetch(true);
+    vi.stubGlobal("fetch", fetchMock);
   });
 
   afterEach(() => {
@@ -280,9 +284,8 @@ describe("KidHome on the wall (spec §6 amendment)", () => {
     expect(store.saveTasks).not.toHaveBeenCalled();
     // No points move locally: week store untouched.
     expect(store.saveWeekData).not.toHaveBeenCalled();
-    expect(store.syncWeekDataToPB).not.toHaveBeenCalled();
     expect(store.week.points.Caspian).toBe(20);
-    expect(store.syncTasksToPB).not.toHaveBeenCalled();
+    expectNoStructuredTaskPush();
 
     // Celebration fires with the honest "on the way" copy, and the pad closes.
     const burst = document.querySelector('[aria-label^="Congratulations"]');
@@ -295,7 +298,8 @@ describe("KidHome on the wall (spec §6 amendment)", () => {
 
   it("wall + 10+ kid: a wrong PIN surfaces the error inside the pad and completes nothing", async () => {
     wallMock.wall = true;
-    vi.stubGlobal("fetch", verifyFetch(false));
+    fetchMock = verifyFetch(false);
+    vi.stubGlobal("fetch", fetchMock);
     const el = await renderAsync(<KidHome />);
     await settle();
 
