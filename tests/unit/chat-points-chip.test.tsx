@@ -238,26 +238,37 @@ describe("chat page — point-proposal chip wiring", () => {
     expect(el.textContent).toContain("Done ✓");
   });
 
-  it("a proposal with no id still posts ONE stable generated id on every retry", async () => {
-    const legacy = { tool: "adjust_points" as const, args: { ...PROPOSAL.args } } as any;
-    stubFetch([
-      { status: 503, body: { ok: false, error: "Points could not be updated just now." } },
-      { status: 200, body: { ok: true, applied: true } },
-    ]);
+  it("an UN-KEYED proposal (a thread stored before operation ids existed) can never be submitted", async () => {
+    const legacy = { tool: "adjust_points", args: { ...PROPOSAL.args } } as any;
+    stubFetch({ status: 200, body: { ok: true } });
     kidStore.verifyPinRemote.mockResolvedValue({ status: "ok", member: { name: "Rebecca G" } });
     const el = render(<AdjustPointsChip proposal={legacy} actorName="Rebecca G" />);
 
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      clickButton(el, "Confirm with PIN");
-      typePin(el, "1234");
-      clickButton(el, "Submit");
-      await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
-    }
+    clickButton(el, "Confirm with PIN");
+    typePin(el, "1234");
+    clickButton(el, "Submit");
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 
-    const firstId = JSON.parse(applyCalls[0].init.body).operationId;
-    expect(typeof firstId).toBe("string");
-    expect(firstId.length).toBeGreaterThan(0);
-    expect(JSON.parse(applyCalls[1].init.body).operationId).toBe(firstId);
+    expect(applyCalls).toHaveLength(0);
+    expect(kidStore.verifyPinRemote).not.toHaveBeenCalled();
+    expect(el.textContent).toMatch(/fresh proposal/i);
+    expect(el.textContent).not.toContain("Done ✓");
+  });
+
+  it("a thread whose stored proposal has no operation id renders NO chip at all", async () => {
+    const legacy = { tool: "adjust_points", args: { ...PROPOSAL.args } };
+    stubFetch({ status: 200, body: { ok: true } });
+    streamMock.fn.mockResolvedValue({
+      content: "Ready for confirmation",
+      streamed: false,
+      proposals: [legacy],
+    });
+    const el = render(<ChatPage />);
+    await act(async () => { await inputProps.current!.onSendMessage("add 10 points to Emily"); });
+
+    expect(el.textContent).not.toContain("Confirm with PIN");
+    expect(el.textContent).not.toContain("+10 pts to Emily");
+    expect(applyCalls).toHaveLength(0);
   });
 
   it("a 200 that reports a duplicate is reported as 'already applied', not a fresh adjustment", async () => {

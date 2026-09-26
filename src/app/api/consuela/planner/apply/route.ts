@@ -120,9 +120,16 @@ async function applyPointAdjustment(
 
   if (!result.ok) {
     if (result.code === "insufficient_balance") {
-      const balance = result.weekData.points[memberName] ?? 0;
+      if (delta < 0) {
+        const balance = result.weekData.points[memberName] ?? 0;
+        return adjustError(
+          `${memberName.split(" ")[0]} has ${balance} pts — a ${Math.abs(delta)}-point deduction needs more points.`,
+          400,
+          { operationId: result.operationId },
+        );
+      }
       return adjustError(
-        `${memberName.split(" ")[0]} has ${balance} pts — a ${Math.abs(delta)}-point deduction needs more points.`,
+        "This week's points are out of balance, so no adjustment can be applied until a parent checks the week.",
         400,
         { operationId: result.operationId },
       );

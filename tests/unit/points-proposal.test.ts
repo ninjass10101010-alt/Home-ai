@@ -46,11 +46,11 @@ describe("propose_point_adjustment — validate only, never write", () => {
   it("valid proposal: resolves the member to the ledger name, echoes delta/reason, writes NOTHING", async () => {
     const out = JSON.parse(await TOOL()!.handler({ member: "Emily", delta: 10, reason: "helping carry groceries" }));
     expect(out.ok).toBe(true);
-    expect(out.proposal).toMatchObject({
+    expect(out.proposal).toEqual({
       tool: "adjust_points",
+      operationId: expect.any(String),
       args: { member: "Emily G", delta: 10, reason: "helping carry groceries" },
     });
-    expect(typeof out.proposal.operationId).toBe("string");
     expect(out.proposal.operationId.trim().length).toBeGreaterThan(0);
     expect(String(out.message)).toMatch(/parent/i);
     expect(String(out.message)).toMatch(/PIN/i);
