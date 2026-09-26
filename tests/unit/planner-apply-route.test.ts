@@ -24,6 +24,7 @@ const ledger = vi.hoisted(() => ({
 
 const mocks = vi.hoisted(() => ({
   verifyPinAgainstAnyMember: vi.fn(),
+  requireLiveSession: vi.fn(),
   handler: vi.fn(),
   getTool: vi.fn(),
   liveMembers: vi.fn(),
@@ -31,6 +32,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/lib/server-auth", () => ({
   verifyPinAgainstAnyMember: mocks.verifyPinAgainstAnyMember,
+  requireLiveSession: mocks.requireLiveSession,
 }));
 
 vi.mock("@/lib/hermes-tools", () => ({
@@ -51,14 +53,23 @@ vi.mock("@/lib/ledger-operations", () => ({
 
 import { POST } from "@/app/api/consuela/planner/apply/route";
 
-function post(body: unknown, opts: { pin?: string; cookie?: string } = {}) {
+function post(
+  body: unknown,
+  opts: { pin?: string; pinCookie?: boolean; session?: boolean } = {},
+) {
+  const cookie = [
+    opts.session === false ? null : "consuela_session=live-parent-session",
+    opts.pinCookie ? "x-consuela-pin=1234" : null,
+  ]
+    .filter(Boolean)
+    .join("; ");
   return POST(
     new NextRequest("http://localhost/api/consuela/planner/apply", {
       method: "POST",
       headers: {
         "content-type": "application/json",
         ...(opts.pin ? { "x-consuela-pin": opts.pin } : {}),
-        ...(opts.cookie ? { cookie: opts.cookie } : {}),
+        cookie,
       },
       body: JSON.stringify(body),
     })
@@ -72,6 +83,16 @@ beforeEach(() => {
   ledger.queue.length = 0;
   ledger.result = undefined;
   mocks.verifyPinAgainstAnyMember.mockReset();
+  mocks.requireLiveSession.mockReset().mockImplementation(async (request: Request) => {
+    const cookie = request.headers.get("cookie") || "";
+    if (!cookie.includes("consuela_session=")) {
+      return { ok: false as const, status: 401 as const, error: "unauthorized" as const };
+    }
+    return {
+      ok: true as const,
+      identity: { memberId: "m1", name: "Rebecca", role: "parent" as const },
+    };
+  });
   mocks.handler.mockReset();
   mocks.getTool.mockReset().mockReturnValue({ handler: mocks.handler });
   mocks.liveMembers.mockReset();
@@ -116,9 +137,50 @@ describe("POST /api/consuela/planner/apply — PIN-gated buffer apply", () => {
   it("PIN from the cookie is honored like the header (act-route parity)", async () => {
     mocks.verifyPinAgainstAnyMember.mockResolvedValue({ id: "m1", name: "Rebecca", role: "parent" });
     mocks.handler.mockResolvedValue(JSON.stringify({ ok: true, event: { id: "e1", ...VALID_ARGS } }));
-    const res = await post({ tool: "add_event", args: VALID_ARGS }, { cookie: "x-consuela-pin=1234" });
+    const res = await post({ tool: "add_event", args: VALID_ARGS }, { pinCookie: true });
     expect(res.status).toBe(200);
     expect(mocks.verifyPinAgainstAnyMember).toHaveBeenCalledWith("1234");
+  });
+
+  it("no session cookie at all → 401 unauthorized before the PIN is read", async () => {
+    const res = await post({ tool: "add_event", args: VALID_ARGS }, { pin: "1234", session: false });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+    expect(mocks.verifyPinAgainstAnyMember).not.toHaveBeenCalled();
+    expect(mocks.getTool).not.toHaveBeenCalled();
+  });
+
+  it("dispatches with the SERVER source + the live parent caller — never 'hermes'", async () => {
+    mocks.verifyPinAgainstAnyMember.mockResolvedValue({ id: "m1", name: "Rebecca", role: "parent" });
+    mocks.handler.mockResolvedValue(JSON.stringify({ ok: true, event: { id: "e1", ...VALID_ARGS } }));
+    const res = await post({ tool: "add_event", args: VALID_ARGS }, { pin: "1234" });
+    expect(res.status).toBe(200);
+    expect(mocks.handler).toHaveBeenCalledWith(
+      expect.objectContaining({ title: VALID_ARGS.title }),
+      { source: "server", caller: { memberId: "m1", name: "Rebecca", role: "parent" } },
+    );
+  });
+
+  it("a demoted session is refused before the PIN is read", async () => {
+    mocks.requireLiveSession.mockResolvedValue({
+      ok: false,
+      status: 403,
+      error: "session_role_changed",
+    });
+    mocks.verifyPinAgainstAnyMember.mockResolvedValue({ id: "m1", name: "Rebecca", role: "parent" });
+    const res = await post({ tool: "add_event", args: VALID_ARGS }, { pin: "1234" });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "session_role_changed" });
+    expect(mocks.verifyPinAgainstAnyMember).not.toHaveBeenCalled();
+    expect(mocks.getTool).not.toHaveBeenCalled();
+  });
+
+  it("a live child session is refused before the PIN is read", async () => {
+    mocks.requireLiveSession.mockResolvedValue({ ok: false, status: 403, error: "adult_only" });
+    const res = await post({ tool: "add_event", args: VALID_ARGS }, { pin: "1234" });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "adult_only" });
+    expect(mocks.verifyPinAgainstAnyMember).not.toHaveBeenCalled();
   });
 
   it("tool outside the add_event allowlist → 400, getTool never reached", async () => {
@@ -227,7 +289,10 @@ describe("POST /api/consuela/planner/apply — PIN-gated buffer apply", () => {
     const json = await res.json();
     expect(json.ok).toBe(true);
     expect(json.event).toEqual(event);
-    expect(mocks.handler).toHaveBeenCalledWith(VALID_ARGS);
+    expect(mocks.handler).toHaveBeenCalledWith(VALID_ARGS, {
+      source: "server",
+      caller: { memberId: "m1", name: "Rebecca", role: "parent" },
+    });
   });
 
   it("handler reports failure (ok:false + error) → 400 with the handler's message", async () => {

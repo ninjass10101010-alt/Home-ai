@@ -35,12 +35,17 @@ function toolAllowedForRole(tool: string, role: string): boolean {
 
 async function isAuthorized(
   request: NextRequest,
-): Promise<{ ok: boolean; role?: string }> {
+): Promise<{ ok: boolean; role?: string; member?: { id: string; name: string; role: string } }> {
   const pin =
     request.headers.get(PIN_HEADER) || request.cookies.get(PIN_HEADER)?.value || "";
   if (!pin) return { ok: false };
   const member = await verifyPinAgainstAnyMember(pin);
-  return member !== null ? { ok: true, role: member.role } : { ok: false };
+  if (member === null) return { ok: false };
+  return {
+    ok: true,
+    role: member.role,
+    member: { id: String(member.id), name: String(member.name), role: String(member.role) },
+  };
 }
 
 // R2 — allowlist of tools the act route may dispatch. Only safe, non-admin,
@@ -84,7 +89,17 @@ export async function POST(request: NextRequest) {
     if (!tool) {
       return NextResponse.json({ ok: false, error: `Unknown tool: ${payload.tool}` }, { status: 400 });
     }
-    const raw = await tool.handler((payload.args as Record<string, unknown>) || {});
+    // This is a server-authoritative, PIN-verified dispatch — NOT a Hermes
+    // chat call — so it is attributed as `server` with the verified member as
+    // the caller. A task command then re-checks that member's live role.
+    const raw = await tool.handler((payload.args as Record<string, unknown>) || {}, {
+      source: "server",
+      caller: {
+        memberId: auth.member?.id ?? "",
+        name: auth.member?.name ?? "Consuela",
+        role: auth.member?.role ?? auth.role ?? "child",
+      },
+    });
     let result: unknown = raw;
     try {
       result = JSON.parse(raw);

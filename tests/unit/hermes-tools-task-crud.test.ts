@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const SNAP = "consuela_data_snapshots";
 const rows: Record<string, any[]> = {};
 const writes: Array<{ op: string; collection: string; id?: string; data?: any }> = [];
-const mocks = vi.hoisted(() => ({ execute: vi.fn(), getLiveMembers: vi.fn() }));
+const mocks = vi.hoisted(() => ({ execute: vi.fn(), getLiveMembers: vi.fn(), nextOperationId: vi.fn() }));
 vi.mock("@/lib/pb-auth", () => ({
   withAdmin: vi.fn(async (fn: any) => fn({
     collection: (name: string) => ({
@@ -35,12 +35,58 @@ vi.mock("@/lib/live-member", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/live-member")>();
   return { ...actual, getLiveMembers: mocks.getLiveMembers };
 });
+vi.mock("@/lib/task-operation-outbox", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/task-operation-outbox")>();
+  return { ...actual, createTaskOperationId: mocks.nextOperationId };
+});
 import { getTool } from "@/lib/hermes-tools";
 
 const snapData = () => rows[SNAP]?.[0]?.data ?? {};
 const snapTasks = () => snapData().tasks ?? [];
 const byId = (id: number) => snapTasks().find((t: any) => Number(t.id) === id);
 const lastCommand = () => mocks.execute.mock.calls.at(-1);
+
+const parentCaller = {
+  source: "hermes" as const,
+  caller: { memberId: "mem-dad", name: "Dad", role: "parent" },
+};
+const childCaller = {
+  source: "hermes" as const,
+  caller: { memberId: "mem-emily", name: "Emily", role: "child" },
+};
+
+const crewPendingRow = () => ({
+  id: 1,
+  title: "Crew clean",
+  assignee: "Crew",
+  points: 10,
+  due: "2026-09-30",
+  completed: true,
+  status: "done",
+  completedBy: "Crew",
+  completedAt: "2026-09-22T10:00:00.000Z",
+  completedInWeek: "2026-09-21",
+  universal: false,
+  crewSize: 3,
+  sentBackAt: null,
+  crew: {
+    members: [
+      { name: "Member A", emoji: "\u{1F467}", joinedAt: "2026-09-21T08:00:00.000Z", checkedInAt: "2026-09-22T09:00:00.000Z" },
+      { name: "Member B", emoji: "\u{1F9D2}", joinedAt: "2026-09-21T08:05:00.000Z", checkedInAt: "2026-09-22T09:05:00.000Z" },
+    ],
+    removed: ["Former Member"],
+  },
+  pendingApproval: {
+    byName: "Crew",
+    at: "2026-09-22T10:00:00.000Z",
+    points: 10,
+    crew: ["Member A", "Member B"],
+  },
+});
+
+const seedTasks = (tasks: any[]) => {
+  rows[SNAP][0].data.tasks = tasks;
+};
 
 beforeEach(() => {
   for (const k of Object.keys(rows)) delete rows[k];
@@ -58,13 +104,18 @@ beforeEach(() => {
       })),
   );
   rows.members = [{ id: "mem-emily", name: "Emily", fullName: "Emily G", role: "child", emoji: "🎻" }];
+  mocks.nextOperationId.mockReset();
+  let operationSequence = 0;
+  mocks.nextOperationId.mockImplementation(() => `op-fixture-${++operationSequence}`);
   rows[SNAP] = [{
     id: "snap1",
     key: "tasks-snapshot",
     data: {
+      // `universal: false` is what the manage command writes for an assigned
+      // chore; without it the canonical reader treats the row as open.
       tasks: [
-        { id: 101, title: "Walk Rocco", assignee: "Emily G", points: 10, due: "2026-09-10", completed: false },
-        { id: 102, title: "Done Chore", assignee: "Emily G", points: 5, completed: true },
+        { id: 101, title: "Walk Rocco", assignee: "Emily G", points: 10, due: "2026-09-10", completed: false, universal: false },
+        { id: 102, title: "Done Chore", assignee: "Emily G", points: 5, completed: true, universal: false },
       ],
       weekData: { weekStart: "2026-09-21", points: {}, history: [] },
       deletedTaskIds: [],
@@ -220,4 +271,199 @@ it("reopen_task refuses an already-paid row with honest copy", async () => {
   const out = JSON.parse(await getTool("reopen_task")!.handler({ taskId: 102 }));
   expect(out.ok).toBe(false);
   expect(out.error).toContain("Tasks UI");
+});
+
+it("complete_task refuses an open (universal) row with the claim instruction", async () => {
+  seedTasks([{ id: 201, title: "Race to the bins", assignee: "Open", points: 5, due: "2026-09-30", completed: false, universal: true, speedBonus: 2 }]);
+  const out = JSON.parse(await getTool("complete_task")!.handler({ taskId: 201 }));
+  expect(out).toMatchObject({ ok: false, reason: "assigned_only" });
+  expect(out.error).toContain("claim");
+  expect(mocks.execute).not.toHaveBeenCalledWith(expect.objectContaining({ kind: "complete" }));
+  expect(byId(201)!.completed).toBe(false);
+});
+
+it("complete_task refuses a late-stealable row with the claim instruction", async () => {
+  seedTasks([{ id: 202, title: "Late chore", assignee: "Emily G", points: 5, due: "2020-01-01", completed: false, universal: false, stealable: true }]);
+  const out = JSON.parse(await getTool("complete_task")!.handler({ taskId: 202 }));
+  expect(out).toMatchObject({ ok: false, reason: "assigned_only" });
+  expect(out.error).toContain("claim");
+  expect(mocks.execute).not.toHaveBeenCalledWith(expect.objectContaining({ kind: "complete" }));
+  expect(byId(202)!.completed).toBe(false);
+});
+
+it("complete_task refuses a crew row with the crew instruction", async () => {
+  rows.members = [
+    { id: "mem-dad", name: "Dad", fullName: "Dad", role: "parent", emoji: "🧔" },
+    { id: "mem-a", name: "Member A", fullName: "Member A", role: "child", emoji: "👧" },
+  ];
+  seedTasks([{
+    id: 203, title: "Crew clean", assignee: "Crew", points: 10, due: "2026-09-30",
+    completed: false, universal: false, crewSize: 3,
+    crew: { members: [{ name: "Member A", emoji: "👧", joinedAt: "2026-09-21T08:00:00.000Z" }], removed: [] },
+  }]);
+  const out = JSON.parse(await getTool("complete_task")!.handler({ taskId: 203 }));
+  expect(out).toMatchObject({ ok: false, reason: "assigned_only" });
+  expect(out.error).toContain("crew");
+  expect(mocks.execute).not.toHaveBeenCalledWith(expect.objectContaining({ kind: "complete" }));
+  expect(byId(203)!.completed).toBe(false);
+});
+
+it("queues an assigned completion through the internal command with the canonical payee", async () => {
+  const out = JSON.parse(await getTool("complete_task")!.handler({ taskId: 101 }));
+  expect(out.ok).toBe(true);
+  const [command, context] = lastCommand()!;
+  expect(context).toEqual({ source: "hermes" });
+  expect(command).toMatchObject({
+    kind: "complete",
+    operationId: expect.any(String),
+    actor: { memberId: "mem-emily", name: "Emily", role: "child" },
+  });
+  expect(command.payload).toEqual({ taskId: 101 });
+  expect(out.queuedForApproval).toBe(true);
+  expect(out.reconciled).toBe(true);
+  expect(byId(101)!.pendingApproval).toMatchObject({ byName: "Emily", points: 10 });
+});
+
+it("derives the payee and points from canonical state, never the assignee argument", async () => {
+  const out = JSON.parse(await getTool("complete_task")!.handler({ taskId: 101, assignee: "Not A Member" }));
+  expect(out.ok).toBe(true);
+  const row = byId(101)!;
+  expect(row.pendingApproval).toMatchObject({ byName: "Emily", points: 10 });
+  expect(String(row.pendingApproval.byName)).not.toContain("Not A Member");
+  expect(lastCommand()![0].payload).toEqual({ taskId: 101 });
+});
+
+it("a queued completion writes no week_data row and no transaction", async () => {
+  await getTool("complete_task")!.handler({ taskId: 101 });
+  expect(writes.some((w) => w.collection === "week_data")).toBe(false);
+  expect(snapData().weekData?.history ?? []).toHaveLength(0);
+});
+
+it("refuses an adult-owned chore — the assistant never moves points", async () => {
+  rows.members = [{ id: "mem-dad", name: "Dad", fullName: "Dad", role: "parent", emoji: "🧔" }];
+  seedTasks([{ id: 205, title: "Dad's chore", assignee: "Dad", points: 5, due: "2026-09-30", completed: false, universal: false }]);
+  const out = JSON.parse(await getTool("complete_task")!.handler({ taskId: 205 }, parentCaller));
+  expect(out.ok).toBe(false);
+  expect(out.error).toContain("Tasks");
+  expect(mocks.execute).not.toHaveBeenCalled();
+  expect(writes.some((w) => w.collection === "week_data")).toBe(false);
+  expect(byId(205)!.completed).toBe(false);
+});
+
+it("reopens a crew row while preserving members, joinedAt, and removed", async () => {
+  rows.members = [
+    { id: "mem-dad", name: "Dad", fullName: "Dad", role: "parent", emoji: "🧔" },
+    { id: "mem-a", name: "Member A", fullName: "Member A", role: "child", emoji: "👧" },
+    { id: "mem-b", name: "Member B", fullName: "Member B", role: "child", emoji: "🧒" },
+  ];
+  seedTasks([crewPendingRow()]);
+  const out = JSON.parse(await getTool("reopen_task")!.handler({ taskId: 1 }, parentCaller));
+  expect(out.ok).toBe(true);
+  expect(out.reopened).toBe(true);
+  expect(out.reconciled).toBe(true);
+  expect(out.task.completed).toBe(false);
+  expect(out.task.crew.members).toEqual([
+    { name: "Member A", emoji: "👧", joinedAt: "2026-09-21T08:00:00.000Z" },
+    { name: "Member B", emoji: "🧒", joinedAt: "2026-09-21T08:05:00.000Z" },
+  ]);
+  expect(out.task.crew.removed).toEqual(["Former Member"]);
+  expect(out.task.pendingApproval).toBeNull();
+  const row = byId(1)!;
+  expect(row.crew.members.every((m: any) => m.checkedInAt === undefined)).toBe(true);
+  expect(row.crew.removed).toEqual(["Former Member"]);
+  expect(writes.some((w) => w.collection === "week_data")).toBe(false);
+});
+
+it("reopen_task refuses a queued row whose canonical earn was never reversed", async () => {
+  seedTasks([{ id: 104, title: "Paid", assignee: "Emily G", points: 5, universal: false, completed: true, completedBy: "Emily", completedInWeek: "2026-09-21", pendingApproval: { byName: "Emily", at: "2026-09-22T10:00:00.000Z", points: 5 }, sentBackAt: null }]);
+  snapData().weekData = {
+    weekStart: "2026-09-21",
+    points: { Emily: 5 },
+    history: [{ id: 1, timestamp: "2026-09-22T10:00:00.000Z", member: "Emily", type: "earn", amount: 5, description: "Completed: Paid", taskId: 104 }],
+  };
+  const out = JSON.parse(await getTool("reopen_task")!.handler({ taskId: 104 }));
+  expect(out.ok).toBe(false);
+  expect(mocks.execute).not.toHaveBeenCalledWith(expect.objectContaining({ kind: "undo" }));
+  expect(byId(104)!.completed).toBe(true);
+});
+
+it("reopen_task routes through the internal command and reports the reconciler state", async () => {
+  seedTasks([{ id: 103, title: "Queued", assignee: "Emily G", universal: false, completed: true, completedBy: "Emily G", pendingApproval: { byName: "Emily G", at: "2026-09-10T10:00:00Z", points: 5 }, sentBackAt: null }]);
+  const out = JSON.parse(await getTool("reopen_task")!.handler({ taskId: 103 }));
+  expect(out.ok).toBe(true);
+  const [command, context] = lastCommand()!;
+  expect(context).toEqual({ source: "hermes" });
+  expect(command).toMatchObject({
+    kind: "undo",
+    operationId: expect.any(String),
+    payload: { taskId: 103 },
+  });
+  expect(out.reconciled).toBe(true);
+});
+
+it("delete_task writes through the command seam with an operationId and the reconciler result", async () => {
+  const out = JSON.parse(await getTool("delete_task")!.handler({ taskId: 101 }));
+  expect(out.ok).toBe(true);
+  const [command, context] = lastCommand()!;
+  expect(context).toEqual({ source: "hermes" });
+  expect(command).toMatchObject({
+    kind: "delete",
+    operationId: expect.any(String),
+  });
+  expect(JSON.parse((command as any).payload.taskData)).toMatchObject({ taskId: 101 });
+  expect(out.reconciled).toBe(true);
+  expect(out.deleted).toBe(true);
+  expect(byId(101)).toBeUndefined();
+  expect(snapData().deletedTaskIds).toContain(101);
+});
+
+it("delete_task is idempotent under a replayed operationId", async () => {
+  mocks.nextOperationId.mockReturnValue("op-delete-replay");
+  const first = JSON.parse(await getTool("delete_task")!.handler({ taskId: 101 }));
+  const second = JSON.parse(await getTool("delete_task")!.handler({ taskId: 101 }));
+  expect(first.ok).toBe(true);
+  expect(second.ok).toBe(true);
+  expect(second.taskId).toBe(101);
+  expect(second.deleted).toBe(true);
+  expect(second.reconciled).toBe(true);
+  expect(snapData().deletedTaskIds.filter((id: number) => Number(id) === 101)).toHaveLength(1);
+  expect(snapTasks().some((t: any) => Number(t.id) === 101)).toBe(false);
+  expect(mocks.execute.mock.calls.filter(([c]: any[]) => c.kind === "delete")).toHaveLength(2);
+});
+
+it("delete_task refuses a completed row", async () => {
+  const out = JSON.parse(await getTool("delete_task")!.handler({ taskId: 102 }));
+  expect(out.ok).toBe(false);
+  expect(mocks.execute).not.toHaveBeenCalledWith(expect.objectContaining({ kind: "delete" }));
+  expect(byId(102)).toBeDefined();
+});
+
+it("the manage command — not the tool list — refuses a child caller with adult_only", async () => {
+  const out = JSON.parse(await getTool("add_task")!.handler({ title: "Feed dogs", assigned_to: "Emily" }, childCaller));
+  expect(out).toMatchObject({ ok: false, reason: "adult_only" });
+  expect(out.error).toContain("grown-up");
+  const [command] = lastCommand()!;
+  expect(command.actor).toMatchObject({ memberId: "mem-emily", name: "Emily", role: "child" });
+  expect(snapTasks()).toHaveLength(2);
+  expect(writes.some((w) => w.collection === SNAP)).toBe(false);
+});
+
+it("delete_task re-checks the caller's adulthood inside the command", async () => {
+  const out = JSON.parse(await getTool("delete_task")!.handler({ taskId: 101 }, childCaller));
+  expect(out).toMatchObject({ ok: false, reason: "adult_only" });
+  expect(lastCommand()![0].actor).toMatchObject({ role: "child" });
+  expect(byId(101)).toBeDefined();
+  expect(snapData().deletedTaskIds).not.toContain(101);
+});
+
+it("a child caller cannot queue a completion or reopen one", async () => {
+  const completion = JSON.parse(await getTool("complete_task")!.handler({ taskId: 101 }, childCaller));
+  expect(completion).toMatchObject({ ok: false, reason: "adult_only" });
+  expect(mocks.execute).not.toHaveBeenCalledWith(expect.objectContaining({ kind: "complete" }));
+  expect(byId(101)!.completed).toBe(false);
+  seedTasks([{ id: 103, title: "Queued", assignee: "Emily G", universal: false, completed: true, completedBy: "Emily G", pendingApproval: { byName: "Emily G", at: "2026-09-10T10:00:00Z", points: 5 }, sentBackAt: null }]);
+  const reopen = JSON.parse(await getTool("reopen_task")!.handler({ taskId: 103 }, childCaller));
+  expect(reopen).toMatchObject({ ok: false, reason: "adult_only" });
+  expect(mocks.execute).not.toHaveBeenCalledWith(expect.objectContaining({ kind: "undo" }));
+  expect(byId(103)!.completed).toBe(true);
 });

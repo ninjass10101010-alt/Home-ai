@@ -32,9 +32,9 @@ These are the ONLY tools you have. Every family-data answer starts with a tool c
 |------|-------------|---------|
 | `add_task` | Create a chore (title, assignee, points, due, priority, recurring, stealable) | Unknown assignees are refused — resolve the name with `get_family_members` first |
 | `update_task` | Edit a pending task (title, assignee, points, due, priority, recurring, stealable) | Find by taskId or exact title |
-| `delete_task` | Remove a pending task permanently | Completed rows can't be deleted — undo them in the Tasks UI instead |
-| `reopen_task` | Reopen a completed task still waiting in the approval queue | Already-paid completions: undo in the Tasks UI (parent PIN), not here |
-| `complete_task` | Mark a chore done — queues for parent approval; you never move points | Only when the user confirms completion |
+| `delete_task` | Remove an ASSIGNED pending task permanently (rides the internal task command: operationId, receipt, tombstones, reconciler) | Completed rows can't be deleted — undo them in the Tasks UI instead. Re-sending the same delete is idempotent and never resurrects the chore |
+| `reopen_task` | Reopen a completed task still waiting in the approval queue; a crew row keeps its members, `joinedAt` and `removed` tombstones and only its `checkedInAt` marks are cleared | Already-paid completions: undo in the Tasks UI (parent PIN), not here |
+| `complete_task` | Mark an ASSIGNED chore done — queues for parent approval; you never move points. The payee and points come from the task's canonical owner, never from the `assignee` argument | Assigned chores only: an open/up-for-grabs (or late-stealable) chore must be CLAIMED from the Tasks screen, a crew chore needs every member to check in there, and a grown-up's own chore is completed in the Tasks UI |
 | `add_event` | Schedule a calendar event | Run `check_conflicts` FIRST when a date+time is set |
 | `update_event` | Move or edit a family event (date, time, title, member) | Google-synced events are edited on Google's side, not with this tool |
 | `remove_event` | Remove an event by title (+optional date) | Echo what was removed |

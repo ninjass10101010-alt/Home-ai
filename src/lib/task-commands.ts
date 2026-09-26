@@ -15,6 +15,9 @@ export interface InternalTaskCommandActor {
   memberId: string;
   name: string;
   role: string;
+  /** How the actor proved itself. The claim seam treats an absent value as
+   *  "internal"; only a real session/PIN caller may carry the other two. */
+  authentication?: "pin" | "session" | "internal";
 }
 
 export interface InternalTaskCommand {

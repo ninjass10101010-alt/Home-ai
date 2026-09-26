@@ -57,7 +57,11 @@ const snap = (tasks: any[]) => ([{
 
 describe("hermes-tools — PB-side filters + batching", () => {
   it("complete_task never touches week_data — completions queue for parent approval", async () => {
-    rows.consuela_data_snapshots = snap([{ id: 7, title: "Walk Rocco", completed: false, points: 10, assignee: "Emily" }]);
+    // The roster the completion is attributed to, and `universal: false` (what
+    // the manage command writes for an assigned chore) — the canonical reader
+    // treats a row without it as open.
+    rows.members = [{ id: "mem-emily", name: "Emily", role: "child", emoji: "🎻" }];
+    rows.consuela_data_snapshots = snap([{ id: 7, title: "Walk Rocco", completed: false, points: 10, assignee: "Emily", universal: false }]);
     const tool = getTool("complete_task")!;
     const out = JSON.parse(await tool.handler({ taskId: 7 }));
     expect(out.ok).toBe(true);
