@@ -12,9 +12,20 @@ vi.mock("@/lib/pb-auth", () => ({
         calls.push({ collection: name, filter: opts?.filter });
         return rows[name] ?? [];
       },
-      update: async (_id: string, d: any) => { updates.push({ collection: name, data: d }); return { id: _id, ...d }; },
+      update: async (_id: string, d: any) => {
+        updates.push({ collection: name, data: d });
+        if (name === "consuela_data_snapshots") {
+          const row = (rows[name] || []).find((x: any) => x.id === _id);
+          if (row) row.data = d.data;
+        }
+        return { id: _id, ...d };
+      },
       create: async (d: any) => {
         creates.push({ collection: name, data: d });
+        if (name === "consuela_data_snapshots") {
+          rows[name] = [{ id: "snap-new", key: "tasks-snapshot", data: d.data }];
+          return { id: "snap-new", ...d };
+        }
         return { id: `new-${creates.length}`, ...d };
       },
       delete: async () => true,
@@ -90,7 +101,7 @@ describe("hermes-tools — PB-side filters + batching", () => {
   });
 
   it("add_task writes the new chore to the snapshot the dashboard renders", async () => {
-    rows.members = [{ name: "Emily", fullName: "Emily" }];
+    rows.members = [{ id: "mem-emily", name: "Emily", fullName: "Emily", role: "child" }];
     rows.consuela_data_snapshots = snap([]);
     const tool = getTool("add_task")!;
     const out = JSON.parse(await tool.handler({ title: "Test chore", assigned_to: "Emily", points: 5 }));

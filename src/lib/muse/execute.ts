@@ -111,7 +111,7 @@ export async function executeMuseTool(
   if (!tool) return { error: "unknown tool", status: 400 };
 
   try {
-    const raw = await tool.handler(args ?? {});
+    const raw = await tool.handler(args ?? {}, { source: "muse" });
     try {
       return { result: JSON.parse(raw) };
     } catch {
