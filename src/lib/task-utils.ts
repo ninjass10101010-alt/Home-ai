@@ -785,10 +785,11 @@ export function mergeTasksSnapshot(
 
 /**
  * The ONE config-leg adoption seam for the rewards, penalties and weekly-prizes
- * catalogs. Every caller hands it a task snapshot and it merges each leg by
- * LAST-WRITE-WINS on that leg's own stamp — never "a longer list wins", which is
- * delete-blind: a parent's delete is a SHORTER, NEWER list, so a length
- * heuristic resurrects the row it just removed.
+ * catalogs. It accepts a config snapshot leg — a whole task snapshot, or just
+ * the one leg a caller read — and merges each leg it finds by LAST-WRITE-WINS
+ * on that leg's own stamp — never "a longer list wins", which is delete-blind:
+ * a parent's delete is a SHORTER, NEWER list, so a length heuristic resurrects
+ * the row it just removed.
  *
  * Two rules make that safe, and both are load-bearing:
  *  - only a STRICTLY-NEWER stamp wins, and a leg with no stamp never wins, so a
@@ -801,10 +802,11 @@ export function mergeTasksSnapshot(
  * was PULL-only: a device that never wrote a config command could never learn
  * the server's list. The weekly-prizes leg uses the identical contract.
  *
- * Callers: the outbox's snapshot proof (adoptTaskOutboxSnapshot), the 60s
- * refresh via applyTasksSnapshotToStores (db.refreshCaches), and a page that
- * pulls the snapshot itself (the Tasks page). Returns whether anything was
- * adopted.
+ * Callers: applyTasksSnapshotToStores — which the 60s refresh (db.refreshCaches)
+ * and the outbox's snapshot proof (adoptTaskOutboxSnapshot) both route through —
+ * the Tasks page's own restoreFromSnapshot pull, and WeeklyPrizesCard, which
+ * hands it only the weekly-prizes leg of a config read. Returns whether anything
+ * was adopted.
  */
 export function applyTaskConfigSnapshotToStores(snapshot: any): boolean {
   if (!snapshot) return false;
