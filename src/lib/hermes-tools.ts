@@ -690,6 +690,7 @@ const TOOLS: Tool[] = [
     },
     handler: async (args) => {
       const tasks = await livePendingTasks();
+      if (tasks === null) return summarize({ error: "task data unavailable — do not guess", tasks: [] });
       let filtered = tasks;
       if (args.member) {
         const m = String(args.member).toLowerCase();
@@ -1606,7 +1607,8 @@ const TOOLS: Tool[] = [
     },
     handler: async () => {
       const events = await mergedTodaysEvents();
-      const tasks = await livePendingTasks();
+      const taskRows = await livePendingTasks();
+      const tasks = taskRows ?? [];
       const mealRows = await liveMealRows();
       const meals = mealsForWeek(mealRows ?? [], localWeekStartISO());
       const today = localTodayISO();
@@ -1620,6 +1622,7 @@ const TOOLS: Tool[] = [
         today_weekday: todayWeekday,
         family_timezone: familyTimeZone(),
         ...(mealRows === null ? { meals_error: "meal data unavailable — do not guess" } : {}),
+        ...(taskRows === null ? { tasks_error: "task data unavailable — do not guess" } : {}),
         events: events.map((e) => ({ title: e.title, time: e.time, member: e.member, source: e.source })),
         pending_tasks: tasks.map((t: any) => ({
           title: t.title,

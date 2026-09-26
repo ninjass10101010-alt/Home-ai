@@ -10,6 +10,7 @@ import { localTodayISO, localWeekdayShort } from "@/lib/local-date";
 import { weekKey } from "@/lib/task-utils";
 import { weekStartForDate } from "@/lib/meals-week-utils";
 import { dinnerForToday } from "@/lib/consuela/chat-context";
+import { readCanonicalTasks, type CanonicalTaskRead } from "@/lib/consuela/live-reads";
 import {
   selectTodayEvents,
   choreProgress,
@@ -71,6 +72,14 @@ async function fetchWeather(now: Date): Promise<ScreensaverPayload["weather"]> {
   return wx;
 }
 
+function choreRowsFor(read: CanonicalTaskRead): Array<{ status: string; completedInWeek?: string; due?: string }> {
+  return read.tasks.map((task: any) => ({
+    status: task.completed === true ? "done" : "pending",
+    completedInWeek: task.completedInWeek,
+    due: task.due,
+  }));
+}
+
 export async function composeScreensaverPayload(now: Date = new Date()): Promise<ScreensaverPayload> {
   if (payloadCache && now.getTime() - payloadCache.at < PAYLOAD_TTL_MS) return payloadCache.payload;
 
@@ -79,20 +88,23 @@ export async function composeScreensaverPayload(now: Date = new Date()): Promise
   const weekStart = weekStartForDate(today);
   const weekEnd = addDaysISO(weekStart, 6);
 
-  // One admin session, five reads. A throw here means PB is down → caller 503s.
-  // The Google read is unfiltered on purpose: the collection is
-  // sync-window-bounded (~30d back / 90d fwd) so the list stays small, and a
-  // `start_iso~"today"` contains-match could never express multi-day coverage
-  // — `selectTodayEvents` filters by covered day via `googleEventCoversDay`.
-  const [familyEvents, googleEvents, tasks, meals, briefingRows] = await withAdmin(async (pb) =>
-    Promise.all([
-      pb.collection("events").getFullList({ filter: `date="${today}"`, requestKey: null }),
-      pb.collection("consuela_google_calendar_events").getFullList({ requestKey: null }),
-      pb.collection("tasks").getFullList({ requestKey: null }),
-      pb.collection("meal_plan_entries").getFullList({ filter: `weekOf="${weekStart}"`, requestKey: null }),
-      pb.collection("morning_briefing").getFullList({ filter: `scopeDate="${today}"`, requestKey: null }),
-    ])
-  );
+  const [[familyEvents, googleEvents, meals, briefingRows], taskRead] = await Promise.all([
+    // One admin session, four reads. A throw here means PB is down → caller 503s.
+    // The Google read is unfiltered on purpose: the collection is
+    // sync-window-bounded (~30d back / 90d fwd) so the list stays small, and a
+    // `start_iso~"today"` contains-match could never express multi-day coverage
+    // — `selectTodayEvents` filters by covered day via `googleEventCoversDay`.
+    withAdmin(async (pb) =>
+      Promise.all([
+        pb.collection("events").getFullList({ filter: `date="${today}"`, requestKey: null }),
+        pb.collection("consuela_google_calendar_events").getFullList({ requestKey: null }),
+        pb.collection("meal_plan_entries").getFullList({ filter: `weekOf="${weekStart}"`, requestKey: null }),
+        pb.collection("morning_briefing").getFullList({ filter: `scopeDate="${today}"`, requestKey: null }),
+      ])
+    ),
+    readCanonicalTasks(),
+  ]);
+  if (taskRead.source === "unavailable") throw new Error("task_data_unavailable");
 
   const weather = await fetchWeather(now).catch(() => null);
   const summary = (briefingRows[0] as { summary?: never } | undefined)?.summary ?? null;
@@ -109,7 +121,7 @@ export async function composeScreensaverPayload(now: Date = new Date()): Promise
       weekStart,
       localWeekdayShort(now)
     ),
-    tasks: choreProgress(tasks as never, wk, weekEnd),
+    tasks: choreProgress(choreRowsFor(taskRead), wk, weekEnd),
     briefing: briefingDigest(summary as never),
     weather,
   };

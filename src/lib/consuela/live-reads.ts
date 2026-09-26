@@ -15,7 +15,14 @@
 import { withAdmin } from "@/lib/pb-auth";
 import { localTodayISO, localWeekdayShort } from "@/lib/local-date";
 import { mergeTodaysEvents, mergeEventsRange } from "./todays-events";
-import { readSnapshotTasks } from "@/lib/snapshot-tasks";
+import { readSnapshotTasks, type SnapshotTask } from "@/lib/snapshot-tasks";
+
+export type CanonicalTaskSource = "snapshot" | "pb" | "unavailable";
+
+export interface CanonicalTaskRead {
+  tasks: SnapshotTask[];
+  source: CanonicalTaskSource;
+}
 
 /** Family events for `dayISO` (default today), read live. Degrades to [] when
  *  PB is unreachable. */
@@ -120,24 +127,63 @@ export async function mergedTodaysEvents(dayISO = localTodayISO()) {
   return mergeTodaysEvents(family, google, dayISO);
 }
 
+function taskFromCollectionRow(row: Record<string, any>): SnapshotTask | null {
+  const id = Number(row?.taskId);
+  if (!Number.isSafeInteger(id) || id <= 0) return null;
+  const assignee = typeof row.assignee === "string" ? row.assignee : "";
+  return {
+    id,
+    title: typeof row.title === "string" ? row.title : "task",
+    assignee,
+    assigned: typeof row.assigned === "string" ? row.assigned : assignee,
+    due: row.due ?? null,
+    points: row.points ?? 0,
+    completed: row.completed === true || row.status === "done",
+    completedInWeek: row.completedInWeek ?? null,
+  };
+}
+
+export async function readCanonicalTasks(): Promise<CanonicalTaskRead> {
+  const snapshot = await readSnapshotTasks().then(
+    (tasks) => ({ tasks, source: "snapshot" as const }),
+    () => null
+  );
+  if (snapshot) return snapshot;
+  const replica = await withAdmin(async (pb) =>
+    pb.collection("tasks").getFullList({ requestKey: null })
+  ).then(
+    (rows) => ({
+      tasks: (Array.isArray(rows) ? rows : [])
+        .map(taskFromCollectionRow)
+        .filter((task): task is SnapshotTask => task !== null),
+      source: "pb" as const,
+    }),
+    () => null
+  );
+  if (replica) return replica;
+  return { tasks: [], source: "unavailable" };
+}
+
 /** Pending tasks, read live. Unlike the pbDb listing (capped at 3 for the
- *  Home widget) the chat tool returns every pending row. Degrades to [] when
- *  PB is unreachable — an outage must not break get_dashboard_summary. */
-async function pendingTaskRows(): Promise<any[]> {
+ *  Home widget) the chat tool returns every pending row. */
+async function pendingTaskRows(): Promise<any[] | null> {
   // Read the SNAPSHOT (what the dashboard renders) — the PB `tasks` collection
   // is a derived replica and diverged from it (2026-09-21). Points come from
   // the task itself; the old priority→15/20 guess fabricated numbers.
-  const [taskRows, members] = await Promise.all([
-    readSnapshotTasks(),
-    withAdmin(async (pb) => pb.collection("members").getFullList({ requestKey: null })),
-  ]);
-  return (Array.isArray(taskRows) ? taskRows : [])
-    .filter((t: any) => !t.completed)
+  const read = await readCanonicalTasks();
+  if (read.source === "unavailable") return null;
+  const members = await withAdmin(async (pb) =>
+    pb.collection("members").getFullList({ requestKey: null })
+  ).then((rows) => (Array.isArray(rows) ? rows : []), () => []);
+  const today = localTodayISO();
+  const tomorrow = localTodayISO(new Date(Date.now() + 86400000));
+  return read.tasks
+    .filter((task: any) => !task.completed)
     .map((task: any) => {
       const name = task.assignee || task.assigned;
-      const member = (members || []).find((m: any) => m.fullName === name || m.name === name);
-      const due = task.due === localTodayISO() ? "Today"
-        : task.due === localTodayISO(new Date(Date.now() + 86400000)) ? "Tomorrow"
+      const member = members.find((m: any) => m.fullName === name || m.name === name);
+      const due = task.due === today ? "Today"
+        : task.due === tomorrow ? "Tomorrow"
         : task.due || "Later";
       return {
         id: task.id,
@@ -149,24 +195,12 @@ async function pendingTaskRows(): Promise<any[]> {
     });
 }
 
-export async function livePendingTasks(): Promise<any[]> {
-  try {
-    return await pendingTaskRows();
-  } catch {
-    return [];
-  }
+export async function livePendingTasks(): Promise<any[] | null> {
+  return pendingTaskRows();
 }
 
-/** Pack-only sibling of livePendingTasks (assistant-context tasks zone). Null =
- *  the read FAILED so the context pack can emit an honest unavailable signal —
- *  [] because the family truly has nothing pending stays []. The tool surface
- *  (get_pending_tasks / get_dashboard_summary) keeps the [] degradation above. */
 export async function livePendingTasksForPack(): Promise<any[] | null> {
-  try {
-    return await pendingTaskRows();
-  } catch {
-    return null;
-  }
+  return livePendingTasks();
 }
 
 /** Today's routine schedule, read live. Degrades to [] when PB is down. */
