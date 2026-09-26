@@ -2,6 +2,18 @@ import { db } from "@/db";
 import { groceryCategories } from "@/data/meals";
 import { withAdmin } from "@/lib/pb-auth";
 import { weekKey } from "@/lib/task-utils";
+import {
+  executeInternalTaskCommand,
+  type InternalTaskCommandActor,
+  type InternalTaskCommandResult,
+} from "@/lib/task-commands";
+import {
+  ensureTaskManageHandlersRegistered,
+  taskManageInternalPayload,
+  type AddTaskCommand,
+  type ManageTaskCommand,
+  type UpdateTaskCommand,
+} from "@/lib/task-manage";
 // Task mutations go through the SNAPSHOT (the store the dashboard renders),
 // not the PB `tasks` collection — see src/lib/snapshot-tasks.ts.
 import {
@@ -79,7 +91,12 @@ export interface ToolDefinition {
   };
 }
 
-export type ToolHandler = (args: Record<string, any>) => Promise<string>;
+export type TaskCommandSource = "hermes" | "muse";
+
+export type ToolHandler = (
+  args: Record<string, any>,
+  context?: { source?: TaskCommandSource },
+) => Promise<string>;
 
 export interface Tool {
   definition: ToolDefinition;
@@ -166,7 +183,57 @@ async function adminUpsertMeal(meal: Record<string, unknown>): Promise<{ row: an
   }
 }
 
-async function updateTaskCore(args: any) {
+function assistantTaskCommandActor(source: TaskCommandSource): InternalTaskCommandActor {
+  return { memberId: `assistant:${source}`, name: "Consuela", role: "parent" };
+}
+
+async function runInternalTaskCommand(
+  source: TaskCommandSource,
+  command: ManageTaskCommand,
+): Promise<InternalTaskCommandResult> {
+  ensureTaskManageHandlersRegistered();
+  return executeInternalTaskCommand(
+    {
+      operationId: command.operationId,
+      kind: command.action,
+      actor: assistantTaskCommandActor(source),
+      payload: taskManageInternalPayload(command),
+    },
+    { source },
+  );
+}
+
+function isPetMemberRow(member: any): boolean {
+  return String(member?.role ?? "").trim().toLowerCase() === "pet";
+}
+
+function petAssigneeFailure(name: string) {
+  return {
+    ok: false,
+    reason: "pet_assignee",
+    error: `pets can't be assigned chores — "${name}" is a pet, so nothing was changed`,
+  };
+}
+
+function taskCommandFailure(reason: string | undefined, fallback: string) {
+  const copy: Record<string, string> = {
+    pet_assignee: "pets can't be assigned chores — nothing was changed",
+    unknown_assignee: "unknown member — call get_family_members to see the roster, then retry",
+    unknown_task: "task not found — call get_pending_tasks first",
+    adult_only: "task changes need a grown-up — ask a parent to make this change",
+    member_roster_unavailable: "member data unavailable — call get_family_members first",
+    operation_conflict: "that task operation already did something else — try again",
+    forbidden_task_field: "that change includes a field Consuela is not allowed to set",
+    invalid_task_command: fallback,
+  };
+  return {
+    ok: false,
+    reason: reason ?? "task_command_failed",
+    error: copy[reason ?? ""] ?? "could not save the task to the dashboard — try again",
+  };
+}
+
+async function updateTaskCore(args: any, source: TaskCommandSource) {
   try {
     let newAssignee: { name: string; emoji: any } | null = null;
     if (args.newAssignee) {
@@ -174,7 +241,8 @@ async function updateTaskCore(args: any) {
       if (members === null) return { ok: false, error: "member data unavailable — call get_family_members first" };
       const m = (members || []).find((x: any) => String(x.fullName || x.name || "").toLowerCase().includes(String(args.newAssignee).toLowerCase()));
       if (!m) return { ok: false, error: `unknown member "${args.newAssignee}" — call get_family_members first` };
-      newAssignee = { name: m.fullName || m.name, emoji: m.emoji };
+      if (isPetMemberRow(m)) return petAssigneeFailure(String(m.fullName || m.name));
+      newAssignee = { name: m.name || m.fullName, emoji: m.emoji };
     }
     const patch: Record<string, unknown> = {};
     if (args.newTitle) patch.title = String(args.newTitle).trim();
@@ -184,28 +252,40 @@ async function updateTaskCore(args: any) {
       patch.points = Math.max(1, Math.min(100, p));
     }
     if (args.due && /^\d{4}-\d{2}-\d{2}$/.test(args.due)) patch.due = args.due;
-    if (args.priority) patch.priority = args.priority;
+    if (args.priority && ["low", "medium", "high"].includes(String(args.priority))) patch.priority = String(args.priority);
     if (args.recurring) patch.recurring = ["none", "daily", "weekly"].includes(args.recurring) ? args.recurring : "none";
     if (args.stealable !== undefined) patch.stealable = args.stealable === true;
-    if (newAssignee) {
-      patch.assignee = newAssignee.name;
-      patch.assigneeEmoji = newAssignee.emoji; // raw value into storage (UI renders via Avatar); textEmoji() is for OUTPUT only
-    }
+    if (newAssignee) patch.assignee = newAssignee.name;
     if (Object.keys(patch).length === 0) return { ok: false, error: "no valid fields to update" };
 
-    let mirrored: any = null;
-    const result = await mutateSnapshot<any>((data) => {
-      const row = findSnapshotTask(liveSnapshotTasks(data) as any[], args);
-      if (!row) return { data, result: { ok: false, error: "task not found — call get_pending_tasks first" } };
-      if (row.completed) return { data, result: { ok: false, error: "task is completed — mark it pending in the UI first" } };
-      const before = { title: row.title, assignee: row.assignee, points: row.points, due: row.due, priority: row.priority, recurring: row.recurring, stealable: row.stealable };
-      const next = { ...row, ...patch };
-      mirrored = next;
-      const after = { title: next.title, assignee: next.assignee, points: next.points, due: next.due, priority: next.priority, recurring: next.recurring, stealable: next.stealable };
-      return { data: upsertSnapshotTask(data, next as any), result: { ok: true, taskId: Number(row.id), before, after } };
+    const live = await readSnapshotTasks();
+    const row = findSnapshotTask(live as any[], args);
+    if (!row) return { ok: false, error: "task not found — call get_pending_tasks first" };
+    if (row.completed) return { ok: false, error: "task is completed — mark it pending in the UI first" };
+    const before = { title: row.title, assignee: row.assignee, points: row.points, due: row.due, priority: row.priority, recurring: row.recurring, stealable: row.stealable };
+    const result = await runInternalTaskCommand(source, {
+      action: "update",
+      operationId: createTaskOperationId(),
+      taskId: Number(row.id),
+      patch: patch as UpdateTaskCommand["patch"],
     });
-    if ((result as any).ok && mirrored) void mirrorTaskToCollection("upsert", mirrored);
-    return result;
+    if (!result.ok) return taskCommandFailure(result.reason, "update_task failed — nothing was changed");
+    const task = (result.task ?? {}) as any;
+    return {
+      ok: true,
+      taskId: Number(task.id ?? row.id),
+      before,
+      after: {
+        title: task.title,
+        assignee: task.assignee,
+        points: task.points,
+        due: task.due,
+        priority: task.priority,
+        recurring: task.recurring,
+        stealable: task.stealable,
+      },
+      reconciled: result.reconciled,
+    };
   } catch (e: any) {
     return { ok: false, error: `update_task failed: ${e?.message}` };
   }
@@ -472,10 +552,10 @@ const TOOLS: Tool[] = [
         required: ["title", "assigned_to"],
       },
     },
-    handler: async (args) => {
-      const due = args.due || todayISO();
+    handler: async (args, context) => {
+      const due = /^\d{4}-\d{2}-\d{2}$/.test(String(args.due ?? "")) ? String(args.due) : todayISO();
       const points = Math.max(1, Math.min(100, Number(args.points) || 10));
-      const priority = args.priority || "medium";
+      const priority = ["low", "medium", "high"].includes(String(args.priority)) ? String(args.priority) : "medium";
       const members = await liveMembers();
       if (members === null) {
         return summarize({ ok: false, error: "member data unavailable — call get_family_members first" });
@@ -491,40 +571,41 @@ const TOOLS: Tool[] = [
           error: `unknown member "${args.assigned_to}" — call get_family_members to see the roster, then retry`,
         });
       }
-      const newId = Date.now();
-      const snapshotTask = {
-        id: newId,
-        title: String(args.title).trim(),
-        assignee: match.fullName || match.name,
-        assigneeEmoji: match.emoji,
-        assigned: match.fullName || match.name,
-        due,
-        points,
-        priority,
-        recurring: ["none", "daily", "weekly"].includes(args.recurring) ? args.recurring : "none",
-        stealable: args.stealable === true,
-        category: "chore",
-        universal: false,
-        completed: false,
-      };
-      // Write to the SNAPSHOT (what the dashboard renders) and mirror to the
-      // collection best-effort; adminUpsertTask alone never reached the UI.
-      try {
-        await mutateSnapshot<any>((data) => ({ data: upsertSnapshotTask(data, snapshotTask as any), result: null }));
-      } catch (e: any) {
-        return summarize({ ok: false, error: `Could not persist task to the dashboard: ${e?.message}` });
+      if (isPetMemberRow(match)) {
+        return summarize(petAssigneeFailure(String(match.fullName || match.name)));
       }
-      void mirrorTaskToCollection("upsert", snapshotTask as any);
+      const command: AddTaskCommand = {
+        action: "add",
+        operationId: createTaskOperationId(),
+        task: {
+          title: String(args.title).trim(),
+          assignee: String(match.name || match.fullName),
+          assigneeEmoji: typeof match.emoji === "string" && match.emoji ? match.emoji : "👤",
+          due,
+          points,
+          recurring: ["none", "daily", "weekly"].includes(args.recurring) ? args.recurring : "none",
+          category: "chore",
+          priority: priority as "low" | "medium" | "high",
+          universal: false,
+          stealable: args.stealable === true,
+        },
+      };
+      const result = await runInternalTaskCommand(context?.source ?? "hermes", command);
+      if (!result.ok) {
+        return summarize(taskCommandFailure(result.reason, "add_task failed — nothing was created"));
+      }
+      const task = (result.task ?? {}) as any;
       return summarize({
         ok: true,
-        taskId: newId,
-        id: newId,
-        title: snapshotTask.title,
-        assignee: snapshotTask.assignee,
-        assigneeEmoji: textEmoji(match.emoji),
-        points: snapshotTask.points,
-        due: snapshotTask.due,
-        priority: snapshotTask.priority,
+        taskId: Number(task.id),
+        id: Number(task.id),
+        title: task.title,
+        assignee: task.assignee,
+        assigneeEmoji: textEmoji(task.assigneeEmoji),
+        points: task.points,
+        due: task.due,
+        priority: task.priority,
+        reconciled: result.reconciled,
       });
     },
   },
@@ -548,7 +629,7 @@ const TOOLS: Tool[] = [
         },
       },
     },
-    handler: async (args: any) => summarize(await updateTaskCore(args)),
+    handler: async (args: any, context) => summarize(await updateTaskCore(args, context?.source ?? "hermes")),
   },
   {
     definition: {
