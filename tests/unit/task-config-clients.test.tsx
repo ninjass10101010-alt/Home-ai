@@ -10,7 +10,17 @@ import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue"
 import { readTaskConfig, writeTaskConfig } from "@/lib/task-config-client";
 import RewardSection from "@/components/settings/RewardSection";
 import WeeklyPrizesCard from "@/components/settings/WeeklyPrizesCard";
-import { REWARDS_KEY, loadRewards, readRewardsStamp } from "@/lib/task-utils";
+import {
+  REWARDS_KEY,
+  loadRewards,
+  loadWeeklyPrizes,
+  readRewardsStamp,
+  readWeeklyPrizesStamp,
+  saveRewards,
+  saveWeeklyPrizes,
+  writeRewardsStamp,
+  writeWeeklyPrizesStamp,
+} from "@/lib/task-utils";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -340,6 +350,50 @@ describe("the settings catalog is read, not assumed", () => {
     });
     await settle(150);
     expect(prizeField().value).toBe("Peer prize");
+  });
+
+  it("WeeklyPrizesCard re-reads the pull leg through the shared last-write-wins guard", async () => {
+    const storeStamp = "2026-09-25T09:00:00.000Z";
+    saveWeeklyPrizes([{ id: "local", rank: 1, emoji: "🥇", text: "Local newer" }]);
+    writeWeeklyPrizesStamp(storeStamp);
+    server.snapshot = {
+      tasks: [],
+      weekData: null,
+      weeklyPrizes: [{ id: "server", rank: 1, emoji: "🏆", text: "Server older" }],
+      weeklyPrizesStamp: T_STAMP,
+    };
+
+    const el = await mount(<WeeklyPrizesCard showToast={() => {}} />);
+    await settle(150);
+    const prizeField = () => el.querySelector('input[aria-label="Prize 1 text"]') as HTMLInputElement;
+
+    // The read answers with an OLDER leg than the store already holds, so the
+    // seam refuses it and the visible list stays on the store's newer list.
+    expect(prizeField().value).toBe("Local newer");
+    expect(loadWeeklyPrizes().map((p) => p.text)).toEqual(["Local newer"]);
+    expect(readWeeklyPrizesStamp()).toBe(storeStamp);
+  });
+
+  it("RewardSection re-renders when a pull adopts a newer catalog into the store", async () => {
+    saveRewards([{ id: 1, name: "Ice cream", emoji: "🍦", cost: 15 }]);
+    const el = await mount(<RewardSection showToast={() => {}} />);
+    await settle(150);
+    expect(el.textContent).toContain("Ice cream");
+    expect(el.textContent).not.toContain("Screen time");
+
+    // The shared seam writes REWARDS_KEY in-tab: no REWARDS_UPDATED_EVENT and no
+    // cross-tab `storage` event, so the 60s pulse is the only signal.
+    saveRewards([
+      { id: 1, name: "Ice cream", emoji: "🍦", cost: 15 },
+      { id: 2, name: "Screen time", emoji: "📱", cost: 25 },
+    ]);
+    writeRewardsStamp("2026-09-25T09:00:00.000Z");
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent("consuela-data-refreshed"));
+    });
+    await settle(150);
+
+    expect(el.textContent).toContain("Screen time");
   });
 });
 

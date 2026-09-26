@@ -53,9 +53,11 @@ function getServerRewardsSnapshot(): any[] {
 function subscribeToRewards(onStoreChange: () => void): () => void {
   window.addEventListener(REWARDS_UPDATED_EVENT, onStoreChange);
   window.addEventListener("storage", onStoreChange);
+  window.addEventListener("consuela-data-refreshed", onStoreChange);
   return () => {
     window.removeEventListener(REWARDS_UPDATED_EVENT, onStoreChange);
     window.removeEventListener("storage", onStoreChange);
+    window.removeEventListener("consuela-data-refreshed", onStoreChange);
   };
 }
 
