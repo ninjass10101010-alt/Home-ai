@@ -1207,7 +1207,7 @@ Tap your avatar on Home to open the profile sheet, then tap **🔑 Change PIN**.
 Two kinds of tasks can live there: **universal** chores (marked "Universal task" — anyone can claim them anytime) and chores marked **"⏰ Up for grabs when late"** that went past their due date without being done — the moment that happens they're fair game for anyone. Tap the **🤝 Up for grabs** filter tile on the Tasks tab to see both. Tap a task, confirm who's claiming it, enter that member's PIN — the points go to the claimant (the original assignee keeps the points they already had). Tasks that are late-and-stealable show "was due {day}" in the row. If two people grab the same task at once, the first one wins.
 
 **"Why is there a countdown next to my avatar?"**  
-For family safety, Consuela signs you out automatically after 30 minutes of no activity. The small `⏳ mm:ss` pill in the Home header shows how much time is left, but only appears once you've been idle for at least a minute (so it doesn't distract active use). In the last 30 seconds, a toast appears at the top of the screen: "You'll be signed out in {N}s — tap to stay." Tap the toast (or just keep using the dashboard) to reset the timer back to 30 minutes.
+For family safety, the session is short and role-aware: **parents get 30 minutes, kids and pets get 15**. The small `⏳ mm:ss` pill in the Home header shows how much time is left, but only appears once you've been idle for at least a minute (so it doesn't distract active use). In the last 30 seconds (5 minutes for a kid) a toast appears at the top of the screen: "You'll be signed out in {N}s — tap to stay." Tap the toast, or just keep using the dashboard: activity quietly rotates the session in the background (at most once a minute) so a signed-in person is never logged out mid-use. The **signed cookie is the real boundary** — the countdown is a hint. If the server can't confirm you're still a family member (the account was deleted, or your role changed), the very next call signs you out even if the clock still had time on it.
 
 **"How do I connect Google Calendar + Tasks + Reminders?"**  
 Go to **Settings → Integrations → Connect Google account**. The card shows a 6-character code (e.g. `ABCD-1234`) and a button to open `google.com/device`. On any phone or laptop, sign in to the Google account you want Consuela to sync with, enter the code, and grant Calendar + Tasks access. The dashboard polls every 5 seconds; once you grant access, the card flips to "Connected as you@gmail.com · Synced Xs ago". You can then add a reminder on the Tasks tab, and it will appear in Google Tasks under the "Consuela" list. Calendar events added in Google will appear in the Calendar tab within 5 minutes (or tap **Sync now** for an immediate pull).
@@ -1248,28 +1248,24 @@ Parents set them in **Settings → 🏆 Weekly prizes** — up to three prizes (
 
 ### 2.1 Meal / Recipe Management (Setup • Execution • Troubleshooting)
 
-**Setup (one-time or after DB reset):**
-1. Ensure the in-memory DB is seeded (see `db:seed-emergency` script or manual population in `src/db/index.ts`).
-2. (Optional) Run `npm run db:migrate-node` if using the node migration path.
-3. On first load of `/meals`, the default 7-day plan + sample pantry + grocery items are present.
+**Setup (one-time or after a DB reset):**
+1. Run `npm run pb:seed` against PocketBase — it creates/heals every app collection, the LOCKED_RULES admin-only enforcement, and the schema/indices, and it now **fails closed** if the final live state does not match the contract.
+2. Meals/recipes/grocery/pantry persist in PocketBase (`meal_plan_entries`, `recipes`, `meal_week_archive`, `grocery_list_items`, `pantry_items`) through the sessioned `/api/db/[collection]` gateway. **The live instance starts empty on purpose** — all demo/seed rows were purged on 2026-08-27 — so the first-load experience is the existing empty-state UI, never a sample 7-day plan.
+3. `db:seed-emergency` still exists for emergency-contact rows only; it is not a meal/grocery seeder.
 
 **Daily Execution (what a user actually does in the UI):**
-1. Tap **Meals** tab.
-2. Scroll the horizontal "This Week's Meals" strip (or tap a day to edit).
-3. To add a custom recipe-style meal:
-   - Tap the + or "Add custom" control
-   - Choose emoji from the food emoji grid (or type custom)
-   - Enter name, prep time, servings, calories, macros, tags, full instructions
-   - Assign to a weekday
-4. Tap the big **Sync Pantry & Grocery** button (or the per-item sync).
-5. Switch to **Grocery** tab — new items appear with correct category/aisle/priority. User can toggle "manual override" to prevent future auto-sync from changing them.
-6. From Home or Chat, say to Consuela: "Add salmon for Thursday and put missing items on the grocery list."
+1. Tap **Meals** tab — the three steps are 🍽️ Plan → 🛒 Shop → 🥫 Stock (there is no separate Grocery tab any more; `/meals?tab=grocery` deep-links to Shop).
+2. In **Plan**, navigate the week strip and tap an empty slot to add a meal, or open the folded **Recipe box** for saved recipes and web/file import.
+3. To add a custom meal: pick a slot, choose an emoji, then fill name, prep/cook time, servings, calories, macros, tags and instructions; assign it to the day.
+4. Preview before you commit — **Add missing from meal plan** (Shop) and **Add low & out to grocery list** (Stock) both open a preview sheet; nothing is written until you confirm.
+5. In **Shop**, check items off; 🥫 Send to pantry hands the checked rows to Stock as Plenty with an 8-second Undo; 📌 Pin/Lock a row to stop meal-plan sync from changing it.
+6. From Home or Chat, say to Consuela: "Add salmon for Thursday and put missing ingredients on the grocery list."
 
 **Troubleshooting Tree (use this exact flow when user reports problems):**
-- Sync button does nothing or shows old data → Check that `mealSyncService` is imported and the button calls the bidirectional sync methods. Verify `lastSyncedAt` timestamps in the in-memory store.
-- Grocery items missing after adding meal → Ensure the recipe's `ingredients` array uses names that match pantry/grocery catalog (case-insensitive substring match in current implementation).
-- Custom meal disappears on refresh → Currently in-memory only; tell user "Data is demo-only until we persist to real DB."
-- Full reset: run the seed script + hard reload.
+- Sync button does nothing or shows old data → the preview sheet is confirmation-first by design; check the sheet was actually confirmed, then verify the `lastSyncedAt` stamp on the pending-writes entry.
+- Grocery items missing after adding a meal → the recipe's `ingredients` strings are matched against the pantry/grocery catalog by case-insensitive substring in the current implementation, so a wording mismatch silently skips the item.
+- A custom meal "disappeared" → it is persisted, not in-memory: re-pull the row from `meal_plan_entries` in PocketBase and check whether a stale device push or the same-day rollover replaced it. **Never tell a user their meal data is demo-only** — that is a pre-PocketBase state.
+- Full reset: `npm run pb:seed` (self-healing) + hard reload.
 
 **Deep reference (read first when answering advanced questions):**  
 `MEAL_SYSTEM_ARCHITECTURE.md` (data model, AI-ready fields, sync rules) and `src/app/meals/page.tsx` (the actual UI + service calls).
@@ -1287,10 +1283,11 @@ Parents set them in **Settings → 🏆 Weekly prizes** — up to three prizes (
    GMAIL_USER=your@gmail.com
    GMAIL_APP_PASSWORD=xxxx xxxx xxxx xxxx
    ```
-4. Edit the placeholder contacts in `src/db/index.ts:120` (`emergencyContactsData`):
+4. Add the real contacts in the dashboard UI: **Settings → Emergency contacts**. They persist in PocketBase (`emergency_contacts`, a **parent-only** write policy in the gateway allowlist):
    - Use real E.164 phone numbers (`+15551234567`)
    - Real email addresses
    - Keep `isPrimary: true` for the ones that should receive alerts
+   - There is no `emergencyContactsData` seed array in `src/db/index.ts` any more — do not tell anyone to edit source for contacts; the UI is the editor
 5. (Recommended) Also populate the friendlier list in `src/app/emergency/page.tsx` for the non-critical quick-reference page.
 
 **Button Behavior (what actually happens):**
@@ -1306,7 +1303,7 @@ Parents set them in **Settings → 🏆 Weekly prizes** — up to three prizes (
 - Production: same, but rate-limit yourself (Gmail free tier = 500 emails/day).
 
 **Fallbacks & Limitations (always mention):**
-- No real auth on the button yet — anyone with the app can trigger.
+- The endpoint is PIN-gated: a missing PIN is `401 "PIN required to trigger emergency alert"` and a wrong one is `401 "Invalid PIN"` — there is no unauthenticated trigger path. It is exempt from the middleware session gate (an alert must never be blocked by an expired session), so the PIN is the only credential, and `EMERGENCY_PIN_BYPASS` is read per request.
 - US carriers primarily.
 - SMS delivery can take 1–5 min; email is faster.
 - If Gmail creds missing → clear error "service not configured".
@@ -1319,7 +1316,7 @@ Parents set them in **Settings → 🏆 Weekly prizes** — up to three prizes (
 
 **Agent rule:** Emergency questions are high priority. Never guess. Always say: "First let me read the live Emergency section in AGENTS.md, then we'll follow the exact configuration steps together."
 
-### 2.3 API route surface & access gates (2026-09-15)
+### 2.3 API route surface & access gates (2026-09-25)
 
 The middleware default is **session-required for every `/api/**` path**, minus the
 exempt prefixes that carry their own gate (`/api/auth/`, `/api/cron/` (CRON_SECRET),
@@ -1328,7 +1325,9 @@ exempt prefixes that carry their own gate (`/api/auth/`, `/api/cron/` (CRON_SECR
 `/api/muse/`). `/api/muse/` is exempt *from the session gate* because it
 self-authenticates with its own bearer token — its settings/log routes still
 require an adult dashboard session (or the server-only `ADMIN_SECRET`, or a
-parent PIN). Non-gateway routes with meaningfully different gates:
+parent PIN). A *live* session means the signed cookie's `memberId` was
+re-read from PocketBase and the live role still matches the signed claim — see
+§5.6. Non-gateway routes with meaningfully different gates:
 
 | Route | Method | Gate |
 | --- | --- | --- |
@@ -1340,18 +1339,24 @@ parent PIN). Non-gateway routes with meaningfully different gates:
 | `/api/muse/context` | GET | MUSE bearer (`?scope=meal\|task\|schedule\|all`) |
 | `/api/muse/docs` | GET | Public (protocol docs only, no family data) |
 | `/api/muse/settings`, `settings/rotate`, `settings/revoke-tokens`, `/api/muse/log` | GET/PUT/POST | Parent session **or** `ADMIN_SECRET` **or** parent `x-admin-pin` — never the bearer |
+| `/api/auth/touch` | POST | **Live** session (`requireLiveSession`); re-signs at the role's TTL (`parent` 1800s / `child`+`pet` 900s) and answers `{ ok, member, expiresIn }` — a refusal sets no cookie. Role-aware lifetimes live in `src/lib/session-policy.ts` |
+| `/api/auth/whoami` | GET | **Live** session (`requireLiveSession`) — resolves by the signed `memberId`, not by name |
+| `/api/chat/messages`, `/api/consuela/briefing`, `/api/consuela/suggestions`, `/api/hall-of-fame/celebrate`, `/api/services/runtime`, `/api/tasks/claim` | GET/POST/PATCH | **Live** session (`requireLiveSession`) — a deleted member or any signed-vs-live role drift is refused |
+| `/api/consuela/planner/apply` | POST | **Live parent** session (`requireLiveSession { requireRole: "parent" }`) + the parent PIN |
+| `/api/hermes/chat` | POST | **Live** session when a cookie is present (the guest/child surface is unchanged with no cookie); the planner intent additionally requires a **live parent** session |
 | `/api/rewards/redeem` | POST | Session + member PIN; server-authoritative (reads cost, checks balance, writes the redeem tx) |
 | `/api/members/admin` | GET | Any **live** session revalidated against PocketBase (adult or child; a signed-but-deleted or demoted member is refused) — sanitized roster, every pin stripped |
 | `/api/members/admin` | POST/PATCH/DELETE | Adults only (`authorizeAdminRequest`); POST creates the member and resolves a server-side default PIN because the body may never carry one; DELETE refuses the last parent-role member |
-| `/api/members/profile`, `/api/members/pin` | POST | Current member's PIN (profile also accepts a child session's own avatar-only patch); update is matched by the actor's own PocketBase id and is never re-created. A deleted actor is refused: `/api/members/pin` answers `401 identity_unavailable`, and `/api/members/profile` keeps its opaque `401 Invalid PIN` so the route is not a role oracle |
+| `/api/members/profile`, `/api/members/pin` | POST | Current member's PIN (profile also accepts a **live** child session's own avatar-only patch); update is matched by the actor's own PocketBase id and is never re-created. A deleted actor is refused: `/api/members/pin` answers `401 identity_unavailable`, and `/api/members/profile` keeps its opaque `401 Invalid PIN` so the route is not a role oracle |
 | `/api/ai/health` | GET | Session (any signed-in member; metadata-only chat outcomes — never message text) |
 | `/api/ai/providers` | GET | Session (any signed-in member; key previews only — 2-char suffix, decrypted key never leaves the server) |
 | `/api/ai/providers` | PUT/DELETE | Parent session (`authorizeAdminRequest`) |
 | `/api/ai/models` | POST | Parent session (`authorizeAdminRequest`) — server-side `/v1/models` listing with the stored key |
-| `/api/db/[collection]`, `/api/db/[collection]/[id]` | POST/PATCH/DELETE | Live session + per-collection write policy (`command` / `parent` / `session`) — see §5.6. `tasks`, `week_data` and `week_archive` are command-only: `403 command_only` for every role |
-| `/api/tasks/sync` | POST | Session; **no browser writes** — a `tasks`/`weekData` body is 410 `legacy_sync_write_disabled`, any other body 400 `invalid_body` (GET is the read: rollover + reconcile + snapshot) |
+| `/api/db/[collection]`, `/api/db/[collection]/[id]` | POST/PATCH/DELETE | **Live** session + per-collection write policy (`command` / `parent` / `session`) — see §5.6. `tasks`, `week_data` and `week_archive` are command-only: `403 command_only` for every role |
+| `/api/tasks/manage`, `/api/tasks/config` | POST | Parent session **and** a live PocketBase `role === "parent"` row (`verifyLiveParentSession`; 401 `unauthorized`/`member_missing`, 403 `adult_only`, 503 `member_lookup_failed`) |
+| `/api/tasks/sync` | POST | **Live** session; **no browser writes** — a `tasks`/`weekData` body is 410 `legacy_sync_write_disabled`, any other body 400 `invalid_body` (GET is the read: rollover + reconcile + snapshot) |
 | `/api/tasks/quarantine` | POST | Parent session **and** a live PocketBase `role === "parent"` row (`verifyLiveParentSession`; 401 `unauthorized`/`member_missing`, 403 `adult_only`, 503 `member_lookup_failed`); takes no PIN because it writes nothing to the server — `dry-run` returns the match report only, `export` writes one JSON file to `local-quarantine/`. PB is read-only here (snapshot → `week_data` fallback, `getFullList` only; 503 `canonical_week_unavailable`) |
-| `/api/consuela/briefing` | GET/PATCH | Session (no longer middleware-exempt); PATCH stamps `acknowledgedBy` |
+| `/api/admin/update` | POST | `authorizeAdminRequest`, then **410 `manual_deploy_required`** — it authorizes first, but never invokes Docker, Git, or any filesystem mutation. Deploys are the NAS-local `deploy.sh` runner |
 | `/api/ha/call-service`, `notify-config`, `notify-prefs`, `notify-test` | POST | Parent session (`authorizeAdminRequest`); HA reads stay session-level |
 
 ---
@@ -1416,7 +1421,7 @@ One-sentence goal from the human user's perspective.
 
 **Expected Results / Success Signals**
 - UI: "You should now see a green success toast and the new contact in the list."
-- Backend / DB: "A new row appears in emergencyContactsData with isPrimary: true"
+- Backend / DB: "A new row appears in the PocketBase `emergency_contacts` collection with `isPrimary: true`" (there is no `emergencyContactsData` seed array — contacts are UI-edited and PB-persisted)
 - Logs / Notifications: "Gmail sent folder contains the alert"
 
 **Rollback / Undo**
@@ -1433,17 +1438,18 @@ One-sentence goal from the human user's perspective.
 #### SOP-001: Onboarding a New Family Member (Onboard)
 **Purpose:** Add a person to the family roster so they appear in avatars, get assigned tasks, and can be emergency contacts.
 
-**Prerequisites:** Access to `src/db/index.ts` (or the future real DB UI in Settings).
+**Prerequisites:** A signed-in **parent** session. The roster lives in PocketBase (`members`) and is edited only through the UI — there is no `membersData` seed array to edit.
 
 **Step-by-Step:**
-1. In `membersData` array add a new object with id, name, emoji, color, etc.
-2. (Future) Expose the same form in the Settings → Family section.
-3. For emergency: also add an entry to `emergencyContactsData` if they should receive alerts.
-4. Hard reload the app or trigger any state reset so the new member appears in Home family row and avatar pickers.
+1. Sign in as a parent → **Settings → Family Members** → **Add member** (`POST /api/members/admin`, adults-only; it refuses the last parent-role member on delete).
+2. Fill name, role (`parent` / `child` / `pet`), PIN, and — for a child who should one-tap sign in — **Age** under 10. The Avatar control is the shared `AvatarPicker` (category emoji grid or a photo upload, resized to 256px webp).
+3. The request body may never carry a PIN, so the route resolves a **server-side default credential for that name**; set the real PIN immediately (at creation, or right after via `POST /api/members/pin` using the resolved default as the actor PIN). A member with no usable PIN can never sign in.
+4. For emergency: add them in **Settings → Emergency contacts** (`emergency_contacts`, parent-only write) if they should receive alerts.
+5. The new member appears in the Home family row, avatar pickers, and the roster reads — the browser roster is a PocketBase pull.
 
-**Expected Results:** New avatar shows in the top family strip on Home. The person can be assigned tasks and appears in the Emergency quick-reference page.
+**Expected Results:** New avatar shows in the top family strip on Home. The person can be assigned tasks and appears in the Emergency quick-reference page. Quick smoke: tap their avatar on Home — an under-10 child signs in with no PIN (`POST /api/auth/quick-login`), anyone else gets the PIN modal.
 
-**Agent Notes:** "After adding them in the code, tell the user to pull the latest and hard-refresh. Their emoji will now animate if it matches one of the special cases in AnimatedEmoji.tsx."
+**Agent Notes:** "Add them in Settings → Family Members — the roster lives on the family server, so nothing needs a code change. Give them their real PIN straight away."
 
 #### SOP-004: Change Your Own Profile Picture or PIN (Daily)
 **Purpose:** Let a signed-in family member update their own avatar (emoji or photo) and PIN from a social-media-style profile sheet.
@@ -1464,8 +1470,9 @@ One-sentence goal from the human user's perspective.
 - Switch back to emoji with **🙂 Use emoji** in the same sheet, or ask a parent to edit the member in Settings → Family Members.
 
 **Agent Notes**
-- Parent-side edits for other members remain client-side (Settings → Family Members); parents are trusted admins.
-- Photo storage is inline base64 in the `members.emoji` field (capped at 256px so PB rows stay small).
+- Parent-side edits for other members go through the server too — `POST /api/members/admin` (PATCH/DELETE), adults-only and revalidated live. Never describe a member edit as client-side.
+- The update is matched by the actor's **own PocketBase id**, so a deleted actor is refused rather than silently re-created.
+- Photo storage is inline base64 in the `members.emoji` field (capped at 256px so PB rows stay small), with a 400 000-char field bound so an oversized value can never hit PB's text constraint.
 
 #### SOP-005: Safe GitHub Push + Deploy Prompt (Rollout)
 **Purpose** Ship committed work to the public-ish GitHub remotes WITHOUT leaking credentials, and never leave the human guessing whether the NAS is current.
@@ -1476,7 +1483,7 @@ One-sentence goal from the human user's perspective.
 1. `bash scripts/security/push-safe.sh` from each repo root (add `--nas` for the strict check) — prints only key NAMES on hits, exits 1 on any live value in the push range, staged diff, or worktree.
 2. If it flags: replace the value with `<REDACTED-NAME>` in tracked files, commit the redaction, re-run. If the value EVER reached a pushed commit → treat as burned: advise rotation (NAS admin password / provider key / PB pass) — history rewrite is human-decision only (force-push forbidden otherwise).
 3. `git push origin warm-glass-v2` (Home-ai) → outer repo: stage ONLY the `Home-ai` gitlink (+ own named files), commit `chore(submodule): …`, scan, `git push origin main`. Never `git add .`.
-4. ALWAYS end the turn by asking: **"Deploy to NAS now?"** — the push does not change the running container; only deploy via `DEPLOY_NAS_LOCAL.md` (rename-swap + `npm run pb:seed` after) does.
+4. ALWAYS end the turn by asking: **"Deploy to NAS now?"** — the push does not change the running container. A deploy is the parent repo's `scripts/sync-nas-source.sh` (tar-over-SSH, refuses a dirty Mac tree) handing off to the NAS-local `deploy.sh`, which is Git-free, replacement-only, builds before it replaces, and runs the fail-closed `pb-seed` before it swaps. **Never deploy from inside the app** — `POST /api/admin/update` answers `410 manual_deploy_required`.
 
 **Expected Results:** push-safe prints `CLEAN`, both remotes updated, human gets the deploy question.
 **Rollback:** pushing a redaction commit forward only; never force-push.
@@ -1520,14 +1527,14 @@ One-sentence goal from the human user's perspective.
 
 ## 5. Consuela Admin Capabilities (Self-Management)
 
-Consuela has 5 admin-level tools available through the Ask Consuela chat interface. These tools let her manage the dashboard itself — check for updates, deploy new code, restart containers, and verify database health.
+Consuela has 5 admin-level tools available through the Ask Consuela chat interface. These tools let her manage the dashboard itself — check for updates, report that a deploy must be done by a human, restart containers, and verify database health. **She can no longer deploy code from inside the app.**
 
 ### 5.1 Available Admin Tools
 
 | Tool | Description | Use Case | Safety |
 |------|-------------|----------|--------|
-| `check_for_update` | Checks GitHub for newer commits on `warm-glass-v2` | "Is there a dashboard update available?" | Read-only. Calls `/api/admin/version` internally. |
-| `trigger_update` | Pulls latest code + rebuilds Docker container | "Update the dashboard to the latest version" | **Destructive** — restarts the dashboard (brief downtime). Consuela will confirm with the user before running. |
+| `check_for_update` | Checks the deployed build for newer commits on `warm-glass-v2` | "Is there a dashboard update available?" | Read-only. Calls `/api/admin/version` internally. |
+| `trigger_update` | **Retired** — authorizes, then answers `410 manual_deploy_required` | "Update the dashboard to the latest version" | **No-op by design.** Never invokes Docker, Git, or any filesystem mutation. The answer is "ask a human to run the NAS deploy runner". |
 | `get_container_status` | Lists Docker containers and their health | "Is PocketBase running?" / "Check dashboard health" | Read-only. Calls `/api/admin/containers`. |
 | `restart_container` | Restarts a Docker container by name | "Restart PocketBase, it's not responding" | **Restart** — brief downtime for that service. Only allowed: consuela-dashboard, pocketbase, hermes-agent-2. |
 | `check_pocketbase` | Verifies PocketBase is healthy | "Check if the database is up" | Read-only. Pings PB health endpoint. |
@@ -1545,9 +1552,14 @@ User → Ask Consuela → POST /api/hermes/chat
   → User sees natural-language answer
 ```
 
-**New API routes:**
+Every one of those routes is behind `authorizeAdminRequest`, whose cookie branch
+resolves the session's role **live** against PocketBase (see §5.6) — a demoted
+parent is refused, not trusted on the signed claim.
+
+**API routes:**
 - `src/app/api/admin/containers/route.ts` — GET: lists three key containers (dashboard, PB, Hermes) with state, status, ports, image
 - `src/app/api/admin/restart/route.ts` — POST: restarts a named container from an allow-list
+- `src/app/api/admin/update/route.ts` — POST: authorizes, then `410 manual_deploy_required`; no mutation path exists
 
 **Env vars needed:**
 - `NEXT_PUBLIC_APP_URL=http://localhost:3000` — internal self-referencing URL for tool handler fetches
@@ -1565,7 +1577,7 @@ User → Ask Consuela → POST /api/hermes/chat
 
 Unauthorized requests (missing/wrong bearer) get a 401 `{error:"unauthorized"}`.
 
-**Security (suggestion write routes):** all `/api/consuela/suggestions/*` write routes (PATCH, POST /act) require the `x-consuela-pin` header verified against a family member PIN. GET requests remain public (read-only). The client sends the active session PIN when one exists; when the session has none (after a page reload — the PIN is in-memory only and never persisted — or for guests) the Home "Consuela suggests" widget and the /suggestions page prompt for a family-member PIN, queue the pending dismiss/snooze/act, and retry it once a PIN is submitted. A rejected PIN (401) clears the cached pin and re-prompts with an error; non-401 write failures surface a toast instead of failing silently.
+**Security (suggestion write routes):** all `/api/consuela/suggestions/*` write routes (PATCH, POST /act) require the `x-consuela-pin` header verified against a family member PIN. GET is read-only and still middleware-exempt, but the parent/child filter is derived from the **live** PocketBase role (`requireLiveSession`) — never from the signed claim, so a demoted or deleted session is not treated as a kid. The client sends the active session PIN when one exists; when the session has none (after a page reload — the PIN is in-memory only and never persisted — or for guests) the Home "Consuela suggests" widget and the /suggestions page prompt for a family-member PIN, queue the pending dismiss/snooze/act, and retry it once a PIN is submitted. A rejected PIN (401) clears the cached pin and re-prompts with an error; non-401 write failures surface a toast instead of failing silently.
 
 ### 5.3 What Consuela CAN Do
 
@@ -1584,7 +1596,7 @@ Every bullet is backed by shipped tools in `src/lib/hermes-tools.ts` (`getAllToo
 - ✅ House control (parents) — `ha_list_devices` / `ha_control_device` for lights/switches/scenes/climate/media players/vacuums; alarms + locks excluded at the server
 - ✅ Suggestions + logistics — `get_proactive_suggestions`, `dismiss_suggestion`, `action_suggestion`; `check_conflicts`, `suggest_buffers`, `create_buffers`
 - ✅ Check for dashboard updates and report version info
-- ✅ Trigger dashboard rebuild after user confirmation
+- ✅ Say honestly that a deploy needs a human — `trigger_update` is retired (`410 manual_deploy_required`); she reports, she never deploys
 - ✅ Check container health (dashboard, PocketBase, Hermes)
 - ✅ Restart unhealthy containers
 - ✅ Verify PocketBase database connectivity
@@ -1603,6 +1615,7 @@ Chat history is persisted as user + final assistant content only — tool-call t
 - ❌ Send emergency alerts (human must press the shield button)
 - ❌ Touch the family finances / The Ledger
 - ❌ Access the Docker host or other containers outside the allowed three
+- ❌ **Deploy or update the dashboard** — `POST /api/admin/update` authorizes and then answers `410 manual_deploy_required`; it never touches Docker, Git, or the filesystem. Deploys are the NAS-local runner, driven by a human
 - ❌ Run arbitrary commands or shell access
 - ❌ Modify her own system prompt or tools
 - ❌ Invent family data — an unavailable tool/provider is reported honestly, never papered over with demo rows
@@ -1610,7 +1623,7 @@ Chat history is persisted as user + final assistant content only — tool-call t
 ### 5.5 Common Q&A
 
 **"Consuela, can you update the dashboard?"**  
-"I can check if an update is available and install it. Want me to check first?"
+"I can check whether an update is available. Installing it isn't something I can do from in here any more — that has to be a person running the NAS deploy."
 
 **"Consuela, PocketBase is acting up"**  
 "Let me check PocketBase's health and the container status. I'll let you know what I find."
@@ -1618,17 +1631,73 @@ Chat history is persisted as user + final assistant content only — tool-call t
 **"Consuela, what tools do you have?"**  
 Full explanation of all 52 tools available (reads incl. calendar ranges/routines/history, task CRUD, pantry/routine/recipe writes, memory, house control, admin; point adjustments only via PIN-confirmed proposals). Memory is adults-only; kids get the read-only allowlist (the 17 `get_*` tools). No shell access.
 
-### 5.6 Routing & access-control truths (2026-09-15)
+### 5.6 Routing & access-control truths (2026-09-25)
+
+**PocketBase is the only production identity source.**
+`canonicalMemberFallbacksEnabled()` (`src/lib/member-fallback.ts`) is a
+**two-condition gate**: `NODE_ENV !== "production"` **and**
+`NEXT_PUBLIC_CANONICAL_MEMBER_FALLBACKS === "true"`. Production is therefore
+forced off even if the environment accidentally contains `true`, and the
+built-in canonical roster is a NON-production opt-in only. It is the single
+seam every fallback consumer reads — `mergeMemberFallbacks` (the shared
+server+browser roster merge), `withResolvedPins` in `server-auth.ts` (the
+seed-side default credential can no longer be synthesized for a PB row with no
+stored pin), `db/index.ts`, `db/pb-db.ts` and `calendar-member-snapshot.ts`
+(the Calendar member chips). A PB read failure resolves to **no members at
+all** and authentication fails closed. Never re-derive the production check at
+a call site, and never re-add a client-side roster fallback. **One sanctioned
+exception:** `createMemberRecord` (`POST /api/members/admin`) still resolves the
+seed-side default PIN server-side, because the creation body may never carry a
+pin and a member with no pin could never sign in — the parent sets the real PIN
+at creation or immediately after via `POST /api/members/pin`. That is a
+documented exception to the PB-only rule, not an oversight; do not "fix" it.
+
+**`requireLiveSession` is THE live gate.** `requireLiveSession(request,
+{ requireRole? })` (`src/lib/server-auth.ts`) verifies the HMAC cookie, re-reads
+the member row from PocketBase by the signed `memberId`, and returns **only**
+`{ memberId, name, role }` from live state. Answers: 401 `unauthorized`
+(missing/expired/unverifiable cookie, deleted member), 403
+`session_role_changed` (any signed-vs-live role drift, including an
+out-of-vocabulary live role), 403 `adult_only` (a role was required and does not
+match), 503 `identity_unavailable` (PB unreachable). **A signed role is a claim,
+never authority** — `authorizeAdminRequest` resolves its cookie branch through
+this gate, so a demoted parent is 403 and a deleted one 401. `verifyLiveParentSession`
+(`src/lib/live-member.ts`) is the parent-only sibling for the task command
+routes. Never add a route that authorizes on the signed payload alone.
+
+**Role-aware session lifetimes.** `src/lib/session-policy.ts` is the only
+lifetime vocabulary: `SESSION_ROLES` = `parent | child | pet`,
+`SESSION_TTL_SECONDS_BY_ROLE` = **parent 1800s, child 900s, pet 900s**. The same
+map drives `signSession`, the cookie `maxAge`, and every issuer
+(`/api/auth/login`, `/api/auth/quick-login` — under-10 child quick-login is
+15 minutes). **Never reintroduce a single hardcoded session length.** The
+signed cookie's `exp` is the security boundary; the client countdown is a UX
+hint only.
+
+**`POST /api/auth/touch` rotates, it never extends blindly.** It revalidates
+live, re-signs at the *live* role's TTL, and returns `{ ok, member, expiresIn }`;
+a refusal (401/403/503) sets no cookie. `useAuth` calls it from throttled
+browser activity: at most one non-forced request per 60000 ms, an in-flight
+guard, and a 10 s attempt floor after a failed attempt; a 200 updates the
+success clock and adopts the returned role, 401/403 logs out, and any other
+failure preserves the current expiry. **Known bounds (do not describe these as
+fixed):** the route has **no server-side frequency cap** — the 60 s bound and
+the 10 s floor are client constants only; and across a single page load the
+countdown can display up to one TTL the server has already spent, until the
+first activity reconciles it.
 
 **Per-collection gateway write policy.** The single sessioned gateway
 `/api/db/[collection]` is role-gated per collection (`WRITE_POLICY`/`canWrite` in
-`src/lib/db-gateway.ts`). Reads are unchanged (any session); a missing session is
-still 401 at middleware, and a wrong role is 403 `adult_only`.
+`src/lib/db-gateway.ts`). Writes require a LIVE session; reads are unchanged
+(any session); a missing session is still 401 at middleware, and a wrong role is
+403 `adult_only`.
 
 - **Command-only writes** (`policy === "command"`): `tasks`, `week_data`,
   `week_archive` — refused `403 command_only` for **every** role including parent,
   before any body parse or PocketBase call. The browser no longer writes these at
-  all; they mutate only through the command routes.
+  all; they mutate only through the command routes. The policy is a typed union
+  (`"command" | "parent" | "session"`) so a collection with a missing role entry
+  can never slip past the parent check.
 - **Parent-only writes** (`role === "parent"`): `rewards`, `penalties`,
   `hall_of_fame`, `weekly_prizes`, `family_goals`, `emergency_contacts`,
   `events`, `schedules`, `meal_plan_entries`, `recipes`, `meal_week_archive`,
@@ -1699,12 +1768,14 @@ them as riding the command seam, and migrate them in Wave 3.
 **Parent-only admin auth (pets denied).** `authorizeAdminRequest`
 (`src/lib/admin-auth.ts`) is an **allowlist on `role === "parent"`**: a valid
 session that is child or pet is 403 `adult_only`, and a valid PIN belonging to a
-child/pet is likewise 403 (the roster's third role `pet` has default PIN `0000`,
-so a `!== "child"` denylist would leak). Credentials, in order: `Authorization:
-Bearer $ADMIN_SECRET` (server-only, internal callers) → parent session cookie →
-parent `x-admin-pin`. It guards the `/api/admin/*` routes, members admin,
-services-config/ai-provider writes, the family memory bank, the HA mutating
-routes, and the MUSE settings/log routes.
+child/pet is likewise 403. A `role === "child"` denylist would leak, because the
+roster carries a third role `pet` — never narrow the check to two roles.
+Credentials, in order: `Authorization: Bearer $ADMIN_SECRET` (server-only,
+internal callers) → parent session cookie (**resolved live** through
+`requireLiveSession`, never off the signed claim) → parent `x-admin-pin`. When
+none applies, every request is rejected. It guards the `/api/admin/*` routes,
+members admin, services-config/ai-provider writes, the family memory bank, the
+HA mutating routes, and the MUSE settings/log routes.
 
 **MUSE surface + admin toggle + propose-only invariant.** MUSE is a distinct
 inbound identity, not a config toggle: key (SHA-256 stored) → 24-hour HMAC bearer
@@ -1725,7 +1796,38 @@ rotate/revoke are **not** written to the MUSE audit log (known v1 gap — the
 `GET /api/muse/docs` (also `docs/muse-api.md`).
 
 > **Ops on deploy:** `npm run pb:seed` creates `consuela_muse` +
-> `consuela_muse_log` and carries the briefing `acknowledgedBy` field.
+> `consuela_muse_log` and carries the briefing `acknowledgedBy` field. It is now
+> **fail-closed**: after every heal it re-reads the final live state and throws
+> on any drift (missing collection, a non-null rule, a field missing/typed
+> wrong/required flipped, a text `max`, a number/date `min`/`max`, select
+> values, the autodate `onCreate`/`onUpdate` pair, a missing index), and
+> `scripts/pb-seed.mjs` exits nonzero. The report prints collection and field
+> NAMES only — never a live rule expression or a field value. The
+> `hall_of_fame` de-duplication runs BEFORE the UNIQUE `(member, weekStart)`
+> index is attempted, because PocketBase cannot build that index while duplicate
+> legacy wins exist. Schema changes arrive as a NEW terminal migration
+> (`pb_migrations/1790250000_terminal_locked_task_schema.js`, later than the
+> previous terminal `1788500000`) mounted read-only at
+> `./pb_migrations:/pb_migrations:ro`; it forces every non-system collection back
+> to LOCKED_RULES, reconciles fields to the terminal definition, and its `down`
+> removes only the fields it added. An existing migration is **never** edited.
+> PocketBase is pinned exactly to `ghcr.io/muchobien/pocketbase:0.39.11`.
+
+**Deploys are the NAS-local runner, never an in-app trigger.**
+`POST /api/admin/update` authorizes first and then answers **410
+`manual_deploy_required`** — it never invokes Docker, Git, or any filesystem
+mutation. The sanctioned path is the parent repo's `deploy.sh`, which is
+**Git-free** (the NAS has no version-control binary) and **replacement-only**:
+it requires a staged tar-over-SSH tree plus an env file carrying every required
+KEY by name, builds both images before anything is stopped, starts PocketBase,
+waits for its health, runs the fail-closed `pb-seed`, and only then swaps —
+renaming the live container aside *before* stopping it, with a rollback that can
+never destroy the only serving container. daily-budget deploys only behind a
+healthy dashboard. **Known bounds:** a first-ever install is out of scope (the
+runner aborts honestly), and a replacement that starts and then dies is caught
+only by the real health poll, not by the test fake. `SESSION_COOKIE_SECURE` is
+required as a key and then deliberately overridden to `false` for LAN HTTP —
+**flagged for human sign-off.**
 
 ---
 
@@ -1733,8 +1835,8 @@ rotate/revoke are **not** written to the MUSE audit log (known v1 gap — the
 
 The parent `Dashboard` repo (deployment shell: docker-compose, deploy scripts, PocketBase bits, specs + plans in `docs/superpowers/`) tracks two submodules: **Home-ai** (this app, branch `warm-glass-v2`) and **daily-budget**. The per-feature dance — **mandatory, same session**:
 
-1. **Build + verify in Home-ai** — tests green, `npm run typecheck`, then `git status` + `git diff` review (secrets check: no `.env*` except `.env.example`, no `DEPLOY_NAS_LOCAL.md`, no literal tokens).
-2. **Commit the feature in Home-ai** — conventional message (`feat|fix|docs|chore(scope): …`), and append the CHANGELOG.md entry in the same session (see the header update rules).
+1. **Build + verify in Home-ai** — tests green, `npm run typecheck`, then `git status` + `git diff` review (secrets check: no `.env*` except `.env.example`, no `DEPLOY_NAS_LOCAL.md`, no literal tokens). If a PocketBase collection, field or index changed, the change also needs a **new terminal migration** under the parent's `pb_migrations/` (never an edit to an existing one) and a `pb:seed` run note in the CHANGELOG entry.
+2. **Commit the feature in Home-ai** — conventional message (`feat|fix|docs|chore(scope): …`), and append the CHANGELOG.md entry in the same session (see the header update rules). A docs-only pass commits with `docs(...)` and still updates CHANGELOG/AGENTS.md when a contract changed.
 3. **Push Home-ai** — `bash scripts/security/push-safe.sh` then `git push origin warm-glass-v2`.
 4. **In the parent Dashboard repo** — write the spec/plan doc for brainstormed features (`docs/superpowers/specs|plans/YYYY-MM-DD-*.md`), then bump the submodule pointer + docs in ONE commit: `git add Home-ai <docs> && git commit -m "chore(submodule): Home-ai -> <short summary>"`. Never `git add .`.
 5. **Push the parent** — push-safe scan then `git push origin main`.
@@ -1743,7 +1845,7 @@ The parent `Dashboard` repo (deployment shell: docker-compose, deploy scripts, P
 
 **Local-only (gitignored — never commit):** `.env*` (except `.env.example`), `DEPLOY_NAS_LOCAL.md`, `backups/`, `*.log`, `.agents/` (skills — reinstall via the tracked `skills-lock.json`), `.impeccable/`, `.opencode/`, `.superpowers/`, `pb_data/` + `pocketbase_data/` (live DB state), `.DS_Store`.
 
-**Deploy ≠ push:** pushing to GitHub never changes the running NAS container — always end feature work by asking "Deploy to NAS now?" (runbook: `DEPLOY_NAS_LOCAL.md`, local-only).
+**Deploy ≠ push:** pushing to GitHub never changes the running NAS container — always end feature work by asking "Deploy to NAS now?" The deploy itself is the parent repo's `scripts/sync-nas-source.sh` → NAS-local `deploy.sh` pair (§5.6); `DEPLOY_NAS_LOCAL.md` (local-only, gitignored) holds the appliance-specific runbook and SSH details.
 
 ---
 
