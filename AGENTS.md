@@ -1756,24 +1756,31 @@ credential registry keyed by `operationId`. The stored reward row stays the sole
 authority for the cost — never widen the allowlist to admit a client `cost` or
 `title`. The entry's failure fields are split, and the boundary is exact:
 
-- `body.reason` / `body.code` is the **machine channel** — the route's own
-  classification code. The client deliberately acts on it: it selects
-  retryable / permanent / semantic-duplicate, sets the retry backoff, and a
-  `stale_config` 409 triggers adopting the authoritative catalog. That is the
-  designed contract, and it is the ONLY server input that steers a branch.
-- `body.error` is the **display channel** — a human sentence. It is read at
-  exactly one place (`serverMessageOf`) and lands on `lastErrorMessage`, which
-  exactly one caller renders. It never reaches `reasonOf`, classification, the
-  retry budget, or any credential gate. A body carrying only `error` therefore
-  yields no machine reason at all, and the caller falls back to a value derived
-  from the **status** (`http_<status>`, `unauthorized`, `adult_only`,
-  `operation_conflict`, ...) rather than adopting the sentence.
+- `body.reason` / `body.code` is the **machine channel** and is honoured
+  **unconditionally**. The client deliberately acts on it: it selects
+  retryable / permanent / semantic-duplicate and sets the retry backoff.
+- `body.error` is the **display channel** — normally a human sentence — and is
+  honoured as a machine reason **only when it is a member of the closed
+  `ERROR_CHANNEL_MACHINE_CODES` vocabulary** in `task-operation-outbox.ts`. That
+  exception exists because `/api/tasks/config` and `/api/tasks/manage` express
+  their machine codes ONLY through `error` (their exact response bodies are
+  pinned by `task-config-route.test.ts`, so the codes cannot move to `reason`).
+  The vocabulary is the union of the retryable / permanent / duplicate code sets
+  plus the codes those two routes can emit; it is hand-written because
+  `TaskManageErrorCode` is a type-only union in a server-only module a browser
+  module cannot import at runtime — and `EveryManageCodeIsClassified` makes
+  `npm run typecheck` fail if a new `TaskManageErrorCode` member has no matching
+  decision here, so the list cannot silently rot.
+- A **non-member** `error` yields no machine reason at all, and the caller
+  degrades to a status-derived reason (`http_<status>`, `unauthorized`,
+  `adult_only`, `operation_conflict`, ...). Every `error` — member or not — also
+  lands on `lastErrorMessage`, which one caller renders.
 - `credentialMissing` is a **module-owned boolean**, not a string. It is set
   only by `markAuthRequired(..., deferred: false)` — the one place this module
-  decides a credential is absent — and `runFlush` reads it to skip an entry
-  that cannot be attempted. Because it is never string-matched against
-  `lastErrorReason`, no server response, through either channel, can
-  impersonate that sentinel and silently strand a command.
+  decides a credential is absent — and `runFlush` reads it to skip an entry that
+  cannot be attempted. Because it is never string-matched against
+  `lastErrorReason`, **no server field, through any channel, can move the
+  credential gate.**
 
 **`executeInternalTaskCommand` is the sanctioned server-side command seam.**
 `executeInternalTaskCommand` (`src/lib/task-commands.ts`) is the *only* entry

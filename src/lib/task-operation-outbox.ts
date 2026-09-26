@@ -1,4 +1,5 @@
 import { isRecord, normalizeOperationId } from "@/lib/task-operation-contract";
+import type { TaskManageErrorCode } from "@/lib/task-manage";
 import type {
   SnapshotConfigOperationReceipt,
   SnapshotData,
@@ -262,7 +263,7 @@ const CREDENTIAL_REQUIRED_ACTIONS: Record<string, Set<string>> = {
   "/api/rewards/redeem": new Set(),
 };
 
-const RETRYABLE_REASONS = new Set([
+const RETRYABLE_REASON_CODES = [
   "member_roster_unavailable",
   "ledger_unavailable",
   "snapshot_write_failed",
@@ -272,18 +273,22 @@ const RETRYABLE_REASONS = new Set([
   "projection_reconcile_unavailable",
   "snapshot_unavailable",
   "projection_reconcile_pending",
-]);
+] as const;
 
-const PERMANENT_REASONS = new Set(["operation_conflict", "stale_config"]);
+const PERMANENT_REASON_CODES = ["operation_conflict", "stale_config"] as const;
 
-const DUPLICATE_REASONS = new Set([
+const DUPLICATE_REASON_CODES = [
   "semantic_duplicate",
   "already_completed",
   "already_claimed",
   "already_undone",
   "nothing_to_undo",
   "member_checked_in",
-]);
+] as const;
+
+const RETRYABLE_REASONS: ReadonlySet<string> = new Set(RETRYABLE_REASON_CODES);
+const PERMANENT_REASONS: ReadonlySet<string> = new Set(PERMANENT_REASON_CODES);
+const DUPLICATE_REASONS: ReadonlySet<string> = new Set(DUPLICATE_REASON_CODES);
 
 const EMPTY_SERVER_SNAPSHOT: TaskOutboxEntry[] = Object.freeze<TaskOutboxEntry[]>([]) as TaskOutboxEntry[];
 
@@ -956,19 +961,34 @@ export function taskOutboxReconcileBackoffMs(reconcileAttemptCount: number): num
   );
 }
 
-// Every code this module will accept as a MACHINE reason, whatever field it
-// arrived in. `reason` and `code` are the machine channel by contract; `error`
-// is the display channel, but two command routes (`/api/tasks/config`,
-// `/api/tasks/manage`) can express a machine code ONLY through `error` — their
-// exact response bodies are pinned by the route suites — so `error` is honoured
-// here ONLY when it is a member of this closed vocabulary. A human sentence is
-// never a member, which is what keeps a display string out of classification, out
-// of the retry budget and away from every sentinel below. Anything unrecognised
-// yields "" and the caller falls back to a value derived from the STATUS.
-const ERROR_CHANNEL_MACHINE_CODES = new Set<string>([
-  ...RETRYABLE_REASONS,
-  ...PERMANENT_REASONS,
-  ...DUPLICATE_REASONS,
+/**
+ * The codes this module will accept as a MACHINE reason when the route delivered
+ * it through the DISPLAY channel (`error`) rather than `reason` / `code`.
+ *
+ * `error` is the human channel by contract, but `/api/tasks/config` and
+ * `/api/tasks/manage` can express a machine code ONLY through it — their exact
+ * response bodies are pinned by `task-config-route.test.ts`, so the codes cannot
+ * be moved to `reason` without rewriting those assertions. `error` is therefore
+ * honoured here ONLY when it is a member of this closed vocabulary. A human
+ * sentence is never a member, and neither is any sentinel this module owns, so a
+ * display string can never reach classification, the retry budget or the
+ * credential gate. An unrecognised `error` yields "" and the caller degrades to a
+ * status-derived reason.
+ *
+ * The list is hand-written because `TaskManageErrorCode` is a type-only union in
+ * a server-only module (`node:crypto`, `pb-auth`) that a browser module cannot
+ * import at runtime. `EveryManageCodeIsClassified` below is what keeps the
+ * hand-written list honest: adding a member to `TaskManageErrorCode` without
+ * deciding it here is a `tsc` failure, not a silently degraded reason string.
+ *
+ * `unknown-task` (hyphenated) is deliberately absent: it appears only in the
+ * approve route's `reason`, which is honoured unconditionally. `invalid_task_field`
+ * is gone because no route emits it.
+ */
+const ERROR_CHANNEL_CODE_LIST = [
+  ...RETRYABLE_REASON_CODES,
+  ...PERMANENT_REASON_CODES,
+  ...DUPLICATE_REASON_CODES,
   "adult_only",
   "config_natural_key_conflict",
   "config_store_unreachable",
@@ -979,13 +999,22 @@ const ERROR_CHANNEL_MACHINE_CODES = new Set<string>([
   "invalid_current_config",
   "invalid_resulting_config",
   "invalid_task_command",
-  "invalid_task_field",
   "member_lookup_failed",
   "member_missing",
+  "pet_assignee",
   "pin_required",
-  "unknown-task",
+  "unknown_assignee",
+  "unknown_task",
+  "unsupported_task_command",
   "unauthorized",
-]);
+] as const;
+
+const ERROR_CHANNEL_MACHINE_CODES: ReadonlySet<string> = new Set(ERROR_CHANNEL_CODE_LIST);
+
+type ErrorChannelMachineCode = (typeof ERROR_CHANNEL_CODE_LIST)[number];
+type ManageCodeAwaitingDecision = Exclude<TaskManageErrorCode, ErrorChannelMachineCode>;
+type AssertNever<T extends never> = T;
+export type EveryManageCodeIsClassified = AssertNever<ManageCodeAwaitingDecision>;
 
 function machineCode(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
