@@ -412,7 +412,7 @@ export default function RewardsShop() {
       if (entry.status === "failed" || entry.status === "auth-required") {
         cancelTaskOutboxEntry(operationId);
         parentApprovalRef.current = null;
-        setPinError(entry.lastErrorReason || "That redemption could not go through.");
+        setPinError(entry.lastErrorMessage || entry.lastErrorReason || "That redemption could not go through.");
         setPin("");
         setRedeemOperationId("");
         return;

@@ -146,32 +146,54 @@ function buttonByText(text: string): HTMLButtonElement | undefined {
   return Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.includes(text)) as HTMLButtonElement | undefined;
 }
 
-async function clickRewardCard(labelPrefix: string) {
+async function waitUntil(assertion: () => void) {
+  await vi.waitFor(
+    async () => {
+      await act(async () => { await Promise.resolve(); });
+      assertion();
+    },
+    { timeout: 5000, interval: 10 },
+  );
+}
+
+function pinInputByLabel(ariaLabel: string): HTMLInputElement | null {
+  return document.querySelector(`input[aria-label="${ariaLabel}"]`);
+}
+
+function outboxEntry(operationTitle: string) {
+  return listTaskOutbox().find((entry) => entry.displayTarget.title === operationTitle);
+}
+
+async function clickRewardCard(labelPrefix: string, opened: string) {
   const card = document.querySelector(`[aria-label^="${labelPrefix}"]`) as HTMLElement;
   expect(card).not.toBeNull();
   await act(async () => { card.click(); });
-  await settle();
+  await waitUntil(() => expect(pinInputByLabel(opened)).not.toBeNull());
 }
 
 async function fillPin(ariaLabel: string, value: string) {
-  const input = document.querySelector(`input[aria-label="${ariaLabel}"]`) as HTMLInputElement;
+  const input = pinInputByLabel(ariaLabel);
   expect(input).not.toBeNull();
-  await act(async () => { setInputValue(input, value); });
+  await act(async () => { setInputValue(input!, value); });
+  await waitUntil(() => expect(pinInputByLabel(ariaLabel)?.value).toBe(value));
 }
 
-async function pressButton(text: string) {
+async function pressButton(text: string, settled: () => void) {
   const button = buttonByText(text);
   expect(button).toBeTruthy();
   await act(async () => { button!.click(); });
-  await settle(150);
+  await waitUntil(settled);
 }
 
-async function redeemBigRewardApproved() {
-  await clickRewardCard("Movie night — 150 points");
+function redeemsOnTheWire(): number {
+  return posted.filter((entry) => entry.url.includes("/api/rewards/redeem")).length;
+}
+
+async function approveBigReward() {
+  await clickRewardCard("Movie night — 150 points", "Parent PIN");
   await fillPin("Parent PIN", "0000");
-  await pressButton("Approve");
+  await pressButton("Approve", () => expect(pinInputByLabel("Your 4-digit PIN")).not.toBeNull());
   await fillPin("Your 4-digit PIN", "1234");
-  await pressButton("Redeem");
 }
 
 describe("RewardsShop parent approval gate (>100pt rewards)", () => {
@@ -363,11 +385,11 @@ describe("RewardsShop redemption acknowledgment (Wave 3 Task 4)", () => {
     await settle();
 
     const before = JSON.parse(JSON.stringify(store.week));
-    await clickRewardCard("Movie night — 150 points");
-    await fillPin("Parent PIN", "0000");
-    await pressButton("Approve");
-    await fillPin("Your 4-digit PIN", "1234");
-    await pressButton("Redeem");
+    await approveBigReward();
+    await pressButton("Redeem", () => {
+      const entry = outboxEntry("Movie night");
+      expect(entry?.status).toBe("retrying");
+    });
 
     expect(store.saveWeekData).not.toHaveBeenCalled();
     expect(store.week).toEqual(before);
@@ -384,18 +406,15 @@ describe("RewardsShop redemption acknowledgment (Wave 3 Task 4)", () => {
     await renderAsync(<RewardsShop />);
     await settle();
 
-    await clickRewardCard("Movie night — 150 points");
-    await fillPin("Parent PIN", "0000");
-    await pressButton("Approve");
-    await fillPin("Your 4-digit PIN", "1234");
-    await pressButton("Redeem");
+    await approveBigReward();
+    await pressButton("Redeem", () => expect(outboxEntry("Movie night")?.status).toBe("retrying"));
     expect(listTaskOutbox()).toHaveLength(1);
 
     redeemResult = {
       status: 202,
       body: { ok: true, applied: true, duplicate: false, reconciled: false, weekData: REDEEMED_WEEK },
     };
-    await pressButton("Redeem");
+    await pressButton("Redeem", () => expect(listTaskOutbox()).toHaveLength(0));
 
     const redeems = posted.filter((entry) => entry.url.includes("/api/rewards/redeem"));
     expect(redeems).toHaveLength(1);
@@ -424,11 +443,11 @@ describe("RewardsShop redemption acknowledgment (Wave 3 Task 4)", () => {
     await renderAsync(<RewardsShop />);
     await settle();
 
-    await clickRewardCard("Movie night — 150 points");
-    await fillPin("Parent PIN", "0000");
-    await pressButton("Approve");
-    await fillPin("Your 4-digit PIN", "1234");
-    await pressButton("Redeem");
+    await approveBigReward();
+    await pressButton("Redeem", () => {
+      expect(store.saveWeekData).toHaveBeenCalled();
+      expect(listTaskOutbox()).toHaveLength(0);
+    });
 
     expect(document.body.textContent || "").toContain("Redeemed!");
     expect(listTaskOutbox()).toHaveLength(0);
@@ -449,7 +468,8 @@ describe("RewardsShop redemption acknowledgment (Wave 3 Task 4)", () => {
     await renderAsync(<RewardsShop />);
     await settle();
 
-    await redeemBigRewardApproved();
+    await approveBigReward();
+    await pressButton("Redeem", () => expect(redeemsOnTheWire()).toBe(1));
 
     const redeems = posted.filter((entry) => entry.url.includes("/api/rewards/redeem"));
     expect(redeems).toHaveLength(1);
@@ -474,9 +494,9 @@ describe("RewardsShop redemption acknowledgment (Wave 3 Task 4)", () => {
     await renderAsync(<RewardsShop />);
     await settle();
 
-    await clickRewardCard("Ice cream trip — 40 points");
+    await clickRewardCard("Ice cream trip — 40 points", "Your 4-digit PIN");
     await fillPin("Your 4-digit PIN", "1234");
-    await pressButton("Redeem");
+    await pressButton("Redeem", () => expect(redeemsOnTheWire()).toBe(1));
 
     const redeems = posted.filter((entry) => entry.url.includes("/api/rewards/redeem"));
     expect(redeems).toHaveLength(1);
