@@ -14,7 +14,6 @@ const h = vi.hoisted(() => ({
   groceryThrows: false,
   insertedMeals: [] as any[],
   upsertedRecipes: [] as any[],
-  syncAllTasksToPB: vi.fn(async () => ({})),
 }));
 
 vi.mock("@/db", () => ({
@@ -40,8 +39,11 @@ vi.mock("@/db", () => ({
   },
 }));
 
+// Only the non-task migration collections survive here. The whole
+// `sync*ToPB` family is gone, so there is nothing left to spy on: a task, week
+// or ledger leg here would be a writer the outbox/command routes do not own,
+// and the Settings toast would report a persistence that never happened.
 vi.mock("@/lib/task-utils", () => ({
-  syncAllTasksToPB: h.syncAllTasksToPB,
   syncFamilyGoalToPB: async () => ({}),
 }));
 
@@ -56,7 +58,6 @@ beforeEach(() => {
   h.groceryThrows = false;
   h.insertedMeals = [];
   h.upsertedRecipes = [];
-  h.syncAllTasksToPB.mockClear();
 });
 
 describe("pushLocalToPB honest counts", () => {
@@ -158,6 +159,12 @@ describe("pushLocalToPB honest counts", () => {
       "family_goals",
       "emergency_contacts",
     ]);
-    expect(h.syncAllTasksToPB).not.toHaveBeenCalled();
+    // No task / week / ledger / reward / weekly-config leg may reappear: those
+    // collections are command-only now, and reporting a push for one of them
+    // would be a lie about where the data lives.
+    expect(collections).not.toContain("tasks/leaderboard (6 collections)");
+    for (const commandOnly of ["tasks", "week_data", "week_archive", "rewards", "penalties", "weekly_prizes"]) {
+      expect(collections).not.toContain(commandOnly);
+    }
   });
 });
