@@ -422,6 +422,7 @@ export default function TasksPage() {
   // the approval step and the redemption command, and is cleared the moment the
   // command is queued — it is never React state, storage, or a render value.
   const parentApprovalPinRef = useRef<string>("");
+  const parentApprovalNameRef = useRef<string>("");
   const [approvalTaskId, setApprovalTaskId] = useState<number | null>(null);
   const [approvalMode, setApprovalMode] = useState<"approve" | "sendback" | "approve-all">("approve");
   // P0: deleting a family chore is destructive + cross-device — confirm first
@@ -861,6 +862,7 @@ export default function TasksPage() {
         return;
       }
       parentApprovalPinRef.current = parentApprovalPin;
+      parentApprovalNameRef.current = parent.fullName;
       setPinReward(parentApprovalReward);
       setParentApprovalReward(null);
       setParentApprovalPin("");
@@ -1094,7 +1096,11 @@ export default function TasksPage() {
         queueCommand({
           route: "/api/rewards/redeem",
           action: "redeem",
-          payload: { rewardId: pinReward.id, memberName: normalizedName },
+          payload: {
+            rewardId: pinReward.id,
+            memberName: normalizedName,
+            ...(parentApprovalNameRef.current ? { parentName: parentApprovalNameRef.current } : {}),
+          },
           displayTarget: { kind: "config", title: pinReward.name },
           credential: {
             pin: pinInput,
@@ -1102,6 +1108,7 @@ export default function TasksPage() {
           },
         });
         parentApprovalPinRef.current = "";
+        parentApprovalNameRef.current = "";
         setPinInput("");
         setPinSuccess(
           `${pinReward.emoji} ${normalizedName.split(" ")[0]} redeeming ${pinReward.name} — the family server confirms the ${cost}pts.`,
