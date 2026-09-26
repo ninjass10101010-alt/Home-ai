@@ -664,6 +664,54 @@ describe("a redemption is adopted only on a 200 or a 202", () => {
     expect(listTaskOutbox()[0].credentialMissing).not.toBe(true);
   });
 
+  it("every code the error-only command routes can emit is honoured through `error`", async () => {
+    // `/api/tasks/config` and `/api/tasks/manage` can express a machine code ONLY
+    // through `error`. Each of these must therefore classify, and must NOT decay
+    // to the `http_<status>` fallback. Table-driven so a REMOVED member is caught
+    // as loudly as an added one; `npm run typecheck` catches an undecided NEW code
+    // in `TaskManageErrorCode`.
+    const cases = [
+      { code: "pet_assignee", status: 400 },
+      { code: "unknown_assignee", status: 400 },
+      { code: "unknown_task", status: 404 },
+      { code: "unsupported_task_command", status: 400 },
+      { code: "invalid_task_command", status: 400 },
+      { code: "forbidden_task_field", status: 400 },
+      { code: "forbidden_config_field", status: 400 },
+      { code: "invalid_config_command", status: 400 },
+      { code: "invalid_current_config", status: 422 },
+      { code: "invalid_resulting_config", status: 422 },
+      { code: "config_natural_key_conflict", status: 409 },
+      { code: "stale_config", status: 409 },
+      { code: "config_store_unreachable", status: 502 },
+      { code: "task_store_unavailable", status: 503 },
+      { code: "member_roster_unavailable", status: 503 },
+      { code: "adult_only", status: 403 },
+      { code: "unauthorized", status: 401 },
+    ];
+
+    for (const { code, status } of cases) {
+      const harness = makePb();
+      mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+      const posted: PostedRequest[] = [];
+      const operationId = `op-error-code-${code}`;
+      redeemEntry(operationId, { parentName: PARENT });
+      rememberTaskCommandCredential(operationId, { pin: MEMBER_PIN, parentPin: PARENT_PIN });
+
+      await flushTaskOutbox(harnessDriver(harness, posted, async () => ({
+        status,
+        body: { ok: false, operationId, error: code },
+      })));
+
+      const entry = listTaskOutbox()[0];
+      expect(entry, code).toBeDefined();
+      expect(entry.lastErrorReason, code).toBe(code);
+      expect(entry.lastErrorReason, code).not.toBe(`http_${status}`);
+      expect(entry.lastErrorMessage, code).toBe(code);
+      removeTaskOutboxEntry(operationId);
+    }
+  });
+
   it("a retryable 5xx with retryable:true and no reason keeps the status-derived machine reason", async () => {
     const harness = makePb();
     mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
