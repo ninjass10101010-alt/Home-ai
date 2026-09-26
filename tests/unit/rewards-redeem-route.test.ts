@@ -402,6 +402,13 @@ describe("POST /api/rewards/redeem — canonical ledger seam", () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true, applied: false, duplicate: true });
+    expect(ledger.calls).toHaveLength(1);
+    expect(ledger.calls[0].operation.operationId).toBe("op-replay");
+    expect(ledger.calls[0].operation.source).toBe("reward-redeem");
+    expect(ledger.calls[0].operation.actorId).toBe("member-a");
+    expect(ledger.calls[0].operation.entries).toEqual([
+      { type: "redeem", member: "Member A", amount: -15, description: "Redeemed: Ice cream (-15pts)" },
+    ]);
   });
 
   it("never reads or writes week_data itself", async () => {
