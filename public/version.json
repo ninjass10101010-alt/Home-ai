@@ -1,7 +1,7 @@
 {
-  "hash": "79d4f93b03b14fb980f21e8281c7347657f6ce33",
-  "short": "79d4f93",
-  "message": "fix(deploy): name the built images so the runner can start them",
-  "date": "2026-09-25 21:48:09 -0400",
+  "hash": "02ad3caa05ec2f9d9f74985fffa17ba9e4c7ee45",
+  "short": "02ad3ca",
+  "message": "fix(leaderboard): stop fabricating levels and all-time totals",
+  "date": "2026-09-26 13:48:45 -0400",
   "author": "GarciaFam"
 }
