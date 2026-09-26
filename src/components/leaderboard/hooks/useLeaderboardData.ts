@@ -4,7 +4,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { db } from "@/db";
 import type { LeaderboardEntry, WeekData, Task, HallOfFameEntry } from "@/types/tasks";
-import { getLevel, BADGES } from "@/types/tasks";
 import {
   loadWeekData,
   loadTasks,
@@ -12,13 +11,13 @@ import {
   getThisWeeksCompletedDates,
   getDaysUntilWeekReset,
   getPreviousWeekRanks,
-  getMemberAllTimePoints,
-  getMemberAllTimeCompletions,
   loadHallOfFame,
   loadHallOfFameMerged,
   loadPreviousWeekRanksMerged,
   todayMondayISO,
 } from "@/lib/task-utils";
+import { useAllTimeTotals, type AllTimeReadState } from "@/hooks/useAllTimeTotals";
+import { earnedBadgeEmojis, resolveAllTimeLevel } from "@/components/leaderboard/level";
 
 // Same list, same content → keep the previous reference (no re-render when
 // the async downlink confirms what the synchronous local read already showed).
@@ -51,9 +50,11 @@ export interface LeaderboardData {
   daysUntilReset: number;
   previousRanks: Record<string, number>;
   hall: HallOfFameEntry[];
+  allTime: { state: AllTimeReadState; updatedAt: string | null };
 }
 
 export function useLeaderboardData() {
+  const allTime = useAllTimeTotals();
   const [mounted, setMounted] = useState(false);
   const [weekData, setWeekData] = useState<WeekData | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -137,14 +138,15 @@ export function useLeaderboardData() {
       .map((m: any) => {
         const name = m.fullName;
         const weeklyPoints = weekData.points[name] || 0;
-        const allTimePoints = getMemberAllTimePoints(name, weekData);
-        const allTimeComps = getMemberAllTimeCompletions(name, tasks, weekData);
+        const allTimeTotal = allTime.totals[name];
+        const allTimePoints = allTimeTotal?.points ?? null;
+        const allTimeComps = allTimeTotal?.completions ?? null;
         // Streaks are per-member: filter this week's completion dates to THIS
         // member before scoring (calculateRealStreak's documented contract —
         // an aggregate would hand every member the family's combined streak).
         const streak = calculateRealStreak(name, weekData, getThisWeeksCompletedDates(tasks, name));
-        const { level, title, emoji, progress } = getLevel(allTimePoints);
-        const earnedBadges = BADGES.filter(b => b.condition(allTimePoints, streak, allTimeComps)).map(b => b.emoji);
+        const { known, level, title, emoji, progress } = resolveAllTimeLevel(allTimePoints);
+        const earnedBadges = earnedBadgeEmojis(allTimePoints, streak, allTimeComps);
         // Weekly Champ history is out-of-band (BADGES.week_champ condition stays
         // false): a rank-1 Hall of Fame entry earns the 🥇 career badge.
         const hasWeeklyChamp = hall.some(h => h.member === name && h.rank === 1);
@@ -159,6 +161,7 @@ export function useLeaderboardData() {
           level,
           levelTitle: title,
           levelEmoji: emoji,
+          levelKnown: known,
           progressToNext: progress,
           badges: earnedBadges,
           allTimePoints,
@@ -173,7 +176,7 @@ export function useLeaderboardData() {
       })
       .sort((a, b) => b.points - a.points || a.name.localeCompare(b.name))
       .map((e, i) => ({ ...e, rank: i + 1 }));
-  }, [weekData, tasks, hall, mounted]);
+  }, [weekData, tasks, hall, mounted, allTime.totals]);
 
   return {
     data: {
@@ -183,6 +186,7 @@ export function useLeaderboardData() {
       daysUntilReset,
       previousRanks,
       hall,
+      allTime: { state: allTime.state, updatedAt: allTime.updatedAt },
     } as LeaderboardData,
     mounted,
   };

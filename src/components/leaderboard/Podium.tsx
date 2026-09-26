@@ -3,8 +3,16 @@
 import Avatar from "@/components/ui/Avatar";
 import IconButton from "@/components/ui/IconButton";
 import RankArrow from "./RankArrow";
+import AllTimeValue from "./AllTimeValue";
+import { entryLevelLabel } from "./level";
 import { prizeForRank } from "@/lib/task-utils";
+import type { AllTimeReadState } from "@/hooks/useAllTimeTotals";
 import type { WeeklyPrize } from "@/types/tasks";
+
+export interface AllTimeReadProp {
+  state: AllTimeReadState;
+  updatedAt: string | null;
+}
 
 interface PodiumSlotProps {
   entry: any;
@@ -19,11 +27,12 @@ interface PodiumSlotProps {
   onAdjust: () => void;
   isAdmin: boolean;
   prizes: WeeklyPrize[];
+  allTimeRead: AllTimeReadProp;
 }
 
 function PodiumSlot({
   entry, rank, heightClass, medalEmoji, bgClass, isYou, color, previousRank,
-  onClick, onAdjust, isAdmin, prizes,
+  onClick, onAdjust, isAdmin, prizes, allTimeRead,
 }: PodiumSlotProps) {
   // Weekly-prize ribbon: a zero-point fresh week shows no ribbons (the "crown
   // is up for grabs" zero-state keeps owning that moment).
@@ -68,11 +77,13 @@ function PodiumSlot({
             </div>
           )}
           {showAllTime && (
-            <div className="text-[10px] text-text-muted">{entry.allTimePoints} all-time</div>
+            <div className="text-[10px] text-text-muted text-center">
+              <AllTimeValue points={entry.allTimePoints} read={allTimeRead.state} updatedAt={allTimeRead.updatedAt} />
+            </div>
           )}
           <div className="flex items-center gap-1.5">
             {entry.streak > 0 && <span className="text-xs text-[var(--color-accent-amber)] font-semibold">🔥{entry.streak}d</span>}
-            <span className="text-xs text-text-muted">{entry.levelEmoji} {entry.levelTitle}</span>
+            <span className="text-xs text-text-muted">{entryLevelLabel(entry)}</span>
             <RankArrow currentRank={rank} previousRank={previousRank} />
           </div>
         </div>
@@ -102,11 +113,12 @@ interface PodiumProps {
   onOpenSheet: (name: string) => void;
   onAdjust: (name: string) => void;
   isAdmin: boolean;
+  allTimeRead: AllTimeReadProp;
 }
 
 export default function Podium({
   entries, prizes, previousRanks, isYou, getMemberColor,
-  onOpenSheet, onAdjust, isAdmin,
+  onOpenSheet, onAdjust, isAdmin, allTimeRead,
 }: PodiumProps) {
   if (entries.length === 0) return null;
 
@@ -129,6 +141,7 @@ export default function Podium({
           onAdjust={() => onAdjust(second.name)}
           isAdmin={isAdmin}
           prizes={prizes}
+          allTimeRead={allTimeRead}
         />
       )}
       <PodiumSlot
@@ -140,6 +153,7 @@ export default function Podium({
         onAdjust={() => onAdjust(first.name)}
         isAdmin={isAdmin}
         prizes={prizes}
+        allTimeRead={allTimeRead}
       />
       {third && (
         <PodiumSlot
@@ -151,6 +165,7 @@ export default function Podium({
           onAdjust={() => onAdjust(third.name)}
           isAdmin={isAdmin}
           prizes={prizes}
+          allTimeRead={allTimeRead}
         />
       )}
     </div>

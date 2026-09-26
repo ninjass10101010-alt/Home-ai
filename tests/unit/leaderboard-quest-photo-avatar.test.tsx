@@ -78,6 +78,7 @@ describe("MemberSheet pending-task photo avatars", () => {
         entry={{ name: "Emily", emoji: PHOTO, streak: 2, rank: 1, levelEmoji: "⭐", levelTitle: "Champ" }}
         allTimePoints={120}
         allTimeComps={30}
+        allTimeRead={{ state: "authoritative", updatedAt: null }}
         weeklyPoints={40}
         pendingTasks={[{ id: 1, title: "Feed the cat", assignee: "Emily", assigneeEmoji: "👤", points: 5 }]}
         affordableRewards={[]}
