@@ -25,7 +25,10 @@ vi.mock("@/lib/admin-auth", async (importOriginal) => {
   return { ...actual, authorizeAdminRequest: mocks.authorizeAdminRequest };
 });
 
-vi.mock("child_process", () => ({ execSync: mocks.execSync }));
+vi.mock("child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("child_process")>();
+  return { ...actual, execSync: mocks.execSync };
+});
 
 // version route reads fs + GitHub; stub both to stay hermetic
 vi.mock("fs/promises", () => ({ readFile: mocks.readFile }));
@@ -118,6 +121,21 @@ describe("admin routes auth gate", () => {
     expect(mocks.readFile).not.toHaveBeenCalled();
   });
 
+  it("returns 410 for a real ADMIN_SECRET bearer and spawns no process", async () => {
+    vi.stubEnv("ADMIN_SECRET", "adm-s3cret");
+    const res = await updatePOST(
+      req({ headers: { authorization: "Bearer adm-s3cret" }, body: {} })
+    );
+
+    expect(res.status).toBe(410);
+    expect(await res.json()).toEqual({
+      ok: false,
+      error: "manual_deploy_required",
+    });
+    expect(mocks.execSync).not.toHaveBeenCalled();
+    expect(mocks.readFile).not.toHaveBeenCalled();
+  });
+
   it("returns 410 for an authorized parent PIN and spawns no process", async () => {
     mocks.verifyPinAgainstAnyMember.mockResolvedValue({ id: "dad", role: "parent" });
     const res = await updatePOST(
@@ -134,4 +152,20 @@ describe("admin routes auth gate", () => {
     expect(mocks.restartContainer).not.toHaveBeenCalled();
     expect(mocks.readFile).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["version", () => versionGET(req())],
+    ["update", () => updatePOST(req({ body: {} }))],
+  ])(
+    "%s answers 401 when a refusal carries no status",
+    async (_name, call) => {
+      mocks.authorizeAdminRequest.mockResolvedValue({
+        ok: false,
+        error: "unauthorized",
+      });
+      const res = await call();
+      expect(res.status).toBe(401);
+      expect((await res.json()).error).toBe("unauthorized");
+    }
+  );
 });
