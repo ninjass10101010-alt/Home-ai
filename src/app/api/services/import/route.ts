@@ -14,7 +14,10 @@ export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest) {
   const auth = await authorizeAdminRequest(request);
   if (!auth.ok) {
-    return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
+    return NextResponse.json(
+      { ok: false, error: auth.error },
+      { status: auth.status ?? 401 },
+    );
   }
 
   try {

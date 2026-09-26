@@ -20,7 +20,7 @@ const MAX_NAME_LENGTH = 64;
 export async function POST(req: Request) {
   const auth = await authorizeAdminRequest(req);
   if (!auth.ok) {
-    return NextResponse.json({ error: auth.error }, { status: auth.status });
+    return NextResponse.json({ error: auth.error }, { status: auth.status ?? 401 });
   }
 
   try {

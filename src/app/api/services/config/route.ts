@@ -51,7 +51,7 @@ export async function PUT(request: NextRequest) {
   if (!auth.ok) {
     return NextResponse.json(
       { ok: false, error: auth.error },
-      { status: auth.status }
+      { status: auth.status ?? 401 }
     );
   }
 
@@ -112,7 +112,7 @@ export async function DELETE(request: NextRequest) {
   if (!auth.ok) {
     return NextResponse.json(
       { ok: false, error: auth.error },
-      { status: auth.status }
+      { status: auth.status ?? 401 }
     );
   }
 

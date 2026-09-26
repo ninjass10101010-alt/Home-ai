@@ -13,7 +13,7 @@ const TEST_MESSAGE = "This is a notification test from your family dashboard üè
 export async function POST(req: Request) {
   const auth = await authorizeAdminRequest(req);
   if (!auth.ok) {
-    return NextResponse.json({ error: auth.error }, { status: auth.status });
+    return NextResponse.json({ error: auth.error }, { status: auth.status ?? 401 });
   }
 
   let body: unknown;

@@ -23,7 +23,10 @@ export async function GET(request: NextRequest) {
     // services routes).
     const auth = await authorizeAdminRequest(request);
     if (!auth.ok) {
-      return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
+      return NextResponse.json(
+        { ok: false, error: auth.error },
+        { status: auth.status ?? 401 },
+      );
     }
 
     const { searchParams } = new URL(request.url);
@@ -82,7 +85,10 @@ export async function POST(request: NextRequest) {
     // F2 — adults-only gate (same 401/403 shape as the services routes).
     const auth = await authorizeAdminRequest(request);
     if (!auth.ok) {
-      return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
+      return NextResponse.json(
+        { ok: false, error: auth.error },
+        { status: auth.status ?? 401 },
+      );
     }
 
     const body = await request.json();

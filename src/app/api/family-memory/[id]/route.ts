@@ -13,7 +13,10 @@ import { updateMemory, deleteMemory, incrementMemoryUsage } from '@/lib/family-m
 async function gate(request: NextRequest): Promise<NextResponse | null> {
   const auth = await authorizeAdminRequest(request);
   if (!auth.ok) {
-    return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
+    return NextResponse.json(
+      { ok: false, error: auth.error },
+      { status: auth.status ?? 401 },
+    );
   }
   return null;
 }
