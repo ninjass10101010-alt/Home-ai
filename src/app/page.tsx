@@ -42,7 +42,7 @@ import HomeSecurityWidget from "@/components/ha/HomeSecurityWidget";
 import HomeClimateWidget from "@/components/ha/HomeClimateWidget";
 import HomeLightsWidget from "@/components/ha/HomeLightsWidget";
 import LedgerWidget from "@/components/finance/LedgerWidget";
-import { useMorningBriefing, briefingSectionsEmpty } from "@/components/briefing/hooks/useMorningBriefing";
+import { useMorningBriefing, briefingShowsCard } from "@/components/briefing/hooks/useMorningBriefing";
 import ProfileSheet from "@/components/profile/ProfileSheet";
 import { useHomeEvents } from "@/hooks/useHomeEvents";
 import { googleEventCoversDay, mapGoogleEvent } from "@/lib/calendar/google-mapping";
@@ -101,7 +101,7 @@ export function plannedDaysThisWeek(meals: any[] | null, weekOf: string): number
  */
 function MorningBriefingSlot({ span }: { span: string }) {
   const { briefing, loading, ack, ackError } = useMorningBriefing();
-  if (loading || !briefing || briefingSectionsEmpty(briefing)) return null;
+  if (loading || !briefing || !briefingShowsCard(briefing)) return null;
   return (
     <div className={span}>
       <MorningBriefingWidget briefing={briefing} loading={loading} ack={ack} ackError={ackError} className="h-full" />

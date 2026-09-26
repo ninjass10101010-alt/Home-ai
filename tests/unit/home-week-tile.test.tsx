@@ -41,6 +41,7 @@ vi.mock("@/db", () => ({
 vi.mock("@/components/briefing/hooks/useMorningBriefing", () => ({
   useMorningBriefing: () => ({ briefing: null, loading: false, ack: null, ackError: null }),
   briefingSectionsEmpty: () => true,
+  briefingShowsCard: () => false,
 }));
 
 vi.mock("@/hooks/useHomeEvents", () => ({ useHomeEvents: () => ({ upcomingImportant: [] }) }));

@@ -94,6 +94,18 @@ describe("briefingDigest", () => {
       "✅ No chores open",
     ]);
   });
+  it("a stored unavailable task source never renders 'No chores open'", () => {
+    const lines = briefingDigest({ events: [{}, {}, {}], tasks: [], suggestions: [], taskSource: "unavailable" });
+    expect(lines).toEqual(["📅 3 events today", "❓ Chores unavailable — do not guess"]);
+    expect(lines.join(" ")).not.toContain("No chores open");
+  });
+  it("a PB-sourced chore count never claims snapshot authority", () => {
+    const empty = briefingDigest({ events: [], tasks: [], suggestions: [], taskSource: "pb" });
+    expect(empty.join(" ")).not.toContain("No chores open");
+    const two = briefingDigest({ events: [], tasks: [{}, {}], suggestions: [], taskSource: "pb" });
+    expect(two.join(" ")).toContain("backup copy");
+    expect(two.join(" ")).toContain("2");
+  });
 });
 
 describe("wxConditionLabel", () => {

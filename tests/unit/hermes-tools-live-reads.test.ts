@@ -5,14 +5,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const calls: Array<{ collection: string; filter?: string }> = [];
-const rows: Record<string, any[]> = {};
+const rows: Record<string, any[] | null> = {};
 
 vi.mock("@/lib/pb-auth", () => ({
   withAdmin: vi.fn(async (fn: any) => fn({
     collection: (name: string) => ({
       getFullList: async (opts: any) => {
         calls.push({ collection: name, filter: opts?.filter });
-        return rows[name] ?? [];
+        const value = rows[name];
+        if (value === null) throw new Error(`read failed: ${name}`);
+        return value ?? [];
       },
       getFirstListItem: async () => { throw new Error("404"); },
       update: async (_id: string, d: any) => ({ id: _id, ...d }),
@@ -111,6 +113,14 @@ describe("get_pending_tasks — live read, full list", () => {
     const list = Array.isArray(out) ? out : out.tasks ?? out.pending_tasks;
     expect(list.map((t: any) => t.title)).toEqual(["Walk Rocco"]);
     expect(list.every((t: any) => String(t.assigned || "").includes("Emily"))).toBe(true);
+  });
+
+  it("both task sources down reports unavailable, never an empty chore list", async () => {
+    rows.consuela_data_snapshots = null;
+    rows.tasks = null;
+    const out = JSON.parse(await getTool("get_pending_tasks")!.handler({}));
+    expect(out.error).toContain("unavailable");
+    expect(out.tasks).toEqual([]);
   });
 });
 

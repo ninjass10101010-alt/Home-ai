@@ -259,6 +259,29 @@ describe("screensaver — the same snapshot-first reader", () => {
     expect(payload.tasks).toEqual({ done: 1, total: 2 });
   });
 
+  it("an empty successful snapshot scores an empty week and PB is never consulted", async () => {
+    rows.consuela_data_snapshots = snapshotRow([]);
+    rows.tasks = [
+      { taskId: 8, title: "PB replica row", status: "pending", due: "2026-09-13" },
+    ];
+    const payload = await composeScreensaverPayload(SCREENSAVER_NOW);
+    expect(payload.tasks).toEqual({ done: 0, total: 0 });
+  });
+
+  it("a stored unavailable briefing never claims 'No chores open' on a later healthy compose", async () => {
+    rows.consuela_data_snapshots = snapshotRow([
+      { id: 1, title: "Swept the porch", completed: true, completedInWeek: weekKey(SCREENSAVER_NOW) },
+      { id: 2, title: "Water the plants", completed: false, due: "2026-09-13" },
+    ]);
+    rows.morning_briefing = [{
+      summary: { events: [{}, {}, {}], tasks: [], meals: [], suggestions: [], taskSource: "unavailable" },
+    }];
+    const payload = await composeScreensaverPayload(SCREENSAVER_NOW);
+    expect(payload.tasks).toEqual({ done: 1, total: 2 });
+    expect(payload.briefing.join(" ")).not.toContain("No chores open");
+    expect(payload.briefing).toContain("❓ Chores unavailable — do not guess");
+  });
+
   it("throws (route 503) when both task sources fail", async () => {
     rows.consuela_data_snapshots = null;
     rows.tasks = null;
