@@ -2,6 +2,7 @@ node_modules
 .next
 .git
 .gitignore
+deploy.sh
 .cache
 .env
 .env.*
