@@ -470,8 +470,11 @@ it("reopen_task still reopens a crew row whose earn was reversed", async () => {
 it("reopen_task refuses a queued row whose earn carries a STRING taskId", async () => {
   // The ledger stores `taskId` as a number, but a snapshot round-trip through
   // a JSON-typed column can hand back a string. A strict pre-filter
-  // (`t.taskId === Number(row.id)`) skips the guard entirely; the canonical
-  // checker normalizes with Number(...) and must still refuse.
+  // (`t.taskId === Number(row.id)`) skipped the guard entirely. The canonical
+  // checker is what now catches it: `parseCanonicalTransactions` REJECTS a
+  // non-numeric taskId (task-ledger.ts), so it throws and the guard's catch
+  // fails closed. (Not numeric normalization — the string never survives
+  // parsing.)
   seedTasks([{ id: 104, title: "Paid", assignee: "Emily G", points: 5, universal: false, completed: true, completedBy: "Emily", completedInWeek: "2026-09-21", pendingApproval: { byName: "Emily", at: "2026-09-22T10:00:00.000Z", points: 5 }, sentBackAt: null }]);
   snapData().weekData = {
     weekStart: "2026-09-21",
