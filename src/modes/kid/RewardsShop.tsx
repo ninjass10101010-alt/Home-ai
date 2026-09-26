@@ -20,7 +20,14 @@ import IconButton from "@/components/ui/IconButton";
 import { useAuth } from "@/hooks/useAuth";
 import { useRouter } from "next/navigation";
 import { db } from "@/db";
-import { loadWeekData, loadRewards, saveWeekData } from "@/lib/task-utils";
+import { loadWeekData, loadRewards } from "@/lib/task-utils";
+import {
+  cancelTaskOutboxEntry,
+  createTaskOperationId,
+  listTaskOutbox,
+  requestTaskOutboxFlush,
+} from "@/lib/task-operation-outbox";
+import { queueTaskCommandAndFlush } from "@/lib/task-command-queue";
 import { currentWeekPoints, verifyPinRemote, unreachableCopy } from "./kid-store";
 
 // ─── Reward catalog ────────────────────────────────────────────────────────
@@ -232,6 +239,8 @@ export default function RewardsShop() {
   const [parentApprovalReward, setParentApprovalReward] = useState<Reward | null>(null);
   const [parentApprovalPin, setParentApprovalPin] = useState("");
   const [parentApprovalError, setParentApprovalError] = useState("");
+  const [redeemOperationId, setRedeemOperationId] = useState("");
+  const parentApprovalRef = useRef<{ name: string; pin: string } | null>(null);
   // The wrong-PIN nudge auto-clears; the timer must die with the component
   // (an unmounted setState was the review finding).
   const approvalErrorTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -277,6 +286,8 @@ export default function RewardsShop() {
   }, [refresh]);
 
   const openRedeem = useCallback((reward: Reward) => {
+    setRedeemOperationId(createTaskOperationId());
+    parentApprovalRef.current = null;
     // Same gate as the Tasks page: big rewards (>100pts) need a parent PIN
     // BEFORE the kid's own redemption PIN step.
     if (reward.cost > 100) {
@@ -288,6 +299,13 @@ export default function RewardsShop() {
     setPinReward(reward);
     setPin("");
     setPinError("");
+  }, []);
+
+  const closeParentApproval = useCallback(() => {
+    setParentApprovalReward(null);
+    setParentApprovalPin("");
+    setParentApprovalError("");
+    parentApprovalRef.current = null;
   }, []);
 
   const approveParentReward = async () => {
@@ -316,6 +334,7 @@ export default function RewardsShop() {
         return;
       }
       // Approved — hand off to the normal kid-PIN redemption step.
+      parentApprovalRef.current = { name: parent.fullName || parent.name, pin: parentApprovalPin };
       setPinReward(parentApprovalReward);
       setParentApprovalReward(null);
       setParentApprovalPin("");
@@ -331,12 +350,16 @@ export default function RewardsShop() {
     setPinReward(null);
     setPin("");
     setPinError("");
+    setRedeemOperationId("");
+    parentApprovalRef.current = null;
   }, []);
 
   const submitRedeem = async () => {
     if (!pinReward || !currentUser || pinBusy || pin.length < 4) return;
     setPinBusy(true);
     const reward = pinReward;
+    const operationId = redeemOperationId || createTaskOperationId();
+    if (!redeemOperationId) setRedeemOperationId(operationId);
     try {
       // Client-side verify is the UX gate only; the route re-verifies the PIN
       // server-side and owns the authoritative cost + ledger write (F2: the
@@ -354,56 +377,48 @@ export default function RewardsShop() {
         return;
       }
       const memberName = (result.member as any)?.name || currentUser.name;
+      const approval = parentApprovalRef.current;
 
-      let res: Response;
-      try {
-        res = await fetch("/api/rewards/redeem", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            rewardId: String(reward.id),
-            rewardName: reward.name,
-            memberName,
-            pin,
-          }),
-        });
-      } catch {
-        // Network rejection — honest offline-vs-server copy, PIN cleared.
-        setPinError(unreachableCopy());
+      queueTaskCommandAndFlush({
+        operationId,
+        route: "/api/rewards/redeem",
+        action: "redeem",
+        payload: {
+          rewardId: String(reward.id),
+          memberName,
+          ...(approval ? { parentName: approval.name } : {}),
+        },
+        displayTarget: { kind: "config", title: reward.name },
+        credential: {
+          pin,
+          ...(approval ? { parentPin: approval.pin } : {}),
+        },
+      });
+
+      await requestTaskOutboxFlush();
+      const entry = listTaskOutbox().find((candidate) => candidate.operationId === operationId);
+
+      if (!entry) {
+        parentApprovalRef.current = null;
+        setPinReward(null);
         setPin("");
+        setPinError("");
+        setRedeemOperationId("");
+        refresh();
+        setPurchasing(reward);
         return;
       }
-      const data = await res.json().catch(() => null);
-      if (res.status === 401) {
-        setPinError("Wrong PIN. Try again.");
+
+      if (entry.status === "failed" || entry.status === "auth-required") {
+        cancelTaskOutboxEntry(operationId);
+        parentApprovalRef.current = null;
+        setPinError(entry.lastErrorReason || "That redemption could not go through.");
         setPin("");
+        setRedeemOperationId("");
         return;
       }
-      if (res.status === 400 || res.status === 404 || res.status === 409) {
-        // Server-authoritative verdicts: insufficient points / unknown reward /
-        // duplicate redeem — show the honest server copy, never celebrate.
-        setPinError(
-          data?.error ||
-            (res.status === 400
-              ? "Not enough points for that reward."
-              : res.status === 404
-                ? "That reward isn't available anymore."
-                : "That redemption just went through — check your points.")
-        );
-        setPin("");
-        return;
-      }
-      if (!res.ok || !data?.ok || !data.weekData) {
-        setPinError(unreachableCopy());
-        setPin("");
-        return;
-      }
-      // Server is authoritative: adopt its ledger, then celebrate.
-      saveWeekData(data.weekData);
-      setPinReward(null);
-      setPin("");
-      refresh();
-      setPurchasing(reward);
+
+      setPinError(unreachableCopy());
     } finally {
       setPinBusy(false);
     }
@@ -556,12 +571,12 @@ export default function RewardsShop() {
       {parentApprovalReward && (
         <Modal
           open
-          onClose={() => { setParentApprovalReward(null); setParentApprovalPin(""); }}
+          onClose={closeParentApproval}
           title="Parent Approval Required"
           description={`"${parentApprovalReward.name}" costs ${parentApprovalReward.cost}pts — needs a parent PIN to unlock.`}
           footer={
             <>
-              <SoftButton variant="secondary" onClick={() => { setParentApprovalReward(null); setParentApprovalPin(""); }} className="flex-1">
+              <SoftButton variant="secondary" onClick={closeParentApproval} className="flex-1">
                 Cancel
               </SoftButton>
               <SoftButton onClick={approveParentReward} loading={pinBusy} disabled={!parentApprovalPin || pinBusy} className="flex-1">

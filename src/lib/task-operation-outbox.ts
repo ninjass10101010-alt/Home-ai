@@ -166,7 +166,7 @@ const LEDGER_PAYLOAD_KEYS: Record<string, readonly string[]> = {
 // A redemption names the reward and the member; the stored reward row decides
 // the cost, so there is no amount key here either.
 const REDEEM_PAYLOAD_KEYS: Record<string, readonly string[]> = {
-  redeem: ["rewardId", "memberName"],
+  redeem: ["rewardId", "memberName", "parentName"],
 };
 
 const MANAGE_PAYLOAD_KEYS: Record<string, readonly string[]> = {
@@ -955,6 +955,21 @@ function reasonOf(body: TaskOutboxAcknowledgement): string {
   return typeof raw === "string" ? raw.trim() : "";
 }
 
+const MAX_SERVER_MESSAGE_CHARS = 240;
+
+function serverMessageOf(body: TaskOutboxAcknowledgement): string {
+  const raw = body.error;
+  if (typeof raw !== "string") return "";
+  const trimmed = raw.trim();
+  return trimmed.length > MAX_SERVER_MESSAGE_CHARS
+    ? trimmed.slice(0, MAX_SERVER_MESSAGE_CHARS)
+    : trimmed;
+}
+
+function refusalReason(body: TaskOutboxAcknowledgement, fallback: string): string {
+  return serverMessageOf(body) || reasonOf(body) || fallback;
+}
+
 function requiresCredential(entry: TaskOutboxEntry): boolean {
   return CREDENTIAL_REQUIRED_ACTIONS[entry.route]?.has(entry.action) ?? false;
 }
@@ -1083,7 +1098,7 @@ async function classifyConflict(
   if (body.semanticDuplicate === true || DUPLICATE_REASONS.has(reason)) {
     return markFailed(entry, "semantic-duplicate", reason || "semantic_duplicate");
   }
-  return markFailed(entry, "validation", reason || "operation_conflict");
+  return markFailed(entry, "validation", refusalReason(body, "operation_conflict"));
 }
 
 function classifyFailure(
@@ -1100,7 +1115,7 @@ function classifyFailure(
   if (status >= 500 || status === 408 || status === 425 || status === 429) {
     return markRetryable(entry, "server", reason || `http_${status}`);
   }
-  return markFailed(entry, "validation", reason || `http_${status}`);
+  return markFailed(entry, "validation", refusalReason(body, `http_${status}`));
 }
 
 interface SnapshotView {
@@ -1627,6 +1642,16 @@ async function resolveSnapshotProof(
   return { kind: "proven", acknowledgement: { ...body, reconciled: true } };
 }
 
+function acknowledgedInFull(
+  entry: TaskOutboxEntry,
+  status: number,
+  body: TaskOutboxAcknowledgement,
+): boolean {
+  if (status === 200) return body.reconciled !== false;
+  if (status !== 202) return false;
+  return entry.route === "/api/rewards/redeem" && isRecord(body.weekData);
+}
+
 async function processEntry(
   entry: TaskOutboxEntry,
   options: FlushTaskOutboxOptions,
@@ -1653,7 +1678,7 @@ async function processEntry(
   }
 
   try {
-    if (status === 200 && body.reconciled !== false) {
+    if (acknowledgedInFull(entry, status, body)) {
       return await acknowledge(entry, body, options);
     }
     if (status === 200 || status === 202 || status === 409) {
