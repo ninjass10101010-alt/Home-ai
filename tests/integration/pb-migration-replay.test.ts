@@ -16,13 +16,23 @@ import type { PbCollectionContract, PbSchemaFieldContract } from "@/lib/pb-seed"
 const REQUIRED_POCKETBASE_VERSION = "0.39.11";
 const MIGRATIONS_DIR = resolve(__dirname, "../../../pb_migrations");
 const TERMINAL_MIGRATION_FILE = "1790250000_terminal_locked_task_schema.js";
-const DUPLICATE_HALL_MIGRATION_FILE = "1789000000_seed_duplicate_hall_of_fame.js";
+const HALL_SEED_MIGRATION_FILE = "1789000000_seed_dirty_hall_of_fame.js";
 const HALL_TABLE = "hall_of_fame";
+const STATE_TABLE = "consuela_state";
 const HALL_UNIQUE_INDEX = "idx_hall_of_fame_member_week";
+const STATE_DECLARED_INDEX = "idx_key_unique";
+const OUT_OF_BAND_INDEX_NAME = "idx_replay_out_of_band";
+const OUT_OF_BAND_INDEX_SQL = `CREATE INDEX ${OUT_OF_BAND_INDEX_NAME} ON ${STATE_TABLE} (value)`;
 const HALL_MEMBER = "Aurora";
 const HALL_WEEK = "2026-09-14";
 const HALL_EARLY = "replay-early-not-celebrated";
 const HALL_CELEBRATED = "replay-late-celebrated";
+const DIRTY_FIRST = "replay-dirty-lowest-id";
+const DIRTY_SECOND = "replay-dirty-middle-id";
+const DIRTY_THIRD = "replay-dirty-highest-id";
+const DIRTY_LOWEST_ID = "dirtyhall000001";
+const DIRTY_MIDDLE_ID = "dirtyhall000002";
+const DIRTY_HIGHEST_ID = "dirtyhall000003";
 const REPLAY_SCHEMA_COLLECTIONS = [
   "members",
   "tasks",
@@ -59,44 +69,70 @@ type LiveCollection = Record<string, unknown> & {
   indexes?: unknown;
 };
 
-const DUPLICATE_HALL_MIGRATION_TEMPLATE = `migrate((app) => {
-  const collection = app.findCollectionByNameOrId("hall_of_fame")
-  if (!collection.fields.getByName("created")) {
+type HallSeedRow = {
+  id: string;
+  emoji: string;
+  celebrated?: boolean;
+};
+
+type HallSeedScenario = {
+  preAddSignalColumns: boolean;
+  rows: HallSeedRow[];
+};
+
+const PRE_ADD_SIGNAL_COLUMNS = `  if (!collection.fields.getByName("created")) {
     collection.fields.add(new Field({ name: "created", type: "autodate", onCreate: true }))
   }
   if (!collection.fields.getByName("celebrated")) {
     collection.fields.add(new Field({ name: "celebrated", type: "bool" }))
   }
   app.save(collection)
-  const target = app.findCollectionByNameOrId("hall_of_fame")
-  app.save(new Record(target, {
-    member: "__HALL_MEMBER__",
-    weekStart: "__HALL_WEEK__",
-    emoji: "__HALL_EARLY__",
-    points: 30,
-    rank: 1,
-    celebrated: false,
-  }))
-  app.save(new Record(target, {
-    member: "__HALL_MEMBER__",
-    weekStart: "__HALL_WEEK__",
-    emoji: "__HALL_CELEBRATED__",
-    points: 30,
-    rank: 1,
-    celebrated: true,
-  }))
-}, (app) => {})`;
+`;
 
-const DUPLICATE_HALL_MIGRATION_SOURCE = DUPLICATE_HALL_MIGRATION_TEMPLATE.replace(
-  /__HALL_(MEMBER|WEEK|EARLY|CELEBRATED)__/g,
-  (_match, key: string) =>
-    ({
-      MEMBER: HALL_MEMBER,
-      WEEK: HALL_WEEK,
-      EARLY: HALL_EARLY,
-      CELEBRATED: HALL_CELEBRATED,
-    })[key] ?? ""
-);
+function hallSeedMigrationSource(scenario: HallSeedScenario): string {
+  const preAdd = scenario.preAddSignalColumns ? PRE_ADD_SIGNAL_COLUMNS : "";
+  const inserts = scenario.rows
+    .map((row) => {
+      const celebrated =
+        row.celebrated === undefined ? "" : `\n    celebrated: ${String(row.celebrated)},`;
+      return `  app.save(new Record(target, {
+    id: ${JSON.stringify(row.id)},
+    member: ${JSON.stringify(HALL_MEMBER)},
+    weekStart: ${JSON.stringify(HALL_WEEK)},
+    emoji: ${JSON.stringify(row.emoji)},
+    points: 30,
+    rank: 1,${celebrated}
+  }))`;
+    })
+    .join("\n");
+
+  return `migrate((app) => {
+  const collection = app.findCollectionByNameOrId("hall_of_fame")
+${preAdd}  const target = app.findCollectionByNameOrId("hall_of_fame")
+${inserts}
+
+  const state = app.findCollectionByNameOrId(${JSON.stringify(STATE_TABLE)})
+  state.indexes = (state.indexes || []).concat([${JSON.stringify(OUT_OF_BAND_INDEX_SQL)}])
+  app.save(state)
+}, (app) => {})`;
+}
+
+const SYNTHETIC_HALL_SCENARIO: HallSeedScenario = {
+  preAddSignalColumns: true,
+  rows: [
+    { id: "synthetichall01", emoji: HALL_EARLY, celebrated: false },
+    { id: "synthetichall02", emoji: HALL_CELEBRATED, celebrated: true },
+  ],
+};
+
+const DIRTY_HALL_SCENARIO: HallSeedScenario = {
+  preAddSignalColumns: false,
+  rows: [
+    { id: DIRTY_LOWEST_ID, emoji: DIRTY_FIRST },
+    { id: DIRTY_MIDDLE_ID, emoji: DIRTY_SECOND },
+    { id: DIRTY_HIGHEST_ID, emoji: DIRTY_THIRD },
+  ],
+};
 
 function contractFor(name: string): PbCollectionContract {
   const contract = COLLECTIONS.find((entry) => entry.name === name);
@@ -407,20 +443,18 @@ async function stopServer(child: ReplayServer | null): Promise<void> {
   clearTimeout(timer);
 }
 
-function stageMigrations(staged: string, includeTerminal: boolean): void {
+function stageMigrations(staged: string, scenario: HallSeedScenario): void {
   mkdirSync(staged, { recursive: true });
   for (const entry of readdirSync(MIGRATIONS_DIR)) {
     if (!entry.endsWith(".js")) continue;
-    if (!includeTerminal && entry === TERMINAL_MIGRATION_FILE) continue;
+    if (entry === TERMINAL_MIGRATION_FILE) continue;
     copyFileSync(join(MIGRATIONS_DIR, entry), join(staged, entry));
   }
-  if (!includeTerminal) {
-    writeFileSync(
-      join(staged, DUPLICATE_HALL_MIGRATION_FILE),
-      DUPLICATE_HALL_MIGRATION_SOURCE,
-      "utf8"
-    );
-  }
+  writeFileSync(
+    join(staged, HALL_SEED_MIGRATION_FILE),
+    hallSeedMigrationSource(scenario),
+    "utf8"
+  );
 }
 
 function migrateUp(binary: string, dataDir: string, migrationsDir: string): void {
@@ -436,24 +470,61 @@ function migrateUp(binary: string, dataDir: string, migrationsDir: string): void
   }
 }
 
-async function replayTerminalMigration(): Promise<void> {
-  const { binary, problem: binaryProblem } = resolveBinary();
-  expect(
-    binaryProblem,
-    "the replay never targets a running PocketBase; POCKETBASE_BIN must be a local executable path"
-  ).toBeNull();
-  const versionProblem = requireBinaryVersion(binary);
-  expect(
-    versionProblem,
-    `PB_MIGRATION_REPLAY=1 fails instead of skipping when the binary is absent or the wrong version`
-  ).toBeNull();
+type HallRowView = {
+  id?: unknown;
+  member?: unknown;
+  weekStart?: unknown;
+  emoji?: unknown;
+  celebrated?: unknown;
+  created?: unknown;
+};
 
+async function hallRowsFor(pb: PocketBase): Promise<HallRowView[]> {
+  return (await pb.collection(HALL_TABLE).getFullList()) as unknown as HallRowView[];
+}
+
+function naturalKeyRows(rows: HallRowView[]): HallRowView[] {
+  return rows.filter((row) => row.member === HALL_MEMBER && row.weekStart === HALL_WEEK);
+}
+
+function assertOutOfBandIndexSurvived(live: LiveCollection[], dataDir: string): void {
+  const state = live.find((entry) => String(entry.name) === STATE_TABLE);
+  const liveNames = ((state?.indexes as unknown[] | undefined) ?? []).map(liveIndexName);
+  expect(
+    liveNames,
+    `${STATE_TABLE} must keep the declared ${STATE_DECLARED_INDEX}`
+  ).toContain(STATE_DECLARED_INDEX);
+  expect(
+    liveNames,
+    `the terminal migration must apply indexes additively — ${OUT_OF_BAND_INDEX_NAME} was created outside the declared set and was dropped`
+  ).toContain(OUT_OF_BAND_INDEX_NAME);
+  const physical = sqliteIndexNames(join(dataDir, "data.db"), STATE_TABLE);
+  expect(
+    physical,
+    `${OUT_OF_BAND_INDEX_NAME} must exist as a real index in the replayed database, not just in the collection definition`
+  ).toContain(OUT_OF_BAND_INDEX_NAME);
+  expect(
+    physical,
+    `${STATE_DECLARED_INDEX} must exist as a real index in the replayed database`
+  ).toContain(STATE_DECLARED_INDEX);
+}
+
+async function runReplay(
+  binary: string,
+  scenario: HallSeedScenario,
+  assertScenario: (
+    pb: PocketBase,
+    live: LiveCollection[],
+    rows: HallRowView[],
+    dataDir: string
+  ) => void
+): Promise<void> {
   const tempRoot = mkdtempSync(join(tmpdir(), "pb-migration-replay-"));
   const dataDir = join(tempRoot, "pb_data");
   const staged = join(tempRoot, "migrations");
   let server: ReplayServer | null = null;
   try {
-    stageMigrations(staged, false);
+    stageMigrations(staged, scenario);
     migrateUp(binary, dataDir, staged);
 
     copyFileSync(
@@ -493,28 +564,12 @@ async function replayTerminalMigration(): Promise<void> {
 
     assertReplayState(live);
 
-    const hallRows = (await pb.collection(HALL_TABLE).getFullList()) as unknown as Array<{
-      member?: unknown;
-      weekStart?: unknown;
-      emoji?: unknown;
-      celebrated?: unknown;
-    }>;
+    const rows = await hallRowsFor(pb);
     expect(
-      hallRows.filter(
-        (row) => row.member === HALL_MEMBER && row.weekStart === HALL_WEEK
-      ),
+      naturalKeyRows(rows),
       "the terminal migration must collapse the duplicate hall_of_fame rows that already violated the unique index"
     ).toHaveLength(1);
-    expect(
-      hallRows.filter(
-        (row) => row.member === HALL_MEMBER && row.weekStart === HALL_WEEK
-      )[0]?.emoji,
-      "the celebrated hall_of_fame row must survive the dedupe, matching dedupeHallOfFameRows"
-    ).toBe(HALL_CELEBRATED);
-    expect(
-      hallRows.some((row) => row.emoji === HALL_EARLY),
-      "the non-celebrated duplicate must be removed"
-    ).toBe(false);
+    assertScenario(pb, live, rows, dataDir);
 
     let exercised = 0;
     let uniqueExercised = 0;
@@ -575,6 +630,8 @@ async function replayTerminalMigration(): Promise<void> {
       "at least one UNIQUE index must be exercised — otherwise the duplicate-row checks prove nothing"
     ).toBeGreaterThan(0);
 
+    assertOutOfBandIndexSurvived(live, dataDir);
+
     await stopServer(server);
     server = null;
     expect(
@@ -587,13 +644,74 @@ async function replayTerminalMigration(): Promise<void> {
   }
 }
 
+function requireBinary(): string {
+  const { binary, problem } = resolveBinary();
+  expect(
+    problem,
+    "the replay never targets a running PocketBase; POCKETBASE_BIN must be a local executable path"
+  ).toBeNull();
+  const versionProblem = requireBinaryVersion(binary);
+  expect(
+    versionProblem,
+    "PB_MIGRATION_REPLAY=1 fails instead of skipping when the binary is absent or the wrong version"
+  ).toBeNull();
+  return binary;
+}
+
+async function replayCelebratedSignalScenario(binary: string): Promise<void> {
+  await runReplay(binary, SYNTHETIC_HALL_SCENARIO, (_pb, _live, rows) => {
+    expect(
+      naturalKeyRows(rows)[0]?.emoji,
+      "when a duplicate group carries a celebrated row, that row must survive the dedupe, matching dedupeHallOfFameRows"
+    ).toBe(HALL_CELEBRATED);
+    expect(
+      rows.some((row) => row.emoji === HALL_EARLY),
+      "the non-celebrated duplicate must be removed"
+    ).toBe(false);
+  });
+}
+
+async function replayDirtyDatabaseScenario(binary: string): Promise<void> {
+  await runReplay(binary, DIRTY_HALL_SCENARIO, (_pb, _live, rows) => {
+    const survivor = naturalKeyRows(rows)[0];
+    expect(
+      survivor?.celebrated,
+      "PocketBase must not back-fill the celebrated column it just added, so a real dirty database carries no celebrated signal"
+    ).toBe(false);
+    expect(
+      survivor?.created,
+      "PocketBase must not back-fill the created column it just added, so every pre-existing row ties on created"
+    ).toBe("");
+    expect(
+      survivor?.id,
+      "with no celebrated row and every created value tied, the dedupe must fall through to the id tiebreak and keep the lowest id"
+    ).toBe(DIRTY_LOWEST_ID);
+    expect(
+      survivor?.emoji,
+      "the surviving row must be the one the id tiebreak selects"
+    ).toBe(DIRTY_FIRST);
+    expect(
+      rows.some((row) => row.emoji === DIRTY_SECOND || row.emoji === DIRTY_THIRD),
+      "every duplicate beyond the tiebreak winner must be removed"
+    ).toBe(false);
+  });
+}
+
 describe.runIf(process.env.PB_MIGRATION_REPLAY === "1")(
   "PocketBase terminal migration replay",
   () => {
     it(
       "replays the complete migration chain locked",
       async () => {
-        await replayTerminalMigration();
+        await replayCelebratedSignalScenario(requireBinary());
+      },
+      HEALTH_TIMEOUT_MS * 2
+    );
+
+    it(
+      "replays a genuinely dirty database with no back-filled signal columns",
+      async () => {
+        await replayDirtyDatabaseScenario(requireBinary());
       },
       HEALTH_TIMEOUT_MS * 2
     );
