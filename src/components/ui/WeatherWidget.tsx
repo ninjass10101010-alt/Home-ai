@@ -9,7 +9,8 @@ import { useRuntimeConfig } from "@/hooks/useRuntimeConfig";
 import { useAuth } from "@/hooks/useAuth";
 import Skeleton from "@/components/ui/Skeleton";
 import { db } from "@/db";
-import { moonPhase, moonPhaseName } from "./WeatherScene";
+import { moonPhase, moonPhaseName } from "@/lib/weather-astro";
+import { mixHex, posterTextSurface, weatherHeaderTextSurfaces } from "@/lib/weather-contrast";
 import { SKY, INK, GLASS, GLASS_NIGHT } from "./wx-tokens";
 import { SceneLayers, Condition, wmoToScene, dayCondition, conditionPresentation, wmoCondition, useWxMotionOk } from "./WxToys";
 import { getWeatherSkin, cardinalFromDegrees, SeasonKey, severeFamily, resolveAccent, contrastSafeTextAccent, accentForeground } from "./WeatherSkins";
@@ -156,17 +157,6 @@ function deriveOutlookInfo(hourly: HourlyBlock | undefined, condition: string): 
   return { sentence: "No rain expected today", hitISO: null };
 }
 
-function mixHex(a: string, b: string, t: number): string {
-  const pa = parseInt(a.slice(1), 16);
-  const pb = parseInt(b.slice(1), 16);
-  const ch = (shift: number) => {
-    const ca = (pa >> shift) & 255;
-    const cb = (pb >> shift) & 255;
-    return Math.round(ca + (cb - ca) * t);
-  };
-  return `#${[ch(16), ch(8), ch(0)].map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
-}
-
 function tempBarColor(t: number): string {
   const x = Math.max(0, Math.min(1, t));
   return x < 0.5 ? mixHex("#38bdf8", "#fbbf24", x * 2) : mixHex("#fbbf24", "#fb923c", (x - 0.5) * 2);
@@ -175,30 +165,6 @@ function tempBarColor(t: number): string {
 function getRealTimeOfDay(): TimeOfDayFlag {
   const hour = new Date().getHours();
   return hour >= 6 && hour < 19 ? "day" : "night";
-}
-
-function posterTextSurface(scene: ReturnType<typeof wmoToScene>, heavySnow = false): string[] {
-  if (scene === "clear") return ["#55BCE8", "#8FD8F1", "#D8F2F4"];
-  if (scene === "cloudy") return ["#DFE4EE", "#EEF1F6", "#D9E6F5"];
-  if (scene === "rain") return ["#B9C4D8", "#C9D7EA", "#D8D3F0"];
-  if (scene === "snow" && heavySnow) return ["#5D6F8C", "#465A78", "#354861"];
-  if (scene === "snow") return ["#F4F7FB", "#E6EFFF", "#EFE6FB"];
-  if (scene === "storm") return ["#6A6F96", "#5D5B8F", "#4D4770"];
-  return ["#6F74A8", "#A29DC9", "#E2DBF2"];
-}
-
-function weatherHeaderTextSurfaces(scene: ReturnType<typeof wmoToScene>, failedFetch = false, heavySnow = false): string[] {
-  const glassAlpha = scene === "storm" ? 0.4 : 0.3;
-  const sheenAlpha = 0.4;
-  const surfaceAlpha = glassAlpha + sheenAlpha * (1 - glassAlpha);
-  const baseSurfaces = posterTextSurface(scene, heavySnow);
-  const surfaces = failedFetch
-    ? baseSurfaces.map((surface) => mixHex(surface, "#788091", 0.38))
-    : baseSurfaces;
-  return surfaces.flatMap((surface) => [
-    mixHex(surface, "#FFFFFF", glassAlpha),
-    mixHex(surface, "#FFFFFF", surfaceAlpha),
-  ]);
 }
 
 function modalCellTextSurfaces(accent: string): string[] {

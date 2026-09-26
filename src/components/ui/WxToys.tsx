@@ -69,7 +69,7 @@ export function CloudPuff({ className = "", style, tone = "day", layer, characte
 }
 
 // ─── Seagulls — flap via SMIL (CSS animation:none cannot stop SMIL,
-// so the flap unmounts under reduced-motion, mirroring WeatherScene) ──
+// so the flap unmounts under reduced-motion) ──
 
 const BIRDS = [
   { a: 44, b: 12, dur: 17, delay: -3, size: 14, flap: 0.9 },

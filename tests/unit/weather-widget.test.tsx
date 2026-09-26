@@ -8,7 +8,7 @@ import { act, createElement, useLayoutEffect } from "react";
 import type { ReactElement } from "react";
 import WeatherWidget from "@/components/ui/WeatherWidget";
 import { SceneLayers, conditionPresentation } from "@/components/ui/WxToys";
-import { moonPhase, moonPhaseName, makeCloudSpec } from "@/components/ui/WeatherScene";
+import { moonPhase, moonPhaseName, makeCloudSpec } from "@/lib/weather-astro";
 import { wearAdvice, stormAdvice, snowAdvice, fusionOutlook } from "@/lib/weather-insights";
 import { contrastSafeTextAccent, getWeatherSkin, resolveAccent } from "@/components/ui/WeatherSkins";
 import { SKY } from "@/components/ui/wx-tokens";

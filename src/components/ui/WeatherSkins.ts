@@ -1,4 +1,5 @@
 import { WX_POSTER } from "./wx-tokens";
+import { parseHexColor, formatHexColor, mixHexColor, contrastRatio, type Rgb } from "@/lib/weather-contrast";
 
 export type SeasonKey = "spring" | "summer" | "autumn" | "winter";
 
@@ -108,8 +109,8 @@ const NIGHT_SKIN: Omit<WeatherSkin, "skyGradient"> = {
   stripTrack: "rgba(255,255,255,0.16)",
 };
 
-// One source of truth for every sky wash — WeatherScene renders its crossfade
-// layers from here instead of hardcoding the gradients a second time.
+// One source of truth for every skin sky wash — skyGradient() derives the
+// gradient from these values instead of hardcoding it a second time.
 function skyGradient(season: SeasonKey | null): string {
   const s = season === null ? NIGHT_SKIN : DAY_SKINS[season] ?? DAY_SKINS.summer;
   return `linear-gradient(175deg, ${s.skyTop} 0%, ${s.skyBottom} 100%)`;
@@ -139,49 +140,6 @@ export type { SevereKind } from "@/lib/weather-severity";
 // party accent — the state accent wins until the severe weather passes.
 export function resolveAccent(skin: WeatherSkin, holidayAccent: string | null | undefined): string {
   return skin.severe ? skin.accent : holidayAccent ?? skin.accent;
-}
-
-type Rgb = [number, number, number];
-
-function parseHexColor(value: unknown): Rgb | null {
-  if (typeof value !== "string") return null;
-  const raw = value.trim().replace(/^#/, "");
-  if (![3, 4, 6, 8].includes(raw.length) || !/^[0-9a-f]+$/i.test(raw)) return null;
-  if (raw.length === 4 && raw[3].toLowerCase() !== "f") return null;
-  if (raw.length === 8 && raw.slice(6).toLowerCase() !== "ff") return null;
-  const expanded = raw.length <= 4 ? raw.split("").map((part) => `${part}${part}`).join("") : raw.slice(0, 6);
-  const channels = [0, 2, 4].map((offset) => Number.parseInt(expanded.slice(offset, offset + 2), 16));
-  if (channels.some((channel) => !Number.isFinite(channel) || channel < 0 || channel > 255)) return null;
-  return channels as Rgb;
-}
-
-function formatHexColor(rgb: Rgb): string {
-  return `#${rgb.map((channel) => Math.max(0, Math.min(255, Math.round(channel))).toString(16).padStart(2, "0")).join("")}`;
-}
-
-function mixHexColor(a: string, b: string, t: number): string {
-  if (!Number.isFinite(t) || t < 0 || t > 1) throw new Error("Invalid color blend alpha");
-  const pa = parseHexColor(a);
-  const pb = parseHexColor(b);
-  if (!pa || !pb) throw new Error("Invalid color blend input");
-  return formatHexColor(pa.map((channel, index) => channel + (pb[index] - channel) * t) as Rgb);
-}
-
-function colorLuminance(color: Rgb): number {
-  const channels = color.map((channel) => {
-    const value = channel / 255;
-    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
-  });
-  return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
-}
-
-function contrastRatio(a: string, b: string): number {
-  const foreground = parseHexColor(a);
-  const background = parseHexColor(b);
-  if (!foreground || !background) return 0;
-  const first = colorLuminance(foreground);
-  const second = colorLuminance(background);
-  return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
 }
 
 export function contrastSafeTextAccent(accent: string, surface: string | string[], fallback: string): string {
