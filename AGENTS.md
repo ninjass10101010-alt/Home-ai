@@ -1804,14 +1804,35 @@ handler registered via `registerInternalTaskCommandHandler`.
 through it. A new internal writer **registers a handler and calls this** — it
 never reaches PocketBase or the week row on its own, and it never infers a
 payee, amount or approval identity from untrusted tool arguments.
-**Wave 3 scope, explicitly NOT yet remediated:** the adjacent writers are still
-outside this seam and still write their own way — reward redemption
+**Wave 3 scope — Hermes/MUSE task writers DONE (Wave 3 Task 5 + Task 6); the rest
+NOT yet remediated.** `complete_task` / `reopen_task` ride the **claim** seam
+(`kind:"complete"` / `kind:"undo"`) and `add_task` / `update_task` / `delete_task`
+ride the **manage** seam (`kind:"add"|"update"|"delete"`) — none of them writes a
+snapshot, a tombstone or a mirror row itself any more, and the
+`mutateSnapshot` / `upsertSnapshotTask` / `deleteSnapshotTask` /
+`mirrorTaskToCollection` imports are gone from `src/lib/hermes-tools.ts`. Still
+outside the seam and still writing their own way: reward redemption
 (`POST /api/rewards/redeem` runs its own `withWeekLedgerLock` body instead of the
-shared ledger operation helper), the planner point adjustment, the Hermes/MUSE
-task writers (`complete_task` / `reopen_task` / `add_task` / `update_task`),
-briefing authority (morning briefing, assistant live reads, screensaver task
-progress) and all-time totals. Treat all of them as unremediated: never describe
-them as riding the command seam, and migrate them in Wave 3.
+shared ledger operation helper), the planner point adjustment, briefing
+authority (morning briefing, assistant live reads, screensaver task progress) and
+all-time totals. Treat only those as unremediated: never describe them as riding
+the command seam, and migrate them in a later wave.
+
+**CONTRACTS to keep (Task 5 + Task 6):** (1) every assistant task write goes
+through `executeInternalTaskCommand` with a `caller` — the actor role is the
+caller's LIVE role, and `callerRole()` **fails closed** (only a literal `parent`
+is a parent), so a context-free `handler(args)` can never author a parent-actor
+command; all five call sites pass a context. (2) `ai/TOOLS.md` is embedded at
+prebuild into `src/lib/ai-boot.generated.ts` and composes `SYSTEM_PROMPT` for
+every parent chat — **regenerate it with `node scripts/write-ai-boot.mjs` (or
+`npm run ai:boot`) in the same commit as any `ai/*.md` edit**; never hand-edit the
+generated file. (3) The reopen guard's payee list follows how the earn was
+actually written: a crew approval pays PER MEMBER (`pendingApproval.crew`), so
+`byName` — the literal `"Crew"` — is not a payee. (4) The guard has **no** cheap
+pre-filter: `hasUnreversedTaskEarn` normalizes and its throw path is the
+fail-closed one. (5) `reopenTask` writes `completedBy/completedAt/
+completedInWeek` as **`null`**, matching the approval seam's send-back — `""`
+is not nullish and would persist as a lie.
 
 **Parent-only admin auth (pets denied).** `authorizeAdminRequest`
 (`src/lib/admin-auth.ts`) is an **allowlist on `role === "parent"`**: a valid
