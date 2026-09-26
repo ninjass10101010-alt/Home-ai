@@ -784,12 +784,27 @@ export function mergeTasksSnapshot(
 }
 
 /**
- * Store-level seam for the 60s refresh loop (db.refreshCaches): the caller
- * reads /api/tasks/sync and hands the snapshot here, which merges it into the
- * same localStorage stores loadTasks()/loadWeekData() read — so KidHome's
- * dataVersion listener and Home's widgets actually see another device's
- * tasks when they re-read on `consuela-data-refreshed`. Returns whether
- * anything changed.
+ * The ONE config-leg adoption seam for the rewards, penalties and weekly-prizes
+ * catalogs. Every caller hands it a task snapshot and it merges each leg by
+ * LAST-WRITE-WINS on that leg's own stamp — never "a longer list wins", which is
+ * delete-blind: a parent's delete is a SHORTER, NEWER list, so a length
+ * heuristic resurrects the row it just removed.
+ *
+ * Two rules make that safe, and both are load-bearing:
+ *  - only a STRICTLY-NEWER stamp wins, and a leg with no stamp never wins, so a
+ *    legacy unstamped snapshot can never resurrect a deleted row;
+ *  - the winning stamp is carried through VERBATIM (never re-stamped to "now"),
+ *    so this device stops looking "edited" and a no-op refresh cannot block the
+ *    next real server edit.
+ *
+ * The rewards leg needs this in particular because without it the reward catalog
+ * was PULL-only: a device that never wrote a config command could never learn
+ * the server's list. The weekly-prizes leg uses the identical contract.
+ *
+ * Callers: the outbox's snapshot proof (adoptTaskOutboxSnapshot), the 60s
+ * refresh via applyTasksSnapshotToStores (db.refreshCaches), and a page that
+ * pulls the snapshot itself (the Tasks page). Returns whether anything was
+ * adopted.
  */
 export function applyTaskConfigSnapshotToStores(snapshot: any): boolean {
   if (!snapshot) return false;
@@ -829,15 +844,8 @@ export function applyTaskConfigSnapshotToStores(snapshot: any): boolean {
  * reads /api/tasks/sync and hands the snapshot here, which merges it into the
  * same localStorage stores loadTasks()/loadWeekData() read — so KidHome's
  * dataVersion listener and Home's widgets actually see another device's
- * tasks when they re-read on `consuela-data-refreshed`. Returns whether
- * anything changed.
- */
-/**
- * Store-level seam for the 60s refresh loop (db.refreshCaches): the caller
- * reads /api/tasks/sync and hands the snapshot here, which merges it into the
- * same localStorage stores loadTasks()/loadWeekData() read — so KidHome's
- * dataVersion listener and Home's widgets actually see another device's
- * tasks when they re-read on `consuela-data-refreshed`. Returns whether
+ * tasks when they re-read on `consuela-data-refreshed`. The three config legs
+ * ride along through applyTaskConfigSnapshotToStores. Returns whether
  * anything changed.
  */
 export function applyTasksSnapshotToStores(snapshot: any): boolean {
@@ -865,6 +873,15 @@ export function saveRewards<T>(rewards: T): void {
 // uses, so the two modules always agree on how fresh this device's catalog is.
 export const REWARDS_STAMP_KEY = "consuela-rewards-updatedAt";
 
+/**
+ * Reads a last-write-wins stamp. These stamps are compared with `>` against
+ * another ISO string, so the STORED FORM MATTERS: a JSON-quoted value starts
+ * with `"` (0x22) and therefore sorts BEFORE every bare ISO, which makes a
+ * quoted stamp look permanently stale and lets an older snapshot win. This key
+ * is written raw (as kid-store wrote it), and the reader still tolerates a
+ * quoted value left behind by an earlier JSON writer instead of silently
+ * reporting "no stamp".
+ */
 function readStampText(key: string): string {
   if (typeof window === "undefined") return "";
   try {
@@ -881,6 +898,7 @@ function readStampText(key: string): string {
   }
 }
 
+/** Writes a last-write-wins stamp as the bare ISO string readStampText compares. */
 function writeStampText(key: string, stamp: string): void {
   if (typeof window === "undefined") return;
   try {

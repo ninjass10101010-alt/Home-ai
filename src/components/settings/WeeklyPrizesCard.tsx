@@ -7,13 +7,14 @@ import SoftButton from "@/components/ui/SoftButton";
 import IconButton from "@/components/ui/IconButton";
 import {
   loadWeeklyPrizes,
+  applyTaskConfigSnapshotToStores,
   DEFAULT_WEEKLY_PRIZES,
 } from "@/lib/task-utils";
 import { onTaskOutboxAdopted } from "@/lib/task-command-queue";
 import { readTaskConfig, writeTaskConfig } from "@/lib/task-config-client";
 import { useTaskCommandQueue } from "@/hooks/useTaskCommandQueue";
+import type { TaskConfigResponse } from "@/lib/task-config";
 import type { WeeklyPrize } from "@/types/tasks";
-import type { TaskConfigCommand } from "@/lib/task-config";
 
 const MEDALS = ["🥇", "🥈", "🥉"] as const;
 const MAX_PRIZES = 3;
@@ -25,7 +26,7 @@ function queueWeeklyPrizes(items: WeeklyPrize[]): void {
     action: "replace",
     updatedAt: new Date().toISOString(),
     items,
-  } as TaskConfigCommand).catch(() => {});
+  }).catch(() => {});
 }
 
 interface WeeklyPrizesCardProps {
@@ -60,9 +61,15 @@ export default function WeeklyPrizesCard({ showToast }: WeeklyPrizesCardProps) {
 
   useEffect(() => {
     let active = true;
-    const adopt = (response: { items: unknown } | null) => {
+    const adopt = (response: TaskConfigResponse | null) => {
       if (!active || dirtyRef.current) return;
-      setPrizes(response ? (response.items as WeeklyPrize[]) : loadWeeklyPrizes());
+      if (response) {
+        applyTaskConfigSnapshotToStores({
+          weeklyPrizes: response.items,
+          weeklyPrizesStamp: response.updatedAt,
+        });
+      }
+      setPrizes(loadWeeklyPrizes());
     };
     const read = () => {
       void readTaskConfig("weekly-prizes").then(adopt).catch(() => adopt(null));

@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  createTaskOperationId,
   listTaskOutbox,
   onTaskOutboxAcknowledged,
   pullTaskSnapshotDocument,
@@ -166,7 +165,7 @@ export async function readTaskConfig(kind: TaskConfigKind): Promise<TaskConfigRe
   const updatedAt = typeof snapshotStamp === "string" ? snapshotStamp : "";
   const snapshotRevision = snapshot.revision;
   const revision = typeof snapshotRevision === "string" ? snapshotRevision : updatedAt;
-  return response(createTaskOperationId(), leg, items, updatedAt, revision);
+  return response("", leg, items, updatedAt, revision);
 }
 
 export async function writeTaskConfig(command: TaskConfigCommand): Promise<TaskConfigResponse> {

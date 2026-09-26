@@ -501,6 +501,10 @@ export default function TasksPage() {
   // local tap. The old inline version was ADD-ONLY on known rows, so a kid's
   // tap on another device never reached this page's Needs-approval queue (and
   // an approval elsewhere never cleared the stale "On the way" row here).
+  // The rewards / penalties / weekly-prizes legs are NOT merged here: that
+  // last-write-wins merge lives in exactly one place,
+  // applyTaskConfigSnapshotToStores, which the outbox's snapshot proof and the
+  // 60s refresh share. This page only re-reads what that seam adopted.
   // Latest-state mirrors for the async snapshot restore: the fetch resolves
   // long after commit, and these effects re-sync before any merge runs, so
   // mergeTasksSnapshot always sees the CURRENT state (never a stale closure).
