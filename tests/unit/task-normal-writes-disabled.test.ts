@@ -124,6 +124,18 @@ describe("GET /api/tasks/sync stays the cross-device read endpoint", () => {
     const route = readFileSync(join(process.cwd(), "src/app/api/tasks/sync/route.ts"), "utf8");
     expect(route).toMatch(/export\s+(?:async\s+)?function\s+GET\b/);
     expect(route).toMatch(/export\s+(?:async\s+)?function\s+POST\b/);
-    expect(route).toContain("legacy_sync_write_disabled");
+
+    // Pin the refusal's TRIGGER and its STATUS, not the spelling of the error
+    // constant: a body carrying either snapshot key is what the 410 is for, and
+    // a body carrying neither is a 400. (`tasks-sync-legs` drives the handler
+    // itself end-to-end; this pins the shape so the gate cannot be dropped or
+    // quietly downgraded to a 400.)
+    const gate = route.match(
+      new RegExp(`hasOwnProperty\\.call\\(record,\\s*"(\\w+)"\\)([\\s\\S]{0,80}?)hasOwnProperty\\.call\\(record,\\s*"(\\w+)"\\)([\\s\\S]{0,300}?)status:\\s*(\\d+)`, DOTALL)
+    );
+    expect(gate).not.toBeNull();
+    expect([gate![1], gate![3]].sort()).toEqual(["tasks", "weekData"]);
+    expect(gate![5]).toBe("410");
+    expect(route).toMatch(/status:\s*400/);
   });
 });

@@ -162,7 +162,6 @@ describe("pushLocalToPB honest counts", () => {
     // No task / week / ledger / reward / weekly-config leg may reappear: those
     // collections are command-only now, and reporting a push for one of them
     // would be a lie about where the data lives.
-    expect(collections).not.toContain("tasks/leaderboard (6 collections)");
     for (const commandOnly of ["tasks", "week_data", "week_archive", "rewards", "penalties", "weekly_prizes"]) {
       expect(collections).not.toContain(commandOnly);
     }

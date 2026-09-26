@@ -36,7 +36,6 @@ vi.mock("@/db", () => ({
 const store = vi.hoisted(() => ({
   week: { weekStart: "2026-09-01", points: { Caspian: 200 } as Record<string, number>, streak: {}, lastActive: {}, history: [] as any[] },
   saveWeekData: vi.fn(async (_week: any) => {}),
-  syncWeekDataToPB: vi.fn(async (_week: any) => {}),
 }));
 
 vi.mock("@/lib/task-utils", () => ({
@@ -56,7 +55,6 @@ vi.mock("@/lib/task-utils", () => ({
     ...week,
     history: [...week.history, { id: 1, timestamp: "2026-09-04T12:00:00.000Z", type, amount, description, member }],
   }),
-  syncWeekDataToPB: store.syncWeekDataToPB,
 }));
 
 vi.mock("@/components/ui/SyncInit", () => ({ default: () => null }));
@@ -92,6 +90,19 @@ let redeemResult: { status: number; body: any; network?: boolean } = {
 let posted: Array<{ url: string; body: any }> = [];
 
 // Parent PIN "0000" verifies for parents only; kid PIN "1234" for Caspian.
+function stubFetch() {
+  fetchMock = fetchHandler();
+  vi.stubGlobal("fetch", fetchMock);
+}
+
+function expectNoStructuredTaskPush() {
+  const writes = (fetchMock.mock.calls as Array<[RequestInfo | URL, RequestInit | undefined]>)
+    .filter(([, init]) => init?.method && !["GET", "HEAD"].includes(String(init.method).toUpperCase()))
+    .map(([input, init]) => `${String(init!.method).toUpperCase()} ${String(input)}`);
+  expect(writes.filter((w) => /\/api\/tasks\/sync|\/api\/db\//.test(w))).toEqual([]);
+  expect(writes.filter((w) => !/^POST \/api\/(tasks\/|rewards\/redeem$|members\/verify$)/.test(w))).toEqual([]);
+}
+
 function fetchHandler() {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -121,6 +132,7 @@ function db_member(name: string) {
 }
 
 let activeRoot: Root | null = null;
+let fetchMock = vi.fn();
 
 async function renderAsync(ui: ReactElement): Promise<HTMLElement> {
   const el = document.createElement("div");
@@ -205,7 +217,6 @@ describe("RewardsShop parent approval gate (>100pt rewards)", () => {
     posted = [];
     store.week = { weekStart: "2026-09-01", points: { Caspian: 200 }, streak: {}, lastActive: {}, history: [] };
     store.saveWeekData.mockReset();
-    store.syncWeekDataToPB.mockClear();
     redeemResult = { status: 200, body: { ok: true, weekData: REDEEMED_WEEK } };
     vi.stubGlobal("matchMedia", vi.fn(() => ({
       matches: false,
@@ -222,7 +233,7 @@ describe("RewardsShop parent approval gate (>100pt rewards)", () => {
   });
 
   it("tapping a >100pt reward opens the parent-approval modal and writes nothing", async () => {
-    vi.stubGlobal("fetch", fetchHandler());
+    stubFetch();
     const el = await renderAsync(<RewardsShop />);
     await settle();
 
@@ -235,11 +246,11 @@ describe("RewardsShop parent approval gate (>100pt rewards)", () => {
     expect(document.body.textContent || "").toContain("Parent Approval Required");
     expect(document.body.textContent || "").not.toContain("Redeem with your PIN");
     expect(store.saveWeekData).not.toHaveBeenCalled();
-    expect(store.syncWeekDataToPB).not.toHaveBeenCalled();
+    expectNoStructuredTaskPush();
   });
 
   it("a WRONG parent PIN never unlocks the redemption or writes points", async () => {
-    vi.stubGlobal("fetch", fetchHandler());
+    stubFetch();
     const el = await renderAsync(<RewardsShop />);
     await settle();
     const card = el.querySelector('[aria-label^="Movie night — 150 points"]') as HTMLElement;
@@ -255,11 +266,11 @@ describe("RewardsShop parent approval gate (>100pt rewards)", () => {
     expect(document.body.textContent || "").toContain("Parent PIN required to approve large rewards.");
     expect(document.body.textContent || "").not.toContain("Redeem with your PIN");
     expect(store.saveWeekData).not.toHaveBeenCalled();
-    expect(store.syncWeekDataToPB).not.toHaveBeenCalled();
+    expectNoStructuredTaskPush();
   });
 
   it("a correct parent PIN unlocks the kid-PIN step, and the write lands only after it", async () => {
-    vi.stubGlobal("fetch", fetchHandler());
+    stubFetch();
     const el = await renderAsync(<RewardsShop />);
     await settle();
     const card = el.querySelector('[aria-label^="Movie night — 150 points"]') as HTMLElement;
@@ -282,18 +293,18 @@ describe("RewardsShop parent approval gate (>100pt rewards)", () => {
     await settle();
 
     // The server's returned weekData is adopted verbatim — the old
-    // local-then-fire-and-forget sync (syncWeekDataToPB) is gone: the gateway
-    // now rejects a child's week_data write, so it would 403 and be reverted.
+    // local-then-fire-and-forget is gone: the gateway now rejects a child's
+    // week_data write, so it would 403 and be reverted.
     expect(store.saveWeekData).toHaveBeenCalled();
     const week = store.saveWeekData.mock.calls.at(-1)![0];
     expect(week.points.Caspian).toBe(50);
     expect(week.history.some((tx: any) => tx.type === "redeem" && tx.amount === -150)).toBe(true);
-    expect(store.syncWeekDataToPB).not.toHaveBeenCalled();
+    expectNoStructuredTaskPush();
     expect(document.body.textContent || "").toContain("Redeemed!");
   });
 
   it("a ≤100pt reward skips parent approval (kid PIN only, as before)", async () => {
-    vi.stubGlobal("fetch", fetchHandler());
+    stubFetch();
     const el = await renderAsync(<RewardsShop />);
     await settle();
     const card = el.querySelector('[aria-label^="Ice cream trip — 40 points"]') as HTMLElement;
@@ -306,7 +317,7 @@ describe("RewardsShop parent approval gate (>100pt rewards)", () => {
   });
 
   it("a failed redeem (duplicate 409) shows the honest error and does NOT celebrate", async () => {
-    vi.stubGlobal("fetch", fetchHandler());
+    stubFetch();
     redeemResult = {
       status: 409,
       body: { ok: false, reason: "duplicate", error: "That redemption just went through — check your points." },
@@ -330,7 +341,7 @@ describe("RewardsShop parent approval gate (>100pt rewards)", () => {
   });
 
   it("an insufficient-points 400 surfaces the server's 'needs N more pts' copy (no celebration)", async () => {
-    vi.stubGlobal("fetch", fetchHandler());
+    stubFetch();
     redeemResult = {
       status: 400,
       body: { ok: false, reason: "insufficient", error: "Caspian needs 10 more pts for 🍦 Ice cream trip" },
@@ -362,7 +373,6 @@ describe("RewardsShop redemption acknowledgment (Wave 3 Task 4)", () => {
     posted = [];
     store.week = { weekStart: "2026-09-01", points: { Caspian: 200 }, streak: {}, lastActive: {}, history: [] };
     store.saveWeekData.mockReset();
-    store.syncWeekDataToPB.mockClear();
     redeemResult = { status: 200, body: { ok: true, weekData: REDEEMED_WEEK } };
     vi.stubGlobal("matchMedia", vi.fn(() => ({
       matches: false,
@@ -380,7 +390,7 @@ describe("RewardsShop redemption acknowledgment (Wave 3 Task 4)", () => {
 
   it("does not mutate local points before a 200 or 202 response", async () => {
     redeemResult = { status: 0, body: {}, network: true };
-    vi.stubGlobal("fetch", fetchHandler());
+    stubFetch();
     await renderAsync(<RewardsShop />);
     await settle();
 
@@ -402,7 +412,7 @@ describe("RewardsShop redemption acknowledgment (Wave 3 Task 4)", () => {
 
   it("reuses one operation ID for network retries", async () => {
     redeemResult = { status: 0, body: {}, network: true };
-    vi.stubGlobal("fetch", fetchHandler());
+    stubFetch();
     await renderAsync(<RewardsShop />);
     await settle();
 
@@ -439,7 +449,7 @@ describe("RewardsShop redemption acknowledgment (Wave 3 Task 4)", () => {
       status: 202,
       body: { ok: true, applied: true, duplicate: false, reconciled: false, weekData: REDEEMED_WEEK },
     };
-    vi.stubGlobal("fetch", fetchHandler());
+    stubFetch();
     await renderAsync(<RewardsShop />);
     await settle();
 
@@ -464,7 +474,7 @@ describe("RewardsShop redemption acknowledgment (Wave 3 Task 4)", () => {
   });
 
   it("a queued >100 redemption names the approver on the wire and never a cost or a title", async () => {
-    vi.stubGlobal("fetch", fetchHandler());
+    stubFetch();
     await renderAsync(<RewardsShop />);
     await settle();
 
@@ -490,7 +500,7 @@ describe("RewardsShop redemption acknowledgment (Wave 3 Task 4)", () => {
   });
 
   it("a ≤100pt redemption sends the member PIN only — no parent identity at all", async () => {
-    vi.stubGlobal("fetch", fetchHandler());
+    stubFetch();
     await renderAsync(<RewardsShop />);
     await settle();
 
