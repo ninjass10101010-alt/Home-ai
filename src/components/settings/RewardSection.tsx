@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useEffect, useSyncExternalStore } from "react";
-import { queueTaskCommandAndFlush, onTaskOutboxAdopted } from "@/lib/task-command-queue";
+import { onTaskOutboxAdopted } from "@/lib/task-command-queue";
+import { writeTaskConfig } from "@/lib/task-config-client";
+import type { TaskConfigCommand } from "@/lib/task-config";
 import { useTaskCommandQueue } from "@/hooks/useTaskCommandQueue";
 import SoftButton from "@/components/ui/SoftButton";
 import IconButton from "@/components/ui/IconButton";
@@ -62,12 +64,15 @@ function emitRewardsUpdate(): void {
 }
 
 function queueRewardsCommand(action: "replace" | "upsert" | "delete", rest: Record<string, unknown>): void {
-  queueTaskCommandAndFlush({
-    route: "/api/tasks/config",
+  const command: TaskConfigCommand = {
+    operationId: "",
+    kind: "rewards",
     action,
-    payload: { kind: "rewards", updatedAt: new Date().toISOString(), ...rest },
-    displayTarget: { kind: "config" },
-  });
+    updatedAt: new Date().toISOString(),
+    ...(rest.item !== undefined ? { item: rest.item as TaskConfigCommand["item"] } : {}),
+    ...(rest.itemId !== undefined ? { itemId: rest.itemId as TaskConfigCommand["itemId"] } : {}),
+  };
+  void writeTaskConfig(command).catch(() => {});
 }
 
 export default function RewardSection({ showToast }: RewardSectionProps) {

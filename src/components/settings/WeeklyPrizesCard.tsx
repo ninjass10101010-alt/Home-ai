@@ -9,20 +9,23 @@ import {
   loadWeeklyPrizes,
   DEFAULT_WEEKLY_PRIZES,
 } from "@/lib/task-utils";
-import { queueTaskCommandAndFlush, onTaskOutboxAdopted } from "@/lib/task-command-queue";
+import { onTaskOutboxAdopted } from "@/lib/task-command-queue";
+import { readTaskConfig, writeTaskConfig } from "@/lib/task-config-client";
 import { useTaskCommandQueue } from "@/hooks/useTaskCommandQueue";
 import type { WeeklyPrize } from "@/types/tasks";
+import type { TaskConfigCommand } from "@/lib/task-config";
 
 const MEDALS = ["🥇", "🥈", "🥉"] as const;
 const MAX_PRIZES = 3;
 
 function queueWeeklyPrizes(items: WeeklyPrize[]): void {
-  queueTaskCommandAndFlush({
-    route: "/api/tasks/config",
+  void writeTaskConfig({
+    operationId: "",
+    kind: "weekly-prizes",
     action: "replace",
-    payload: { kind: "weekly-prizes", updatedAt: new Date().toISOString(), items },
-    displayTarget: { kind: "config" },
-  });
+    updatedAt: new Date().toISOString(),
+    items,
+  } as TaskConfigCommand).catch(() => {});
 }
 
 interface WeeklyPrizesCardProps {
@@ -55,15 +58,21 @@ export default function WeeklyPrizesCard({ showToast }: WeeklyPrizesCardProps) {
     [],
   );
 
-  // Re-read on the 60s CacheRefresher pulse so another device's prize edits
-  // land — but only when the card is clean (no unsaved edits in flight).
   useEffect(() => {
-    const onRefreshed = () => {
-      if (dirtyRef.current) return;
-      setPrizes(loadWeeklyPrizes());
+    let active = true;
+    const adopt = (response: { items: unknown } | null) => {
+      if (!active || dirtyRef.current) return;
+      setPrizes(response ? (response.items as WeeklyPrize[]) : loadWeeklyPrizes());
     };
-    window.addEventListener("consuela-data-refreshed", onRefreshed);
-    return () => window.removeEventListener("consuela-data-refreshed", onRefreshed);
+    const read = () => {
+      void readTaskConfig("weekly-prizes").then(adopt).catch(() => adopt(null));
+    };
+    read();
+    window.addEventListener("consuela-data-refreshed", read);
+    return () => {
+      active = false;
+      window.removeEventListener("consuela-data-refreshed", read);
+    };
   }, []);
 
   // Parent-only surface — kids and guests never see the prize race controls.

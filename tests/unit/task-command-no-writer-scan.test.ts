@@ -114,7 +114,7 @@ describe("no-writer scan — kid home", () => {
 });
 
 describe("no-writer scan — config callers", () => {
-  it("RewardSection, WeeklyPrizesCard and action-runner all queue config commands", () => {
+  it("RewardSection, WeeklyPrizesCard and action-runner all reach the durable config queue", () => {
     for (const file of [
       "components/settings/RewardSection.tsx",
       "components/settings/WeeklyPrizesCard.tsx",
@@ -122,8 +122,17 @@ describe("no-writer scan — config callers", () => {
     ]) {
       const source = read(file);
       expect(lineNumbers(source, /fetch\(\s*["'`]\/api\/tasks\/config/)).toEqual([]);
-      expect(lineNumbers(source, /queueTaskCommand(?:AndFlush)?\(/).length).toBeGreaterThan(0);
+      const durable = lineNumbers(source, /queueTaskCommand(?:AndFlush)?\(/).length
+        + lineNumbers(source, /writeTaskConfig\(/).length;
+      expect({ file, durableSeams: durable > 0 }).toEqual({ file, durableSeams: true });
     }
+  });
+
+  it("the task-config client is a durable queue, not a direct route fetch", () => {
+    const source = read("lib/task-config-client.ts");
+    expect(lineNumbers(source, /fetch\(\s*["'`]\/api\/tasks\/config/)).toEqual([]);
+    expect(source).toContain("queueTaskCommandAndFlush(");
+    expect(source).toContain('route: "/api/tasks/config"');
   });
 
   it("no caller stamps a config write as a local success before acknowledgment", () => {
