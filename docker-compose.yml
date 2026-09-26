@@ -20,6 +20,10 @@ services:
         - NEXT_PUBLIC_PB_URL=http://pocketbase:8090
         - FINANCE_DASHBOARD_URL=http://finance-dashboard
         - NEXT_PUBLIC_CANONICAL_MEMBER_FALLBACKS=false
+    # Named so the NAS runner can start exactly the image it built. Without this
+    # key Compose tags the build <project>-home-dashboard and the runner has no
+    # name to `docker run`.
+    image: ${DASHBOARD_IMAGE:-consuela-dashboard:latest}
     container_name: consuela-dashboard
     restart: unless-stopped
     ports:
@@ -78,6 +82,9 @@ services:
     build:
       context: .
       target: seed
+    # Same contract as home-dashboard: the runner polls health with the seed
+    # image, so the seed image must carry a name both sides agree on.
+    image: ${PB_SEED_IMAGE:-consuela-pb-seed:latest}
     command: ["npm", "run", "pb:seed"]
     env_file:
       - ${DASHBOARD_ENV_FILE:-./.env}
