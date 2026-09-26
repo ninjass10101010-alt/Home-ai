@@ -67,6 +67,7 @@ export interface TaskOutboxEntry {
   lastErrorCategory?: TaskOutboxErrorCategory;
   lastErrorReason?: string;
   lastErrorMessage?: string;
+  credentialMissing?: boolean;
   nextAttemptAt?: string;
   status: TaskOutboxStatus;
   displayTarget: TaskOutboxDisplayTarget;
@@ -417,6 +418,7 @@ function parseEntry(value: unknown): TaskOutboxEntry | null {
     ...(typeof value.lastErrorMessage === "string" && value.lastErrorMessage.trim()
       ? { lastErrorMessage: clampServerMessage(value.lastErrorMessage) }
       : {}),
+    ...(value.credentialMissing === true ? { credentialMissing: true } : {}),
     ...(nextAttemptAt ? { nextAttemptAt } : {}),
     status,
     displayTarget: sanitizeDisplayTarget(value.displayTarget),
@@ -954,9 +956,46 @@ export function taskOutboxReconcileBackoffMs(reconcileAttemptCount: number): num
   );
 }
 
+// Every code this module will accept as a MACHINE reason, whatever field it
+// arrived in. `reason` and `code` are the machine channel by contract; `error`
+// is the display channel, but two command routes (`/api/tasks/config`,
+// `/api/tasks/manage`) can express a machine code ONLY through `error` — their
+// exact response bodies are pinned by the route suites — so `error` is honoured
+// here ONLY when it is a member of this closed vocabulary. A human sentence is
+// never a member, which is what keeps a display string out of classification, out
+// of the retry budget and away from every sentinel below. Anything unrecognised
+// yields "" and the caller falls back to a value derived from the STATUS.
+const ERROR_CHANNEL_MACHINE_CODES = new Set<string>([
+  ...RETRYABLE_REASONS,
+  ...PERMANENT_REASONS,
+  ...DUPLICATE_REASONS,
+  "adult_only",
+  "config_natural_key_conflict",
+  "config_store_unreachable",
+  "forbidden_config_field",
+  "forbidden_task_field",
+  "invalid_body",
+  "invalid_config_command",
+  "invalid_current_config",
+  "invalid_resulting_config",
+  "invalid_task_command",
+  "invalid_task_field",
+  "member_lookup_failed",
+  "member_missing",
+  "pin_required",
+  "unknown-task",
+  "unauthorized",
+]);
+
+function machineCode(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
 function reasonOf(body: TaskOutboxAcknowledgement): string {
-  const raw = body.reason ?? body.error ?? body.code;
-  return typeof raw === "string" ? raw.trim() : "";
+  const declared = machineCode(body.reason) || machineCode(body.code);
+  if (declared) return declared;
+  const fallback = machineCode(body.error);
+  return ERROR_CHANNEL_MACHINE_CODES.has(fallback) ? fallback : "";
 }
 
 const MAX_SERVER_MESSAGE_CHARS = 240;
@@ -977,8 +1016,23 @@ function serverMessageOf(body: TaskOutboxAcknowledgement): string {
   return typeof body.error === "string" ? clampServerMessage(body.error) : "";
 }
 
-function serverMessagePatch(message: string): Pick<TaskOutboxEntry, "lastErrorMessage"> {
-  return { lastErrorMessage: message ? clampServerMessage(message) : undefined };
+/**
+ * The two display/sentinel fields, written (or cleared) on every state change.
+ *
+ * `credentialMissing` is set ONLY here, from `markAuthRequired(..., deferred:
+ * false)` — the one place this module decides a credential is absent. It exists
+ * so that `runFlush`'s "never attempt this again without a credential" skip
+ * reads a boolean it owns instead of string-matching `lastErrorReason`, which
+ * no server response of any kind can then set to the sentinel's name.
+ */
+function entryExtras(
+  message: string,
+  credentialMissing = false,
+): Pick<TaskOutboxEntry, "lastErrorMessage" | "credentialMissing"> {
+  return {
+    lastErrorMessage: message ? clampServerMessage(message) : undefined,
+    credentialMissing: credentialMissing ? true : undefined,
+  };
 }
 
 function requiresCredential(entry: TaskOutboxEntry): boolean {
@@ -998,7 +1052,7 @@ function markRetryable(
     status: "retrying",
     lastErrorCategory: category,
     lastErrorReason: reason,
-    ...serverMessagePatch(message),
+    ...entryExtras(message),
     authAttemptCount: 0,
     reconcileAttemptCount: 0,
     nextAttemptAt: new Date(Date.now() + taskOutboxBackoffMs(attemptCount)).toISOString(),
@@ -1016,7 +1070,7 @@ function markFailed(
     status: "failed",
     lastErrorCategory: category,
     lastErrorReason: reason,
-    ...serverMessagePatch(message),
+    ...entryExtras(message),
     nextAttemptAt: undefined,
   });
   return { acknowledged: 0, retryable: 0, permanent: 1 };
@@ -1033,7 +1087,7 @@ function markAuthRequired(
       status: "auth-required",
       lastErrorCategory: "unauthorized",
       lastErrorReason: reason,
-      ...serverMessagePatch(message),
+      ...entryExtras(message, true),
       nextAttemptAt: undefined,
     });
     return RETAINED;
@@ -1043,7 +1097,7 @@ function markAuthRequired(
     status: "auth-required",
     lastErrorCategory: "unauthorized",
     lastErrorReason: reason,
-    ...serverMessagePatch(message),
+    ...entryExtras(message),
     authAttemptCount,
     nextAttemptAt: new Date(Date.now() + taskOutboxAuthBackoffMs(authAttemptCount)).toISOString(),
   });
@@ -1056,7 +1110,7 @@ function markReconciling(entry: TaskOutboxEntry, reason: string, message = ""): 
     status: "reconciling",
     lastErrorCategory: "projection",
     lastErrorReason: reason,
-    ...serverMessagePatch(message),
+    ...entryExtras(message),
     authAttemptCount: 0,
     reconcileAttemptCount,
     nextAttemptAt: new Date(
@@ -1131,7 +1185,7 @@ function classifyFailure(
   if (status === 401) return markAuthRequired(entry, reason || "unauthorized", true, message);
   if (status === 403) return markFailed(entry, "unauthorized", reason || "adult_only", message);
   if (body.retryable === true || RETRYABLE_REASONS.has(reason)) {
-    return markRetryable(entry, "server", reason || "retryable_conflict", message);
+    return markRetryable(entry, "server", reason || `http_${status}`, message);
   }
   if (status >= 500 || status === 408 || status === 425 || status === 429) {
     return markRetryable(entry, "server", reason || `http_${status}`, message);
@@ -1738,7 +1792,7 @@ async function runFlush(options: FlushTaskOutboxOptions): Promise<FlushTaskOutbo
       if (entry.status === "failed") continue;
       if (
         entry.status === "auth-required" &&
-        entry.lastErrorReason === "credential_missing" &&
+        entry.credentialMissing === true &&
         !options.getCredential?.(entry)
       ) {
         continue;

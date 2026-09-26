@@ -1679,11 +1679,26 @@ a wrong PIN is `401 invalid_pin`, both before the ledger write. A PIN
 (`pin` / `parentPin`) **never** enters the entry: it lives only in the ephemeral
 credential registry keyed by `operationId`. The stored reward row stays the sole
 authority for the cost — never widen the allowlist to admit a client `cost` or
-`title`. The entry's failure fields are likewise split: `lastErrorReason` is a
-machine code this module controls and is the ONLY thing classification reads,
-while `lastErrorMessage` carries the server's human copy for the UI. A
-server-supplied string can never move a branch, a retry budget or a credential
-gate.
+`title`. The entry's failure fields are split, and the boundary is exact:
+
+- `body.reason` / `body.code` is the **machine channel** — the route's own
+  classification code. The client deliberately acts on it: it selects
+  retryable / permanent / semantic-duplicate, sets the retry backoff, and a
+  `stale_config` 409 triggers adopting the authoritative catalog. That is the
+  designed contract, and it is the ONLY server input that steers a branch.
+- `body.error` is the **display channel** — a human sentence. It is read at
+  exactly one place (`serverMessageOf`) and lands on `lastErrorMessage`, which
+  exactly one caller renders. It never reaches `reasonOf`, classification, the
+  retry budget, or any credential gate. A body carrying only `error` therefore
+  yields no machine reason at all, and the caller falls back to a value derived
+  from the **status** (`http_<status>`, `unauthorized`, `adult_only`,
+  `operation_conflict`, ...) rather than adopting the sentence.
+- `credentialMissing` is a **module-owned boolean**, not a string. It is set
+  only by `markAuthRequired(..., deferred: false)` — the one place this module
+  decides a credential is absent — and `runFlush` reads it to skip an entry
+  that cannot be attempted. Because it is never string-matched against
+  `lastErrorReason`, no server response, through either channel, can
+  impersonate that sentinel and silently strand a command.
 
 **`executeInternalTaskCommand` is the sanctioned server-side command seam.**
 `executeInternalTaskCommand` (`src/lib/task-commands.ts`) is the *only* entry
