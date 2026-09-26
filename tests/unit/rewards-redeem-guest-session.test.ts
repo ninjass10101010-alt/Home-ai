@@ -53,6 +53,7 @@ function makePb() {
   const writes: any[] = [];
   return {
     writes,
+    stored: () => weekRow,
     pb: {
       collection: (name: string) => {
         if (name === "members") {
@@ -166,5 +167,64 @@ describe("a guest session can reach reward redemption", () => {
   it("a sessionless surface the browser must NOT reach stays gated", async () => {
     const res = await middleware(guestRequest("/api/rewards/redeem-history"));
     expect(res.status).toBe(401);
+  });
+});
+
+describe("the real ledger seam applies a replayed redemption exactly once", () => {
+  function readJson(value: unknown): any {
+    return typeof value === "string" ? JSON.parse(value) : value;
+  }
+
+  it("the same operation id sent twice deducts the points a single time", async () => {
+    const { pb, writes, stored } = makePb();
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+
+    const body = {
+      operationId: "op-replay-once",
+      rewardId: "r-cheap",
+      memberName: "Caspian",
+      pin: "1010",
+    };
+    const first = await redeemPOST(guestRequest("/api/rewards/redeem", body));
+    const second = await redeemPOST(guestRequest("/api/rewards/redeem", body));
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    const firstBody = await first.json();
+    const secondBody = await second.json();
+    expect(firstBody).toMatchObject({ ok: true, applied: true, duplicate: false });
+    expect(secondBody).toMatchObject({ ok: true, applied: false, duplicate: true });
+    expect(secondBody.operationId).toBe("op-replay-once");
+    expect(secondBody.weekData.points["Caspian Garcia"]).toBe(25);
+
+    const storedRow = stored();
+    const history = readJson(storedRow.history);
+    const points = readJson(storedRow.points);
+    expect(history.filter((tx: any) => tx.type === "redeem")).toHaveLength(1);
+    expect(history.filter((tx: any) => tx.meta?.operationId === "op-replay-once")).toHaveLength(1);
+    expect(history.filter((tx: any) => tx.amount === -15)).toHaveLength(1);
+    expect(points["Caspian Garcia"]).toBe(25);
+    expect(writes).toHaveLength(1);
+  });
+
+  it("a DIFFERENT operation id is a second real redemption, so the one-deduction claim is the operation id's doing", async () => {
+    const { pb, writes, stored } = makePb();
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+
+    const base = { rewardId: "r-cheap", memberName: "Caspian", pin: "1010" };
+    const first = await redeemPOST(guestRequest("/api/rewards/redeem", { ...base, operationId: "op-other-1" }));
+    const second = await redeemPOST(guestRequest("/api/rewards/redeem", { ...base, operationId: "op-other-2" }));
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    const secondBody = await second.json();
+    expect(secondBody).toMatchObject({ ok: true, applied: true, duplicate: false });
+
+    const storedRow = stored();
+    const history = readJson(storedRow.history);
+    const points = readJson(storedRow.points);
+    expect(history.filter((tx: any) => tx.type === "redeem")).toHaveLength(2);
+    expect(points["Caspian Garcia"]).toBe(10);
+    expect(writes).toHaveLength(2);
   });
 });
