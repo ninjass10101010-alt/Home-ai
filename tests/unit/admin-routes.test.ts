@@ -5,6 +5,9 @@ const mocks = vi.hoisted(() => ({
   listContainers: vi.fn(),
   restartContainer: vi.fn(),
   verifyPinAgainstAnyMember: vi.fn(),
+  authorizeAdminRequest: vi.fn(),
+  execSync: vi.fn(),
+  readFile: vi.fn(),
 }));
 
 vi.mock("@/lib/docker-api", () => ({
@@ -17,12 +20,15 @@ vi.mock("@/lib/server-auth", async (importOriginal) => {
   return { ...actual, verifyPinAgainstAnyMember: mocks.verifyPinAgainstAnyMember };
 });
 
+vi.mock("@/lib/admin-auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/admin-auth")>();
+  return { ...actual, authorizeAdminRequest: mocks.authorizeAdminRequest };
+});
+
+vi.mock("child_process", () => ({ execSync: mocks.execSync }));
+
 // version route reads fs + GitHub; stub both to stay hermetic
-vi.mock("fs/promises", () => ({
-  readFile: vi.fn(async () => {
-    throw new Error("no file");
-  }),
-}));
+vi.mock("fs/promises", () => ({ readFile: mocks.readFile }));
 vi.stubGlobal(
   "fetch",
   vi.fn(() => Promise.reject(new Error("offline")))
@@ -41,10 +47,16 @@ function req(init: { headers?: Record<string, string>; body?: unknown } = {}): N
   });
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.stubEnv("ADMIN_SECRET", "");
   mocks.listContainers.mockReset().mockResolvedValue([]);
   mocks.restartContainer.mockReset().mockResolvedValue(undefined);
+  mocks.execSync.mockReset().mockReturnValue("");
+  mocks.readFile.mockReset().mockRejectedValue(new Error("no file"));
+  const actual = await vi.importActual<typeof import("@/lib/admin-auth")>("@/lib/admin-auth");
+  mocks.authorizeAdminRequest
+    .mockReset()
+    .mockImplementation(actual.authorizeAdminRequest);
 });
 
 describe("admin routes auth gate", () => {
@@ -91,5 +103,35 @@ describe("admin routes auth gate", () => {
     );
     expect(res.status).toBe(200);
     expect(mocks.restartContainer).toHaveBeenCalledWith("pocketbase");
+  });
+
+  it("returns 410 and runs no deployment command", async () => {
+    mocks.authorizeAdminRequest.mockResolvedValue({ ok: true });
+    const res = await updatePOST(req({ body: {} }));
+
+    expect(res.status).toBe(410);
+    expect(await res.json()).toEqual({
+      ok: false,
+      error: "manual_deploy_required",
+    });
+    expect(mocks.execSync).not.toHaveBeenCalled();
+    expect(mocks.readFile).not.toHaveBeenCalled();
+  });
+
+  it("returns 410 for an authorized parent PIN and spawns no process", async () => {
+    mocks.verifyPinAgainstAnyMember.mockResolvedValue({ id: "dad", role: "parent" });
+    const res = await updatePOST(
+      req({ headers: { "x-admin-pin": "2222" }, body: {} })
+    );
+
+    expect(res.status).toBe(410);
+    expect(await res.json()).toEqual({
+      ok: false,
+      error: "manual_deploy_required",
+    });
+    expect(mocks.verifyPinAgainstAnyMember).toHaveBeenCalledWith("2222");
+    expect(mocks.execSync).not.toHaveBeenCalled();
+    expect(mocks.restartContainer).not.toHaveBeenCalled();
+    expect(mocks.readFile).not.toHaveBeenCalled();
   });
 });
