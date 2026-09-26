@@ -51,7 +51,9 @@ beforeEach(() => {
     id: "snap1",
     key: "tasks-snapshot",
     data: {
-      tasks: [{ id: 42, title: "Existing chore", assignee: "Member A", points: 5, due: "2026-09-24", completed: false }],
+      // `universal: false` is what the manage command writes for an assigned
+      // chore; without it the canonical reader treats the row as open.
+      tasks: [{ id: 42, title: "Existing chore", assignee: "Member A", points: 5, due: "2026-09-24", completed: false, universal: false }],
       weekData: { weekStart: "2026-09-21", points: {}, history: [] },
       deletedTaskIds: [],
     },
@@ -139,4 +141,112 @@ it("surfaces the command's own pet refusal — the seam is the final authority",
   expect(museResult(out)).toMatchObject({ ok: false, reason: "pet_assignee" });
   expect(museResult(out).error).toContain("pet");
   expect(snapTasks()).toHaveLength(1);
+});
+
+it("an MUSE delete_task rides the command seam and never writes the snapshot itself", async () => {
+  mocks.execute.mockResolvedValue({
+    ok: true,
+    operationId: "task-op-delete",
+    task: undefined,
+    reconciled: true,
+    deleted: true,
+    noCurrentTask: true,
+  });
+  const out = await executeMuseTool("delete_task", { taskId: 42 }, { admin: false });
+  const [command, context] = lastCommand()!;
+  expect(context).toEqual({ source: "muse" });
+  expect(command).toMatchObject({
+    kind: "delete",
+    operationId: expect.any(String),
+  });
+  expect(JSON.parse((command as any).payload.taskData)).toMatchObject({ taskId: 42 });
+  expect(museResult(out)).toMatchObject({ ok: true, taskId: 42, deleted: true, reconciled: true });
+  expect(writes.filter((w) => w.collection === SNAP)).toHaveLength(0);
+  expect(snapTasks()).toHaveLength(1);
+});
+
+it("an MUSE delete_task is idempotent under a replayed operationId", async () => {
+  mocks.execute.mockResolvedValue({
+    ok: true,
+    operationId: "task-op-delete-replay",
+    reconciled: true,
+    deleted: true,
+    noCurrentTask: true,
+  });
+  const first = await executeMuseTool("delete_task", { taskId: 42 }, { admin: false });
+  const second = await executeMuseTool("delete_task", { taskId: 42 }, { admin: false });
+  expect(museResult(first)).toMatchObject({ ok: true, taskId: 42 });
+  expect(museResult(second)).toMatchObject({ ok: true, taskId: 42, reconciled: true });
+  expect(lastCommand()![0]).toMatchObject({ kind: "delete", operationId: expect.any(String) });
+});
+
+it("an MUSE completion derives its payee from canonical state and writes no snapshot row", async () => {
+  mocks.execute.mockResolvedValue({
+    ok: true,
+    operationId: "task-op-complete",
+    task: {
+      id: 42,
+      title: "Existing chore",
+      assignee: "Member A",
+      completed: true,
+      pendingApproval: { byName: "Member A", at: "2026-09-24T10:00:00.000Z", points: 5 },
+    },
+    pending: true,
+    claimedBy: "Member A",
+    reconciled: true,
+  });
+  const out = await executeMuseTool("complete_task", { taskId: 42, assignee: "Someone Else" }, { admin: false });
+  const [command, context] = lastCommand()!;
+  expect(context).toEqual({ source: "muse" });
+  expect(command).toMatchObject({
+    kind: "complete",
+    actor: { memberId: "mem-alex", name: "Member A", role: "child" },
+    payload: { taskId: 42 },
+  });
+  expect(museResult(out)).toMatchObject({ ok: true, queuedForApproval: true, reconciled: true });
+  expect(museResult(out).assignee).toBe("Member A");
+  expect(writes.filter((w) => w.collection === SNAP || w.collection === "week_data")).toHaveLength(0);
+  expect(snapTasks()[0].completed).toBe(false);
+});
+
+it("an MUSE reopen rides the same seam and clears crew check-ins", async () => {
+  rows.members = [
+    { id: "mem-alex", name: "Member A", fullName: "Member A", role: "parent", emoji: "🎻" },
+  ];
+  rows[SNAP][0].data.tasks = [{
+    id: 42,
+    title: "Crew clean",
+    assignee: "Crew",
+    points: 10,
+    completed: true,
+    universal: false,
+    crewSize: 2,
+    crew: {
+      members: [{ name: "Member A", emoji: "🎻", joinedAt: "2026-09-21T08:00:00.000Z", checkedInAt: "2026-09-22T09:00:00.000Z" }],
+      removed: ["Former Member"],
+    },
+    pendingApproval: { byName: "Crew", at: "2026-09-22T10:00:00.000Z", points: 10, crew: ["Member A"] },
+    sentBackAt: null,
+  }];
+  mocks.execute.mockResolvedValue({
+    ok: true,
+    operationId: "task-op-undo",
+    task: {
+      id: 42,
+      title: "Crew clean",
+      assignee: "Crew",
+      completed: false,
+      crew: { members: [{ name: "Member A", emoji: "🎻", joinedAt: "2026-09-21T08:00:00.000Z" }], removed: ["Former Member"] },
+    },
+    reopened: true,
+    reconciled: true,
+  });
+  const out = await executeMuseTool("reopen_task", { taskId: 42 }, { admin: false });
+  const [command, context] = lastCommand()!;
+  expect(context).toEqual({ source: "muse" });
+  expect(command).toMatchObject({ kind: "undo", operationId: expect.any(String), payload: { taskId: 42 } });
+  expect(museResult(out)).toMatchObject({ ok: true, reopened: true, reconciled: true });
+  expect(museResult(out).task.crew.members[0].checkedInAt).toBeUndefined();
+  expect(museResult(out).task.crew.removed).toEqual(["Former Member"]);
+  expect(writes.filter((w) => w.collection === SNAP || w.collection === "week_data")).toHaveLength(0);
 });

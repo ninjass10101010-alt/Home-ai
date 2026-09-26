@@ -90,6 +90,19 @@ describe("POST /api/consuela/suggestions/act — child PIN cannot dispatch write
     expect(json.ok).toBe(true);
   });
 
+  it("parent pin + write tool dispatches with the SERVER source + the caller's live role", async () => {
+    verifyPinAgainstAnyMember.mockResolvedValue(parent);
+    mockSuggestion("add_task");
+    const handler = vi.fn().mockResolvedValue(JSON.stringify({ ok: true }));
+    getTool.mockReturnValue({ handler });
+    const res = await POST(req("add_task"));
+    expect(res.status).toBe(200);
+    expect(handler).toHaveBeenCalledWith(
+      {},
+      { source: "server", caller: { memberId: "p1", name: "Rebecca", role: "parent" } },
+    );
+  });
+
   it("child pin + dismiss_suggestion allowed (kid can dismiss their own feed)", async () => {
     verifyPinAgainstAnyMember.mockResolvedValue(child);
     mockSuggestion("dismiss_suggestion");

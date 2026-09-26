@@ -226,7 +226,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: `Unknown tool: ${tool}` }, { status: 400 });
   }
   try {
-    const raw = await def.handler({ ...a, title, date, ...(time ? { time } : {}) });
+    // A live parent session + parent PIN: this dispatch is server-authoritative,
+    // so it is attributed as `server` with the live caller — never as a Hermes
+    // chat call.
+    const raw = await def.handler({ ...a, title, date, ...(time ? { time } : {}) }, {
+      source: "server",
+      caller: { memberId: live.identity.memberId, name: live.identity.name, role: live.identity.role },
+    });
     let result: unknown = raw;
     try {
       result = JSON.parse(raw);

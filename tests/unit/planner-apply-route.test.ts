@@ -150,6 +150,17 @@ describe("POST /api/consuela/planner/apply — PIN-gated buffer apply", () => {
     expect(mocks.getTool).not.toHaveBeenCalled();
   });
 
+  it("dispatches with the SERVER source + the live parent caller — never 'hermes'", async () => {
+    mocks.verifyPinAgainstAnyMember.mockResolvedValue({ id: "m1", name: "Rebecca", role: "parent" });
+    mocks.handler.mockResolvedValue(JSON.stringify({ ok: true, event: { id: "e1", ...VALID_ARGS } }));
+    const res = await post({ tool: "add_event", args: VALID_ARGS }, { pin: "1234" });
+    expect(res.status).toBe(200);
+    expect(mocks.handler).toHaveBeenCalledWith(
+      expect.objectContaining({ title: VALID_ARGS.title }),
+      { source: "server", caller: { memberId: "m1", name: "Rebecca", role: "parent" } },
+    );
+  });
+
   it("a demoted session is refused before the PIN is read", async () => {
     mocks.requireLiveSession.mockResolvedValue({
       ok: false,
@@ -278,7 +289,10 @@ describe("POST /api/consuela/planner/apply — PIN-gated buffer apply", () => {
     const json = await res.json();
     expect(json.ok).toBe(true);
     expect(json.event).toEqual(event);
-    expect(mocks.handler).toHaveBeenCalledWith(VALID_ARGS);
+    expect(mocks.handler).toHaveBeenCalledWith(VALID_ARGS, {
+      source: "server",
+      caller: { memberId: "m1", name: "Rebecca", role: "parent" },
+    });
   });
 
   it("handler reports failure (ok:false + error) → 400 with the handler's message", async () => {

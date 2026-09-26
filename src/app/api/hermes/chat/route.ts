@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { buildToolsForOpenAI, getTool } from "@/lib/hermes-tools";
+import { buildToolsForOpenAI, getTool, type ToolHandlerContext } from "@/lib/hermes-tools";
 import { db } from "@/db";
 import { readSessionCookie, requireLiveSession } from "@/lib/server-auth";
 import type { SessionIdentity } from "@/lib/session-policy";
@@ -315,6 +315,7 @@ async function callAiStream(
 async function runToolCalls(
   toolCalls: ToolCall[],
   tools: ReturnType<typeof buildToolsForOpenAI>,
+  context: ToolHandlerContext,
 ): Promise<string[]> {
   return Promise.all(toolCalls.map(async (tc) => {
     const name = tc.function?.name;
@@ -327,7 +328,7 @@ async function runToolCalls(
       return JSON.stringify({ error: `Unknown tool: ${name ?? "<missing name>"}. Available: ${available}` });
     }
     try {
-      return await tool.handler(parseToolArgs(tc.function?.arguments));
+      return await tool.handler(parseToolArgs(tc.function?.arguments), context);
     } catch (e: any) {
       return JSON.stringify({ error: e?.message || "Tool failed" });
     }
@@ -411,7 +412,26 @@ async function buildChatContext(body: ChatRequestBody, gate: LiveChatSession) {
     ...recentHistory,
     { role: "user", content: message },
   ];
-  return { message, isClem, targets, tools, messages, role, sessionName: session?.name };
+  return {
+    message,
+    isClem,
+    targets,
+    tools,
+    messages,
+    role,
+    sessionName: session?.name,
+    // The normalized `role` (pet folds into "child", guest has no session and
+    // is non-adult) rides every tool call as the actor identity, so a task
+    // command re-checks adulthood instead of trusting the allowlist.
+    toolContext: {
+      source: "hermes" as const,
+      caller: {
+        memberId: session?.memberId ?? "",
+        name: session?.name ?? "Guest",
+        role,
+      },
+    } satisfies ToolHandlerContext,
+  };
 }
 
 async function handleStreamedChat(request: NextRequest, body: ChatRequestBody, gate: LiveChatSession): Promise<Response> {
@@ -433,7 +453,7 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody, g
     // Health-recorder context hoisted so the catch path records rounds/brain too.
     const ctx = { agent: body.agent || "consuela", rounds: 0, brain: null as string | null, targets: 0 };
     try {
-      const { message, isClem, targets, tools, messages, sessionName } = await buildChatContext(body, gate);
+      const { message, isClem, targets, tools, messages, sessionName, toolContext } = await buildChatContext(body, gate);
       ctx.brain = targets.length ? `${targets[0].provider}/${targets[0].model}` : null;
       ctx.targets = targets.length;
       let finalContent = "";
@@ -492,7 +512,7 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody, g
         for (const tc of tool_calls) {
           write(sseFrame(JSON.stringify({ label: toolStatusLabel(tc.function?.name) }), "status"));
         }
-        const results = await runToolCalls(tool_calls, tools);
+        const results = await runToolCalls(tool_calls, tools, toolContext);
         results.forEach((result, i) => {
           messages.push({ role: "tool", tool_call_id: tool_calls[i].id || "", content: result });
           const proposal = extractPointProposal(tool_calls[i].function?.name, result);
@@ -637,7 +657,7 @@ export async function POST(request: NextRequest) {
   // carry the REAL rounds/brain/agent instead of zeroed placeholders.
   const ctx = { agent: body.agent || "consuela", rounds: 0, brain: null as string | null, targets: 0 };
   try {
-    const { isClem, targets, tools, messages, role, sessionName } = await buildChatContext(body, gate);
+    const { isClem, targets, tools, messages, role, sessionName, toolContext } = await buildChatContext(body, gate);
     ctx.brain = targets.length ? `${targets[0].provider}/${targets[0].model}` : null;
     ctx.targets = targets.length;
     console.log(`[ai] agent=${body.agent || "consuela"} isClem=${isClem} brain=${targets[0]?.provider}/${targets[0]?.model} role=${role}`);
@@ -695,7 +715,7 @@ export async function POST(request: NextRequest) {
 
       messages.push({ role: "assistant", content, tool_calls });
 
-      const results = await runToolCalls(tool_calls, tools);
+      const results = await runToolCalls(tool_calls, tools, toolContext);
       results.forEach((result, i) => {
         messages.push({ role: "tool", tool_call_id: tool_calls[i].id || "", content: result });
         // Buffered sibling of the streamed proposal status frame (Task 15).

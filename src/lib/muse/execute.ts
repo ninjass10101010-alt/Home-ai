@@ -111,7 +111,13 @@ export async function executeMuseTool(
   if (!tool) return { error: "unknown tool", status: 400 };
 
   try {
-    const raw = await tool.handler(args ?? {}, { source: "muse" });
+    // MUSE is adult-only (bearer-authenticated), so its caller identity is an
+    // adult service principal — stated explicitly so a task command re-checks
+    // adulthood instead of inheriting a default.
+    const raw = await tool.handler(args ?? {}, {
+      source: "muse",
+      caller: { memberId: "muse-agent", name: "MUSE", role: "parent" },
+    });
     try {
       return { result: JSON.parse(raw) };
     } catch {
