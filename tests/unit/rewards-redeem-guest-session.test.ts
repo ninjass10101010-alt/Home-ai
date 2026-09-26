@@ -31,14 +31,25 @@ function currentWeekKey(): string {
 }
 
 function makePb() {
+  // The canonical balance is recomputed from history by the shared ledger
+  // seam, so the stored points map needs a real transaction behind it.
+  const openingEarn = {
+    id: 7001,
+    timestamp: "2026-09-21T12:00:00.000Z",
+    member: "Caspian Garcia",
+    type: "earn",
+    amount: 40,
+    description: "Opening balance",
+  };
   const weekRow = {
     id: "w1",
     weekStart: currentWeekKey(),
     points: JSON.stringify({ "Caspian Garcia": 40 }),
     streak: "{}",
     lastActive: "{}",
-    history: JSON.stringify([]),
+    history: JSON.stringify([openingEarn]),
   };
+  let snapshotRow: any = { id: "snapshot-1", data: { tasks: [], deletedTaskIds: [] } };
   const writes: any[] = [];
   return {
     writes,
@@ -49,6 +60,19 @@ function makePb() {
         }
         if (name === "rewards") {
           return { getFullList: async () => [{ id: "r-cheap", name: "Ice cream", emoji: "🍦", cost: 15 }] };
+        }
+        if (name === "consuela_data_snapshots") {
+          return {
+            getFullList: async () => [{ ...snapshotRow }],
+            update: async (_id: string, payload: any) => {
+              snapshotRow = { ...snapshotRow, ...payload };
+              return snapshotRow;
+            },
+            create: async (payload: any) => {
+              snapshotRow = { ...snapshotRow, ...payload };
+              return snapshotRow;
+            },
+          };
         }
         return {
           getFullList: async () => [weekRow],
@@ -103,6 +127,7 @@ describe("a guest session can reach reward redemption", () => {
 
     // No `consuela_session` cookie anywhere: identity is the PIN alone.
     const request = guestRequest("/api/rewards/redeem", {
+      operationId: "op-guest-redeem",
       rewardId: "r-cheap",
       memberName: "Caspian",
       pin: "1010",
@@ -116,7 +141,11 @@ describe("a guest session can reach reward redemption", () => {
     expect(body.ok).toBe(true);
     expect(body.weekData.points["Caspian Garcia"]).toBe(25);
     expect(writes).toHaveLength(1);
-    expect(writes[0].history.at(-1)).toMatchObject({ type: "redeem", amount: -15 });
+    expect(writes[0].history.at(-1)).toMatchObject({
+      type: "redeem",
+      amount: -15,
+      meta: { operationId: "op-guest-redeem", source: "reward-redeem" },
+    });
   });
 
   it("the same guest request with a wrong PIN is refused by the route, not the middleware", async () => {
@@ -124,6 +153,7 @@ describe("a guest session can reach reward redemption", () => {
     mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
 
     const res = await redeemPOST(guestRequest("/api/rewards/redeem", {
+      operationId: "op-guest-wrong-pin",
       rewardId: "r-cheap",
       memberName: "Caspian",
       pin: "0000",
