@@ -20,13 +20,22 @@ function pbRowsFor(name: string): unknown[] {
       return [{ title: "Soccer", date: "2026-09-07", time: "4:00 PM" }];
     case "consuela_google_calendar_events":
       return [{ summary: "Dentist", start_iso: "2026-09-07T18:30:00+08:00", all_day: false }];
-    case "tasks":
+    case "consuela_data_snapshots":
+      // Tasks are snapshot-first (2026-09-24 remediation): the board scores the
+      // week from the SNAPSHOT, so that is where the chore rows belong now.
       // completedInWeek must round-trip the SAME helper the app writes with
       // (weekKey is TZ-sensitive) — never hardcode the key in fixtures.
-      return [
-        { status: "done", completedInWeek: weekKey(now) },
-        { status: "pending", due: "2026-09-13" },
-      ];
+      return [{
+        id: "snap1",
+        key: "tasks-snapshot",
+        data: {
+          tasks: [
+            { id: 1, title: "Swept the porch", completed: true, completedInWeek: weekKey(now) },
+            { id: 2, title: "Water the plants", completed: false, due: "2026-09-13" },
+          ],
+          deletedTaskIds: [],
+        },
+      }];
     case "meal_plan_entries":
       return [{ name: "Tacos", mealType: "dinner", time: "Mon", weekOf: "2026-09-07" }];
     case "morning_briefing":
