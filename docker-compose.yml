@@ -1,12 +1,15 @@
+name: familydashboard
+
 services:
   pocketbase:
-    image: ghcr.io/muchobien/pocketbase:latest
+    image: ghcr.io/muchobien/pocketbase:0.39.11
     ports:
       - "8090:8090"
     container_name: pocketbase
     restart: unless-stopped
     volumes:
       - pocketbase_data:/pb_data
+      - ../pb_migrations:/pb_migrations:ro
     networks:
       - dashboard-net
 
@@ -16,6 +19,7 @@ services:
       args:
         - NEXT_PUBLIC_PB_URL=http://pocketbase:8090
         - FINANCE_DASHBOARD_URL=http://finance-dashboard
+        - NEXT_PUBLIC_CANONICAL_MEMBER_FALLBACKS=false
     container_name: consuela-dashboard
     restart: unless-stopped
     ports:
@@ -26,6 +30,7 @@ services:
     environment:
       - NODE_ENV=production
       - NEXT_PUBLIC_PB_URL=http://pocketbase:8090
+      - NEXT_PUBLIC_CANONICAL_MEMBER_FALLBACKS=false
       - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
       # Fail fast instead of booting with known defaults — set both in .env
       - PB_ADMIN_EMAIL=${PB_ADMIN_EMAIL:?set PB_ADMIN_EMAIL in .env}
@@ -63,6 +68,22 @@ services:
       - GMAIL_APP_PASSWORD=${GMAIL_APP_PASSWORD:-}
       - INSTACART_API_KEY=${INSTACART_API_KEY:-}
       - COMPOSIO_API_KEY=${COMPOSIO_API_KEY:-}
+    networks:
+      - dashboard-net
+
+  pb-seed:
+    profiles:
+      - tools
+    build:
+      context: .
+      target: seed
+    command: ["npm", "run", "pb:seed"]
+    env_file:
+      - ${DASHBOARD_ENV_FILE:-./.env}
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_PB_URL=http://pocketbase:8090
+      - NEXT_PUBLIC_CANONICAL_MEMBER_FALLBACKS=false
     networks:
       - dashboard-net
 
