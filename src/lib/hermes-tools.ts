@@ -214,18 +214,19 @@ function assistantTaskCommandActor(
 }
 
 /**
- * The caller's live role, normalized. A context-free call (a direct internal
- * `getTool(...).handler(args)`, i.e. no human behind it) keeps the assistant's
- * own service identity; every real route passes the live role, so the command's
- * `adult_only` check is a real second line of defense rather than a tautology.
+ * The caller's live role, normalized. FAIL CLOSED: an absent, blank or
+ * out-of-vocabulary role is never a parent. A context-free call (a direct
+ * internal `getTool(...).handler(args)` with no human behind it) therefore
+ * cannot author a parent-actor task command, and every real route passes the
+ * live role anyway — so a missing context is a bug, not a licence.
  */
 function callerRole(caller?: TaskCommandCaller): string {
   const role = caller?.role?.trim().toLowerCase();
-  return role || "parent";
+  return role === "parent" ? "parent" : "child";
 }
 
 function callerIsAdult(caller?: TaskCommandCaller): boolean {
-  return !caller || callerRole(caller) === "parent";
+  return Boolean(caller) && callerRole(caller) === "parent";
 }
 
 function adultCallerRefusal() {
@@ -345,6 +346,24 @@ function resolveLiveTaskMember(
     (member) => member.name.trim().toLowerCase().split(/\s+/)[0] === first,
   );
   return firstName.length === 1 ? asActor(firstName[0]) : null;
+}
+
+/**
+ * Resolve a caller the route ALREADY verified by id. The claim seam's
+ * `resolveActor` cross-checks id + name, so the tool hands it the id it was
+ * given and never re-derives an identity from a name a session may have
+ * renamed (or that a first-name match could answer for someone else).
+ */
+function resolveLiveTaskMemberById(
+  members: Array<{ id: string; name: string; role: string }>,
+  value: unknown,
+): { memberId: string; name: string; role: string } | null {
+  if (typeof value !== "string") return null;
+  const wanted = value.trim();
+  if (!wanted) return null;
+  const hit = members.find((member) => String(member.id ?? "").trim() === wanted);
+  if (!hit || normalizedLiveMemberRole(hit) === "pet") return null;
+  return { memberId: hit.id, name: hit.name, role: hit.role };
 }
 
 async function liveTaskRoster(): Promise<Array<{ id: string; name: string; role: string }> | null> {
@@ -787,7 +806,7 @@ const TOOLS: Tool[] = [
   {
     definition: {
       name: "delete_task",
-      description: "Delete an ASSIGNED (not open, not crew) task by taskId or exact title. Removal is IMMEDIATE — no parent PIN and no approval queue (only completions are approval-gated). Completed rows cannot be deleted; they are undone in the Tasks UI instead. Re-sending the same delete is safe — it never resurrects the chore.",
+      description: "Delete a task by taskId or exact title. Removal is IMMEDIATE — no parent PIN and no approval queue (only completions are approval-gated), and it does not check who the chore is for. Completed rows cannot be deleted; they are undone in the Tasks UI instead. Re-sending the same delete is safe — it never resurrects the chore.",
       parameters: {
         type: "object",
         properties: {
@@ -863,9 +882,25 @@ const TOOLS: Tool[] = [
         }
         // A queued row that ALSO carries an unreversed earn is drift, not a
         // pending completion: reopening it would leave real points behind.
-        const payee = String(row.pendingApproval?.byName || row.completedBy || row.assignee || "");
+        // The payee list follows HOW the earn was actually written: a crew
+        // approval pays PER MEMBER (`pendingApproval.crew`), so `byName` — the
+        // literal "Crew" — is not a payee and can never match. There is
+        // deliberately no cheap pre-filter: `hasUnreversedTaskEarn` normalizes
+        // `taskId` with Number(...) and a hand-rolled strict `===` filter
+        // would skip a string-typed taskId straight past the guard. Its throw
+        // path (an unparseable history) fails closed.
+        const rawCrewPayees: unknown[] = Array.isArray(row.pendingApproval?.crew)
+          ? row.pendingApproval.crew
+          : [];
+        const crewPayees: string[] = rawCrewPayees
+          .filter((name): name is string => typeof name === "string" && Boolean(name.trim()))
+          .map((name) => name.trim());
+        const soloPayee = String(row.pendingApproval?.byName || row.completedBy || row.assignee || "");
+        const payees: string[] = crewPayees.length > 0
+          ? [...new Set<string>(crewPayees)]
+          : soloPayee ? [soloPayee] : [];
         const history = Array.isArray(data.weekData?.history) ? data.weekData.history : [];
-        if (payee && history.some((t: any) => t?.taskId === Number(row.id) && t?.member === payee && t?.type === "earn")) {
+        for (const payee of payees) {
           let unreversed = false;
           try {
             unreversed = hasUnreversedTaskEarn(history, Number(row.id), payee);
@@ -884,7 +919,10 @@ const TOOLS: Tool[] = [
         // A crew row has no single owner ("Crew" is not a member), so the
         // actor is the live grown-up authority: a parent who is in the crew,
         // else the parent behind the call. Both are real roster members, and
-        // the seam re-checks that a crew send-back is done by a parent.
+        // the seam re-checks that a crew send-back is done by a parent. The
+        // third step uses the caller's VERIFIED memberId (the route already
+        // resolved it live) and lets the seam's own id+name cross-check have
+        // the last word.
         const crewNames: unknown[] = Array.isArray(row.crew?.members)
           ? row.crew.members.map((member: any) => member?.name)
           : [];
@@ -893,7 +931,7 @@ const TOOLS: Tool[] = [
           crewNames
             .map((name: unknown) => resolveLiveTaskMember(roster, name))
             .find((member) => member !== null && normalizedLiveMemberRole(member) === "parent") ??
-          (context?.caller ? resolveLiveTaskMember(roster, context.caller.name) : null);
+          (context?.caller ? resolveLiveTaskMemberById(roster, context.caller.memberId) : null);
         const actor = owner;
         if (!actor) {
           return summarize({

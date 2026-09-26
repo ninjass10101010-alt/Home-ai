@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const SNAP = "consuela_data_snapshots";
 const rows: Record<string, any[]> = {};
 const writes: Array<{ op: string; collection: string; id?: string; data?: any }> = [];
-const mocks = vi.hoisted(() => ({ execute: vi.fn() }));
+const mocks = vi.hoisted(() => ({ execute: vi.fn(), nextOperationId: vi.fn() }));
 
 vi.mock("@/lib/pb-auth", () => ({
   withAdmin: vi.fn(async (fn: any) => fn({
@@ -33,6 +33,13 @@ vi.mock("@/lib/task-commands", () => ({
   registerInternalTaskCommandHandler: vi.fn(() => () => {}),
 }));
 
+// The operation-id seam, so a "replayed" MUSE call can be driven to carry the
+// SAME id — otherwise every call gets a fresh one and a replay is untestable.
+vi.mock("@/lib/task-operation-outbox", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/task-operation-outbox")>();
+  return { ...actual, createTaskOperationId: mocks.nextOperationId };
+});
+
 import { executeMuseTool } from "@/lib/muse/execute";
 
 const snapTasks = () => rows[SNAP]?.[0]?.data?.tasks ?? [];
@@ -46,6 +53,8 @@ beforeEach(() => {
   for (const k of Object.keys(rows)) delete rows[k];
   writes.length = 0;
   mocks.execute.mockReset();
+  let operationSequence = 0;
+  mocks.nextOperationId.mockReset().mockImplementation(() => `op-muse-fixture-${++operationSequence}`);
   rows.members = [{ id: "mem-alex", name: "Member A", fullName: "Member A", role: "child", emoji: "🎻" }];
   rows[SNAP] = [{
     id: "snap1",
@@ -165,10 +174,16 @@ it("an MUSE delete_task rides the command seam and never writes the snapshot its
   expect(snapTasks()).toHaveLength(1);
 });
 
-it("an MUSE delete_task is idempotent under a replayed operationId", async () => {
+it("an MUSE delete_task sends the SAME operationId on a replay and maps both receipts", async () => {
+  // The MUSE half of the replay: a second identical call must reach the seam
+  // carrying the same operationId. Whether the seam DEDUPES it is the claim
+  // seam's own contract, proven for real in hermes-tools-task-crud.test.ts
+  // ("delete_task is idempotent under a replayed operationId") — this suite
+  // stubs the seam, so it only pins the command shape and the result mapping.
+  mocks.nextOperationId.mockReturnValue("op-muse-delete-replay");
   mocks.execute.mockResolvedValue({
     ok: true,
-    operationId: "task-op-delete-replay",
+    operationId: "op-muse-delete-replay",
     reconciled: true,
     deleted: true,
     noCurrentTask: true,
@@ -176,8 +191,12 @@ it("an MUSE delete_task is idempotent under a replayed operationId", async () =>
   const first = await executeMuseTool("delete_task", { taskId: 42 }, { admin: false });
   const second = await executeMuseTool("delete_task", { taskId: 42 }, { admin: false });
   expect(museResult(first)).toMatchObject({ ok: true, taskId: 42 });
-  expect(museResult(second)).toMatchObject({ ok: true, taskId: 42, reconciled: true });
-  expect(lastCommand()![0]).toMatchObject({ kind: "delete", operationId: expect.any(String) });
+  expect(museResult(second)).toMatchObject({ ok: true, taskId: 42, deleted: true, reconciled: true });
+  const deletes = mocks.execute.mock.calls.filter(([c]: any[]) => c.kind === "delete");
+  expect(deletes).toHaveLength(2);
+  expect(deletes.map(([c]: any[]) => c.operationId)).toEqual(["op-muse-delete-replay", "op-muse-delete-replay"]);
+  expect(deletes.every(([, ctx]: any[]) => ctx.source === "muse")).toBe(true);
+  expect(writes.filter((w) => w.collection === SNAP)).toHaveLength(0);
 });
 
 it("an MUSE completion derives its payee from canonical state and writes no snapshot row", async () => {
@@ -209,7 +228,14 @@ it("an MUSE completion derives its payee from canonical state and writes no snap
   expect(snapTasks()[0].completed).toBe(false);
 });
 
-it("an MUSE reopen rides the same seam and clears crew check-ins", async () => {
+it("an MUSE reopen rides the same seam and maps the crew payload through verbatim", async () => {
+  // This suite stubs the seam, so it pins the MUSE half only: the `undo`
+  // command it sends, `source:"muse"`, and that the crew row the seam
+  // returned is handed back to the caller unchanged. That the seam really
+  // STRIPS `checkedInAt` while keeping members, joinedAt and `removed` is
+  // proven for real (real seam, real write) in
+  // hermes-tools-task-crud.test.ts → "reopens a crew row while preserving
+  // members, joinedAt, and removed".
   rows.members = [
     { id: "mem-alex", name: "Member A", fullName: "Member A", role: "parent", emoji: "🎻" },
   ];
@@ -228,6 +254,7 @@ it("an MUSE reopen rides the same seam and clears crew check-ins", async () => {
     pendingApproval: { byName: "Crew", at: "2026-09-22T10:00:00.000Z", points: 10, crew: ["Member A"] },
     sentBackAt: null,
   }];
+  const seamCrew = { members: [{ name: "Member A", emoji: "🎻", joinedAt: "2026-09-21T08:00:00.000Z" }], removed: ["Former Member"] };
   mocks.execute.mockResolvedValue({
     ok: true,
     operationId: "task-op-undo",
@@ -236,7 +263,7 @@ it("an MUSE reopen rides the same seam and clears crew check-ins", async () => {
       title: "Crew clean",
       assignee: "Crew",
       completed: false,
-      crew: { members: [{ name: "Member A", emoji: "🎻", joinedAt: "2026-09-21T08:00:00.000Z" }], removed: ["Former Member"] },
+      crew: seamCrew,
     },
     reopened: true,
     reconciled: true,
@@ -246,7 +273,8 @@ it("an MUSE reopen rides the same seam and clears crew check-ins", async () => {
   expect(context).toEqual({ source: "muse" });
   expect(command).toMatchObject({ kind: "undo", operationId: expect.any(String), payload: { taskId: 42 } });
   expect(museResult(out)).toMatchObject({ ok: true, reopened: true, reconciled: true });
-  expect(museResult(out).task.crew.members[0].checkedInAt).toBeUndefined();
+  expect(museResult(out).task.completed).toBe(false);
+  expect(museResult(out).task.crew).toEqual(seamCrew);
   expect(museResult(out).task.crew.removed).toEqual(["Former Member"]);
   expect(writes.filter((w) => w.collection === SNAP || w.collection === "week_data")).toHaveLength(0);
 });
