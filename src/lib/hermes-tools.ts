@@ -19,6 +19,7 @@ import { localTodayISO, localWeekdayShort, familyTimeZone, weekdayOfISO, localWe
 import { fetchLiveWeather } from "@/lib/weather-live";
 import { weekStartForDate, isoDateForWeekday } from "@/lib/meals-week-utils";
 import { storeMemory, queryMemories, deleteMemory, incrementMemoryUsage, type MemoryCategory } from "@/lib/family-memory";
+import { createTaskOperationId } from "@/lib/task-operation-outbox";
 import { MEMORY_USER_ID, MEMORY_FAMILY_ID } from "@/lib/memory-ids";
 // Live readers + shared helpers were extracted to ./consuela/live-reads
 // (Task 8, 2026-09-14). Imported here for the tool handlers below and
@@ -2170,7 +2171,11 @@ const TOOLS: Tool[] = [
       const member = String(match.fullName || match.name);
       return summarize({
         ok: true,
-        proposal: { tool: "adjust_points", args: { member, delta, reason } },
+        proposal: {
+          tool: "adjust_points",
+          operationId: createTaskOperationId(),
+          args: { member, delta, reason },
+        },
         message: `Ask the parent to confirm this adjustment with their PIN on the chat screen (${delta > 0 ? "+" : ""}${delta} pts to ${member}). Points have NOT moved yet — never state the adjustment as done.`,
       });
     },

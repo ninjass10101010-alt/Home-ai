@@ -63,6 +63,7 @@ import { __resetChatStoreForTests } from "@/lib/chat-store";
 
 const PROPOSAL = {
   tool: "adjust_points" as const,
+  operationId: "proposal-op-1",
   args: { member: "Emily G", delta: 10, reason: "helping carry groceries" },
 };
 
@@ -75,14 +76,16 @@ function render(ui: ReactElement): HTMLElement {
 }
 
 const applyCalls: Array<{ url: string; init: any }> = [];
-function stubFetch(applyResponse: { status: number; body: unknown }) {
+function stubFetch(applyResponse: { status: number; body: unknown } | Array<{ status: number; body: unknown }>) {
   applyCalls.length = 0;
+  const queue = Array.isArray(applyResponse) ? [...applyResponse] : [applyResponse];
   vi.stubGlobal("fetch", vi.fn(async (url: string, init: any) => {
     const u = String(url);
     if (u.includes("/api/consuela/planner/apply")) {
       applyCalls.push({ url: u, init });
-      return new Response(JSON.stringify(applyResponse.body), {
-        status: applyResponse.status,
+      const next = queue.length > 1 ? queue.shift()! : queue[0];
+      return new Response(JSON.stringify(next.body), {
+        status: next.status,
         headers: { "content-type": "application/json" },
       });
     }
@@ -90,6 +93,10 @@ function stubFetch(applyResponse: { status: number; body: unknown }) {
       status: 200, headers: { "content-type": "application/json" },
     });
   }));
+}
+
+function lastApplyBody(): any {
+  return JSON.parse(applyCalls[applyCalls.length - 1].init.body);
 }
 
 function typePin(el: HTMLElement, pin: string) {
@@ -198,11 +205,71 @@ describe("chat page — point-proposal chip wiring", () => {
     expect(applyCalls).toHaveLength(1);
     const { init } = applyCalls[0];
     expect(init.headers["x-consuela-pin"]).toBe("1234");
-    expect(JSON.parse(init.body)).toEqual({ tool: "adjust_points", args: PROPOSAL.args });
+    expect(JSON.parse(init.body)).toEqual({
+      tool: "adjust_points",
+      operationId: PROPOSAL.operationId,
+      args: PROPOSAL.args,
+    });
     // Success: toast + button becomes Done.
     expect(document.body.textContent).toContain("Points adjusted ✓");
     expect(el.textContent).toContain("Done ✓");
     expect(el.textContent).not.toContain("Confirm with PIN");
+  });
+
+  it("every retry reuses the proposal's ONE operation id", async () => {
+    stubFetch([
+      { status: 503, body: { ok: false, error: "Points could not be updated just now." } },
+      { status: 200, body: { ok: true, applied: true, duplicate: false, reconciled: true } },
+    ]);
+    kidStore.verifyPinRemote.mockResolvedValue({ status: "ok", member: { name: "Rebecca G" } });
+    const el = render(<AdjustPointsChip proposal={PROPOSAL} actorName="Rebecca G" />);
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      clickButton(el, "Confirm with PIN");
+      typePin(el, "1234");
+      clickButton(el, "Submit");
+      await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    }
+
+    expect(applyCalls).toHaveLength(2);
+    expect(lastApplyBody().operationId).toBe(PROPOSAL.operationId);
+    expect(JSON.parse(applyCalls[0].init.body).operationId)
+      .toBe(JSON.parse(applyCalls[1].init.body).operationId);
+    expect(el.textContent).toContain("Done ✓");
+  });
+
+  it("a proposal with no id still posts ONE stable generated id on every retry", async () => {
+    const legacy = { tool: "adjust_points" as const, args: { ...PROPOSAL.args } } as any;
+    stubFetch([
+      { status: 503, body: { ok: false, error: "Points could not be updated just now." } },
+      { status: 200, body: { ok: true, applied: true } },
+    ]);
+    kidStore.verifyPinRemote.mockResolvedValue({ status: "ok", member: { name: "Rebecca G" } });
+    const el = render(<AdjustPointsChip proposal={legacy} actorName="Rebecca G" />);
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      clickButton(el, "Confirm with PIN");
+      typePin(el, "1234");
+      clickButton(el, "Submit");
+      await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    }
+
+    const firstId = JSON.parse(applyCalls[0].init.body).operationId;
+    expect(typeof firstId).toBe("string");
+    expect(firstId.length).toBeGreaterThan(0);
+    expect(JSON.parse(applyCalls[1].init.body).operationId).toBe(firstId);
+  });
+
+  it("a 200 that reports a duplicate is reported as 'already applied', not a fresh adjustment", async () => {
+    stubFetch({ status: 200, body: { ok: true, applied: false, duplicate: true, reconciled: true } });
+    kidStore.verifyPinRemote.mockResolvedValue({ status: "ok", member: { name: "Rebecca G" } });
+    const el = render(<AdjustPointsChip proposal={PROPOSAL} actorName="Rebecca G" />);
+    clickButton(el, "Confirm with PIN");
+    typePin(el, "1234");
+    clickButton(el, "Submit");
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(applyCalls).toHaveLength(1);
+    expect(document.body.textContent).toContain("Already applied ✓");
   });
 
   it("an unknown/garbage proposal payload renders no chip", async () => {
