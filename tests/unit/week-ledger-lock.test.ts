@@ -276,7 +276,7 @@ describe("week ledger lock — claim vs redeem", () => {
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
 
     const pClaim = claimPOST(jsonReq("/api/tasks/claim", { action: "claim", operationId: "op-lock-claim-redeem", taskId: 42, claimantName: "Alex", claimantPin: "1234" }));
-    const pRedeem = redeemPOST(jsonReq("/api/rewards/redeem", { rewardId: "r1", memberName: "Sam", pin: "5678" }));
+    const pRedeem = redeemPOST(jsonReq("/api/rewards/redeem", { operationId: "op-lock-redeem", rewardId: "r1", memberName: "Sam", pin: "5678" }));
     const [rClaim, rRedeem] = await drive(
       resolveOne,
       [
