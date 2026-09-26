@@ -1,5 +1,6 @@
 import { isRecord, normalizeOperationId } from "@/lib/task-operation-contract";
 import type { TaskManageErrorCode } from "@/lib/task-manage";
+import type { TaskConfigErrorCode } from "@/lib/task-config";
 import type {
   SnapshotConfigOperationReceipt,
   SnapshotData,
@@ -965,25 +966,36 @@ export function taskOutboxReconcileBackoffMs(reconcileAttemptCount: number): num
  * The codes this module will accept as a MACHINE reason when the route delivered
  * it through the DISPLAY channel (`error`) rather than `reason` / `code`.
  *
- * `error` is the human channel by contract, but `/api/tasks/config` and
- * `/api/tasks/manage` can express a machine code ONLY through it — their exact
- * response bodies are pinned by `task-config-route.test.ts`, so the codes cannot
- * be moved to `reason` without rewriting those assertions. `error` is therefore
- * honoured here ONLY when it is a member of this closed vocabulary. A human
- * sentence is never a member, and neither is any sentinel this module owns, so a
- * display string can never reach classification, the retry budget or the
- * credential gate. An unrecognised `error` yields "" and the caller degrades to a
- * status-derived reason.
+ * `error` is the human channel by contract, but two command routes can express a
+ * machine code ONLY through it. `/api/tasks/config` bodies are pinned by exact
+ * equality in `tests/unit/task-config-route.test.ts`, and `/api/tasks/manage`
+ * bodies by `toMatchObject` in `tests/unit/task-manage-route.test.ts` — so
+ * neither route's codes can be moved to `reason` without rewriting those
+ * assertions. `error` is therefore honoured here ONLY when it is a member of this
+ * closed vocabulary. A human sentence is never a member, and neither is any
+ * sentinel this module owns, so a display string cannot impersonate a code. An
+ * unrecognised `error` yields "" and the caller degrades to a status-derived reason.
  *
- * The list is hand-written because `TaskManageErrorCode` is a type-only union in
- * a server-only module (`node:crypto`, `pb-auth`) that a browser module cannot
- * import at runtime. `EveryManageCodeIsClassified` below is what keeps the
- * hand-written list honest: adding a member to `TaskManageErrorCode` without
- * deciding it here is a `tsc` failure, not a silently degraded reason string.
+ * This vocabulary buys CORRECTNESS, not security. An attacker who controls the
+ * response body already controls `reason` / `code`, which are honoured
+ * unconditionally, so gating `error` defends nothing against a hostile server.
+ * What it buys is that a well-behaved route's human sentence is never mistaken
+ * for a code, and no server field of any kind can strand a queued command.
  *
- * `unknown-task` (hyphenated) is deliberately absent: it appears only in the
- * approve route's `reason`, which is honoured unconditionally. `invalid_task_field`
- * is gone because no route emits it.
+ * The list is hand-written because `TaskManageErrorCode` and `TaskConfigErrorCode`
+ * are type-only unions in server-only modules that a browser module cannot import
+ * at runtime. `EveryManageCodeIsClassified` and `EveryConfigCodeIsClassified`
+ * below are what keep the hand-written list honest: adding a member to either
+ * union without deciding it here is a `tsc` failure, not a silently degraded
+ * reason string. Those two guards cover ONLY those two unions. Five further
+ * members — `invalid_body`, `member_missing`, `member_lookup_failed`,
+ * `pin_required` and `unsupported_task_command` — are bare string literals with no
+ * derivable union, so they are covered by the table-driven test and not by tsc.
+ *
+ * `unknown-task` (hyphenated) is deliberately absent: the approve route does send
+ * it in `error`, but always alongside `reason` and `code`, so `reasonOf` returns at
+ * the machine channel and the vocabulary is never consulted.
+ * `invalid_task_field` is gone because no route emits it.
  */
 const ERROR_CHANNEL_CODE_LIST = [
   ...RETRYABLE_REASON_CODES,
@@ -991,7 +1003,6 @@ const ERROR_CHANNEL_CODE_LIST = [
   ...DUPLICATE_REASON_CODES,
   "adult_only",
   "config_natural_key_conflict",
-  "config_store_unreachable",
   "forbidden_config_field",
   "forbidden_task_field",
   "invalid_body",
@@ -1012,9 +1023,13 @@ const ERROR_CHANNEL_CODE_LIST = [
 const ERROR_CHANNEL_MACHINE_CODES: ReadonlySet<string> = new Set(ERROR_CHANNEL_CODE_LIST);
 
 type ErrorChannelMachineCode = (typeof ERROR_CHANNEL_CODE_LIST)[number];
-type ManageCodeAwaitingDecision = Exclude<TaskManageErrorCode, ErrorChannelMachineCode>;
 type AssertNever<T extends never> = T;
-export type EveryManageCodeIsClassified = AssertNever<ManageCodeAwaitingDecision>;
+export type EveryManageCodeIsClassified = AssertNever<
+  Exclude<TaskManageErrorCode, ErrorChannelMachineCode>
+>;
+export type EveryConfigCodeIsClassified = AssertNever<
+  Exclude<TaskConfigErrorCode, ErrorChannelMachineCode>
+>;
 
 function machineCode(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -1037,10 +1052,14 @@ function clampServerMessage(value: string): string {
 }
 
 // DISPLAY ONLY. The server's own words for a refusal, carried on their own
-// field so they can never be mistaken for the machine `reason` that
-// classification reads: `lastErrorReason` stays a code this module controls,
-// and nothing a server sends can move a branch, a retry budget or a
-// credential gate. `body.error` is a user-facing string from the network.
+// field so they can never be mistaken for the machine reason classification
+// reads. `lastErrorMessage` steers nothing: it is written here, persisted, and
+// rendered by one caller, and nothing reads it to make a decision. (The machine
+// reason is NOT equally inert — `reason` / `code`, and vocabulary members of
+// `error`, do drive classification and the retry budget by design.) What no
+// server field can move, through any channel, is the CREDENTIAL GATE: that is the
+// module-owned `credentialMissing` boolean, never a string. `body.error` is a
+// user-facing string from the network.
 function serverMessageOf(body: TaskOutboxAcknowledgement): string {
   return typeof body.error === "string" ? clampServerMessage(body.error) : "";
 }

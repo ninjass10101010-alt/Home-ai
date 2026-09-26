@@ -667,9 +667,15 @@ describe("a redemption is adopted only on a 200 or a 202", () => {
   it("every code the error-only command routes can emit is honoured through `error`", async () => {
     // `/api/tasks/config` and `/api/tasks/manage` can express a machine code ONLY
     // through `error`. Each of these must therefore classify, and must NOT decay
-    // to the `http_<status>` fallback. Table-driven so a REMOVED member is caught
-    // as loudly as an added one; `npm run typecheck` catches an undecided NEW code
-    // in `TaskManageErrorCode`.
+    // to the `http_<status>` fallback. Table-driven so a removed member is caught
+    // too, with one measured limit: removal is only detectable where the
+    // status-derived substitute DIFFERS from the code. For the `unauthorized`(401)
+    // and `adult_only`(403) rows the substitute IS the code, so those two ROWS pass
+    // either way. `unauthorized` is caught incidentally elsewhere (the sentinel
+    // scenario below asserts the status-derived fallback on a 401); `adult_only` is
+    // not caught anywhere — dropping it today would leave the suite fully green.
+    // `npm run typecheck` separately catches an undecided NEW member of
+    // `TaskManageErrorCode` / `TaskConfigErrorCode`.
     const cases = [
       { code: "pet_assignee", status: 400 },
       { code: "unknown_assignee", status: 400 },
