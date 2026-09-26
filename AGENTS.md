@@ -34,7 +34,8 @@ If you are asked to document or debug something that touches credentials, descri
 
 ---
 
-**Current Dashboard Snapshot** (keep at most the newest 2 entries — full history: `CHANGELOG.md`)  
+**Current Dashboard Snapshot** (keep at most the newest 2 entries — full history: `CHANGELOG.md`; the 2026-09-21 ops entry below is deliberately retained past that cap because its Hermes profile/port knowledge exists in no other file)
+- **Last Updated:** 2026-09-26 | **Task-adjacent writers, Wave 3 — every AI, planner, rewards, briefing and all-time path is on the server.** `POST /api/rewards/redeem` and `POST /api/consuela/planner/apply` now both run through the shared `applyWeekLedgerOperation` (`src/lib/ledger-operations.ts`) — one lock order (`week-ledger → snapshot-keyed`), one replay rule, one projection repair, `tx.meta.operationId`; a replayed redemption deducts once and a chat adjustment with no stable operation id is refused. `readCanonicalTasks()` (`src/lib/consuela/live-reads.ts`) is the new single assistant/ambient task reader — snapshot first, PB replica as a *declared* fallback, `unavailable` as the honest third state — and the morning briefing + screensaver payload use it (the screensaver throws `task_data_unavailable` and 503s rather than drawing a fabricated progress bar). `GET /api/tasks/all-time` + `src/lib/all-time-totals.ts` recompute points AND completion counts from canonical transaction history; a stored `points` map is never authority, and `historyComplete: false` yields per-member `null` — the podium, your-card, member sheet and kid hero render that honestly instead of showing a short total as whole, and levels are no longer derived from a missing number. `ai/TOOLS.md` + `TASK_ACTIONS_ADDENDUM` + `docs/muse-api.md` now teach the `executeInternalTaskCommand` ownership, one-command-per-`operationId`, canonical payee derivation and assigned-only completion; `src/lib/ai-boot.generated.ts` regenerated via `node scripts/write-ai-boot.mjs`. **§5.6's "NOT yet remediated" list is retired — it was a directive that would have sent a future agent to "fix" correct surfaces.** OPEN HUMAN DECISION (not decided in code): a chore whose owner is a grown-up — `complete_task` returns `reason: "adult_owner"` today and the docs mark it provisional. Tests: NEW `task-normal-writes-disabled` + the Wave 3 route/hook suites. Contracts in the 2026-09-26 UI Change Record.
 - **Last Updated:** 2026-09-23 | **Server-authoritative task approvals** — NEW `src/app/api/tasks/approve/route.ts` (approve/approve-all/send-back; parent PIN via `verifyPinFromPB`, snapshot-primary lookup, `withWeekLedgerLock` → snapshot keyed lock, pay `pendingApproval.points`, per-payee `taskId+member` idempotency, crew send-back strips `checkedInAt`, approve-all fail-closed on unknown ids); `src/lib/snapshot-tasks.ts` gains shared `persistSnapshotWeek` (claim now imports it); `src/lib/task-utils.ts` B1 fix; middleware exempts `/api/tasks/approve`; client `submitApproval` POSTs and adopts server `weekData` (offline keeps local). Tests: NEW `task-approve-route` + extended pending-flow/approve-all/middleware-exempt. Contracts in the 2026-09-23 UI Change Record.
 - **Last Updated:** 2026-09-21 | **Ops: Hermes container upgraded to v0.21.3 and every agent moved to OpenCode Go `deepseek-v4-flash`.** The NAS `hermes-agent-2` container (s6-overlay, `nousresearch/hermes-agent:latest`) was upgraded **v0.20.4 → v0.21.3** (image pull + container recreate; `/share/Container/Hermes` → `/opt/data` volume preserved; rollback twin `hermes-agent-2-old` kept stopped; config backups at `/share/Container/hermes-backup-20260921-111204/`). All four Hermes gateway profiles now run the same brain — `provider: opencode-go`, `default: deepseek-v4-flash` — with `OPENCODE_GO_API_KEY` set to one Go key in each profile's `.env`: **default/drogon (:8643), consuela (:8642 — the route the dashboard uses), finance/alex (:8644), rubio (:8646)** (key/token VALUES never recorded — names only). Why the upgrade mattered: OpenCode Go requires the `x-opencode-session` header, which v0.20.4 never sent (`HTTP 400 MissingSessionID`); v0.21.3 sends it natively, so the temporary custom-provider "bridge" workaround was removed (drogon's 5 agent cron jobs repointed to `opencode-go`). The upgrade also flipped `API_SERVER_PORT` precedence — a profile's own `.env` now beats `config.yaml platforms.api_server.extra.port` — which briefly shuffled the ports and left default `fatal: Port 8642 in use`; fixed by pinning each profile's `API_SERVER_PORT` in its own `.env` (consuela 8642 / default 8643 / finance 8644 / rubio 8646 — all `api_server: connected`, health 200). Verified: `hermes gateway list` all four green, one-shot chat `ok` on all four, consuela `:8642` `/v1/chat/completions` `ok`. **Ops runbook + gotchas live in `memories/hermes-gateway-setup.md`** (the API_SERVER_PORT precedence rule, the `x-opencode-session` version floor, the container recreate command, key NAMES only). Admin-tool allowlist (`consuela-dashboard`, `pocketbase`, `hermes-agent-2`) unchanged.
 > 📜 Older snapshot entries + the legacy UI Change Records live in **CHANGELOG.md**.
@@ -91,6 +92,14 @@ Use this exact delta format in the "What's New" area and update 1.5 journeys:
 - User-facing description (copy-paste ready for responses):
   > "On the Home screen the chat bubble now gently floats up and down..."
 ```
+
+### UI Change Record — 2026-09-26 — Task-adjacent writers, Wave 3: the AI, the planner, the rewards shop, the briefing and the all-time numbers all ride the server now
+- Added / Changed: `src/app/api/rewards/redeem/route.ts` + `src/app/api/consuela/planner/apply/route.ts` (both rewritten onto the shared `applyWeekLedgerOperation` in `src/lib/ledger-operations.ts` — one lock order, one replay rule, one projection repair, `tx.meta.operationId` on every write, PB-owned cost/title, live-parent + parent-PIN gate on the planner), `src/lib/consuela/live-reads.ts` (NEW `readCanonicalTasks()` — snapshot first, PB replica as a *declared* fallback, `unavailable` as the honest third state), `src/lib/consuela/briefing.ts` + `src/lib/screensaver/payload.ts` (both read through it; the screensaver throws `task_data_unavailable` and answers an honest 503 instead of a fake progress bar), `src/app/api/tasks/all-time/route.ts` + `src/lib/all-time-totals.ts` + `src/hooks/useAllTimeTotals.ts` (NEW — points AND completion counts recomputed from canonical transaction history across the live week + archives; a stored `points` map is never authority; `historyComplete: false` ⇒ per-member `null`), leaderboard surfaces (`src/components/leaderboard/hooks/useLeaderboardData.ts`, `Podium.tsx`, `YourCard.tsx`, `MemberSheet.tsx`) + `src/modes/kid/KidHome.tsx` (all-time lines render the honest null/partial states; levels stop being fabricated from a missing number), `ai/TOOLS.md` (NEW "Who owns a task write" — the `executeInternalTaskCommand` seam, one command per `operationId`, receipt-not-intent reporting, canonical payee derivation, assigned-only completion, and the adult-owned chore marked OPEN), `src/lib/consuela-prompts.ts` (`TASK_ACTIONS_ADDENDUM` teaches the same three truths), `docs/muse-api.md` (two new task-write invariants), `src/lib/ai-boot.generated.ts` (regenerated by `node scripts/write-ai-boot.mjs` — never hand-edited), `AGENTS.md` §5.6 (the "NOT yet remediated" directive removed; it would have sent a future agent to "fix" already-correct surfaces), tests: NEW `tests/unit/task-normal-writes-disabled.test.ts` (8 — static writer-surface pin), NEW `tests/unit/rewards-redeem-route` / `planner-apply-route` / `task-config-clients` / `all-time-totals` / `all-time-route` / `use-all-time-totals` / `briefing-authority` regressions across Tasks 2–8, plus a phantom `syncAllTasksToPB` mock removed from `push-local-honest-counts`.
+- Visual / Motion: No new keyframes, no loops, no restyle; `prefers-reduced-motion` untouched. The only user-visible change is **honesty**: the leaderboard/podium/your-card/member-sheet/kid-hero all-time lines now say "—" with a short-total note when a week of history could not be read instead of quietly showing a smaller number as if it were the real total, the briefing never renders a stored unknown as "no chores", and the wall board refuses to render a chore progress bar it cannot read. Everything else is backend correctness: a replayed redemption deducts once, a chat point adjustment with no stable operation id is refused instead of applied, and a double-tap can no longer double-charge a reward.
+- Color sources: None — no palette entries. State colour reuse is the existing `--color-accent-mint` / `--color-accent-amber` / `--color-text-muted` honest-state tokens.
+- Agent action required: Update this section + "Current Dashboard Snapshot" + §5.6. **CONTRACTS to keep:** (1) `applyWeekLedgerOperation` (`src/lib/ledger-operations.ts`) is the ONLY way redeem and the planner apply a ledger write — never give either route its own `withWeekLedgerLock` body; (2) the assistant/ambient task readers are `readCanonicalTasks()` — snapshot → declared PB fallback → `unavailable`, never a bare PB read and never a fabricated default; (3) all-time points/completions are recomputed from `parseCanonicalTransactions` history, a stored `points` map is never authority, and `historyComplete: false` produces `null` — an unknown is `null`, never `0`; (4) the outbox `parentName` is identity, never a credential — the route re-resolves it live with `namesMatch` and then verifies `parentPin`; (5) `ai/*.md` edits must ship with a regenerated `src/lib/ai-boot.generated.ts`; (6) `POST /api/tasks/sync` stays as the cross-device READ and the whole `sync*ToPB` structured push family stays deleted — nothing is retained "for migration". **OPEN HUMAN DECISION:** what should happen when a chore's own owner is a grown-up (`complete_task` → `reason: "adult_owner"`) is undecided; the code is left as-is and the docs mark it provisional. Do not harden or relax it. Verified: focused Wave 3 suites green, `npm run typecheck` exit 0, backend-focused lint no new findings, full `npx vitest run` green, `npm run build` exit 0, `git diff --check` silent.
+- User-facing description (copy-paste ready for responses):
+  > "Consuela's chores are honest now, on every screen. The all-time number next to each family member is worked out from the actual record of every point they've ever earned — and if the family server can't give us a complete week of history, the card says so instead of quietly showing a smaller total as if it were the real one. The morning briefing and the kitchen wall board read the same chore list the Tasks page reads, so a chore can't be 'missing' on one screen and present on another, and the wall display would rather say it can't read the chores than draw a progress bar it made up. Redeeming a reward and applying a suggested point change both go through one locked, replay-proof server operation now, so a double-tap can't charge you twice and a chat suggestion can't move points on its own. And a grown-up asking Consuela to tick off their own chore is still an open question we're leaving to you — right now she sends you to the Tasks screen so you can watch the points land."
 
 ### UI Change Record — 2026-09-23 — Server-authoritative task approvals
 - Added / Changed: NEW `src/app/api/tasks/approve/route.ts` (approve/approve-all/send-back actions — parent PIN via `verifyPinFromPB`, snapshot-primary task lookup, entire pay under `withWeekLedgerLock` → snapshot keyed lock, pays `pendingApproval.points`, per-payee `taskId+member` reversal-aware idempotency, crew send-back strips `checkedInAt`, approve-all takes explicit `taskIds` and fails closed on unknown ids), `src/lib/snapshot-tasks.ts` (shared `persistSnapshotWeek` — claim route now imports it), `src/lib/task-utils.ts` (B1 fix — amount = `pendingApproval.points ?? task.points`), `src/middleware.ts` (exempts `/api/tasks/approve`), `src/app/tasks/page.tsx` (client `submitApproval` POSTs and adopts server `weekData`; offline keeps local approval), tests: NEW `tests/unit/task-approve-route` + extended pending-flow, approve-all, middleware-exempt, pending-approval (B1 amount).
@@ -1729,35 +1738,116 @@ handler registered via `registerInternalTaskCommandHandler`.
 through it. A new internal writer **registers a handler and calls this** — it
 never reaches PocketBase or the week row on its own, and it never infers a
 payee, amount or approval identity from untrusted tool arguments.
-**Wave 3 scope — Hermes/MUSE task writers DONE (Wave 3 Task 5 + Task 6); the rest
-NOT yet remediated.** `complete_task` / `reopen_task` ride the **claim** seam
-(`kind:"complete"` / `kind:"undo"`) and `add_task` / `update_task` / `delete_task`
-ride the **manage** seam (`kind:"add"|"update"|"delete"`) — none of them writes a
-snapshot, a tombstone or a mirror row itself any more, and the
-`mutateSnapshot` / `upsertSnapshotTask` / `deleteSnapshotTask` /
-`mirrorTaskToCollection` imports are gone from `src/lib/hermes-tools.ts`. Still
-outside the seam and still writing their own way: reward redemption
-(`POST /api/rewards/redeem` runs its own `withWeekLedgerLock` body instead of the
-shared ledger operation helper), the planner point adjustment, briefing
-authority (morning briefing, assistant live reads, screensaver task progress) and
-all-time totals. Treat only those as unremediated: never describe them as riding
-the command seam, and migrate them in a later wave.
+**Wave 3 is COMPLETE — there is NO unremediated writer left in this plan's
+scope.** Do not "migrate" any of the surfaces below; they are already on the
+seam and the notes that once said otherwise are retired. What each one rides
+now:
 
-**CONTRACTS to keep (Task 5 + Task 6):** (1) every assistant task write goes
-through `executeInternalTaskCommand` with a `caller` — the actor role is the
-caller's LIVE role, and `callerRole()` **fails closed** (only a literal `parent`
-is a parent), so a context-free `handler(args)` can never author a parent-actor
-command; all five call sites pass a context. (2) `ai/TOOLS.md` is embedded at
-prebuild into `src/lib/ai-boot.generated.ts` and composes `SYSTEM_PROMPT` for
-every parent chat — **regenerate it with `node scripts/write-ai-boot.mjs` (or
-`npm run ai:boot`) in the same commit as any `ai/*.md` edit**; never hand-edit the
-generated file. (3) The reopen guard's payee list follows how the earn was
-actually written: a crew approval pays PER MEMBER (`pendingApproval.crew`), so
-`byName` — the literal `"Crew"` — is not a payee. (4) The guard has **no** cheap
-pre-filter: `hasUnreversedTaskEarn` normalizes and its throw path is the
-fail-closed one. (5) `reopenTask` writes `completedBy/completedAt/
-completedInWeek` as **`null`**, matching the approval seam's send-back — `""`
-is not nullish and would persist as a lie.
+- **Hermes/MUSE task tools (Tasks 5 + 6).** `complete_task` / `reopen_task` ride
+  the **claim** seam (`kind:"complete"` / `kind:"undo"`) and `add_task` /
+  `update_task` / `delete_task` ride the **manage** seam
+  (`kind:"add"|"update"|"delete"`) — none of them writes a snapshot, a tombstone
+  or a mirror row itself, and the `mutateSnapshot` / `upsertSnapshotTask` /
+  `deleteSnapshotTask` / `mirrorTaskToCollection` imports are gone from
+  `src/lib/hermes-tools.ts`.
+- **Reward redemption (Task 3).** `POST /api/rewards/redeem` runs through
+  `applyWeekLedgerOperation` (`src/lib/ledger-operations.ts`) — the **shared**
+  helper, under the same lock order (`week-ledger → snapshot-keyed`), with a
+  `tx.meta.operationId` for replay and a shared projection-repair callback. It
+  does **not** have its own `withWeekLedgerLock` body; an earlier note here
+  claiming it did was wrong and has been removed.
+- **Planner point adjustment (Task 2).**
+  `POST /api/consuela/planner/apply` uses the same shared helper. It is **not**
+  "its own `withWeekLedgerLock` body" — the earlier wording was wrong and is
+  retired. The route still requires a live parent session + the parent PIN, and
+  a chat-side adjustment with no stable operation id is refused rather than
+  applied.
+- **Briefing authority (Task 7).** The morning briefing, the assistant live
+  reads and the screensaver payload all read through
+  `readCanonicalTasks()` (`src/lib/consuela/live-reads.ts`) — the snapshot
+  first, the PB replica only as a declared fallback, and `unavailable` as the
+  third, honest outcome. See "snapshot-first reads" below.
+- **All-time totals (Task 8).** `GET /api/tasks/all-time` +
+  `src/lib/all-time-totals.ts` recompute points AND completions from canonical
+  transaction history. See "all-time recomputation" below.
+
+**CONTRACTS to keep (Wave 3, all tasks):**
+
+1. **Command seam.** Every non-browser task mutation registers a handler and
+   calls `executeInternalTaskCommand`; it never reaches PocketBase or the week
+   row on its own and never infers a payee, amount or approval identity from
+   untrusted arguments. The two command routes that carry a ledger write
+   (redeem, planner apply) go through `applyWeekLedgerOperation`, so lock order,
+   replay detection and projection repair are defined in exactly one place.
+2. **All-time recomputation from canonical history.** All-time points and
+   completion counts are **recomputed** from parsed transaction history
+   (`parseCanonicalTransactions`) across the live week plus archived weeks. A
+   stored `points` map is **never** authority. `historyComplete: false` means
+   at least one week could not be read, so the per-member values are `null` and
+   every surface says so rather than showing a short total as if it were whole.
+3. **The honest-null policy.** A value that cannot be known is `null` and says
+   so — never `0`, never an empty list, never "no chores", never a level
+   derived from a missing number. Only *rendered* copies change ("no chores"
+   was the specific Wave 3 Task 7 fix). Any new total, count or level MUST
+   accept the null and must not coalesce it to zero.
+4. **Snapshot-first reads.** Assistant/ambient task readers use
+   `readCanonicalTasks()`: `consuela_data_snapshots` (the rows the family
+   actually sees) → PB `tasks` replica as a **declared** fallback → `unavailable`.
+   The screensaver throws `task_data_unavailable` on the third case and answers
+   an honest 503; it never renders a fabricated progress bar. Tombstoned rows
+   are dropped, and unresolved (`pendingApproval`) rows are filtered where the
+   surface's meaning requires a settled answer.
+5. **Outbox `parentName` contract.** A queued `/api/rewards/redeem` entry stores
+   `{ rewardId, memberName, parentName }`; `parentName` is the approver's
+   **identity**, never a credential. The route re-resolves it against the LIVE
+   roster with `namesMatch` and then verifies `parentPin` — a stale, renamed,
+   deleted or forged name authorizes nothing (off-roster or non-parent is
+   `403 parent_only`; right name + wrong PIN is `401 invalid_pin`, both before
+   the ledger write). A PIN never enters the entry; the stored reward row stays
+   the sole authority for the cost.
+6. **Prompt/codegen coupling.** `ai/TOOLS.md` is embedded at prebuild into
+   `src/lib/ai-boot.generated.ts` and composes `SYSTEM_PROMPT` for every parent
+   chat — **regenerate it with `node scripts/write-ai-boot.mjs` (or
+   `npm run ai:boot`) in the same commit as any `ai/*.md` edit**; never hand-edit
+   the generated file.
+7. **Assistant actor attribution (Task 5).** Every assistant task write passes
+   a `caller`; the actor role is the caller's LIVE role and `callerRole()`
+   **fails closed** (only a literal `parent` is a parent), so a context-free
+   `handler(args)` can never author a parent-actor command. All five call sites
+   pass a context.
+8. **Assigned-only completion, canonical payee.** `complete_task` completes an
+   ASSIGNED chore only; open/late-stealable chores are CLAIMED from the Tasks
+   screen and crew chores need every member checked in. The payee and the amount
+   are derived from the chore's canonical owner and stored points — the
+   `assignee` argument only disambiguates which row was meant.
+9. **Reopen guard.** The payee list follows how the earn was actually written: a
+   crew approval pays PER MEMBER (`pendingApproval.crew`), so `byName` — the
+   literal `"Crew"` — is not a payee. There is **no** cheap pre-filter:
+   `hasUnreversedTaskEarn` normalizes and its throw path is the fail-closed one.
+   `reopenTask` writes `completedBy/completedAt/completedInWeek` as **`null`**,
+   matching the approval seam's send-back — `""` is not nullish and would persist
+   as a lie.
+10. **GET `/api/tasks/sync` is the read, not a writer.** The route is retired as
+    a browser write path (POST is 410 `legacy_sync_write_disabled` / 400
+    `invalid_body`) and **kept** as the cross-device read. The browser's
+    structured whole-body push family (`syncTasksToPB`, `syncWeekDataToPB`,
+    `syncArchiveToPB`, `syncRewardsToPB`, `syncPenaltiesToPB`,
+    `syncWeeklyPrizesToPB`, `syncAllTasksToPB`, `syncHallOfFameToPB`) is
+    **deleted** — there is no migration-tooling caller left, so nothing is
+    retained "for migration". `pushLocalToPB` keeps only the eight non-task
+    migration collections; `syncFamilyGoalToPB` is the one surviving
+    `sync*ToPB` helper and it is a family-goal (non-task) write.
+    `tests/unit/task-normal-writes-disabled.test.ts` pins the writer surface and
+    `tests/unit/task-no-browser-writes.test.ts` pins the db layer.
+
+**OPEN HUMAN DECISION — do NOT decide this in code.** `complete_task` currently
+refuses a chore whose canonical owner is a grown-up (`reason: "adult_owner"`,
+`src/lib/hermes-tools.ts`) and points the family at the Tasks screen. Whether
+an adult-owned chore should instead be completable from chat, routed to
+approval, or refused permanently is an **undecided product question**. The code
+is left as it is, and `ai/TOOLS.md` / `docs/muse-api.md` deliberately mark it
+provisional — do not harden it into a permanent rule, and do not relax it, until
+the family decides.
 
 **Parent-only admin auth (pets denied).** `authorizeAdminRequest`
 (`src/lib/admin-auth.ts`) is an **allowlist on `role === "parent"`**: a valid
