@@ -136,6 +136,16 @@ function mockOpenMeteo(payload: unknown) {
   );
 }
 
+const PINNED_NOW = "2026-09-24T17:20:00.000Z";
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"], now: new Date(PINNED_NOW) });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe("WeatherWidget — Not Boring redesign", () => {
   beforeEach(() => {
     vi.stubGlobal("requestAnimationFrame", vi.fn((cb: FrameRequestCallback) => setTimeout(() => cb(Date.now()), 0) as unknown as number));
