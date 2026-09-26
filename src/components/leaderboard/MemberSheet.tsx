@@ -5,14 +5,13 @@ import SoftButton from "@/components/ui/SoftButton";
 import Avatar from "@/components/ui/Avatar";
 import Surface from "@/components/ui/Surface";
 import Chip from "@/components/ui/Chip";
-import { BADGES, type Badge } from "@/types/tasks";
 import {
   PROGRESS_UNAVAILABLE_LABEL,
   allTimeCaption,
   allTimeCompletionsCaption,
   allTimeLevelLabel,
-  isBadgeEarned,
   resolveAllTimeLevel,
+  splitBadgesWithWeeklyChamp,
 } from "./level";
 import type { AllTimeReadProp } from "./Podium";
 
@@ -50,11 +49,12 @@ export default function MemberSheet({
 }: MemberSheetProps) {
   if (!entry) return null;
   const color = getMemberColor(entry.name);
-  const isEarned = (b: Badge) =>
-    isBadgeEarned(b, allTimePoints, entry.streak, allTimeComps) ||
-    (b.id === "week_champ" && hasWeeklyChamp);
-  const earnedBadgeObjects = BADGES.filter(isEarned);
-  const lockedBadges = BADGES.filter((b) => !isEarned(b));
+  const { earned: earnedBadgeObjects, locked: lockedBadges } = splitBadgesWithWeeklyChamp(
+    allTimePoints,
+    entry.streak,
+    allTimeComps,
+    hasWeeklyChamp
+  );
   const levelInfo = resolveAllTimeLevel(allTimePoints);
   const maxGraphPoints = Math.max(1, ...weekGraph.map(d => d.points));
 
@@ -164,8 +164,14 @@ export default function MemberSheet({
             )}
           </div>
           <div className="mt-1 flex justify-between text-[10px] text-text-muted">
-            <span>{levelInfo.known ? levelInfo.title : PROGRESS_UNAVAILABLE_LABEL}</span>
-            <span>{levelInfo.known ? `${levelInfo.progress}% to next` : PROGRESS_UNAVAILABLE_LABEL}</span>
+            {levelInfo.known ? (
+              <>
+                <span>{levelInfo.title}</span>
+                <span>{levelInfo.progress}% to next</span>
+              </>
+            ) : (
+              <span>{PROGRESS_UNAVAILABLE_LABEL}</span>
+            )}
           </div>
         </div>
       </div>

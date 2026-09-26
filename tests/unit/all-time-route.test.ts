@@ -21,7 +21,7 @@ vi.mock("@/lib/local-date", () => ({
   localWeekStartISO: (now?: Date) => mocks.localWeekStartISO(now),
 }));
 
-import { GET } from "@/app/api/tasks/all-time/route";
+import { GET, __resetAllTimeCache, ALL_TIME_CACHE_TTL_MS } from "@/app/api/tasks/all-time/route";
 
 const WEEK = "2026-09-21";
 const PREVIOUS = "2026-09-14";
@@ -36,7 +36,7 @@ function archiveRow(weekStart: string, history: unknown, extra: Row = {}): Row {
   return { id: `wa-${weekStart}`, weekStart, archivedAt: "2026-09-21T06:00:00.000Z", points: {}, history, ...extra };
 }
 
-function pbCollections(dataRows: Row[], archiveRows: Row[]) {
+function pbCollections(dataRows: Row[], archiveRows: Row[], memberRows: Row[] = []) {
   const reads: string[] = [];
   return {
     reads,
@@ -45,12 +45,18 @@ function pbCollections(dataRows: Row[], archiveRows: Row[]) {
         reads.push(name);
         return {
           async getFullList() {
-            return name === "week_data" ? dataRows : archiveRows;
+            if (name === "week_data") return dataRows;
+            if (name === "members") return memberRows;
+            return archiveRows;
           },
         };
       },
     },
   };
+}
+
+function memberRow(name: string, role = "child"): Row {
+  return { id: `m-${name}`, name, fullName: name, role, pin: "" };
 }
 
 const CURRENT_HISTORY = [
@@ -73,6 +79,7 @@ beforeEach(() => {
     ok: true,
     identity: { memberId: "m1", name: "Parent", role: "parent" },
   });
+  __resetAllTimeCache();
 });
 
 describe("GET /api/tasks/all-time", () => {
@@ -91,7 +98,7 @@ describe("GET /api/tasks/all-time", () => {
     expect(body.historyComplete).toBe(true);
     expect(body.totals["Member A"]).toEqual({ points: 45, completions: 2 });
     expect(Number.isFinite(Date.parse(body.fetchedAt))).toBe(true);
-    expect(pb.reads).toEqual(["week_data", "week_archive"]);
+    expect(pb.reads).toEqual(["week_data", "week_archive", "members"]);
     expect(mocks.withAdmin).toHaveBeenCalledTimes(1);
   });
 
@@ -194,5 +201,125 @@ describe("GET /api/tasks/all-time", () => {
     expect(source).not.toContain("localStorage");
     expect(source).not.toContain("loadWeekData");
     expect(source).not.toContain("getArchivedWeeks");
+  });
+});
+
+describe("GET /api/tasks/all-time — every roster member is emitted", () => {
+  it("a member with no history at all is zero, so the family total stays knowable", async () => {
+    const pb = pbCollections(
+      [weekRow(WEEK, CURRENT_HISTORY)],
+      [archiveRow(PREVIOUS, ARCHIVE_HISTORY)],
+      [memberRow("Member A"), memberRow("Brand New"), memberRow("Fido", "pet")],
+    );
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(pb.pb));
+
+    const res = await GET(request());
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.historyComplete).toBe(true);
+    expect(body.totals["Member A"]).toEqual({ points: 45, completions: 2 });
+    // A never-earning member provably IS zero — not unknown.
+    expect(body.totals["Brand New"]).toEqual({ points: 0, completions: 0 });
+    // A pet can never earn, so it is not part of the all-time board at all.
+    expect(body.totals["Fido"]).toBeUndefined();
+  });
+
+  it("an incomplete history still nulls EVERY member, including the zero-history one", async () => {
+    const pb = pbCollections(
+      [weekRow(WEEK, CURRENT_HISTORY)],
+      [archiveRow(PREVIOUS, CURRENT_HISTORY), { id: "wa-2026-09-07", weekStart: "2026-09-07", points: {} }],
+      [memberRow("Member A"), memberRow("Brand New")],
+    );
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(pb.pb));
+
+    const res = await GET(request());
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.historyComplete).toBe(false);
+    expect(Object.keys(body.totals).sort()).toEqual(["Brand New", "Member A"]);
+    expect(body.totals["Member A"]).toEqual({ points: null, completions: null });
+    expect(body.totals["Brand New"]).toEqual({ points: null, completions: null });
+  });
+
+  it("an unreadable members read fails closed rather than dropping the roster", async () => {
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) =>
+      fn({ collection: (name: string) => ({ getFullList: async () => (name === "members" ? null : []) }) }),
+    );
+    const res = await GET(request());
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ ok: false, error: "all_time_unavailable" });
+  });
+});
+
+describe("GET /api/tasks/all-time — one computation per TTL window", () => {
+  it("two rapid requests share a single PocketBase computation", async () => {
+    const pb = pbCollections([weekRow(WEEK, CURRENT_HISTORY)], [archiveRow(PREVIOUS, ARCHIVE_HISTORY)]);
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(pb.pb));
+
+    const first = await GET(request());
+    const second = await GET(request());
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(await second.json()).toEqual(await first.json());
+    expect(mocks.withAdmin).toHaveBeenCalledTimes(1);
+    expect(pb.reads).toEqual(["week_data", "week_archive", "members"]);
+  });
+
+  it("concurrent requests in flight share the same computation", async () => {
+    const pb = pbCollections([weekRow(WEEK, CURRENT_HISTORY)], [archiveRow(PREVIOUS, ARCHIVE_HISTORY)]);
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(pb.pb));
+
+    const [first, second] = await Promise.all([GET(request()), GET(request())]);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(mocks.withAdmin).toHaveBeenCalledTimes(1);
+  });
+
+  it("a week rollover recomputes instead of serving the previous week's payload", async () => {
+    const pb = pbCollections(
+      [weekRow(WEEK, CURRENT_HISTORY), weekRow("2026-09-28", CURRENT_HISTORY)],
+      [archiveRow(PREVIOUS, ARCHIVE_HISTORY)],
+    );
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(pb.pb));
+
+    const first = await GET(request());
+    expect((await first.json()).weekStart).toBe(WEEK);
+
+    mocks.localWeekStartISO.mockReturnValue("2026-09-28");
+    const next = await GET(request());
+
+    expect(next.status).toBe(200);
+    expect((await next.json()).weekStart).toBe("2026-09-28");
+    expect(mocks.withAdmin).toHaveBeenCalledTimes(2);
+  });
+
+  it("a stale entry past the TTL recomputes", async () => {
+    const pb = pbCollections([weekRow(WEEK, CURRENT_HISTORY)], [archiveRow(PREVIOUS, ARCHIVE_HISTORY)]);
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(pb.pb));
+
+    await GET(request());
+    const nowSpy = vi.spyOn(Date, "now");
+    nowSpy.mockReturnValue(Date.now() + ALL_TIME_CACHE_TTL_MS + 1);
+    const later = await GET(request());
+
+    expect(later.status).toBe(200);
+    expect(mocks.withAdmin).toHaveBeenCalledTimes(2);
+    nowSpy.mockRestore();
+  });
+
+  it("a failed computation is never cached (the next request retries)", async () => {
+    mocks.withAdmin.mockRejectedValue(new Error("pb down"));
+    expect((await GET(request())).status).toBe(503);
+
+    const pb = pbCollections([weekRow(WEEK, CURRENT_HISTORY)], [archiveRow(PREVIOUS, ARCHIVE_HISTORY)]);
+    mocks.withAdmin.mockImplementation(async (fn: (pb: unknown) => Promise<unknown>) => fn(pb.pb));
+    const res = await GET(request());
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).totals["Member A"]).toEqual({ points: 45, completions: 2 });
   });
 });

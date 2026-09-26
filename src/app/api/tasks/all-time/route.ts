@@ -2,14 +2,28 @@ import { NextRequest, NextResponse } from "next/server";
 import { withAdmin } from "@/lib/pb-auth";
 import { requireLiveSession } from "@/lib/server-auth";
 import { localWeekStartISO } from "@/lib/local-date";
-import { buildAllTimeTotals, type ArchiveWeekRow } from "@/lib/all-time-totals";
+import { buildAllTimeTotals, type AllTimeTotalsPayload, type ArchiveWeekRow } from "@/lib/all-time-totals";
 import type { WeekData } from "@/types/tasks";
 
 export const dynamic = "force-dynamic";
 
 export const ALL_TIME_UNAVAILABLE_ERROR = "all_time_unavailable";
 
+export const ALL_TIME_CACHE_TTL_MS = 45_000;
+
 type Row = Record<string, unknown>;
+
+type CacheEntry = {
+  weekStart: string;
+  startedAt: number;
+  promise: Promise<AllTimeTotalsPayload>;
+};
+
+let cache: CacheEntry | null = null;
+
+export function __resetAllTimeCache(): void {
+  cache = null;
+}
 
 function isRecord(value: unknown): value is Row {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -44,6 +58,34 @@ function canonicalCurrentWeek(rows: readonly unknown[], weekStart: string): Week
   } as unknown as WeekData;
 }
 
+function rosterNames(rows: readonly unknown[]): string[] {
+  const names: string[] = [];
+  for (const row of rows) {
+    if (!isRecord(row)) continue;
+    if (row.role === "pet") continue;
+    const fullName = typeof row.fullName === "string" ? row.fullName.trim() : "";
+    const name = typeof row.name === "string" ? row.name.trim() : "";
+    const resolved = fullName || name;
+    if (resolved.length > 0 && !names.includes(resolved)) names.push(resolved);
+  }
+  return names;
+}
+
+async function computePayload(weekStart: string): Promise<AllTimeTotalsPayload> {
+  const read = await withAdmin(async (pb) => {
+    const dataRows = await pb.collection("week_data").getFullList({ requestKey: null });
+    const archiveRows = await pb.collection("week_archive").getFullList({ requestKey: null });
+    const memberRows = await pb.collection("members").getFullList({ requestKey: null });
+    return { dataRows, archiveRows, memberRows };
+  });
+  if (!Array.isArray(read.dataRows) || !Array.isArray(read.archiveRows) || !Array.isArray(read.memberRows)) {
+    throw new Error("all_time_unreadable");
+  }
+  const currentWeek = canonicalCurrentWeek(read.dataRows, weekStart);
+  if (!currentWeek) throw new Error("all_time_no_current_week");
+  return buildAllTimeTotals(currentWeek, archiveWeekRows(read.archiveRows), rosterNames(read.memberRows));
+}
+
 export async function GET(request: NextRequest) {
   const live = await requireLiveSession(request);
   if (!live.ok) {
@@ -51,20 +93,28 @@ export async function GET(request: NextRequest) {
   }
 
   const weekStart = localWeekStartISO();
-  let payload: ReturnType<typeof buildAllTimeTotals>;
-  try {
-    const read = await withAdmin(async (pb) => {
-      const dataRows = await pb.collection("week_data").getFullList({ requestKey: null });
-      const archiveRows = await pb.collection("week_archive").getFullList({ requestKey: null });
-      return { dataRows, archiveRows };
-    });
-    if (!Array.isArray(read.dataRows) || !Array.isArray(read.archiveRows)) return unavailable();
-    const currentWeek = canonicalCurrentWeek(read.dataRows, weekStart);
-    if (!currentWeek) return unavailable();
-    payload = buildAllTimeTotals(currentWeek, archiveWeekRows(read.archiveRows));
-  } catch {
-    return unavailable();
+  const now = Date.now();
+  const reusable =
+    cache !== null &&
+    cache.weekStart === weekStart &&
+    now - cache.startedAt < ALL_TIME_CACHE_TTL_MS
+      ? cache
+      : null;
+  if (reusable) {
+    try {
+      return NextResponse.json(await reusable.promise, { status: 200 });
+    } catch {
+      if (cache?.promise === reusable.promise) cache = null;
+      return unavailable();
+    }
   }
 
-  return NextResponse.json(payload, { status: 200 });
+  const promise = computePayload(weekStart);
+  cache = { weekStart, startedAt: now, promise };
+  try {
+    return NextResponse.json(await promise, { status: 200 });
+  } catch {
+    if (cache?.promise === promise) cache = null;
+    return unavailable();
+  }
 }

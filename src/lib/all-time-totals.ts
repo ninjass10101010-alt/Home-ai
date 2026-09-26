@@ -122,6 +122,7 @@ export function familyAllTimePoints(
 export function buildAllTimeTotals(
   currentWeek: WeekData | null,
   archiveRows: readonly ArchiveWeekRow[],
+  rosterNames: readonly string[] = [],
 ): AllTimeTotalsPayload {
   const weeks = includedWeeks(currentWeek, archiveRows);
   const members = new Set<string>();
@@ -152,6 +153,14 @@ export function buildAllTimeTotals(
     }
   }
 
+  // Every roster member belongs in the payload: a member with no history at all
+  // provably earned zero, and omitting them would make the family total
+  // unknowable for everyone.
+  for (const name of rosterNames) {
+    const trimmed = name.trim();
+    if (trimmed.length > 0) members.add(trimmed);
+  }
+
   const totals: Record<string, AllTimeMemberTotal> = {};
   for (const name of [...members].sort()) {
     if (!historyComplete) {
@@ -167,7 +176,6 @@ export function buildAllTimeTotals(
     }
     totals[name] = { points, completions };
   }
-
   return {
     weekStart: currentWeek ? readWeekStart(currentWeek.weekStart) : "",
     totals,

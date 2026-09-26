@@ -92,6 +92,21 @@ export function splitBadges(
   return { earned, locked: BADGES.filter((badge) => !earnedIds.has(badge.id)) };
 }
 
+export function splitBadgesWithWeeklyChamp(
+  allTimePoints: number | null,
+  streak: number,
+  allTimeCompletions: number | null,
+  hasWeeklyChamp: boolean,
+): { earned: Badge[]; locked: Badge[] } {
+  if (!hasWeeklyChamp) return splitBadges(allTimePoints, streak, allTimeCompletions);
+  const earned = BADGES.filter(
+    (badge) =>
+      badge.id === "week_champ" || isBadgeEarned(badge, allTimePoints, streak, allTimeCompletions),
+  );
+  const earnedIds = new Set(earned.map((badge) => badge.id));
+  return { earned, locked: BADGES.filter((badge) => !earnedIds.has(badge.id)) };
+}
+
 export function formatAllTimeStamp(updatedAt: string): string {
   const parsed = new Date(updatedAt);
   if (Number.isNaN(parsed.getTime())) return updatedAt;
