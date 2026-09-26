@@ -1758,29 +1758,39 @@ authority for the cost — never widen the allowlist to admit a client `cost` or
 
 - `body.reason` / `body.code` is the **machine channel** and is honoured
   **unconditionally**. The client deliberately acts on it: it selects
-  retryable / permanent / semantic-duplicate and sets the retry backoff.
+  retryable / permanent / semantic-duplicate and sets the retry backoff. This is
+  the one place a server field is trusted outright, and it is intentional.
 - `body.error` is the **display channel** — normally a human sentence — and is
   honoured as a machine reason **only when it is a member of the closed
   `ERROR_CHANNEL_MACHINE_CODES` vocabulary** in `task-operation-outbox.ts`. That
-  exception exists because `/api/tasks/config` and `/api/tasks/manage` express
-  their machine codes ONLY through `error` (their exact response bodies are
-  pinned by `task-config-route.test.ts`, so the codes cannot move to `reason`).
-  The vocabulary is the union of the retryable / permanent / duplicate code sets
-  plus the codes those two routes can emit; it is hand-written because
-  `TaskManageErrorCode` is a type-only union in a server-only module a browser
-  module cannot import at runtime — and `EveryManageCodeIsClassified` makes
-  `npm run typecheck` fail if a new `TaskManageErrorCode` member has no matching
-  decision here, so the list cannot silently rot.
-- A **non-member** `error` yields no machine reason at all, and the caller
-  degrades to a status-derived reason (`http_<status>`, `unauthorized`,
-  `adult_only`, `operation_conflict`, ...). Every `error` — member or not — also
-  lands on `lastErrorMessage`, which one caller renders.
-- `credentialMissing` is a **module-owned boolean**, not a string. It is set
-  only by `markAuthRequired(..., deferred: false)` — the one place this module
-  decides a credential is absent — and `runFlush` reads it to skip an entry that
-  cannot be attempted. Because it is never string-matched against
-  `lastErrorReason`, **no server field, through any channel, can move the
-  credential gate.**
+  exception exists because two command routes express their machine codes ONLY
+  through `error`: `/api/tasks/config`, whose bodies are pinned by exact equality
+  in `tests/unit/task-config-route.test.ts`, and `/api/tasks/manage`, whose bodies
+  are pinned by `toMatchObject` in `tests/unit/task-manage-route.test.ts`. Neither
+  route's codes can move to `reason` without rewriting those assertions.
+- A **non-member** `error` yields no machine reason, and the caller degrades to a
+  status-derived reason (`http_<status>`, `unauthorized`, `adult_only`,
+  `operation_conflict`, ...). Every `error` — member or not — also lands on
+  `lastErrorMessage`, which one caller renders; that field **steers nothing**.
+- The vocabulary buys **correctness, not security.** An attacker who controls the
+  response body already controls `reason` / `code`, which are honoured
+  unconditionally, so gating `error` defends nothing against a hostile server.
+  What it buys is that a well-behaved route's human sentence is never mistaken for
+  a code, and that no server field can impersonate a module sentinel and strand a
+  queued command. Do not later describe it as a security control.
+- The list is hand-written because `TaskManageErrorCode` and `TaskConfigErrorCode`
+  are type-only unions in server-only modules a browser module cannot import at
+  runtime. `EveryManageCodeIsClassified` and `EveryConfigCodeIsClassified` make
+  `npm run typecheck` fail if a new member of **either union** has no matching
+  decision here. Those two guards cover only those two unions; five further
+  members (`invalid_body`, `member_missing`, `member_lookup_failed`,
+  `pin_required`, `unsupported_task_command`) are bare string literals with no
+  derivable union, so they rest on the table-driven test alone.
+- `credentialMissing` is a **module-owned boolean**, not a string. It is set only
+  by `markAuthRequired(..., deferred: false)` — the one place this module decides a
+  credential is absent — and `runFlush` reads it to skip an entry that cannot be
+  attempted. Because it is never string-matched against `lastErrorReason`,
+  **no server field, through any channel, can move the credential gate.**
 
 **`executeInternalTaskCommand` is the sanctioned server-side command seam.**
 `executeInternalTaskCommand` (`src/lib/task-commands.ts`) is the *only* entry
