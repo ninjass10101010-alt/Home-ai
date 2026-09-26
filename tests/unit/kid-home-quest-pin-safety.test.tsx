@@ -458,10 +458,18 @@ describe("KidHome quest completion (age predicates: under-10 tap → pending; 10
     await settle();
 
     // Under-10 direct tap: the completedInWeek guard refuses BEFORE any write
-    // (the modal must not even open — the tap path is fully trap-proof).
+    // (the modal must not even open — the tap path is fully trap-proof). The
+    // only traffic the surface may do is a READ (the all-time totals GET) — no
+    // write verb and no task command route, ever.
     await tapQuest(el, "Feed the dog");
 
-    expect(spyFetch).not.toHaveBeenCalled();
+    const calls = spyFetch.mock.calls as unknown as Array<[RequestInfo | URL, RequestInit | undefined]>;
+    const writeCalls = calls.filter(([, init]) => Boolean(init?.method));
+    const commandCalls = calls.filter(([input]) =>
+      /\/api\/tasks\/(claim|approve|manage|config|ledger|sync)/.test(String(input))
+    );
+    expect(writeCalls).toEqual([]);
+    expect(commandCalls).toEqual([]);
     expect(store.saveTasks).not.toHaveBeenCalled();
     expect(store.saveWeekData).not.toHaveBeenCalled();
     expect(store.syncTasksToPB).not.toHaveBeenCalled();

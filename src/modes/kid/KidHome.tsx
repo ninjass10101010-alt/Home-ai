@@ -45,7 +45,6 @@ import {
   getThisWeeksCompletedTasks,
   getThisWeeksCompletedDates,
   calculateRealStreak,
-  getMemberAllTimePoints,
   completesWithoutPin,
   completesWithPendingApproval,
   isSnatchable,
@@ -59,10 +58,13 @@ import {
   getDaysUntilWeekReset,
 } from "@/lib/task-utils";
 import { useTaskCommandQueue } from "@/hooks/useTaskCommandQueue";
+import { useAllTimeTotals } from "@/hooks/useAllTimeTotals";
 import { kidRaceLine } from "./quest-labels";
 import KidCrewBoard from "./KidCrewBoard";
 import { splitKidBoard } from "./kid-board";
 import { useWeeklyPrizes } from "@/components/leaderboard/hooks/useWeeklyPrizes";
+import AllTimeValue from "@/components/leaderboard/AllTimeValue";
+import { LEVEL_UNAVAILABLE_LABEL, LOADING_LABEL } from "@/components/leaderboard/level";
 import QuestCard from "./QuestCard";
 import LevelBar from "./LevelBar";
 import CelebrationBurst from "./CelebrationBurst";
@@ -249,8 +251,9 @@ export default function KidHome() {
   const [points, setPoints] = useState(0);
   const [pointsToday, setPointsToday] = useState(0);
   const [streak, setStreak] = useState(0);
-  // All-time total for the hero caption beneath the weekly points figure.
-  const [allTimePoints, setAllTimePoints] = useState(0);
+  // The ledger key the weekly points figure is keyed by — the all-time read is
+  // looked up under the SAME key (never the session's first name).
+  const [ledgerName, setLedgerName] = useState("");
   const [tonightMeal, setTonightMeal] = useState<any>(null);
   const [celebration, setCelebration] = useState<{ points: number; leveledUp: boolean; newLevel: number; pending?: boolean } | null>(null);
   // Quest PIN gate — the typed PIN lives in this component's state only and
@@ -294,6 +297,8 @@ export default function KidHome() {
 
   const { currentUser, logout, sessionWarning, sessionRemainingMs } = useAuth();
   const { isBedtime, isWeekend } = useDashboardMode();
+  const allTime = useAllTimeTotals();
+  const myAllTime = ledgerName ? allTime.totals[ledgerName] : undefined;
   // Wall profile (spec §6 amendment): on the wall the quest PIN gate renders
   // the WallPinPad keypad instead of the shared typed-input Modal, and the
   // hero gains a kid-visible Switch-member control. Bedtime keeps its calm
@@ -399,8 +404,7 @@ export default function KidHome() {
       setPoints(pointsFor(week.points, currentUser.name));
       const key = ledgerKey(week.points, currentUser.name) || currentUser.name;
       setStreak(calculateRealStreak(key, week, getThisWeeksCompletedDates(tasks, key)));
-      // All-time reads the same ledger key as the weekly figure right above it.
-      setAllTimePoints(getMemberAllTimePoints(key, week));
+      setLedgerName(key);
     } catch {}
   }, [currentUser, dataVersion, membersVersion]);
 
@@ -928,10 +932,21 @@ export default function KidHome() {
                 ⭐ Forever
               </p>
               <div className="mt-1">
-                <LevelBar points={allTimePoints} pointsPerLevel={POINTS_PER_LEVEL} />
+                {typeof myAllTime?.points === "number" ? (
+                  <LevelBar points={myAllTime.points} pointsPerLevel={POINTS_PER_LEVEL} />
+                ) : (
+                  <p className="text-[11px] font-semibold text-text-muted">
+                    {allTime.state === "loading" ? LOADING_LABEL : LEVEL_UNAVAILABLE_LABEL}
+                  </p>
+                )}
               </div>
               <p className="mt-1.5 text-[11px] font-semibold text-text-muted tabular-nums">
-                {allTimePoints} pts · yours to keep
+                <AllTimeValue
+                  points={myAllTime?.points}
+                  read={allTime.state}
+                  updatedAt={allTime.updatedAt}
+                  label="pts · yours to keep"
+                />
               </p>
             </div>
           </div>

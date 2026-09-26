@@ -27,7 +27,6 @@ import { useAuth } from "@/hooks/useAuth";
 import { useWallMode } from "@/hooks/useWallMode";
 import { useWallConfirm } from "@/hooks/useWallConfirm";
 import type { Task, LeaderboardEntry, Reward, Penalty, WeekData, HallOfFameEntry } from "@/types/tasks";
-import { getLevel, BADGES } from "@/types/tasks";
 import {
   TASKS_STORAGE_KEY, REWARDS_KEY, PENALTIES_KEY,
   weekKey, emptyWeekData,
@@ -36,7 +35,6 @@ import {
   getThisWeeksCompletedDates, getThisWeeksCompletedTasks,
   loadTasks, saveTasks,
   saveRewards, savePenalties,
-  getMemberAllTimePoints, getMemberAllTimeCompletions,
   getPreviousWeekRanks, loadHallOfFame, loadHallOfFameMerged,
   loadPreviousWeekRanksMerged,
   loadWeeklyPrizes,
@@ -74,6 +72,10 @@ import ShareCard from "@/components/leaderboard/ShareCard";
 import WeeklyWinModal from "@/components/leaderboard/WeeklyWinModal";
 import ConfettiBurst from "@/components/ui/ConfettiBurst";
 import TaskLedgerQuarantineNotice from "@/components/tasks/TaskLedgerQuarantineNotice";
+import AllTimeValue from "@/components/leaderboard/AllTimeValue";
+import { earnedBadgeEmojis, resolveAllTimeLevel } from "@/components/leaderboard/level";
+import { useAllTimeTotals } from "@/hooks/useAllTimeTotals";
+import { familyAllTimePoints } from "@/lib/all-time-totals";
 
 function isoOffset(days: number): string {
   const d = new Date(Date.now() + days * 86400000);
@@ -269,6 +271,7 @@ export default function TasksPage() {
     return () => window.removeEventListener("consuela-data-refreshed", onDataRefreshed);
   }, []);
   const weeklyPrizes = useMemo(() => loadWeeklyPrizes(), [prizesVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+  const allTime = useAllTimeTotals();
   const { currentUser, isLoggedIn } = useAuth();
   const router = useRouter();
   // P0 gate: creating, editing, and deleting family chores is parent-only.
@@ -1546,13 +1549,14 @@ export default function TasksPage() {
       .map((m: any) => {
         const name = m.fullName;
         const weeklyPoints = weekData.points[name] || 0;
-        const allTimePoints = getMemberAllTimePoints(name, weekData);
-        const allTimeComps = getMemberAllTimeCompletions(name, visibleTasks, weekData);
+        const allTimeTotal = allTime.totals[name];
+        const allTimePoints = allTimeTotal?.points ?? null;
+        const allTimeComps = allTimeTotal?.completions ?? null;
         // Streaks are per-member: filter this week's completion dates to this
         // member before walking back consecutive days.
         const streak = calculateRealStreak(name, weekData, getThisWeeksCompletedDates(visibleTasks, name));
-        const { level, title, emoji, progress } = getLevel(allTimePoints);
-        const earnedBadges = BADGES.filter(b => b.condition(allTimePoints, streak, allTimeComps)).map(b => b.emoji);
+        const { known, level, title, emoji, progress } = resolveAllTimeLevel(allTimePoints);
+        const earnedBadges = earnedBadgeEmojis(allTimePoints, streak, allTimeComps);
         // Weekly Champ history is out-of-band (BADGES.week_champ condition
         // stays false): a rank-1 Hall of Fame entry earns the 🥇 career badge.
         if (hallOfFame.some(h => h.member === name && h.rank === 1) && !earnedBadges.includes("🥇")) {
@@ -1575,6 +1579,7 @@ export default function TasksPage() {
           level,
           levelTitle: title,
           levelEmoji: emoji,
+          levelKnown: known,
           progressToNext: progress,
           badges: earnedBadges,
           allTimePoints,
@@ -1590,7 +1595,7 @@ export default function TasksPage() {
       ...e,
       rank: i > 0 && e.points === entries[i - 1].points ? entries[i - 1].rank : i + 1,
     }));
-  }, [weekData, membersData, visibleTasks, hallOfFame]);
+  }, [weekData, membersData, visibleTasks, hallOfFame, allTime.totals]);
 
   const topScorer = dynamicLeaderboard[0];
   const familyTotal = dynamicLeaderboard.reduce((sum, entry) => sum + entry.points, 0);
@@ -1625,9 +1630,11 @@ export default function TasksPage() {
   const scopedEarned = scopedMember ? scopedMember.points : weeklyEarned;
   // Earned tile detail: all-time context next to the weekly number — the
   // member filter scopes it (a member's own total, family sum under "All").
+  // The family sum is knowable only when EVERY member total is known.
   const scopedAllTimeEarned = scopedMember
     ? scopedMember.allTimePoints
-    : dynamicLeaderboard.reduce((sum, e) => sum + e.allTimePoints, 0);
+    : familyAllTimePoints(dynamicLeaderboard.map((e) => e.allTimePoints));
+  const allTimeRead = { state: allTime.state, updatedAt: allTime.updatedAt };
   const sheetEntry = sheetMember ? dynamicLeaderboard.find(e => e.name === sheetMember) : null;
 
   useEffect(() => {
@@ -1706,7 +1713,7 @@ export default function TasksPage() {
         <div className="grid grid-cols-3 gap-3">
           <StatTile label="Pending" value={pending.length} detail="Open tasks" icon="📋" tone="warning" compact />
           <StatTile label="Completed" value={scopedCompletedCount} detail="This week" icon="🎉" tone="success" compact />
-          <StatTile label="Earned this week" value={scopedEarned} detail={`${scopedAllTimeEarned} pts all-time`} icon="🏆" tone="accent" compact />
+          <StatTile label="Earned this week" value={scopedEarned} detail={<AllTimeValue points={scopedAllTimeEarned} read={allTimeRead.state} updatedAt={allTimeRead.updatedAt} label="pts all-time" />} icon="🏆" tone="accent" compact />
         </div>
 
         <SegmentedControl
@@ -2381,6 +2388,7 @@ export default function TasksPage() {
                 onOpenSheet={setSheetMember}
                 onAdjust={openAdjust}
                 isAdmin={isLoggedIn && currentUser?.role === "parent"}
+                allTimeRead={allTimeRead}
               />
               <div className="mt-3 space-y-3">
                 {dynamicLeaderboard.slice(3).map((entry, index) => (
@@ -2410,7 +2418,7 @@ export default function TasksPage() {
               const myEntry = dynamicLeaderboard.find(e => e.name === currentUser.name || e.name.startsWith(currentUser.name));
               const myRank = myEntry?.rank ?? 0;
               const aheadEntry = myRank > 1 ? dynamicLeaderboard[myRank - 2] : undefined;
-              return myEntry ? <YourCard entry={myEntry} aheadEntry={aheadEntry} getMemberColor={(n: string) => memberColors[n] || "green"} /> : null;
+              return myEntry ? <YourCard entry={myEntry} aheadEntry={aheadEntry} getMemberColor={(n: string) => memberColors[n] || "green"} allTimeRead={allTimeRead} /> : null;
             })()}
 
             {needsStreakSave && (
@@ -2437,8 +2445,8 @@ export default function TasksPage() {
                 open={!!sheetMember}
                 entry={sheetEntry}
                 hasWeeklyChamp={hallOfFame.some(h => h.member === sheetEntry.name && h.rank === 1)}
-                allTimePoints={getMemberAllTimePoints(sheetEntry.name, weekData)}
-                allTimeComps={getMemberAllTimeCompletions(sheetEntry.name, visibleTasks, weekData)}
+                allTimePoints={sheetEntry.allTimePoints}
+                allTimeComps={sheetEntry.allTimeCompletions}
                 weeklyPoints={sheetEntry.points}
                 pendingTasks={visibleTasks.filter(t => !t.completed && (t.assignee === sheetEntry.name || t.universal))}
                 affordableRewards={rewards.filter(r => r.cost <= sheetEntry.points)}
@@ -2450,6 +2458,7 @@ export default function TasksPage() {
                 }))}
                 onClose={() => setSheetMember(null)}
                 getMemberColor={(name: string) => memberColors[name] || "green"}
+                allTimeRead={allTimeRead}
               />
             )}
 
@@ -2460,19 +2469,19 @@ export default function TasksPage() {
               <summary className="cursor-pointer text-sm font-semibold text-text-secondary">🏅 Trophies, journey & history</summary>
               <div className="mt-4 space-y-6">
                 {isLoggedIn && currentUser && (() => {
-                  const myAllTime = getMemberAllTimePoints(currentUser.name, weekData);
+                  const myAllTime = raceName ? allTime.totals[raceName] : undefined;
                   return (
                     <SectionCard title="Your Journey" description={`${textEmojiOrFallback(currentUser.emoji)} Level progress & badges`}>
                       <TreasurePath
-                        allTimePoints={myAllTime}
+                        allTimePoints={myAllTime?.points ?? null}
                         memberEmoji={currentUser.emoji || "🌱"}
                         memberColor={memberColors[currentUser.name] || "green"}
                       />
                       <div className="mt-4">
                         <AchievementWall
-                          allTimePoints={myAllTime}
+                          allTimePoints={myAllTime?.points ?? null}
                           streak={dynamicLeaderboard.find(e => e.name === currentUser.name || e.name.startsWith(currentUser.name))?.streak ?? 0}
-                          completions={getMemberAllTimeCompletions(currentUser.name, visibleTasks, weekData)}
+                          completions={myAllTime?.completions ?? null}
                         />
                       </div>
                     </SectionCard>

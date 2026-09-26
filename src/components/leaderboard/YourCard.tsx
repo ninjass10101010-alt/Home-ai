@@ -1,14 +1,18 @@
 "use client";
 
 import Avatar from "@/components/ui/Avatar";
+import AllTimeValue from "./AllTimeValue";
+import { entryLevelLabel } from "./level";
+import type { AllTimeReadProp } from "./Podium";
 
 interface YourCardProps {
   entry: any;
   aheadEntry: any | undefined;
   getMemberColor: (name: string) => string;
+  allTimeRead: AllTimeReadProp;
 }
 
-export default function YourCard({ entry, aheadEntry, getMemberColor }: YourCardProps) {
+export default function YourCard({ entry, aheadEntry, getMemberColor, allTimeRead }: YourCardProps) {
   if (!entry) return null;
   const color = getMemberColor(entry.name);
   const gap = aheadEntry ? aheadEntry.points - entry.points : 0;
@@ -29,8 +33,8 @@ export default function YourCard({ entry, aheadEntry, getMemberColor }: YourCard
             <span className="text-lg font-bold text-text-primary">#{entry.rank}</span>
             <span className="text-sm text-text-secondary">—</span>
             <span className="font-bold text-[var(--color-accent-selected)]">{entry.points} pts</span>
-            <span className="text-xs text-text-muted">· {entry.allTimePoints} all-time</span>
-            <span className="text-xs text-text-muted">{entry.levelEmoji} {entry.levelTitle}</span>
+            <span className="text-xs text-text-muted">· <AllTimeValue points={entry.allTimePoints} read={allTimeRead.state} updatedAt={allTimeRead.updatedAt} /></span>
+            <span className="text-xs text-text-muted">{entryLevelLabel(entry)}</span>
           </div>
           <div className="mt-1 text-xs">
             {entry.rank === 1 ? (
@@ -49,7 +53,7 @@ export default function YourCard({ entry, aheadEntry, getMemberColor }: YourCard
         </div>
         <div className="h-12 w-12 rounded-2xl flex items-center justify-center text-2xl"
           style={{ background: `${color}15` }}>
-          {entry.levelEmoji}
+          {entry.levelKnown ? entry.levelEmoji : "❔"}
         </div>
       </div>
     </div>

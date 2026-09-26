@@ -107,6 +107,18 @@ function includedWeeks(
   return weeks;
 }
 
+export function familyAllTimePoints(
+  totals: readonly (number | null | undefined)[],
+): number | null {
+  if (totals.length === 0) return null;
+  let sum = 0;
+  for (const total of totals) {
+    if (typeof total !== "number" || !Number.isFinite(total)) return null;
+    sum += total;
+  }
+  return sum;
+}
+
 export function buildAllTimeTotals(
   currentWeek: WeekData | null,
   archiveRows: readonly ArchiveWeekRow[],

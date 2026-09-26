@@ -1,17 +1,15 @@
 "use client";
 
-import Surface from "@/components/ui/Surface";
-import { BADGES, getLevel } from "@/types/tasks";
+import { splitBadges } from "./level";
 
 interface AchievementWallProps {
-  allTimePoints: number;
+  allTimePoints: number | null;
   streak: number;
-  completions: number;
+  completions: number | null;
 }
 
 export default function AchievementWall({ allTimePoints, streak, completions }: AchievementWallProps) {
-  const earned = BADGES.filter(b => b.condition(allTimePoints, streak, completions));
-  const locked = BADGES.filter(b => !b.condition(allTimePoints, streak, completions));
+  const { earned, locked } = splitBadges(allTimePoints, streak, completions);
 
   return (
     <div className="space-y-3">

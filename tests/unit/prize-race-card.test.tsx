@@ -32,6 +32,7 @@ function entry(name: string, points: number): LeaderboardEntry {
     level: 1,
     levelTitle: "Rookie",
     levelEmoji: "🌱",
+    levelKnown: true,
     progressToNext: 0,
     badges: [],
     completedInWeek: 0,

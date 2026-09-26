@@ -79,6 +79,7 @@ describe("MemberSheet pending-row avatars resolve from the sheet entry", () => {
     entry: { name: "Emily", emoji: PHOTO, streak: 2, rank: 1, levelEmoji: "⭐", levelTitle: "Star" },
     allTimePoints: 40,
     allTimeComps: 6,
+    allTimeRead: { state: "authoritative", updatedAt: null } as const,
     weeklyPoints: 10,
     pendingTasks: [{ id: 9, title: "Walk the dog", assignee: "Emily", assigneeEmoji: "👤", points: 5 }],
     affordableRewards: [],

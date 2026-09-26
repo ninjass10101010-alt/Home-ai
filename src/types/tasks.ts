@@ -162,11 +162,12 @@ export interface LeaderboardEntry {
   level: number;
   levelTitle: string;
   levelEmoji: string;
+  levelKnown: boolean;
   progressToNext: number;
   badges: string[];
   completedInWeek: number;
-  allTimePoints: number;
-  allTimeCompletions: number;
+  allTimePoints: number | null;
+  allTimeCompletions: number | null;
 }
 
 export interface Reward {

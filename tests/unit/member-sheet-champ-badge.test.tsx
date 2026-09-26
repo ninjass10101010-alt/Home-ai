@@ -38,6 +38,7 @@ function sheetProps(hasWeeklyChamp?: boolean) {
     entry: { name: "Rebecca", emoji: "👩", streak: 8, rank: 1, levelEmoji: "⭐", levelTitle: "Champ" },
     allTimePoints: 1200,
     allTimeComps: 60,
+    allTimeRead: { state: "authoritative", updatedAt: null } as const,
     weeklyPoints: 40,
     pendingTasks: [],
     affordableRewards: [],
