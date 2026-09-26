@@ -107,7 +107,17 @@ export async function composeScreensaverPayload(now: Date = new Date()): Promise
   if (taskRead.source === "unavailable") throw new Error("task_data_unavailable");
 
   const weather = await fetchWeather(now).catch(() => null);
-  const summary = (briefingRows[0] as { summary?: never } | undefined)?.summary ?? null;
+  const summary =
+    (briefingRows[0] as
+      | {
+          summary?: {
+            events?: unknown[];
+            tasks?: unknown[];
+            suggestions?: Array<{ title?: string }>;
+            taskSource?: string;
+          };
+        }
+      | undefined)?.summary ?? null;
 
   const payload: ScreensaverPayload = {
     ok: true,
@@ -122,7 +132,7 @@ export async function composeScreensaverPayload(now: Date = new Date()): Promise
       localWeekdayShort(now)
     ),
     tasks: choreProgress(choreRowsFor(taskRead), wk, weekEnd),
-    briefing: briefingDigest(summary as never),
+    briefing: briefingDigest(summary),
     weather,
   };
   payloadCache = { at: now.getTime(), payload };

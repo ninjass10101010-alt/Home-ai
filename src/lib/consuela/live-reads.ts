@@ -149,6 +149,7 @@ export async function readCanonicalTasks(): Promise<CanonicalTaskRead> {
     () => null
   );
   if (snapshot) return snapshot;
+  console.warn("[consuela] consuela_data_snapshots read failed — falling back to the PB replica");
   const replica = await withAdmin(async (pb) =>
     pb.collection("tasks").getFullList({ requestKey: null })
   ).then(
@@ -161,6 +162,7 @@ export async function readCanonicalTasks(): Promise<CanonicalTaskRead> {
     () => null
   );
   if (replica) return replica;
+  console.warn("[consuela] every task source failed (consuela_data_snapshots, tasks) — reporting tasks unavailable");
   return { tasks: [], source: "unavailable" };
 }
 

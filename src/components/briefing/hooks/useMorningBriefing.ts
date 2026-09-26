@@ -11,6 +11,7 @@ export interface BriefingSummary {
   tasks: Array<Record<string, unknown>>;
   meals: Array<Record<string, unknown>>;
   suggestions: Array<Record<string, unknown>>;
+  taskSource?: string;
   generatedAt?: string;
 }
 
@@ -32,6 +33,21 @@ export function briefingSectionsEmpty(briefing: MorningBriefing): boolean {
     (!Array.isArray(s.meals) || s.meals.length === 0) &&
     (!Array.isArray(s.suggestions) || s.suggestions.length === 0)
   );
+}
+
+/** The honest statement about the chore list the briefing could not read.
+ *  An `unavailable` source means "unknown" — saying nothing would let a shorter
+ *  section count read as a calm, quiet day. */
+export function briefingTaskSourceNote(briefing: MorningBriefing): string | null {
+  const source = briefing.summary?.taskSource;
+  if (source === "unavailable") return "❓ Chore list unavailable — Consuela couldn't read it";
+  if (source === "pb") return "⚠️ Chores are from a backup copy, not the live list";
+  return null;
+}
+
+/** True when the card has something to show OR something to admit. */
+export function briefingShowsCard(briefing: MorningBriefing): boolean {
+  return !briefingSectionsEmpty(briefing) || briefingTaskSourceNote(briefing) !== null;
 }
 
 export function useMorningBriefing() {

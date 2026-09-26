@@ -6,7 +6,7 @@ import WidgetCard from "@/components/patterns/WidgetCard";
 import Chip from "@/components/ui/Chip";
 import SoftButton from "@/components/ui/SoftButton";
 import Toast from "@/components/ui/Toast";
-import { briefingSectionsEmpty } from "./hooks/useMorningBriefing";
+import { briefingShowsCard, briefingTaskSourceNote } from "./hooks/useMorningBriefing";
 import type { MorningBriefing } from "./hooks/useMorningBriefing";
 
 const BRIEFING_TONE = "#f97316";
@@ -83,10 +83,11 @@ export default function MorningBriefingWidget({ briefing, loading, ack, ackError
     );
   }
 
-  if (briefingSectionsEmpty(briefing)) return null;
+  if (!briefingShowsCard(briefing)) return null;
 
   const summary = briefing.summary!;
   const count = totalCount(briefing);
+  const sourceNote = briefingTaskSourceNote(briefing);
 
   const handleGotIt = async () => {
     setAcknowledging(true);
@@ -122,6 +123,10 @@ export default function MorningBriefingWidget({ briefing, loading, ack, ackError
     >
       {expanded ? (
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
+          {sourceNote && (
+            <p className="text-xs font-semibold text-[var(--color-accent-amber)]">{sourceNote}</p>
+          )}
+
           {summary.events.length > 0 && (
             <div className="space-y-2">
               <SectionLabel emoji="📅" label="Today's events" count={summary.events.length} />
@@ -187,7 +192,12 @@ export default function MorningBriefingWidget({ briefing, loading, ack, ackError
           )}
         </div>
       ) : (
-        <p className="text-xs text-text-muted">Tap the badge above to see today’s plan.</p>
+        <div className="space-y-1.5">
+          {sourceNote && (
+            <p className="text-xs font-semibold text-[var(--color-accent-amber)]">{sourceNote}</p>
+          )}
+          <p className="text-xs text-text-muted">Tap the badge above to see today’s plan.</p>
+        </div>
       )}
     </SectionCard>
   );
