@@ -219,6 +219,11 @@ function redeemEntry(
   });
 }
 
+function advanceClock(ms: number): void {
+  const current = Date.now();
+  vi.spyOn(Date, "now").mockImplementation(() => current + ms);
+}
+
 function localWeek(): any {
   const raw = localStorage.getItem(WEEK_DATA_KEY);
   return raw ? JSON.parse(raw) : null;
@@ -504,53 +509,185 @@ describe("a redemption is adopted only on a 200 or a 202", () => {
     expect(entry.lastErrorMessage).toBe("Only a parent can approve this reward.");
   });
 
-  it("a server STRING that names a machine reason can never move a classification branch", async () => {
+  it("an EXPLICIT reason wins over error: the machine code is what classifies", async () => {
     const harness = makePb();
     mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
     const posted: PostedRequest[] = [];
 
-    redeemEntry("op-inject-retryable-1");
-    rememberTaskCommandCredential("op-inject-retryable-1", { pin: MEMBER_PIN });
-    const retryableLookalike = await flushTaskOutbox(
+    redeemEntry("op-explicit-reason-1");
+    rememberTaskCommandCredential("op-explicit-reason-1", { pin: MEMBER_PIN });
+    const result = await flushTaskOutbox(
       harnessDriver(harness, posted, async () => ({
         status: 400,
         body: {
           ok: false,
-          operationId: "op-inject-retryable-1",
+          operationId: "op-explicit-reason-1",
           reason: "http_400",
           error: "task_store_unavailable",
         },
       })),
     );
-    expect(retryableLookalike).toEqual({ acknowledged: 0, retryable: 0, permanent: 1 });
-    const retryableEntry = listTaskOutbox()[0];
-    expect(retryableEntry.status).toBe("failed");
-    expect(retryableEntry.lastErrorReason).toBe("http_400");
-    expect(retryableEntry.lastErrorMessage).toBe("task_store_unavailable");
-    removeTaskOutboxEntry("op-inject-retryable-1");
 
-    redeemEntry("op-inject-credential-1");
-    rememberTaskCommandCredential("op-inject-credential-1", { pin: MEMBER_PIN });
-    const credentialLookalike = await flushTaskOutbox(
+    expect(result).toEqual({ acknowledged: 0, retryable: 0, permanent: 1 });
+    const entry = listTaskOutbox()[0];
+    expect(entry.status).toBe("failed");
+    expect(entry.lastErrorReason).toBe("http_400");
+    expect(entry.lastErrorMessage).toBe("task_store_unavailable");
+  });
+
+  it("a body with NO reason does not let a human SENTENCE classify — the status does", async () => {
+    const harness = makePb();
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+    const posted: PostedRequest[] = [];
+
+    redeemEntry("op-error-only-sentence-1");
+    rememberTaskCommandCredential("op-error-only-sentence-1", { pin: MEMBER_PIN });
+    const result = await flushTaskOutbox(
       harnessDriver(harness, posted, async () => ({
-        status: 401,
+        status: 400,
         body: {
           ok: false,
-          operationId: "op-inject-credential-1",
-          reason: "unauthorized",
-          error: "credential_missing",
+          operationId: "op-error-only-sentence-1",
+          error: "We could not save that reward just now.",
         },
       })),
     );
-    expect(credentialLookalike).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
-    const credentialEntry = listTaskOutbox()[0];
-    expect(credentialEntry.status).toBe("auth-required");
-    expect(credentialEntry.lastErrorReason).toBe("unauthorized");
-    expect(credentialEntry.lastErrorMessage).toBe("credential_missing");
 
-    const reloaded = await flushTaskOutbox(harnessDriver(harness, posted));
-    expect(reloaded).toEqual({ acknowledged: 0, retryable: 0, permanent: 0 });
-    expect(listTaskOutbox()[0].lastErrorReason).toBe("unauthorized");
+    expect(result).toEqual({ acknowledged: 0, retryable: 0, permanent: 1 });
+    const entry = listTaskOutbox()[0];
+    expect(entry.status).toBe("failed");
+    expect(entry.lastErrorReason).toBe("http_400");
+    expect(entry.lastErrorMessage).toBe("We could not save that reward just now.");
+  });
+
+  it("a machine CODE in the error channel is still honoured — the vocabulary decides, not the field", async () => {
+    const harness = makePb();
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+    const posted: PostedRequest[] = [];
+
+    // `/api/tasks/config` and `/api/tasks/manage` can express a machine code
+    // ONLY through `error` (their exact response bodies are pinned by the route
+    // suites), so a vocabulary member arriving there must still classify.
+    redeemEntry("op-error-channel-code-1");
+    rememberTaskCommandCredential("op-error-channel-code-1", { pin: MEMBER_PIN });
+    const result = await flushTaskOutbox(
+      harnessDriver(harness, posted, async () => ({
+        status: 502,
+        body: {
+          ok: false,
+          operationId: "op-error-channel-code-1",
+          error: "config_store_unreachable",
+        },
+      })),
+    );
+
+    expect(result).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
+    const entry = listTaskOutbox()[0];
+    expect(entry.status).toBe("retrying");
+    expect(entry.lastErrorReason).toBe("config_store_unreachable");
+    expect(entry.lastErrorMessage).toBe("config_store_unreachable");
+  });
+
+  it("a 401 whose only `error` names the credential_missing sentinel is still retried once a credential exists", async () => {
+    const harness = makePb();
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+    const posted: PostedRequest[] = [];
+    redeemEntry("op-sentinel-401-1", { parentName: PARENT });
+    rememberTaskCommandCredential("op-sentinel-401-1", { pin: MEMBER_PIN, parentPin: PARENT_PIN });
+
+    // 1 + 2: the display string lands on the DISPLAY field only. The module's
+    // own sentinel is not set, so `runFlush` can never skip this entry.
+    const refused = await flushTaskOutbox(harnessDriver(harness, posted, async () => ({
+      status: 401,
+      body: { ok: false, operationId: "op-sentinel-401-1", error: "credential_missing" },
+    })));
+    expect(refused).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
+    const refusedEntry = listTaskOutbox()[0];
+    expect(refusedEntry.status).toBe("auth-required");
+    expect(refusedEntry.lastErrorReason).not.toBe("credential_missing");
+    expect(refusedEntry.lastErrorReason).toBe("unauthorized");
+    expect(refusedEntry.lastErrorMessage).toBe("credential_missing");
+    expect(refusedEntry.credentialMissing).not.toBe(true);
+
+    // 3: the credential is gone (a reload). The entry must still be ATTEMPTED.
+    forgetTaskCommandCredential("op-sentinel-401-1");
+    advanceClock(10 * 60_000);
+    const withoutCredential = await flushTaskOutbox(
+      harnessDriver(harness, posted, async () => ({
+        status: 401,
+        body: { ok: false, operationId: "op-sentinel-401-1", error: "credential_missing" },
+      })),
+    );
+    expect(withoutCredential).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
+    expect(posted).toHaveLength(2);
+    expect(listTaskOutbox()).toHaveLength(1);
+
+    // 4: a correct credential exists again -> the SAME operation id lands, once.
+    rememberTaskCommandCredential("op-sentinel-401-1", { pin: MEMBER_PIN, parentPin: PARENT_PIN });
+    advanceClock(10 * 60_000);
+    const landed = await flushTaskOutbox(harnessDriver(harness, posted));
+    expect(landed).toEqual({ acknowledged: 1, retryable: 0, permanent: 0 });
+    expect(listTaskOutbox()).toHaveLength(0);
+    expect(harness.readHistory().filter((tx: any) => tx.type === "redeem")).toHaveLength(1);
+    expect(harness.readHistory().at(-1)).toMatchObject({
+      meta: { operationId: "op-sentinel-401-1", source: "reward-redeem" },
+    });
+    expect(harness.readPoints()[MEMBER]).toBe(350);
+  });
+
+  it("an `error` naming the sentinel on a 409 or 5xx cannot skip the retry either", async () => {
+    const harness = makePb();
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+    const posted: PostedRequest[] = [];
+
+    redeemEntry("op-sentinel-409-1");
+    rememberTaskCommandCredential("op-sentinel-409-1", { pin: MEMBER_PIN });
+    const conflict = await flushTaskOutbox(harnessDriver(harness, posted, async () => ({
+      status: 409,
+      body: { ok: false, operationId: "op-sentinel-409-1", error: "credential_missing" },
+    })));
+    expect(conflict).toEqual({ acknowledged: 0, retryable: 0, permanent: 1 });
+    expect(listTaskOutbox()[0].status).toBe("failed");
+    expect(listTaskOutbox()[0].lastErrorReason).toBe("operation_conflict");
+    expect(listTaskOutbox()[0].credentialMissing).not.toBe(true);
+    removeTaskOutboxEntry("op-sentinel-409-1");
+
+    redeemEntry("op-sentinel-503-1");
+    rememberTaskCommandCredential("op-sentinel-503-1", { pin: MEMBER_PIN });
+    const outage = await flushTaskOutbox(harnessDriver(harness, posted, async () => ({
+      status: 503,
+      body: { ok: false, operationId: "op-sentinel-503-1", error: "credential_missing" },
+    })));
+    expect(outage).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
+    expect(listTaskOutbox()[0].status).toBe("retrying");
+    expect(listTaskOutbox()[0].lastErrorReason).toBe("http_503");
+    expect(listTaskOutbox()[0].credentialMissing).not.toBe(true);
+  });
+
+  it("a retryable 5xx with retryable:true and no reason keeps the status-derived machine reason", async () => {
+    const harness = makePb();
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+    const posted: PostedRequest[] = [];
+    redeemEntry("op-503-fallback-1");
+    rememberTaskCommandCredential("op-503-fallback-1", { pin: MEMBER_PIN });
+
+    const result = await flushTaskOutbox(
+      harnessDriver(harness, posted, async () => ({
+        status: 503,
+        body: {
+          ok: false,
+          operationId: "op-503-fallback-1",
+          retryable: true,
+          error: "Points could not be updated just now. Please try again.",
+        },
+      })),
+    );
+
+    expect(result).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
+    const entry = listTaskOutbox()[0];
+    expect(entry.status).toBe("retrying");
+    expect(entry.lastErrorReason).toBe("http_503");
+    expect(entry.lastErrorMessage).toBe("Points could not be updated just now. Please try again.");
   });
 
   it("a 409 pulls authoritative state first and then stops retrying", async () => {
