@@ -222,6 +222,70 @@ describe("useAllTimeTotals — refresh", () => {
   });
 });
 
+describe("useAllTimeTotals — one read at a time", () => {
+  it("a trigger that lands mid-read never issues a second request", async () => {
+    let release: (() => void) | null = null;
+    fetchMock.mockReturnValue(new Promise((resolve) => {
+      release = () => resolve(jsonOk(payload()));
+    }));
+    const { result } = renderUseAllTimeTotals();
+    await settle(10);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent("consuela-data-refreshed"));
+      window.dispatchEvent(new CustomEvent("consuela-data-refreshed"));
+    });
+    await settle(10);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => { release!(); });
+    await settle();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.current.state).toBe("authoritative");
+    expect(result.current.totals["Member A"].points).toBe(45);
+  });
+
+  it("a settled read does not block the next one", async () => {
+    fetchMock.mockResolvedValue(jsonOk(payload()));
+    const { result } = renderUseAllTimeTotals();
+    await settle();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent("consuela-data-refreshed"));
+    });
+    await settle();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.current.state).toBe("authoritative");
+  });
+
+  it("a refresh joining an in-flight read resolves with that read's result", async () => {
+    let release: (() => void) | null = null;
+    fetchMock.mockReturnValue(new Promise((resolve) => {
+      release = () => resolve(jsonOk(payload({ totals: { "Member A": { points: 77, completions: 7 } } })));
+    }));
+    const { result } = renderUseAllTimeTotals();
+    await settle(10);
+
+    let joined: Promise<void> | null = null;
+    await act(async () => {
+      joined = result.current.refresh();
+      await settle(0);
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => { release!(); });
+    await act(async () => { await joined; });
+    await settle();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.current.totals["Member A"].points).toBe(77);
+  });
+});
+
 describe("familyAllTimePoints", () => {
   it("sums only when EVERY member total is known", () => {
     expect(familyAllTimePoints([45, 20, 0])).toBe(65);

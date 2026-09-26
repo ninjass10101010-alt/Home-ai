@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -77,6 +76,7 @@ function writeCache(payload: AllTimeTotalsPayload): void {
 export function useAllTimeTotals(): AllTimeRead & { refresh: () => Promise<void> } {
   const [read, setRead] = useState<AllTimeRead>(INITIAL);
   const aliveRef = useRef(true);
+  const inFlightRef = useRef<Promise<void> | null>(null);
 
   useEffect(() => {
     aliveRef.current = true;
@@ -85,7 +85,7 @@ export function useAllTimeTotals(): AllTimeRead & { refresh: () => Promise<void>
     };
   }, []);
 
-  const load = useCallback(async (): Promise<void> => {
+  const run = useCallback(async (): Promise<void> => {
     setRead((prev) =>
       prev.state === "authoritative" || prev.state === "offline_cache"
         ? prev
@@ -132,6 +132,16 @@ export function useAllTimeTotals(): AllTimeRead & { refresh: () => Promise<void>
     }
     setRead({ totals: {}, state: "error", source: null, updatedAt: null, error: failure });
   }, []);
+
+  const load = useCallback((): Promise<void> => {
+    const inFlight = inFlightRef.current;
+    if (inFlight) return inFlight;
+    const started = run().finally(() => {
+      if (inFlightRef.current === started) inFlightRef.current = null;
+    });
+    inFlightRef.current = started;
+    return started;
+  }, [run]);
 
   useEffect(() => {
     void load();

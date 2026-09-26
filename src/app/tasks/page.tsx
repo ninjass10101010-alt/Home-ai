@@ -1641,6 +1641,10 @@ export default function TasksPage() {
     if (!mounted || !isLoggedIn || !currentUser) return;
     const myEntry = dynamicLeaderboard.find(e => e.name === currentUser.name || e.name.startsWith(currentUser.name));
     if (!myEntry) return;
+    // An unknown level is not level 0: recording it would make the real level
+    // look like a promotion the moment the read lands, so nothing is compared
+    // and nothing is recorded until the level is actually known.
+    if (!myEntry.levelKnown) return;
     const prev = prevLevelsRef.current[currentUser.name];
     if (prev !== undefined && myEntry.level > prev) {
       setLevelUpInfo({ name: currentUser.name, emoji: myEntry.emoji, oldLevel: prev, newLevel: myEntry.level });

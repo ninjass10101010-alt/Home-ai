@@ -297,3 +297,37 @@ describe("all-time totals — history shape and completion counting", () => {
     expect(payload.totals["Member B"]).toEqual({ points: -5, completions: 1 });
   });
 });
+
+describe("all-time totals — the roster decides who is on the board", () => {
+  const HISTORY = [
+    { id: 1, timestamp: "2026-09-21T10:00:00.000Z", member: "Member A", type: "earn", amount: 5, description: "Task" },
+  ];
+
+  it("a roster member with no history at all is emitted as a real zero", () => {
+    const payload = buildAllTimeTotals(currentWeek(HISTORY, {}), [], ["Member A", "Brand New"]);
+    expect(payload.historyComplete).toBe(true);
+    expect(payload.totals["Member A"]).toEqual({ points: 5, completions: 1 });
+    expect(payload.totals["Brand New"]).toEqual({ points: 0, completions: 0 });
+  });
+
+  it("an incomplete history still nulls a roster member who never earned", () => {
+    const payload = buildAllTimeTotals(currentWeek(HISTORY, {}), [
+      { weekStart: "2026-09-14", history: "not-json" },
+    ], ["Member A", "Brand New"]);
+    expect(payload.historyComplete).toBe(false);
+    expect(payload.totals["Member A"]).toEqual({ points: null, completions: null });
+    expect(payload.totals["Brand New"]).toEqual({ points: null, completions: null });
+  });
+
+  it("blank roster names are ignored and no roster argument changes existing behavior", () => {
+    const withRoster = buildAllTimeTotals(currentWeek(HISTORY, {}), [], ["  ", ""]);
+    const without = buildAllTimeTotals(currentWeek(HISTORY, {}), []);
+    expect(withRoster.totals).toEqual(without.totals);
+    expect(Object.keys(withRoster.totals)).toEqual(["Member A"]);
+  });
+
+  it("a roster name that already has history keeps the recomputed balance", () => {
+    const payload = buildAllTimeTotals(currentWeek(HISTORY, {}), [], ["Member A"]);
+    expect(payload.totals["Member A"]).toEqual({ points: 5, completions: 1 });
+  });
+});

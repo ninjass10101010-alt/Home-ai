@@ -643,8 +643,10 @@ describe("KidHome hero all-time caption", () => {
     const el = await renderAsync(<KidHome />);
     await settle();
 
-    // The ledger key for a first-name session is the roster FULL name — the
-    // payload is keyed that way, and 120 can only come from the service.
+    // This case pins the LEDGER KEY, not the source: the retired local helper
+    // would also have produced 120 from the stored map. The source is proven by
+    // the two divergent-number cases above (a 9999 archive that must not win,
+    // and an unknown total that must render unavailable).
     const foreverCard = el.querySelector('[data-testid="kid-forever-card"]');
     expect(foreverCard).toBeTruthy();
     expect(foreverCard!.textContent).toContain("120 pts · yours to keep");
