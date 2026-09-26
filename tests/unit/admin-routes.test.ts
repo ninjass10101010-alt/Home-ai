@@ -155,6 +155,8 @@ describe("admin routes auth gate", () => {
 
   it.each([
     ["version", () => versionGET(req())],
+    ["containers", () => containersGET(req())],
+    ["restart", () => restartPOST(req({ body: { container: "pocketbase" } }))],
     ["update", () => updatePOST(req({ body: {} }))],
   ])(
     "%s answers 401 when a refusal carries no status",

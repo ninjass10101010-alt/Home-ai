@@ -7,7 +7,10 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const auth = await authorizeAdminRequest(request);
   if (!auth.ok) {
-    return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
+    return NextResponse.json(
+      { ok: false, error: auth.error },
+      { status: auth.status ?? 401 },
+    );
   }
 
   try {
