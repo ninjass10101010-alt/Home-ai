@@ -791,20 +791,9 @@ export function mergeTasksSnapshot(
  * tasks when they re-read on `consuela-data-refreshed`. Returns whether
  * anything changed.
  */
-export function applyTasksSnapshotToStores(snapshot: any): boolean {
+export function applyTaskConfigSnapshotToStores(snapshot: any): boolean {
   if (!snapshot) return false;
-  const { tasks, weekData, tasksChanged, weekChanged, deletedTaskIds } = mergeTasksSnapshot(
-    loadTasks(),
-    loadWeekData(),
-    snapshot
-  );
-  if (tasksChanged) saveTasks(tasks);
-  if (weekChanged) saveWeekData(weekData);
-  if (deletedTaskIds?.length) saveDeletedTaskIds(deletedTaskIds);
-  let changed = tasksChanged || weekChanged;
-  // Rewards leg: the same last-write-wins contract as the penalties and
-  // prizes legs. Without it the reward catalog was PULL-only, so a device that
-  // never wrote a config command could never learn the server's list.
+  let changed = false;
   if (
     Array.isArray(snapshot.rewards) &&
     typeof snapshot.rewardsUpdatedAt === "string" &&
@@ -823,9 +812,6 @@ export function applyTasksSnapshotToStores(snapshot: any): boolean {
     savePenalties(snapshot.penalties);
     changed = true;
   }
-  // Weekly-prizes leg (same last-write-wins contract the tasks page restore
-  // already uses): only a strictly-newer stamp wins, and the snapshot's stamp
-  // is carried through verbatim so this device stops looking "edited".
   if (
     Array.isArray(snapshot.weeklyPrizes) &&
     typeof snapshot.weeklyPrizesStamp === "string" &&
@@ -836,6 +822,35 @@ export function applyTasksSnapshotToStores(snapshot: any): boolean {
     changed = true;
   }
   return changed;
+}
+
+/**
+ * Store-level seam for the 60s refresh loop (db.refreshCaches): the caller
+ * reads /api/tasks/sync and hands the snapshot here, which merges it into the
+ * same localStorage stores loadTasks()/loadWeekData() read — so KidHome's
+ * dataVersion listener and Home's widgets actually see another device's
+ * tasks when they re-read on `consuela-data-refreshed`. Returns whether
+ * anything changed.
+ */
+/**
+ * Store-level seam for the 60s refresh loop (db.refreshCaches): the caller
+ * reads /api/tasks/sync and hands the snapshot here, which merges it into the
+ * same localStorage stores loadTasks()/loadWeekData() read — so KidHome's
+ * dataVersion listener and Home's widgets actually see another device's
+ * tasks when they re-read on `consuela-data-refreshed`. Returns whether
+ * anything changed.
+ */
+export function applyTasksSnapshotToStores(snapshot: any): boolean {
+  if (!snapshot) return false;
+  const { tasks, weekData, tasksChanged, weekChanged, deletedTaskIds } = mergeTasksSnapshot(
+    loadTasks(),
+    loadWeekData(),
+    snapshot
+  );
+  if (tasksChanged) saveTasks(tasks);
+  if (weekChanged) saveWeekData(weekData);
+  if (deletedTaskIds?.length) saveDeletedTaskIds(deletedTaskIds);
+  return tasksChanged || weekChanged || applyTaskConfigSnapshotToStores(snapshot);
 }
 
 export function loadRewards<T>(fallback: T): T {
@@ -850,12 +865,35 @@ export function saveRewards<T>(rewards: T): void {
 // uses, so the two modules always agree on how fresh this device's catalog is.
 export const REWARDS_STAMP_KEY = "consuela-rewards-updatedAt";
 
+function readStampText(key: string): string {
+  if (typeof window === "undefined") return "";
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return "";
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      return typeof parsed === "string" ? parsed : raw;
+    } catch {
+      return raw;
+    }
+  } catch {
+    return "";
+  }
+}
+
+function writeStampText(key: string, stamp: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(key, stamp);
+  } catch {}
+}
+
 export function readRewardsStamp(): string {
-  return loadJSON<string>(REWARDS_STAMP_KEY, "");
+  return readStampText(REWARDS_STAMP_KEY);
 }
 
 export function writeRewardsStamp(stamp: string): void {
-  saveJSON(REWARDS_STAMP_KEY, stamp);
+  writeStampText(REWARDS_STAMP_KEY, stamp);
 }
 
 export function loadPenalties<T>(fallback: T): T {

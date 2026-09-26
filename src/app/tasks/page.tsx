@@ -36,12 +36,11 @@ import {
   getThisWeeksCompletedDates, getThisWeeksCompletedTasks,
   loadTasks, saveTasks,
   saveRewards, savePenalties,
-  readPenaltiesStamp, writePenaltiesStamp,
   getMemberAllTimePoints, getMemberAllTimeCompletions,
   getPreviousWeekRanks, loadHallOfFame, loadHallOfFameMerged,
   loadPreviousWeekRanksMerged,
-  loadWeeklyPrizes, saveWeeklyPrizes,
-  readWeeklyPrizesStamp, writeWeeklyPrizesStamp,
+  loadWeeklyPrizes,
+  applyTaskConfigSnapshotToStores,
   pickDefaultClaimMember, isSnatchable, isPendingApproval,
   completesWithoutPin, completesWithPendingApproval,
   resolveMemberName,
@@ -52,8 +51,9 @@ import {
   normalizeSpeedBonus,
 } from "@/lib/task-utils";
 import { useTaskCommandQueue } from "@/hooks/useTaskCommandQueue";
+import { writeTaskConfig } from "@/lib/task-config-client";
+import type { TaskConfigCommand } from "@/lib/task-config";
 import {
-  readRewardsStamp, writeRewardsStamp,
   verifyPinRemote, unreachableCopy,
 } from "@/modes/kid/kid-store";
 import Podium from "@/components/leaderboard/Podium";
@@ -501,9 +501,6 @@ export default function TasksPage() {
   // local tap. The old inline version was ADD-ONLY on known rows, so a kid's
   // tap on another device never reached this page's Needs-approval queue (and
   // an approval elsewhere never cleared the stale "On the way" row here).
-  // The catalog legs (rewards, penalties, weekly prizes) merge by
-  // last-write-wins on their stamp instead, because "a longer list wins" is
-  // delete-blind: a parent's delete is a SHORTER, NEWER list.
   // Latest-state mirrors for the async snapshot restore: the fetch resolves
   // long after commit, and these effects re-sync before any merge runs, so
   // mergeTasksSnapshot always sees the CURRENT state (never a stale closure).
@@ -514,35 +511,8 @@ export default function TasksPage() {
   const restoreFromSnapshot = useCallback((data: any) => {
     if (!data?.snapshot) return;
     const snap = data.snapshot;
-    if (Array.isArray(snap.rewards)) {
-      const snapStamp = typeof snap.rewardsUpdatedAt === "string" ? snap.rewardsUpdatedAt : "";
-      if (snapStamp && snapStamp > readRewardsStamp()) {
-        writeRewardsStamp(snapStamp);
-        setRewards(snap.rewards);
-      }
-    }
-    // Weekly prizes: same last-write-wins stamp contract as rewards — adopt a
-    // strictly-NEWER snapshot's prizes and carry ITS stamp through verbatim
-    // (writeWeeklyPrizesStamp, not a touch: re-stamping "now" would make a
-    // no-op refresh block the next real server edit). Missing stamps or a
-    // non-array prizes leg never win.
-    if (
-      typeof snap.weeklyPrizesStamp === "string" &&
-      snap.weeklyPrizesStamp > readWeeklyPrizesStamp() &&
-      Array.isArray(snap.weeklyPrizes)
-    ) {
-      saveWeeklyPrizes(snap.weeklyPrizes);
-      writeWeeklyPrizesStamp(snap.weeklyPrizesStamp);
-    }
-    if (
-      typeof snap.penaltiesUpdatedAt === "string" &&
-      snap.penaltiesUpdatedAt > readPenaltiesStamp() &&
-      Array.isArray(snap.penalties)
-    ) {
-      savePenalties(snap.penalties);
-      writePenaltiesStamp(snap.penaltiesUpdatedAt);
-      setPenalties(snap.penalties);
-    }
+    applyTaskConfigSnapshotToStores(snap);
+    adoptStores();
     const { tasks: nextTasks, weekData: nextWeek, tasksChanged, weekChanged, deletedTaskIds } = mergeTasksSnapshot(
       tasksRef.current,
       weekDataRef.current,
@@ -557,7 +527,7 @@ export default function TasksPage() {
       weekDataRef.current = nextWeek;
       setWeekData(nextWeek);
     }
-  }, []);
+  }, [adoptStores]);
 
   useEffect(() => {
     if (!mounted || restoreAttempted.current) return;
@@ -1312,12 +1282,14 @@ export default function TasksPage() {
   // the local list changes, adopted from the acknowledgment, and never written
   // to localStorage as a "success" first.
   const queueConfig = (kind: "rewards" | "penalties", action: "upsert" | "delete", rest: Record<string, unknown>) => {
-    queueCommand({
-      route: "/api/tasks/config",
+    void writeTaskConfig({
+      operationId: "",
+      kind,
       action,
-      payload: { kind, updatedAt: new Date().toISOString(), ...rest },
-      displayTarget: { kind: "config" },
-    });
+      updatedAt: new Date().toISOString(),
+      ...(rest.item !== undefined ? { item: rest.item as TaskConfigCommand["item"] } : {}),
+      ...(rest.itemId !== undefined ? { itemId: rest.itemId as TaskConfigCommand["itemId"] } : {}),
+    }).catch(() => {});
   };
   const saveReward = () => {
     if (!rewardForm.name.trim()) return;

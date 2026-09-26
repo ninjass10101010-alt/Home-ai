@@ -73,6 +73,21 @@ function buttonByText(el: HTMLElement, text: string): HTMLButtonElement | undefi
   return Array.from(el.querySelectorAll("button")).find((b) => b.textContent?.trim() === text);
 }
 
+async function pulse() {
+  await act(async () => {
+    window.dispatchEvent(new CustomEvent("consuela-data-refreshed"));
+    await Promise.resolve();
+  });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+}
+
+function configCommandBody(): any {
+  const call = (fetchMock.mock.calls as any[]).find(([url, init]: any[]) =>
+    String(url) === "/api/tasks/config" && init?.body);
+  if (!call) throw new Error("no config command was sent");
+  return JSON.parse(String(call[1].body));
+}
+
 function seedPrizes(prizes: any[]) {
   localStorage.setItem(WEEKLY_PRIZES_KEY, JSON.stringify(prizes));
 }
@@ -190,7 +205,7 @@ describe("WeeklyPrizesCard", () => {
       DEFAULT_WEEKLY_PRIZES.map((p) => [p.rank, p.emoji, p.text])
     );
     expect(readWeeklyPrizesStamp()).toBeTruthy();
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
+    expect(configCommandBody()).toMatchObject({
       kind: "weekly-prizes",
       action: "replace",
       items: DEFAULT_WEEKLY_PRIZES,
@@ -264,7 +279,7 @@ describe("WeeklyPrizesCard", () => {
     expect(buttonByText(el, "Add prize")).toBeTruthy();
   });
 
-  it("a data-refreshed pulse does NOT clobber in-progress edits (dirty guard)", () => {
+  it("a data-refreshed pulse does NOT clobber in-progress edits (dirty guard)", async () => {
     mockAuth.currentUser = { name: "Rebecca", role: "parent" };
     const el = mount();
 
@@ -275,21 +290,17 @@ describe("WeeklyPrizesCard", () => {
 
     // A peer device's save landed in the store; the 60s pulse fires.
     seedPrizes([{ id: "x", rank: 1, emoji: "🥇", text: "Pancake day" }]);
-    act(() => {
-      window.dispatchEvent(new CustomEvent("consuela-data-refreshed"));
-    });
+    await pulse();
 
     expect(textInputs(el)[0].value).toBe("Typed but unsaved");
   });
 
-  it("still re-reads on the pulse when the card has no unsaved edits", () => {
+  it("still re-reads on the pulse when the card has no unsaved edits", async () => {
     mockAuth.currentUser = { name: "Rebecca", role: "parent" };
     const el = mount();
 
     seedPrizes([{ id: "x", rank: 1, emoji: "🥇", text: "Pancake day" }]);
-    act(() => {
-      window.dispatchEvent(new CustomEvent("consuela-data-refreshed"));
-    });
+    await pulse();
 
     expect(textInputs(el).map((i) => i.value)).toEqual(["Pancake day"]);
   });
@@ -306,9 +317,7 @@ describe("WeeklyPrizesCard", () => {
     });
 
     seedPrizes([{ id: "x", rank: 1, emoji: "🥇", text: "Pancake day" }]);
-    act(() => {
-      window.dispatchEvent(new CustomEvent("consuela-data-refreshed"));
-    });
+    await pulse();
 
     expect(textInputs(el).map((i) => i.value)).toEqual(["Pancake day"]);
   });
