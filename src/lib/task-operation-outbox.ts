@@ -66,6 +66,7 @@ export interface TaskOutboxEntry {
   reconcileAttemptCount?: number;
   lastErrorCategory?: TaskOutboxErrorCategory;
   lastErrorReason?: string;
+  lastErrorMessage?: string;
   nextAttemptAt?: string;
   status: TaskOutboxStatus;
   displayTarget: TaskOutboxDisplayTarget;
@@ -413,6 +414,9 @@ function parseEntry(value: unknown): TaskOutboxEntry | null {
     ...(reconcileAttemptCount !== undefined ? { reconcileAttemptCount } : {}),
     ...(category ? { lastErrorCategory: category } : {}),
     ...(optionalText(value.lastErrorReason) ? { lastErrorReason: optionalText(value.lastErrorReason) } : {}),
+    ...(typeof value.lastErrorMessage === "string" && value.lastErrorMessage.trim()
+      ? { lastErrorMessage: clampServerMessage(value.lastErrorMessage) }
+      : {}),
     ...(nextAttemptAt ? { nextAttemptAt } : {}),
     status,
     displayTarget: sanitizeDisplayTarget(value.displayTarget),
@@ -957,17 +961,24 @@ function reasonOf(body: TaskOutboxAcknowledgement): string {
 
 const MAX_SERVER_MESSAGE_CHARS = 240;
 
-function serverMessageOf(body: TaskOutboxAcknowledgement): string {
-  const raw = body.error;
-  if (typeof raw !== "string") return "";
-  const trimmed = raw.trim();
+function clampServerMessage(value: string): string {
+  const trimmed = value.trim();
   return trimmed.length > MAX_SERVER_MESSAGE_CHARS
     ? trimmed.slice(0, MAX_SERVER_MESSAGE_CHARS)
     : trimmed;
 }
 
-function refusalReason(body: TaskOutboxAcknowledgement, fallback: string): string {
-  return serverMessageOf(body) || reasonOf(body) || fallback;
+// DISPLAY ONLY. The server's own words for a refusal, carried on their own
+// field so they can never be mistaken for the machine `reason` that
+// classification reads: `lastErrorReason` stays a code this module controls,
+// and nothing a server sends can move a branch, a retry budget or a
+// credential gate. `body.error` is a user-facing string from the network.
+function serverMessageOf(body: TaskOutboxAcknowledgement): string {
+  return typeof body.error === "string" ? clampServerMessage(body.error) : "";
+}
+
+function serverMessagePatch(message: string): Pick<TaskOutboxEntry, "lastErrorMessage"> {
+  return { lastErrorMessage: message ? clampServerMessage(message) : undefined };
 }
 
 function requiresCredential(entry: TaskOutboxEntry): boolean {
@@ -978,14 +989,16 @@ function markRetryable(
   entry: TaskOutboxEntry,
   category: TaskOutboxErrorCategory,
   reason: string,
+  message = "",
 ): FlushTaskOutboxResult {
   const attemptCount = entry.attemptCount + 1;
-  if (attemptCount >= TASK_OUTBOX_MAX_ATTEMPTS) return markFailed(entry, category, reason);
+  if (attemptCount >= TASK_OUTBOX_MAX_ATTEMPTS) return markFailed(entry, category, reason, message);
   patchEntry(entry.operationId, {
     attemptCount,
     status: "retrying",
     lastErrorCategory: category,
     lastErrorReason: reason,
+    ...serverMessagePatch(message),
     authAttemptCount: 0,
     reconcileAttemptCount: 0,
     nextAttemptAt: new Date(Date.now() + taskOutboxBackoffMs(attemptCount)).toISOString(),
@@ -997,11 +1010,13 @@ function markFailed(
   entry: TaskOutboxEntry,
   category: TaskOutboxErrorCategory,
   reason: string,
+  message = "",
 ): FlushTaskOutboxResult {
   patchEntry(entry.operationId, {
     status: "failed",
     lastErrorCategory: category,
     lastErrorReason: reason,
+    ...serverMessagePatch(message),
     nextAttemptAt: undefined,
   });
   return { acknowledged: 0, retryable: 0, permanent: 1 };
@@ -1011,12 +1026,14 @@ function markAuthRequired(
   entry: TaskOutboxEntry,
   reason: string,
   deferred: boolean,
+  message = "",
 ): FlushTaskOutboxResult {
   if (!deferred) {
     patchEntry(entry.operationId, {
       status: "auth-required",
       lastErrorCategory: "unauthorized",
       lastErrorReason: reason,
+      ...serverMessagePatch(message),
       nextAttemptAt: undefined,
     });
     return RETAINED;
@@ -1026,18 +1043,20 @@ function markAuthRequired(
     status: "auth-required",
     lastErrorCategory: "unauthorized",
     lastErrorReason: reason,
+    ...serverMessagePatch(message),
     authAttemptCount,
     nextAttemptAt: new Date(Date.now() + taskOutboxAuthBackoffMs(authAttemptCount)).toISOString(),
   });
   return RETAINED;
 }
 
-function markReconciling(entry: TaskOutboxEntry, reason: string): FlushTaskOutboxResult {
+function markReconciling(entry: TaskOutboxEntry, reason: string, message = ""): FlushTaskOutboxResult {
   const reconcileAttemptCount = (entry.reconcileAttemptCount ?? 0) + 1;
   patchEntry(entry.operationId, {
     status: "reconciling",
     lastErrorCategory: "projection",
     lastErrorReason: reason,
+    ...serverMessagePatch(message),
     authAttemptCount: 0,
     reconcileAttemptCount,
     nextAttemptAt: new Date(
@@ -1078,8 +1097,9 @@ async function classifyConflict(
   body: TaskOutboxAcknowledgement,
 ): Promise<FlushTaskOutboxResult> {
   const reason = reasonOf(body);
+  const message = serverMessageOf(body);
   if (body.retryable === true || RETRYABLE_REASONS.has(reason)) {
-    return markRetryable(entry, "server", reason || "retryable_conflict");
+    return markRetryable(entry, "server", reason || "retryable_conflict", message);
   }
   if (PERMANENT_REASONS.has(reason)) {
     // A refused config write still carries the AUTHORITATIVE catalog. Adopt it
@@ -1093,12 +1113,12 @@ async function classifyConflict(
         /* the retained entry is the honest signal; adoption is best effort */
       }
     }
-    return markFailed(entry, "validation", reason);
+    return markFailed(entry, "validation", reason, message);
   }
   if (body.semanticDuplicate === true || DUPLICATE_REASONS.has(reason)) {
-    return markFailed(entry, "semantic-duplicate", reason || "semantic_duplicate");
+    return markFailed(entry, "semantic-duplicate", reason || "semantic_duplicate", message);
   }
-  return markFailed(entry, "validation", refusalReason(body, "operation_conflict"));
+  return markFailed(entry, "validation", reason || "operation_conflict", message);
 }
 
 function classifyFailure(
@@ -1107,15 +1127,16 @@ function classifyFailure(
   body: TaskOutboxAcknowledgement,
 ): FlushTaskOutboxResult {
   const reason = reasonOf(body);
-  if (status === 401) return markAuthRequired(entry, reason || "unauthorized", true);
-  if (status === 403) return markFailed(entry, "unauthorized", reason || "adult_only");
+  const message = serverMessageOf(body);
+  if (status === 401) return markAuthRequired(entry, reason || "unauthorized", true, message);
+  if (status === 403) return markFailed(entry, "unauthorized", reason || "adult_only", message);
   if (body.retryable === true || RETRYABLE_REASONS.has(reason)) {
-    return markRetryable(entry, "server", reason || `http_${status}`);
+    return markRetryable(entry, "server", reason || "retryable_conflict", message);
   }
   if (status >= 500 || status === 408 || status === 425 || status === 429) {
-    return markRetryable(entry, "server", reason || `http_${status}`);
+    return markRetryable(entry, "server", reason || `http_${status}`, message);
   }
-  return markFailed(entry, "validation", refusalReason(body, `http_${status}`));
+  return markFailed(entry, "validation", reason || `http_${status}`, message);
 }
 
 interface SnapshotView {

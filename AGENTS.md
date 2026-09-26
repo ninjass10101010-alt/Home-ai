@@ -1669,6 +1669,22 @@ route writes nothing to the server. **Do not fork the key or the entry shape** �
 import `TASK_OUTBOX_STORAGE_KEY` and the queue helpers, never re-implement a
 localStorage command buffer.
 
+**What the on-disk entry payload may contain.** A `/api/rewards/redeem` entry
+persists `{ rewardId, memberName, parentName }` in localStorage. `parentName` is
+the approver's **identity**, not a credential: `/api/rewards/redeem` re-resolves
+it against the LIVE PocketBase roster with `namesMatch` and then verifies
+`parentPin`, so a stale, renamed, deleted or forged name authorizes nothing — a
+name off the roster or a non-parent is `403 parent_only`, and a right name with
+a wrong PIN is `401 invalid_pin`, both before the ledger write. A PIN
+(`pin` / `parentPin`) **never** enters the entry: it lives only in the ephemeral
+credential registry keyed by `operationId`. The stored reward row stays the sole
+authority for the cost — never widen the allowlist to admit a client `cost` or
+`title`. The entry's failure fields are likewise split: `lastErrorReason` is a
+machine code this module controls and is the ONLY thing classification reads,
+while `lastErrorMessage` carries the server's human copy for the UI. A
+server-supplied string can never move a branch, a retry budget or a credential
+gate.
+
 **`executeInternalTaskCommand` is the sanctioned server-side command seam.**
 `executeInternalTaskCommand` (`src/lib/task-commands.ts`) is the *only* entry
 point a non-browser task mutation may use: it takes a normalized

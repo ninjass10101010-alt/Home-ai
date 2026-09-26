@@ -38,8 +38,10 @@ import {
   forgetTaskCommandCredential,
   listTaskOutbox,
   rememberTaskCommandCredential,
+  removeTaskOutboxEntry,
   resolveTaskOutboxCredential,
   sanitizeTaskOperationPayload,
+  taskOutboxEntryStorageKey,
   type SnapshotRead,
   type TaskOutboxDriver,
   type TaskOutboxEntry,
@@ -82,7 +84,9 @@ function readJson(value: unknown): any {
   return typeof value === "string" ? JSON.parse(value) : value;
 }
 
-function makePb(opts: { openingPoints?: number; snapshotFails?: boolean } = {}): PbHarness {
+function makePb(
+  opts: { openingPoints?: number; snapshotFails?: boolean; roster?: Array<Record<string, unknown>> } = {},
+): PbHarness {
   const openingPoints = opts.openingPoints ?? 500;
   let weekRow: any = {
     id: "w1",
@@ -116,10 +120,11 @@ function makePb(opts: { openingPoints?: number; snapshotFails?: boolean } = {}):
     collection: (name: string) => {
       if (name === "members") {
         return {
-          getFullList: async () => [
-            { id: "member-kid", name: MEMBER, fullName: MEMBER, role: "child" },
-            { id: "member-parent", name: PARENT, fullName: PARENT, role: "parent" },
-          ],
+          getFullList: async () =>
+            opts.roster ?? [
+              { id: "member-kid", name: MEMBER, fullName: MEMBER, role: "child" },
+              { id: "member-parent", name: PARENT, fullName: PARENT, role: "parent" },
+            ],
         };
       }
       if (name === "rewards") {
@@ -360,8 +365,7 @@ describe("one operation id is one redemption (the double-tap window)", () => {
 });
 
 describe("a redemption is adopted only on a 200 or a 202", () => {
-  it("a 202 (canonical write landed, projection repair pending) is acknowledged and adopted once", async () => {
-    const harness = makePb({ snapshotFails: true });
+  it("a 202 (canonical write landed, projection repair pending) is acknowledged and adopted once", async () => {    const harness = makePb({ snapshotFails: true });
     mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
     const posted: PostedRequest[] = [];
     redeemEntry("op-202-1", { parentName: PARENT });
@@ -382,6 +386,29 @@ describe("a redemption is adopted only on a 200 or a 202", () => {
     ).toHaveLength(1);
     expect(adopted.history.filter((tx: any) => tx.type === "redeem")).toHaveLength(1);
     expect(adopted.history.filter((tx: any) => tx.operationId !== undefined)).toHaveLength(0);
+  });
+
+  it("a 202 with NO weekData is NOT acknowledged in full — it stays on the Wave 1 retention path", async () => {
+    const harness = makePb();
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+    const posted: PostedRequest[] = [];
+    redeemEntry("op-202-bare-1", { parentName: PARENT });
+    rememberTaskCommandCredential("op-202-bare-1", { pin: MEMBER_PIN, parentPin: PARENT_PIN });
+
+    const result = await flushTaskOutbox(harnessDriver(harness, posted, async () => ({
+      status: 202,
+      body: { ok: true, operationId: "op-202-bare-1", applied: true, duplicate: false, reconciled: false, repairRequired: true },
+    })));
+
+    expect(result.acknowledged).toBe(0);
+    expect(posted).toHaveLength(1);
+    expect(listTaskOutbox()).toHaveLength(1);
+    const entry = listTaskOutbox()[0];
+    expect(entry.operationId).toBe("op-202-bare-1");
+    expect(entry.status).toBe("reconciling");
+    expect(entry.lastErrorCategory).toBe("projection");
+    expect(localWeek().points[MEMBER]).toBe(500);
+    expect(localWeek().history).toHaveLength(0);
   });
 
   it("a 503 keeps the entry for a durable retry and moves no local points", async () => {
@@ -420,9 +447,110 @@ describe("a redemption is adopted only on a 200 or a 202", () => {
     const entry = listTaskOutbox()[0];
     expect(entry.status).toBe("failed");
     expect(entry.lastErrorCategory).toBe("validation");
-    expect(entry.lastErrorReason).toContain("more pts for");
+    expect(entry.lastErrorReason).toBe("insufficient");
+    expect(entry.lastErrorMessage).toContain("more pts for");
     expect(localWeek().points[MEMBER]).toBe(20);
     expect(harness.weekWrites).toHaveLength(0);
+  });
+
+  it("a 401 keeps the machine reason for control flow and the server's words for the UI", async () => {
+    const harness = makePb();
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+    const posted: PostedRequest[] = [];
+    redeemEntry("op-401-1", { parentName: PARENT });
+    rememberTaskCommandCredential("op-401-1", { pin: MEMBER_PIN, parentPin: PARENT_PIN });
+
+    const result = await flushTaskOutbox(harnessDriver(harness, posted, async () => ({
+      status: 401,
+      body: {
+        ok: false,
+        operationId: "op-401-1",
+        reason: "parent_approval_required",
+        error: "A parent has to approve this reward.",
+      },
+    })));
+
+    expect(result).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
+    const entry = listTaskOutbox()[0];
+    expect(entry.status).toBe("auth-required");
+    expect(entry.lastErrorCategory).toBe("unauthorized");
+    expect(entry.lastErrorReason).toBe("parent_approval_required");
+    expect(entry.lastErrorMessage).toBe("A parent has to approve this reward.");
+    expect(localWeek().points[MEMBER]).toBe(500);
+  });
+
+  it("a 403 keeps the machine reason for control flow and the server's words for the UI", async () => {
+    const harness = makePb();
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+    const posted: PostedRequest[] = [];
+    redeemEntry("op-403-1", { parentName: PARENT });
+    rememberTaskCommandCredential("op-403-1", { pin: MEMBER_PIN, parentPin: PARENT_PIN });
+
+    const result = await flushTaskOutbox(harnessDriver(harness, posted, async () => ({
+      status: 403,
+      body: {
+        ok: false,
+        operationId: "op-403-1",
+        reason: "parent_only",
+        error: "Only a parent can approve this reward.",
+      },
+    })));
+
+    expect(result).toEqual({ acknowledged: 0, retryable: 0, permanent: 1 });
+    const entry = listTaskOutbox()[0];
+    expect(entry.status).toBe("failed");
+    expect(entry.lastErrorCategory).toBe("unauthorized");
+    expect(entry.lastErrorReason).toBe("parent_only");
+    expect(entry.lastErrorMessage).toBe("Only a parent can approve this reward.");
+  });
+
+  it("a server STRING that names a machine reason can never move a classification branch", async () => {
+    const harness = makePb();
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+    const posted: PostedRequest[] = [];
+
+    redeemEntry("op-inject-retryable-1");
+    rememberTaskCommandCredential("op-inject-retryable-1", { pin: MEMBER_PIN });
+    const retryableLookalike = await flushTaskOutbox(
+      harnessDriver(harness, posted, async () => ({
+        status: 400,
+        body: {
+          ok: false,
+          operationId: "op-inject-retryable-1",
+          reason: "http_400",
+          error: "task_store_unavailable",
+        },
+      })),
+    );
+    expect(retryableLookalike).toEqual({ acknowledged: 0, retryable: 0, permanent: 1 });
+    const retryableEntry = listTaskOutbox()[0];
+    expect(retryableEntry.status).toBe("failed");
+    expect(retryableEntry.lastErrorReason).toBe("http_400");
+    expect(retryableEntry.lastErrorMessage).toBe("task_store_unavailable");
+    removeTaskOutboxEntry("op-inject-retryable-1");
+
+    redeemEntry("op-inject-credential-1");
+    rememberTaskCommandCredential("op-inject-credential-1", { pin: MEMBER_PIN });
+    const credentialLookalike = await flushTaskOutbox(
+      harnessDriver(harness, posted, async () => ({
+        status: 401,
+        body: {
+          ok: false,
+          operationId: "op-inject-credential-1",
+          reason: "unauthorized",
+          error: "credential_missing",
+        },
+      })),
+    );
+    expect(credentialLookalike).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
+    const credentialEntry = listTaskOutbox()[0];
+    expect(credentialEntry.status).toBe("auth-required");
+    expect(credentialEntry.lastErrorReason).toBe("unauthorized");
+    expect(credentialEntry.lastErrorMessage).toBe("credential_missing");
+
+    const reloaded = await flushTaskOutbox(harnessDriver(harness, posted));
+    expect(reloaded).toEqual({ acknowledged: 0, retryable: 0, permanent: 0 });
+    expect(listTaskOutbox()[0].lastErrorReason).toBe("unauthorized");
   });
 
   it("a 409 pulls authoritative state first and then stops retrying", async () => {
@@ -453,6 +581,90 @@ describe("a redemption is adopted only on a 200 or a 202", () => {
     expect(pulls).toBe(1);
     expect(result).toEqual({ acknowledged: 0, retryable: 0, permanent: 1 });
     expect(listTaskOutbox()[0].status).toBe("failed");
-    expect(listTaskOutbox()[0].lastErrorReason).toContain("already went through");
+    expect(listTaskOutbox()[0].lastErrorReason).toBe("duplicate");
+    expect(listTaskOutbox()[0].lastErrorMessage).toContain("already went through");
+  });
+});
+
+describe("the approver NAME rides on disk; the approver PIN never does", () => {
+  it("a queued redemption persists the approver's name and neither PIN", () => {
+    redeemEntry("op-on-disk-1", { parentName: PARENT });
+    rememberTaskCommandCredential("op-on-disk-1", { pin: MEMBER_PIN, parentPin: PARENT_PIN });
+
+    const raw = localStorage.getItem(taskOutboxEntryStorageKey("op-on-disk-1"));
+    expect(raw).not.toBeNull();
+    const stored = JSON.parse(String(raw));
+    expect(stored.payload).toEqual({ rewardId: BIG_REWARD.id, memberName: MEMBER, parentName: PARENT });
+    expect(raw).toContain(PARENT);
+    expect(raw).not.toContain(MEMBER_PIN);
+    expect(raw).not.toContain(PARENT_PIN);
+
+    const dump = Object.keys(localStorage)
+      .map((key) => `${key}=${localStorage.getItem(key) ?? ""}`)
+      .join("\n");
+    expect(dump).not.toContain(MEMBER_PIN);
+    expect(dump).not.toContain(PARENT_PIN);
+  });
+
+  it("a name that is no longer on the live roster is refused — a stale approver cannot authorize", async () => {
+    const harness = makePb({
+      roster: [
+        { id: "member-kid", name: MEMBER, fullName: MEMBER, role: "child" },
+        { id: "member-someone-else", name: "Someone Else", fullName: "Someone Else", role: "parent" },
+      ],
+    });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+    const posted: PostedRequest[] = [];
+    redeemEntry("op-stale-approver-1", { parentName: PARENT });
+    rememberTaskCommandCredential("op-stale-approver-1", { pin: MEMBER_PIN, parentPin: PARENT_PIN });
+
+    const result = await flushTaskOutbox(harnessDriver(harness, posted));
+
+    expect(result).toEqual({ acknowledged: 0, retryable: 0, permanent: 1 });
+    const entry = listTaskOutbox()[0];
+    expect(entry.lastErrorReason).toBe("parent_only");
+    expect(entry.lastErrorMessage).toBe("Only a parent can approve this reward.");
+    expect(posted).toHaveLength(1);
+    expect(harness.weekWrites).toHaveLength(0);
+    expect(harness.readPoints()[MEMBER]).toBe(500);
+    expect(harness.readHistory().filter((tx: any) => tx.type === "redeem")).toHaveLength(0);
+    expect(localWeek().points[MEMBER]).toBe(500);
+  });
+
+  it("a live member who is not a parent is refused, whatever name the device persisted", async () => {
+    const harness = makePb({
+      roster: [
+        { id: "member-kid", name: MEMBER, fullName: MEMBER, role: "child" },
+        { id: "member-teen", name: PARENT, fullName: PARENT, role: "child" },
+      ],
+    });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+    const posted: PostedRequest[] = [];
+    redeemEntry("op-nonparent-approver-1", { parentName: PARENT });
+    rememberTaskCommandCredential("op-nonparent-approver-1", { pin: MEMBER_PIN, parentPin: PARENT_PIN });
+
+    const result = await flushTaskOutbox(harnessDriver(harness, posted));
+
+    expect(result).toEqual({ acknowledged: 0, retryable: 0, permanent: 1 });
+    expect(listTaskOutbox()[0].lastErrorReason).toBe("parent_only");
+    expect(harness.weekWrites).toHaveLength(0);
+    expect(harness.readPoints()[MEMBER]).toBe(500);
+  });
+
+  it("a live parent's name with a wrong PIN is refused — the name alone authorizes nothing", async () => {
+    const harness = makePb();
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+    const posted: PostedRequest[] = [];
+    redeemEntry("op-wrong-approver-pin-1", { parentName: PARENT });
+    rememberTaskCommandCredential("op-wrong-approver-pin-1", { pin: MEMBER_PIN, parentPin: "0000" });
+
+    const result = await flushTaskOutbox(harnessDriver(harness, posted));
+
+    expect(result).toEqual({ acknowledged: 0, retryable: 1, permanent: 0 });
+    const entry = listTaskOutbox()[0];
+    expect(entry.status).toBe("auth-required");
+    expect(entry.lastErrorReason).toBe("invalid_pin");
+    expect(harness.weekWrites).toHaveLength(0);
+    expect(harness.readPoints()[MEMBER]).toBe(500);
   });
 });
