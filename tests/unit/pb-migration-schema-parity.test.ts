@@ -39,6 +39,11 @@ type TerminalField = {
   type?: unknown;
   required?: unknown;
   options?: unknown;
+  max?: unknown;
+  maxSelect?: unknown;
+  values?: unknown;
+  onCreate?: unknown;
+  onUpdate?: unknown;
 };
 
 type TerminalCollection = Record<string, unknown>;
@@ -206,6 +211,69 @@ describe("terminal migration schema parity", () => {
         declaredSql.slice().sort(),
         `${name} must declare exactly the seed index statements`
       ).toEqual((contract.indexes ?? []).map(normalizedIndexSql).sort());
+    }
+  );
+
+  it("declares every top-level binding exactly once", () => {
+    const source = readFileSync(MIGRATION_PATH, "utf8");
+    const bindings = [...source.matchAll(/^(?:var\s+)?(\w+)\s*=/gm)].map(
+      (match) => match[1]
+    );
+    const duplicates = bindings.filter(
+      (name, index) => bindings.indexOf(name) !== index
+    );
+    expect(
+      [...new Set(duplicates)],
+      "each top-level binding in the terminal migration must be declared exactly once — a duplicated literal is dead weight that can silently diverge from its copy"
+    ).toEqual([]);
+    expect(
+      bindings.slice().sort(),
+      "the terminal migration must declare only the schema and the down-function field map at top level"
+    ).toEqual(["TERMINAL_ADDED_FIELDS", "TERMINAL_SCHEMA"]);
+  });
+
+  it("runs a single migrate call", () => {
+    const source = readFileSync(MIGRATION_PATH, "utf8");
+    const calls = [...source.matchAll(/\bmigrate\s*\(/g)].length;
+    expect(calls, "the terminal migration must register exactly one up/down pair").toBe(1);
+  });
+
+  it.each(TERMINAL_PARITY_COLLECTIONS)(
+    "declares the top-level field keys PocketBase 0.39.11 actually honours for %s",
+    (name) => {
+      const declared = terminalFields(loadTerminalSchema()[name], name);
+      for (const field of declared) {
+        const options = ((field.options ?? {}) as Record<string, unknown>);
+        const label = `${name}.${String(field.name)}`;
+        if (typeof options.max === "number") {
+          expect(
+            field.max,
+            `${label} must repeat max at the top level — PocketBase 0.39.11 ignores options and would silently store max 0`
+          ).toBe(options.max);
+        }
+        if (typeof options.maxSelect === "number") {
+          expect(
+            field.maxSelect,
+            `${label} must repeat maxSelect at the top level`
+          ).toBe(options.maxSelect);
+        }
+        if (Array.isArray(options.values)) {
+          expect(
+            (Array.isArray(field.values) ? field.values : []).map((value) => String(value)).sort(),
+            `${label} must repeat its select values at the top level — PocketBase 0.39.11 rejects a select with no top-level values`
+          ).toEqual(options.values.map((value) => String(value)).sort());
+        }
+        if (String(field.type) === "autodate") {
+          expect(
+            field.onCreate,
+            `${label} must set top-level onCreate — options alone is rejected`
+          ).toBe(true);
+          expect(
+            Boolean(field.onUpdate),
+            `${label} top-level onUpdate must mirror the seed contract`
+          ).toBe(options.onUpdate === true);
+        }
+      }
     }
   );
 });

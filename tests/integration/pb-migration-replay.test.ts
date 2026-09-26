@@ -1,10 +1,10 @@
 import { spawn, spawnSync } from "node:child_process";
 import type { ChildProcessByStdio } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import type { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
 
@@ -16,7 +16,27 @@ import type { PbCollectionContract, PbSchemaFieldContract } from "@/lib/pb-seed"
 const REQUIRED_POCKETBASE_VERSION = "0.39.11";
 const MIGRATIONS_DIR = resolve(__dirname, "../../../pb_migrations");
 const TERMINAL_MIGRATION_FILE = "1790250000_terminal_locked_task_schema.js";
-const REPLAY_SCHEMA_COLLECTIONS = ["members", "tasks"] as const;
+const DUPLICATE_HALL_MIGRATION_FILE = "1789000000_seed_duplicate_hall_of_fame.js";
+const HALL_TABLE = "hall_of_fame";
+const HALL_UNIQUE_INDEX = "idx_hall_of_fame_member_week";
+const HALL_MEMBER = "Aurora";
+const HALL_WEEK = "2026-09-14";
+const HALL_EARLY = "replay-early-not-celebrated";
+const HALL_CELEBRATED = "replay-late-celebrated";
+const REPLAY_SCHEMA_COLLECTIONS = [
+  "members",
+  "tasks",
+  "consuela_data_snapshots",
+  "week_data",
+  "week_archive",
+  "rewards",
+  "penalties",
+  "hall_of_fame",
+  "chat_messages",
+  "morning_briefing",
+  "proactive_suggestions",
+  "consuela_state",
+] as const;
 const RULE_NAMES = [
   "listRule",
   "viewRule",
@@ -38,6 +58,45 @@ type LiveCollection = Record<string, unknown> & {
   fields?: unknown;
   indexes?: unknown;
 };
+
+const DUPLICATE_HALL_MIGRATION_TEMPLATE = `migrate((app) => {
+  const collection = app.findCollectionByNameOrId("hall_of_fame")
+  if (!collection.fields.getByName("created")) {
+    collection.fields.add(new Field({ name: "created", type: "autodate", onCreate: true }))
+  }
+  if (!collection.fields.getByName("celebrated")) {
+    collection.fields.add(new Field({ name: "celebrated", type: "bool" }))
+  }
+  app.save(collection)
+  const target = app.findCollectionByNameOrId("hall_of_fame")
+  app.save(new Record(target, {
+    member: "__HALL_MEMBER__",
+    weekStart: "__HALL_WEEK__",
+    emoji: "__HALL_EARLY__",
+    points: 30,
+    rank: 1,
+    celebrated: false,
+  }))
+  app.save(new Record(target, {
+    member: "__HALL_MEMBER__",
+    weekStart: "__HALL_WEEK__",
+    emoji: "__HALL_CELEBRATED__",
+    points: 30,
+    rank: 1,
+    celebrated: true,
+  }))
+}, (app) => {})`;
+
+const DUPLICATE_HALL_MIGRATION_SOURCE = DUPLICATE_HALL_MIGRATION_TEMPLATE.replace(
+  /__HALL_(MEMBER|WEEK|EARLY|CELEBRATED)__/g,
+  (_match, key: string) =>
+    ({
+      MEMBER: HALL_MEMBER,
+      WEEK: HALL_WEEK,
+      EARLY: HALL_EARLY,
+      CELEBRATED: HALL_CELEBRATED,
+    })[key] ?? ""
+);
 
 function contractFor(name: string): PbCollectionContract {
   const contract = COLLECTIONS.find((entry) => entry.name === name);
@@ -82,6 +141,18 @@ function liveIndexName(index: unknown): string {
   if (typeof index === "string") return indexName(index);
   const name = (index as { name?: unknown } | null)?.name;
   return typeof name === "string" ? name : "";
+}
+
+function parsedIndex(spec: string): { unique: boolean; name: string; columns: string[] } {
+  const flat = spec.replace(/\s+/g, " ").trim();
+  const columnList = flat.match(/\(([^)]*)\)\s*$/);
+  const columns = columnList
+    ? columnList[1]
+        .split(",")
+        .map((entry) => entry.trim().replace(/^["`]|["`]$/g, ""))
+        .filter(Boolean)
+    : [];
+  return { unique: /CREATE\s+UNIQUE\s+INDEX/i.test(flat), name: indexName(spec), columns };
 }
 
 function fieldIssues(
@@ -174,6 +245,62 @@ function assertReplayState(live: LiveCollection[]): void {
     issues,
     `the ${REQUIRED_POCKETBASE_VERSION} migration replay is not locked and schema-complete:\n${report.slice(0, MAX_REPORTED_ISSUE_CHARS)}`
   ).toEqual([]);
+}
+
+function requiredRow(contract: PbCollectionContract, tag: string): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  for (const field of collectionFieldsForSeed(contract)) {
+    if (field.required !== true) continue;
+    if (field.type === "autodate") continue;
+    if (field.type === "number") {
+      row[field.name] = 1;
+      continue;
+    }
+    if (field.type === "bool") {
+      row[field.name] = false;
+      continue;
+    }
+    if (field.type === "json") {
+      row[field.name] = {};
+      continue;
+    }
+    if (field.type === "date") {
+      row[field.name] = "2026-09-14 10:00:00.000Z";
+      continue;
+    }
+    if (field.type === "select") {
+      row[field.name] = field.options?.values?.[0];
+      continue;
+    }
+    row[field.name] = `${tag}-${field.name}`;
+  }
+  return row;
+}
+
+function sqliteIndexNames(dbFile: string, table: string): string[] {
+  const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+  const db = new DatabaseSync(dbFile, { readOnly: true });
+  try {
+    const rows = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ?")
+      .all(table) as Array<{ name: string }>;
+    return rows.map((row) => row.name);
+  } finally {
+    db.close();
+  }
+}
+
+async function createRecord(
+  collection: { create: (data: Record<string, unknown>) => Promise<unknown> },
+  data: Record<string, unknown>,
+  message: string
+): Promise<unknown> {
+  try {
+    return await collection.create(data);
+  } catch (error) {
+    const detail = String((error as { response?: { text?: string } })?.response?.text ?? error);
+    throw new Error(`${message}\nrejected payload: ${JSON.stringify(data)}\nresponse: ${detail}`);
+  }
 }
 
 function resolveBinary(): { binary: string; problem: string | null } {
@@ -280,6 +407,35 @@ async function stopServer(child: ReplayServer | null): Promise<void> {
   clearTimeout(timer);
 }
 
+function stageMigrations(staged: string, includeTerminal: boolean): void {
+  mkdirSync(staged, { recursive: true });
+  for (const entry of readdirSync(MIGRATIONS_DIR)) {
+    if (!entry.endsWith(".js")) continue;
+    if (!includeTerminal && entry === TERMINAL_MIGRATION_FILE) continue;
+    copyFileSync(join(MIGRATIONS_DIR, entry), join(staged, entry));
+  }
+  if (!includeTerminal) {
+    writeFileSync(
+      join(staged, DUPLICATE_HALL_MIGRATION_FILE),
+      DUPLICATE_HALL_MIGRATION_SOURCE,
+      "utf8"
+    );
+  }
+}
+
+function migrateUp(binary: string, dataDir: string, migrationsDir: string): void {
+  const result = spawnSync(
+    binary,
+    ["migrate", "up", "--dir", dataDir, "--migrationsDir", migrationsDir],
+    { encoding: "utf8" }
+  );
+  if (result.status !== 0) {
+    throw new Error(
+      `the migration chain did not apply: ${result.error?.message ?? `status ${String(result.status)}`}\n${tailOutput(result.stderr ?? result.stdout)}`
+    );
+  }
+}
+
 async function replayTerminalMigration(): Promise<void> {
   const { binary, problem: binaryProblem } = resolveBinary();
   expect(
@@ -294,18 +450,17 @@ async function replayTerminalMigration(): Promise<void> {
 
   const tempRoot = mkdtempSync(join(tmpdir(), "pb-migration-replay-"));
   const dataDir = join(tempRoot, "pb_data");
+  const staged = join(tempRoot, "migrations");
   let server: ReplayServer | null = null;
   try {
-    const migrated = spawnSync(
-      binary,
-      ["migrate", "up", "--dir", dataDir, "--migrationsDir", MIGRATIONS_DIR],
-      { encoding: "utf8" }
+    stageMigrations(staged, false);
+    migrateUp(binary, dataDir, staged);
+
+    copyFileSync(
+      join(MIGRATIONS_DIR, TERMINAL_MIGRATION_FILE),
+      join(staged, TERMINAL_MIGRATION_FILE)
     );
-    if (migrated.status !== 0) {
-      throw new Error(
-        `the full migration chain did not apply: ${migrated.error?.message ?? `status ${String(migrated.status)}`}\n${tailOutput(migrated.stderr)}`
-      );
-    }
+    migrateUp(binary, dataDir, staged);
 
     const { email, password } = createSuperuser(binary, dataDir);
 
@@ -319,7 +474,7 @@ async function replayTerminalMigration(): Promise<void> {
     const captured: string[] = [];
     server = spawn(
       binary,
-      ["serve", `--http=127.0.0.1:${port}`, "--dir", dataDir, "--migrationsDir", MIGRATIONS_DIR],
+      ["serve", `--http=127.0.0.1:${port}`, "--dir", dataDir, "--migrationsDir", staged],
       { stdio: ["ignore", "pipe", "pipe"] }
     );
     const capture = (chunk: Buffer) => {
@@ -337,6 +492,95 @@ async function replayTerminalMigration(): Promise<void> {
     const live = (await pb.collections.getFullList()) as unknown as LiveCollection[];
 
     assertReplayState(live);
+
+    const hallRows = (await pb.collection(HALL_TABLE).getFullList()) as unknown as Array<{
+      member?: unknown;
+      weekStart?: unknown;
+      emoji?: unknown;
+      celebrated?: unknown;
+    }>;
+    expect(
+      hallRows.filter(
+        (row) => row.member === HALL_MEMBER && row.weekStart === HALL_WEEK
+      ),
+      "the terminal migration must collapse the duplicate hall_of_fame rows that already violated the unique index"
+    ).toHaveLength(1);
+    expect(
+      hallRows.filter(
+        (row) => row.member === HALL_MEMBER && row.weekStart === HALL_WEEK
+      )[0]?.emoji,
+      "the celebrated hall_of_fame row must survive the dedupe, matching dedupeHallOfFameRows"
+    ).toBe(HALL_CELEBRATED);
+    expect(
+      hallRows.some((row) => row.emoji === HALL_EARLY),
+      "the non-celebrated duplicate must be removed"
+    ).toBe(false);
+
+    let exercised = 0;
+    let uniqueExercised = 0;
+    for (const name of REPLAY_SCHEMA_COLLECTIONS) {
+      const contract = contractFor(name);
+      for (const spec of contract.indexes ?? []) {
+        const { unique, name: specName, columns } = parsedIndex(spec);
+        if (columns.length === 0) continue;
+        exercised += 1;
+        if (unique) uniqueExercised += 1;
+        const collection = pb.collection(name);
+        const base = requiredRow(contract, `${name}-${specName}-base`);
+        await createRecord(
+          collection,
+          base,
+          `${name}: the base row for ${specName} must be insertable`
+        );
+        const duplicate = requiredRow(contract, `${name}-${specName}-dup`);
+        for (const column of columns) {
+          duplicate[column] = base[column];
+        }
+        if (unique) {
+          let rejected = false;
+          let detail = "";
+          try {
+            await collection.create(duplicate);
+          } catch (error) {
+            rejected = true;
+            detail = String((error as { response?: { text?: string } })?.response?.text ?? error);
+          }
+          expect(
+            rejected,
+            `${name}: ${specName} is declared UNIQUE but the replayed database accepted a duplicate row (rejected with: ${detail})`
+          ).toBe(true);
+        } else {
+          await createRecord(
+            collection,
+            duplicate,
+            `${name}: ${specName} is not unique, so a duplicate row must still be accepted`
+          );
+        }
+      }
+    }
+
+    const declaredIndexSpecs = REPLAY_SCHEMA_COLLECTIONS.flatMap(
+      (name) => contractFor(name).indexes ?? []
+    );
+    expect(
+      exercised,
+      "every declared index must be exercised against real rows so the assertion cannot go vacuous"
+    ).toBe(declaredIndexSpecs.length);
+    expect(
+      uniqueExercised,
+      "every declared UNIQUE index must be proven to reject a duplicate row"
+    ).toBe(declaredIndexSpecs.filter((spec) => parsedIndex(spec).unique).length);
+    expect(
+      uniqueExercised,
+      "at least one UNIQUE index must be exercised — otherwise the duplicate-row checks prove nothing"
+    ).toBeGreaterThan(0);
+
+    await stopServer(server);
+    server = null;
+    expect(
+      sqliteIndexNames(join(dataDir, "data.db"), HALL_TABLE),
+      `${HALL_UNIQUE_INDEX} must exist as a real index in the replayed database`
+    ).toContain(HALL_UNIQUE_INDEX);
   } finally {
     await stopServer(server);
     rmSync(tempRoot, { recursive: true, force: true });
