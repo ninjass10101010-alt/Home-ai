@@ -1153,6 +1153,11 @@ export default function WeatherWidget({ className = "" }: { className?: string }
           }}
         />
 
+        {/* Glass sheen — light glancing off the card surface, above the scene
+            and scrim, below content. Pointer-transparent so the day-strip
+            drag and tap-to-modal keep working. */}
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-[15] bg-gradient-to-br from-white/15 via-transparent to-white/5" />
+
         <div className="pointer-events-none relative z-20 flex h-full min-h-0 flex-col px-4 pb-3 pt-3 sm:px-5 sm:pb-4 sm:pt-4">
           <div className="flex items-center justify-between gap-2">
             <div className={`flex min-w-0 items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold ${heroScene === "storm" ? GLASS_NIGHT : GLASS}`}>

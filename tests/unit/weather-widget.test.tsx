@@ -1360,9 +1360,9 @@ describe("WeatherWidget — Not Boring redesign", () => {
 
       expect(hero.style.color).toBe("rgb(255, 255, 255)");
       expect(location).toBeTruthy();
-      expect(locationChip?.className).toContain("bg-white/40");
+      expect(locationChip?.className).toContain("rgba(255,255,255,0.32)");
       expect(locationChip?.className).toContain("before:from-white/40");
-      expect(details?.className).toContain("bg-white/40");
+      expect(details?.className).toContain("rgba(255,255,255,0.32)");
       expect(details?.className).toContain("before:from-white/40");
       expect(holiday).toBeTruthy();
       if (!location || !details || !holiday) return;

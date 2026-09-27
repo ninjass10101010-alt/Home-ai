@@ -38,16 +38,20 @@ export const INK: Record<string, string> = {
   night: "text-slate-800",
 };
 
-// One glass recipe, reused everywhere
+// One glass recipe, reused everywhere. Drive-tuned: a 135° white gradient at
+// lower opacity, 18px blur, 160% saturation. This is the SAME material the
+// card has always used — retuned, not a second material (DESIGN.md 2026-09-14
+// record intact). The chip's specular top-half sheen stays (pinned by tests).
 export const GLASS =
-  "bg-white/30 backdrop-blur-2xl backdrop-saturate-150 " +
-  "border border-white/50 " +
-  "shadow-[inset_0_1px_0_rgba(255,255,255,.75),inset_0_-1px_0_rgba(255,255,255,.15),0_8px_32px_-8px_rgba(60,70,120,.18)] " +
-  // specular sheen on the top half
+  "bg-[linear-gradient(135deg,rgba(255,255,255,0.22),rgba(255,255,255,0.08))] " +
+  "backdrop-blur-[18px] backdrop-saturate-[1.6] " +
+  "border border-white/[0.28] " +
+  "shadow-[inset_0_1px_0_rgba(255,255,255,0.45),inset_0_-1px_0_rgba(255,255,255,0.08),0_10px_30px_-10px_rgba(0,0,0,0.35)] " +
   "relative before:pointer-events-none before:absolute before:inset-0 before:rounded-[inherit] " +
   "before:bg-gradient-to-b before:from-white/40 before:to-transparent before:to-50%";
 
-export const GLASS_NIGHT = GLASS.replace("bg-white/30", "bg-white/40").replace(
-  "border-white/50",
-  "border-white/60"
-);
+// Derived from GLASS by the same +0.10 alphas the old recipe used — not hand-tuned.
+export const GLASS_NIGHT = GLASS
+  .replace("rgba(255,255,255,0.22)", "rgba(255,255,255,0.32)")
+  .replace("rgba(255,255,255,0.08)", "rgba(255,255,255,0.18)")
+  .replace("border-white/[0.28]", "border-white/[0.40]");
