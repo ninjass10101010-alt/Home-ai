@@ -2,7 +2,7 @@
 // P3 parent efficiency: the Needs-approval queue gets an "Approve all" that
 // costs ONE parent-PIN confirmation instead of a PIN per row, and the Add
 // modal gets progressive disclosure (points stepper, recurring select).
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot, type Root } from "react-dom/client";
 import { act } from "react";
 import type { ReactElement } from "react";
@@ -69,13 +69,26 @@ function setInput(input: HTMLInputElement, value: string) {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+afterEach(() => {
+  // Also unmount at the end of the run — the last test's root would otherwise
+  // be torn down by the jsdom environment itself, which is what produced the
+  // trailing uncaught NotFoundError.
+  activeRoot?.unmount?.();
+  activeRoot = null;
+});
+
 const approveCalls: any[] = [];
 
 beforeEach(() => {
-  document.body.innerHTML = "";
-  localStorage.clear();
+  // Unmount BEFORE the body is wiped: the Add-task modal renders through a
+  // portal whose container is a child of <body>. Clearing the body first left
+  // React removing a node that was no longer a child → uncaught jsdom
+  // NotFoundError (code 8) which made `npm test` exit non-zero despite every
+  // test passing.
   activeRoot?.unmount?.();
   activeRoot = null;
+  document.body.innerHTML = "";
+  localStorage.clear();
   approveCalls.length = 0;
   // verifyPinRemote answers ok for the parent, wrongPin for the kids.
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
