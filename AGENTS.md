@@ -97,7 +97,27 @@ This entry-point contract preserves the Settings feature's route, role, probe, a
 
 ---
 
+## UI Contracts (hard rules — 2026-09-26 audit)
+
+Authoritative copy lives in `docs/DESIGN_SYSTEM.md` §6–8; these are the parts agents break most often.
+
+- **Type floor is 12px (0.75rem / `text-xs`).** This *replaces* the 11px floor that earlier
+  change records and plan docs cited — those are history, do not follow them for new work.
+  Arbitrary px text (`text-[10px]`, `text-[11px]`, …) is banned outright in `src/**`: it
+  defeats the rem Dynamic-Type scale. Locked by
+  `tests/unit/warm-glass-contracts.test.tsx` (contract B), `tests/unit/compact-type-floor.test.tsx`.
+- **Tap targets ≥44×44.** Visual size may stay compact when the element carries **`.hit-44`**
+  (guarantees a centred 44px hit box via `::before`, no layout change) or an equivalent
+  documented `after:-inset-*` region. Glyph-only controls need an `aria-label`.
+- **Text contrast must clear WCAG AA (4.5:1 body, 3:1 large) in dark AND light.**
+  `--color-text-muted` / `--color-text-dim` are the only sub-primary levels and both clear AA;
+  to add emphasis change weight or size, never colour, and never re-lighten text with a local
+  override.
+- Never reintroduce `<Card>`/`<Button>`/`<Input>`/`<Badge>`/`<Modal>` — those primitives are
+  deleted; use `SoftButton`, `IconButton`, `Modal`, `.widget-card`, `neu-*`.
+
 ## 3. Operational Clarity — Agent Role Definition
+
 
 ### 3.1 Core Responsibilities
 - You are the **live dashboard expert**. Every answer about how the app behaves for a human user must be 100% consistent with the "Current Dashboard Snapshot" and the subsections above.

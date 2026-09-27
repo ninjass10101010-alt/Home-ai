@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
-// The 11px type floor is the project's own rule (AGENTS.md) — the compact
-// StatTile detail and compact DayStrip label used to sit at 10px as
-// "deliberate compact choices"; the critique ruled the floor wins. This test
-// locks the floor so a future compaction pass can't silently re-break it.
+// The 12px type floor is the project's own rule (AGENTS.md "UI Contracts"). The compact
+// StatTile detail and compact DayStrip label used to sit at 10px as "deliberate compact
+// choices"; a 2026-09-09 critique ruled the (then 11px) floor wins, and the 2026-09-26 UI
+// audit (docs/UI_AUDIT_2026-09.md) measured those labels rendering too small on a phone and
+// raised the floor to 12px — rem-based `text-xs`, so Dynamic Type still scales them.
+// This test locks the floor so a future compaction pass cannot silently re-break it.
 import { describe, it, expect } from "vitest";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
@@ -28,15 +30,15 @@ describe("calendar glass refresh (globals.css class contracts)", () => {
   });
 });
 
-describe("11px type floor on compact patterns", () => {
-  it("StatTile compact detail renders at 11px, never 10px", () => {
+describe("12px type floor on compact patterns", () => {
+  it("StatTile compact detail renders at text-xs (12px), never an arbitrary sub-12px size", () => {
     const el = render(<StatTile label="Events" value={3} detail="+2 today" compact />);
     const detail = Array.from(el.querySelectorAll("div")).find((d) => d.textContent === "+2 today")!;
-    expect(detail.className).toContain("text-[11px]");
-    expect(detail.className).not.toContain("text-[10px]");
+    expect(detail.className).toContain("text-xs");
+    expect(detail.className).not.toMatch(/text-\[\d+(?:\.\d+)?px\]/);
   });
 
-  it("DayStrip compact labels render at 11px, never 10px", () => {
+  it("DayStrip compact labels render at text-xs (12px), never an arbitrary sub-12px size", () => {
     const el = render(
       <DayStrip
         value="mon"
@@ -51,8 +53,8 @@ describe("11px type floor on compact patterns", () => {
     const labels = Array.from(el.querySelectorAll("span")).filter((s) => /^(MON|TUE)$/.test(s.textContent || ""));
     expect(labels).toHaveLength(2);
     for (const label of labels) {
-      expect(label.className).toContain("text-[11px]");
-      expect(label.className).not.toContain("text-[10px]");
+      expect(label.className).toContain("text-xs");
+      expect(label.className).not.toMatch(/text-\[\d+(?:\.\d+)?px\]/);
     }
   });
 });

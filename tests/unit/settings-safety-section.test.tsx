@@ -197,8 +197,8 @@ describe("SafetySettingsSection", () => {
     expect(element.textContent).toContain("Primary contacts receive serious alerts");
     const primaryBadge = element.querySelector<HTMLElement>('[data-testid="primary-contact-badge"]');
     expect(primaryBadge?.textContent).toBe("Primary");
-    expect(primaryBadge?.classList.contains("text-[11px]")).toBe(true);
-    expect(primaryBadge?.classList.contains("text-[10px]")).toBe(false);
+    expect(primaryBadge?.classList.contains("text-xs")).toBe(true);
+    expect(primaryBadge?.classList.contains("text-[11px]")).toBe(false);
     expect(element.querySelector('button[aria-label="Edit Primary Person"]')).toBeTruthy();
     expect(element.querySelector('a[href="/emergency"]')).toBeTruthy();
     expect(element.textContent).toContain("Emergency reference");

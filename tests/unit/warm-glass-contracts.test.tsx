@@ -4,9 +4,11 @@
 //      in src — component color must come from design tokens (--color-accent-*,
 //      --color-surface-*, text-text-*). Weather widget / WxToys / screensaver are
 //      self-contained scenes and stay allowlisted.
-//   B. The documented type floor is 11px. text-[10px] compacts are deliberately
-//      grandfathered (Podium all-time lines, HallOfFame count badge). Anything
-//      below 10px (text-[8px], text-[9px]) is banned outright.
+//   B. The type floor is 12px (0.75rem / text-xs) — raised from 11px by the 2026-09-26
+//      UI audit (docs/UI_AUDIT_2026-09.md, AGENTS.md "UI Contracts"). Arbitrary px text
+//      below 12px — text-[10px], text-[11px], the old grandfathered Podium / HallOfFame
+//      compacts included — is banned outright: px sizes ignore the rem root and defeat
+//      Dynamic Type. Sizes >=12px stay legal (display numerals use text-[96px] etc.).
 //   C. Sub-44px tap targets (SoftButton sm, IconButton sm, Stepper buttons) must
 //      carry .hit-44 so their hit area expands to 44px (globals.css).
 import { describe, it, expect } from "vitest";
@@ -53,15 +55,16 @@ describe("Warm Glass contract A: no raw Tailwind palette classes in src", () => 
   });
 });
 
-describe("Warm Glass contract B: 11px type floor", () => {
-  it("no type below 10px (text-[8px] / text-[9px] banned)", () => {
+describe("Warm Glass contract B: 12px type floor", () => {
+  it("no arbitrary px text size below 12px (rem-based text-xs is the floor)", () => {
     const offenders: string[] = [];
     for (const file of walk(SRC)) {
       const rel = file.slice(process.cwd().length + 1);
       const lines = readFileSync(file, "utf8").split("\n");
       lines.forEach((line, i) => {
-        const m = line.match(/text-\[(?:[0-8](?:\.\d+)?|9(?:\.0+)?)px\]/);
-        if (m) offenders.push(`${rel}:${i + 1}: ${m[0]}`);
+        for (const m of line.matchAll(/text-\[(\d+(?:\.\d+)?)px\]/g)) {
+          if (parseFloat(m[1]) < 12) offenders.push(`${rel}:${i + 1}: ${m[0]}`);
+        }
       });
     }
     expect(offenders).toEqual([]);

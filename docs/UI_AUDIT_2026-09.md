@@ -82,6 +82,27 @@ role-filtered settings (`settingsSectionsForRole`) and a role-aware dock
 6. **Dead file found:** `src/styles/tokens.css` duplicates the token layer but **nothing
    imports it** — it was updated to stay honest and is a delete candidate in Phase 5.
 
+#### Contract delta this phase deliberately created (approved 2026-09-26)
+
+The repo carried an **11px type floor** since 2026-09-02 (restated in `docs/DESIGN.md` change
+records, the 2026-09-04 calendar/tasks plan specs, and locked by `compact-type-floor.test.tsx`
++ Warm Glass contract B, which grandfathered a few `text-[10px]` compacts). The measured sweep
+showed that floor was the *cause* of the P0: 238 nodes were rendering at exactly 11px and the
+grandfathered ones at 10px. The floor is therefore raised to **12px rem (`text-xs`)** and the
+grandfathering is retired:
+
+| Guard | Old contract | New contract |
+|---|---|---|
+| Warm Glass contract B (`warm-glass-contracts.test.tsx`) | bans `text-[8px]`/`text-[9px]`, allows 10/11px | bans **any** `text-[Npx]` with N < 12 in `src/**/*.tsx` |
+| `compact-type-floor.test.tsx` | asserts StatTile detail + DayStrip labels are `text-[11px]` | asserts they are `text-xs` and carry **no** arbitrary px size |
+| `settings-safety-section.test.tsx` | “Primary” badge is `text-[11px]` | badge is `text-xs` |
+| `AGENTS.md` | floor only implied | new **“UI Contracts (hard rules)”** section: 12px floor, ≥44px targets via size or `.hit-44`, AA text contrast, banned primitives |
+
+Historical change records in `docs/DESIGN.md` are left as written — they are history, and
+`AGENTS.md` now says so explicitly so a future agent does not "restore" 11px from them.
+Remaining `text-[Npx]` sites in `src` are all ≥13px (weather/display numerals up to 96px) and
+therefore legal.
+
 **Verification (re-measured headless, 390×844 + 1440×900, 10 routes × 2 viewports):**
 
 | Metric | Before | After |
