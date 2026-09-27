@@ -444,7 +444,7 @@ export default function SafetySettingsSection() {
                     title={(
                       <span className="flex items-center gap-2">
                         <span className="truncate">{contact.name}</span>
-                        {contact.isPrimary ? <span data-testid="primary-contact-badge" className="shrink-0 rounded-full bg-[var(--color-accent-rose)]/15 px-2 py-0.5 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--color-accent-rose)]">Primary</span> : null}
+                        {contact.isPrimary ? <span data-testid="primary-contact-badge" className="shrink-0 rounded-full bg-[var(--color-accent-rose)]/15 px-2 py-0.5 text-xs font-bold uppercase tracking-[0.12em] text-[var(--color-accent-rose)]">Primary</span> : null}
                       </span>
                     )}
                     subtitle={`${contact.phone} · ${contact.email}`}

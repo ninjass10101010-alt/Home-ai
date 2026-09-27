@@ -52,7 +52,7 @@ export default function SecurityPanel({ states, onRefresh }: SecurityPanelProps)
     <div className="space-y-4">
       {alarm && (
         <div className="rounded-3xl border border-white/10 bg-[var(--color-surface-0)]/30 p-5 backdrop-blur-xl">
-          <p className="text-[11px] uppercase tracking-wide text-text-muted">Alarm system</p>
+          <p className="text-xs uppercase tracking-wide text-text-muted">Alarm system</p>
           <p className={`mt-1 text-3xl font-bold ${armed ? "text-[var(--color-accent-rose)]" : "text-[var(--color-accent-mint)]"}`}>{alarmLabel(alarm.state)}</p>
           <p className="mt-1 text-xs text-text-secondary">{entityFriendlyName(alarm)}</p>
           {!readOnly &&
@@ -77,7 +77,7 @@ export default function SecurityPanel({ states, onRefresh }: SecurityPanelProps)
       )}
 
       <div className="rounded-3xl border border-white/10 bg-[var(--color-surface-0)]/30 p-5 backdrop-blur-xl">
-        <div className="text-[11px] uppercase tracking-wide text-text-muted">Presence</div>
+        <div className="text-xs uppercase tracking-wide text-text-muted">Presence</div>
         {people.length === 0 ? (
           <p className="mt-2 text-xs text-text-muted">No presence data yet</p>
         ) : (
@@ -99,7 +99,7 @@ export default function SecurityPanel({ states, onRefresh }: SecurityPanelProps)
       </div>
 
       <div className="rounded-3xl border border-white/10 bg-[var(--color-surface-0)]/30 p-5 backdrop-blur-xl">
-        <div className="text-[11px] uppercase tracking-wide text-text-muted">Doors &amp; windows</div>
+        <div className="text-xs uppercase tracking-wide text-text-muted">Doors &amp; windows</div>
         {openSensors.length === 0 ? (
           <div className="mt-2">
             <Chip size="sm" tone="success">All clear ✓</Chip>

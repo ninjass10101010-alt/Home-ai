@@ -106,7 +106,7 @@ export default function SwipeableRow({
               }}
             >
               <span className="text-lg">{action.icon}</span>
-              <span className="text-[10px]">{action.label}</span>
+              <span className="text-xs">{action.label}</span>
             </button>
           ))}
         </div>
@@ -128,7 +128,7 @@ export default function SwipeableRow({
               }}
             >
               <span className="text-lg">{action.icon}</span>
-              <span className="text-[10px]">{action.label}</span>
+              <span className="text-xs">{action.label}</span>
             </button>
           ))}
         </div>

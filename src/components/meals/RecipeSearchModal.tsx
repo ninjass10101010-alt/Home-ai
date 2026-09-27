@@ -216,7 +216,7 @@ export default function RecipeSearchModal({
                   </div>
                   <div className="px-3 py-2">
                     <p className="text-sm font-bold text-text-primary leading-snug line-clamp-2">{recipe.name}</p>
-                    {recipe.tags?.[0] && <p className="text-[10px] font-bold text-text-muted mt-0.5">{recipe.tags[0]}</p>}
+                    {recipe.tags?.[0] && <p className="text-xs font-bold text-text-muted mt-0.5">{recipe.tags[0]}</p>}
                   </div>
                 </button>
               ))}
@@ -247,7 +247,7 @@ export default function RecipeSearchModal({
                   {selected.tags?.length > 0 && (
                     <div className="mt-1.5 flex flex-wrap gap-1.5">
                       {selected.tags.slice(0, 4).map((tag, tagIdx) => (
-                        <span key={`${tag}-${tagIdx}`} className="glass-subtle rounded-full px-2 py-0.5 text-[10px] font-bold text-text-secondary">
+                        <span key={`${tag}-${tagIdx}`} className="glass-subtle rounded-full px-2 py-0.5 text-xs font-bold text-text-secondary">
                           {tag}
                         </span>
                       ))}
@@ -277,7 +277,7 @@ export default function RecipeSearchModal({
                 )}
 
                 {selected.sourceUrl && (
-                  <p className="text-text-muted text-[11px] break-all">
+                  <p className="text-text-muted text-xs break-all">
                     Source: <span className="text-text-secondary">{selected.sourceUrl}</span>
                   </p>
                 )}
@@ -319,7 +319,7 @@ export default function RecipeSearchModal({
             href={THEMEALDB_SITE_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-[11px] font-semibold text-text-muted hover:text-text-secondary transition-colors"
+            className="text-xs font-semibold text-text-muted hover:text-text-secondary transition-colors"
           >
             {THEMEALDB_ATTRIBUTION}
           </a>

@@ -334,7 +334,7 @@ export default function ServicesKeysCard() {
                   <span className={`h-2 w-2 rounded-full ${dot.cls}`} aria-hidden />
                   <span className="text-sm font-semibold text-text-primary">{svc.displayName}</span>
                   {svc.status.some((f) => f.source === "db") && (
-                    <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] uppercase text-text-secondary">DB</span>
+                    <span className="rounded bg-white/10 px-1.5 py-0.5 text-xs uppercase text-text-secondary">DB</span>
                   )}
                 </span>
                 <span className="text-xs text-text-muted">{open ? "Hide" : dot.label}</span>
@@ -380,15 +380,15 @@ export default function ServicesKeysCard() {
                               type="button"
                               disabled={busy}
                               onClick={() => void clearField(svc.id, f.key)}
-                              className="shrink-0 rounded-lg border border-white/10 px-2 py-1.5 text-[11px] text-text-secondary hover:bg-white/5 disabled:opacity-40"
+                              className="shrink-0 rounded-lg border border-white/10 px-2 py-1.5 text-xs text-text-secondary hover:bg-white/5 disabled:opacity-40"
                             >
                               Use .env
                             </button>
                           )}
                         </div>
-                        {f.helpText && <p className="text-[11px] text-text-muted">{f.helpText}</p>}
+                        {f.helpText && <p className="text-xs text-text-muted">{f.helpText}</p>}
                         {f.unreadable && (
-                          <p className="text-[11px] text-[var(--color-accent-rose)]">
+                          <p className="text-xs text-[var(--color-accent-rose)]">
                             Saved but unreadable — the server&apos;s encryption key has changed since this was saved. Re-enter the value below.
                           </p>
                         )}

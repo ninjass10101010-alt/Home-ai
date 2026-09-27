@@ -56,7 +56,7 @@ export default function SigmaImage({
                 <circle cx="8.5" cy="8.5" r="1.5" />
                 <path d="m21 15-5-5L5 21" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-              <span className="text-[10px]">no photo</span>
+              <span className="text-xs">no photo</span>
             </div>
           )}
         </div>

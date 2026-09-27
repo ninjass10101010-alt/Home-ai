@@ -182,7 +182,7 @@ export function TransactionLogger({
                   }`}
                 >
                   <span className="text-base">{s.label.split(' ')[0]}</span>
-                  <span className="text-[10px] font-medium">{s.label.split(' ')[1]}</span>
+                  <span className="text-xs font-medium">{s.label.split(' ')[1]}</span>
                 </button>
               ))}
             </div>

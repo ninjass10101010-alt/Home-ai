@@ -48,7 +48,7 @@ export default function ClimateCard({ states, onRefresh }: ClimateCardProps) {
 
   return (
     <div className="rounded-3xl border border-white/10 bg-[var(--color-surface-0)]/30 p-5 backdrop-blur-xl">
-      <p className="text-[11px] uppercase tracking-wide text-text-muted">{entityFriendlyName(climate)}</p>
+      <p className="text-xs uppercase tracking-wide text-text-muted">{entityFriendlyName(climate)}</p>
       <div className="mt-2 flex items-end justify-between gap-4">
         <div>
           <div className="text-5xl font-bold text-text-primary">{Number.isFinite(currentTemp) ? `${Math.round(currentTemp)}°` : "--"}</div>

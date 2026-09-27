@@ -1,0 +1,268 @@
+# UI / UX Audit — September 2026
+
+**Audit date:** 2026-09-26 · **Branch:** `warm-glass-v2` · **Phase 1 fixes landed same day**
+**Supersedes:** `docs/UI_CONSISTENCY_AUDIT.md` (2026-07-20), which audited against the
+pre-`warm-glass-v2` shadcn recipe (`<Card>`, `bg-primary`) and is kept for history only.
+**Status:** ✅ **Phase 1 shipped** (legibility + contrast + tap targets) · ⏳ Phases 2–5 open.
+
+Method: (1) static scan of 240 `.tsx` files / 46.9k lines, 29 routes, `globals.css`
+(2,852 lines / 296 selectors / 95 keyframes) + `modes.css`; (2) a live Playwright/Chromium
+pass at **390×844** and **1440×900** measuring *rendered* font sizes, *measured* hit-target
+rectangles, viewport utilisation, running animations and console errors, plus WCAG contrast
+math run against the token values in `src/app/globals.css`.
+
+Limitation: the live pass ran signed-out in **family/guest** mode (no PINs used), so
+`adult`, `kid` and `wall` layouts were reviewed in code only.
+
+---
+
+## Scorecard
+
+| Dimension | Grade | Evidence |
+|---|---|---|
+| Tokens / palette discipline | **A−** | 1,343 `var(--color-*)` uses vs 6 stray Tailwind palette classes |
+| Colour contrast | **D → B (post-fix)** | `text-muted` was 2.72:1 (dark) / 3.20:1 (light); now AA in both themes |
+| Typography & legibility | **D → C+ (post-fix)** | 354 `text-[10px]/[11px]` sites; 9px rendered text measured on `/calendar` |
+| Touch targets | **D → C (post-fix)** | measured 33×17, 41×25, 60×28, 72×30, 40×48 controls |
+| Visual consistency (radius / surface) | **C** | 12 distinct rendered radii incl. 11.2 / 12.8 / 13.6 / 14.4px; 569 hex + 523 `rgba(` literals in TSX |
+| Navigation & IA | **C−** | 3 competing navs; 5 feature routes with zero inbound links |
+| Responsive (tablet / wall) | **D** | Tasks, Meals, Chat, Calendar, KidHome contain **0** `md:`/`lg:` utilities |
+| States (loading / empty / error) | **C** | `EmptyState` 22 files, `Skeleton` 17, `ErrorState` 5; no `app/error.tsx` or `app/loading.tsx` |
+| Modal & focus management | **B+** | `Modal.tsx` is exemplary; but 24 ad-hoc `fixed inset-0` overlays vs 4 `role="dialog"` |
+| Motion | **B** | 13 reduced-motion blocks; 42 concurrent animations measured on Home |
+| Screen-reader basics | **B−** | 275 `aria-label`, 1 live region + 1 `h1` per page, 0 unlabelled inputs; glyph-only buttons unlabelled |
+
+**Worth keeping (do not regress):** the token layer is real and widely used; `Modal.tsx`
+has a correct focus trap / Escape / focus-restore implementation; the anti-FOUC
+`data-theme` + `data-contrast` bootstrap; `EmptyState` / `Skeleton` exist and are used;
+role-filtered settings (`settingsSectionsForRole`) and a role-aware dock
+(`visibleNavItems` swaps House → Rewards for kids); the dock's `--capsule-scale` math.
+
+---
+
+## Phase 1 — shipped 2026-09-26 (legibility · contrast · tap targets)
+
+1. **AA text ramp.** `--color-text-muted` `#4e5a72 → #8892aa` (dark, 2.72 → **6.06:1** on
+   canvas, 5.04:1 on `surface-2`) and `#8a8a8a → #6f6f6f` (light, 3.20 → **4.65:1**);
+   `--color-text-dim` `#363e50 → #828da6` (1.76 → 5.67:1) and `#ababab → #6f6f6f`
+   (2.13 → 4.65:1). Dark mode therefore has **two** readable text levels — hierarchy below
+   `text-secondary` must be carried by weight/size, never by colour. Mirrored in
+   `src/styles/tokens.css`. Boost mode lifts muted/dim to `#c3cadd`.
+2. **Sub-12px text retired (measured: 262 → 0 nodes).** All 354 `text-[10px]` / `text-[11px]`
+   sites → `text-xs` (0.75rem, rem-based so it scales with root font size), plus the CSS ramp
+   that the class sweep could not reach: `.calendar-strip-day .wd` 11 → `.75rem`;
+   `.calendar-day-btn` `.72 → .8rem`; `.calendar-today-btn` `.62 → .8rem`;
+   `.calendar-sync-btn` `.65 → .8rem`; `.calendar-add-link` `.72 → .8rem`;
+   `.calendar-day-number` `.72 → .82rem`; `.calendar-weekday` `.58 → .75rem`;
+   `.calendar-hero-kicker` `.68 → .76rem`; `.calendar-panel-subtitle` `.64 → .76rem`;
+   `.calendar-upcoming-day-label` `.55 → .75rem`; `.calendar-upcoming-empty` `.6 → .76rem`;
+   `.calendar-empty-subtitle` `.7 → .78rem`; `.member-tile-name` `.7 → .78rem`;
+   `.calendar-member-chip / .member-chip` `.7 → .78rem` (padding `.42/.72 → .5/.8rem`);
+   `AtmosphericBridge` drift particles `8+i*2 px → 12+i*2 px` so even decorative emoji clear
+   the floor and the CI sweep can assert “zero sub-12px”.
+
+3. **Dock labels no longer shrink to ~10px.** `--capsule-scale` renders ≈0.73 on a 390px
+   phone, which had been shrinking the active pill label; the label now cancels the scale
+   (`font-size: clamp(0.9rem, calc(0.85rem / var(--capsule-scale)), 1.35rem)`, CapsuleNav) so
+   it paints ≈14px at every width. Wall mode keeps its fixed `text-base`.
+4. **`.hit-44` now guarantees 44×44** instead of assuming the control was ≥36px: the pseudo
+   box is `max(100%, 44px)` centred on the element, so a 17px-tall link also qualifies.
+5. **Measured small controls enlarged:** `.calendar-month-nav .calendar-icon-btn` 36 → 44px;
+   `.calendar-today-btn`, `.calendar-sync-btn`, `.calendar-add-link` ≥44px tall (Add keeps
+   its text look, gains height + hover fill); Meals `All` / meal-type / `Archive` chips and
+   the dashed add tile ≥44px; week `‹ ›` 32 → 44px **and labelled** `Previous/Next week`
+   (they had no accessible name); chat Send/Stop 40 → 44px; Home `Sign in` pill ≥44px;
+   member sign-in chips gained `min-h-11 min-w-11` (they drive the width). Where the visual
+   pill must stay compact, the **hit region** was fixed instead of the paint: `hit-44` now sits
+   on `Chip` (so status chips like “Doors & windows closed” qualify), `ThemeToggle`,
+   `KitchenFlowCard` collapse, the chat “new conversation” and “Speaking as …” controls, and
+   the Home `Quick ask` link; `a.widget-accent-text` (widget footer “See all →” links, previously
+   15–17px tall) carries a 44px line box. WCAG 2.2 Target Size measures the hit region, so a
+   36px ghost button with `hit-44` passes.
+6. **Dead file found:** `src/styles/tokens.css` duplicates the token layer but **nothing
+   imports it** — it was updated to stay honest and is a delete candidate in Phase 5.
+
+**Verification (re-measured headless, 390×844 + 1440×900, 10 routes × 2 viewports):**
+
+| Metric | Before | After |
+|---|---|---|
+| Visible text nodes rendering under 12px | **262** | **0** |
+| Smallest rendered text | 8px (particles), 9px (calendar) | 12px |
+| Interactive rects under 44×44 *with no enlarged hit region* | **77** | **0** |
+| …(18 small visual rects remain, every one verified to carry a 44px `hit-44`/`::after` region via computed `::before` size) | | |
+| Horizontal overflow | 0 | 0 |
+| Inputs without an accessible name | 0 | 0 |
+| `<img>` without `alt` | 0 | 0 |
+| Routes with an `<h1>` | 10/10 | 10/10 |
+| Console errors | 401 noise while signed out (Phase 2) | unchanged |
+
+`npm run typecheck` passed · ESLint on every changed file: **0 errors** (1 pre-existing
+`<img>` warning in `meals/recipes/[id]/page.tsx`) · `npm run build` passed (52 routes, only the
+documented `middleware` deprecation and Turbopack-root warnings).
+
+
+---
+
+## Findings (full list, with evidence)
+
+### P0 — defects for this product's real context (shared family screen, used by kids)
+
+**1. Micro-text everywhere.** `text-[11px]` ×222 + `text-[10px]` ×132 in source; heaviest in
+`meals/PlanTab.tsx` (27), `ui/WeatherWidget.tsx` (25), `settings/AiModelsCard.tsx` (25),
+`modes/adult/AdultHome.tsx` (24), `modes/kid/KidHome.tsx` (18). Rendered: Home 35 sub-12px
+nodes (`Events Today`, `Tasks Pending`, `Days planned`, `NOW`, `5PM`), Calendar 54 nodes with
+11 at **9px**, and nine `Empty` labels at 10px on `/meals`. Illegible at wall distance, hostile
+to low-vision family members, and `px` arbitrary values defeat the rem-based Dynamic Type the
+design system promises. → **Fixed in Phase 1.**
+
+**2. `text-muted` / `text-dim` failed AA — at the smallest sizes.** 383 uses of
+`text-text-muted` across 98 files, and **283 of those lines also carried 10–11px text**: the
+compounding worst case (2.7:1 *at* 10px) sat on `"Events Today"`, `"Tasks Pending"`,
+`"Days planned"`, calendar weekday labels and Meals `"Empty"`. The codebase had already been
+patching this *locally* (`.widget-card` and `.kitchen-text` re-scope `--color-text-muted` to
+`#8b99b5` / `#4e596b`, with a comment naming the old `2.5:1` failure) — those local overrides
+are now redundant with the global token fix and can be retired in Phase 5. → **Fixed in Phase 1.**
+
+**3. Hit targets far below 44×44** (measured DOM rectangles, 390×844): Calendar `+ Add`
+**33×17**, `+ Add an event` **85×17**, `Today` 60×28, month `‹ ›` 36×36, `Sync` 72×30; Home
+`Sign in` 86×30, member sign-in chips **40×48** wide; Meals filter chips 91–112×34, collapse
+chevron 41×25, day arrows 32×32; Chat `Speaking as …` 110×26, `Send` 40×40. 21 failing
+controls on Home alone; 82 small `h-N w-N` pairs in source; the design system claims a 44×44
+minimum. → **Fixed for the measured controls in Phase 1** (systemic enforcement in Phase 5).
+
+**4. Silent failure: “Empty” is indistinguishable from “broken”.** Every route logs repeated
+`401 Unauthorized` while signed out, swallowed by empty catches (`AdultHome.tsx:145
+.catch(() => {})`); `ErrorState` is imported in only 5 files; there is **no `app/error.tsx`
+and no `app/loading.tsx`** anywhere (only `settings/not-found.tsx`). On a wall display a
+network hiccup therefore reads as “nothing on today” — exactly the wrong feedback for a
+calendar/chore product. → Phase 2.
+
+### P1 — navigation, IA, layout
+
+**5. Five features are unreachable.** Inbound-link scan across all TSX: `/analytics` **0**,
+`/memory` **0**, `/money-mountain` **0**, `/skill-tree` **0**, `/time-capsule` **0**,
+`/grocery` **1** (and that one only from the design-system demo page); `/screensaver` 0 —
+plausibly fine as a typed wall URL, since `CacheRefresher` special-cases it. Real API,
+migration and maintenance surface for screens nobody can navigate to; in an assistant-first
+product “unreachable” also means Consuela never surfaces them. → Phase 3: surface or delete,
+per route, no orphans left.
+
+**6. Three navs, three icon systems, one dead reference.** `CapsuleNav` (global via
+`PageShell`, 7 items, inline SVG, `pathname === item.href`, hard-coded lime
+`rgba(120,240,90,…)`), `SidebarNav` (rendered **only inside `AdultHome`**, 6 items, emoji
+icons, `startsWith` matching, honours `--color-accent-selected`; its header comment still
+credits a deleted `BottomNav`), plus `lucide-react` in 25 files. Consequences: leaving Home
+removes the desktop rail entirely while the phone dock stays; the two navs disagree about the
+active item on `/settings/me`; the dock ignores the ten-accent Accent Studio the design system
+advertises. → Phase 3: one route manifest (`path, label, iconKey, roles, modes, wall`) feeding
+one dock + one rail, one icon set, shared `isActive()`, dock glow tokenised as
+`--color-nav-active`.
+
+**7. Desktop/tablet is a stretched phone.** `PageShell` is `max-w-lg md:max-w-3xl
+lg:max-none`; at 1440×900 `/tasks` still renders one narrow 886px column, and `/calendar`,
+`/meals`, `/chat`, `/ha`, `/settings` report identical layout metrics to the 390px run.
+`KidHome`, `Meals`, `Calendar`, `Chat`, `Settings` contain **zero** `md:`/`lg:` utilities,
+while Home already has real tier work (`WALL_GRID_CLASS`, `homeGridClass(orientation)`) — the
+capability exists, it just stops at Home. `/chat` additionally bypasses `PageShell` entirely
+(no `<main>`), so it misses the sync banner, safe-area padding and `page-settle`. → Phase 4.
+
+**8. Home depth and density.** 3,859px of content at 390px width (~9.9 screens) with **42**
+concurrently running animations, 54 distinct background treatments and 13 `h3`s; adult mode
+adds a second dense layout (`OverviewBar` + 2-col grid + 7 integration widgets), so both modes
+are scroll-heavy and structurally different. → Phase 4: rank widgets to the first fold, one
+`More…` sheet (already modeled by `MoreMenuItem`), cap ambient motion.
+
+### P2 — consistency & maintainability
+
+**9. Radius drift.** Tokens are `10 / 16 / 20 / 28 / 36 / 9999`; rendered radii include
+`11.2, 12.8, 13.6, 14.4, 17.6, 24, 32px` (`rounded-2xl` ×335, `rounded-3xl` ×34,
+`rounded-[2rem]`, `rounded-[1.25rem]`).
+**10. Duplicated surface recipes.** 569 hex + 523 `rgba(` literals in TSX vs one `Surface` /
+`--neu-raised` system → themes and Accent Studio cannot retune the app centrally.
+**11. Modal adoption 1 : 24.** One excellent `Modal` vs 24 hand-rolled `fixed inset-0`
+overlays; only 4 `role="dialog"` / `aria-modal` in the app → Escape, focus-return and
+scroll-lock differ per sheet.
+**12. Emoji as UI chrome.** The member sign-in rail exposes only `"🐱 👨 👧 …"` as accessible
+text; meal tabs (🌅☀️🥨🌙), Settings section icons and the AdultHome stat strip (📅✅🍽️) are
+emoji too — platform-dependent rendering, no tinting, no contrast control. Keep emoji for
+*content* (food prefs, personalities), use SVG (`HomeWidgetIcon`, `Avatar`) for controls.
+**13. Two motion systems.** `DESIGN_SYSTEM.md` says motion is CSS-only, yet `framer-motion`
+and `three` are dependencies; there is no user-facing “reduce motion” toggle (OS-level only).
+**14. Monolith screens.** `tasks/page.tsx` **2,943** lines / 33 `useState`,
+`calendar/page.tsx` 1,358, `KidHome.tsx` 1,354, `WeatherWidget.tsx` 1,753 — the family's
+daily driver is the hardest file to change safely.
+**15. Two design-system pages.** `src/app/design-system/page.tsx` and
+`src/app/_design-system/page.tsx` are near-duplicates (each with its own production gate),
+while `DESIGN_SYSTEM.md` §7 claims `_design-system` *rewrites* to `/design-system` — there is
+no such rewrite in `next.config.ts`. Two sources of truth means the standard drifts.
+**16. `src/styles/tokens.css` is imported by nothing** yet duplicates the whole token layer
+(now updated in lockstep, still a delete candidate).
+**17. One 2,852-line global stylesheet** (296 selectors, 95 keyframes) → specificity
+collisions (`warm-glass-*`, `widget-card`, `material-*`, `tap`, `capsule-*`) and invisible
+dead CSS.
+**18. Tests cannot protect the UI.** 4 e2e specs, 1 a11y-related assertion, no axe-core.
+**19. Doc drift.** `DESIGN_SYSTEM.md` promised 44×44 targets, rem-based type, CSS-only motion,
+Modal-for-every-sheet and the `/_design-system` rewrite; the first three are now true, the
+rest need Phase 5.
+
+---
+
+## Remaining phases (each independently shippable behind its own commit)
+
+**Phase 2 — honest states (P0-4).** Add `app/error.tsx` + `app/loading.tsx`; one shared
+`useSafeFetch` that distinguishes *loading* → *empty* → *offline/unauthorised* instead of
+swallowing; give each Home widget an error/offline state (the 401-on-every-fetch pattern in
+`AdultHome.tsx` / `page.tsx` is the template to replace); make the existing `sync-failed`
+banner offer Retry, not just colour a dot.
+
+**Phase 3 — navigation & IA (P1-5, P1-6).** `lib/nav-items.ts` as the single manifest feeding
+dock + rail; adopt it in `CapsuleNav` and `SidebarNav` (or delete `SidebarNav` and keep Home's
+widgets + the rail); resolve the `===` vs `startsWith` active-item mismatch; tokenise the lime
+glow as `--color-nav-active` so all ten accents work; decide **surface or delete** per orphaned
+route (`/memory`, `/grocery`, `/money-mountain`, `/skill-tree`, `/time-capsule`, `/analytics`)
+— deleting is allowed and cheapest.
+
+**Phase 4 — responsive tiers (P1-7, P1-8).** Tablet two-column + rail for Tasks / Meals /
+Calendar / Settings; wall composition per screen reusing the `WALL_GRID_CLASS` idiom (12ft
+legibility: ≥16px body, 44px targets, no hover-only affordances); route `/chat` through
+`PageShell`; rank Home widgets and fold the rest into the `More…` sheet.
+
+**Phase 5 — design-system convergence (P2).** Delete or import `styles/tokens.css`; map
+`rounded-2xl` → `--radius-lg` etc. via `@theme` aliases and ban raw `rounded-[..]`; replace
+`bg-white/[0.03]` + hex clusters with `Surface`/`--neu-*`; port the 24 ad-hoc overlays onto
+`Modal` (or `BottomSheet` for mobile) and add `role="dialog"` where a sheet must stay; add a
+user-facing **Reduce motion** toggle alongside `data-contrast`; merge the two design-system
+pages into one, and grow it into a live audit (axe-core, min-tap-target, sub-12px sweep,
+inset-shadow ban); split `tasks/page.tsx` by section.
+
+**Guardrails to make this stick:** an ESLint rule (or CI grep) rejecting `text-[9|10|11]px`
+and unlabelled `h-8/h-9/h-10 w-8/w-9/w-10` without `hit-44`; the Playwright probe as a CI job
+asserting *zero* sub-12px nodes, *zero* hit targets <44px and *zero* new `aria-label`-less
+controls per release; axe-core wired into `e2e/console-errors.spec.ts`; a PR checklist item
+for `DESIGN_SYSTEM.md` + `CHANGELOG.md` + `docs/UI_AUDIT_2026-09.md`.
+
+---
+
+## Appendix — reproduction
+
+```bash
+# scratch dir for the sweep (not repo tooling)
+mkdir -p /tmp/ui-audit
+# audit.cjs  — measures the 10 routes at 390x844 + 1440x900, writes report.json + screenshots
+# after.cjs  — same sweep against the fixed build, writes report-after.json
+# compare.cjs— prints the before/after table above from report-before.json + report-after.json
+# tiny-detail.cjs / ctrl-detail.cjs — per-route "every sub-12px node" / "every sub-44px rect
+#                                      with its computed ::before hit box" listings
+cd ~/Documents/Dashboard/Home-ai && node /tmp/ui-audit/after.cjs && node /tmp/ui-audit/compare.cjs
+```
+
+
+The probe launches the Playwright-pinned Chromium by executable path (this machine's global
+`playwright` browser cache needs `chmod -R a+rX` after install), walks
+`/ · /calendar · /tasks · /meals · /chat · /settings · /ha` at 390×844 and 1440×900 signed-out,
+and reports rendered font sizes, computed hit targets, viewport utilisation, running
+animations, background variants, headings, console errors and token contrast math.
+It is a scratch artifact, not repo tooling — Phase 5 promotes it into CI.
+
+
+

@@ -36,7 +36,7 @@ export default function AtmosphericBridge() {
               position: "absolute",
               left: `${15 + i * 25}%`,
               top: "50%",
-              fontSize: `${8 + i * 2}px`,
+              fontSize: `${12 + i * 2}px`,
               opacity: theme.atmosphereOpacity * 1.5,
               animationDelay: `${i * 0.8}s`,
               animationDuration: `${4 + i * 1.2}s`,

@@ -121,7 +121,7 @@ export default function AllowanceWidget() {
               {isKid ? "My Allowance" : "Allowance & Cash-Out"}
             </h3>
           </div>
-          <span className="text-[10px] font-bold text-[var(--color-accent-mint)] uppercase tracking-wider">
+          <span className="text-xs font-bold text-[var(--color-accent-mint)] uppercase tracking-wider">
             Greenlight
           </span>
         </div>
@@ -136,15 +136,15 @@ export default function AllowanceWidget() {
         >
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-[10px] text-text-muted uppercase tracking-wider">Points Balance</p>
+              <p className="text-xs text-text-muted uppercase tracking-wider">Points Balance</p>
               <p className="text-2xl font-black text-text-primary tabular-nums">{points}</p>
             </div>
             <div className="text-right">
-              <p className="text-[10px] text-text-muted uppercase tracking-wider">Cash Value</p>
+              <p className="text-xs text-text-muted uppercase tracking-wider">Cash Value</p>
               <p className="text-2xl font-black text-[var(--color-accent-mint)] tabular-nums">${cashValue.toFixed(2)}</p>
             </div>
           </div>
-          <p className="text-[10px] text-text-muted mt-2">
+          <p className="text-xs text-text-muted mt-2">
             {conversionRate} points = $1.00
           </p>
         </div>
@@ -165,7 +165,7 @@ export default function AllowanceWidget() {
                   : "No points to cash out"
               }
             </SoftButton>
-            <p className="text-[10px] text-text-muted text-center mt-2">
+            <p className="text-xs text-text-muted text-center mt-2">
               {points > 0
                 ? "Money goes to your Greenlight card! 🎉"
                 : "Complete quests to earn points!"}
@@ -198,7 +198,7 @@ export default function AllowanceWidget() {
         {/* Transaction History */}
         {transactions.length > 0 && (
           <div className="mt-4 pt-3 border-t border-white/[0.04]">
-            <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-2">
+            <p className="text-xs font-bold text-text-muted uppercase tracking-wider mb-2">
               Recent Transactions
             </p>
             <div className="space-y-1.5">
@@ -206,8 +206,8 @@ export default function AllowanceWidget() {
                 <div key={txn.id} className="flex items-center gap-2.5 py-1">
                   <span className="text-sm">{txn.type === "deposit" ? "💰" : "💸"}</span>
                   <div className="flex-1 min-w-0">
-                    <p className="text-[11px] text-text-primary truncate">{txn.description}</p>
-                    <p className="text-[11px] text-text-muted">
+                    <p className="text-xs text-text-primary truncate">{txn.description}</p>
+                    <p className="text-xs text-text-muted">
                       {new Date(txn.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                       {" · "}{txn.points} pts
                     </p>

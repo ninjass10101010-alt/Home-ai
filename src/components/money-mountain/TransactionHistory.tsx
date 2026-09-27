@@ -89,7 +89,7 @@ function TransactionRow({
             {transaction.description}
           </span>
           {transaction.isMatch && (
-            <span className="text-[10px] font-medium text-[var(--color-accent-violet)] bg-[var(--color-accent-violet)]/10 px-1.5 py-0.5 rounded">
+            <span className="text-xs font-medium text-[var(--color-accent-violet)] bg-[var(--color-accent-violet)]/10 px-1.5 py-0.5 rounded">
               MATCH
             </span>
           )}

@@ -53,22 +53,22 @@ function PodiumSlot({
             {entry.name.split(" ")[0]}
           </span>
           {isYou && (
-            <span className="rounded-md px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wider"
+            <span className="rounded-md px-1.5 py-0.5 text-xs font-bold uppercase tracking-wider"
               style={{ background: `${color}25`, color }}>
               You
             </span>
           )}
           <div className="flex items-center gap-1.5">
             <span className="text-base font-bold text-text-primary display-numeral">{entry.points}</span>
-            <span className="text-[10px] text-text-muted">pts</span>
+            <span className="text-xs text-text-muted">pts</span>
           </div>
           {prize && (
-            <div className="text-[10px] text-text-muted truncate max-w-full" title={prize.text}>
+            <div className="text-xs text-text-muted truncate max-w-full" title={prize.text}>
               🎁 {prize.text}
             </div>
           )}
           {showAllTime && (
-            <div className="text-[10px] text-text-muted">{entry.allTimePoints} all-time</div>
+            <div className="text-xs text-text-muted">{entry.allTimePoints} all-time</div>
           )}
           <div className="flex items-center gap-1.5">
             {entry.streak > 0 && <span className="text-xs text-[var(--color-accent-amber)] font-semibold">🔥{entry.streak}d</span>}

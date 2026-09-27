@@ -38,11 +38,11 @@ export default function PriceCompareSheet({ open, onClose, items, onApply }: Pri
         <div className="max-h-[60vh] overflow-auto">
           {/* Header row */}
           <div className="sticky top-0 z-10 grid border-b border-white/10 bg-[var(--color-surface-1)]" style={{ gridTemplateColumns: `120px repeat(${storesWithPrices.length}, 1fr)` }}>
-            <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-text-muted">Item</div>
+            <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-text-muted">Item</div>
             {storesWithPrices.map((s) => (
-              <div key={s.id} className={`px-2 py-2 text-center text-[11px] font-semibold ${result.cheapestStore === s.id ? "text-[var(--color-accent-mint)]" : "text-text-muted"}`}>
+              <div key={s.id} className={`px-2 py-2 text-center text-xs font-semibold ${result.cheapestStore === s.id ? "text-[var(--color-accent-mint)]" : "text-text-muted"}`}>
                 {s.label}
-                {result.cheapestStore === s.id && <span className="ml-1 text-[11px]">★</span>}
+                {result.cheapestStore === s.id && <span className="ml-1 text-xs">★</span>}
               </div>
             ))}
           </div>

@@ -488,7 +488,7 @@ export default function HomePage() {
                 <div className="flex shrink-0 items-center gap-2">
                   {showSessionPill && (
                     <span
-                      className={`rounded-full border border-white/10 bg-[var(--color-surface-0)]/35 px-2.5 py-1 text-[10px] font-semibold tabular-nums text-text-secondary backdrop-blur-xl ${
+                      className={`rounded-full border border-white/10 bg-[var(--color-surface-0)]/35 px-2.5 py-1 text-xs font-semibold tabular-nums text-text-secondary backdrop-blur-xl ${
                         sessionWarning ? "session-pill-warning border-[var(--color-accent-amber)]/30 bg-[var(--color-accent-amber)]/10 text-[var(--color-accent-amber)]" : ""
                       }`}
                       aria-label={`Auto sign-out in ${sessionPillMM}:${sessionPillSS}`}
@@ -519,7 +519,7 @@ export default function HomePage() {
                 <button
                   type="button"
                   onClick={() => setPickerOpen(true)}
-                  className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-[var(--color-surface-0)]/35 px-3 py-1.5 text-xs font-semibold text-text-secondary backdrop-blur-xl transition hover:bg-[var(--color-surface-0)]/55 hover:text-text-primary active:scale-95"
+                  className="min-h-11 inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-[var(--color-surface-0)]/35 px-3 py-1.5 text-xs font-semibold text-text-secondary backdrop-blur-xl transition hover:bg-[var(--color-surface-0)]/55 hover:text-text-primary active:scale-95"
                   aria-label="Sign in"
                   title="Sign in"
                 >
@@ -551,7 +551,7 @@ export default function HomePage() {
                       handleSignInPick(member);
                     }
                   }}
-                  className="active:scale-90 transition-transform"
+                  className="min-h-11 min-w-11 flex items-center justify-center active:scale-90 transition-transform"
                 >
                   <Avatar name={member.name} color={member.color} emoji={member.emoji} size={normalizeAvatarSize(member.avatarSize)} variant="emoji" glow={member.glow} />
                 </button>
@@ -559,7 +559,7 @@ export default function HomePage() {
               {!isLoggedIn && (
                 <Chip
                   tone="accent"
-                  className="h-12 w-12 !px-0 text-lg"
+                  className="h-12 w-12 min-w-12 shrink-0 !px-0 text-lg"
                   aria-label="Add a family member"
                   title="Add a family member"
                   onClick={() => router.push("/settings")}
@@ -655,7 +655,7 @@ export default function HomePage() {
                         )}
                         {upcoming.length > 0 && (
                           <div className="pt-3 border-t border-white/10">
-                            <div className="text-[11px] uppercase tracking-wide text-text-muted mb-2">Upcoming important</div>
+                            <div className="text-xs uppercase tracking-wide text-text-muted mb-2">Upcoming important</div>
                             <div className="space-y-2">
                               {upcoming.map((event: any) => {
                                 const timeStr = event.time
@@ -784,7 +784,7 @@ export default function HomePage() {
                     <div key="aiQuickAsk" className={span}>
                       <WidgetCard tone="#8b5cf6" icon={<HomeWidgetIcon variant="ask" size="lg" />} className="h-full">
                         <div className="flex flex-1 flex-col items-center justify-center gap-1 p-5 text-center">
-                          <Link href="/chat" className="flex items-center gap-2 tap-sm">
+                          <Link href="/chat" className="flex items-center gap-2 tap-sm hit-44">
                             <h3 className="text-base font-bold text-text-primary">Quick ask</h3>
                             <span className="widget-accent-text">→</span>
                           </Link>
@@ -794,7 +794,7 @@ export default function HomePage() {
                               <Link
                                 key={prompt}
                                 href={`/chat?q=${encodeURIComponent(prompt)}`}
-                                className="tap-sm rounded-full border border-[var(--color-accent-violet)]/25 bg-[var(--color-accent-violet)]/10 px-2.5 py-1 text-[11px] font-semibold widget-accent-text transition-colors hover:bg-[var(--color-accent-violet)]/20"
+                                className="tap-sm rounded-full border border-[var(--color-accent-violet)]/25 bg-[var(--color-accent-violet)]/10 px-2.5 py-1 text-xs font-semibold widget-accent-text transition-colors hover:bg-[var(--color-accent-violet)]/20"
                               >
                                 {prompt}
                               </Link>

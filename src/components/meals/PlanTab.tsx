@@ -235,7 +235,7 @@ export default function PlanTab({
       <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
         <button
           onClick={() => setMealFilter(null)}
-          className={`shrink-0 cursor-pointer rounded-full px-3.5 py-1.5 text-xs font-bold tap-sm ${
+          className={`shrink-0 cursor-pointer rounded-full min-h-11 px-3.5 py-1.5 text-xs font-bold tap-sm ${
             !mealFilter
               ? "bg-[var(--color-accent-selected)] text-white"
               : "glass-subtle text-text-secondary hover:text-text-primary"
@@ -248,7 +248,7 @@ export default function PlanTab({
             <button
               key={type.id}
               onClick={() => setMealFilter(mealFilter === type.id ? null : type.id)}
-              className={`shrink-0 cursor-pointer rounded-full px-3.5 py-1.5 text-xs font-bold tap-sm flex items-center gap-1.5 ${
+              className={`shrink-0 cursor-pointer rounded-full min-h-11 px-3.5 py-1.5 text-xs font-bold tap-sm flex items-center gap-1.5 ${
                 mealFilter === type.id
                   ? "text-white"
                   : "glass-subtle text-text-secondary hover:text-text-primary"
@@ -272,7 +272,8 @@ export default function PlanTab({
             <div className="flex items-center justify-between mb-1">
               <button
                 onClick={() => goToWeek?.(-1)}
-                className="w-8 h-8 rounded-lg glass flex items-center justify-center text-text-secondary hover:text-text-primary tap-sm text-sm"
+                aria-label="Previous week"
+                className="h-11 w-11 rounded-lg glass flex items-center justify-center text-text-secondary hover:text-text-primary tap-sm text-base"
               >
                 ‹
               </button>
@@ -283,7 +284,7 @@ export default function PlanTab({
                 {!isCurrentWeek && (
                   <button
                     onClick={() => archiveCurrentWeek?.()}
-                    className="text-[10px] px-2 py-1 rounded-lg bg-[var(--color-surface-2)] text-text-muted hover:text-text-primary tap-sm"
+                    className="min-h-11 px-3 py-1 rounded-lg bg-[var(--color-surface-2)] text-text-muted hover:text-text-primary tap-sm"
                   >
                     Archive
                   </button>
@@ -299,13 +300,14 @@ export default function PlanTab({
                   </SoftButton>
                 )}
                 {weeklyPlanError && (
-                  <span className="text-[10px] px-2 py-1 rounded-lg bg-[var(--color-accent-rose)]/15 text-[var(--color-accent-rose)]">
+                  <span className="text-xs px-2 py-1 rounded-lg bg-[var(--color-accent-rose)]/15 text-[var(--color-accent-rose)]">
                     {weeklyPlanError}
                   </span>
                 )}
                 <button
                   onClick={() => goToWeek?.(1)}
-                  className="w-8 h-8 rounded-lg glass flex items-center justify-center text-text-secondary hover:text-text-primary tap-sm text-sm"
+                  aria-label="Next week"
+                  className="h-11 w-11 rounded-lg glass flex items-center justify-center text-text-secondary hover:text-text-primary tap-sm text-base"
                 >
                   ›
                 </button>
@@ -330,7 +332,7 @@ export default function PlanTab({
                     >
                       <span className="text-xs font-semibold text-[var(--color-accent-selected)]">{day}</span>
                       <span className="text-2xl">{dinner?.emoji ?? "➕"}</span>
-                      <span className="text-[10px] text-text-muted text-center leading-tight w-full truncate">
+                      <span className="text-xs text-text-muted text-center leading-tight w-full truncate">
                         {mealCount > 0 ? `${mealCount} meal${mealCount > 1 ? "s" : ""}` : "Empty"}
                       </span>
                     </button>
@@ -338,20 +340,20 @@ export default function PlanTab({
                       <button
                         onClick={(e) => { e.stopPropagation(); setCopyTarget(targetPickerOpen ? null : day); }}
                         aria-label="Copy day meals"
-                        className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-[var(--color-surface-0)]/80 border border-[var(--color-surface-4)] text-[10px] flex items-center justify-center shadow tap-sm"
+                        className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-[var(--color-surface-0)]/80 border border-[var(--color-surface-4)] text-xs flex items-center justify-center shadow tap-sm"
                       >
                         📋
                       </button>
                     )}
                     {targetPickerOpen && (
                       <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 z-20 p-2 rounded-xl bg-[var(--color-surface-0)]/95 border border-[var(--color-surface-4)] shadow-xl backdrop-blur-xl w-[152px]">
-                        <div className="text-[10px] font-semibold text-text-muted mb-1.5 text-center">Copy {day} to</div>
+                        <div className="text-xs font-semibold text-text-muted mb-1.5 text-center">Copy {day} to</div>
                         <div className="grid grid-cols-3 gap-1.5">
                           {targetDays.map(target => (
                             <button
                               key={target}
                               onClick={() => { copyDayMeals(day, target); setCopyTarget(null); }}
-                              className="rounded-lg px-1 py-1.5 text-[10px] font-semibold bg-[var(--color-surface-2)] hover:bg-[var(--color-accent-selected)] hover:text-white tap-sm"
+                              className="rounded-lg px-1 py-1.5 text-xs font-semibold bg-[var(--color-surface-2)] hover:bg-[var(--color-accent-selected)] hover:text-white tap-sm"
                             >
                               {target}
                             </button>
@@ -370,7 +372,7 @@ export default function PlanTab({
                 >
                   <span className="text-xs font-semibold text-text-secondary">{day}</span>
                   <span className="text-2xl">{dinner?.emoji ?? "➕"}</span>
-                  <span className="text-[10px] text-text-muted text-center leading-tight w-full truncate">
+                  <span className="text-xs text-text-muted text-center leading-tight w-full truncate">
                     {mealCount > 0 ? `${mealCount} meal${mealCount > 1 ? "s" : ""}` : "Empty"}
                   </span>
                 </button>
@@ -411,7 +413,7 @@ export default function PlanTab({
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
-                            <span className="text-[11px] font-bold uppercase tracking-wider text-text-muted">
+                            <span className="text-xs font-bold uppercase tracking-wider text-text-muted">
                               {meta?.label || type.label} · {meta?.time || ""}
                             </span>
                             <div className="ml-auto flex gap-1.5">
@@ -426,8 +428,8 @@ export default function PlanTab({
                           {duplicateTarget?.meal.id === mealForType.id && (
                             <div className="mt-2 p-2 rounded-xl bg-[var(--color-surface-0)]/70 border border-[var(--color-surface-4)] backdrop-blur-xl">
                               <div className="flex items-center justify-between mb-1.5">
-                                <span className="text-[10px] font-semibold text-text-muted">Copy to day</span>
-                                <button onClick={() => setDuplicateTarget(null)} className="text-[10px] text-text-muted hover:text-text-primary px-1.5 py-0.5 rounded hover:bg-[var(--color-surface-2)] tap-sm">Close</button>
+                                <span className="text-xs font-semibold text-text-muted">Copy to day</span>
+                                <button onClick={() => setDuplicateTarget(null)} className="text-xs text-text-muted hover:text-text-primary px-1.5 py-0.5 rounded hover:bg-[var(--color-surface-2)] tap-sm">Close</button>
                               </div>
                               <div className="grid grid-cols-3 gap-1.5">
                                 {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(d => (
@@ -435,7 +437,7 @@ export default function PlanTab({
                                     key={d}
                                     disabled={d === mealForType.time}
                                     onClick={() => { duplicateMeal(mealForType, d); setDuplicateTarget(null); }}
-                                    className={`rounded-lg px-1 py-1.5 text-[10px] font-semibold transition ${
+                                    className={`rounded-lg px-1 py-1.5 text-xs font-semibold transition ${
                                       d === mealForType.time
                                         ? "opacity-40 cursor-not-allowed bg-[var(--color-surface-2)]"
                                         : "bg-[var(--color-surface-2)] hover:bg-[var(--color-accent-selected)] hover:text-white"
@@ -458,7 +460,7 @@ export default function PlanTab({
                               <span className="glass-subtle rounded-full px-2 py-0.5">👨‍👩‍👧‍👦 {display.servings}</span>
                             )}
                             {display.tags?.map((t: string) => (
-                              <span key={t} className="hidden sm:inline rounded-full bg-[var(--color-surface-2)] px-2 py-0.5 text-text-secondary text-[10px] font-medium border border-[var(--color-surface-3)]">
+                              <span key={t} className="hidden sm:inline rounded-full bg-[var(--color-surface-2)] px-2 py-0.5 text-text-secondary text-xs font-medium border border-[var(--color-surface-3)]">
                                 {t}
                               </span>
                             ))}
@@ -505,7 +507,7 @@ export default function PlanTab({
                   {isPickerOpen && (
                     <div className="mt-2 space-y-3">
                       <div>
-                        <p className="text-[11px] text-text-muted font-semibold mb-2 px-1">
+                        <p className="text-xs text-text-muted font-semibold mb-2 px-1">
                           ⚡ Quick pick a {type.label.toLowerCase()}:
                         </p>
                         <div className="grid grid-cols-2 gap-2">
@@ -524,10 +526,10 @@ export default function PlanTab({
                               </span>
                               <div className="min-w-0">
                                 <p className="text-text-primary text-xs font-semibold leading-tight truncate">{idea.name}</p>
-                                <p className="text-text-muted text-[10px] mt-0.5">{idea.prepTime}</p>
+                                <p className="text-text-muted text-xs mt-0.5">{idea.prepTime}</p>
                                 <div className="flex gap-1 flex-wrap mt-1">
                                   {idea.tags.slice(0, 2).map((t: string) => (
-                                    <span key={t} className="px-1.5 py-0.5 rounded-md bg-[var(--color-surface-2)] text-text-secondary text-[11px] font-medium">
+                                    <span key={t} className="px-1.5 py-0.5 rounded-md bg-[var(--color-surface-2)] text-text-secondary text-xs font-medium">
                                       {t}
                                     </span>
                                   ))}
@@ -548,10 +550,10 @@ export default function PlanTab({
 
                       <div className="pt-2 border-t border-[var(--color-surface-4)]/60">
                         <div className="flex items-center justify-between mb-2">
-                          <p className="text-[11px] text-text-muted font-semibold px-1">
+                          <p className="text-xs text-text-muted font-semibold px-1">
                             📖 Recipe catalog → add to {activeDay} ({type.label}):
                           </p>
-                          <span className="text-[10px] text-text-muted px-2 py-0.5 rounded-md bg-[var(--color-surface-2)] border border-[var(--color-surface-3)]">
+                          <span className="text-xs text-text-muted px-2 py-0.5 rounded-md bg-[var(--color-surface-2)] border border-[var(--color-surface-3)]">
                             {recipes?.length ? `${recipes.length} recipes` : "No recipes"}
                           </span>
                         </div>
@@ -570,7 +572,7 @@ export default function PlanTab({
                                 </span>
                                 <div className="min-w-0">
                                   <p className="text-text-primary text-xs font-semibold leading-tight truncate">{r.name}</p>
-                                  <p className="text-text-muted text-[10px] mt-0.5">{r.prepTime} · {r.servings} servings</p>
+                                  <p className="text-text-muted text-xs mt-0.5">{r.prepTime} · {r.servings} servings</p>
                                 </div>
                               </button>
                             ))}
@@ -578,7 +580,7 @@ export default function PlanTab({
                         ) : (
                           <div className="text-center py-4">
                             <p className="text-text-muted text-xs">No recipes in your catalog yet.</p>
-                            <p className="text-text-muted text-[10px] mt-1">Use the 📖 Recipe box below to add/import.</p>
+                            <p className="text-text-muted text-xs mt-1">Use the 📖 Recipe box below to add/import.</p>
                           </div>
                         )}
                       </div>
@@ -610,7 +612,7 @@ export default function PlanTab({
           {tonightDinner && (
             <WidgetCard tone="#10b981" icon={<span>🌙</span>} className="p-5 pt-16">
               <div className="flex items-center justify-between mb-2 pl-[72px]">
-                <p className="text-[11px] font-bold uppercase tracking-wider text-text-muted">
+                <p className="text-xs font-bold uppercase tracking-wider text-text-muted">
                   Tonight&apos;s dinner
                 </p>
                 <span className="text-lg">
@@ -620,7 +622,7 @@ export default function PlanTab({
               <div className="flex items-center gap-3">
                 <div className="min-w-0 flex-1">
                   <h3 className="font-bold text-text-primary leading-tight truncate">{tonightDinner.meal.name}</h3>
-                  <p className="text-[11px] font-semibold text-text-muted mt-1">
+                  <p className="text-xs font-semibold text-text-muted mt-1">
                     ⏱ {tonightDinner.meal.prepTime || "Not set"}
                     {tonightDinner.meal.calories ? ` · 🔥 ${tonightDinner.meal.calories} kcal` : ""}
                     {tonightDinner.meal.servings ? ` · 👨‍👩‍👧‍👦 ${tonightDinner.meal.servings}` : ""}
@@ -638,7 +640,7 @@ export default function PlanTab({
                       }}
                     />
                   </div>
-                  <p className="mt-1.5 text-[11px] font-semibold text-text-muted">
+                  <p className="mt-1.5 text-xs font-semibold text-text-muted">
                     {tonightDinner.readiness.ready} of {tonightDinner.readiness.total} ingredients ready in your pantry
                   </p>
                 </>
@@ -646,7 +648,7 @@ export default function PlanTab({
               {tonightDinner.meal.tags?.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {tonightDinner.meal.tags.slice(0, 3).map((t: string) => (
-                    <span key={t} className="glass-subtle rounded-full px-2 py-0.5 text-[10px] font-semibold text-text-secondary">
+                    <span key={t} className="glass-subtle rounded-full px-2 py-0.5 text-xs font-semibold text-text-secondary">
                       {t}
                     </span>
                   ))}
@@ -673,7 +675,7 @@ export default function PlanTab({
                 </svg>
                 <div className="absolute inset-0 flex flex-col items-center justify-center">
                   <span className="text-xl font-black text-text-primary">{totalKcal}</span>
-                  <span className="text-[10px] font-bold text-text-muted">/ {CALORIE_GOAL} kcal</span>
+                  <span className="text-xs font-bold text-text-muted">/ {CALORIE_GOAL} kcal</span>
                 </div>
               </div>
               <div className="flex-1 space-y-2.5 text-xs font-bold">
@@ -702,7 +704,7 @@ export default function PlanTab({
               <h3 className="text-xs font-bold uppercase tracking-wider text-text-muted">
                 Who&apos;s eating tonight
               </h3>
-              <span className="text-[10px] font-semibold text-text-muted">{eatingMembers.length} / {familyMembers.length}</span>
+              <span className="text-xs font-semibold text-text-muted">{eatingMembers.length} / {familyMembers.length}</span>
             </div>
             <div className="mt-3 flex items-start gap-2 flex-wrap">
               {familyMembers.map((member: any) => {
@@ -732,7 +734,7 @@ export default function PlanTab({
                       variant="emoji"
                       animated={false}
                     />
-                    <span className="w-full min-w-0 truncate text-center text-[11px] font-bold text-text-secondary">{member.name}</span>
+                    <span className="w-full min-w-0 truncate text-center text-xs font-bold text-text-secondary">{member.name}</span>
                   </button>
                 );
               })}
@@ -740,7 +742,7 @@ export default function PlanTab({
                 <button
                   type="button"
                   onClick={() => setShowMemberPicker(v => !v)}
-                  className="ml-1 flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border-2 border-dashed border-[var(--color-surface-4)] text-xl font-bold text-text-muted transition hover:bg-[var(--color-surface-0)]/60 hover:border-[var(--color-accent-selected)]/40"
+                  className="ml-1 flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border-2 border-dashed border-[var(--color-surface-4)] text-xl font-bold text-text-muted transition hover:bg-[var(--color-surface-0)]/60 hover:border-[var(--color-accent-selected)]/40"
                   aria-label="Add members"
                   title="Add members"
                 >
@@ -750,7 +752,7 @@ export default function PlanTab({
             </div>
             {showMemberPicker && (
               <div className="mt-3 pt-3 border-t border-[var(--color-surface-4)]/60">
-                <p className="text-[10px] font-semibold text-text-muted mb-2">Not eating tonight, tap to add back:</p>
+                <p className="text-xs font-semibold text-text-muted mb-2">Not eating tonight, tap to add back:</p>
                 <div className="flex gap-2 flex-wrap">
                   {familyMembers.filter((m: any) => !eatingMembers.includes(m.name)).map((member: any) => (
                     <button

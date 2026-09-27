@@ -39,7 +39,7 @@ export default function SectionCard({
         <div className="relative shrink-0 border-b border-white/10 p-4 pb-3 text-center">
           {action && <div className="absolute right-3 top-3">{action}</div>}
           <Heading className={`mt-1 font-bold text-text-primary ${compact ? "text-sm" : "text-base"}`}>{title}</Heading>
-          {description && <p className={`mt-0.5 text-text-secondary ${compact ? "text-[11px]" : "text-xs"}`}>{description}</p>}
+          {description && <p className={`mt-0.5 text-text-secondary ${compact ? "text-xs" : "text-xs"}`}>{description}</p>}
         </div>
         <div className={`flex min-h-0 flex-1 flex-col ${compact ? "p-4" : "p-5"}`}>{children}</div>
         {footer && <div className={`border-t border-white/10 ${compact ? "p-4" : "p-5"}`}>{footer}</div>}
@@ -53,7 +53,7 @@ export default function SectionCard({
       <div className={`flex items-start justify-between gap-4 border-b border-white/10 ${compact ? "p-4 pl-[72px]" : "p-5 pl-[72px]"}`}>
         <div className="min-w-0">
           <Heading className={`font-bold text-text-primary ${compact ? "text-sm" : "text-base"}`}>{title}</Heading>
-          {description && <p className={`mt-0.5 text-text-secondary ${compact ? "text-[11px]" : "text-xs"}`}>{description}</p>}
+          {description && <p className={`mt-0.5 text-text-secondary ${compact ? "text-xs" : "text-xs"}`}>{description}</p>}
         </div>
         {action && <div className="shrink-0 self-center">{action}</div>}
       </div>

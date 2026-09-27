@@ -94,7 +94,7 @@ export default function LedgerPage() {
                 <span className="truncate text-sm font-semibold text-text-primary">The Ledger</span>
                 <span className="hidden truncate text-xs text-text-muted sm:inline">— Alex&apos;s finance app</span>
               </div>
-              <span className="shrink-0 rounded-full border border-white/10 bg-white/5 px-2.5 py-0.5 text-[11px] font-medium text-text-secondary">
+              <span className="shrink-0 rounded-full border border-white/10 bg-white/5 px-2.5 py-0.5 text-xs font-medium text-text-secondary">
                 Opens Alex&apos;s app
               </span>
             </div>

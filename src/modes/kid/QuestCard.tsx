@@ -97,7 +97,7 @@ export default function QuestCard({ task, onComplete, disabled = false }: QuestC
         </div>
         <div className="flex-1 min-w-0">
           <h3 className="text-sm font-bold text-text-muted line-through">{task.title}</h3>
-          <p className="text-[11px] text-text-muted mt-0.5">Completed! +{task.points} pts</p>
+          <p className="text-xs text-text-muted mt-0.5">Completed! +{task.points} pts</p>
         </div>
       </div>
     );
@@ -142,20 +142,20 @@ export default function QuestCard({ task, onComplete, disabled = false }: QuestC
           {task.title}
         </h3>
         <div className="flex items-center gap-2 mt-1">
-          <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: config.pointColor }}>
+          <span className="text-xs font-bold uppercase tracking-wider" style={{ color: config.pointColor }}>
             {config.label}
           </span>
           <span className="text-text-dim">·</span>
           {/* Who-line in kid language: "Up for grabs"/"Crew" never reads as
               another kid's chore; an assigned quest shows the owner's name. */}
-          <span className="text-[11px] font-semibold text-text-secondary">{questWhoLabel(task)}</span>
+          <span className="text-xs font-semibold text-text-secondary">{questWhoLabel(task)}</span>
           {(() => {
             const label = kidDueLabel(task.due, localTodayISO());
             if (!label) return null;
             return (
               <>
                 <span className="text-text-dim">·</span>
-                <span className="text-[11px] font-bold" style={{ color: dueTone(label) }}>{label}</span>
+                <span className="text-xs font-bold" style={{ color: dueTone(label) }}>{label}</span>
               </>
             );
           })()}
@@ -173,7 +173,7 @@ export default function QuestCard({ task, onComplete, disabled = false }: QuestC
         <span className="text-lg font-black tabular-nums" style={{ color: config.pointColor }}>
           +{task.points}
         </span>
-        <span className="text-[11px] text-text-muted font-bold -mt-0.5">pts</span>
+        <span className="text-xs text-text-muted font-bold -mt-0.5">pts</span>
       </div>
 
       {/* Tap hint (subtle) */}

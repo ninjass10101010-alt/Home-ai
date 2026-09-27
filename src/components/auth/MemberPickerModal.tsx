@@ -51,7 +51,7 @@ export default function MemberPickerModal({
               glow={member.glow}
             />
             <span className="text-xs font-semibold leading-tight text-text-primary">{member.name.split(" ")[0]}</span>
-            <span className="text-[10px] capitalize leading-tight text-text-muted">{member.role || "member"}</span>
+            <span className="text-xs capitalize leading-tight text-text-muted">{member.role || "member"}</span>
           </button>
         ))}
       </div>

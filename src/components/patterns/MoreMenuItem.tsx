@@ -19,7 +19,7 @@ export default function MoreMenuItem({ icon, title, description, href, badge }: 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <h3 className="truncate text-sm font-bold text-text-primary">{title}</h3>
-          {badge && <span className="rounded-full bg-[var(--color-accent-selected)]/15 px-2 py-0.5 text-[10px] font-bold text-[var(--color-accent-selected)]">{badge}</span>}
+          {badge && <span className="rounded-full bg-[var(--color-accent-selected)]/15 px-2 py-0.5 text-xs font-bold text-[var(--color-accent-selected)]">{badge}</span>}
         </div>
         {description && <p className="mt-0.5 truncate text-xs text-text-muted">{description}</p>}
       </div>

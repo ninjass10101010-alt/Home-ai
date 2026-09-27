@@ -53,7 +53,7 @@ export default function HomeSecurityWidget({ className }: { className?: string }
     >
       <div className="flex min-h-0 flex-1 flex-col gap-3">
         <div>
-          <div className="mb-2 text-[11px] uppercase tracking-wide text-text-muted">Presence</div>
+          <div className="mb-2 text-xs uppercase tracking-wide text-text-muted">Presence</div>
           {people.length === 0 ? (
             <p className="text-xs text-text-muted">No presence data yet</p>
           ) : (
@@ -74,7 +74,7 @@ export default function HomeSecurityWidget({ className }: { className?: string }
           )}
         </div>
         <div>
-          <div className="mb-2 text-[11px] uppercase tracking-wide text-text-muted">Sensors</div>
+          <div className="mb-2 text-xs uppercase tracking-wide text-text-muted">Sensors</div>
           {openSensors.length === 0 ? (
             <Chip size="sm" tone="success">Doors &amp; windows closed</Chip>
           ) : (

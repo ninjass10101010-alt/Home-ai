@@ -39,7 +39,7 @@ export default function HomeClimateWidget({ className }: { className?: string })
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 text-center">
         <div className="text-4xl font-bold text-text-primary">{Number.isFinite(currentTemp) ? `${Math.round(currentTemp)}°` : "--"}</div>
         <p className="text-xs text-text-secondary">{hvacMode}</p>
-        {humidity !== null && <p className="text-[11px] text-text-muted">Humidity {Math.round(humidity)}%</p>}
+        {humidity !== null && <p className="text-xs text-text-muted">Humidity {Math.round(humidity)}%</p>}
         <div className="mt-2 flex items-center gap-2">
           {readOnly ? (
             <span className="text-xs font-semibold tabular-nums text-text-secondary">Target {Math.round(target)}°</span>

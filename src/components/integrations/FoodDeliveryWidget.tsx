@@ -65,7 +65,7 @@ export default function FoodDeliveryWidget() {
               }}
             >
               <span className="text-2xl">{cuisine.emoji}</span>
-              <span className="text-[10px] font-bold text-text-secondary">{cuisine.label}</span>
+              <span className="text-xs font-bold text-text-secondary">{cuisine.label}</span>
             </button>
           ))}
         </div>

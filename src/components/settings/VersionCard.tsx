@@ -189,7 +189,7 @@ export default function VersionCard() {
           <p className="text-sm font-semibold text-text-primary">
             {built.short && built.short !== "unknown" ? `Consuela Dashboard ${built.short}` : "Development build"}
           </p>
-          <p className="mt-0.5 text-[11px] text-text-muted">{built.message || "—"}</p>
+          <p className="mt-0.5 text-xs text-text-muted">{built.message || "—"}</p>
         </div>
         <p role="status" className="text-sm text-text-secondary">Couldn&apos;t check for updates. Try again when the family server is reachable.</p>
         <SoftButton onClick={checkNow} loading={checking} size="sm">Try again</SoftButton>
@@ -204,24 +204,24 @@ export default function VersionCard() {
           <p className="text-sm font-semibold text-text-primary">
             {built.short && built.short !== "unknown" ? `Consuela Dashboard ${built.short}` : "Development build"}
           </p>
-          <p className="mt-0.5 text-[11px] text-text-muted">{built.message || "—"}</p>
+          <p className="mt-0.5 text-xs text-text-muted">{built.message || "—"}</p>
           {built.date ? (
-            <p className="text-[10px] text-text-muted">
+            <p className="text-xs text-text-muted">
               Built {new Date(built.date).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
             </p>
           ) : null}
         </div>
         {data.update_available ? (
-          <span className="shrink-0 rounded-full bg-[var(--color-accent-amber)]/15 px-2.5 py-1 text-[11px] font-bold text-[var(--color-accent-amber)]">{data.commits_behind ?? 0} behind</span>
+          <span className="shrink-0 rounded-full bg-[var(--color-accent-amber)]/15 px-2.5 py-1 text-xs font-bold text-[var(--color-accent-amber)]">{data.commits_behind ?? 0} behind</span>
         ) : (
-          <span className="shrink-0 rounded-full bg-[var(--color-accent-mint)]/15 px-2.5 py-1 text-[11px] font-bold text-[var(--color-accent-mint)]">Up to date</span>
+          <span className="shrink-0 rounded-full bg-[var(--color-accent-mint)]/15 px-2.5 py-1 text-xs font-bold text-[var(--color-accent-mint)]">Up to date</span>
         )}
       </div>
 
       {remote && data.update_available ? (
         <div className="rounded-xl border border-[var(--color-accent-amber)]/20 bg-[var(--color-accent-amber)]/5 px-3 py-2">
-          <p className="text-[11px] font-semibold text-[var(--color-accent-amber)]">Latest: {remote.short} — {remote.message || "—"}</p>
-          <p className="mt-1 text-[10px] text-text-muted">Run <span className="font-mono text-text-secondary">bash deploy.sh</span> on the family server or rebuild the container to update.</p>
+          <p className="text-xs font-semibold text-[var(--color-accent-amber)]">Latest: {remote.short} — {remote.message || "—"}</p>
+          <p className="mt-1 text-xs text-text-muted">Run <span className="font-mono text-text-secondary">bash deploy.sh</span> on the family server or rebuild the container to update.</p>
         </div>
       ) : null}
 
@@ -252,16 +252,16 @@ export default function VersionCard() {
 
       {updateLogs.length > 0 ? (
         <div className="rounded-xl border border-white/10 bg-[var(--color-surface-2)]/60 p-3">
-          <p className="mb-2 text-[11px] font-semibold text-text-muted">Update progress:</p>
+          <p className="mb-2 text-xs font-semibold text-text-muted">Update progress:</p>
           <div className="space-y-1">
             {updateLogs.map((log, index) => (
-              <div key={`${log.step}-${index}`} className={`flex items-start gap-2 text-[11px] ${log.status === "error" ? "text-[var(--color-accent-rose)]" : log.status === "ok" ? "text-[var(--color-accent-mint)]" : "text-text-muted"}`}>
+              <div key={`${log.step}-${index}`} className={`flex items-start gap-2 text-xs ${log.status === "error" ? "text-[var(--color-accent-rose)]" : log.status === "ok" ? "text-[var(--color-accent-mint)]" : "text-text-muted"}`}>
                 <span className="shrink-0">{log.status === "ok" ? "✓" : log.status === "error" ? "✗" : "○"}</span>
                 <span>{log.detail}</span>
               </div>
             ))}
           </div>
-          {updateDone ? <p className="mt-2 text-[11px] font-semibold text-[var(--color-accent-mint)]">Update complete — the page will reload in a few seconds.</p> : null}
+          {updateDone ? <p className="mt-2 text-xs font-semibold text-[var(--color-accent-mint)]">Update complete — the page will reload in a few seconds.</p> : null}
         </div>
       ) : null}
 

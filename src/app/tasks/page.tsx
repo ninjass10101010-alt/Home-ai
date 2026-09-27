@@ -1944,7 +1944,7 @@ export default function TasksPage() {
                     <label className="block">
                       <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">⚡ Speed bonus (first grab)</span>
                       <input type="number" min={0} max={5} value={editForm.speedBonus ?? 2} onChange={(e) => updateForm("speedBonus", Math.max(0, Math.min(5, parseInt(e.target.value) || 0)))} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none" />
-                      <span className="mt-1 block text-[11px] text-text-muted">The first person to claim it earns this many extra points (0–5).</span>
+                      <span className="mt-1 block text-xs text-text-muted">The first person to claim it earns this many extra points (0–5).</span>
                     </label>
                   )}
                   {formType === "crew" && (() => {
@@ -1960,7 +1960,7 @@ export default function TasksPage() {
                           <span className="text-xs text-text-secondary">helpers · +{editForm.points} pts each</span>
                         </div>
                         {crewMemberCount(editForm) > 0 && (
-                          <span className="mt-1 block text-[11px] text-text-muted">Can&apos;t go below {minSize} — {crewMemberCount(editForm)} already joined.</span>
+                          <span className="mt-1 block text-xs text-text-muted">Can&apos;t go below {minSize} — {crewMemberCount(editForm)} already joined.</span>
                         )}
                       </div>
                     );

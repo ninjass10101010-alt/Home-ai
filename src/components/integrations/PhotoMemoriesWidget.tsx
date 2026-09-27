@@ -82,13 +82,13 @@ export default function PhotoMemoriesWidget() {
             <span className="text-lg">📸</span>
             <h3 className="text-sm font-bold text-text-primary">Memories</h3>
           </div>
-          <span className="text-[10px] font-semibold text-text-muted">This Day</span>
+          <span className="text-xs font-semibold text-text-muted">This Day</span>
         </div>
 
         {/* "This Day" Memories — horizontal scroll */}
         {memories.length > 0 && (
           <div className="mb-4">
-            <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-2">
+            <p className="text-xs font-bold text-text-muted uppercase tracking-wider mb-2">
               On this day in past years
             </p>
             <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
@@ -116,10 +116,10 @@ export default function PhotoMemoriesWidget() {
                     {memory.thumbnail}
                   </div>
                   <div className="p-2">
-                    <h4 className="text-[11px] font-bold text-text-primary truncate">{memory.title}</h4>
+                    <h4 className="text-xs font-bold text-text-primary truncate">{memory.title}</h4>
                     <div className="flex items-center justify-between mt-0.5">
-                      <span className="text-[11px] text-text-muted">{memory.year} · {memory.date}</span>
-                      <span className="text-[11px] text-text-muted">{memory.photoCount} 📷</span>
+                      <span className="text-xs text-text-muted">{memory.year} · {memory.date}</span>
+                      <span className="text-xs text-text-muted">{memory.photoCount} 📷</span>
                     </div>
                   </div>
                 </button>
@@ -130,7 +130,7 @@ export default function PhotoMemoriesWidget() {
 
         {/* Recent Albums */}
         <div>
-          <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-2">
+          <p className="text-xs font-bold text-text-muted uppercase tracking-wider mb-2">
             Recent Albums
           </p>
           <div className="grid grid-cols-2 gap-2">
@@ -148,8 +148,8 @@ export default function PhotoMemoriesWidget() {
               >
                 <span className="text-xl">{album.emoji}</span>
                 <div className="flex-1 min-w-0">
-                  <h4 className="text-[11px] font-semibold text-text-primary truncate">{album.name}</h4>
-                  <span className="text-[11px] text-text-muted">{album.count} photos</span>
+                  <h4 className="text-xs font-semibold text-text-primary truncate">{album.name}</h4>
+                  <span className="text-xs text-text-muted">{album.count} photos</span>
                 </div>
               </a>
             ))}

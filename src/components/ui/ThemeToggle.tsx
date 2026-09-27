@@ -26,7 +26,7 @@ export const ThemeToggle = () => {
       onClick={toggleTheme}
       aria-label={isDark ? 'Switch to light theme' : 'Switch to dark theme'}
       className="
-        flex items-center justify-center w-10 h-10
+        flex items-center justify-center w-10 h-10 hit-44
         bg-[var(--color-surface-2)] 
         rounded-full
         hover:bg-[var(--color-surface-3)]

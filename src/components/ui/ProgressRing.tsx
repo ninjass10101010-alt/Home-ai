@@ -37,7 +37,7 @@ export default function ProgressRing({ value, max, label, detail, size = 132, st
       <div className="min-w-0">
         <div className="text-lg font-bold text-text-primary display-numeral">{Math.round(progress * 100)}%</div>
         <div className="mt-0.5 text-xs font-semibold text-text-primary truncate">{label}</div>
-        {detail && <div className="mt-0.5 text-[10px] text-text-muted truncate">{detail}</div>}
+        {detail && <div className="mt-0.5 text-xs text-text-muted truncate">{detail}</div>}
       </div>
     </div>
   );

@@ -115,7 +115,7 @@ export default function LearningWidget() {
           {streak > 0 && (
             <div className="flex items-center gap-1 px-2 py-0.5 rounded-full" style={{ background: "rgba(251, 191, 36, 0.1)", border: "1px solid rgba(251, 191, 36, 0.2)" }}>
               <span className="text-xs">🔥</span>
-              <span className="text-[10px] font-bold text-[var(--color-accent-amber)]">{streak} day streak!</span>
+              <span className="text-xs font-bold text-[var(--color-accent-amber)]">{streak} day streak!</span>
             </div>
           )}
         </div>
@@ -123,8 +123,8 @@ export default function LearningWidget() {
         {/* Overall Progress */}
         <div className="mb-4">
           <div className="flex items-center justify-between mb-1">
-            <span className="text-[10px] font-semibold text-text-muted">This Week</span>
-            <span className="text-[10px] font-bold text-text-primary tabular-nums">{overallProgress}%</span>
+            <span className="text-xs font-semibold text-text-muted">This Week</span>
+            <span className="text-xs font-bold text-text-primary tabular-nums">{overallProgress}%</span>
           </div>
           <div className="h-2 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.08)" }}>
             <div
@@ -137,7 +137,7 @@ export default function LearningWidget() {
               }}
             />
           </div>
-          <p className="text-[10px] text-text-muted mt-1 tabular-nums">
+          <p className="text-xs text-text-muted mt-1 tabular-nums">
             {totalCurrent} / {totalTarget} minutes
           </p>
         </div>
@@ -159,7 +159,7 @@ export default function LearningWidget() {
                     </span>
                     {isComplete && <span className="text-xs">✅</span>}
                   </div>
-                  <span className="text-[10px] text-text-muted tabular-nums">
+                  <span className="text-xs text-text-muted tabular-nums">
                     {goal.current}/{goal.target} {goal.unit}
                   </span>
                 </div>
@@ -182,7 +182,7 @@ export default function LearningWidget() {
         {/* Kid Mode: Log minutes buttons */}
         {isKid && (
           <div>
-            <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-2">
+            <p className="text-xs font-bold text-text-muted uppercase tracking-wider mb-2">
               Log Learning Time
             </p>
             <div className="grid grid-cols-2 gap-2">

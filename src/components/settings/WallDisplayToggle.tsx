@@ -38,7 +38,7 @@ export default function WallDisplayToggle() {
         onChange={(v) => applyWallPref(v as WallPref)}
         aria-label="Wall display (ApoloSign)"
       />
-      <p className="mt-1 text-[11px] text-text-muted">
+      <p className="mt-1 text-xs text-text-muted">
         Wall display (ApoloSign) — Auto detects the wall screen on its own; force On/Off to override.
       </p>
     </div>

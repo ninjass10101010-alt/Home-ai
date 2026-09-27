@@ -74,7 +74,7 @@ function SuggestionCard({
           {suggestion.body && (
             <div className="mt-1 text-xs leading-5 text-text-muted">{suggestion.body}</div>
           )}
-          <div className="mt-1.5 text-[10px] uppercase tracking-wider text-text-muted">
+          <div className="mt-1.5 text-xs uppercase tracking-wider text-text-muted">
             {KIND_LABELS[suggestion.kind]} · {suggestion.scopeDate}
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-2">

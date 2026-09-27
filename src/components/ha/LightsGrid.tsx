@@ -71,7 +71,7 @@ export default function LightsGrid({ states, onRefresh }: LightsGridProps) {
                   {area && <span className="mt-0.5 block truncate text-xs text-text-muted">{area}</span>}
                 </span>
                 <span
-                  className={`inline-flex h-7 shrink-0 items-center rounded-full border px-2.5 text-[11px] font-semibold ${
+                  className={`inline-flex h-7 shrink-0 items-center rounded-full border px-2.5 text-xs font-semibold ${
                     isOn ? "border-[var(--color-accent-mint)]/25 text-[var(--color-accent-mint)]" : "border-white/10 text-text-secondary"
                   }`}
                 >

@@ -21,7 +21,7 @@ const toneMap: Record<ChipTone, string> = {
 };
 
 const sizeMap: Record<ChipSize, string> = {
-  sm: "h-7 px-2.5 text-[11px] rounded-full",
+  sm: "h-7 px-2.5 text-xs rounded-full",
   md: "h-9 px-3 text-xs rounded-full",
   lg: "h-10 px-4 text-sm rounded-full",
 };
@@ -30,7 +30,7 @@ export default function Chip({ children, tone = "neutral", size = "md", selected
   return (
     <button
       type="button"
-      className={`inline-flex items-center justify-center gap-1.5 border bg-[var(--color-surface-0)]/20 backdrop-blur-xl tap-sm disabled:pointer-events-none disabled:opacity-50 ${toneMap[tone]} ${sizeMap[size]} ${
+      className={`inline-flex items-center justify-center gap-1.5 border bg-[var(--color-surface-0)]/20 backdrop-blur-xl tap-sm hit-44 disabled:pointer-events-none disabled:opacity-50 ${toneMap[tone]} ${sizeMap[size]} ${
         selected ? "chip-selected bg-[var(--color-accent-button)] text-white border-transparent" : ""
       } ${className}`}
       {...props}

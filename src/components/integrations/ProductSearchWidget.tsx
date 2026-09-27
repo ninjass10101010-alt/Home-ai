@@ -91,10 +91,10 @@ export default function ProductSearchWidget({ items = [] }: ProductSearchWidgetP
           <h3 className="text-sm font-bold text-text-primary">Compare Prices</h3>
           <div className="flex items-center gap-1 ml-auto">
             {amazonEnabled && (
-              <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-full bg-[var(--color-accent-amber)]/15 text-[var(--color-accent-amber)]">Amazon</span>
+              <span className="text-xs font-bold px-1.5 py-0.5 rounded-full bg-[var(--color-accent-amber)]/15 text-[var(--color-accent-amber)]">Amazon</span>
             )}
             {walmartEnabled && (
-              <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-full bg-[var(--color-accent-nori)]/15 text-[var(--color-accent-nori)]">Walmart</span>
+              <span className="text-xs font-bold px-1.5 py-0.5 rounded-full bg-[var(--color-accent-nori)]/15 text-[var(--color-accent-nori)]">Walmart</span>
             )}
           </div>
         </div>
@@ -122,13 +122,13 @@ export default function ProductSearchWidget({ items = [] }: ProductSearchWidgetP
         {/* Quick search from grocery list */}
         {items.length > 0 && !results.length && (
           <div className="mb-3">
-            <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-1.5">From your grocery list</p>
+            <p className="text-xs font-bold text-text-muted uppercase tracking-wider mb-1.5">From your grocery list</p>
             <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
               {items.slice(0, 6).map((item) => (
                 <button
                   key={item}
                   onClick={() => { setSearchQuery(item); search(item); }}
-                  className="px-3 py-1.5 rounded-full text-[10px] font-semibold whitespace-nowrap tap shrink-0"
+                  className="px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap tap shrink-0"
                   style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", color: "var(--color-text-secondary)" }}
                 >
                   {item}
@@ -142,7 +142,7 @@ export default function ProductSearchWidget({ items = [] }: ProductSearchWidgetP
         {loading && (
           <div className="flex items-center gap-2 py-3 justify-center">
             <div className="w-3 h-3 rounded-full border-2 border-[var(--color-accent-selected)] border-t-transparent animate-spin" />
-            <span className="text-[10px] text-text-muted">Searching...</span>
+            <span className="text-xs text-text-muted">Searching...</span>
           </div>
         )}
 
@@ -170,10 +170,10 @@ export default function ProductSearchWidget({ items = [] }: ProductSearchWidgetP
                   <div className="flex items-center gap-2 mt-0.5">
                     <span className="text-xs font-bold text-text-primary tabular-nums">{product.price}</span>
                     {product.rating && (
-                      <span className="text-[10px] text-[var(--color-accent-amber)]">⭐ {product.rating}</span>
+                      <span className="text-xs text-[var(--color-accent-amber)]">⭐ {product.rating}</span>
                     )}
                     {product.prime && (
-                      <span className="text-[11px] font-bold text-[var(--color-accent-nori)]">Prime</span>
+                      <span className="text-xs font-bold text-[var(--color-accent-nori)]">Prime</span>
                     )}
                   </div>
                 </div>

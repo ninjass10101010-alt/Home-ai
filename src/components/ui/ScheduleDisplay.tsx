@@ -63,7 +63,7 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
       <WidgetCard tone="#22d3ee" icon={<HomeWidgetIcon variant="schedule" size="lg" />} className={className}>
         <div className="relative shrink-0 border-b border-white/10 p-4 pb-3 text-center">
           <h3 className="mt-1 text-sm font-bold text-text-primary">{title}</h3>
-          <span className="mt-0.5 text-[10px] font-medium text-text-muted">0 upcoming</span>
+          <span className="mt-0.5 text-xs font-medium text-text-muted">0 upcoming</span>
         </div>
         <div className="flex min-h-0 flex-1 flex-col p-4">
           <div className="flex flex-col items-center gap-2 py-6 text-text-muted">
@@ -115,7 +115,7 @@ export default function ScheduleDisplay({ schedule, title = "Today's Schedule", 
     <WidgetCard tone="#22d3ee" icon={<HomeWidgetIcon variant="schedule" size="lg" />} className={className}>
       <div className="flex flex-col items-center border-b border-white/10 p-4 text-center">
         <h2 className="mt-1 text-sm font-bold text-text-primary">{title}</h2>
-        <span className="mt-0.5 text-[10px] font-medium text-text-muted">{upcomingCount} upcoming</span>
+        <span className="mt-0.5 text-xs font-medium text-text-muted">{upcomingCount} upcoming</span>
       </div>
       <div className="flex min-h-0 flex-1 flex-col p-5">
         <DayLine

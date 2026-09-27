@@ -65,7 +65,7 @@ export default function TravelTimeCard({ eventTitle, eventTime, eventLocation }:
       {loading ? (
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 rounded-full border-2 border-[var(--color-accent-selected)] border-t-transparent animate-spin" />
-          <span className="text-[10px] text-text-muted">Calculating route...</span>
+          <span className="text-xs text-text-muted">Calculating route...</span>
         </div>
       ) : (
         <>
@@ -73,10 +73,10 @@ export default function TravelTimeCard({ eventTitle, eventTime, eventLocation }:
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold text-text-primary tabular-nums">{travelTime} drive</span>
-              {distance && <span className="text-[10px] text-text-muted tabular-nums">· {distance}</span>}
+              {distance && <span className="text-xs text-text-muted tabular-nums">· {distance}</span>}
             </div>
             {leaveBy && (
-              <span className="text-[10px] text-[var(--color-accent-selected)] font-semibold">
+              <span className="text-xs text-[var(--color-accent-selected)] font-semibold">
                 ⏰ Leave by {leaveBy}
               </span>
             )}
@@ -85,7 +85,7 @@ export default function TravelTimeCard({ eventTitle, eventTime, eventLocation }:
             href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(eventLocation)}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-[10px] font-semibold text-[var(--color-accent-selected)] hover:underline shrink-0 tap"
+            className="text-xs font-semibold text-[var(--color-accent-selected)] hover:underline shrink-0 tap"
           >
             Directions →
           </a>

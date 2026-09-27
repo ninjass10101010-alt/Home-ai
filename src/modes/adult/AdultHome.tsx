@@ -92,7 +92,7 @@ function Stat({ label, value, icon, accent }: { label: string; value: string | n
     <div className="flex items-center gap-1.5 shrink-0">
       <span className="text-xs">{icon}</span>
       <span className={`text-xs font-semibold tabular-nums ${accent || "text-text-primary"}`}>{value}</span>
-      <span className="text-[10px] text-text-muted">{label}</span>
+      <span className="text-xs text-text-muted">{label}</span>
     </div>
   );
 }
@@ -155,15 +155,15 @@ function CompactWeather() {
             <p className="text-xs text-text-secondary">{condition}</p>
           </div>
         </div>
-        <Link href="/calendar" className="text-[10px] font-semibold text-[var(--color-accent-selected)]">Details →</Link>
+        <Link href="/calendar" className="text-xs font-semibold text-[var(--color-accent-selected)]">Details →</Link>
       </div>
       {forecast.length > 0 && (
         <div className="flex gap-1 pt-2 border-t border-white/[0.06]">
           {forecast.map((d) => (
             <div key={d.day} className="flex-1 flex flex-col items-center gap-0.5 py-1">
-              <span className="text-[11px] font-semibold text-text-muted">{d.day}</span>
+              <span className="text-xs font-semibold text-text-muted">{d.day}</span>
               <span className="text-sm">{d.emoji}</span>
-              <span className="text-[10px] font-bold text-text-secondary tabular-nums">{d.high}°</span>
+              <span className="text-xs font-bold text-text-secondary tabular-nums">{d.high}°</span>
             </div>
           ))}
         </div>
@@ -192,7 +192,7 @@ function MealPlanGrid({ meals }: { meals: any[] }) {
     <Surface variant="glass-subtle" radius="xl" padding="none">
       <div className="flex items-center justify-between p-4 pb-2">
         <h3 className="text-sm font-bold text-text-primary">This Week</h3>
-        <Link href="/meals" className="text-[10px] font-semibold text-[var(--color-accent-selected)]">
+        <Link href="/meals" className="text-xs font-semibold text-[var(--color-accent-selected)]">
           Plan →
         </Link>
       </div>
@@ -210,7 +210,7 @@ function MealPlanGrid({ meals }: { meals: any[] }) {
                   border: isToday ? "1px solid rgba(var(--color-accent-selected-rgb, 59,130,246), 0.2)" : "1px solid transparent",
                 }}
               >
-                <span className={`text-[11px] font-bold ${isToday ? "text-[var(--color-accent-selected)]" : "text-text-muted"}`}>
+                <span className={`text-xs font-bold ${isToday ? "text-[var(--color-accent-selected)]" : "text-text-muted"}`}>
                   {day}
                 </span>
                 {dayMeals.length > 0 ? (
@@ -218,10 +218,10 @@ function MealPlanGrid({ meals }: { meals: any[] }) {
                     {dayMeals[0].emoji || "🍽️"}
                   </span>
                 ) : (
-                  <span className="text-[10px] text-text-dim">—</span>
+                  <span className="text-xs text-text-dim">—</span>
                 )}
                 {dayMeals.length > 0 && (
-                  <span className="text-[11px] text-text-muted truncate max-w-full px-0.5 text-center leading-tight">
+                  <span className="text-xs text-text-muted truncate max-w-full px-0.5 text-center leading-tight">
                     {dayMeals[0].name?.split(" ")[0] || ""}
                   </span>
                 )}
@@ -233,13 +233,13 @@ function MealPlanGrid({ meals }: { meals: any[] }) {
         {/* Today's meal detail */}
         {mealsByDay[todayDay]?.length > 0 && (
           <div className="mt-3 pt-3 border-t border-white/[0.06]">
-            <p className="text-[10px] font-semibold text-text-muted uppercase tracking-wider mb-1.5">Today</p>
+            <p className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-1.5">Today</p>
             {mealsByDay[todayDay].map((meal: any, i: number) => (
               <div key={i} className="flex items-center gap-2.5 py-1.5">
                 <span className="text-sm">{meal.emoji || "🍽️"}</span>
                 <span className="text-xs text-text-primary flex-1 truncate">{meal.name}</span>
                 {meal.mealType && (
-                  <span className="text-[11px] font-semibold text-text-muted uppercase">{meal.mealType}</span>
+                  <span className="text-xs font-semibold text-text-muted uppercase">{meal.mealType}</span>
                 )}
                 {meal.ingredients && meal.ingredients.length > 0 && (
                   <InstacartButton
@@ -366,7 +366,7 @@ export default function AdultHome() {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-lg font-bold text-text-primary">{dateStr}</h1>
-              <span className="text-[10px] font-bold text-[var(--color-accent-violet)] uppercase tracking-wider">🌙 Evening</span>
+              <span className="text-xs font-bold text-[var(--color-accent-violet)] uppercase tracking-wider">🌙 Evening</span>
             </div>
             {user && (
               <Avatar name={user.name} color={user.color || "green"} emoji={user.emoji || "😊"} size="sm" variant="emoji" />
@@ -382,7 +382,7 @@ export default function AdultHome() {
                     <div key={event.id} className="flex items-center gap-2.5 py-1">
                       <span className="text-sm">{event.icon || "📅"}</span>
                       <span className="text-sm text-text-primary flex-1 truncate">{event.title}</span>
-                      <span className="text-[10px] font-mono text-text-muted tabular-nums">{event.time}</span>
+                      <span className="text-xs font-mono text-text-muted tabular-nums">{event.time}</span>
                     </div>
                   ))}
                 </div>
@@ -401,7 +401,7 @@ export default function AdultHome() {
                     <div key={task.id} className="flex items-center gap-2.5 py-1">
                       <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: "var(--color-accent-amber)" }} />
                       <span className="text-xs text-text-secondary flex-1 truncate">{task.title}</span>
-                      <span className="text-[10px] text-text-muted">{task.assignee?.split(" ")[0]}</span>
+                      <span className="text-xs text-text-muted">{task.assignee?.split(" ")[0]}</span>
                     </div>
                   ))}
                 </div>
@@ -453,7 +453,7 @@ export default function AdultHome() {
         <div>
           <h1 className="text-lg font-bold text-text-primary tracking-tight">{dateStr}</h1>
           {isWeekend && (
-            <span className="text-[10px] font-bold text-[var(--color-accent-amber)] uppercase tracking-wider weekend-badge">
+            <span className="text-xs font-bold text-[var(--color-accent-amber)] uppercase tracking-wider weekend-badge">
               🏖️ Weekend
             </span>
           )}
@@ -480,7 +480,7 @@ export default function AdultHome() {
               <h3 className="text-sm font-bold text-text-primary">
                 {isWeekend ? "Weekend Plans" : "Schedule"}
               </h3>
-              <Link href="/calendar" className="text-[10px] font-semibold text-[var(--color-accent-selected)]">Full →</Link>
+              <Link href="/calendar" className="text-xs font-semibold text-[var(--color-accent-selected)]">Full →</Link>
             </div>
             <div className="px-4 pb-4 space-y-1.5">
               {schedules.length === 0 ? (
@@ -509,7 +509,7 @@ export default function AdultHome() {
                     ]}
                   >
                     <div className="flex items-center gap-2.5 py-2 px-1 bg-[var(--color-surface-1)] rounded-2xl">
-                      <span className="text-[10px] font-mono text-text-muted w-12 text-right tabular-nums">
+                      <span className="text-xs font-mono text-text-muted w-12 text-right tabular-nums">
                         {item.time || "—"}
                       </span>
                       <span className="text-sm text-text-primary truncate flex-1">{item.title}</span>
@@ -528,7 +528,7 @@ export default function AdultHome() {
                 {isWeekend ? "Weekend Projects" : "Tasks"}
                 <span className="text-text-muted font-normal ml-1.5">({completedTasks.length}/{pendingTasks.length + completedTasks.length})</span>
               </h3>
-              <Link href="/tasks" className="text-[10px] font-semibold text-[var(--color-accent-selected)]">All →</Link>
+              <Link href="/tasks" className="text-xs font-semibold text-[var(--color-accent-selected)]">All →</Link>
             </div>
             <div className="px-4 pb-4 space-y-1.5">
               {pendingTasks.length === 0 ? (
@@ -564,8 +564,8 @@ export default function AdultHome() {
                         }}
                       />
                       <span className="text-sm text-text-primary truncate flex-1">{task.title}</span>
-                      <span className="text-[10px] font-semibold text-text-muted tabular-nums">+{task.points}</span>
-                      <span className="text-[10px] text-text-muted">{task.assignee?.split(" ")[0]}</span>
+                      <span className="text-xs font-semibold text-text-muted tabular-nums">+{task.points}</span>
+                      <span className="text-xs text-text-muted">{task.assignee?.split(" ")[0]}</span>
                     </div>
                   </SwipeableRow>
                 ))
@@ -587,14 +587,14 @@ export default function AdultHome() {
                   <span className="text-lg">📅</span>
                   <div>
                     <p className="text-xs font-semibold text-text-primary tabular-nums">{todayEvents.length}</p>
-                    <p className="text-[10px] text-text-muted">Events today</p>
+                    <p className="text-xs text-text-muted">Events today</p>
                   </div>
                 </div>
                 <Link href="/meals?tab=grocery" className="flex items-center gap-2">
                   <span className="text-lg">🛒</span>
                   <div>
                     <p className="text-xs font-semibold text-text-primary tabular-nums">{groceryCount}</p>
-                    <p className="text-[10px] text-text-muted">Grocery items</p>
+                    <p className="text-xs text-text-muted">Grocery items</p>
                   </div>
                 </Link>
               </div>
@@ -607,7 +607,7 @@ export default function AdultHome() {
           <Surface variant="glass-subtle" radius="xl" padding="none">
             <div className="flex items-center justify-between p-4 pb-2">
               <h3 className="text-sm font-bold text-text-primary">Today&apos;s Events</h3>
-              <Link href="/calendar" className="text-[10px] font-semibold text-[var(--color-accent-selected)]">Calendar →</Link>
+              <Link href="/calendar" className="text-xs font-semibold text-[var(--color-accent-selected)]">Calendar →</Link>
             </div>
             <div className="px-4 pb-4 space-y-1.5">
               {todayEvents.map((event) => (
@@ -635,7 +635,7 @@ export default function AdultHome() {
                       className="w-1 h-6 rounded-full shrink-0"
                       style={{ background: event.color === "green" ? "var(--color-accent-mint)" : "var(--color-accent-nori)" }}
                     />
-                    <span className="text-[10px] font-mono text-text-muted w-14 text-right tabular-nums">{event.time}</span>
+                    <span className="text-xs font-mono text-text-muted w-14 text-right tabular-nums">{event.time}</span>
                     <div className="flex-1 min-w-0">
                       <span className="text-sm text-text-primary truncate block">{event.title}</span>
                       {/* Travel time for events with locations */}
@@ -648,7 +648,7 @@ export default function AdultHome() {
                       )}
                     </div>
                     <span className="text-xs">{event.icon}</span>
-                    <span className="text-[10px] text-text-muted">{event.member?.split(" ")[0]}</span>
+                    <span className="text-xs text-text-muted">{event.member?.split(" ")[0]}</span>
                   </div>
                 </SwipeableRow>
               ))}

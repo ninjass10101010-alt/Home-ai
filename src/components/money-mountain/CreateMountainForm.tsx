@@ -226,7 +226,7 @@ export function CreateMountainForm({ onClose, onSubmit }: CreateMountainFormProp
                   }`}
                 >
                   <span className="text-xl">{t.emoji}</span>
-                  <span className="text-[10px] font-medium">{t.label}</span>
+                  <span className="text-xs font-medium">{t.label}</span>
                 </button>
               ))}
             </div>

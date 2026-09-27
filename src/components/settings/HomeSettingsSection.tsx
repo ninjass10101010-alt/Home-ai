@@ -174,13 +174,13 @@ export default function HomeSettingsSection() {
             onChange={(value) => setSelectedOrientation(value as LayoutMode)}
             aria-label="Layout mode"
           />
-          <p className="text-[11px] text-text-muted">
+          <p className="text-xs text-text-muted">
             Each orientation keeps its own order. {editingOrientation === orientation
               ? "You're editing the layout your device is using right now."
               : `Your device is in ${orientation} — the ${orientation} layout applies automatically.`}
           </p>
           <WallDisplayToggle />
-          <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.18em] text-text-muted">
+          <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-[0.18em] text-text-muted">
             <span>All widgets</span>
             <span>{visibleCount} on Home</span>
           </div>

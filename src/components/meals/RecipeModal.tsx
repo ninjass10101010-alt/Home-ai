@@ -221,7 +221,7 @@ export default function RecipeModal({
                 { key: "fat", label: "Fat", unit: "g", color: "#ec4899" },
               ].map(n => (
                 <div key={n.key} className="bg-surface-2 rounded-2xl p-2.5 text-center border border-surface-3">
-                  <p className="text-[10px] font-medium mb-1" style={{ color: n.color }}>{n.label}</p>
+                  <p className="text-xs font-medium mb-1" style={{ color: n.color }}>{n.label}</p>
                   <input
                     type="number"
                     value={(recipe as any)[n.key] ?? ""}
@@ -229,7 +229,7 @@ export default function RecipeModal({
                     min={0}
                     className="w-full bg-transparent text-text-primary text-sm font-bold text-center outline-none"
                   />
-                  <p className="text-[10px] text-text-muted">{n.unit}</p>
+                  <p className="text-xs text-text-muted">{n.unit}</p>
                 </div>
               ))}
             </div>

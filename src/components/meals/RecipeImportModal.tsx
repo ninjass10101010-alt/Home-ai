@@ -536,7 +536,7 @@ export default function RecipeImportModal({
               </div>
 
               {draft.sourceUrl && (
-                <p className="text-text-muted text-[11px] break-all">
+                <p className="text-text-muted text-xs break-all">
                   Source: <span className="text-text-secondary">{draft.sourceUrl}</span>
                 </p>
               )}

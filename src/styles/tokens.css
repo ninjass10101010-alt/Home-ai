@@ -15,8 +15,8 @@
 
   --color-text-primary: #1a1a1a;   /* Main body text */
   --color-text-secondary: #5a5a5a;   /* Hints, secondary text */
-  --color-text-muted: #8a8a8a;   /* Disabled text */
-  --color-text-dim: #ababab;   /* Placeholders */
+  --color-text-muted: #6f6f6f;   /* Disabled text */
+  --color-text-dim: #6f6f6f;   /* Placeholders */
 
   /* ACCENT COLORS (Light mode variants - darker for better contrast) */
   --color-accent-nori: #2563eb;   /* Darker shade */
@@ -67,8 +67,8 @@
 
     --color-text-primary: #1a1a1a;
     --color-text-secondary: #5a5a5a;
-    --color-text-muted: #8a8a8a;
-    --color-text-dim: #ababab;
+    --color-text-muted: #6f6f6f;
+    --color-text-dim: #6f6f6f;
 
     /* ACCENT COLORS */
     --color-accent-nori: #2563eb;
@@ -118,8 +118,8 @@
 
   --color-text-primary: #f0f4ff;   /* Main body text */
   --color-text-secondary: #8892aa;   /* Hints, secondary text */
-  --color-text-muted: #4e5a72;   /* Disabled text */
-  --color-text-dim: #363e50;   /* Placeholders */
+  --color-text-muted: #8892aa;   /* Disabled text */
+  --color-text-dim: #828da6;   /* Placeholders */
 
   /* ACCENT COLORS (Dark mode variants) */
   --color-accent-nori: #3b82f6;   /* Selected by default */

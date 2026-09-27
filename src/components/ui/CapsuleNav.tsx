@@ -247,6 +247,11 @@ export default function CapsuleNav() {
                       style={{
                         transitionTimingFunction: LABEL_EASE,
                         transitionDelay: isActive ? "60ms" : "0ms",
+                        // The dock scales itself down (--capsule-scale ≈0.73 on a 390px
+                        // phone) to stay inside the viewport, which used to shrink the
+                        // active label to ~10px. Cancel the scale so the label always
+                        // renders at ≈14px; wall mode keeps its fixed text-base.
+                        fontSize: wall ? undefined : "clamp(0.9rem, calc(0.85rem / var(--capsule-scale)), 1.35rem)",
                       }}
                     >
                       {item.label}

@@ -529,7 +529,7 @@ export default function ShopTab({
                               <button
                                 onClick={(e) => { e.stopPropagation(); sendSingleToPantry(item); }}
                                 disabled={sending}
-                                className="flex items-center gap-1 rounded-xl bg-[var(--color-accent-mint)]/15 px-2 py-1.5 text-[11px] font-bold text-[var(--color-accent-mint)] hover:bg-[var(--color-accent-mint)]/25 tap-sm disabled:opacity-50"
+                                className="flex items-center gap-1 rounded-xl bg-[var(--color-accent-mint)]/15 px-2 py-1.5 text-xs font-bold text-[var(--color-accent-mint)] hover:bg-[var(--color-accent-mint)]/25 tap-sm disabled:opacity-50"
                               >
                                 🥫 <span className="hidden sm:inline">Pantry</span>
                               </button>
@@ -633,7 +633,7 @@ export default function ShopTab({
               )}
               {instacartStoreIds.length > 0 && (
                 <div className="space-y-1.5 border-t border-white/10 pt-3">
-                  <p className="text-[11px] font-semibold text-text-muted">Shop with Ask Instacart</p>
+                  <p className="text-xs font-semibold text-text-muted">Shop with Ask Instacart</p>
                   {instacartStoreIds.slice(0, 4).map((storeId) => (
                     <SoftButton
                       key={storeId}
@@ -646,7 +646,7 @@ export default function ShopTab({
                     </SoftButton>
                   ))}
                   {instacartStoreIds.length > 4 && (
-                    <p className="text-[11px] text-text-muted">…and {instacartStoreIds.length - 4} more</p>
+                    <p className="text-xs text-text-muted">…and {instacartStoreIds.length - 4} more</p>
                   )}
                 </div>
               )}

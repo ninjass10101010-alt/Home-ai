@@ -103,7 +103,7 @@ export function UnifiedInput({
               disabled={showStop ? false : !canSend}
               aria-label={showStop ? 'Stop generating' : 'Send message'}
               title={showStop ? 'Stop generating' : 'Send message'}
-              className={`absolute right-2 bottom-2 h-10 w-10 flex items-center justify-center rounded-full text-white transition disabled:opacity-50 disabled:cursor-not-allowed ${
+              className={`absolute right-2 bottom-2 h-11 w-11 flex items-center justify-center rounded-full text-white transition disabled:opacity-50 disabled:cursor-not-allowed ${
                 showStop
                   ? 'bg-[var(--color-surface-3,#3a4256)] hover:brightness-110'
                   : 'bg-[var(--color-accent-button,var(--color-accent-selected))] hover:brightness-110'

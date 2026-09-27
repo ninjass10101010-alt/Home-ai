@@ -53,7 +53,7 @@ export default function KitchenFlowCard({ step, summary }: { step: KitchenStep; 
               {i > 0 && <span aria-hidden className="text-xs text-text-muted">→</span>}
               <span
                 aria-current={s.id === step ? "step" : undefined}
-                className={`rounded-full px-2.5 py-1 text-[11px] font-bold whitespace-nowrap ${
+                className={`rounded-full px-2.5 py-1 text-xs font-bold whitespace-nowrap ${
                   s.id === step
                     ? "bg-[var(--color-accent-button)] text-white"
                     : "bg-[var(--color-surface-2)] text-text-muted"
@@ -68,7 +68,7 @@ export default function KitchenFlowCard({ step, summary }: { step: KitchenStep; 
           onClick={toggle}
           aria-expanded={!mounted || !collapsed}
           aria-label={mounted && collapsed ? "Expand kitchen flow card" : "Collapse kitchen flow card"}
-          className="shrink-0 rounded-lg px-2 py-1 text-[11px] font-semibold text-text-muted hover:text-text-primary tap-sm"
+          className="shrink-0 rounded-lg px-2 py-1 text-xs font-semibold text-text-muted hover:text-text-primary tap-sm hit-44"
         >
           {mounted && collapsed ? "Show" : "Hide"}
         </button>

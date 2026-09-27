@@ -123,18 +123,35 @@ Motion is CSS-only: keyframes for ambient motion and Tailwind transitions for st
 
 ## 6 · Accessibility
 
-- Dynamic Type via rem-based type scale
-- Minimum 44×44 touch targets
+- Dynamic Type via rem-based type scale — **never** `text-[Npx]`: arbitrary px defeats the
+  root font-size scaling. Floor is **12px (0.75rem / `text-xs`)** for any real text, including
+  eyebrows, chips, weekday labels and calendar day numbers. (September 2026 audit: 354 sites
+  were rendering 10–11px, some 9px.)
+- Minimum 44×44 touch targets. When the *visual* control must stay compact (inline `＋`, a
+  36px ghost icon button, a status chip), add **`hit-44`** — it guarantees a centred 44×44
+  hit region via `::before` without changing layout. Widget footer links (`a.widget-accent-text`)
+  carry a 44px line box in `globals.css`.
+- Colour contrast (WCAG 2.2 AA, 4.5:1 body / 3:1 large): `--color-text-muted` and
+  `--color-text-dim` are the **only** sub-primary text levels and both clear 4.5:1 in dark and
+  light. Dark mode therefore has two readable levels below `text-primary`
+  (`text-secondary` → `text-muted`); when a third level is needed, change **weight or size**,
+  never colour. Do not re-lighten text with local overrides (`.widget-card` / `.kitchen-text`
+  re-scopes are legacy; retire them in Phase 5 of `docs/UI_AUDIT_2026-09.md`).
 - `:focus-visible` rings on all interactive elements
 - `aria-live` for toasts and live regions
 - `role="alert"` for errors
 - High-contrast mode preserved
 - Reduced-motion support preserved
 - Keyboard alternatives for swipe actions
+- Glyph-only controls need an `aria-label`; emoji used as *chrome* (not content) is a Phase 3 item.
 
 ## 7 · Internal Review Surface
 
 `/_design-system` renders all primitives and patterns in both dark and light themes. It is gated with `NODE_ENV !== "production"` and rewrites to `/design-system` because Next treats underscore-prefixed app folders as private.
+
+> ⚠️ Documented drift (2026-09-26): no such rewrite exists in `next.config.ts`, and
+> `src/app/design-system/page.tsx` is a second near-duplicate page. Both are scheduled to
+> merge in Phase 5 of `docs/UI_AUDIT_2026-09.md`.
 
 ## 8 · Verification
 
@@ -142,3 +159,10 @@ Motion is CSS-only: keyframes for ambient motion and Tailwind transitions for st
 - `npm run build` passes.
 - `npm run lint` exits cleanly with warnings only from pre-existing image and hook-dep rules.
 - Visual QA should start at `/_design-system`, then review Home, Tasks, Meals, Settings, and More in development.
+- **Legibility / tap-target sweep:** render every route headless at 390×844 **and** 1440×900 and
+  assert (a) zero visible text nodes computed under 12px, (b) every interactive element has a
+  ≥44px box *or* a `hit-44` region, (c) zero horizontal overflow, (d) zero new console errors.
+  The sweep used for the September 2026 fix (Chromium + `getComputedStyle` +
+  `getBoundingClientRect`, plus WCAG math over the tokens in `globals.css`) is described in
+  `docs/UI_AUDIT_2026-09.md` → Appendix; CI adoption is Phase 5.
+

@@ -59,7 +59,7 @@ function dateOf(iso: string): string {
 
 type Status = "idle" | "loading" | "ok" | "empty" | "error";
 
-const MONTH_KICKER = "text-[11px] font-semibold uppercase tracking-[0.12em] text-text-secondary";
+const MONTH_KICKER = "text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary";
 
 export default function ConsuelaWeekCard() {
   const { currentUser } = useAuth();

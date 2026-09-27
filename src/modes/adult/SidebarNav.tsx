@@ -48,7 +48,7 @@ export default function SidebarNav() {
             </div>
             <div>
               <h2 className="text-sm font-bold text-text-primary tracking-tight">Consuela</h2>
-              <p className="text-[10px] text-text-muted">Family Dashboard</p>
+              <p className="text-xs text-text-muted">Family Dashboard</p>
             </div>
           </div>
         </div>

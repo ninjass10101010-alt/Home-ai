@@ -98,16 +98,16 @@ export default function SpotifyWidget() {
             {currentTrack ? (
               <>
                 <h3 className="text-sm font-bold text-text-primary truncate">{currentTrack.name}</h3>
-                <p className="text-[11px] text-text-secondary truncate">{currentTrack.artist}</p>
+                <p className="text-xs text-text-secondary truncate">{currentTrack.artist}</p>
               </>
             ) : (
               <>
                 <h3 className="text-sm font-bold text-text-primary">Spotify</h3>
-                <p className="text-[11px] text-text-secondary">Select a playlist to start</p>
+                <p className="text-xs text-text-secondary">Select a playlist to start</p>
               </>
             )}
           </div>
-          <div className="shrink-0 text-[10px] font-bold text-[var(--color-accent-mint)] uppercase tracking-wider">
+          <div className="shrink-0 text-xs font-bold text-[var(--color-accent-mint)] uppercase tracking-wider">
             {isPlaying ? "▶ Playing" : "⏸ Paused"}
           </div>
         </div>
@@ -126,8 +126,8 @@ export default function SpotifyWidget() {
             />
           </div>
           <div className="flex justify-between mt-1">
-            <span className="text-[11px] text-text-muted tabular-nums">{formatTime(progress)}</span>
-            <span className="text-[11px] text-text-muted tabular-nums">{formatTime(currentTrack.duration_ms)}</span>
+            <span className="text-xs text-text-muted tabular-nums">{formatTime(progress)}</span>
+            <span className="text-xs text-text-muted tabular-nums">{formatTime(currentTrack.duration_ms)}</span>
           </div>
         </div>
       )}
@@ -170,7 +170,7 @@ export default function SpotifyWidget() {
 
       {/* Playlist Shortcuts */}
       <div className="px-4 pb-4 pt-1 border-t border-white/[0.04]">
-        <p className="text-[10px] font-bold text-text-muted uppercase tracking-wider mb-2">Playlists</p>
+        <p className="text-xs font-bold text-text-muted uppercase tracking-wider mb-2">Playlists</p>
         <div className="flex gap-1.5 overflow-x-auto no-scrollbar pb-1">
           {FAMILY_PLAYLISTS.map((pl) => (
             <button

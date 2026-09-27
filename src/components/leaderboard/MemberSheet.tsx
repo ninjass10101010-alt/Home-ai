@@ -75,7 +75,7 @@ export default function MemberSheet({
                   className="w-full rounded-t-md bg-gradient-to-t from-[var(--color-accent-selected)]/40 to-[var(--color-accent-selected)] transition-all duration-500"
                   style={{ height: `${Math.max(2, (d.points / maxGraphPoints) * 56)}px` }}
                 />
-                <span className="text-[11px] text-text-muted">{d.day}</span>
+                <span className="text-xs text-text-muted">{d.day}</span>
               </div>
             ))}
           </div>
@@ -88,7 +88,7 @@ export default function MemberSheet({
               {earnedBadgeObjects.map((b) => (
                 <div key={b.id} className="flex flex-col items-center gap-0.5 rounded-xl bg-white/5 p-2">
                   <span className="text-lg animate-badge-sparkle">{b.emoji}</span>
-                  <span className="text-[11px] text-text-secondary text-center leading-tight">{b.name}</span>
+                  <span className="text-xs text-text-secondary text-center leading-tight">{b.name}</span>
                 </div>
               ))}
             </div>
@@ -102,7 +102,7 @@ export default function MemberSheet({
               {lockedBadges.slice(0, 8).map((b) => (
                 <div key={b.id} className="flex flex-col items-center gap-0.5 rounded-xl bg-white/3 p-2 opacity-40">
                   <span className="text-lg">❓</span>
-                  <span className="text-[11px] text-text-muted text-center leading-tight">{b.name}</span>
+                  <span className="text-xs text-text-muted text-center leading-tight">{b.name}</span>
                 </div>
               ))}
             </div>
@@ -149,7 +149,7 @@ export default function MemberSheet({
               style={{ width: `${Math.max(2, levelInfo.progress)}%` }}
             />
           </div>
-          <div className="mt-1 flex justify-between text-[10px] text-text-muted">
+          <div className="mt-1 flex justify-between text-xs text-text-muted">
             <span>{levelInfo.title}</span>
             <span>{levelInfo.progress}% to next</span>
           </div>

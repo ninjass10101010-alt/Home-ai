@@ -30,11 +30,11 @@ export default function CookWithWhatYouHave({ recipes, pantryItems, onAddMissing
               <span className="text-2xl" aria-hidden>{recipe.emoji}</span>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-bold text-text-primary truncate">{recipe.name}</p>
-                <p className="text-[11px] font-semibold text-text-muted">
+                <p className="text-xs font-semibold text-text-muted">
                   {readiness.readyPct}% ready · {readiness.total - readiness.missing.length}/{readiness.total} ingredients
                 </p>
               </div>
-              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold ${
+              <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-bold ${
                 readiness.readyPct === 100
                   ? "bg-[var(--color-accent-mint)]/15 text-[var(--color-accent-mint)]"
                   : "bg-[var(--color-accent-amber)]/15 text-[var(--color-accent-amber)]"
@@ -50,7 +50,7 @@ export default function CookWithWhatYouHave({ recipes, pantryItems, onAddMissing
             </div>
             {readiness.missing.length > 0 && (
               <div className="mt-3 flex items-start justify-between gap-2">
-                <p className="min-w-0 flex-1 text-[11px] leading-relaxed text-text-secondary line-clamp-2">
+                <p className="min-w-0 flex-1 text-xs leading-relaxed text-text-secondary line-clamp-2">
                   Missing: {readiness.missing.join(", ")}
                 </p>
                 <SoftButton variant="ghost" size="sm" onClick={() => onAddMissing(readiness.missing)}>

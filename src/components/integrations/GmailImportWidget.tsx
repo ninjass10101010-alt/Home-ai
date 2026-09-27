@@ -110,7 +110,7 @@ export default function GmailImportWidget() {
             <span className="text-lg">📧</span>
             <h3 className="text-sm font-bold text-text-primary">Smart Inbox</h3>
             {events.length > 0 && (
-              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-[var(--color-accent-selected)]/15 text-[var(--color-accent-selected)]">
+              <span className="text-xs font-bold px-1.5 py-0.5 rounded-full bg-[var(--color-accent-selected)]/15 text-[var(--color-accent-selected)]">
                 {events.length - approved.size} new
               </span>
             )}
@@ -160,13 +160,13 @@ export default function GmailImportWidget() {
                         {event.title}
                       </h4>
                       <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-[10px] text-text-secondary">📅 {event.date}</span>
-                        {event.time && <span className="text-[10px] text-text-muted">· 🕐 {event.time}</span>}
+                        <span className="text-xs text-text-secondary">📅 {event.date}</span>
+                        {event.time && <span className="text-xs text-text-muted">· 🕐 {event.time}</span>}
                       </div>
                       {event.location && (
-                        <p className="text-[10px] text-text-muted mt-0.5">📍 {event.location}</p>
+                        <p className="text-xs text-text-muted mt-0.5">📍 {event.location}</p>
                       )}
-                      <p className="text-[11px] text-text-muted mt-0.5">From: {event.source}</p>
+                      <p className="text-xs text-text-muted mt-0.5">From: {event.source}</p>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
                       {isApproved ? (
@@ -175,14 +175,14 @@ export default function GmailImportWidget() {
                         <>
                           <button
                             onClick={() => handleApprove(event.id)}
-                            className="px-2.5 py-1 rounded-lg text-[10px] font-bold tap"
+                            className="px-2.5 py-1 rounded-lg text-xs font-bold tap"
                             style={{ background: "rgba(74, 222, 128, 0.15)", color: "#4ade80", border: "1px solid rgba(74, 222, 128, 0.2)" }}
                           >
                             ✅ Add
                           </button>
                           <button
                             onClick={() => handleSkip(event.id)}
-                            className="px-2 py-1 rounded-lg text-[10px] font-bold tap text-text-muted hover:text-text-secondary"
+                            className="px-2 py-1 rounded-lg text-xs font-bold tap text-text-muted hover:text-text-secondary"
                             style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)" }}
                           >
                             Skip

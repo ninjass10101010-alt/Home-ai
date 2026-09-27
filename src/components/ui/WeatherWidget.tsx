@@ -416,7 +416,7 @@ function DayStrip({ hours, conv, skin, accent, textAccent, selectedTextAccent, p
               }}
             >
               <span
-                className="text-[11px] font-bold tracking-wide"
+                className="text-xs font-bold tracking-wide"
                 style={{ color: selected ? selectedTextAccent : i === 0 ? textAccent : skin.inkSoft }}
               >
                 {i === 0 ? "NOW" : formatHourTick(h.time)}
@@ -428,7 +428,7 @@ function DayStrip({ hours, conv, skin, accent, textAccent, selectedTextAccent, p
                 {h.temp == null ? "—" : `${conv(h.temp)}°`}
               </span>
               {h.precip != null && h.precip >= 20 ? (
-                <span className="text-[10px] font-semibold tabular-nums" style={{ color: cellTextAccent }}>
+                <span className="text-xs font-semibold tabular-nums" style={{ color: cellTextAccent }}>
                   {Math.round(h.precip)}%
                 </span>
               ) : (
@@ -448,7 +448,7 @@ function LeaderRow({ label, value, hidden, children }: { label: string; value: s
   if (hidden) return null;
   return (
     <div className="flex items-baseline gap-2.5">
-      <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-white/60">{label}</span>
+      <span className="text-xs font-bold uppercase tracking-[0.14em] text-white/60">{label}</span>
       <span className="flex-1 border-b border-dotted border-white/25" aria-hidden="true" />
       <span className="flex items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1 text-[13px] font-bold tabular-nums text-white">
         {children}
@@ -493,7 +493,7 @@ function SunArc({ sunriseISO, sunsetISO, progress, accent }: {
         <line x1={8} y1={58} x2={272} y2={58} stroke="rgba(255,255,255,0.14)" strokeWidth={1} />
          {px != null && py != null && <circle cx={px} cy={py} r={6} fill={accent} style={{ filter: `drop-shadow(0 0 6px ${accent})` }} />}
       </svg>
-      <div className="mt-1 flex items-center justify-between text-[11px] font-semibold text-white/70">
+      <div className="mt-1 flex items-center justify-between text-xs font-semibold text-white/70">
         <span>↑ {formatHourLabel(interval.sunriseISO)}</span>
         {dayLen && <span className="text-white/50">{dayLen} of daylight</span>}
         <span>↓ {formatHourLabel(interval.sunsetISO)}</span>
@@ -584,7 +584,7 @@ function TimelineScrubber({ hours, conv, accent, textAccent, idx, onIdx }: {
           {labelIdx.map((i) => (
             <span
               key={i}
-              className="absolute text-[11px] font-bold tracking-wide"
+              className="absolute text-xs font-bold tracking-wide"
               style={{
                 left: x(i),
                 transform: i === 0 ? "translateX(0)" : i === hours.length - 1 ? "translateX(-100%)" : "translateX(-50%)",
@@ -1169,7 +1169,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
               <span className="relative truncate" style={{ color: chromeInk }}>{weather.location}</span>
               {holidayStyle && (
                 <span
-                  className="ml-1 shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider"
+                  className="ml-1 shrink-0 rounded-full px-2 py-0.5 text-xs font-bold uppercase tracking-wider"
                   style={{ background: `${holidayStyle.accent}22`, color: holidayBadgeInk, border: `1px solid ${holidayStyle.accent}55` }}
                 >
                   {holidayStyle.label}
@@ -1235,14 +1235,14 @@ export default function WeatherWidget({ className = "" }: { className?: string }
                 )}
                 {severeLine && (
                   <div className="relative z-10 mt-1.5 max-w-full rounded-2xl px-3 py-2 text-center" style={{ background: `${accent}18`, border: `1px solid ${accent}22` }} role="status">
-                    <p className="text-[11px] font-bold leading-tight" style={{ color: heroScene === "storm" || heroHeavySnow ? "#FFF8EC" : "#4A2E05" }}>{severeFamily(weatherData?.code ?? 0) === "snow" ? "❄️" : "⛈️"} {severeLine.headline}</p>
-                    <p className="mt-0.5 text-[11px] font-medium leading-tight" style={{ color: heroScene === "storm" || heroHeavySnow ? "rgba(255,248,236,0.85)" : "rgba(74,46,5,0.85)" }}>{severeLine.detail}</p>
+                    <p className="text-xs font-bold leading-tight" style={{ color: heroScene === "storm" || heroHeavySnow ? "#FFF8EC" : "#4A2E05" }}>{severeFamily(weatherData?.code ?? 0) === "snow" ? "❄️" : "⛈️"} {severeLine.headline}</p>
+                    <p className="mt-0.5 text-xs font-medium leading-tight" style={{ color: heroScene === "storm" || heroHeavySnow ? "rgba(255,248,236,0.85)" : "rgba(74,46,5,0.85)" }}>{severeLine.detail}</p>
                   </div>
                 )}
                 {!severeLine && fusionLine && (
                   <div className="relative z-10 mt-1.5 max-w-full rounded-2xl px-3 py-2 text-center" style={{ background: `${accent}14`, border: `1px solid ${accent}20` }}>
-                    <p className="text-[11px] font-bold leading-tight" style={{ color: heroScene === "storm" ? accent : skin.ink }}>📅 {fusionLine.headline}</p>
-                    <p className="mt-0.5 text-[11px] font-medium leading-tight" style={{ color: skin.inkSoft }}>{fusionLine.detail}</p>
+                    <p className="text-xs font-bold leading-tight" style={{ color: heroScene === "storm" ? accent : skin.ink }}>📅 {fusionLine.headline}</p>
+                    <p className="mt-0.5 text-xs font-medium leading-tight" style={{ color: skin.inkSoft }}>{fusionLine.detail}</p>
                   </div>
                 )}
                 {!severeLine && displayHigh !== null && displayLow !== null && (
@@ -1261,12 +1261,12 @@ export default function WeatherWidget({ className = "" }: { className?: string }
                   </p>
                 )}
                 {fetchError && (
-                  <p className="pointer-events-auto mt-1.5 inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2.5 py-1 text-[11px] font-medium text-amber-900" role="alert">
+                  <p className="pointer-events-auto mt-1.5 inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2.5 py-1 text-xs font-medium text-amber-900" role="alert">
                     {fetchError}
                     <button
                       type="button"
                       onClick={loadWeather}
-                      className="pointer-events-auto ml-0.5 min-h-[44px] rounded-full px-2 text-[11px] font-bold underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2"
+                      className="pointer-events-auto ml-0.5 min-h-[44px] rounded-full px-2 text-xs font-bold underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2"
                       style={{ ["--tw-ring-color" as string]: accent }}
                     >
                       Try again
@@ -1279,7 +1279,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
 
           {!loading && stripHours.length >= 2 && (
             <div className="pointer-events-auto mt-auto shrink-0 pt-2">
-              <div className="mb-1.5 flex items-center justify-between text-[11px] font-bold uppercase tracking-[0.16em]" style={{ color: skin.inkSoft }}>
+              <div className="mb-1.5 flex items-center justify-between text-xs font-bold uppercase tracking-[0.16em]" style={{ color: skin.inkSoft }}>
                 <div className="flex items-center gap-1.5">
                   <span>Rest of today</span>
                   <svg viewBox="0 0 10 16" className="h-4 w-2.5 shrink-0 opacity-70" aria-hidden="true">
@@ -1292,7 +1292,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
                   <button
                     type="button"
                     onClick={handleStripRelease}
-                    className="hit-44 relative z-30 flex min-h-[36px] items-center rounded-full px-2.5 text-[11px] font-bold normal-case tracking-normal transition-colors focus-visible:outline-none focus-visible:ring-2"
+                    className="hit-44 relative z-30 flex min-h-[36px] items-center rounded-full px-2.5 text-xs font-bold normal-case tracking-normal transition-colors focus-visible:outline-none focus-visible:ring-2"
                     style={{ background: skin.stripTrack, color: skin.ink, ["--tw-ring-color" as string]: accent }}
                   >
                     ↩ Back to now
@@ -1300,7 +1300,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
                 ) : (
                   updatedLabel && (
                     <span
-                      className="rounded-full px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal"
+                      className="rounded-full px-1.5 py-0.5 text-xs font-medium normal-case tracking-normal"
                       style={{
                         color: minutesSinceUpdate != null && minutesSinceUpdate > 30 ? "#92400e" : skin.inkSoft,
                         background: minutesSinceUpdate != null && minutesSinceUpdate > 30 ? "rgba(251,191,36,0.18)" : "transparent",
@@ -1328,7 +1328,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
           )}
 
           {(!stripHours || stripHours.length < 2) && updatedLabel && (
-            <div className="mt-auto pt-2 text-right text-[10px] font-medium" style={{ color: skin.inkSoft }}>
+            <div className="mt-auto pt-2 text-right text-xs font-medium" style={{ color: skin.inkSoft }}>
               <span>{updatedLabel}</span>
             </div>
           )}
@@ -1485,7 +1485,7 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
         </div>
         <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-white/10 bg-[rgba(8,12,24,0.42)] px-5 py-3 backdrop-blur-md">
           <div className="min-w-0">
-            <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-white/60">Weather</p>
+            <p className="text-xs font-bold uppercase tracking-[0.14em] text-white/60">Weather</p>
             <p className="truncate text-sm font-semibold text-white">{location}</p>
           </div>
           <button
@@ -1558,7 +1558,7 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
 
             {hours.length >= 2 && (
               <div>
-                <p className="mb-1 text-[11px] font-bold uppercase tracking-[0.16em] text-white/50">Next 24 Hours</p>
+                <p className="mb-1 text-xs font-bold uppercase tracking-[0.16em] text-white/50">Next 24 Hours</p>
                 <TimelineScrubber hours={hours} conv={conv} accent={mAccent} textAccent={mTextAccent} idx={scrubIdx} onIdx={setScrubIdx} />
               </div>
             )}
@@ -1596,7 +1596,7 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
                 value={scrubIdx !== 0 ? "—" : data.feelsLike != null ? `${conv(data.feelsLike)}°` : "—"}
               />
               <div className="flex items-baseline gap-2.5">
-                <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-white/60">UV index</span>
+                <span className="text-xs font-bold uppercase tracking-[0.14em] text-white/60">UV index</span>
                 <span className="flex-1 border-b border-dotted border-white/25" aria-hidden="true" />
                 <span className="flex items-center gap-2 rounded-full bg-white/10 px-2.5 py-1">
                   {scrubIdx === 0 && data.uv != null ? <UvDots uv={data.uv} accent={mAccent} /> : null}
@@ -1608,7 +1608,7 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
 
             {mSolar && (
               <div className="rounded-2xl border border-white/10 bg-white/[0.05] p-4">
-                <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-white/50">Daylight</p>
+                <p className="mb-2 text-xs font-bold uppercase tracking-[0.16em] text-white/50">Daylight</p>
                 <SunArc
                   sunriseISO={mSolar.sunriseISO}
                   sunsetISO={mSolar.sunsetISO}
@@ -1616,7 +1616,7 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
                   accent={mAccent}
                 />
                 <div className="mt-3 flex items-baseline gap-2.5">
-                  <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-white/60">Moon</span>
+                  <span className="text-xs font-bold uppercase tracking-[0.14em] text-white/60">Moon</span>
                   <span className="flex-1 border-b border-dotted border-white/25" aria-hidden="true" />
                   <span className="text-[13px] font-bold text-white">
                     {moonPhaseName(nowMoon.phase)} · {Math.round(nowMoon.illumination * 100)}%
@@ -1627,7 +1627,7 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
 
             <div>
               <div className="mb-2.5 flex items-center justify-between">
-                <h4 className="text-[11px] font-bold uppercase tracking-[0.14em] text-white/70">
+                <h4 className="text-xs font-bold uppercase tracking-[0.14em] text-white/70">
                   {view === "hourly" ? "Hourly" : "5-Day Forecast"}
                 </h4>
                 <div className="flex rounded-full border border-white/12 bg-white/[0.06] p-0.5" role="tablist" aria-label="Forecast view">
@@ -1638,7 +1638,7 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
                       role="tab"
                       aria-selected={view === v}
                       onClick={() => setView(v)}
-                      className="rounded-full px-3 py-1 text-[11px] font-bold capitalize transition-colors"
+                      className="rounded-full px-3 py-1 text-xs font-bold capitalize transition-colors"
                       style={view === v ? { background: mAccent, color: mAccentForeground } : { color: "rgba(255,255,255,0.6)" }}
                     >
                       {v}
@@ -1661,7 +1661,7 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
                       {i === scrubIdx && (
                         <span className="absolute inset-x-2 top-0 h-[2.5px] rounded-full" style={{ background: mAccent }} aria-hidden="true" />
                       )}
-                      <span className="text-[11px] font-bold" style={{ color: mCellTextAccent }}>
+                      <span className="text-xs font-bold" style={{ color: mCellTextAccent }}>
                         {i === 0 ? "NOW" : formatHourTick(h.time)}
                       </span>
                       <span className="flex h-[26px] w-full items-center justify-center" aria-hidden="true">
@@ -1669,7 +1669,7 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
                       </span>
                       <span className="text-sm font-black tabular-nums" style={{ color: mCellTextAccent }}>{h.temp == null ? "—" : `${conv(h.temp)}°`}</span>
                       {h.precip != null && h.precip >= 20 ? (
-                        <span className="text-[11px] font-semibold tabular-nums" style={{ color: mCellTextAccent }}>
+                        <span className="text-xs font-semibold tabular-nums" style={{ color: mCellTextAccent }}>
                           {Math.round(h.precip)}%
                         </span>
                       ) : (

@@ -318,10 +318,10 @@ export default function AiModelsCard() {
                     <span className={`h-2 w-2 shrink-0 rounded-full ${statusDot(p.status)}`} aria-hidden />
                     <span className="truncate text-sm font-semibold text-text-primary">{p.displayName}</span>
                     {pIdx === firstEnabledIdx && (
-                      <span className="rounded-full bg-[var(--color-accent-button)] px-2 py-0.5 text-[11px] font-bold text-white">Brain</span>
+                      <span className="rounded-full bg-[var(--color-accent-button)] px-2 py-0.5 text-xs font-bold text-white">Brain</span>
                     )}
                   </div>
-                  <p className="truncate text-[11px] text-text-muted">
+                  <p className="truncate text-xs text-text-muted">
                     {p.baseUrl}{p.keyPreview ? ` · key …${p.keyPreview}` : " · no key"}
                   </p>
                 </div>
@@ -373,17 +373,17 @@ export default function AiModelsCard() {
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 {p.models.map((m, i) => (
                   <span key={m} className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-[var(--color-surface-0)] px-2 py-0.5">
-                    <span className="text-[11px] font-semibold text-text-primary">{m}</span>
+                    <span className="text-xs font-semibold text-text-primary">{m}</span>
                     {i === 0 && pIdx === firstEnabledIdx ? (
-                      <span className="text-[10px] font-bold text-[var(--color-accent-mint)]">Brain</span>
+                      <span className="text-xs font-bold text-[var(--color-accent-mint)]">Brain</span>
                     ) : (
-                      <span className="text-[10px] text-text-muted">Fallback</span>
+                      <span className="text-xs text-text-muted">Fallback</span>
                     )}
                     {isParent && i > 0 && (
                       <button
                         type="button"
                         aria-label={`Move ${m} up`}
-                        className="text-[10px] text-text-secondary hover:text-text-primary"
+                        className="text-xs text-text-secondary hover:text-text-primary"
                         onClick={() => void moveModel(p, i, -1)}
                       >
                         ↑
@@ -393,7 +393,7 @@ export default function AiModelsCard() {
                       <button
                         type="button"
                         aria-label={`Move ${m} down`}
-                        className="text-[10px] text-text-secondary hover:text-text-primary"
+                        className="text-xs text-text-secondary hover:text-text-primary"
                         onClick={() => void moveModel(p, i, 1)}
                       >
                         ↓
@@ -402,9 +402,9 @@ export default function AiModelsCard() {
                   </span>
                 ))}
               </div>
-              {testing === p.id && <p className="mt-1 text-[11px] text-text-secondary">Testing…</p>}
+              {testing === p.id && <p className="mt-1 text-xs text-text-secondary">Testing…</p>}
               {testResult[p.id] && testing !== p.id && (
-                <p className={`mt-1 text-[11px] ${testResult[p.id].startsWith("ok") ? "text-[var(--color-accent-mint)]" : "text-[var(--color-accent-rose)]"}`}>
+                <p className={`mt-1 text-xs ${testResult[p.id].startsWith("ok") ? "text-[var(--color-accent-mint)]" : "text-[var(--color-accent-rose)]"}`}>
                   {testResult[p.id]}
                 </p>
               )}
@@ -419,24 +419,24 @@ export default function AiModelsCard() {
               <div className="flex items-center gap-2">
                 <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--color-accent-amber)]" aria-hidden />
                 <span className="truncate text-sm font-semibold text-text-primary">{g.provider}</span>
-                <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] font-semibold text-text-muted">read-only · env</span>
+                <span className="rounded-full border border-white/10 px-2 py-0.5 text-xs font-semibold text-text-muted">read-only · env</span>
               </div>
-              <p className="truncate text-[11px] text-text-muted">
+              <p className="truncate text-xs text-text-muted">
                 {g.baseUrl}{g.keyPreview ? ` · key …${g.keyPreview}` : ""}
               </p>
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 {g.models.map((m, i) => (
                   <span key={m} className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-[var(--color-surface-0)] px-2 py-0.5">
-                    <span className="text-[11px] font-semibold text-text-primary">{m}</span>
+                    <span className="text-xs font-semibold text-text-primary">{m}</span>
                     {i === 0 ? (
-                      <span className="text-[10px] font-bold text-[var(--color-accent-mint)]">Brain</span>
+                      <span className="text-xs font-bold text-[var(--color-accent-mint)]">Brain</span>
                     ) : (
-                      <span className="text-[10px] text-text-muted">Fallback</span>
+                      <span className="text-xs text-text-muted">Fallback</span>
                     )}
                   </span>
                 ))}
               </div>
-              <p className="mt-1 text-[11px] text-text-muted">
+              <p className="mt-1 text-xs text-text-muted">
                 Set via environment/fallback config — add a provider below to take over.
               </p>
             </div>
@@ -471,7 +471,7 @@ export default function AiModelsCard() {
                 <SoftButton size="sm" loading={listing} disabled={!draft.baseUrl} onClick={() => void loadModels()}>
                   Load models
                 </SoftButton>
-                <span className="text-[11px] text-text-muted">or type names below</span>
+                <span className="text-xs text-text-muted">or type names below</span>
               </div>
               {fetchedIds.length > 0 && (
                 <div className="flex flex-wrap gap-1.5" role="group" aria-label="Fetched models — tap to toggle">
@@ -491,8 +491,8 @@ export default function AiModelsCard() {
                         }
                         className={
                           included
-                            ? "rounded-full bg-[var(--color-accent-button)] px-2.5 py-1 text-[11px] font-semibold text-white"
-                            : "rounded-full border border-white/10 bg-[var(--color-surface-0)] px-2.5 py-1 text-[11px] font-semibold text-text-secondary"
+                            ? "rounded-full bg-[var(--color-accent-button)] px-2.5 py-1 text-xs font-semibold text-white"
+                            : "rounded-full border border-white/10 bg-[var(--color-surface-0)] px-2.5 py-1 text-xs font-semibold text-text-secondary"
                         }
                       >
                         {id}
@@ -528,9 +528,9 @@ export default function AiModelsCard() {
             </div>
           )}
 
-          {notice && <p className="text-[11px] text-text-secondary">{notice}</p>}
+          {notice && <p className="text-xs text-text-secondary">{notice}</p>}
           {providers.length === 0 && envProviders.length === 0 && (
-            <p className="text-[11px] text-text-muted">
+            <p className="text-xs text-text-muted">
               The brain chain is: provider 1&apos;s first model answers, later models/providers catch failures.
             </p>
           )}
@@ -544,25 +544,25 @@ export default function AiModelsCard() {
                 type="button"
                 onClick={() => void loadHealth()}
                 aria-label="Refresh AI health"
-                className="text-[11px] font-semibold text-text-secondary hover:text-text-primary"
+                className="text-xs font-semibold text-text-secondary hover:text-text-primary"
               >
                 Refresh
               </button>
             </div>
             {healthErr ? (
-              <p className="mt-1 text-[11px] text-text-muted">Health feed unavailable — tap Refresh to retry.</p>
+              <p className="mt-1 text-xs text-text-muted">Health feed unavailable — tap Refresh to retry.</p>
             ) : !h || h.total === 0 ? (
-              <p className="mt-1 text-[11px] text-text-muted">No chat requests recorded since the dashboard last restarted.</p>
+              <p className="mt-1 text-xs text-text-muted">No chat requests recorded since the dashboard last restarted.</p>
             ) : (
               <>
-                <p className="mt-1 text-[11px] text-text-secondary">
+                <p className="mt-1 text-xs text-text-secondary">
                   Last {h.total}: {h.ok} ok{h.wrapup ? ` · ${h.wrapup} wrap-up` : ""}
                   {h.exhausted ? ` · ${h.exhausted} ran out of steps` : ""}
                   {h.snag ? ` · ${h.snag} timeout` : ""}
                   {h.clientGone ? ` · ${h.clientGone} client left` : ""} · avg {(h.avgMs / 1000).toFixed(1)}s
                 </p>
                 {h.lastFailure && (
-                  <p className="mt-1 text-[11px] text-[var(--color-accent-rose)]">
+                  <p className="mt-1 text-xs text-[var(--color-accent-rose)]">
                     Last failure: {outcomeLabel(h.lastFailure.outcome)}
                     {h.lastFailure.reason ? ` — ${h.lastFailure.reason}` : ""} · {ago(h.lastFailure.ts)}
                   </p>

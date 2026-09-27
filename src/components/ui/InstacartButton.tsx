@@ -100,7 +100,7 @@ export default function InstacartButton({ title, ingredients, variant = "full", 
         <span>{loading ? "Opening..." : "Order Delivery"}</span>
       </button>
       {error && (
-        <p className="mt-1 text-[10px] text-[var(--color-accent-rose)]">{error}</p>
+        <p className="mt-1 text-xs text-[var(--color-accent-rose)]">{error}</p>
       )}
     </div>
   );

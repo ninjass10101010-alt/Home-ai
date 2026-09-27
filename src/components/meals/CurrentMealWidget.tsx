@@ -270,7 +270,7 @@ export default function CurrentMealWidget({ className = "" }: { className?: stri
                 {(activeMealData.tags ?? []).slice(0, 3).map((t: string) => (
                   <span
                     key={t}
-                    className="px-2 py-0.5 rounded-md text-[11px] font-medium"
+                    className="px-2 py-0.5 rounded-md text-xs font-medium"
                     style={{
                       color: `var(--widget-accent-strong, ${atm.accentColor})`,
                       background: `${atm.accentColor}15`,
@@ -282,7 +282,7 @@ export default function CurrentMealWidget({ className = "" }: { className?: stri
                 ))}
                 {(activeMealData.tags?.length ?? 0) > 3 && (
                   <span
-                    className="px-2 py-0.5 rounded-md text-[11px] font-medium"
+                    className="px-2 py-0.5 rounded-md text-xs font-medium"
                     style={{
                       color: `var(--widget-accent-strong, ${atm.accentColor})`,
                       background: `${atm.accentColor}15`,

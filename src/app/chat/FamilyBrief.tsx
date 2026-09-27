@@ -99,14 +99,14 @@ export function FamilyBrief({ speaker, onDraft, onSpeakerTap, compact = false, s
     if (next) parts.push(`📅 ${next.title}${next.countdown ? ` · ${next.countdown}` : ` · ${next.time}`}`);
     if (parts.length === 0) return null;
     return (
-      <div className="w-full px-3 py-2 rounded-2xl glass-subtle text-[11px] text-text-secondary flex items-center gap-2 overflow-hidden" role="status" aria-label="Today at a glance">
+      <div className="w-full px-3 py-2 rounded-2xl glass-subtle text-xs text-text-secondary flex items-center gap-2 overflow-hidden" role="status" aria-label="Today at a glance">
         <span className="shrink-0 font-semibold text-text-primary flex items-center gap-1"><EmojiText emoji={speaker.emoji} alt={speaker.name} /> {speaker.name.split(" ")[0]}</span>
         <span className="truncate min-w-0">{parts.join("  ·  ")}</span>
         {!signedIn && (
           <button
             onClick={onSpeakerTap}
             aria-label="Switch speaker"
-            className="tap-sm relative shrink-0 rounded-full px-2 py-1.5 text-[11px] font-semibold text-[var(--color-accent-selected)] before:absolute before:-inset-1.5 before:content-['']"
+            className="tap-sm relative shrink-0 rounded-full px-2 py-1.5 text-xs font-semibold text-[var(--color-accent-selected)] before:absolute before:-inset-1.5 before:content-['']"
           >
             switch
           </button>
@@ -125,7 +125,7 @@ export function FamilyBrief({ speaker, onDraft, onSpeakerTap, compact = false, s
       >
         <span className="text-2xl shrink-0" aria-hidden>{dinner ? "🍽️" : "🤷"}</span>
         <span className="min-w-0">
-          <span className="block text-[11px] uppercase tracking-wider text-text-secondary">Dinner</span>
+          <span className="block text-xs uppercase tracking-wider text-text-secondary">Dinner</span>
           <span className="block text-sm font-semibold text-text-primary truncate">
             {loaded ? (dinner ? dinner.name : "Nothing planned yet") : "…"}
           </span>
@@ -140,7 +140,7 @@ export function FamilyBrief({ speaker, onDraft, onSpeakerTap, compact = false, s
       >
         <span className="text-2xl shrink-0" aria-hidden>{next ? next.title.match(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u)?.[0] ?? "📅" : "🌙"}</span>
         <span className="min-w-0">
-          <span className="block text-[11px] uppercase tracking-wider text-text-secondary">Next up</span>
+          <span className="block text-xs uppercase tracking-wider text-text-secondary">Next up</span>
           <span className="block text-sm font-semibold text-text-primary truncate">
             {next ? `${next.title}${next.countdown ? ` · ${next.countdown}` : ` · ${next.time}`}` : "Quiet rest of day"}
           </span>
@@ -156,7 +156,7 @@ export function FamilyBrief({ speaker, onDraft, onSpeakerTap, compact = false, s
         >
           <span className="shrink-0" aria-hidden><EmojiText emoji={speaker.emoji} alt={speaker.name} className="w-8 h-8 text-2xl" /></span>
           <span className="min-w-0">
-            <span className="block text-[11px] uppercase tracking-wider text-text-secondary">Speaking as</span>
+            <span className="block text-xs uppercase tracking-wider text-text-secondary">Speaking as</span>
             <span className="block text-sm font-semibold text-text-primary truncate">
               {speaker.name.split(" ")[0]}
             </span>
@@ -171,7 +171,7 @@ export function FamilyBrief({ speaker, onDraft, onSpeakerTap, compact = false, s
         >
           <span className="shrink-0" aria-hidden><EmojiText emoji={speaker.emoji} alt={speaker.name} className="w-8 h-8 text-2xl" /></span>
           <span className="min-w-0">
-            <span className="block text-[11px] uppercase tracking-wider text-text-secondary">Speaking as</span>
+            <span className="block text-xs uppercase tracking-wider text-text-secondary">Speaking as</span>
             <span className="block text-sm font-semibold text-text-primary truncate">
               {speaker.name.split(" ")[0]}
             </span>

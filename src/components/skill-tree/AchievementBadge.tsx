@@ -73,7 +73,7 @@ export function AchievementBadge({
       {/* Rarity Badge */}
       <motion.div
         whileHover={{ scale: 1.05 }}
-        className={`rounded-full bg-gradient-to-r px-2 py-0.5 text-[10px] font-bold uppercase text-white shadow-md ${rarityColors[achievement.rarity]}`}
+        className={`rounded-full bg-gradient-to-r px-2 py-0.5 text-xs font-bold uppercase text-white shadow-md ${rarityColors[achievement.rarity]}`}
       >
         {achievement.rarity}
       </motion.div>
@@ -92,7 +92,7 @@ export function AchievementBadge({
       
       {/* Earned date */}
       {earned && earnedAt && (
-        <div className="text-[10px] text-text-secondary">
+        <div className="text-xs text-text-secondary">
           {new Date(earnedAt).toLocaleDateString('en-US', {
             month: 'short',
             day: 'numeric',

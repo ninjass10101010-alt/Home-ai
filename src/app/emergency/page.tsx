@@ -123,7 +123,7 @@ export default function EmergencyPage() {
       <p className="text-text-primary font-medium text-sm truncate">{contact.name}</p>
       <p className="text-text-secondary text-xs mt-0.5 truncate">{formatPhoneForDisplay(contact.phone)}</p>
       {contact.carrier && (
-        <p className="text-text-secondary text-[10px] truncate">{carrierLabels[contact.carrier] || contact.carrier}</p>
+        <p className="text-text-secondary text-xs truncate">{carrierLabels[contact.carrier] || contact.carrier}</p>
       )}
       <a
         href={`tel:${cleanPhoneForTel(contact.phone)}`}

@@ -155,31 +155,31 @@ export default function RecipeBox({
                     )}
                     <div className="absolute bottom-3 left-3 flex gap-1.5">
                       {recipe.prepTime && (
-                        <span className="rounded-full bg-[var(--color-surface-0)]/70 px-2.5 py-1 text-[11px] font-extrabold text-text-primary backdrop-blur-md">⏱ {recipe.prepTime}</span>
+                        <span className="rounded-full bg-[var(--color-surface-0)]/70 px-2.5 py-1 text-xs font-extrabold text-text-primary backdrop-blur-md">⏱ {recipe.prepTime}</span>
                       )}
                       {recipe.calories > 0 && (
-                        <span className="rounded-full bg-[var(--color-surface-0)]/70 px-2.5 py-1 text-[11px] font-extrabold text-text-primary backdrop-blur-md">🔥 {recipe.calories} kcal</span>
+                        <span className="rounded-full bg-[var(--color-surface-0)]/70 px-2.5 py-1 text-xs font-extrabold text-text-primary backdrop-blur-md">🔥 {recipe.calories} kcal</span>
                       )}
                     </div>
                   </div>
                   <div className="p-4 pb-0">
                     <h3 className="text-base font-bold text-text-primary truncate">{recipe.name}</h3>
-                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] font-bold text-text-muted">
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs font-bold text-text-muted">
                       {recipe.servings > 0 && (<span>👨‍👩‍👧‍👦 serves {recipe.servings}</span>)}
                       {recipe.servings > 0 && recipe.tags?.length > 0 && <span>·</span>}
                       {recipe.tags?.slice(0, 3).map((t: string) => (
-                        <span key={t} className="glass-subtle rounded-full px-2 py-0.5 text-[10px] font-bold text-text-secondary">{t}</span>
+                        <span key={t} className="glass-subtle rounded-full px-2 py-0.5 text-xs font-bold text-text-secondary">{t}</span>
                       ))}
                     </div>
                     {recipe.difficulty && (
-                      <span className={`mt-2 inline-block rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                      <span className={`mt-2 inline-block rounded-full px-2 py-0.5 text-xs font-bold ${
                         recipe.difficulty === "Easy" ? "bg-[var(--color-accent-mint)]/20 text-[var(--color-accent-mint)]"
                           : recipe.difficulty === "Medium" ? "bg-[var(--color-accent-amber)]/20 text-[var(--color-accent-amber)]"
                           : "bg-[var(--color-accent-rose)]/20 text-[var(--color-accent-rose)]"
                       }`}>{recipe.difficulty}</span>
                     )}
                     {recipe.rating && recipe.rating > 0 && (
-                      <span className="ml-1.5 text-[11px] font-bold text-text-muted">⭐ {recipe.rating.toFixed(1)}</span>
+                      <span className="ml-1.5 text-xs font-bold text-text-muted">⭐ {recipe.rating.toFixed(1)}</span>
                     )}
                   </div>
                 </div>
@@ -218,7 +218,7 @@ export default function RecipeBox({
                         <button
                           key={day}
                           onClick={(e) => { e.stopPropagation(); addToPlan(recipe, day); }}
-                           className="rounded-lg px-2 py-1 text-[10px] font-medium text-text-secondary hover:bg-[var(--color-accent-selected)]/15 hover:text-[var(--color-accent-selected)] whitespace-nowrap cursor-pointer tap-sm"
+                           className="rounded-lg px-2 py-1 text-xs font-medium text-text-secondary hover:bg-[var(--color-accent-selected)]/15 hover:text-[var(--color-accent-selected)] whitespace-nowrap cursor-pointer tap-sm"
                         >
                           {day}
                         </button>

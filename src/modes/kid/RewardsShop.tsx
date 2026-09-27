@@ -168,7 +168,7 @@ function RewardCard({
         <h3 className={`text-sm font-bold ${canAfford ? "text-text-primary" : "text-text-muted"}`}>
           {reward.name}
         </h3>
-        <span className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">
+        <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">
           {config.label}
         </span>
       </div>
@@ -182,7 +182,7 @@ function RewardCard({
         <span className={`text-base font-black tabular-nums ${canAfford ? "text-[var(--color-accent-amber)]" : "text-text-muted"}`}>
           {reward.cost}
         </span>
-        <span className="text-[11px] text-text-muted font-bold -mt-0.5">pts</span>
+        <span className="text-xs text-text-muted font-bold -mt-0.5">pts</span>
       </div>
     </button>
   );
@@ -477,7 +477,7 @@ export default function RewardsShop() {
               <div className="flex items-center gap-2 mb-3">
                 <span className="text-lg">{group.config.icon}</span>
                 <h3 className="text-base font-bold text-text-primary">{group.config.label}</h3>
-                <span className="text-[11px] text-text-muted font-semibold">{group.items.length} available</span>
+                <span className="text-xs text-text-muted font-semibold">{group.items.length} available</span>
               </div>
               <div className="space-y-2">
                 {group.items.map((reward) => (

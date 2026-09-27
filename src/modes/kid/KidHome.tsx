@@ -118,7 +118,7 @@ function KidLeaderboard({ members }: { members: { name: string; color: string; e
     <Surface variant="warm" radius="2xl" padding="none" aria-live="polite" aria-label="Family leaderboard">
       <div className="p-4 pb-2 flex items-center justify-between">
         <h3 className="text-base font-bold text-text-primary">🏆 Leaderboard</h3>
-        <span className="text-[11px] font-semibold text-text-muted">This week</span>
+        <span className="text-xs font-semibold text-text-muted">This week</span>
       </div>
       <div className="px-4 pb-4 space-y-2">
         {sorted.slice(0, 5).map((member, i) => {
@@ -153,7 +153,7 @@ function KidLeaderboard({ members }: { members: { name: string; color: string; e
                 </span>
                 {isMe && (
                   <span
-                    className="ml-1.5 text-[11px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md inline-block align-middle"
+                    className="ml-1.5 text-xs font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md inline-block align-middle"
                     style={{ background: "var(--color-accent-button, var(--color-accent-selected))", color: "white" }}
                   >
                     You!
@@ -166,7 +166,7 @@ function KidLeaderboard({ members }: { members: { name: string; color: string; e
               <span className="text-sm font-bold text-text-primary tabular-nums">
                 {member.points || 0}
               </span>
-              <span className="text-[11px] text-text-muted">pts</span>
+              <span className="text-xs text-text-muted">pts</span>
             </div>
           );
         })}
@@ -1007,19 +1007,19 @@ export default function KidHome() {
                 border: "1px solid color-mix(in srgb, var(--color-accent-amber) 28%, transparent)",
               }}
             >
-              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--color-accent-amber)]">
+              <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--color-accent-amber)]">
                 🏆 This Week
               </p>
               <p className="mt-1 flex items-baseline gap-1">
                 <span className="text-3xl font-black tabular-nums text-text-primary">{points}</span>
-                <span className="text-[11px] font-semibold text-text-muted">pts</span>
+                <span className="text-xs font-semibold text-text-muted">pts</span>
               </p>
               {heroRaceLine && (
-                <p className="mt-1 text-[11px] font-semibold leading-snug text-text-secondary">
+                <p className="mt-1 text-xs font-semibold leading-snug text-text-secondary">
                   {heroRaceLine}
                 </p>
               )}
-              <p className="mt-1.5 text-[11px] font-semibold text-text-muted">
+              <p className="mt-1.5 text-xs font-semibold text-text-muted">
                 {resetLine}
               </p>
             </div>
@@ -1035,13 +1035,13 @@ export default function KidHome() {
                 border: "1px solid color-mix(in srgb, var(--color-accent-violet) 28%, transparent)",
               }}
             >
-              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--color-accent-violet)]">
+              <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--color-accent-violet)]">
                 ⭐ Forever
               </p>
               <div className="mt-1">
                 <LevelBar points={allTimePoints} pointsPerLevel={POINTS_PER_LEVEL} />
               </div>
-              <p className="mt-1.5 text-[11px] font-semibold text-text-muted tabular-nums">
+              <p className="mt-1.5 text-xs font-semibold text-text-muted tabular-nums">
                 {allTimePoints} pts · yours to keep
               </p>
             </div>
@@ -1140,7 +1140,7 @@ export default function KidHome() {
             <div>
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-base font-bold text-text-primary">🏖️ Weekend Bonus!</h2>
-                <span className="text-[11px] font-bold text-[var(--color-accent-amber)]">Double points today!</span>
+                <span className="text-xs font-bold text-[var(--color-accent-amber)]">Double points today!</span>
               </div>
               <Surface variant="warm" radius="2xl" padding="none">
                 <div className="p-4">
@@ -1156,7 +1156,7 @@ export default function KidHome() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <h3 className="text-sm font-bold text-text-primary">Weekend Challenge</h3>
-                      <p className="text-[11px] text-text-secondary">Do something fun with the family!</p>
+                      <p className="text-xs text-text-secondary">Do something fun with the family!</p>
                     </div>
                     <div
                       className="shrink-0 flex flex-col items-center justify-center w-14 h-14 rounded-2xl"
@@ -1166,7 +1166,7 @@ export default function KidHome() {
                       }}
                     >
                       <span className="text-lg font-black tabular-nums text-[var(--color-accent-amber)]">+25</span>
-                      <span className="text-[11px] text-text-muted font-bold -mt-0.5">pts</span>
+                      <span className="text-xs text-text-muted font-bold -mt-0.5">pts</span>
                     </div>
                   </div>
                   <p className="text-xs text-text-muted text-center">
@@ -1187,7 +1187,7 @@ export default function KidHome() {
                 border: "1px solid color-mix(in srgb, var(--color-accent-amber) 25%, transparent)",
               }}
             >
-              <p className="text-[11px] font-semibold text-[var(--color-accent-amber)]">
+              <p className="text-xs font-semibold text-[var(--color-accent-amber)]">
                 {claimOutboxSummary.stalled > 0
                   ? `⏳ Couldn't send ${claimOutboxSummary.stalled} chore${claimOutboxSummary.stalled !== 1 ? "s" : ""} — ask a grown-up to check your chores.`
                   : `⏳ Still sending ${claimOutboxSummary.queued} chore${claimOutboxSummary.queued !== 1 ? "s" : ""} to the family server…`}
@@ -1223,20 +1223,20 @@ export default function KidHome() {
                       <span className="text-sm">{pending ? "⏳" : "✅"}</span>
                       <span className={`text-xs text-text-muted flex-1 ${pending ? "" : "line-through"}`}>
                         {task.title}
-                        {pending && <span className="ml-1 text-[11px] font-semibold text-[var(--color-accent-amber)]">on the way</span>}
+                        {pending && <span className="ml-1 text-xs font-semibold text-[var(--color-accent-amber)]">on the way</span>}
                       </span>
                       {pending ? (
                         <button
                           type="button"
                           aria-label={`Cancel: ${task.title}`}
                           onClick={() => cancelQuestTap(task.id)}
-                          className="text-[11px] font-semibold px-2 py-1 rounded-lg"
+                          className="text-xs font-semibold px-2 py-1 rounded-lg"
                           style={{ color: "var(--color-accent-rose)" }}
                         >
                           ↩ Not done
                         </button>
                       ) : (
-                        <span className="text-[11px] font-bold text-[var(--color-accent-mint)]">+{task.points}</span>
+                        <span className="text-xs font-bold text-[var(--color-accent-mint)]">+{task.points}</span>
                       )}
                     </div>
                   );
@@ -1256,7 +1256,7 @@ export default function KidHome() {
                       <span className="text-xl">{event.icon || "📅"}</span>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-text-primary">{event.title}</p>
-                        <p className="text-[11px] text-text-secondary">{event.time}</p>
+                        <p className="text-xs text-text-secondary">{event.time}</p>
                       </div>
                     </div>
                   ))}
@@ -1279,7 +1279,7 @@ export default function KidHome() {
                   {tonightMeal.tags && tonightMeal.tags.length > 0 && (
                     <div className="flex justify-center gap-1.5 mt-2">
                       {tonightMeal.tags.map((tag: string) => (
-                        <span key={tag} className="text-[11px] font-bold px-2 py-0.5 rounded-full" style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.1)", color: "var(--color-text-secondary)" }}>
+                        <span key={tag} className="text-xs font-bold px-2 py-0.5 rounded-full" style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.1)", color: "var(--color-text-secondary)" }}>
                           {tag}
                         </span>
                       ))}

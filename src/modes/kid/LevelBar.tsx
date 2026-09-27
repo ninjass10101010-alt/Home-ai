@@ -68,7 +68,7 @@ export default function LevelBar({
             </span>
           )}
         </div>
-        <span className="text-[10px] font-semibold text-text-secondary tabular-nums">
+        <span className="text-xs font-semibold text-text-secondary tabular-nums">
           {pointsInLevel}/{pointsPerLevel} → Lv{nextLevel}
         </span>
       </div>
@@ -115,10 +115,10 @@ export default function LevelBar({
 
       {/* Points remaining */}
       <div className="flex items-center justify-between mt-1">
-        <span className="text-[10px] text-text-muted">
+        <span className="text-xs text-text-muted">
           {pointsToNext > 0 ? `${pointsToNext} more pts to Level ${nextLevel}` : "Almost there!"}
         </span>
-        <span className="text-[10px] font-bold text-text-secondary tabular-nums">
+        <span className="text-xs font-bold text-text-secondary tabular-nums">
           {points} total pts
         </span>
       </div>

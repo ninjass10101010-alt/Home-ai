@@ -206,7 +206,7 @@ export default function StockTab({
                           <span className="text-xl shrink-0" aria-hidden>{g.emoji}</span>
                           <span className="flex-1 min-w-0 text-sm font-semibold truncate">{g.group}</span>
                           <span
-                            className={`shrink-0 text-[10px] font-bold rounded-full px-1.5 py-0.5 ${
+                            className={`shrink-0 text-xs font-bold rounded-full px-1.5 py-0.5 ${
                               isSelected ? "bg-white/20 text-white" : "bg-[var(--color-surface-2)] text-text-muted"
                             }`}
                           >
@@ -246,7 +246,7 @@ export default function StockTab({
                   {(currentGroup?.items.length ?? 0) > PRESETS_PER_PAGE && (
                     <button
                       onClick={() => setShowAllPresets(v => !v)}
-                      className="mt-2 text-[11px] text-[var(--color-accent-selected)] hover:opacity-80 transition-opacity"
+                      className="mt-2 text-xs text-[var(--color-accent-selected)] hover:opacity-80 transition-opacity"
                     >
                       {showAllPresets ? "Show less ↑" : `Show ${(currentGroup?.items.length ?? 0) - PRESETS_PER_PAGE} more ↓`}
                     </button>
@@ -292,12 +292,12 @@ export default function StockTab({
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-bold leading-tight text-text-primary break-words" title={p.item}>{p.item}</p>
-                      <p className="flex items-center gap-1.5 text-[11px] font-bold">
+                      <p className="flex items-center gap-1.5 text-xs font-bold">
                         <span className={`h-1.5 w-1.5 rounded-full ${f.dot}`} />
                         <span className={f.text}>{f.label}</span>
                         <span className="text-text-muted">· {guessCategory(p.item)}</span>
                         {onGrocery && (
-                          <span className="rounded-full bg-[var(--color-accent-amber)]/10 px-1.5 py-0.5 text-[10px] font-bold text-[var(--color-accent-amber)]">
+                          <span className="rounded-full bg-[var(--color-accent-amber)]/10 px-1.5 py-0.5 text-xs font-bold text-[var(--color-accent-amber)]">
                             on grocery
                           </span>
                         )}
@@ -317,7 +317,7 @@ export default function StockTab({
                         <button
                           key={s}
                           onClick={() => updatePantryStatus(p.id, s)}
-                          className={`cursor-pointer rounded-lg px-2 py-1 text-[10px] font-bold tap-sm ${
+                          className={`cursor-pointer rounded-lg px-2 py-1 text-xs font-bold tap-sm ${
                             p.status === s
                               ? s === "plenty" ? "bg-[var(--color-accent-mint)]/20 text-[var(--color-accent-mint)]"
                                 : s === "low" ? "bg-[var(--color-accent-amber)]/20 text-[var(--color-accent-amber)]"
@@ -344,7 +344,7 @@ export default function StockTab({
                       title={pendingDeleteId === p.id ? "Tap again to remove" : "Remove item"}
                     >
                       {pendingDeleteId === p.id ? (
-                        <span className="text-[10px] font-bold whitespace-nowrap px-1">Remove?</span>
+                        <span className="text-xs font-bold whitespace-nowrap px-1">Remove?</span>
                       ) : (
                         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />

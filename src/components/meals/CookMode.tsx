@@ -85,7 +85,7 @@ export default function CookMode({ recipe, onExit }: { recipe: Recipe; onExit: (
           </button>
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-base font-bold text-text-primary">👨‍🍳 {recipe.name}</h2>
-            <p className="text-[11px] font-semibold text-text-muted">
+            <p className="text-xs font-semibold text-text-muted">
               {stepsDone
                 ? "Finished!"
                 : steps.length > 0
@@ -119,7 +119,7 @@ export default function CookMode({ recipe, onExit }: { recipe: Recipe; onExit: (
       ) : (
         <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-4 pb-8">
           <section aria-label="Gather ingredients">
-            <p className="mb-2 text-[11px] font-extrabold uppercase tracking-wider text-text-muted">
+            <p className="mb-2 text-xs font-extrabold uppercase tracking-wider text-text-muted">
               🥕 Gather · {ingredients.length > 0 ? `${checkedIngredients.length} of ${ingredients.length} ready` : "Nothing to gather"}
             </p>
             <div className="liquid-glass rounded-2xl p-2">
@@ -160,7 +160,7 @@ export default function CookMode({ recipe, onExit }: { recipe: Recipe; onExit: (
           </section>
 
           <section aria-label="Cooking steps">
-            <p className="mb-2 text-[11px] font-extrabold uppercase tracking-wider text-text-muted">👨‍🍳 Steps</p>
+            <p className="mb-2 text-xs font-extrabold uppercase tracking-wider text-text-muted">👨‍🍳 Steps</p>
             <div className="space-y-2">
               {steps.length === 0 && (
                 <p className="liquid-glass rounded-2xl p-4 text-sm font-medium text-text-muted">
@@ -181,7 +181,7 @@ export default function CookMode({ recipe, onExit }: { recipe: Recipe; onExit: (
                       className="mt-0.5 h-5 w-5 accent-[var(--color-accent-selected)]"
                     />
                     <span className="flex items-start gap-3">
-                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-[var(--color-accent-selected)]/15 text-[11px] font-extrabold text-[var(--color-accent-selected)]">
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-[var(--color-accent-selected)]/15 text-xs font-extrabold text-[var(--color-accent-selected)]">
                         {idx + 1}
                       </span>
                       <span className={`text-sm leading-relaxed ${checked ? "text-text-muted line-through" : "text-text-primary"}`}>

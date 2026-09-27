@@ -263,7 +263,7 @@ export default function MuseApiCard() {
 
   const revealedKeyBlock = revealedKey ? (
     <div className="space-y-2 rounded-2xl border border-[var(--color-accent-amber)]/40 bg-[color-mix(in_srgb,var(--color-accent-amber),transparent_88%)] p-3">
-      <p className="text-[11px] font-semibold text-[var(--color-accent-amber)]">
+      <p className="text-xs font-semibold text-[var(--color-accent-amber)]">
         Save this now — it will not be shown again.
       </p>
       <code className="block break-all rounded-xl bg-black/30 px-3 py-2 text-xs text-text-primary">
@@ -317,7 +317,7 @@ export default function MuseApiCard() {
                 label="Allow admin operations"
                 description="Let MUSE call the guarded dashboard admin tools."
               />
-              <p className="mt-2 text-[11px] text-[var(--color-accent-amber)]">
+              <p className="mt-2 text-xs text-[var(--color-accent-amber)]">
                 Warning: with this on, MUSE could update or restart the dashboard containers. Leave it
                 off unless you trust the connected agent.
               </p>
@@ -328,7 +328,7 @@ export default function MuseApiCard() {
             {settings.hasKey ? (
               <>
                 <p className="text-sm font-semibold text-text-primary">Key {settings.keyPrefix}…</p>
-                <p className="text-[11px] text-text-muted">
+                <p className="text-xs text-text-muted">
                   Version {settings.version} · Created {formatWhen(settings.createdAt)} · Rotated{" "}
                   {formatWhen(settings.rotatedAt)} · Last used {formatWhen(settings.lastUsedAt)}
                 </p>
@@ -365,7 +365,7 @@ export default function MuseApiCard() {
                 Revoke tokens
               </SoftButton>
             </div>
-            <p className="text-[11px] text-text-muted">
+            <p className="text-xs text-text-muted">
               Rotating issues a new key and immediately signs out every connected agent. Revoking only
               signs agents out — the key keeps working for new logins.
             </p>
@@ -405,7 +405,7 @@ export default function MuseApiCard() {
               </SoftButton>
             </div>
             {rateError && (
-              <p role="alert" className="text-[11px] text-[var(--color-accent-rose)]">
+              <p role="alert" className="text-xs text-[var(--color-accent-rose)]">
                 {rateError}
               </p>
             )}
@@ -415,9 +415,9 @@ export default function MuseApiCard() {
             <p className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
               Recent activity
             </p>
-            {logError && <p className="text-[11px] text-text-muted">{logError}</p>}
+            {logError && <p className="text-xs text-text-muted">{logError}</p>}
             {shown.length === 0 ? (
-              <p className="text-[11px] text-text-muted">No MUSE activity yet.</p>
+              <p className="text-xs text-text-muted">No MUSE activity yet.</p>
             ) : (
               <>
                 <ul className="space-y-1">
@@ -436,14 +436,14 @@ export default function MuseApiCard() {
                         {entry.tool || entry.kind || "request"}
                         {entry.tokenAdmin ? " · admin" : ""}
                       </span>
-                      <span className="shrink-0 text-[11px] text-text-muted">
+                      <span className="shrink-0 text-xs text-text-muted">
                         {entry.ok ? "ok" : "failed"} · {relative(entry.at)}
                       </span>
                     </li>
                   ))}
                 </ul>
                 {failures && (
-                  <p className="text-[11px] text-[var(--color-accent-rose)]">{failures}</p>
+                  <p className="text-xs text-[var(--color-accent-rose)]">{failures}</p>
                 )}
               </>
             )}
@@ -453,10 +453,10 @@ export default function MuseApiCard() {
             <p className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
               Connect an agent
             </p>
-            <p className="text-[11px] text-text-muted">
+            <p className="text-xs text-text-muted">
               Base URL: <code className="text-text-secondary">{baseUrl}</code>
             </p>
-            <pre className="overflow-x-auto rounded-xl bg-black/30 px-3 py-2 text-[11px] text-text-secondary">
+            <pre className="overflow-x-auto rounded-xl bg-black/30 px-3 py-2 text-xs text-text-secondary">
               {loginCurl}
             </pre>
             <SoftButton
@@ -469,7 +469,7 @@ export default function MuseApiCard() {
             </SoftButton>
           </div>
 
-          {notice && <p className="text-[11px] text-text-secondary">{notice}</p>}
+          {notice && <p className="text-xs text-text-secondary">{notice}</p>}
         </div>
       ) : null}
 

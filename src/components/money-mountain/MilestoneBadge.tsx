@@ -54,7 +54,7 @@ export function MilestoneBadge({ milestone, currentPercentage }: MilestoneBadgeP
         <div className={`text-xs font-medium transition-colors ${isReached ? 'text-text-primary' : 'text-text-secondary'}`}>
           {milestone.label}
         </div>
-        <div className="text-[10px] text-text-secondary">{milestone.percentage}%</div>
+        <div className="text-xs text-text-secondary">{milestone.percentage}%</div>
       </div>
       
       {/* Mini progress bar */}

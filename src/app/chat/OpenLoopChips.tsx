@@ -101,7 +101,7 @@ export function OpenLoopChips({ onDraft, role }: OpenLoopChipsProps) {
         >
           <span className="text-xl shrink-0" aria-hidden>{s.emoji || "💭"}</span>
           <span className="min-w-0 flex-1">
-            <span className="block text-[11px] uppercase tracking-wider text-text-secondary">Consuela noticed</span>
+            <span className="block text-xs uppercase tracking-wider text-text-secondary">Consuela noticed</span>
             <span className="block text-sm font-medium text-text-primary line-clamp-2">{s.title}</span>
           </span>
         </button>

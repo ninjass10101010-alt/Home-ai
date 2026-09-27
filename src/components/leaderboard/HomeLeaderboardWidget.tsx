@@ -107,7 +107,7 @@ function PodiumRow({
           </span>
           {isYou && (
             <span
-              className="rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider"
+              className="rounded-md px-1.5 py-0.5 text-xs font-bold uppercase tracking-wider"
               style={{
                 background: `${memberColor}25`,
                 color: memberColor,
@@ -127,7 +127,7 @@ function PodiumRow({
         <span className="text-sm font-bold text-text-primary display-numeral">
           {entry.points}
         </span>
-        <span className="text-[10px] text-text-muted">pts</span>
+        <span className="text-xs text-text-muted">pts</span>
         <RankArrow currentRank={rank} previousRank={previousRank} />
       </div>
     </div>
@@ -159,7 +159,7 @@ function OtherRow({
       <span className="truncate text-sm text-text-secondary flex-1">{entry.name.split(" ")[0]}</span>
       <div className="flex items-center gap-2 shrink-0">
         <span className="text-sm font-semibold text-text-secondary display-numeral">{entry.points}</span>
-        <span className="text-[10px] text-text-muted">pts</span>
+        <span className="text-xs text-text-muted">pts</span>
         <RankArrow currentRank={entry.rank} previousRank={previousRank} />
       </div>
     </div>

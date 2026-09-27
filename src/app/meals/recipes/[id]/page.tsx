@@ -266,13 +266,13 @@ function RecipeDetailContent() {
           <h1 className="text-2xl font-extrabold text-text-primary">{recipe.name}</h1>
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             {recipe.tags?.slice(0, 4).map((t) => (
-              <span key={t} className="glass-subtle rounded-full px-2.5 py-0.5 text-[11px] font-bold text-text-secondary">
+              <span key={t} className="glass-subtle rounded-full px-2.5 py-0.5 text-xs font-bold text-text-secondary">
                 {t}
               </span>
             ))}
             {recipe.difficulty && (
               <span
-                className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
+                className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${
                   recipe.difficulty === "Easy"
                     ? "bg-[var(--color-accent-mint)]/20 text-[var(--color-accent-mint)]"
                     : recipe.difficulty === "Medium"
@@ -284,7 +284,7 @@ function RecipeDetailContent() {
               </span>
             )}
             {recipe.rating && recipe.rating > 0 && (
-              <span className="text-[11px] font-bold text-text-muted">⭐ {recipe.rating.toFixed(1)}</span>
+              <span className="text-xs font-bold text-text-muted">⭐ {recipe.rating.toFixed(1)}</span>
             )}
           </div>
         </div>
@@ -300,20 +300,20 @@ function RecipeDetailContent() {
         <div className="grid items-start gap-6 lg:grid-cols-[320px_1fr]">
           <div className="space-y-4 lg:sticky lg:top-4">
             <div className="glass rounded-2xl p-4">
-              <p className="mb-3 text-[11px] font-extrabold uppercase tracking-wider text-text-muted">📊 Stats</p>
+              <p className="mb-3 text-xs font-extrabold uppercase tracking-wider text-text-muted">📊 Stats</p>
               <div className="flex flex-wrap gap-2">
                 {recipe.prepTime && (
-                  <span className="glass-subtle rounded-full px-3 py-1 text-[11px] font-bold text-text-primary">
+                  <span className="glass-subtle rounded-full px-3 py-1 text-xs font-bold text-text-primary">
                     ⏱ {recipe.prepTime} prep
                   </span>
                 )}
                 {recipe.cookTime && (
-                  <span className="glass-subtle rounded-full px-3 py-1 text-[11px] font-bold text-text-primary">
+                  <span className="glass-subtle rounded-full px-3 py-1 text-xs font-bold text-text-primary">
                     🔥 {recipe.cookTime} cook
                   </span>
                 )}
                 {recipe.servings > 0 && (
-                  <span className="glass-subtle rounded-full px-3 py-1 text-[11px] font-bold text-text-primary">
+                  <span className="glass-subtle rounded-full px-3 py-1 text-xs font-bold text-text-primary">
                     👨‍👩‍👧‍👦 serves {recipe.servings}
                   </span>
                 )}
@@ -322,19 +322,19 @@ function RecipeDetailContent() {
                 <div className="mt-3 grid grid-cols-4 gap-1.5 text-center">
                   <div className="glass-subtle rounded-xl p-2">
                     <p className="text-sm font-extrabold text-text-primary">{recipe.calories || "—"}</p>
-                    <p className="text-[11px] font-semibold text-text-muted">kcal</p>
+                    <p className="text-xs font-semibold text-text-muted">kcal</p>
                   </div>
                   <div className="glass-subtle rounded-xl p-2">
                     <p className="text-sm font-extrabold text-text-primary">{recipe.protein || "—"}</p>
-                    <p className="text-[11px] font-semibold text-text-muted">protein</p>
+                    <p className="text-xs font-semibold text-text-muted">protein</p>
                   </div>
                   <div className="glass-subtle rounded-xl p-2">
                     <p className="text-sm font-extrabold text-text-primary">{recipe.carbs || "—"}</p>
-                    <p className="text-[11px] font-semibold text-text-muted">carbs</p>
+                    <p className="text-xs font-semibold text-text-muted">carbs</p>
                   </div>
                   <div className="glass-subtle rounded-xl p-2">
                     <p className="text-sm font-extrabold text-text-primary">{recipe.fat || "—"}</p>
-                    <p className="text-[11px] font-semibold text-text-muted">fat</p>
+                    <p className="text-xs font-semibold text-text-muted">fat</p>
                   </div>
                 </div>
               )}
@@ -398,7 +398,7 @@ function RecipeDetailContent() {
             </div>
 
             <div className="glass rounded-2xl p-4">
-              <p className="mb-3 text-[11px] font-extrabold uppercase tracking-wider text-text-muted">
+              <p className="mb-3 text-xs font-extrabold uppercase tracking-wider text-text-muted">
                 🥕 Ingredients · {recipe.ingredients?.length ?? 0}
               </p>
               {(!recipe.ingredients || recipe.ingredients.length === 0) && (
@@ -432,7 +432,7 @@ function RecipeDetailContent() {
 
           <div className="space-y-4">
             <div className="glass rounded-2xl p-4 sm:p-5">
-              <p className="mb-4 text-[11px] font-extrabold uppercase tracking-wider text-text-muted">
+              <p className="mb-4 text-xs font-extrabold uppercase tracking-wider text-text-muted">
                 👨‍🍳 Instructions · {steps.length} step{steps.length === 1 ? "" : "s"}
               </p>
               {steps.length === 0 && (
@@ -443,7 +443,7 @@ function RecipeDetailContent() {
               <ol className="space-y-4">
                 {steps.map((step, idx) => (
                   <li key={idx} className="flex gap-3">
-                    <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-[var(--color-accent-selected)]/15 text-[11px] font-extrabold text-[var(--color-accent-selected)]">
+                    <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-[var(--color-accent-selected)]/15 text-xs font-extrabold text-[var(--color-accent-selected)]">
                       {idx + 1}
                     </span>
                     <p className="text-sm leading-relaxed text-text-primary">{step}</p>
@@ -453,7 +453,7 @@ function RecipeDetailContent() {
             </div>
 
             {(recipe.sourceUrl || recipe.source) && (
-              <p className="break-words text-[11px] font-semibold text-text-muted">
+              <p className="break-words text-xs font-semibold text-text-muted">
                 🌐 Source:{" "}
                 {recipe.sourceUrl ? (
                   <a

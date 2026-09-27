@@ -594,15 +594,15 @@ export default function GoogleConnectCard() {
           <p className="text-sm font-semibold text-text-primary">Connected as {state.account_email || "Google account"}</p>
           <p className="mt-0.5 text-xs text-text-secondary">Google Calendar sync is on for this family server.</p>
           {state.minutes_until_expiry !== null ? (
-            <p className="mt-1 text-[11px] text-text-muted">Access expires in {state.minutes_until_expiry} min · Last granted {formatRelativeTime(state.granted_at)}</p>
+            <p className="mt-1 text-xs text-text-muted">Access expires in {state.minutes_until_expiry} min · Last granted {formatRelativeTime(state.granted_at)}</p>
           ) : null}
-          {lastSyncAt ? <p className="mt-1 text-[11px] text-text-muted">Last auto-sync: {formatRelativeTime(lastSyncAt)}</p> : null}
-          {syncStateError ? <p role="status" className="mt-1 text-[11px] text-text-secondary">{syncStateError}</p> : null}
+          {lastSyncAt ? <p className="mt-1 text-xs text-text-muted">Last auto-sync: {formatRelativeTime(lastSyncAt)}</p> : null}
+          {syncStateError ? <p role="status" className="mt-1 text-xs text-text-secondary">{syncStateError}</p> : null}
         </div>
       </div>
       {calendars && calendars.length > 0 ? (
         <div className="space-y-2 border-y border-white/10 py-4">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-text-muted">Calendars</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.15em] text-text-muted">Calendars</p>
           <p className="text-xs text-text-secondary">Choose which Google calendars Consuela syncs.</p>
           <div className="mt-3 space-y-1">
             {calendars.map((calendar) => (
@@ -618,7 +618,7 @@ export default function GoogleConnectCard() {
                 <span aria-hidden="true" className="mt-1.5 h-3 w-3 shrink-0 rounded-full border border-white/20" style={{ background: calendar.colorRgb || "var(--color-accent-cyan)" }} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-medium text-text-primary">{calendar.summary}</span>
-                  <span className="block text-[11px] text-text-muted">Last synced {formatRelativeTime(calendar.lastSyncAt)}</span>
+                  <span className="block text-xs text-text-muted">Last synced {formatRelativeTime(calendar.lastSyncAt)}</span>
                 </span>
               </label>
             ))}
@@ -649,7 +649,7 @@ export default function GoogleConnectCard() {
         <CountdownPill expiresAt={waiting.expires_at} />
       </div>
       <div className="rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/40 p-5 text-center">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-text-muted">Your code</p>
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-text-muted">Your code</p>
         <p className="mt-2 select-all font-mono text-3xl font-bold tracking-[0.2em] text-text-primary">{waiting.user_code}</p>
         <p className="mt-3 select-all break-all text-xs text-text-secondary">{waiting.verification_url}</p>
       </div>

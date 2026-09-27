@@ -67,7 +67,7 @@ export default function RoomSheet({ room, states, onClose, onRefresh }: RoomShee
       <div className="space-y-4">
         {toggleables.length > 0 && (
           <div className="space-y-2">
-            <div className="text-[11px] uppercase tracking-wide text-text-muted">Lights</div>
+            <div className="text-xs uppercase tracking-wide text-text-muted">Lights</div>
             {toggleables.map((entity) => (
               <ListRow
                 key={entity.entity_id}
@@ -86,7 +86,7 @@ export default function RoomSheet({ room, states, onClose, onRefresh }: RoomShee
 
         {climate && (
           <div className="space-y-2">
-            <div className="text-[11px] uppercase tracking-wide text-text-muted">Climate</div>
+            <div className="text-xs uppercase tracking-wide text-text-muted">Climate</div>
             <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/30 p-3">
               <span className="text-sm font-semibold text-text-primary">
                 {typeof attrs.current_temperature === "number" ? `${Math.round(attrs.current_temperature as number)}°` : "--"}
@@ -113,7 +113,7 @@ export default function RoomSheet({ room, states, onClose, onRefresh }: RoomShee
 
         {openSensors.length > 0 && (
           <div className="space-y-2">
-            <div className="text-[11px] uppercase tracking-wide text-text-muted">Open sensors</div>
+            <div className="text-xs uppercase tracking-wide text-text-muted">Open sensors</div>
             <div className="flex flex-wrap gap-1.5">
               {openSensors.map((sensor) => (
                 <Chip key={sensor.entity_id} size="sm" tone="danger">

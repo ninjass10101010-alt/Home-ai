@@ -34,7 +34,7 @@ function SectionLabel({ emoji, label, count }: { emoji: string; label: string; c
     <div className="flex items-center gap-2">
       <span className="text-base">{emoji}</span>
       <span className="text-xs font-bold uppercase tracking-wider text-text-secondary">{label}</span>
-      <span className="ml-auto rounded-full bg-[var(--color-surface-2)] px-2 py-0.5 text-[10px] font-semibold text-text-muted">
+      <span className="ml-auto rounded-full bg-[var(--color-surface-2)] px-2 py-0.5 text-xs font-semibold text-text-muted">
         {count}
       </span>
     </div>
@@ -102,7 +102,7 @@ export default function MorningBriefingWidget({ briefing, loading, ack, ackError
             aria-label={expanded ? "Collapse morning briefing" : "Expand morning briefing"}
             className="tap-sm inline-flex items-center gap-1.5 rounded-full border border-[var(--color-accent-selected)]/25 bg-[var(--color-surface-0)]/20 px-3 py-1 text-xs font-semibold widget-accent-text"
           >
-            {count} item{count !== 1 ? "s" : ""} <span className="text-[10px]">{expanded ? "▲" : "▼"}</span>
+            {count} item{count !== 1 ? "s" : ""} <span className="text-xs">{expanded ? "▲" : "▼"}</span>
           </button>
         </div>
         <h3 className="mt-1 font-bold text-text-primary text-base">Morning Briefing</h3>

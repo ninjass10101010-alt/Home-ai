@@ -59,7 +59,7 @@ export default function LeaderboardRow({
             <span className="truncate text-sm font-semibold text-text-primary">{entry.name.split(" ")[0]}</span>
             {isYou && (
               <span
-                className="rounded-md px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wider"
+                className="rounded-md px-1.5 py-0.5 text-xs font-bold uppercase tracking-wider"
                 style={{ background: `${color}25`, color }}
               >
                 You
@@ -92,13 +92,13 @@ export default function LeaderboardRow({
               style={{ width: `${Math.max(2, entry.progressToNext)}%` }}
             />
           </div>
-          <div className="mt-0.5 text-[10px] text-text-muted">
+          <div className="mt-0.5 text-xs text-text-muted">
             {entry.levelTitle} → {entry.progressToNext >= 100 ? "MAX" : `${entry.progressToNext}%`}
           </div>
         </div>
         <div className="text-right shrink-0">
           <div className="text-sm font-bold text-text-primary display-numeral">{entry.points}</div>
-          <div className="text-[11px] text-text-muted">pts</div>
+          <div className="text-xs text-text-muted">pts</div>
         </div>
         {isAdmin && (
           <IconButton size="sm" variant="ghost" aria-label="Adjust points" onClick={(e: React.MouseEvent) => { e.stopPropagation(); onAdjust(entry.name); }}>
