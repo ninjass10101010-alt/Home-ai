@@ -3,6 +3,7 @@
 import { CSSProperties, useEffect, useId, useState } from "react";
 import { moonLitPath } from "@/lib/weather-astro";
 import type { SkyPhase } from "@/lib/weather-scene-params";
+import { cloudVariant, backCloudVariant, starOpacity } from "@/lib/weather-scene-params";
 import { WX_POSTER } from "./wx-tokens";
 
 // WxToys — the toy weather kit: SunOrb, CloudPuff, seagull Birds,
@@ -40,39 +41,67 @@ export function SunOrb({ night = false }: { night?: boolean }) {
   );
 }
 
-// Three overlapping blobs = chunky toy cloud. Pastel, with soft undershadow.
-export function CloudPuff({ className = "", style, tone = "day", layer, character = false }: {
+// Cloud tone pairs, from the clay palette the poster already uses.
+const CLOUD_TONES: Record<"day" | "poster" | "night" | "heavy-snow", { hi: string; lo: string; shade: string }> = {
+  poster: { hi: "#E9FFFC", lo: "#82D8D0", shade: "rgba(42, 166, 164, 0.20)" },
+  day: { hi: "#FFFFFF", lo: "#E8EDF7", shade: "rgba(150, 165, 200, 0.35)" },
+  night: { hi: "#E6E4FF", lo: "#7477A8", shade: "rgba(69, 72, 111, 0.25)" },
+  "heavy-snow": { hi: "#E8F0FB", lo: "#8DA2BF", shade: "rgba(52, 73, 99, 0.30)" },
+};
+
+// Blob layouts per density variant — [cx, cy, r] triples on a 200×120 strip,
+// from the reference project's CloudShape (soft-highlight ellipse follows blob 1).
+const CLOUD_VARIANTS: [number, number, number][][] = [
+  [[48, 78, 34], [92, 58, 44], [140, 74, 36], [110, 88, 30], [72, 90, 26]],
+  [[40, 82, 30], [80, 62, 40], [124, 62, 38], [160, 84, 28], [100, 90, 32]],
+  [[56, 80, 36], [104, 66, 46], [150, 82, 32], [80, 94, 28]],
+];
+
+export function CloudPuff({ className = "", style, tone = "day", layer, character = false, variant = 0, bob = false }: {
   className?: string;
   style?: CSSProperties;
   tone?: "day" | "poster" | "night" | "heavy-snow";
   layer?: "front" | "back";
   character?: boolean;
+  variant?: 0 | 1 | 2;
+  bob?: boolean;
 }) {
-  const blob = tone === "poster"
-    ? "absolute rounded-full bg-gradient-to-b from-[#e9fffc] via-[#b9eee8] to-[#82d8d0] " +
-      "shadow-[inset_0_-6px_10px_rgba(30,130,140,.28),inset_0_3px_6px_rgba(255,255,255,1)]"
-    : tone === "night"
-      ? "absolute rounded-full bg-gradient-to-b from-[#e6e4ff] via-[#aaa9d2] to-[#7477a8] " +
-        "shadow-[inset_0_-6px_10px_rgba(45,45,90,.35),inset_0_3px_6px_rgba(255,255,255,.8)]"
-      : tone === "heavy-snow"
-        ? "absolute rounded-full bg-gradient-to-b from-[#e8f0fb] via-[#c3d1e4] to-[#8da2bf] " +
-          "shadow-[inset_0_-6px_10px_rgba(42,58,82,.34),inset_0_3px_6px_rgba(255,255,255,.95)]"
-        : "absolute rounded-full bg-gradient-to-b from-white to-[#e8edf7] " +
-          "shadow-[inset_0_-6px_10px_rgba(150,165,200,.35),inset_0_3px_6px_rgba(255,255,255,1)]";
+  const uid = useId().replace(/[^a-zA-Z0-9]/g, "");
+  const t = CLOUD_TONES[tone];
+  const blobs = CLOUD_VARIANTS[variant];
   const faceInk = tone === "night" ? "#34385F" : tone === "heavy-snow" ? "#3D4D66" : "#174F59";
   return (
     <div aria-hidden="true" className={`relative h-14 w-24 ${className}`} style={style} data-cloud-form={tone} data-cloud-layer={layer}>
-      <div className={`${blob} left-0 bottom-0 h-10 w-10`} />
-      <div className={`${blob} left-6 bottom-0 h-14 w-14`} />
-      <div className={`${blob} right-0 bottom-0 h-9 w-9`} />
-      <div className={`absolute -bottom-2 left-3 right-3 h-3 rounded-full blur-md ${tone === "poster" ? "bg-[#2aa6a4]/20" : tone === "night" ? "bg-[#45486f]/25" : tone === "heavy-snow" ? "bg-[#344963]/30" : "bg-slate-500/15"}`} />
+      <svg
+        viewBox="0 0 200 120"
+        className="h-full w-full overflow-visible"
+        style={bob ? { animation: "wx-bob 7s ease-in-out infinite", transformBox: "fill-box", transformOrigin: "center" } : undefined}
+      >
+        <defs>
+          <linearGradient id={`${uid}-cloud`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={t.hi} />
+            <stop offset="100%" stopColor={t.lo} />
+          </linearGradient>
+          <filter id={`${uid}-soft`} x="-20%" y="-20%" width="140%" height="150%">
+            <feDropShadow dx="0" dy="6" stdDeviation="6" floodColor="#000" floodOpacity="0.18" />
+          </filter>
+        </defs>
+        <g fill={`url(#${uid}-cloud)`} filter={`url(#${uid}-soft)`}>
+          {blobs.map(([cx, cy, r], i) => (
+            <circle key={i} cx={cx} cy={cy} r={r} />
+          ))}
+          <rect x="30" y="72" width="140" height="38" rx="19" />
+        </g>
+        <g fill="rgba(255,255,255,0.35)">
+          <ellipse cx={blobs[1][0] - 8} cy={blobs[1][1] - blobs[1][2] * 0.45} rx={blobs[1][2] * 0.55} ry={blobs[1][2] * 0.28} />
+        </g>
+      </svg>
+      <div className="absolute -bottom-2 left-3 right-3 h-3 rounded-full blur-md" style={{ background: t.shade }} />
       {character && (
-        <svg data-weather-character="cloud" className="absolute inset-0 h-full w-full" viewBox="0 0 96 56" fill="none">
-          <circle cx="41" cy="34" r="2" fill={faceInk} />
-          <circle cx="56" cy="34" r="2" fill={faceInk} />
-          <path d="M43 42Q48.5 46 54 42" stroke={faceInk} strokeWidth="2" strokeLinecap="round" />
-          <circle cx="36" cy="39" r="2" fill="#E98279" opacity="0.7" />
-          <circle cx="61" cy="39" r="2" fill="#E98279" opacity="0.7" />
+        <svg data-weather-character="cloud" className="absolute inset-0 h-full w-full" viewBox="0 0 200 120" fill="none">
+          <circle cx={blobs[1][0] - 14} cy={blobs[1][1] + 6} r="3.4" fill={faceInk} />
+          <circle cx={blobs[1][0] + 14} cy={blobs[1][1] + 6} r="3.4" fill={faceInk} />
+          <path d={`M${blobs[1][0] - 10} ${blobs[1][1] + 16} Q${blobs[1][0]} ${blobs[1][1] + 24} ${blobs[1][0] + 10} ${blobs[1][1] + 16}`} stroke={faceInk} strokeWidth="3.4" strokeLinecap="round" fill="none" />
         </svg>
       )}
     </div>
@@ -331,58 +360,84 @@ export function SceneLayers({ scene, heavySnow = false, showFog = false, fogCode
       data-precipitation={measurementLabel(normalizedPrecipitation)}
       data-wind={measurementLabel(numericWind)}
       className="absolute inset-0"
+      style={{ containerType: "size" }}
       aria-hidden="true"
     >
       <PosterAccents scene={scene} heavySnow={heavySnow} motionOk={motionOk} sunProgress={finiteMeasurement(sunProgress)} cloudCover={numericCloudCover} precipitation={normalizedPrecipitation} skyPhase={skyPhase} moonPhase={moonPhase} moonIllumination={moonIllumination} />
 
       {scene === "night" &&
-        Array.from({ length: 18 }).map((_, i) => (
+        Array.from({ length: 42 }, (_, i) => (
           <span
             key={i}
-            className="absolute h-[3px] w-[3px] rounded-full bg-white"
+            className="absolute rounded-full bg-white"
             style={{
               left: `${(i * 37) % 100}%`,
               top: `${(i * 53) % 45}%`,
+              width: 2 + (i % 3),
+              height: 2 + (i % 3),
+              opacity: starOpacity(numericCloudCover),
               animation: motionOk ? `wxStarTwinkle ${2.5 + (i % 4)}s ease-in-out ${i * 0.3}s infinite` : undefined,
             }}
           />
         ))}
+      {scene === "night" && starOpacity(numericCloudCover) === 1 && (
+        <span
+          aria-hidden="true"
+          className="absolute h-[2px] w-[90px] rounded-full bg-gradient-to-r from-transparent via-white/90 to-white"
+          style={{
+            left: "72%",
+            top: "12%",
+            transform: "rotate(-24deg)",
+            opacity: 0,
+            animation: motionOk ? "wx-shoot 11s ease-in 5s infinite" : undefined,
+          }}
+        />
+      )}
 
       <div data-testid="wx-poster-clouds" data-cloud-cover={numericCloudCover == null ? "unavailable" : Math.round(cover)} data-visible={cover > 0 ? "true" : "false"} className="absolute inset-0">
         <CloudPuff
           layer="front"
           tone={cloudTone}
+          variant={cloudVariant(numericCloudCover)}
           character={scene !== "storm" && !heavySnow && frontCloudOpacity >= 0.25}
+          bob={driftAnimation}
           className="absolute top-12 left-[-12px] -rotate-6 scale-[1.35]"
-          style={{ opacity: frontCloudOpacity, visibility: frontCloudOpacity > 0 ? "visible" : "hidden", ...(driftAnimation && driftDuration != null ? { animation: `wxCloudDrift ${driftDuration}s ease-in-out infinite alternate` } : {}) }}
+          style={{ opacity: frontCloudOpacity, visibility: frontCloudOpacity > 0 ? "visible" : "hidden", ...(driftAnimation && driftDuration != null ? ({ animation: `wx-drift ${driftDuration}s linear infinite`, "--travel": "calc(100cqw + 140px)" } as CSSProperties) : {}) }}
         />
         <CloudPuff
           layer="back"
           tone={cloudTone}
+          variant={backCloudVariant(cloudVariant(numericCloudCover))}
+          bob={driftAnimation}
           className="absolute top-28 right-[-12px] rotate-3 scale-[1.15] blur-[1px]"
-          style={{ opacity: backCloudOpacity, visibility: backCloudOpacity > 0 ? "visible" : "hidden", ...(driftAnimation && driftDuration != null ? { animation: `wxCloudDrift ${driftDuration + 12}s ease-in-out infinite alternate-reverse` } : {}) }}
+          style={{ opacity: backCloudOpacity, visibility: backCloudOpacity > 0 ? "visible" : "hidden", ...(driftAnimation && driftDuration != null ? ({ animation: `wx-drift ${driftDuration + 12}s linear ${-(driftDuration + 12) / 2}s infinite`, "--travel": "calc(100cqw + 140px)" } as CSSProperties) : {}) }}
         />
       </div>
 
       {rainCount > 0 && (
         <div data-weather-rain-layer style={{ transform: numericWind != null && numericWindDirection != null ? `rotate(${rainSlant}deg)` : undefined }}>
-          {Array.from({ length: rainCount }).map((_, i) => (
+          {Array.from({ length: rainCount }, (_, i) => (
             <span
               key={i}
               data-weather-precip="rain"
               data-precipitation={measurementLabel(normalizedPrecipitation)}
-              className="absolute top-[-40px] h-10 w-[2px] rounded-full bg-gradient-to-b from-transparent via-white/80 to-white/20"
+              className="absolute top-[-40px] w-[2px] rounded-full bg-gradient-to-b from-transparent via-white/80 to-white/20"
               style={{
                 left: `${(i * 41) % 100}%`,
-                animation: motionOk ? `wxRainStreak ${0.8 + (i % 5) * 0.12}s linear ${(i % 7) * 0.17}s infinite` : undefined,
-              }}
+                height: 14 + ((i * 7) % 3) * 6,
+                opacity: 0.45 + ((i * 13) % 40) / 100,
+                animation: motionOk
+                  ? `wx-fall ${0.6 + ((i * 17) % 40) / 100}s linear ${-(((i * 31) % 100) / 50)}s infinite`
+                  : undefined,
+                ["--travel" as string]: "115cqh",
+              } as CSSProperties}
             />
           ))}
         </div>
       )}
 
       {snowCount > 0 &&
-        Array.from({ length: snowCount }).map((_, i) => (
+        Array.from({ length: snowCount }, (_, i) => (
           <span
             key={i}
             data-weather-precip="snow"
@@ -390,10 +445,15 @@ export function SceneLayers({ scene, heavySnow = false, showFog = false, fogCode
             className="absolute top-[-16px] rounded-full bg-white shadow-[0_0_6px_rgba(255,255,255,.9)]"
             style={{
               left: `${(i * 47) % 100}%`,
-              width: 4 + (i % 3) * 2,
-              height: 4 + (i % 3) * 2,
-              animation: motionOk ? `wxSnowFall ${6 + (i % 5)}s linear ${(i % 9) * 0.6}s infinite` : undefined,
-            }}
+              width: 3 + ((i * 5) % 5),
+              height: 3 + ((i * 5) % 5),
+              opacity: 0.55 + ((i * 9) % 45) / 100,
+              filter: (i * 3) % 10 > 7 ? "blur(1.2px)" : undefined,
+              animation: motionOk
+                ? `wx-snowfall ${6.5 + ((i * 7) % 6)}s linear ${-((i * 11) % 13)}s infinite, wx-sway ${3 + ((i * 3) % 4)}s ease-in-out ${-((i * 11) % 13)}s infinite alternate`
+                : undefined,
+              ["--travel" as string]: "115cqh",
+            } as CSSProperties}
           />
         ))}
 
@@ -403,12 +463,35 @@ export function SceneLayers({ scene, heavySnow = false, showFog = false, fogCode
           style={motionOk ? { animation: "wxLightning 9s linear infinite" } : undefined}
         />
       )}
+      {scene === "storm" && (
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 40 120"
+          className="absolute top-0 h-[70%] w-auto"
+          style={{
+            left: "62%",
+            opacity: 0,
+            filter: "drop-shadow(0 0 8px rgba(255,255,255,0.95)) drop-shadow(0 0 22px rgba(170,190,255,0.9))",
+            animation: motionOk ? "wx-bolt 9s linear infinite" : undefined,
+          }}
+        >
+          <path d="M22 0 L6 56 L18 56 L10 120 L36 44 L23 44 L34 0 Z" fill="#FFFDF0" stroke="rgba(190,205,255,0.9)" strokeWidth="1.5" />
+        </svg>
+      )}
 
       {fogOpacity > 0 && (
         <div data-testid="wx-fog" data-fog-opacity={fogOpacity.toFixed(2)}>
           <div
             className="absolute inset-x-[-10%] bottom-0 h-40 bg-gradient-to-t from-white/60 to-transparent blur-xl"
-            style={motionOk ? { animation: "wxFogDrift 30s ease-in-out infinite alternate" } : undefined}
+            style={motionOk ? { animation: "wx-fogdrift 30s ease-in-out infinite alternate" } : undefined}
+          />
+          <div
+            className="absolute inset-x-[-20%] bottom-10 h-32 bg-gradient-to-t from-white/45 to-transparent blur-xl"
+            style={motionOk ? { animation: "wx-fogdrift 26s ease-in-out -9s infinite alternate" } : undefined}
+          />
+          <div
+            className="absolute inset-x-[-15%] bottom-20 h-28 bg-gradient-to-t from-white/35 to-transparent blur-xl"
+            style={motionOk ? { animation: "wx-fogdrift 40s ease-in-out -20s infinite alternate" } : undefined}
           />
         </div>
       )}

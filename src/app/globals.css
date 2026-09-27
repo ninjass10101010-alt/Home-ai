@@ -1751,34 +1751,52 @@ body {
   opacity: 1;
 }
 
-@keyframes wxCloudDrift {
-  from { translate: -2.5% 0; }
-  to   { translate: 2.5% 0; }
+@keyframes wx-drift {
+  from { transform: translateX(-60%); }
+  to   { transform: translateX(var(--travel, 700px)); }
+}
+
+@keyframes wx-bob {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-4px); }
+}
+
+@keyframes wx-fall {
+  from { transform: translateY(0); opacity: 0.8; }
+  to   { transform: translateY(var(--travel, 460px)); opacity: 0.2; }
+}
+
+@keyframes wx-snowfall {
+  from { transform: translateY(0) rotate(0deg); }
+  to   { transform: translateY(var(--travel, 460px)) rotate(180deg); }
+}
+
+@keyframes wx-sway {
+  from { margin-left: -12px; }
+  to   { margin-left: 12px; }
+}
+
+@keyframes wx-fogdrift {
+  from { transform: translateX(-6%); }
+  to   { transform: translateX(8%); }
+}
+
+@keyframes wx-bolt {
+  0%, 41.5%, 46.5%, 100% { opacity: 0; }
+  42%   { opacity: 1; }
+  43%   { opacity: 0.3; }
+  44.5% { opacity: 1; }
+}
+
+@keyframes wx-shoot {
+  0%, 92% { opacity: 0; transform: translate(0, 0) rotate(-24deg); }
+  93%     { opacity: 1; }
+  100%    { opacity: 0; transform: translate(-220px, 120px) rotate(-24deg); }
 }
 
 @keyframes wxStarTwinkle {
   0%, 100% { opacity: 0.25; }
   50%      { opacity: 0.9; }
-}
-
-@keyframes wxFogDrift {
-  from { translate: -4% 0; }
-  to   { translate: 4% 0; }
-}
-
-@keyframes wxRainStreak {
-  0%   { transform: translateY(0); opacity: 0; }
-  8%   { opacity: 1; }
-  92%  { opacity: 1; }
-  100% { transform: translateY(420px); opacity: 0; }
-}
-
-@keyframes wxSnowFall {
-  0%   { transform: translateY(0) translateX(0); opacity: 0; }
-  10%  { opacity: 0.95; }
-  50%  { transform: translateY(200px) translateX(9px); }
-  90%  { opacity: 0.9; }
-  100% { transform: translateY(420px) translateX(-6px); opacity: 0; }
 }
 
 @keyframes wxLightning {
@@ -1807,12 +1825,6 @@ body {
   50%      { transform: scale(1.05); }
 }
 
-@keyframes wxPuff {
-  0%   { transform: scale(0.3); opacity: 0; }
-  35%  { opacity: 0.9; }
-  100% { transform: scale(1.6); opacity: 0; }
-}
-
 @keyframes wxBirdOrbit {
   0%   { transform: translate(calc(var(--wx-bird-a, 48px) * -1), 0) scale(1); opacity: 1; }
   25%  { transform: translate(0, var(--wx-bird-b, 14px)) scale(1); opacity: 1; }
@@ -1825,18 +1837,21 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .wx-sky,
-  [style*="wxCloudDrift"],
   [style*="wxStarTwinkle"],
-  [style*="wxFogDrift"],
-  [style*="wxRainStreak"],
-  [style*="wxSnowFall"],
   [style*="wxLightning"],
   [style*="wxFadeIn"],
   [style*="wxThumbIn"],
-  [style*="wxPuff"],
   [style*="wxBirdOrbit"],
   [style*="wx-sunrays"],
-  [style*="wx-breathe"] {
+  [style*="wx-breathe"],
+  [style*="wx-drift"],
+  [style*="wx-bob"],
+  [style*="wx-fall"],
+  [style*="wx-snowfall"],
+  [style*="wx-sway"],
+  [style*="wx-fogdrift"],
+  [style*="wx-bolt"],
+  [style*="wx-shoot"] {
     animation: none !important;
     transition: none !important;
   }

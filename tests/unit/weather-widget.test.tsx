@@ -885,7 +885,8 @@ describe("WeatherWidget — Not Boring redesign", () => {
     const stillLayer = still.querySelector("[data-cloud-layer]") as HTMLElement;
     const movingLayer = moving.querySelector("[data-cloud-layer]") as HTMLElement;
     expect(stillLayer.style.animation).toBe("");
-    expect(movingLayer.style.animation).toContain("wxCloudDrift");
+    expect(movingLayer.style.animation).toContain("wx-drift");
+    expect(stillLayer.style.animation).toBe("");
   });
 
   it("pauses holiday artwork and SMIL when motion is disabled", () => {
