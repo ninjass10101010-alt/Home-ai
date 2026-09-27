@@ -1,12 +1,23 @@
 "use client";
 
 import { CSSProperties, useEffect, useId, useState } from "react";
+import { moonLitPath } from "@/lib/weather-astro";
+import type { SkyPhase } from "@/lib/weather-scene-params";
 import { WX_POSTER } from "./wx-tokens";
 
 // WxToys — the toy weather kit: SunOrb, CloudPuff, seagull Birds,
 // keyframe-wired SceneLayers, and the clay Condition icon set.
 // Gradients live in inline styles: Tailwind JIT cannot generate dynamic
 // from-[${…}] / opacity-${n} classes, so clay never uses them.
+
+// Phase-tinted sun disc — a butter-yellow disc in an ember sky was a visual
+// falsehood. Fixed values, not data-derived (spec §7).
+const SUN_DISC: Record<SkyPhase, { fill: string; haloOpacity: number }> = {
+  dawn: { fill: "#FFAB40", haloOpacity: 0.35 },
+  day: { fill: "#FFD166", haloOpacity: 0.2 },
+  dusk: { fill: "#FF7A3D", haloOpacity: 0.35 },
+  night: { fill: "#FFD166", haloOpacity: 0.2 },
+};
 
 // ─── Toy objects ────────────────────────────────────────────────
 
@@ -146,7 +157,9 @@ function fogOpacityFor(fogCode: boolean, visibility: number | null, humidity: nu
   return codeOpacity;
 }
 
-function PosterAccents({ scene, heavySnow = false, motionOk, sunProgress, cloudCover, precipitation }: { scene: WxScene; heavySnow?: boolean; motionOk: boolean; sunProgress: number | null; cloudCover?: number | null; precipitation?: number | null }) {
+function PosterAccents({ scene, heavySnow = false, motionOk, sunProgress, cloudCover, precipitation, skyPhase, moonPhase = 0.5, moonIllumination = 1 }: { scene: WxScene; heavySnow?: boolean; motionOk: boolean; sunProgress: number | null; cloudCover?: number | null; precipitation?: number | null; skyPhase?: SkyPhase; moonPhase?: number; moonIllumination?: number }) {
+  const uid = useId().replace(/[^a-zA-Z0-9]/g, "");
+  const phase: SkyPhase = skyPhase ?? (scene === "night" ? "night" : "day");
   const sun = posterSunPosition(sunProgress);
   const horizon = posterHorizon(sunProgress);
   const numericCloud = finiteMeasurement(cloudCover);
@@ -170,15 +183,48 @@ function PosterAccents({ scene, heavySnow = false, motionOk, sunProgress, cloudC
       aria-hidden="true"
       style={motionOk ? { animation: "wxFadeIn 0.85s ease both" } : undefined}
     >
+      <defs>
+        <clipPath id={`${uid}-moonclip`}>
+          <circle r={21} />
+        </clipPath>
+      </defs>
       {scene === "clear" && sun && (
         <>
           <g data-weather-character="sun">
-            <circle data-weather-shape="sun" cx={sun.x} cy={sun.y} r="19" fill={WX_POSTER.sun} opacity="0.92" />
+            <circle
+              cx={sun.x}
+              cy={sun.y}
+              r={30}
+              fill={SUN_DISC[phase].fill}
+              opacity={SUN_DISC[phase].haloOpacity}
+              style={motionOk ? { animation: "wx-breathe 9s ease-in-out infinite", transformBox: "fill-box", transformOrigin: "center" } : undefined}
+            />
+            <circle data-weather-shape="sun" cx={sun.x} cy={sun.y} r={19} fill={SUN_DISC[phase].fill} opacity="0.92" />
             <circle cx={sun.x - 6} cy={sun.y - 2} r="1.8" fill="#6A452A" />
             <circle cx={sun.x + 6} cy={sun.y - 2} r="1.8" fill="#6A452A" />
             <path d={`M${sun.x - 6} ${sun.y + 5}Q${sun.x} ${sun.y + 10} ${sun.x + 6} ${sun.y + 5}`} fill="none" stroke="#6A452A" strokeWidth="1.8" strokeLinecap="round" />
           </g>
-          <path data-weather-shape="sun-rays" d={`M${sun.x} ${sun.y - 30}v8M${sun.x} ${sun.y + 22}v8M${sun.x - 30} ${sun.y}h8M${sun.x + 22} ${sun.y}h8M${sun.x - 21} ${sun.y - 21}l6 6M${sun.x + 15} ${sun.y + 15}l6 6M${sun.x + 15} ${sun.y - 21}l-6 6M${sun.x - 21} ${sun.y + 15}l-6 6`} stroke={WX_POSTER.sun} strokeWidth="4" strokeLinecap="round" opacity="0.72" />
+          <g
+            data-weather-shape="sun-rays"
+            stroke={SUN_DISC[phase].fill}
+            strokeWidth="4"
+            strokeLinecap="round"
+            opacity="0.72"
+            style={motionOk ? { animation: "wx-sunrays 40s linear infinite", transformBox: "view-box", transformOrigin: `${sun.x}px ${sun.y}px` } : undefined}
+          >
+            {Array.from({ length: 8 }, (_, i) => {
+              const ang = (i * Math.PI) / 4;
+              return (
+                <line
+                  key={i}
+                  x1={sun.x + Math.cos(ang) * 28}
+                  y1={sun.y + Math.sin(ang) * 28}
+                  x2={sun.x + Math.cos(ang) * 36}
+                  y2={sun.y + Math.sin(ang) * 36}
+                />
+              );
+            })}
+          </g>
           {horizon && <path data-weather-shape="poster-horizon" d={horizon} fill={WX_POSTER.cloudMid} opacity="0.2" />}
         </>
       )}
@@ -202,11 +248,27 @@ function PosterAccents({ scene, heavySnow = false, motionOk, sunProgress, cloudC
         </g>
       )}
       {scene === "night" && (
-        <g data-weather-character="moon">
-          <path data-weather-shape="night-orbit" d="M246 20a25 25 0 1 0 18 39 28 28 0 0 1-18-39Z" fill={WX_POSTER.cloudLight} opacity="0.86" />
-          <circle cx="250" cy="38" r="1.8" fill="#62658D" />
-          <circle cx="260" cy="38" r="1.8" fill="#62658D" />
-          <path d="M251 46Q255 49 259 46" fill="none" stroke="#62658D" strokeWidth="1.8" strokeLinecap="round" />
+        <g data-weather-character="moon" data-moon-phase={moonPhase.toFixed(4)} data-moon-illumination={moonIllumination.toFixed(2)}>
+          <g transform="translate(253 42)">
+            {/* dark disc always renders — a new moon leaves no hole in the poster */}
+            <circle r={22} fill="#242E56" opacity="0.88" />
+            <path data-weather-shape="night-orbit" d={moonLitPath(moonPhase, 21)} fill="#F1EEE3" opacity="0.92" />
+            {/* craters — constants, clipped to the disc, multiply-blended */}
+            <g opacity="0.35" clipPath={`url(#${uid}-moonclip)`} style={{ mixBlendMode: "multiply" }}>
+              <circle cx={-7} cy={-6} r={3.8} fill="#9AA3C4" />
+              <circle cx={5} cy={3} r={5} fill="#9AA3C4" />
+              <circle cx={-3} cy={9} r={2.4} fill="#9AA3C4" />
+              <circle cx={10} cy={-10} r={2} fill="#9AA3C4" />
+              <circle cx={-13} cy={4} r={1.8} fill="#9AA3C4" />
+            </g>
+            <circle r={21} fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth="1" />
+            {/* the face fades with the light — no face at new moon */}
+            <g data-weather-face="moon" opacity={moonIllumination}>
+              <circle cx={-5} cy={-3} r="1.8" fill="#62658D" />
+              <circle cx={5} cy={-3} r="1.8" fill="#62658D" />
+              <path d="M-4 4 Q0 8 4 4" fill="none" stroke="#62658D" strokeWidth="1.8" strokeLinecap="round" />
+            </g>
+          </g>
         </g>
       )}
     </svg>
@@ -215,7 +277,7 @@ function PosterAccents({ scene, heavySnow = false, motionOk, sunProgress, cloudC
 
 // ─── Scene layer wired to the wx* keyframes ─────────────────────
 
-export function SceneLayers({ scene, heavySnow = false, showFog = false, fogCode = showFog, showBirds, cloudCover, precipitation, wind, windDirection, humidity, visibility, sunProgress, paused = false }: {
+export function SceneLayers({ scene, heavySnow = false, showFog = false, fogCode = showFog, showBirds, cloudCover, precipitation, wind, windDirection, humidity, visibility, sunProgress, skyPhase, moonPhase, moonIllumination, paused = false }: {
   scene: WxScene;
   heavySnow?: boolean;
   showFog?: boolean;
@@ -228,6 +290,9 @@ export function SceneLayers({ scene, heavySnow = false, showFog = false, fogCode
   humidity?: number | null;
   visibility?: number | null;
   sunProgress?: number | null;
+  skyPhase?: SkyPhase;
+  moonPhase?: number;
+  moonIllumination?: number;
   paused?: boolean;
 }) {
   const motionOk = useWxMotionOk() && !paused;
@@ -268,7 +333,7 @@ export function SceneLayers({ scene, heavySnow = false, showFog = false, fogCode
       className="absolute inset-0"
       aria-hidden="true"
     >
-      <PosterAccents scene={scene} heavySnow={heavySnow} motionOk={motionOk} sunProgress={finiteMeasurement(sunProgress)} cloudCover={numericCloudCover} precipitation={normalizedPrecipitation} />
+      <PosterAccents scene={scene} heavySnow={heavySnow} motionOk={motionOk} sunProgress={finiteMeasurement(sunProgress)} cloudCover={numericCloudCover} precipitation={normalizedPrecipitation} skyPhase={skyPhase} moonPhase={moonPhase} moonIllumination={moonIllumination} />
 
       {scene === "night" &&
         Array.from({ length: 18 }).map((_, i) => (

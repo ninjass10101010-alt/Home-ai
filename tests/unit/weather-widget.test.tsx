@@ -2006,6 +2006,47 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(el.querySelector('[data-testid="wx-hero-icon"] [data-weather-icon="night-stars"]')).toBeTruthy();
   });
 
+  it("renders a phase-lit poster moon with an illumination-tracked face", () => {
+    const full = render(<SceneLayers scene="night" showFog={false} showBirds={false} moonPhase={0.5} moonIllumination={1} />);
+    const moonGroup = full.querySelector('[data-weather-character="moon"]');
+    expect(full.querySelectorAll('[data-weather-character="moon"]').length).toBe(1);
+    expect(moonGroup?.getAttribute("data-moon-phase")).toBe("0.5000");
+    expect(moonGroup?.getAttribute("data-moon-illumination")).toBe("1.00");
+    expect(moonGroup?.querySelector('[data-weather-shape="night-orbit"]')).toBeTruthy();
+    expect(moonGroup?.querySelector('[data-weather-face="moon"]')?.getAttribute("opacity")).toBe("1");
+
+    const quarter = render(<SceneLayers scene="night" showFog={false} showBirds={false} moonPhase={0.25} moonIllumination={0.5} />);
+    const quarterMoon = quarter.querySelector('[data-weather-character="moon"]');
+    expect(quarterMoon?.getAttribute("data-moon-phase")).toBe("0.2500");
+    expect(quarterMoon?.querySelector('[data-weather-face="moon"]')?.getAttribute("opacity")).toBe("0.5");
+  });
+
+  it("keeps the sun character and swaps static rays for a rotating ray group", () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {} })));
+    const clear = render(<SceneLayers scene="clear" showFog={false} showBirds={false} cloudCover={5} sunProgress={0.4} />);
+    const rays = clear.querySelector('[data-weather-shape="sun-rays"]');
+    expect(rays).toBeTruthy();
+    expect(rays?.querySelectorAll("line").length).toBe(8);
+    expect((rays as HTMLElement).style.animation).toContain("wx-sunrays");
+    expect(clear.querySelector('[data-weather-character="sun"]')).toBeTruthy();
+    expect(clear.querySelector('[data-weather-shape="poster-horizon"]')).toBeTruthy();
+  });
+
+  it("tints the sun disc by sky phase", () => {
+    const day = render(<SceneLayers scene="clear" showFog={false} showBirds={false} cloudCover={5} sunProgress={0.4} />);
+    expect(day.querySelector('[data-weather-shape="sun"]')?.getAttribute("fill")).toBe("#FFD166");
+    const dusk = render(<SceneLayers scene="clear" showFog={false} showBirds={false} cloudCover={5} sunProgress={0.95} skyPhase="dusk" />);
+    expect(dusk.querySelector('[data-weather-shape="sun"]')?.getAttribute("fill")).toBe("#FF7A3D");
+    const dawn = render(<SceneLayers scene="clear" showFog={false} showBirds={false} cloudCover={5} sunProgress={0.05} skyPhase="dawn" />);
+    expect(dawn.querySelector('[data-weather-shape="sun"]')?.getAttribute("fill")).toBe("#FFAB40");
+  });
+
+  it("defaults to a full moon when no phase is passed (deterministic direct renders)", () => {
+    const night = render(<SceneLayers scene="night" showFog={false} showBirds={false} />);
+    const moonGroup = night.querySelector('[data-weather-character="moon"]');
+    expect(moonGroup?.getAttribute("data-moon-phase")).toBe("0.5000");
+  });
+
   it("gives condition-backed poster scenes friendly geometric weather characters", async () => {
     mockOpenMeteo(makeOpenMeteoPayload({ code: 0, cloud: 0, precip: 0 }));
     const clear = render(<WeatherWidget />);

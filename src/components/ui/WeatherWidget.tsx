@@ -913,6 +913,7 @@ export default function WeatherWidget({ className = "" }: { className?: string }
     sceneIsDay
   );
   const heroSkyScene = skySceneKey(heroScene, heroSkyPhase, heroHeavySnow);
+  const heroMoon = moonPhase(Date.now());
   const heroFogCode = sceneCode === 45 || sceneCode === 48;
   const heroFogMeasurement = (heroVis != null && heroVis < 8000) || (heroVis == null && heroHumidity != null && heroHumidity >= 82);
   const heroFog = heroFogCode || heroFogMeasurement;
@@ -1124,6 +1125,9 @@ export default function WeatherWidget({ className = "" }: { className?: string }
             humidity={heroHumidity}
             visibility={heroVis}
             sunProgress={heroSunProgress}
+            skyPhase={heroSkyPhase}
+            moonPhase={heroMoon.phase}
+            moonIllumination={heroMoon.illumination}
             paused={tabHidden}
           />
         </div>
@@ -1510,6 +1514,9 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
                   humidity={mHumidity}
                   visibility={mVis}
                   sunProgress={mSunProgress}
+                  skyPhase={mSkyPhase}
+                  moonPhase={nowMoon.phase}
+                  moonIllumination={nowMoon.illumination}
                   paused={tabHidden}
                 />
               </div>
