@@ -113,8 +113,18 @@ Authoritative copy lives in `docs/DESIGN_SYSTEM.md` §6–8; these are the parts
   `--color-text-muted` / `--color-text-dim` are the only sub-primary levels and both clear AA;
   to add emphasis change weight or size, never colour, and never re-lighten text with a local
   override.
-- Never reintroduce `<Card>`/`<Button>`/`<Input>`/`<Badge>`/`<Modal>` — those primitives are
-  deleted; use `SoftButton`, `IconButton`, `Modal`, `.widget-card`, `neu-*`.
+- **Primitives.** The canonical set is `docs/DESIGN_SYSTEM.md` §3 (`Surface`, `SoftButton`,
+  `IconButton`, `Toggle`, `SegmentedControl`, `Chip`, `ListRow`, `SwipeableRow`, `TextField`,
+  `Stepper`, `EmptyState`) plus `Modal` (34 call sites). `Card`, `Button` and `Badge` still
+  exist as **legacy** leftovers of the pre-warm-glass shadcn recipe (8 files import them) and
+  `Input` is deleted — do not add new call sites to the legacy three; converging them is
+  Phase 5 of `docs/UI_AUDIT_2026-09.md`.
+- **Raw CSS counts for the floor.** Contract B only reads `*.tsx` class strings, so the two
+  live stylesheets (`src/app/globals.css`, `src/modes/modes.css` — the only ones `layout.tsx`
+  loads) are guarded separately in the same file by contract B2: no `font-size` below
+  `0.75rem` / `12px`. Everything else under `src/styles/` (`animations`, `tokens`, `materials`,
+  `components`) is **dead** — nothing imports it, B2 asserts it stays that way, and edits there
+  change nothing on screen. Put new CSS in `globals.css`.
 
 ## 3. Operational Clarity — Agent Role Definition
 

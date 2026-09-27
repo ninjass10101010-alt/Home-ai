@@ -1,3 +1,8 @@
+/* ⚠️ DEAD FILE (2026-09-26 audit). Nothing imports it — layout.tsx only loads globals.css and
+   modes/modes.css, and every selector defined here (html/body base, tap, scroll, focus) is
+   already defined in src/app/globals.css. Edits here change nothing on screen. Delete in
+   Phase 5 of docs/UI_AUDIT_2026-09.md. */
+
 /* ═══ COMPONENT UTILITIES — Base styles, tap, scroll, focus ═══ */
 
 html {

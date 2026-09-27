@@ -1,3 +1,9 @@
+/* ⚠️ DEAD FILE (2026-09-26 audit). Nothing imports this stylesheet: every @keyframes that
+   actually runs is defined in src/app/globals.css or inline in the component that uses it.
+   The file is also malformed — it opens mid-rule (the first block is an orphaned fragment),
+   so it would not compile cleanly even if it were imported. Edits here change nothing on
+   screen. Delete in Phase 5 of docs/UI_AUDIT_2026-09.md. */
+
 /* ═══ ANIMATIONS — All @keyframes and animation utility classes ═══ */
 
         rgba(255, 255, 255, 0) 40%

@@ -71,6 +71,71 @@ describe("Warm Glass contract B: 12px type floor", () => {
   });
 });
 
+// Contract B reads class strings only, so raw CSS and inline styles used to slip past it —
+// the 2026-09 residual pass found 12 sub-12px rules in globals.css that nothing asserted on
+// (see docs/UI_AUDIT_2026-09.md, "Residual pass"). Same floor, same file, so a regression
+// fails in either direction. Out of scope by design (decorative, aria-hidden): dynamic
+// template sizes (`fontSize: `${p.size}px`` in WeatherParticles) and SVG `fontSize="…"`
+// attributes inside illustrations, which scale with their viewBox.
+// Only two stylesheets are live — layout.tsx imports ./globals.css and @/modes/modes.css, and
+// globals.css imports nothing but tailwindcss. Everything under src/styles/ is orphaned.
+const CSS_DEAD = new Set([
+  "src/styles/animations.css",
+  "src/styles/tokens.css",
+  "src/styles/materials.css",
+  "src/styles/components.css",
+]);
+
+function walkCss(dir: string, out: string[] = []): string[] {
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name);
+    if (statSync(p).isDirectory()) walkCss(p, out);
+    else if (p.endsWith(".css")) out.push(p);
+  }
+  return out;
+}
+
+const CSS_FLOOR_RE = /font-size:\s*(\d*\.\d+|\d+)(rem|px)/g;
+const INLINE_PX_RE = /fontSize:\s*["'](\d*\.\d+|\d+)px["']/g;
+const INLINE_BARE_RE = /fontSize:\s*(\d*\.\d+|\d+)\s*[,}]/g;
+
+describe("Warm Glass contract B2: the 12px floor also covers raw CSS and inline styles", () => {
+  it("the dead stylesheets stay dead — nothing imports them", () => {
+    const globals = readFileSync(join(SRC, "app/globals.css"), "utf8");
+    for (const dead of CSS_DEAD) expect(globals.includes(dead.split("/").pop()!)).toBe(false);
+  });
+
+  it("no live stylesheet declares a font-size below 12px", () => {
+    const offenders: string[] = [];
+    for (const file of walkCss(SRC)) {
+      const rel = file.slice(process.cwd().length + 1);
+      if (CSS_DEAD.has(rel)) continue;
+      readFileSync(file, "utf8").split("\n").forEach((line, i) => {
+        for (const m of line.matchAll(CSS_FLOOR_RE)) {
+          const px = m[2] === "rem" ? parseFloat(m[1]) * 16 : parseFloat(m[1]);
+          if (px < 12) offenders.push(`${rel}:${i + 1}: ${m[0]}`);
+        }
+      });
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("no inline style hard-codes a literal font size below 12px", () => {
+    const offenders: string[] = [];
+    for (const file of walk(SRC)) {
+      const rel = file.slice(process.cwd().length + 1);
+      readFileSync(file, "utf8").split("\n").forEach((line, i) => {
+        for (const re of [INLINE_PX_RE, INLINE_BARE_RE]) {
+          for (const m of line.matchAll(re)) {
+            if (parseFloat(m[1]) < 12) offenders.push(`${rel}:${i + 1}: ${m[0]}`);
+          }
+        }
+      });
+    }
+    expect(offenders).toEqual([]);
+  });
+});
+
 describe("Warm Glass contract C: hit-44 on sub-44px tap targets", () => {
   function render(ui: React.ReactElement): HTMLElement {
     const el = document.createElement("div");

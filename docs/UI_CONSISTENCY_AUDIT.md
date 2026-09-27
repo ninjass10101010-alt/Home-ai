@@ -1,10 +1,12 @@
 # UI Consistency Audit - Pre-Migration Review
 
 > ⚠️ **SUPERSEDED (2026-09-26).** This page audited the pre-`warm-glass-v2` shadcn recipe
-> (`<Card>`, `bg-primary`, the old Button/Input set). Those components are now **deleted** and
-> the rules cited here ("use `Card`", "replace `bg-gray-*` with `bg-primary`") would regress
-> the current design system. For the current standard see `docs/DESIGN_SYSTEM.md`, and for the
-> current findings/roadmap see **`docs/UI_AUDIT_2026-09.md`**. Kept for history only.
+> (`<Card>`, `bg-primary`, the old Button/Input set). That recipe is no longer the standard:
+> `Input` has been deleted, and the rules cited here ("use `Card`", "replace `bg-gray-*` with
+> `bg-primary`") would regress the current design system. `Card`/`Button`/`Badge` survive only
+> as legacy leftovers (8 importing files) and are scheduled to converge in Phase 5. For the
+> current standard see `docs/DESIGN_SYSTEM.md`, and for the current findings/roadmap see
+> **`docs/UI_AUDIT_2026-09.md`**. Kept for history only.
 
 **Audit Date:** July 20, 2026  
 **Scope:** All features implemented after UI Renewal (Phases 2-3)  

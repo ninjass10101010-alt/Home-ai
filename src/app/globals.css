@@ -904,7 +904,7 @@ a.widget-accent-text {
   background: var(--color-accent-selected);
   color: var(--color-text-on-accent, #fff);
   padding: 0.35rem 0.65rem;
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -2135,7 +2135,7 @@ a.widget-accent-text {
   box-shadow: 0 8px 24px rgba(var(--calendar-accent-rgb, 59,130,246), .28);
   color: #fff; font-size: 1rem;
 }
-.calendar-panel-kicker { font-size: .6rem; font-weight: 600; color: var(--color-text-muted); letter-spacing: .06em; text-transform: uppercase; }
+.calendar-panel-kicker { font-size: .75rem; font-weight: 600; color: var(--color-text-muted); letter-spacing: .06em; text-transform: uppercase; }
 .calendar-panel-title { font-size: .82rem; font-weight: 700; color: var(--color-text-primary); }
 .calendar-panel-subtitle { font-size: .76rem; color: var(--color-text-muted); }
 .calendar-add-link { display: inline-flex; align-items: center; min-height: 2.75rem; padding: 0 .6rem; border-radius: .85rem; font-size: .8rem; font-weight: 600; color: var(--color-accent-selected); background: none; border: none; cursor: pointer; transition: background .2s, opacity .2s; }
@@ -2188,7 +2188,7 @@ a.widget-accent-text {
   width: .45rem; height: .45rem; border-radius: 999px; border: 2px solid rgba(255,255,255,.5);
   background: var(--event-color, var(--color-accent-selected));
 }
-.calendar-event-time { font-size: .68rem; font-weight: 700; color: var(--color-text-secondary); }
+.calendar-event-time { font-size: .78rem; font-weight: 700; color: var(--color-text-secondary); }
 .calendar-event-divider {
   width: 2px; flex: 1; border-radius: 999px; background: color-mix(in srgb, var(--event-color, var(--color-accent-selected)) 18%, transparent);
 }
@@ -2227,10 +2227,10 @@ a.widget-accent-text {
 .calendar-upcoming-events { margin-top: .65rem; display: flex; flex-direction: column; gap: .35rem; }
 .calendar-upcoming-event { display: flex; align-items: center; gap: .35rem; }
 .calendar-upcoming-dot { width: .3rem; height: .3rem; border-radius: 999px; flex-shrink: 0; }
-.calendar-upcoming-event-title { font-size: .6rem; font-weight: 500; color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color .2s; }
+.calendar-upcoming-event-title { font-size: .75rem; font-weight: 500; color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color .2s; }
 .calendar-upcoming-card:hover .calendar-upcoming-event-title { color: var(--color-text-primary); }
 .calendar-upcoming-empty { font-size: .76rem; color: var(--color-text-muted); font-weight: 500; margin-top: .5rem; }
-.calendar-upcoming-more { font-size: .55rem; color: var(--color-accent-selected); font-weight: 600; margin-top: .2rem; }
+.calendar-upcoming-more { font-size: .75rem; color: var(--color-accent-selected); font-weight: 600; margin-top: .2rem; }
 
 /* ─── Schedule list ─── */
 .calendar-schedule-list { display: flex; flex-direction: column; gap: .45rem; }
@@ -2249,11 +2249,11 @@ a.widget-accent-text {
   box-shadow: 0 0 14px var(--schedule-color, var(--color-accent-selected));
 }
 .calendar-schedule-row:hover { transform: translateX(2px); }
-.calendar-schedule-time { font-size: .65rem; font-family: var(--font-mono); color: var(--color-text-muted); width: 2.8rem; flex-shrink: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.calendar-schedule-time { font-size: .75rem; font-family: var(--font-mono); color: var(--color-text-muted); width: 2.8rem; flex-shrink: 0; text-align: right; font-variant-numeric: tabular-nums; }
 .calendar-schedule-icon { font-size: 1rem; flex-shrink: 0; }
 .calendar-schedule-title { font-size: .78rem; font-weight: 500; color: var(--color-text-primary); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .calendar-schedule-meta { display: flex; align-items: center; gap: .3rem; flex-shrink: 0; }
-.calendar-schedule-day { font-size: .58rem; color: var(--color-text-muted); padding: .15rem .4rem; border-radius: 999px; background: rgba(255,255,255,.05); font-weight: 500; }
+.calendar-schedule-day { font-size: .75rem; color: var(--color-text-muted); padding: .15rem .4rem; border-radius: 999px; background: rgba(255,255,255,.05); font-weight: 500; }
 
 /* ─── Icons ─── */
 .calendar-icon-btn {
@@ -2342,7 +2342,7 @@ a.widget-accent-text {
     color-mix(in srgb, var(--widget-tone, var(--color-accent-selected)) 7%, rgba(255,255,255,.03));
   box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
   color: var(--color-text-secondary);
-  transition: all .25s var(--ease-spring); cursor: pointer; font-size: .72rem; font-weight: 600;
+  transition: all .25s var(--ease-spring); cursor: pointer; font-size: .78rem; font-weight: 600;
 }
 .calendar-day-btn:hover {
   background:
@@ -2464,7 +2464,7 @@ a.widget-accent-text {
 .calendar-time-ampm-btn {
   flex: 1; min-width: 2.25rem; padding: .4rem .5rem; border-radius: .55rem;
   background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.06);
-  color: var(--color-text-muted); font-size: .65rem; font-weight: 600;
+  color: var(--color-text-muted); font-size: .75rem; font-weight: 600; min-height: 2.75rem;
   cursor: pointer; transition: all .15s; letter-spacing: .04em;
 }
 .calendar-time-ampm-btn:hover { color: var(--color-text-primary); background: rgba(255,255,255,.08); }
@@ -2529,8 +2529,8 @@ a.widget-accent-text {
 }
 .calendar-filter-pill {
   display: inline-flex; align-items: center; gap: .35rem;
-  padding: .4rem .85rem; border-radius: .75rem;
-  font-size: .68rem; font-weight: 600; white-space: nowrap;
+  padding: .4rem .85rem; border-radius: .75rem; min-height: 2.75rem;
+  font-size: .75rem; font-weight: 600; white-space: nowrap;
   background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.08);
   color: var(--color-text-secondary); cursor: pointer; transition: all .2s;
 }
@@ -2554,7 +2554,7 @@ a.widget-accent-text {
 }
 .calendar-category-icon svg { width: .95rem; height: .95rem; }
 .calendar-category-title { font-size: .78rem; font-weight: 700; color: var(--color-text-primary); }
-.calendar-category-count { font-size: .62rem; color: var(--color-text-muted); font-weight: 500; }
+.calendar-category-count { font-size: .75rem; color: var(--color-text-muted); font-weight: 500; }
 
 /* ─── Routine-style schedule card ─── */
 /* Each row is frosted in its own routine color, matching the home widgets'
@@ -2594,12 +2594,12 @@ a.widget-accent-text {
 .calendar-routine-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .35rem; }
 .calendar-routine-title { font-size: .82rem; font-weight: 600; color: var(--color-text-primary); }
 .calendar-routine-meta { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
-.calendar-routine-time { font-size: .68rem; color: var(--color-text-secondary); font-weight: 500; }
+.calendar-routine-time { font-size: .75rem; color: var(--color-text-secondary); font-weight: 500; }
 .calendar-routine-days { display: flex; gap: .18rem; margin-top: .1rem; }
 .calendar-routine-day-pill {
-  width: 1.2rem; height: 1.2rem; border-radius: .28rem;
+  width: 1.35rem; height: 1.35rem; border-radius: .3rem;
   display: grid; place-items: center;
-  font-size: .55rem; font-weight: 700;
+  font-size: .75rem; font-weight: 700; line-height: 1;
   background: rgba(255,255,255,.08); color: var(--color-text-dim);
   transition: all .2s;
 }

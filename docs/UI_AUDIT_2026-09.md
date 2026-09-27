@@ -51,7 +51,7 @@ role-filtered settings (`settingsSectionsForRole`) and a role-aware dock
 2. **Sub-12px text retired (measured: 262 → 0 nodes).** All 354 `text-[10px]` / `text-[11px]`
    sites → `text-xs` (0.75rem, rem-based so it scales with root font size), plus the CSS ramp
    that the class sweep could not reach: `.calendar-strip-day .wd` 11 → `.75rem`;
-   `.calendar-day-btn` `.72 → .8rem`; `.calendar-today-btn` `.62 → .8rem`;
+   `.calendar-today-btn` `.62 → .8rem`;
    `.calendar-sync-btn` `.65 → .8rem`; `.calendar-add-link` `.72 → .8rem`;
    `.calendar-day-number` `.72 → .82rem`; `.calendar-weekday` `.58 → .75rem`;
    `.calendar-hero-kicker` `.68 → .76rem`; `.calendar-panel-subtitle` `.64 → .76rem`;
@@ -123,6 +123,50 @@ documented `middleware` deprecation and Turbopack-root warnings).
 
 
 ---
+
+### Residual pass — same day (measured states were not the whole app)
+
+The first pass declared “sub-12px text 262 → 0” from the headless sweep, but that number only
+covered the states the sweep actually opened: 10 routes, signed-out family mode, no modal
+sheets. Two guardrails therefore had blind spots, and a follow-up grep found real text under
+the floor that neither the class test nor the sweep could see:
+
+1. **Contract B only reads `*.tsx` class strings.** Raw CSS was unguarded, and 13 rules in
+   `src/app/globals.css` sat below the floor (they were invisible to the codemod *and* to the
+   test that was supposed to lock it in). All 13 raised to ≥ `.75rem`:
+   `.calendar-panel-kicker` `.6`, `.calendar-event-time` `.68`, `.calendar-upcoming-event-title`
+   `.6`, `.calendar-upcoming-more` `.55`, `.calendar-schedule-time` `.65`,
+   `.calendar-schedule-day` `.58`, `.calendar-day-btn` `.72`, `.calendar-time-ampm-btn` `.65`,
+   `.calendar-filter-pill` `.68`, `.calendar-category-count` `.62`, `.calendar-routine-time`
+   `.68`, `.calendar-routine-day-pill` `.55` (day-pill box `.28 → 1.35rem` so the 12px label fits),
+   `.settings-control-badge` `.68`. Note how the last one hid from a hand-written grep too: the
+   audit's own scan pattern assumed `.68rem`, not `0.68rem`.
+2. **Two controls inside the add-event sheet / filter bar were under 44px** and only appear in
+   states the sweep never opened: `.calendar-time-ampm-btn` (AM/PM toggle) and
+   `.calendar-filter-pill` now carry `min-height: 2.75rem`. `.calendar-routine-day-pill` is
+   presentational — the routine card is the tap target — so it keeps its compact box.
+3. **Four of the six stylesheets in `src` are dead.** `src/app/layout.tsx` loads exactly two —
+   `./globals.css` and `@/modes/modes.css` — and `globals.css` imports nothing but
+   `tailwindcss`. So `src/styles/animations.css` (1283 lines, all 66 of its `@keyframes`
+   duplicated in globals; also malformed, it opens mid-rule), `materials.css` (507 lines, 21 of
+   24 selectors duplicated), `tokens.css` (183 lines of mirrored tokens) and `components.css`
+   (81 lines, every selector duplicated) — 2054 lines in total — are edit traps: changing them
+   changes nothing on screen, and their copies have already drifted from the live rules. Each
+   file now carries a `⚠️ DEAD FILE` header; deleting all four is Phase 5.
+4. **`contract B2`** (same test file) closes the blind spot for good: it fails on any
+   `font-size` below 12px in a *live* stylesheet, on any literal inline `fontSize` below 12px in
+   `src/**`, and on anyone importing one of the four dead stylesheets. Deliberately out of
+   scope, both decorative and `aria-hidden`: the dynamic particle sizes
+   (`WeatherParticles` `fontSize: \`${p.size}px\``, 3–8px snowflakes) and SVG `fontSize="…"`
+   attributes inside hand-drawn illustrations (`WeatherSeasonArt`, `MountainVisualization`),
+   which scale with their viewBox and are not content. The sweep is still state-limited; the
+   static guard is what makes “no sub-12px text” a repo-wide claim rather than a sampled one.
+
+Also corrected while writing this up: the Phase-1 list above claimed `.calendar-day-btn`
+`.72 → .8rem`, which never happened (only `.calendar-day-number` changed in that commit) — the
+button is fixed here instead. And `docs/UI_CONSISTENCY_AUDIT.md` / `AGENTS.md` said
+`Card`/`Button`/`Badge` were *deleted*: they are not, they are legacy leftovers still imported
+by 8 files, `Modal` is the canonical sheet component, and only `Input` is gone.
 
 ## Findings (full list, with evidence)
 
@@ -234,7 +278,12 @@ rest need Phase 5.
 `useSafeFetch` that distinguishes *loading* → *empty* → *offline/unauthorised* instead of
 swallowing; give each Home widget an error/offline state (the 401-on-every-fetch pattern in
 `AdultHome.tsx` / `page.tsx` is the template to replace); make the existing `sync-failed`
-banner offer Retry, not just colour a dot.
+banner offer Retry, not just colour a dot. Also in scope: `npm test` exits non-zero even though
+all 3241 tests pass — two uncaught jsdom `NotFoundError: The node to be removed is not a child
+of this node` (code 8) escape from `tests/unit/tasks-approve-all.test.tsx` after
+`createRoot`/toast-portal teardown, so CI can never tell a real failure from this noise.
+Reproduce with `npx vitest run tests/unit/tasks-approve-all.test.tsx`; fix by unmounting the
+root in `afterEach` before the document is torn down (or guarding the portal's `removeChild`).
 
 **Phase 3 — navigation & IA (P1-5, P1-6).** `lib/nav-items.ts` as the single manifest feeding
 dock + rail; adopt it in `CapsuleNav` and `SidebarNav` (or delete `SidebarNav` and keep Home's
@@ -248,7 +297,11 @@ Calendar / Settings; wall composition per screen reusing the `WALL_GRID_CLASS` i
 legibility: ≥16px body, 44px targets, no hover-only affordances); route `/chat` through
 `PageShell`; rank Home widgets and fold the rest into the `More…` sheet.
 
-**Phase 5 — design-system convergence (P2).** Delete or import `styles/tokens.css`; map
+**Phase 5 — design-system convergence (P2).** Delete the four orphaned stylesheets
+(`styles/animations.css`, `styles/tokens.css`, `styles/materials.css`, `styles/components.css`
+— 2054 lines, every rule duplicated or superseded in `globals.css`, all flagged `⚠️ DEAD FILE`
+and asserted unimported by contract B2); converge the legacy `Card` / `Button` / `Badge` on
+`Surface` / `SoftButton` / `Chip` (8 importing files); map
 `rounded-2xl` → `--radius-lg` etc. via `@theme` aliases and ban raw `rounded-[..]`; replace
 `bg-white/[0.03]` + hex clusters with `Surface`/`--neu-*`; port the 24 ad-hoc overlays onto
 `Modal` (or `BottomSheet` for mobile) and add `role="dialog"` where a sheet must stay; add a

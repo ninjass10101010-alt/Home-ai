@@ -1,3 +1,9 @@
+/* ⚠️ DEAD FILE (2026-09-26 audit). Nothing imports this stylesheet — the live token set is the
+   `:root` block in src/app/globals.css. The values here are a manually mirrored copy (kept in
+   sync through the September contrast fix) and will drift from now on. Edits here change
+   nothing on screen. Kept only as reference for the Phase-5 token cleanup in
+   docs/UI_AUDIT_2026-09.md, then delete. */
+
 /* ═══ COLOR TOKENS — Light/Dark/Contrast Mode Overrides ═══ */
 
 :root[data-theme="light"] {
