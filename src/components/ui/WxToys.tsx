@@ -365,33 +365,35 @@ export function SceneLayers({ scene, heavySnow = false, showFog = false, fogCode
     >
       <PosterAccents scene={scene} heavySnow={heavySnow} motionOk={motionOk} sunProgress={finiteMeasurement(sunProgress)} cloudCover={numericCloudCover} precipitation={normalizedPrecipitation} skyPhase={skyPhase} moonPhase={moonPhase} moonIllumination={moonIllumination} />
 
-      {scene === "night" &&
-        Array.from({ length: 42 }, (_, i) => (
-          <span
-            key={i}
-            className="absolute rounded-full bg-white"
-            style={{
-              left: `${(i * 37) % 100}%`,
-              top: `${(i * 53) % 45}%`,
-              width: 2 + (i % 3),
-              height: 2 + (i % 3),
-              opacity: starOpacity(numericCloudCover),
-              animation: motionOk ? `wxStarTwinkle ${2.5 + (i % 4)}s ease-in-out ${i * 0.3}s infinite` : undefined,
-            }}
-          />
-        ))}
-      {scene === "night" && starOpacity(numericCloudCover) === 1 && (
-        <span
-          aria-hidden="true"
-          className="absolute h-[2px] w-[90px] rounded-full bg-gradient-to-r from-transparent via-white/90 to-white"
-          style={{
-            left: "72%",
-            top: "12%",
-            transform: "rotate(-24deg)",
-            opacity: 0,
-            animation: motionOk ? "wx-shoot 11s ease-in 5s infinite" : undefined,
-          }}
-        />
+      {scene === "night" && (
+        <div className="absolute inset-0" style={{ opacity: starOpacity(numericCloudCover) }}>
+          {Array.from({ length: 42 }, (_, i) => (
+            <span
+              key={i}
+              className="absolute rounded-full bg-white"
+              style={{
+                left: `${(i * 37) % 100}%`,
+                top: `${(i * 53) % 45}%`,
+                width: 2 + (i % 3),
+                height: 2 + (i % 3),
+                animation: motionOk ? `wxStarTwinkle ${2.5 + (i % 4)}s ease-in-out ${i * 0.3}s infinite` : undefined,
+              }}
+            />
+          ))}
+          {starOpacity(numericCloudCover) === 1 && (
+            <span
+              aria-hidden="true"
+              className="absolute h-[2px] w-[90px] rounded-full bg-gradient-to-r from-transparent via-white/90 to-white"
+              style={{
+                left: "72%",
+                top: "12%",
+                transform: "rotate(-24deg)",
+                opacity: 0,
+                animation: motionOk ? "wx-shoot 11s ease-in 5s infinite" : undefined,
+              }}
+            />
+          )}
+        </div>
       )}
 
       <div data-testid="wx-poster-clouds" data-cloud-cover={numericCloudCover == null ? "unavailable" : Math.round(cover)} data-visible={cover > 0 ? "true" : "false"} className="absolute inset-0">

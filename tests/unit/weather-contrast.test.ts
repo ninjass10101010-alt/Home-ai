@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { contrastRatio, posterTextSurface, weatherHeaderTextSurfaces } from "@/lib/weather-contrast";
+import { SKY } from "@/components/ui/wx-tokens";
 
 const SLATE_800 = "#1E293B";
 const SCENES = ["clear", "cloudy", "rain", "snow", "storm", "night"] as const;
@@ -63,4 +64,13 @@ describe("weatherHeaderTextSurfaces", () => {
 describe("contrastRatio sanity", () => {
   it("black/white is 21", () => expect(contrastRatio("#000000", "#FFFFFF")).toBeCloseTo(21, 1));
   it("identical colors are 1", () => expect(contrastRatio("#898CBB", "#898CBB")).toBeCloseTo(1, 3));
+});
+
+describe("SKY wash strings match the verified ink stops", () => {
+  const stopsOf = (skyClass: string) =>
+    Array.from(skyClass.matchAll(/#([0-9a-f]{6})/gi), (m) => `#${m[1]}`.toLowerCase());
+
+  it.each(["dawn", "dusk"] as const)("SKY.%s hexes equal posterTextSurface stops", (phase) => {
+    expect(stopsOf(SKY[phase])).toEqual(posterTextSurface("clear", false, phase).map((s) => s.toLowerCase()));
+  });
 });

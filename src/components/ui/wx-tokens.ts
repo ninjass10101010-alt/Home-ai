@@ -25,7 +25,7 @@ export const SKY: Record<string, string> = {
   snow: "from-[#f4f7fb] via-[#e6efff] to-[#efe6fb]", // near-white → lavender
   heavySnow: "from-[#5d6f8c] via-[#465a78] to-[#354861]",
   storm: "from-[#6a6f96] via-[#5d5b8f] to-[#4d4770]", // deep slate-violet storm wash (white ink stays ≥4.5:1 at every stop)
-  night: "from-[#6f74a8] via-[#a29dc9] to-[#e2dbf2]", // lighter dusk wash (slate-800 ink stays ≥4.5:1 at every stop)
+  night: "from-[#6f74a8] via-[#a29dc9] to-[#e2dbf2]", // lamplit dusk wash — top stop #6f74a8 is 3.30:1 vs slate-800 (known gap, Change Record contract 8)
 };
 
 // Ink flips per sky so text stays legible on pastels
@@ -50,7 +50,10 @@ export const GLASS =
   "relative before:pointer-events-none before:absolute before:inset-0 before:rounded-[inherit] " +
   "before:bg-gradient-to-b before:from-white/40 before:to-transparent before:to-50%";
 
-// Derived from GLASS by the same +0.10 alphas the old recipe used — not hand-tuned.
+// Derived from GLASS — bg stops +0.10 (the old recipe's step), border +0.12
+// (0.28→0.40, the old border-white/50→60 step). The .replace chain relies on
+// String.replace first-occurrence semantics: the gradient's 0.08 precedes the
+// inset shadow's 0.08 in the concatenated string, so only the gradient lifts.
 export const GLASS_NIGHT = GLASS
   .replace("rgba(255,255,255,0.22)", "rgba(255,255,255,0.32)")
   .replace("rgba(255,255,255,0.08)", "rgba(255,255,255,0.18)")

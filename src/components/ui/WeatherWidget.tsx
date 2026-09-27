@@ -1429,7 +1429,15 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
   const mPresentation = conditionPresentation(mScene, mCode, mCloud, mIsDay);
   const mCond = mPresentation.icon;
   const mSunProgress = sunProgressAt(scrubHour?.time ?? new Date().toISOString(), mSolar?.sunriseISO ?? null, mSolar?.sunsetISO ?? null);
-  const mSkyPhase = skyPhase(mSunProgress, mIsDay);
+  // Same shared-timeline anchor as the card: the scrubbed hour, else the
+  // payload's own current hour — never wall clock (see plan Task 3).
+  const mPhaseAnchorISO = scrubHour?.time ?? data.hours[0]?.time ?? null;
+  const mSkyPhase = skyPhase(
+    mPhaseAnchorISO == null
+      ? null
+      : sunProgressAt(mPhaseAnchorISO, mSolar?.sunriseISO ?? null, mSolar?.sunsetISO ?? null),
+    mIsDay
+  );
   const mSkyScene = skySceneKey(mScene, mSkyPhase, mHeavySnow);
   const mBirds =
     !fetchError &&
