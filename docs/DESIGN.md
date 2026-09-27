@@ -137,6 +137,18 @@ Use this exact delta format in the "What's New" area and update 1.5 journeys:
   > "On the Home screen the chat bubble now gently floats up and down..."
 ```
 
+### Weather sky re-skin — dawn/dusk axis, god-rays, phase-lit moon, Drive particle craft (2026-09-25)
+
+CONTRACTS:
+1. `skyPhase` derives dawn/day/dusk/night from measured `sunProgress`, **night checked first** (a clamped 4am progress of 0 must never read as dawn); null solar yields day/night only — no dawn/dusk without data.
+2. Dawn/dusk SKY washes override only `clear`/`cloudy`; rain/snow/heavySnow/storm keep their condition washes. Stops are machine-verified AA vs slate-800 (dawn 4.55/7.16/10.85; dusk 4.57/4.59/8.15) — changing any stop re-runs `tests/unit/weather-contrast.test.ts`.
+3. Precipitation probability drives particle COUNT only; per-drop length/speed/opacity vary by deterministic particle index, never by measurement — identical data renders identical scenes (SSR/hydration). Wind is mph: cloud drift keeps the `max(16, 46 − wind)` gate (drift requires wind > 0).
+4. The poster moon is phase-lit via `moonLitPath`; the face's opacity tracks illumination — no face at new moon, and the dark disc always renders so new moons leave no hole. Exactly one `[data-weather-character="moon"]`; the scene moon never takes `data-testid="wx-moon"` (reserved for the hero glyph, which stays stars).
+5. Keyframe lifecycle: `wx-drift/wx-bob/wx-fall/wx-snowfall/wx-sway/wx-fogdrift/wx-bolt/wx-shoot/wx-breathe/wx-sunrays` added; `wxCloudDrift/wxRainStreak/wxSnowFall/wxFogDrift/wxPuff` removed with their reduced-motion selectors — every live name is listed in the `prefers-reduced-motion` kill-switch.
+6. Storm keeps the `mix-blend-overlay` wash; the bolt glyph is additive. The whole-card sheen is `pointer-events-none` between scrim and content — the day-strip drag and tap-to-modal are unaffected.
+7. `GLASS`/`GLASS_NIGHT` are retuned in place (Drive alphas, night derived by the historical +0.10s) — **not** a second card material; the app-wide `.glass` family is untouched.
+8. The pre-existing night-wash AA gap (top stop `#6f74a8` vs slate-800 = 3.30) is documented and out of scope; the new keys do not regress it.
+
 ### UI Change Record — 2026-09-24 — Nullable hourly temperature, boosted scene truth, and composite modal cells
 - Added / Changed: `src/components/ui/WeatherWidget.tsx`, `WxToys.tsx`, `tests/unit/weather-widget.test.tsx`, and the focused contrast model.
 - Data / Accessibility: `HourPoint.temp` remains nullable through parsing and every selected-temperature surface; missing values preserve the hour, announce temperature unavailability, and render an em dash without a degree mark instead of borrowing the current reading or fabricating `0°`. Cloud layers and birds use scoped visibility/data-visible state so zero or unknown cloud cover and disallowed birds stay unavailable under boosted contrast. Modal selected and unselected hourly labels share one foreground validated across the actual translucent panel/overlay composites in both themes and clear, storm, night, and holiday accents.
