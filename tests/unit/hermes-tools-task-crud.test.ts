@@ -3,6 +3,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // the dashboard renders — not the PB `tasks` collection. This harness seeds a
 // snapshot blob and persists snapshot writes so read-after-write works.
 const SNAP = "consuela_data_snapshots";
+// The ledger write path reads its own week row back to VERIFY the transaction
+// landed, so a created/updated week_data row has to persist in this fake too —
+// otherwise any paying branch aborts with `ledger_write_conflict` and the test
+// cannot tell "the seam paid" apart from "the harness could not".
+const WEEK = "week_data";
 const rows: Record<string, any[]> = {};
 const writes: Array<{ op: string; collection: string; id?: string; data?: any }> = [];
 const mocks = vi.hoisted(() => ({ execute: vi.fn(), getLiveMembers: vi.fn(), nextOperationId: vi.fn() }));
@@ -14,12 +19,14 @@ vi.mock("@/lib/pb-auth", () => ({
       update: async (id: string, d: any) => {
         writes.push({ op: "update", collection: name, id, data: d });
         if (name === SNAP) { const r = (rows[SNAP] || []).find((x) => x.id === id); if (r) r.data = d.data; }
+        if (name === WEEK) { const r = (rows[WEEK] || []).find((x) => x.id === id); if (r) Object.assign(r, d); }
         return { id, ...d };
       },
       create: async (d: any) => {
         writes.push({ op: "create", collection: name, data: d });
         if (name === SNAP) rows[SNAP] = [{ id: "snap1", key: "tasks-snapshot", data: d.data }];
-        return { id: "snap1", ...d };
+        if (name === WEEK) rows[WEEK] = [{ id: "week1", ...d }];
+        return { id: name === WEEK ? "week1" : "snap1", ...d };
       },
       delete: async (id: string) => { writes.push({ op: "delete", collection: name, id }); return true; },
     }),
@@ -339,15 +346,18 @@ it("a queued completion writes no week_data row and no transaction", async () =>
   expect(snapData().weekData?.history ?? []).toHaveLength(0);
 });
 
-it("refuses an adult-owned chore — the assistant never moves points", async () => {
+it("queues an adult-owned chore instead of refusing it (Option B) — chat never pays", async () => {
   rows.members = [{ id: "mem-dad", name: "Dad", fullName: "Dad", role: "parent", emoji: "🧔" }];
   seedTasks([{ id: 205, title: "Dad's chore", assignee: "Dad", points: 5, due: "2026-09-30", completed: false, universal: false }]);
+
   const out = JSON.parse(await getTool("complete_task")!.handler({ taskId: 205 }, parentCaller));
-  expect(out.ok).toBe(false);
-  expect(out.error).toContain("Tasks");
-  expect(mocks.execute).not.toHaveBeenCalled();
+
+  expect(out.ok).toBe(true);
+  expect(out.queuedForApproval).toBe(true);
+  expect(byId(205)!.pendingApproval).toMatchObject({ byName: "Dad", points: 5 });
   expect(writes.some((w) => w.collection === "week_data")).toBe(false);
-  expect(byId(205)!.completed).toBe(false);
+  expect(snapData().weekData?.history ?? []).toHaveLength(0);
+  expect(out.error).toBeUndefined();
 });
 
 it("reopens a crew row while preserving members, joinedAt, and removed", async () => {

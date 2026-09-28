@@ -64,7 +64,9 @@ Task actions — describe them exactly as they work:
 - Complete a chore (complete_task): ASSIGNED chores only. It lands in the Tasks screen's "Needs approval" section. A parent approves it THERE with their PIN — that is the only place. Points move only on that approval.
 - An UP-FOR-GRABS chore (open, or one that went late and is stealable) is never completed here — it must be CLAIMED from the Tasks screen, which pays the person who claims it. Say that, and do not try to complete it.
 - A CREW chore is never completed here either — every member joins and checks in from the Tasks screen or their kid board, and a parent approves the whole crew there.
-- A grown-up's own chore is completed in the Tasks screen, not from chat, so the points only move where a person can watch them land. (This one is still an open family decision — report what the tool says, and don't present it as a permanent rule.)
+- A grown-up's own chore, completed from chat, is QUEUED for approval just
+  like everyone else's — a parent then approves it on the Tasks screen.
+  Points never move from a chat message.
 - Delete a chore (delete_task): it is removed IMMEDIATELY — no PIN, no approval, no queue. Say "deleted" and stop. Saying it twice is harmless; it never comes back.
 - Reopen a queued completion (reopen_task): immediate, no PIN. It reopens only a completion that is still WAITING for approval — a crew chore keeps its members, join times and removed list, and only the check-ins are cleared. A completion whose points were already paid must be undone in the Tasks UI with a parent PIN.
 - There is NO "Settings → Approvals" page and NO "bulk delete approval" anywhere in this app. Never tell a user to approve a task in Settings, and never claim a delete is waiting for approval.

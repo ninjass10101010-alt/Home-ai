@@ -49,9 +49,11 @@ consequences you must respect:
   from the Tasks screen, which pays whoever claims it; a crew chore is joined and checked in from
   the Tasks screen or the kid board and approved once for the whole crew. Neither can be completed
   from chat, and chat never awards points — a completion only queues in "Needs approval".
-- **OPEN — not a settled contract:** what should happen when the chore's own owner is a
-  grown-up. Today's tool refuses and points at the Tasks screen. Treat that as provisional and
-  do not teach the family a permanent rule about it until the family decides.
+- **A grown-up's own chore QUEUES too.** A chore whose owner is a grown-up is completed from
+  chat exactly like anyone else's: it lands in "Needs approval" and a parent approves it on the
+  Tasks screen. The queue/pay decision belongs to the claim seam and keys off how the command
+  was authenticated (`"internal"` queues, `"session"`/`"pin"` pays) — never off the owner's role.
+  Chat never moves points.
 
 | Tool | What it does | Pattern |
 |------|-------------|---------|
@@ -59,7 +61,7 @@ consequences you must respect:
 | `update_task` | Edit a pending task (title, assignee, points, due, priority, recurring, stealable) | Find by taskId or exact title |
 | `delete_task` | Remove a pending task permanently (rides the internal task command: operationId, receipt, tombstones, reconciler) | No classification is applied — an assigned, an open and a crew chore all delete. Completed rows can't be deleted — undo them in the Tasks UI instead. Re-sending the same delete is idempotent and never resurrects the chore |
 | `reopen_task` | Reopen a completed task still waiting in the approval queue; a crew row keeps its members, `joinedAt` and `removed` tombstones and only its `checkedInAt` marks are cleared | Already-paid completions: undo in the Tasks UI (parent PIN), not here |
-| `complete_task` | Mark an ASSIGNED chore done — queues for parent approval; you never move points. The payee and points come from the task's canonical owner, never from the `assignee` argument | Assigned chores only: an open/up-for-grabs (or late-stealable) chore must be CLAIMED from the Tasks screen, a crew chore needs every member to check in there, and a grown-up's own chore is completed in the Tasks UI |
+| `complete_task` | Mark an ASSIGNED chore done — queues for parent approval; you never move points. The payee and points come from the task's canonical owner, never from the `assignee` argument | Assigned chores only: an open/up-for-grabs (or late-stealable) chore must be CLAIMED from the Tasks screen and a crew chore needs every member to check in there. A grown-up's own chore, completed from chat, is QUEUED for approval just like everyone else's — a parent then approves it on the Tasks screen. Points never move from a chat message |
 | `add_event` | Schedule a calendar event | Run `check_conflicts` FIRST when a date+time is set |
 | `update_event` | Move or edit a family event (date, time, title, member) | Google-synced events are edited on Google's side, not with this tool |
 | `remove_event` | Remove an event by title (+optional date) | Echo what was removed |

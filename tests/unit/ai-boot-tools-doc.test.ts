@@ -75,7 +75,15 @@ describe("complete_task / reopen_task: the prompt matches the enforced refusals"
     const row = docRow(AI_BOOT.TOOLS_MD, "complete_task");
     expect(row).toContain("CLAIMED from the Tasks screen");
     expect(row).toContain("crew chore needs every member to check in");
-    expect(row).toContain("grown-up's own chore is completed in the Tasks UI");
+  });
+
+  it("complete_task says an adult-owned chore QUEUES (Option B), never that it is refused", () => {
+    const row = docRow(AI_BOOT.TOOLS_MD, "complete_task");
+    expect(row).toContain("grown-up's own chore, completed from chat, is QUEUED for approval");
+    expect(row).toContain("Points never move from a chat message");
+    // The refusal is gone from the tool AND from its documentation.
+    expect(row).not.toContain("completed in the Tasks UI");
+    expect(AI_BOOT.TOOLS_MD).not.toContain("adult_owner");
   });
 
   it("reopen_task states the crew-preservation the claim seam actually performs", () => {

@@ -1210,11 +1210,17 @@ async function executeClaimCommandUnlocked(
     if (!owner) return failure(command.operationId, "unknown_task_owner", action);
     if (owner.id !== actor.id) return failure(command.operationId, "not_task_owner", action);
     if (points === null) return failure(command.operationId, "invalid_task_state", action);
+    // Option B: chat never moves points. A command authenticated as "internal"
+    // (the assistant) queues for approval whether the owner is a child or a
+    // grown-up; only a real session/PIN caller — the Tasks screen — pays now.
+    // Keying off `authentication` rather than `role` closes the roster race:
+    // a member promoted between two reads cannot flip this branch.
+    const queueOnly = actorRole === "child" || baseActor.authentication === "internal";
     const build = (current: SnapshotTask): SnapshotTask => ({
       ...current,
       assigneeEmoji: actor.emoji ?? current.assigneeEmoji ?? "",
       ...completedFields(now, weekStart, baseActor),
-      pendingApproval: actorRole === "child"
+      pendingApproval: queueOnly
         ? {
             byName: actor.name,
             at: now,
@@ -1222,7 +1228,7 @@ async function executeClaimCommandUnlocked(
           }
         : null,
     });
-    if (actorRole === "child") {
+    if (queueOnly) {
       return withAdmin((pb) => writeCanonicalTask(
         pb,
         lookup,

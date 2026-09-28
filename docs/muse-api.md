@@ -290,9 +290,11 @@ These hold regardless of what the tool catalog appears to allow:
   The payee and the point amount are derived server-side from the chore's
   canonical owner and stored points — no argument sets or redirects a payment,
   and MUSE cannot award points at all.
-- **Not a settled contract:** a chore whose own owner is a grown-up is refused
-  today and pointed at the Tasks screen. That disposition is an open decision
-  for the family; do not encode it as a permanent MUSE rule.
+- **A grown-up's own chore QUEUES too.** A chore whose owner is a grown-up is completed from
+  chat exactly like anyone else's: it lands as `pendingApproval` and a parent approves it on the
+  Tasks screen. The queue/pay decision belongs to the claim seam and keys off how the command was
+  authenticated (`"internal"` queues, `"session"`/`"pin"` pays) — never off the owner's role, so a
+  roster promotion between two reads cannot change the outcome. Chat never moves points.
 - **Memory tools share the family memory bank.** Reads and writes go to the
   same PocketBase-backed memory the family sees. MUSE has no private memory
   store.

@@ -1068,13 +1068,11 @@ const TOOLS: Tool[] = [
             error: `The chore's owner ("${task.assignee || "unknown"}") is not on the family roster — nothing was changed.`,
           });
         }
-        if (normalizedLiveMemberRole(owner) !== "child") {
-          return summarize({
-            ok: false,
-            reason: "adult_owner",
-            error: "A grown-up's own chore moves points only from the Tasks screen, so you can watch them land — mark it there.",
-          });
-        }
+        // Option B (decided 2026-09-28): an adult-owned chore is no longer
+        // refused here. The pay/queue decision belongs to the claim seam,
+        // where it keys off `authentication` — chat ("internal") queues,
+        // the Tasks screen ("session"/"pin") pays. Role is deliberately not
+        // consulted, so a roster race cannot change the outcome.
         const result = await runClaimTaskCommand(
           context?.source ?? "hermes",
           "complete",
