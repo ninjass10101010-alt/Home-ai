@@ -13,7 +13,7 @@ import { moonPhase, moonPhaseName } from "@/lib/weather-astro";
 import { mixHex, posterTextSurface, weatherHeaderTextSurfaces } from "@/lib/weather-contrast";
 import { skyPhase, skySceneKey } from "@/lib/weather-scene-params";
 import { SKY, INK, GLASS, GLASS_NIGHT } from "./wx-tokens";
-import { SceneLayers, Condition, wmoToScene, dayCondition, conditionPresentation, wmoCondition, useWxMotionOk } from "./WxToys";
+import { SceneLayers, Condition, wmoToScene, dayCondition, conditionPresentation, wmoCondition, posterCarriesSun, useWxMotionOk } from "./WxToys";
 import { getWeatherSkin, cardinalFromDegrees, SeasonKey, severeFamily, resolveAccent, contrastSafeTextAccent, accentForeground } from "./WeatherSkins";
 import { wearAdvice, stormAdvice, snowAdvice, fusionOutlook, InsightEvent } from "@/lib/weather-insights";
 import type { ParticleKind } from "./WeatherParticles";
@@ -1241,9 +1241,11 @@ export default function WeatherWidget({ className = "" }: { className?: string }
                     </>
                   )}
                   </div>
-                  {/* clay condition — clamp prevents overflow on 320 px phones */}
+                  {/* clay condition — clamp prevents overflow on 320 px phones.
+                      The poster already paints the sun on a clear day, so the
+                      hero suppresses its own disc (same rule as the night moon). */}
                   <div data-testid="wx-hero-icon" className="shrink-0 flex items-center justify-center" style={{ width: "clamp(48px, 16vw, 64px)", height: "clamp(48px, 16vw, 64px)", animation: "wxThumbIn .6s cubic-bezier(.2,.8,.2,1) both" }}>
-                    <Condition code={heroPresentation.icon} size={64} />
+                    <Condition code={heroPresentation.icon} size={64} hideSun={posterCarriesSun(heroScene, heroSunProgress)} />
                   </div>
                 </div>
                 {heroCondition && (
@@ -1552,7 +1554,9 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
                 />
               </div>
               <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-1 text-center">
-                <Condition code={mCond} size={64} />
+                <div data-testid="wx-modal-condition" className="flex h-16 w-16 items-center justify-center">
+                  <Condition code={mCond} size={64} hideSun={posterCarriesSun(mScene, mSunProgress)} />
+                </div>
                 <div
                   data-testid="wx-modal-hero-ink"
                   className="flex flex-col items-center rounded-2xl px-4 py-2"

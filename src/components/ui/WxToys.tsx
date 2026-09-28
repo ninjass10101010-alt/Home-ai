@@ -164,6 +164,13 @@ function posterSunPosition(progress: number | null): { x: number; y: number } | 
   return { x: 42 + p * 236, y: 58 - Math.sin(p * Math.PI) * 42 };
 }
 
+/** True when the poster itself paints the sun character (see PosterAccents).
+    The hero and the details modal must not add a second disc on top of it —
+    the same rule the night moon already follows with the star glyph. */
+export function posterCarriesSun(scene: WxScene, sunProgress: number | null): boolean {
+  return scene === "clear" && posterSunPosition(sunProgress) != null;
+}
+
 function posterHorizon(progress: number | null): string | null {
   if (progress == null) return null;
   const p = Math.max(0, Math.min(1, progress));
@@ -748,18 +755,22 @@ export function Wind({ width = 72 }: { width?: number }) {
   );
 }
 
-export function Condition({ code, size = 80 }: { code: ConditionCode; size?: number }) {
+/** `hideSun` drops the sun disc because the poster behind already paints one
+    (see posterCarriesSun). Mirrors how the night scene suppresses the moon. */
+export function Condition({ code, size = 80, hideSun = false }: { code: ConditionCode; size?: number; hideSun?: boolean }) {
   switch (code) {
     case "clear":
-      return <Sun size={size * 0.8} />;
+      return hideSun ? null : <Sun size={size * 0.8} />;
     case "cloudy":
       return <Cloud size={size} />;
     case "partly":
       return (
         <div className="relative" style={{ width: size, height: size * 0.75 }}>
-          <div className="absolute top-0 right-2">
-            <Sun size={size * 0.5} />
-          </div>
+          {!hideSun && (
+            <div className="absolute top-0 right-2">
+              <Sun size={size * 0.5} />
+            </div>
+          )}
           <div className="absolute bottom-0 left-0">
             <Cloud size={size * 0.85} />
           </div>

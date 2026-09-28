@@ -73,8 +73,11 @@ function conditionShowsCloud(condition: Element | null): boolean {
   return !!condition?.firstElementChild;
 }
 
+// The modal centers the condition icon over the poster. Query it by its own
+// testid — positional sibling walking silently grabbed the temperature digits
+// once the clear-day disc was suppressed and the slot rendered empty.
 function modalCondition(dialog: HTMLElement): Element | null {
-  return dialog.querySelector('[data-testid="wx-scene-layers"]')?.parentElement?.nextElementSibling?.firstElementChild ?? null;
+  return dialog.querySelector('[data-testid="wx-modal-condition"]')?.firstElementChild ?? null;
 }
 
 function metricRow(dialog: HTMLElement, label: string): HTMLElement | undefined {
@@ -191,7 +194,7 @@ function LayoutMotionCapture({ capture }: { capture: () => void }) {
   return null;
 }
 
-function makeOpenMeteoPayload(overrides: { isDay?: number; precip?: number; visibility?: number; cloud?: number | null; code?: number; startAt?: string } = {}) {
+function makeOpenMeteoPayload(overrides: { isDay?: number; precip?: number; visibility?: number; cloud?: number | null; code?: number; startAt?: string; sunrise?: string | null } = {}) {
   const isDay = overrides.isDay ?? 1;
   const precip = overrides.precip ?? 5;
   const visibility = overrides.visibility ?? 16000;
@@ -247,7 +250,7 @@ function makeOpenMeteoPayload(overrides: { isDay?: number; precip?: number; visi
       temperature_2m_max: [75, 76, 77, 78, 79, 80],
       temperature_2m_min: [58, 59, 60, 61, 62, 63],
       precipitation_probability_max: [10, 10, 10, 10, 10, 10],
-      sunrise: [sunrise.toISOString(), ...dailyTimes.slice(1).map(() => sunrise.toISOString())],
+      sunrise: [overrides.sunrise === undefined ? sunrise.toISOString() : overrides.sunrise, ...dailyTimes.slice(1).map(() => sunrise.toISOString())],
       sunset: [sunset.toISOString(), ...dailyTimes.slice(1).map(() => sunset.toISOString())],
       uv_index_max: [6, 5, 4, 3, 2, 1],
     },
@@ -2196,10 +2199,12 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(temp.className).toContain("text-[64px]");
     expect(temp.className).toContain("sm:text-[80px]");
     expect(temp.className).toContain("xl:text-[96px]");
+    // The slot still reserves its clamped box (48–64px, see the inline style —
+    // jsdom strips `clamp()`) so the layout never shifts when the sun is dropped.
     const icon = el.querySelector('[data-testid="wx-hero-icon"]') as HTMLElement;
-    const renderedIconWidth = parseFloat((icon.firstElementChild as HTMLElement).style.width);
-    expect(renderedIconWidth).toBeGreaterThanOrEqual(48);
-    expect(renderedIconWidth).toBeLessThan(64);
+    expect(icon.className).toContain("shrink-0");
+    // The poster's sun is the only one: no clay disc in the hero slot.
+    expect(icon.firstElementChild).toBeNull();
 
     const movingLayer = clouds?.querySelector('[data-cloud-form="poster"]') as HTMLElement;
     const accent = scene?.querySelector('[data-testid="wx-poster-accents"]') as HTMLElement;
@@ -2252,8 +2257,10 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(sceneToCondition(wmoToScene(95, true), 95)).toBe("storm");
   });
 
-  it("hero shows the clay icon for the live condition", async () => {
-    mockOpenMeteo(makeOpenMeteoPayload({ code: 0 }));
+  it("hero shows the clay icon for the live condition when the poster has no sun", async () => {
+    // No solar interval → the poster paints no sun character, so the hero
+    // carries the condition disc itself.
+    mockOpenMeteo(makeOpenMeteoPayload({ code: 0, sunrise: null as unknown as string }));
     const el = render(<WeatherWidget />);
     await settle();
     // code 0 by day → clear → clay sun disc with an inline clay gradient
@@ -2261,6 +2268,35 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(icon).toBeTruthy();
     const sun = icon!.firstChild as HTMLElement;
     expect(sun.style.background).toContain("linear-gradient");
+  });
+
+  it("renders one sun on a clear day — the poster's, never a second hero disc", async () => {
+    mockOpenMeteo(makeOpenMeteoPayload({ code: 0, cloud: 0, precip: 0 }));
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    // The poster paints the one illustrated sun (disc + rays).
+    expect(el.querySelectorAll('[data-testid="wx-scene-layers"] [data-weather-shape="sun"]')).toHaveLength(1);
+    // The hero slot is empty rather than stacking a clay disc on top of it.
+    const heroIcon = el.querySelector('[data-testid="wx-hero-icon"]');
+    expect(heroIcon).toBeTruthy();
+    expect(heroIcon!.firstElementChild).toBeNull();
+
+    // The details modal obeys the same single-sun rule.
+    act(() => findDetailsButton(el)!.click());
+    await settle();
+    const dialog = document.querySelector("#weather-details-dialog") as HTMLElement;
+    expect(dialog.querySelectorAll('[data-weather-shape="sun"]')).toHaveLength(1);
+    expect(dialog.querySelector('[data-testid="wx-modal-condition"]')?.firstElementChild).toBeNull();
+  });
+
+  it("keeps a partly-cloudy hero truthful when the poster supplies the sun", async () => {
+    mockOpenMeteo(makeOpenMeteoPayload({ code: 2, cloud: 40 }));
+    const el = render(<WeatherWidget />);
+    await settle();
+    // The cloud still reads; only the duplicate sun disc is dropped.
+    expect(conditionShowsCloud(el.querySelector('[data-testid="wx-hero-icon"]')?.firstElementChild ?? null)).toBe(true);
+    expect(el.textContent).toContain("Partly Cloudy");
   });
 
   it("hero uses the star glyph when the poster already carries the single night moon", async () => {
