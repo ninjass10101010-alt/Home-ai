@@ -56,5 +56,10 @@ DEPLOY_NAS_LOCAL.md
 /backups/
 *.log
 
+# throwaway local PocketBase instance used by scripts/verify-pb-target.mjs:
+# data dir (/.local/pb_data) + the migration files PocketBase generates
+# beside it (/.local/pb_migrations) — never the live NAS db
+/.local/
+
 # quarantined local ledger exports (family data — never commit)
 /local-quarantine/
