@@ -293,8 +293,9 @@ These hold regardless of what the tool catalog appears to allow:
 - **A grown-up's own chore QUEUES too.** A chore whose owner is a grown-up is completed from
   chat exactly like anyone else's: it lands as `pendingApproval` and a parent approves it on the
   Tasks screen. The queue/pay decision belongs to the claim seam and keys off how the command was
-  authenticated (`"internal"` queues, `"session"`/`"pin"` pays) — never off the owner's role, so a
-  roster promotion between two reads cannot change the outcome. Chat never moves points.
+  authenticated — `"internal"` queues, `"pin"` (the Tasks screen, PIN-verified) pays, and an adult
+  `"session"` caller is refused `pin_required` — never off the owner's role, so a roster promotion
+  between two reads cannot change the outcome. Chat never moves points.
 - **Memory tools share the family memory bank.** Reads and writes go to the
   same PocketBase-backed memory the family sees. MUSE has no private memory
   store.

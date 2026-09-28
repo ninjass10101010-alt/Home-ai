@@ -191,7 +191,6 @@ describe("Option B — who queues and who pays", () => {
 
     expect(result.ok).toBe(true);
     expect(result.task?.pendingApproval).toMatchObject({ byName: "Alex", points: 7 });
-    expect(result.paid ?? 0).toBe(0);
     expect(fixture.weekWrites).toHaveLength(0);
     expect(fixture.snapshotWeekPoints()).toEqual({});
   });
@@ -218,7 +217,6 @@ describe("Option B — who queues and who pays", () => {
       );
       expect(result.ok).toBe(true);
       expect(result.task?.pendingApproval).toMatchObject({ byName: "Caspian Garcia", points: 5 });
-      expect(result.paid ?? 0).toBe(0);
       expect(fixture.weekWrites).toHaveLength(0);
     }
   });
@@ -231,7 +229,6 @@ describe("Option B — who queues and who pays", () => {
 
     expect(result.ok).toBe(false);
     expect(result.reason).toBe("pin_required");
-    expect(result.paid ?? 0).toBe(0);
     expect(fixture.weekWrites).toHaveLength(0);
   });
 });

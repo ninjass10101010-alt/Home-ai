@@ -328,6 +328,65 @@ describe("internal task command registry", () => {
     }
   });
 
+  it("rejects an out-of-vocabulary actor.authentication at the contract boundary", async () => {
+    // `authentication` is the ONLY input that decides queue-vs-pay in the
+    // claim seam, so an unrecognised value must never reach a handler: today it
+    // would fail every `=== "internal"` / `!== "session"` test and silently
+    // become a PAYING caller. An absent value stays legal — three producers
+    // (approve, manage, the assistant's manage command) omit it, and the claim
+    // seam defaults it to "internal".
+    for (const authentication of ["cookie", "PIN", "internal ", 1, null, true]) {
+      const handler = vi.fn(async (): Promise<InternalTaskCommandResult> => ({
+        ok: true,
+        operationId: baseCommand.operationId,
+        reconciled: true,
+      }));
+      const unregister = registerInternalTaskCommandHandler("complete", handler);
+
+      try {
+        const result = await executeInternalTaskCommand(
+          {
+            ...baseCommand,
+            actor: { ...baseCommand.actor, authentication },
+          } as unknown as InternalTaskCommand,
+          { source: "hermes" },
+        );
+        expect(result).toEqual({
+          ok: false,
+          operationId: baseCommand.operationId,
+          reason: "invalid_task_command",
+          reconciled: false,
+        });
+        expect(handler).not.toHaveBeenCalled();
+      } finally {
+        unregister();
+      }
+    }
+  });
+
+  it.each(["pin", "session", "internal"] as const)(
+    "accepts the %s actor.authentication value",
+    async (authentication) => {
+      const handler = vi.fn(async (): Promise<InternalTaskCommandResult> => ({
+        ok: true,
+        operationId: baseCommand.operationId,
+        reconciled: true,
+      }));
+      const unregister = registerInternalTaskCommandHandler("complete", handler);
+
+      try {
+        const result = await executeInternalTaskCommand(
+          { ...baseCommand, actor: { ...baseCommand.actor, authentication } },
+          { source: "hermes" },
+        );
+        expect(result.ok).toBe(true);
+        expect(handler).toHaveBeenCalledOnce();
+      } finally {
+        unregister();
+      }
+    },
+  );
+
   it("turns handler failures into a sanitized result", async () => {
     const unregister = registerInternalTaskCommandHandler("complete", async () => {
       throw new Error("private request material");

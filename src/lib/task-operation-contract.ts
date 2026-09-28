@@ -15,6 +15,11 @@ export const INTERNAL_TASK_COMMAND_KINDS = [
 
 export const INTERNAL_TASK_COMMAND_SOURCES = ["hermes", "muse", "server"] as const;
 
+/** Mirrors `ClaimAuthentication` in `src/lib/task-claim.ts`. The claim seam keys
+ *  the queue-vs-pay branch off this value, so anything outside the vocabulary
+ *  must be refused here rather than reaching a handler. */
+export const INTERNAL_TASK_COMMAND_AUTHENTICATIONS = ["pin", "session", "internal"] as const;
+
 const authorityTokens = new Set([
   "member",
   "amount",
@@ -205,6 +210,13 @@ export function isInternalTaskCommandSource(value: unknown): boolean {
   );
 }
 
+export function isInternalTaskCommandAuthentication(value: unknown): boolean {
+  return (
+    typeof value === "string" &&
+    (INTERNAL_TASK_COMMAND_AUTHENTICATIONS as readonly string[]).includes(value)
+  );
+}
+
 export function hasValidInternalTaskCommandShape(
   command: unknown,
   context: unknown,
@@ -220,6 +232,16 @@ export function hasValidInternalTaskCommandShape(
     !command.actor.name.trim() ||
     typeof command.actor.role !== "string" ||
     !command.actor.role.trim()
+  ) {
+    return false;
+  }
+  // Optional: the approve, manage and assistant-manage producers legitimately
+  // omit it and the claim seam defaults to "internal". Present-but-wrong is
+  // not — an unrecognised value would fail both the `=== "internal"` and the
+  // `!== "session"` tests and silently act as a paying caller.
+  if (
+    command.actor.authentication !== undefined &&
+    !isInternalTaskCommandAuthentication(command.actor.authentication)
   ) {
     return false;
   }
