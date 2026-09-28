@@ -12,7 +12,7 @@ interface ErrorStateProps {
 export default function ErrorState({ title = "Something needs attention", description = "Consuela could not load this section. Try again or continue from another tab.", retryLabel = "Try again", onRetry }: ErrorStateProps) {
   return (
     <div
-      className="flex min-h-56 flex-col items-center justify-center rounded-3xl border p-8 text-center backdrop-blur-xl"
+      className="flex min-h-56 flex-col items-center justify-center rounded-2xl border p-8 text-center backdrop-blur-xl"
       style={{
         borderColor: "color-mix(in srgb, var(--color-accent-rose) 25%, transparent)",
         background: "color-mix(in srgb, var(--color-accent-rose) 10%, transparent)",

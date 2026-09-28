@@ -1495,7 +1495,7 @@ function WeatherDetailsModal({ data, location, conv, season, todOverride, holida
     >
       <div
         ref={panelRef}
-        className="weather-details-modal relative flex w-full max-w-[440px] max-h-[92dvh] flex-col overflow-hidden rounded-t-[2rem] rounded-b-none sm:rounded-[2rem] sm:max-h-[84vh]"
+        className="weather-details-modal relative flex w-full max-w-[440px] max-h-[92dvh] flex-col overflow-hidden rounded-t-2xl rounded-b-none sm:rounded-2xl sm:max-h-[84vh]"
         style={{
           background: "linear-gradient(170deg, rgba(16,20,34,0.92) 0%, rgba(10,13,24,0.94) 100%)",
           border: "1px solid rgba(255,255,255,0.12)",

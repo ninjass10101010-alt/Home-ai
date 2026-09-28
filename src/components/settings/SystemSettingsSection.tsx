@@ -92,7 +92,7 @@ export default function SystemSettingsSection() {
 
   if (hydrated !== true) {
     return (
-      <section aria-label="Connections and System settings" data-settings-system="true" aria-busy="true" className="rounded-3xl border border-white/10 bg-[var(--color-surface-0)]/35 p-6">
+      <section aria-label="Connections and System settings" data-settings-system="true" aria-busy="true" className="rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/35 p-6">
         <p className="text-sm text-text-secondary">Checking system settings…</p>
       </section>
     );

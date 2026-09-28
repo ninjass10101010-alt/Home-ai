@@ -298,7 +298,7 @@ function ChatContent() {
 
       {/* ─── Top bar ─── */}
       <div
-        className="sticky top-0 z-40 mx-3 sm:mx-4 mt-3 px-3 sm:px-4 py-3 glass-strong rounded-3xl flex items-center gap-4"
+        className="sticky top-0 z-40 mx-3 sm:mx-4 mt-3 px-3 sm:px-4 py-3 glass-strong rounded-2xl flex items-center gap-4"
         style={{ marginTop: "calc(env(safe-area-inset-top) + 0.5rem)" }}
       >
         <div className="w-9 h-9 rounded-2xl flex items-center justify-center text-lg shrink-0"

@@ -23,7 +23,7 @@ export default function SettingsPage() {
           <SettingsLauncher sections={sections} />
         ) : (
           <section className="px-4 pb-8" aria-label="Loading settings" aria-busy="true">
-            <div className="rounded-3xl border border-[var(--color-border)] bg-[var(--color-surface-0)]/35 p-6">
+            <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-0)]/35 p-6">
               <h2 className="text-lg font-bold text-text-primary">Checking your settings</h2>
               <p className="mt-2 text-sm leading-6 text-text-secondary">One moment while we confirm who is using this screen.</p>
             </div>

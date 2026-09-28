@@ -72,7 +72,7 @@ export default function DesignSystemPage() {
   if (process.env.NODE_ENV === "production") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--color-surface-0)] p-6 text-center">
-        <div className="max-w-md rounded-3xl border border-white/10 bg-[var(--color-surface-0)]/80 p-8 backdrop-blur-xl">
+        <div className="max-w-md rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/80 p-8 backdrop-blur-xl">
           <h1 className="text-xl font-bold text-text-primary">Design system preview</h1>
           <p className="mt-3 text-sm text-text-secondary">This route is only available in development.</p>
         </div>
@@ -218,7 +218,7 @@ export default function DesignSystemPage() {
 
         <SectionCard title="Theme matrix" description="Dark and light previews using inline token overrides.">
           <div className="grid gap-5 lg:grid-cols-2">
-            <div className="rounded-3xl border border-white/10 p-5" style={darkModeStyles}>
+            <div className="rounded-2xl border border-white/10 p-5" style={darkModeStyles}>
               <h3 className="mb-4 text-sm font-bold text-text-primary">Dark</h3>
               <Surface variant="warm" radius="xl" padding="lg">
                 <p className="text-sm text-text-secondary">Glass + neumorphism on dark canvas.</p>
@@ -228,7 +228,7 @@ export default function DesignSystemPage() {
                 </div>
               </Surface>
             </div>
-            <div className="rounded-3xl border border-black/5 p-5" style={lightModeStyles}>
+            <div className="rounded-2xl border border-black/5 p-5" style={lightModeStyles}>
               <h3 className="mb-4 text-sm font-bold text-text-primary">Light</h3>
               <Surface variant="warm" radius="xl" padding="lg">
                 <p className="text-sm text-text-secondary">Glass + neumorphism on light canvas.</p>

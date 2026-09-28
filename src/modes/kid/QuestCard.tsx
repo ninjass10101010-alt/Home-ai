@@ -85,7 +85,7 @@ export default function QuestCard({ task, onComplete, disabled = false }: QuestC
   if (task.completed) {
     return (
       <div
-        className="relative flex items-center gap-3 p-4 rounded-[1.25rem] transition-all duration-500"
+        className="relative flex items-center gap-3 p-4 rounded-lg transition-all duration-500"
         style={{
           background: "rgba(74, 222, 128, 0.06)",
           border: "1px solid rgba(74, 222, 128, 0.15)",
@@ -179,7 +179,7 @@ export default function QuestCard({ task, onComplete, disabled = false }: QuestC
       {/* Tap hint (subtle) */}
       {!disabled && !isPressed && (
         <div
-          className="absolute inset-0 rounded-[1.25rem] pointer-events-none"
+          className="absolute inset-0 rounded-lg pointer-events-none"
           style={{
             background: "radial-gradient(circle at 50% 50%, rgba(255,255,255,0.03), transparent 70%)",
           }}

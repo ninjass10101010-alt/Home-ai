@@ -11,7 +11,7 @@ export default function Skeleton({ variant = "text", className = "" }: SkeletonP
     title: "h-5 w-2/3 rounded-xl",
     block: "h-24 w-full rounded-2xl",
     avatar: "h-12 w-12 rounded-full",
-    card: "h-40 w-full rounded-3xl",
+    card: "h-40 w-full rounded-2xl",
   };
 
   return <div className={`animate-pulse bg-[var(--color-surface-3)] ${variantMap[variant]} ${className}`} />;

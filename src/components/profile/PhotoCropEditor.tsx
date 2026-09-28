@@ -204,7 +204,7 @@ export default function PhotoCropEditor({ src, onApply, onCancel }: PhotoCropEdi
 
           <div
             ref={viewportRef}
-            className="relative aspect-square w-full touch-none select-none overflow-hidden rounded-3xl border border-white/15 bg-[var(--color-surface-2)]"
+            className="relative aspect-square w-full touch-none select-none overflow-hidden rounded-2xl border border-white/15 bg-[var(--color-surface-2)]"
             style={{ touchAction: "none" }}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}

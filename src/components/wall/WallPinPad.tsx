@@ -93,7 +93,7 @@ export default function WallPinPad({
         aria-modal="true"
         aria-label={`Sign in as ${member.name}`}
         onClick={(e) => e.stopPropagation()}
-        className="material-thick w-full max-w-xl rounded-[2rem] border border-white/12 p-8 shadow-2xl"
+        className="material-thick w-full max-w-xl rounded-2xl border border-white/12 p-8 shadow-2xl"
       >
         <div className="flex flex-col items-center gap-3">
           <Avatar name={member.name} color={member.color || "green"} emoji={member.emoji} size="lg" variant="emoji" />

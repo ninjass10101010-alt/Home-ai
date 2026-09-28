@@ -62,18 +62,18 @@ export default function LedgerPage() {
       />
       <div className="px-4 pb-6">
         {!mounted || (isParent && frame === "checking") ? (
-          <div className="grid h-[calc(100dvh-220px)] place-items-center rounded-3xl border border-white/10 bg-white/5">
+          <div className="grid h-[calc(100dvh-220px)] place-items-center rounded-2xl border border-white/10 bg-white/5">
             <p className="text-sm text-text-secondary">{mounted ? "Opening The Ledger…" : "\u00A0"}</p>
           </div>
         ) : !isParent ? (
-          <div className="grid place-items-center rounded-3xl border border-white/10 bg-white/5 p-10 text-center">
+          <div className="grid place-items-center rounded-2xl border border-white/10 bg-white/5 p-10 text-center">
             <div className="text-4xl">🔒</div>
             <p className="mt-3 text-sm text-text-secondary">
               The Ledger is for parents only — ask Mom or Dad to sign in.
             </p>
           </div>
         ) : frame === "error" ? (
-          <div className="grid place-items-center rounded-3xl border border-white/10 bg-white/5 p-10 text-center">
+          <div className="grid place-items-center rounded-2xl border border-white/10 bg-white/5 p-10 text-center">
             <div className="text-4xl">📒</div>
             <p className="mt-3 text-sm text-text-secondary">The Ledger is unreachable right now.</p>
             <button
@@ -85,7 +85,7 @@ export default function LedgerPage() {
             </button>
           </div>
         ) : (
-          <div className="overflow-hidden rounded-3xl border border-white/10 bg-[var(--color-surface-0)]/60 shadow-[0_20px_50px_-20px_rgba(0,0,0,0.5)]">
+          <div className="overflow-hidden rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/60 shadow-[0_20px_50px_-20px_rgba(0,0,0,0.5)]">
             {/* Window chrome: honestly frames the embedded app as Alex's, so the
                 cream editorial world reads as a deliberate window, not a theme clash. */}
             <div className="flex items-center justify-between gap-3 border-b border-white/10 bg-white/[0.04] px-4 py-2.5">

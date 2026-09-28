@@ -230,7 +230,7 @@ export default function RecipeImportModal({
       onClick={onClose}
     >
       <div
-        className="absolute bottom-0 left-0 right-0 rounded-t-3xl flex flex-col overflow-hidden"
+        className="absolute bottom-0 left-0 right-0 rounded-t-2xl flex flex-col overflow-hidden"
         style={{ background: "var(--color-surface-1)", border: "1px solid var(--color-surface-4)", maxHeight: "92vh" }}
         onClick={(event) => event.stopPropagation()}
       >

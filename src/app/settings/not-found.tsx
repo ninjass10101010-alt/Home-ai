@@ -7,7 +7,7 @@ export default function SettingsNotFound() {
       <div data-settings-surface="true">
         <PageHeader title="Settings" backHref="/settings" backLabel="Back to Settings" icon="⚙️" />
         <section className="px-4 pb-8" aria-labelledby="settings-not-found-heading">
-          <div className="rounded-3xl border border-white/10 bg-[var(--color-surface-0)]/35 p-6">
+          <div className="rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/35 p-6">
             <h2 id="settings-not-found-heading" className="text-lg font-bold text-text-primary">
               Settings section not found
             </h2>

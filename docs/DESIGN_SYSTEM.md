@@ -43,7 +43,8 @@ Controls use `--neu-raised` and `--neu-pressed` shadow pairs with mode-aware `--
 
 ### 2.4 Spacing and radius
 
-All layout spacing follows the 8px baseline grid with a 4px half-step. Radius tokens are squircle-first: `sm 10`, `md 16`, `lg 20`, `xl 28`, `2xl 36`, `pill 9999`.
+All layout spacing follows the 8px baseline grid with the 4px half-step. Radius tokens are squircle-first: `sm 10`, `md 16`, `lg 20`, `xl 28`, `2xl 36`, `pill 9999`.
+Every `rounded-*` utility resolves to one of these tokens (Tailwind's own scale is overridden in `@theme`) — raw `rounded-[…]` lengths are banned by contract (`tests/unit/radius-and-color-tokens.test.ts`); the one exception is the wall screensaver board's `rounded-[3vh]`, whose radius scales with the 12ft display's viewport rather than a static token.
 
 ### 2.5 Motion
 

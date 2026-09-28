@@ -21,7 +21,7 @@ vi.stubGlobal("matchMedia", (query: string) => ({
 
 let root: Root | null = null;
 let container: HTMLElement;
-const DEFAULT_MODAL_PANEL_CLASS = "material-thick flex max-h-[85dvh] w-full max-w-lg flex-col rounded-[2rem] border border-white/12 bg-[var(--color-surface-0)]/80 p-5 shadow-2xl backdrop-blur-2xl outline-none sm:pb-safe";
+const DEFAULT_MODAL_PANEL_CLASS = "material-thick flex max-h-[85dvh] w-full max-w-lg flex-col rounded-2xl border border-white/12 bg-[var(--color-surface-0)]/80 p-5 shadow-2xl backdrop-blur-2xl outline-none sm:pb-safe";
 
 function mount(ui: React.ReactElement) {
   if (!root) {

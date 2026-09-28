@@ -237,7 +237,7 @@ export default function SafetySettingsSection() {
 
   if (!hydrated) {
     return (
-      <section aria-label="Safety settings" aria-busy="true" className="rounded-3xl border border-white/10 bg-[var(--color-surface-0)]/35 p-6">
+      <section aria-label="Safety settings" aria-busy="true" className="rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/35 p-6">
         <p className="text-sm text-text-secondary">Checking your safety settings…</p>
       </section>
     );

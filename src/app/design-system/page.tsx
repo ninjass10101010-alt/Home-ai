@@ -77,7 +77,7 @@ export default function DesignSystemPage() {
   if (process.env.NODE_ENV === "production") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[var(--color-surface-0)] p-6 text-center">
-        <div className="max-w-md rounded-3xl border border-white/10 bg-[var(--color-surface-0)]/80 p-8 backdrop-blur-xl">
+        <div className="max-w-md rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/80 p-8 backdrop-blur-xl">
           <h1 className="text-xl font-bold text-text-primary">Design system preview</h1>
           <p className="mt-3 text-sm text-text-secondary">This route is only available in development.</p>
         </div>

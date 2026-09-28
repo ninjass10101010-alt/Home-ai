@@ -190,8 +190,8 @@ function RecipeDetailContent() {
         {!catalogSettled ? (
           <div className="mx-auto max-w-5xl space-y-4 px-4 py-8">
             <div className="h-10 w-44 rounded-2xl bg-[var(--color-surface-2)]" />
-            <div className="h-64 rounded-3xl bg-[var(--color-surface-2)]" />
-            <div className="h-40 rounded-3xl bg-[var(--color-surface-2)]" />
+            <div className="h-64 rounded-2xl bg-[var(--color-surface-2)]" />
+            <div className="h-40 rounded-2xl bg-[var(--color-surface-2)]" />
           </div>
         ) : syncBlocked ? (
           <div className="space-y-4 px-4 py-16 text-center">
@@ -232,7 +232,7 @@ function RecipeDetailContent() {
           ← Back to kitchen
         </button>
 
-        <div className="relative flex h-52 items-center justify-center overflow-hidden rounded-3xl bg-[var(--color-surface-2)] sm:h-72">
+        <div className="relative flex h-52 items-center justify-center overflow-hidden rounded-2xl bg-[var(--color-surface-2)] sm:h-72">
           {recipe.image ? (
             <img
               src={recipe.image}

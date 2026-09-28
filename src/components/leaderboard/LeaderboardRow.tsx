@@ -33,7 +33,7 @@ export default function LeaderboardRow({
       variant="glass-subtle"
       radius="xl"
       padding="sm"
-      className={`cursor-pointer hover:bg-white/[0.03] transition-colors ${isYou ? "widget-row-glow" : ""}`}
+      className={`cursor-pointer hover:bg-[var(--color-surface-2)] transition-colors ${isYou ? "widget-row-glow" : ""}`}
       style={isYou ? { "--row-color": color } as React.CSSProperties : undefined}
       onClick={() => onOpenSheet(entry.name)}
     >

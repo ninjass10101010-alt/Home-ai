@@ -15,7 +15,7 @@ export default function NotFound() {
     <PageShell>
       <section className="px-4 pt-16 pb-10" aria-labelledby="not-found-heading">
         <div
-          className="mx-auto max-w-md rounded-3xl border p-8 text-center backdrop-blur-xl"
+          className="mx-auto max-w-md rounded-2xl border p-8 text-center backdrop-blur-xl"
           style={{
             borderColor: "color-mix(in srgb, var(--color-accent-amber) 30%, transparent)",
             background: "color-mix(in srgb, var(--color-accent-amber) 8%, transparent)",

@@ -253,7 +253,7 @@ export default function ProfileSheet({ open, onClose, member, panelClassName }: 
           </div>
         </div>
 
-        <div className="rounded-3xl border border-white/10 bg-[var(--color-surface-0)]/50 p-4">
+        <div className="rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/50 p-4">
           <h5 className="mb-3 text-sm font-bold text-text-primary">Change your avatar</h5>
           <AvatarPicker value={avatarValue} onChange={setAvatarValue} fallbackEmoji={member.emoji || "😊"} previewSize={sizeValue} previewGlow={member.glow} />
           <div className="mt-3">
@@ -289,7 +289,7 @@ export default function ProfileSheet({ open, onClose, member, panelClassName }: 
           {avatarError && <p className="mt-2 text-xs font-medium text-[var(--color-accent-rose)]">{avatarError}</p>}
         </div>
 
-        <div className="rounded-3xl border border-white/10 bg-[var(--color-surface-0)]/50 p-4">
+        <div className="rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/50 p-4">
           <h5 className="mb-3 text-sm font-bold text-text-primary">Account</h5>
           {!pinOpen ? (
             <button

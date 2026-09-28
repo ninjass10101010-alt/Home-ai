@@ -366,9 +366,15 @@ Home's widget ranking/`More…` folding is still Phase 4.5.
   (`.widget-card` dark + light, and the whole `.kitchen-text` block — its class also left the eight
   markup sites, including the three hand-rolled recipe overlays 5.4 will port). Contract:
   `tests/unit/design-system-convergence.test.tsx` (4).
-- ⬜ **5.3 — radius + surface tokens.** `rounded-2xl` → `--radius-lg` etc. via `@theme` aliases, ban raw
-  `rounded-[…]`, replace `bg-white/[0.03]` / hex clusters (569 hex + 523 `rgba(` literals) with
-  `Surface` / `--neu-*`.
+- ✅ **5.3 — radius + surface tokens.** Every `rounded-*` utility now resolves to a `--radius-*`
+  token: the off-scale `rounded-3xl` (35 plain + 4 side variants, Tailwind's default 24px next to
+  36px cards) became `rounded-2xl` (39 call sites), `rounded-[1.25rem]` → `rounded-lg`,
+  `rounded-[2rem]` → `rounded-2xl` (Modal, Weather details, WallPinPad), and the last
+  `bg-white/[0.03]` → `hover:bg-[var(--color-surface-2)]`. The only sanctioned raw radius is the
+  wall screensaver's `rounded-[3vh]` (viewport-scaled, with a written reason). The 556 hex + 512
+  `rgba(` literals in TSX now carry a **budget contract** — it can only shrink as files migrate to
+  `Surface`/`--neu-*`; a new literal fails CI. Contract: `tests/unit/radius-and-color-tokens.test.ts`
+  (4).
 - ⬜ **5.4 — modal adoption (1:24).** Port the hand-rolled `fixed inset-0` overlays onto `Modal` /
   `BottomSheet`, adding `role="dialog"` where a sheet must stay custom.
 - ✅ **5.5 — user-facing Reduce motion.** The thirteen `prefers-reduced-motion` blocks only fire

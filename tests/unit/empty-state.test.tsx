@@ -15,7 +15,7 @@ function render(ui: ReactElement): HTMLElement {
 describe("EmptyState", () => {
   it("renders a self-contained glass card by default", () => {
     const state = render(<EmptyState title="Quiet day" description="No events today." icon="🌿" />);
-    expect(state.className).toContain("rounded-3xl");
+    expect(state.className).toContain("rounded-2xl");
     expect(state.className).toContain("border");
     expect(state.className).toContain("backdrop-blur-xl");
     expect(state.className).toContain("min-h-56");
@@ -23,7 +23,7 @@ describe("EmptyState", () => {
 
   it("renders flat (no nested card chrome) when flat is set", () => {
     const state = render(<EmptyState title="Quiet day" description="No events today." icon="🌿" flat />);
-    expect(state.className).not.toContain("rounded-3xl");
+    expect(state.className).not.toContain("rounded-2xl");
     expect(state.className).not.toContain("border");
     expect(state.className).not.toContain("backdrop-blur-xl");
     expect(state.className).not.toContain("min-h-56");

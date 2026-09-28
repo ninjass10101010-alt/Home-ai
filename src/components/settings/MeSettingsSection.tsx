@@ -144,7 +144,7 @@ export default function MeSettingsSection() {
     <section aria-labelledby="settings-me-heading" className="space-y-4">
       <div
         aria-busy={!hydrated}
-        className="rounded-3xl border border-[var(--color-border)] bg-[var(--color-surface-0)]/35 p-6"
+        className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-0)]/35 p-6"
       >
         <h2 id="settings-me-heading" className="text-lg font-bold text-text-primary">
           Your profile

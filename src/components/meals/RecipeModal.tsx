@@ -34,7 +34,7 @@ export default function RecipeModal({
     <div className="fixed inset-0 z-[200] flex flex-col" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(12px)" }}>
       {/* Modal sheet */}
       <div
-        className="absolute bottom-0 left-0 right-0 rounded-t-3xl flex flex-col overflow-hidden"
+        className="absolute bottom-0 left-0 right-0 rounded-t-2xl flex flex-col overflow-hidden"
         style={{
           background: "var(--color-surface-1)",
           border: "1px solid var(--color-surface-4)",

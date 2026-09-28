@@ -30,7 +30,7 @@ export default function SettingsSectionView({ section, children }: SettingsSecti
         <div data-settings-surface="true" data-settings-content="true" data-settings-hydrated="false" aria-busy="true">
           <PageHeader title="Settings" backHref="/settings" backLabel="Back to Settings" icon="⚙️" />
           <section className="px-4 pb-8" aria-labelledby="settings-hydration-heading">
-            <div className="rounded-3xl border border-white/10 bg-[var(--color-surface-0)]/35 p-6">
+            <div className="rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/35 p-6">
               <h2 id="settings-hydration-heading" className="text-lg font-bold text-text-primary">
                 Checking your settings
               </h2>
@@ -48,7 +48,7 @@ export default function SettingsSectionView({ section, children }: SettingsSecti
         <div data-settings-surface="true" data-settings-content="true" data-settings-hydrated="true" data-settings-role={role}>
           <PageHeader title="Settings" backHref="/settings" backLabel="Back to Settings" icon="⚙️" />
           <section className="px-4 pb-8" aria-labelledby="settings-unavailable-heading">
-            <div className="rounded-3xl border border-white/10 bg-[var(--color-surface-0)]/35 p-6">
+            <div className="rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/35 p-6">
               <h2 id="settings-unavailable-heading" className="text-lg font-bold text-text-primary">
                 This section is not available
               </h2>
@@ -72,7 +72,7 @@ export default function SettingsSectionView({ section, children }: SettingsSecti
         />
         <div className="space-y-6 px-4 pb-8">
           {children}
-          <nav aria-label="Settings sections" className="rounded-3xl border border-white/10 bg-[var(--color-surface-0)]/25 p-4">
+          <nav aria-label="Settings sections" className="rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/25 p-4">
             <h2 className="px-2 text-sm font-bold text-text-primary">All available sections</h2>
             <ul className="mt-2 grid gap-2 sm:grid-cols-2">
               {availableSections.map((item) => (

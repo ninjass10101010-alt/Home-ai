@@ -120,7 +120,7 @@ export default function Modal({ open, onClose, title, description, children, foo
         aria-labelledby={titleId}
         aria-describedby={description ? descriptionId : undefined}
         tabIndex={-1}
-        className={`material-thick flex max-h-[85dvh] w-full max-w-lg flex-col rounded-[2rem] border border-white/12 bg-[var(--color-surface-0)]/80 p-5 shadow-2xl backdrop-blur-2xl outline-none sm:pb-safe${panelClassName ? ` ${panelClassName}` : ""}`}
+        className={`material-thick flex max-h-[85dvh] w-full max-w-lg flex-col rounded-2xl border border-white/12 bg-[var(--color-surface-0)]/80 p-5 shadow-2xl backdrop-blur-2xl outline-none sm:pb-safe${panelClassName ? ` ${panelClassName}` : ""}`}
         style={{ animation: closing ? `modalExit ${EXIT_MS}ms var(--ease-standard) both` : `modalEnter 0.35s var(--ease-spring) both` }}
         onClick={(event) => event.stopPropagation()}
       >
