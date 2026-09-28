@@ -80,13 +80,27 @@ async function applyPointAdjustment(
 
   const members = await liveMembers();
   if (members === null) return adjustError("family roster unavailable — try again in a moment", 503);
+  // Exact normalized full-name match wins. Failing that, a first name still
+  // resolves — but only when it is UNIQUE. A first-match `startsWith` let
+  // "J" adjust whichever sibling happened to sort first, which is a
+  // wrong-person WRITE to a real ledger, not a refusal, so an ambiguous
+  // prefix is refused and the caller is told who it could have meant.
   const search = member.toLowerCase();
-  const match = members.find((m: any) => {
-    const name = String(m.fullName || m.name || "").toLowerCase();
-    return name === search || name.startsWith(search);
-  });
-  if (!match) return adjustError(`unknown member "${member}" — adjust points for a family member on the roster`);
-  const memberName = String(match.fullName || match.name);
+  const label = (m: any) => String(m.fullName || m.name || "");
+  const prefixed = (Array.isArray(members) ? members : []).filter((m: any) =>
+    label(m).toLowerCase().startsWith(search),
+  );
+  const exact = prefixed.filter((m: any) => label(m).toLowerCase() === search);
+  const match = exact.length === 1 ? exact[0] : exact.length === 0 && prefixed.length === 1 ? prefixed[0] : null;
+  if (!match) {
+    if (prefixed.length > 1) {
+      return adjustError(
+        `"${member}" matches more than one member (${prefixed.map(label).join(", ")}) — use the full name`,
+      );
+    }
+    return adjustError(`unknown member "${member}" — adjust points for a family member on the roster`);
+  }
+  const memberName = label(match);
 
   const operation: LedgerOperationInput = {
     operationId,

@@ -74,7 +74,8 @@ vi.mock("@/hooks/useAtmosphericTheme", () => ({
 }));
 
 import KidHome from "@/modes/kid/KidHome";
-import { WEEKLY_PRIZES_KEY, WEEK_DATA_KEY, TASKS_STORAGE_KEY, todayMondayISO } from "@/lib/task-utils";
+import { localWeekStartISO } from "@/lib/local-date";
+import { WEEKLY_PRIZES_KEY, WEEK_DATA_KEY, TASKS_STORAGE_KEY } from "@/lib/task-utils";
 
 const PRIZES = [
   { id: "p1", rank: 1, emoji: "🥇", text: "Movie pick" },
@@ -85,7 +86,7 @@ const PRIZES = [
 function seedWeek(points: Record<string, number>) {
   localStorage.setItem(
     WEEK_DATA_KEY,
-    JSON.stringify({ weekStart: todayMondayISO(), points, streak: {}, lastActive: {}, history: [] })
+    JSON.stringify({ weekStart: localWeekStartISO(), points, streak: {}, lastActive: {}, history: [] })
   );
 }
 

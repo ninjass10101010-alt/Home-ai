@@ -9,8 +9,8 @@ vi.mock("@/lib/pb-auth", () => ({
 }));
 
 import { requireLiveSession } from "@/lib/server-auth";
-import { SESSION_TTL_SECONDS_BY_ROLE, isSessionRole, sessionTtlSeconds } from "@/lib/session-policy";
-import { SESSION_COOKIE, signSession } from "@/lib/session";
+import { isSessionRole } from "@/lib/session-policy";
+import { SESSION_COOKIE, SESSION_TTL_SECONDS, signSession } from "@/lib/session";
 
 function requestWithToken(token: string): Request {
   return new Request("http://localhost/api/db/members", {
@@ -251,14 +251,14 @@ describe("session policy vocabulary", () => {
     expect(isSessionRole(undefined)).toBe(false);
   });
 
-  it("keeps the per-role session TTLs", () => {
-    expect(SESSION_TTL_SECONDS_BY_ROLE).toEqual({
-      parent: 1800,
-      child: 900,
-      pet: 900,
-    });
-    expect(sessionTtlSeconds("parent")).toBe(1800);
-    expect(sessionTtlSeconds("child")).toBe(900);
-    expect(sessionTtlSeconds("pet")).toBe(900);
+  // The role-aware-lifetime leg of Wave 2 (per-role TTLs + POST /api/auth/touch
+  // re-signing) was WITHHELD from this ship, so no per-role TTL table may reappear
+  // here: the live lifetime is the single SESSION_TTL_SECONDS in lib/session.ts,
+  // and a table would read as an enforced policy that nothing honours.
+  it("exposes no per-role TTL vocabulary — the lifetime is the one SESSION_TTL_SECONDS", async () => {
+    const policy = await import("@/lib/session-policy");
+    expect(Object.keys(policy)).not.toContain("SESSION_TTL_SECONDS_BY_ROLE");
+    expect(Object.keys(policy)).not.toContain("sessionTtlSeconds");
+    expect(SESSION_TTL_SECONDS).toBe(60 * 60 * 24 * 7);
   });
 });

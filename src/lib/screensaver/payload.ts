@@ -6,8 +6,7 @@
  */
 import { withAdmin } from "@/lib/pb-auth";
 import { getServiceConfig } from "@/lib/services/config";
-import { localTodayISO, localWeekdayShort } from "@/lib/local-date";
-import { weekKey } from "@/lib/task-utils";
+import { localTodayISO, localWeekdayShort, localWeekStartISO } from "@/lib/local-date";
 import { weekStartForDate } from "@/lib/meals-week-utils";
 import { dinnerForToday } from "@/lib/consuela/chat-context";
 import { readCanonicalTasks, type CanonicalTaskRead } from "@/lib/consuela/live-reads";
@@ -84,7 +83,7 @@ export async function composeScreensaverPayload(now: Date = new Date()): Promise
   if (payloadCache && now.getTime() - payloadCache.at < PAYLOAD_TTL_MS) return payloadCache.payload;
 
   const today = localTodayISO(now);
-  const wk = weekKey(now);
+  const wk = localWeekStartISO(now);
   const weekStart = weekStartForDate(today);
   const weekEnd = addDaysISO(weekStart, 6);
 

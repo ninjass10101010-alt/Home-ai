@@ -40,15 +40,10 @@ vi.mock("@/lib/ledger-operations", () => ({
 }));
 
 import { POST } from "@/app/api/rewards/redeem/route";
-
-function currentWeekKey(): string {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff);
-  return d.toISOString().split("T")[0];
-}
+// The ONE week key. A test that re-implements it would inherit the very
+// timezone bug this suite exists to catch, so the fixture and the expectation
+// both read the canonical helper the route is required to use.
+import { localWeekStartISO } from "@/lib/local-date";
 
 function jsonReq(body: unknown): NextRequest {
   return new NextRequest("http://localhost/api/rewards/redeem", {
@@ -91,7 +86,7 @@ const REWARDS = [EXPENSIVE_REWARD, CHEAP_REWARD];
 
 function weekFixture(overrides?: { points?: Record<string, number>; history?: any[] }) {
   return {
-    weekStart: currentWeekKey(),
+    weekStart: localWeekStartISO(),
     points: overrides?.points ?? { "Member A": 200 },
     streak: {},
     lastActive: {},
@@ -336,7 +331,7 @@ describe("POST /api/rewards/redeem — canonical ledger seam", () => {
       amount: -15,
       description: "Redeemed: Ice cream (-15pts)",
     });
-    expect(ledger.calls[0].weekStart).toBe(currentWeekKey());
+    expect(ledger.calls[0].weekStart).toBe(localWeekStartISO());
   });
 
   it("resolves a reward by name when the client id is not the PB row id", async () => {
@@ -653,6 +648,73 @@ describe("POST /api/rewards/redeem — validation and credentials", () => {
     expect(res.status).toBe(503);
     expect((await res.json()).reason).toBe("ledger_unavailable");
     expect(ledger.calls).toHaveLength(0);
+  });
+});
+
+describe("POST /api/rewards/redeem — the ledger week is the LOCAL week", () => {
+  // A redemption is a DEDUCTION from one `week_data` row. The rollover
+  // (`task-week-rollover`) and the planner both key that row on
+  // `localWeekStartISO()`, so any other derivation strands the deduction: the
+  // balance is taken from a row the family never sees again.
+  //
+  // The defect was `setHours(0, 0, 0, 0)` followed by `.toISOString()` — local
+  // midnight serialised as UTC. EAST of UTC that resolves to the PREVIOUS day
+  // (on a Sunday, the previous week), and Detroit — where this suite's vitest
+  // config pins TZ — is behind UTC, where the bug is invisible. So this case
+  // re-pins the zone at runtime: Node re-reads `process.env.TZ`, and
+  // `localWeekStartISO` honours `process.env.TZ` explicitly through
+  // `toLocaleString`, so the assertion is real rather than vacuous.
+  const MONDAY_0030_JST = "2026-09-27T15:30:00.000Z"; // = Mon 2026-09-28 00:30 in Tokyo
+
+  async function underTokyoMonday(run: () => Promise<void>): Promise<void> {
+    const previousTz = process.env.TZ;
+    process.env.TZ = "Asia/Tokyo";
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(MONDAY_0030_JST));
+    try {
+      await run();
+    } finally {
+      vi.useRealTimers();
+      if (previousTz === undefined) delete process.env.TZ;
+      else process.env.TZ = previousTz;
+    }
+  }
+
+  it("writes to the LOCAL Monday, not the UTC-shifted day east of UTC", async () => {
+    await underTokyoMonday(async () => {
+      ledger.result = redeemFixture({ operationId: "op-tokyo-week" });
+
+      const res = await POST(jsonReq({
+        operationId: "op-tokyo-week",
+        rewardId: "reward-row-2",
+        memberName: "Member A",
+        pin: memberPin,
+      }));
+
+      expect(res.status).toBe(200);
+      // The canonical answer in Tokyo on Monday 2026-09-28.
+      expect(localWeekStartISO()).toBe("2026-09-28");
+      expect(ledger.calls[0].weekStart).toBe("2026-09-28");
+      // What the UTC-serializing path produced: Tokyo Sunday 2026-09-27 —
+      // not even a week start, and a row the rollover will never open.
+      expect(ledger.calls[0].weekStart).not.toBe("2026-09-27");
+    });
+  });
+
+  it("agrees with the canonical week key the rollover and planner use", async () => {
+    await underTokyoMonday(async () => {
+      ledger.result = redeemFixture({ operationId: "op-tokyo-parity" });
+
+      await POST(jsonReq({
+        operationId: "op-tokyo-parity",
+        rewardId: "reward-row-2",
+        memberName: "Member A",
+        pin: memberPin,
+      }));
+
+      // Same instant, same answer, no separate week math anywhere in the path.
+      expect(ledger.calls[0].weekStart).toBe(localWeekStartISO());
+    });
   });
 });
 

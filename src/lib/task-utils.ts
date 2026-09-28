@@ -15,6 +15,14 @@ export const DELETED_TASKS_KEY = "consuela-deleted-task-ids";
 export const FAMILY_GOAL_KEY = "consuela-family-goal";
 export const HALL_OF_FAME_KEY = "consuela-hall-of-fame";
 
+// NOTE: the week key is NOT computed here. `localWeekStartISO()`
+// (src/lib/local-date) is the single source of truth — it serializes from the
+// family's LOCAL calendar date, so it is correct in any timezone. The
+// `todayMondayISO()` / `weekKey()` pair that used to live here, backed by
+// `mondayOf()`, did `setHours(0,0,0,0)` and then `.toISOString()`: local
+// midnight serialized as UTC, which east of UTC resolved to the PREVIOUS day
+// and on a Sunday to the previous week. The client's `completedInWeek` guard
+// and both money-path week keys now read the canonical helper.
 export function mondayOf(date: Date): Date {
   const d = new Date(date);
   d.setHours(0, 0, 0, 0);
@@ -22,14 +30,6 @@ export function mondayOf(date: Date): Date {
   const diff = day === 0 ? -6 : 1 - day;
   d.setDate(d.getDate() + diff);
   return d;
-}
-
-export function todayMondayISO(): string {
-  return mondayOf(new Date()).toISOString().split("T")[0];
-}
-
-export function weekKey(date?: Date): string {
-  return mondayOf(date || new Date()).toISOString().split("T")[0];
 }
 
 export function todayISO(): string {
@@ -352,7 +352,7 @@ export function regenerateRecurringTasks(tasks: Task[]): Task[] {
   // Local calendar day — the UTC date rolled the clone due to "tomorrow"
   // when regen ran in the evening (8pm–midnight Detroit).
   const now = localTodayISO();
-  const monday = todayMondayISO();
+  const monday = localWeekStartISO();
 
   // Clone sources: recurring tasks completed in a PRIOR week (or with no
   // completedInWeek recorded). Tasks completed THIS week are left untouched —
@@ -423,7 +423,7 @@ export function getThisWeeksCompletedDates(tasks: Task[], memberName?: string, t
 }
 
 export function getThisWeeksCompletedTasks(tasks: Task[]): Task[] {
-  const monday = todayMondayISO();
+  const monday = localWeekStartISO();
   const now = localTodayISO();
   return tasks.filter(
     (t) => t.completed && (

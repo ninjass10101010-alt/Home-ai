@@ -57,14 +57,15 @@ async function loadDb() {
 
 describe("db.refreshCaches tasks/week_data pull", () => {
   it("reads /api/tasks/sync and merges the snapshot into the localStorage stores", async () => {
-    const { saveTasks, saveWeekData, emptyWeekData, todayMondayISO } = await import("@/lib/task-utils");
+    const { saveTasks, saveWeekData, emptyWeekData } = await import("@/lib/task-utils");
+    const { localWeekStartISO } = await import("@/lib/local-date");
     saveTasks([{ id: 1, title: "Dishes", assignee: "Alex", assigneeEmoji: "🦊", due: "2026-09-04", points: 5, recurring: null, category: "kitchen", completed: false, priority: "medium" } as any]);
     saveWeekData(emptyWeekData());
 
     snapshotPayload = {
       tasks: [{ id: 8, title: "Feed the fish", assigned: "Rebecca" }],
       weekData: {
-        weekStart: todayMondayISO(),
+        weekStart: localWeekStartISO(),
         points: { Rebecca: 5 },
         streak: {},
         lastActive: {},
@@ -92,9 +93,9 @@ describe("db.refreshCaches tasks/week_data pull", () => {
       ARCHIVE_KEY,
       saveTasks,
       saveWeekData,
-      todayMondayISO,
     } = await import("@/lib/task-utils");
-    const currentWeek = todayMondayISO();
+    const { localWeekStartISO } = await import("@/lib/local-date");
+    const currentWeek = localWeekStartISO();
     saveWeekData({
       weekStart: "2000-01-03",
       points: { Alex: 5 },

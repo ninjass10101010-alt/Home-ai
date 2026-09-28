@@ -4,7 +4,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { mapTaskIdeas, mapRewardIdeas } from "@/lib/ai-suggestions";
-import { localTodayISO } from "@/lib/local-date";
+import { localTodayISO, localWeekStartISO } from "@/lib/local-date";
 import PageShell from "@/components/ui/PageShell";
 import PageHeader from "@/components/patterns/PageHeader";
 import SectionCard from "@/components/patterns/SectionCard";
@@ -33,7 +33,7 @@ import { useWallConfirm } from "@/hooks/useWallConfirm";
 import type { Task, LeaderboardEntry, Reward, Penalty, WeekData, HallOfFameEntry } from "@/types/tasks";
 import {
   TASKS_STORAGE_KEY, REWARDS_KEY, PENALTIES_KEY,
-  weekKey, emptyWeekData,
+  emptyWeekData,
   loadWeekData, saveWeekData,
   calculateRealStreak,
   getThisWeeksCompletedDates, getThisWeeksCompletedTasks,
@@ -789,7 +789,7 @@ export default function TasksPage() {
       // assigned chore is a durable PIN-free completion command — queued FIRST,
       // with no credential at all, because the session IS the identity. Points
       // move only when a parent approves, and only through the outbox.
-      if (task.completedInWeek === weekKey()) return;
+      if (task.completedInWeek === localWeekStartISO()) return;
       const me = resolveMemberName(membersData, currentUser!.name);
       const complete = queueCommand({
         route: "/api/tasks/claim",
@@ -1207,7 +1207,7 @@ export default function TasksPage() {
     if (pinTaskId === null) return;
     const task = tasks.find(t => t.id === pinTaskId);
     if (!task || task.completed) return;
-    if (task.completedInWeek === weekKey()) return;
+    if (task.completedInWeek === localWeekStartISO()) return;
 
     if (task.universal || isSnatchable(task)) {
       const claimant = snatchForMember;

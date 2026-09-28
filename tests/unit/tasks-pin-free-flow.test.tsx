@@ -3,7 +3,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
 import type { ReactElement } from "react";
-import { todayMondayISO, todayISO, pendingPointsFor } from "@/lib/task-utils";
+import { localWeekStartISO } from "@/lib/local-date";
+import { todayISO, pendingPointsFor } from "@/lib/task-utils";
 import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-operation-outbox";
 import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 import TasksPage from "@/app/tasks/page";
@@ -40,7 +41,7 @@ vi.mock("@/db", () => ({
   },
 }));
 
-const MONDAY = todayMondayISO();
+const MONDAY = localWeekStartISO();
 const FEED_CASP = { id: 51, title: "Feed the dog", assignee: "Caspian Garcia", assigneeEmoji: "🧒", due: todayISO(), points: 5, recurring: null, category: "Chores", completed: false, priority: "low" };
 const FEED_JASM = { id: 52, title: "Feed the dog", assignee: "Jasmine Rose", assigneeEmoji: "👧", due: todayISO(), points: 5, recurring: null, category: "Chores", completed: false, priority: "low" };
 const MOW = { id: 53, title: "Mow lawn", assignee: "Rebecca (Mom)", assigneeEmoji: "👩", due: todayISO(), points: 5, recurring: null, category: "Chores", completed: false, priority: "low" };

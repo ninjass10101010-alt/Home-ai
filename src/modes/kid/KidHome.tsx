@@ -38,10 +38,10 @@ import WallPinPad from "@/components/wall/WallPinPad";
 import Surface from "@/components/ui/Surface";
 import Link from "next/link";
 import { db } from "@/db";
+import { localWeekStartISO } from "@/lib/local-date";
 import {
   loadTasks,
   loadWeekData,
-  weekKey,
   getThisWeeksCompletedTasks,
   getThisWeeksCompletedDates,
   calculateRealStreak,
@@ -568,7 +568,7 @@ export default function KidHome() {
       // Stale-cache double-tap guard (same trap-proof order as the Tasks
       // page): a row already completed this week lands nothing, not even a
       // second pending stamp.
-      if (task.completedInWeek === weekKey()) return;
+      if (task.completedInWeek === localWeekStartISO()) return;
       const myName = resolveMemberName(db.selectMembers(), user!.name);
       const week = loadWeekData();
       const before = pointsFor(week.points, myName);
@@ -617,7 +617,7 @@ export default function KidHome() {
       }
       // Double-completion guard (same as the Tasks page): a stale local cache
       // row already completed this week must never re-POST or re-award points.
-      if (questPinTask.completedInWeek === weekKey()) {
+      if (questPinTask.completedInWeek === localWeekStartISO()) {
         setQuestPinTask(null);
         setQuestPin("");
         setQuestPinError("");

@@ -3,7 +3,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
 import type { ReactElement } from "react";
-import { todayMondayISO, todayISO } from "@/lib/task-utils";
+import { localWeekStartISO } from "@/lib/local-date";
+import { todayISO } from "@/lib/task-utils";
 import TasksPage from "@/app/tasks/page";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -36,7 +37,7 @@ vi.mock("@/db", () => ({
   },
 }));
 
-const MONDAY = todayMondayISO();
+const MONDAY = localWeekStartISO();
 const NOW = new Date().toISOString();
 // The row BOTH devices already share (parent created it, snapshot synced it
 // to the kid's device). The kid tapped it on THEIR device — the snapshot now

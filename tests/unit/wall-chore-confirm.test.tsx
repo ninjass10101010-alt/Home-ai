@@ -51,7 +51,8 @@ import { useWallConfirm } from "@/hooks/useWallConfirm";
 import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-operation-outbox";
 import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 import TasksPage from "@/app/tasks/page";
-import { todayMondayISO, todayISO } from "@/lib/task-utils";
+import { localWeekStartISO } from "@/lib/local-date";
+import { todayISO } from "@/lib/task-utils";
 
 /* ─────────────────────────── 1. hook seam tests ─────────────────────────── */
 
@@ -157,7 +158,7 @@ describe("useWallConfirm (the extracted row-tap seam)", () => {
 
 /* ─────────────────────── 2. Tasks page wiring tests ─────────────────────── */
 
-const MONDAY = todayMondayISO();
+const MONDAY = localWeekStartISO();
 const FEED_CASP = { id: 51, title: "Feed the dog", assignee: "Caspian Garcia", assigneeEmoji: "🧒", due: todayISO(), points: 5, recurring: null, category: "Chores", completed: false, priority: "low" };
 const FEED_JASM = { id: 52, title: "Feed the dog", assignee: "Jasmine Rose", assigneeEmoji: "👧", due: todayISO(), points: 5, recurring: null, category: "Chores", completed: false, priority: "low" };
 

@@ -35,11 +35,12 @@ vi.mock("@/db", () => ({
 }));
 
 import TasksPage from "@/app/tasks/page";
-import { todayMondayISO, todayISO } from "@/lib/task-utils";
+import { localWeekStartISO } from "@/lib/local-date";
+import { todayISO } from "@/lib/task-utils";
 import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-operation-outbox";
 import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 
-const MONDAY = todayMondayISO();
+const MONDAY = localWeekStartISO();
 
 function seedPendingTaps() {
   localStorage.setItem("consuela-tasks", JSON.stringify([

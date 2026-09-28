@@ -1,8 +1,7 @@
 import { db } from "@/db";
 import { withAdmin } from "@/lib/pb-auth";
 import { weekStartForDate } from "@/lib/meals-week-utils";
-import { weekKey } from "@/lib/task-utils";
-import { localTodayISO, localPreviousDayISO } from "@/lib/local-date";
+import { localTodayISO, localPreviousDayISO, localWeekStartISO } from "@/lib/local-date";
 import { scheduleCoversWeekday, scheduleTimeMinutes, formatScheduleTime12h } from "@/lib/schedule-time";
 import { ROUTINE_LEAD_MS } from "@/lib/ha/alerts";
 import type { NewSuggestion } from "./types";
@@ -58,7 +57,7 @@ export async function scanPantryLow(scopeDate: string): Promise<NewSuggestion[]>
 }
 
 export async function scanTaskPenaltyStreak(scopeDate: string): Promise<NewSuggestion[]> {
-  const weekStr = weekKey();
+  const weekStr = localWeekStartISO();
   const week = await withAdmin(async (pb) => {
     const rows = await pb.collection("week_data").getFullList({ requestKey: null }) as Array<{
       weekStart: string; history?: Array<{ type?: string; member?: string; timestamp?: string }>;

@@ -17,7 +17,7 @@ import {
   scanTaskPenaltyStreak,
   scanCalendarConflicts,
 } from "@/lib/consuela/engine";
-import { weekKey } from "@/lib/task-utils";
+import { localWeekStartISO } from "@/lib/local-date";
 
 /** pb mock whose collection(name).getFullList(args) resolves via table[name](args). */
 function makePb(table: Record<string, (args?: any) => any[]>) {
@@ -82,7 +82,7 @@ describe("scanTaskPenaltyStreak undefined guards", () => {
     const pb = makePb({
       week_data: () => [
         {
-          weekStart: weekKey(),
+          weekStart: localWeekStartISO(),
           history: [
             { type: "penalty", timestamp: now },
             { type: "penalty", timestamp: now },

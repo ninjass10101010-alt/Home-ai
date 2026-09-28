@@ -3,7 +3,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
 import type { ReactElement } from "react";
-import { todayMondayISO, todayISO } from "@/lib/task-utils";
+import { localWeekStartISO } from "@/lib/local-date";
+import { todayISO } from "@/lib/task-utils";
 import TasksPage from "@/app/tasks/page";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -33,7 +34,7 @@ vi.mock("@/db", () => ({
   },
 }));
 
-const MONDAY = todayMondayISO();
+const MONDAY = localWeekStartISO();
 
 function seed(tasks: any[]) {
   localStorage.setItem("consuela-tasks", JSON.stringify(tasks));

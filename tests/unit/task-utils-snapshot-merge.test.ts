@@ -12,13 +12,13 @@ vi.mock("@/db", () => ({
   },
 }));
 
+import { localWeekStartISO } from "@/lib/local-date";
 import {
   applyTasksSnapshotToStores,
   emptyWeekData,
   mergeTasksSnapshot,
   saveTasks,
   saveWeekData,
-  todayMondayISO,
   TASKS_STORAGE_KEY,
   WEEK_DATA_KEY,
 } from "@/lib/task-utils";
@@ -55,7 +55,7 @@ describe("mergeTasksSnapshot (pure restore guards — same contract as the Tasks
     const local = [makeTask({ id: 1, title: "Dishes" })];
     const res = mergeTasksSnapshot(local, emptyWeekData(), {
       tasks: [
-        { id: 7, title: "Recycle", assigned: "Caspian", completed: true, completedBy: "Caspian", completedAt: "2026-09-03T10:00:00Z", completedInWeek: todayMondayISO() },
+        { id: 7, title: "Recycle", assigned: "Caspian", completed: true, completedBy: "Caspian", completedAt: "2026-09-03T10:00:00Z", completedInWeek: localWeekStartISO() },
       ],
     });
     expect(res.tasksChanged).toBe(true);
@@ -63,7 +63,7 @@ describe("mergeTasksSnapshot (pure restore guards — same contract as the Tasks
     expect(adopted.id).toBe(7);
     expect(adopted.assignee).toBe("Caspian"); // assigned → assignee bridge
     expect(adopted.completedBy).toBe("Caspian");
-    expect(adopted.completedInWeek).toBe(todayMondayISO());
+    expect(adopted.completedInWeek).toBe(localWeekStartISO());
   });
 
   it("never duplicates a task already present by id OR by (title + assignee)", () => {
@@ -201,7 +201,7 @@ describe("applyTasksSnapshotToStores (the 60s refresh seam into localStorage)", 
     saveWeekData(emptyWeekData());
     const changed = applyTasksSnapshotToStores({
       weekData: {
-        weekStart: todayMondayISO(),
+        weekStart: localWeekStartISO(),
         points: { Alex: 5 },
         streak: {},
         lastActive: {},

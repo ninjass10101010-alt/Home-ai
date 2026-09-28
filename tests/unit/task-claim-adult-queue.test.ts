@@ -67,6 +67,15 @@ const childTask = {
   completed: false,
 };
 
+const claimableTask = {
+  id: 44,
+  title: "Unload the dishwasher",
+  assignee: "Open",
+  points: 6,
+  universal: true,
+  completed: false,
+};
+
 /** A fake PocketBase that round-trips the snapshot row and the week_data row,
  *  so both the queueing write and the paying write are observable. */
 function makePb(options?: { task?: Record<string, unknown> }) {
@@ -230,6 +239,52 @@ describe("Option B — who queues and who pays", () => {
     expect(result.ok).toBe(false);
     expect(result.reason).toBe("pin_required");
     expect(fixture.weekWrites).toHaveLength(0);
+  });
+});
+
+// The same invariant, on the OTHER paying branch. `kind: "claim"` (an open or
+// late-stealable chore) is registered as an internal command kind, so the seam
+// itself must hold the "chat never moves points" rule — not just the single
+// caller that currently uses it (`hermes-tools.runClaimTaskCommand` is typed
+// "complete" | "undo"). Without this the guarantee is one rename away from
+// being false.
+describe("Option B — the CLAIM branch queues an internal adult too", () => {
+  const buildClaimCommand = (
+    authentication: "internal" | "pin",
+  ): InternalTaskCommand => ({
+    operationId: `op-claim-branch-${authentication}`,
+    kind: "claim",
+    actor: {
+      memberId: "parent-alex",
+      name: "Alex",
+      role: "parent",
+      authentication,
+    },
+    payload: { taskId: claimableTask.id },
+  });
+
+  it("queues an adult claim arriving as authentication internal (chat) — no ledger write", async () => {
+    const { result, fixture } = await run(buildClaimCommand("internal"), makePb({ task: claimableTask }));
+
+    expect(result.ok).toBe(true);
+    expect(result.task?.pendingApproval).toMatchObject({ byName: "Alex", points: 6 });
+    expect(fixture.snapshotTask(claimableTask.id)?.pendingApproval).toMatchObject({
+      byName: "Alex",
+      points: 6,
+    });
+    expect(fixture.weekWrites).toHaveLength(0);
+    expect(fixture.snapshotWeekPoints()).toEqual({});
+  });
+
+  it("still pays an adult claim arriving as authentication pin (the Tasks screen)", async () => {
+    const { result, fixture } = await run(buildClaimCommand("pin"), makePb({ task: claimableTask }));
+
+    expect(result.ok).toBe(true);
+    expect(result.task?.pendingApproval).toBeNull();
+    expect(fixture.weekWrites.length).toBeGreaterThan(0);
+    const weekWrite = fixture.weekWrites.at(-1) as any;
+    expect(weekWrite.points.Alex).toBe(6);
+    expect(weekWrite.history.some((tx: any) => tx.type === "earn" && tx.amount === 6)).toBe(true);
   });
 });
 

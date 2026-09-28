@@ -12,6 +12,7 @@ vi.mock("@/db", () => ({
   },
 }));
 
+import { localWeekStartISO } from "@/lib/local-date";
 import {
   ARCHIVE_KEY,
   TASKS_STORAGE_KEY,
@@ -24,7 +25,6 @@ import {
   loadWeekData,
   regenerateRecurringTasks,
   todayISO,
-  todayMondayISO,
 } from "@/lib/task-utils";
 import type { Task } from "@/types/tasks";
 
@@ -70,7 +70,7 @@ describe("getThisWeeksCompletedDates", () => {
         completed: true,
         completedBy: "Alex",
         completedAt: `${today}T13:00:00.000Z`,
-        completedInWeek: todayMondayISO(),
+        completedInWeek: localWeekStartISO(),
       }),
     ];
     const dates = getThisWeeksCompletedDates(tasks);
@@ -78,7 +78,7 @@ describe("getThisWeeksCompletedDates", () => {
   });
 
   it("excludes a completion from before this week's Monday", () => {
-    const monday = todayMondayISO();
+    const monday = localWeekStartISO();
     const lastSunday = addDays(monday, -1);
     const tasks = [
       makeTask({
@@ -157,7 +157,7 @@ describe("calculateRealStreak", () => {
 
 describe("regenerateRecurringTasks", () => {
   it("clones a prior-week completed recurring task once and removes the old completed row", () => {
-    const prevMonday = addDays(todayMondayISO(), -7);
+    const prevMonday = addDays(localWeekStartISO(), -7);
     const tasks = [
       makeTask({
         id: 1,
@@ -190,7 +190,7 @@ describe("regenerateRecurringTasks", () => {
         completed: true,
         completedBy: "Alex",
         completedAt: `${todayISO()}T09:00:00.000Z`,
-        completedInWeek: todayMondayISO(),
+        completedInWeek: localWeekStartISO(),
       }),
     ];
 
@@ -202,7 +202,7 @@ describe("regenerateRecurringTasks", () => {
   });
 
   it("produces only ONE clone for duplicate completed rows of the same lineage (no compounding)", () => {
-    const prevMonday = addDays(todayMondayISO(), -7);
+    const prevMonday = addDays(localWeekStartISO(), -7);
     const dupA = makeTask({ id: 1, title: "Trash", recurring: "Weekly", completed: true, completedInWeek: prevMonday });
     const dupB = makeTask({ id: 2, title: "Trash", recurring: "Weekly", completed: true, completedInWeek: prevMonday });
 
@@ -216,7 +216,7 @@ describe("regenerateRecurringTasks", () => {
 
     // The following week, the completed clone regenerates into exactly one
     // fresh pending instance — the lineage never compounds.
-    const thisMonday = todayMondayISO();
+    const thisMonday = localWeekStartISO();
     localStorage.clear();
     vi.setSystemTime(new Date(`${addDays(thisMonday, 7)}T12:00:00Z`));
     const completedClone = {
@@ -232,7 +232,7 @@ describe("regenerateRecurringTasks", () => {
   });
 
   it("regenerates universal tasks as assignee All / 🤝", () => {
-    const prevMonday = addDays(todayMondayISO(), -7);
+    const prevMonday = addDays(localWeekStartISO(), -7);
     const tasks = [
       makeTask({
         id: 3,
@@ -261,7 +261,7 @@ describe("regenerateRecurringTasks", () => {
 describe("local task caches", () => {
   it("loads prior week data without archiving or resetting local storage", () => {
     const previous = {
-      weekStart: addDays(todayMondayISO(), -7),
+      weekStart: addDays(localWeekStartISO(), -7),
       points: { Alex: 5 },
       streak: {},
       lastActive: {},
@@ -278,7 +278,7 @@ describe("local task caches", () => {
     const previous = makeTask({
       recurring: "Weekly",
       completed: true,
-      completedInWeek: addDays(todayMondayISO(), -7),
+      completedInWeek: addDays(localWeekStartISO(), -7),
     });
     localStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify([previous]));
 

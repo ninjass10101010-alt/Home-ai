@@ -9,7 +9,8 @@ import { describe, it, expect, vi } from "vitest";
 
 vi.mock("@/db", () => ({ db: {} }));
 
-import { todayISO, todayMondayISO } from "@/lib/task-utils";
+import { localWeekStartISO } from "@/lib/local-date";
+import { todayISO } from "@/lib/task-utils";
 import { taskProjectionRecord } from "@/lib/snapshot-tasks";
 import { PB_TASK_EMOJI_MAX } from "@/lib/task-emoji";
 import type { Task } from "@/types/tasks";
@@ -28,7 +29,7 @@ function t(over: Partial<Task> = {}): Task {
     category: "chores",
     completed: false,
     priority: "medium",
-    completedInWeek: todayMondayISO(),
+    completedInWeek: localWeekStartISO(),
     ...over,
   };
 }

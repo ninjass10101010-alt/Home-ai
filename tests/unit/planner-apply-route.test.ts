@@ -571,6 +571,60 @@ describe("POST /api/consuela/planner/apply — adjust_points (canonical ledger s
     expect(ledger.calls).toHaveLength(0);
   });
 
+  // A point adjustment is a WRITE to one named person's ledger. Resolving the
+  // name with a first-match `startsWith` meant "J" could silently land on
+  // whichever sibling sorted first — a wrong-person adjustment, not a refusal.
+  it("an AMBIGUOUS member prefix → 400 and no ledger request (never the first sibling)", async () => {
+    parentPin();
+    mocks.liveMembers.mockResolvedValue([
+      { id: 1, name: "Jasmine", fullName: "Jasmine G", role: "child" },
+      { id: 2, name: "Jon", fullName: "Jon B", role: "child" },
+    ]);
+    ledger.result = adjustResult();
+
+    const res = await post(adjustBody({ args: { ...ADJUST_ARGS, member: "J" } }), { pin: PARENT_PIN });
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(String(body.error)).toMatch(/jasmine|jon/i);
+    expect(ledger.calls).toHaveLength(0);
+  });
+
+  it("an exact full-name match wins even when a sibling shares its prefix", async () => {
+    parentPin();
+    mocks.liveMembers.mockResolvedValue([
+      { id: 1, name: "Jasmine", fullName: "Jasmine G", role: "child" },
+      { id: 2, name: "Jon", fullName: "Jon B", role: "child" },
+    ]);
+    ledger.result = adjustResult();
+
+    const res = await post(
+      adjustBody({ args: { ...ADJUST_ARGS, member: "Jasmine G" } }),
+      { pin: PARENT_PIN },
+    );
+
+    expect(res.status).toBe(200);
+    expect(ledger.calls[0].operation.entries[0].member).toBe("Jasmine G");
+  });
+
+  it("a UNIQUE prefix still resolves (a first name keeps working)", async () => {
+    parentPin();
+    mocks.liveMembers.mockResolvedValue([
+      { id: 1, name: "Jasmine", fullName: "Jasmine G", role: "child" },
+      { id: 2, name: "Rebecca", fullName: "Rebecca G", role: "parent" },
+    ]);
+    ledger.result = adjustResult();
+
+    const res = await post(
+      adjustBody({ args: { ...ADJUST_ARGS, member: "Jasmine" } }),
+      { pin: PARENT_PIN },
+    );
+
+    expect(res.status).toBe(200);
+    expect(ledger.calls[0].operation.entries[0].member).toBe("Jasmine G");
+  });
+
   it("an unreadable roster → 503, never a silent point move", async () => {
     parentPin();
     mocks.liveMembers.mockResolvedValue(null);

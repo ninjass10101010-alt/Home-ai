@@ -15,7 +15,7 @@
 // collection missing). An array is a successful read (possibly empty). A key
 // that is absent is an empty successful read.
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { weekKey } from "@/lib/task-utils";
+import { localWeekStartISO } from "@/lib/local-date";
 
 const rows: Record<string, any[] | null> = {};
 const reads: string[] = [];
@@ -239,7 +239,7 @@ describe("live task reads — empty is not unknown", () => {
 describe("screensaver — the same snapshot-first reader", () => {
   it("scores the week from the snapshot, never the PB replica", async () => {
     rows.consuela_data_snapshots = snapshotRow([
-      { id: 1, title: "Swept the porch", completed: true, completedInWeek: weekKey(SCREENSAVER_NOW) },
+      { id: 1, title: "Swept the porch", completed: true, completedInWeek: localWeekStartISO(SCREENSAVER_NOW) },
       { id: 2, title: "Water the plants", completed: false, due: "2026-09-13" },
     ]);
     rows.tasks = [
@@ -252,7 +252,7 @@ describe("screensaver — the same snapshot-first reader", () => {
   it("falls back to PB rows when the snapshot read fails", async () => {
     rows.consuela_data_snapshots = null;
     rows.tasks = [
-      { taskId: 8, title: "PB chore", status: "done", completedInWeek: weekKey(SCREENSAVER_NOW) },
+      { taskId: 8, title: "PB chore", status: "done", completedInWeek: localWeekStartISO(SCREENSAVER_NOW) },
       { taskId: 9, title: "PB open chore", status: "pending", due: "2026-09-13" },
     ];
     const payload = await composeScreensaverPayload(SCREENSAVER_NOW);
@@ -270,7 +270,7 @@ describe("screensaver — the same snapshot-first reader", () => {
 
   it("a stored unavailable briefing never claims 'No chores open' on a later healthy compose", async () => {
     rows.consuela_data_snapshots = snapshotRow([
-      { id: 1, title: "Swept the porch", completed: true, completedInWeek: weekKey(SCREENSAVER_NOW) },
+      { id: 1, title: "Swept the porch", completed: true, completedInWeek: localWeekStartISO(SCREENSAVER_NOW) },
       { id: 2, title: "Water the plants", completed: false, due: "2026-09-13" },
     ]);
     rows.morning_briefing = [{

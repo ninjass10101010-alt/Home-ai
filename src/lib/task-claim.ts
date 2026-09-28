@@ -1159,13 +1159,22 @@ async function executeClaimCommandUnlocked(
     const speedBonus = gate === "late" ? 0 : normalizeSpeedBonus(task.speedBonus);
     const amount = points + speedBonus;
     const label = gate === "late" ? "Snatched" : speedBonus > 0 ? "Fast grab" : "Completed";
+    // Option B, mirrored from the `complete` branch below: chat never moves
+    // points. A command authenticated as "internal" (the assistant, or any
+    // future server-side caller) QUEUES for approval whether the claimer is a
+    // child or a grown-up; only a real session/PIN caller — the Tasks screen —
+    // pays on the spot. Keying off `authentication` rather than `role` closes
+    // the roster-promotion race by construction, and it is the SEAM that
+    // enforces the rule, not the one caller that happens to be typed to
+    // "complete" | "undo" today.
+    const queueOnly = actorRole === "child" || baseActor.authentication === "internal";
     const build = (current: SnapshotTask): SnapshotTask => ({
       ...current,
       assignee: actor.name,
       assigned: actor.name,
       assigneeEmoji: actor.emoji ?? current.assigneeEmoji ?? "",
       ...completedFields(now, weekStart, baseActor),
-      pendingApproval: actorRole === "child"
+      pendingApproval: queueOnly
         ? {
             byName: actor.name,
             at: now,
@@ -1173,7 +1182,7 @@ async function executeClaimCommandUnlocked(
           }
         : null,
     });
-    if (actorRole === "child") {
+    if (queueOnly) {
       return withAdmin((pb) => writeCanonicalTask(
         pb,
         lookup,

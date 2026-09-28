@@ -8,7 +8,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot, type Root } from "react-dom/client";
 import { act } from "react";
 import type { ReactElement } from "react";
-import { todayMondayISO, weekKey } from "@/lib/task-utils";
+import { localWeekStartISO } from "@/lib/local-date";
+
 import {
   __resetTaskOutboxForTests,
   listTaskOutbox,
@@ -48,7 +49,7 @@ vi.mock("@/db", () => ({
   },
 }));
 
-const MONDAY = todayMondayISO();
+const MONDAY = localWeekStartISO();
 const OPEN = { id: 51, title: "Make bed", assignee: "Jasmine", assigneeEmoji: "👧", due: MONDAY, points: 5, recurring: null, category: "Chores", completed: false, priority: "low" };
 
 const server = vi.hoisted(() => ({
@@ -291,7 +292,7 @@ describe("kid tap-to-complete", () => {
       completed: true,
       completedBy: "Jasmine Rose",
       completedAt: new Date().toISOString(),
-      completedInWeek: weekKey(),
+      completedInWeek: localWeekStartISO(),
       pendingApproval: { byName: "Jasmine Rose", at: new Date().toISOString(), points: 5 },
     }]);
     const el = await renderAsync(<TasksPage />);
@@ -322,7 +323,7 @@ function pendingSeed() {
     completed: true,
     completedBy: "Jasmine Rose",
     completedAt: new Date().toISOString(),
-    completedInWeek: weekKey(),
+    completedInWeek: localWeekStartISO(),
     pendingApproval: { byName: "Jasmine Rose", at: new Date().toISOString(), points: 5 },
   }];
 }
@@ -446,7 +447,7 @@ describe("needs approval → durable command", () => {
       completed: true,
       completedBy: "Jasmine Rose",
       completedAt: new Date().toISOString(),
-      completedInWeek: weekKey(),
+      completedInWeek: localWeekStartISO(),
       pendingApproval: { byName: "Jasmine Rose", at: new Date().toISOString(), points: 8 },
     }];
   }

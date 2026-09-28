@@ -1,5 +1,5 @@
 import { it, expect, vi, beforeEach } from "vitest";
-import { weekKey } from "@/lib/task-utils";
+import { localWeekStartISO } from "@/lib/local-date";
 
 const getFullList = vi.fn();
 const collection = vi.fn<(name: string) => { getFullList: () => Promise<unknown[]> }>(() => ({ getFullList }));
@@ -30,7 +30,7 @@ function pbRowsFor(name: string): unknown[] {
         key: "tasks-snapshot",
         data: {
           tasks: [
-            { id: 1, title: "Swept the porch", completed: true, completedInWeek: weekKey(now) },
+            { id: 1, title: "Swept the porch", completed: true, completedInWeek: localWeekStartISO(now) },
             { id: 2, title: "Water the plants", completed: false, due: "2026-09-13" },
           ],
           deletedTaskIds: [],

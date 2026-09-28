@@ -12,7 +12,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot, type Root } from "react-dom/client";
 import { act } from "react";
 import type { ReactElement } from "react";
-import { todayMondayISO, todayISO, weekKey } from "@/lib/task-utils";
+import { localWeekStartISO } from "@/lib/local-date";
+import { todayISO } from "@/lib/task-utils";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -42,11 +43,11 @@ vi.mock("@/db", () => ({
 
 import TasksPage from "@/app/tasks/page";
 
-const MONDAY = todayMondayISO();
+const MONDAY = localWeekStartISO();
 
 const PENDING = { id: 42, title: "Feed the dog", assignee: "Jasmine", assigneeEmoji: "👧", due: todayISO(), points: 5, recurring: null, category: "Chores", completed: false, priority: "medium" };
 const UNIVERSAL = { id: 43, title: "Grab the mail", assignee: "All", assigneeEmoji: "🤝", due: todayISO(), points: 12, recurring: null, category: "Chores", completed: false, priority: "medium", universal: true };
-const DONE = { id: 44, title: "Sweep the kitchen", assignee: "Jasmine", assigneeEmoji: "👧", due: todayISO(), points: 8, recurring: null, category: "Chores", completed: true, completedBy: "Jasmine", completedAt: new Date().toISOString(), completedInWeek: weekKey(), priority: "medium" };
+const DONE = { id: 44, title: "Sweep the kitchen", assignee: "Jasmine", assigneeEmoji: "👧", due: todayISO(), points: 8, recurring: null, category: "Chores", completed: true, completedBy: "Jasmine", completedAt: new Date().toISOString(), completedInWeek: localWeekStartISO(), priority: "medium" };
 const SMALL_REWARD = { id: 11, name: "Ice cream trip", emoji: "🍦", cost: 40 };
 const BIG_REWARD = { id: 12, name: "Movie night", emoji: "🎬", cost: 150 };
 const PENALTY = { id: 21, name: "Forgot homework", emoji: "⚠️", points: 10 };

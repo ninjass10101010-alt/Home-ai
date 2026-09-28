@@ -41,6 +41,15 @@ const store = vi.hoisted(() => ({
   saveWeekData: vi.fn(async (_week: any) => {}),
 }));
 
+// The week key is the family's own week row, which the fixtures pin — so the
+// stale-cache guard below is about that row, not the wall clock. The canonical
+// helper (src/lib/local-date) is what KidHome reads; only it is pinned, so the
+// real local-date exports the tree still uses (localTodayISO) stay live.
+vi.mock("@/lib/local-date", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/local-date")>();
+  return { ...actual, localWeekStartISO: () => store.week.weekStart };
+});
+
 vi.mock("@/lib/task-utils", () => ({
   loadTasks: () => store.tasks.map((t) => ({ ...t })),
   saveTasks: store.saveTasks,

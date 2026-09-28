@@ -6,7 +6,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRoot, type Root } from "react-dom/client";
 import { act } from "react";
 import type { ReactElement } from "react";
-import { todayMondayISO, weekKey } from "@/lib/task-utils";
+import { localWeekStartISO } from "@/lib/local-date";
+
 import {
   __resetTaskOutboxForTests,
   listTaskOutbox,
@@ -47,7 +48,7 @@ vi.mock("@/db", () => ({
   },
 }));
 
-const MONDAY = todayMondayISO();
+const MONDAY = localWeekStartISO();
 
 const server = vi.hoisted(() => ({
   requests: [] as Array<{ route: string; body: any }>,
@@ -251,7 +252,7 @@ const PENDING_TASK = {
   completed: true,
   completedBy: "Jasmine Rose",
   completedAt: new Date().toISOString(),
-  completedInWeek: weekKey(),
+  completedInWeek: localWeekStartISO(),
   pendingApproval: { byName: "Jasmine Rose", at: new Date().toISOString(), points: 8 },
 };
 
@@ -575,7 +576,7 @@ describe("assigned completion, open claim, crew and undo", () => {
   });
 
   it("queues a paid undo and reverses no local points before acknowledgment", async () => {
-    const done = { ...ASSIGNED_TASK, assignee: "Rebecca Mom", completed: true, completedBy: "Rebecca Mom", completedAt: new Date().toISOString(), completedInWeek: weekKey() };
+    const done = { ...ASSIGNED_TASK, assignee: "Rebecca Mom", completed: true, completedBy: "Rebecca Mom", completedAt: new Date().toISOString(), completedInWeek: localWeekStartISO() };
     server.claimStatus = 503;
     seed([done], { points: { "Rebecca Mom": 5 }, streak: {}, lastActive: {}, history: [] });
     await renderAsync(<TasksPage />);

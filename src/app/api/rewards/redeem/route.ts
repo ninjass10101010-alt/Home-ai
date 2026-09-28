@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withAdmin } from "@/lib/pb-auth";
 import { namesMatch, verifyPinFromPB } from "@/lib/server-auth";
 import { applyWeekLedgerOperation, type LedgerProjection } from "@/lib/ledger-operations";
+import { localWeekStartISO } from "@/lib/local-date";
 import {
   mutateSnapshotWithMeta,
   persistSnapshotWeek,
@@ -44,13 +45,14 @@ interface RedeemReward {
   emoji: string;
 }
 
+// The ONE week key, shared with the week rollover and the planner. The previous
+// `setHours(0,0,0,0)` + `.toISOString()` here serialised local midnight as UTC,
+// so east of UTC it resolved to the PREVIOUS day — and on a Sunday, the
+// previous week. A redemption is a DEDUCTION, so the wrong key stranded it in a
+// `week_data` row the rollover had already closed while the visible balance
+// sprang back.
 function currentWeekKey(): string {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff);
-  return d.toISOString().split("T")[0];
+  return localWeekStartISO();
 }
 
 function errorResponse(

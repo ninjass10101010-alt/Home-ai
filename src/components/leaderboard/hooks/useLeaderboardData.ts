@@ -4,6 +4,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { db } from "@/db";
 import type { LeaderboardEntry, WeekData, Task, HallOfFameEntry } from "@/types/tasks";
+import { localWeekStartISO } from "@/lib/local-date";
 import {
   loadWeekData,
   loadTasks,
@@ -14,7 +15,6 @@ import {
   loadHallOfFame,
   loadHallOfFameMerged,
   loadPreviousWeekRanksMerged,
-  todayMondayISO,
 } from "@/lib/task-utils";
 import { useAllTimeTotals, type AllTimeReadState } from "@/hooks/useAllTimeTotals";
 import { earnedBadgeEmojis, resolveAllTimeLevel } from "@/components/leaderboard/level";
@@ -107,7 +107,7 @@ export function useLeaderboardData() {
     let alive = true;
     void Promise.all([
       loadHallOfFameMerged(),
-      loadPreviousWeekRanksMerged(weekData?.weekStart || todayMondayISO()),
+      loadPreviousWeekRanksMerged(weekData?.weekStart || localWeekStartISO()),
     ]).then(([merged, ranks]) => {
       if (!alive) return;
       if (!sameHall(hallRef.current, merged)) {
@@ -132,7 +132,7 @@ export function useLeaderboardData() {
   const entries = useMemo<LeaderboardEntry[]>(() => {
     if (!mounted || !weekData) return [];
     const members = db.selectMembers();
-    const currentMonday = todayMondayISO();
+    const currentMonday = localWeekStartISO();
     return members
       .filter((m: any) => m.role !== "pet")
       .map((m: any) => {
