@@ -31,10 +31,23 @@ const unavailableTasks: MorningBriefing = {
   summary: { events: [], tasks: [], meals: [], suggestions: [], taskSource: "unavailable" },
 } as unknown as MorningBriefing;
 
+const backupTasks: MorningBriefing = {
+  summary: { events: [], tasks: [], meals: [], suggestions: [], taskSource: "pb" },
+} as unknown as MorningBriefing;
+
+// The shape the slot fixture uses: a briefing that EXISTS but carries no
+// summary. The real helpers must read it as empty, or that fixture's hostile
+// `briefingShowsCard` would not be the only hostile input it is given.
+const noSummary: MorningBriefing = { summary: null } as unknown as MorningBriefing;
+
 describe("briefing composition (audit P0-4 + points remediation)", () => {
   it("audit: an empty day with no admission collapses the card", () => {
     expect(briefingSectionsEmpty(empty)).toBe(true);
     expect(briefingShowsCard(empty)).toBe(false);
+  });
+
+  it("audit: a summary-less briefing collapses the card", () => {
+    expect(briefingShowsCard(noSummary)).toBe(false);
   });
 
   it("remediation: content keeps the card", () => {
@@ -48,5 +61,12 @@ describe("briefing composition (audit P0-4 + points remediation)", () => {
     expect(briefingSectionsEmpty(unavailableTasks)).toBe(true);
     expect(briefingTaskSourceNote(unavailableTasks)).toContain("unavailable");
     expect(briefingShowsCard(unavailableTasks)).toBe(true);
+  });
+
+  it("remediation: a backup chore list is admitted and named as a backup", () => {
+    // The second honest-source branch: chores read from a backup copy are no
+    // more complete than missing ones, so the card keeps the slot and says so.
+    expect(briefingTaskSourceNote(backupTasks)).toContain("backup");
+    expect(briefingShowsCard(backupTasks)).toBe(true);
   });
 });

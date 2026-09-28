@@ -236,8 +236,12 @@ describe("Home morning briefing slot", () => {
     // A briefing that exists but has no summary: the real `briefingSectionsEmpty`
     // and `briefingShowsCard` agree with all three of these values, so the only
     // hostile input is the guard itself — which isolates the fault to where the
-    // guard sits. A null `briefing` would instead return early for the "no
-    // briefing" reason and pass even with the gate hoisted.
+    // guard sits. The briefing must be non-null because the pre-existing P0-4
+    // case above runs on `briefing: null`, where the slot's `!briefing` return
+    // and the widget's own `briefing === null` gate both answer before the
+    // emptiness rule is ever consulted with a hostile value — so that case
+    // cannot see a `briefingShowsCard` consult hoisted above the failure
+    // exemption. This one can, and the spy proves which way it was consulted.
     briefingState.briefing = {
       id: "briefing-no-summary",
       scopeDate: "2026-09-28",
@@ -277,10 +281,37 @@ describe("Home morning briefing slot", () => {
     const el = await renderAsync(<HomePage />);
     await settle();
 
-    // The emptiness check is still wired in — deleting it to make the failure
-    // case pass would render this card again.
+    // The emptiness rule is still consulted on the success path — the gate is
+    // live, not dead code. Reducing it to `if (!briefing) return null;` would
+    // leave THIS case green, because the widget's own gate collapses the same
+    // card; the deletion pin lives in the acknowledged-empty case above.
     expect(briefingShowsCardSpy).toHaveBeenCalled();
     expect(el.textContent).not.toContain("Morning Briefing");
     expect(el.querySelector('svg[data-variant="briefing"]')).toBeNull();
+  });
+
+  // The admission half of the subset's rule, pinned at the WIRING rather than
+  // only in the pure helper: rewiring the slot gate back to
+  // `briefingSectionsEmpty` left all nine briefing suites green, because the
+  // old `!emptySections` derivation had been supplying an accidental detector.
+  // Without it an `unavailable` day collapses at the slot and the honest note
+  // never reaches the wall — invisible to `briefing-composition.test.ts`, which
+  // tests the helper and not who calls it.
+  it("an unavailable chore list is admitted by the slot", async () => {
+    briefingState.briefing = {
+      id: "b",
+      scopeDate: "2026-09-28",
+      acknowledged: false,
+      summary: { events: [], tasks: [], meals: [], suggestions: [], taskSource: "unavailable" },
+    };
+    briefingState.failure = null;
+    briefingState.emptySections = true;   // the sections really are empty…
+    briefingState.showsCard = true;       // …and the rule still admits the card
+
+    const el = await renderAsync(<HomePage />);
+    await settle();
+
+    expect(briefingShowsCardSpy).toHaveBeenCalled();
+    expect(el.textContent).toContain("Morning Briefing");
   });
 });
