@@ -18,6 +18,12 @@ export interface ThemeConfig {
   /** Per-target overrides (hex strings like #7c3aed). */
   accentHex: AccentHexByTarget;
   contrastBoost: boolean;
+  /**
+   * User-facing motion preference (UI audit 5.5). A shared wall's OS says
+   * nothing about motion, so the family can set it here; it mirrors
+   * `prefers-reduced-motion` app-wide via `<html data-reduce-motion="true">`.
+   */
+  reduceMotion: boolean;
 }
 
 export const defaultAccentHex: AccentHexByTarget = {
@@ -33,6 +39,7 @@ export const defaultThemeConfig: ThemeConfig = {
   accentColor: 'nori',
   accentHex: defaultAccentHex,
   contrastBoost: false,
+  reduceMotion: false,
 };
 
 // Storage key for theme configuration

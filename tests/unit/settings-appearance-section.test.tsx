@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => {
       border: "rgba(59,130,246,0.35)",
     },
     contrastBoost: false,
+    reduceMotion: false,
   };
   const fog = {
     enabled: true,
@@ -29,6 +30,7 @@ const mocks = vi.hoisted(() => {
     setMode: vi.fn(),
     setAccentColor: vi.fn(),
     setContrastBoost: vi.fn(),
+    setReduceMotion: vi.fn(),
     setAccentHex: vi.fn(),
   };
   const fogApi = {
@@ -167,7 +169,10 @@ describe("AppearanceSettingsSection", () => {
     expect(cards[1].textContent).toContain("Home background");
     expect(element.textContent).not.toMatch(/Cloud Background|cloud background/i);
     expect(element.querySelectorAll(".glass-subtle")).toHaveLength(0);
-    expect(element.querySelectorAll(".toggle-knob")).toHaveLength(2);
+    // Two toggles: the background switch + High contrast — plus the
+    // user-facing "Reduce motion" toggle audit 5.5 added below High contrast.
+    expect(element.querySelectorAll(".toggle-knob")).toHaveLength(3);
+    expect(element.textContent).toContain("Reduce motion");
     expect(element.querySelectorAll('[role="radiogroup"]')).toHaveLength(2);
   });
 

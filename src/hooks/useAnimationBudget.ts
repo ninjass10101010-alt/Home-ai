@@ -42,8 +42,11 @@ export function useAnimationBudget(maxConcurrent: number = DEFAULT_BUDGET) {
 }
 
 /**
- * usePrefersReducedMotion — Detects if user prefers reduced motion.
- * Use this alongside the animation budget to fully respect accessibility.
+ * usePrefersReducedMotion — OS preference OR the family's user-facing toggle
+ * (UI audit 5.5: `<html data-reduce-motion="true">`, set in Settings →
+ * Appearance and mirrored by ThemeProvider). The toggle dispatches
+ * `consuela-motion-preference-change`, so flipping it mid-session updates
+ * every mounted consumer immediately.
  */
 export function usePrefersReducedMotion(): boolean {
   const [prefersReduced, setPrefersReduced] = useState(false);
@@ -53,10 +56,23 @@ export function usePrefersReducedMotion(): boolean {
     // absence as "no preference" rather than throwing.
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    setPrefersReduced(mq.matches);
-    const handler = (e: MediaQueryListEvent) => setPrefersReduced(e.matches);
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
+    const sync = () => {
+      const userPreference =
+        typeof document !== "undefined" &&
+        document.documentElement.getAttribute("data-reduce-motion") === "true";
+      setPrefersReduced(mq.matches || userPreference);
+    };
+    sync();
+    const handler = (e: MediaQueryListEvent | Event) => {
+      sync();
+      void e;
+    };
+    mq.addEventListener("change", handler as (e: MediaQueryListEvent) => void);
+    window.addEventListener("consuela-motion-preference-change", handler);
+    return () => {
+      mq.removeEventListener("change", handler as (e: MediaQueryListEvent) => void);
+      window.removeEventListener("consuela-motion-preference-change", handler);
+    };
   }, []);
 
   return prefersReduced;

@@ -14,6 +14,7 @@ const ThemeContext = createContext<{
   setMode: (mode: ThemeMode) => void;
   setAccentColor: (color: AccentColor) => void;
   setContrastBoost: (boost: boolean) => void;
+  setReduceMotion: (value: boolean) => void;
   setAccentHex: (target: AccentTarget, value: string) => void;
 } | undefined>(undefined);
 
@@ -46,6 +47,7 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
           parsed.accentColor &&
           ['nori', 'violet', 'rose', 'coral', 'lavender', 'cyan', 'mint', 'amber', 'apricot', 'sage'].includes(parsed.accentColor) &&
           typeof parsed.contrastBoost === 'boolean' &&
+          (parsed.reduceMotion === undefined || typeof parsed.reduceMotion === 'boolean') &&
           (!parsed.accentHex || typeof parsed.accentHex === 'object')
         ) {
           setTheme({
@@ -110,6 +112,18 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
         document.documentElement.removeAttribute('data-contrast');
       }
 
+      // User-facing Reduce motion (UI audit 5.5): the same effect as the OS
+      // prefers-reduced-motion rules, but set by the family — a shared wall's
+      // OS preference says nothing about motion. Motion-aware components
+      // (AnimatedEmoji, usePrefersReducedMotion) listen for the dispatched
+      // event so an in-session toggle takes effect immediately.
+      if (theme.reduceMotion) {
+        document.documentElement.setAttribute('data-reduce-motion', 'true');
+      } else {
+        document.documentElement.removeAttribute('data-reduce-motion');
+      }
+      window.dispatchEvent(new Event('consuela-motion-preference-change'));
+
       // Update CSS variables (per-target overrides)
       document.documentElement.style.setProperty('--color-accent-selected', theme.accentHex.selected);
       document.documentElement.style.setProperty('--color-accent-glow', theme.accentHex.glow);
@@ -145,6 +159,7 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
   }, [
     theme.mode,
     theme.contrastBoost,
+    theme.reduceMotion,
     theme.accentHex.selected,
     theme.accentHex.glow,
     theme.accentHex.button,
@@ -195,8 +210,13 @@ export const ThemeProvider = ({ children }: { children: ReactNode }) => {
     setTheme((prev) => ({ ...prev, contrastBoost: boost }));
   }, []);
 
+  // Function to set the user-facing motion preference (UI audit 5.5)
+  const setReduceMotion = useCallback((value: boolean) => {
+    setTheme((prev) => ({ ...prev, reduceMotion: value }));
+  }, []);
+
   return (
-    <ThemeContext.Provider value={{ theme, toggleTheme, setMode, setAccentColor, setContrastBoost, setAccentHex }}>
+    <ThemeContext.Provider value={{ theme, toggleTheme, setMode, setAccentColor, setContrastBoost, setReduceMotion, setAccentHex }}>
       {children}
 
     </ThemeContext.Provider>

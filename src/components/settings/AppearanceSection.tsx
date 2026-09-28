@@ -45,7 +45,7 @@ function targetColor(value: unknown, target: AccentTarget) {
 }
 
 export default function AppearanceSection() {
-  const { theme, setMode, setAccentColor, setContrastBoost, setAccentHex } = useTheme();
+  const { theme, setMode, setAccentColor, setContrastBoost, setReduceMotion, setAccentHex } = useTheme();
   const [accentTarget, setAccentTarget] = useState<AccentTarget>("selected");
 
   const setTargetColor = (target: AccentTarget, value: unknown) => {
@@ -140,6 +140,17 @@ export default function AppearanceSection() {
           onCheckedChange={setContrastBoost}
           label="High contrast"
           description="Boosts text and border contrast for easier reading."
+        />
+      </div>
+
+      {/* UI audit 5.5 — the shared wall's OS never asks for reduced motion,
+          so the family can set it here (mirrors prefers-reduced-motion). */}
+      <div className="mt-4 border-t-[var(--color-border)] pt-4">
+        <Toggle
+          checked={theme.reduceMotion}
+          onCheckedChange={setReduceMotion}
+          label="Reduce motion"
+          description="Stops ambient animations and transitions across the app — for shared walls and motion sensitivity."
         />
       </div>
     </div>

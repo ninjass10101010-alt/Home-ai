@@ -371,8 +371,13 @@ Home's widget ranking/`More…` folding is still Phase 4.5.
   `Surface` / `--neu-*`.
 - ⬜ **5.4 — modal adoption (1:24).** Port the hand-rolled `fixed inset-0` overlays onto `Modal` /
   `BottomSheet`, adding `role="dialog"` where a sheet must stay custom.
-- ⬜ **5.5 — user-facing Reduce-motion toggle** alongside `data-contrast` (OS-level preference is not
-  enough for a shared wall).
+- ✅ **5.5 — user-facing Reduce motion.** The thirteen `prefers-reduced-motion` blocks only fire
+  when the OS asks, and a shared wall's OS never does. The preference now lives in the theme config
+  (`reduceMotion`, persisted with the rest), Settings → Appearance carries a "Reduce motion" toggle
+  beside High contrast, and `ThemeProvider` mirrors it onto `<html data-reduce-motion="true">` — a
+  blanket rule (near-zero durations, one iteration, no smooth scroll) plus a
+  `consuela-motion-preference-change` event so `usePrefersReducedMotion` (AnimatedEmoji) reacts
+  mid-session. Contract: `tests/unit/reduce-motion-preference.test.tsx` (2).
 - ⬜ **5.6 — one design-system page.** The `/_design-system` → `/design-system` rewrite does exist — in
   `src/middleware.ts`, not `next.config.ts`; the two pages are near-duplicates with two production
   gates: keep one and grow it into a live audit (axe-core, min-tap-target, sub-12px sweep,

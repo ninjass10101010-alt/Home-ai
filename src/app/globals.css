@@ -2945,3 +2945,20 @@ html[data-wall="true"] [class*="group-hover:grid"] {
   display: none;
 }
 
+/* ─── User-facing Reduce motion (UI audit 5.5) ───
+   The thirteen prefers-reduced-motion blocks above only fire when the OS
+   asks for it — on a shared wall (ApoloSign kiosk) the OS never does. The
+   family can set the preference in Settings → Appearance, which mirrors it
+   onto <html data-reduce-motion="true">; this rule then gives the same
+   blanket treatment (near-zero durations, one iteration, no smooth
+   scrolling) regardless of the OS. Components that animate through JS
+   (AnimatedEmoji) read the attribute via usePrefersReducedMotion. */
+html[data-reduce-motion="true"] *,
+html[data-reduce-motion="true"] *::before,
+html[data-reduce-motion="true"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
