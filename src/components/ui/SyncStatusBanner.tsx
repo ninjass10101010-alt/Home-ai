@@ -9,8 +9,8 @@ import { useAuth } from "@/hooks/useAuth";
  * copy with every save staying on this device only; without this banner
  * that state is indistinguishable from "synced", which is exactly how
  * cross-device edits look "lost". Rendered by PageShell so it covers every
- * data screen (Home, Meals, Tasks, Calendar, Settings); the chat page renders
- * it directly with surface-specific copy (chat has no session, yet guest AI
+ * data screen (Home, Meals, Tasks, Calendar, Settings, chat); pages can pass
+ * surface-specific copy through the shell (chat has no session, yet guest AI
  * still answers — the danger is believing you're in the family thread).
  *
  * Audit P0-4: the banner told the user to "sign in with your PIN" without any

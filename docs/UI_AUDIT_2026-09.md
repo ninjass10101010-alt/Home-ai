@@ -230,8 +230,9 @@ lg:max-none`; at 1440×900 `/tasks` still renders one narrow 886px column, and `
 `/meals`, `/chat`, `/ha`, `/settings` report identical layout metrics to the 390px run.
 `KidHome`, `Meals`, `Calendar`, `Chat`, `Settings` contain **zero** `md:`/`lg:` utilities,
 while Home already has real tier work (`WALL_GRID_CLASS`, `homeGridClass(orientation)`) — the
-capability exists, it just stops at Home. `/chat` additionally bypasses `PageShell` entirely
-(no `<main>`), so it misses the sync banner, safe-area padding and `page-settle`. → Phase 4.
+capability exists, it just stops at Home. `/chat` additionally bypassed `PageShell` entirely
+(no `<main>`), so it missed the sync banner and `page-settle`. → Phase 4; **4.2 shipped** — chat
+now renders through the shell, keeping its narrow thread column and its own dock clearance.
 
 **8. Home depth and density.** 3,859px of content at 390px width (~9.9 screens) with **42**
 concurrently running animations, 54 distinct background treatments and 13 `h3`s; adult mode
@@ -308,14 +309,24 @@ the six orphaned routes were **surfaced, not deleted** — every Home mode mount
 role-filtered so the wall shows only `/grocery`, `/skill-tree`, `/time-capsule` and `/analytics`
 (never the parent-only `/memory` or the finance pages). `tests/unit/nav-items.test.ts` now fails on
 any shipped route that is neither in the manifest nor in `EXEMPT_ROUTES` with a reason, so the
-"unreachable route" class of bug cannot come back. Deliberately left for Phase 4: the rail is still
-mounted inside `AdultHome` only (so leaving Home on a desktop still drops the rail), and Home's
-widget ranking/`More…` folding is unchanged.
+"unreachable route" class of bug cannot come back. Shipped in Phase 4 (4.1): the rail now lives in
+`PageShell` (`SidebarNav` moved to `src/components/ui/`), so it follows the parent to every route;
+Home's widget ranking/`More…` folding is still Phase 4.5.
 
-**Phase 4 — responsive tiers (P1-7, P1-8).** Tablet two-column + rail for Tasks / Meals /
-Calendar / Settings; wall composition per screen reusing the `WALL_GRID_CLASS` idiom (12ft
-legibility: ≥16px body, 44px targets, no hover-only affordances); route `/chat` through
-`PageShell`; rank Home widgets and fold the rest into the `More…` sheet.
+**Phase 4 — responsive tiers (P1-7, P1-8).**
+- ✅ **4.1 — rail on every route:** `SidebarNav` moved to `src/components/ui/`; `PageShell` mounts it
+  for parent sessions at `md+`, `md:pl-60` reserves exactly its `w-60`, `data-page-rail` marks the
+  wrapper, `AdultHome`'s local mounts removed. Contract: `tests/unit/page-shell-tiers.test.tsx`.
+- ✅ **4.2 — `/chat` through `PageShell`:** chat gains `<main>`, the sync banner (its signed-out copy
+  passed as `bannerMessage`), the rail and the shared dock, while keeping its `max-w-lg` thread
+  (`contentClassName`), its composer's own dock clearance (`bottomInset={false}`) and the document
+  scrollport for its sticky top bar/composer (`clip={false}` — the shell's `overflow-hidden` would
+  otherwise become their scrollport and freeze sticky).
+- ⬜ **4.3 — tablet two-column + rail** for Tasks / Meals / Calendar / Settings, using Home's grid
+  idiom rather than new breakpoints.
+- ⬜ **4.4 — wall composition per screen** reusing `WALL_GRID_CLASS` (12ft legibility: ≥16px body,
+  44px targets, no hover-only affordances).
+- ⬜ **4.5 — Home ranking + `More…` folding** and an ambient-motion budget (finding 8).
 
 **Phase 5 — design-system convergence (P2).** Delete the four orphaned stylesheets
 (`styles/animations.css`, `styles/tokens.css`, `styles/materials.css`, `styles/components.css`

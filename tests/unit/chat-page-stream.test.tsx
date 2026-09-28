@@ -66,7 +66,10 @@ vi.mock("@/app/chat/OpenLoopChips", () => ({
 }));
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => authMock.state }));
 vi.mock("@/hooks/usePendingChatQuery", () => ({ usePendingChatQuery: () => {} }));
-vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams() }));
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/chat",
+  useSearchParams: () => new URLSearchParams(),
+}));
 vi.mock("@/db", () => ({ db: { selectMembers: () => [] } }));
 
 import ChatPage from "@/app/chat/page";

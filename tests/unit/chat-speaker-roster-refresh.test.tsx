@@ -18,7 +18,10 @@ vi.mock("@/components/ui/CapsuleNav", () => ({ default: () => null }));
 vi.mock("@/components/3d", () => ({ Icon3D: () => null }));
 vi.mock("@/hooks/useAuth", () => ({ useAuth: () => ({ currentUser: null, isLoggedIn: false }) }));
 vi.mock("@/hooks/usePendingChatQuery", () => ({ usePendingChatQuery: () => {} }));
-vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams() }));
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/chat",
+  useSearchParams: () => new URLSearchParams(),
+}));
 
 const PHOTO = "data:image/webp;base64,UklGRkIZAABXRUJQVlA4WAoAAAAQREBEQA==";
 

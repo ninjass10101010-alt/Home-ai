@@ -2,10 +2,9 @@
 "use client";
 
 import { useState, useRef, useEffect, useMemo, Suspense, useSyncExternalStore } from "react";
-import CapsuleNav from "@/components/ui/CapsuleNav";
 import Avatar from "@/components/ui/Avatar";
 import { EmojiText } from "@/components/ui/EmojiText";
-import SyncStatusBanner from "@/components/ui/SyncStatusBanner";
+import PageShell from "@/components/ui/PageShell";
 import Modal from "@/components/ui/Modal";
 import { UnifiedInput } from "@/components/chat/UnifiedInput";
 import AdjustPointsChip from "@/components/chat/AdjustPointsChip";
@@ -288,7 +287,14 @@ function ChatContent() {
   const openSpeakerPicker = () => setShowSpeakerPicker(true);
 
   return (
-    <div className="page-settle min-h-screen max-w-lg mx-auto flex flex-col relative bg-surface-0">
+    <PageShell
+      clip={false}
+      style={{ backgroundColor: "var(--color-surface-0)" }}
+      contentClassName="max-w-lg mx-auto flex flex-col min-h-screen"
+      bottomInset={false}
+      bannerMessage="🔐 Signed out — this conversation stays on this device. Sign in with your PIN to join the family thread."
+      bannerClassName="mx-3 sm:mx-4 mt-3"
+    >
 
       {/* ─── Top bar ─── */}
       <div
@@ -373,12 +379,6 @@ function ChatContent() {
           </svg>
         </button>
       </div>
-
-      {/* ─── Signed-out honesty: chat without a session is this-device-only ─── */}
-      <SyncStatusBanner
-        message="🔐 Signed out — this conversation stays on this device. Sign in with your PIN to join the family thread."
-        className="mx-3 sm:mx-4 mt-3"
-      />
 
       {/* ─── Messages area ─── */}
       <div
@@ -637,8 +637,6 @@ function ChatContent() {
         </div>
       </Modal>
 
-      <CapsuleNav />
-
       <style>{`
         @keyframes bounce {
           0%, 100% { transform: translateY(0); }
@@ -659,7 +657,7 @@ function ChatContent() {
           }
         }
       `}</style>
-    </div>
+    </PageShell>
   );
 }
 
