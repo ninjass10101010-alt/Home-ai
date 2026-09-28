@@ -1,5 +1,6 @@
 import { db } from "@/db";
 import { localTodayISO, localWeekStartISO } from "@/lib/local-date";
+import { weekStartForDate } from "@/lib/meals-week-utils";
 import { isRecord } from "@/lib/task-operation-contract";
 import type { Task, WeekData, Transaction, WeekArchive, FamilyGoal, HallOfFameEntry, WeeklyPrize, CrewMember } from "@/types/tasks";
 
@@ -16,13 +17,20 @@ export const FAMILY_GOAL_KEY = "consuela-family-goal";
 export const HALL_OF_FAME_KEY = "consuela-hall-of-fame";
 
 // NOTE: the week key is NOT computed here. `localWeekStartISO()`
-// (src/lib/local-date) is the single source of truth — it serializes from the
-// family's LOCAL calendar date, so it is correct in any timezone. The
-// `todayMondayISO()` / `weekKey()` pair that used to live here, backed by
-// `mondayOf()`, did `setHours(0,0,0,0)` and then `.toISOString()`: local
-// midnight serialized as UTC, which east of UTC resolved to the PREVIOUS day
-// and on a Sunday to the previous week. The client's `completedInWeek` guard
-// and both money-path week keys now read the canonical helper.
+// (src/lib/local-date) is the single source of truth for "this week", and
+// `weekStartForDate()` (src/lib/meals-week-utils) for "the week containing
+// this date-only string" — it serializes from the family's LOCAL calendar
+// date, so both are correct in any timezone. The `todayMondayISO()` /
+// `weekKey()` pair that used to live here, backed by `mondayOf()`, did
+// `setHours(0,0,0,0)` and then `.toISOString()`: local midnight serialized as
+// UTC, which east of UTC resolved to the PREVIOUS day and on a Sunday to the
+// previous week. The client's `completedInWeek` guard and both money-path week
+// keys now read the canonical helper.
+//
+// `mondayOf()` below survives only for the two tests that still call it, and
+// it is `setHours(0,0,0,0)`-based: it is correct only for an instant already
+// anchored to local midnight, and silently wrong for a UTC-parsed one. Do not
+// hand it `new Date(<date-only string>)` — use `weekStartForDate(string)`.
 export function mondayOf(date: Date): Date {
   const d = new Date(date);
   d.setHours(0, 0, 0, 0);
@@ -324,13 +332,15 @@ export function calculateRealStreak(
   // old UTC todayISO() cursor read "tomorrow" every evening 8pm–midnight
   // local, zeroing every streak each night. The optional param keeps the
   // streak scenarios deterministic in tests (pinned dates, no wall clock).
-  // Compare DATE STRINGS, not Date instants. Deriving `monday` via
-  // mondayOf() yields local-midnight → toISOString, which on any zone behind
-  // UTC lands at e.g. 04:00Z while the cursor walks at 00:00Z — the Monday
-  // cursor then compares strictly less-than and the loop exits one day early,
-  // undercounting the streak (the family NAS runs TZ=America/Detroit). Date
-  // parts compare lexically and are immune to the offset.
-  const monday = mondayOf(new Date(today)).toISOString().split("T")[0];
+  // Compare DATE STRINGS, not Date instants — date parts compare lexically
+  // and are immune to the offset. `monday` is the Monday of the LOCAL week
+  // containing `today`, read straight from the canonical helper:
+  // `new Date("2026-09-28")` parses as UTC midnight (Sunday evening in
+  // Detroit), so walking back from it scoped every streak to the PREVIOUS
+  // week, and `mondayOf(...).toISOString()` had the mirror defect east of
+  // UTC. weekStartForDate takes the date-only string and does local math from
+  // local date parts, so it is correct in every zone.
+  const monday = weekStartForDate(today);
   let streak = 0;
   let cursor = today;
 
@@ -404,10 +414,11 @@ export function regenerateRecurringTasks(tasks: Task[]): Task[] {
 }
 
 export function getThisWeeksCompletedDates(tasks: Task[], memberName?: string, today: string = localTodayISO()): string[] {
-  // Monday derives from `today` (the same local-midnight normalize the streak
-  // walk uses), so a pinned test date scopes its own week — never the real
-  // wall clock's.
-  const monday = mondayOf(new Date(today)).toISOString().split("T")[0];
+  // `monday` is the Monday of the LOCAL week containing `today`, from the
+  // canonical helper (a date-only string never round-trips through new Date(),
+  // which would read it as UTC midnight) — so a pinned test date scopes its
+  // own week, never the real wall clock's, and never the previous week.
+  const monday = weekStartForDate(today);
   const now = today;
   return tasks
     .filter(
