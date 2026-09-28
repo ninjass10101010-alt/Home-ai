@@ -331,8 +331,15 @@ Home's widget ranking/`More…` folding is still Phase 4.5.
   and `xl:order-*`/`hidden xl:*` hooks with the md tier; RecipeBox drops `xl:grid-cols-3`; the
   Settings launcher already tiers (`grid-cols-1 sm:grid-cols-2`). Contract:
   `tests/unit/tablet-two-column.test.ts` (5).
-- ⬜ **4.4 — wall composition per screen** reusing `WALL_GRID_CLASS` (12ft legibility: ≥16px body,
-  44px targets, no hover-only affordances).
+- ✅ **4.4 — wall composition per screen** (12ft legibility: ≥16px body, 44px targets, no
+  hover-only affordances): Home already swaps its grid to `WALL_GRID_CLASS` when the wall profile
+  resolves (contract-pinned) and the data screens inherit the md two-column composition from 4.3;
+  `globals.css` now floors body copy (`text-sm`) at **16px** and every smaller utility at 14px
+  under `html[data-wall]`, floors **every interactive control at 44×44** (settings keeps its
+  stricter 64px — that selector is more specific), and withdraws the one hover-only *action*
+  popup — RecipeBox's `hidden group-hover:grid` day-picker — because the wall is touch-only (its
+  primary "＋ Add" button remains the working path). Decorative `pointer-events-none` hover glows
+  stay hover-lit: they are not affordances. Contract: `tests/unit/wall-composition.test.ts` (4).
 - ⬜ **4.5 — Home ranking + `More…` folding** and an ambient-motion budget (finding 8).
 
 **Phase 5 — design-system convergence (P2).** Delete the four orphaned stylesheets

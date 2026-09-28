@@ -2858,10 +2858,17 @@ a.widget-accent-text {
    Spec: docs/superpowers/specs/2026-09-09-apolosign-wall-mode-design.md
    Size/layout only — no keyframes, no zoom; `useWallMode` (Task 2) mirrors
    the resolved profile onto <html data-wall="true">. Distance-viewing rules:
-   compact type floor 10/11px → 14px, hit-44 expands further, list rows and
-   the weather hero scale up. Phones/laptops never match these selectors. */
+   body copy (text-sm) floors at 16px and smaller utilities at 14px (audit
+   4.4), hit-44 expands further, list rows and the weather hero scale up.
+   Phones/laptops never match these selectors. */
+html[data-wall="true"] .text-sm {
+  font-size: 16px;
+}
+html[data-wall="true"] .text-xs,
 html[data-wall="true"] .text-\[10px\],
-html[data-wall="true"] .text-\[11px\] {
+html[data-wall="true"] .text-\[11px\],
+html[data-wall="true"] .text-\[12px\],
+html[data-wall="true"] .text-\[13px\] {
   font-size: 14px;
 }
 html[data-wall="true"] .hit-44::before {
@@ -2921,5 +2928,35 @@ html[data-wall="true"] .settings-wall-target {
   align-items: center;
   min-height: 64px;
   min-width: 64px;
+}
+
+/* ─── Audit 4.4 — wall composition contract ───
+   Touch: every interactive control floors at 44×44 (the wall is touch
+   only). The settings surfaces keep their stricter 64px above — that
+   selector carries an extra [data-settings-surface] scope, so it still
+   wins. Inline elements ignore min-height/width, so text links inside
+   sentences are untouched.
+   Hover: the one hover-only ACTION popup — RecipeBox's quick day-picker
+   (`hidden group-hover:grid`) — is withdrawn on the wall; its primary
+   "＋ Add" button is the working path there. Decorative hover glows
+   (pointer-events-none) are deliberately left alone: they are not
+   affordances. */
+html[data-wall="true"] :is(
+    button,
+    a,
+    [role="button"],
+    [role="radio"],
+    [role="tab"],
+    input:not(.sr-only):not([type="hidden"]),
+    select,
+    textarea,
+    label:has(> input.sr-only)
+  ) {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+html[data-wall="true"] [class*="group-hover:grid"] {
+  display: none;
 }
 
