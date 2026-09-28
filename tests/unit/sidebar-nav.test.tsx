@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
 import type { ReactElement, ReactNode } from "react";
-import SidebarNav from "@/modes/adult/SidebarNav";
+import SidebarNav from "@/components/ui/SidebarNav";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 

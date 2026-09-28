@@ -1,5 +1,5 @@
 /**
- * SidebarNav — the desktop/tablet rail (adult mode).
+ * SidebarNav — the desktop/tablet rail (parent sessions; `md+` only).
  *
  * Reads `lib/nav-items.ts`, the same manifest the dock and the Home More… sheet
  * read, so both navs agree on order, roles, icons and — the bug the 2026-09 UI
@@ -14,8 +14,11 @@
  *     variable is defined nowhere, so the hard-coded fallback blue always won —
  *     replaced by `--color-nav-active*`, the token the dock uses too.
  *
- * Rendered inside `AdultHome` today; mounting the rail for every route (and the
- * tablet two-column layout) is Phase 4 of `docs/UI_AUDIT_2026-09.md`.
+ * Phase 4: `PageShell` mounts it for a parent session on every route (it used to
+ * live inside `AdultHome`, so leaving Home dropped the rail while the phone dock
+ * stayed) and reserves its width, so content can never slide underneath. The
+ * rail renders `hidden md:flex`; the shell's offset is `md:pl-60` — keep the two
+ * in step (both are asserted by `tests/unit/page-shell-tiers.test.tsx`).
  */
 "use client";
 

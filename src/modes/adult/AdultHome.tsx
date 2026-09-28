@@ -28,7 +28,6 @@ import SoftButton from "@/components/ui/SoftButton";
 import IconButton from "@/components/ui/IconButton";
 import SwipeableRow from "./SwipeableRow";
 import InstacartButton from "@/components/ui/InstacartButton";
-import SidebarNav from "./SidebarNav";
 import SpotifyWidget from "@/components/integrations/SpotifyWidget";
 import HomeAssistantWidget from "@/components/integrations/HomeAssistantWidget";
 import GmailImportWidget from "@/components/integrations/GmailImportWidget";
@@ -397,7 +396,6 @@ export default function AdultHome() {
   if (isBedtime) {
     return (
       <PageShell>
-        <SidebarNav />
         <EmergencyButton />
         <div className="px-4 pt-6 pb-8 space-y-4">
           <div className="flex items-center justify-between">
@@ -472,7 +470,6 @@ export default function AdultHome() {
 
   return (
     <PageShell>
-      <SidebarNav />
       <EmergencyButton />
 
       <OverviewBar
