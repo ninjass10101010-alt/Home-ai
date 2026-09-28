@@ -389,9 +389,12 @@ describe("SystemSettingsSection", () => {
     expect(host.textContent).not.toContain("Pushed 1 household item");
   });
   it("reports an all-failed push with zero successes and the exact error count", async () => {
+    // "pantry_items" is one of the six SAFE_LOCAL_PUSH_COLLECTIONS the push can
+    // still emit; the row's collection name only feeds the summed error count
+    // (6 + 1 = 7), so the exact label is fixture realism, not an assertion.
     mocks.pushLocalToPB.mockResolvedValue([
       { collection: "family data", pushed: 0, errors: 6 },
-      { collection: "family_goals", pushed: 0, errors: 1 },
+      { collection: "pantry_items", pushed: 0, errors: 1 },
     ]);
     const host = render(<SystemSettingsSection />);
     await settle();

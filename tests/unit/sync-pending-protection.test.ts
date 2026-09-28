@@ -1,3 +1,11 @@
+// NOTE (2026-09-28): `protectPendingOnPush` is RETAINED FOR REFERENCE and
+// currently has NO CALLER in `src/` — `grep -rn "protectPendingOnPush" src/`
+// returns only its own declaration in `snapshot-tasks.ts:195`. The 8 cases below
+// therefore pin the helper's merge logic, but NOT a live production path: they
+// prove nothing that runs in the app today. Kept deliberately rather than
+// deleted, because removal is a judgement call for the human: either wire the
+// proof-gated push back in, or drop the helper and this suite together. If you
+// wire a caller in, this header is wrong and must be removed.
 import { describe, expect, it } from "vitest";
 import { protectPendingOnPush, type SnapshotTask } from "@/lib/snapshot-tasks";
 
