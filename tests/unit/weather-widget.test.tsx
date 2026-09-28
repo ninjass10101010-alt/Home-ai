@@ -2257,6 +2257,47 @@ describe("WeatherWidget — Not Boring redesign", () => {
     expect(sceneToCondition(wmoToScene(95, true), 95)).toBe("storm");
   });
 
+  // Locks the whole poster-vs-hero matrix so a future scene can't quietly
+  // reintroduce a second sun/moon, or collapse two conditions into one glyph.
+  it.each([
+    // name, code, cloud, precip, poster suns, poster moons, hero glyph present
+    ["clear day", 0, 0, 0, 1, 0, false],
+    ["partly day", 2, 40, 5, 1, 0, true],
+    ["overcast", 3, 90, 5, 0, 0, true],
+    ["rain", 61, 86, 72, 0, 0, true],
+    ["snow", 71, 90, 70, 0, 0, true],
+    ["storm", 95, 90, 80, 0, 0, true],
+    ["fog", 45, 80, 5, 0, 0, true],
+    ["clear night", 0, 0, 0, 0, 1, true],
+    ["partly night", 2, 40, 5, 0, 1, true],
+  ])("%s paints one celestial body and never doubles it in the hero", async (name, code, cloud, precip, suns, moons, heroGlyph) => {
+    mockOpenMeteo(makeOpenMeteoPayload({ code, cloud, precip, isDay: name.includes("night") ? 0 : 1 }));
+    const el = render(<WeatherWidget />);
+    await settle();
+
+    const scene = el.querySelector('[data-testid="wx-scene-layers"]') as HTMLElement;
+    expect(scene.querySelectorAll('[data-weather-shape="sun"]')).toHaveLength(suns as number);
+    expect(scene.querySelectorAll('[data-weather-character="moon"]')).toHaveLength(moons as number);
+
+    // The hero never doubles up on a celestial body: the clear-day sun lives in
+    // the poster alone, and night shows a star glyph rather than a second moon.
+    const hero = el.querySelector('[data-testid="wx-hero-icon"]');
+    expect(hero).toBeTruthy();
+    expect(!!hero!.firstElementChild).toBe(heroGlyph as boolean);
+  });
+
+  it("keeps the partly-cloudy hero badge distinct from an overcast lone cloud", async () => {
+    mockOpenMeteo(makeOpenMeteoPayload({ code: 2, cloud: 40 }));
+    const el = render(<WeatherWidget />);
+    await settle();
+    // The partly glyph composes sun + cloud; dropping the sun would render it
+    // identical to overcast, which is a different condition.
+    const partlyHero = el.querySelector('[data-testid="wx-hero-icon"]')?.firstElementChild ?? null;
+    expect(partlyHero).toBeTruthy();
+    expect(partlyHero!.children.length).toBe(2);
+    expect(el.textContent).toContain("Partly Cloudy");
+  });
+
   it("hero shows the clay icon for the live condition when the poster has no sun", async () => {
     // No solar interval → the poster paints no sun character, so the hero
     // carries the condition disc itself.

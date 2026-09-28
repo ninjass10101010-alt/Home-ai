@@ -755,8 +755,16 @@ export function Wind({ width = 72 }: { width?: number }) {
   );
 }
 
-/** `hideSun` drops the sun disc because the poster behind already paints one
-    (see posterCarriesSun). Mirrors how the night scene suppresses the moon. */
+/** `hideSun` drops the standalone sun disc because the poster behind already
+    paints a sun character (see posterCarriesSun). Mirrors how the night scene
+    suppresses the moon.
+
+    Deliberately NOT applied to "partly": that glyph is a composite
+    sun-behind-cloud *condition badge*, and dropping its sun would collapse it
+    into the same lone-cloud glyph an overcast card uses — two different
+    conditions rendering identically. The duplicate-sun problem was two
+    identical round discs reading as two suns; a small sun peeking from behind
+    a cloud reads as a condition badge, not a second sun. */
 export function Condition({ code, size = 80, hideSun = false }: { code: ConditionCode; size?: number; hideSun?: boolean }) {
   switch (code) {
     case "clear":
@@ -766,11 +774,9 @@ export function Condition({ code, size = 80, hideSun = false }: { code: Conditio
     case "partly":
       return (
         <div className="relative" style={{ width: size, height: size * 0.75 }}>
-          {!hideSun && (
-            <div className="absolute top-0 right-2">
-              <Sun size={size * 0.5} />
-            </div>
-          )}
+          <div className="absolute top-0 right-2">
+            <Sun size={size * 0.5} />
+          </div>
           <div className="absolute bottom-0 left-0">
             <Cloud size={size * 0.85} />
           </div>
