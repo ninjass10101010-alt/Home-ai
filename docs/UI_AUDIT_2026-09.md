@@ -4,7 +4,8 @@
 **Supersedes:** `docs/UI_CONSISTENCY_AUDIT.md` (2026-07-20), which audited against the
 pre-`warm-glass-v2` shadcn recipe (`<Card>`, `bg-primary`) and is kept for history only.
 **Status:** ✅ **Phase 1 shipped** (legibility + contrast + tap targets) · ✅ **Phase 2 shipped**
-(honest states) · ⏳ Phases 3–5 open.
+(honest states) · ✅ **Phase 3 shipped** (navigation & IA — one route manifest, one icon set, one
+active rule, no orphaned route) · ⏳ Phases 4–5 open.
 
 Method: (1) static scan of 240 `.tsx` files / 46.9k lines, 29 routes, `globals.css`
 (2,852 lines / 296 selectors / 95 keyframes) + `modes.css`; (2) a live Playwright/Chromium
@@ -297,12 +298,19 @@ and a *failed* read must never reuse the *stale* copy, so offline-with-nothing-c
 "no saved copy on this device" rather than promising one. `npm test` exits 0 again (the
 jsdom teardown escape was fixed in `05f1005`).
 
-**Phase 3 — navigation & IA (P1-5, P1-6).** `lib/nav-items.ts` as the single manifest feeding
-dock + rail; adopt it in `CapsuleNav` and `SidebarNav` (or delete `SidebarNav` and keep Home's
-widgets + the rail); resolve the `===` vs `startsWith` active-item mismatch; tokenise the lime
-glow as `--color-nav-active` so all ten accents work; decide **surface or delete** per orphaned
-route (`/memory`, `/grocery`, `/money-mountain`, `/skill-tree`, `/time-capsule`, `/analytics`)
-— deleting is allowed and cheapest.
+**Phase 3 — navigation & IA (P1-5, P1-6) — shipped 2026-09-28.** `lib/nav-items.ts` is the single
+manifest (`path, label, iconKey, roles, group, wall`) feeding the dock, the rail *and* the new Home
+`More…` sheet; `NavIcon` is the one SVG icon set (the dock's inline SVGs and the rail's emoji are
+gone); `isPathActive` is the one active-item rule, so `/settings/me` now lights Settings in both
+navs; the dock glow is `--color-nav-active*` (the accent system drives it — the active pill is
+accent-coloured instead of hard-coded lime, documented in `globals.css` with the one-line revert);
+the six orphaned routes were **surfaced, not deleted** — every Home mode mounts the More… sheet,
+role-filtered so the wall shows only `/grocery`, `/skill-tree`, `/time-capsule` and `/analytics`
+(never the parent-only `/memory` or the finance pages). `tests/unit/nav-items.test.ts` now fails on
+any shipped route that is neither in the manifest nor in `EXEMPT_ROUTES` with a reason, so the
+"unreachable route" class of bug cannot come back. Deliberately left for Phase 4: the rail is still
+mounted inside `AdultHome` only (so leaving Home on a desktop still drops the rail), and Home's
+widget ranking/`More…` folding is unchanged.
 
 **Phase 4 — responsive tiers (P1-7, P1-8).** Tablet two-column + rail for Tasks / Meals /
 Calendar / Settings; wall composition per screen reusing the `WALL_GRID_CLASS` idiom (12ft

@@ -121,6 +121,25 @@ Motion is CSS-only: keyframes for ambient motion and Tailwind transitions for st
 - Layout and display
 - Data and sync
 
+### Navigation
+
+- **One manifest.** `src/lib/nav-items.ts` owns every destination: `path`, `label`, `iconKey`,
+  `roles`, `group` (`primary` = dock/rail cap, `more` = the Home `More…` sheet) and `wall` (may a
+  signed-out screen offer it). The dock, the desktop rail and the More… sheet all render from it —
+  never add a nav list inside a component, and never add a route without a manifest entry (or an
+  `EXEMPT_ROUTES` entry with a written reason). `tests/unit/nav-items.test.ts` enforces both, plus
+  no stale exemption.
+- **One icon set.** `NavIcon`, keyed to `NavIconKey`, draws every nav glyph as an SVG. Emoji are
+  *content* (food prefs, personalities, celebration bursts), never navigation or control chrome.
+- **One active rule.** `isPathActive`: exact for `/`, segment-aware everywhere else — so
+  `/settings/me` lights Settings and `/mealsomething` lights nothing.
+- **One active ink.** `--color-nav-active` (+ `-border`, `-sheen`, `-wash`, `-glow`, `-halo`,
+  `-fill`) in `globals.css`; the dock, the rail and the nav focus ring read it, so an accent change
+  retints all of navigation at once. `-fill` is the accent deepened so the white active glyph keeps
+  ≥3:1 non-text contrast on light accents.
+- **Roles.** `guest` means *no session* and sees only `wall: true` destinations; `parent` is the
+  only privileged role; an unknown signed-in role resolves to `child`, never to parent.
+
 ## 6 · Accessibility
 
 - Dynamic Type via rem-based type scale — **never** `text-[Npx]`: arbitrary px defeats the
