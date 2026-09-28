@@ -75,6 +75,7 @@ import LevelBar from "./LevelBar";
 import CelebrationBurst from "./CelebrationBurst";
 import KidProfileSheet from "@/components/modes/kid/KidProfileSheet";
 import WeeklyWinModal from "@/components/leaderboard/WeeklyWinModal";
+import MoreSheet, { MoreButton } from "@/components/patterns/MoreSheet";
 import { ledgerKey, pointsFor, currentWeekPoints, unreachableCopy, verifyPinRemote } from "./kid-store";
 import SpotifyWidget from "@/components/integrations/SpotifyWidget";
 import AllowanceWidget from "@/components/integrations/AllowanceWidget";
@@ -277,6 +278,8 @@ export default function KidHome() {
   const [dataVersion, setDataVersion] = useState(0);
   // Kid profile sheet (tap the hero avatar) — shared by bedtime + normal flows.
   const [profileSheetOpen, setProfileSheetOpen] = useState(false);
+  // Home More… sheet — the secondary destinations from lib/nav-items.ts.
+  const [moreOpen, setMoreOpen] = useState(false);
   // Claim outbox (2026-09-23 review, Critical #2): a fire-and-forget claim
   // POST that fails (network / 5xx / expired 15-min kid session) used to
   // strand the kid's completion FOREVER — the parent queue reads the server
@@ -1314,6 +1317,7 @@ export default function KidHome() {
                 🏪 Reward Shop
               </SoftButton>
             </Link>
+            <MoreButton className="flex-1 text-base py-4" onClick={() => setMoreOpen(true)} />
           </div>
         </div>
 
@@ -1334,6 +1338,10 @@ export default function KidHome() {
             the normal/weekend surface only (bedtime stays calm); on the wall
             display this is the ONLY mount (the family view skips it). */}
         <WeeklyWinModal memberName={weeklyWinName} />
+
+        {/* Home More… sheet — a kid's secondary destinations (a child never sees
+            the parent-only family memory bank or the finance pages). */}
+        <MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} />
 
         {/* Kid profile sheet — the hero avatar tap target (bedtime renders its own). */}
         <KidProfileSheet

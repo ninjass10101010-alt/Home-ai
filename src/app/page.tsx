@@ -52,6 +52,7 @@ import { localTodayISO } from "@/lib/local-date";
 import { normalizeAvatarSize } from "@/lib/avatar-size";
 import { loadTasks, isPendingApproval, PIN_FREE_MAX_AGE, resolveMemberName } from "@/lib/task-utils";
 import WeeklyWinModal from "@/components/leaderboard/WeeklyWinModal";
+import MoreSheet, { MoreButton } from "@/components/patterns/MoreSheet";
 import { todayMondayISO } from "@/lib/meals-week-utils";
 import { useDashboardMode } from "@/hooks/useDashboardMode";
 
@@ -153,6 +154,7 @@ export default function HomePage() {
   const [confirmingLogout, setConfirmingLogout] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   // Live roster: db/index.ts dispatches consuela-members-updated whenever the
   // members cache refreshes (60s CacheRefresher pull, patchMemberLocal after a
   // profile save). Bump a version so the family strip re-reads the roster
@@ -865,8 +867,13 @@ export default function HomePage() {
               <Link href="/tasks" className="flex-1">
                 <SoftButton className="w-full">Open Tasks</SoftButton>
               </Link>
+              <MoreButton className="flex-1" onClick={() => setMoreOpen(true)} />
             </div>
           </div>
+
+          {/* Home More… sheet — keeps /grocery, /skill-tree, /time-capsule,
+              /analytics, /money-mountain and /memory reachable (audit P1-5). */}
+          <MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} />
 
           <MemberPickerModal
             open={pickerOpen}

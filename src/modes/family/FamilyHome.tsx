@@ -27,6 +27,7 @@ import StatTile from "@/components/patterns/StatTile";
 import SectionCard from "@/components/patterns/SectionCard";
 import HomeLeaderboardWidget from "@/components/leaderboard/HomeLeaderboardWidget";
 import PhotoMemoriesWidget from "@/components/integrations/PhotoMemoriesWidget";
+import MoreSheet, { MoreButton } from "@/components/patterns/MoreSheet";
 import Link from "next/link";
 import { db } from "@/db";
 
@@ -50,6 +51,8 @@ export default function FamilyHome() {
 
   const { currentUser, isLoggedIn, logout } = useAuth();
   const { isWeekend, isBedtime } = useDashboardMode();
+  // Home More… sheet — the secondary destinations from lib/nav-items.ts.
+  const [moreOpen, setMoreOpen] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -229,7 +232,13 @@ export default function FamilyHome() {
             <Link href="/tasks" className="flex-1">
               <SoftButton className="w-full">View Tasks</SoftButton>
             </Link>
+            <MoreButton className="flex-1" onClick={() => setMoreOpen(true)} />
           </div>
+
+          {/* Home More… sheet — the wall is signed out, so it offers only the
+              wall-safe half of the manifest (/memory and /money-mountain stay
+              off this screen). */}
+          <MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} />
         </div>
       </PageShell>
     </AtmosphericProvider>
