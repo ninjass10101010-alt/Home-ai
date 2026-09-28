@@ -332,7 +332,7 @@ export default function ShopTab({
       <KitchenFlowCard step="shop" summary={flowSummary} />
       <ShopGuide />
 
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_280px]">
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
         <div className="space-y-5 min-w-0">
           <div className="space-y-3">
             <div className="flex gap-2">
@@ -598,7 +598,7 @@ export default function ShopTab({
 
           {/* ── Desktop bulk bar ── */}
           {checkedCount > 0 && (
-            <div className="hidden xl:block">
+            <div className="hidden md:block">
               <SectionCard
                 title="Checked items"
                 icon="✅"
@@ -611,7 +611,7 @@ export default function ShopTab({
         </div>
 
         {/* ── Right rail (desktop) ── */}
-        <div className="space-y-5 min-w-0 xl:order-2 order-first xl:order-none">
+        <div className="space-y-5 min-w-0 order-first md:order-none">
           <SectionCard title="Shopping progress" icon="🛒" tone="#10b981">
             <div className="space-y-4">
               <div className="flex items-end justify-between">
@@ -657,7 +657,7 @@ export default function ShopTab({
 
       {/* ── Mobile sticky bulk bar ── */}
       {checkedCount > 0 && (
-        <div className="xl:hidden sticky bottom-28 z-30">
+        <div className="md:hidden sticky bottom-28 z-30">
           <div className="rounded-2xl border border-white/10 bg-[var(--color-surface-0)]/85 p-2 shadow-2xl backdrop-blur-xl">
             {bulkActions}
           </div>

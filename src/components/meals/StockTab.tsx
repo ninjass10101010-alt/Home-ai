@@ -141,7 +141,7 @@ export default function StockTab({
     <div className="space-y-6 pb-6">
       <KitchenFlowCard step="stock" summary={flowSummary} />
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
         {/* ── Left Column ── */}
         <div className="space-y-5 min-w-0">
           {/* ── Add Item ── */}
@@ -369,7 +369,7 @@ export default function StockTab({
         </div>
 
         {/* ── Right Column ── */}
-        <div className="space-y-5 min-w-0 lg:order-2 order-first lg:order-none">
+        <div className="space-y-5 min-w-0 order-first md:order-none">
           <WidgetCard tone="#f59e0b" icon="🥫" className="p-5 pl-[72px]">
             <SoftButton variant="primary" size="md" onClick={openPantrySync} disabled={syncBusy} className="w-full">
               🛒 {syncBusy ? "Adding…" : "Add low & out to grocery list"}

@@ -888,8 +888,11 @@ export default function CalendarPage() {
           ))}
         </div>
 
+        {/* Phone: stacked cards. md+: Home's two-column idiom — month grid
+            left, the selected-day agenda pinned beside it (col-start/row-start
+            so the week card and forms flow full-width underneath). */}
         {activeTab === "calendar" && (
-          <div key="calendar" className="panel-swap space-y-4">
+          <div key="calendar" className="panel-swap space-y-4 md:grid md:grid-cols-2 md:items-start md:gap-4 md:space-y-0">
             <WidgetCard tone="#3b82f6" className="calendar-grid-card">
               <div className="calendar-panel-header calendar-grid-header">
                 <h2 key={`${year}-${month}`} className="calendar-month-title is-animating">
@@ -966,9 +969,13 @@ export default function CalendarPage() {
               </div>
             </WidgetCard>
 
-            {currentUser?.role === "parent" && <ConsuelaWeekCard />}
+            {currentUser?.role === "parent" && (
+              <div className="md:col-span-2">
+                <ConsuelaWeekCard />
+              </div>
+            )}
 
-            <section className="calendar-panel widget-card" style={{ "--widget-tone": "#22d3ee" } as CSSProperties}>
+            <section className="calendar-panel widget-card md:col-start-2 md:row-start-1" style={{ "--widget-tone": "#22d3ee" } as CSSProperties}>
               <div className="calendar-panel-header">
                 <div className="calendar-panel-heading">
                   <div className="calendar-panel-icon">{`\uD83D\uDCC5`}</div>

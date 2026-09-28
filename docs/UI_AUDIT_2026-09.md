@@ -322,8 +322,15 @@ Home's widget ranking/`More…` folding is still Phase 4.5.
   (`contentClassName`), its composer's own dock clearance (`bottomInset={false}`) and the document
   scrollport for its sticky top bar/composer (`clip={false}` — the shell's `overflow-hidden` would
   otherwise become their scrollport and freeze sticky).
-- ⬜ **4.3 — tablet two-column + rail** for Tasks / Meals / Calendar / Settings, using Home's grid
-  idiom rather than new breakpoints.
+- ✅ **4.3 — tablet two-column + rail for Tasks / Meals / Calendar / Settings** (rail shipped with
+  4.1): every split now uses Home's grid idiom (`grid-cols-1 md:grid-cols-2 gap-6`, `col-span-*`,
+  `order-*` at `md:`) instead of one-off breakpoints — Tasks drops its private `lg:max-w-3xl` and
+  splits stats/switch left | task board or leaderboard right (`md:col-span-2` stats); Calendar
+  pairs month grid | selected-day agenda (`md:col-start-2 md:row-start-1`, week card
+  `md:col-span-2`); the meals tabs replace `lg:grid-cols-[1fr_320px]`, `xl:grid-cols-[1fr_280px]`
+  and `xl:order-*`/`hidden xl:*` hooks with the md tier; RecipeBox drops `xl:grid-cols-3`; the
+  Settings launcher already tiers (`grid-cols-1 sm:grid-cols-2`). Contract:
+  `tests/unit/tablet-two-column.test.ts` (5).
 - ⬜ **4.4 — wall composition per screen** reusing `WALL_GRID_CLASS` (12ft legibility: ≥16px body,
   44px targets, no hover-only affordances).
 - ⬜ **4.5 — Home ranking + `More…` folding** and an ambient-motion budget (finding 8).

@@ -1798,7 +1798,7 @@ export default function TasksPage() {
       <WeeklyWinModal memberName={raceName} />
       <Toast open={Boolean(toast)} tone={toast?.includes("Failed") ? "error" : toast?.includes("grabbed") || toast?.includes("not connected") || toast?.includes("not granted") ? "neutral" : "success"}>{toast}</Toast>
 
-      <div className="mx-auto w-full lg:max-w-3xl">
+      <div className="mx-auto w-full">
       <PageHeader
         title="Tasks"
         subtitle={`${pending.length} pending`}
@@ -1815,10 +1815,13 @@ export default function TasksPage() {
         icon="✅"
       />
 
-      <div className="px-4 space-y-6 pb-8">
+      {/* Phone keeps the stacked column (space-y); md+ uses Home's two-column
+          grid idiom — stats span both columns, then the view switch sits left
+          of the active panel (task board / leaderboard). */}
+      <div className="px-4 pb-8 space-y-6 md:grid md:grid-cols-2 md:items-start md:gap-6 md:space-y-0">
         {/* One compact 3-up stat row at every width — on phones the stacked
             tiles used to eat 405px of prime screen before the first chore. */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-3 gap-3 md:col-span-2">
           <StatTile label="Pending" value={pending.length} detail="Open tasks" icon="📋" tone="warning" compact />
           <StatTile label="Completed" value={scopedCompletedCount} detail="This week" icon="🎉" tone="success" compact />
           <StatTile label="Earned this week" value={scopedEarned} detail={`${scopedAllTimeEarned} pts all-time`} icon="🏆" tone="accent" compact />

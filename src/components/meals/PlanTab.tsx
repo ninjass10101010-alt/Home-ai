@@ -264,7 +264,7 @@ export default function PlanTab({
         })}
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
         {/* ── Left Column ────────────────────────────────── */}
         <div key={activeDay} className="space-y-5 min-w-0">
           {/* ── Week Nav ── */}
