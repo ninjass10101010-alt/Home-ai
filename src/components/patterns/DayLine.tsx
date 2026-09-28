@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useAmbientAnimation } from "@/components/providers/AnimationBudgetProvider";
 
 /** Parse "8:00 AM" | "2:30 PM" | "07:00" | ISO "2000-01-01T15:30" → minutes since midnight */
 export function parseTimeToMinutes(timeStr: string): number {
@@ -71,6 +72,9 @@ function spread(positions: { position: number; color?: string }[]): { position: 
  */
 export default function DayLine({ markers = [], progress, tone = "var(--color-accent-selected)", mode = "day", className = "" }: DayLineProps) {
   const dayFraction = useDayFraction();
+  // Audit 4.5: the now-glow is ambient — give up the loop when Home's budget
+  // is spent (outside Home's provider this stays true; nothing changes).
+  const motion = useAmbientAnimation();
   const fraction = mode === "week" ? (progress ?? 0) : (progress ?? dayFraction);
   const scale = (at: number) => (mode === "week" ? Math.max(0, Math.min(1, at)) : Math.max(0, Math.min(1, at / 1440)));
   const placed = spread(markers.map((marker) => ({ position: scale(marker.at) * 100, color: marker.color })))
@@ -102,7 +106,7 @@ export default function DayLine({ markers = [], progress, tone = "var(--color-ac
       )}
       {fraction !== null && (
         <span
-          className="dayline-now absolute top-1/2 h-[7px] w-[7px] -translate-x-1/2 -translate-y-1/2 rounded-full transition-[left] duration-1000"
+          className={`${motion ? "dayline-now " : ""}absolute top-1/2 h-[7px] w-[7px] -translate-x-1/2 -translate-y-1/2 rounded-full transition-[left] duration-1000`}
           style={{ left: `${fraction * 100}%`, background: tone }}
         />
       )}

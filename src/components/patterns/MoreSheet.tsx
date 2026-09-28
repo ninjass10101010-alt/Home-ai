@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import Modal from "@/components/ui/Modal";
 import NavIcon from "@/components/ui/NavIcon";
 import SoftButton from "@/components/ui/SoftButton";
@@ -24,9 +25,21 @@ import { moreNavItemsForRole, navRoleForUser } from "@/lib/nav-items";
 interface MoreSheetProps {
   open: boolean;
   onClose: () => void;
+  /** Action rows appended after the route manifest (audit 4.5): Home folds its
+   *  below-the-fold widgets behind a "Show all widgets" row here. */
+  extraItems?: MoreExtraItem[];
 }
 
-export default function MoreSheet({ open, onClose }: MoreSheetProps) {
+export interface MoreExtraItem {
+  key: string;
+  title: string;
+  description?: string;
+  icon: ReactNode;
+  badge?: string;
+  onSelect: () => void;
+}
+
+export default function MoreSheet({ open, onClose, extraItems }: MoreSheetProps) {
   const { currentUser } = useAuth();
   const role = navRoleForUser(currentUser);
   const items = moreNavItemsForRole(role);
@@ -47,6 +60,16 @@ export default function MoreSheet({ open, onClose }: MoreSheetProps) {
             title={item.label}
             description={item.description}
             icon={<NavIcon iconKey={item.iconKey} className="h-6 w-6" />}
+          />
+        ))}
+        {extraItems?.map((item) => (
+          <MoreMenuItem
+            key={item.key}
+            title={item.title}
+            description={item.description}
+            badge={item.badge}
+            icon={item.icon}
+            onSelect={item.onSelect}
           />
         ))}
       </div>

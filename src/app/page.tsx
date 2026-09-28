@@ -17,7 +17,8 @@ import { AtmosphericProvider } from "@/hooks/useAtmosphericTheme";
 import AtmosphericBridge from "@/components/ui/AtmosphericBridge";
 import { useHomeLayout } from "@/hooks/useHomeLayout";
 import { useWallMode } from "@/hooks/useWallMode";
-import { WIDGET_SPANS, homeGridClass, widgetSpanClass, tabletSpan, tabletSpanFor, HOME_GRID_FALLBACK, WALL_GRID_CLASS } from "@/lib/layout-config";
+import { WIDGET_SPANS, homeGridClass, widgetSpanClass, tabletSpan, tabletSpanFor, HOME_GRID_FALLBACK, WALL_GRID_CLASS, PHONE_WIDGET_FOLD } from "@/lib/layout-config";
+import { AnimationBudgetProvider } from "@/components/providers/AnimationBudgetProvider";
 import { useAuth, type AuthUser } from "@/hooks/useAuth";
 import PinModal from "@/components/auth/PinModal";
 import WallPinPad from "@/components/wall/WallPinPad";
@@ -155,6 +156,9 @@ export default function HomePage() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  // Audit 4.5: below-the-fold widgets start folded behind the More… sheet on
+  // stacked layouts; expanding is session-only (a reload folds them again).
+  const [widgetsExpanded, setWidgetsExpanded] = useState(false);
   // Live roster: db/index.ts dispatches consuela-members-updated whenever the
   // members cache refreshes (60s CacheRefresher pull, patchMemberLocal after a
   // profile save). Bump a version so the family strip re-reads the roster
@@ -179,6 +183,10 @@ export default function HomePage() {
       : HOME_GRID_FALLBACK;
   // The Ledger is parents-only — filtered out entirely (not a hollow cell).
   const homeWidgets = isParent ? visibleWidgets : visibleWidgets.filter((w) => w.id !== "financeLedger");
+  // Audit 4.5: stacked layouts (phone / tablet portrait, never the wall) keep
+  // only the ranked first fold rendered; the rest wait behind the More… sheet.
+  const foldActive = !wall && layoutMounted && orientation !== "desktop" && homeWidgets.length > PHONE_WIDGET_FOLD;
+  const renderedWidgets = foldActive && !widgetsExpanded ? homeWidgets.slice(0, PHONE_WIDGET_FOLD) : homeWidgets;
 
   const sessionSecondsRemaining = Math.ceil(sessionRemainingMs / 1000);
   const showSessionPill = isLoggedIn && sessionRemainingMs < 30 * 60 * 1000 - 60 * 1000;
@@ -495,6 +503,7 @@ export default function HomePage() {
 
   return (
       <AtmosphericProvider>
+        <AnimationBudgetProvider>
         <FogBackground />
         <PageShell style={{ backgroundColor: "transparent" }}>
           <EmergencyButton />
@@ -613,11 +622,13 @@ export default function HomePage() {
 
             <div className={gridClass}>
 
-            {homeWidgets.map((w, index) => {
+            {/* Audit 4.5: stacked layouts render `renderedWidgets` — the ranked
+                first fold only; the rest wait behind the More… sheet. */}
+            {renderedWidgets.map((w, index) => {
               const id = w.id;
               const span = layoutMounted
                 ? orientation === "tablet"
-                  ? tabletSpanFor(id, index, homeWidgets)
+                  ? tabletSpanFor(id, index, renderedWidgets)
                   : widgetSpanClass(id, orientation)
                 : (WIDGET_SPANS[id] ?? "lg:col-span-1");
               switch (id) {
@@ -873,7 +884,29 @@ export default function HomePage() {
 
           {/* Home More… sheet — keeps /grocery, /skill-tree, /time-capsule,
               /analytics, /money-mountain and /memory reachable (audit P1-5). */}
-          <MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} />
+          <MoreSheet
+            open={moreOpen}
+            onClose={() => setMoreOpen(false)}
+            extraItems={
+              foldActive
+                ? [
+                    {
+                      key: "widgets",
+                      title: widgetsExpanded ? "Show fewer widgets" : "Show all widgets",
+                      description: widgetsExpanded
+                        ? `Back to the first ${PHONE_WIDGET_FOLD}`
+                        : `${homeWidgets.length - PHONE_WIDGET_FOLD} more below the fold`,
+                      badge: widgetsExpanded ? undefined : String(homeWidgets.length - PHONE_WIDGET_FOLD),
+                      icon: <span className="text-xl" aria-hidden="true">🧩</span>,
+                      onSelect: () => {
+                        setWidgetsExpanded((v) => !v);
+                        setMoreOpen(false);
+                      },
+                    },
+                  ]
+                : undefined
+            }
+          />
 
           <MemberPickerModal
             open={pickerOpen}
@@ -969,6 +1002,7 @@ export default function HomePage() {
             {notification}
           </Toast>
         </PageShell>
+        </AnimationBudgetProvider>
       </AtmosphericProvider>
   );
 }

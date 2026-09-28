@@ -11,6 +11,7 @@ import Avatar from "@/components/ui/Avatar";
 import EmptyState from "@/components/ui/EmptyState";
 import RankArrow from "./RankArrow";
 import { getGapMessage, raceGap, resolveMemberName, prizeForRank } from "@/lib/task-utils";
+import { useAmbientAnimation } from "@/components/providers/AnimationBudgetProvider";
 import type { LeaderboardEntry, WeeklyPrize } from "@/types/tasks";
 
 // Prize copy is one compact line — long prize text from Settings gets a hard
@@ -82,6 +83,8 @@ function PodiumRow({
   previousRank: number | undefined;
   memberColor: string;
 }) {
+  // Audit 4.5: "your" row glow is ambient — claim a slot from Home's budget.
+  const motion = useAmbientAnimation();
   const bgClass =
     rank === 1
       ? "bg-[var(--color-accent-amber)]/15 border-[var(--color-accent-amber)]/25"
@@ -92,7 +95,7 @@ function PodiumRow({
   return (
     <div
       className={`flex items-center gap-3 rounded-2xl border px-3 py-2.5 ${bgClass} ${
-        isYou ? "widget-row-glow" : ""
+        isYou && motion ? "widget-row-glow" : ""
       }`}
       style={isYou ? { "--row-color": memberColor } as React.CSSProperties : undefined}
     >
@@ -145,10 +148,11 @@ function OtherRow({
   previousRank: number | undefined;
   memberColor: string;
 }) {
+  const motion = useAmbientAnimation();
   return (
     <div
       className={`flex items-center gap-3 rounded-2xl border border-white/5 px-3 py-2 ${
-        isYou ? "widget-row-glow" : ""
+        isYou && motion ? "widget-row-glow" : ""
       }`}
       style={isYou ? { "--row-color": memberColor } as React.CSSProperties : undefined}
     >
@@ -167,6 +171,7 @@ function OtherRow({
 }
 
 export default function HomeLeaderboardWidget({ className = "" }: { className?: string }) {
+  const motion = useAmbientAnimation();
   const { data, mounted } = useLeaderboardData();
   const { currentUser, isLoggedIn } = useAuth();
   const prizes = useWeeklyPrizes();
@@ -230,7 +235,7 @@ export default function HomeLeaderboardWidget({ className = "" }: { className?: 
       >
         {isLoggedIn && myEntry && (
           <div
-            className="mb-3 rounded-2xl border px-3 py-2 flex items-center gap-2.5 widget-row-glow"
+            className={`mb-3 rounded-2xl border px-3 py-2 flex items-center gap-2.5 ${motion ? "widget-row-glow" : ""}`}
             style={{
               borderColor: `${myEntry.color || "var(--color-accent-selected)"}40`,
               "--row-color": myEntry.color || "var(--color-accent-selected)",

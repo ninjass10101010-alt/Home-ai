@@ -138,9 +138,30 @@ export interface HomeLayoutConfig {
  * top row instead of splitting the pairings below.
  * Portrait keeps the familiar single-column mobile stack.
  */
+/**
+ * First-fold ranking (UI audit 4.5): what earns the top of a 390×844 phone.
+ * Home measured 3,859px (~9.9 screens) of default content, so the order now
+ * leads with what the family actually checks before leaving the house — the
+ * briefing, what's on today, the weather, and what's still pending — and the
+ * ambient/lower-value widgets sit last. FIRST_FOLD must stay a prefix of
+ * PHONE_DEFAULT_WIDGETS (contract: tests/unit/home-first-fold.test.ts).
+ */
+export const FIRST_FOLD_WIDGETS: WidgetId[] = ["morningBriefing", "todayEvents", "weather", "tasks"];
+
+/**
+ * How many widgets stay rendered on a stacked (phone/tablet-portrait) Home
+ * before the rest fold behind Home's More… sheet (audit 4.5). Desktop and the
+ * wall render everything — they have the columns and the height for it.
+ */
+export const PHONE_WIDGET_FOLD = 4;
+
 /** Phone (single-column) default order — the source order tablet derives from. */
 const PHONE_DEFAULT_WIDGETS: WidgetId[] = [
-  "morningBriefing", "weather", "aiQuickAsk", "consuelaSuggestions", "leaderboard", "todayEvents", "schedule", "currentMeal", "tasks", "homeSecurity", "homeClimate", "homeLights", "financeLedger",
+  // First fold, ranked: morningBriefing, todayEvents, weather, tasks.
+  "morningBriefing", "todayEvents", "weather", "tasks",
+  // Folded behind More…: ask/meal/schedule next, ambient and integration
+  // widgets after, finance (parents only) last.
+  "aiQuickAsk", "currentMeal", "schedule", "leaderboard", "consuelaSuggestions", "homeSecurity", "homeClimate", "homeLights", "financeLedger",
 ];
 
 export const DEFAULT_LAYOUT: HomeLayoutConfig = {

@@ -51,6 +51,31 @@ describe("MoreSheet", () => {
     expect(document.querySelector("[data-more-sheet]")).toBeNull();
   });
 
+  it("renders action rows (Home's widget fold, audit 4.5) as buttons after the routes", () => {
+    const onSelect = vi.fn();
+    render(
+      <MoreSheet
+        open
+        onClose={() => {}}
+        extraItems={[
+          { key: "widgets", title: "Show all widgets", badge: "9", icon: <span>🧩</span>, onSelect },
+        ]}
+      />,
+    );
+    const action = document.querySelector(
+      '[data-more-sheet] [data-more-action="Show all widgets"]',
+    ) as HTMLButtonElement | null;
+    expect(action).not.toBeNull();
+    expect(action!.tagName).toBe("BUTTON");
+    expect(action!.textContent).toContain("Show all widgets");
+    expect(action!.textContent).toContain("9");
+    act(() => {
+      action!.click();
+    });
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    expect(document.querySelectorAll('[data-more-sheet] a').length).toBeGreaterThan(0);
+  });
+
   it("gives a parent every formerly orphaned destination, with real copy", () => {
     render(<MoreSheet open onClose={() => {}} />);
     expect(hrefs()).toEqual([

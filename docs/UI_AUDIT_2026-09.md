@@ -340,7 +340,17 @@ Home's widget ranking/`More…` folding is still Phase 4.5.
   popup — RecipeBox's `hidden group-hover:grid` day-picker — because the wall is touch-only (its
   primary "＋ Add" button remains the working path). Decorative `pointer-events-none` hover glows
   stay hover-lit: they are not affordances. Contract: `tests/unit/wall-composition.test.ts` (4).
-- ⬜ **4.5 — Home ranking + `More…` folding** and an ambient-motion budget (finding 8).
+- ✅ **4.5 — Home ranking + `More…` folding + ambient-motion budget** (finding 8, shipped — Phase 4
+  complete): the phone default order now leads with a ranked first fold —
+  `FIRST_FOLD_WIDGETS = [morningBriefing, todayEvents, weather, tasks]` — and stacked layouts
+  (phone / tablet portrait, never the wall or desktop) render only `PHONE_WIDGET_FOLD = 4`
+  widgets; the rest fold behind Home's existing `More…` sheet via a "Show all widgets" action row
+  (`MoreMenuItem` gained an `onSelect` button variant; expanding is session-only). Ambient motion
+  runs through `AnimationBudgetProvider` (6 slots on `useAnimationBudget`) — the DayLine now-glow
+  and the leaderboard row glows claim a slot for their mount lifetime and render static when the
+  budget is spent; outside Home the hook returns true (no behavior change). Contracts:
+  `tests/unit/home-first-fold.test.ts` (5), `tests/unit/animation-budget.test.tsx` (3), plus an
+  action-row test in `more-sheet.test.tsx`.
 
 **Phase 5 — design-system convergence (P2).** Delete the four orphaned stylesheets
 (`styles/animations.css`, `styles/tokens.css`, `styles/materials.css`, `styles/components.css`
