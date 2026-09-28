@@ -4,6 +4,8 @@ import { createRoot } from "react-dom/client";
 import { act } from "react";
 import type { ReactElement } from "react";
 import { todayMondayISO, todayISO, pendingPointsFor } from "@/lib/task-utils";
+import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-operation-outbox";
+import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 import TasksPage from "@/app/tasks/page";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
@@ -49,17 +51,27 @@ function seed(tasks: any[]) {
 }
 
 function stubGuestFetches() {
-  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 401, json: async () => ({}) })));
+  vi.stubGlobal("fetch", vi.fn(async (input: any) => {
+    if (String(input) === "/api/tasks/sync") {
+      return { ok: false, status: 401, json: async () => ({}) };
+    }
+    return { ok: false, status: 401, json: async () => ({}) };
+  }));
 }
 
 // Every /api/members/verify call answers with the given (sanitized) member —
 // exactly the shape the real route returns via sanitizeMember.
+const claimStatus = { value: 200 };
+
 function stubVerifyMember(member: any) {
-  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     if (String(input).includes("/api/members/verify")) {
       return { ok: true, status: 200, json: async () => ({ member }) };
     }
-    return { ok: true, status: 200, json: async () => ({ snapshot: null }) };
+    if (String(input) === "/api/tasks/claim") {
+      return { ok: claimStatus.value < 400, status: claimStatus.value, json: async () => ({ success: true }) };
+    }
+    return { ok: true, status: 200, json: async () => ({ snapshot: null, reconciled: true }) };
   }));
 }
 
@@ -112,6 +124,9 @@ beforeEach(() => {
   vi.unstubAllGlobals();
   mockAuth.currentUser = null;
   mockAuth.isLoggedIn = false;
+  __resetTaskOutboxForTests();
+  __resetTaskCommandCredentialsForTests();
+  claimStatus.value = 200;
   vi.stubGlobal("matchMedia", vi.fn(() => ({
     matches: false,
     addEventListener: () => {}, removeEventListener: () => {},
@@ -120,8 +135,9 @@ beforeEach(() => {
 });
 
 describe("age-gated task completion", () => {
-  it("Caspian (5) taps an assigned chore: pending, NO PIN modal", async () => {
-    stubGuestFetches();
+  it("Caspian (5) taps an assigned chore: one PIN-free durable command, NO PIN modal", async () => {
+    stubVerifyMember({ name: "Caspian Garcia", fullName: "Caspian Garcia", role: "child" });
+    claimStatus.value = 503;
     mockAuth.currentUser = { name: "Caspian", role: "child", age: 5 };
     mockAuth.isLoggedIn = true;
     seed([FEED_CASP]);
@@ -133,26 +149,29 @@ describe("age-gated task completion", () => {
     await act(async () => { row.click(); });
     await settle();
 
-    // The tap lands as done-but-unpaid pending on the FULL-name ledger key.
+    // The tap is queued FIRST on the roster-resolved FULL-name ledger key,
+    // with NO credential at all — the session is the identity.
+    const [entry] = listTaskOutbox();
+    expect(entry).toMatchObject({ route: "/api/tasks/claim", action: "complete", payload: { taskId: 51 } });
+    expect((entry.payload as any).memberName).toBe("Caspian Garcia");
+    // No local row and no local ledger line — the acknowledgment writes both.
     const saved = storedTasks();
-    expect(saved[0].completed).toBe(true);
-    expect(saved[0].pendingApproval).toEqual({ byName: "Caspian Garcia", at: expect.any(String), points: 5 });
-    expect(pendingPointsFor("Caspian Garcia", saved)).toBe(5);
+    expect(saved[0].completed).toBe(false);
+    expect(saved[0].pendingApproval).toBeUndefined();
+    expect(pendingPointsFor("Caspian Garcia", saved)).toBe(0);
     expect(storedHistory()).toHaveLength(0);
     // No PIN step, no verify traffic — and the honest copy tells the truth.
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(document.querySelector('input[inputMode="numeric"]')).toBeNull();
     expect(verifyCalls()).not.toContain("/api/members/verify");
     expect(el.textContent || "").toContain("on the way"); // "on the way — a parent approves" toast
-    // The pending row lives in the (collapsed by default) completed section.
-    const toggle = [...el.querySelectorAll("button")].find((b) => (b.textContent || "").includes("completed")) as HTMLElement;
-    await act(async () => { toggle.click(); });
-    await settle();
-    expect(el.textContent || "").toContain("On the way");
+    // The queue is honestly reported instead of pretending the row landed.
+    expect(el.textContent || "").toMatch(/Sending 1 change|Still sending/);
   });
 
-  it("Jasmine (10) taps an assigned chore: PIN modal, and a verified PIN lands PENDING (no instant points)", async () => {
+  it("Jasmine (10) taps an assigned chore: PIN modal, and the verified PIN is queued ephemerally (no instant points)", async () => {
     stubVerifyMember({ name: "Jasmine Rose", fullName: "Jasmine Rose", role: "child" });
+    claimStatus.value = 503;
     mockAuth.currentUser = { name: "Jasmine", role: "child", age: 10 };
     mockAuth.isLoggedIn = true;
     seed([FEED_JASM]);
@@ -171,13 +190,20 @@ describe("age-gated task completion", () => {
     await typeAndSubmit();
     expect(verifyCalls()).toContain("/api/members/verify");
 
-    // Verified child: the completion WAITS for approval, points never move.
+    // Verified child: the completion is QUEUED and points never move locally.
+    const [entry] = listTaskOutbox();
+    expect(entry).toMatchObject({ route: "/api/tasks/claim", action: "complete", payload: { taskId: 52 } });
     const saved = storedTasks();
-    expect(saved[0].completed).toBe(true);
-    expect(saved[0].pendingApproval).toEqual({ byName: "Jasmine Rose", at: expect.any(String), points: 5 });
+    expect(saved[0].completed).toBe(false);
+    expect(saved[0].pendingApproval).toBeUndefined();
     expect(storedHistory()).toHaveLength(0);
     const week = JSON.parse(localStorage.getItem("consuela-week-data") || "{}");
     expect(week.points["Jasmine Rose"]).toBeUndefined();
+    // The PIN lives only in the ephemeral registry — never in localStorage.
+    const dump = Object.keys(localStorage)
+      .map((key) => `${key}=${localStorage.getItem(key) ?? ""}`)
+      .join("\n");
+    expect(dump).not.toContain("1234");
     // Honest pending copy, never the instant-earn copy.
     expect(document.body.textContent || "").toContain("on the way");
     expect(document.body.textContent || "").not.toContain("completed Feed the dog");
@@ -187,8 +213,9 @@ describe("age-gated task completion", () => {
     await settle(1800);
   });
 
-  it("parent PIN-complete still earns instantly (regression guard)", async () => {
+  it("parent PIN-complete queues one command and moves no local point line", async () => {
     stubVerifyMember({ name: "Rebecca (Mom)", fullName: "Rebecca (Mom)", role: "parent" });
+    claimStatus.value = 503;
     mockAuth.currentUser = { name: "Rebecca (Mom)", role: "parent" };
     mockAuth.isLoggedIn = true;
     seed([MOW]);
@@ -203,16 +230,16 @@ describe("age-gated task completion", () => {
 
     await typeAndSubmit();
 
-    // Adults are byte-identical: instant earn tx, no pending record.
+    // Adults are the SAME command as a kid's — only the PIN differs. The
+    // earn line is the server's, and arrives with the acknowledgment.
+    const [entry] = listTaskOutbox();
+    expect(entry).toMatchObject({ route: "/api/tasks/claim", action: "complete", payload: { taskId: 53 } });
     const saved = storedTasks();
-    expect(saved[0].completed).toBe(true);
+    expect(saved[0].completed).toBe(false);
     expect(saved[0].pendingApproval).toBeUndefined();
-    const history = storedHistory();
-    expect(history).toHaveLength(1);
-    expect(history[0].type).toBe("earn");
-    expect(history[0].member).toBe("Rebecca (Mom)");
+    expect(storedHistory()).toHaveLength(0);
     const week = JSON.parse(localStorage.getItem("consuela-week-data") || "{}");
-    expect(week.points["Rebecca (Mom)"]).toBe(5);
+    expect(week.points["Rebecca (Mom)"]).toBeUndefined();
     expect(document.body.textContent || "").toContain("completed Mow lawn! +5pts");
     // Flush the success-copy auto-close (1500ms + exit) — same portal-
     // teardown hygiene as the child test.

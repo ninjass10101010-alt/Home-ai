@@ -55,3 +55,6 @@ DEPLOY_NAS_LOCAL.md
 # local backups + logs (never commit)
 /backups/
 *.log
+
+# quarantined local ledger exports (family data — never commit)
+/local-quarantine/

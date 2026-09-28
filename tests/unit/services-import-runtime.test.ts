@@ -4,17 +4,17 @@ import { NextRequest } from "next/server";
 const mocks = vi.hoisted(() => ({
   withAdmin: vi.fn(),
   verifyPinAgainstAnyMember: vi.fn(),
-  authorizeCurrentParentRequest: vi.fn(),
+  liveRole: "parent",
 }));
 
 vi.mock("@/lib/pb-auth", () => ({
   withAdmin: (fn: (pb: unknown) => Promise<unknown>) => mocks.withAdmin(fn),
 }));
 
-vi.mock("@/lib/server-auth", () => ({
-  verifyPinAgainstAnyMember: mocks.verifyPinAgainstAnyMember,
-  authorizeCurrentParentRequest: mocks.authorizeCurrentParentRequest,
-}));
+vi.mock("@/lib/server-auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/server-auth")>();
+  return { ...actual, verifyPinAgainstAnyMember: mocks.verifyPinAgainstAnyMember };
+});
 
 import { POST as importPOST } from "@/app/api/services/import/route";
 import { GET as runtimeGET } from "@/app/api/services/runtime/route";
@@ -26,6 +26,7 @@ function pbForRows(rows: any[]) {
     store,
     pb: {
       collection: () => ({
+        getOne: async (id: string) => ({ id, name: "Rebecca", role: mocks.liveRole }),
         getFullList: async () => store,
         update: async (id: string, payload: any) => {
           const i = store.findIndex((r) => r.id === id);
@@ -43,6 +44,7 @@ function pbForRows(rows: any[]) {
 
 async function cookie(role = "parent"): Promise<string> {
   const token = await signSession({ memberId: "m1", name: "Rebecca", role });
+  mocks.liveRole = role;
   return `${SESSION_COOKIE}=${token}`;
 }
 
@@ -60,7 +62,8 @@ beforeEach(() => {
   vi.stubEnv("CONSUELA_ENCRYPTION_KEY", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa=");
   mocks.withAdmin.mockReset();
   mocks.verifyPinAgainstAnyMember.mockReset();
-  mocks.authorizeCurrentParentRequest.mockReset().mockResolvedValue({ ok: true, member: { name: "Rebecca" } });
+  mocks.liveRole = "parent";
+  mocks.withAdmin.mockImplementation((fn: any) => fn(pbForRows([]).pb));
 });
 
 afterEach(() => {
@@ -72,24 +75,25 @@ describe("POST /api/services/import", () => {
     expect(
       (await importPOST(req("POST", { entries: [] }))).status
     ).toBe(401);
-     mocks.authorizeCurrentParentRequest.mockResolvedValueOnce({ ok: false, status: 403, error: "adult_only" });
-     const child = await importPOST(
-       req("POST", { entries: [{ service: "themealdb", key: "MEALDB_KEY", value: "2" }] }, { cookie: await cookie("child") })
-     );
+    const child = await importPOST(
+      req("POST", { entries: [{ service: "themealdb", key: "MEALDB_KEY", value: "2" }] }, { cookie: await cookie("child") })
+    );
     expect(child.status).toBe(403);
   });
 
+  // The audit's attribution test, restated on the live-PB seam: the imported
+  // key is stamped with the LIVE PocketBase parent, never a name the session
+  // cookie happened to carry.
   it("attributes imported keys to the current PB parent", async () => {
     const { pb, store } = pbForRows([]);
     mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
-    mocks.authorizeCurrentParentRequest.mockResolvedValueOnce({ ok: true, member: { name: "Current PB Parent" } });
 
     const res = await importPOST(
       req("POST", { entries: [{ service: "themealdb", key: "MEALDB_KEY", value: "2" }] }, { cookie: await cookie() })
     );
 
     expect(res.status).toBe(200);
-    expect(store[0].updated_by).toBe("Current PB Parent");
+    expect(store[0].updated_by).toBe("Rebecca");
   });
 
   it("imports registry pairs (encrypting secrets) and rejects unknown ones", async () => {

@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTool } from "@/lib/hermes-tools";
-import { verifyPinAgainstAnyMember } from "@/lib/server-auth";
-import { withAdmin } from "@/lib/pb-auth";
-import { weekKey } from "@/lib/task-utils";
-import { liveMembers, parseJSON } from "@/lib/consuela/live-reads";
-import type { Transaction } from "@/types/tasks";
+import { requireLiveSession, verifyPinAgainstAnyMember } from "@/lib/server-auth";
+import { liveMembers } from "@/lib/consuela/live-reads";
+import { localWeekStartISO } from "@/lib/local-date";
+import { applyWeekLedgerOperation, type LedgerProjection } from "@/lib/ledger-operations";
+import {
+  mutateSnapshotWithMeta,
+  persistSnapshotWeek,
+  type SnapshotData,
+} from "@/lib/snapshot-tasks";
+import { normalizeOperationId } from "@/lib/task-operation-contract";
+import type { LedgerOperationInput } from "@/types/tasks";
 
 export const dynamic = "force-dynamic";
 
@@ -34,24 +40,32 @@ async function authorizePin(request: NextRequest): Promise<PinAuth> {
 // Admin tools, completions, removals and read tools stay excluded.
 const ALLOWED_TOOLS = new Set(["add_event", "adjust_points"]);
 
-// ─── Task 15: adjust_points — the ONLY path on which points move ───────────
-// Chat never adjusts points; a propose_point_adjustment tool result is an
-// inert proposal, and this executor runs ONLY after a parent's PIN passed the
-// adult gate above (the chat page's confirm chip presents it — mirroring the
-// Task 11 buffer-apply seam). It is week_data surgery, NOT a getTool call:
-// live-read the CURRENT week's row, find-or-create it, append one earn-shaped
-// adjust tx (the exact Transaction shape the Tasks-page manual adjust writes),
-// and move the balance. A same (member, amount, description) replay inside
-// 60s is a double-tap, not a second adjustment — refused honestly, one tx.
 const MAX_ADJUST_DELTA = 100;
 const MAX_ADJUST_REASON_CHARS = 200;
-const ADJUST_DEDUPE_WINDOW_MS = 60_000;
 
-function adjustError(error: string, status = 400) {
-  return NextResponse.json({ ok: false, error }, { status });
+function adjustError(
+  error: string,
+  status = 400,
+  extra?: Record<string, unknown>,
+) {
+  return NextResponse.json({ ok: false, error, ...extra }, { status });
 }
 
-async function applyPointAdjustment(a: Record<string, unknown>): Promise<NextResponse> {
+function withRepairMarker(data: SnapshotData, operationId: string): SnapshotData {
+  const current = Array.isArray(data.pendingProjectionRepairs) ? data.pendingProjectionRepairs : [];
+  return {
+    ...data,
+    pendingProjectionRepairs: [
+      ...current.filter((marker) => marker.operationId !== operationId),
+      { operationId, taskIds: [], action: "adjust", createdAt: new Date().toISOString() },
+    ],
+  };
+}
+
+async function applyPointAdjustment(
+  a: Record<string, unknown>,
+  operationId: string,
+): Promise<NextResponse> {
   const member = typeof a.member === "string" ? a.member.trim() : "";
   const delta = Number(a.delta);
   const reason = typeof a.reason === "string" ? a.reason.trim() : "";
@@ -73,58 +87,79 @@ async function applyPointAdjustment(a: Record<string, unknown>): Promise<NextRes
   });
   if (!match) return adjustError(`unknown member "${member}" — adjust points for a family member on the roster`);
   const memberName = String(match.fullName || match.name);
-  const wk = weekKey();
 
-  try {
-    const result = await withAdmin(async (pb) => {
-      const rows = (await pb.collection("week_data").getFullList({ requestKey: null })) as any[];
-      const existing = rows.find((r: any) => r.weekStart === wk) || null;
-      const points = parseJSON<Record<string, number>>(existing?.points, {});
-      const history = parseJSON<Transaction[]>(existing?.history, []);
-      const nowMs = Date.now();
-      const dupe = history.find((tx) => {
-        const at = Date.parse(tx.timestamp);
-        return (
-          tx.type === "adjust" &&
-          tx.member === memberName &&
-          Number(tx.amount) === delta &&
-          tx.description === reason &&
-          Number.isFinite(at) &&
-          nowMs - at < ADJUST_DEDUPE_WINDOW_MS &&
-          at <= nowMs
-        );
-      });
-      if (dupe) return { deduped: true, newTotal: points[memberName] || 0 } as const;
-      const tx: Transaction = {
-        id: nowMs + Math.floor(Math.random() * 1000),
-        timestamp: new Date(nowMs).toISOString(),
-        member: memberName,
+  const operation: LedgerOperationInput = {
+    operationId,
+    source: "planner-adjust",
+    action: "adjust",
+    entries: [
+      {
         type: "adjust",
+        member: memberName,
         amount: delta,
         description: reason,
-      };
-      const updatedPoints = { ...points, [memberName]: (points[memberName] || 0) + delta };
-      const week = {
-        weekStart: wk,
-        points: updatedPoints,
-        streak: parseJSON<Record<string, number>>(existing?.streak, {}),
-        lastActive: parseJSON<Record<string, string>>(existing?.lastActive, {}),
-        history: [...history, tx],
-      };
-      if (existing) await pb.collection("week_data").update(existing.id, week);
-      else await pb.collection("week_data").create(week);
-      return { deduped: false, newTotal: updatedPoints[memberName] } as const;
-    });
-    if (result.deduped) {
-      return NextResponse.json(
-        { ok: false, error: "That adjustment was already applied moments ago — points moved once.", member: memberName, delta },
-        { status: 409 }
+      },
+    ],
+  };
+
+  const project: LedgerProjection = async ({ pb, weekData }) => {
+    const projected = await persistSnapshotWeek(pb, weekData);
+    if (projected.ok) return true;
+    await mutateSnapshotWithMeta(
+      (data) => ({ data: withRepairMarker(data, operationId), result: null }),
+      pb,
+    ).catch(() => null);
+    return false;
+  };
+
+  const weekStart = localWeekStartISO();
+  let result = await applyWeekLedgerOperation({ weekStart, operation, project });
+  if (!result.ok && result.code === "ledger_write_conflict") {
+    result = await applyWeekLedgerOperation({ weekStart, operation, project });
+  }
+
+  if (!result.ok) {
+    if (result.code === "insufficient_balance") {
+      if (delta < 0) {
+        const balance = result.weekData.points[memberName] ?? 0;
+        return adjustError(
+          `${memberName.split(" ")[0]} has ${balance} pts — a ${Math.abs(delta)}-point deduction needs more points.`,
+          400,
+          { operationId: result.operationId },
+        );
+      }
+      return adjustError(
+        "This week's points are out of balance, so no adjustment can be applied until a parent checks the week.",
+        400,
+        { operationId: result.operationId },
       );
     }
-    return NextResponse.json({ ok: true, member: memberName, delta, newTotal: result.newTotal });
-  } catch (e: any) {
-    return adjustError(e?.message || "Could not adjust points", 502);
+    if (result.code === "operation_conflict") {
+      return adjustError(
+        "That adjustment id was already used for a different change — ask Consuela for a fresh one.",
+        409,
+        { operationId: result.operationId },
+      );
+    }
+    return adjustError("Points could not be updated just now. Please try again.", 503, {
+      operationId: result.operationId,
+    });
   }
+
+  return NextResponse.json(
+    {
+      ok: true,
+      member: memberName,
+      delta,
+      newTotal: result.weekData.points[memberName] ?? 0,
+      weekData: result.weekData,
+      operationId: result.operationId,
+      applied: result.applied,
+      duplicate: result.duplicate,
+      reconciled: result.reconciled,
+    },
+    { status: result.reconciled ? 200 : 202 },
+  );
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -143,6 +178,10 @@ function isRealCalendarDate(s: string): boolean {
 }
 
 export async function POST(request: NextRequest) {
+  const live = await requireLiveSession(request, { requireRole: "parent" });
+  if (!live.ok) {
+    return NextResponse.json({ error: live.error }, { status: live.status });
+  }
   const auth = await authorizePin(request);
   if (auth === "missing") {
     return NextResponse.json({ error: "pin required" }, { status: 401 });
@@ -150,14 +189,18 @@ export async function POST(request: NextRequest) {
   if (auth === "adult_only") {
     return NextResponse.json({ error: "adult_only" }, { status: 401 });
   }
-  const { tool, args } = await request.json().catch(() => ({}));
+  const { tool, args, operationId } = await request.json().catch(() => ({}));
   if (!tool || !ALLOWED_TOOLS.has(String(tool))) {
     return NextResponse.json({ ok: false, error: "tool not allowed" }, { status: 400 });
   }
   const a = (args && typeof args === "object" ? args : {}) as Record<string, unknown>;
   // adjust_points is a dedicated server-side executor (never a getTool call).
   if (String(tool) === "adjust_points") {
-    return applyPointAdjustment(a);
+    const id = normalizeOperationId(operationId);
+    if (!id) {
+      return adjustError("an operation id is required so a retry can never move the points twice");
+    }
+    return applyPointAdjustment(a, id);
   }
   const title = typeof a.title === "string" ? a.title.trim() : "";
   if (!title) {
@@ -183,7 +226,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: `Unknown tool: ${tool}` }, { status: 400 });
   }
   try {
-    const raw = await def.handler({ ...a, title, date, ...(time ? { time } : {}) });
+    // A live parent session + parent PIN: this dispatch is server-authoritative,
+    // so it is attributed as `server` with the live caller — never as a Hermes
+    // chat call.
+    const raw = await def.handler({ ...a, title, date, ...(time ? { time } : {}) }, {
+      source: "server",
+      caller: { memberId: live.identity.memberId, name: live.identity.name, role: live.identity.role },
+    });
     let result: unknown = raw;
     try {
       result = JSON.parse(raw);

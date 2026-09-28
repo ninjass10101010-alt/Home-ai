@@ -2,7 +2,7 @@
 "use client";
 
 import Avatar from "@/components/ui/Avatar";
-import { loadHallOfFame } from "@/lib/task-utils";
+import { loadHallOfFame, loadHallOfFameMerged } from "@/lib/task-utils";
 import type { HallOfFameEntry } from "@/types/tasks";
 import { useState, useEffect } from "react";
 
@@ -16,12 +16,18 @@ function weekLabel(weekStart: string): string {
 }
 
 export default function HallOfFame() {
-  const [hall, setHall] = useState<HallOfFameEntry[]>([]);
+  const [hall, setHall] = useState<HallOfFameEntry[]>(() => loadHallOfFame());
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setHall(loadHallOfFame());
+    let active = true;
+    void loadHallOfFameMerged().then((rows) => {
+      if (active) setHall(rows);
+    });
     setMounted(true);
+    return () => {
+      active = false;
+    };
   }, []);
 
   if (!mounted || hall.length === 0) return null;

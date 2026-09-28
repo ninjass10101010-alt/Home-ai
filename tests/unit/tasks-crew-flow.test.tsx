@@ -41,13 +41,20 @@ function seed(tasks: any[]) {
 }
 
 const CLAIM_CALLS: any[] = [];
-function stubVerify(member: any) {
+function stubVerify(
+  member: any,
+  claimResponse?: { status?: number; body?: Record<string, unknown> },
+) {
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.includes("/api/members/verify")) return { ok: true, status: 200, json: async () => ({ member }) };
     if (url.includes("/api/tasks/claim")) {
       try { CLAIM_CALLS.push(JSON.parse(String(init?.body || "{}"))); } catch {}
-      return { ok: true, status: 200, json: async () => ({ success: true }) };
+      return {
+        ok: true,
+        status: claimResponse?.status ?? 200,
+        json: async () => claimResponse?.body ?? { success: true },
+      };
     }
     return { ok: true, status: 200, json: async () => ({ snapshot: null }) };
   }));
@@ -132,6 +139,42 @@ describe("Crew tasks — open board + join/check-in", () => {
 
     expect(CLAIM_CALLS.length).toBe(1);
     expect(CLAIM_CALLS[0]).toMatchObject({ action: "crew-join", taskId: 40, memberName: "Caspian Garcia" });
+    await settle(1800);
+  });
+
+  it("accepts a 202 reconciled crew projection without treating it as a claim failure", async () => {
+    mockAuth.currentUser = { name: "Caspian Garcia", role: "child", age: 5 };
+    mockAuth.isLoggedIn = true;
+    seed([CREW]);
+    stubVerify(
+      { name: "Caspian Garcia", fullName: "Caspian Garcia", role: "child", emoji: "🧒" },
+      {
+        status: 202,
+        body: {
+          success: true,
+          operationId: "op-crew-projection",
+          action: "crew-join",
+          task: {
+            ...CREW,
+            crew: {
+              members: [{ name: "Caspian Garcia", emoji: "🧒", joinedAt: "2026-09-24T10:00:00.000Z" }],
+            },
+          },
+          revision: { revision: "2", updatedAt: "2026-09-24T10:00:00.000Z" },
+          reconciled: false,
+        },
+      },
+    );
+    const el = await renderAsync(<TasksPage />);
+    await settle();
+    const joinBtn = [...el.querySelectorAll("button")].find((b) => (b.getAttribute("aria-label") || "").includes("Join crew for"));
+    expect(joinBtn).toBeTruthy();
+    await act(async () => { (joinBtn as HTMLElement).click(); });
+    await settle();
+    await submitPin();
+
+    expect(CLAIM_CALLS[0]).toMatchObject({ action: "crew-join", taskId: 40 });
+    expect(document.body.textContent || "").not.toContain("Couldn't reach");
     await settle(1800);
   });
 

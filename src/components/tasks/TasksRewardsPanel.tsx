@@ -71,7 +71,7 @@ export default function TasksRewardsPanel({
                     <div className="text-sm font-semibold text-text-primary">{reward.name}</div>
                     <div className="text-xs text-text-muted">{reward.cost} pts {reward.cost > 100 && <span className="ml-1" style={{ color: "var(--color-accent-amber)" }}>· needs parent</span>}</div>
                   </div>
-                  <SoftButton size="sm" variant="secondary" onClick={() => onRedeem(reward)}>Redeem</SoftButton>
+                  <SoftButton size="sm" variant="secondary" aria-label={`Redeem ${reward.name}`} onClick={() => onRedeem(reward)}>Redeem</SoftButton>
                   <IconButton size="sm" variant="ghost" aria-label="Edit reward" className="hit-44" onClick={() => onEdit(reward)}>✎</IconButton>
                 </div>
               </Surface>

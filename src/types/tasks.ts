@@ -52,6 +52,34 @@ export interface PendingApproval {
   crew?: string[];
 }
 
+export type LedgerOperationSource =
+  | "assigned-complete"
+  | "open-claim"
+  | "late-snatch"
+  | "task-approval"
+  | "reward-redeem"
+  | "planner-adjust"
+  | "task-undo"
+  | "task-penalty"
+  | "manual-adjust"
+  | "legacy-migration";
+
+export type LedgerOperationAction =
+  | "approve"
+  | "approve-all"
+  | "send-back"
+  | "penalty"
+  | "adjust";
+
+export interface LedgerOperationMeta {
+  operationId: string;
+  source: LedgerOperationSource;
+  fingerprint?: string;
+  actorId?: string;
+  action?: LedgerOperationAction;
+  taskIds?: number[];
+}
+
 export interface Transaction {
   id: number;
   timestamp: string;
@@ -61,6 +89,26 @@ export interface Transaction {
   description: string;
   taskId?: number;
   appliedBy?: string;
+  meta?: LedgerOperationMeta;
+}
+
+export interface LedgerEntryInput {
+  type: Transaction["type"];
+  member: string;
+  amount: number;
+  description: string;
+  taskId?: number;
+  appliedBy?: string;
+}
+
+export interface LedgerOperationInput {
+  operationId: string;
+  source: LedgerOperationSource;
+  fingerprint?: string;
+  actorId?: string;
+  action?: LedgerOperationAction;
+  taskIds?: number[];
+  entries: LedgerEntryInput[];
 }
 
 export interface WeekData {
@@ -114,11 +162,12 @@ export interface LeaderboardEntry {
   level: number;
   levelTitle: string;
   levelEmoji: string;
+  levelKnown: boolean;
   progressToNext: number;
   badges: string[];
   completedInWeek: number;
-  allTimePoints: number;
-  allTimeCompletions: number;
+  allTimePoints: number | null;
+  allTimeCompletions: number | null;
 }
 
 export interface Reward {

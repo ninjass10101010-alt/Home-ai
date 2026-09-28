@@ -1,34 +1,40 @@
 "use client";
 
-import { getLevel, LEVELS } from "@/types/tasks";
+import { LEVELS } from "@/types/tasks";
 import { EmojiText } from "@/components/ui/EmojiText";
+import { LEVEL_UNAVAILABLE_LABEL, resolveAllTimeLevel } from "./level";
 
 interface TreasurePathProps {
-  allTimePoints: number;
+  allTimePoints: number | null;
   memberEmoji: string;
   memberColor: string;
 }
 
 export default function TreasurePath({ allTimePoints, memberEmoji, memberColor }: TreasurePathProps) {
-  const current = getLevel(allTimePoints);
+  const current = resolveAllTimeLevel(allTimePoints);
+  const known = allTimePoints !== null;
 
   return (
     <div className="relative">
       <div className="flex items-center justify-between mb-2">
         <p className="text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Level Journey</p>
-        <span className="text-xs text-text-muted">{current.title} → {current.next ? LEVELS[current.level]?.title : "MAX"}</span>
+        <span className="text-xs text-text-muted">
+          {known ? `${current.title} → ${current.next ? LEVELS[current.level]?.title : "MAX"}` : LEVEL_UNAVAILABLE_LABEL}
+        </span>
       </div>
 
       <div className="relative">
         <div className="absolute top-1/2 left-0 right-0 h-1 rounded-full bg-white/5" />
-        <div
-          className="absolute top-1/2 left-0 h-1 rounded-full bg-gradient-to-r from-[var(--color-accent-selected)]/40 to-[var(--color-accent-selected)]"
-          style={{ width: `${current.progress}%`, transform: "translateY(-50%)" }}
-        />
+        {known && (
+          <div
+            className="absolute top-1/2 left-0 h-1 rounded-full bg-gradient-to-r from-[var(--color-accent-selected)]/40 to-[var(--color-accent-selected)]"
+            style={{ width: `${current.progress}%`, transform: "translateY(-50%)" }}
+          />
+        )}
         <div className="relative flex justify-between items-center py-2">
           {LEVELS.map((level, i) => {
-            const isReached = allTimePoints >= level.points;
-            const isCurrent = i + 1 === current.level;
+            const isReached = known && allTimePoints >= level.points;
+            const isCurrent = known && i + 1 === current.level;
             return (
               <div key={level.points} className="flex flex-col items-center gap-1">
                 <div

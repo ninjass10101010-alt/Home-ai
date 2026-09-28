@@ -13,10 +13,15 @@ vi.mock("@/db", () => ({
 }));
 
 import {
+  ARCHIVE_KEY,
+  TASKS_STORAGE_KEY,
+  WEEK_DATA_KEY,
   calculateRealStreak,
   emptyWeekData,
   getDaysUntilWeekReset,
   getThisWeeksCompletedDates,
+  loadTasks,
+  loadWeekData,
   regenerateRecurringTasks,
   todayISO,
   todayMondayISO,
@@ -177,27 +182,6 @@ describe("regenerateRecurringTasks", () => {
     expect(clone.recurring).toBe("Daily");
   });
 
-  it("is a no-op when run twice in the same week (regen tracker)", () => {
-    const prevMonday = addDays(todayMondayISO(), -7);
-    const tasks = [
-      makeTask({
-        id: 1,
-        recurring: "Weekly",
-        completed: true,
-        completedInWeek: prevMonday,
-      }),
-    ];
-
-    const first = regenerateRecurringTasks(tasks);
-    expect(first).toHaveLength(1);
-    expect(first[0].completed).toBe(false);
-
-    // Same week, fresh load containing a completed prior-week source again:
-    // the tracker blocks a second regen pass.
-    const second = regenerateRecurringTasks(tasks);
-    expect(second).toEqual(tasks);
-  });
-
   it("does not clone a task completed THIS week", () => {
     const tasks = [
       makeTask({
@@ -271,6 +255,35 @@ describe("regenerateRecurringTasks", () => {
     expect(clone.assignee).toBe("All");
     expect(clone.assigneeEmoji).toBe("🤝");
     expect(clone.completed).toBe(false);
+  });
+});
+
+describe("local task caches", () => {
+  it("loads prior week data without archiving or resetting local storage", () => {
+    const previous = {
+      weekStart: addDays(todayMondayISO(), -7),
+      points: { Alex: 5 },
+      streak: {},
+      lastActive: {},
+      history: [],
+    };
+    localStorage.setItem(WEEK_DATA_KEY, JSON.stringify(previous));
+
+    expect(loadWeekData()).toEqual(previous);
+    expect(localStorage.getItem(ARCHIVE_KEY)).toBeNull();
+    expect(JSON.parse(localStorage.getItem(WEEK_DATA_KEY)!)).toEqual(previous);
+  });
+
+  it("loads recurring tasks without regeneration or tracker writes", () => {
+    const previous = makeTask({
+      recurring: "Weekly",
+      completed: true,
+      completedInWeek: addDays(todayMondayISO(), -7),
+    });
+    localStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify([previous]));
+
+    expect(loadTasks()).toEqual([previous]);
+    expect(localStorage.getItem("consuela-regen-week")).toBeNull();
   });
 });
 

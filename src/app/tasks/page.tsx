@@ -30,33 +30,32 @@ import { db } from "@/db";
 import { useAuth } from "@/hooks/useAuth";
 import { useWallMode } from "@/hooks/useWallMode";
 import { useWallConfirm } from "@/hooks/useWallConfirm";
-import type { Task, LeaderboardEntry, Reward, Penalty, WeekData, CrewMember } from "@/types/tasks";
-import { getLevel, BADGES } from "@/types/tasks";
+import type { Task, LeaderboardEntry, Reward, Penalty, WeekData, HallOfFameEntry } from "@/types/tasks";
 import {
   TASKS_STORAGE_KEY, REWARDS_KEY, PENALTIES_KEY,
-  todayMondayISO, weekKey, emptyWeekData,
-  loadWeekData, saveWeekData, addTransaction,
-  calculateRealStreak, regenerateRecurringTasks,
+  weekKey, emptyWeekData,
+  loadWeekData, saveWeekData,
+  calculateRealStreak,
   getThisWeeksCompletedDates, getThisWeeksCompletedTasks,
-  loadTasks, saveTasks, loadRewards, saveRewards,
-  loadPenalties, savePenalties,
-  getArchivedWeeks, getMemberAllTimePoints, getMemberAllTimeCompletions,
-  getPreviousWeekRanks, loadHallOfFame,
-  syncAllTasksToPB, syncWeekDataToPB,
-  archiveAndResetWeek, archiveWeekWinner, saveCurrentWeekRanksForNextWeek,
-  archiveWeekIfMissing, loadWeeklyPrizes, saveWeeklyPrizes,
-  readWeeklyPrizesStamp, writeWeeklyPrizesStamp,
+  loadTasks, saveTasks,
+  saveRewards, savePenalties,
+  getPreviousWeekRanks, loadHallOfFame, loadHallOfFameMerged,
+  loadPreviousWeekRanksMerged,
+  loadWeeklyPrizes,
+  applyTaskConfigSnapshotToStores,
   pickDefaultClaimMember, isSnatchable, isPendingApproval,
   completesWithoutPin, completesWithPendingApproval,
-  tapCompletePending, sendBackPendingCompletion, approvePendingCompletion, resolveMemberName,
-  mergeTasksSnapshot, getDaysUntilWeekReset, adoptServerWeekData,
-  loadDeletedTaskIds, saveDeletedTaskIds,
+  resolveMemberName,
+  mergeTasksSnapshot, getDaysUntilWeekReset,
+  saveDeletedTaskIds,
   isCrewTask, crewMembers, crewMemberCount, crewFull, crewHasMember,
-  crewMemberCheckedIn, crewCheckinProgress, crewAllCheckedIn, canJoinCrew,
+  crewMemberCheckedIn, crewCheckinProgress,
   normalizeSpeedBonus,
 } from "@/lib/task-utils";
+import { useTaskCommandQueue } from "@/hooks/useTaskCommandQueue";
+import { writeTaskConfig } from "@/lib/task-config-client";
+import type { TaskConfigCommand } from "@/lib/task-config";
 import {
-  readRewardsStamp, touchRewardsStamp, writeRewardsStamp,
   verifyPinRemote, unreachableCopy,
 } from "@/modes/kid/kid-store";
 import Podium from "@/components/leaderboard/Podium";
@@ -76,6 +75,11 @@ import TrophyCase from "@/components/leaderboard/TrophyCase";
 import ShareCard from "@/components/leaderboard/ShareCard";
 import WeeklyWinModal from "@/components/leaderboard/WeeklyWinModal";
 import ConfettiBurst from "@/components/ui/ConfettiBurst";
+import TaskLedgerQuarantineNotice from "@/components/tasks/TaskLedgerQuarantineNotice";
+import AllTimeValue from "@/components/leaderboard/AllTimeValue";
+import { earnedBadgeEmojis, resolveAllTimeLevel } from "@/components/leaderboard/level";
+import { useAllTimeTotals } from "@/hooks/useAllTimeTotals";
+import { familyAllTimePoints } from "@/lib/all-time-totals";
 
 function isoOffset(days: number): string {
   const d = new Date(Date.now() + days * 86400000);
@@ -222,22 +226,6 @@ function migrateAssigneeNames(tasks: Task[], members: any[]): Task[] {
   });
 }
 
-// Competition-ranked point entries for a week (ties share a rank) — feeds the
-// Hall of Fame winner record and the previous-week rank arrows.
-function rankedEntriesFromWeek(week: WeekData, emojis: Record<string, string>): { name: string; emoji: string; points: number; rank: number }[] {
-  const entries = Object.entries(week.points || {})
-    .map(([name, points]) => ({ name, emoji: emojis[name] || "👤", points: points || 0, rank: 0 }))
-    .filter((e) => e.points > 0)
-    .sort((a, b) => b.points - a.points);
-  let lastPoints = Number.NaN;
-  let lastRank = 0;
-  entries.forEach((e, i) => {
-    if (e.points !== lastPoints) { lastRank = i + 1; lastPoints = e.points; }
-    e.rank = lastRank;
-  });
-  return entries;
-}
-
 function loadFromStorage<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
   try {
@@ -287,6 +275,7 @@ export default function TasksPage() {
     return () => window.removeEventListener("consuela-data-refreshed", onDataRefreshed);
   }, []);
   const weeklyPrizes = useMemo(() => loadWeeklyPrizes(), [prizesVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+  const allTime = useAllTimeTotals();
   const { currentUser, isLoggedIn } = useAuth();
   const router = useRouter();
   // P0 gate: creating, editing, and deleting family chores is parent-only.
@@ -351,38 +340,27 @@ export default function TasksPage() {
     }
   });
 
-  useEffect(() => { saveTasks(tasks); }, [tasks]);
-  useEffect(() => { saveWeekData(weekData); }, [weekData]);
-
-  const [ranksVersion, setRanksVersion] = useState(0);
+  const [hallOfFame, setHallOfFame] = useState<HallOfFameEntry[]>(() => loadHallOfFame());
+  const [previousRanks, setPreviousRanks] = useState<Record<string, number>>(() => getPreviousWeekRanks());
 
   useEffect(() => {
     if (!mounted) return;
-    const interval = setInterval(() => {
-      const current = weekKey();
-      if (current !== weekData.weekStart) {
-        // Record the finished week BEFORE resetting: archive it, enshrine the
-        // top 3 with their weekly prizes in the Hall of Fame, and keep the
-        // ranks for next week's movement arrows. (archiveAndResetWeek also
-        // persists the archive + the fresh empty week, so the saveWeekData
-        // effect can't clobber it.)
-        const entries = rankedEntriesFromWeek(weekData, memberEmojis);
-        if (entries.length) {
-          archiveWeekWinner(entries, weekData.weekStart, loadWeeklyPrizes());
-          saveCurrentWeekRanksForNextWeek(entries);
-        }
-        archiveAndResetWeek(weekData, current);
-        setWeekData(emptyWeekData(current));
-        setRanksVersion((v) => v + 1);
-        setTasks(prev => {
-          const regenerated = regenerateRecurringTasks(prev);
-          saveTasks(regenerated);
-          return regenerated;
-        });
-      }
-    }, 60000);
-    return () => clearInterval(interval);
-  }, [mounted, weekData, memberEmojis]);
+    let active = true;
+    void Promise.all([
+      loadHallOfFameMerged(),
+      loadPreviousWeekRanksMerged(weekData.weekStart),
+    ]).then(([serverHall, serverRanks]) => {
+      if (!active) return;
+      setHallOfFame(serverHall);
+      setPreviousRanks(serverRanks);
+    });
+    return () => {
+      active = false;
+    };
+  }, [mounted, prizesVersion, weekData.weekStart]);
+
+  useEffect(() => { saveTasks(tasks); }, [tasks]);
+  useEffect(() => { saveWeekData(weekData); }, [weekData]);
 
   const [filterMember, setFilterMember] = useState("All");
   useEffect(() => {
@@ -446,6 +424,12 @@ export default function TasksPage() {
   const [parentApprovalReward, setParentApprovalReward] = useState<Reward | null>(null);
   const [parentApprovalPin, setParentApprovalPin] = useState("");
   const [parentApprovalError, setParentApprovalError] = useState("");
+  // A high-cost redemption needs BOTH PINs on the wire (the member's, and the
+  // grown-up's who approved it). The parent PIN lives only in this ref between
+  // the approval step and the redemption command, and is cleared the moment the
+  // command is queued — it is never React state, storage, or a render value.
+  const parentApprovalPinRef = useRef<string>("");
+  const parentApprovalNameRef = useRef<string>("");
   const [approvalTaskId, setApprovalTaskId] = useState<number | null>(null);
   const [approvalMode, setApprovalMode] = useState<"approve" | "sendback" | "approve-all">("approve");
   // P0: deleting a family chore is destructive + cross-device — confirm first
@@ -461,50 +445,56 @@ export default function TasksPage() {
   useEffect(() => { saveRewards(rewards); }, [rewards]);
   useEffect(() => { savePenalties(penalties); }, [penalties]);
 
-  // Persist tasks + week data to PocketBase in the background (snapshot + structured)
-  const syncPendingRef = useRef(false);
-  const pbSyncPendingRef = useRef(false);
-  const claimSnapshotRef = useRef<{ tasks: Task[]; weekData: WeekData } | null>(null);
+  // The ONE durable write seam for this page: every claim, completion, undo,
+  // approval, crew action, task edit and config edit is enqueued here BEFORE
+  // any local state change, and the outbox is what decides whether the family's
+  // points, ledger and task rows actually move. `onAdopted` re-reads the stores
+  // the acknowledgment just wrote — the only path that can change the visible
+  // task/week state.
+  // One display-only mark per queued command: the row it is about to create,
+  // the row it is about to hide, or the "on the way" / "taking it back" note.
+  type OptimisticRow =
+    | { kind: "add"; task: Task }
+    | { kind: "update"; task: Task }
+    | { kind: "remove"; taskId: number }
+    | { kind: "pending"; taskId: number }
+    | { kind: "cancelling"; taskId: number };
+  const [optimisticRows, setOptimisticRows] = useState<Record<string, OptimisticRow>>({});
+  const adoptStores = useCallback(() => {
+    setTasks(loadTasks());
+    setWeekData(loadWeekData());
+    setRewards(loadFromStorage(REWARDS_KEY, []));
+    setPenalties(loadFromStorage(PENALTIES_KEY, []));
+  }, []);
+  // Display-only optimism, keyed by OPERATION ID. A mark is created when a
+  // command is queued and released when THAT command leaves the outbox (an
+  // acknowledgment, a cancel, or a terminal failure) — never by a global queue
+  // count, so one operation's landing can never clear another's optimism and a
+  // retrying command keeps its honest "still sending" row.
+  const addOptimisticRow = useCallback((operationId: string, row: OptimisticRow) => {
+    setOptimisticRows((prev) => ({ ...prev, [operationId]: row }));
+  }, []);
+  const onAcknowledged = useCallback((acknowledged: { operationId?: string }) => {
+    const operationId = acknowledged?.operationId;
+    if (!operationId) return;
+    setOptimisticRows((prev) => {
+      if (!(operationId in prev)) return prev;
+      const next = { ...prev };
+      delete next[operationId];
+      return next;
+    });
+  }, []);
+  const {
+    queue: queueCommand,
+    counts: outboxCounts,
+    entries: outboxEntries,
+    cancel: cancelQueuedOperation,
+    onAcknowledged: onOutboxAcknowledged,
+  } = useTaskCommandQueue({ onAdopted: adoptStores });
   useEffect(() => {
-    if (!mounted) return;
-    if (syncPendingRef.current) return;
-    syncPendingRef.current = true;
-    const t = setTimeout(() => {
-      fetch("/api/tasks/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        // The rewards catalog rides the snapshot WITH its last-write-wins
-        // stamp (kid-store) so a Settings delete (newer stamp) is never
-        // overwritten by a stale snapshot on the next restore. The weekly
-        // prizes ride the same contract (task-utils stamp key).
-        body: JSON.stringify({
-          tasks, weekData, rewards, rewardsUpdatedAt: readRewardsStamp(),
-          weeklyPrizes: loadWeeklyPrizes(), weeklyPrizesStamp: readWeeklyPrizesStamp(),
-          // Carry the tombstones so a delete (chat-initiated) is durable across
-          // devices — the server also unions them, so a stale push can't drop one.
-          deletedTaskIds: loadDeletedTaskIds(),
-        }),
-      })
-        .then((res) => {
-          if (!res.ok) console.warn(`Tasks snapshot sync failed (${res.status}) — will retry on next change`);
-        })
-        .catch(() => {});
-      syncPendingRef.current = false;
-    }, 2000);
-    return () => { clearTimeout(t); syncPendingRef.current = false; };
-  }, [tasks, weekData, rewards, mounted]);
-
-  // Structured PB sync (individual collections)
-  useEffect(() => {
-    if (!mounted) return;
-    if (pbSyncPendingRef.current) return;
-    pbSyncPendingRef.current = true;
-    const t = setTimeout(() => {
-      syncAllTasksToPB(tasks, weekData, getArchivedWeeks(), rewards, penalties, loadHallOfFame(), loadWeeklyPrizes());
-      pbSyncPendingRef.current = false;
-    }, 5000);
-    return () => { clearTimeout(t); pbSyncPendingRef.current = false; };
-  }, [tasks, weekData, rewards, penalties, mounted]);
+    if (typeof onOutboxAcknowledged !== "function") return;
+    onOutboxAcknowledged(onAcknowledged);
+  }, [onOutboxAcknowledged, onAcknowledged]);
 
   // Restore tasks state from PocketBase snapshot on mount (bridges container restarts)
   const restoreAttempted = useRef(false);
@@ -513,15 +503,16 @@ export default function TasksPage() {
   const [guestSyncBlocked, setGuestSyncBlocked] = useState(false);
   // Restore tasks state from a PocketBase snapshot (bridges container restarts
   // and merges another device's changes) via the SHARED pure merge — the same
-  // guards the 60s refresh loop applies to the stores: adopt new tasks,
-  // adopt field changes on known rows only with proof (pending tap / send-back
-  // / richer week history), never clobber a fresh local tap. The old inline
-  // version was ADD-ONLY on known rows, so a kid's tap on another device
-  // never reached this page's Needs-approval queue (and an approval elsewhere
-  // never cleared the stale "On the way" row here). The REWARDS leg is the
-  // exception: "longer wins" is delete-blind (a parent's Settings delete is a
-  // SHORTER, NEWER list), so rewards merge by last-write-wins on the
-  // kid-store stamp — a stale snapshot can never resurrect a deleted reward.
+  // guards the 60s refresh loop applies to the stores: adopt new tasks, and
+  // adopt field changes on known rows only with proof (a pending tap, a
+  // send-back stamp, or an earn that paid the row), never clobber a fresh
+  // local tap. The old inline version was ADD-ONLY on known rows, so a kid's
+  // tap on another device never reached this page's Needs-approval queue (and
+  // an approval elsewhere never cleared the stale "On the way" row here).
+  // The rewards / penalties / weekly-prizes legs are NOT merged here: that
+  // last-write-wins merge lives in exactly one place,
+  // applyTaskConfigSnapshotToStores, which the outbox's snapshot proof and the
+  // 60s refresh share. This page only re-reads what that seam adopted.
   // Latest-state mirrors for the async snapshot restore: the fetch resolves
   // long after commit, and these effects re-sync before any merge runs, so
   // mergeTasksSnapshot always sees the CURRENT state (never a stale closure).
@@ -532,27 +523,8 @@ export default function TasksPage() {
   const restoreFromSnapshot = useCallback((data: any) => {
     if (!data?.snapshot) return;
     const snap = data.snapshot;
-    if (Array.isArray(snap.rewards)) {
-      const snapStamp = typeof snap.rewardsUpdatedAt === "string" ? snap.rewardsUpdatedAt : "";
-      if (snapStamp && snapStamp > readRewardsStamp()) {
-        writeRewardsStamp(snapStamp);
-        setRewards(snap.rewards);
-      }
-    }
-    // Weekly prizes: same last-write-wins stamp contract as rewards — adopt a
-    // strictly-NEWER snapshot's prizes and carry ITS stamp through verbatim
-    // (writeWeeklyPrizesStamp, not a touch: re-stamping "now" would make a
-    // no-op refresh block the next real server edit). Missing stamps or a
-    // non-array prizes leg never win.
-    if (
-      typeof snap.weeklyPrizesStamp === "string" &&
-      snap.weeklyPrizesStamp > readWeeklyPrizesStamp() &&
-      Array.isArray(snap.weeklyPrizes)
-    ) {
-      saveWeeklyPrizes(snap.weeklyPrizes);
-      writeWeeklyPrizesStamp(snap.weeklyPrizesStamp);
-    }
-    if (snap.penalties?.length) setPenalties((prev: any) => snap.penalties.length > prev.length ? snap.penalties : prev);
+    applyTaskConfigSnapshotToStores(snap);
+    adoptStores();
     const { tasks: nextTasks, weekData: nextWeek, tasksChanged, weekChanged, deletedTaskIds } = mergeTasksSnapshot(
       tasksRef.current,
       weekDataRef.current,
@@ -567,7 +539,7 @@ export default function TasksPage() {
       weekDataRef.current = nextWeek;
       setWeekData(nextWeek);
     }
-  }, []);
+  }, [adoptStores]);
 
   useEffect(() => {
     if (!mounted || restoreAttempted.current) return;
@@ -598,30 +570,6 @@ export default function TasksPage() {
     return () => window.removeEventListener("consuela-data-refreshed", onRefreshed);
   }, [restoreFromSnapshot]);
 
-  // Backfill the Hall of Fame + previous-week ranks for weeks that rolled over
-  // while the page was closed (loadWeekData archives them on load, but the
-  // winner/ranks were never recorded on that path). Idempotent: skips weeks
-  // already enshrined.
-  useEffect(() => {
-    if (!mounted) return;
-    const archive = getArchivedWeeks();
-    const weeks = Object.keys(archive).sort();
-    if (!weeks.length) return;
-    const latest = weeks[weeks.length - 1];
-    // Make sure the finished week lands in PB's week_archive (idempotent).
-    // The reload path archives to localStorage only, so without this the
-    // assistant's get_past_weeks never sees weeks that rolled over while the
-    // page was closed. Fire-and-forget: a PB failure must not block the rest.
-    void archiveWeekIfMissing(archive[latest]);
-    if (loadHallOfFame().some((h) => h.weekStart === latest)) return;
-    const entries = rankedEntriesFromWeek(archive[latest], memberEmojis);
-    if (!entries.length) return;
-    archiveWeekWinner(entries, latest, loadWeeklyPrizes());
-    saveCurrentWeekRanksForNextWeek(entries);
-    setRanksVersion((v) => v + 1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mounted]);
-
   const triggerConfetti = useCallback(() => {
     if (typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     setConfettiActive(true);
@@ -635,6 +583,10 @@ export default function TasksPage() {
 
   const startEdit = (task: Task) => {
     if (!isParent) return; // P0 gate — kids/guests can never edit family chores
+    if (!tasks.some((row) => row.id === task.id)) {
+      showToast("That chore is still being saved — try again in a moment.");
+      return;
+    }
     setEditingId(task.id);
     setEditForm({ ...task });
     setIsAdding(false);
@@ -666,16 +618,43 @@ export default function TasksPage() {
         ? { ...editForm, crewSize: null, crew: null, speedBonus: normalizeSpeedBonus(editForm.speedBonus) }
         : { ...editForm, crewSize: null, crew: null, speedBonus: undefined, universal: false };
     if (isAdding) {
-      setTasks(prev => [...prev, { ...normalized, id: uid() }]);
+      const temporaryId = uid();
+      const added = queueCommand({
+        route: "/api/tasks/manage",
+        action: "add",
+        payload: { task: { ...normalized } },
+        displayTarget: { kind: "task", temporaryId, title: normalized.title },
+      });
+      addOptimisticRow(added.operationId, { kind: "add", task: { ...normalized, id: temporaryId } });
     } else {
-      setTasks(prev => prev.map(t => t.id === editingId ? { ...normalized } : t));
+      const updated = queueCommand({
+        route: "/api/tasks/manage",
+        action: "update",
+        payload: { taskId: editingId, patch: { ...normalized } },
+        displayTarget: { kind: "task", taskId: editingId ?? undefined, title: normalized.title },
+      });
+      addOptimisticRow(updated.operationId, { kind: "update", task: { ...normalized, id: editingId as number } });
     }
     setEditingId(null);
     setIsAdding(false);
   };
 
+  // A delete is only ever queued for a row the SERVER already has. A
+  // temporary (not-yet-acknowledged) add row is inert: it renders as text, and
+  // delete/edit/complete on it can never send an id the server has never seen.
   const deleteTask = (id: number) => {
-    setTasks(prev => prev.filter(t => t.id !== id));
+    const row = tasks.find((t) => t.id === id);
+    if (!row) {
+      showToast("That chore is still being saved — try again in a moment.");
+      return;
+    }
+    const removed = queueCommand({
+      route: "/api/tasks/manage",
+      action: "delete",
+      payload: { taskId: id },
+      displayTarget: { kind: "task", taskId: id, title: row.title },
+    });
+    addOptimisticRow(removed.operationId, { kind: "remove", taskId: id });
     setEditingId(null);
     setIsAdding(false);
   };
@@ -735,7 +714,14 @@ export default function TasksPage() {
   };
 
   const adoptSuggestion = (suggestion: Task) => {
-    setTasks(prev => [...prev, { ...suggestion, id: uid() }]);
+    const temporaryId = uid();
+    const adopted = queueCommand({
+      route: "/api/tasks/manage",
+      action: "add",
+      payload: { task: { ...suggestion } },
+      displayTarget: { kind: "task", temporaryId, title: suggestion.title },
+    });
+    addOptimisticRow(adopted.operationId, { kind: "add", task: { ...suggestion, id: temporaryId } });
     setAiSuggestions(prev => prev.filter(s => s.title !== suggestion.title));
   };
 
@@ -744,16 +730,30 @@ export default function TasksPage() {
   };
 
   const openPinEntry = (taskId: number) => {
+    // A temporary row is not a task yet: there is nothing on the server to
+    // complete, so this can only be a stale click on a queued add.
     const task = tasks.find((x) => x.id === taskId);
-    if (!task) return;
+    if (!task) {
+      showToast("That chore is still being saved — try again in a moment.");
+      return;
+    }
     if (task.completed) {
       if (isPendingApproval(task) && isLoggedIn && currentUser?.role === "child" && resolveMemberName(membersData, task.pendingApproval?.byName) === resolveMemberName(membersData, currentUser.name)) {
         // The kid who tapped can take it back PIN-free: nothing was verified,
-        // so there is nothing to un-verify. No points ever moved. Names are
-        // compared in the resolved-ledger space — a session first name and a
-        // fullName byName are the same kid.
-        setTasks((prev) => sendBackPendingCompletion(prev, taskId));
-        showToast("Back on the list — no points were given.");
+        // so there is nothing to un-verify. No points ever moved. The reopen is
+        // a durable server undo queued FIRST — the pending row itself is never
+        // cleared locally, so a lost command can never silently erase a tap.
+        // Names are compared in the resolved-ledger space — a session first
+        // name and a fullName byName are the same kid.
+        const me = resolveMemberName(membersData, currentUser.name);
+        const undo = queueCommand({
+          route: "/api/tasks/claim",
+          action: "undo",
+          payload: { taskId, memberName: me, assigneeEmoji: task.assigneeEmoji },
+          displayTarget: { kind: "undo", taskId, title: task.title },
+        });
+        addOptimisticRow(undo.operationId, { kind: "cancelling", taskId });
+        showToast("Taking it back — asking the family server to reopen it.");
         return;
       }
       setUndoTaskId(taskId);
@@ -786,15 +786,18 @@ export default function TasksPage() {
     }
     if (completesWithoutPin(currentUser?.role, currentUser?.age, task)) {
       // Trust-but-verify, junior edition: an under-10 kid's tap on their OWN
-      // assigned chore lands immediately as done-but-unpaid — no PIN round
-      // trip. Points move only on parent approval. The pending record's
-      // byName is the roster-resolved FULL name (the same ledger key the
-      // classic PIN path credits) so approve posts the earn to the right
-      // ledger entry instead of stranding points on a first-name key.
+      // assigned chore is a durable PIN-free completion command — queued FIRST,
+      // with no credential at all, because the session IS the identity. Points
+      // move only when a parent approves, and only through the outbox.
       if (task.completedInWeek === weekKey()) return;
-      const now = new Date().toISOString();
       const me = resolveMemberName(membersData, currentUser!.name);
-      setTasks((prev) => prev.map((t) => (t.id === taskId ? tapCompletePending(t, me, now, weekKey()) : t)));
+      const complete = queueCommand({
+        route: "/api/tasks/claim",
+        action: "complete",
+        payload: { taskId, memberName: me, assigneeEmoji: task.assigneeEmoji },
+        displayTarget: { kind: "claim", taskId, title: task.title },
+      });
+      addOptimisticRow(complete.operationId, { kind: "pending", taskId });
       triggerConfetti();
       showToast(`Done! +${task.points}pts on the way — a parent approves.`);
       return;
@@ -865,6 +868,8 @@ export default function TasksPage() {
         setTimeout(() => setParentApprovalError(""), 2500);
         return;
       }
+      parentApprovalPinRef.current = parentApprovalPin;
+      parentApprovalNameRef.current = parent.fullName;
       setPinReward(parentApprovalReward);
       setParentApprovalReward(null);
       setParentApprovalPin("");
@@ -901,129 +906,54 @@ export default function TasksPage() {
         return;
       }
       const parentName: string = parent.fullName;
-      // Snapshot for 4xx revert — optimistic updates below may hit localStorage
-      // before the POST settles.
-      const prevTasks = tasks;
-      const prevWeekData = weekData;
 
-      const postApprove = async (payload: Record<string, unknown>) => {
-        try {
-          const res = await fetch("/api/tasks/approve", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              ...payload,
-              memberName: parentName,
-              pin: approvalPin,
-            }),
-          });
-          if (res.ok) {
-            const body = await res.json();
-            // Guarded adoption (2026-09-23 review): an offline approval's tx
-            // lives ONLY locally — an unconditional adopt erased it (and the
-            // re-armed sync pushed the truncated ledger everywhere).
-            if (body?.weekData) setWeekData(adoptServerWeekData(prevWeekData, body.weekData));
-            return { ok: true as const, body };
-          }
-          if (res.status >= 500) {
-            // 5xx ≈ network failure (D8): the route may have PARTIALLY
-            // applied (the snapshot row is cleared + week paid inside the
-            // lock before a later write throws) — reverting would fight the
-            // next merge's paidElsewhere adoption (approve → un-approve →
-            // re-approve churn). Keep the local approval; the idempotent
-            // server + the merge reconcile. Callers take the status-0
-            // saved-locally path (identical to offline).
-            return { ok: false as const, status: 0 };
-          }
-          // 4xx: revert the optimistic write — the server refused.
-          setTasks(prevTasks);
-          setWeekData(prevWeekData);
-          if (res.status === 401) {
-            setApprovalError("Parent PIN required to review tapped tasks.");
-            setApprovalPin("");
-            setTimeout(() => setApprovalError(""), 2500);
-          } else {
-            const body = await res.json().catch(() => ({}));
-            if (body?.reason === "unknown-task") {
-              showToast("That task is no longer waiting — refresh and try again.");
-            } else if (res.status === 403) {
-              showToast("Only a parent can review tapped tasks — nothing changed.");
-            } else {
-              showToast("The server refused the change — nothing changed.");
-            }
-          }
-          return { ok: false as const, status: res.status };
-        } catch {
-          // Cases: (1) network failure → status 0 — offline/degraded mode (D8):
-          // KEEP the local approval; the next snapshot sync reconciles.
-          // (2) the server responded but res.json() failed to parse (e.g. a 200
-          // with a non-JSON body) — the server DID apply the change; keeping the
-          // local approval is still correct (adopt is skipped, sync reconciles).
-          return { ok: false as const, status: 0 };
-        }
-      };
-
+      // Every review action is ONE durable command. The PIN rides the ephemeral
+      // credential registry keyed by the operation id — it is never written to
+      // the outbox entry or to localStorage, and the outbox releases it only
+      // after the acknowledgment (or the user's cancel).
       if (approvalMode === "approve-all") {
-        // Optimistic local pay (B1-fixed amount), then one server batch call.
-        const result = pendingApprovals.reduce(
-          (acc, pending) => {
-            const before = acc.weekData.history.length;
-            const next = approvePendingCompletion(acc.tasks, acc.weekData, pending.id);
-            return {
-              tasks: next.tasks,
-              weekData: next.weekData,
-              paid: acc.paid + (next.weekData.history.length > before ? 1 : 0),
-            };
-          },
-          { tasks, weekData, paid: 0 }
-        );
-        setTasks(result.tasks);
-        setWeekData(result.weekData);
-        const posted = await postApprove({
+        const taskIds = pendingApprovals.map((p) => p.id);
+        queueCommand({
+          route: "/api/tasks/approve",
           action: "approve-all",
-          taskIds: pendingApprovals.map((p) => p.id),
+          payload: { taskIds, memberName: parentName },
+          displayTarget: { kind: "approval", title: `${taskIds.length} tapped tasks` },
+          credential: { pin: approvalPin },
         });
-        if (posted.ok) {
-          const paid = posted.body?.paid ?? result.paid;
-          showToast(
-            paid > 0
-              ? `Approved! ${paid} tapped task${paid !== 1 ? "s" : ""} paid.`
-              : "All tapped tasks were already paid."
-          );
-        } else if (posted.status === 0) {
-          showToast(
-            result.paid > 0
-              ? `Approved! ${result.paid} tapped task${result.paid !== 1 ? "s" : ""} paid (saved locally — will sync).`
-              : "Saved locally — will sync."
-          );
-        }
+        showToast(
+          `Approving ${taskIds.length} tapped task${taskIds.length !== 1 ? "s" : ""} — points land when the family server confirms.`,
+        );
       } else if (approvalMode === "approve" && approvalTaskId !== null) {
         const target = tasks.find((x) => x.id === approvalTaskId);
-        const { tasks: nt, weekData: nw } = approvePendingCompletion(tasks, weekData, approvalTaskId);
-        setTasks(nt);
-        setWeekData(nw);
         const crew = target?.pendingApproval?.crew;
-        // B1 toast: use the recorded approval amount, not task.points.
         const amt = target?.pendingApproval?.points ?? target?.points ?? 0;
-        const posted = await postApprove({ action: "approve", taskId: approvalTaskId });
-        if (posted.ok || posted.status === 0) {
-          showToast(
-            crew && crew.length > 0
-              ? `Approved! +${amt}pts each for ${crew.map((n) => n.split(" ")[0]).join(", ")}.`
-              : `Approved! +${amt}pts for ${(target?.pendingApproval?.byName ?? "").split(" ")[0]}.`
-          );
-        }
+        queueCommand({
+          route: "/api/tasks/approve",
+          action: "approve",
+          payload: { taskId: approvalTaskId, memberName: parentName },
+          displayTarget: { kind: "approval", taskId: approvalTaskId, title: target?.title },
+          credential: { pin: approvalPin },
+        });
+        showToast(
+          crew && crew.length > 0
+            ? `Approving — +${amt}pts each for ${crew.map((n) => n.split(" ")[0]).join(", ")}.`
+            : `Approving — +${amt}pts for ${(target?.pendingApproval?.byName ?? "").split(" ")[0]}.`,
+        );
       } else if (approvalTaskId !== null) {
         const target = tasks.find((x) => x.id === approvalTaskId);
-        setTasks(sendBackPendingCompletion(prevTasks, approvalTaskId));
-        const posted = await postApprove({ action: "send-back", taskId: approvalTaskId });
-        if (posted.ok || posted.status === 0) {
-          showToast(
-            target && isCrewTask(target)
-              ? "Sent back — the whole crew reopens, no points given."
-              : "Sent back — no points were given."
-          );
-        }
+        const sendBack = queueCommand({
+          route: "/api/tasks/approve",
+          action: "send-back",
+          payload: { taskId: approvalTaskId, memberName: parentName },
+          displayTarget: { kind: "approval", taskId: approvalTaskId, title: target?.title },
+          credential: { pin: approvalPin },
+        });
+        addOptimisticRow(sendBack.operationId, { kind: "cancelling", taskId: approvalTaskId });
+        showToast(
+          target && isCrewTask(target)
+            ? "Sending back — the whole crew reopens, no points given."
+            : "Sending back — no points were given.",
+        );
       }
       setApprovalTaskId(null);
       setApprovalMode("approve");
@@ -1058,27 +988,20 @@ export default function TasksPage() {
         setTimeout(() => setCrewRemoveError(""), 2500);
         return;
       }
-      const res = await fetch("/api/tasks/claim", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "crew-remove",
+      queueCommand({
+        route: "/api/tasks/claim",
+        action: "crew-remove",
+        payload: {
           taskId: crewRemoveTarget.taskId,
           memberName: parent.fullName,
-          pin: crewRemovePin,
           targetName: crewRemoveTarget.memberName,
-        }),
+        },
+        displayTarget: { kind: "crew", taskId: crewRemoveTarget.taskId, title: crewRemoveTarget.memberName },
+        credential: { pin: crewRemovePin },
       });
-      const data = await res.json().catch(() => null);
-      if (res.ok && data?.success && data?.task) {
-        const updated = data.task;
-        setTasks(prev => prev.map(t => t.id === crewRemoveTarget.taskId ? { ...t, crew: updated.crew ?? t.crew } : t));
-        showToast(`${crewRemoveTarget.memberName.split(" ")[0]} removed from the crew.`);
-      } else if (res.status === 409) {
-        setCrewRemoveError("They already checked in — can't remove.");
-      } else {
-        setCrewRemoveError("Couldn't remove them — try again.");
-      }
+      showToast(
+        `Removing ${crewRemoveTarget.memberName.split(" ")[0]} from the crew — the family server confirms.`,
+      );
       setCrewRemoveTarget(null);
       setCrewRemovePin("");
       setCrewRemoveError("");
@@ -1125,53 +1048,25 @@ export default function TasksPage() {
       }
       const verified = result.member;
       const normalizedName = normalizeName(memberName);
-      if (isPendingApproval(task)) {
-        // PIN verified above, but pending taps hold no points — reopen with no
-        // ledger entry instead of the standard points-reversing undo.
-        setTasks((prev) => sendBackPendingCompletion(prev, task.id));
-        setUndoTaskId(null);
-        setUndoPin("");
-        showToast("Sent back — no points were given.");
-        // Server-authoritative reopen so other devices see it (guest-safe).
-        fetch("/api/tasks/claim", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "undo", taskId: task.id, memberName: normalizedName, pin: undoPin }),
-        }).catch(() => {});
-        return;
-      }
-      claimSnapshotRef.current = { tasks, weekData };
-      setTasks(prev => prev.map(t => t.id === undoTaskId ? { ...t, completed: false, completedBy: undefined, completedAt: undefined, completedInWeek: undefined } : t));
-      const current = (weekData.points[normalizedName] || 0) - task.points;
-      const updated = { ...weekData, points: { ...weekData.points, [normalizedName]: Math.max(0, current) } };
-      const nextWeek = addTransaction(updated, "adjust", -task.points, `Undo: ${task.title} (-${task.points}pts)`, normalizedName, task.id);
-      setWeekData(nextWeek);
-      // Push the reversal now (not on the 5s debounce) so the server-side claim
-      // guard releases the task for re-claiming immediately.
-      syncWeekDataToPB(nextWeek);
-      // Server-authoritative undo too (week_data + snapshot + task row) — a
-      // guest device's local undo must reach every device. Server refusals
-      // (nothing_to_undo / already_undone) mean the local-only earn is already
-      // reconciled; the local undo always stands.
-      fetch("/api/tasks/claim", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "undo", taskId: task.id, memberName: normalizedName, pin: undoPin }),
-      }).then(async (res) => {
-        const data = await res.json().catch(() => null);
-        claimSnapshotRef.current = null;
-        if ((res.ok || res.status === 409) && data?.weekData?.weekStart === weekKey()) {
-          setWeekData((prev) =>
-            (data.weekData.history?.length || 0) >= (prev.history?.length || 0) ? data.weekData : prev
-          );
-        }
-      }).catch(() => {
-        // Offline: keep the local undo (sync reconciles later).
-        claimSnapshotRef.current = null;
+      // BOTH a paid undo and a pending reopen are the same durable server undo.
+      // No local point reversal, no local reopen, no legacy POST: the outbox
+      // command is queued first and the family's ledger moves only when it is
+      // acknowledged.
+      const undo = queueCommand({
+        route: "/api/tasks/claim",
+        action: "undo",
+        payload: { taskId: task.id, memberName: normalizedName, assigneeEmoji: task.assigneeEmoji },
+        displayTarget: { kind: "undo", taskId: task.id, title: task.title },
+        credential: { pin: undoPin },
       });
+      addOptimisticRow(undo.operationId, { kind: "cancelling", taskId: task.id });
+      showToast(
+        isPendingApproval(task)
+          ? "Reopening — no points were given."
+          : `Undoing ${task.title} — points come back when the family server confirms.`,
+      );
       setUndoTaskId(null);
       setUndoPin("");
-      showToast(`Undone: ${task.title}`);
     } finally {
       setPinBusy(false);
     }
@@ -1201,15 +1096,31 @@ export default function TasksPage() {
           setTimeout(() => setPinError(""), 2500);
           return;
         }
-        setWeekData(prev => {
-          const current = prev.points[normalizedName] || 0;
-          if (current < cost) return prev;
-          const updated = { ...prev, points: { ...prev.points, [normalizedName]: current - cost } };
-          return addTransaction(updated, "redeem", -cost, `Redeemed: ${pinReward.name} (-${cost}pts)`, normalizedName);
+        // The redemption is a durable command against the server-authoritative
+        // route: the stored reward row decides the cost, the ledger entry is
+        // written under the week lock, and a reward over 100pts carries the
+        // parent's PIN so the server can gate it. Nothing is deducted locally.
+        queueCommand({
+          route: "/api/rewards/redeem",
+          action: "redeem",
+          payload: {
+            rewardId: pinReward.id,
+            memberName: normalizedName,
+            ...(parentApprovalNameRef.current ? { parentName: parentApprovalNameRef.current } : {}),
+          },
+          displayTarget: { kind: "config", title: pinReward.name },
+          credential: {
+            pin: pinInput,
+            ...(parentApprovalPinRef.current ? { parentPin: parentApprovalPinRef.current } : {}),
+          },
         });
+        parentApprovalPinRef.current = "";
+        parentApprovalNameRef.current = "";
         setPinInput("");
-        setPinSuccess(`${pinReward.emoji} ${normalizedName.split(" ")[0]} redeemed ${pinReward.name}! -${cost}pts`);
-        setTimeout(() => { setPinReward(null); setPinSuccess(""); }, 1500);
+        setPinSuccess(
+          `${pinReward.emoji} ${normalizedName.split(" ")[0]} redeeming ${pinReward.name} — the family server confirms the ${cost}pts.`,
+        );
+        setTimeout(() => { setPinReward(null); setPinSuccess(""); }, 1800);
       } else {
         setPinError(result.status === "unreachable" ? unreachableCopy() : "Wrong code for selected member. Try again.");
         setPinInput("");
@@ -1236,13 +1147,19 @@ export default function TasksPage() {
       if (result.status === "ok") {
         const normalizedName = membersData.find((m: any) => m.fullName === penaltyForMember)?.fullName || penaltyForMember;
         const penaltyPoints = pinPenalty?.points ?? 0;
-        setWeekData(prev => {
-          const updated = { ...prev, points: { ...prev.points, [normalizedName]: Math.max(0, (prev.points[normalizedName] || 0) - penaltyPoints) } };
-          return addTransaction(updated, "penalty", -penaltyPoints, `Penalty: ${pinPenalty.name} (-${penaltyPoints}pts)`, normalizedName);
+        // The catalog penalty id travels, never a client-chosen point value:
+        // the server reads the canonical penalty and refuses a body that tries
+        // to set its own amount.
+        queueCommand({
+          route: "/api/tasks/ledger",
+          action: "penalty",
+          payload: { memberName: normalizedName, itemId: pinPenalty.id },
+          displayTarget: { kind: "config", title: pinPenalty.name },
+          credential: { pin: pinInput },
         });
         setPinInput("");
-        setPinSuccess(`-${penaltyPoints}pts from ${normalizedName.split(" ")[0]}`);
-        setTimeout(() => { setPinPenalty(null); setPinSuccess(""); }, 1500);
+        setPinSuccess(`-${penaltyPoints}pts from ${normalizedName.split(" ")[0]} — the family server confirms.`);
+        setTimeout(() => { setPinPenalty(null); setPinSuccess(""); }, 1800);
       } else {
         setPinError(result.status === "unreachable" ? unreachableCopy() : "Wrong PIN. Try again.");
         setPinInput("");
@@ -1262,65 +1179,23 @@ export default function TasksPage() {
       }
       const result = await verifyPinRemote(memberName, pinInput);
       if (result.status === "ok") {
-        const verified = result.member;
-        const normalizedName = normalizeName((verified as any).name);
+        const normalizedName = normalizeName(result.member.name);
         const claimantEmoji = membersData.find((m: any) => m.fullName === normalizedName)?.emoji;
-        const res = await fetch("/api/tasks/claim", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: crewAction.action,
-            taskId: crewAction.taskId,
-            memberName: normalizedName,
-            pin: pinInput,
-            assigneeEmoji: claimantEmoji,
-          }),
+        queueCommand({
+          route: "/api/tasks/claim",
+          action: crewAction.action,
+          payload: { taskId: crewAction.taskId, memberName: normalizedName, assigneeEmoji: claimantEmoji },
+          displayTarget: { kind: "crew", taskId: crewAction.taskId, title: tasks.find((t) => t.id === crewAction.taskId)?.title },
+          credential: { pin: pinInput },
         });
-        const data = await res.json().catch(() => null);
-        if (res.ok && data?.success && data?.task) {
-          const updated = data.task;
-          setTasks(prev => prev.map(x => x.id === crewAction.taskId ? {
-            ...x,
-            crew: updated.crew ?? null,
-            completed: !!updated.completed,
-            completedBy: updated.completedBy ?? x.completedBy,
-            completedAt: updated.completedAt ?? x.completedAt,
-            completedInWeek: updated.completedInWeek ?? x.completedInWeek,
-            pendingApproval: updated.pendingApproval ?? x.pendingApproval,
-          } : x));
-          const joinedCount = Array.isArray(updated.crew?.members) ? updated.crew.members.length : 0;
-          const first = normalizedName.split(" ")[0];
-          setPinInput("");
-          setPinSuccess(
-            crewAction.action === "crew-join"
-              ? `🤝 ${first} joined — ${joinedCount}/${updated.crewSize} on the crew.`
-              : updated.pendingApproval
-                ? `🎉 Crew all done! ${first} checked in — a parent approves next.`
-                : `✓ ${first} checked in.`
-          );
-          if (updated.pendingApproval) triggerConfetti();
-          setTimeout(() => { setPinTaskId(null); setPinCrewAction(null); setPinSuccess(""); setSnatchForMember(""); }, 1800);
-        } else if (res.status === 409 && data?.reason === "crew_full") {
-          setPinError("That crew just filled up — try another task.");
-          setPinInput("");
-          setTimeout(() => setPinError(""), 2500);
-        } else if (res.status === 403 && data?.reason === "not_in_crew") {
-          setPinError("You're not on this crew — join first.");
-          setPinInput("");
-          setTimeout(() => setPinError(""), 2500);
-        } else if (res.status === 400 && data?.reason === "not_crew_task") {
-          setPinError("This task isn't a crew task.");
-          setPinInput("");
-          setTimeout(() => setPinError(""), 2500);
-        } else if (res.status === 401) {
-          setPinError("PIN rejected by the server — try again.");
-          setPinInput("");
-          setTimeout(() => setPinError(""), 2000);
-        } else {
-          setPinError("Couldn't reach Consuela — try again.");
-          setPinInput("");
-          setTimeout(() => setPinError(""), 2500);
-        }
+        const first = normalizedName.split(" ")[0];
+        setPinInput("");
+        setPinSuccess(
+          crewAction.action === "crew-join"
+            ? `🤝 ${first} joining the crew — the family server confirms.`
+            : `✓ ${first} checking in.`,
+        );
+        setTimeout(() => { setPinTaskId(null); setPinCrewAction(null); setPinSuccess(""); setSnatchForMember(""); }, 1800);
       } else {
         setPinError(result.status === "unreachable" ? unreachableCopy() : "Wrong code for selected member. Try again.");
         setPinInput("");
@@ -1333,8 +1208,6 @@ export default function TasksPage() {
     const task = tasks.find(t => t.id === pinTaskId);
     if (!task || task.completed) return;
     if (task.completedInWeek === weekKey()) return;
-    const now = new Date().toISOString();
-    const currentWeek = weekKey();
 
     if (task.universal || isSnatchable(task)) {
       const claimant = snatchForMember;
@@ -1350,90 +1223,31 @@ export default function TasksPage() {
         const wasSnatch = !task.universal && isSnatchable(task);
         const normalizedName = normalizeName((verified as any).name);
         const claimantEmoji = (membersData.find((m: any) => m.fullName === normalizedName)?.emoji) || task.assigneeEmoji;
-        claimSnapshotRef.current = { tasks, weekData };
         // The kid branch is keyed on the CLAIMANT's role from the verified
         // record — the same record the server routes on — never on age
         // (claims are always PIN-gated) and never on the session user (a
         // parent claiming for a kid must mirror the server's pending answer).
         const kidClaim = (verified as any).role === "child";
-        // Open ("up for grabs") first claims carry a speed bonus; the server
-        // re-derives it authoritatively, but the optimistic UI must match.
         const speedBonus = !wasSnatch ? normalizeSpeedBonus(task.speedBonus) : 0;
         const earnAmount = task.points + speedBonus;
-        const claimLabel = wasSnatch ? "Snatched" : speedBonus > 0 ? "Fast grab" : "Completed";
-        setTasks(prev => prev.map(t => t.id === pinTaskId
-          ? (kidClaim
-            ? (() => {
-                const pending = tapCompletePending({ ...t, assignee: normalizedName, assigneeEmoji: claimantEmoji }, normalizedName, now, currentWeek);
-                return { ...pending, completedBy: normalizedName, pendingApproval: { ...pending.pendingApproval!, points: earnAmount } };
-              })()
-            : { ...t, completed: true, completedBy: normalizedName, completedAt: now, completedInWeek: currentWeek, assignee: normalizedName, assigneeEmoji: claimantEmoji })
-          : t));
+        // Exactly one family member wins the race and the points land on the
+        // server — the browser queues the claim and adopts the winning
+        // weekData. No local earn, no local rollback snapshot.
+        const claim = queueCommand({
+          route: "/api/tasks/claim",
+          action: "claim",
+          payload: { taskId: task.id, memberName: normalizedName, assigneeEmoji: claimantEmoji },
+          displayTarget: { kind: "claim", taskId: task.id, title: task.title },
+          credential: { pin: pinInput },
+        });
+        addOptimisticRow(claim.operationId, { kind: "pending", taskId: task.id });
         const pointsMsg = earnAmount > 0 ? `+${earnAmount}pts` : "";
-        if (!kidClaim) {
-          setWeekData(prev => {
-            const updated = { ...prev, points: { ...prev.points, [normalizedName]: (prev.points[normalizedName] || 0) + earnAmount } };
-            return addTransaction(updated, "earn", earnAmount, `${claimLabel}: ${task.title}${pointsMsg ? ` (${pointsMsg})` : ""}`, normalizedName, task.id);
-          });
-        }
         setPinInput("");
         setPinSuccess(kidClaim
           ? `🎯 ${normalizedName.split(" ")[0]} — grabbed! +${earnAmount}pts on the way (parent approves).`
           : `🎯 ${normalizedName.split(" ")[0]} ${wasSnatch ? "snatched" : "completed"} ${task.title}! ${pointsMsg}`);
         triggerConfetti();
         setTimeout(() => { setPinTaskId(null); setPinSuccess(""); setSnatchForMember(""); }, 1500);
-
-        // Server-authoritative claim: exactly one family member wins the race
-        fetch("/api/tasks/claim", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "claim",
-            taskId: task.id,
-            claimantName: normalizedName,
-            claimantPin: pinInput,
-            completedAt: now,
-            title: task.title,
-            points: task.points,
-            assigneeEmoji: claimantEmoji,
-          }),
-        }).then(async (res) => {
-          const data = await res.json().catch(() => null);
-          if (!res.ok || !data?.success) {
-            const snap = claimSnapshotRef.current;
-            if (snap) {
-              setTasks(snap.tasks);
-              setWeekData(snap.weekData);
-              claimSnapshotRef.current = null;
-            }
-            if (res.status === 409 && data?.claimedBy) {
-              showToast(`🤝 ${data.claimedBy.split(" ")[0]} already grabbed that one!`);
-            } else if (res.status === 409) {
-              showToast("That task was already claimed.");
-            } else if (res.status === 404) {
-              showToast("Task isn't synced yet — try again in a few seconds.");
-            } else if (res.status === 400) {
-              showToast("That task isn't up for grabs.");
-            } else if (res.status === 401) {
-              showToast("PIN rejected by the server — try again.");
-            } else {
-              showToast("Claim failed — try again.");
-            }
-          } else if (data?.weekData?.weekStart === weekKey()) {
-            // Server is authoritative for the week ledger: adopt its weekData
-            // when it's at least as fresh as ours (picks up other devices).
-            setWeekData((prev) =>
-              (data.weekData.history?.length || 0) >= (prev.history?.length || 0) ? data.weekData : prev
-            );
-            claimSnapshotRef.current = null;
-          } else if (data?.pending) {
-            // Kid claim confirmed pending server-side (no weekData exists to
-            // adopt — none was written) — the optimistic pending row stands.
-            claimSnapshotRef.current = null;
-          }
-        }).catch(() => {
-          // Offline: keep the optimistic claim (local sync will reconcile)
-        });
       } else {
         setPinError(result.status === "unreachable" ? unreachableCopy() : "Wrong code for selected member. Try again.");
         setPinInput("");
@@ -1446,63 +1260,30 @@ export default function TasksPage() {
     if (result.status === "ok") {
       const verified = result.member;
       const normalizedName = normalizeName((verified as any).name);
-      // Pre-state for rollback if the server definitively refuses (409/400).
-      claimSnapshotRef.current = { tasks, weekData };
-      // Shared server-persist response handling for the optimistic completion:
-      // 409/400 = definitive refusal (another device completed it / wrong
-      // shape) → roll back; anything else (401/5xx/network) is transient → keep
-      // the optimistic row and let the normal syncs reconcile.
-      const handleCompleteResponse = async (res: Response) => {
-        const data = await res.json().catch(() => null);
-        const snap = claimSnapshotRef.current;
-        claimSnapshotRef.current = null;
-        if (!res.ok || !data?.success) {
-          if ((res.status === 409 || res.status === 400) && snap) {
-            setTasks(snap.tasks);
-            setWeekData(snap.weekData);
-            showToast(res.status === 409 ? "That task was already completed." : "That task couldn't be completed.");
-          }
-          return;
-        }
-        // The server ledger is authoritative — adopt it when at least as
-        // fresh (it may carry other devices' earns).
-        if (data?.weekData?.weekStart === weekKey()) {
-          setWeekData((prev) =>
-            (data.weekData.history?.length || 0) >= (prev.history?.length || 0) ? data.weekData : prev
-          );
-        }
-      };
-      const persistServerComplete = () => {
-        // A GUEST device (the kitchen display auto-logs-out after 30 min)
-        // cannot push the snapshot — without this server call the completion
-        // lives only in this browser's localStorage.
-        fetch("/api/tasks/claim", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "complete", taskId: task.id, memberName: normalizedName, pin: pinInput, assigneeEmoji: task.assigneeEmoji }),
-        }).then(handleCompleteResponse).catch(() => { claimSnapshotRef.current = null; });
-      };
+      // One durable completion command for BOTH shapes — the server owns the
+      // ledger and the pending/completed decision. The browser keeps only
+      // display-only optimism; the points line appears only on acknowledgment.
+      const complete = queueCommand({
+        route: "/api/tasks/claim",
+        action: "complete",
+        payload: { taskId: task.id, memberName: normalizedName, assigneeEmoji: task.assigneeEmoji },
+        displayTarget: { kind: "claim", taskId: task.id, title: task.title },
+        credential: { pin: pinInput },
+      });
       if (completesWithPendingApproval((verified as any).role, task)) {
         // Identity verified by PIN; the parent verifies the work. Points wait.
-        setTasks((prev) => prev.map((t) => (t.id === pinTaskId ? tapCompletePending(t, normalizedName, now, currentWeek) : t)));
+        addOptimisticRow(complete.operationId, { kind: "pending", taskId: task.id });
         triggerConfetti();
         setPinInput("");
         setPinSuccess(`⏳ ${normalizedName.split(" ")[0]} — done! +${task.points}pts on the way.`);
         setTimeout(() => { setPinTaskId(null); setPinSuccess(""); setSnatchForMember(""); }, 1500);
-        persistServerComplete();
         return;
       }
-      setTasks(prev => prev.map(t => t.id === pinTaskId ? { ...t, completed: true, completedBy: normalizedName, completedAt: now, completedInWeek: currentWeek } : t));
       const pointsMsg = task.points > 0 ? `+${task.points}pts` : "";
-      setWeekData(prev => {
-        const updated = { ...prev, points: { ...prev.points, [normalizedName]: (prev.points[normalizedName] || 0) + task.points } };
-        return addTransaction(updated, "earn", task.points, `Completed: ${task.title}${pointsMsg ? ` (${pointsMsg})` : ""}`, normalizedName, task.id);
-      });
       setPinInput("");
       setPinSuccess(`${normalizedName.split(" ")[0]} completed ${task.title}! ${pointsMsg}`);
       triggerConfetti();
       setTimeout(() => { setPinTaskId(null); setPinSuccess(""); setSnatchForMember(""); }, 1500);
-      persistServerComplete();
     } else {
       setPinError(result.status === "unreachable" ? unreachableCopy() : "Wrong PIN. Try again.");
       setPinInput("");
@@ -1513,28 +1294,48 @@ export default function TasksPage() {
     }
   };
 
-  const startAddReward = () => { setEditingRewardId(null); setAddingReward(true); setRewardForm({ id: Date.now(), name: "", emoji: "🎁", cost: 50 }); };
+  const startAddReward = () => { setEditingRewardId(null); setAddingReward(true); setRewardForm({ id: Date.now(), name: "", emoji: "\u{1F381}", cost: 50 }); };
   const startEditReward = (r: Reward) => { setEditingRewardId(r.id); setAddingReward(false); setRewardForm({ ...r }); };
+  // Reward + penalty catalog writes are durable config commands: queued BEFORE
+  // the local list changes, adopted from the acknowledgment, and never written
+  // to localStorage as a "success" first.
+  const queueConfig = (kind: "rewards" | "penalties", action: "upsert" | "delete", rest: Record<string, unknown>) => {
+    void writeTaskConfig({
+      operationId: "",
+      kind,
+      action,
+      updatedAt: new Date().toISOString(),
+      ...(rest.item !== undefined ? { item: rest.item as TaskConfigCommand["item"] } : {}),
+      ...(rest.itemId !== undefined ? { itemId: rest.itemId as TaskConfigCommand["itemId"] } : {}),
+    }).catch(() => {});
+  };
   const saveReward = () => {
     if (!rewardForm.name.trim()) return;
-    if (addingReward) setRewards(prev => [...prev, { ...rewardForm, id: Date.now() }]);
-    else setRewards(prev => prev.map(r => r.id === editingRewardId ? { ...rewardForm } : r));
-    touchRewardsStamp();
+    queueConfig("rewards", "upsert", { item: { ...rewardForm, name: rewardForm.name.trim() } });
     setEditingRewardId(null);
     setAddingReward(false);
+    showToast(`\u2705 "${rewardForm.name.trim()}" \u2014 saving to the family server\u2026`);
   };
-  const deleteReward = (id: number) => { setRewards(prev => prev.filter(r => r.id !== id)); touchRewardsStamp(); setEditingRewardId(null); };
+  const deleteReward = (id: number) => {
+    queueConfig("rewards", "delete", { itemId: id });
+    setEditingRewardId(null);
+    showToast("\u{1F5D1}\uFE0F Removing that reward \u2014 saving to the family server\u2026");
+  };
 
-  const startAddPenalty = () => { setEditingPenaltyId(null); setAddingPenalty(true); setPenaltyForm({ id: Date.now(), name: "", emoji: "⚠️", points: 10 }); };
+  const startAddPenalty = () => { setEditingPenaltyId(null); setAddingPenalty(true); setPenaltyForm({ id: Date.now(), name: "", emoji: "\u26A0\uFE0F", points: 10 }); };
   const startEditPenalty = (p: Penalty) => { setEditingPenaltyId(p.id); setAddingPenalty(false); setPenaltyForm({ ...p }); };
   const savePenalty = () => {
     if (!penaltyForm.name.trim()) return;
-    if (addingPenalty) setPenalties(prev => [...prev, { ...penaltyForm, id: Date.now() }]);
-    else setPenalties(prev => prev.map(p => p.id === editingPenaltyId ? { ...penaltyForm } : p));
+    queueConfig("penalties", "upsert", { item: { ...penaltyForm, name: penaltyForm.name.trim() } });
     setEditingPenaltyId(null);
     setAddingPenalty(false);
+    showToast(`\u2705 "${penaltyForm.name.trim()}" \u2014 saving to the family server\u2026`);
   };
-  const deletePenalty = (id: number) => { setPenalties(prev => prev.filter(p => p.id !== id)); setEditingPenaltyId(null); };
+  const deletePenalty = (id: number) => {
+    queueConfig("penalties", "delete", { itemId: id });
+    setEditingPenaltyId(null);
+    showToast("\u{1F5D1}\uFE0F Removing that penalty \u2014 saving to the family server\u2026");
+  };
 
   const generateAiRewards = async () => {
     setAiRewardSuggesting(true);
@@ -1545,23 +1346,23 @@ export default function TasksPage() {
         body: JSON.stringify({ agent: "planner", intent: "reward_ideas" }),
       });
       const data = await res.json();
-      // Priced from validated points — the old "Cost pts" detail regex is gone.
+      // Priced from validated points \u2014 the old "Cost pts" detail regex is gone.
       const ideas = data.ok ? mapRewardIdeas(data.result?.actions) : [];
       if (ideas.length > 0) {
         setAiRewards(ideas);
       } else {
-        showToast("Consuela couldn't come up with reward ideas right now — try again in a bit.");
+        showToast("Consuela couldn't come up with reward ideas right now \u2014 try again in a bit.");
       }
     } catch {
-      showToast("Consuela couldn't come up with reward ideas right now — try again in a bit.");
+      showToast("Consuela couldn't come up with reward ideas right now \u2014 try again in a bit.");
     }
     setAiRewardSuggesting(false);
   };
 
   const adoptReward = (r: Reward) => {
-    setRewards(prev => [...prev, { ...r, id: Date.now() }]);
-    touchRewardsStamp();
+    queueConfig("rewards", "upsert", { item: { ...r, id: Date.now() } });
     setAiRewards(prev => prev.filter(rr => rr.name !== r.name));
+    showToast(`\u2705 "${r.name}" \u2014 saving to the family server\u2026`);
   };
 
   const openAdjust = (name: string) => {
@@ -1599,20 +1400,106 @@ export default function TasksPage() {
       }
       const delta = parseInt(adjustAmount) || 0;
       const change = adjustDir === "+" ? delta : -delta;
-      setWeekData(prev => {
-        const updated = { ...prev, points: { ...prev.points, [adjustMember]: Math.max(0, (prev.points[adjustMember] || 0) + change) } };
-        const reason = adjustReason ? ` (${adjustReason})` : "";
-        return addTransaction(updated, "adjust", change, `Manual adjust: ${change > 0 ? "+" : ""}${change}pts${reason}`, adjustMember, undefined, parent.fullName);
+      // A manual adjust is a parent-PIN ledger command like any other: the
+      // amount and reason travel, the balance never does, and the server writes
+      // the entry under the week lock with a non-negative floor.
+      queueCommand({
+        route: "/api/tasks/ledger",
+        action: "adjust",
+        payload: { memberName: adjustMember, amount: change, reason: adjustReason },
+        displayTarget: { kind: "config", title: adjustMember },
+        credential: { pin: adjustPin },
       });
       const label = adjustDir === "+" ? `+${delta}` : `-${delta}`;
-      setAdjustSuccess(`${label} pts applied to ${adjustMember.split(" ")[0]}!`);
-      setTimeout(() => { setAdjustMember(null); setAdjustSuccess(""); }, 1500);
+      setAdjustSuccess(`${label} pts for ${adjustMember.split(" ")[0]} — the family server confirms.`);
+      setTimeout(() => { setAdjustMember(null); setAdjustSuccess(""); }, 1800);
     } finally {
       setPinBusy(false);
     }
   };
 
-  const filtered = tasks.filter((t) => {
+  // Display-only optimism, derived from the per-operation mark map: a queued ADD
+  // contributes a temporary row, a queued DELETE hides its row, a queued UPDATE
+  // substitutes its row's copy, and a queued completion / reopen contributes an
+  // honest note. None of this is written to the store.
+  //
+  // The mark list is memoised so the memos below have a STABLE input: deriving
+  // it inline would hand every one of them a fresh array each render and make
+  // the memoisation decorative.
+  const optimisticRowsList = useMemo(() => Object.values(optimisticRows), [optimisticRows]);
+  const optimisticRemoved = useMemo(
+    () => optimisticRowsList
+      .filter((row): row is Extract<OptimisticRow, { kind: "remove" }> => row.kind === "remove")
+      .map((row) => row.taskId),
+    [optimisticRowsList],
+  );
+  const optimisticCancelling = useMemo(
+    () => optimisticRowsList
+      .filter((row): row is Extract<OptimisticRow, { kind: "cancelling" }> => row.kind === "cancelling")
+      .map((row) => row.taskId),
+    [optimisticRowsList],
+  );
+  const optimisticPending = useMemo(
+    () => optimisticRowsList
+      .filter((row): row is Extract<OptimisticRow, { kind: "pending" }> => row.kind === "pending")
+      .map((row) => row.taskId)
+      // A CANCELLING mark suppresses that task's own pending note (H4): the
+      // reopen is already shown, so both must not render at once.
+      .filter((taskId) => !optimisticCancelling.includes(taskId)),
+    [optimisticRowsList, optimisticCancelling],
+  );
+  const optimisticPendingSet = useMemo(
+    () => new Set([...optimisticPending, ...optimisticCancelling]),
+    [optimisticPending, optimisticCancelling],
+  );
+  // LAST WINS: two queued updates to the same chore (a double-tap on Save, or an
+  // edit the parent retried) collapse to ONE substituted row carrying the newest
+  // copy, so a chore can never render twice.
+  const optimisticUpdates = useMemo(() => {
+    const byId = new Map<number, Task>();
+    for (const row of optimisticRowsList) {
+      if (row.kind !== "update") continue;
+      byId.set(row.task.id, row.task);
+    }
+    return [...byId.values()];
+  }, [optimisticRowsList]);
+  const optimisticUpdatedIds = optimisticUpdates.map((task) => task.id);
+  // A queued ADD is a TEMPORARY row: it never reaches an interactive list (so
+  // complete/edit/delete cannot send an id the server has never assigned) and
+  // renders inert below instead.
+  const optimisticTasks = useMemo(
+    () => optimisticRowsList
+      .filter((row): row is Extract<OptimisticRow, { kind: "add" }> => row.kind === "add")
+      .map((row) => row.task)
+      .filter((task) => !optimisticRemoved.includes(task.id) && !optimisticUpdatedIds.includes(task.id)),
+    [optimisticRowsList, optimisticRemoved, optimisticUpdatedIds],
+  );
+  // `serverTasks` is the server's rows only: a queued remove hides its row.
+  const serverTasks = useMemo(
+    () => tasks.filter((t) => !optimisticRemoved.includes(t.id)),
+    [tasks, optimisticRemoved],
+  );
+  // What every interactive surface renders until the acknowledgment replaces a
+  // row: the server's rows, with a queued UPDATE's copy substituted in place (the
+  // id is a real server id, so the row stays actionable).
+  const interactiveRows = useMemo(
+    () => [
+      ...serverTasks.filter((t) => !optimisticUpdatedIds.includes(t.id)),
+      ...optimisticUpdates,
+    ],
+    [serverTasks, optimisticUpdatedIds, optimisticUpdates],
+  );
+  // The inert lookup table: the same rows PLUS the temporary ones, used only to
+  // resolve a queued command's display target to a title.
+  const optimisticVisible = [...interactiveRows, ...optimisticTasks];
+  // The pending list never shows a row whose completion is already queued, and
+  // never shows a row a queued delete is about to remove.
+  const hiddenByQueuedCommand = useMemo(
+    () => new Set([...optimisticPending, ...optimisticRemoved]),
+    [optimisticPending, optimisticRemoved],
+  );
+
+  const filtered = interactiveRows.filter((t) => {
     if (filterMember === "Open") {
       // Open + late-stealable rows and crew tasks with space.
       return ((t.universal || isSnatchable(t)) || (isCrewTask(t) && !crewFull(t))) && (showCompleted ? true : !t.completed);
@@ -1629,7 +1516,7 @@ export default function TasksPage() {
     return memberMatch && completedMatch;
   });
 
-  const pending = filtered.filter((t) => !t.completed);
+  const pending = filtered.filter((t) => !t.completed && !hiddenByQueuedCommand.has(t.id));
   const pendingApprovals = tasks.filter(isPendingApproval);
   // The Open board: unclaimed "up for grabs" tasks (universal or late-stealable)
   // PLUS crew tasks with space — shown only when the viewer isn't on a
@@ -1639,7 +1526,7 @@ export default function TasksPage() {
   const openBoard = (() => {
     if (filterMember !== "All" && filterMember !== "My Tasks" && filterMember !== "Open") return [] as Task[];
     const me = isLoggedIn && currentUser ? resolveMemberName(membersData, currentUser.name) : "";
-    return tasks
+    return interactiveRows
       .filter((t) => {
         if (t.completed) return false;
         if ((t.universal || isSnatchable(t)) && !isCrewTask(t)) return true;
@@ -1653,13 +1540,12 @@ export default function TasksPage() {
       .sort((a, b) => b.points - a.points);
   })();
   const completed = filtered.filter((t) => t.completed);
-  const thisWeeksCompleted = getThisWeeksCompletedTasks(tasks);
+  // Everything that reads "the family's chores" reads the SUBSTITUTED copy, so
+  // a queued edit is reflected on the completed list, the streaks, the leaderboard
+  // and the member sheet until the acknowledgment replaces it with the real row.
+  const visibleTasks = interactiveRows;
+  const thisWeeksCompleted = getThisWeeksCompletedTasks(visibleTasks);
   const thisWeeksCompletedCount = thisWeeksCompleted.length;
-
-  // Hall of Fame drives the out-of-band 🥇 Weekly Champ badge on the entries.
-  // Re-read when the week or the enshrinement version bumps (rollover path),
-  // mirroring the previousRanks memo below.
-  const hallOfFame = useMemo(() => loadHallOfFame(), [weekData, ranksVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const dynamicLeaderboard: LeaderboardEntry[] = useMemo(() => {
     const entries = membersData
@@ -1667,20 +1553,21 @@ export default function TasksPage() {
       .map((m: any) => {
         const name = m.fullName;
         const weeklyPoints = weekData.points[name] || 0;
-        const allTimePoints = getMemberAllTimePoints(name, weekData);
-        const allTimeComps = getMemberAllTimeCompletions(name, tasks, weekData);
+        const allTimeTotal = allTime.totals[name];
+        const allTimePoints = allTimeTotal?.points ?? null;
+        const allTimeComps = allTimeTotal?.completions ?? null;
         // Streaks are per-member: filter this week's completion dates to this
         // member before walking back consecutive days.
-        const streak = calculateRealStreak(name, weekData, getThisWeeksCompletedDates(tasks, name));
-        const { level, title, emoji, progress } = getLevel(allTimePoints);
-        const earnedBadges = BADGES.filter(b => b.condition(allTimePoints, streak, allTimeComps)).map(b => b.emoji);
+        const streak = calculateRealStreak(name, weekData, getThisWeeksCompletedDates(visibleTasks, name));
+        const { known, level, title, emoji, progress } = resolveAllTimeLevel(allTimePoints);
+        const earnedBadges = earnedBadgeEmojis(allTimePoints, streak, allTimeComps);
         // Weekly Champ history is out-of-band (BADGES.week_champ condition
         // stays false): a rank-1 Hall of Fame entry earns the 🥇 career badge.
         if (hallOfFame.some(h => h.member === name && h.rank === 1) && !earnedBadges.includes("🥇")) {
           earnedBadges.push("🥇");
         }
         const currentMonday = weekData.weekStart;
-        const completedInWeek = tasks.filter(
+        const completedInWeek = visibleTasks.filter(
           t => t.completed && t.completedBy === name && (
             t.completedInWeek === currentMonday ||
             (!t.completedInWeek && t.completedAt && t.completedAt >= currentMonday)
@@ -1696,6 +1583,7 @@ export default function TasksPage() {
           level,
           levelTitle: title,
           levelEmoji: emoji,
+          levelKnown: known,
           progressToNext: progress,
           badges: earnedBadges,
           allTimePoints,
@@ -1711,13 +1599,16 @@ export default function TasksPage() {
       ...e,
       rank: i > 0 && e.points === entries[i - 1].points ? entries[i - 1].rank : i + 1,
     }));
-  }, [weekData, membersData, tasks, hallOfFame]);
+  }, [weekData, membersData, visibleTasks, hallOfFame, allTime.totals]);
 
   const topScorer = dynamicLeaderboard[0];
   const familyTotal = dynamicLeaderboard.reduce((sum, entry) => sum + entry.points, 0);
   const championShare = familyTotal > 0 ? topScorer.points / familyTotal : 0;
   const weeklyEarned = Object.values(weekData.points).reduce((a, b) => a + b, 0);
   const daysUntilReset = getDaysUntilWeekReset();
+  // Everything the user can still take back: a `reconciling` entry has already
+  // been applied server-side, so cancelling it would be a lie.
+  const cancellableEntries = outboxEntries.filter((entry) => entry.status !== "reconciling");
 
   // The three StatTiles all follow the member filter: a parent tapping a kid's
   // tile reads that kid's open chores / this-week completions / this week's
@@ -1743,16 +1634,21 @@ export default function TasksPage() {
   const scopedEarned = scopedMember ? scopedMember.points : weeklyEarned;
   // Earned tile detail: all-time context next to the weekly number — the
   // member filter scopes it (a member's own total, family sum under "All").
+  // The family sum is knowable only when EVERY member total is known.
   const scopedAllTimeEarned = scopedMember
     ? scopedMember.allTimePoints
-    : dynamicLeaderboard.reduce((sum, e) => sum + e.allTimePoints, 0);
-  const previousRanks = useMemo(() => getPreviousWeekRanks(), [weekData, ranksVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+    : familyAllTimePoints(dynamicLeaderboard.map((e) => e.allTimePoints));
+  const allTimeRead = { state: allTime.state, updatedAt: allTime.updatedAt };
   const sheetEntry = sheetMember ? dynamicLeaderboard.find(e => e.name === sheetMember) : null;
 
   useEffect(() => {
     if (!mounted || !isLoggedIn || !currentUser) return;
     const myEntry = dynamicLeaderboard.find(e => e.name === currentUser.name || e.name.startsWith(currentUser.name));
     if (!myEntry) return;
+    // An unknown level is not level 0: recording it would make the real level
+    // look like a promotion the moment the read lands, so nothing is compared
+    // and nothing is recorded until the level is actually known.
+    if (!myEntry.levelKnown) return;
     const prev = prevLevelsRef.current[currentUser.name];
     if (prev !== undefined && myEntry.level > prev) {
       setLevelUpInfo({ name: currentUser.name, emoji: myEntry.emoji, oldLevel: prev, newLevel: myEntry.level });
@@ -1762,19 +1658,19 @@ export default function TasksPage() {
 
   const myPendingQuests = useMemo(() => {
     if (!isLoggedIn || !currentUser) return [];
-    return tasks
+    return visibleTasks
       .filter(t => !t.completed && (t.assignee === currentUser.name || t.assignee.startsWith(currentUser.name) || t.universal))
       .sort((a, b) => a.points - b.points)
       .slice(0, 3);
-  }, [tasks, isLoggedIn, currentUser]);
+  }, [visibleTasks, isLoggedIn, currentUser]);
 
   const needsStreakSave = useMemo(() => {
     if (!isLoggedIn || !currentUser) return false;
     const myEntry = dynamicLeaderboard.find(e => e.name === currentUser.name || e.name.startsWith(currentUser.name));
     if (!myEntry || myEntry.streak < 2) return false;
     const today = localTodayISO();
-    return !tasks.some(t => t.completed && t.completedBy === currentUser.name && t.completedAt && t.completedAt.split("T")[0] === today);
-  }, [dynamicLeaderboard, tasks, isLoggedIn, currentUser]);
+    return !visibleTasks.some(t => t.completed && t.completedBy === currentUser.name && t.completedAt && t.completedAt.split("T")[0] === today);
+  }, [dynamicLeaderboard, visibleTasks, isLoggedIn, currentUser]);
 
   const myEntry = isLoggedIn && currentUser ? dynamicLeaderboard.find(e => e.name === currentUser.name || e.name.startsWith(currentUser.name)) : null;
   const aheadEntry = myEntry && myEntry.rank > 1 ? dynamicLeaderboard[myEntry.rank - 2] : undefined;
@@ -1828,9 +1724,55 @@ export default function TasksPage() {
           completedCount={scopedCompletedCount}
           earnedThisWeek={scopedEarned}
           allTimePoints={scopedAllTimeEarned}
+          allTimeRead={allTimeRead}
           activeTab={activeTab}
           onChange={setActiveTab}
         />
+
+        {outboxCounts.pending > 0 && (
+          <div
+            data-testid="task-command-queue"
+            className="rounded-xl px-3 py-2"
+            style={{
+              background: "color-mix(in srgb, var(--color-accent-amber) 10%, transparent)",
+              border: "1px solid color-mix(in srgb, var(--color-accent-amber) 25%, transparent)",
+            }}
+          >
+            <p className="text-xs font-semibold text-[var(--color-accent-amber)]">
+              {outboxCounts.queued > 0
+                ? `⏳ Sending ${outboxCounts.queued} change${outboxCounts.queued !== 1 ? "s" : ""} to the family server…`
+                : ""}
+              {outboxCounts.authRequired > 0
+                ? `${outboxCounts.queued > 0 ? " " : ""}🔒 ${outboxCounts.authRequired} waiting on a PIN.`
+                : ""}
+              {outboxCounts.reconciling > 0
+                ? `${outboxCounts.queued > 0 || outboxCounts.authRequired > 0 ? " " : ""}⏳ ${outboxCounts.reconciling} finishing up.`
+                : ""}
+              {outboxCounts.failed > 0
+                ? `${outboxCounts.queued > 0 || outboxCounts.authRequired > 0 || outboxCounts.reconciling > 0 ? " " : ""}⚠️ ${outboxCounts.failed} couldn't be sent.`
+                : ""}
+            </p>
+            {cancellableEntries.length > 0 && (
+              <ul className="mt-1 space-y-1">
+                {cancellableEntries.map((entry) => (
+                  <li key={entry.operationId} className="flex items-center gap-2">
+                    <span className="text-xs text-text-secondary">
+                      {entry.displayTarget.title || entry.action}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label={`Cancel queued ${entry.displayTarget.title || entry.action}`}
+                      onClick={() => cancelQueuedOperation(entry.operationId)}
+                      className="tap-sm text-xs font-semibold text-[var(--color-accent-rose)]"
+                    >
+                      Cancel
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
 
         {activeTab === "tasks" && (
           <div key="tasks" className="panel-swap space-y-6">
@@ -1974,6 +1916,8 @@ export default function TasksPage() {
               </Modal>
              )}
 
+            <TaskLedgerQuarantineNotice localWeekData={weekData} isParent={isParent} />
+
             {openBoard.length > 0 && (
               <SectionCard title="🫳 Open" description="Nobody's claimed these — fastest fingers earn the bonus." icon="⚡">
                 <div className="space-y-2">
@@ -2016,7 +1960,7 @@ export default function TasksPage() {
             )}
 
             <CrewTasksCard
-              tasks={tasks}
+              tasks={visibleTasks}
               visible={isLoggedIn && currentUser?.role === "parent"}
               onRemoveMember={(taskId, memberName) => {
                 setCrewRemoveTarget({ taskId, memberName });
@@ -2026,6 +1970,63 @@ export default function TasksPage() {
             />
 
             <SectionCard title="Pending" description={`${pending.length} open tasks`} icon="📋">
+              {optimisticTasks.length > 0 && (
+                <div className="mb-2 space-y-2">
+                  {optimisticTasks.map((row) => (
+                    <div
+                      key={`optimistic-add-${row.id}`}
+                      data-testid="optimistic-add-row"
+                      className="flex items-center gap-2.5 px-3 py-2 rounded-2xl"
+                      style={{
+                        background: "color-mix(in srgb, var(--color-accent-amber) 8%, transparent)",
+                        border: "1px solid color-mix(in srgb, var(--color-accent-amber) 22%, transparent)",
+                      }}
+                    >
+                      <span className="text-sm">⏳</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm text-text-primary">{row.title}</div>
+                        <div className="truncate text-xs text-text-secondary">
+                          adding — {row.assignee}
+                        </div>
+                      </div>
+                      <span className="shrink-0 text-xs font-semibold text-[var(--color-accent-amber)]">
+                        Saving
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {optimisticPendingSet.size > 0 && (
+                <div className="mb-2 space-y-2">
+                  {[...optimisticPendingSet].map((taskId) => {
+                    const row = optimisticVisible.find((t) => t.id === taskId);
+                    if (!row) return null;
+                    const cancelling = optimisticCancelling.includes(taskId);
+                    return (
+                      <div
+                        key={`optimistic-${taskId}`}
+                        data-testid="optimistic-task-row"
+                        className="flex items-center gap-2.5 px-3 py-2 rounded-2xl"
+                        style={{
+                          background: "color-mix(in srgb, var(--color-accent-amber) 8%, transparent)",
+                          border: "1px solid color-mix(in srgb, var(--color-accent-amber) 22%, transparent)",
+                        }}
+                      >
+                        <span className="text-sm">⏳</span>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm text-text-primary">{row.title}</div>
+                          <div className="truncate text-xs text-text-secondary">
+                            {cancelling ? "asking the family server to reopen it" : `${row.points}pts on the way`}
+                          </div>
+                        </div>
+                        <span className="shrink-0 text-xs font-semibold text-[var(--color-accent-amber)]">
+                          {cancelling ? "Taking it back" : "On the way"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               {pending.length === 0 ? (
                 !isLoggedIn && guestSyncBlocked && tasks.length === 0 ? (
                   <EmptyState title="Tasks are synced to the family account" description="Sign in with your PIN to see everyone's tasks. Your chores aren't gone — they're waiting on the family server." icon="🔐" />
@@ -2362,6 +2363,7 @@ export default function TasksPage() {
                 onOpenSheet={setSheetMember}
                 onAdjust={openAdjust}
                 isAdmin={isLoggedIn && currentUser?.role === "parent"}
+                allTimeRead={allTimeRead}
               />
               <div className="mt-3 space-y-3">
                 {dynamicLeaderboard.slice(3).map((entry, index) => (
@@ -2391,7 +2393,7 @@ export default function TasksPage() {
               const myEntry = dynamicLeaderboard.find(e => e.name === currentUser.name || e.name.startsWith(currentUser.name));
               const myRank = myEntry?.rank ?? 0;
               const aheadEntry = myRank > 1 ? dynamicLeaderboard[myRank - 2] : undefined;
-              return myEntry ? <YourCard entry={myEntry} aheadEntry={aheadEntry} getMemberColor={(n: string) => memberColors[n] || "green"} /> : null;
+              return myEntry ? <YourCard entry={myEntry} aheadEntry={aheadEntry} getMemberColor={(n: string) => memberColors[n] || "green"} allTimeRead={allTimeRead} /> : null;
             })()}
 
             {needsStreakSave && (
@@ -2418,10 +2420,10 @@ export default function TasksPage() {
                 open={!!sheetMember}
                 entry={sheetEntry}
                 hasWeeklyChamp={hallOfFame.some(h => h.member === sheetEntry.name && h.rank === 1)}
-                allTimePoints={getMemberAllTimePoints(sheetEntry.name, weekData)}
-                allTimeComps={getMemberAllTimeCompletions(sheetEntry.name, tasks, weekData)}
+                allTimePoints={sheetEntry.allTimePoints}
+                allTimeComps={sheetEntry.allTimeCompletions}
                 weeklyPoints={sheetEntry.points}
-                pendingTasks={tasks.filter(t => !t.completed && (t.assignee === sheetEntry.name || t.universal))}
+                pendingTasks={visibleTasks.filter(t => !t.completed && (t.assignee === sheetEntry.name || t.universal))}
                 affordableRewards={rewards.filter(r => r.cost <= sheetEntry.points)}
                 weekGraph={["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(day => ({
                   day,
@@ -2431,6 +2433,7 @@ export default function TasksPage() {
                 }))}
                 onClose={() => setSheetMember(null)}
                 getMemberColor={(name: string) => memberColors[name] || "green"}
+                allTimeRead={allTimeRead}
               />
             )}
 
@@ -2442,6 +2445,8 @@ export default function TasksPage() {
               leaderboard={dynamicLeaderboard}
               memberColors={memberColors}
               isParent={!!membersData.find((m: any) => m.role === "parent")}
+              allTimePoints={raceName ? allTime.totals[raceName]?.points : undefined}
+              allTimeCompletions={raceName ? allTime.totals[raceName]?.completions : undefined}
             />
 
             <TasksRewardsPanel
@@ -2654,19 +2659,19 @@ export default function TasksPage() {
           <div className="space-y-4">
             <label className="block">
               <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Amount</span>
-              <input type="number" value={adjustAmount} onChange={(e) => setAdjustAmount(e.target.value)} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none" />
+              <input type="number" aria-label="Adjustment amount" value={adjustAmount} onChange={(e) => setAdjustAmount(e.target.value)} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none" />
             </label>
             <div className="grid gap-2 sm:grid-cols-2">
-              <SoftButton variant={adjustDir === "+" ? "success" : "secondary"} onClick={() => setAdjustDir("+")}>Add points</SoftButton>
+              <SoftButton aria-label="Add points" variant={adjustDir === "+" ? "success" : "secondary"} onClick={() => setAdjustDir("+")}>Add points</SoftButton>
               <SoftButton variant={adjustDir === "-" ? "danger" : "secondary"} onClick={() => setAdjustDir("-")}>Remove points</SoftButton>
             </div>
             <label className="block">
               <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Reason</span>
-              <input value={adjustReason} onChange={(e) => setAdjustReason(e.target.value)} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none" placeholder="Why?" />
+              <input aria-label="Adjustment reason" value={adjustReason} onChange={(e) => setAdjustReason(e.target.value)} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-sm text-text-primary outline-none" placeholder="Why?" />
             </label>
             <label className="block">
               <span className="mb-1.5 block text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary">Parent PIN</span>
-              <input type="password" inputMode="numeric" maxLength={4} value={adjustPin} onChange={(e) => { setAdjustPin(e.target.value.replace(/[^0-9]/g, "")); setAdjustError(""); }} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted" placeholder="0000" />
+              <input type="password" aria-label="Parent PIN" inputMode="numeric" maxLength={4} value={adjustPin} onChange={(e) => { setAdjustPin(e.target.value.replace(/[^0-9]/g, "")); setAdjustError(""); }} className="w-full rounded-2xl border border-white/10 bg-[var(--color-surface-2)] px-4 py-3 text-center text-2xl tracking-[0.5em] text-text-primary outline-none placeholder:text-text-muted" placeholder="0000" />
             </label>
             {adjustError && <p className="text-center text-sm text-[var(--color-accent-rose)]">{adjustError}</p>}
             {adjustSuccess && <p className="text-center text-sm text-[var(--color-accent-selected)]">{adjustSuccess}</p>}

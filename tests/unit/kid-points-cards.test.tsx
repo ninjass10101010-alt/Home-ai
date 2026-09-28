@@ -71,6 +71,21 @@ import KidHome from "@/modes/kid/KidHome";
 import { loadWeekData, saveWeekData, WEEK_DATA_KEY, getArchivedWeeks, saveHallOfFame, mondayOf } from "@/lib/task-utils";
 import { kidRaceLine } from "@/modes/kid/quest-labels";
 
+const allTime = vi.hoisted(() => ({
+  respond: null as null | (() => unknown),
+}));
+const ALL_TIME_FETCHED_AT = "2026-09-24T10:00:00.000Z";
+
+function serveAllTime(totals: Record<string, { points: number | null; completions: number | null }>, historyComplete = true) {
+  allTime.respond = () => ({
+    weekStart: "2026-09-21",
+    totals,
+    historyComplete,
+    source: "pocketbase",
+    fetchedAt: ALL_TIME_FETCHED_AT,
+  });
+}
+
 let activeRoot: Root | null = null;
 async function renderAsync(ui: ReactElement): Promise<HTMLElement> {
   const el = document.createElement("div");
@@ -111,7 +126,18 @@ beforeEach(() => {
   modeMock.isBedtime = false;
   modeMock.isWeekend = false;
   vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {}, addListener: () => {}, removeListener: () => {} })));
-  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 401, json: async () => ({}) })));
+  // The all-time total is the PB service's, not the stored 10 + 60.
+  serveAllTime({
+    Rebecca: { points: 0, completions: 0 },
+    Aurora: { points: 70, completions: 6 },
+    Caspian: { points: 25, completions: 2 },
+  });
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    if (String(url).includes("/api/tasks/all-time")) {
+      return { ok: true, status: 200, json: async () => (allTime.respond ? allTime.respond() : null) };
+    }
+    return { ok: false, status: 401, json: async () => ({}) };
+  }));
 });
 
 afterEach(() => {
@@ -177,6 +203,46 @@ describe("KidHome hero — two named point systems", () => {
     expect(boardLine).toBeTruthy();
     const weekCard = el.querySelector('[data-testid="kid-week-card"]');
     expect(weekCard!.textContent).toContain(boardLine!.textContent);
+  });
+
+  it("an unknown all-time total says unavailable and claims no level", async () => {
+    seedWeek({ Aurora: 10 });
+    serveAllTime({ Aurora: { points: null, completions: null } }, false);
+    const el = await renderAsync(<KidHome />);
+    await settle(300);
+
+    const foreverCard = el.querySelector('[data-testid="kid-forever-card"]')!;
+    expect(foreverCard.textContent).toContain("All-time unavailable");
+    expect(foreverCard.textContent).not.toMatch(/Level \d/);
+    expect(foreverCard.textContent).not.toContain("70");
+    // The weekly card is unaffected — that figure is a live week read.
+    const weekCard = el.querySelector('[data-testid="kid-week-card"]')!;
+    expect(weekCard.textContent).toContain("10");
+  });
+
+  it("an offline-cached all-time total says so instead of reading as live", async () => {
+    seedWeek({ Aurora: 10 });
+    serveAllTime({ Aurora: { points: 70, completions: 6 } });
+    localStorage.setItem("consuela-all-time-cache-v1", JSON.stringify({
+      weekStart: "2026-09-21",
+      totals: { Aurora: { points: 70, completions: 6 } },
+      historyComplete: true,
+      source: "pocketbase",
+      fetchedAt: ALL_TIME_FETCHED_AT,
+    }));
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (String(url).includes("/api/tasks/all-time")) {
+        return { ok: false, status: 503, json: async () => ({}) };
+      }
+      return { ok: false, status: 401, json: async () => ({}) };
+    }));
+
+    const el = await renderAsync(<KidHome />);
+    await settle(300);
+
+    const foreverCard = el.querySelector('[data-testid="kid-forever-card"]')!;
+    expect(foreverCard.textContent).toContain("70");
+    expect(foreverCard.textContent).toContain("offline cache");
   });
 });
 

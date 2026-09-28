@@ -4,7 +4,6 @@ import FamilyGoal from "@/components/leaderboard/FamilyGoal";
 import HallOfFame from "@/components/leaderboard/HallOfFame";
 import AchievementWall from "@/components/leaderboard/AchievementWall";
 import { textEmojiOrFallback } from "@/components/ui/EmojiText";
-import { getMemberAllTimePoints, getMemberAllTimeCompletions } from "@/lib/task-utils";
 import type { LeaderboardEntry, Task, WeekData } from "@/types/tasks";
 
 /**
@@ -20,6 +19,15 @@ interface TasksArchiveProps {
   leaderboard: LeaderboardEntry[];
   memberColors: Record<string, string>;
   isParent: boolean;
+  /**
+   * The signed-in member's canonical all-time totals, recomputed server-side
+   * from transaction history (`GET /api/tasks/all-time`). `null` means the
+   * value could NOT be read — journey and wall must say so rather than derive a
+   * level from a missing number. The page owns the data; this block owns the
+   * markup.
+   */
+  allTimePoints: number | null | undefined;
+  allTimeCompletions: number | null | undefined;
 }
 
 export default function TasksArchive({
@@ -30,6 +38,8 @@ export default function TasksArchive({
   leaderboard,
   memberColors,
   isParent,
+  allTimePoints,
+  allTimeCompletions,
 }: TasksArchiveProps) {
   return (
     <>
@@ -40,19 +50,19 @@ export default function TasksArchive({
           <summary className="cursor-pointer text-sm font-semibold text-text-secondary">🏅 Trophies, journey & history</summary>
           <div className="mt-4 space-y-6">
             {isLoggedIn && currentUser && (() => {
-              const myAllTime = getMemberAllTimePoints(currentUser.name, weekData);
+              const myAllTimePoints = allTimePoints ?? null;
               return (
                 <SectionCard title="Your Journey" description={`${textEmojiOrFallback(currentUser.emoji)} Level progress & badges`}>
                   <TreasurePath
-                    allTimePoints={myAllTime}
+                    allTimePoints={myAllTimePoints}
                     memberEmoji={currentUser.emoji || "🌱"}
                     memberColor={memberColors[currentUser.name] || "green"}
                   />
                   <div className="mt-4">
                     <AchievementWall
-                      allTimePoints={myAllTime}
+                      allTimePoints={myAllTimePoints}
                       streak={leaderboard.find(e => e.name === currentUser.name || e.name.startsWith(currentUser.name))?.streak ?? 0}
-                      completions={getMemberAllTimeCompletions(currentUser.name, tasks, weekData)}
+                      completions={allTimeCompletions ?? null}
                     />
                   </div>
                 </SectionCard>

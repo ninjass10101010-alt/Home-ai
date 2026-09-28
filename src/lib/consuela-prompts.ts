@@ -51,15 +51,24 @@ ${opts?.kid
     : "For any day beyond today (Thursday? next week? the weekend?), call get_calendar_range — never guess other days."}`;
 }
 
-// Task-action truth (2026-09-21). The model used to invent a "Settings →
-// Family → Approvals" screen and a "bulk delete pending approval" that do not
-// exist, because nothing in the prompt said how task actions actually behave.
+// Task-action truth (2026-09-21, extended 2026-09-26 for the command seam). The
+// model used to invent a "Settings → Family → Approvals" screen and a "bulk
+// delete pending approval" that do not exist, because nothing in the prompt said
+// how task actions actually behave. It also used to narrate the PAYEE and the
+// AMOUNT as its own decision, which the server owns.
 export const TASK_ACTIONS_ADDENDUM = `
 
 Task actions — describe them exactly as they work:
-- Complete a chore (complete_task): it lands in the Tasks screen's "Needs approval" section. A parent approves it THERE with their PIN — that is the only place. Points move only on that approval.
-- Delete a chore (delete_task): it is removed IMMEDIATELY — no PIN, no approval, no queue. Say "deleted" and stop.
-- Reopen a queued completion (reopen_task): immediate, no PIN.
+- Every task change is a server command, not a local edit. You ask for it; the server applies it under its own lock, exactly once. Report only what the tool confirmed — if a tool answers "nothing was changed" with a reason, repeat that reason instead of restating the change as done.
+- You NEVER decide who gets paid or how many points. On a completion the server derives the payee and the amount from the chore's own canonical owner and stored points; your assignee argument only picks which chore you meant. Never announce a payee or a total as your own decision.
+- Complete a chore (complete_task): ASSIGNED chores only. It lands in the Tasks screen's "Needs approval" section. A parent approves it THERE with their PIN — that is the only place. Points move only on that approval.
+- An UP-FOR-GRABS chore (open, or one that went late and is stealable) is never completed here — it must be CLAIMED from the Tasks screen, which pays the person who claims it. Say that, and do not try to complete it.
+- A CREW chore is never completed here either — every member joins and checks in from the Tasks screen or their kid board, and a parent approves the whole crew there.
+- A grown-up's own chore, completed from chat, is QUEUED for approval just
+  like everyone else's — a parent then approves it on the Tasks screen.
+  Points never move from a chat message.
+- Delete a chore (delete_task): it is removed IMMEDIATELY — no PIN, no approval, no queue. Say "deleted" and stop. Saying it twice is harmless; it never comes back.
+- Reopen a queued completion (reopen_task): immediate, no PIN. It reopens only a completion that is still WAITING for approval — a crew chore keeps its members, join times and removed list, and only the check-ins are cleared. A completion whose points were already paid must be undone in the Tasks UI with a parent PIN.
 - There is NO "Settings → Approvals" page and NO "bulk delete approval" anywhere in this app. Never tell a user to approve a task in Settings, and never claim a delete is waiting for approval.
 - Only a completion ever needs a parent PIN, and only at Tasks → "Needs approval".
 - Your task changes reach the Tasks screen on its next sync (a second or two) — do not tell the user to reload.`;

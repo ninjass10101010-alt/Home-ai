@@ -31,7 +31,8 @@ parent PIN). Non-gateway routes with meaningfully different gates:
 | `/api/ai/providers` | PUT/DELETE | Parent session (`authorizeAdminRequest`) |
 | `/api/ai/models` | POST | Parent session (`authorizeAdminRequest`) — server-side `/v1/models` listing with the stored key |
 | `/api/db/[collection]`, `/api/db/[collection]/[id]` | POST/PATCH/DELETE | Session + per-collection write policy (parent-only vs session) — see §5.6 |
-| `/api/tasks/sync` | POST | Session; non-parents sync the tasks leg only (`ignoredLegs`) |
+| `/api/tasks/sync` | POST | Session; **no browser writes** — a `tasks`/`weekData` body is 410 `legacy_sync_write_disabled`, any other body 400 `invalid_body` (GET is the read: rollover + reconcile + snapshot) |
+| `/api/tasks/quarantine` | POST | Parent session **and** a live PocketBase `role === "parent"` row (`verifyLiveParentSession`; 401 `unauthorized`/`member_missing`, 403 `adult_only`, 503 `member_lookup_failed`); takes no PIN because it writes nothing to the server — `dry-run` returns the match report only, `export` writes one JSON file to `local-quarantine/`. PB is read-only here (snapshot → `week_data` fallback, `getFullList` only; 503 `canonical_week_unavailable`) |
 | `/api/consuela/briefing` | GET/PATCH | Session (no longer middleware-exempt); PATCH stamps `acknowledgedBy` |
 | `/api/ha/call-service`, `notify-config`, `notify-prefs`, `notify-test` | POST | Parent session (`authorizeAdminRequest`); HA reads stay session-level |
 
@@ -209,12 +210,239 @@ still 401 at middleware, and a wrong role is 403 `adult_only`.
   `grocery_list_items`, `pantry_items` — what the household already toggles in
   the UI. The gateway `sort` param is whitelisted (field lists only; else 400
   `invalid_sort`).
-- `POST /api/tasks/sync` from a non-parent syncs the **tasks leg only**
-  (`ignoredLegs: ["weekData","rewards","penalties"]`), so a child can never
-  overwrite the shared points snapshot.
+- `POST /api/tasks/sync` takes **no browser writes at all**: a body carrying
+  `tasks` or `weekData` is refused 410 `legacy_sync_write_disabled`, and every
+  other body is 400 `invalid_body`. Task, ledger and config writes go through the
+  command routes (`/api/tasks/approve`, `/api/tasks/claim`, `/api/tasks/ledger`,
+  `/api/tasks/config`, `/api/tasks/manage`, `/api/rewards/redeem`) and the
+  server-side week-ledger lock, so no session — child included — can overwrite the
+  shared points snapshot.
+- `POST /api/tasks/quarantine` is **read-only against PocketBase** and is not a
+  ledger write: it needs a parent session *and* a live parent PB role
+  (`verifyLiveParentSession`, no PIN), answers `dry-run` with the match report
+  alone, and `export` writes a single JSON file under `local-quarantine/`. It
+  must never grow a `create`/`update`/`delete` against `week_data` or the tasks
+  snapshot — unmatched legacy rows are surfaced and exported, never applied.
 - Kid reward redemption is **not** a gateway write: `POST /api/rewards/redeem` is
   server-authoritative (server-read cost + balance, appends the redeem tx, 60s
   dedupe → 409, unknown → 404, insufficient → 400, wrong/missing PIN → 401).
+
+**The browser outbox is how a device asks for a write (`consuela-task-operation-outbox-v1`).**
+Normal browser task/ledger writes are **retired** — no device pushes `tasks`,
+`weekData`, points or history anywhere, and no client surface POSTs a command
+route directly. `saveTasks`/`saveWeekData` are still called on the client, but
+they are the localStorage **cache** writers (they are what "adopt the
+authoritative state, then cache it" means), and `addTransaction` is a pure
+in-memory transformer that returns a new `WeekData` — none of the three reaches
+the network.
+Every task/ledger mutation leaves the device as a durable command queued in
+`src/lib/task-operation-outbox.ts`, persisted under the localStorage key
+**`consuela-task-operation-outbox-v1`** (one `:entry:<operationId>` record per
+command; a credential never enters the entry). An entry is queued — with its
+stable `operationId` and a display target — *before* any local state moves, is
+released only after a `200`/`202` acknowledgment has handed back authoritative
+`weekData`/`task` plus the snapshot revision for adoption, retries on the same
+`operationId`, and only clears on acknowledgment or an explicit user cancel of
+a non-applied operation. The queue carries the outbox-carrying command routes
+(`/api/tasks/claim`, `/api/tasks/approve`, `/api/tasks/manage`,
+`/api/tasks/config`, `/api/tasks/ledger`, `/api/rewards/redeem`);
+`/api/tasks/quarantine` is the one command route it does not carry, because that
+route writes nothing to the server. **Do not fork the key or the entry shape** —
+import `TASK_OUTBOX_STORAGE_KEY` and the queue helpers, never re-implement a
+localStorage command buffer.
+
+**What the on-disk entry payload may contain.** A `/api/rewards/redeem` entry
+persists `{ rewardId, memberName, parentName }` in localStorage. `parentName` is
+the approver's **identity**, not a credential: `/api/rewards/redeem` re-resolves
+it against the LIVE PocketBase roster with `namesMatch` and then verifies
+`parentPin`, so a stale, renamed, deleted or forged name authorizes nothing — a
+name off the roster or a non-parent is `403 parent_only`, and a right name with
+a wrong PIN is `401 invalid_pin`, both before the ledger write. A PIN
+(`pin` / `parentPin`) **never** enters the entry: it lives only in the ephemeral
+credential registry keyed by `operationId`. The stored reward row stays the sole
+authority for the cost — never widen the allowlist to admit a client `cost` or
+`title`. The entry's failure fields are split, and the boundary is exact:
+
+- `body.reason` / `body.code` is the **machine channel** and is honoured
+  **unconditionally**. The client deliberately acts on it: it selects
+  retryable / permanent / semantic-duplicate and sets the retry backoff. This is
+  the one place a server field is trusted outright, and it is intentional.
+- `body.error` is the **display channel** — normally a human sentence — and is
+  honoured as a machine reason **only when it is a member of the closed
+  `ERROR_CHANNEL_MACHINE_CODES` vocabulary** in `task-operation-outbox.ts`. That
+  exception exists because two command routes express their machine codes ONLY
+  through `error`: `/api/tasks/config`, whose bodies are pinned by exact equality
+  in `tests/unit/task-config-route.test.ts`, and `/api/tasks/manage`, whose bodies
+  are pinned by `toMatchObject` in `tests/unit/task-manage-route.test.ts`. Neither
+  route's codes can move to `reason` without rewriting those assertions.
+- A **non-member** `error` yields no machine reason, and the caller degrades to a
+  status-derived reason (`http_<status>`, `unauthorized`, `adult_only`,
+  `operation_conflict`, ...). Every `error` — member or not — also lands on
+  `lastErrorMessage`, which one caller renders; that field **steers nothing**.
+- The vocabulary buys **correctness, not security.** An attacker who controls the
+  response body already controls `reason` / `code`, which are honoured
+  unconditionally, so gating `error` defends nothing against a hostile server.
+  What it buys is that a well-behaved route's human sentence is never mistaken for
+  a code, and that no server field can impersonate a module sentinel and strand a
+  queued command. Do not later describe it as a security control.
+- The list is hand-written because `TaskManageErrorCode` and `TaskConfigErrorCode`
+  are type-only unions in server-only modules a browser module cannot import at
+  runtime. `EveryManageCodeIsClassified` and `EveryConfigCodeIsClassified` make
+  `npm run typecheck` fail if a new member of **either union** has no matching
+  decision here. Those two guards cover only those two unions; five further
+  members (`invalid_body`, `member_missing`, `member_lookup_failed`,
+  `pin_required`, `unsupported_task_command`) are bare string literals with no
+  derivable union, so they rest on the table-driven test alone.
+- `credentialMissing` is a **module-owned boolean**, not a string. It is set only
+  by `markAuthRequired(..., deferred: false)` — the one place this module decides a
+  credential is absent — and `runFlush` reads it to skip an entry that cannot be
+  attempted. Because it is never string-matched against `lastErrorReason`,
+  **no server field, through any channel, can move the credential gate.**
+
+**`executeInternalTaskCommand` is the sanctioned server-side command seam.**
+`executeInternalTaskCommand` (`src/lib/task-commands.ts`) is the *only* entry
+point a non-browser task mutation may use: it takes a normalized
+`{ operationId, kind, actor, payload }` command plus a `context.source`
+(`hermes` | `muse` | `server`), refuses a malformed id or shape, a forbidden
+payload key (any authority token — `member`, `amount`, `points`, `history`, … —
+or any credential token) and an unregistered kind, then dispatches to the
+handler registered via `registerInternalTaskCommandHandler`.
+`/api/tasks/manage`, `/api/tasks/claim` and `/api/tasks/approve` all execute
+through it. A new internal writer **registers a handler and calls this** — it
+never reaches PocketBase or the week row on its own, and it never infers a
+payee, amount or approval identity from untrusted tool arguments.
+**Wave 3 is COMPLETE — there is NO unremediated writer left in this plan's
+scope.** Do not "migrate" any of the surfaces below; they are already on the
+seam and the notes that once said otherwise are retired. What each one rides
+now:
+
+- **Hermes/MUSE task tools (Tasks 5 + 6).** `complete_task` / `reopen_task` ride
+  the **claim** seam (`kind:"complete"` / `kind:"undo"`) and `add_task` /
+  `update_task` / `delete_task` ride the **manage** seam
+  (`kind:"add"|"update"|"delete"`) — none of them writes a snapshot, a tombstone
+  or a mirror row itself, and the `mutateSnapshot` / `upsertSnapshotTask` /
+  `deleteSnapshotTask` / `mirrorTaskToCollection` imports are gone from
+  `src/lib/hermes-tools.ts`.
+- **Reward redemption (Task 3).** `POST /api/rewards/redeem` runs through
+  `applyWeekLedgerOperation` (`src/lib/ledger-operations.ts`) — the **shared**
+  helper, under the same lock order (`week-ledger → snapshot-keyed`), with a
+  `tx.meta.operationId` for replay and a shared projection-repair callback. It
+  does **not** have its own `withWeekLedgerLock` body; an earlier note here
+  claiming it did was wrong and has been removed.
+- **Planner point adjustment (Task 2).**
+  `POST /api/consuela/planner/apply` uses the same shared helper. It is **not**
+  "its own `withWeekLedgerLock` body" — the earlier wording was wrong and is
+  retired. The route still requires a live parent session + the parent PIN, and
+  a chat-side adjustment with no stable operation id is refused rather than
+  applied.
+- **Briefing authority (Task 7).** The morning briefing, the assistant live
+  reads and the screensaver payload all read through
+  `readCanonicalTasks()` (`src/lib/consuela/live-reads.ts`) — the snapshot
+  first, the PB replica only as a declared fallback, and `unavailable` as the
+  third, honest outcome. See "snapshot-first reads" below.
+- **All-time totals (Task 8).** `GET /api/tasks/all-time` +
+  `src/lib/all-time-totals.ts` recompute points AND completions from canonical
+  transaction history. See "all-time recomputation" below.
+
+**CONTRACTS to keep (Wave 3, all tasks):**
+
+1. **Command seam.** Every non-browser task mutation registers a handler and
+   calls `executeInternalTaskCommand`; it never reaches PocketBase or the week
+   row on its own and never infers a payee, amount or approval identity from
+   untrusted arguments. The two command routes that carry a ledger write
+   (redeem, planner apply) go through `applyWeekLedgerOperation`, so lock order,
+   replay detection and projection repair are defined in exactly one place.
+2. **All-time recomputation from canonical history.** All-time points and
+   completion counts are **recomputed** from parsed transaction history
+   (`parseCanonicalTransactions`) across the live week plus archived weeks. A
+   stored `points` map is **never** authority. `historyComplete: false` means
+   at least one week could not be read, so the per-member values are `null` and
+   every surface says so rather than showing a short total as if it were whole.
+3. **The honest-null policy.** A value that cannot be known is `null` and says
+   so — never `0`, never an empty list, never "no chores", never a level
+   derived from a missing number. Only *rendered* copies change ("no chores"
+   was the specific Wave 3 Task 7 fix). Any new total, count or level MUST
+   accept the null and must not coalesce it to zero.
+4. **Snapshot-first reads.** Assistant/ambient task readers use
+   `readCanonicalTasks()`: `consuela_data_snapshots` (the rows the family
+   actually sees) → PB `tasks` replica as a **declared** fallback → `unavailable`.
+   The screensaver throws `task_data_unavailable` on the third case and answers
+   an honest 503; it never renders a fabricated progress bar. Tombstoned rows
+   are dropped, and unresolved (`pendingApproval`) rows are filtered where the
+   surface's meaning requires a settled answer.
+5. **Outbox `parentName` contract.** A queued `/api/rewards/redeem` entry stores
+   `{ rewardId, memberName, parentName }`; `parentName` is the approver's
+   **identity**, never a credential. The route re-resolves it against the LIVE
+   roster with `namesMatch` and then verifies `parentPin` — a stale, renamed,
+   deleted or forged name authorizes nothing (off-roster or non-parent is
+   `403 parent_only`; right name + wrong PIN is `401 invalid_pin`, both before
+   the ledger write). A PIN never enters the entry; the stored reward row stays
+   the sole authority for the cost.
+6. **Prompt/codegen coupling.** `ai/TOOLS.md` is embedded at prebuild into
+   `src/lib/ai-boot.generated.ts` and composes `SYSTEM_PROMPT` for every parent
+   chat — **regenerate it with `node scripts/write-ai-boot.mjs` (or
+   `npm run ai:boot`) in the same commit as any `ai/*.md` edit**; never hand-edit
+   the generated file.
+7. **Assistant actor attribution (Task 5).** Every assistant task write passes
+   a `caller`; the actor role is the caller's LIVE role and `callerRole()`
+   **fails closed** (only a literal `parent` is a parent), so a context-free
+   `handler(args)` can never author a parent-actor command. All five call sites
+   pass a context.
+8. **Assigned-only completion, canonical payee.** `complete_task` completes an
+   ASSIGNED chore only; open/late-stealable chores are CLAIMED from the Tasks
+   screen and crew chores need every member checked in. The payee and the amount
+   are derived from the chore's canonical owner and stored points — the
+   `assignee` argument only disambiguates which row was meant.
+9. **Reopen guard.** The payee list follows how the earn was actually written: a
+   crew approval pays PER MEMBER (`pendingApproval.crew`), so `byName` — the
+   literal `"Crew"` — is not a payee. There is **no** cheap pre-filter:
+   `hasUnreversedTaskEarn` normalizes and its throw path is the fail-closed one.
+   `reopenTask` writes `completedBy/completedAt/completedInWeek` as **`null`**,
+   matching the approval seam's send-back — `""` is not nullish and would persist
+   as a lie.
+10. **GET `/api/tasks/sync` is the read, not a writer.** The route is retired as
+    a browser write path (POST is 410 `legacy_sync_write_disabled` / 400
+    `invalid_body`) and **kept** as the cross-device read. The browser's
+    structured whole-body push family (`syncTasksToPB`, `syncWeekDataToPB`,
+    `syncArchiveToPB`, `syncRewardsToPB`, `syncPenaltiesToPB`,
+    `syncWeeklyPrizesToPB`, `syncAllTasksToPB`, `syncHallOfFameToPB`) is
+    **deleted** — there is no migration-tooling caller left, so nothing is
+    retained "for migration". `pushLocalToPB` keeps only the six non-task
+    migration collections the Settings push may write
+    (`SAFE_LOCAL_PUSH_COLLECTIONS` = grocery, pantry, meals, recipes, events,
+    schedules) — tasks, points and goals stay server-owned and the legacy
+    emergency-contact leg is gone. `syncFamilyGoalToPB` is the one surviving
+    `sync*ToPB` helper and it is a family-goal (non-task) write.
+    `tests/unit/task-normal-writes-disabled.test.ts` pins the writer surface and
+    `tests/unit/task-no-browser-writes.test.ts` pins the db layer.
+
+**DECIDED (2026-09-28, Option B):** an adult-owned chore completed from chat
+queues as `pendingApproval` — chat never moves points, and the Tasks screen
+still pays directly, because it is PIN-verified: `"pin"` pays, an adult
+`"session"` caller is refused `pin_required`. The queue/pay branch keys off
+`authentication`, never `role`.
+
+`complete_task` no longer refuses a chore whose canonical owner is a grown-up
+(the `reason: "adult_owner"` guard in `src/lib/hermes-tools.ts` is deleted — the
+tool makes **no** authority decision at all any more). The disposition moved into
+the claim seam (`src/lib/task-claim.ts`, the `action === "complete"` branch):
+
+- `actor.authentication === "internal"` (chat / MUSE / a server-side caller)
+  → **queues** as `pendingApproval`, no ledger write.
+- `"pin"` (the Tasks screen, member PIN verified) → **pays** immediately.
+- `"session"` → an adult is refused `pin_required` by `sessionPolicyAllows`
+  (pre-existing: the adult Tasks-screen path is PIN-verified).
+- A **child** actor still queues on every authentication — the child path is
+  unchanged.
+
+Because the branch never reads `role`, the spec §3 roster-promotion race (a
+member promoted `child → parent` between two roster reads) is closed **by
+construction**: the role read can no longer change the outcome. Do not "improve"
+this by consulting `role` — that is what reintroduces the race. Pinned by
+`tests/unit/task-claim-adult-queue.test.ts` (chat-queues-with-`role: "parent"`,
+`pin`-pays, child-unchanged, session-refused, adult reopen, adult approve
+idempotency) and by the Option B case in
+`tests/unit/hermes-tools-task-crud.test.ts`.
 
 **Parent-only admin auth (pets denied).** `authorizeAdminRequest`
 (`src/lib/admin-auth.ts`) is an **allowlist on `role === "parent"`**: a valid

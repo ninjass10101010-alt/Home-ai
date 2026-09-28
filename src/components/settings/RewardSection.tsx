@@ -1,14 +1,17 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useSyncExternalStore } from "react";
+import { onTaskOutboxAdopted } from "@/lib/task-command-queue";
+import { writeTaskConfig } from "@/lib/task-config-client";
+import type { TaskConfigCommand } from "@/lib/task-config";
+import { useTaskCommandQueue } from "@/hooks/useTaskCommandQueue";
 import SoftButton from "@/components/ui/SoftButton";
 import IconButton from "@/components/ui/IconButton";
 import Modal from "@/components/ui/Modal";
 import ListRow from "@/components/ui/ListRow";
 import EmptyState from "@/components/ui/EmptyState";
 import FormField from "@/components/patterns/FormField";
-import { REWARDS_KEY, loadRewards, saveRewards } from "@/lib/task-utils";
-import { touchRewardsStamp } from "@/modes/kid/kid-store";
+import { REWARDS_KEY, loadRewards } from "@/lib/task-utils";
 
 // Retired Settings-only key. The live shop (RewardsShop) and the Tasks page
 // read/write REWARDS_KEY via task-utils — one catalog, one source.
@@ -28,11 +31,71 @@ interface RewardSectionProps {
   showToast: (msg: string) => void;
 }
 
+const REWARDS_UPDATED_EVENT = "consuela-rewards-updated";
+const EMPTY_REWARDS: any[] = [];
+let cachedRewardsRaw: string | null | undefined;
+let cachedRewards: any[] = EMPTY_REWARDS;
+
+function getRewardsSnapshot(): any[] {
+  if (typeof window === "undefined") return EMPTY_REWARDS;
+  const raw = localStorage.getItem(REWARDS_KEY);
+  if (raw !== cachedRewardsRaw) {
+    cachedRewardsRaw = raw;
+    cachedRewards = loadRewards<any[]>([]);
+  }
+  return cachedRewards;
+}
+
+function getServerRewardsSnapshot(): any[] {
+  return EMPTY_REWARDS;
+}
+
+function subscribeToRewards(onStoreChange: () => void): () => void {
+  window.addEventListener(REWARDS_UPDATED_EVENT, onStoreChange);
+  window.addEventListener("storage", onStoreChange);
+  window.addEventListener("consuela-data-refreshed", onStoreChange);
+  return () => {
+    window.removeEventListener(REWARDS_UPDATED_EVENT, onStoreChange);
+    window.removeEventListener("storage", onStoreChange);
+    window.removeEventListener("consuela-data-refreshed", onStoreChange);
+  };
+}
+
+function emitRewardsUpdate(): void {
+  window.dispatchEvent(new Event(REWARDS_UPDATED_EVENT));
+}
+
+function queueRewardsCommand(action: "replace" | "upsert" | "delete", rest: Record<string, unknown>): void {
+  const command: TaskConfigCommand = {
+    operationId: "",
+    kind: "rewards",
+    action,
+    updatedAt: new Date().toISOString(),
+    ...(rest.item !== undefined ? { item: rest.item as TaskConfigCommand["item"] } : {}),
+    ...(rest.itemId !== undefined ? { itemId: rest.itemId as TaskConfigCommand["itemId"] } : {}),
+  };
+  void writeTaskConfig(command).catch(() => {});
+}
+
 export default function RewardSection({ showToast }: RewardSectionProps) {
-  const [rewards, setRewards] = useState<any[]>([]);
+  // The Settings surface owns its OWN queue counters (it is never mounted at
+  // the same time as Tasks or KidHome), so a parent editing the catalog sees
+  // the command is still sending — and a refusal is visible, not swallowed.
+  const { entries, counts, cancel } = useTaskCommandQueue();
+  const failedEntries = entries.filter((entry) => entry.status === "failed");
+  const rewards = useSyncExternalStore(
+    subscribeToRewards,
+    getRewardsSnapshot,
+    getServerRewardsSnapshot,
+  );
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState({ name: "", emoji: "🎁", cost: 25, category: "fun" });
+
+  // An adoption rewrites the canonical catalog, so the rendered list has to be
+  // told to re-read: a REFUSED (stale) command repairs the visible catalog
+  // immediately, at the moment of the refusal, instead of on the next 60s pull.
+  useEffect(() => onTaskOutboxAdopted(emitRewardsUpdate), []);
 
   useEffect(() => {
     // One-time heal: a device whose only catalog is the retired Settings key
@@ -47,7 +110,7 @@ export default function RewardSection({ showToast }: RewardSectionProps) {
         localStorage.removeItem(LEGACY_CATALOG_KEY);
       }
     } catch {}
-    setRewards(loadRewards<any[]>([]));
+    emitRewardsUpdate();
   }, []);
 
   const openModal = (reward?: any) => {
@@ -56,38 +119,67 @@ export default function RewardSection({ showToast }: RewardSectionProps) {
     setModalOpen(true);
   };
 
-  // Every catalog write touches the shared LWW stamp (kid-store) so the
-  // Tasks page's snapshot restore can tell a Settings edit (newer) from a
-  // stale server snapshot (older) — without it, the restore's old "longer
-  // list wins" heuristic resurrected deletes on the next Tasks mount/tick.
+  // Every catalog write is a durable config command queued BEFORE the local
+  // list changes. The outbox acknowledgment adopts the authoritative list —
+  // this component never writes a "success" into localStorage first, and the
+  // edit survives a reload or a dead NAS because the command is persisted.
   const save = () => {
     if (!form.name.trim()) return;
     const reward = { ...form, name: form.name.trim(), id: editing?.id || `reward-${Date.now()}` };
-    const updated = editing ? rewards.map((r) => r.id === editing.id ? reward : r) : [...rewards, reward];
-    setRewards(updated);
-    saveRewards(updated);
-    touchRewardsStamp();
-    showToast(editing ? `✅ Updated "${reward.name}"` : `✅ Added "${reward.name}"`);
+    queueRewardsCommand("upsert", { item: reward });
+    showToast(editing ? `✅ Updating "${reward.name}"…` : `✅ Adding "${reward.name}"…`);
     setModalOpen(false);
   };
 
   const remove = (reward: any) => {
-    const updated = rewards.filter((r) => r.id !== reward.id);
-    setRewards(updated);
-    saveRewards(updated);
-    touchRewardsStamp();
-    showToast(`🗑️ Removed "${reward.name}"`);
+    queueRewardsCommand("delete", { itemId: reward.id });
+    showToast(`🗑️ Removing "${reward.name}"…`);
   };
 
   const resetDefaults = () => {
-    localStorage.removeItem(REWARDS_KEY);
-    touchRewardsStamp();
-    setRewards([]);
-    showToast("✅ Rewards cleared — the shop starts empty");
+    queueRewardsCommand("replace", { items: [] });
+    showToast("✅ Clearing the rewards…");
   };
 
   return (
     <>
+      {counts.pending > 0 && (
+        <div
+          data-testid="rewards-command-queue"
+          className="mb-3 rounded-xl px-3 py-2 text-xs font-semibold"
+          style={{
+            background: "color-mix(in srgb, var(--color-accent-amber) 10%, transparent)",
+            border: "1px solid color-mix(in srgb, var(--color-accent-amber) 25%, transparent)",
+            color: "var(--color-accent-amber)",
+          }}
+        >
+          {counts.queued > 0
+            ? `⏳ Sending ${counts.queued} change${counts.queued !== 1 ? "s" : ""} to the family server…`
+            : ""}
+          {counts.authRequired > 0 ? " 🔒 Waiting on a PIN." : ""}
+          {counts.reconciling > 0 ? " ⏳ Finishing up." : ""}
+          {counts.failed > 0 ? " ⚠️ Couldn't be saved." : ""}
+        </div>
+      )}
+      {counts.failed > 0 && (
+        <ul data-testid="rewards-command-failures" className="mb-3 space-y-1">
+          {failedEntries.map((entry) => (
+            <li key={entry.operationId} className="flex items-center gap-2">
+              <span className="text-xs text-text-secondary">
+                {entry.displayTarget.title || entry.action}
+              </span>
+              <button
+                type="button"
+                aria-label={`Discard unsaved ${entry.displayTarget.title || entry.action}`}
+                onClick={() => cancel(entry.operationId)}
+                className="tap-sm text-xs font-semibold text-[var(--color-accent-rose)]"
+              >
+                Discard
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="space-y-3">
         {rewards.map((reward) => (
           <ListRow

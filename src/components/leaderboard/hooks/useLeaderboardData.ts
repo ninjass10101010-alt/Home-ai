@@ -4,7 +4,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { db } from "@/db";
 import type { LeaderboardEntry, WeekData, Task, HallOfFameEntry } from "@/types/tasks";
-import { getLevel, BADGES } from "@/types/tasks";
 import {
   loadWeekData,
   loadTasks,
@@ -12,12 +11,13 @@ import {
   getThisWeeksCompletedDates,
   getDaysUntilWeekReset,
   getPreviousWeekRanks,
-  getMemberAllTimePoints,
-  getMemberAllTimeCompletions,
   loadHallOfFame,
   loadHallOfFameMerged,
+  loadPreviousWeekRanksMerged,
   todayMondayISO,
 } from "@/lib/task-utils";
+import { useAllTimeTotals, type AllTimeReadState } from "@/hooks/useAllTimeTotals";
+import { earnedBadgeEmojis, resolveAllTimeLevel } from "@/components/leaderboard/level";
 
 // Same list, same content → keep the previous reference (no re-render when
 // the async downlink confirms what the synchronous local read already showed).
@@ -37,6 +37,12 @@ function sameHall(a: HallOfFameEntry[], b: HallOfFameEntry[]): boolean {
   });
 }
 
+function sameRanks(a: Record<string, number>, b: Record<string, number>): boolean {
+  const aKeys = Object.keys(a).sort();
+  const bKeys = Object.keys(b).sort();
+  return aKeys.length === bKeys.length && aKeys.every((key, index) => key === bKeys[index] && a[key] === b[key]);
+}
+
 export interface LeaderboardData {
   entries: LeaderboardEntry[];
   weekData: WeekData;
@@ -44,9 +50,11 @@ export interface LeaderboardData {
   daysUntilReset: number;
   previousRanks: Record<string, number>;
   hall: HallOfFameEntry[];
+  allTime: { state: AllTimeReadState; updatedAt: string | null };
 }
 
 export function useLeaderboardData() {
+  const allTime = useAllTimeTotals();
   const [mounted, setMounted] = useState(false);
   const [weekData, setWeekData] = useState<WeekData | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -59,6 +67,8 @@ export function useLeaderboardData() {
   // Mirror of what was last applied so the async downlink can skip scheduling
   // a state update entirely when the merged hall matches (the common case).
   const hallRef = useRef<HallOfFameEntry[]>([]);
+  const previousRanksRef = useRef<Record<string, number>>({});
+  const [previousRanks, setPreviousRanks] = useState<Record<string, number>>({});
 
   // The Home leaderboard stays mounted on the always-on kitchen display while
   // tasks get completed elsewhere. The 60s CacheRefresher merges another
@@ -84,6 +94,8 @@ export function useLeaderboardData() {
     setTasks(loadTasks());
     hallRef.current = loadHallOfFame();
     setHall(hallRef.current);
+    previousRanksRef.current = getPreviousWeekRanks();
+    setPreviousRanks(previousRanksRef.current);
     setMounted(true);
   }, [refreshVersion]);
 
@@ -93,26 +105,28 @@ export function useLeaderboardData() {
   useEffect(() => {
     if (!mounted) return;
     let alive = true;
-    loadHallOfFameMerged()
-      .then((merged) => {
-        if (!alive || sameHall(hallRef.current, merged)) return;
+    void Promise.all([
+      loadHallOfFameMerged(),
+      loadPreviousWeekRanksMerged(weekData?.weekStart || todayMondayISO()),
+    ]).then(([merged, ranks]) => {
+      if (!alive) return;
+      if (!sameHall(hallRef.current, merged)) {
         hallRef.current = merged;
         setHall(merged);
-      })
-      .catch(() => {});
+      }
+      if (!sameRanks(previousRanksRef.current, ranks)) {
+        previousRanksRef.current = ranks;
+        setPreviousRanks(ranks);
+      }
+    });
     return () => {
       alive = false;
     };
-  }, [mounted, refreshVersion]);
+  }, [mounted, refreshVersion, weekData?.weekStart]);
 
   const daysUntilReset = useMemo(() => {
     if (!mounted) return 7;
     return getDaysUntilWeekReset();
-  }, [mounted]);
-
-  const previousRanks = useMemo(() => {
-    if (!mounted) return {};
-    return getPreviousWeekRanks();
   }, [mounted]);
 
   const entries = useMemo<LeaderboardEntry[]>(() => {
@@ -124,14 +138,15 @@ export function useLeaderboardData() {
       .map((m: any) => {
         const name = m.fullName;
         const weeklyPoints = weekData.points[name] || 0;
-        const allTimePoints = getMemberAllTimePoints(name, weekData);
-        const allTimeComps = getMemberAllTimeCompletions(name, tasks, weekData);
+        const allTimeTotal = allTime.totals[name];
+        const allTimePoints = allTimeTotal?.points ?? null;
+        const allTimeComps = allTimeTotal?.completions ?? null;
         // Streaks are per-member: filter this week's completion dates to THIS
         // member before scoring (calculateRealStreak's documented contract —
         // an aggregate would hand every member the family's combined streak).
         const streak = calculateRealStreak(name, weekData, getThisWeeksCompletedDates(tasks, name));
-        const { level, title, emoji, progress } = getLevel(allTimePoints);
-        const earnedBadges = BADGES.filter(b => b.condition(allTimePoints, streak, allTimeComps)).map(b => b.emoji);
+        const { known, level, title, emoji, progress } = resolveAllTimeLevel(allTimePoints);
+        const earnedBadges = earnedBadgeEmojis(allTimePoints, streak, allTimeComps);
         // Weekly Champ history is out-of-band (BADGES.week_champ condition stays
         // false): a rank-1 Hall of Fame entry earns the 🥇 career badge.
         const hasWeeklyChamp = hall.some(h => h.member === name && h.rank === 1);
@@ -146,6 +161,7 @@ export function useLeaderboardData() {
           level,
           levelTitle: title,
           levelEmoji: emoji,
+          levelKnown: known,
           progressToNext: progress,
           badges: earnedBadges,
           allTimePoints,
@@ -160,7 +176,7 @@ export function useLeaderboardData() {
       })
       .sort((a, b) => b.points - a.points || a.name.localeCompare(b.name))
       .map((e, i) => ({ ...e, rank: i + 1 }));
-  }, [weekData, tasks, hall, mounted]);
+  }, [weekData, tasks, hall, mounted, allTime.totals]);
 
   return {
     data: {
@@ -170,6 +186,7 @@ export function useLeaderboardData() {
       daysUntilReset,
       previousRanks,
       hall,
+      allTime: { state: allTime.state, updatedAt: allTime.updatedAt },
     } as LeaderboardData,
     mounted,
   };

@@ -1,6 +1,21 @@
 import { withAdmin } from "@/lib/pb-auth";
 import { withKeyedLock } from "@/lib/keyed-lock";
 import { persistedTaskEmoji, persistedCrewEmoji } from "@/lib/task-emoji";
+import { parseCanonicalTransactions, recomputeWeekPoints } from "@/lib/task-ledger";
+import { normalizeOperationId, normalizeTimestamp } from "@/lib/task-operation-contract";
+import {
+  applyTaskConfigCommand,
+  taskConfigCommandFingerprint,
+  TASK_CONFIG_ACTIONS,
+  TASK_CONFIG_RECEIPT_MAX_AGE_MS,
+  TASK_CONFIG_RECEIPT_MAX_COUNT,
+  TASK_CONFIG_DATA_KEYS,
+  TASK_CONFIG_KINDS,
+  TASK_CONFIG_STAMP_KEYS,
+  type TaskConfigCommand,
+  type TaskConfigItem,
+  type TaskConfigKind,
+} from "@/lib/task-config";
 import type { WeekData, Transaction } from "@/types/tasks";
 
 /**
@@ -10,7 +25,7 @@ import type { WeekData, Transaction } from "@/types/tasks";
  * Background (2026-09-21): the chat task tools used to read/write the PB
  * `tasks` COLLECTION, while the dashboard renders the browser-owned snapshot.
  * The two never met: chat completions/deletes were invisible in the Tasks UI,
- * and the browser's periodic `syncTasksToPB()` re-upserted its snapshot rows
+ * and the browser's periodic full-task re-upsert wrote its snapshot rows
  * back into the collection, resurrecting whatever chat had deleted. These
  * helpers make the chat operate on the SAME store the UI reads.
  *
@@ -28,9 +43,70 @@ export type SnapshotTask = Record<string, any> & {
   assignee?: string;
 };
 
+export interface SnapshotRevision {
+  revision: string;
+  updatedAt: string;
+}
+
+export interface SnapshotOperationReceipt {
+  operationId: string;
+  action: string;
+  taskId: number;
+  deleted?: boolean;
+  fingerprint?: string;
+  actorId?: string;
+  taskIds?: number[];
+  createdAt: string;
+}
+
+export interface SnapshotConfigOperationReceipt {
+  kind: TaskConfigKind;
+  action: "replace" | "upsert" | "delete";
+  updatedAt: string;
+  fingerprint?: string;
+  reconcileRequired?: boolean;
+}
+
+export interface SnapshotConfigMutationResult {
+  items: TaskConfigItem[];
+  updatedAt: string;
+  revision: SnapshotRevision;
+  applied: boolean;
+  duplicate: boolean;
+  stale: boolean;
+  conflict: boolean;
+  reconcile: boolean;
+  clearRepairMarker: boolean;
+}
+
+export interface SnapshotProjectionRepair {
+  operationId: string;
+  taskIds: number[];
+  action?: "approve" | "approve-all" | "send-back" | "penalty" | "adjust";
+  actorId?: string;
+  fingerprint?: string;
+  createdAt: string;
+}
+
+export interface SnapshotWriteResult {
+  ok: boolean;
+  revision: SnapshotRevision;
+  error?: string;
+}
+
+export interface SnapshotMutationResult<T> {
+  result: T;
+  revision: SnapshotRevision;
+}
+
 export type SnapshotData = Record<string, any> & {
   tasks?: SnapshotTask[];
   deletedTaskIds?: number[];
+  revision?: string;
+  taskWeekStart?: string;
+  operationReceipts?: Record<string, SnapshotOperationReceipt[]>;
+  configOperationReceipts?: Record<string, SnapshotConfigOperationReceipt>;
+  pendingProjectionRepairs?: SnapshotProjectionRepair[];
 };
 
 /** Live (non-tombstoned) tasks from a snapshot blob. */
@@ -197,21 +273,313 @@ export function protectPendingOnPush(args: {
   });
 }
 
-async function readRow(): Promise<{ id: string | null; data: SnapshotData }> {
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseJSON<T>(value: unknown, fallback: T): T {
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as T;
+      return parsed ?? fallback;
+    } catch {
+      return fallback;
+    }
+  }
+  return isObjectRecord(value) || Array.isArray(value) ? (value as T) : fallback;
+}
+
+function parseSnapshotData(value: unknown): SnapshotData {
+  const parsed = parseJSON<unknown>(value, {});
+  return isObjectRecord(parsed) ? (parsed as SnapshotData) : {};
+}
+
+function decimalRevision(value: unknown): string {
+  const revision = typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? String(value)
+    : value;
+  return typeof revision === "string" && /^\d+$/.test(revision) ? BigInt(revision).toString() : "0";
+}
+
+function nextRevision(value: unknown): string {
+  return (BigInt(decimalRevision(value)) + BigInt(1)).toString();
+}
+
+function rowUpdatedAt(row: any, data: SnapshotData): string {
+  const updatedAt = row?.updated_at ?? row?.updatedAt ?? data.updatedAt;
+  return typeof updatedAt === "string" ? updatedAt : "";
+}
+
+function isPositiveTaskId(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function sanitizeOperationReceipt(value: unknown): SnapshotOperationReceipt | null {
+  if (!isObjectRecord(value)) return null;
+  const operationId = normalizeOperationId(value.operationId);
+  const action = typeof value.action === "string" ? value.action.trim() : "";
+  const taskId = value.taskId;
+  const createdAt = normalizeTimestamp(value.createdAt);
+  const fingerprint = typeof value.fingerprint === "string" && /^[a-f0-9]{64}$/.test(value.fingerprint)
+    ? value.fingerprint
+    : undefined;
+  const actorId = typeof value.actorId === "string" && value.actorId.trim() ? value.actorId.trim() : undefined;
+  const taskIds = Array.isArray(value.taskIds)
+    ? [...new Set(value.taskIds.filter(isPositiveTaskId))].sort((left, right) => left - right)
+    : undefined;
+  if (
+    !operationId ||
+    !action ||
+    !isPositiveTaskId(taskId) ||
+    !createdAt ||
+    (value.deleted !== undefined && typeof value.deleted !== "boolean") ||
+    (value.actorId !== undefined && !actorId) ||
+    (value.taskIds !== undefined && (!taskIds || taskIds.length === 0))
+  ) {
+    return null;
+  }
+  return {
+    operationId,
+    action,
+    taskId,
+    ...(typeof value.deleted === "boolean" ? { deleted: value.deleted } : {}),
+    ...(fingerprint ? { fingerprint } : {}),
+    ...(actorId ? { actorId } : {}),
+    ...(taskIds ? { taskIds } : {}),
+    createdAt,
+  };
+}
+
+function sanitizeOperationReceipts(
+  value: unknown,
+): Record<string, SnapshotOperationReceipt[]> {
+  const parsed = parseJSON<unknown>(value, {});
+  const grouped = new Map<string, Map<number, SnapshotOperationReceipt>>();
+  if (!isObjectRecord(parsed)) return Object.create(null) as Record<string, SnapshotOperationReceipt[]>;
+
+  for (const stored of Object.values(parsed)) {
+    const candidates = Array.isArray(stored) ? stored : [stored];
+    for (const candidate of candidates) {
+      const receipt = sanitizeOperationReceipt(candidate);
+      if (!receipt) continue;
+      const byTask = grouped.get(receipt.operationId) ?? new Map<number, SnapshotOperationReceipt>();
+      byTask.set(receipt.taskId, receipt);
+      grouped.set(receipt.operationId, byTask);
+    }
+  }
+
+  const receipts = Object.create(null) as Record<string, SnapshotOperationReceipt[]>;
+  for (const [operationId, byTask] of grouped) {
+    receipts[operationId] = [...byTask.values()].sort((left, right) => left.taskId - right.taskId);
+  }
+  return receipts;
+}
+
+export function getSnapshotOperationReceipts(
+  data: SnapshotData,
+  operationId: unknown,
+): SnapshotOperationReceipt[] {
+  const normalizedOperationId = normalizeOperationId(operationId);
+  if (!normalizedOperationId) return [];
+  const receipts = sanitizeOperationReceipts(data.operationReceipts);
+  return [...(receipts[normalizedOperationId] ?? [])];
+}
+
+function sanitizeConfigOperationReceipts(
+  value: unknown,
+  now = Date.now(),
+): Record<string, SnapshotConfigOperationReceipt> {
+  const parsed = parseJSON<unknown>(value, {});
+  const retained: Array<[string, SnapshotConfigOperationReceipt]> = [];
+  if (!isObjectRecord(parsed)) {
+    return Object.create(null) as Record<string, SnapshotConfigOperationReceipt>;
+  }
+
+  for (const [storedId, candidate] of Object.entries(parsed)) {
+    const operationId = normalizeOperationId(storedId);
+    if (!operationId || !isObjectRecord(candidate)) continue;
+    const kind = TASK_CONFIG_KINDS.includes(candidate.kind as TaskConfigKind)
+      ? candidate.kind as TaskConfigKind
+      : null;
+    const action = TASK_CONFIG_ACTIONS.includes(candidate.action as SnapshotConfigOperationReceipt["action"])
+      ? candidate.action as SnapshotConfigOperationReceipt["action"]
+      : null;
+    const updatedAt = normalizeTimestamp(candidate.updatedAt);
+    if (
+      !kind ||
+      !action ||
+      !updatedAt ||
+      Date.parse(updatedAt) < now - TASK_CONFIG_RECEIPT_MAX_AGE_MS
+    ) continue;
+    const fingerprint = typeof candidate.fingerprint === "string" && /^[a-f0-9]{64}$/.test(candidate.fingerprint)
+      ? candidate.fingerprint
+      : undefined;
+    const reconcileRequired = fingerprint && candidate.reconcileRequired === true
+      ? true
+      : undefined;
+    retained.push([operationId, {
+      kind,
+      action,
+      updatedAt,
+      ...(fingerprint ? { fingerprint } : {}),
+      ...(reconcileRequired ? { reconcileRequired } : {}),
+    }]);
+  }
+
+  retained.sort((left, right) => (
+    right[1].updatedAt.localeCompare(left[1].updatedAt) ||
+    left[0].localeCompare(right[0])
+  ));
+  const receipts = Object.create(null) as Record<string, SnapshotConfigOperationReceipt>;
+  for (const [operationId, receipt] of retained.slice(0, TASK_CONFIG_RECEIPT_MAX_COUNT)) {
+    receipts[operationId] = receipt;
+  }
+  return receipts;
+}
+
+const REPAIR_ACTIONS = new Set(["approve", "approve-all", "send-back", "penalty", "adjust"]);
+
+function sanitizeProjectionRepairs(value: unknown): SnapshotProjectionRepair[] {
+  const parsed = parseJSON<unknown>(value, []);
+  if (!Array.isArray(parsed)) return [];
+  const repairs: SnapshotProjectionRepair[] = [];
+
+  for (const candidate of parsed) {
+    if (!isObjectRecord(candidate)) continue;
+    const operationId = normalizeOperationId(candidate.operationId);
+    const createdAt = normalizeTimestamp(candidate.createdAt);
+    const taskIds = Array.isArray(candidate.taskIds)
+      ? [
+          ...new Set(
+            candidate.taskIds.filter(isPositiveTaskId),
+          ),
+        ].sort((left, right) => left - right)
+      : [];
+    const action = REPAIR_ACTIONS.has(String(candidate.action))
+      ? candidate.action as SnapshotProjectionRepair["action"]
+      : undefined;
+    const actorId = typeof candidate.actorId === "string" && candidate.actorId.trim() ? candidate.actorId.trim() : undefined;
+    const fingerprint = typeof candidate.fingerprint === "string" && /^[a-f0-9]{64}$/.test(candidate.fingerprint)
+      ? candidate.fingerprint
+      : undefined;
+    if (!operationId || !createdAt) continue;
+    // A penalty/adjust marker projects the WEEK leg and legitimately has no
+    // task rows, so requiring an id there would silently erase the very marker
+    // that records an unprojected ledger command. An approval marker with no
+    // task id is meaningless and is still dropped.
+    if (taskIds.length === 0 && action !== "penalty" && action !== "adjust") continue;
+    repairs.push({
+      operationId,
+      taskIds,
+      ...(action ? { action } : {}),
+      ...(actorId ? { actorId } : {}),
+      ...(fingerprint ? { fingerprint } : {}),
+      createdAt,
+    });
+  }
+
+  return repairs;
+}
+
+function sanitizeSnapshotMetadata(data: SnapshotData): SnapshotData {
+  const next = { ...data };
+  if ("operationReceipts" in data) {
+    next.operationReceipts = sanitizeOperationReceipts(data.operationReceipts);
+  }
+  if ("configOperationReceipts" in data) {
+    next.configOperationReceipts = sanitizeConfigOperationReceipts(data.configOperationReceipts);
+  }
+  if ("pendingProjectionRepairs" in data) {
+    next.pendingProjectionRepairs = sanitizeProjectionRepairs(data.pendingProjectionRepairs);
+  }
+  return next;
+}
+
+function canonicalSnapshotData(
+  data: SnapshotData,
+  revision: string,
+  normalizeWeek = true,
+  sanitizeMetadata = true,
+): SnapshotData {
+  const next: SnapshotData = {
+    ...(sanitizeMetadata ? sanitizeSnapshotMetadata(data) : data),
+    revision,
+  };
+  if (normalizeWeek && next.weekData != null) {
+    const weekData = normalizeWeekData(next.weekData);
+    if (!weekData) throw new TypeError("invalid_week_data");
+    next.weekData = {
+      ...weekData,
+      points: recomputeWeekPoints(weekData.history),
+    };
+  }
+  return next;
+}
+
+export async function readSnapshotWithRevision(): Promise<{
+  data: SnapshotData;
+  revision: SnapshotRevision;
+  rowId: string | null;
+}> {
   return withAdmin(async (pb) => {
     const rows = await pb.collection(SNAPSHOT_COLLECTION).getFullList({
       requestKey: null,
       filter: `key = "${SNAPSHOT_KEY}"`,
     });
     const row = rows[0] as any;
-    return { id: row?.id ?? null, data: (row?.data ?? {}) as SnapshotData };
+    const data = sanitizeSnapshotMetadata(parseSnapshotData(row?.data));
+    return {
+      data,
+      revision: {
+        revision: decimalRevision(data.revision),
+        updatedAt: rowUpdatedAt(row, data),
+      },
+      rowId: row?.id ?? null,
+    };
   });
+}
+
+async function readRow(): Promise<{ id: string | null; data: SnapshotData }> {
+  const result = await readSnapshotWithRevision();
+  return { id: result.rowId, data: result.data };
 }
 
 /** Read the live task list (tombstones already applied). */
 export async function readSnapshotTasks(): Promise<SnapshotTask[]> {
   const { data } = await readRow();
   return liveSnapshotTasks(data);
+}
+
+export async function mutateSnapshotWithMeta<T>(
+  fn: (data: SnapshotData) => { data: SnapshotData; result: T },
+  pb?: AdminPB,
+): Promise<SnapshotMutationResult<T>> {
+  return withKeyedLock(`snapshot:${SNAPSHOT_KEY}`, async () => {
+    const mutate = async (client: AdminPB): Promise<SnapshotMutationResult<T>> => {
+      const rows = await client.collection(SNAPSHOT_COLLECTION).getFullList({
+        requestKey: null,
+        filter: `key = "${SNAPSHOT_KEY}"`,
+      });
+      const row = rows[0] as any;
+      const current = sanitizeSnapshotMetadata(parseSnapshotData(row?.data));
+      const { data, result } = fn(current);
+      const revision = nextRevision(current.revision);
+      const updatedAt = new Date().toISOString();
+      const payload = {
+        key: SNAPSHOT_KEY,
+        data: canonicalSnapshotData(data, revision),
+        updated_at: updatedAt,
+      };
+      if (row) {
+        await client.collection(SNAPSHOT_COLLECTION).update(row.id, payload, { requestKey: null });
+      } else {
+        await client.collection(SNAPSHOT_COLLECTION).create(payload, { requestKey: null });
+      }
+      return { result, revision: { revision, updatedAt } };
+    };
+
+    return pb ? mutate(pb) : withAdmin(mutate);
+  });
 }
 
 /**
@@ -222,21 +590,8 @@ export async function readSnapshotTasks(): Promise<SnapshotTask[]> {
 export async function mutateSnapshot<T>(
   fn: (data: SnapshotData) => { data: SnapshotData; result: T }
 ): Promise<T> {
-  return withKeyedLock(`snapshot:${SNAPSHOT_KEY}`, () =>
-    withAdmin(async (pb) => {
-      const rows = await pb.collection(SNAPSHOT_COLLECTION).getFullList({
-        requestKey: null,
-        filter: `key = "${SNAPSHOT_KEY}"`,
-      });
-      const row = rows[0] as any;
-      const current = (row?.data ?? {}) as SnapshotData;
-      const { data, result } = fn(current);
-      const payload = { key: SNAPSHOT_KEY, data, updated_at: new Date().toISOString() };
-      if (rows.length > 0) await pb.collection(SNAPSHOT_COLLECTION).update(row.id, payload, { requestKey: null });
-      else await pb.collection(SNAPSHOT_COLLECTION).create(payload, { requestKey: null });
-      return result;
-    })
-  );
+  const mutation = await mutateSnapshotWithMeta(fn);
+  return mutation.result;
 }
 
 /**
@@ -292,7 +647,478 @@ export async function mirrorTaskToCollection(
   }
 }
 
-type PB = ReturnType<typeof import("@/lib/pb").getAdminPB>;
+export type AdminPB = ReturnType<typeof import("@/lib/pb").getAdminPB>;
+
+export interface CanonicalTaskLookup {
+  task: SnapshotTask | null;
+  source: "snapshot" | "pb" | "none";
+  tombstoned: boolean;
+  ambiguous: boolean;
+  revision: SnapshotRevision;
+  data: SnapshotData;
+  snapshotRowId: string | null;
+  pbRecordId: string | null;
+}
+
+export async function readSnapshotStateWithRevision(pb: AdminPB): Promise<{
+  data: SnapshotData;
+  revision: SnapshotRevision;
+  rowId: string | null;
+}> {
+  const rows = await pb.collection(SNAPSHOT_COLLECTION).getFullList({
+    requestKey: null,
+    filter: `key = "${SNAPSHOT_KEY}"`,
+  });
+  const row = rows[0] as any;
+  const data = sanitizeSnapshotMetadata(parseSnapshotData(row?.data));
+  return {
+    data,
+    revision: {
+      revision: decimalRevision(data.revision),
+      updatedAt: rowUpdatedAt(row, data),
+    },
+    rowId: row?.id ?? null,
+  };
+}
+
+function snapshotTaskFromCollection(record: Record<string, any>): SnapshotTask | null {
+  const id = Number(record?.taskId);
+  if (!isPositiveTaskId(id)) return null;
+  return {
+    id,
+    title: typeof record.title === "string" ? record.title : "task",
+    assignee: typeof record.assignee === "string" ? record.assignee : "",
+    assigneeEmoji: typeof record.assigneeEmoji === "string" ? record.assigneeEmoji : "",
+    assigned: typeof record.assigned === "string" ? record.assigned : record.assignee ?? "",
+    status: record.status ?? (record.completed === true ? "done" : "pending"),
+    due: record.due ?? null,
+    points: record.points ?? 0,
+    recurring: record.recurring ?? null,
+    category: record.category ?? "chores",
+    priority: record.priority ?? "medium",
+    universal: record.universal === undefined ? true : record.universal === true,
+    stealable: record.stealable === true,
+    speedBonus: record.speedBonus ?? null,
+    crewSize: record.crewSize ?? null,
+    crew: parseJSON<SnapshotTask["crew"]>(record.crew, null),
+    completed: record.completed === true,
+    completedBy: record.completedBy ?? null,
+    completedAt: record.completedAt ?? null,
+    completedInWeek: record.completedInWeek ?? null,
+    pendingApproval: parseJSON<SnapshotTask["pendingApproval"]>(record.pendingApproval, null),
+    sentBackAt: record.sentBackAt ?? null,
+  };
+}
+
+export async function findCanonicalTask(
+  pb: AdminPB,
+  taskId: number,
+): Promise<CanonicalTaskLookup> {
+  if (!isPositiveTaskId(taskId)) {
+    return {
+      task: null,
+      source: "none",
+      tombstoned: false,
+      ambiguous: false,
+      revision: { revision: "0", updatedAt: "" },
+      data: {},
+      snapshotRowId: null,
+      pbRecordId: null,
+    };
+  }
+  const snapshot = await readSnapshotStateWithRevision(pb);
+  const tombstoned = (snapshot.data.deletedTaskIds ?? []).some((candidate) => Number(candidate) === taskId);
+  if (tombstoned) {
+    return {
+      task: null,
+      source: "none",
+      tombstoned: true,
+      ambiguous: false,
+      revision: snapshot.revision,
+      data: snapshot.data,
+      snapshotRowId: snapshot.rowId,
+      pbRecordId: null,
+    };
+  }
+  const snapshotMatches = liveSnapshotTasks(snapshot.data).filter(
+    (task) => Number(task.id) === taskId,
+  );
+  if (snapshotMatches.length > 0) {
+    return {
+      task: snapshotMatches.length === 1 ? snapshotMatches[0] : null,
+      source: "snapshot",
+      tombstoned: false,
+      ambiguous: snapshotMatches.length > 1,
+      revision: snapshot.revision,
+      data: snapshot.data,
+      snapshotRowId: snapshot.rowId,
+      pbRecordId: null,
+    };
+  }
+
+  const rows = await pb.collection("tasks").getFullList({ requestKey: null });
+  const matches = (Array.isArray(rows) ? rows : [])
+    .filter((row: any) => Number(row?.taskId) === taskId)
+    .map((row: any) => ({ row, task: snapshotTaskFromCollection(row) }))
+    .filter((entry): entry is { row: Record<string, any>; task: SnapshotTask } => entry.task !== null);
+  if (matches.length > 0) {
+    return {
+      task: matches.length === 1 ? matches[0].task : null,
+      source: "pb",
+      tombstoned: false,
+      ambiguous: matches.length > 1,
+      revision: snapshot.revision,
+      data: snapshot.data,
+      snapshotRowId: snapshot.rowId,
+      pbRecordId: matches.length === 1 ? String(matches[0].row.id) : null,
+    };
+  }
+  return {
+    task: null,
+    source: "none",
+    tombstoned: false,
+    ambiguous: false,
+    revision: snapshot.revision,
+    data: snapshot.data,
+    snapshotRowId: snapshot.rowId,
+    pbRecordId: null,
+  };
+}
+
+function stableProjectionValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stableProjectionValue);
+  if (isObjectRecord(value)) {
+    return Object.fromEntries(
+      Object.keys(value).sort().map((key) => [key, stableProjectionValue(value[key])]),
+    );
+  }
+  return value;
+}
+
+function sameProjectionValue(left: unknown, right: unknown): boolean {
+  return JSON.stringify(stableProjectionValue(left)) === JSON.stringify(stableProjectionValue(right));
+}
+
+export function taskProjectionRecord(task: SnapshotTask): Record<string, unknown> {
+  return {
+    taskId: task.id,
+    title: task.title,
+    assignee: task.assignee ?? "All",
+    assigneeEmoji: persistedTaskEmoji(task.assigneeEmoji) || "👤",
+    assigned: task.assignee ?? "All",
+    status: task.completed === true ? "done" : "pending",
+    due: task.due ?? null,
+    points: task.points ?? 0,
+    recurring: task.recurring ?? null,
+    category: task.category ?? "chores",
+    priority: task.priority ?? "medium",
+    universal: task.universal === true,
+    stealable: task.stealable === true,
+    completed: task.completed === true,
+    completedBy: task.completedBy ?? null,
+    completedAt: task.completedAt ?? null,
+    completedInWeek: task.completedInWeek ?? null,
+    pendingApproval: task.pendingApproval ?? null,
+    sentBackAt: task.sentBackAt ?? null,
+    crewSize: task.crewSize ?? null,
+    crew: persistedCrewEmoji(task.crew as any),
+    speedBonus: task.speedBonus ?? null,
+  };
+}
+
+function projectionValue(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return value;
+  }
+}
+
+function taskProjectionMatches(row: Record<string, any>, expected: Record<string, unknown>): boolean {
+  return Object.entries(expected).every(([key, expectedValue]) => {
+    const actualValue = ["crew", "pendingApproval"].includes(key)
+      ? projectionValue(row[key])
+      : row[key];
+    if (["crew", "pendingApproval"].includes(key)) return sameProjectionValue(actualValue, expectedValue);
+    if (["crewSize", "speedBonus", "completedBy", "completedAt", "completedInWeek", "sentBackAt", "recurring", "due"].includes(key)) {
+      const leftEmpty = actualValue === null || actualValue === undefined || actualValue === "";
+      const rightEmpty = expectedValue === null || expectedValue === undefined || expectedValue === "";
+      if (leftEmpty && rightEmpty) return true;
+      if ((key === "crewSize" || key === "speedBonus") && Number(actualValue) === 0 && Number(expectedValue) === 0) {
+        return true;
+      }
+    }
+    return actualValue === expectedValue;
+  });
+}
+
+export interface TaskRowCache {
+  rows: Record<string, any>[];
+}
+
+export function createTaskRowCache(rows: Record<string, any>[]): TaskRowCache {
+  return { rows: [...rows] };
+}
+
+export async function projectCanonicalTaskToPB(
+  pb: AdminPB,
+  task: SnapshotTask | null,
+  taskId: number,
+  cache?: TaskRowCache,
+): Promise<boolean> {
+  if (!isPositiveTaskId(taskId)) return false;
+  try {
+    const collection = pb.collection("tasks");
+    let loadedRows: Record<string, any>[] | null = cache ? cache.rows : null;
+    const allRows = async () => {
+      if (!loadedRows) {
+        const value = await collection.getFullList({ requestKey: null });
+        loadedRows = Array.isArray(value) ? [...value] : [];
+      }
+      return loadedRows;
+    };
+    const rows = async () => (await allRows()).filter(
+      (row: any) => Number(row?.taskId) === taskId,
+    );
+    if (!task) {
+      for (const row of await rows()) {
+        await collection.delete(row.id, { requestKey: null });
+        const cached = await allRows();
+        const index = cached.findIndex((candidate) => candidate.id === row.id);
+        if (index >= 0) cached.splice(index, 1);
+      }
+      return (await rows()).length === 0;
+    }
+    const expected = taskProjectionRecord(task);
+    const before = await rows();
+    if (before.length === 0) {
+      const created = await collection.create(expected, { requestKey: null });
+      const cached = await allRows();
+      cached.push({ id: (created as any)?.id, ...expected });
+    } else if (!taskProjectionMatches(before[0], expected)) {
+      await collection.update(before[0].id, expected, { requestKey: null });
+      const cached = await allRows();
+      const index = cached.findIndex((candidate) => candidate.id === before[0].id);
+      if (index >= 0) cached[index] = { ...cached[index], ...expected };
+    }
+    for (const duplicate of before.slice(1)) {
+      await collection.delete(duplicate.id, { requestKey: null });
+      const cached = await allRows();
+      const index = cached.findIndex((candidate) => candidate.id === duplicate.id);
+      if (index >= 0) cached.splice(index, 1);
+    }
+    const after = await rows();
+    return after.length === 1 && taskProjectionMatches(after[0], expected);
+  } catch {
+    return false;
+  }
+}
+
+export type SnapshotConfigItemsSanitizer = (
+  kind: TaskConfigKind,
+  value: unknown,
+) => TaskConfigItem[] | null;
+
+export class InvalidStoredTaskConfigError extends Error {
+  constructor(readonly kind: TaskConfigKind) {
+    super("invalid_current_config");
+    this.name = "InvalidStoredTaskConfigError";
+  }
+}
+
+export class InvalidResultingTaskConfigError extends Error {
+  constructor(readonly kind: TaskConfigKind) {
+    super("invalid_resulting_config");
+    this.name = "InvalidResultingTaskConfigError";
+  }
+}
+
+export async function mutateSnapshotConfig(
+  command: TaskConfigCommand,
+  pb: AdminPB,
+  sanitizeItems: SnapshotConfigItemsSanitizer,
+): Promise<SnapshotConfigMutationResult> {
+  return withKeyedLock(`snapshot:${SNAPSHOT_KEY}`, async () => {
+    const rows = await pb.collection(SNAPSHOT_COLLECTION).getFullList({
+      requestKey: null,
+      filter: `key = "${SNAPSHOT_KEY}"`,
+    });
+    const row = rows[0] as any;
+    const current = parseSnapshotData(row?.data);
+    const dataKey = TASK_CONFIG_DATA_KEYS[command.kind];
+    const stampKey = TASK_CONFIG_STAMP_KEYS[command.kind];
+    const storedItems = current[dataKey];
+    const currentItems = Array.isArray(storedItems)
+      ? sanitizeItems(command.kind, storedItems)
+      : null;
+    const currentChanged = Boolean(
+      Array.isArray(storedItems) &&
+      currentItems &&
+      JSON.stringify(storedItems) !== JSON.stringify(currentItems),
+    );
+    if (command.action !== "replace" && !currentItems) {
+      throw new InvalidStoredTaskConfigError(command.kind);
+    }
+    const revision = decimalRevision(current.revision);
+    const revisionUpdatedAt = rowUpdatedAt(row, current);
+    const currentStamp = normalizeTimestamp(current[stampKey]) ?? "";
+    const fingerprint = taskConfigCommandFingerprint(command);
+    const receipt = sanitizeConfigOperationReceipts(current.configOperationReceipts)[command.operationId];
+    const persistSanitizedCurrent = async (
+      repairMarker?: SnapshotConfigOperationReceipt,
+    ) => {
+      const updatedRevision = nextRevision(revision);
+      const updatedAt = new Date().toISOString();
+      const configOperationReceipts = sanitizeConfigOperationReceipts(current.configOperationReceipts);
+      if (repairMarker) configOperationReceipts[command.operationId] = repairMarker;
+      const payload = {
+        key: SNAPSHOT_KEY,
+        data: canonicalSnapshotData({
+          ...current,
+          [dataKey]: currentItems!,
+          ...("configOperationReceipts" in current || repairMarker
+            ? { configOperationReceipts }
+            : {}),
+        }, updatedRevision, false, false),
+        updated_at: updatedAt,
+      };
+      if (row) {
+        await pb.collection(SNAPSHOT_COLLECTION).update(row.id, payload, { requestKey: null });
+      } else {
+        await pb.collection(SNAPSHOT_COLLECTION).create(payload, { requestKey: null });
+      }
+      return { revision: updatedRevision, updatedAt };
+    };
+
+    if (receipt) {
+      const matches = receipt.kind === command.kind &&
+        receipt.action === command.action &&
+        receipt.updatedAt === command.updatedAt &&
+        receipt.fingerprint === fingerprint;
+      if (matches && !currentItems) {
+        throw new InvalidStoredTaskConfigError(command.kind);
+      }
+      const sanitizedWrite = matches && currentChanged
+        ? await persistSanitizedCurrent()
+        : null;
+      return {
+        items: currentItems!,
+        updatedAt: currentStamp || receipt.updatedAt,
+        revision: sanitizedWrite ?? { revision, updatedAt: revisionUpdatedAt },
+        applied: false,
+        duplicate: matches,
+        stale: false,
+        conflict: !matches,
+        reconcile: true,
+        clearRepairMarker: matches && receipt.reconcileRequired === true,
+      };
+    }
+
+    if (currentStamp && command.updatedAt <= currentStamp) {
+      if (!currentItems) throw new InvalidStoredTaskConfigError(command.kind);
+      const sanitizedWrite = currentChanged
+        ? await persistSanitizedCurrent({
+            kind: command.kind,
+            action: command.action,
+            updatedAt: command.updatedAt,
+            fingerprint,
+            reconcileRequired: true,
+          })
+        : null;
+      return {
+        items: currentItems,
+        updatedAt: currentStamp,
+        revision: sanitizedWrite ?? { revision, updatedAt: revisionUpdatedAt },
+        applied: false,
+        duplicate: false,
+        stale: true,
+        conflict: false,
+        reconcile: currentChanged,
+        clearRepairMarker: currentChanged,
+      };
+    }
+
+    const baseItems = command.action === "replace" ? [] : currentItems!;
+    const items = sanitizeItems(command.kind, applyTaskConfigCommand(baseItems, command));
+    if (!items) throw new InvalidResultingTaskConfigError(command.kind);
+    const configOperationReceipts = sanitizeConfigOperationReceipts({
+      ...sanitizeConfigOperationReceipts(current.configOperationReceipts),
+      [command.operationId]: {
+        kind: command.kind,
+        action: command.action,
+        updatedAt: command.updatedAt,
+        fingerprint,
+      },
+    });
+    const updatedRevision = nextRevision(revision);
+    const updatedAt = new Date().toISOString();
+    const payload = {
+      key: SNAPSHOT_KEY,
+      data: canonicalSnapshotData({
+        ...current,
+        [dataKey]: items,
+        [stampKey]: command.updatedAt,
+        configOperationReceipts,
+      }, updatedRevision, false, false),
+      updated_at: updatedAt,
+    };
+    if (row) {
+      await pb.collection(SNAPSHOT_COLLECTION).update(row.id, payload, { requestKey: null });
+    } else {
+      await pb.collection(SNAPSHOT_COLLECTION).create(payload, { requestKey: null });
+    }
+
+    return {
+      items,
+      updatedAt: command.updatedAt,
+      revision: { revision: updatedRevision, updatedAt },
+      applied: true,
+      duplicate: false,
+      stale: false,
+      conflict: false,
+      reconcile: true,
+      clearRepairMarker: false,
+    };
+  });
+}
+
+export async function clearTaskConfigRepairMarker(
+  operationId: string,
+  pb: AdminPB,
+): Promise<SnapshotRevision | null> {
+  const normalizedOperationId = normalizeOperationId(operationId);
+  if (!normalizedOperationId) return null;
+  return withKeyedLock(`snapshot:${SNAPSHOT_KEY}`, async () => {
+    const rows = await pb.collection(SNAPSHOT_COLLECTION).getFullList({
+      requestKey: null,
+      filter: `key = "${SNAPSHOT_KEY}"`,
+    });
+    const row = rows[0] as any;
+    const current = parseSnapshotData(row?.data);
+    const configOperationReceipts = sanitizeConfigOperationReceipts(current.configOperationReceipts);
+    if (configOperationReceipts[normalizedOperationId]?.reconcileRequired !== true) {
+      return null;
+    }
+    delete configOperationReceipts[normalizedOperationId];
+    const revision = nextRevision(current.revision);
+    const updatedAt = new Date().toISOString();
+    const payload = {
+      key: SNAPSHOT_KEY,
+      data: canonicalSnapshotData({
+        ...current,
+        configOperationReceipts,
+      }, revision, false, false),
+      updated_at: updatedAt,
+    };
+    if (row) {
+      await pb.collection(SNAPSHOT_COLLECTION).update(row.id, payload, { requestKey: null });
+    } else {
+      await pb.collection(SNAPSHOT_COLLECTION).create(payload, { requestKey: null });
+    }
+    return { revision, updatedAt };
+  });
+}
 
 export type SnapshotWeekTaskPatch = {
   id: number;
@@ -314,72 +1140,203 @@ export type SnapshotWeekTaskPatch = {
  * dropped, and only adopts a week at least as new as what's stored.
  * Best-effort: week_data stays authoritative; failures are logged.
  */
+export function normalizeWeekData(value: unknown): WeekData | null {
+  const parsed = parseJSON<unknown>(value, null);
+  if (!isObjectRecord(parsed) || typeof parsed.weekStart !== "string" || !parsed.weekStart.trim()) {
+    return null;
+  }
+  const pointsValue = parseJSON<unknown>(parsed.points, {});
+  const streakValue = parseJSON<unknown>(parsed.streak, {});
+  const lastActiveValue = parseJSON<unknown>(parsed.lastActive, {});
+  const history = parseCanonicalTransactions(parsed.history);
+  if (!history) return null;
+  return {
+    weekStart: parsed.weekStart.trim(),
+    points: isObjectRecord(pointsValue) ? (pointsValue as Record<string, number>) : {},
+    streak: isObjectRecord(streakValue) ? (streakValue as Record<string, number>) : {},
+    lastActive: isObjectRecord(lastActiveValue) ? (lastActiveValue as Record<string, string>) : {},
+    history,
+  };
+}
+
 export async function persistSnapshotWeek(
-  pb: PB,
+  pb: AdminPB,
   weekData: WeekData | null,
   taskRow?: SnapshotWeekTaskPatch
-): Promise<void> {
-  await withKeyedLock(`snapshot:${SNAPSHOT_KEY}`, async () => {
-    try {
+): Promise<SnapshotWriteResult> {
+  let currentRevision = "0";
+  let currentUpdatedAt = "";
+
+  try {
+    return await withKeyedLock(`snapshot:${SNAPSHOT_KEY}`, async () => {
       const rows = await pb.collection(SNAPSHOT_COLLECTION).getFullList({
         requestKey: null,
         filter: `key = "${SNAPSHOT_KEY}"`,
       });
-      const row: any = rows[0];
-      const raw = row?.data;
-      let data: any = {};
-      if (typeof raw === "string") {
-        try { data = JSON.parse(raw) || {}; } catch { data = {}; }
-      } else if (raw && typeof raw === "object") {
-        data = raw;
-      }
+      const row = rows[0] as any;
+      const data = sanitizeSnapshotMetadata(parseSnapshotData(row?.data));
+      currentRevision = decimalRevision(data.revision);
+      currentUpdatedAt = rowUpdatedAt(row, data);
+
       if (weekData) {
-        const stored: any = data.weekData ?? {};
-        const storedStart = typeof stored.weekStart === "string" ? stored.weekStart : "";
-        let mergedWeek: WeekData = weekData;
-        if (storedStart && storedStart > weekData.weekStart) {
+        const incoming = normalizeWeekData(weekData);
+        if (!incoming) throw new TypeError("invalid_week_data");
+        const hasStoredWeek = data.weekData != null;
+        const stored = hasStoredWeek ? normalizeWeekData(data.weekData) : null;
+        if (hasStoredWeek && !stored) throw new TypeError("invalid_stored_week_data");
+        let mergedWeek = incoming;
+
+        if (stored && stored.weekStart > incoming.weekStart) {
           mergedWeek = stored;
-        } else if (storedStart === weekData.weekStart) {
+        } else if (stored && stored.weekStart === incoming.weekStart) {
           const byId = new Map<number, Transaction>();
-          for (const t of Array.isArray(stored.history) ? stored.history : []) byId.set(t.id, t);
-          for (const t of weekData.history) byId.set(t.id, t);
-          const history = [...byId.values()].sort((a, b) =>
-            String(a.timestamp).localeCompare(String(b.timestamp))
-          );
-          const points: Record<string, number> = {};
-          for (const t of history) {
-            if (t.type === "earn") points[t.member] = (points[t.member] || 0) + t.amount;
-            else if (t.type === "redeem" || t.type === "penalty" || (t.type === "adjust" && t.amount < 0)) {
-              points[t.member] = Math.max(0, (points[t.member] || 0) + t.amount);
-            } else if (t.type === "adjust") {
-              points[t.member] = (points[t.member] || 0) + t.amount;
-            }
-          }
-          mergedWeek = { ...weekData, history, points };
+          for (const transaction of stored.history) byId.set(transaction.id, transaction);
+          for (const transaction of incoming.history) byId.set(transaction.id, transaction);
+          mergedWeek = {
+            ...incoming,
+            history: [...byId.values()].sort(
+              (left, right) =>
+                String(left.timestamp).localeCompare(String(right.timestamp)) ||
+                left.id - right.id,
+            ),
+          };
         }
+
         data.weekData = mergedWeek;
+        data.taskWeekStart = mergedWeek.weekStart;
       }
+
       if (taskRow && Array.isArray(data.tasks)) {
-        data.tasks = data.tasks.map((t: any) =>
-          Number(t.id) === Number(taskRow.id)
+        data.tasks = data.tasks.map((task: SnapshotTask) =>
+          Number(task.id) === Number(taskRow.id)
             ? {
-                ...t,
+                ...task,
                 ...(taskRow.crew !== undefined ? { crew: taskRow.crew } : {}),
                 ...(taskRow.completed !== undefined ? { completed: taskRow.completed } : {}),
                 ...(taskRow.completedBy !== undefined ? { completedBy: taskRow.completedBy } : {}),
                 ...(taskRow.completedAt !== undefined ? { completedAt: taskRow.completedAt } : {}),
-                ...(taskRow.completedInWeek !== undefined ? { completedInWeek: taskRow.completedInWeek } : {}),
-                ...(taskRow.pendingApproval !== undefined ? { pendingApproval: taskRow.pendingApproval } : {}),
+                ...(taskRow.completedInWeek !== undefined
+                  ? { completedInWeek: taskRow.completedInWeek }
+                  : {}),
+                ...(taskRow.pendingApproval !== undefined
+                  ? { pendingApproval: taskRow.pendingApproval }
+                  : {}),
                 ...(taskRow.sentBackAt !== undefined ? { sentBackAt: taskRow.sentBackAt } : {}),
               }
-            : t
+            : task,
         );
       }
-      const payload = { key: SNAPSHOT_KEY, data, updated_at: new Date().toISOString() };
-      if (row) await pb.collection(SNAPSHOT_COLLECTION).update(row.id, payload, { requestKey: null });
-      else await pb.collection(SNAPSHOT_COLLECTION).create(payload, { requestKey: null });
-    } catch (e: any) {
-      console.warn("[persistSnapshotWeek] snapshot persist failed:", e?.message);
-    }
-  });
+
+      const revision = nextRevision(data.revision);
+      const updatedAt = new Date().toISOString();
+      const payload = {
+        key: SNAPSHOT_KEY,
+        data: canonicalSnapshotData(data, revision),
+        updated_at: updatedAt,
+      };
+      if (row) {
+        await pb.collection(SNAPSHOT_COLLECTION).update(row.id, payload, { requestKey: null });
+      } else {
+        await pb.collection(SNAPSHOT_COLLECTION).create(payload, { requestKey: null });
+      }
+      currentRevision = revision;
+      currentUpdatedAt = updatedAt;
+      return {
+        ok: true,
+        revision: { revision, updatedAt },
+      };
+    });
+  } catch {
+    console.warn("[persistSnapshotWeek] snapshot persist failed");
+    return {
+      ok: false,
+      revision: { revision: currentRevision, updatedAt: currentUpdatedAt },
+      error: "snapshot_write_failed",
+    };
+  }
+}
+
+export async function replaceSnapshotWeekData(
+  pb: AdminPB,
+  weekData: WeekData,
+): Promise<SnapshotWriteResult> {
+  let currentRevision = "0";
+  let currentUpdatedAt = "";
+  try {
+    return await withKeyedLock(`snapshot:${SNAPSHOT_KEY}`, async () => {
+      const rows = await pb.collection(SNAPSHOT_COLLECTION).getFullList({
+        requestKey: null,
+        filter: `key = "${SNAPSHOT_KEY}"`,
+      });
+      const row = rows[0] as any;
+      const data = sanitizeSnapshotMetadata(parseSnapshotData(row?.data));
+      currentRevision = decimalRevision(data.revision);
+      currentUpdatedAt = rowUpdatedAt(row, data);
+      const incoming = normalizeWeekData(weekData);
+      if (!incoming) throw new TypeError("invalid_week_data");
+      const storedWeek = normalizeWeekData(data.weekData);
+      if (
+        (storedWeek && storedWeek.weekStart > incoming.weekStart) ||
+        (typeof data.taskWeekStart === "string" && data.taskWeekStart > incoming.weekStart)
+      ) {
+        return {
+          ok: false,
+          revision: { revision: currentRevision, updatedAt: currentUpdatedAt },
+          error: "snapshot_write_failed",
+        };
+      }
+      const revision = nextRevision(data.revision);
+      const updatedAt = new Date().toISOString();
+      const expectedWeek = {
+        ...incoming,
+        points: recomputeWeekPoints(incoming.history),
+      };
+      const payload = {
+        key: SNAPSHOT_KEY,
+        data: canonicalSnapshotData({
+          ...data,
+          weekData: expectedWeek,
+          taskWeekStart: incoming.weekStart,
+        }, revision),
+        updated_at: updatedAt,
+      };
+      if (row) {
+        await pb.collection(SNAPSHOT_COLLECTION).update(row.id, payload, { requestKey: null });
+      } else {
+        await pb.collection(SNAPSHOT_COLLECTION).create(payload, { requestKey: null });
+      }
+      const verifiedRows = await pb.collection(SNAPSHOT_COLLECTION).getFullList({
+        requestKey: null,
+        filter: `key = "${SNAPSHOT_KEY}"`,
+      });
+      const verifiedRow = verifiedRows[0] as any;
+      const verifiedData = sanitizeSnapshotMetadata(parseSnapshotData(verifiedRow?.data));
+      const verifiedWeek = normalizeWeekData(verifiedData.weekData);
+      if (
+        !verifiedRow ||
+        verifiedData.revision !== revision ||
+        verifiedData.taskWeekStart !== incoming.weekStart ||
+        !verifiedWeek ||
+        JSON.stringify(verifiedWeek) !== JSON.stringify(expectedWeek)
+      ) {
+        return {
+          ok: false,
+          revision: { revision, updatedAt },
+          error: "snapshot_write_failed",
+        };
+      }
+      currentRevision = revision;
+      currentUpdatedAt = updatedAt;
+      return {
+        ok: true,
+        revision: { revision, updatedAt },
+      };
+    });
+  } catch {
+    return {
+      ok: false,
+      revision: { revision: currentRevision, updatedAt: currentUpdatedAt },
+      error: "snapshot_write_failed",
+    };
+  }
 }

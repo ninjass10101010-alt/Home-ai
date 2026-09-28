@@ -6,7 +6,7 @@ import HomeWidgetIcon from "@/components/ui/HomeWidgetIcon";
 import Chip from "@/components/ui/Chip";
 import SoftButton from "@/components/ui/SoftButton";
 import Toast from "@/components/ui/Toast";
-import { briefingSectionsEmpty } from "./hooks/useMorningBriefing";
+import { briefingSectionsEmpty, briefingShowsCard, briefingTaskSourceNote } from "./hooks/useMorningBriefing";
 import type { MorningBriefing } from "./hooks/useMorningBriefing";
 import ReadStatePill from "@/components/ui/ReadStatePill";
 import { READ_COPY_STALE, type ReadFailure } from "@/lib/read-state";
@@ -99,13 +99,21 @@ export default function MorningBriefingWidget({ briefing, loading, ack, ackError
     );
   }
 
-  if (loading || !briefing) return null;
-
-  if (briefingSectionsEmpty(briefing) && !briefing.acknowledged) return null;
+  // Composition of audit P0-4 + the points remediation. A read that FAILED is
+  // answered by the failure card above, so this gate only ever sees a briefing
+  // that really exists — it therefore CANNOT suppress a failure state. It
+  // decides two things: an ACKNOWLEDGED briefing always keeps its "seen today"
+  // card (the acknowledged-empty case), and an un-acknowledged one collapses
+  // only when `briefingShowsCard` finds nothing to show AND nothing to admit
+  // (an unavailable / backup chore list is admitted, not hidden).
+  if (loading) return null;
+  if (!briefing) return null;
+  if (!briefingShowsCard(briefing) && !briefing.acknowledged) return null;
 
   const acknowledged = briefing.acknowledged;
   const summary = briefing.summary!;
   const count = totalCount(briefing);
+  const sourceNote = briefingTaskSourceNote(briefing);
 
   const handleGotIt = async () => {
     setAcknowledging(true);
@@ -152,6 +160,13 @@ export default function MorningBriefingWidget({ briefing, loading, ack, ackError
       <div className="flex min-h-0 flex-1 flex-col p-5">
         {expanded ? (
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
+            {/* The remediation: a chore list read from a backup copy, or not
+                read at all, is ADMITTED here — the card names which it was
+                instead of quietly rendering "no chores". */}
+            {sourceNote && (
+              <p className="text-xs font-semibold text-[var(--color-accent-amber)]">{sourceNote}</p>
+            )}
+
             {summary.events.length > 0 && (
               <div className="space-y-2">
                 <SectionLabel emoji="📅" label="Today's events" count={summary.events.length} />
@@ -207,7 +222,12 @@ export default function MorningBriefingWidget({ briefing, loading, ack, ackError
             )}
           </div>
         ) : (
-          <p className="text-xs text-text-muted">Tap the badge above to see today’s plan.</p>
+          <div className="space-y-1.5">
+            {sourceNote && (
+              <p className="text-xs font-semibold text-[var(--color-accent-amber)]">{sourceNote}</p>
+            )}
+            <p className="text-xs text-text-muted">Tap the badge above to see today’s plan.</p>
+          </div>
         )}
       </div>
     </>

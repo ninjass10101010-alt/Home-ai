@@ -361,7 +361,7 @@ export const COLLECTIONS = [
       { name: "title", type: "text", required: false },
     ],
     // One enshrinement per member+week — the natural key of a win. Two
-    // devices that both passed syncHallOfFameToPB's client-side dedupe could
+    // devices that both passed the client-side dedupe could
     // land duplicate rows for the same win; the index refuses the second
     // create at the PocketBase level.
     indexes: [

@@ -22,7 +22,6 @@ vi.mock("@/db", () => ({
 }));
 
 vi.mock("@/lib/task-utils", () => ({
-  syncAllTasksToPB: async () => ({}),
   syncFamilyGoalToPB: async () => ({}),
 }));
 

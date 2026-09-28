@@ -58,7 +58,11 @@ describe("Tasks page cross-device refresh", () => {
       "fetch",
       vi.fn(async (input: any) => {
         if (String(input).includes("/api/tasks/sync")) {
-          return { ok: true, status: 200, json: async () => ({ ok: true, snapshot: server.snapshot }) };
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ ok: true, snapshot: server.snapshot, reconciled: true, repaired: [], failed: [] }),
+          };
         }
         return { ok: true, status: 200, json: async () => ({ ok: true }) };
       })

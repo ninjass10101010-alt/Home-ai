@@ -33,6 +33,8 @@ vi.mock("@/db", () => ({
   },
 }));
 
+import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-operation-outbox";
+import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 import TasksPage from "@/app/tasks/page";
 
 const TODAY = new Date().toISOString().split("T")[0];
@@ -144,11 +146,14 @@ describe("P0 — tasks-page safety gates", () => {
     expect(document.body.textContent).toMatch(/can't be undone|cannot be undone|This can't be undone/i);
     expect(storedTasks()).toHaveLength(1);
 
-    // Confirm the deletion → the task is gone.
+    // Confirm the deletion → a durable manage command is queued and the row is
+    // only removed by the acknowledgment (never by a local store write).
     const confirmBtn = [...document.querySelectorAll("button")].find((b) => /Delete/i.test(b.textContent) && b !== delBtn);
     await act(async () => { confirmBtn!.click(); });
-    await settle();
-    expect(storedTasks()).toHaveLength(0);
+    await settle(120);
+    const [entry] = listTaskOutbox();
+    expect(entry).toMatchObject({ route: "/api/tasks/manage", action: "delete", payload: { taskId: 77 } });
+    expect(storedTasks()).toHaveLength(1);
   });
 
   it("a CHILD cannot reach the edit modal even by swiping (gate defense-in-depth)", async () => {

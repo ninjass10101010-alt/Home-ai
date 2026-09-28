@@ -307,6 +307,9 @@ function mockOpenMeteo(payload: unknown) {
   );
 }
 
+// The audit's sequential-fetch stub (a retry test needs two answers in order)
+// and the remediation's pinned clock (the honest-null tests must not drift with
+// the wall clock). Both stay.
 function mockOpenMeteoSequence(payloads: unknown[]) {
   let index = 0;
   vi.stubGlobal(
@@ -322,6 +325,16 @@ function mockOpenMeteoSequence(payloads: unknown[]) {
     })
   );
 }
+
+const PINNED_NOW = "2026-09-24T17:20:00.000Z";
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"], now: new Date(PINNED_NOW) });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("WeatherWidget — Not Boring redesign", () => {
   beforeEach(() => {

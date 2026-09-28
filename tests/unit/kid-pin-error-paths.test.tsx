@@ -45,8 +45,6 @@ const store = vi.hoisted(() => ({
   week: { weekStart: "2026-09-01", points: {} as Record<string, number>, streak: {}, lastActive: {}, history: [] as any[] },
   saveTasks: vi.fn(async (_tasks: any[]) => {}),
   saveWeekData: vi.fn(async (_week: any) => {}),
-  syncTasksToPB: vi.fn(async (_tasks: any[]) => {}),
-  syncWeekDataToPB: vi.fn(async (_week: any) => {}),
 }));
 
 vi.mock("@/lib/task-utils", () => ({
@@ -66,8 +64,6 @@ vi.mock("@/lib/task-utils", () => ({
   getThisWeeksCompletedTasks: (tasks: any[]) => tasks.filter((t: any) => t.completed),
   getThisWeeksCompletedDates: () => [],
   calculateRealStreak: () => 0,
-  syncTasksToPB: store.syncTasksToPB,
-  syncWeekDataToPB: store.syncWeekDataToPB,
   // The REAL age predicates (mirrored): under-10 + child + open + assigned +
   // never snatchable completes PIN-free; every child completion lands
   // pending after the gate. The deprecated pre-age seam is gone from KidHome —
@@ -156,6 +152,8 @@ vi.mock("@/hooks/useAtmosphericTheme", () => ({
   }),
 }));
 
+import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-operation-outbox";
+import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 import KidHome from "@/modes/kid/KidHome";
 import RewardsShop from "@/modes/kid/RewardsShop";
 
@@ -163,6 +161,20 @@ const QUEST = { id: 7, title: "Feed the dog", points: 10, assignee: "Caspian", c
 const UNIVERSAL = { id: 9, title: "Grab the mail", points: 12, assignee: "All", universal: true, completed: false };
 
 let activeRoot: Root | null = null;
+let fetchMock = vi.fn();
+
+function stubFetch(fn: any) {
+  fetchMock = fn;
+  vi.stubGlobal("fetch", fn);
+}
+
+function expectNoStructuredTaskPush() {
+  const writes = (fetchMock.mock.calls as Array<[RequestInfo | URL, RequestInit | undefined]>)
+    .filter(([, init]) => init?.method && !["GET", "HEAD"].includes(String(init.method).toUpperCase()))
+    .map(([input, init]) => `${String(init!.method).toUpperCase()} ${String(input)}`);
+  expect(writes.filter((w) => /\/api\/tasks\/sync|\/api\/db\//.test(w))).toEqual([]);
+  expect(writes.filter((w) => !/^POST \/api\/(tasks\/|members\/verify$)/.test(w))).toEqual([]);
+}
 
 async function renderAsync(ui: ReactElement): Promise<HTMLElement> {
   const el = document.createElement("div");
@@ -217,9 +229,9 @@ describe("KidHome — honest error paths on the quest PIN gate", () => {
     store.tasks = [{ ...QUEST }];
     store.week = { weekStart: "2026-09-01", points: { Caspian: 20 }, streak: {}, lastActive: {}, history: [] };
     store.saveTasks.mockReset();
+    __resetTaskOutboxForTests();
+    __resetTaskCommandCredentialsForTests();
     store.saveWeekData.mockReset();
-    store.syncTasksToPB.mockClear();
-    store.syncWeekDataToPB.mockClear();
     vi.stubGlobal("matchMedia", vi.fn(() => ({
       matches: false,
       addEventListener: () => {}, removeEventListener: () => {},
@@ -236,35 +248,37 @@ describe("KidHome — honest error paths on the quest PIN gate", () => {
     vi.unstubAllGlobals();
   });
 
-  it("a SERVER ERROR (500) no longer blocks an under-10 kid quest — the tap lands pending with zero verify traffic", async () => {
+  it("a SERVER ERROR (500) no longer blocks an under-10 kid quest — the command is queued, with zero verify traffic", async () => {
     const spyFetch = vi.fn(async (..._args: any[]) => ({ ok: false, status: 500, json: async () => ({}) }));
-    vi.stubGlobal("fetch", spyFetch);
+    stubFetch(spyFetch);
     const el = await renderAsync(<KidHome />);
     await settle();
     await tapQuest(el, "Feed the dog");
 
-    // Pending contract: done-but-unpaid even when the server errors — the
-    // under-10 path performs no network round trip at all (syncTasksToPB is
-    // the mocked store seam), so the 500 is never even observed.
-    expect(store.saveTasks).toHaveBeenCalled();
-    const saved = store.saveTasks.mock.calls[0][0];
-    expect(saved.find((t: any) => t.id === 7)?.pendingApproval).toMatchObject({ byName: "Caspian", points: 10 });
+    // A 5xx can never strand or lose the tap: the command is durable and the
+    // celebration still fires. The local task store is untouched — the
+    // acknowledgment writes it.
+    expect(listTaskOutbox()[0]).toMatchObject({
+      route: "/api/tasks/claim",
+      action: "complete",
+      payload: { taskId: 7 },
+    });
+    expect(store.saveTasks).not.toHaveBeenCalled();
     expect(spyFetch.mock.calls.filter((call) => String(call[0]).includes("/api/members/verify"))).toHaveLength(0);
     expect(store.saveWeekData).not.toHaveBeenCalled();
     expect(store.week.history).toHaveLength(0);
     expect(document.querySelector('[aria-label^="Congratulations"]')).not.toBeNull();
   });
 
-  it("a NETWORK REJECTION no longer blocks an under-10 kid quest — it lands pending, not unreachable", async () => {
+  it("a NETWORK REJECTION no longer blocks an under-10 kid quest — the command survives, nothing is lost", async () => {
     const spyFetch = vi.fn(async (..._args: any[]) => { throw new TypeError("Failed to fetch"); });
-    vi.stubGlobal("fetch", spyFetch);
+    stubFetch(spyFetch);
     const el = await renderAsync(<KidHome />);
     await settle();
     await tapQuest(el, "Feed the dog");
 
-    expect(store.saveTasks).toHaveBeenCalled();
-    const saved = store.saveTasks.mock.calls[0][0];
-    expect(saved.find((t: any) => t.id === 7)?.pendingApproval).toMatchObject({ byName: "Caspian", points: 10 });
+    expect(listTaskOutbox()[0]).toMatchObject({ route: "/api/tasks/claim", action: "complete", payload: { taskId: 7 } });
+    expect(store.saveTasks).not.toHaveBeenCalled();
     expect(spyFetch.mock.calls.filter((call) => String(call[0]).includes("/api/members/verify"))).toHaveLength(0);
     expect(store.saveWeekData).not.toHaveBeenCalled();
     expect(store.week.history).toHaveLength(0);
@@ -277,7 +291,7 @@ describe("KidHome — honest error paths on the quest PIN gate", () => {
     // 10+ kids must verify before the pending row lands.
     mockAuth.currentUser = { name: "Caspian", role: "child", age: 10 };
     const spyFetch = vi.fn(async (..._args: any[]) => ({ ok: false, status: 401, json: async () => ({}) }));
-    vi.stubGlobal("fetch", spyFetch);
+    stubFetch(spyFetch);
     const el = await renderAsync(<KidHome />);
     await settle();
     await completeQuestWithPin(el, "Feed the dog", "9999");
@@ -285,33 +299,33 @@ describe("KidHome — honest error paths on the quest PIN gate", () => {
     expect(spyFetch.mock.calls.some((call) => String(call[0]).includes("/api/members/verify"))).toBe(true);
     expect(document.body.textContent || "").toContain("Wrong PIN");
     expect(store.saveTasks).not.toHaveBeenCalled();
-    expect(store.syncTasksToPB).not.toHaveBeenCalled();
+    expectNoStructuredTaskPush();
     expect(store.week.history).toHaveLength(0);
     expect(document.querySelector('[aria-label^="Congratulations"]')).toBeNull();
   });
 
-  it("an OFFLINE kid quest still lands pending locally (syncs when the connection returns)", async () => {
+  it("an OFFLINE kid quest is still queued durably (drains when the connection returns)", async () => {
     Object.defineProperty(window.navigator, "onLine", { value: false, configurable: true });
     const spyFetch = vi.fn(async (..._args: any[]) => { throw new TypeError("Failed to fetch"); });
-    vi.stubGlobal("fetch", spyFetch);
+    stubFetch(spyFetch);
     const el = await renderAsync(<KidHome />);
     await settle();
     await tapQuest(el, "Feed the dog");
 
-    // Local-first pending write: no network needed, no verify, no earn.
-    expect(store.saveTasks).toHaveBeenCalled();
-    const saved = store.saveTasks.mock.calls[0][0];
-    expect(saved.find((t: any) => t.id === 7)?.pendingApproval).toMatchObject({ byName: "Caspian", points: 10 });
+    // The command is persisted before the first request, so an offline tap
+    // survives a reload instead of living only in this tab's memory.
+    expect(listTaskOutbox()[0]).toMatchObject({ route: "/api/tasks/claim", action: "complete", payload: { taskId: 7 } });
+    expect(store.saveTasks).not.toHaveBeenCalled();
     expect(spyFetch.mock.calls.filter((call) => String(call[0]).includes("/api/members/verify"))).toHaveLength(0);
     expect(store.saveWeekData).not.toHaveBeenCalled();
     expect(store.week.history).toHaveLength(0);
-    expect(store.syncTasksToPB).toHaveBeenCalled();
+    expectNoStructuredTaskPush();
     expect(document.querySelector('[aria-label^="Congratulations"]')).not.toBeNull();
   });
 
-  it("a NETWORK REJECTION on the claim POST is caught (was: escaped the onClick, silent)", async () => {
+  it("a claim whose PIN cannot be verified is refused, never queued", async () => {
     store.tasks = [{ ...UNIVERSAL }];
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    stubFetch(vi.fn(async (input: RequestInfo | URL) => {
       if (String(input).includes("/api/tasks/claim")) throw new TypeError("Failed to fetch");
       return { ok: true, status: 200, json: async () => ({}) };
     }));
@@ -330,12 +344,15 @@ describe("KidHome — honest error paths on the quest PIN gate", () => {
     await act(async () => { buttonByText("Complete")!.click(); });
     await settle();
 
+    // A claim is PIN-gated for every age, so the typed PIN is verified BEFORE
+    // anything is queued. A 401 verify means a wrong PIN: nothing is queued,
+    // nothing is written, and the kid is told the truth instead of seeing a
+    // celebration for a claim the server will never accept.
     const text = document.body.textContent || "";
-    expect(text).toContain("Couldn't reach Consuela");
-    expect(text).not.toContain("Wrong PIN");
-    // No silent success: nothing persisted, no celebration, spinner released.
+    expect(text).toContain("Wrong PIN");
+    expect(listTaskOutbox()).toHaveLength(0);
     expect(store.saveTasks).not.toHaveBeenCalled();
-    expect(store.syncTasksToPB).not.toHaveBeenCalled();
+    expectNoStructuredTaskPush();
     expect(document.querySelector('[aria-label^="Congratulations"]')).toBeNull();
     const completeBtn = buttonByText("Complete")!;
     expect(completeBtn.querySelector('[class*="animate-spin"]')).toBeNull();
@@ -350,8 +367,7 @@ describe("RewardsShop — honest error paths on the redemption PIN gate", () => 
     localStorage.clear();
     store.week = { weekStart: "2026-09-01", points: { Caspian: 200 }, streak: {}, lastActive: {}, history: [] };
     store.saveWeekData.mockReset();
-    store.syncWeekDataToPB.mockClear();
-    vi.stubGlobal("matchMedia", vi.fn(() => ({
+      vi.stubGlobal("matchMedia", vi.fn(() => ({
       matches: false,
       addEventListener: () => {}, removeEventListener: () => {},
       addListener: () => {}, removeListener: () => {},
@@ -374,7 +390,7 @@ describe("RewardsShop — honest error paths on the redemption PIN gate", () => 
   }
 
   it("a SERVER ERROR (500) on the redeem PIN says 'Couldn't reach', never 'Wrong PIN'", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
+    stubFetch(vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
     const el = await renderAsync(<RewardsShop />);
     await settle();
     await openRedeem(el, "Ice cream trip — 40 points");
@@ -392,7 +408,7 @@ describe("RewardsShop — honest error paths on the redemption PIN gate", () => 
   });
 
   it("a NETWORK REJECTION on the redeem PIN is unreachable, not a wrong PIN", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("Failed to fetch"); }));
+    stubFetch(vi.fn(async () => { throw new TypeError("Failed to fetch"); }));
     const el = await renderAsync(<RewardsShop />);
     await settle();
     await openRedeem(el, "Ice cream trip — 40 points");
@@ -409,7 +425,7 @@ describe("RewardsShop — honest error paths on the redemption PIN gate", () => 
   });
 
   it("a server error during PARENT APPROVAL says 'Couldn't reach', not 'Parent PIN required'", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 502, json: async () => ({}) })));
+    stubFetch(vi.fn(async () => ({ ok: false, status: 502, json: async () => ({}) })));
     const el = await renderAsync(<RewardsShop />);
     await settle();
     await openRedeem(el, "Movie night — 150 points");
@@ -428,7 +444,7 @@ describe("RewardsShop — honest error paths on the redemption PIN gate", () => 
   });
 
   it("a wrong parent PIN (401 for every parent) still reads 'Parent PIN required'", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 401, json: async () => ({}) })));
+    stubFetch(vi.fn(async () => ({ ok: false, status: 401, json: async () => ({}) })));
     const el = await renderAsync(<RewardsShop />);
     await settle();
     await openRedeem(el, "Movie night — 150 points");

@@ -18,6 +18,8 @@ vi.mock("@/hooks/useAuth", () => ({ useAuth: () => mockAuth }));
 
 vi.mock("@/components/ui/SyncInit", () => ({ default: () => null }));
 
+const serverTaskReads = vi.hoisted(() => ({ hall: [] as any[], archives: [] as any[] }));
+
 vi.mock("@/db", () => ({
   db: {
     refreshMembersCache: vi.fn(async () => true),
@@ -29,6 +31,8 @@ vi.mock("@/db", () => ({
       { id: 1, name: "Rebecca", fullName: "Rebecca (Mom)", role: "parent", emoji: "👩", color: "violet" },
       { id: 2, name: "Jasmine", fullName: "Jasmine Rose", role: "child", emoji: "👧", color: "rose" },
     ],
+    selectHallOfFame: async () => serverTaskReads.hall,
+    listArchivedWeeks: async () => serverTaskReads.archives,
   },
 }));
 
@@ -54,12 +58,14 @@ function seed(tasks: any[]) {
 }
 
 function stubSnapshotFetch(snapshot: any) {
-  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
     if (String(input).includes("/api/tasks/sync")) {
       return { ok: true, status: 200, json: async () => ({ snapshot }) };
     }
     return { ok: false, status: 401, json: async () => ({}) };
-  }));
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
 }
 
 async function renderAsync(ui: ReactElement): Promise<HTMLElement> {
@@ -87,6 +93,8 @@ beforeEach(() => {
   vi.unstubAllGlobals();
   mockAuth.currentUser = null;
   mockAuth.isLoggedIn = false;
+  serverTaskReads.hall = [];
+  serverTaskReads.archives = [];
   vi.stubGlobal("matchMedia", vi.fn(() => ({
     matches: false,
     addEventListener: () => {}, removeEventListener: () => {},
@@ -151,4 +159,53 @@ describe("cross-device snapshot restore on the Tasks page", () => {
     expect(storedTasks()[0].pendingApproval).toBeDefined();
     expect(document.body.textContent || "").toContain("Needs approval");
   });
+
+  it("loads server HOF and previous archive ranks on a fresh device", async () => {
+    const priorDate = new Date(`${MONDAY}T12:00:00Z`);
+    priorDate.setUTCDate(priorDate.getUTCDate() - 7);
+    const prior = priorDate.toISOString().slice(0, 10);
+    serverTaskReads.hall = [{
+      member: "Rebecca (Mom)",
+      emoji: "👩",
+      weekStart: prior,
+      points: 20,
+      rank: 1,
+      prize: "Server prize",
+    }];
+    serverTaskReads.archives = [{ weekStart: prior, points: JSON.stringify({ "Rebecca (Mom)": 20 }) }];
+    stubSnapshotFetch({
+      tasks: [OPEN_ROW],
+      weekData: { weekStart: MONDAY, points: {}, streak: {}, lastActive: {}, history: [] },
+    });
+    mockAuth.currentUser = { name: "Rebecca (Mom)", role: "parent" };
+    mockAuth.isLoggedIn = true;
+    seed([OPEN_ROW]);
+    localStorage.removeItem("consuela-hall-of-fame");
+    localStorage.removeItem("consuela-previous-ranks");
+    await renderAsync(<TasksPage />);
+    await settle();
+
+    expect(JSON.parse(localStorage.getItem("consuela-hall-of-fame") || "[]")).toEqual([
+      expect.objectContaining({ member: "Rebecca (Mom)", points: 20, prize: "Server prize" }),
+    ]);
+    expect(JSON.parse(localStorage.getItem("consuela-previous-ranks") || "{}")).toEqual({
+      "Rebecca (Mom)": 1,
+    });
+  });
+
+  it("uses the task sync endpoint for reads only", async () => {
+    const fetchMock = stubSnapshotFetch({
+      tasks: [OPEN_ROW],
+      weekData: { weekStart: MONDAY, points: {}, streak: {}, lastActive: {}, history: [] },
+    });
+    mockAuth.currentUser = { name: "Rebecca (Mom)", role: "parent" };
+    mockAuth.isLoggedIn = true;
+    seed([OPEN_ROW]);
+    await renderAsync(<TasksPage />);
+    await settle(5300);
+
+    const taskSyncCalls = fetchMock.mock.calls.filter((call) => String(call[0]).includes("/api/tasks/sync"));
+    expect(taskSyncCalls.length).toBeGreaterThan(0);
+    expect(taskSyncCalls.every((call) => (call[1] as RequestInit | undefined)?.method !== "POST")).toBe(true);
+  }, 7000);
 });

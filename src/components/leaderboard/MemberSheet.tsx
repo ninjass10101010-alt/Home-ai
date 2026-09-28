@@ -5,14 +5,21 @@ import SoftButton from "@/components/ui/SoftButton";
 import Avatar from "@/components/ui/Avatar";
 import Surface from "@/components/ui/Surface";
 import Chip from "@/components/ui/Chip";
-import { BADGES } from "@/types/tasks";
-import { getLevel } from "@/types/tasks";
+import {
+  PROGRESS_UNAVAILABLE_LABEL,
+  allTimeCaption,
+  allTimeCompletionsCaption,
+  allTimeLevelLabel,
+  resolveAllTimeLevel,
+  splitBadgesWithWeeklyChamp,
+} from "./level";
+import type { AllTimeReadProp } from "./Podium";
 
 interface MemberSheetProps {
   open: boolean;
   entry: any;
-  allTimePoints: number;
-  allTimeComps: number;
+  allTimePoints: number | null;
+  allTimeComps: number | null;
   weeklyPoints: number;
   pendingTasks: any[];
   affordableRewards: any[];
@@ -23,6 +30,7 @@ interface MemberSheetProps {
   // Weekly Champ 🥇) — the BADGES.week_champ condition itself is a
   // deliberately dead placeholder.
   hasWeeklyChamp?: boolean;
+  allTimeRead: AllTimeReadProp;
 }
 
 export default function MemberSheet({
@@ -37,15 +45,17 @@ export default function MemberSheet({
   onClose,
   getMemberColor,
   hasWeeklyChamp = false,
+  allTimeRead,
 }: MemberSheetProps) {
   if (!entry) return null;
   const color = getMemberColor(entry.name);
-  const isEarned = (b: (typeof BADGES)[number]) =>
-    b.condition(allTimePoints, entry.streak, allTimeComps) ||
-    (b.id === "week_champ" && hasWeeklyChamp);
-  const earnedBadgeObjects = BADGES.filter(isEarned);
-  const lockedBadges = BADGES.filter((b) => !isEarned(b));
-  const levelInfo = getLevel(allTimePoints);
+  const { earned: earnedBadgeObjects, locked: lockedBadges } = splitBadgesWithWeeklyChamp(
+    allTimePoints,
+    entry.streak,
+    allTimeComps,
+    hasWeeklyChamp
+  );
+  const levelInfo = resolveAllTimeLevel(allTimePoints);
   const maxGraphPoints = Math.max(1, ...weekGraph.map(d => d.points));
 
   return (
@@ -53,7 +63,7 @@ export default function MemberSheet({
       open={open}
       onClose={onClose}
       title={entry.name.split(" ")[0]}
-      description={`${entry.levelEmoji} ${entry.levelTitle} · Rank #${entry.rank}`}
+      description={`${allTimeLevelLabel(levelInfo)} · Rank #${entry.rank}`}
       footer={<SoftButton variant="secondary" onClick={onClose} className="w-full">Close</SoftButton>}
     >
       <div className="space-y-5">
@@ -61,7 +71,9 @@ export default function MemberSheet({
           <Avatar name={entry.name} color={color} emoji={entry.emoji} size="lg" variant="emoji" glow={entry.rank === 1} />
           <div>
             <div className="text-2xl font-bold text-text-primary display-numeral">{weeklyPoints} <span className="text-sm text-text-muted font-normal">pts this week</span></div>
-            <div className="text-sm text-text-secondary">{allTimePoints} all-time · {allTimeComps} tasks completed</div>
+            <div className="text-sm text-text-secondary">
+              {allTimeCaption(allTimePoints, allTimeRead.state, allTimeRead.updatedAt)} · {allTimeCompletionsCaption(allTimeComps, allTimeRead.state)}
+            </div>
             {entry.streak > 0 && <div className="mt-1 text-[var(--color-accent-amber)] text-sm font-semibold">🔥 {entry.streak}-day streak</div>}
           </div>
         </div>
@@ -144,14 +156,22 @@ export default function MemberSheet({
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-text-secondary mb-2">Level Progress</p>
           <div className="h-3 w-full overflow-hidden rounded-full bg-white/5">
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-[var(--color-accent-selected)]/50 to-[var(--color-accent-selected)] animate-progress-fill"
-              style={{ width: `${Math.max(2, levelInfo.progress)}%` }}
-            />
+            {levelInfo.known && (
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-[var(--color-accent-selected)]/50 to-[var(--color-accent-selected)] animate-progress-fill"
+                style={{ width: `${Math.max(2, levelInfo.progress)}%` }}
+              />
+            )}
           </div>
           <div className="mt-1 flex justify-between text-xs text-text-muted">
-            <span>{levelInfo.title}</span>
-            <span>{levelInfo.progress}% to next</span>
+            {levelInfo.known ? (
+              <>
+                <span>{levelInfo.title}</span>
+                <span>{levelInfo.progress}% to next</span>
+              </>
+            ) : (
+              <span>{PROGRESS_UNAVAILABLE_LABEL}</span>
+            )}
           </div>
         </div>
       </div>

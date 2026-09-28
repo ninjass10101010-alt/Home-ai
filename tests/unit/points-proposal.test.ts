@@ -48,10 +48,22 @@ describe("propose_point_adjustment — validate only, never write", () => {
     expect(out.ok).toBe(true);
     expect(out.proposal).toEqual({
       tool: "adjust_points",
+      operationId: expect.any(String),
       args: { member: "Emily G", delta: 10, reason: "helping carry groceries" },
     });
+    expect(out.proposal.operationId.trim().length).toBeGreaterThan(0);
     expect(String(out.message)).toMatch(/parent/i);
     expect(String(out.message)).toMatch(/PIN/i);
+    expect(writes).toHaveLength(0);
+  });
+
+  it("two proposals for the SAME adjustment are separate operations, so a genuine second one is not swallowed as a replay", async () => {
+    const args = { member: "Emily", delta: 10, reason: "helping carry groceries" };
+    const first = JSON.parse(await TOOL()!.handler(args));
+    const second = JSON.parse(await TOOL()!.handler(args));
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    expect(first.proposal.operationId).not.toBe(second.proposal.operationId);
     expect(writes).toHaveLength(0);
   });
 

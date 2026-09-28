@@ -1,64 +1,75 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { NextRequest } from "next/server";
 
 // PIN mock idiom copied from tests/unit/ha-alarm-route.test.ts — the proven
 // seam for x-consuela-pin routes (server-auth + tool dispatch fully mocked;
 // no PocketBase, no network).
+const PARENT_PIN = "parent-pin-fixture";
+
 const CURRENT_MONDAY = (() => {
-  // Same mondayOf/ISO contract as weekKey() in src/lib/task-utils.ts.
   const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  const day = d.getDay();
-  d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
-  return d.toISOString().split("T")[0];
+  d.setDate(d.getDate() + (d.getDay() === 0 ? -6 : 1 - d.getDay()));
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${month}-${day}`;
 })();
+
+const ledger = vi.hoisted(() => ({
+  calls: [] as any[],
+  queue: [] as any[],
+  result: undefined as any,
+}));
 
 const mocks = vi.hoisted(() => ({
   verifyPinAgainstAnyMember: vi.fn(),
+  requireLiveSession: vi.fn(),
   handler: vi.fn(),
   getTool: vi.fn(),
-  withAdmin: vi.fn(),
   liveMembers: vi.fn(),
-  weekKey: vi.fn(() => "2026-09-07"),
 }));
 
 vi.mock("@/lib/server-auth", () => ({
   verifyPinAgainstAnyMember: mocks.verifyPinAgainstAnyMember,
+  requireLiveSession: mocks.requireLiveSession,
 }));
 
 vi.mock("@/lib/hermes-tools", () => ({
   getTool: mocks.getTool,
 }));
 
-// The adjust_points executor is week_data surgery (NOT getTool): it reads the
-// roster + current week live and writes the row through withAdmin. All three
-// seams are mocked so no PocketBase is ever contacted.
-vi.mock("@/lib/pb-auth", () => ({
-  withAdmin: (fn: (pb: unknown) => Promise<unknown>) => mocks.withAdmin(fn),
-}));
 vi.mock("@/lib/consuela/live-reads", () => ({
   liveMembers: () => mocks.liveMembers(),
-  parseJSON: (value: unknown, fallback: any) => {
-    if (typeof value === "string") {
-      try { return JSON.parse(value); } catch { return fallback; }
-    }
-    return value ?? fallback;
-  },
 }));
-vi.mock("@/lib/task-utils", () => ({
-  weekKey: () => mocks.weekKey(),
+
+vi.mock("@/lib/ledger-operations", () => ({
+  applyWeekLedgerOperation: async (args: any) => {
+    ledger.calls.push(args);
+    if (ledger.queue.length > 0) return ledger.queue.shift();
+    return ledger.result;
+  },
 }));
 
 import { POST } from "@/app/api/consuela/planner/apply/route";
 
-function post(body: unknown, opts: { pin?: string; cookie?: string } = {}) {
+function post(
+  body: unknown,
+  opts: { pin?: string; pinCookie?: boolean; session?: boolean } = {},
+) {
+  const cookie = [
+    opts.session === false ? null : "consuela_session=live-parent-session",
+    opts.pinCookie ? "x-consuela-pin=1234" : null,
+  ]
+    .filter(Boolean)
+    .join("; ");
   return POST(
     new NextRequest("http://localhost/api/consuela/planner/apply", {
       method: "POST",
       headers: {
         "content-type": "application/json",
         ...(opts.pin ? { "x-consuela-pin": opts.pin } : {}),
-        ...(opts.cookie ? { cookie: opts.cookie } : {}),
+        cookie,
       },
       body: JSON.stringify(body),
     })
@@ -68,12 +79,23 @@ function post(body: unknown, opts: { pin?: string; cookie?: string } = {}) {
 const VALID_ARGS = { title: "Drive to soccer", date: "2026-09-11", time: "14:30" };
 
 beforeEach(() => {
+  ledger.calls.length = 0;
+  ledger.queue.length = 0;
+  ledger.result = undefined;
   mocks.verifyPinAgainstAnyMember.mockReset();
+  mocks.requireLiveSession.mockReset().mockImplementation(async (request: Request) => {
+    const cookie = request.headers.get("cookie") || "";
+    if (!cookie.includes("consuela_session=")) {
+      return { ok: false as const, status: 401 as const, error: "unauthorized" as const };
+    }
+    return {
+      ok: true as const,
+      identity: { memberId: "m1", name: "Rebecca", role: "parent" as const },
+    };
+  });
   mocks.handler.mockReset();
   mocks.getTool.mockReset().mockReturnValue({ handler: mocks.handler });
-  mocks.withAdmin.mockReset();
   mocks.liveMembers.mockReset();
-  mocks.weekKey.mockReset().mockReturnValue(CURRENT_MONDAY);
 });
 
 describe("POST /api/consuela/planner/apply — PIN-gated buffer apply", () => {
@@ -115,9 +137,50 @@ describe("POST /api/consuela/planner/apply — PIN-gated buffer apply", () => {
   it("PIN from the cookie is honored like the header (act-route parity)", async () => {
     mocks.verifyPinAgainstAnyMember.mockResolvedValue({ id: "m1", name: "Rebecca", role: "parent" });
     mocks.handler.mockResolvedValue(JSON.stringify({ ok: true, event: { id: "e1", ...VALID_ARGS } }));
-    const res = await post({ tool: "add_event", args: VALID_ARGS }, { cookie: "x-consuela-pin=1234" });
+    const res = await post({ tool: "add_event", args: VALID_ARGS }, { pinCookie: true });
     expect(res.status).toBe(200);
     expect(mocks.verifyPinAgainstAnyMember).toHaveBeenCalledWith("1234");
+  });
+
+  it("no session cookie at all → 401 unauthorized before the PIN is read", async () => {
+    const res = await post({ tool: "add_event", args: VALID_ARGS }, { pin: "1234", session: false });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+    expect(mocks.verifyPinAgainstAnyMember).not.toHaveBeenCalled();
+    expect(mocks.getTool).not.toHaveBeenCalled();
+  });
+
+  it("dispatches with the SERVER source + the live parent caller — never 'hermes'", async () => {
+    mocks.verifyPinAgainstAnyMember.mockResolvedValue({ id: "m1", name: "Rebecca", role: "parent" });
+    mocks.handler.mockResolvedValue(JSON.stringify({ ok: true, event: { id: "e1", ...VALID_ARGS } }));
+    const res = await post({ tool: "add_event", args: VALID_ARGS }, { pin: "1234" });
+    expect(res.status).toBe(200);
+    expect(mocks.handler).toHaveBeenCalledWith(
+      expect.objectContaining({ title: VALID_ARGS.title }),
+      { source: "server", caller: { memberId: "m1", name: "Rebecca", role: "parent" } },
+    );
+  });
+
+  it("a demoted session is refused before the PIN is read", async () => {
+    mocks.requireLiveSession.mockResolvedValue({
+      ok: false,
+      status: 403,
+      error: "session_role_changed",
+    });
+    mocks.verifyPinAgainstAnyMember.mockResolvedValue({ id: "m1", name: "Rebecca", role: "parent" });
+    const res = await post({ tool: "add_event", args: VALID_ARGS }, { pin: "1234" });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "session_role_changed" });
+    expect(mocks.verifyPinAgainstAnyMember).not.toHaveBeenCalled();
+    expect(mocks.getTool).not.toHaveBeenCalled();
+  });
+
+  it("a live child session is refused before the PIN is read", async () => {
+    mocks.requireLiveSession.mockResolvedValue({ ok: false, status: 403, error: "adult_only" });
+    const res = await post({ tool: "add_event", args: VALID_ARGS }, { pin: "1234" });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: "adult_only" });
+    expect(mocks.verifyPinAgainstAnyMember).not.toHaveBeenCalled();
   });
 
   it("tool outside the add_event allowlist → 400, getTool never reached", async () => {
@@ -226,7 +289,10 @@ describe("POST /api/consuela/planner/apply — PIN-gated buffer apply", () => {
     const json = await res.json();
     expect(json.ok).toBe(true);
     expect(json.event).toEqual(event);
-    expect(mocks.handler).toHaveBeenCalledWith(VALID_ARGS);
+    expect(mocks.handler).toHaveBeenCalledWith(VALID_ARGS, {
+      source: "server",
+      caller: { memberId: "m1", name: "Rebecca", role: "parent" },
+    });
   });
 
   it("handler reports failure (ok:false + error) → 400 with the handler's message", async () => {
@@ -253,14 +319,19 @@ describe("POST /api/consuela/planner/apply — PIN-gated buffer apply", () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ ok: false, error: "PB is down" });
   });
+
+  it("add_event never reaches the ledger seam", async () => {
+    mocks.verifyPinAgainstAnyMember.mockResolvedValue({ id: "m1", name: "Rebecca", role: "parent" });
+    mocks.handler.mockResolvedValue(JSON.stringify({ ok: true, event: { id: "e1" } }));
+
+    const res = await post({ tool: "add_event", args: VALID_ARGS }, { pin: "1234" });
+    expect(res.status).toBe(200);
+    expect(ledger.calls).toHaveLength(0);
+  });
 });
 
-// ─── Task 15: adjust_points — the ONLY path on which points actually move ───
-// Dedicated executor (NOT getTool): live-read the current week, find-or-create
-// the week_data row, append one earn-shaped adjust tx, move the balance, and
-// refuse a same-(member, amount, reason) replay inside 60s.
 const ADJUST_ARGS = { member: "Emily", delta: 10, reason: "helping carry groceries" };
-const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+const OPERATION_ID = "adjust-fixture-1";
 
 function parentPin() {
   mocks.verifyPinAgainstAnyMember.mockResolvedValue({ id: "m1", name: "Rebecca", fullName: "Rebecca G", role: "parent" });
@@ -273,160 +344,315 @@ function roster() {
   ]);
 }
 
-/** Fake PB backed by `weekRows` (week_data fields kept as JSON strings, the
- *  live-PB convention). Returns the rows after the route ran. */
-function pbWithWeek(weekRows: any[]) {
-  const calls: Array<{ op: string; id?: string; data?: any }> = [];
-  mocks.withAdmin.mockImplementation(async (fn: any) => fn({
-    collection: (name: string) => ({
-      getFullList: async () => (name === "week_data" ? weekRows : []),
-      update: async (id: string, data: any) => {
-        calls.push({ op: "update", id, data });
-        const row = weekRows.find((r) => r.id === id);
-        Object.assign(row, data);
-        return row;
-      },
-      create: async (data: any) => {
-        calls.push({ op: "create", data });
-        weekRows.push({ id: "w-new", ...data });
-        return data;
-      },
-    }),
-  }));
-  return calls;
-}
-
-/** Tolerates both shapes a live PB json field can surface (object|string). */
-function field(v: any): any {
-  return typeof v === "string" ? JSON.parse(v) : v;
-}
-
-function existingWeekRow(overrides: Record<string, unknown> = {}) {
+function weekFixture(overrides?: { points?: Record<string, number>; history?: any[] }) {
   return {
-    id: "w1",
     weekStart: CURRENT_MONDAY,
-    points: JSON.stringify({ "Emily G": 13 }),
-    streak: JSON.stringify({}),
-    lastActive: JSON.stringify({}),
-    history: JSON.stringify([]),
+    points: overrides?.points ?? { "Emily G": 23 },
+    streak: {},
+    lastActive: {},
+    history: overrides?.history ?? [],
+  };
+}
+
+function adjustResult(extra?: Record<string, unknown>) {
+  return {
+    ok: true,
+    applied: true,
+    duplicate: false,
+    semanticDuplicate: false,
+    reconciled: true,
+    weekData: weekFixture(),
+    operationId: OPERATION_ID,
+    ...extra,
+  };
+}
+
+function adjustFailure(code: string, extra?: Record<string, unknown>) {
+  return {
+    ok: false,
+    code,
+    applied: false,
+    duplicate: false,
+    semanticDuplicate: false,
+    reconciled: false,
+    weekData: weekFixture(),
+    operationId: OPERATION_ID,
+    ...extra,
+  };
+}
+
+function adjustBody(overrides?: Record<string, unknown>) {
+  return {
+    tool: "adjust_points",
+    operationId: OPERATION_ID,
+    args: { ...ADJUST_ARGS },
     ...overrides,
   };
 }
 
-describe("POST /api/consuela/planner/apply — adjust_points (PIN-confirmed)", () => {
-  it("child PIN stays 401 adult_only via the existing gate — no week_data surgery", async () => {
+describe("POST /api/consuela/planner/apply — adjust_points (canonical ledger seam)", () => {
+  it("passes the stable operation ID to the shared helper", async () => {
+    ledger.result = adjustResult({
+      operationId: "adjust-fixture-1",
+      weekData: weekFixture({
+        history: [{
+          id: 5150,
+          timestamp: "2026-09-24T12:00:00.000Z",
+          member: "Emily G",
+          type: "adjust",
+          amount: 10,
+          description: "helping carry groceries",
+          meta: { operationId: "adjust-fixture-1", source: "planner-adjust" },
+        }],
+      }),
+    });
+    parentPin();
+    roster();
+
+    const res = await post(adjustBody(), { pin: PARENT_PIN });
+    expect(res.status).toBe(200);
+    expect(ledger.calls[0].operation).toMatchObject({
+      source: "planner-adjust",
+      operationId: "adjust-fixture-1",
+    });
+    const body = await res.json();
+    expect(body.weekData.history.at(-1).meta.operationId).toBe("adjust-fixture-1");
+    expect(body.weekData.history.at(-1).operationId).toBeUndefined();
+    expect(mocks.getTool).not.toHaveBeenCalled();
+  });
+
+  it("returns 202 after a successful ledger write with pending projection", async () => {
+    ledger.result = adjustResult({
+      operationId: "adjust-fixture-2",
+      reconciled: false,
+      projectionError: "projection_failed",
+    });
+    parentPin();
+    roster();
+
+    const res = await post(adjustBody({ operationId: "adjust-fixture-2" }), { pin: PARENT_PIN });
+    expect(res.status).toBe(202);
+    expect(await res.json()).toMatchObject({ ok: true, reconciled: false, applied: true });
+  });
+
+  it("hands the helper the current week, the planner source and one adjust entry for the LIVE full name", async () => {
+    parentPin();
+    roster();
+    ledger.result = adjustResult();
+
+    await post(adjustBody(), { pin: PARENT_PIN });
+
+    expect(ledger.calls).toHaveLength(1);
+    expect(ledger.calls[0].weekStart).toBe(CURRENT_MONDAY);
+    expect(ledger.calls[0].operation.source).toBe("planner-adjust");
+    expect(ledger.calls[0].operation.entries).toEqual([
+      { type: "adjust", member: "Emily G", amount: 10, description: "helping carry groceries" },
+    ]);
+    expect(typeof ledger.calls[0].project).toBe("function");
+  });
+
+  it("returns member, delta, newTotal, weekData, operationId, applied, duplicate and reconciled", async () => {
+    parentPin();
+    roster();
+    ledger.result = adjustResult();
+
+    const res = await post(adjustBody(), { pin: PARENT_PIN });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({
+      ok: true,
+      member: "Emily G",
+      delta: 10,
+      newTotal: 23,
+      operationId: OPERATION_ID,
+      applied: true,
+      duplicate: false,
+      reconciled: true,
+    });
+    expect(body.weekData.weekStart).toBe(CURRENT_MONDAY);
+  });
+
+  it("a replayed operation id is answered as a duplicate, not a second adjustment", async () => {
+    parentPin();
+    roster();
+    ledger.result = adjustResult({ applied: false, duplicate: true });
+
+    const res = await post(adjustBody(), { pin: PARENT_PIN });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      ok: true,
+      applied: false,
+      duplicate: true,
+      operationId: OPERATION_ID,
+    });
+  });
+
+  it("a child PIN stays 401 adult_only via the existing gate — no ledger request", async () => {
     mocks.verifyPinAgainstAnyMember.mockResolvedValue({ id: "m2", name: "Caspian", role: "child" });
-    const res = await post({ tool: "adjust_points", args: ADJUST_ARGS }, { pin: "1234" });
+    const res = await post(adjustBody(), { pin: "1234" });
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "adult_only" });
-    expect(mocks.withAdmin).not.toHaveBeenCalled();
+    expect(ledger.calls).toHaveLength(0);
   });
 
-  it("happy path: ONE adjust tx with the exact task-utils shape + points move; getTool is NOT used", async () => {
-    parentPin();
-    roster();
-    const row = existingWeekRow();
-    const calls = pbWithWeek([row]);
-
-    const res = await post({ tool: "adjust_points", args: ADJUST_ARGS }, { pin: "1234" });
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, member: "Emily G", delta: 10, newTotal: 23 });
-    expect(mocks.getTool).not.toHaveBeenCalled();
-
-    const write = calls.find((c) => c.op === "update");
-    expect(write).toBeDefined();
-    const data: any = write!.data;
-    expect(field(data.points)["Emily G"]).toBe(23);
-    const history = field(data.history);
-    expect(history).toHaveLength(1);
-    const tx = history[0];
-    expect(typeof tx.id).toBe("number");
-    expect(tx.timestamp).toMatch(ISO_RE);
-    expect(tx.member).toBe("Emily G");
-    expect(tx.type).toBe("adjust");
-    expect(tx.amount).toBe(10);
-    expect(tx.description).toBe("helping carry groceries");
+  it("a pet PIN stays 401 adult_only — no ledger request", async () => {
+    mocks.verifyPinAgainstAnyMember.mockResolvedValue({ id: "m3", name: "Bailey", role: "pet" });
+    const res = await post(adjustBody(), { pin: "0000" });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "adult_only" });
+    expect(ledger.calls).toHaveLength(0);
   });
 
-  it("find-or-create: no row for the current week → create one carrying the tx + points", async () => {
-    parentPin();
-    roster();
-    const calls = pbWithWeek([]);
-
-    const res = await post({ tool: "adjust_points", args: { ...ADJUST_ARGS, delta: -4 } }, { pin: "1234" });
-    expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ ok: true, member: "Emily G", delta: -4, newTotal: -4 });
-    const created = calls.find((c) => c.op === "create");
-    expect(created).toBeDefined();
-    expect(created!.data.weekStart).toBe(CURRENT_MONDAY);
-    expect(field(created!.data.points)["Emily G"]).toBe(-4);
-    expect(field(created!.data.history)).toHaveLength(1);
+  it("an unauthenticated request (no live session) never reaches the PIN or the ledger", async () => {
+    const res = await post(adjustBody(), { pin: PARENT_PIN, session: false });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: "unauthorized" });
+    expect(mocks.verifyPinAgainstAnyMember).not.toHaveBeenCalled();
+    expect(ledger.calls).toHaveLength(0);
   });
 
-  it("idempotent: the same (member, amount, reason) twice inside 60s = ONE tx", async () => {
-    parentPin();
-    roster();
-    const row = existingWeekRow();
-    pbWithWeek([row]);
+  it("a missing or invalid PIN never reaches the ledger", async () => {
+    const missing = await post(adjustBody());
+    expect(missing.status).toBe(401);
+    expect(await missing.json()).toEqual({ error: "pin required" });
 
-    const first = await post({ tool: "adjust_points", args: ADJUST_ARGS }, { pin: "1234" });
-    expect(first.status).toBe(200);
-    const second = await post({ tool: "adjust_points", args: ADJUST_ARGS }, { pin: "1234" });
-    expect(second.status).toBe(409);
-    expect((await second.json()).ok).toBeFalsy();
-
-    expect(field(row.history)).toHaveLength(1);
-    expect(field(row.points)["Emily G"]).toBe(23);
+    mocks.verifyPinAgainstAnyMember.mockResolvedValue(null);
+    const wrong = await post(adjustBody(), { pin: "9999" });
+    expect(wrong.status).toBe(401);
+    expect(await wrong.json()).toEqual({ error: "pin required" });
+    expect(ledger.calls).toHaveLength(0);
   });
 
-  it("the 60s window only blocks replays — the same reason MAY land again later", async () => {
+  it("integer-delta validation runs before any point-changing request", async () => {
     parentPin();
-    roster();
-    const old = new Date(Date.now() - 90_000).toISOString();
-    const row = existingWeekRow({
-      history: JSON.stringify([
-        { id: 1, timestamp: old, member: "Emily G", type: "adjust", amount: 10, description: "helping carry groceries" },
-      ]),
-    });
-    pbWithWeek([row]);
-
-    const res = await post({ tool: "adjust_points", args: ADJUST_ARGS }, { pin: "1234" });
-    expect(res.status).toBe(200);
-    expect(field(row.history)).toHaveLength(2);
-  });
-
-  it("unknown member → 400 and no week_data write", async () => {
-    parentPin();
-    mocks.liveMembers.mockResolvedValue([{ name: "Rebecca", fullName: "Rebecca G", role: "parent" }]);
-    const calls = pbWithWeek([existingWeekRow()]);
-    const res = await post({ tool: "adjust_points", args: { ...ADJUST_ARGS, member: "Zoe" } }, { pin: "1234" });
-    expect(res.status).toBe(400);
-    expect((await res.json()).ok).toBeFalsy();
-    expect(calls).toHaveLength(0);
-  });
-
-  it("bad delta/reason → 400 before the roster is even read", async () => {
-    parentPin();
-    for (const args of [
-      { ...ADJUST_ARGS, delta: 0 },
-      { ...ADJUST_ARGS, delta: 150 },
-      { ...ADJUST_ARGS, delta: "ten" },
-      { ...ADJUST_ARGS, delta: 2.5 },
-      { ...ADJUST_ARGS, reason: "" },
-      { ...ADJUST_ARGS, reason: "x".repeat(201) },
-      { ...ADJUST_ARGS, member: "" },
-    ]) {
-      const res = await post({ tool: "adjust_points", args }, { pin: "1234" });
-      expect(res.status, JSON.stringify(args)).toBe(400);
+    for (const delta of [0, 150, -150, "ten", 2.5, null, undefined]) {
+      const res = await post(adjustBody({ args: { ...ADJUST_ARGS, delta } }), { pin: PARENT_PIN });
+      expect(res.status, `delta=${JSON.stringify(delta)}`).toBe(400);
+      expect((await res.json()).ok).toBe(false);
     }
     expect(mocks.liveMembers).not.toHaveBeenCalled();
-    expect(mocks.withAdmin).not.toHaveBeenCalled();
+    expect(ledger.calls).toHaveLength(0);
   });
 
-  it("a missing member name is refused before any PB read", async () => {
+  it("a blank reason (or an over-long one) is refused before any point-changing request", async () => {
     parentPin();
-    const res = await post({ tool: "adjust_points", args: { delta: 5, reason: "helped" } }, { pin: "1234" });
+    for (const reason of ["", "   ", "x".repeat(201)]) {
+      const res = await post(adjustBody({ args: { ...ADJUST_ARGS, reason } }), { pin: PARENT_PIN });
+      expect(res.status, `reason length=${reason.length}`).toBe(400);
+      expect((await res.json()).ok).toBe(false);
+    }
+    expect(mocks.liveMembers).not.toHaveBeenCalled();
+    expect(ledger.calls).toHaveLength(0);
+  });
+
+  it("a missing member name is refused before any point-changing request", async () => {
+    parentPin();
+    const res = await post(adjustBody({ args: { delta: 5, reason: "helped" } }), { pin: PARENT_PIN });
     expect(res.status).toBe(400);
-    expect(mocks.withAdmin).not.toHaveBeenCalled();
+    expect(ledger.calls).toHaveLength(0);
+  });
+
+  it("a missing or unusable operation id is refused — a point move is never un-keyed", async () => {
+    parentPin();
+    for (const operationId of [undefined, "", "   ", "constructor", 42]) {
+      const res = await post(adjustBody({ operationId }), { pin: PARENT_PIN });
+      expect(res.status, `operationId=${JSON.stringify(operationId)}`).toBe(400);
+      expect((await res.json()).ok).toBe(false);
+    }
+    expect(ledger.calls).toHaveLength(0);
+  });
+
+  it("unknown member → 400 and no ledger request", async () => {
+    parentPin();
+    mocks.liveMembers.mockResolvedValue([{ name: "Rebecca", fullName: "Rebecca G", role: "parent" }]);
+    const res = await post(adjustBody({ args: { ...ADJUST_ARGS, member: "Zoe" } }), { pin: PARENT_PIN });
+    expect(res.status).toBe(400);
+    expect((await res.json()).ok).toBeFalsy();
+    expect(ledger.calls).toHaveLength(0);
+  });
+
+  it("an unreadable roster → 503, never a silent point move", async () => {
+    parentPin();
+    mocks.liveMembers.mockResolvedValue(null);
+    const res = await post(adjustBody(), { pin: PARENT_PIN });
+    expect(res.status).toBe(503);
+    expect(ledger.calls).toHaveLength(0);
+  });
+
+  it("insufficient balance on a DEDUCTION → 400 with the honest gap, no second attempt", async () => {
+    parentPin();
+    roster();
+    ledger.result = adjustFailure("insufficient_balance", {
+      weekData: weekFixture({ points: { "Emily G": 3 } }),
+    });
+
+    const res = await post(
+      adjustBody({ args: { ...ADJUST_ARGS, delta: -10 } }),
+      { pin: PARENT_PIN },
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body).toMatchObject({ ok: false, operationId: OPERATION_ID });
+    expect(String(body.error)).toMatch(/3 pts/);
+    expect(String(body.error)).toMatch(/deduction/i);
+    expect(ledger.calls).toHaveLength(1);
+  });
+
+  it("a BONUS refused by the ledger never claims a deduction happened", async () => {
+    parentPin();
+    roster();
+    ledger.result = adjustFailure("insufficient_balance", {
+      weekData: weekFixture({ points: { "Emily G": -3 } }),
+    });
+
+    const res = await post(adjustBody(), { pin: PARENT_PIN });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body).toMatchObject({ ok: false, operationId: OPERATION_ID });
+    expect(String(body.error)).not.toMatch(/deduction/i);
+    expect(String(body.error)).toMatch(/out of balance|balance/i);
+    expect(String(body.error)).not.toMatch(/point moves|points moved/i);
+  });
+
+  it("a conflicting operation id → 409, so a client can tell a replay from a clash", async () => {
+    parentPin();
+    roster();
+    ledger.result = adjustFailure("operation_conflict");
+
+    const res = await post(adjustBody(), { pin: PARENT_PIN });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ ok: false, operationId: OPERATION_ID });
+  });
+
+  it("a lost update is retried ONCE under the SAME operation id, then 503", async () => {
+    parentPin();
+    roster();
+    ledger.queue.push(adjustFailure("ledger_write_conflict"), adjustFailure("ledger_write_conflict"));
+
+    const res = await post(adjustBody(), { pin: PARENT_PIN });
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({ ok: false, operationId: OPERATION_ID });
+    expect(ledger.calls).toHaveLength(2);
+    expect(ledger.calls[0].operation.operationId).toBe(ledger.calls[1].operation.operationId);
+  });
+
+  it("an unusable operation shape from the helper is a 503, not a fake success", async () => {
+    parentPin();
+    roster();
+    ledger.result = adjustFailure("invalid_ledger_operation");
+
+    const res = await post(adjustBody(), { pin: PARENT_PIN });
+    expect(res.status).toBe(503);
+    expect((await res.json()).ok).toBe(false);
+  });
+
+  it("the route owns no week_data surgery: no withAdmin, parseJSON, weekKey or Transaction", () => {
+    const source = readFileSync(
+      join(process.cwd(), "src/app/api/consuela/planner/apply/route.ts"),
+      "utf8",
+    );
+    for (const banned of ["withAdmin", "parseJSON", "weekKey", "Transaction"]) {
+      expect(source, `${banned} must not appear in the planner apply route`).not.toContain(banned);
+    }
   });
 });

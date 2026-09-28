@@ -1,6 +1,8 @@
 import { db } from "@/db";
 import { upsertGroceryItem } from "./grocery-service";
 import { saveOrQueue } from "./pending-writes";
+import { queueTaskCommand } from "./task-command-queue";
+import { requestTaskOutboxFlush } from "./task-operation-outbox";
 
 export type LocalActionType =
   | "event"
@@ -255,18 +257,36 @@ export async function runAction(action: ActionCard): Promise<{ success: boolean;
         return { success: true, message: `Created recipe "${action.title}"` };
       }
       case "reward": {
-        const REWARDS_KEY = "consuela-rewards";
         const points = parseInt(action.detail?.match(/(\d+)/)?.[1] || "50");
-        const newReward = { id: Date.now(), name: action.title, emoji: action.emoji || "🎁", cost: points };
-        if (typeof window !== "undefined") {
-          try {
-            const stored = localStorage.getItem(REWARDS_KEY);
-            const rewards = stored ? JSON.parse(stored) : [];
-            rewards.push(newReward);
-            localStorage.setItem(REWARDS_KEY, JSON.stringify(rewards));
-          } catch {}
+        // The reward catalog is a durable config command, not a fire-and-forget
+        // POST: it is persisted BEFORE the first request, survives a reload or
+        // a dead NAS, and the authoritative list arrives with the
+        // acknowledgment. Nothing is written to localStorage as a "success"
+        // first.
+        queueTaskCommand({
+          route: "/api/tasks/config",
+          action: "upsert",
+          payload: {
+            kind: "rewards",
+            updatedAt: new Date().toISOString(),
+            item: { id: Date.now(), name: action.title, emoji: action.emoji || "\u{1F381}", cost: points },
+          },
+          displayTarget: { kind: "config", title: action.title },
+        });
+        // Report the QUEUE, never a save this call has not seen. The command
+        // is durable before this line, so a flush failure must not escape as a
+        // throw (it would report a failure for a write that is already safely
+        // queued and will be retried by the mount/interval/visibility flush).
+        // Only a real acknowledgment lets us say the server took it.
+        let acknowledged = false;
+        try {
+          acknowledged = (await requestTaskOutboxFlush()).acknowledged > 0;
+        } catch {
+          acknowledged = false;
         }
-        return { success: true, message: `Added reward "${action.title}" (${points}pts)` };
+        return acknowledged
+          ? { success: true, message: `Added reward "${action.title}" (${points}pts)` }
+          : { success: true, message: `Queued reward "${action.title}" (${points}pts) — the family server will confirm it shortly.` };
       }
       case "clear": {
         if (typeof window !== "undefined") {

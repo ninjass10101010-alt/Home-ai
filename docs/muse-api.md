@@ -274,6 +274,28 @@ These hold regardless of what the tool catalog appears to allow:
   executes when a parent taps it and verifies their PIN. Task approvals also
   stay in the UI; a tool call can queue a completion for approval but never
   awards points.
+- **Every task write is a server command.** `add_task`, `update_task`,
+  `delete_task`, `complete_task` and `reopen_task` all execute through the one
+  internal command seam (`executeInternalTaskCommand`) with a normalized
+  `{ operationId, kind, actor, payload }` and a `context.source` of
+  `hermes` | `muse` | `server`. MUSE never writes the task snapshot, a delete
+  tombstone or a mirror row itself, and there is no "write this task row"
+  primitive to call. The command is applied under the server's own week-ledger
+  and snapshot locks, at most once per `operationId`; report the receipt, and
+  repeat a refusal reason verbatim instead of restating the change as done.
+- **Completion is assigned-only, and the payee is never an argument.**
+  `complete_task` only completes an ASSIGNED chore. An open / late-stealable
+  chore must be **claimed** from the Tasks screen (a claim pays the claimer),
+  and a crew chore needs every member checked in before it can be approved.
+  The payee and the point amount are derived server-side from the chore's
+  canonical owner and stored points — no argument sets or redirects a payment,
+  and MUSE cannot award points at all.
+- **A grown-up's own chore QUEUES too.** A chore whose owner is a grown-up is completed from
+  chat exactly like anyone else's: it lands as `pendingApproval` and a parent approves it on the
+  Tasks screen. The queue/pay decision belongs to the claim seam and keys off how the command was
+  authenticated — `"internal"` queues, `"pin"` (the Tasks screen, PIN-verified) pays, and an adult
+  `"session"` caller is refused `pin_required` — never off the owner's role, so a roster promotion
+  between two reads cannot change the outcome. Chat never moves points.
 - **Memory tools share the family memory bank.** Reads and writes go to the
   same PocketBase-backed memory the family sees. MUSE has no private memory
   store.

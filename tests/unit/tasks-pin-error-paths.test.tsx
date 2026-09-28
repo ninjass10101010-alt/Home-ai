@@ -69,6 +69,30 @@ function stubFetch(verify: () => any) {
 const NETWORK_DOWN = () => { throw new TypeError("Failed to fetch"); };
 const http = (status: number) => () => ({ ok: false, status, json: async () => ({}) });
 
+const PARENT_PIN = "4826";
+const KID_PIN = "1357";
+
+function stubRedeemWire(posted: Array<Record<string, unknown>>) {
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes("/api/members/verify")) {
+      const body = JSON.parse(String(init?.body || "{}"));
+      const name = String(body.memberName ?? "");
+      const wanted = name.startsWith("Jasmine") ? KID_PIN : PARENT_PIN;
+      if (body.pin !== wanted) return { ok: false, status: 401, json: async () => ({}) };
+      const full = name.startsWith("Jasmine") ? "Jasmine" : "Rebecca (Mom)";
+      const first = full.split(" ")[0];
+      return { ok: true, status: 200, json: async () => ({ member: { name: first, fullName: full, role: first === "Jasmine" ? "child" : "parent" } }) };
+    }
+    if (url.includes("/api/rewards/redeem")) {
+      const body = JSON.parse(String(init?.body || "{}"));
+      posted.push(body);
+      return { ok: true, status: 200, json: async () => ({ ok: true, reconciled: true, weekData: { weekStart: MONDAY, points: {}, streak: {}, lastActive: {}, history: [] } }) };
+    }
+    return { ok: true, status: 200, json: async () => ({ snapshot: null, reconciled: true }) };
+  }));
+}
+
 let activeRoot: Root | null = null;
 
 async function renderAsync(ui: ReactElement): Promise<HTMLElement> {
@@ -270,6 +294,29 @@ describe("Tasks gate: universal claim", () => {
     expect(text).not.toContain("Couldn't reach");
     expect(pinInput("4-digit PIN").value).toBe("");
   });
+
+  it("a ≤100pt redemption puts ONLY the redeeming member's PIN on the wire", async () => {
+    const posted: Array<Record<string, unknown>> = [];
+    stubRedeemWire(posted);
+    seed({ rewards: [SMALL_REWARD], points: { "Rebecca (Mom)": 200 } });
+    await renderAsync(<TasksPage />);
+    await settle();
+    await toLeaderboard();
+    await act(async () => { buttonByText("Redeem")!.click(); });
+    await settle();
+    await typeAndSubmit("4-digit PIN", "Submit", PARENT_PIN);
+
+    const redeems = posted.filter((body) => body.action === "redeem");
+    expect(redeems).toHaveLength(1);
+    expect(redeems[0]).toMatchObject({
+      rewardId: SMALL_REWARD.id,
+      memberName: "Rebecca (Mom)",
+      pin: PARENT_PIN,
+    });
+    expect(redeems[0]).not.toHaveProperty("parentPin");
+    expect(redeems[0]).not.toHaveProperty("parentName");
+    expect(redeems[0]).not.toHaveProperty("cost");
+  });
 });
 
 describe("Tasks gate: reward redemption", () => {
@@ -408,5 +455,33 @@ describe("Tasks gate: parent approval of large rewards", () => {
     expect(text).toContain("Parent PIN required to approve large rewards.");
     expect(text).not.toContain("Couldn't reach");
     expect(pinInput("Parent PIN").value).toBe("");
+  });
+
+  it("a >100pt redemption names the approver on the wire, and neither PIN is persisted", async () => {
+    const posted: Array<Record<string, unknown>> = [];
+    stubRedeemWire(posted);
+    seed({ rewards: [BIG_REWARD], points: { "Rebecca (Mom)": 200 } });
+    await renderAsync(<TasksPage />);
+    await settle();
+    await toLeaderboard();
+    await act(async () => { buttonByText("Redeem")!.click(); });
+    await settle();
+    await typeAndSubmit("Parent PIN", "Approve", PARENT_PIN);
+    await typeAndSubmit("4-digit PIN", "Submit", PARENT_PIN);
+
+    const redeems = posted.filter((body) => body.action === "redeem");
+    expect(redeems).toHaveLength(1);
+    expect(redeems[0]).toMatchObject({
+      rewardId: BIG_REWARD.id,
+      memberName: "Rebecca (Mom)",
+      parentName: "Rebecca (Mom)",
+      pin: PARENT_PIN,
+      parentPin: PARENT_PIN,
+    });
+    expect(redeems[0]).not.toHaveProperty("cost");
+    const dump = Object.keys(localStorage)
+      .map((key) => `${key}=${localStorage.getItem(key) ?? ""}`)
+      .join("\n");
+    expect(dump).not.toContain(PARENT_PIN);
   });
 });

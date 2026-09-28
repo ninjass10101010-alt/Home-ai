@@ -12,6 +12,14 @@ function isServer() {
   return typeof window === "undefined";
 }
 
+export const TASK_LEDGER_WRITE_ERROR = "task_ledger_write_requires_command";
+
+function refuseTaskLedgerWrite(): never {
+  const error = new Error(TASK_LEDGER_WRITE_ERROR) as Error & { code: string };
+  error.code = TASK_LEDGER_WRITE_ERROR;
+  throw error;
+}
+
 // === Client-mode (browser) helpers ===
 // The gateway returns raw PocketBase rows; these replicate the small amount of
 // mapping pb-db does internally so caller-facing shapes stay identical.
@@ -214,7 +222,6 @@ async function refreshTasksSnapshot() {
     const data = await res.json();
     applyTasksSnapshotToStores(data?.snapshot);
   } catch {
-    /* snapshot store unavailable — local task state stays authoritative */
   }
 }
 
@@ -430,16 +437,14 @@ export const db = {
   selectPendingTasks: () => tasksCache,
 
   insertTask: async (task: any) => {
-    const result = isServer()
-      ? await pbDb.insertTask(task)
-      : await safeGatewayRow(() => gatewayCreate("tasks", task));
+    if (!isServer()) refuseTaskLedgerWrite();
+    const result = await pbDb.insertTask(task);
     if (result) tasksCache.push(result);
     return result;
   },
   updateTask: async (id: number | string, updates: any) => {
-    const result = isServer()
-      ? await pbDb.updateTask(id, updates)
-      : await safeGatewayRow(() => gatewayUpdate("tasks", String(id), updates));
+    if (!isServer()) refuseTaskLedgerWrite();
+    const result = await pbDb.updateTask(id, updates);
     if (result) {
       const idx = tasksCache.findIndex((t: any) => t.id == id);
       if (idx !== -1) tasksCache[idx] = result;
@@ -447,7 +452,8 @@ export const db = {
     return result;
   },
   deleteTask: async (id: number | string) => {
-    const result = isServer() ? await pbDb.deleteTask(id) : await gatewayDeleteOk("tasks", id);
+    if (!isServer()) refuseTaskLedgerWrite();
+    const result = await pbDb.deleteTask(id);
     if (result) {
       const idx = tasksCache.findIndex((t: any) => t.id == id);
       if (idx !== -1) tasksCache.splice(idx, 1);
@@ -660,29 +666,12 @@ export const db = {
     : authoritativeClientList("schedules"),
 
   upsertTask: async (task: any) => {
-    if (!isServer()) {
-      // Never swallow: syncTasksToPB's catch is the ONLY log trail when a
-      // PB validation rejects the row (e.g. assigneeEmoji over max=5000).
-      const records = await gatewayList("tasks");
-      const existing = records.find((r: any) => r.taskId === task.taskId);
-      if (existing) return await gatewayUpdate("tasks", existing.id, task);
-      return await gatewayCreate("tasks", task);
-    }
+    if (!isServer()) refuseTaskLedgerWrite();
     return pbDb.upsertTask(task);
   },
   selectAllTasks: async () => isServer() ? pbDb.selectAllTasks() : clientListOrEmpty("tasks"),
   deleteTaskByTaskId: async (taskId: number) => {
-    if (!isServer()) {
-      try {
-        const records = await gatewayList("tasks");
-        const task = records.find((r: any) => r.taskId === taskId);
-        if (!task) return false;
-        await gatewayDelete("tasks", task.id);
-        return true;
-      } catch {
-        return false;
-      }
-    }
+    if (!isServer()) refuseTaskLedgerWrite();
     return pbDb.deleteTaskByTaskId(taskId);
   },
 
@@ -698,29 +687,12 @@ export const db = {
     return pbDb.getWeekData(weekStart);
   },
   upsertWeekData: async (data: any) => {
-    if (!isServer()) {
-      try {
-        const records = await gatewayList("week_data", filterQuery(`weekStart="${data.weekStart}"`));
-        const existing = records.find((r: any) => r.weekStart === data.weekStart);
-        if (existing) return await gatewayUpdate("week_data", existing.id, data);
-        return await gatewayCreate("week_data", data);
-      } catch {
-        return null;
-      }
-    }
+    if (!isServer()) refuseTaskLedgerWrite();
     return pbDb.upsertWeekData(data);
   },
-  // Upsert by weekStart (mirrors pb-db) — the browser pre-read fast path can
-  // falsely see [] when the gateway read fails, so the write itself must not
-  // blind-create. A genuine read failure here degrades to null (no create).
   archiveWeek: async (data: any) => {
-    if (isServer()) return pbDb.archiveWeek(data);
-    return safeGatewayRow(async () => {
-      const records = await gatewayList("week_archive", filterQuery(`weekStart="${data.weekStart}"`));
-      const existing = records.find((r: any) => r.weekStart === data.weekStart);
-      if (existing) return await gatewayUpdate("week_archive", existing.id, data);
-      return await gatewayCreate("week_archive", data);
-    });
+    if (!isServer()) refuseTaskLedgerWrite();
+    return pbDb.archiveWeek(data);
   },
   listArchivedWeeks: async () => isServer() ? pbDb.listArchivedWeeks() : clientListOrEmpty("week_archive"),
 

@@ -1,12 +1,13 @@
 import { describe, it, expect, vi } from "vitest";
 import type { Task, WeekData } from "@/types/tasks";
 
-vi.mock("@/db", () => ({ db: { upsertTask: vi.fn(async () => ({})) } }));
+vi.mock("@/db", () => ({ db: {} }));
 
 import {
   isPendingApproval, pendingApprovals, pendingPointsFor, completesWithoutPin,
-  tapCompletePending, approvePendingCompletion, sendBackPendingCompletion, adoptServerWeekData,
+  tapCompletePending, approvePendingCompletion, sendBackPendingCompletion, adoptAuthoritativeWeekData,
 } from "@/lib/task-utils";
+import { taskProjectionRecord } from "@/lib/snapshot-tasks";
 
 function t(over: Partial<Task>): Task {
   return {
@@ -139,26 +140,17 @@ describe("sendBackPendingCompletion", () => {
   });
 });
 
-describe("syncTasksToPB pendingApproval persistence", () => {
-  it("writes the pending record when set, null otherwise", async () => {
-    const { syncTasksToPB } = await import("@/lib/task-utils");
-    const { db } = await import("@/db");
-    await syncTasksToPB([
-      t({ completed: true, pendingApproval: { byName: "Jasmine", at: NOW, points: 5 } }),
-      t({ id: 2, title: "No pending" }),
-    ]);
-    const calls = vi.mocked(db.upsertTask).mock.calls;
-    expect(calls[0][0].pendingApproval).toEqual({ byName: "Jasmine", at: NOW, points: 5 });
-    expect(calls[1][0].pendingApproval).toBeNull();
+describe("pendingApproval persistence — the server task projection", () => {
+  it("writes the pending record when set, null otherwise", () => {
+    const record = taskProjectionRecord(
+      t({ completed: true, pendingApproval: { byName: "Jasmine", at: NOW, points: 5 } }) as any,
+    );
+    expect(record.pendingApproval).toEqual({ byName: "Jasmine", at: NOW, points: 5 });
+    expect(taskProjectionRecord(t({ id: 2, title: "No pending" }) as any).pendingApproval).toBeNull();
   });
 
-  it("carries sentBackAt to the PB row (cross-device send-back proof rides existing rails)", async () => {
-    const { syncTasksToPB } = await import("@/lib/task-utils");
-    const { db } = await import("@/db");
-    await syncTasksToPB([t({ sentBackAt: NOW })]);
-    // mock.calls accumulates across tests in this file — read the latest call.
-    const calls = vi.mocked(db.upsertTask).mock.calls;
-    expect(calls.at(-1)![0].sentBackAt).toBe(NOW);
+  it("carries sentBackAt to the PB row (cross-device send-back proof rides existing rails)", () => {
+    expect(taskProjectionRecord(t({ sentBackAt: NOW }) as any).sentBackAt).toBe(NOW);
   });
 });
 
@@ -190,47 +182,47 @@ describe("regenerateRecurringTasks with pending rows", () => {
   });
 });
 
-describe("adoptServerWeekData (guarded server-ledger adoption, 2026-09-23 review)", () => {
+describe("adoptAuthoritativeWeekData (Task 10 \u2014 outbox/snapshot adoption, no history heuristic)", () => {
   const offlineTx = {
     id: 1, timestamp: "2026-09-22T10:00:00.000Z", member: "Jasmine Rose",
     type: "earn", amount: 8, description: "Completed: Dishes (+8pts)", taskId: 101,
   } as any;
 
-  it("same week, server ledger SHORTER than local → local survives (offline approval tx is never dropped)", () => {
-    
+  it("same week, server ledger SHORTER than local \u2192 the server is the truth and wins", () => {
     const prev = wk({ history: [offlineTx] as any });
     const server = wk({ history: [] });
-    expect(adoptServerWeekData(prev, server)).toBe(prev);
+    const adopted = adoptAuthoritativeWeekData(prev, server);
+    expect(adopted.history).toHaveLength(0);
+    expect(adopted).not.toBe(prev);
   });
 
-  it("same week, server ledger at least as long → adopted (the normal online flow)", () => {
-    
+  it("same week, server ledger at least as long \u2192 adopted", () => {
     const prev = wk({ history: [offlineTx] as any });
     const server = wk({
       points: { "Caspian Garcia": 8 },
       history: [offlineTx, { id: 2, timestamp: "2026-09-22T11:00:00.000Z", member: "Caspian Garcia", type: "earn", amount: 8, description: "x", taskId: 102 }] as any,
     });
-    expect(adoptServerWeekData(prev, server)).toBe(server);
+    const adopted = adoptAuthoritativeWeekData(prev, server);
+    expect(adopted.points["Caspian Garcia"]).toBe(8);
+    expect(adopted.history).toHaveLength(2);
   });
 
-  it("server carries a NEWER week → adopted verbatim (Monday rollover)", () => {
-    
+  it("server carries a NEWER week \u2192 adopted (Monday rollover)", () => {
     const prev = wk({ weekStart: "2026-09-01", history: [offlineTx] as any });
     const server = wk({ weekStart: "2026-09-08", history: [] });
-    expect(adoptServerWeekData(prev, server)).toBe(server);
+    expect(adoptAuthoritativeWeekData(prev, server)).toMatchObject({ weekStart: "2026-09-08" });
   });
 
-  it("server carries an OLDER week (stale server) → local kept", () => {
-    
+  it("server carries an OLDER week (stale server) \u2192 local kept", () => {
     const prev = wk({ weekStart: "2026-09-08" });
     const server = wk({ weekStart: "2026-09-01" });
-    expect(adoptServerWeekData(prev, server)).toBe(prev);
+    expect(adoptAuthoritativeWeekData(prev, server)).toBe(prev);
   });
 
-  it("empty/absent server week → local kept; empty local → server adopted", () => {
+  it("empty/absent server week \u2192 local kept; empty local \u2192 server adopted", () => {
     const prev = wk();
-    expect(adoptServerWeekData(prev, {} as WeekData)).toBe(prev);
+    expect(adoptAuthoritativeWeekData(prev, {} as WeekData)).toBe(prev);
     const server = wk();
-    expect(adoptServerWeekData({} as WeekData, server)).toBe(server);
+    expect(adoptAuthoritativeWeekData({} as WeekData, server)).toMatchObject({ weekStart: server.weekStart });
   });
 });

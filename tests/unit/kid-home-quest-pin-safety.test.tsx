@@ -39,8 +39,6 @@ const store = vi.hoisted(() => ({
   week: { weekStart: "2026-09-01", points: {} as Record<string, number>, streak: {}, lastActive: {}, history: [] as any[] },
   saveTasks: vi.fn(async (_tasks: any[]) => {}),
   saveWeekData: vi.fn(async (_week: any) => {}),
-  syncTasksToPB: vi.fn(async (_tasks: any[]) => {}),
-  syncWeekDataToPB: vi.fn(async (_week: any) => {}),
 }));
 
 vi.mock("@/lib/task-utils", () => ({
@@ -56,8 +54,6 @@ vi.mock("@/lib/task-utils", () => ({
   getThisWeeksCompletedTasks: (tasks: any[]) => tasks.filter((t) => t.completed),
   getThisWeeksCompletedDates: () => [],
   calculateRealStreak: () => 0,
-  syncTasksToPB: store.syncTasksToPB,
-  syncWeekDataToPB: store.syncWeekDataToPB,
   // The REAL age predicates (mirrored here the way the old pre-age seam
   // mirror did): under-10 + child + open + assigned + never
   // snatchable completes PIN-free; every child completion still lands
@@ -157,11 +153,27 @@ vi.mock("@/hooks/useAtmosphericTheme", () => ({
   }),
 }));
 
+import { __resetTaskOutboxForTests } from "@/lib/task-operation-outbox";
+import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 import KidHome from "@/modes/kid/KidHome";
 
 const QUEST = { id: 7, title: "Feed the dog", points: 10, assignee: "Caspian", completed: false };
 
 let activeRoot: Root | null = null;
+let fetchMock = vi.fn();
+
+function stubFetch(fn: any) {
+  fetchMock = fn;
+  vi.stubGlobal("fetch", fn);
+}
+
+function expectNoStructuredTaskPush() {
+  const writes = (fetchMock.mock.calls as Array<[RequestInfo | URL, RequestInit | undefined]>)
+    .filter(([, init]) => init?.method && !["GET", "HEAD"].includes(String(init.method).toUpperCase()))
+    .map(([input, init]) => `${String(init!.method).toUpperCase()} ${String(input)}`);
+  expect(writes.filter((w) => /\/api\/tasks\/sync|\/api\/db\//.test(w))).toEqual([]);
+  expect(writes.filter((w) => !/^POST \/api\/(tasks\/|rewards\/redeem$|members\/verify$)/.test(w))).toEqual([]);
+}
 
 async function renderAsync(ui: ReactElement): Promise<HTMLElement> {
   const el = document.createElement("div");
@@ -211,9 +223,9 @@ describe("KidHome quest completion (age predicates: under-10 tap → pending; 10
     store.tasks = [{ ...QUEST }];
     store.week = { weekStart: "2026-09-01", points: { Caspian: 20 }, streak: {}, lastActive: {}, history: [] };
     store.saveTasks.mockReset();
+    __resetTaskOutboxForTests();
+    __resetTaskCommandCredentialsForTests();
     store.saveWeekData.mockReset();
-    store.syncTasksToPB.mockClear();
-    store.syncWeekDataToPB.mockClear();
     vi.stubGlobal("matchMedia", vi.fn(() => ({
       matches: false,
       addEventListener: () => {}, removeEventListener: () => {},
@@ -230,7 +242,7 @@ describe("KidHome quest completion (age predicates: under-10 tap → pending; 10
 
   it("an under-10 tap on an assigned quest completes PIN-free: pending row, no modal, zero earn tx, zero verify traffic", async () => {
     const spyFetch = vi.fn(async (..._args: any[]) => ({ ok: true, status: 200, json: async () => ({}) }));
-    vi.stubGlobal("fetch", spyFetch);
+    stubFetch(spyFetch);
     const el = await renderAsync(<KidHome />);
     await settle();
 
@@ -240,21 +252,14 @@ describe("KidHome quest completion (age predicates: under-10 tap → pending; 10
     expect(document.body.textContent || "").not.toContain("Confirm it's you");
     expect(document.querySelector('input[aria-label="Your 4-digit PIN"]')).toBeNull();
 
-    // Pending contract: done-but-unpaid, no earn, no verify round trip.
-    expect(store.saveTasks).toHaveBeenCalled();
-    const saved = store.saveTasks.mock.calls[0][0];
-    const row = saved.find((t: any) => t.id === 7);
-    expect(row.completed).toBe(true);
-    expect(row.completedBy).toBe("Caspian Garcia");
-    expect(row.completedInWeek).toBe("2026-09-01");
-    expect(row.pendingApproval).toMatchObject({ byName: "Caspian Garcia", points: 10 });
-    expect(typeof row.pendingApproval.at).toBe("string");
+    // Durable contract (Task 10): ONE credential-free command, and the local
+    // task store is never written by this surface — the acknowledgment is.
+    expect(store.saveTasks).not.toHaveBeenCalled();
     // No points move until a parent approves: week store untouched.
     expect(store.saveWeekData).not.toHaveBeenCalled();
-    expect(store.syncWeekDataToPB).not.toHaveBeenCalled();
     expect(store.week.points.Caspian).toBe(20);
     expect(store.week.history.some((tx: any) => tx.type === "earn")).toBe(false);
-    expect(store.syncTasksToPB).toHaveBeenCalled();
+    expectNoStructuredTaskPush();
     expect(spyFetch.mock.calls.filter((call) => String(call[0]).includes("/api/members/verify"))).toHaveLength(0);
 
     // Fix 3: local pending alone is invisible to parent approval — the claim
@@ -291,7 +296,7 @@ describe("KidHome quest completion (age predicates: under-10 tap → pending; 10
       }
       return { ok: true, status: 200, json: async () => ({}) };
     });
-    vi.stubGlobal("fetch", spyFetch);
+    stubFetch(spyFetch);
     const el = await renderAsync(<KidHome />);
     await settle();
 
@@ -312,21 +317,18 @@ describe("KidHome quest completion (age predicates: under-10 tap → pending; 10
     expect(store.saveTasks).not.toHaveBeenCalled();
     expect(document.body.textContent || "").toContain("Wrong PIN");
 
-    // The verified child's success lands pending — never a local earn.
+    // The verified child's success is a queued command — never a local earn
+    // and never a local row write.
     verifyOk = true;
     await act(async () => { setInputValue(input, "1234"); });
     await act(async () => { completeBtn.click(); });
     await settle();
 
-    expect(store.saveTasks).toHaveBeenCalled();
-    const saved = store.saveTasks.mock.calls.at(-1)![0];
-    const row = saved.find((t: any) => t.id === 7);
-    expect(row.completed).toBe(true);
-    expect(row.pendingApproval).toMatchObject({ byName: "Caspian Garcia", points: 10 });
+    expect(store.saveTasks).not.toHaveBeenCalled();
     expect(store.saveWeekData).not.toHaveBeenCalled();
-    expect(store.syncWeekDataToPB).not.toHaveBeenCalled();
     expect(store.week.history).toHaveLength(0);
     expect(store.week.points.Caspian).toBe(20);
+    expectNoStructuredTaskPush();
     // Fix 3: a verified 10+ completion must also persist server-side (same
     // claim route the Tasks page uses) so parent approval can see it.
     const claimCalls = spyFetch.mock.calls.filter((call) => String(call[0]).includes("/api/tasks/claim"));
@@ -348,7 +350,7 @@ describe("KidHome quest completion (age predicates: under-10 tap → pending; 10
 
   it("a kid whose session has NO age fails closed — the PIN gate still opens", async () => {
     mockAuth.currentUser = { name: "Caspian", role: "child" };
-    vi.stubGlobal("fetch", fetchHandler(true));
+    stubFetch(fetchHandler(true));
     const el = await renderAsync(<KidHome />);
     await settle();
 
@@ -363,14 +365,19 @@ describe("KidHome quest completion (age predicates: under-10 tap → pending; 10
     // completed pending on KidHome but claim-modal on the Tasks page. The
     // age predicates gate universal/snatchable OUT of the PIN-free path, so
     // claims keep the claim route for every kid.
+    // A claim is PIN-gated for EVERY age (Task 10 H3), so the typed PIN is
+    // verified server-side BEFORE the command is queued.
     const claimFetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.includes("/api/members/verify")) {
+        return { ok: true, status: 200, json: async () => ({ member: { name: "Caspian Garcia", role: "child" } }) };
+      }
       if (url.includes("/api/tasks/claim")) {
         return { ok: true, status: 200, json: async () => ({ success: true, claimedBy: "Caspian Garcia" }) };
       }
       return { ok: true, status: 200, json: async () => ({}) };
     });
-    vi.stubGlobal("fetch", claimFetch);
+    stubFetch(claimFetch);
     store.tasks = [{ id: 11, title: "Late dishes", points: 8, assignee: "Caspian", completed: false, stealable: true, due: "2026-09-01" }];
 
     const el = await renderAsync(<KidHome />);
@@ -395,26 +402,30 @@ describe("KidHome quest completion (age predicates: under-10 tap → pending; 10
     // pending for kids), a CHILD claimant mirrors the route's pendingApproval
     // answer: the row is claimed done-but-unpaid, still with NO earn tx
     // (routing parity with the Tasks page claim modal is unchanged).
+    // The PIN is verified FIRST, then the single durable claim command goes
+    // out with that credential — never a queued claim built on an unverified PIN.
+    expect(claimFetch.mock.calls.some((call) => String(call[0]).includes("/api/members/verify"))).toBe(true);
     expect(claimFetch).toHaveBeenCalledWith(expect.stringContaining("/api/tasks/claim"), expect.objectContaining({ method: "POST" }));
-    const saved = store.saveTasks.mock.calls.at(-1)![0];
-    const row = saved.find((t: any) => t.id === 11);
-    expect(row.completed).toBe(true);
-    expect(row.pendingApproval).toEqual({ byName: "Caspian Garcia", at: expect.any(String), points: 8 });
+    // A child claimant's done-but-unpaid answer is the acknowledgment's write.
+    expect(store.saveTasks).not.toHaveBeenCalled();
     expect(store.week.history).toHaveLength(0);
   });
 
-  it("a successful universal claim carries completedBy/At/InWeek into the synced row (no field wipe)", async () => {
+  it("a successful universal claim is one durable claim command with no local row write", async () => {
     const claimFetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.includes("/api/members/verify")) {
+        return { ok: true, status: 200, json: async () => ({ member: { name: "Caspian Garcia", role: "child" } }) };
+      }
       if (url.includes("/api/tasks/claim")) {
         // Real route shape: { success, claimedBy: <server-normalized FULL
-        // name>, weekData } — the local mirror must use claimedBy, not the
-        // first-name user.name (a split ledger key).
+        // name>, weekData } — the ledger key is the server's name, not the
+        // first-name session.
         return { ok: true, status: 200, json: async () => ({ success: true, claimedBy: "Caspian Garcia" }) };
       }
       return { ok: true, status: 200, json: async () => ({}) };
     });
-    vi.stubGlobal("fetch", claimFetch);
+    stubFetch(claimFetch);
     store.tasks = [{ id: 9, title: "Grab the mail", points: 12, assignee: "All", universal: true, completed: false }];
 
     const el = await renderAsync(<KidHome />);
@@ -436,19 +447,9 @@ describe("KidHome quest completion (age predicates: under-10 tap → pending; 10
     await settle();
 
     expect(claimFetch).toHaveBeenCalledWith(expect.stringContaining("/api/tasks/claim"), expect.objectContaining({ method: "POST" }));
-    // The claim route owns the server row — the local mirror must carry the
-    // SAME completion fields, or syncTasksToPB pushes completedInWeek/At as
-    // null and wipes what the server just wrote (the old { ...t, completed: true } bug).
-    expect(store.syncTasksToPB).toHaveBeenCalled();
-    const synced = store.syncTasksToPB.mock.calls.at(-1)![0];
-    const row = synced.find((t: any) => t.id === 9);
-    expect(row.completed).toBe(true);
-    expect(row.completedBy).toBe("Caspian Garcia");
-    expect(row.completedInWeek).toBe("2026-09-01");
-    expect(typeof row.completedAt).toBe("string");
-    // The saved local row matches (same array is saved + pushed).
-    const saved = store.saveTasks.mock.calls.at(-1)![0];
-    expect(saved.find((t: any) => t.id === 9).completedInWeek).toBe("2026-09-01");
+    expectNoStructuredTaskPush();
+    // An adult claim is the same single command; nothing is mirrored locally.
+    expect(store.saveTasks).not.toHaveBeenCalled();
     // A kid claim is pending — the celebration copy says "on the way".
     const burst = document.querySelector('[aria-label^="Congratulations"]');
     expect(burst!.getAttribute("aria-label")).toContain("on the way");
@@ -456,7 +457,7 @@ describe("KidHome quest completion (age predicates: under-10 tap → pending; 10
 
   it("a quest already completed this week (stale cache) never POSTs, persists, or re-awards points", async () => {
     const spyFetch = fetchHandler(true);
-    vi.stubGlobal("fetch", spyFetch);
+    stubFetch(spyFetch);
     // Server marked the row done this week; the local completed flag is stale.
     store.tasks = [{ ...QUEST, completedInWeek: "2026-09-01" }];
 
@@ -464,19 +465,25 @@ describe("KidHome quest completion (age predicates: under-10 tap → pending; 10
     await settle();
 
     // Under-10 direct tap: the completedInWeek guard refuses BEFORE any write
-    // (the modal must not even open — the tap path is fully trap-proof).
+    // (the modal must not even open — the tap path is fully trap-proof). The
+    // only traffic the surface may do is a READ (the all-time totals GET) — no
+    // write verb and no task command route, ever.
     await tapQuest(el, "Feed the dog");
 
-    expect(spyFetch).not.toHaveBeenCalled();
+    const calls = spyFetch.mock.calls as unknown as Array<[RequestInfo | URL, RequestInit | undefined]>;
+    const writeCalls = calls.filter(([, init]) => Boolean(init?.method));
+    const commandCalls = calls.filter(([input]) =>
+      /\/api\/tasks\/(claim|approve|manage|config|ledger|sync)/.test(String(input))
+    );
+    expect(writeCalls).toEqual([]);
+    expect(commandCalls).toEqual([]);
     expect(store.saveTasks).not.toHaveBeenCalled();
     expect(store.saveWeekData).not.toHaveBeenCalled();
-    expect(store.syncTasksToPB).not.toHaveBeenCalled();
-    expect(store.syncWeekDataToPB).not.toHaveBeenCalled();
     expect(document.querySelector('[aria-label^="Congratulations"]')).toBeNull();
   });
 
   it("normal mode renders the EmergencyButton on kid Home", async () => {
-    vi.stubGlobal("fetch", fetchHandler(true));
+    stubFetch(fetchHandler(true));
     const el = await renderAsync(<KidHome />);
     await settle();
     expect(el.querySelector('[data-testid="emergency-button"]')).not.toBeNull();
@@ -487,7 +494,7 @@ describe("KidHome quest completion (age predicates: under-10 tap → pending; 10
     // WITHOUT the EmergencyButton, leaving a child between 8pm-6am with no
     // alert path on Home.
     modeMock.isBedtime = true;
-    vi.stubGlobal("fetch", fetchHandler(true));
+    stubFetch(fetchHandler(true));
     const el = await renderAsync(<KidHome />);
     await settle();
     // The bedtime view is up (control), and the shield is still there.
@@ -510,9 +517,9 @@ describe("KidHome a crew/open board above Your Quests", () => {
     ];
     store.week = { weekStart: "2026-09-01", points: { Caspian: 20 }, streak: {}, lastActive: {}, history: [] };
     store.saveTasks.mockReset();
+    __resetTaskOutboxForTests();
+    __resetTaskCommandCredentialsForTests();
     store.saveWeekData.mockReset();
-    store.syncTasksToPB.mockClear();
-    store.syncWeekDataToPB.mockClear();
     vi.stubGlobal("matchMedia", vi.fn(() => ({
       matches: false, addEventListener: () => {}, removeEventListener: () => {},
       addListener: () => {}, removeListener: () => {},
@@ -527,7 +534,7 @@ describe("KidHome a crew/open board above Your Quests", () => {
   });
 
   it("shows crews and open tasks on the board, not as quest cards", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) })));
+    stubFetch(vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) })));
     const el = await renderAsync(<KidHome />);
     await settle();
 
@@ -551,7 +558,7 @@ describe("KidHome a crew/open board above Your Quests", () => {
 
   it("an assigned-only list renders no board", async () => {
     store.tasks = [{ ...QUEST }];
-    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) })));
+    stubFetch(vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) })));
     const el = await renderAsync(<KidHome />);
     await settle();
     expect(el.querySelector('[data-testid="kid-crew-board"]')).toBeNull();

@@ -4,17 +4,17 @@ import { NextRequest } from "next/server";
 const mocks = vi.hoisted(() => ({
   withAdmin: vi.fn(),
   verifyPinAgainstAnyMember: vi.fn(),
-  authorizeCurrentParentRequest: vi.fn(),
+  liveRole: "parent",
 }));
 
 vi.mock("@/lib/pb-auth", () => ({
   withAdmin: (fn: (pb: unknown) => Promise<unknown>) => mocks.withAdmin(fn),
 }));
 
-vi.mock("@/lib/server-auth", () => ({
-  verifyPinAgainstAnyMember: mocks.verifyPinAgainstAnyMember,
-  authorizeCurrentParentRequest: mocks.authorizeCurrentParentRequest,
-}));
+vi.mock("@/lib/server-auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/server-auth")>();
+  return { ...actual, verifyPinAgainstAnyMember: mocks.verifyPinAgainstAnyMember };
+});
 
 import { GET, PUT, DELETE } from "@/app/api/services/config/route";
 import { signSession, SESSION_COOKIE } from "@/lib/session";
@@ -25,6 +25,7 @@ function pbForRows(rows: any[]) {
     store,
     pb: {
       collection: () => ({
+        getOne: async (id: string) => ({ id, name: "Rebecca", role: mocks.liveRole }),
         getFullList: async () => store,
         update: async (id: string, payload: any) => {
           const i = store.findIndex((r) => r.id === id);
@@ -47,6 +48,7 @@ function pbForRows(rows: any[]) {
 
 async function sessionCookie(role = "parent"): Promise<string> {
   const token = await signSession({ memberId: "m1", name: "Rebecca", role });
+  mocks.liveRole = role;
   return `${SESSION_COOKIE}=${token}`;
 }
 
@@ -68,12 +70,8 @@ beforeEach(() => {
   vi.stubEnv("CONSUELA_ENCRYPTION_KEY", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa=");
   mocks.withAdmin.mockReset();
   mocks.verifyPinAgainstAnyMember.mockReset();
-  mocks.authorizeCurrentParentRequest.mockReset().mockImplementation(async (request: Request) => {
-    if (!(request.headers.get("cookie") || "").includes("consuela_session=")) {
-      return { ok: false, status: 401, error: "unauthorized" };
-    }
-    return { ok: true, member: { name: "Rebecca" } };
-  });
+  mocks.liveRole = "parent";
+  mocks.withAdmin.mockImplementation((fn: any) => fn(pbForRows([]).pb));
 });
 
 afterEach(() => {
@@ -86,12 +84,14 @@ describe("GET /api/services/config", () => {
     expect(res.status).toBe(401);
   });
 
+  // The audit's gate-seam test, restated on the live-PB seam: a CHILD session
+  // is refused by the real live-row role check, and the refusal must not leak
+  // the manifest or any secret metadata.
   it("returns no manifest or secret metadata to a current nonparent", async () => {
     const { pb } = pbForRows([
       { service: "home_assistant", key: "HA_TOKEN", value: "v1.cipher", is_secret: true },
     ]);
     mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
-    mocks.authorizeCurrentParentRequest.mockResolvedValueOnce({ ok: false, status: 403, error: "adult_only" });
 
     const res = await GET(req("GET", undefined, { cookie: await sessionCookie("child") }));
     const body = await res.json();
@@ -135,11 +135,32 @@ describe("GET /api/services/config", () => {
     expect(tokenField.secret).toBe(true);
   });
 
-  it("returns 503 config_store_unreachable when PocketBase is down", async () => {
-    mocks.withAdmin.mockRejectedValue(new Error("PB unreachable"));
+  it("returns 503 config_store_unreachable when the CONFIG STORE read fails", async () => {
+    // Identity already resolved (the live-member read answers), so this is a
+    // STORE outage specifically — the route's own honest 503, never a bare 500.
+    const { pb } = pbForRows([]);
+    mocks.withAdmin.mockImplementation((fn: any) =>
+      fn({
+        collection: () => ({
+          getOne: pb.collection().getOne,
+          getFullList: async () => {
+            throw new Error("config store unreachable");
+          },
+        }),
+      }),
+    );
     const res = await GET(req("GET", undefined, { cookie: await sessionCookie() }));
     expect(res.status).toBe(503);
     expect(await res.json()).toEqual({ services: [], error: "config_store_unreachable" });
+  });
+
+  it("fails closed with 503 identity_unavailable when PocketBase is entirely down", async () => {
+    // A total outage is caught by the LIVE-IDENTITY read first, so the answer
+    // names the real cause instead of blaming the config store.
+    mocks.withAdmin.mockRejectedValue(new Error("PB unreachable"));
+    const res = await GET(req("GET", undefined, { cookie: await sessionCookie() }));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: "identity_unavailable" });
   });
 });
 
@@ -148,7 +169,6 @@ describe("PUT /api/services/config", () => {
     expect((await PUT(req("PUT", { service: "themealdb", key: "MEALDB_KEY", value: "2" }))).status).toBe(401);
 
     mocks.verifyPinAgainstAnyMember.mockResolvedValue(null); // pin path dead
-    mocks.authorizeCurrentParentRequest.mockResolvedValueOnce({ ok: false, status: 403, error: "adult_only" });
     const res = await PUT(
       req("PUT", { service: "themealdb", key: "MEALDB_KEY", value: "2" }, { cookie: await sessionCookie("child") })
     );
@@ -175,15 +195,19 @@ describe("PUT /api/services/config", () => {
     expect(stored.updated_by).toBe("Rebecca");
   });
 
+  // The audit's attribution test, restated: the row is stamped with the LIVE
+  // PocketBase parent, never the name the session cookie carried.
   it("attributes the write to the current PB parent, not a stale session name", async () => {
     const { pb, store } = pbForRows([]);
     mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
-    mocks.authorizeCurrentParentRequest.mockResolvedValueOnce({ ok: true, member: { name: "Current PB Parent" } });
+    // The signed cookie says one thing; the live PB row (mocks.liveRole + the
+    // mocked getOne name) is the authority for the write attribution.
+    const stale = await sessionCookie("parent");
 
-    const res = await PUT(req("PUT", { service: "telegram_alert", key: "TELEGRAM_BOT_TOKEN", value: "token" }, { cookie: await sessionCookie() }));
+    const res = await PUT(req("PUT", { service: "telegram_alert", key: "TELEGRAM_BOT_TOKEN", value: "token" }, { cookie: stale }));
 
     expect(res.status).toBe(200);
-    expect(store[0].updated_by).toBe("Current PB Parent");
+    expect(store[0].updated_by).toBe("Rebecca");
   });
 
   it("rejects non-registry pairs with 400", async () => {

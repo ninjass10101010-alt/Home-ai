@@ -1,8 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-// Harness mirrors tests/unit/task-claim.test.ts: mock ONLY the PB layer and
-// the shared server-auth PIN seam the claim route uses.
+const memberPin = "member-pin-fixture";
+const parentPin = "parent-pin-fixture";
+
+// The route owns NO ledger write. The Wave 1 helper is the only writer, so the
+// harness replaces the seam and records exactly what the route asked it to do.
+const ledger = vi.hoisted(() => ({
+  calls: [] as any[],
+  result: undefined as any,
+  queue: [] as any[],
+  failure: null as Error | null,
+}));
+
 const mocks = vi.hoisted(() => ({
   withAdmin: vi.fn(),
   verifyPinFromPB: vi.fn(),
@@ -12,8 +22,21 @@ vi.mock("@/lib/pb-auth", () => ({
   withAdmin: (fn: (pb: unknown) => Promise<unknown>) => mocks.withAdmin(fn),
 }));
 
-vi.mock("@/lib/server-auth", () => ({
-  verifyPinFromPB: mocks.verifyPinFromPB,
+// The real `namesMatch` stays live: the route resolves the approving parent
+// with the SAME matcher `verifyPinFromPB` uses, and only the PIN seam is
+// replaced.
+vi.mock("@/lib/server-auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/server-auth")>();
+  return { ...actual, verifyPinFromPB: mocks.verifyPinFromPB };
+});
+
+vi.mock("@/lib/ledger-operations", () => ({
+  applyWeekLedgerOperation: async (args: any) => {
+    ledger.calls.push(args);
+    if (ledger.failure) throw ledger.failure;
+    if (ledger.queue.length > 0) return ledger.queue.shift();
+    return ledger.result;
+  },
 }));
 
 import { POST } from "@/app/api/rewards/redeem/route";
@@ -35,280 +58,704 @@ function jsonReq(body: unknown): NextRequest {
   });
 }
 
-function makePb(opts?: {
-  rewards?: any[] | null;
-  points?: Record<string, number>;
-  history?: any[];
-}) {
-  const rewardRows =
-    opts?.rewards === null
-      ? []
-      : opts?.rewards ?? [{ id: "r1", name: "Movie night", emoji: "🎬", cost: 150 }];
-  const weekRow = {
-    id: "w1",
-    weekStart: currentWeekKey(),
-    points: JSON.stringify(opts?.points ?? { "Caspian Garcia": 200 }),
-    streak: "{}",
-    lastActive: "{}",
-    history: JSON.stringify(opts?.history ?? []),
-  };
-  const writes: any[] = [];
+function rawReq(body: string): NextRequest {
+  return new NextRequest("http://localhost/api/rewards/redeem", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body,
+  });
+}
+
+const ROSTER = [
+  { id: "member-a", name: "Member A", role: "child", emoji: "🧒" },
+  { id: "parent-a", name: "Parent A", role: "parent", emoji: "👩" },
+];
+
+const EXPENSIVE_REWARD = {
+  id: "reward-row-1",
+  name: "Movie night",
+  emoji: "🎬",
+  cost: 150,
+  category: "fun",
+};
+
+const CHEAP_REWARD = {
+  id: "reward-row-2",
+  name: "Ice cream",
+  emoji: "🍦",
+  cost: 15,
+  category: "fun",
+};
+
+const REWARDS = [EXPENSIVE_REWARD, CHEAP_REWARD];
+
+function weekFixture(overrides?: { points?: Record<string, number>; history?: any[] }) {
   return {
-    writes,
-    pb: {
-      collection: (name: string) => {
-        if (name === "rewards") {
-          return { getFullList: async () => rewardRows };
-        }
-      return {
-        getFullList: async () => [weekRow],
-        update: async (_id: string, payload: any) => {
-          writes.push(payload);
-          Object.assign(weekRow, payload);
-          return weekRow;
-        },
-        create: async (payload: any) => {
-          writes.push(payload);
-          Object.assign(weekRow, payload);
-          return weekRow;
-        },
-        // Post-write verification read (lost-update detection, mirrors claim).
-        getOne: async () => weekRow,
-      };
-      },
-    },
+    weekStart: currentWeekKey(),
+    points: overrides?.points ?? { "Member A": 200 },
+    streak: {},
+    lastActive: {},
+    history: overrides?.history ?? [],
   };
 }
 
+function redeemFixture(extra?: Record<string, unknown>) {
+  return {
+    ok: true,
+    applied: true,
+    duplicate: false,
+    semanticDuplicate: false,
+    reconciled: true,
+    weekData: weekFixture(),
+    operationId: "redeem-fixture",
+    ...extra,
+  };
+}
+
+function failureFixture(code: string, weekData = weekFixture()) {
+  return {
+    ok: false,
+    code,
+    applied: false,
+    duplicate: false,
+    semanticDuplicate: false,
+    reconciled: false,
+    weekData,
+    operationId: "redeem-fixture",
+  };
+}
+
+/**
+ * A PB double whose `week_data` collection is a TRAP: any access is recorded,
+ * so a test can prove the route itself never reads or writes the canonical
+ * ledger row. The snapshot collection is real enough for the projection seam.
+ */
+function makePb(opts?: {
+  rewards?: any[];
+  members?: any[];
+  snapshotFails?: boolean;
+}) {
+  const rewardRows = opts?.rewards ?? REWARDS;
+  const memberRows = opts?.members ?? ROSTER;
+  const access: string[] = [];
+  const snapshotWrites: any[] = [];
+  let snapshotRow: any = {
+    id: "snapshot-1",
+    data: { tasks: [], deletedTaskIds: [] },
+  };
+  const pb = {
+    collection: (name: string) => {
+      if (name === "rewards") {
+        return { getFullList: async () => rewardRows };
+      }
+      if (name === "members") {
+        return { getFullList: async () => memberRows };
+      }
+      if (name === "consuela_data_snapshots") {
+        return {
+          getFullList: async () => [{ ...snapshotRow }],
+          update: async (_id: string, payload: any) => {
+            if (opts?.snapshotFails) throw new Error("snapshot write refused");
+            snapshotWrites.push(payload);
+            snapshotRow = { ...snapshotRow, ...payload };
+            return snapshotRow;
+          },
+          create: async (payload: any) => {
+            if (opts?.snapshotFails) throw new Error("snapshot write refused");
+            snapshotWrites.push(payload);
+            snapshotRow = { ...snapshotRow, ...payload };
+            return snapshotRow;
+          },
+        };
+      }
+      if (name === "week_data") {
+        return {
+          getFullList: async () => {
+            access.push("week_data.getFullList");
+            return [];
+          },
+          getOne: async () => {
+            access.push("week_data.getOne");
+            return null;
+          },
+          update: async () => {
+            access.push("week_data.update");
+            return null;
+          },
+          create: async () => {
+            access.push("week_data.create");
+            return null;
+          },
+        };
+      }
+      access.push(`${name}.getFullList`);
+      return { getFullList: async () => [] };
+    },
+  };
+  return { pb, access, snapshotWrites };
+}
+
+function fixturePin(name: string): string | null {
+  if (name === "Member A") return memberPin;
+  if (name === "Parent A") return parentPin;
+  return null;
+}
+
 beforeEach(() => {
-  mocks.withAdmin.mockReset();
-  mocks.verifyPinFromPB.mockReset();
-  mocks.verifyPinFromPB.mockResolvedValue({ id: "k", name: "Caspian Garcia", role: "child", emoji: "🧒" });
+  ledger.calls.length = 0;
+  ledger.queue.length = 0;
+  ledger.failure = null;
+  ledger.result = redeemFixture();
+  mocks.withAdmin.mockReset().mockImplementation((fn: (p: unknown) => Promise<unknown>) =>
+    fn(makePb().pb),
+  );
+  mocks.verifyPinFromPB.mockReset().mockImplementation(async (name: string, pin: string) => {
+    const row = ROSTER.find((member) => member.name === name);
+    if (!row) return null;
+    return fixturePin(name) === pin ? row : null;
+  });
 });
 
-describe("POST /api/rewards/redeem", () => {
-  it("deducts the SERVER cost and ignores the client-supplied cost", async () => {
-    const { pb, writes } = makePb();
-    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
-
-    const res = await POST(
-      jsonReq({ rewardId: "r1", memberName: "Caspian", pin: "1010", cost: 1 })
-    );
-
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.ok).toBe(true);
-    expect(body.weekData.points["Caspian Garcia"]).toBe(50);
-    expect(writes).toHaveLength(1);
-    const tx = writes[0].history.at(-1);
-    expect(tx.amount).toBe(-150);
+describe("POST /api/rewards/redeem — canonical ledger seam", () => {
+  it("requires a separate parent credential for a PB reward over 100", async () => {
+    ledger.result = redeemFixture({ operationId: "redeem-fixture-1" });
+    const res = await POST(jsonReq({
+      operationId: "redeem-fixture-1",
+      rewardId: "reward-row-1",
+      memberName: "Member A",
+      pin: memberPin,
+    }));
+    expect(res.status).toBe(401);
+    expect((await res.json()).reason).toBe("parent_approval_required");
+    expect(ledger.calls).toHaveLength(0);
   });
 
-  it("writes a transaction matching the app's redeem shape", async () => {
-    const { pb, writes } = makePb();
+  it("uses the PB reward cost and title", async () => {
+    ledger.result = redeemFixture({ operationId: "redeem-fixture-2" });
+    await POST(jsonReq({
+      operationId: "redeem-fixture-2",
+      rewardId: "reward-row-1",
+      memberName: "Member A",
+      pin: memberPin,
+      parentName: "Parent A",
+      parentPin,
+      cost: 1,
+      title: "Forged title",
+    }));
+    expect(ledger.calls[0].operation.source).toBe("reward-redeem");
+    expect(ledger.calls[0].operation.entries[0]).toMatchObject({
+      amount: -150,
+      description: "Redeemed: Movie night (-150pts)",
+    });
+  });
+
+  it("returns 202 when projection repair is pending", async () => {
+    ledger.result = redeemFixture({
+      operationId: "redeem-fixture-3",
+      reconciled: false,
+      projectionError: "projection_failed",
+    });
+    const res = await POST(jsonReq({
+      operationId: "redeem-fixture-3",
+      rewardId: "reward-row-1",
+      memberName: "Member A",
+      pin: memberPin,
+      parentName: "Parent A",
+      parentPin,
+    }));
+    expect(res.status).toBe(202);
+    expect(await res.json()).toMatchObject({
+      ok: true,
+      reconciled: false,
+      operationId: "redeem-fixture-3",
+    });
+  });
+
+  it("writes operation metadata on the canonical transaction", async () => {
+    // The plan's own body omitted the parent credential its first case
+    // requires for a >100 reward, so the approved request carries both.
+    ledger.result = redeemFixture({
+      operationId: "redeem-fixture-4",
+      weekData: weekFixture({
+        history: [{
+          id: 5150,
+          timestamp: "2026-09-24T12:00:00.000Z",
+          member: "Member A",
+          type: "redeem",
+          amount: -150,
+          description: "Redeemed: Movie night (-150pts)",
+          meta: { operationId: "redeem-fixture-4", source: "reward-redeem" },
+        }],
+      }),
+    });
+    const res = await POST(jsonReq({
+      operationId: "redeem-fixture-4",
+      rewardId: "reward-row-1",
+      memberName: "Member A",
+      pin: memberPin,
+      parentName: "Parent A",
+      parentPin,
+    }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.weekData.history.at(-1).meta.operationId).toBe("redeem-fixture-4");
+    expect(body.weekData.history.at(-1).operationId).toBeUndefined();
+    expect(ledger.calls[0].operation.entries[0]).not.toHaveProperty("operationId");
+  });
+
+  it("deducts the SERVER cost and ignores the client-supplied cost", async () => {
+    const { pb } = makePb();
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+    ledger.result = redeemFixture({ operationId: "op-forged-cost" });
 
-    await POST(jsonReq({ rewardId: "r1", memberName: "Caspian", pin: "1010" }));
+    const res = await POST(jsonReq({
+      operationId: "op-forged-cost",
+      rewardId: "reward-row-1",
+      memberName: "Member A",
+      pin: memberPin,
+      parentName: "Parent A",
+      parentPin,
+      cost: 1,
+    }));
 
-    const tx = writes[0].history.at(-1);
-    expect(typeof tx.id).toBe("number");
-    expect(typeof tx.timestamp).toBe("string");
-    expect(tx.member).toBe("Caspian Garcia");
-    expect(tx.type).toBe("redeem");
-    expect(tx.amount).toBe(-150);
-    expect(tx.description).toContain("Movie night");
-    expect(tx.description).toMatch(/Redeemed:/);
-    expect(tx.description).toBe("Redeemed: Movie night (-150pts)");
+    expect(res.status).toBe(200);
+    expect(ledger.calls[0].operation.entries[0].amount).toBe(-150);
+  });
+
+  it("writes a redeem entry in the app's transaction shape for the redeeming member", async () => {
+    await POST(jsonReq({
+      operationId: "op-cheap",
+      rewardId: "reward-row-2",
+      memberName: "Member A",
+      pin: memberPin,
+    }));
+
+    expect(ledger.calls[0].operation.entries[0]).toEqual({
+      type: "redeem",
+      member: "Member A",
+      amount: -15,
+      description: "Redeemed: Ice cream (-15pts)",
+    });
+    expect(ledger.calls[0].weekStart).toBe(currentWeekKey());
   });
 
   it("resolves a reward by name when the client id is not the PB row id", async () => {
-    const { pb, writes } = makePb();
-    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
-
-    const res = await POST(
-      jsonReq({ rewardId: "reward-1699", rewardName: "Movie night", memberName: "Caspian", pin: "1010" })
-    );
+    ledger.result = redeemFixture({ operationId: "op-by-name" });
+    const res = await POST(jsonReq({
+      operationId: "op-by-name",
+      rewardId: "reward-1699",
+      rewardName: "Ice cream",
+      memberName: "Member A",
+      pin: memberPin,
+    }));
 
     expect(res.status).toBe(200);
-    expect(writes[0].history.at(-1).amount).toBe(-150);
+    expect(ledger.calls[0].operation.entries[0].amount).toBe(-15);
   });
 
-  it("rejects insufficient points with 400 and an honest 'needs N more pts' message", async () => {
-    const { pb, writes } = makePb({ points: { "Caspian Garcia": 40 } });
+  it("answers the acknowledgement with the server-owned member, reward and week", async () => {
+    ledger.result = redeemFixture({ operationId: "op-shape" });
+    const res = await POST(jsonReq({
+      operationId: "op-shape",
+      rewardId: "reward-row-1",
+      memberName: "Member A",
+      pin: memberPin,
+      parentName: "Parent A",
+      parentPin,
+    }));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      ok: true,
+      applied: true,
+      duplicate: false,
+      reconciled: true,
+      operationId: "op-shape",
+      member: "Member A",
+      reward: { id: "reward-row-1", name: "Movie night", cost: 150, emoji: "🎬" },
+    });
+  });
+
+  it("records the redeeming member as the ledger actor", async () => {
+    await POST(jsonReq({
+      operationId: "op-actor",
+      rewardId: "reward-row-2",
+      memberName: "Member A",
+      pin: memberPin,
+    }));
+
+    expect(ledger.calls[0].operation.actorId).toBe("member-a");
+  });
+
+  it("replays a duplicate operation without applying a second entry", async () => {
+    ledger.result = redeemFixture({
+      operationId: "op-replay",
+      applied: false,
+      duplicate: true,
+    });
+    const res = await POST(jsonReq({
+      operationId: "op-replay",
+      rewardId: "reward-row-2",
+      memberName: "Member A",
+      pin: memberPin,
+    }));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, applied: false, duplicate: true });
+    expect(ledger.calls).toHaveLength(1);
+    expect(ledger.calls[0].operation.operationId).toBe("op-replay");
+    expect(ledger.calls[0].operation.source).toBe("reward-redeem");
+    expect(ledger.calls[0].operation.actorId).toBe("member-a");
+    expect(ledger.calls[0].operation.entries).toEqual([
+      { type: "redeem", member: "Member A", amount: -15, description: "Redeemed: Ice cream (-15pts)" },
+    ]);
+  });
+
+  it("never reads or writes week_data itself", async () => {
+    const { pb, access } = makePb();
     mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
 
-    const res = await POST(jsonReq({ rewardId: "r1", memberName: "Caspian", pin: "1010" }));
+    await POST(jsonReq({
+      operationId: "op-no-week-access",
+      rewardId: "reward-row-2",
+      memberName: "Member A",
+      pin: memberPin,
+    }));
+
+    expect(access).toEqual([]);
+  });
+
+  it("projects the canonical week into the snapshot after verification", async () => {
+    const { pb, snapshotWrites } = makePb();
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+    await POST(jsonReq({
+      operationId: "op-project",
+      rewardId: "reward-row-2",
+      memberName: "Member A",
+      pin: memberPin,
+    }));
+    const canonical = weekFixture({
+      history: [{
+        id: 4242,
+        timestamp: "2026-09-24T12:00:00.000Z",
+        member: "Member A",
+        type: "redeem",
+        amount: -15,
+        description: "Redeemed: Ice cream (-15pts)",
+        meta: { operationId: "op-project", source: "reward-redeem" },
+      }],
+    });
+
+    const project = ledger.calls[0].project;
+    expect(typeof project).toBe("function");
+    expect(await project({
+      pb,
+      weekData: canonical,
+      operationId: "op-project",
+      applied: true,
+      duplicate: false,
+      semanticDuplicate: false,
+    })).toBe(true);
+    expect(snapshotWrites).toHaveLength(1);
+    expect(snapshotWrites[0].data.weekData.history.at(-1).meta.operationId).toBe("op-project");
+  });
+
+  it("reports a pending repair instead of a false success when the projection cannot be written", async () => {
+    const { pb, snapshotWrites } = makePb({ snapshotFails: true });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+    await POST(jsonReq({
+      operationId: "op-projection-fail",
+      rewardId: "reward-row-2",
+      memberName: "Member A",
+      pin: memberPin,
+    }));
+
+    const project = ledger.calls[0].project;
+    const ok = await project({
+      pb,
+      weekData: weekFixture(),
+      operationId: "op-projection-fail",
+      applied: true,
+      duplicate: false,
+      semanticDuplicate: false,
+    });
+    expect(ok).toBe(false);
+    expect(snapshotWrites).toHaveLength(0);
+  });
+});
+
+describe("POST /api/rewards/redeem — validation and credentials", () => {
+  it("rejects malformed JSON with 400 invalid_body and no ledger call", async () => {
+    const res = await POST(rawReq("{not json"));
+    expect(res.status).toBe(400);
+    expect((await res.json()).reason).toBe("invalid_body");
+    expect(ledger.calls).toHaveLength(0);
+  });
+
+  it("rejects a non-object body with 400 invalid_body", async () => {
+    const res = await POST(rawReq("[]"));
+    expect(res.status).toBe(400);
+    expect((await res.json()).reason).toBe("invalid_body");
+    expect(ledger.calls).toHaveLength(0);
+  });
+
+  it("refuses a missing or blank operation ID before any point-changing work", async () => {
+    for (const operationId of [undefined, "", "   "]) {
+      const res = await POST(jsonReq({
+        ...(operationId === undefined ? {} : { operationId }),
+        rewardId: "reward-row-2",
+        memberName: "Member A",
+        pin: memberPin,
+      }));
+      expect(res.status).toBe(400);
+      expect((await res.json()).reason).toBe("invalid_body");
+    }
+    expect(ledger.calls).toHaveLength(0);
+    expect(mocks.verifyPinFromPB).not.toHaveBeenCalled();
+  });
+
+  it("rejects a body with no reward id or no member name with 400 invalid_body", async () => {
+    const missingReward = await POST(jsonReq({
+      operationId: "op-missing-reward",
+      memberName: "Member A",
+      pin: memberPin,
+    }));
+    expect(missingReward.status).toBe(400);
+    expect((await missingReward.json()).reason).toBe("invalid_body");
+
+    const missingMember = await POST(jsonReq({
+      operationId: "op-missing-member",
+      rewardId: "reward-row-2",
+      pin: memberPin,
+    }));
+    expect(missingMember.status).toBe(400);
+    expect((await missingMember.json()).reason).toBe("invalid_body");
+    expect(ledger.calls).toHaveLength(0);
+  });
+
+  it("rejects a wrong member PIN with 401 and never reaches PocketBase", async () => {
+    const res = await POST(jsonReq({
+      operationId: "op-wrong-pin",
+      rewardId: "reward-row-1",
+      memberName: "Member A",
+      pin: "wrong-pin-fixture",
+    }));
+
+    expect(res.status).toBe(401);
+    expect((await res.json()).reason).toBe("invalid_pin");
+    expect(mocks.withAdmin).not.toHaveBeenCalled();
+    expect(ledger.calls).toHaveLength(0);
+  });
+
+  it("rejects a missing member PIN with 401 before any verification call", async () => {
+    const res = await POST(jsonReq({
+      operationId: "op-no-pin",
+      rewardId: "reward-row-1",
+      memberName: "Member A",
+    }));
+
+    expect(res.status).toBe(401);
+    expect((await res.json()).reason).toBe("invalid_pin");
+    expect(mocks.verifyPinFromPB).not.toHaveBeenCalled();
+    expect(ledger.calls).toHaveLength(0);
+  });
+
+  it("refuses a high-cost reward whose approver is not a parent", async () => {
+    const res = await POST(jsonReq({
+      operationId: "op-child-approver",
+      rewardId: "reward-row-1",
+      memberName: "Member A",
+      pin: memberPin,
+      parentName: "Member A",
+      parentPin: memberPin,
+    }));
+
+    expect(res.status).toBe(403);
+    expect((await res.json()).reason).toBe("parent_only");
+    expect(ledger.calls).toHaveLength(0);
+  });
+
+  it("refuses a high-cost reward whose approver is not on the live roster", async () => {
+    const res = await POST(jsonReq({
+      operationId: "op-ghost-approver",
+      rewardId: "reward-row-1",
+      memberName: "Member A",
+      pin: memberPin,
+      parentName: "Ghost Parent",
+      parentPin,
+    }));
+
+    expect(res.status).toBe(403);
+    expect((await res.json()).reason).toBe("parent_only");
+    expect(ledger.calls).toHaveLength(0);
+  });
+
+  it("refuses a high-cost reward whose parent PIN is wrong", async () => {
+    const res = await POST(jsonReq({
+      operationId: "op-wrong-parent-pin",
+      rewardId: "reward-row-1",
+      memberName: "Member A",
+      pin: memberPin,
+      parentName: "Parent A",
+      parentPin: "wrong-pin-fixture",
+    }));
+
+    expect(res.status).toBe(401);
+    expect((await res.json()).reason).toBe("invalid_pin");
+    expect(ledger.calls).toHaveLength(0);
+  });
+
+  it("never needs a parent credential at or below the threshold", async () => {
+    const { pb } = makePb({
+      rewards: [{ id: "reward-edge", name: "Big treat", emoji: "🍕", cost: 100 }],
+    });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+    ledger.result = redeemFixture({ operationId: "op-edge" });
+
+    const res = await POST(jsonReq({
+      operationId: "op-edge",
+      rewardId: "reward-edge",
+      memberName: "Member A",
+      pin: memberPin,
+    }));
+
+    expect(res.status).toBe(200);
+    expect(ledger.calls).toHaveLength(1);
+    expect(ledger.calls[0].operation.entries[0].amount).toBe(-100);
+  });
+
+  it("answers 404 unknown_reward for a reward that is not in PocketBase", async () => {
+    const res = await POST(jsonReq({
+      operationId: "op-unknown-reward",
+      rewardId: "nope",
+      memberName: "Member A",
+      pin: memberPin,
+    }));
+
+    expect(res.status).toBe(404);
+    expect((await res.json()).reason).toBe("unknown_reward");
+    expect(ledger.calls).toHaveLength(0);
+  });
+
+  it("refuses a stored reward row whose cost is not a usable point value", async () => {
+    const { pb } = makePb({
+      rewards: [{ id: "reward-broken", name: "Broken", emoji: "🧨", cost: "many" }],
+    });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({
+      operationId: "op-broken-cost",
+      rewardId: "reward-broken",
+      memberName: "Member A",
+      pin: memberPin,
+    }));
+
+    expect(res.status).toBe(503);
+    expect((await res.json()).reason).toBe("ledger_unavailable");
+    expect(ledger.calls).toHaveLength(0);
+  });
+});
+
+describe("POST /api/rewards/redeem — ledger result mapping", () => {
+  it("maps an insufficient balance to 400 with the honest points message", async () => {
+    ledger.result = failureFixture(
+      "insufficient_balance",
+      weekFixture({ points: { "Member A": 4 } }),
+    );
+
+    const res = await POST(jsonReq({
+      operationId: "op-insufficient",
+      rewardId: "reward-row-2",
+      memberName: "Member A",
+      pin: memberPin,
+    }));
 
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.ok).toBe(false);
     expect(body.reason).toBe("insufficient");
-    expect(body.error).toMatch(/needs 110 more pts/);
-    expect(writes).toHaveLength(0);
+    expect(body.error).toMatch(/needs 11 more pts/);
   });
 
-  it("returns 404 for an unknown reward", async () => {
-    const { pb, writes } = makePb({ rewards: [] });
-    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+  it("maps a semantic duplicate to 409 duplicate", async () => {
+    ledger.result = failureFixture("operation_conflict");
 
-    const res = await POST(jsonReq({ rewardId: "nope", memberName: "Caspian", pin: "1010" }));
-
-    expect(res.status).toBe(404);
-    expect((await res.json()).reason).toBe("unknown-reward");
-    expect(writes).toHaveLength(0);
-  });
-
-  it("rejects a wrong PIN with 401", async () => {
-    mocks.verifyPinFromPB.mockResolvedValue(null);
-    const { pb } = makePb();
-    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
-
-    const res = await POST(jsonReq({ rewardId: "r1", memberName: "Caspian", pin: "9999" }));
-
-    expect(res.status).toBe(401);
-    expect(mocks.withAdmin).not.toHaveBeenCalled();
-  });
-
-  it("rejects a missing PIN with 401", async () => {
-    const { pb } = makePb();
-    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
-
-    const res = await POST(jsonReq({ rewardId: "r1", memberName: "Caspian" }));
-
-    expect(res.status).toBe(401);
-    expect(mocks.verifyPinFromPB).not.toHaveBeenCalled();
-  });
-
-  it("rejects a duplicate redeem of the same reward within 60s with 409", async () => {
-    const { pb, writes } = makePb({
-      history: [
-        {
-          id: 111,
-          timestamp: new Date().toISOString(),
-          member: "Caspian Garcia",
-          type: "redeem",
-          amount: -150,
-          description: "Redeemed: Movie night (-150pts)",
-        },
-      ],
-    });
-    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
-
-    const res = await POST(jsonReq({ rewardId: "r1", memberName: "Caspian", pin: "1010" }));
-
-    expect(res.status).toBe(409);
-    expect((await res.json()).reason).toBe("duplicate");
-    expect(writes).toHaveLength(0);
-  });
-
-  it("allows a second redeem after the 60s dedupe window", async () => {
-    const { pb, writes } = makePb({
-      history: [
-        {
-          id: 111,
-          timestamp: new Date(Date.now() - 61_000).toISOString(),
-          member: "Caspian Garcia",
-          type: "redeem",
-          amount: -150,
-          description: "Redeemed: Movie night (-150pts)",
-        },
-      ],
-    });
-    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
-
-    const res = await POST(jsonReq({ rewardId: "r1", memberName: "Caspian", pin: "1010" }));
-
-    expect(res.status).toBe(200);
-    expect(writes[0].history).toHaveLength(2);
-  });
-
-  // Lost-update race (mirrors tests/unit/task-claim.test.ts): two concurrent
-  // redeems of different rewards by the SAME member must not clobber one
-  // deduction. PocketBase has no conditional update, so the route re-reads the
-  // week row after each write and retries once when its own tx is gone.
-  function makeClobberingPb(opts: { clobberEveryWrite: boolean }) {
-    const weekStart = currentWeekKey();
-    // The concurrent writer's deduction (a different reward, same member).
-    const otherTx = {
-      id: 999_001,
-      timestamp: new Date().toISOString(),
-      member: "Caspian Garcia",
-      type: "redeem",
-      amount: -50,
-      description: "Redeemed: Sticker pack (-50pts)",
-    };
-    let stored: any = {
-      id: "w1",
-      weekStart,
-      points: JSON.stringify({ "Caspian Garcia": 200 }),
-      streak: "{}",
-      lastActive: "{}",
-      history: JSON.stringify([]),
-    };
-    let updates = 0;
-    const pb = {
-      collection: (name: string) => {
-        if (name === "rewards") {
-          return { getFullList: async () => [{ id: "r1", name: "Movie night", emoji: "🎬", cost: 150 }] };
-        }
-        return {
-          getFullList: async () => [stored],
-          getOne: async () => stored,
-          update: async (_id: string, payload: any) => {
-            updates += 1;
-            const clobber = opts.clobberEveryWrite || updates === 1;
-            // Our write lands, then the concurrent writer overwrites the row
-            // with its own deduction (our tx is no longer present).
-            stored = clobber
-              ? {
-                  ...stored,
-                  points: JSON.stringify({ "Caspian Garcia": 150 }),
-                  history: JSON.stringify([otherTx]),
-                }
-              : { ...payload, id: stored.id, weekStart };
-            return stored;
-          },
-          create: async (payload: any) => {
-            stored = { ...payload, id: "w1", weekStart };
-            return stored;
-          },
-        };
-      },
-    };
-    return { pb, updates: () => updates, stored: () => stored, otherTx };
-  }
-
-  it("retries once when a concurrent redeem clobbers the first write, ending with BOTH deductions", async () => {
-    const { pb, updates, stored } = makeClobberingPb({ clobberEveryWrite: false });
-    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
-
-    const res = await POST(jsonReq({ rewardId: "r1", memberName: "Caspian", pin: "1010" }));
-
-    expect(res.status).toBe(200);
-    expect((await res.json()).ok).toBe(true);
-    expect(updates()).toBe(2); // one clobbered attempt + one retry
-    const raw = stored();
-    const finalHistory = Array.isArray(raw.history) ? raw.history : JSON.parse(raw.history);
-    const amounts = finalHistory.map((t: any) => t.amount);
-    expect(amounts).toContain(-50); // the concurrent writer's deduction
-    expect(amounts).toContain(-150); // ours
-    const finalPoints = typeof raw.points === "string" ? JSON.parse(raw.points) : raw.points;
-    expect(finalPoints["Caspian Garcia"]).toBe(0);
-  });
-
-  it("returns 409 conflict without a false success when every write is clobbered", async () => {
-    const { pb, updates } = makeClobberingPb({ clobberEveryWrite: true });
-    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
-
-    const res = await POST(jsonReq({ rewardId: "r1", memberName: "Caspian", pin: "1010" }));
+    const res = await POST(jsonReq({
+      operationId: "op-duplicate",
+      rewardId: "reward-row-2",
+      memberName: "Member A",
+      pin: memberPin,
+    }));
 
     expect(res.status).toBe(409);
     const body = await res.json();
-    expect(body.ok).toBe(false);
-    expect(body.reason).toBe("conflict");
-    expect(typeof body.error).toBe("string");
-    expect(body.error.length).toBeGreaterThan(0);
+    expect(body.reason).toBe("duplicate");
+    expect(body.operationId).toBe("redeem-fixture");
     expect(body.weekData).toBeUndefined();
-    expect(updates()).toBe(2); // retried once, then gave up honestly
+  });
+
+  it("maps a ledger write conflict to 503 after one same-operation retry", async () => {
+    ledger.queue = [
+      failureFixture("ledger_write_conflict"),
+      failureFixture("ledger_write_conflict"),
+    ];
+
+    const res = await POST(jsonReq({
+      operationId: "op-write-conflict",
+      rewardId: "reward-row-2",
+      memberName: "Member A",
+      pin: memberPin,
+    }));
+
+    expect(res.status).toBe(503);
+    expect((await res.json()).reason).toBe("ledger_unavailable");
+    expect(ledger.calls).toHaveLength(2);
+    expect(ledger.calls.map((call) => call.operation.operationId)).toEqual([
+      "op-write-conflict",
+      "op-write-conflict",
+    ]);
+  });
+
+  it("acknowledges the redemption when the retried write lands", async () => {
+    ledger.queue = [failureFixture("ledger_write_conflict"), redeemFixture({ operationId: "op-retry" })];
+
+    const res = await POST(jsonReq({
+      operationId: "op-retry",
+      rewardId: "reward-row-2",
+      memberName: "Member A",
+      pin: memberPin,
+    }));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, operationId: "op-retry" });
+    expect(ledger.calls).toHaveLength(2);
+  });
+
+  it("maps an invalid ledger operation to 503 ledger_unavailable", async () => {
+    ledger.result = failureFixture("invalid_ledger_operation");
+
+    const res = await POST(jsonReq({
+      operationId: "op-invalid",
+      rewardId: "reward-row-2",
+      memberName: "Member A",
+      pin: memberPin,
+    }));
+
+    expect(res.status).toBe(503);
+    expect((await res.json()).reason).toBe("ledger_unavailable");
+  });
+
+  it("answers 503 when the ledger seam itself is unreachable", async () => {
+    ledger.failure = new Error("pocketbase unreachable");
+
+    const res = await POST(jsonReq({
+      operationId: "op-unreachable",
+      rewardId: "reward-row-2",
+      memberName: "Member A",
+      pin: memberPin,
+    }));
+
+    expect(res.status).toBe(503);
+    expect((await res.json()).reason).toBe("ledger_unavailable");
   });
 });

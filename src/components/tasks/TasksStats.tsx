@@ -1,5 +1,7 @@
 import StatTile from "@/components/patterns/StatTile";
 import SegmentedControl from "@/components/ui/SegmentedControl";
+import AllTimeValue from "@/components/leaderboard/AllTimeValue";
+import type { AllTimeReadState } from "@/hooks/useAllTimeTotals";
 
 /**
  * The Tasks page's stat row + view switch (UI audit 5.7). These are the two
@@ -10,7 +12,8 @@ interface TasksStatsProps {
   pendingCount: number;
   completedCount: number;
   earnedThisWeek: number;
-  allTimePoints: number;
+  allTimePoints: number | null | undefined;
+  allTimeRead: { state: AllTimeReadState; updatedAt: string | null };
   activeTab: string;
   onChange: (tab: "tasks" | "leaderboard") => void;
 }
@@ -20,6 +23,7 @@ export default function TasksStats({
   completedCount,
   earnedThisWeek,
   allTimePoints,
+  allTimeRead,
   activeTab,
   onChange,
 }: TasksStatsProps) {
@@ -30,7 +34,24 @@ export default function TasksStats({
     <div className="grid grid-cols-3 gap-3 md:col-span-2">
       <StatTile label="Pending" value={pendingCount} detail="Open tasks" icon="📋" tone="warning" compact />
       <StatTile label="Completed" value={completedCount} detail="This week" icon="🎉" tone="success" compact />
-      <StatTile label="Earned this week" value={earnedThisWeek} detail={`${allTimePoints} pts all-time`} icon="🏆" tone="accent" compact />
+      <StatTile
+        label="Earned this week"
+        value={earnedThisWeek}
+        detail={
+          // A total that could not be read is `null`, never a shortened number:
+          // AllTimeValue says so out loud instead of rendering a partial as if
+          // it were the whole all-time total.
+          <AllTimeValue
+            points={allTimePoints}
+            read={allTimeRead.state}
+            updatedAt={allTimeRead.updatedAt}
+            label="pts all-time"
+          />
+        }
+        icon="🏆"
+        tone="accent"
+        compact
+      />
     </div>
 
     <SegmentedControl

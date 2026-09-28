@@ -4,6 +4,7 @@ import Surface from "@/components/ui/Surface";
 import Avatar from "@/components/ui/Avatar";
 import IconButton from "@/components/ui/IconButton";
 import RankArrow from "./RankArrow";
+import { entryLevelLabel } from "./level";
 
 interface LeaderboardRowProps {
   entry: any;
@@ -65,7 +66,7 @@ export default function LeaderboardRow({
                 You
               </span>
             )}
-            <span className="text-xs">{entry.levelEmoji}</span>
+            <span className="text-xs">{entry.levelKnown ? entry.levelEmoji : "❔"}</span>
             {entry.badges.length > 0 && (
               <span className="flex gap-0.5">
                 {entry.badges.slice(0, 3).map((b: string, i: number) => (
@@ -87,13 +88,15 @@ export default function LeaderboardRow({
             <RankArrow currentRank={entry.rank} previousRank={previousRank} />
           </div>
           <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-white/5">
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-[var(--color-accent-selected)]/60 to-[var(--color-accent-selected)] transition-all duration-700 ease-out animate-progress-fill"
-              style={{ width: `${Math.max(2, entry.progressToNext)}%` }}
-            />
+            {entry.levelKnown && (
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-[var(--color-accent-selected)]/60 to-[var(--color-accent-selected)] transition-all duration-700 ease-out animate-progress-fill"
+                style={{ width: `${Math.max(2, entry.progressToNext)}%` }}
+              />
+            )}
           </div>
           <div className="mt-0.5 text-xs text-text-muted">
-            {entry.levelTitle} → {entry.progressToNext >= 100 ? "MAX" : `${entry.progressToNext}%`}
+            {entryLevelLabel(entry)}{entry.levelKnown ? ` → ${entry.progressToNext >= 100 ? "MAX" : `${entry.progressToNext}%`}` : ""}
           </div>
         </div>
         <div className="text-right shrink-0">
@@ -101,7 +104,7 @@ export default function LeaderboardRow({
           <div className="text-xs text-text-muted">pts</div>
         </div>
         {isAdmin && (
-          <IconButton size="sm" variant="ghost" aria-label="Adjust points" onClick={(e: React.MouseEvent) => { e.stopPropagation(); onAdjust(entry.name); }}>
+          <IconButton size="sm" variant="ghost" aria-label={`Adjust points for ${entry.name}`} onClick={(e: React.MouseEvent) => { e.stopPropagation(); onAdjust(entry.name); }}>
             ⚙️
           </IconButton>
         )}

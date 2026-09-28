@@ -82,9 +82,34 @@ describe("db gateway", () => {
   });
 
   it("patches and deletes by id", async () => {
+    const p = { params: Promise.resolve({ collection: "grocery_list_items", id: "r1" }) } as any;
+    expect((await patchOne(await withSession(sessionReq("http://x/api/db/grocery_list_items/r1", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ needed: false }) })), p)).status).toBe(200);
+    expect((await deleteOne(await withSession(sessionReq("http://x/api/db/grocery_list_items/r1", { method: "DELETE" })), p)).status).toBe(200);
+  });
+
+  it("a command-owned collection is never writable through the gateway, not even by a parent", async () => {
     const p = { params: Promise.resolve({ collection: "tasks", id: "r1" }) } as any;
-    expect((await patchOne(await withSession(sessionReq("http://x/api/db/tasks/r1", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ done: true }) })), p)).status).toBe(200);
-    expect((await deleteOne(await withSession(sessionReq("http://x/api/db/tasks/r1", { method: "DELETE" })), p)).status).toBe(200);
+    const create = await createPOST(
+      await withSession(sessionReq("http://x/api/db/tasks", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "Dishes" }) })),
+      { params: Promise.resolve({ collection: "tasks" }) } as any
+    );
+    expect(create.status).toBe(403);
+    expect(await create.json()).toEqual({ error: "command_only" });
+    const patch = await patchOne(await withSession(sessionReq("http://x/api/db/tasks/r1", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ completed: true }) })), p);
+    expect(patch.status).toBe(403);
+    expect(await patch.json()).toEqual({ error: "command_only" });
+    const remove = await deleteOne(await withSession(sessionReq("http://x/api/db/tasks/r1", { method: "DELETE" })), p);
+    expect(remove.status).toBe(403);
+    expect(await remove.json()).toEqual({ error: "command_only" });
+    expect(col.create).not.toHaveBeenCalled();
+    expect(col.update).not.toHaveBeenCalled();
+    expect(col.delete).not.toHaveBeenCalled();
+  });
+
+  it("a command-owned collection stays readable", async () => {
+    const res = await listGET(await withSession(sessionReq("http://x/api/db/week_data")), { params: Promise.resolve({ collection: "week_data" }) } as any);
+    expect(res.status).toBe(200);
+    expect(col.getFullList).toHaveBeenCalled();
   });
 
   // MF-4 — the PB filter grammar allows @collection joins, which turn any

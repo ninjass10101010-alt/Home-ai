@@ -16,6 +16,7 @@ import { verifyPinRemote, unreachableCopy } from "@/modes/kid/kid-store";
 
 export interface PointAdjustmentProposal {
   tool: "adjust_points";
+  operationId: string;
   args: { member: string; delta: number; reason: string };
 }
 
@@ -24,6 +25,8 @@ export function isPointAdjustmentProposal(value: unknown): value is PointAdjustm
   return (
     !!p &&
     p.tool === "adjust_points" &&
+    typeof p.operationId === "string" &&
+    p.operationId.trim() !== "" &&
     !!p.args &&
     typeof p.args.member === "string" &&
     p.args.member.trim() !== "" &&
@@ -40,6 +43,8 @@ export default function AdjustPointsChip({
   actorName: string | null;
 }) {
   const { member, delta, reason } = proposal.args;
+  const operationId =
+    typeof proposal.operationId === "string" ? proposal.operationId.trim() : "";
   const [open, setOpen] = useState(false);
   const [pinValue, setPinValue] = useState("");
   const [pinError, setPinError] = useState<string | null>(null);
@@ -73,6 +78,10 @@ export default function AdjustPointsChip({
     const pin = pinValue;
     setPinValue("");
     if (pin.length < 4) return;
+    if (!operationId) {
+      setPinError("This adjustment is out of date — ask Consuela for a fresh proposal.");
+      return;
+    }
     if (!actorName) {
       setPinError("Sign in with a parent PIN to confirm this adjustment.");
       return;
@@ -89,7 +98,7 @@ export default function AdjustPointsChip({
       const res = await fetch("/api/consuela/planner/apply", {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-consuela-pin": pin },
-        body: JSON.stringify({ tool: "adjust_points", args: { member, delta, reason } }),
+        body: JSON.stringify({ tool: "adjust_points", operationId, args: { member, delta, reason } }),
       });
       const data = await res.json().catch(() => ({}));
       if (res.status === 401) {
@@ -97,9 +106,7 @@ export default function AdjustPointsChip({
         setPinError("Wrong PIN. Try again.");
         return;
       }
-      // 409 = the SAME adjustment already landed moments ago (double-tap or a
-      // re-confirmed stale chip). Honest "already applied": points moved once.
-      if (res.status === 409) {
+      if (res.status === 409 || data?.duplicate === true) {
         closePin();
         setDone(true);
         showToast("Already applied ✓ — points moved once.");
@@ -117,7 +124,7 @@ export default function AdjustPointsChip({
       setBusy(false);
       setPinError(unreachableCopy());
     }
-  }, [busy, pinValue, actorName, member, delta, reason, closePin, showToast]);
+  }, [busy, pinValue, actorName, member, delta, reason, operationId, closePin, showToast]);
 
   if (done) {
     return (

@@ -45,6 +45,7 @@ describe("tasks sections (audit 5.7)", () => {
         completedCount: 7,
         earnedThisWeek: 42,
         allTimePoints: 310,
+        allTimeRead: { state: "authoritative", updatedAt: "2026-09-28T10:00:00.000Z" },
         activeTab: "tasks",
         onChange,
       }),

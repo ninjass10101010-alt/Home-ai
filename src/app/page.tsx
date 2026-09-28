@@ -45,7 +45,7 @@ import HomeSecurityWidget from "@/components/ha/HomeSecurityWidget";
 import HomeClimateWidget from "@/components/ha/HomeClimateWidget";
 import HomeLightsWidget from "@/components/ha/HomeLightsWidget";
 import LedgerWidget from "@/components/finance/LedgerWidget";
-import { useMorningBriefing, briefingSectionsEmpty } from "@/components/briefing/hooks/useMorningBriefing";
+import { useMorningBriefing, briefingShowsCard } from "@/components/briefing/hooks/useMorningBriefing";
 import ProfileSheet from "@/components/profile/ProfileSheet";
 import { useHomeEvents } from "@/hooks/useHomeEvents";
 import { googleEventCoversDay, mapGoogleEvent } from "@/lib/calendar/google-mapping";
@@ -108,9 +108,15 @@ function MorningBriefingSlot({ span }: { span: string }) {
   // A failed read keeps the slot: collapsing it to null is precisely the silent
   // absence audit P0-4 is about — the card would vanish instead of admitting it
   // couldn't load. An empty day (read succeeded, nothing to show) still collapses.
+  //
+  // Composition with the points remediation: `briefingShowsCard` is consulted
+  // ONLY inside `if (!failure)`, so it can never suppress the P0-4 failure
+  // card. It widens the non-failure case from "has sections" to "has sections
+  // OR has something to admit" — an unavailable or backup chore list renders an
+  // honest note instead of a silent "no chores".
   if (loading) return null;
   if (!failure) {
-    if (!briefing || briefingSectionsEmpty(briefing)) return null;
+    if (!briefing || !briefingShowsCard(briefing)) return null;
   }
   return (
     <div className={span}>

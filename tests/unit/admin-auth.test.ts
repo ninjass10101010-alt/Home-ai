@@ -1,24 +1,39 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+// Credential order is exact: server bearer -> live parent session -> a present
+// session's failure -> parent x-admin-pin. The bearer and PIN paths must never
+// revalidate a session against PocketBase, and a present-but-failed session
+// must not fall through to the PIN branch.
 const mocks = vi.hoisted(() => ({
   verifyPinAgainstAnyMember: vi.fn(),
-  authorizeCurrentParentRequest: vi.fn(),
+  requireLiveSession: vi.fn(),
 }));
 
-vi.mock("../../src/lib/server-auth", () => ({
-  verifyPinAgainstAnyMember: mocks.verifyPinAgainstAnyMember,
-  authorizeCurrentParentRequest: mocks.authorizeCurrentParentRequest,
-}));
+vi.mock("@/lib/server-auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/server-auth")>();
+  return {
+    ...actual,
+    verifyPinAgainstAnyMember: mocks.verifyPinAgainstAnyMember,
+    requireLiveSession: mocks.requireLiveSession,
+  };
+});
 
-import { authorizeAdminRequest } from "../../src/lib/admin-auth";
+import { authorizeAdminRequest } from "@/lib/admin-auth";
+
+const PARENT = { ok: true, identity: { memberId: "m1", name: "R", role: "parent" } };
 
 function req(headers: Record<string, string> = {}): Request {
   return new Request("http://localhost/api/admin/x", { headers });
 }
 
+async function sessionCookie(role: string): Promise<string> {
+  const { signSession, SESSION_COOKIE } = await import("../../src/lib/session");
+  const token = await signSession({ memberId: `m-${role}`, name: `N-${role}`, role });
+  return `${SESSION_COOKIE}=${token}`;
+}
+
 beforeEach(() => {
-  mocks.verifyPinAgainstAnyMember.mockReset();
-  mocks.authorizeCurrentParentRequest.mockReset().mockResolvedValue({ ok: true });
+  for (const mock of Object.values(mocks)) mock.mockReset();
 });
 
 afterEach(() => {
@@ -34,6 +49,7 @@ describe("authorizeAdminRequest", () => {
 
     expect(result.ok).toBe(true);
     expect(mocks.verifyPinAgainstAnyMember).toHaveBeenCalledWith("1234");
+    expect(mocks.requireLiveSession).not.toHaveBeenCalled();
   });
 
   it("rejects a child member's PIN even when correct", async () => {
@@ -54,36 +70,85 @@ describe("authorizeAdminRequest", () => {
 
     expect(result.ok).toBe(true);
     expect(mocks.verifyPinAgainstAnyMember).not.toHaveBeenCalled();
+    expect(mocks.requireLiveSession).not.toHaveBeenCalled();
   });
 
   it("accepts a valid adult session cookie", async () => {
-    const { signSession, SESSION_COOKIE } = await import("../../src/lib/session");
+    const { SESSION_COOKIE } = await import("../../src/lib/session");
     vi.stubEnv("SESSION_SECRET", "test-secret-0123456789");
-    const token = await signSession({ memberId: "m1", name: "R", role: "parent" });
-    const result = await authorizeAdminRequest(req({ cookie: `${SESSION_COOKIE}=${token}` }));
+    const cookie = await sessionCookie("parent");
+    mocks.requireLiveSession.mockResolvedValue(PARENT);
+
+    const request = req({ cookie });
+    const result = await authorizeAdminRequest(request);
+
     expect(result.ok).toBe(true);
+    // `withMember` is requested so a write can be attributed to the live parent
+    // (the services config routes stamp `updated_by`).
+    expect(mocks.requireLiveSession).toHaveBeenCalledWith(request, {
+      requireRole: "parent",
+      withMember: true,
+    });
+    expect(SESSION_COOKIE).toBe("consuela_session");
   });
 
   it("rechecks the current PB parent identity for a session cookie", async () => {
-    const { signSession, SESSION_COOKIE } = await import("../../src/lib/session");
     vi.stubEnv("SESSION_SECRET", "test-secret-0123456789");
-    const token = await signSession({ memberId: "m1", name: "R", role: "parent" });
-    mocks.authorizeCurrentParentRequest.mockResolvedValueOnce({ ok: false, status: 403, error: "adult_only" });
+    const request = req({ cookie: await sessionCookie("parent") });
+    mocks.requireLiveSession.mockResolvedValueOnce({ ok: false, status: 403, error: "adult_only" });
 
-    const result = await authorizeAdminRequest(req({ cookie: `${SESSION_COOKIE}=${token}` }));
+    const result = await authorizeAdminRequest(request);
 
     expect(result).toMatchObject({ ok: false, status: 403, error: "adult_only" });
-    expect(mocks.authorizeCurrentParentRequest).toHaveBeenCalledTimes(1);
+    // The cookie is only a claim: the gate re-reads the live member exactly once.
+    expect(mocks.requireLiveSession).toHaveBeenCalledTimes(1);
+    expect(mocks.requireLiveSession).toHaveBeenCalledWith(request, { requireRole: "parent", withMember: true });
   });
 
   it("rejects a child session cookie with 403", async () => {
-    const { signSession, SESSION_COOKIE } = await import("../../src/lib/session");
     vi.stubEnv("SESSION_SECRET", "test-secret-0123456789");
-    mocks.authorizeCurrentParentRequest.mockResolvedValueOnce({ ok: false, status: 403, error: "adult_only" });
-    const token = await signSession({ memberId: "m2", name: "Kid", role: "child" });
-    const result = await authorizeAdminRequest(req({ cookie: `${SESSION_COOKIE}=${token}` }));
+    mocks.requireLiveSession.mockResolvedValue({
+      ok: false,
+      status: 403,
+      error: "adult_only",
+    });
+
+    const result = await authorizeAdminRequest(req({ cookie: await sessionCookie("child") }));
+
     expect(result.ok).toBe(false);
     expect(result.status).toBe(403);
+    expect(result.error).toBe("adult_only");
+  });
+
+  it("does not fall through to the PIN branch when a present session fails", async () => {
+    vi.stubEnv("ADMIN_SECRET", "");
+    vi.stubEnv("SESSION_SECRET", "test-secret-0123456789");
+    mocks.requireLiveSession.mockResolvedValue({
+      ok: false,
+      status: 403,
+      error: "session_role_changed",
+    });
+    mocks.verifyPinAgainstAnyMember.mockResolvedValue({ id: "m1", name: "Rebecca", role: "parent" });
+
+    const result = await authorizeAdminRequest(
+      req({ cookie: await sessionCookie("parent"), "x-admin-pin": "1234" }),
+    );
+
+    expect(result).toEqual({ ok: false, status: 403, error: "session_role_changed" });
+    expect(mocks.verifyPinAgainstAnyMember).not.toHaveBeenCalled();
+  });
+
+  it("propagates an unavailable live identity as 503", async () => {
+    vi.stubEnv("SESSION_SECRET", "test-secret-0123456789");
+    mocks.requireLiveSession.mockResolvedValue({
+      ok: false,
+      status: 503,
+      error: "identity_unavailable",
+    });
+
+    const result = await authorizeAdminRequest(req({ cookie: await sessionCookie("parent") }));
+
+    expect(result).toEqual({ ok: false, status: 503, error: "identity_unavailable" });
   });
 
   it("fails closed when neither credential is present or valid", async () => {

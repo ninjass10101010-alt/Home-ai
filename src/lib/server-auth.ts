@@ -5,6 +5,11 @@ import { memberPinMatches } from "./member-pins";
 import { mergeMemberFallbacks } from "./member-fallback";
 import { resolveDefaultMemberPin } from "./pb-seed";
 import { SESSION_COOKIE, verifySession, type SessionPayload } from "./session";
+import {
+  isSessionRole,
+  type SessionIdentity,
+  type SessionRole,
+} from "./session-policy";
 
 export interface ServerMember {
   id: string;
@@ -322,4 +327,76 @@ export async function createMemberRecord(
       pin,
     });
   }));
+}
+
+export type LiveSessionResult =
+  // `member` is OPT-IN (`withMember`): this helper deliberately returns a
+  // MINIMAL identity so a private contact field on the PB row can never leak
+  // into a caller. A caller that must attribute a write asks for the member
+  // explicitly and still gets it sanitized (no PIN).
+  | { ok: true; identity: SessionIdentity; member?: ServerMember }
+  | { ok: false; status: 401; error: "unauthorized" }
+  | {
+      ok: false;
+      status: 403;
+      error: "adult_only" | "session_role_changed";
+    }
+  | { ok: false; status: 503; error: "identity_unavailable" };
+
+export function readSessionCookie(request: Request): string | undefined {
+  return request.headers
+    .get("cookie")
+    ?.match(new RegExp(`${SESSION_COOKIE}=([^;]+)`))?.[1];
+}
+
+export async function requireLiveSession(
+  request: Request,
+  options?: { requireRole?: SessionRole; withMember?: boolean },
+): Promise<LiveSessionResult> {
+  const token = readSessionCookie(request);
+  const signed = await verifySession(token);
+  if (!signed) {
+    return { ok: false, status: 401, error: "unauthorized" };
+  }
+
+  let member: Record<string, unknown>;
+  try {
+    member = await withAdmin((pb) =>
+      pb.collection("members").getOne(signed.memberId, { requestKey: null }),
+    );
+  } catch (error) {
+    if ((error as { status?: number })?.status === 404) {
+      return { ok: false, status: 401, error: "unauthorized" };
+    }
+    return {
+      ok: false,
+      status: 503,
+      error: "identity_unavailable",
+    };
+  }
+
+  if (!isSessionRole(member.role) || member.role !== signed.role) {
+    return {
+      ok: false,
+      status: 403,
+      error: "session_role_changed",
+    };
+  }
+
+  if (options?.requireRole && member.role !== options.requireRole) {
+    return { ok: false, status: 403, error: "adult_only" };
+  }
+
+  return {
+    ok: true,
+    identity: {
+      memberId: String(member.id),
+      name: String(member.name),
+      role: member.role,
+    },
+    // The live row is already in hand — hand the SANITIZED member to a caller
+    // that asked for it, so a write can be attributed to the CURRENT parent
+    // without a second read and without the `admin-secret` bearer fallback.
+    ...(options?.withMember ? { member: sanitizeMember(member) } : {}),
+  };
 }

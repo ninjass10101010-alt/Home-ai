@@ -1,14 +1,13 @@
 import { db } from "@/db";
-import { localTodayISO } from "@/lib/local-date";
-import { persistedTaskEmoji, persistedCrewEmoji } from "@/lib/task-emoji";
-import type { Task, WeekData, Transaction, WeekArchive, FamilyGoal, HallOfFameEntry, Reward, Penalty, WeeklyPrize, CrewMember } from "@/types/tasks";
+import { localTodayISO, localWeekStartISO } from "@/lib/local-date";
+import { isRecord } from "@/lib/task-operation-contract";
+import type { Task, WeekData, Transaction, WeekArchive, FamilyGoal, HallOfFameEntry, WeeklyPrize, CrewMember } from "@/types/tasks";
 
 export const TASKS_STORAGE_KEY = "consuela-tasks";
 export const WEEK_DATA_KEY = "consuela-week-data";
 export const ARCHIVE_KEY = "consuela-week-archive";
 export const REWARDS_KEY = "consuela-rewards";
 export const PENALTIES_KEY = "consuela-penalties";
-export const REGEN_TRACKER_KEY = "consuela-regen-week";
 // Durable removal signal for the tasks snapshot: the client merge is add-only,
 // so a chat-initiated delete needs a tombstone every device honours (otherwise
 // the next push resurrects the row).
@@ -201,6 +200,9 @@ export function sendBackPendingCompletion(tasks: Task[], taskId: number): Task[]
                     emoji: m.emoji,
                     joinedAt: m.joinedAt,
                   })),
+                  ...(Array.isArray(t.crew.removed) && t.crew.removed.length > 0
+                    ? { removed: [...t.crew.removed] }
+                    : {}),
                 }
               : t.crew,
         }
@@ -210,7 +212,7 @@ export function sendBackPendingCompletion(tasks: Task[], taskId: number): Task[]
 
 export function emptyWeekData(startISO?: string): WeekData {
   return {
-    weekStart: startISO || todayMondayISO(),
+    weekStart: startISO || localWeekStartISO(),
     points: {},
     streak: {},
     lastActive: {},
@@ -219,29 +221,33 @@ export function emptyWeekData(startISO?: string): WeekData {
 }
 
 /**
- * Adopt a server-returned weekData (POST /api/tasks/approve 200 body) WITHOUT
- * ever dropping local-only transactions (2026-09-23 review, Critical #3).
+ * Adopt a server-authoritative weekData (an outbox acknowledgment body, or a
+ * pulled snapshot leg) as the truth for the current week.
  *
- * An offline approval's earn tx lives ONLY in the local ledger — the server
- * never saw it. An unconditional `setWeekData(server)` used to erase it on
- * the next online approve, and the re-armed snapshot push then propagated the
- * truncated ledger to every device: permanent point loss. Adoption gates
- * mirror mergeTasksSnapshot's own week-adoption rules:
- *   - server week newer than local (or local empty) → adopt verbatim;
- *   - server week OLDER than local (stale server) → keep local;
- *   - same week → adopt only a server ledger at least as rich as the local
- *     one (server history length >= local). A shorter server ledger means
- *     the local one carries the offline tx the server lacks — keep it; the
- *     next snapshot push uploads it and the server unions by tx id.
+ * There is deliberately NO history-length heuristic here any more. Once every
+ * ledger write is a durable outbox command, a locally recorded earn always has
+ * a queued command behind it, so a shorter server ledger is never "the server
+ * lost my offline transaction" — it is the server's authoritative state and
+ * must win. The only guard left is the week rollover: a strictly OLDER server
+ * week is stale (no device has synced since Monday) and must not resurrect last
+ * week's points into the fresh week.
  */
-export function adoptServerWeekData(prev: WeekData, server: WeekData): WeekData {
+export function adoptAuthoritativeWeekData(prev: WeekData, server: WeekData): WeekData {
   const prevStart = String(prev?.weekStart ?? "");
   const serverStart = String(server?.weekStart ?? "");
   if (!serverStart) return prev;
-  if (!prevStart || serverStart > prevStart) return server;
-  if (serverStart < prevStart) return prev;
-  if ((server.history?.length || 0) >= (prev.history?.length || 0)) return server;
-  return prev;
+  if (prevStart && serverStart < prevStart) return prev;
+  // REPLACE, not merge: a leg the server did not send is the server's answer
+  // ("empty"), and keeping the local copy of it would resurrect points the
+  // server has already dropped. Each leg is therefore taken from the server
+  // when it carries one, and otherwise reset to its canonical empty shape.
+  return {
+    weekStart: server.weekStart,
+    points: isRecord(server.points) ? server.points : {},
+    streak: isRecord(server.streak) ? server.streak : {},
+    lastActive: isRecord(server.lastActive) ? server.lastActive : {},
+    history: Array.isArray(server.history) ? server.history : [],
+  };
 }
 
 let _txId = Date.now();
@@ -272,30 +278,11 @@ function saveJSON(key: string, data: unknown): boolean {
 
 export function loadWeekData(): WeekData {
   const stored = loadJSON<WeekData | null>(WEEK_DATA_KEY, null);
-  if (!stored || !stored.weekStart) return emptyWeekData();
-  const currentMonday = todayMondayISO();
-  if (stored.weekStart !== currentMonday) {
-    archiveAndResetWeek(stored, currentMonday);
-    return emptyWeekData(currentMonday);
-  }
-  return stored;
+  return stored?.weekStart ? stored : emptyWeekData();
 }
 
 export function saveWeekData(data: WeekData): void {
   saveJSON(WEEK_DATA_KEY, data);
-}
-
-export function archiveAndResetWeek(oldWeek: WeekData, newMonday: string): void {
-  const archive = loadJSON<WeekArchive>(ARCHIVE_KEY, {});
-  archive[oldWeek.weekStart] = oldWeek;
-  const keys = Object.keys(archive).sort();
-  if (keys.length > 12) {
-    for (let i = 0; i < keys.length - 12; i++) {
-      delete archive[keys[i]];
-    }
-  }
-  saveJSON(ARCHIVE_KEY, archive);
-  saveJSON(WEEK_DATA_KEY, emptyWeekData(newMonday));
 }
 
 export function addTransaction(
@@ -366,10 +353,6 @@ export function regenerateRecurringTasks(tasks: Task[]): Task[] {
   // when regen ran in the evening (8pm–midnight Detroit).
   const now = localTodayISO();
   const monday = todayMondayISO();
-
-  const regenKey = loadJSON<string | null>(REGEN_TRACKER_KEY, null);
-  if (regenKey === monday) return tasks;
-  saveJSON(REGEN_TRACKER_KEY, monday);
 
   // Clone sources: recurring tasks completed in a PRIOR week (or with no
   // completedInWeek recorded). Tasks completed THIS week are left untouched —
@@ -451,8 +434,7 @@ export function getThisWeeksCompletedTasks(tasks: Task[]): Task[] {
 }
 
 export function loadTasks(): Task[] {
-  const raw = loadJSON<Task[]>(TASKS_STORAGE_KEY, []);
-  return regenerateRecurringTasks(raw);
+  return loadJSON<Task[]>(TASKS_STORAGE_KEY, []);
 }
 
 export function saveTasks(tasks: Task[]): void {
@@ -763,21 +745,27 @@ export function mergeTasksSnapshot(
 
   if (snapshot.weekData?.weekStart) {
     const snapWk = snapshot.weekData;
-    if (currentWeekData.weekStart !== snapWk.weekStart) {
-      // A different week is adopted ONLY when the snapshot is at least as new
-      // as the local one (ISO dates compare lexically). A snapshot week OLDER
-      // than the local week is stale — no device has synced since the Monday
-      // rollover — and adopting it resurrects last week's points into the
-      // fresh week (which the week-reset interval then archives and wipes).
-      if (String(snapWk.weekStart) >= String(currentWeekData.weekStart)) {
-        weekData = { ...currentWeekData, ...snapWk };
+    // A snapshot week OLDER than the local one is stale — no device has synced
+    // since the Monday rollover — and adopting it would resurrect last week's
+    // points into the fresh week (which the week-reset interval then archives
+    // and wipes). ISO dates compare lexically, so that is a string compare.
+    const adoptable = currentWeekData.weekStart !== snapWk.weekStart
+      ? String(snapWk.weekStart) >= String(currentWeekData.weekStart)
+      : true;
+    // Otherwise the server leg IS the ledger and it wins outright, with NO
+    // history-length comparison: every write is a durable command, so a locally
+    // held transaction always has a queued command behind it, and a shorter
+    // server ledger is the server's answer — never evidence of a lost local row.
+    //
+    // A no-op pull must report `weekChanged: false` and hand back the SAME
+    // reference it was given, so a 60s refresh that changed nothing does not
+    // churn the store or look like an adoption.
+    if (adoptable) {
+      const next = { ...currentWeekData, ...snapWk };
+      if (JSON.stringify(next) !== JSON.stringify(currentWeekData)) {
+        weekData = next;
         weekChanged = true;
       }
-    } else if ((snapWk.history?.length || 0) > (currentWeekData.history?.length || 0)) {
-      // Same week, but another device recorded more transactions — adopt the
-      // richer weekData so cross-device points aren't lost.
-      weekData = { ...currentWeekData, ...snapWk };
-      weekChanged = true;
     }
   }
 
@@ -798,27 +786,51 @@ export function mergeTasksSnapshot(
 }
 
 /**
- * Store-level seam for the 60s refresh loop (db.refreshCaches): the caller
- * reads /api/tasks/sync and hands the snapshot here, which merges it into the
- * same localStorage stores loadTasks()/loadWeekData() read — so KidHome's
- * dataVersion listener and Home's widgets actually see another device's
- * tasks when they re-read on `consuela-data-refreshed`. Returns whether
- * anything changed.
+ * The ONE config-leg adoption seam for the rewards, penalties and weekly-prizes
+ * catalogs. It accepts a config snapshot leg — a whole task snapshot, or just
+ * the one leg a caller read — and merges each leg it finds by LAST-WRITE-WINS
+ * on that leg's own stamp — never "a longer list wins", which is delete-blind:
+ * a parent's delete is a SHORTER, NEWER list, so a length heuristic resurrects
+ * the row it just removed.
+ *
+ * Two rules make that safe, and both are load-bearing:
+ *  - only a STRICTLY-NEWER stamp wins, and a leg with no stamp never wins, so a
+ *    legacy unstamped snapshot can never resurrect a deleted row;
+ *  - the winning stamp is carried through VERBATIM (never re-stamped to "now"),
+ *    so this device stops looking "edited" and a no-op refresh cannot block the
+ *    next real server edit.
+ *
+ * The rewards leg needs this in particular because without it the reward catalog
+ * was PULL-only: a device that never wrote a config command could never learn
+ * the server's list. The weekly-prizes leg uses the identical contract.
+ *
+ * Callers: applyTasksSnapshotToStores — which the 60s refresh (db.refreshCaches)
+ * and the outbox's snapshot proof (adoptTaskOutboxSnapshot) both route through —
+ * the Tasks page's own restoreFromSnapshot pull, and WeeklyPrizesCard, which
+ * hands it only the weekly-prizes leg of a config read. Returns whether anything
+ * was adopted.
  */
-export function applyTasksSnapshotToStores(snapshot: any): boolean {
+export function applyTaskConfigSnapshotToStores(snapshot: any): boolean {
   if (!snapshot) return false;
-  const { tasks, weekData, tasksChanged, weekChanged, deletedTaskIds } = mergeTasksSnapshot(
-    loadTasks(),
-    loadWeekData(),
-    snapshot
-  );
-  if (tasksChanged) saveTasks(tasks);
-  if (weekChanged) saveWeekData(weekData);
-  if (deletedTaskIds?.length) saveDeletedTaskIds(deletedTaskIds);
-  let changed = tasksChanged || weekChanged;
-  // Weekly-prizes leg (same last-write-wins contract the tasks page restore
-  // already uses): only a strictly-newer stamp wins, and the snapshot's stamp
-  // is carried through verbatim so this device stops looking "edited".
+  let changed = false;
+  if (
+    Array.isArray(snapshot.rewards) &&
+    typeof snapshot.rewardsUpdatedAt === "string" &&
+    snapshot.rewardsUpdatedAt > readRewardsStamp()
+  ) {
+    writeRewardsStamp(snapshot.rewardsUpdatedAt);
+    saveRewards(snapshot.rewards);
+    changed = true;
+  }
+  if (
+    Array.isArray(snapshot.penalties) &&
+    typeof snapshot.penaltiesUpdatedAt === "string" &&
+    snapshot.penaltiesUpdatedAt > readPenaltiesStamp()
+  ) {
+    writePenaltiesStamp(snapshot.penaltiesUpdatedAt);
+    savePenalties(snapshot.penalties);
+    changed = true;
+  }
   if (
     Array.isArray(snapshot.weeklyPrizes) &&
     typeof snapshot.weeklyPrizesStamp === "string" &&
@@ -831,6 +843,28 @@ export function applyTasksSnapshotToStores(snapshot: any): boolean {
   return changed;
 }
 
+/**
+ * Store-level seam for the 60s refresh loop (db.refreshCaches): the caller
+ * reads /api/tasks/sync and hands the snapshot here, which merges it into the
+ * same localStorage stores loadTasks()/loadWeekData() read — so KidHome's
+ * dataVersion listener and Home's widgets actually see another device's
+ * tasks when they re-read on `consuela-data-refreshed`. The three config legs
+ * ride along through applyTaskConfigSnapshotToStores. Returns whether
+ * anything changed.
+ */
+export function applyTasksSnapshotToStores(snapshot: any): boolean {
+  if (!snapshot) return false;
+  const { tasks, weekData, tasksChanged, weekChanged, deletedTaskIds } = mergeTasksSnapshot(
+    loadTasks(),
+    loadWeekData(),
+    snapshot
+  );
+  if (tasksChanged) saveTasks(tasks);
+  if (weekChanged) saveWeekData(weekData);
+  if (deletedTaskIds?.length) saveDeletedTaskIds(deletedTaskIds);
+  return tasksChanged || weekChanged || applyTaskConfigSnapshotToStores(snapshot);
+}
+
 export function loadRewards<T>(fallback: T): T {
   return loadJSON(REWARDS_KEY, fallback);
 }
@@ -839,12 +873,67 @@ export function saveRewards<T>(rewards: T): void {
   saveJSON(REWARDS_KEY, rewards);
 }
 
+// The rewards last-write-wins stamp lives under the key kid-store already
+// uses, so the two modules always agree on how fresh this device's catalog is.
+export const REWARDS_STAMP_KEY = "consuela-rewards-updatedAt";
+
+/**
+ * Reads a last-write-wins stamp. These stamps are compared with `>` against
+ * another ISO string, so the STORED FORM MATTERS: a JSON-quoted value starts
+ * with `"` (0x22) and therefore sorts BEFORE every bare ISO, which makes a
+ * quoted stamp look permanently stale and lets an older snapshot win. This key
+ * is written raw (as kid-store wrote it), and the reader still tolerates a
+ * quoted value left behind by an earlier JSON writer instead of silently
+ * reporting "no stamp".
+ */
+function readStampText(key: string): string {
+  if (typeof window === "undefined") return "";
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return "";
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      return typeof parsed === "string" ? parsed : raw;
+    } catch {
+      return raw;
+    }
+  } catch {
+    return "";
+  }
+}
+
+/** Writes a last-write-wins stamp as the bare ISO string readStampText compares. */
+function writeStampText(key: string, stamp: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(key, stamp);
+  } catch {}
+}
+
+export function readRewardsStamp(): string {
+  return readStampText(REWARDS_STAMP_KEY);
+}
+
+export function writeRewardsStamp(stamp: string): void {
+  writeStampText(REWARDS_STAMP_KEY, stamp);
+}
+
 export function loadPenalties<T>(fallback: T): T {
   return loadJSON(PENALTIES_KEY, fallback);
 }
 
 export function savePenalties<T>(penalties: T): void {
   saveJSON(PENALTIES_KEY, penalties);
+}
+
+export const PENALTIES_STAMP_KEY = "consuela-penalties-updatedAt";
+
+export function readPenaltiesStamp(): string {
+  return loadJSON<string>(PENALTIES_STAMP_KEY, "");
+}
+
+export function writePenaltiesStamp(stamp: string): void {
+  saveJSON(PENALTIES_STAMP_KEY, stamp);
 }
 
 // ─── Weekly prizes — the top-3 finishers' rewards for the week race ────────
@@ -1026,6 +1115,36 @@ export function getPreviousWeekRanks(): Record<string, number> {
   return loadJSON<Record<string, number>>(PREV_RANKS_KEY, {});
 }
 
+export async function loadPreviousWeekRanksMerged(
+  currentWeekStart: string = localWeekStartISO(),
+): Promise<Record<string, number>> {
+  try {
+    const rows = await db.listArchivedWeeks();
+    const latest = (Array.isArray(rows) ? rows : [])
+      .filter((row: any) => typeof row?.weekStart === "string" && row.weekStart < currentWeekStart)
+      .sort((left: any, right: any) => left.weekStart.localeCompare(right.weekStart))
+      .at(-1);
+    if (!latest) return getPreviousWeekRanks();
+    const parsed = typeof latest.points === "string"
+      ? JSON.parse(latest.points) as unknown
+      : latest.points;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return getPreviousWeekRanks();
+    }
+    const points = Object.entries(parsed as Record<string, unknown>)
+      .map(([member, value]) => ({ member, points: Number(value) || 0 }))
+      .filter((entry) => entry.points > 0);
+    const ranks: Record<string, number> = {};
+    for (const entry of points) {
+      ranks[entry.member] = 1 + points.filter((other) => other.points > entry.points).length;
+    }
+    saveJSON(PREV_RANKS_KEY, ranks);
+    return ranks;
+  } catch {
+    return getPreviousWeekRanks();
+  }
+}
+
 export function saveCurrentWeekRanksForNextWeek(entries: { name: string; rank: number }[]): void {
   const ranks: Record<string, number> = {};
   for (const e of entries) {
@@ -1185,80 +1304,17 @@ export function emptyTask(firstMember?: { name?: string; emoji?: string }): Task
 }
 
 // === PocketBase sync helpers ===
-
-export interface SyncOutcome {
-  pushed: number;
-  errors: number;
-}
-
-function emptySyncOutcome(): SyncOutcome {
-  return { pushed: 0, errors: 0 };
-}
-
-function mergeSyncOutcomes(left: SyncOutcome, right: SyncOutcome): SyncOutcome {
-  return { pushed: left.pushed + right.pushed, errors: left.errors + right.errors };
-}
-
-async function writeOutcome(write: () => Promise<unknown>): Promise<SyncOutcome> {
-  try {
-    const result = await write();
-    return result ? { pushed: 1, errors: 0 } : { pushed: 0, errors: 1 };
-  } catch {
-    return { pushed: 0, errors: 1 };
-  }
-}
-
-function normalizeSyncOutcome(value: unknown): SyncOutcome {
-  if (!value || typeof value !== "object") return { pushed: 0, errors: 1 };
-  const record = value as { pushed?: unknown; errors?: unknown };
-  if (typeof record.pushed !== "number" || typeof record.errors !== "number") {
-    return { pushed: 0, errors: 1 };
-  }
-  return { pushed: record.pushed, errors: record.errors };
-}
-
-export async function syncTasksToPB(tasks: Task[]): Promise<SyncOutcome> {
-  let outcome = emptySyncOutcome();
-  for (const task of tasks) {
-    try {
-      const result = await db.upsertTask({
-        taskId: task.id,
-        title: task.title,
-        assignee: task.assignee,
-        assigneeEmoji: persistedTaskEmoji(task.assigneeEmoji),
-        assigned: task.assignee,
-        status: task.completed ? "done" : "pending",
-        due: task.due,
-        points: task.points,
-        recurring: task.recurring,
-        category: task.category,
-        priority: task.priority,
-        universal: task.universal || false,
-        stealable: task.stealable || false,
-        pendingApproval: task.pendingApproval ?? null,
-        sentBackAt: task.sentBackAt ?? null,
-        completedInWeek: task.completedInWeek ?? null,
-        completedAt: task.completedAt ?? null,
-        crewSize: task.crewSize ?? null,
-        crew: persistedCrewEmoji(task.crew as any),
-        speedBonus: task.speedBonus ?? null,
-      });
-      outcome = mergeSyncOutcomes(outcome, result ? { pushed: 1, errors: 0 } : { pushed: 0, errors: 1 });
-    } catch (error: any) {
-      outcome = mergeSyncOutcomes(outcome, { pushed: 0, errors: 1 });
-      console.warn(
-        `syncTasksToPB failed for "${task.title}" — run \`npm run pb:seed\` if the tasks schema is stale.`,
-        error?.data ?? error?.message ?? error
-      );
-    }
-  }
-  return outcome;
-}
-
-export async function syncWeekDataToPB(data: WeekData | null): Promise<SyncOutcome> {
-  if (!data) return emptySyncOutcome();
-  return writeOutcome(() => db.upsertWeekData(data));
-}
+//
+// The browser's structured whole-body push family is GONE: every member of it
+// (the per-collection task/week/archive/reward/penalty/prize/hall writers and the
+// batch helper that fanned them out) plus the `SyncOutcome` plumbing were
+// retired. Task, ledger and points state is server-owned; the browser only
+// caches it and asks through the command routes + the durable outbox.
+// `tests/unit/task-normal-writes-disabled.test.ts` and
+// `tests/unit/task-no-browser-writes.test.ts` pin the absence by name — keep
+// this note free of the retired identifiers so it cannot read as a call site.
+// The one surviving member of that family is the family-goal (non-task) write
+// below.
 
 /**
  * Persist a finished week into PocketBase's `week_archive` collection exactly
@@ -1276,8 +1332,8 @@ export async function syncWeekDataToPB(data: WeekData | null): Promise<SyncOutco
  * Returns whether a row was written. A write that silently fails (adapters
  * return `null`) reports `false` — never a false "wrote it".
  *
- * `existingWeekStarts` lets a batch caller (syncArchiveToPB) share one read;
- * when omitted the helper reads the archive itself.
+ * `existingWeekStarts` lets a batch caller share one read; when omitted the
+ * helper reads the archive itself.
  */
 export async function archiveWeekIfMissing(
   weekData: WeekData,
@@ -1306,176 +1362,60 @@ export async function archiveWeekIfMissing(
   }
 }
 
-export async function syncArchiveToPB(archive: WeekArchive): Promise<SyncOutcome> {
-  const existing = await db.listArchivedWeeks().catch(() => [] as any[]);
-  const existingStarts = new Set((existing || []).map((row: any) => String(row?.weekStart)));
-  let outcome = emptySyncOutcome();
-  for (const [weekStart, weekData] of Object.entries(archive)) {
-    if (existingStarts.has(weekStart)) continue;
-    const wrote = await archiveWeekIfMissing({ ...weekData, weekStart }, existingStarts);
-    outcome = mergeSyncOutcomes(outcome, wrote ? { pushed: 1, errors: 0 } : { pushed: 0, errors: 1 });
-    if (wrote) existingStarts.add(weekStart);
+export async function syncFamilyGoalToPB(goal: FamilyGoal | null): Promise<void> {
+  if (goal) {
+    await db.upsertFamilyGoal({
+      title: goal.title,
+      emoji: goal.emoji,
+      targetPoints: goal.targetPoints,
+      reward: goal.reward,
+      weekStart: goal.weekStart,
+      active: true,
+    }).catch(() => {});
   }
-  return outcome;
-}
-
-export async function syncRewardsToPB(rewards: Reward[]): Promise<SyncOutcome> {
-  let outcome = emptySyncOutcome();
-  for (const reward of rewards) {
-    outcome = mergeSyncOutcomes(outcome, await writeOutcome(() => db.upsertReward({
-      name: reward.name,
-      emoji: reward.emoji,
-      cost: reward.cost,
-    })));
-  }
-  return outcome;
-}
-
-export async function syncWeeklyPrizesToPB(prizes: WeeklyPrize[]): Promise<SyncOutcome> {
-  let outcome = emptySyncOutcome();
-  for (const prize of prizes) {
-    outcome = mergeSyncOutcomes(outcome, await writeOutcome(() => db.upsertWeeklyPrize({
-      rank: prize.rank,
-      emoji: prize.emoji,
-      text: prize.text,
-    })));
-  }
-  return outcome;
-}
-
-export async function syncPenaltiesToPB(penalties: Penalty[]): Promise<SyncOutcome> {
-  let outcome = emptySyncOutcome();
-  for (const penalty of penalties) {
-    outcome = mergeSyncOutcomes(outcome, await writeOutcome(() => db.upsertPenalty({
-      name: penalty.name,
-      emoji: penalty.emoji,
-      points: penalty.points,
-    })));
-  }
-  return outcome;
-}
-
-export async function syncFamilyGoalToPB(goal: FamilyGoal | null): Promise<SyncOutcome> {
-  if (!goal) return emptySyncOutcome();
-  return writeOutcome(() => db.upsertFamilyGoal({
-    title: goal.title,
-    emoji: goal.emoji,
-    targetPoints: goal.targetPoints,
-    reward: goal.reward,
-    weekStart: goal.weekStart,
-    active: true,
-  }));
-}
-
-export async function syncHallOfFameToPB(entries: HallOfFameEntry[]): Promise<SyncOutcome> {
-  if (entries.length === 0) return emptySyncOutcome();
-  let existing: any[];
-  try {
-    existing = await db.selectHallOfFameAuthoritative();
-    if (!Array.isArray(existing)) throw new Error("invalid authoritative Hall of Fame read");
-  } catch {
-    return { pushed: 0, errors: 1 };
-  }
-  let outcome = emptySyncOutcome();
-  for (const entry of entries) {
-    const alreadySynced = existing.some(
-      (row: any) => row.member === entry.member && row.weekStart === entry.weekStart
-    );
-    if (alreadySynced) continue;
-    outcome = mergeSyncOutcomes(outcome, await writeOutcome(() => db.insertHallOfFameEntry({
-      member: entry.member,
-      emoji: entry.emoji,
-      weekStart: entry.weekStart,
-      points: entry.points,
-      rank: entry.rank,
-      prize: entry.prize ?? null,
-      celebrated: entry.celebrated ?? false,
-    })));
-  }
-  return outcome;
 }
 
 /**
- * The PB→local hall downlink: read the local hall plus PocketBase's
- * hall_of_fame rows (best-effort — a PB failure degrades to local only) and
- * merge them keyed by `member + weekStart`. Local entries win
- * points/emoji/rank/prize (the rollover device froze them); a PB row's
- * `celebrated === true` ALWAYS wins over the local flag (server authority for
- * the ceremony gate — the /api/hall-of-fame/celebrate claim lives
- * server-side, so a win claimed on one device must not re-fire elsewhere);
- * PB rows unknown to local are adopted (cross-device enshrinement). The
- * merged list is persisted with saveHallOfFame() and returned.
+ * The PB→local hall downlink: read PocketBase's `hall_of_fame` rows
+ * (best-effort — a failed read degrades to the local hall) and treat the SERVER
+ * as the authority. The list is keyed by `member + weekStart`; malformed rows
+ * are skipped rather than adopted. When the server answered with at least one
+ * row, its list replaces the local copy and is persisted with `saveHallOfFame()`
+ * — points/emoji/rank/prize and the `celebrated` ceremony flag all come from
+ * the server, because the enshrinement and the `/api/hall-of-fame/celebrate`
+ * claim are both server-owned. An empty (or unreadable) server read keeps the
+ * local hall so a transient outage never blanks the board.
  */
 export async function loadHallOfFameMerged(): Promise<HallOfFameEntry[]> {
   const local = loadHallOfFame();
-  let remote: any[] = [];
+  let remote: any[];
   try {
     const rows = await db.selectHallOfFame();
-    if (Array.isArray(rows)) remote = rows;
+    remote = Array.isArray(rows) ? rows : [];
   } catch {
-    remote = [];
+    return local;
   }
-  const keyOf = (e: { member?: unknown; weekStart?: unknown }) =>
-    `${typeof e.member === "string" ? e.member : ""}::${typeof e.weekStart === "string" ? e.weekStart : ""}`;
   const byKey = new Map<string, HallOfFameEntry>();
-  for (const e of local) byKey.set(keyOf(e), { ...e });
-  const adopted: HallOfFameEntry[] = [];
-  for (const r of remote) {
-    if (!r || typeof r.member !== "string" || r.member.length === 0) continue;
-    if (typeof r.weekStart !== "string" || r.weekStart.length === 0) continue;
-    const key = keyOf(r);
+  for (const row of remote) {
+    if (!row || typeof row.member !== "string" || !row.member) continue;
+    if (typeof row.weekStart !== "string" || !row.weekStart) continue;
+    const key = `${row.member}\u0000${row.weekStart}`;
     const existing = byKey.get(key);
-    if (existing) {
-      if (r.celebrated === true) existing.celebrated = true;
-      continue;
-    }
-    const entryDraft: HallOfFameEntry = {
-      member: r.member,
-      emoji: typeof r.emoji === "string" ? r.emoji : "🏅",
-      weekStart: r.weekStart,
-      points: typeof r.points === "number" ? r.points : 0,
-      rank: typeof r.rank === "number" ? r.rank : 1,
+    const entry: HallOfFameEntry = {
+      member: row.member,
+      emoji: typeof row.emoji === "string" ? row.emoji : "🏅",
+      weekStart: row.weekStart,
+      points: typeof row.points === "number" ? row.points : 0,
+      rank: typeof row.rank === "number" ? row.rank : 1,
+      ...(typeof row.prize === "string" && row.prize ? { prize: row.prize } : {}),
+      ...(row.celebrated === true || existing?.celebrated === true ? { celebrated: true } : {}),
     };
-    if (typeof r.prize === "string" && r.prize.length > 0) entryDraft.prize = r.prize;
-    if (r.celebrated === true) entryDraft.celebrated = true;
-    byKey.set(key, entryDraft);
-    adopted.push(entryDraft);
+    byKey.set(key, entry);
   }
-  const merged: HallOfFameEntry[] = [];
-  const seen = new Set<string>();
-  for (const e of local) {
-    const key = keyOf(e);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    merged.push(byKey.get(key)!);
-  }
-  merged.push(...adopted);
-  saveHallOfFame(merged);
-  return merged;
-}
-
-export async function syncAllTasksToPB(
-  tasks: Task[],
-  weekData: WeekData | null,
-  archive: WeekArchive,
-  rewards: Reward[],
-  penalties: Penalty[],
-  hallOfFame: HallOfFameEntry[],
-  weeklyPrizes: WeeklyPrize[] = []
-): Promise<SyncOutcome> {
-  const settled = await Promise.allSettled([
-    syncTasksToPB(tasks),
-    syncWeekDataToPB(weekData),
-    syncArchiveToPB(archive),
-    syncRewardsToPB(rewards),
-    syncPenaltiesToPB(penalties),
-    syncHallOfFameToPB(hallOfFame),
-    syncWeeklyPrizesToPB(weeklyPrizes),
-  ]);
-  return settled.reduce((aggregate, result) => {
-    if (result.status === "fulfilled") return mergeSyncOutcomes(aggregate, normalizeSyncOutcome(result.value));
-    return mergeSyncOutcomes(aggregate, { pushed: 0, errors: 1 });
-  }, emptySyncOutcome());
+  if (byKey.size === 0) return local;
+  const server = [...byKey.values()];
+  saveHallOfFame(server);
+  return server;
 }
 
 export function getWeekGraph(memberName: string, weekData: WeekData): { day: string; points: number }[] {

@@ -1,10 +1,48 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withAdmin } from "@/lib/pb-auth";
-import { verifyPinFromPB } from "@/lib/server-auth";
-import { withWeekLedgerLock } from "@/lib/week-ledger-lock";
-import type { Transaction, WeekData } from "@/types/tasks";
+import { namesMatch, verifyPinFromPB } from "@/lib/server-auth";
+import { applyWeekLedgerOperation, type LedgerProjection } from "@/lib/ledger-operations";
+import {
+  mutateSnapshotWithMeta,
+  persistSnapshotWeek,
+  type SnapshotData,
+} from "@/lib/snapshot-tasks";
+import { isRecord, normalizeOperationId } from "@/lib/task-operation-contract";
+import type { LedgerOperationInput } from "@/types/tasks";
 
 export const dynamic = "force-dynamic";
+
+type RewardRedeemErrorCode =
+  | "invalid_body"
+  | "invalid_pin"
+  | "parent_approval_required"
+  | "parent_only"
+  | "unknown_reward"
+  | "insufficient"
+  | "duplicate"
+  | "ledger_unavailable";
+
+// A reward above this cost needs a grown-up's say-so. The threshold was
+// previously enforced ONLY in the browser, so any caller could skip it; the
+// gate lives here, and a SEPARATE named parent credential is what satisfies it.
+const PARENT_APPROVAL_MIN_COST = 100;
+
+interface RedeemRequest {
+  operationId: string;
+  rewardId: string;
+  rewardName: string | null;
+  memberName: string;
+  pin: string;
+  parentName: string;
+  parentPin: string;
+}
+
+interface RedeemReward {
+  id: string;
+  title: string;
+  cost: number;
+  emoji: string;
+}
 
 function currentWeekKey(): string {
   const d = new Date();
@@ -15,168 +53,283 @@ function currentWeekKey(): string {
   return d.toISOString().split("T")[0];
 }
 
-function parseJSON<T>(value: unknown, fallback: T): T {
-  if (typeof value === "string") {
-    try {
-      return JSON.parse(value) as T;
-    } catch {
-      return fallback;
-    }
-  }
-  return (value as T) ?? fallback;
+function errorResponse(
+  operationId: string,
+  reason: RewardRedeemErrorCode,
+  status: number,
+  error: string,
+) {
+  return NextResponse.json(
+    { ok: false, operationId, reason, error },
+    { status },
+  );
 }
 
-// A same (member, reward, amount) redeem replay inside this window is a
-// double-tap, not a second purchase — refused honestly, one transaction.
-// Mirrors the planner/apply adjustment dedupe idiom.
-const REDEEM_DEDUPE_WINDOW_MS = 60_000;
+function parseRedeemRequest(body: unknown): RedeemRequest | null {
+  if (!isRecord(body)) return null;
+  // The operation id is validated FIRST: it is the retry identity for a
+  // point-changing request, so a body without one is never acted on.
+  const operationId = normalizeOperationId(body.operationId);
+  if (!operationId) return null;
+  const rawRewardId = body.rewardId;
+  const rewardId =
+    typeof rawRewardId === "number" && Number.isSafeInteger(rawRewardId)
+      ? String(rawRewardId)
+      : typeof rawRewardId === "string"
+        ? rawRewardId.trim()
+        : "";
+  const memberName = typeof body.memberName === "string" ? body.memberName.trim() : "";
+  if (!rewardId || !memberName) return null;
+  const pin = typeof body.pin === "string" ? body.pin.trim() : "";
+  return {
+    operationId,
+    rewardId,
+    rewardName: typeof body.rewardName === "string" ? body.rewardName.trim() || null : null,
+    memberName,
+    pin,
+    parentName: typeof body.parentName === "string" ? body.parentName.trim() : "",
+    parentPin: typeof body.parentPin === "string" ? body.parentPin.trim() : "",
+  };
+}
+
+// Server-authoritative reward lookup: the stored row decides the real cost and
+// title. The request body is never trusted for either — a forged body could
+// otherwise buy a 150-point reward for 1 point under a title of its own. A row
+// whose stored cost is not a usable point value is a broken catalog, not an
+// unknown reward, and it fails closed rather than minting a bogus entry.
+async function readReward(
+  rewardId: string,
+  rewardName: string | null,
+): Promise<RedeemReward | null | "invalid_cost"> {
+  return withAdmin(async (pb): Promise<RedeemReward | null | "invalid_cost"> => {
+    const rows = await pb.collection("rewards").getFullList({ requestKey: null });
+    const list = (Array.isArray(rows) ? rows : []) as Array<Record<string, any>>;
+    const row =
+      list.find((candidate) => String(candidate?.id) === rewardId) ||
+      (rewardName ? list.find((candidate) => String(candidate?.name) === rewardName) : undefined);
+    if (!row) return null;
+    const cost = Number(row.cost ?? row.points);
+    if (!Number.isSafeInteger(cost) || cost < 0) return "invalid_cost";
+    return {
+      id: String(row.id ?? ""),
+      title: typeof row.name === "string" && row.name.trim() ? row.name.trim() : "reward",
+      cost,
+      emoji: typeof row.emoji === "string" && row.emoji.trim() ? row.emoji.trim() : "🎁",
+    };
+  });
+}
+
+/**
+ * A high-cost reward needs a parent who is NAMED and whose live PocketBase row
+ * really is a parent. The name is resolved with the same matcher
+ * `verifyPinFromPB` uses, so the approver is never a role-less guess: a kid,
+ * a pet or a name that is not on the roster can never approve a purchase.
+ */
+async function parentApproval(
+  parentName: string,
+  parentPin: string,
+): Promise<"approved" | "not_parent" | "invalid_pin"> {
+  const roster = await withAdmin(async (pb) => {
+    const rows = await pb.collection("members").getFullList({ requestKey: null });
+    return Array.isArray(rows) ? (rows as Array<Record<string, any>>) : [];
+  });
+  const approver = roster.find(
+    (candidate) => typeof candidate?.name === "string" && namesMatch(candidate.name, parentName),
+  );
+  if (!approver || String(approver.role ?? "").trim().toLowerCase() !== "parent") {
+    return "not_parent";
+  }
+  const verified = await verifyPinFromPB(approver.name, parentPin);
+  return verified ? "approved" : "invalid_pin";
+}
+
+function withRepairMarker(
+  data: SnapshotData,
+  operationId: string,
+  actorId: string,
+): SnapshotData {
+  const current = Array.isArray(data.pendingProjectionRepairs) ? data.pendingProjectionRepairs : [];
+  return {
+    ...data,
+    pendingProjectionRepairs: [
+      ...current.filter((marker) => marker.operationId !== operationId),
+      { operationId, taskIds: [], actorId, createdAt: new Date().toISOString() },
+    ],
+  };
+}
+
+function insufficientMessage(
+  member: string,
+  reward: RedeemReward,
+  balance: number,
+): string {
+  const firstName = member.split(" ")[0];
+  return `${firstName} needs ${Math.max(reward.cost - balance, 0)} more pts for ${reward.emoji} ${reward.title}`;
+}
 
 export async function POST(request: NextRequest) {
+  let rawBody: unknown;
   try {
-    const body = await request.json();
-    const { rewardId, rewardName, memberName, pin } = body || {};
+    rawBody = await request.json();
+  } catch {
+    return errorResponse("", "invalid_body", 400, "That redemption request could not be read.");
+  }
 
-    if (rewardId === undefined || rewardId === null || !memberName) {
-      return NextResponse.json({ error: "rewardId and memberName are required" }, { status: 400 });
+  const parsed = parseRedeemRequest(rawBody);
+  if (!parsed) {
+    return errorResponse("", "invalid_body", 400, "A reward, a member and an operation id are required.");
+  }
+  const { operationId } = parsed;
+  if (!parsed.pin) {
+    return errorResponse(operationId, "invalid_pin", 401, "Invalid PIN");
+  }
+
+  try {
+    const verified = await verifyPinFromPB(parsed.memberName, parsed.pin);
+    if (!verified) {
+      return errorResponse(operationId, "invalid_pin", 401, "Invalid PIN");
     }
-    // A missing or wrong PIN is the same honest failure to the caller.
-    if (!pin) {
-      return NextResponse.json({ error: "Invalid PIN" }, { status: 401 });
+    const member = typeof verified.name === "string" && verified.name.trim()
+      ? verified.name.trim()
+      : parsed.memberName;
+    const memberId = typeof verified.id === "string" ? verified.id.trim() : "";
+
+    const reward = await readReward(parsed.rewardId, parsed.rewardName);
+    if (reward === "invalid_cost") {
+      return errorResponse(
+        operationId,
+        "ledger_unavailable",
+        503,
+        "That reward is misconfigured, so it cannot be redeemed right now.",
+      );
     }
-
-    const member = await verifyPinFromPB(memberName, pin);
-    if (!member) {
-      return NextResponse.json({ error: "Invalid PIN" }, { status: 401 });
-    }
-
-    const currentWeek = currentWeekKey();
-    const normalizedName = member.name || memberName;
-
-    // Serialize the redeem against every other week-ledger writer in-process
-    // (claims, approvals, other redeems) — same rationale as the claim route:
-    // without the lock, overlapping writers each append to a stale snapshot of
-    // the week_data history and the second write silently erases the first's
-    // transaction while both clients were told "success".
-    const result = await withWeekLedgerLock(currentWeek, () =>
-      withAdmin(async (pb) => {
-      // Server-authoritative reward lookup FIRST: the stored row decides the
-      // real cost/title. The request body is never trusted for cost — a forged
-      // body could otherwise buy a 150-point reward for 1 point.
-      const rewardRows = await pb.collection("rewards").getFullList({ requestKey: null });
-      const reward =
-        rewardRows.find((r: any) => String(r.id) === String(rewardId)) ||
-        (rewardName
-          ? rewardRows.find((r: any) => String(r.name) === String(rewardName))
-          : null);
-      if (!reward) {
-        return { ok: false, reason: "unknown-reward" } as const;
-      }
-
-      const cost = Number(reward.cost ?? reward.points) || 0;
-      const title = reward.name || "reward";
-      const description = `Redeemed: ${title} (-${cost}pts)`;
-
-      // One read-modify-write attempt, followed by a post-write verification
-      // read. PocketBase has no conditional update, so two concurrent redeems
-      // by the same member can both pass the balance guard and clobber one
-      // deduction. Mirrors the claim route's lost-update re-read: re-read the
-      // week row and confirm OUR transaction landed; if not, report `conflict`
-      // (the caller retries once).
-      const attemptRedeem = async () => {
-        const weekRecords = await pb.collection("week_data").getFullList({ requestKey: null });
-        const week = weekRecords.find((r: any) => r.weekStart === currentWeek) || null;
-
-        const points = parseJSON<Record<string, number>>(week?.points, {});
-        const history = parseJSON<Transaction[]>(week?.history, []);
-
-        const nowMs = Date.now();
-        const dupe = history.find((tx) => {
-          const at = Date.parse(tx.timestamp);
-          return (
-            tx.type === "redeem" &&
-            tx.member === normalizedName &&
-            Number(tx.amount) === -cost &&
-            tx.description === description &&
-            Number.isFinite(at) &&
-            nowMs - at < REDEEM_DEDUPE_WINDOW_MS &&
-            at <= nowMs
-          );
-        });
-        if (dupe) {
-          return { ok: false, reason: "duplicate" } as const;
-        }
-
-        const balance = points[normalizedName] || 0;
-        if (balance < cost) {
-          const firstName = normalizedName.split(" ")[0];
-          const emoji = reward.emoji || "🎁";
-          return {
-            ok: false,
-            reason: "insufficient",
-            error: `${firstName} needs ${cost - balance} more pts for ${emoji} ${title}`,
-          } as const;
-        }
-
-        const tx: Transaction = {
-          id: nowMs + Math.floor(Math.random() * 1000),
-          timestamp: new Date(nowMs).toISOString(),
-          member: normalizedName,
-          type: "redeem",
-          amount: -cost,
-          description,
-        };
-
-        const updatedWeek: WeekData = {
-          weekStart: currentWeek,
-          points: { ...points, [normalizedName]: balance - cost },
-          streak: parseJSON<Record<string, number>>(week?.streak, {}),
-          lastActive: parseJSON<Record<string, string>>(week?.lastActive, {}),
-          history: [...history, tx],
-        };
-
-        if (week) {
-          await pb.collection("week_data").update(week.id, updatedWeek);
-        } else {
-          await pb.collection("week_data").create(updatedWeek);
-        }
-
-        const verifyRow: any = week
-          ? await pb.collection("week_data").getOne(week.id, { requestKey: null })
-          : (await pb.collection("week_data").getFullList({ requestKey: null })).find(
-              (r: any) => r.weekStart === currentWeek
-            );
-        const verifiedHistory = parseJSON<Transaction[]>(verifyRow?.history, []);
-        if (!verifiedHistory.some((t) => t.id === tx.id)) {
-          return {
-            ok: false,
-            reason: "conflict",
-            error: "That reward couldn't be saved — the points changed at the same time. Please try again.",
-          } as const;
-        }
-
-        return { ok: true, weekData: updatedWeek } as const;
-      };
-
-      // Retry the read-modify-write ONCE when a concurrent write clobbered it.
-      let outcome = await attemptRedeem();
-      if (!outcome.ok && outcome.reason === "conflict") {
-        outcome = await attemptRedeem();
-      }
-      return outcome;
-      })
-    );
-
-    if (!result.ok) {
-      const status = result.reason === "unknown-reward" ? 404 : result.reason === "insufficient" ? 400 : 409;
-      return NextResponse.json(
-        { ok: false, reason: result.reason, error: (result as any).error },
-        { status }
+    if (!reward) {
+      return errorResponse(
+        operationId,
+        "unknown_reward",
+        404,
+        "That reward isn't available anymore.",
       );
     }
 
-    return NextResponse.json({ ok: true, weekData: result.weekData });
+    if (reward.cost > PARENT_APPROVAL_MIN_COST) {
+      if (!parsed.parentName || !parsed.parentPin) {
+        return errorResponse(
+          operationId,
+          "parent_approval_required",
+          401,
+          "A parent has to approve this reward.",
+        );
+      }
+      const approval = await parentApproval(parsed.parentName, parsed.parentPin);
+      if (approval === "not_parent") {
+        return errorResponse(
+          operationId,
+          "parent_only",
+          403,
+          "Only a parent can approve this reward.",
+        );
+      }
+      if (approval === "invalid_pin") {
+        return errorResponse(operationId, "invalid_pin", 401, "Invalid PIN");
+      }
+    }
+
+    const operation: LedgerOperationInput = {
+      operationId,
+      source: "reward-redeem",
+      ...(memberId ? { actorId: memberId } : {}),
+      entries: [
+        {
+          type: "redeem",
+          member,
+          amount: -reward.cost,
+          description: `Redeemed: ${reward.title} (-${reward.cost}pts)`,
+        },
+      ],
+    };
+
+    // The shared helper OWNS the week-ledger lock, the canonical week read, the
+    // balance recomputation, the write and the post-write verification, and it
+    // invokes the projection WHILE that lock is held — so the lock order stays
+    // week-ledger -> snapshot and this route never wraps it in another lock.
+    // The snapshot leg runs only after the canonical write verified, and a leg
+    // that cannot be written leaves an honest pending repair instead of a false
+    // success (the route answers 202).
+    const project: LedgerProjection = async ({ pb, weekData }) => {
+      const projected = await persistSnapshotWeek(pb, weekData);
+      if (projected.ok) return true;
+      try {
+        await mutateSnapshotWithMeta(
+          (data) => ({ data: withRepairMarker(data, operationId, memberId), result: null }),
+          pb,
+        );
+      } catch {
+        // Best effort: the marker is a hint, the reconciler still sees the gap.
+      }
+      return false;
+    };
+    const weekStart = currentWeekKey();
+
+    let result = await applyWeekLedgerOperation({ weekStart, operation, project });
+
+    // A lost update (another process wrote the week between our read and our
+    // write) is recoverable ONCE, and the retry reuses the SAME operation id,
+    // so a partially applied operation can never be applied twice.
+    if (!result.ok && result.code === "ledger_write_conflict") {
+      result = await applyWeekLedgerOperation({ weekStart, operation, project });
+    }
+
+    if (!result.ok) {
+      if (result.code === "insufficient_balance") {
+        return errorResponse(
+          result.operationId,
+          "insufficient",
+          400,
+          insufficientMessage(member, reward, result.weekData.points[member] ?? 0),
+        );
+      }
+      if (result.code === "operation_conflict") {
+        return errorResponse(
+          result.operationId,
+          "duplicate",
+          409,
+          "That redemption already went through — check your points.",
+        );
+      }
+      return errorResponse(
+        result.operationId,
+        "ledger_unavailable",
+        503,
+        "Points could not be updated just now. Please try again.",
+      );
+    }
+
+    return NextResponse.json(
+      {
+        ok: true,
+        applied: result.applied,
+        duplicate: result.duplicate,
+        reconciled: result.reconciled,
+        operationId: result.operationId,
+        member,
+        reward: {
+          id: reward.id,
+          name: reward.title,
+          cost: reward.cost,
+          emoji: reward.emoji,
+        },
+        weekData: result.weekData,
+      },
+      { status: result.reconciled ? 200 : 202 },
+    );
   } catch (error) {
     console.error("Reward redeem API error:", error);
-    return NextResponse.json({ error: "Failed to redeem reward" }, { status: 500 });
+    return errorResponse(
+      operationId,
+      "ledger_unavailable",
+      503,
+      "Points could not be updated just now. Please try again.",
+    );
   }
 }

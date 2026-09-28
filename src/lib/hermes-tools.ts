@@ -1,17 +1,29 @@
 import { db } from "@/db";
 import { groceryCategories } from "@/data/meals";
 import { withAdmin } from "@/lib/pb-auth";
-import { weekKey } from "@/lib/task-utils";
+import {
+  executeInternalTaskCommand,
+  type InternalTaskCommandActor,
+  type InternalTaskCommandResult,
+} from "@/lib/task-commands";
+import {
+  ensureTaskManageHandlersRegistered,
+  taskManageInternalPayload,
+  type AddTaskCommand,
+  type ManageTaskCommand,
+  type UpdateTaskCommand,
+} from "@/lib/task-manage";
+import { ensureTaskClaimHandlersRegistered } from "@/lib/task-claim";
+import { getLiveMembers } from "@/lib/live-member";
+import { hasUnreversedTaskEarn } from "@/lib/task-ledger";
+import { isCrewTask, isSnatchable } from "@/lib/task-utils";
 // Task mutations go through the SNAPSHOT (the store the dashboard renders),
 // not the PB `tasks` collection — see src/lib/snapshot-tasks.ts.
 import {
   readSnapshotTasks,
+  readSnapshotWithRevision,
   liveSnapshotTasks,
   findSnapshotTask,
-  deleteSnapshotTask,
-  upsertSnapshotTask,
-  mutateSnapshot,
-  mirrorTaskToCollection,
 } from "@/lib/snapshot-tasks";
 import { getHAWebSocketClient } from "@/lib/ha/websocket-client";
 import { getStoreLabel, groupByStore } from "@/lib/stores";
@@ -19,6 +31,7 @@ import { localTodayISO, localWeekdayShort, familyTimeZone, weekdayOfISO, localWe
 import { fetchLiveWeather } from "@/lib/weather-live";
 import { weekStartForDate, isoDateForWeekday } from "@/lib/meals-week-utils";
 import { storeMemory, queryMemories, deleteMemory, incrementMemoryUsage, type MemoryCategory } from "@/lib/family-memory";
+import { createTaskOperationId } from "@/lib/task-operation-outbox";
 import { MEMORY_USER_ID, MEMORY_FAMILY_ID } from "@/lib/memory-ids";
 // Live readers + shared helpers were extracted to ./consuela/live-reads
 // (Task 8, 2026-09-14). Imported here for the tool handlers below and
@@ -78,7 +91,29 @@ export interface ToolDefinition {
   };
 }
 
-export type ToolHandler = (args: Record<string, any>) => Promise<string>;
+export type TaskCommandSource = "hermes" | "muse" | "server";
+
+/**
+ * The LIVE identity of the human behind a tool call, resolved by the calling
+ * route (a session, a verified PIN, or the MUSE bearer) — never by the model
+ * and never by the tool body. It rides the internal command as the actor so
+ * the command re-checks adulthood itself instead of trusting the tool list.
+ */
+export interface TaskCommandCaller {
+  memberId: string;
+  name: string;
+  role: string;
+}
+
+export interface ToolHandlerContext {
+  source?: TaskCommandSource;
+  caller?: TaskCommandCaller;
+}
+
+export type ToolHandler = (
+  args: Record<string, any>,
+  context?: ToolHandlerContext,
+) => Promise<string>;
 
 export interface Tool {
   definition: ToolDefinition;
@@ -165,7 +200,212 @@ async function adminUpsertMeal(meal: Record<string, unknown>): Promise<{ row: an
   }
 }
 
-async function updateTaskCore(args: any) {
+function assistantTaskCommandActor(
+  source: TaskCommandSource,
+  caller?: TaskCommandCaller,
+): InternalTaskCommandActor {
+  const memberId = caller?.memberId?.trim();
+  const name = caller?.name?.trim();
+  return {
+    memberId: memberId || `assistant:${source}`,
+    name: name || "Consuela",
+    role: callerRole(caller),
+  };
+}
+
+/**
+ * The caller's live role, normalized. FAIL CLOSED: an absent, blank or
+ * out-of-vocabulary role is never a parent. A context-free call (a direct
+ * internal `getTool(...).handler(args)` with no human behind it) therefore
+ * cannot author a parent-actor task command, and every real route passes the
+ * live role anyway — so a missing context is a bug, not a licence.
+ */
+function callerRole(caller?: TaskCommandCaller): string {
+  const role = caller?.role?.trim().toLowerCase();
+  return role === "parent" ? "parent" : "child";
+}
+
+function callerIsAdult(caller?: TaskCommandCaller): boolean {
+  return Boolean(caller) && callerRole(caller) === "parent";
+}
+
+function adultCallerRefusal() {
+  return {
+    ok: false,
+    reason: "adult_only",
+    error: "task changes need a grown-up — ask a parent to make this change",
+  };
+}
+
+async function runInternalTaskCommand(
+  source: TaskCommandSource,
+  command: ManageTaskCommand,
+  caller?: TaskCommandCaller,
+): Promise<InternalTaskCommandResult> {
+  ensureTaskManageHandlersRegistered();
+  return executeInternalTaskCommand(
+    {
+      operationId: command.operationId,
+      kind: command.action,
+      actor: assistantTaskCommandActor(source, caller),
+      payload: taskManageInternalPayload(command),
+    },
+    { source },
+  );
+}
+
+/**
+ * The claim seam (complete / undo) resolves its actor against the LIVE roster,
+ * so its actor is a real member — the task's canonical owner, or the calling
+ * grown-up for a crew row, which has no single owner. The payee is therefore
+ * never something the model typed into `assignee`.
+ */
+async function runClaimTaskCommand(
+  source: TaskCommandSource,
+  action: "complete" | "undo",
+  taskId: number,
+  actor: { memberId: string; name: string; role: string },
+): Promise<InternalTaskCommandResult> {
+  ensureTaskClaimHandlersRegistered();
+  return executeInternalTaskCommand(
+    {
+      operationId: createTaskOperationId(),
+      kind: action,
+      actor: { ...actor, authentication: "internal" },
+      payload: { taskId },
+    },
+    { source },
+  );
+}
+
+const CLAIM_FAILURE_COPY: Record<string, string> = {
+  unknown_actor: "that member is not on the family roster — nothing was changed",
+  member_roster_unavailable: "member data unavailable — call get_family_members first",
+  not_allowed: "a pet can't complete a chore",
+  not_task_owner: "that chore belongs to someone else — nothing was changed",
+  unknown_task_owner: "that chore's owner is not on the family roster — nothing was changed",
+  task_store_unavailable: "the chore list is unavailable — try again",
+  crew_task: "that is a crew chore — members join and check in from the Tasks screen or the kid board",
+  not_assigned: "that chore is up for grabs — claim it from the Tasks screen instead",
+  already_completed: "that chore is already done — reopen it first if it is waiting for approval",
+  not_universal: "that chore is not up for grabs",
+  not_late_yet: "that chore is not late yet, so it cannot be snatched",
+  nothing_to_undo: "there is nothing to undo for that chore",
+  already_undone: "that chore's points were already taken back",
+  operation_conflict: "that task operation already did something else — try again",
+  invalid_task_state: "that chore's state changed underneath me — try again",
+  insufficient_balance: "the points balance would go negative — nothing was changed",
+  ledger_unavailable: "the points ledger is unavailable — try again",
+  snapshot_write_failed: "could not save the task to the dashboard — try again",
+  session_required: "ask the member to undo their own tap with their PIN",
+  adult_only: "only a grown-up can do that",
+  invalid_task_id: "no such task",
+  ambiguous_task: "several chores share that id — nothing was changed",
+  unknown_task: "task not found — call get_pending_tasks first",
+  crew_full: "that crew is full",
+  not_in_crew: "that member is not in the crew",
+  unknown_crew_member: "that member is not on the family roster",
+  member_checked_in: "that crew member already checked in",
+  removed_crew_member: "that member was removed from the crew",
+  not_crew_task: "that chore is not a crew chore",
+  target_required: "no crew member named",
+  invalid_crew_member: "that crew member could not be resolved",
+};
+
+function claimFailure(reason: string | undefined, fallback: string) {
+  return {
+    ok: false,
+    reason: reason ?? "task_command_failed",
+    error: CLAIM_FAILURE_COPY[reason ?? ""] ?? fallback,
+  };
+}
+
+function normalizedLiveMemberRole(member: { role?: string } | null | undefined): string {
+  return String(member?.role ?? "").trim().toLowerCase();
+}
+
+/** The claim seam's own member resolution: exact name, then a unique first name. */
+function resolveLiveTaskMember(
+  members: Array<{ id: string; name: string; role: string }>,
+  value: unknown,
+): { memberId: string; name: string; role: string } | null {
+  if (typeof value !== "string") return null;
+  const query = value.trim().toLowerCase();
+  if (!query) return null;
+  const humans = members.filter((member) => normalizedLiveMemberRole(member) !== "pet");
+  const asActor = (member: { id: string; name: string; role: string }) => ({
+    memberId: member.id,
+    name: member.name,
+    role: member.role,
+  });
+  const exact = humans.filter((member) => member.name.trim().toLowerCase() === query);
+  if (exact.length === 1) return asActor(exact[0]);
+  if (exact.length > 1) return null;
+  const first = query.split(/\s+/)[0];
+  const firstName = humans.filter(
+    (member) => member.name.trim().toLowerCase().split(/\s+/)[0] === first,
+  );
+  return firstName.length === 1 ? asActor(firstName[0]) : null;
+}
+
+/**
+ * Resolve a caller the route ALREADY verified by id. The claim seam's
+ * `resolveActor` cross-checks id + name, so the tool hands it the id it was
+ * given and never re-derives an identity from a name a session may have
+ * renamed (or that a first-name match could answer for someone else).
+ */
+function resolveLiveTaskMemberById(
+  members: Array<{ id: string; name: string; role: string }>,
+  value: unknown,
+): { memberId: string; name: string; role: string } | null {
+  if (typeof value !== "string") return null;
+  const wanted = value.trim();
+  if (!wanted) return null;
+  const hit = members.find((member) => String(member.id ?? "").trim() === wanted);
+  if (!hit || normalizedLiveMemberRole(hit) === "pet") return null;
+  return { memberId: hit.id, name: hit.name, role: hit.role };
+}
+
+async function liveTaskRoster(): Promise<Array<{ id: string; name: string; role: string }> | null> {
+  try {
+    const members = await getLiveMembers();
+    return Array.isArray(members) ? members : null;
+  } catch {
+    return null;
+  }
+}
+
+function isPetMemberRow(member: any): boolean {
+  return String(member?.role ?? "").trim().toLowerCase() === "pet";
+}
+
+function petAssigneeFailure(name: string) {
+  return {
+    ok: false,
+    reason: "pet_assignee",
+    error: `pets can't be assigned chores — "${name}" is a pet, so nothing was changed`,
+  };
+}
+
+function taskCommandFailure(reason: string | undefined, fallback: string) {
+  const copy: Record<string, string> = {
+    pet_assignee: "pets can't be assigned chores — nothing was changed",
+    unknown_assignee: "unknown member — call get_family_members to see the roster, then retry",
+    unknown_task: "task not found — call get_pending_tasks first",
+    adult_only: "task changes need a grown-up — ask a parent to make this change",
+    member_roster_unavailable: "member data unavailable — call get_family_members first",
+    operation_conflict: "that task operation already did something else — try again",
+    forbidden_task_field: "that change includes a field Consuela is not allowed to set",
+    invalid_task_command: fallback,
+  };
+  return {
+    ok: false,
+    reason: reason ?? "task_command_failed",
+    error: copy[reason ?? ""] ?? "could not save the task to the dashboard — try again",
+  };
+}
+
+async function updateTaskCore(args: any, source: TaskCommandSource, caller?: TaskCommandCaller) {
   try {
     let newAssignee: { name: string; emoji: any } | null = null;
     if (args.newAssignee) {
@@ -173,7 +413,8 @@ async function updateTaskCore(args: any) {
       if (members === null) return { ok: false, error: "member data unavailable — call get_family_members first" };
       const m = (members || []).find((x: any) => String(x.fullName || x.name || "").toLowerCase().includes(String(args.newAssignee).toLowerCase()));
       if (!m) return { ok: false, error: `unknown member "${args.newAssignee}" — call get_family_members first` };
-      newAssignee = { name: m.fullName || m.name, emoji: m.emoji };
+      if (isPetMemberRow(m)) return petAssigneeFailure(String(m.fullName || m.name));
+      newAssignee = { name: m.name || m.fullName, emoji: m.emoji };
     }
     const patch: Record<string, unknown> = {};
     if (args.newTitle) patch.title = String(args.newTitle).trim();
@@ -183,28 +424,40 @@ async function updateTaskCore(args: any) {
       patch.points = Math.max(1, Math.min(100, p));
     }
     if (args.due && /^\d{4}-\d{2}-\d{2}$/.test(args.due)) patch.due = args.due;
-    if (args.priority) patch.priority = args.priority;
+    if (args.priority && ["low", "medium", "high"].includes(String(args.priority))) patch.priority = String(args.priority);
     if (args.recurring) patch.recurring = ["none", "daily", "weekly"].includes(args.recurring) ? args.recurring : "none";
     if (args.stealable !== undefined) patch.stealable = args.stealable === true;
-    if (newAssignee) {
-      patch.assignee = newAssignee.name;
-      patch.assigneeEmoji = newAssignee.emoji; // raw value into storage (UI renders via Avatar); textEmoji() is for OUTPUT only
-    }
+    if (newAssignee) patch.assignee = newAssignee.name;
     if (Object.keys(patch).length === 0) return { ok: false, error: "no valid fields to update" };
 
-    let mirrored: any = null;
-    const result = await mutateSnapshot<any>((data) => {
-      const row = findSnapshotTask(liveSnapshotTasks(data) as any[], args);
-      if (!row) return { data, result: { ok: false, error: "task not found — call get_pending_tasks first" } };
-      if (row.completed) return { data, result: { ok: false, error: "task is completed — mark it pending in the UI first" } };
-      const before = { title: row.title, assignee: row.assignee, points: row.points, due: row.due, priority: row.priority, recurring: row.recurring, stealable: row.stealable };
-      const next = { ...row, ...patch };
-      mirrored = next;
-      const after = { title: next.title, assignee: next.assignee, points: next.points, due: next.due, priority: next.priority, recurring: next.recurring, stealable: next.stealable };
-      return { data: upsertSnapshotTask(data, next as any), result: { ok: true, taskId: Number(row.id), before, after } };
-    });
-    if ((result as any).ok && mirrored) void mirrorTaskToCollection("upsert", mirrored);
-    return result;
+    const live = await readSnapshotTasks();
+    const row = findSnapshotTask(live as any[], args);
+    if (!row) return { ok: false, error: "task not found — call get_pending_tasks first" };
+    if (row.completed) return { ok: false, error: "task is completed — mark it pending in the UI first" };
+    const before = { title: row.title, assignee: row.assignee, points: row.points, due: row.due, priority: row.priority, recurring: row.recurring, stealable: row.stealable };
+    const result = await runInternalTaskCommand(source, {
+      action: "update",
+      operationId: createTaskOperationId(),
+      taskId: Number(row.id),
+      patch: patch as UpdateTaskCommand["patch"],
+    }, caller);
+    if (!result.ok) return taskCommandFailure(result.reason, "update_task failed — nothing was changed");
+    const task = (result.task ?? {}) as any;
+    return {
+      ok: true,
+      taskId: Number(task.id ?? row.id),
+      before,
+      after: {
+        title: task.title,
+        assignee: task.assignee,
+        points: task.points,
+        due: task.due,
+        priority: task.priority,
+        recurring: task.recurring,
+        stealable: task.stealable,
+      },
+      reconciled: result.reconciled,
+    };
   } catch (e: any) {
     return { ok: false, error: `update_task failed: ${e?.message}` };
   }
@@ -437,6 +690,7 @@ const TOOLS: Tool[] = [
     },
     handler: async (args) => {
       const tasks = await livePendingTasks();
+      if (tasks === null) return summarize({ error: "task data unavailable — do not guess", tasks: [] });
       let filtered = tasks;
       if (args.member) {
         const m = String(args.member).toLowerCase();
@@ -471,10 +725,10 @@ const TOOLS: Tool[] = [
         required: ["title", "assigned_to"],
       },
     },
-    handler: async (args) => {
-      const due = args.due || todayISO();
+    handler: async (args, context) => {
+      const due = /^\d{4}-\d{2}-\d{2}$/.test(String(args.due ?? "")) ? String(args.due) : todayISO();
       const points = Math.max(1, Math.min(100, Number(args.points) || 10));
-      const priority = args.priority || "medium";
+      const priority = ["low", "medium", "high"].includes(String(args.priority)) ? String(args.priority) : "medium";
       const members = await liveMembers();
       if (members === null) {
         return summarize({ ok: false, error: "member data unavailable — call get_family_members first" });
@@ -490,40 +744,41 @@ const TOOLS: Tool[] = [
           error: `unknown member "${args.assigned_to}" — call get_family_members to see the roster, then retry`,
         });
       }
-      const newId = Date.now();
-      const snapshotTask = {
-        id: newId,
-        title: String(args.title).trim(),
-        assignee: match.fullName || match.name,
-        assigneeEmoji: match.emoji,
-        assigned: match.fullName || match.name,
-        due,
-        points,
-        priority,
-        recurring: ["none", "daily", "weekly"].includes(args.recurring) ? args.recurring : "none",
-        stealable: args.stealable === true,
-        category: "chore",
-        universal: false,
-        completed: false,
-      };
-      // Write to the SNAPSHOT (what the dashboard renders) and mirror to the
-      // collection best-effort; adminUpsertTask alone never reached the UI.
-      try {
-        await mutateSnapshot<any>((data) => ({ data: upsertSnapshotTask(data, snapshotTask as any), result: null }));
-      } catch (e: any) {
-        return summarize({ ok: false, error: `Could not persist task to the dashboard: ${e?.message}` });
+      if (isPetMemberRow(match)) {
+        return summarize(petAssigneeFailure(String(match.fullName || match.name)));
       }
-      void mirrorTaskToCollection("upsert", snapshotTask as any);
+      const command: AddTaskCommand = {
+        action: "add",
+        operationId: createTaskOperationId(),
+        task: {
+          title: String(args.title).trim(),
+          assignee: String(match.name || match.fullName),
+          assigneeEmoji: typeof match.emoji === "string" && match.emoji ? match.emoji : "👤",
+          due,
+          points,
+          recurring: ["none", "daily", "weekly"].includes(args.recurring) ? args.recurring : "none",
+          category: "chore",
+          priority: priority as "low" | "medium" | "high",
+          universal: false,
+          stealable: args.stealable === true,
+        },
+      };
+      const result = await runInternalTaskCommand(context?.source ?? "hermes", command, context?.caller);
+      if (!result.ok) {
+        return summarize(taskCommandFailure(result.reason, "add_task failed — nothing was created"));
+      }
+      const task = (result.task ?? {}) as any;
       return summarize({
         ok: true,
-        taskId: newId,
-        id: newId,
-        title: snapshotTask.title,
-        assignee: snapshotTask.assignee,
-        assigneeEmoji: textEmoji(match.emoji),
-        points: snapshotTask.points,
-        due: snapshotTask.due,
-        priority: snapshotTask.priority,
+        taskId: Number(task.id),
+        id: Number(task.id),
+        title: task.title,
+        assignee: task.assignee,
+        assigneeEmoji: textEmoji(task.assigneeEmoji),
+        points: task.points,
+        due: task.due,
+        priority: task.priority,
+        reconciled: result.reconciled,
       });
     },
   },
@@ -547,12 +802,12 @@ const TOOLS: Tool[] = [
         },
       },
     },
-    handler: async (args: any) => summarize(await updateTaskCore(args)),
+    handler: async (args: any, context) => summarize(await updateTaskCore(args, context?.source ?? "hermes", context?.caller)),
   },
   {
     definition: {
       name: "delete_task",
-      description: "Delete a task by taskId or exact title. Removal is IMMEDIATE — no parent PIN and no approval queue (only completions are approval-gated). Completed rows cannot be deleted; they are undone in the Tasks UI instead.",
+      description: "Delete a task by taskId or exact title. Removal is IMMEDIATE — no parent PIN and no approval queue (only completions are approval-gated), and it does not check who the chore is for. Completed rows cannot be deleted; they are undone in the Tasks UI instead. Re-sending the same delete is safe — it never resurrects the chore.",
       parameters: {
         type: "object",
         properties: {
@@ -562,18 +817,39 @@ const TOOLS: Tool[] = [
         },
       },
     },
-    handler: async (args: any) => {
+    handler: async (args: any, context) => {
       try {
-        let deletedId: number | null = null;
-        const result = await mutateSnapshot<any>((data) => {
-          const row = findSnapshotTask(liveSnapshotTasks(data) as any[], args);
-          if (!row) return { data, result: { ok: false, error: "task not found — call get_pending_tasks first" } };
-          if (row.completed) return { data, result: { ok: false, error: "task is completed — undo it in the Tasks UI (parent PIN) instead of deleting" } };
-          deletedId = Number(row.id);
-          return { data: deleteSnapshotTask(data, Number(row.id)), result: { ok: true, taskId: Number(row.id), title: row.title, assignee: row.assignee, deleted: true } };
+        const { data } = await readSnapshotWithRevision();
+        const row = findSnapshotTask(liveSnapshotTasks(data) as any[], args);
+        const taskId = row ? Number(row.id) : Number(args.taskId);
+        const tombstoned = Number.isSafeInteger(taskId) &&
+          (data.deletedTaskIds ?? []).map(Number).includes(taskId);
+        if (!row) {
+          // A replayed delete finds no row (the row is already tombstoned) but
+          // the command still owns the answer: it replays the receipt for the
+          // SAME operationId and reports the reconciler state.
+          if (!tombstoned) {
+            return summarize({ ok: false, error: "task not found — call get_pending_tasks first" });
+          }
+        } else if (row.completed) {
+          return summarize({ ok: false, error: "task is completed — undo it in the Tasks UI (parent PIN) instead of deleting" });
+        }
+        const result = await runInternalTaskCommand(
+          context?.source ?? "hermes",
+          { action: "delete", operationId: createTaskOperationId(), taskId },
+          context?.caller,
+        );
+        if (!result.ok) {
+          return summarize(taskCommandFailure(result.reason, "delete_task failed — nothing was deleted"));
+        }
+        return summarize({
+          ok: true,
+          taskId,
+          title: row?.title,
+          assignee: row?.assignee,
+          deleted: result.deleted !== false,
+          reconciled: result.reconciled,
         });
-        if (deletedId !== null && (result as any).ok) void mirrorTaskToCollection("delete", { id: deletedId });
-        return summarize(result);
       } catch (e: any) {
         return summarize({ ok: false, error: `delete_task failed: ${e?.message}` });
       }
@@ -582,7 +858,7 @@ const TOOLS: Tool[] = [
   {
     definition: {
       name: "reopen_task",
-      description: "Reopen a completed task that is still waiting in the parent approval queue (no points moved yet). Immediate — no PIN. Already-paid completions must be undone in the Tasks UI.",
+      description: "Reopen a completed task that is still waiting in the parent approval queue (no points moved yet). Immediate — no PIN. Already-paid completions must be undone in the Tasks UI. A crew chore keeps its members, join times and removed list — only the check-ins are cleared so the crew can check in again.",
       parameters: {
         type: "object",
         properties: {
@@ -592,22 +868,91 @@ const TOOLS: Tool[] = [
         },
       },
     },
-    handler: async (args: any) => {
+    handler: async (args: any, context) => {
+      if (!callerIsAdult(context?.caller)) return summarize(adultCallerRefusal());
       try {
-        let reopened: any = null;
-        const result = await mutateSnapshot<any>((data) => {
-          const row = findSnapshotTask(liveSnapshotTasks(data) as any[], args);
-          if (!row) return { data, result: { ok: false, error: "task not found — call get_pending_tasks or get_completed_tasks first" } };
-          if (!row.completed) return { data, result: { ok: false, error: "task is already pending" } };
-          if (!row.pendingApproval || row.sentBackAt) {
-            return { data, result: { ok: false, error: "this task's points were already awarded — undo it in the Tasks UI (parent PIN)" } };
+        const { data } = await readSnapshotWithRevision();
+        const row = findSnapshotTask(liveSnapshotTasks(data) as any[], args);
+        if (!row) {
+          return summarize({ ok: false, error: "task not found — call get_pending_tasks or get_completed_tasks first" });
+        }
+        if (!row.completed) return summarize({ ok: false, error: "task is already pending" });
+        const queued = Boolean(row.pendingApproval) && !row.sentBackAt;
+        if (!queued) {
+          return summarize({ ok: false, error: "this task's points were already awarded — undo it in the Tasks UI (parent PIN)" });
+        }
+        // A queued row that ALSO carries an unreversed earn is drift, not a
+        // pending completion: reopening it would leave real points behind.
+        // The payee list follows HOW the earn was actually written: a crew
+        // approval pays PER MEMBER (`pendingApproval.crew`), so `byName` — the
+        // literal "Crew" — is not a payee and can never match. There is
+        // deliberately no cheap pre-filter: `hasUnreversedTaskEarn` normalizes
+        // `taskId` with Number(...) and a hand-rolled strict `===` filter
+        // would skip a string-typed taskId straight past the guard. Its throw
+        // path (an unparseable history) fails closed.
+        const rawCrewPayees: unknown[] = Array.isArray(row.pendingApproval?.crew)
+          ? row.pendingApproval.crew
+          : [];
+        const crewPayees: string[] = rawCrewPayees
+          .filter((name): name is string => typeof name === "string" && Boolean(name.trim()))
+          .map((name) => name.trim());
+        const soloPayee = String(row.pendingApproval?.byName || row.completedBy || row.assignee || "");
+        const payees: string[] = crewPayees.length > 0
+          ? [...new Set<string>(crewPayees)]
+          : soloPayee ? [soloPayee] : [];
+        const history = Array.isArray(data.weekData?.history) ? data.weekData.history : [];
+        for (const payee of payees) {
+          let unreversed = false;
+          try {
+            unreversed = hasUnreversedTaskEarn(history, Number(row.id), payee);
+          } catch {
+            unreversed = true;
           }
-          const next = { ...row, completed: false, completedBy: null, completedInWeek: null, completedAt: null, pendingApproval: null, sentBackAt: null };
-          reopened = next;
-          return { data: upsertSnapshotTask(data, next as any), result: { ok: true, taskId: Number(row.id), title: row.title, reopened: true } };
+          if (unreversed) {
+            return summarize({ ok: false, error: "this task's points were already awarded — undo it in the Tasks UI (parent PIN)" });
+          }
+        }
+        const roster = await liveTaskRoster();
+        if (roster === null) {
+          return summarize({ ok: false, reason: "member_roster_unavailable", error: "member data unavailable — call get_family_members first" });
+        }
+        const taskId = Number(row.id);
+        // A crew row has no single owner ("Crew" is not a member), so the
+        // actor is the live grown-up authority: a parent who is in the crew,
+        // else the parent behind the call. Both are real roster members, and
+        // the seam re-checks that a crew send-back is done by a parent. The
+        // third step uses the caller's VERIFIED memberId (the route already
+        // resolved it live) and lets the seam's own id+name cross-check have
+        // the last word.
+        const crewNames: unknown[] = Array.isArray(row.crew?.members)
+          ? row.crew.members.map((member: any) => member?.name)
+          : [];
+        const owner =
+          resolveLiveTaskMember(roster, row.assignee) ??
+          crewNames
+            .map((name: unknown) => resolveLiveTaskMember(roster, name))
+            .find((member) => member !== null && normalizedLiveMemberRole(member) === "parent") ??
+          (context?.caller ? resolveLiveTaskMemberById(roster, context.caller.memberId) : null);
+        const actor = owner;
+        if (!actor) {
+          return summarize({
+            ok: false,
+            reason: "adult_only",
+            error: "only a grown-up can send a crew chore back — ask a parent",
+          });
+        }
+        const result = await runClaimTaskCommand(context?.source ?? "hermes", "undo", taskId, actor);
+        if (!result.ok) {
+          return summarize(claimFailure(result.reason, "reopen_task failed — nothing was changed"));
+        }
+        return summarize({
+          ok: true,
+          taskId,
+          title: (result.task as any)?.title ?? row.title,
+          reopened: true,
+          task: result.task ?? null,
+          reconciled: result.reconciled,
         });
-        if ((result as any).ok && reopened) void mirrorTaskToCollection("upsert", reopened);
-        return summarize(result);
       } catch (e: any) {
         return summarize({ ok: false, error: `reopen_task failed: ${e?.message}` });
       }
@@ -639,7 +984,7 @@ const TOOLS: Tool[] = [
   {
     definition: {
       name: "complete_task",
-      description: "Mark a chore as done — it lands in the Tasks screen's \"Needs approval\" section; points move only when a parent approves it THERE with their PIN (the only approval location — there is no Settings/Approvals page). Find by title or taskId.",
+      description: "Mark an ASSIGNED chore as done — it lands in the Tasks screen's \"Needs approval\" section; points move only when a parent approves it THERE with their PIN (the only approval location — there is no Settings/Approvals page). Use this ONLY for a chore assigned to one person: an open/up-for-grabs chore (including one that went late) must be CLAIMED from the Tasks screen, and a crew chore needs every member to join and check in from the Tasks screen or the kid board. A grown-up's own chore is completed in the Tasks screen, never from chat. Find by title or taskId.",
       parameters: {
         type: "object",
         properties: {
@@ -649,67 +994,105 @@ const TOOLS: Tool[] = [
         },
       },
     },
-    handler: async (args: any) => {
+    handler: async (args: any, context) => {
       const taskId = args.taskId !== undefined ? Number(args.taskId) : undefined;
       const title = args.title ? String(args.title).trim() : undefined;
       const assignee = args.assignee ? String(args.assignee).trim().toLowerCase() : undefined;
       if (!taskId && !title) return summarize({ ok: false, error: "Provide a title or taskId of the task to complete" });
+      if (!callerIsAdult(context?.caller)) return summarize(adultCallerRefusal());
       try {
-        let mirrored: any = null;
-        const result: Record<string, any> = await mutateSnapshot<any>((data) => {
-          const live = liveSnapshotTasks(data) as any[];
-          // Chat never moves points: only pending rows are completable, and a
-          // completion lands as a done-but-UNPAID row for the parent queue —
-          // the exact shape the claim route + tapCompletePending write.
-          const findIn = (pool: any[]): any => {
-            if (taskId !== undefined) {
-              const hit = pool.find((r: any) => Number(r.id) === taskId);
-              if (hit) return hit;
-            }
-            if (title) {
-              const t = title.toLowerCase();
-              let task = pool.find((r: any) => String(r.title).trim().toLowerCase() === t);
-              if (!task) task = pool.find((r: any) => String(r.title).trim().toLowerCase().includes(t));
-              if (task && assignee && !String(task.assignee || "").toLowerCase().includes(assignee)) {
-                const alt = pool.find((r: any) => String(r.title).trim().toLowerCase() === t && String(r.assignee || "").toLowerCase().includes(assignee));
-                if (alt) task = alt;
-              }
-              return task;
-            }
-            return undefined;
-          };
-          const task = findIn(live.filter((r: any) => !r.completed));
-          if (!task) {
-            // A queued row is completed, so the pending-only lookup can never
-            // see it — re-match against ALL rows and answer an already-queued
-            // completion with the honest queue refusal instead of not-found.
-            const queued = findIn(live);
-            if (queued?.pendingApproval && !queued.sentBackAt) {
-              return { data, result: { ok: false, error: "Already completed — waiting for parent approval" } };
-            }
-            return { data, result: { ok: false, error: `No pending task found${title ? ` matching "${title}"` : ""}${taskId !== undefined ? ` (taskId ${taskId})` : ""}` } };
+        const { data } = await readSnapshotWithRevision();
+        const live = liveSnapshotTasks(data) as any[];
+        // Chat never moves points: only pending rows are completable, and a
+        // completion lands as a done-but-UNPAID row for the parent queue —
+        // the exact shape the claim route + tapCompletePending write.
+        const findIn = (pool: any[]): any => {
+          if (taskId !== undefined) {
+            const hit = pool.find((r: any) => Number(r.id) === taskId);
+            if (hit) return hit;
           }
-          if (task.pendingApproval && !task.sentBackAt) return { data, result: { ok: false, error: "Already completed — waiting for parent approval" } };
-          const amount = Number(task.points) || 0;
-          const now = new Date().toISOString();
-          const next = {
-            ...task,
-            completed: true,
-            completedBy: task.assignee || "Unknown",
-            completedInWeek: weekKey(),
-            completedAt: now,
-            assigned: task.assignee ?? null,
-            pendingApproval: { byName: task.assignee || "Unknown", at: now, points: amount },
-            sentBackAt: null,
-          };
-          mirrored = next;
-          return { data: upsertSnapshotTask(data, next as any), result: { ok: true, taskId: Number(task.id), title: task.title, assignee: task.assignee, points: amount, queuedForApproval: true } };
-        });
-        if (result.ok) {
-          result.note = 'A parent approves it in the Tasks screen\'s "Needs approval" section — points only move on approval.';
-          if (mirrored) void mirrorTaskToCollection("upsert", mirrored);
+          if (title) {
+            const t = title.toLowerCase();
+            let task = pool.find((r: any) => String(r.title).trim().toLowerCase() === t);
+            if (!task) task = pool.find((r: any) => String(r.title).trim().toLowerCase().includes(t));
+            if (task && assignee && !String(task.assignee || "").toLowerCase().includes(assignee)) {
+              const alt = pool.find((r: any) => String(r.title).trim().toLowerCase() === t && String(r.assignee || "").toLowerCase().includes(assignee));
+              if (alt) task = alt;
+            }
+            return task;
+          }
+          return undefined;
+        };
+        const task = findIn(live.filter((r: any) => !r.completed));
+        if (!task) {
+          // A queued row is completed, so the pending-only lookup can never
+          // see it — re-match against ALL rows and answer an already-queued
+          // completion with the honest queue refusal instead of not-found.
+          const queued = findIn(live);
+          if (queued?.pendingApproval && !queued.sentBackAt) {
+            return summarize({ ok: false, error: "Already completed — waiting for parent approval" });
+          }
+          return summarize({ ok: false, error: `No pending task found${title ? ` matching "${title}"` : ""}${taskId !== undefined ? ` (taskId ${taskId})` : ""}` });
         }
-        return summarize(result);
+        if (task.pendingApproval && !task.sentBackAt) {
+          return summarize({ ok: false, error: "Already completed — waiting for parent approval" });
+        }
+        // Canonical classification, in this order: a crew chore and an
+        // open/up-for-grabs chore (including one that went late) are NOT
+        // completable from chat — they belong to the claim / crew flows.
+        if (isCrewTask(task as any)) {
+          return summarize({
+            ok: false,
+            reason: "assigned_only",
+            error: "That is a crew chore — every member joins and checks in from the Tasks screen or the kid board, and a parent approves the whole crew there.",
+          });
+        }
+        if (task.universal !== false || isSnatchable(task as any)) {
+          return summarize({
+            ok: false,
+            reason: "assigned_only",
+            error: "That chore is up for grabs — claim it from the Tasks screen (it pays the person who claims it), then a parent approves it there.",
+          });
+        }
+        const roster = await liveTaskRoster();
+        if (roster === null) {
+          return summarize({ ok: false, reason: "member_roster_unavailable", error: "member data unavailable — call get_family_members first" });
+        }
+        // The payee is the task's canonical owner, never the `assignee` the
+        // model typed (that argument only disambiguates a title search).
+        const owner = resolveLiveTaskMember(roster, task.assignee);
+        if (!owner) {
+          return summarize({
+            ok: false,
+            reason: "unknown_task_owner",
+            error: `The chore's owner ("${task.assignee || "unknown"}") is not on the family roster — nothing was changed.`,
+          });
+        }
+        // Option B (decided 2026-09-28): an adult-owned chore is no longer
+        // refused here. The pay/queue decision belongs to the claim seam,
+        // where it keys off `authentication` — chat ("internal") queues,
+        // the Tasks screen ("session"/"pin") pays. Role is deliberately not
+        // consulted, so a roster race cannot change the outcome.
+        const result = await runClaimTaskCommand(
+          context?.source ?? "hermes",
+          "complete",
+          Number(task.id),
+          owner,
+        );
+        if (!result.ok) {
+          return summarize(claimFailure(result.reason, "complete_task failed — nothing was changed"));
+        }
+        const written = (result.task ?? {}) as any;
+        return summarize({
+          ok: true,
+          taskId: Number(written.id ?? task.id),
+          title: written.title ?? task.title,
+          assignee: written.assignee ?? owner.name,
+          points: Number(written.points ?? task.points) || 0,
+          queuedForApproval: true,
+          note: 'A parent approves it in the Tasks screen\'s "Needs approval" section — points only move on approval.',
+          reconciled: result.reconciled,
+        });
       } catch (e: any) {
         return summarize({ ok: false, error: `complete_task failed: ${e?.message}` });
       }
@@ -1222,7 +1605,8 @@ const TOOLS: Tool[] = [
     },
     handler: async () => {
       const events = await mergedTodaysEvents();
-      const tasks = await livePendingTasks();
+      const taskRows = await livePendingTasks();
+      const tasks = taskRows ?? [];
       const mealRows = await liveMealRows();
       const meals = mealsForWeek(mealRows ?? [], localWeekStartISO());
       const today = localTodayISO();
@@ -1236,6 +1620,7 @@ const TOOLS: Tool[] = [
         today_weekday: todayWeekday,
         family_timezone: familyTimeZone(),
         ...(mealRows === null ? { meals_error: "meal data unavailable — do not guess" } : {}),
+        ...(taskRows === null ? { tasks_error: "task data unavailable — do not guess" } : {}),
         events: events.map((e) => ({ title: e.title, time: e.time, member: e.member, source: e.source })),
         pending_tasks: tasks.map((t: any) => ({
           title: t.title,
@@ -1281,7 +1666,7 @@ const TOOLS: Tool[] = [
       description: "Run the suggested action attached to a proactive suggestion. e.g. add a pantry item to the grocery list.",
       parameters: { type: "object", properties: { id: { type: "string", description: "Suggestion id" } }, required: ["id"] },
     },
-    handler: async (args) => {
+    handler: async (args, context) => {
       // C2 — no scopeDate filter: past-day suggestions must still be findable
       // by id (snoozed/older rows live on after midnight).
       const items = await db.selectPendingSuggestions({ limit: 50 });
@@ -1299,7 +1684,9 @@ const TOOLS: Tool[] = [
       }
       let result: string;
       try {
-        result = await tool.handler((payload.args as Record<string, any>) || {});
+        // The nested write inherits THIS call's source and caller — a task tool
+        // behind a suggestion is still attributed to the human who asked.
+        result = await tool.handler((payload.args as Record<string, any>) || {}, context);
       } catch (e: any) {
         return JSON.stringify({ ok: false, error: `Action failed: ${e?.message}`, tool: payload.tool });
       }
@@ -2170,7 +2557,11 @@ const TOOLS: Tool[] = [
       const member = String(match.fullName || match.name);
       return summarize({
         ok: true,
-        proposal: { tool: "adjust_points", args: { member, delta, reason } },
+        proposal: {
+          tool: "adjust_points",
+          operationId: createTaskOperationId(),
+          args: { member, delta, reason },
+        },
         message: `Ask the parent to confirm this adjustment with their PIN on the chat screen (${delta > 0 ? "+" : ""}${delta} pts to ${member}). Points have NOT moved yet — never state the adjustment as done.`,
       });
     },

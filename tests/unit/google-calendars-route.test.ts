@@ -9,7 +9,6 @@ const mocks = vi.hoisted(() => ({
   pruneCalendar: vi.fn(),
   ensureGoogleCollections: vi.fn(),
   verifySession: vi.fn(),
-  authorizeCurrentParentRequest: vi.fn(),
   withGoogleIntegrationOperation: vi.fn(),
 }));
 
@@ -33,10 +32,28 @@ vi.mock("@/lib/session", () => ({
   verifySession: mocks.verifySession,
 }));
 
-vi.mock("@/lib/server-auth", () => ({
-  verifyPinAgainstAnyMember: vi.fn(async () => null),
-  authorizeCurrentParentRequest: mocks.authorizeCurrentParentRequest,
+// The live PocketBase row mirrors the signed session so these route tests
+// exercise the REAL live-session gate (same role => same verdict) instead of a
+// mocked helper. The audit's `authorizeCurrentParentRequest` and the
+// remediation's `requireLiveSession` (behind authorizeAdminRequest) both go
+// through `verifySession` + `withAdmin`, so one PB seam covers both.
+vi.mock("@/lib/pb-auth", () => ({
+  withAdmin: async (fn: (pb: unknown) => Promise<unknown>) =>
+    fn({
+      collection: () => ({
+        getOne: async (id: string) => {
+          const session = await mocks.verifySession("live");
+          if (!session) throw { status: 404 };
+          return { id, name: session.name, role: session.role };
+        },
+      }),
+    }),
 }));
+
+vi.mock("@/lib/server-auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/server-auth")>();
+  return { ...actual, verifyPinAgainstAnyMember: vi.fn(async () => null) };
+});
 vi.mock("@/lib/google/integration-operation", () => ({
   withGoogleIntegrationOperation: mocks.withGoogleIntegrationOperation,
 }));
@@ -79,13 +96,6 @@ beforeEach(() => {
   for (const m of Object.values(mocks)) m.mockReset();
   mocks.verifySession.mockResolvedValue({ memberId: "m0", name: "Jeffery", role: "parent" });
   mocks.isGoogleConnected.mockResolvedValue(true);
-  mocks.authorizeCurrentParentRequest.mockImplementation(async (request: Request) => {
-    const token = (request.headers.get("cookie") || "").split(";").map((part) => part.trim()).find((part) => part.startsWith("consuela_session="))?.slice("consuela_session=".length) || "";
-    const session = await mocks.verifySession(token);
-    if (!session) return { ok: false, status: 401, error: "unauthorized" };
-    if (session.role !== "parent") return { ok: false, status: 403, error: "adult_only" };
-    return { ok: true };
-  });
   mocks.ensureGoogleCollections.mockResolvedValue([]);
   mocks.withGoogleIntegrationOperation.mockImplementation((fn: () => Promise<unknown>) => fn());
 });

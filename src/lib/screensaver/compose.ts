@@ -91,20 +91,30 @@ export function choreProgress(
   return { done, total: done + open };
 }
 
+function choreDigestLine(open: number, source?: string): string {
+  if (source === "unavailable") return "❓ Chores unavailable — do not guess";
+  if (source === "pb") {
+    return open === 0
+      ? "⚠️ Chore count from a backup copy"
+      : `⚠️ ${open} chore${open === 1 ? "" : "s"} — backup copy`;
+  }
+  return open === 0 ? "✅ No chores open" : `✅ ${open} chore${open === 1 ? "" : "s"} still open`;
+}
+
 /** ≤3 digest lines from today's stored BriefingSummary (see lib/consuela/briefing.ts). */
 export function briefingDigest(
   summary: {
     events?: unknown[];
     tasks?: unknown[];
     suggestions?: Array<{ title?: string }>;
+    taskSource?: string;
   } | null
 ): string[] {
   if (!summary) return [];
   const ev = summary.events?.length ?? 0;
-  const tk = summary.tasks?.length ?? 0;
   const lines = [
     ev === 0 ? "📅 No events today" : `📅 ${ev} event${ev === 1 ? "" : "s"} today`,
-    tk === 0 ? "✅ No chores open" : `✅ ${tk} chore${tk === 1 ? "" : "s"} still open`,
+    choreDigestLine(summary.tasks?.length ?? 0, summary.taskSource),
   ];
   const first = summary.suggestions?.[0]?.title;
   if (first) lines.push(`💡 ${first}`);

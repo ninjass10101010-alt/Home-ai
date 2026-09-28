@@ -42,6 +42,7 @@ vi.mock("@/db", () => ({
 vi.mock("@/components/briefing/hooks/useMorningBriefing", () => ({
   useMorningBriefing: () => ({ briefing: null, loading: false, ack: null, ackError: null }),
   briefingSectionsEmpty: () => true,
+  briefingShowsCard: () => false,
 }));
 
 const homeEventsMock = vi.hoisted(() => ({ upcomingImportant: [] as any[] }));

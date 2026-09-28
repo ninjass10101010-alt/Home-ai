@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withAdmin } from "@/lib/pb-auth";
 import { authorizeCurrentMemberRequest } from "@/lib/server-auth";
-import { isGatewayCollection, sanitizeClientRow, canWrite } from "@/lib/db-gateway";
+import { isSessionRole } from "@/lib/session-policy";
+import { isGatewayCollection, sanitizeClientRow, canWrite, writePolicy } from "@/lib/db-gateway";
 
 export const dynamic = "force-dynamic";
 
@@ -32,14 +33,21 @@ export async function GET(_request: NextRequest, ctx: Ctx) {
 
 export async function PATCH(request: NextRequest, ctx: Ctx) {
   const { collection, id } = await ctx.params;
-  if (!isGatewayCollection(collection)) {
+  const policy = writePolicy(collection);
+  if (!policy) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+  if (policy === "command") {
+    return NextResponse.json({ error: "command_only" }, { status: 403 });
   }
   // Middleware already 401s guests, but authorization must also live in the
   // route: writes are role-gated per collection (F2).
   const auth = await authorizeCurrentMemberRequest(request);
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status ?? 401 });
-  if (!canWrite(collection, auth.member?.role)) {
+  // `ServerMember.role` is a loose string; narrow it through the session
+  // policy so an unknown role can never authorize a write (fails closed).
+  const role = isSessionRole(auth.member?.role) ? auth.member.role : undefined;
+  if (!canWrite(collection, role)) {
     return NextResponse.json({ error: "adult_only" }, { status: 403 });
   }
   let parsed: Record<string, unknown>;
@@ -59,12 +67,19 @@ export async function PATCH(request: NextRequest, ctx: Ctx) {
 
 export async function DELETE(request: NextRequest, ctx: Ctx) {
   const { collection, id } = await ctx.params;
-  if (!isGatewayCollection(collection)) {
+  const policy = writePolicy(collection);
+  if (!policy) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+  if (policy === "command") {
+    return NextResponse.json({ error: "command_only" }, { status: 403 });
   }
   const auth = await authorizeCurrentMemberRequest(request);
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status ?? 401 });
-  if (!canWrite(collection, auth.member?.role)) {
+  // `ServerMember.role` is a loose string; narrow it through the session
+  // policy so an unknown role can never authorize a write (fails closed).
+  const role = isSessionRole(auth.member?.role) ? auth.member.role : undefined;
+  if (!canWrite(collection, role)) {
     return NextResponse.json({ error: "adult_only" }, { status: 403 });
   }
   try {

@@ -32,6 +32,16 @@ const API_EXEMPT = [
   // "family completes tasks but points don't show" bug.
   "/api/tasks/claim",
   "/api/tasks/approve",
+  // Parent-PIN gated ledger command (penalty / manual adjust). Like the
+  // approval route it self-authenticates on the member PIN so a guest device
+  // can never reach it, and it hard-requires role === "parent".
+  "/api/tasks/ledger",
+  // Reward redemption self-authenticates the member's PIN (and the parent PIN
+  // over 100pts) against PB server-side, the same trust model as the claim
+  // route above. Without the exemption a guest or auto-logged-out device 401s
+  // at the middleware before the PIN is ever checked, so a kid's redemption
+  // could never land and the points would never move.
+  "/api/rewards/redeem",
   "/api/members/verify",
 ];
 

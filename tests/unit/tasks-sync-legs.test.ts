@@ -1,8 +1,8 @@
-// F2 (continued) — POST /api/tasks/sync shares the same hole: any session
-// could overwrite the shared snapshot blob, whose `weekData` leg carries the
-// family's weekly points. Non-parent sessions may sync the tasks leg ONLY;
-// the weekData/rewards/penalties legs are ignored (not merged) and the
-// response says so via `ignoredLegs`. Parent behavior is unchanged.
+// F2 (continued) + Task 11 — POST /api/tasks/sync used to let any session
+// overwrite the shared snapshot blob. Every browser snapshot write is retired:
+// `tasks`/`weekData` → 410 LEGACY_SYNC_WRITE_ERROR, malformed JSON → 400
+// `invalid_body`, and any other valid object → 400 `invalid_body` too. No
+// rejection reaches PocketBase.
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { signSession, SESSION_COOKIE } from "@/lib/session";
@@ -29,23 +29,35 @@ function makePb() {
   };
 }
 
-const mocks = vi.hoisted(() => ({ withAdmin: vi.fn(), authorizeCurrentMemberRequest: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  withAdmin: vi.fn(),
+  ensureCurrentTaskWeek: vi.fn(),
+  reconcileTaskProjectionLocked: vi.fn(),
+}));
 vi.mock("@/lib/pb-auth", () => ({ withAdmin: (fn: any) => mocks.withAdmin(fn) }));
-vi.mock("@/lib/server-auth", () => ({ authorizeCurrentMemberRequest: mocks.authorizeCurrentMemberRequest }));
+vi.mock("@/lib/task-week-rollover", () => ({
+  ensureCurrentTaskWeek: mocks.ensureCurrentTaskWeek,
+}));
+vi.mock("@/lib/task-projection-reconciler", () => ({
+  reconcileTaskProjectionLocked: mocks.reconcileTaskProjectionLocked,
+}));
 
-import { GET, POST } from "@/app/api/tasks/sync/route";
+import { GET, LEGACY_SYNC_WRITE_ERROR, POST } from "@/app/api/tasks/sync/route";
 
 async function post(body: unknown, role?: string) {
+  return postRaw(JSON.stringify(body), role);
+}
+
+async function postRaw(rawBody: string, role?: string) {
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (role) {
     const token = await signSession({ memberId: "m1", name: "Kid", role });
     headers.cookie = `${SESSION_COOKIE}=${token}`;
   }
-  headers["x-test-current-role"] = role || "";
   const r = new NextRequest("http://x/api/tasks/sync", {
     method: "POST",
     headers,
-    body: JSON.stringify(body),
+    body: rawBody,
   });
   return POST(r);
 }
@@ -56,16 +68,47 @@ const POISONED = {
   rewards: [{ id: "evil-reward" }],
   penalties: [{ id: "evil-penalty" }],
   rewardsUpdatedAt: "2026-09-15T00:00:00.000Z",
+  penaltiesUpdatedAt: "2026-09-15T00:00:00.000Z",
   weeklyPrizes: [{ rank: 1, emoji: "🥇", text: "evil prize" }],
   weeklyPrizesStamp: "2026-09-15T00:00:00.000Z",
+  revision: "999",
+  operationReceipts: { evil: [] },
+  configOperationReceipts: { evil: {} },
+  pendingProjectionRepairs: [{ operationId: "evil", taskIds: [1], createdAt: "2026-09-15T00:00:00.000Z" }],
 };
 
 const EXISTING = {
   tasks: [{ id: "old" }],
   weekData: { weekStart: "2026-09-14", points: 5, history: [] },
   rewards: [{ id: "good-reward" }],
+  rewardsUpdatedAt: "2026-09-24T10:00:00.000Z",
   penalties: [{ id: "good-penalty" }],
-  rewardsUpdatedAt: "old-stamp",
+  penaltiesUpdatedAt: "2026-09-24T10:00:00.000Z",
+  weeklyPrizes: [{ id: "p1", rank: 1, emoji: "🥇", text: "good prize" }],
+  weeklyPrizesStamp: "2026-09-24T10:00:00.000Z",
+  revision: "17",
+  operationReceipts: {
+    canonical: [{
+      operationId: "canonical",
+      action: "approve",
+      taskId: 1,
+      createdAt: "2026-09-24T09:00:00.000Z",
+    }],
+  },
+  configOperationReceipts: {
+    canonical: {
+      kind: "rewards",
+      action: "replace",
+      updatedAt: "2026-09-24T09:00:00.000Z",
+      fingerprint: "a".repeat(64),
+    },
+  },
+  pendingProjectionRepairs: [{
+    operationId: "canonical-repair",
+    taskIds: [2],
+    createdAt: "2026-09-24T09:00:00.000Z",
+  }],
+  taskWeekStart: "2026-09-21",
 };
 
 beforeEach(() => {
@@ -75,58 +118,150 @@ beforeEach(() => {
   db.creates = [];
   mocks.withAdmin.mockReset();
   mocks.withAdmin.mockImplementation((fn: any) => fn(makePb()));
-  mocks.authorizeCurrentMemberRequest.mockReset();
-  mocks.authorizeCurrentMemberRequest.mockImplementation(async (request: Request) => {
-    const role = request.headers.get("x-test-current-role");
-    if (!role) return { ok: false, status: 401, error: "unauthorized" };
-    return { ok: true, member: { id: "m1", role } };
+  mocks.ensureCurrentTaskWeek.mockReset();
+  mocks.reconcileTaskProjectionLocked.mockReset();
+  mocks.ensureCurrentTaskWeek.mockResolvedValue({
+    reconciled: true,
+    weekStart: "2026-09-21",
+    revision: { revision: "1", updatedAt: "" },
+    currentWeekData: { weekStart: "2026-09-21", points: {}, streak: {}, lastActive: {}, history: [] },
+  });
+  mocks.reconcileTaskProjectionLocked.mockResolvedValue({
+    ok: true,
+    reconciled: true,
+    repaired: [],
+    failed: [],
+    weekData: null,
   });
 });
 
 describe("tasks/sync leg gating", () => {
-  it("child POST: ignores weekData/rewards/penalties, keeps the stored parent legs", async () => {
+  it("child task/week POST is retired without touching PB", async () => {
     db.rows = [{ id: "row1", data: EXISTING }];
     const res = await post(POISONED, "child");
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({
-      ok: true,
-      saved: true,
-      ignoredLegs: ["weekData", "rewards", "penalties", "weeklyPrizes", "weeklyPrizesStamp"],
-    });
-
-    expect(db.updates).toHaveLength(1);
-    const stored = db.updates[0].payload.data;
-    expect(stored.tasks).toEqual(POISONED.tasks);
-    // The parent-owned legs survive verbatim — a kid sync can never move points.
-    expect(stored.weekData).toEqual(EXISTING.weekData);
-    expect(stored.rewards).toEqual(EXISTING.rewards);
-    expect(stored.penalties).toEqual(EXISTING.penalties);
-    expect(stored.rewardsUpdatedAt).toBe(EXISTING.rewardsUpdatedAt);
-    // Weekly prize legs are not applied from a non-parent body either.
-    expect(stored.weeklyPrizes).toBeUndefined();
-    expect(stored.weeklyPrizesStamp).toBeUndefined();
+    expect(res.status).toBe(410);
+    expect(await res.json()).toEqual({ ok: false, error: LEGACY_SYNC_WRITE_ERROR });
+    expect(db.updates).toHaveLength(0);
+    expect(db.creates).toHaveLength(0);
   });
 
-  it("pet POST with no prior snapshot stores the tasks leg only", async () => {
+  it("pet task/week POST is retired without touching PB", async () => {
     const res = await post(POISONED, "pet");
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({
-      ok: true,
-      saved: true,
-      ignoredLegs: ["weekData", "rewards", "penalties", "weeklyPrizes", "weeklyPrizesStamp"],
-    });
-    expect(db.creates).toHaveLength(1);
-    // Non-tasks legs — including weekly prizes — are never written.
-    expect(db.creates[0].data).toEqual({ tasks: POISONED.tasks });
+    expect(res.status).toBe(410);
+    expect(await res.json()).toEqual({ ok: false, error: LEGACY_SYNC_WRITE_ERROR });
+    expect(db.updates).toHaveLength(0);
+    expect(db.creates).toHaveLength(0);
   });
 
-  it("parent POST is byte-identical: full body stored verbatim, response unchanged", async () => {
+  it("parent task/week POST is retired without touching PB", async () => {
     db.rows = [{ id: "row1", data: EXISTING }];
     const res = await post(POISONED, "parent");
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, saved: true });
-    expect(db.updates).toHaveLength(1);
-    expect(db.updates[0].payload.data).toEqual(POISONED);
+    expect(res.status).toBe(410);
+    expect(await res.json()).toEqual({ ok: false, error: LEGACY_SYNC_WRITE_ERROR });
+    expect(db.updates).toHaveLength(0);
+    expect(db.creates).toHaveLength(0);
+  });
+
+  it("a tasks-only body is 410 before any PB access or partial import", async () => {
+    db.rows = [{ id: "row1", data: EXISTING }];
+    const res = await post({ tasks: [{ id: 42, title: "Forged" }] }, "parent");
+    expect(res.status).toBe(410);
+    expect(await res.json()).toEqual({ ok: false, error: LEGACY_SYNC_WRITE_ERROR });
+    expect(mocks.withAdmin).not.toHaveBeenCalled();
+    expect(db.updates).toHaveLength(0);
+    expect(db.creates).toHaveLength(0);
+  });
+
+  it("a weekData-only body is 410 before any PB access or partial import", async () => {
+    db.rows = [{ id: "row1", data: EXISTING }];
+    const res = await post({ weekData: { points: { Alex: 9999 } } }, "parent");
+    expect(res.status).toBe(410);
+    expect(await res.json()).toEqual({ ok: false, error: LEGACY_SYNC_WRITE_ERROR });
+    expect(mocks.withAdmin).not.toHaveBeenCalled();
+    expect(db.updates).toHaveLength(0);
+    expect(db.creates).toHaveLength(0);
+  });
+
+  it("a body that merely OWNS tasks — even set to null — is 410, not 400", async () => {
+    db.rows = [{ id: "row1", data: EXISTING }];
+    for (const role of ["parent", "child", "pet"] as const) {
+      const res = await post({ tasks: null }, role);
+      expect(res.status).toBe(410);
+      expect(await res.json()).toEqual({ ok: false, error: LEGACY_SYNC_WRITE_ERROR });
+    }
+    expect(mocks.withAdmin).not.toHaveBeenCalled();
+    expect(db.updates).toHaveLength(0);
+    expect(db.creates).toHaveLength(0);
+  });
+
+  it("a body that merely OWNS weekData — even set to null — is 410, not 400", async () => {
+    db.rows = [{ id: "row1", data: EXISTING }];
+    for (const role of ["parent", "child", "pet"] as const) {
+      const res = await post({ weekData: null }, role);
+      expect(res.status).toBe(410);
+      expect(await res.json()).toEqual({ ok: false, error: LEGACY_SYNC_WRITE_ERROR });
+    }
+    expect(mocks.withAdmin).not.toHaveBeenCalled();
+    expect(db.updates).toHaveLength(0);
+    expect(db.creates).toHaveLength(0);
+  });
+
+  it("null task/week keys beside other legs are still 410 with no partial import", async () => {
+    db.rows = [{ id: "row1", data: EXISTING }];
+    const res = await post({ tasks: null, weekData: null, rewards: POISONED.rewards }, "parent");
+    expect(res.status).toBe(410);
+    expect(await res.json()).toEqual({ ok: false, error: LEGACY_SYNC_WRITE_ERROR });
+    expect(mocks.withAdmin).not.toHaveBeenCalled();
+    expect(db.updates).toHaveLength(0);
+    expect(db.creates).toHaveLength(0);
+  });
+
+  it("a live session is still required before the legacy leg is judged", async () => {
+    const res = await post({ tasks: null }, undefined);
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ ok: false, error: "unauthorized" });
+    expect(mocks.withAdmin).not.toHaveBeenCalled();
+  });
+
+  it("malformed sync JSON is 400 invalid_body with zero snapshot access", async () => {
+    db.rows = [{ id: "row1", data: EXISTING }];
+    const res = await postRaw("not-json", "parent");
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ ok: false, error: "invalid_body" });
+    expect(mocks.withAdmin).not.toHaveBeenCalled();
+    expect(db.updates).toHaveLength(0);
+    expect(db.creates).toHaveLength(0);
+  });
+
+  it("a valid non-task body is 400 invalid_body — this route is not a migration endpoint", async () => {
+    db.rows = [{ id: "row1", data: EXISTING }];
+    const res = await post({ rewards: [] }, "parent");
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ ok: false, error: "invalid_body" });
+    expect(mocks.withAdmin).not.toHaveBeenCalled();
+    expect(db.updates).toHaveLength(0);
+    expect(db.creates).toHaveLength(0);
+  });
+
+  it("the config compatibility legs are refused exactly like any other non-task body", async () => {
+    const res = await post({
+      rewards: POISONED.rewards,
+      rewardsUpdatedAt: POISONED.rewardsUpdatedAt,
+      penalties: POISONED.penalties,
+      penaltiesUpdatedAt: POISONED.penaltiesUpdatedAt,
+      weeklyPrizes: POISONED.weeklyPrizes,
+      weeklyPrizesStamp: POISONED.weeklyPrizesStamp,
+    }, "parent");
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ ok: false, error: "invalid_body" });
+    expect(mocks.withAdmin).not.toHaveBeenCalled();
+  });
+
+  it("a non-object body is 400 invalid_body with zero PB access", async () => {
+    const res = await post([{ tasks: [] }], "parent");
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ ok: false, error: "invalid_body" });
+    expect(mocks.withAdmin).not.toHaveBeenCalled();
   });
 
   it("guest POST → 401 unauthorized, PB untouched", async () => {
@@ -136,27 +271,176 @@ describe("tasks/sync leg gating", () => {
     expect(mocks.withAdmin).not.toHaveBeenCalled();
   });
 
-  it("uses the current PB role for the privileged branch", async () => {
-    db.rows = [{ id: "row1", data: EXISTING }];
-    mocks.authorizeCurrentMemberRequest.mockResolvedValueOnce({ ok: true, member: { id: "m1", role: "child" } });
-    const child = await post(POISONED, "parent");
-    expect(child.status).toBe(200);
-    expect(db.updates[0].payload.data.weekData).toEqual(EXISTING.weekData);
-  });
-
-  it("returns 401 for a deleted current member and 503 for identity outage", async () => {
-    mocks.authorizeCurrentMemberRequest.mockResolvedValueOnce({ ok: false, status: 401, error: "unauthorized" });
-    expect((await post(POISONED, "parent")).status).toBe(401);
-    mocks.authorizeCurrentMemberRequest.mockResolvedValueOnce({ ok: false, status: 503, error: "identity_unavailable" });
-    expect((await post(POISONED, "parent")).status).toBe(503);
-    expect(db.updates).toHaveLength(0);
-    expect(db.creates).toHaveLength(0);
-  });
-
-  it("GET returns the snapshot (unchanged)", async () => {
+  it("GET returns the snapshot after successful reconciliation", async () => {
     db.rows = [{ id: "row1", data: { tasks: [{ id: "t1" }] } }];
     const res = await GET();
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, snapshot: { tasks: [{ id: "t1" }] } });
+    expect(await res.json()).toEqual({
+      ok: true,
+      snapshot: { tasks: [{ id: "t1" }] },
+      reconciled: true,
+      repaired: [],
+      failed: [],
+      warnings: [],
+    });
+    expect(mocks.reconcileTaskProjectionLocked).toHaveBeenCalledOnce();
+  });
+
+  it("GET returns a verified snapshot with a repair-level pending state", async () => {
+    db.rows = [{ id: "row1", data: { tasks: [{ id: "t1" }] } }];
+    mocks.reconcileTaskProjectionLocked.mockResolvedValue({
+      ok: false,
+      reconciled: false,
+      repaired: ["task:1:completion"],
+      failed: ["approval:pending", "secret:raw-row"],
+      weekData: null,
+    });
+    const res = await GET();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      ok: false,
+      snapshot: { tasks: [{ id: "t1" }] },
+      reconciled: false,
+      repaired: ["task:1:completion"],
+      failed: ["approval:pending"],
+    });
+  });
+});
+
+describe("tasks/sync repair status contract", () => {
+  it("503 rollover_unavailable when the rollover leg throws", async () => {
+    mocks.ensureCurrentTaskWeek.mockRejectedValue(new Error("pb down"));
+    const res = await GET();
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({
+      ok: false,
+      error: "rollover_unavailable",
+      reconciled: false,
+      failed: ["rollover:unavailable"],
+      snapshot: null,
+    });
+    expect(mocks.reconcileTaskProjectionLocked).not.toHaveBeenCalled();
+  });
+
+  it("503 rollover_unavailable when the rollover leg produces no current week", async () => {
+    mocks.ensureCurrentTaskWeek.mockResolvedValue({
+      reconciled: true,
+      weekStart: "",
+      revision: { revision: "1", updatedAt: "" },
+      currentWeekData: null,
+    });
+    const res = await GET();
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({
+      error: "rollover_unavailable",
+      failed: ["rollover:unavailable"],
+    });
+    expect(mocks.reconcileTaskProjectionLocked).not.toHaveBeenCalled();
+  });
+
+  it("503 projection_reconcile_unavailable when the locked reconciler throws", async () => {
+    mocks.reconcileTaskProjectionLocked.mockRejectedValue(new Error("lock timeout"));
+    const res = await GET();
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({
+      error: "projection_reconcile_unavailable",
+      failed: ["projection:unavailable"],
+      snapshot: null,
+    });
+  });
+
+  it("503 snapshot_unavailable when the snapshot leg cannot be read", async () => {
+    db.rows = [];
+    mocks.withAdmin.mockImplementation((fn: any) => fn({
+      collection: () => ({ getFullList: async () => { throw new Error("snapshot read failed"); } }),
+    }));
+    const res = await GET();
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({
+      error: "snapshot_unavailable",
+      failed: ["snapshot:read"],
+      snapshot: null,
+    });
+  });
+
+  it("200 repair-level: a task collection read failure still serves the snapshot", async () => {
+    db.rows = [{ id: "row1", data: { tasks: [{ id: "t1" }] } }];
+    mocks.reconcileTaskProjectionLocked.mockResolvedValue({
+      ok: false,
+      reconciled: false,
+      repaired: [],
+      failed: ["tasks:read"],
+      weekData: null,
+    });
+    const res = await GET();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: false,
+      error: "projection_reconcile_pending",
+      snapshot: { tasks: [{ id: "t1" }] },
+      reconciled: false,
+      repaired: [],
+      failed: ["tasks:read"],
+      warnings: [],
+    });
+  });
+
+  it("200 repair-level: a concurrent task change is reported as tasks:changed", async () => {
+    db.rows = [{ id: "row1", data: { tasks: [{ id: "t1" }] } }];
+    mocks.reconcileTaskProjectionLocked.mockResolvedValue({
+      ok: false,
+      reconciled: false,
+      repaired: ["approval:projection"],
+      failed: ["tasks:changed"],
+      weekData: null,
+    });
+    const res = await GET();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      ok: false,
+      error: "projection_reconcile_pending",
+      snapshot: { tasks: [{ id: "t1" }] },
+      reconciled: false,
+      repaired: ["approval:projection"],
+      failed: ["tasks:changed"],
+      warnings: [],
+    });
+  });
+
+  it("200 repair-level: an unreconciled rollover leg is surfaced, not a 503", async () => {
+    db.rows = [{ id: "row1", data: { tasks: [{ id: "t1" }] } }];
+    mocks.ensureCurrentTaskWeek.mockResolvedValue({
+      reconciled: false,
+      weekStart: "2026-09-21",
+      revision: { revision: "1", updatedAt: "" },
+      currentWeekData: { weekStart: "2026-09-21", points: {}, streak: {}, lastActive: {}, history: [] },
+    });
+    const res = await GET();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      ok: false,
+      reconciled: false,
+      failed: ["rollover:pending"],
+    });
+    expect(mocks.reconcileTaskProjectionLocked).toHaveBeenCalledOnce();
+  });
+
+  it("200 repair-level: isolated week warnings keep the snapshot available", async () => {
+    db.rows = [{ id: "row1", data: { tasks: [{ id: "t1" }] } }];
+    mocks.reconcileTaskProjectionLocked.mockResolvedValue({
+      ok: true,
+      reconciled: true,
+      repaired: [],
+      failed: [],
+      warnings: ["week:unrelated_row"],
+      weekData: null,
+    });
+    const res = await GET();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      ok: true,
+      reconciled: true,
+      warnings: ["week:unrelated_row"],
+    });
   });
 });

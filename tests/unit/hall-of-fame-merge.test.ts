@@ -1,20 +1,25 @@
 // @vitest-environment jsdom
 // loadHallOfFameMerged — the PB→local hall downlink (final-review I1).
-// Merge rules, keyed by `member + weekStart`:
-//  - local entries win points/emoji/rank/prize (the rollover device froze them);
-//  - a PB row's `celebrated === true` ALWAYS wins over the local flag
-//    (server authority for the ceremony gate — the /api/hall-of-fame/celebrate
-//    claim lives server-side);
-//  - PB rows unknown to local are adopted (cross-device enshrinement);
-//  - the merged list is persisted with saveHallOfFame() and returned.
+// The SERVER is the authority, keyed by `member + weekStart`:
+//  - the server's fields win — points/emoji/rank/prize and the `celebrated`
+//    ceremony flag all come from PocketBase, because both the enshrinement and
+//    the /api/hall-of-fame/celebrate claim are server-owned;
+//  - a server list of ≥1 row REPLACES the local copy (and is persisted with
+//    saveHallOfFame()), so a stale local row can never outlive the server;
+//  - an empty or unreadable server read keeps the local hall — a transient
+//    outage must never blank the board;
+//  - PB rows without a member or weekStart are skipped, not adopted.
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const selectHallOfFame = vi.hoisted(() => vi.fn(async () => [] as any[]));
-vi.mock("@/db", () => ({ db: { selectHallOfFame } }));
+const listArchivedWeeks = vi.hoisted(() => vi.fn(async () => [] as any[]));
+vi.mock("@/db", () => ({ db: { selectHallOfFame, listArchivedWeeks } }));
 
 import {
   loadHallOfFameMerged,
   loadHallOfFame,
+  loadPreviousWeekRanksMerged,
+  saveCurrentWeekRanksForNextWeek,
   saveHallOfFame,
   uncelebratedWinFor,
 } from "@/lib/task-utils";
@@ -33,6 +38,8 @@ beforeEach(() => {
   localStorage.clear();
   selectHallOfFame.mockReset();
   selectHallOfFame.mockResolvedValue([]);
+  listArchivedWeeks.mockReset();
+  listArchivedWeeks.mockResolvedValue([]);
 });
 
 describe("loadHallOfFameMerged", () => {
@@ -67,13 +74,13 @@ describe("loadHallOfFameMerged", () => {
     expect(loadHallOfFame()[0].celebrated).toBe(true);
   });
 
-  it("a local celebrated=true survives a PB row that has never been claimed", async () => {
+  it("uses the server celebration flag over a stale local claim", async () => {
     saveHallOfFame([{ ...LOCAL_WIN, celebrated: true }]);
-    selectHallOfFame.mockResolvedValue([{ ...LOCAL_WIN }]); // PB row behind (no flag)
+    selectHallOfFame.mockResolvedValue([{ ...LOCAL_WIN }]);
 
     const merged = await loadHallOfFameMerged();
 
-    expect(merged[0].celebrated).toBe(true);
+    expect(merged[0].celebrated).toBeUndefined();
   });
 
   it("adopts PB rows the local hall doesn't know (cross-device enshrinement)", async () => {
@@ -104,7 +111,7 @@ describe("loadHallOfFameMerged", () => {
     expect(loadHallOfFame().some((e) => e.member === "Rebecca")).toBe(true);
   });
 
-  it("local fields win points/emoji/rank/prize against a stale PB row", async () => {
+  it("uses server fields over a stale local row", async () => {
     saveHallOfFame([LOCAL_WIN]);
     selectHallOfFame.mockResolvedValue([
       { ...LOCAL_WIN, points: 1, prize: null, emoji: "❓", rank: 3 },
@@ -115,11 +122,11 @@ describe("loadHallOfFameMerged", () => {
     expect(merged).toHaveLength(1);
     expect(merged[0]).toMatchObject({
       member: "Caspian G",
-      emoji: "🦊",
-      points: 42,
-      rank: 1,
-      prize: "Picks the movie",
+      emoji: "❓",
+      points: 1,
+      rank: 3,
     });
+    expect(merged[0].prize).toBeUndefined();
   });
 
   it("skips malformed PB rows (no member/weekStart) instead of adopting junk", async () => {
@@ -136,7 +143,7 @@ describe("loadHallOfFameMerged", () => {
     expect(merged[0].member).toBe("Caspian G");
   });
 
-  it("keeps local order for known entries and appends adopted rows after", async () => {
+  it("replaces local rows with the server-backed list", async () => {
     const olderLocal: HallOfFameEntry = {
       member: "Emily G",
       emoji: "👧",
@@ -151,6 +158,29 @@ describe("loadHallOfFameMerged", () => {
 
     const merged = await loadHallOfFameMerged();
 
-    expect(merged.map((e) => e.member)).toEqual(["Emily G", "Caspian G", "Rebecca"]);
+    expect(merged.map((e) => e.member)).toEqual(["Rebecca"]);
+  });
+});
+
+describe("loadPreviousWeekRanksMerged", () => {
+  it("uses the newest prior archived week from the server", async () => {
+    listArchivedWeeks.mockResolvedValue([
+      { weekStart: "2026-08-31", points: JSON.stringify({ Alex: 9, Bailey: 4 }) },
+      { weekStart: "2026-09-07", points: JSON.stringify({ Alex: 5, Bailey: 5, Caspian: 2 }) },
+      { weekStart: "2026-09-14", points: JSON.stringify({ Alex: 100 }) },
+    ]);
+
+    const ranks = await loadPreviousWeekRanksMerged("2026-09-14");
+
+    expect(ranks).toEqual({ Alex: 1, Bailey: 1, Caspian: 3 });
+  });
+
+  it("falls back to the local rank cache when the server read fails", async () => {
+    saveCurrentWeekRanksForNextWeek([{ name: "Local", rank: 2 }]);
+    listArchivedWeeks.mockRejectedValue(new Error("offline"));
+
+    const ranks = await loadPreviousWeekRanksMerged("2026-09-14");
+
+    expect(ranks).toEqual({ Local: 2 });
   });
 });

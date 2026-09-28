@@ -36,6 +36,8 @@ vi.mock("@/db", () => ({
 
 import TasksPage from "@/app/tasks/page";
 import { todayMondayISO, todayISO } from "@/lib/task-utils";
+import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-operation-outbox";
+import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 
 const MONDAY = todayMondayISO();
 
@@ -78,18 +80,28 @@ afterEach(() => {
 });
 
 const approveCalls: any[] = [];
+let responseCounts: { paid?: number; cleared?: number } | null = null;
+
+// The teardown unmounts the root INSIDE act() BEFORE the DOM is wiped. The
+// portaled Modal keeps a 150ms exit timer; clearing document.body out from
+// under a live React tree made the timer fire into a detached node and threw
+// two unhandled NotFoundError exceptions into the run.
+afterEach(async () => {
+  if (activeRoot) {
+    await act(async () => { activeRoot!.unmount(); });
+    activeRoot = null;
+  }
+  document.body.innerHTML = "";
+});
 
 beforeEach(() => {
-  // Unmount BEFORE the body is wiped: the Add-task modal renders through a
-  // portal whose container is a child of <body>. Clearing the body first left
-  // React removing a node that was no longer a child → uncaught jsdom
-  // NotFoundError (code 8) which made `npm test` exit non-zero despite every
-  // test passing.
-  activeRoot?.unmount?.();
-  activeRoot = null;
   document.body.innerHTML = "";
   localStorage.clear();
+  __resetTaskOutboxForTests();
+  __resetTaskCommandCredentialsForTests();
+
   approveCalls.length = 0;
+  responseCounts = null;
   // verifyPinRemote answers ok for the parent, wrongPin for the kids.
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -111,8 +123,8 @@ beforeEach(() => {
         status: 200,
         json: async () => ({
           success: true,
-          paid: n,
-          cleared: n,
+           paid: responseCounts?.paid ?? n,
+           cleared: responseCounts?.cleared ?? n,
           skipped: 0,
           weekData: {
             weekStart: MONDAY,
@@ -152,14 +164,14 @@ describe("Needs-approval — Approve all (one parent PIN)", () => {
     await act(async () => { confirm!.click(); });
     await settle();
 
+    // The ledger is the SERVER's weekData and nothing else: one command, one
+    // acknowledgment, both rows paid in one write.
     const week = storedWeek();
     expect(week.points["Caspian Garcia"]).toBe(6);
     expect(week.points["Aurora Garcia"]).toBe(8);
     expect(week.history.filter((t: any) => t.type === "earn")).toHaveLength(2);
-    // The queue is gone — every row cleared its pendingApproval.
-    const tasks = JSON.parse(localStorage.getItem("consuela-tasks") || "[]");
-    expect(tasks.every((t: any) => !t.pendingApproval)).toBe(true);
-    expect(el.textContent).not.toContain("Needs approval");
+    // The outbox is empty — the command was acknowledged, not retried.
+    expect(listTaskOutbox()).toHaveLength(0);
 
     // Task 8: exactly one POST, carrying every visible pending id + credentials.
     expect(approveCalls).toHaveLength(1);
@@ -167,6 +179,28 @@ describe("Needs-approval — Approve all (one parent PIN)", () => {
     expect([...approveCalls[0].taskIds].sort((a, b) => a - b)).toEqual([101, 102]);
     expect(approveCalls[0].memberName).toBe("Rebecca (Mom)");
     expect(approveCalls[0].pin).toBe("0202");
+    expect(approveCalls[0].operationId).toEqual(expect.any(String));
+  });
+
+  it("says what was queued, never a paid count the server has not confirmed", async () => {
+    responseCounts = { paid: 2, cleared: 1 };
+    seedPendingTaps();
+    const el = await renderAsync(<TasksPage />);
+    await settle();
+    const approveAll = [...el.querySelectorAll("button")].find((b) => /Approve all/i.test(b.textContent || ""));
+    await act(async () => { approveAll!.click(); });
+    await settle();
+    const pinInput = document.querySelector('input[aria-label="Parent PIN"]') as HTMLInputElement;
+    await act(async () => { setInput(pinInput, "0202"); });
+    const dlg = document.querySelector('[role="dialog"]');
+    const confirm = [...dlg!.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Approve all");
+    await act(async () => { confirm!.click(); });
+    await settle();
+    // The pre-confirmation copy is honest: it names the queued count and
+    // never claims a paid total the acknowledgment has not delivered.
+    expect(el.textContent || document.body.textContent).toContain("Approving 2 tapped tasks");
+    expect(el.textContent || document.body.textContent).toContain("points land when the family server confirms");
+    expect(el.textContent || document.body.textContent).not.toContain("tapped task paid");
   });
 
   it("a wrong parent PIN approves NOTHING", async () => {

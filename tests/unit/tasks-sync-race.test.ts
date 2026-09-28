@@ -73,7 +73,7 @@ const mocks = vi.hoisted(() => ({ withAdmin: vi.fn(), authorizeCurrentMemberRequ
 vi.mock("@/lib/pb-auth", () => ({ withAdmin: (fn: any) => mocks.withAdmin(fn) }));
 vi.mock("@/lib/server-auth", () => ({ authorizeCurrentMemberRequest: mocks.authorizeCurrentMemberRequest }));
 
-import { POST } from "@/app/api/tasks/sync/route";
+import { LEGACY_SYNC_WRITE_ERROR, POST } from "@/app/api/tasks/sync/route";
 import { __resetKeyedLockForTests } from "@/lib/keyed-lock";
 
 async function post(body: unknown, role: string) {
@@ -124,48 +124,24 @@ beforeEach(() => {
 });
 
 describe("tasks/sync read-modify-write atomicity", () => {
-  it("a kid's tasks-leg sync interleaved with a parent's full write NEVER resurrects the parent's old legs", async () => {
-    const parentBody = {
-      tasks: [{ id: "p1", title: "Parent chore" }],
-      weekData: { weekStart: "2026-09-14", points: { Caspian: 20 }, history: [] },
-      rewards: [{ id: "new-reward" }],
-      penalties: [],
-      rewardsUpdatedAt: "new-stamp",
-    };
-    const kidBody = {
-      tasks: [{ id: "k1", title: "Kid chore" }],
-      // Poison legs a kid must never own — the merge must ignore them.
+  it("rejects stale parent and child task/week bodies without PB access", async () => {
+    const before = h.snapshot();
+
+    const parentRes = await post({
+      tasks: [{ id: 1, title: "Stale parent" }],
       weekData: { weekStart: "2026-09-14", points: { Alex: 999 }, history: [] },
-    };
+    }, "parent");
+    const childRes = await post({
+      tasks: [{ id: 2, title: "Stale child" }],
+      weekData: { weekStart: "2026-09-14", points: { Alex: 999 }, history: [] },
+    }, "child");
 
-    // Parent first, kid second — with the lock the parent's section runs to
-    // completion before the kid's read, which is the whole point. The lock is
-    // FIFO by ACQUISION, so launching both posts at once races on
-    // signSession/verifySession timing and the kid can occasionally win the
-    // lock (then the parent's verbatim full-body write legitimately lands
-    // last, flipping the tasks-leg assertion). Force the ordering the
-    // assertions encode: launch the kid only once the parent's snapshot read
-    // is parked — i.e. the parent already holds the keyed lock.
-    const parentP = post(parentBody, "parent");
-    let guard = 0;
-    while (h.count("read") < 1) {
-      if (guard++ > 200) throw new Error("parent never reached the snapshot read");
-      await tick();
-    }
-    const kidP = post(kidBody, "child");
-    const [parentRes, kidRes] = await drive(
-      [["read", 0], ["read", 1], ["write", 0], ["write", 1]],
-      [parentP, kidP]
-    );
-    expect(parentRes.status).toBe(200);
-    expect(kidRes.status).toBe(200);
-
-    const stored = h.snapshot();
-    // The parent's fresh legs SURVIVE the interleaved kid write…
-    expect(stored.weekData.points).toEqual({ Caspian: 20 });
-    expect(stored.rewards).toEqual([{ id: "new-reward" }]);
-    expect(stored.rewardsUpdatedAt).toBe("new-stamp");
-    // …and the kid's tasks leg landed too (its poison legs ignored).
-    expect(stored.tasks).toEqual([{ id: "k1", title: "Kid chore" }]);
+    expect(parentRes.status).toBe(410);
+    expect(childRes.status).toBe(410);
+    expect(await parentRes.json()).toEqual({ ok: false, error: LEGACY_SYNC_WRITE_ERROR });
+    expect(await childRes.json()).toEqual({ ok: false, error: LEGACY_SYNC_WRITE_ERROR });
+    expect(h.snapshot()).toEqual(before);
+    expect(h.count("read")).toBe(0);
+    expect(h.count("write")).toBe(0);
   });
 });

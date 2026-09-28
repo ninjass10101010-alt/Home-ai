@@ -83,7 +83,13 @@ vi.mock("@/components/briefing/hooks/useMorningBriefing", () => ({
     retrying: briefingState.retrying,
     retry: vi.fn(),
   }),
+  // BOTH predicates are exported by the merged hook and the slot/widget each
+  // read one of them; dropping either makes this file fail to load. Until the
+  // dedicated `showsCard` flag lands (Task 7), `briefingShowsCard` is the
+  // complement of `emptySections` — i.e. "something to show, nothing to admit".
   briefingSectionsEmpty: () => briefingState.emptySections,
+  briefingShowsCard: () => !briefingState.emptySections,
+  briefingTaskSourceNote: () => null,
 }));
 
 vi.mock("@/hooks/useHomeEvents", () => ({ useHomeEvents: () => ({ upcomingImportant: [] }) }));

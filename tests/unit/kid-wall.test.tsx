@@ -52,8 +52,6 @@ const store = vi.hoisted(() => ({
   week: { weekStart: "2026-09-01", points: {} as Record<string, number>, streak: {}, lastActive: {}, history: [] as any[] },
   saveTasks: vi.fn(async (_tasks: any[]) => {}),
   saveWeekData: vi.fn(async (_week: any) => {}),
-  syncTasksToPB: vi.fn(async (_tasks: any[]) => {}),
-  syncWeekDataToPB: vi.fn(async (_week: any) => {}),
 }));
 
 vi.mock("@/lib/task-utils", () => ({
@@ -69,8 +67,6 @@ vi.mock("@/lib/task-utils", () => ({
   getThisWeeksCompletedTasks: (tasks: any[]) => tasks.filter((t) => t.completed),
   getThisWeeksCompletedDates: () => [],
   calculateRealStreak: () => 0,
-  syncTasksToPB: store.syncTasksToPB,
-  syncWeekDataToPB: store.syncWeekDataToPB,
   // The REAL age predicates (mirrored from the safety-test harness):
   completesWithoutPin: (role: string | undefined, age: number | undefined, task: any) =>
     role === "child" &&
@@ -156,11 +152,14 @@ vi.mock("@/hooks/useAtmosphericTheme", () => ({
   }),
 }));
 
+import { __resetTaskOutboxForTests, listTaskOutbox } from "@/lib/task-operation-outbox";
+import { __resetTaskCommandCredentialsForTests } from "@/lib/task-command-queue";
 import KidHome from "@/modes/kid/KidHome";
 
 const QUEST = { id: 7, title: "Feed the dog", points: 10, assignee: "Caspian", completed: false };
 
 let activeRoot: Root | null = null;
+let fetchMock = vi.fn();
 
 async function renderAsync(ui: ReactElement): Promise<HTMLElement> {
   const el = document.createElement("div");
@@ -203,8 +202,22 @@ function verifyFetch(ok: boolean) {
         ? { ok: true, json: async () => ({ member: { name: "Caspian", role: "child" } }) }
         : { ok: false, status: 401, json: async () => ({}) };
     }
-    return { ok: true, status: 200, json: async () => ({}) };
+    // The completion command is left un-acknowledged (503) so this suite can
+    // assert the QUEUED command the pad/tap produced — the row is the
+    // acknowledgment's write, never a local one.
+    if (String(input) === "/api/tasks/claim") {
+      return { ok: false, status: 503, json: async () => ({}) };
+    }
+    return { ok: true, status: 200, json: async () => ({ snapshot: null, reconciled: true }) };
   });
+}
+
+function expectNoStructuredTaskPush() {
+  const writes = (fetchMock.mock.calls as Array<[RequestInfo | URL, RequestInit | undefined]>)
+    .filter(([, init]) => init?.method && !["GET", "HEAD"].includes(String(init.method).toUpperCase()))
+    .map(([input, init]) => `${String(init!.method).toUpperCase()} ${String(input)}`);
+  expect(writes.filter((w) => /\/api\/tasks\/sync|\/api\/db\//.test(w))).toEqual([]);
+  expect(writes.filter((w) => !/^POST \/api\/(tasks\/|members\/verify$)/.test(w))).toEqual([]);
 }
 
 describe("KidHome on the wall (spec §6 amendment)", () => {
@@ -218,15 +231,16 @@ describe("KidHome on the wall (spec §6 amendment)", () => {
     store.tasks = [{ ...QUEST }];
     store.week = { weekStart: "2026-09-01", points: { Caspian: 20 }, streak: {}, lastActive: {}, history: [] };
     store.saveTasks.mockReset();
+    __resetTaskOutboxForTests();
+    __resetTaskCommandCredentialsForTests();
     store.saveWeekData.mockReset();
-    store.syncTasksToPB.mockClear();
-    store.syncWeekDataToPB.mockClear();
     vi.stubGlobal("matchMedia", vi.fn(() => ({
       matches: false,
       addEventListener: () => {}, removeEventListener: () => {},
       addListener: () => {}, removeListener: () => {},
     })));
-    vi.stubGlobal("fetch", verifyFetch(true));
+    fetchMock = verifyFetch(true);
+    vi.stubGlobal("fetch", fetchMock);
   });
 
   afterEach(() => {
@@ -260,19 +274,18 @@ describe("KidHome on the wall (spec §6 amendment)", () => {
     await tapQuest(el, "Feed the dog");
     await tapPadDigits("1", "2", "3", "4");
 
-    // The existing pending-approval contract lands: done-but-unpaid row.
-    expect(store.saveTasks).toHaveBeenCalled();
-    const saved = store.saveTasks.mock.calls.at(-1)![0];
-    const row = saved.find((t: any) => t.id === 7);
-    expect(row.completed).toBe(true);
-    expect(row.completedBy).toBe("Caspian Garcia");
-    expect(row.completedInWeek).toBe("2026-09-01");
-    expect(row.pendingApproval).toMatchObject({ byName: "Caspian Garcia", points: 10 });
+    // The wall pad drives the SAME durable command as the typed modal: the
+    // row is the acknowledgment's write, and no points move locally.
+    expect(listTaskOutbox()[0]).toMatchObject({
+      route: "/api/tasks/claim",
+      action: "complete",
+      payload: { taskId: 7, memberName: "Caspian Garcia" },
+    });
+    expect(store.saveTasks).not.toHaveBeenCalled();
     // No points move locally: week store untouched.
     expect(store.saveWeekData).not.toHaveBeenCalled();
-    expect(store.syncWeekDataToPB).not.toHaveBeenCalled();
     expect(store.week.points.Caspian).toBe(20);
-    expect(store.syncTasksToPB).toHaveBeenCalled();
+    expectNoStructuredTaskPush();
 
     // Celebration fires with the honest "on the way" copy, and the pad closes.
     const burst = document.querySelector('[aria-label^="Congratulations"]');
@@ -285,7 +298,8 @@ describe("KidHome on the wall (spec §6 amendment)", () => {
 
   it("wall + 10+ kid: a wrong PIN surfaces the error inside the pad and completes nothing", async () => {
     wallMock.wall = true;
-    vi.stubGlobal("fetch", verifyFetch(false));
+    fetchMock = verifyFetch(false);
+    vi.stubGlobal("fetch", fetchMock);
     const el = await renderAsync(<KidHome />);
     await settle();
 
@@ -316,11 +330,13 @@ describe("KidHome on the wall (spec §6 amendment)", () => {
     expect(document.body.textContent || "").not.toContain("Confirm it's you");
     expect(document.querySelector('input[aria-label="Your 4-digit PIN"]')).toBeNull();
 
-    // Pending contract lands exactly as off-wall.
-    expect(store.saveTasks).toHaveBeenCalled();
-    const row = store.saveTasks.mock.calls[0][0].find((t: any) => t.id === 7);
-    expect(row.completed).toBe(true);
-    expect(row.pendingApproval).toMatchObject({ byName: "Caspian Garcia", points: 10 });
+    // The same durable contract lands exactly as off-wall.
+    expect(listTaskOutbox()[0]).toMatchObject({
+      route: "/api/tasks/claim",
+      action: "complete",
+      payload: { taskId: 7 },
+    });
+    expect(store.saveTasks).not.toHaveBeenCalled();
     expect(store.week.points.Caspian).toBe(20);
     const burst = document.querySelector('[aria-label^="Congratulations"]');
     expect(burst!.getAttribute("aria-label")).toContain("on the way");

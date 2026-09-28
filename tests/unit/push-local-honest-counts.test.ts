@@ -42,9 +42,12 @@ vi.mock("@/db", () => ({
   },
 }));
 
+// Only the non-task migration collections survive here. The whole
+// `sync*ToPB` family is gone, so there is nothing left to spy on: a task, week
+// or ledger leg here would be a writer the outbox/command routes do not own,
+// and the Settings toast would report a persistence that never happened.
 vi.mock("@/lib/task-utils", () => ({
-  syncAllTasksToPB: async () => h.syncAllResult,
-  syncFamilyGoalToPB: async () => h.syncFamilyGoalResult,
+  syncFamilyGoalToPB: async () => ({}),
 }));
 
 import { pushLocalToPB } from "@/lib/push-local-to-pb";
@@ -170,5 +173,11 @@ describe("pushLocalToPB honest counts", () => {
       "events",
       "schedules",
     ]);
+    // No task / week / ledger / reward / weekly-config leg may reappear: those
+    // collections are command-only now, and reporting a push for one of them
+    // would be a lie about where the data lives.
+    for (const commandOnly of ["tasks", "week_data", "week_archive", "rewards", "penalties", "weekly_prizes"]) {
+      expect(collections).not.toContain(commandOnly);
+    }
   });
 });
