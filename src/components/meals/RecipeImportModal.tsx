@@ -225,7 +225,7 @@ export default function RecipeImportModal({
 
   return createPortal(
     <div
-      className="kitchen-text fixed inset-0 z-[200] flex flex-col"
+      className="fixed inset-0 z-[200] flex flex-col"
       style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(12px)" }}
       onClick={onClose}
     >

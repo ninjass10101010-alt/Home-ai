@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { Plus, Sparkles } from 'lucide-react';
 import PageShell from '@/components/ui/PageShell';
-import Button from '@/components/ui/Button';
+import SoftButton from '@/components/ui/SoftButton';
 import Surface from '@/components/ui/Surface';
 import Skeleton from '@/components/ui/Skeleton';
 import EmptyState from '@/components/ui/EmptyState';
@@ -91,10 +91,10 @@ export default function TimeCapsulePage() {
                 </div>
               </div>
 
-              <Button onClick={() => setShowCreateForm(true)}>
+              <SoftButton onClick={() => setShowCreateForm(true)}>
                 <Plus className="h-4 w-4" />
                 Create Capsule
-              </Button>
+              </SoftButton>
             </div>
           </motion.div>
 

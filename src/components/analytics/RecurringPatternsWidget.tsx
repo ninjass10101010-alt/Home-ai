@@ -2,9 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { Repeat, CheckCircle, XCircle, Sparkles } from 'lucide-react';
-import Card from '@/components/ui/Card';
 import Surface from '@/components/ui/Surface';
-import Button from '@/components/ui/Button';
+import SoftButton from '@/components/ui/SoftButton';
 import Skeleton from '@/components/ui/Skeleton';
 import EmptyState from '@/components/ui/EmptyState';
 import type { RecurringPattern, PatternSuggestion } from '@/lib/recurring-patterns';
@@ -104,21 +103,21 @@ export function RecurringPatternsWidget({ familyId }: RecurringPatternsWidgetPro
   if (loading) {
     return (
       <div className="space-y-6 p-6">
-        <Card padding="lg">
+        <Surface padding="lg">
           <Skeleton className="h-6 w-48 mb-4" />
           <Skeleton className="h-4 w-64 mb-4" />
           <div className="space-y-3">
             <Skeleton className="h-24" />
             <Skeleton className="h-24" />
           </div>
-        </Card>
-        <Card padding="lg">
+        </Surface>
+        <Surface padding="lg">
           <Skeleton className="h-6 w-56 mb-4" />
           <div className="space-y-3">
             <Skeleton className="h-20" />
             <Skeleton className="h-20" />
           </div>
-        </Card>
+        </Surface>
       </div>
     );
   }
@@ -166,7 +165,7 @@ export function RecurringPatternsWidget({ familyId }: RecurringPatternsWidgetPro
 
       {/* Existing Patterns */}
       {patterns.length > 0 && (
-        <Card padding="lg">
+        <Surface padding="lg">
           <h3 className="text-lg font-semibold mb-4 flex items-center gap-2 text-text-primary">
             <Repeat className="h-5 w-5 text-[var(--color-accent-selected)]" />
             Auto-Scheduled Patterns ({patterns.length})
@@ -181,7 +180,7 @@ export function RecurringPatternsWidget({ familyId }: RecurringPatternsWidgetPro
               />
             ))}
           </div>
-        </Card>
+        </Surface>
       )}
 
       {patterns.length === 0 && suggestions.length === 0 && (
@@ -207,7 +206,7 @@ function SuggestionCard({ suggestion, onAccept }: {
   const timeStr = `${displayHour}:${minutes} ${period}`;
 
   return (
-    <Card padding="md">
+    <Surface padding="md">
       <div className="flex items-start justify-between mb-2">
         <div>
           <h4 className="font-semibold text-text-primary">{suggestion.pattern.title}</h4>
@@ -227,12 +226,12 @@ function SuggestionCard({ suggestion, onAccept }: {
         <span className="text-xs text-text-secondary">
           {suggestion.similarPastEvents} similar events found
         </span>
-        <Button onClick={onAccept}>
+        <SoftButton onClick={onAccept}>
           <CheckCircle className="h-4 w-4" />
           Enable Auto-Schedule
-        </Button>
+        </SoftButton>
       </div>
-    </Card>
+    </Surface>
   );
 }
 
@@ -269,15 +268,15 @@ function PatternCard({ pattern, onEnable, onDisable }: {
         </div>
       </div>
       {pattern.autoScheduleEnabled ? (
-        <Button variant="danger" onClick={onDisable}>
+        <SoftButton variant="danger" onClick={onDisable}>
           <XCircle className="h-4 w-4" />
           Disable
-        </Button>
+        </SoftButton>
       ) : (
-        <Button variant="success" onClick={onEnable}>
+        <SoftButton variant="success" onClick={onEnable}>
           <CheckCircle className="h-4 w-4" />
           Enable
-        </Button>
+        </SoftButton>
       )}
     </Surface>
   );

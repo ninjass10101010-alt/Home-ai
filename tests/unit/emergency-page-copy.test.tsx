@@ -30,7 +30,7 @@ vi.mock("@/components/ui/TopBar", () => ({
   default: ({ title }: { title: string }) => <h1>{title}</h1>,
 }));
 
-vi.mock("@/components/ui/Card", () => ({
+vi.mock("@/components/ui/Surface", () => ({
   default: ({ children, interactive, ...props }: { children: ReactNode; interactive?: boolean; [key: string]: unknown }) => {
     void interactive;
     return <div {...props}>{children}</div>;

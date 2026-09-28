@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import PageShell from "@/components/ui/PageShell";
 import TopBar from "@/components/ui/TopBar";
-import Card from "@/components/ui/Card";
+import Surface from "@/components/ui/Surface";
 import Skeleton from "@/components/ui/Skeleton";
 import { useAuth } from "@/hooks/useAuth";
 import { db } from "@/db";
@@ -118,7 +118,7 @@ export default function EmergencyPage() {
   };
 
   const renderContactCard = (contact: EmergencyContact) => (
-    <Card key={contact.id} className="text-center">
+    <Surface key={contact.id} className="text-center">
       <div className="text-3xl mb-1">{contact.emoji || relationshipIcons[contact.relationship] || "👤"}</div>
       <p className="text-text-primary font-medium text-sm truncate">{contact.name}</p>
       <p className="text-text-secondary text-xs mt-0.5 truncate">{formatPhoneForDisplay(contact.phone)}</p>
@@ -132,7 +132,7 @@ export default function EmergencyPage() {
       >
         Call
       </a>
-    </Card>
+    </Surface>
   );
 
   return (
@@ -188,7 +188,7 @@ export default function EmergencyPage() {
 
         {/* Empty state */}
         {!loading && contacts.length === 0 && (
-          <Card className="text-center py-8">
+          <Surface className="text-center py-8">
             <div className="text-4xl mb-3">📋</div>
             <p className="text-text-primary font-medium">No emergency contacts yet</p>
             <p className="text-text-secondary text-sm mt-1">{emptyContactsDescription}</p>
@@ -198,7 +198,7 @@ export default function EmergencyPage() {
             >
               {safetyActionLabel}
             </Link>
-          </Card>
+          </Surface>
         )}
 
         {/* Common Situations */}
@@ -206,30 +206,30 @@ export default function EmergencyPage() {
           <h2 className="text-text-primary font-semibold text-base mb-3">Common Situations</h2>
           <div className="space-y-2">
             {emergencyTypes.map((type) => (
-              <Card key={type.id} className="flex items-center gap-3">
+              <Surface key={type.id} className="flex items-center gap-3">
                 <span className="text-2xl">{type.icon}</span>
                 <div className="flex-1 min-w-0">
                   <p className="text-text-primary text-sm font-medium truncate">{type.label}</p>
                   <p className="text-text-secondary text-xs truncate">{type.desc}</p>
                 </div>
                 <span className="text-xs text-text-secondary shrink-0">{type.contact}</span>
-              </Card>
+              </Surface>
             ))}
           </div>
         </section>
 
         {/* Settings quick-link */}
         <Link href="/settings/safety" className="block">
-          <Card className="bg-[var(--color-surface-2)] border-dashed text-center cursor-pointer hover:bg-[var(--color-surface-3)] transition-colors" interactive>
+          <Surface className="bg-[var(--color-surface-2)] border-dashed text-center cursor-pointer hover:bg-[var(--color-surface-3)] transition-colors" interactive>
             <div className="flex items-center justify-center gap-2">
               <span className="text-lg">⚙️</span>
               <p className="text-text-secondary text-sm">{safetyQuickLinkLabel}</p>
             </div>
-          </Card>
+          </Surface>
         </Link>
 
         {/* 911 */}
-        <Card className="bg-[var(--color-accent-rose)]/10" style={alarmGlow}>
+        <Surface className="bg-[var(--color-accent-rose)]/10" style={alarmGlow}>
           <div className="text-center">
             <span className="text-3xl">🚨</span>
             <h3 className="text-[var(--color-accent-rose)] font-semibold mt-2">Life-Threatening Emergency</h3>
@@ -242,7 +242,7 @@ export default function EmergencyPage() {
               Call 911
             </a>
           </div>
-        </Card>
+        </Surface>
       </div>
     </PageShell>
   );

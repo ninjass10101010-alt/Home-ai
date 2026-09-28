@@ -31,7 +31,7 @@ export default function RecipeModal({
   };
 
   return createPortal(
-    <div className="kitchen-text fixed inset-0 z-[200] flex flex-col" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(12px)" }}>
+    <div className="fixed inset-0 z-[200] flex flex-col" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(12px)" }}>
       {/* Modal sheet */}
       <div
         className="absolute bottom-0 left-0 right-0 rounded-t-3xl flex flex-col overflow-hidden"

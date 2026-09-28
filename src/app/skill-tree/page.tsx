@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 import { motion, MotionConfig } from 'framer-motion';
 import { BookOpen, Trophy } from 'lucide-react';
 import PageShell from '@/components/ui/PageShell';
-import Button from '@/components/ui/Button';
+import SoftButton from '@/components/ui/SoftButton';
 import Surface from '@/components/ui/Surface';
 import Skeleton from '@/components/ui/Skeleton';
 import EmptyState from '@/components/ui/EmptyState';
@@ -220,20 +220,20 @@ export default function SkillTreePage() {
 
             {/* Tabs */}
             <div className="flex gap-2">
-              <Button
+              <SoftButton
                 variant={activeTab === 'tree' ? 'primary' : 'secondary'}
                 onClick={() => setActiveTab('tree')}
               >
                 <BookOpen className="h-4 w-4" />
                 Skill Tree
-              </Button>
-              <Button
+              </SoftButton>
+              <SoftButton
                 variant={activeTab === 'achievements' ? 'primary' : 'secondary'}
                 onClick={() => setActiveTab('achievements')}
               >
                 <Trophy className="h-4 w-4" />
                 Achievements ({data.userAchievements.length})
-              </Button>
+              </SoftButton>
             </div>
           </motion.div>
 

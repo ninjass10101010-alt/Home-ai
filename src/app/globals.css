@@ -383,17 +383,15 @@ body {
    over the warm glass base, tone-tinted glow border, soft outer glow.
    Tone is injected as --widget-tone (hex or CSS var) via inline style.
 
-   WCAG contrast (4.5:1): card-scoped text tokens are brightened/darkened
-   so muted/secondary text stays legible on the pastel washes, and
-   --widget-accent is the accessible variant of the app accent for
-   accent-colored text inside cards (lightened in dark mode, darkened in
-   light mode). */
+   WCAG contrast (4.5:1): the global --color-text-* tokens already meet AA
+   (UI audit Phase 1) — the old card-scoped re-scope of them was retired in
+   audit 5.2. What stays card-scoped is --widget-accent(-strong): the
+   accessible variant of the app accent for accent-colored text inside
+   cards (lightened in dark mode, darkened in light mode). */
 .widget-card {
   --widget-tone: var(--color-accent-selected);
   --widget-accent: color-mix(in srgb, var(--color-accent-selected) 45%, white);
   --widget-accent-strong: color-mix(in srgb, var(--widget-tone) 65%, white);
-  --color-text-secondary: #a5afc7;
-  --color-text-muted: #8b99b5;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -490,8 +488,6 @@ body {
 :root:not([data-theme="dark"]) .widget-card {
   --widget-accent: color-mix(in srgb, var(--color-accent-selected) 72%, black);
   --widget-accent-strong: color-mix(in srgb, var(--widget-tone) 60%, black);
-  --color-text-secondary: #57637a;
-  --color-text-muted: #4e596b;
   background:
     linear-gradient(160deg,
       color-mix(in srgb, var(--widget-tone) 10%, transparent) 0%,
@@ -560,20 +556,9 @@ a.widget-accent-text {
   color: color-mix(in srgb, var(--color-accent-rose) 72%, black);
 }
 
-/* Kitchen (Meals / Pantry / Grocery) surfaces use plain cards, not
-   .widget-card, so their informational labels inherited the base muted token
-   (#4e5a72 ≈ 2.5:1) and failed AA. Re-scope the same AA text tokens the widget
-   cards use, applied once at the page root so secondary text meets contrast
-   without touching the global disabled-text token or 100+ call sites. */
-.kitchen-text {
-  --color-text-secondary: #a5afc7;
-  --color-text-muted: #8b99b5;
-}
-:root[data-theme="light"] .kitchen-text,
-:root:not([data-theme="dark"]) .kitchen-text {
-  --color-text-secondary: #57637a;
-  --color-text-muted: #4e596b;
-}
+/* (The old `.kitchen-text` --color-text-* re-scope was retired in audit 5.2:
+   Phase 1 made the global tokens AA, so the Meals/Pantry/Grocery surfaces
+   need no local override and the class is gone from their markup.) */
 
 /* Schedule rows: solid scrim under the per-color tint so the animated page
    fog can't wash the tint to a mid-tone and break text contrast. The tint

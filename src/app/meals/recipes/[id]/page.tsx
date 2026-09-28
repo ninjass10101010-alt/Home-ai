@@ -188,13 +188,13 @@ function RecipeDetailContent() {
           {notification}
         </Toast>
         {!catalogSettled ? (
-          <div className="kitchen-text mx-auto max-w-5xl space-y-4 px-4 py-8">
+          <div className="mx-auto max-w-5xl space-y-4 px-4 py-8">
             <div className="h-10 w-44 rounded-2xl bg-[var(--color-surface-2)]" />
             <div className="h-64 rounded-3xl bg-[var(--color-surface-2)]" />
             <div className="h-40 rounded-3xl bg-[var(--color-surface-2)]" />
           </div>
         ) : syncBlocked ? (
-          <div className="kitchen-text space-y-4 px-4 py-16 text-center">
+          <div className="space-y-4 px-4 py-16 text-center">
             <p className="text-5xl">🔐</p>
             <p className="font-bold text-text-primary">Recipes are synced to the family account</p>
             <p className="text-xs font-medium text-text-muted">Sign in with your PIN to see this recipe.</p>
@@ -203,7 +203,7 @@ function RecipeDetailContent() {
             </SoftButton>
           </div>
         ) : (
-          <div className="kitchen-text space-y-4 px-4 py-16 text-center">
+          <div className="space-y-4 px-4 py-16 text-center">
             <p className="text-5xl">🍽️</p>
             <p className="font-bold text-text-primary">Recipe not found</p>
             <p className="text-xs font-medium text-text-muted">
@@ -224,7 +224,7 @@ function RecipeDetailContent() {
         {notification}
       </Toast>
 
-      <div className="kitchen-text mx-auto max-w-5xl space-y-5 px-4 pb-10">
+      <div className="mx-auto max-w-5xl space-y-5 px-4 pb-10">
         <button
           onClick={() => router.push(backTarget)}
           className="glass min-h-[44px] rounded-full px-4 text-sm font-semibold text-text-secondary tap-sm hover:text-text-primary"

@@ -357,9 +357,15 @@ Home's widget ranking/`More…` folding is still Phase 4.5.
   (2,064 lines, every rule duplicated or superseded in `globals.css`, all flagged `⚠️ DEAD FILE` and
   imported by nothing) are gone, and contract B2 now asserts they stay **deleted**, not merely
   unimported (`tests/unit/warm-glass-contracts.test.tsx`).
-- ⬜ **5.2 — legacy `Card` / `Button` / `Badge`** (5 importing files today) onto `Surface` / `SoftButton` /
-  `Chip`, and retire the now-redundant local `--color-text-muted` re-scopes (`.widget-card`,
-  `.kitchen-text`) that Phase 1 left behind.
+- ✅ **5.2 — legacy `Card` / `Button` / `Badge` converged, text-token re-scopes retired.** All 13
+  importing files (34+ call sites) now render `Surface` / `SoftButton` / `Chip`; `Card`/`Button`
+  were already re-export shims, while `Badge` (a real 10-variant component) converged onto `Chip`,
+  which grew a static `as="span"` label variant plus `violet`/`cyan` tones — a passive member/type
+  label must not be a button with a `hit-44` tap area. The three legacy components are deleted. The
+  local `--color-text-secondary` / `--color-text-muted` re-scopes Phase 1 made redundant are gone
+  (`.widget-card` dark + light, and the whole `.kitchen-text` block — its class also left the eight
+  markup sites, including the three hand-rolled recipe overlays 5.4 will port). Contract:
+  `tests/unit/design-system-convergence.test.tsx` (4).
 - ⬜ **5.3 — radius + surface tokens.** `rounded-2xl` → `--radius-lg` etc. via `@theme` aliases, ban raw
   `rounded-[…]`, replace `bg-white/[0.03]` / hex clusters (569 hex + 523 `rgba(` literals) with
   `Surface` / `--neu-*`.

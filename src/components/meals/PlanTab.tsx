@@ -2,11 +2,11 @@
 "use client";
 import { useState, useMemo, useEffect } from "react";
 import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
-import Card from "@/components/ui/Card";
+import Surface from "@/components/ui/Surface";
 import WidgetCard from "@/components/patterns/WidgetCard";
 import Avatar from "@/components/ui/Avatar";
 import { EmojiText } from "@/components/ui/EmojiText";
-import Badge from "@/components/ui/Badge";
+import Chip from "@/components/ui/Chip";
 import SoftButton from "@/components/ui/SoftButton";
 import { weekDays, mealIdeas, mealPresets, slotMeta, CALORIE_GOAL, PROTEIN_GOAL, CARBS_GOAL, FAT_GOAL } from "@/data/meals";
 import { Meal } from "@/types/meals";
@@ -780,11 +780,11 @@ export default function PlanTab({
         <section className="pt-2">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-text-primary font-semibold text-sm">✨ Consuela Suggests</h3>
-            <Badge variant="violet">AI picks</Badge>
+            <Chip as="span" tone="violet" size="sm">AI picks</Chip>
           </div>
           <div className="grid grid-cols-2 gap-2">
             {(aiMealIdeas.length > 0 ? aiMealIdeas : mealIdeas).map((idea: any) => (
-              <Card
+              <Surface
                 key={idea.name}
                 className="!p-3 cursor-pointer hover:border-[var(--color-accent-selected)]/30 transition-colors"
                 onClick={() => {
@@ -803,10 +803,10 @@ export default function PlanTab({
                   <span className="text-2xl">{idea.emoji}</span>
                   <p className="text-text-primary text-xs font-medium leading-tight">{idea.name}</p>
                   <div className="flex gap-1 flex-wrap justify-center">
-                    {idea.tags.map((t: string) => <Badge key={t} variant="gray">{t}</Badge>)}
+                    {idea.tags.map((t: string) => <Chip as="span" tone="neutral" size="sm" key={t}>{t}</Chip>)}
                   </div>
                 </div>
-              </Card>
+              </Surface>
             ))}
           </div>
           {aiMealLoading && (

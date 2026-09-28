@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 import { motion, MotionConfig } from 'framer-motion';
 import { Plus, Mountain } from 'lucide-react';
 import PageShell from '@/components/ui/PageShell';
-import Button from '@/components/ui/Button';
+import SoftButton from '@/components/ui/SoftButton';
 import Surface from '@/components/ui/Surface';
 import Skeleton from '@/components/ui/Skeleton';
 import EmptyState from '@/components/ui/EmptyState';
@@ -189,10 +189,10 @@ export default function MoneyMountainPage() {
                 </div>
               </div>
 
-              <Button onClick={() => setShowCreateForm(true)} className="shrink-0">
+              <SoftButton onClick={() => setShowCreateForm(true)} className="shrink-0">
                 <Plus className="h-4 w-4" />
                 New Goal
-              </Button>
+              </SoftButton>
             </div>
           </motion.div>
 

@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { Calendar, TrendingUp, Repeat } from 'lucide-react';
 import PageShell from '@/components/ui/PageShell';
-import Button from '@/components/ui/Button';
+import SoftButton from '@/components/ui/SoftButton';
 import Surface from '@/components/ui/Surface';
 import Skeleton from '@/components/ui/Skeleton';
 import EmergencyButton from '@/components/ui/EmergencyButton';
@@ -49,21 +49,21 @@ export default function AnalyticsPage() {
 
           {/* Tabs */}
           <div className="mb-6 flex flex-wrap gap-2">
-            <Button
+            <SoftButton
               variant={activeTab === 'schedule' ? 'primary' : 'secondary'}
               aria-pressed={activeTab === 'schedule'}
               onClick={() => setActiveTab('schedule')}
             >
               Schedule Analytics
-            </Button>
-            <Button
+            </SoftButton>
+            <SoftButton
               variant={activeTab === 'patterns' ? 'primary' : 'secondary'}
               aria-pressed={activeTab === 'patterns'}
               onClick={() => setActiveTab('patterns')}
             >
               <Repeat className="h-4 w-4" />
               Recurring Patterns
-            </Button>
+            </SoftButton>
           </div>
 
           {/* Date Range Picker */}

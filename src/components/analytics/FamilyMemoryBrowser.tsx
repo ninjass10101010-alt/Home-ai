@@ -2,9 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { Brain, Tag, Edit2, Trash2, Plus, Search } from 'lucide-react';
-import Card from '@/components/ui/Card';
 import Surface from '@/components/ui/Surface';
-import Button from '@/components/ui/Button';
+import SoftButton from '@/components/ui/SoftButton';
 import IconButton from '@/components/ui/IconButton';
 import Modal from '@/components/ui/Modal';
 import TextField from '@/components/ui/TextField';
@@ -132,10 +131,10 @@ export function FamilyMemoryBrowser({ familyId }: FamilyMemoryBrowserProps) {
           <Brain className="h-6 w-6 text-[var(--color-accent-selected)]" />
           Family Memory Bank
         </h2>
-        <Button onClick={() => setShowAddForm(true)}>
+        <SoftButton onClick={() => setShowAddForm(true)}>
           <Plus className="h-4 w-4" />
           Add Memory
-        </Button>
+        </SoftButton>
       </div>
 
       {/* Search and Filters */}
@@ -154,7 +153,7 @@ export function FamilyMemoryBrowser({ familyId }: FamilyMemoryBrowserProps) {
       {/* Category Tabs */}
       <div className="flex flex-wrap gap-2">
         {categories.map((cat) => (
-          <Button
+          <SoftButton
             key={cat.value}
             variant={selectedCategory === cat.value ? 'primary' : 'secondary'}
             size="sm"
@@ -162,7 +161,7 @@ export function FamilyMemoryBrowser({ familyId }: FamilyMemoryBrowserProps) {
           >
             <span>{cat.icon}</span>
             <span>{cat.label}</span>
-          </Button>
+          </SoftButton>
         ))}
       </div>
 
@@ -170,7 +169,7 @@ export function FamilyMemoryBrowser({ familyId }: FamilyMemoryBrowserProps) {
       {loading ? (
         <div className="space-y-3">
           {[1, 2, 3].map((i) => (
-            <Card key={i} padding="md">
+            <Surface key={i} padding="md">
               <div className="flex items-start justify-between mb-2">
                 <div className="flex-1">
                   <Skeleton className="h-4 w-32 mb-1" />
@@ -191,7 +190,7 @@ export function FamilyMemoryBrowser({ familyId }: FamilyMemoryBrowserProps) {
                 <Skeleton className="h-3 w-24" />
                 <Skeleton className="h-3 w-32" />
               </div>
-            </Card>
+            </Surface>
           ))}
         </div>
       ) : error ? (
@@ -254,12 +253,12 @@ export function FamilyMemoryBrowser({ familyId }: FamilyMemoryBrowserProps) {
           description="Are you sure you want to delete this memory? This action cannot be undone."
           footer={
             <>
-              <Button variant="secondary" onClick={() => setDeleteConfirm(null)}>
+              <SoftButton variant="secondary" onClick={() => setDeleteConfirm(null)}>
                 Cancel
-              </Button>
-              <Button variant="danger" onClick={() => handleDelete(deleteConfirm)}>
+              </SoftButton>
+              <SoftButton variant="danger" onClick={() => handleDelete(deleteConfirm)}>
                 Delete
-              </Button>
+              </SoftButton>
             </>
           }
         >
@@ -294,7 +293,7 @@ function MemoryCard({ memory, onEdit, onDelete }: {
   };
 
   return (
-    <Card padding="md">
+    <Surface padding="md">
       <div className="flex items-start justify-between mb-2">
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-1">
@@ -350,7 +349,7 @@ function MemoryCard({ memory, onEdit, onDelete }: {
           <span>Last used {new Date(memory.lastUsed).toLocaleDateString()}</span>
         )}
       </div>
-    </Card>
+    </Surface>
   );
 }
 
@@ -384,15 +383,15 @@ function EditMemoryModal({ memory, onSave, onCancel }: {
       title="Edit Memory"
       footer={
         <>
-          <Button variant="secondary" onClick={onCancel}>
+          <SoftButton variant="secondary" onClick={onCancel}>
             Cancel
-          </Button>
-          <Button
+          </SoftButton>
+          <SoftButton
             onClick={() => onSave({ content, tags, confidence })}
             disabled={!content.trim()}
           >
             Save
-          </Button>
+          </SoftButton>
         </>
       }
     >
@@ -417,9 +416,9 @@ function EditMemoryModal({ memory, onSave, onCancel }: {
                 placeholder="Add tag..."
                 className="flex-1 px-3 py-2 border border-border rounded-lg bg-background text-text-primary focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-selected)]"
               />
-              <Button variant="secondary" onClick={handleAddTag} size="sm">
+              <SoftButton variant="secondary" onClick={handleAddTag} size="sm">
                 Add
-              </Button>
+              </SoftButton>
             </div>
             {tags.length > 0 && (
               <div className="flex flex-wrap gap-1">
@@ -511,15 +510,15 @@ function AddMemoryModal({ familyId, onSave, onCancel }: {
       title="Add Memory"
       footer={
         <>
-          <Button variant="secondary" onClick={onCancel}>
+          <SoftButton variant="secondary" onClick={onCancel}>
             Cancel
-          </Button>
-          <Button
+          </SoftButton>
+          <SoftButton
             onClick={handleSubmit}
             disabled={!content.trim()}
           >
             Add
-          </Button>
+          </SoftButton>
         </>
       }
     >
@@ -563,9 +562,9 @@ function AddMemoryModal({ familyId, onSave, onCancel }: {
                 placeholder="Add tag..."
                 className="flex-1 px-3 py-2 border border-border rounded-lg bg-background text-text-primary focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-selected)]"
               />
-              <Button variant="secondary" onClick={handleAddTag} size="sm">
+              <SoftButton variant="secondary" onClick={handleAddTag} size="sm">
                 Add
-              </Button>
+              </SoftButton>
             </div>
             {tags.length > 0 && (
               <div className="flex flex-wrap gap-1">

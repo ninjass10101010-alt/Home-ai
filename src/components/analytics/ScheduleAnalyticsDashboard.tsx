@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import { Calendar, CheckCircle, AlertTriangle, TrendingUp, Clock } from 'lucide-react';
-import Card from '@/components/ui/Card';
 import Surface from '@/components/ui/Surface';
 import Skeleton from '@/components/ui/Skeleton';
 import EmptyState from '@/components/ui/EmptyState';
@@ -59,21 +58,21 @@ export function ScheduleAnalyticsDashboard({ familyId, startDate, endDate }: Sch
       <div className="space-y-6 p-6">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           {[1, 2, 3, 4].map((i) => (
-            <Card key={i} padding="md">
+            <Surface key={i} padding="md">
               <Skeleton className="h-10 w-10 rounded-lg mb-2" />
               <Skeleton className="h-4 w-20 mb-1" />
               <Skeleton className="h-8 w-16" />
               <Skeleton className="h-3 w-24 mt-1" />
-            </Card>
+            </Surface>
           ))}
         </div>
-        <Card padding="lg">
+        <Surface padding="lg">
           <Skeleton className="h-6 w-48 mb-4" />
           <div className="space-y-3">
             <Skeleton className="h-20" />
             <Skeleton className="h-20" />
           </div>
-        </Card>
+        </Surface>
       </div>
     );
   }
@@ -126,7 +125,7 @@ export function ScheduleAnalyticsDashboard({ familyId, startDate, endDate }: Sch
 
       {/* Insights */}
       {scheduleAnalytics.insights.length > 0 && (
-        <Card padding="lg">
+        <Surface padding="lg">
           <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
             <TrendingUp className="h-5 w-5 text-[var(--color-accent-selected)]" />
             Insights & Recommendations
@@ -136,24 +135,24 @@ export function ScheduleAnalyticsDashboard({ familyId, startDate, endDate }: Sch
               <InsightCard key={i} insight={insight} />
             ))}
           </div>
-        </Card>
+        </Surface>
       )}
 
       {/* Task Completion by Member */}
       {taskStats.memberStats.length > 0 && (
-        <Card padding="lg">
+        <Surface padding="lg">
           <h3 className="text-lg font-semibold mb-4">Task Completion by Member</h3>
           <div className="space-y-3">
             {taskStats.memberStats.map((member) => (
               <MemberTaskCard key={member.memberId} member={member} />
             ))}
           </div>
-        </Card>
+        </Surface>
       )}
 
       {/* Time Spent by Category */}
       {Object.keys(timeAnalytics.byCategory).length > 0 && (
-        <Card padding="lg">
+        <Surface padding="lg">
           <h3 className="text-lg font-semibold mb-4">Time Spent by Category</h3>
           <div className="space-y-2">
             {Object.entries(timeAnalytics.byCategory)
@@ -167,12 +166,12 @@ export function ScheduleAnalyticsDashboard({ familyId, startDate, endDate }: Sch
                 />
               ))}
           </div>
-        </Card>
+        </Surface>
       )}
 
       {/* Peak Hours */}
       {timeAnalytics.peakHours.length > 0 && (
-        <Card padding="lg">
+        <Surface padding="lg">
           <h3 className="text-lg font-semibold mb-4">Peak Hours</h3>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
             {timeAnalytics.peakHours.map((peak) => (
@@ -188,7 +187,7 @@ export function ScheduleAnalyticsDashboard({ familyId, startDate, endDate }: Sch
               </Surface>
             ))}
           </div>
-        </Card>
+        </Surface>
       )}
     </div>
   );
@@ -210,7 +209,7 @@ function SummaryCard({ icon, title, value, subtitle, color }: {
   const accentColor = colorMap[color] || 'var(--color-accent-selected)';
 
   return (
-    <Card padding="md">
+    <Surface padding="md">
       <div
         className="inline-flex items-center justify-center w-10 h-10 rounded-lg mb-2"
         style={{
@@ -223,7 +222,7 @@ function SummaryCard({ icon, title, value, subtitle, color }: {
       <div className="text-sm text-text-secondary mb-1">{title}</div>
       <div className="text-2xl font-bold text-text-primary">{value}</div>
       <div className="text-xs text-text-secondary mt-1">{subtitle}</div>
-    </Card>
+    </Surface>
   );
 }
 

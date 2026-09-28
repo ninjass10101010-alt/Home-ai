@@ -2,8 +2,8 @@
 "use client";
 
 import React, { useState } from "react";
-import Card from "@/components/ui/Card";
-import Button from "@/components/ui/Button";
+import Surface from "@/components/ui/Surface";
+import SoftButton from "@/components/ui/SoftButton";
 
 interface Member {
   name: string;
@@ -108,7 +108,7 @@ export default function MemberModal({ isOpen, onClose, member, onSave, onDelete 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <div className="w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <Card className="border-0 shadow-none bg-transparent">
+        <Surface className="border-0 shadow-none bg-transparent">
           <div className="p-6">
           <h3 className="text-lg font-semibold text-text-primary mb-4">
             {member ? "Edit Member" : "Add New Member"}
@@ -226,36 +226,36 @@ export default function MemberModal({ isOpen, onClose, member, onSave, onDelete 
 
           {/* Action Buttons */}
           <div className="flex gap-3 mt-6 pt-4 border-t border-surface-3">
-            <Button
+            <SoftButton
               variant="secondary"
               className="flex-1"
               onClick={onClose}
             >
               Cancel
-            </Button>
-            <Button
+            </SoftButton>
+            <SoftButton
               variant="primary"
               className="flex-1"
               onClick={handleSave}
             >
               {member ? "Save Changes" : "Add Member"}
-            </Button>
+            </SoftButton>
           </div>
 
           {/* Delete Button (only for existing members) */}
           {member && onDelete && (
             <div className="mt-4 pt-4 border-t border-surface-3">
-              <Button
+              <SoftButton
                 variant="danger"
                 className="w-full"
                 onClick={handleDelete}
               >
                 Delete Member
-              </Button>
+              </SoftButton>
             </div>
           )}
           </div>
-        </Card>
+        </Surface>
       </div>
     </div>
   );

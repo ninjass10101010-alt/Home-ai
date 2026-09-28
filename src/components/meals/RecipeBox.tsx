@@ -1,8 +1,6 @@
 "use client";
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import Card from "@/components/ui/Card";
-import Badge from "@/components/ui/Badge";
 import { weekDays, RECIPE_TAGS } from "@/data/meals";
 import { Recipe } from "@/types/meals";
 

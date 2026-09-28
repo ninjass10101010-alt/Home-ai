@@ -2,7 +2,7 @@
 
 import { AlertCircle, Calendar, Clock, MapPin, Users } from 'lucide-react';
 import Surface from '@/components/ui/Surface';
-import Button from '@/components/ui/Button';
+import SoftButton from '@/components/ui/SoftButton';
 import type { Conflict } from '@/lib/conflict-detection';
 
 interface ConflictWarningProps {
@@ -132,24 +132,24 @@ function ConflictItem({
       {(onResolve || onDismiss) && (
         <div className="flex gap-2 pt-2 border-t border-border">
           {onResolve && (
-            <Button
+            <SoftButton
               variant="primary"
               size="sm"
               onClick={() => onResolve(conflict)}
               className="flex-1"
             >
               Resolve
-            </Button>
+            </SoftButton>
           )}
           {onDismiss && (
-            <Button
+            <SoftButton
               variant="secondary"
               size="sm"
               onClick={() => onDismiss(conflict)}
               className="flex-1"
             >
               Dismiss
-            </Button>
+            </SoftButton>
           )}
         </div>
       )}

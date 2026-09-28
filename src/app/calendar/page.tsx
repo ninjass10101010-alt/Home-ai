@@ -6,7 +6,7 @@ import TopBar from "@/components/ui/TopBar";
 import WidgetCard from "@/components/patterns/WidgetCard";
 import ConsuelaWeekCard from "@/components/calendar/ConsuelaWeekCard";
 import { useAuth } from "@/hooks/useAuth";
-import Badge from "@/components/ui/Badge";
+import Chip, { type ChipTone } from "@/components/ui/Chip";
 import Avatar from "@/components/ui/Avatar";
 import { useAtmosphericTheme } from "@/hooks/useAtmosphericTheme";
 import { expandGoogleEvent, eventInMonth, dbEventToCalEvent, dbScheduleToScheduleItem } from "@/lib/calendar/google-mapping";
@@ -201,8 +201,8 @@ const scheduleColorValues: Record<ScheduleColor, string> = {
   teal: "var(--color-accent-cyan)",
 };
 
-const badgeVariants: Record<string, "green" | "violet" | "amber" | "cyan" | "rose"> = {
-  green: "green", violet: "violet", amber: "amber", cyan: "cyan", rose: "rose",
+const badgeTones: Record<string, ChipTone> = {
+  green: "success", violet: "violet", amber: "warning", cyan: "cyan", rose: "danger",
 };
 
 const memberColorValues: Record<string, string> = {
@@ -1013,9 +1013,9 @@ export default function CalendarPage() {
                         <div className="calendar-event-content">
                           <p className="calendar-event-title break-words">{ev.title}</p>
                           <div className="calendar-event-meta">
-                            <Badge variant={badgeVariants[ev.color] ?? "gray"} size="sm">{ev.member}</Badge>
+                            <Chip as="span" tone={badgeTones[ev.color] ?? "neutral"} size="sm">{ev.member}</Chip>
                             {ev.member === "Google" && (
-                              <Badge variant="cyan" size="sm">GCal</Badge>
+                              <Chip as="span" tone="cyan" size="sm">GCal</Chip>
                             )}
                           </div>
                         </div>
@@ -1312,11 +1312,11 @@ export default function CalendarPage() {
                                     <span className="calendar-routine-time" style={{ color: `color-mix(in srgb, ${scheduleColorValues[itemColor]} 55%, var(--color-text-primary))` }}>
                                       {item.time}
                                     </span>
-                                    <Badge variant={item.type === "routine" ? "amber" : "rose"} size="sm">{item.type}</Badge>
+                                    <Chip as="span" tone={item.type === "routine" ? "warning" : "danger"} size="sm">{item.type}</Chip>
                                     {item.mealType && item.mealType !== "none" && (
-                                      <Badge variant={item.mealType === "breakfast" ? "amber" : item.mealType === "lunch" ? "cyan" : item.mealType === "dinner" ? "violet" : "green"} size="sm">
+                                      <Chip as="span" tone={item.mealType === "breakfast" ? "warning" : item.mealType === "lunch" ? "cyan" : item.mealType === "dinner" ? "violet" : "success"} size="sm">
                                         {item.mealType === "breakfast" ? "\uD83C\uDF05" : item.mealType === "lunch" ? "\u2600\uFE0F" : item.mealType === "dinner" ? "\uD83C\uDF19" : "\uD83C\uDF4E"} {item.mealType}
-                                      </Badge>
+                                      </Chip>
                                     )}
                                   </div>
                                   <div className="calendar-routine-days">
