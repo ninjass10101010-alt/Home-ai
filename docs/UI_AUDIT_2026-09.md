@@ -384,10 +384,14 @@ Home's widget ranking/`More…` folding is still Phase 4.5.
   blanket rule (near-zero durations, one iteration, no smooth scroll) plus a
   `consuela-motion-preference-change` event so `usePrefersReducedMotion` (AnimatedEmoji) reacts
   mid-session. Contract: `tests/unit/reduce-motion-preference.test.tsx` (2).
-- ⬜ **5.6 — one design-system page.** The `/_design-system` → `/design-system` rewrite does exist — in
-  `src/middleware.ts`, not `next.config.ts`; the two pages are near-duplicates with two production
-  gates: keep one and grow it into a live audit (axe-core, min-tap-target, sub-12px sweep,
-  inset-shadow ban).
+- ✅ **5.6 — one design-system page that audits itself.** The near-duplicate
+  `src/app/_design-system/page.tsx` (252 lines, its own production gate) is deleted; the legacy
+  `/_design-system` URL still rewrites to `/design-system` through middleware, and the now-stale
+  `EXEMPT_ROUTES` entry is gone. The surviving page ends with a **live self-audit**
+  (`DesignSystemSelfAudit`): the four house rules — sub-12px text, <44px tap targets without
+  `hit-44`, unnamed controls, resting inset shadows — run in the browser against the page's own DOM
+  with `data-ds-shadow-exempt` / `data-ds-audit-ignore` opt-outs and a Re-scan button. Contract:
+  `tests/unit/design-system-self-audit.test.tsx` (4).
 - ⬜ **5.7 — split `tasks/page.tsx`** (2,943 lines, 33 `useState`) by section — the family's daily
   driver is the hardest file in the repo to change safely.
 - ⬜ **5.8 — emoji-as-chrome sweep** for the leftovers finding 12 lists: Settings section icons, meal

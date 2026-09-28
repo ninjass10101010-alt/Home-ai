@@ -167,7 +167,7 @@ Motion is CSS-only: keyframes for ambient motion and Tailwind transitions for st
 
 ## 7 · Internal Review Surface
 
-`/_design-system` renders all primitives and patterns in both dark and light themes. It is gated with `NODE_ENV !== "production"` and rewrites to `/design-system` because Next treats underscore-prefixed app folders as private.
+`/design-system` is the single design-system preview: every primitive and pattern, in both dark and light review modes, gated with `NODE_ENV !== "production"`. It ends with a **live self-audit** — the four house rules (no sub-12px text, ≥44px tap targets, named controls, no resting inset shadows) run in the browser against the page's own DOM, so drift is visible without CI. The legacy `/_design-system` URL still rewrites to it (middleware; Next treats underscore-prefixed app folders as private — the near-duplicate page behind that path was deleted in the 2026-09 audit, Phase 5.6).
 
 > ⚠️ Documented drift (2026-09-26): no such rewrite exists in `next.config.ts`, and
 > `src/app/design-system/page.tsx` is a second near-duplicate page. Both are scheduled to

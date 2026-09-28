@@ -24,6 +24,7 @@ import StatTile from "@/components/patterns/StatTile";
 import DayStrip from "@/components/patterns/DayStrip";
 import FormField from "@/components/patterns/FormField";
 import MoreMenuItem from "@/components/patterns/MoreMenuItem";
+import DesignSystemSelfAudit from "@/components/design-system/DesignSystemSelfAudit";
 import { warmGlassAccentOptions } from "@/lib/design-tokens";
 
 const darkModeStyles = {
@@ -86,7 +87,7 @@ export default function DesignSystemPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[var(--color-canvas)] px-4 py-8 pb-24">
+    <main className="min-h-screen bg-[var(--color-canvas)] px-4 py-8 pb-24" data-ds-shadow-exempt>
       <div className="mx-auto max-w-5xl space-y-8">
         <PageHeader
           title="Warm Glass System Review"
@@ -198,6 +199,13 @@ export default function DesignSystemPage() {
             </SectionCard>
           </div>
         </div>
+      </div>
+
+      {/* UI audit 5.6 — the page audits itself: the four house rules run in
+          the browser against this very DOM (sub-12px text, <44px tap targets,
+          unnamed controls, resting inset shadows). */}
+      <div className="mx-auto mt-8 max-w-5xl" data-ds-audit-ignore>
+        <DesignSystemSelfAudit />
       </div>
 
       <Modal open={modalOpen} title="Modal preview" onClose={() => setModalOpen(false)}>

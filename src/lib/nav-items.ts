@@ -216,9 +216,7 @@ export function navItemForPath(pathname: string): NavItemDefinition | undefined 
  * the manifest — the "no orphans left" contract from the 2026-09 audit.
  */
 export const EXEMPT_ROUTES: Readonly<Record<string, string>> = {
-  "/_design-system":
-    "Dev-only design-system preview; middleware rewrites it to /design-system (Phase 5 merges those two pages).",
-  "/design-system": "Dev-only design-system preview (production-gated).",
+  "/design-system": "Dev-only design-system preview with the live self-audit (production-gated).",
   "/emergency":
     "Reference page reached from the rail, Settings → Safety and the wall Emergency action; not a dock cap.",
   "/ledger": "Parent-only finance iframe, reached from the Settings ledger widget.",
