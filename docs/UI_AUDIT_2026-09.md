@@ -400,8 +400,15 @@ Home's widget ranking/`More…` folding is still Phase 4.5.
   `hit-44`, unnamed controls, resting inset shadows — run in the browser against the page's own DOM
   with `data-ds-shadow-exempt` / `data-ds-audit-ignore` opt-outs and a Re-scan button. Contract:
   `tests/unit/design-system-self-audit.test.tsx` (4).
-- ⬜ **5.7 — split `tasks/page.tsx`** (2,943 lines, 33 `useState`) by section — the family's daily
-  driver is the hardest file in the repo to change safely.
+- ✅ **5.7 — `tasks/page.tsx` split by section.** Four self-contained view blocks now live in
+  `src/components/tasks/` with explicit typed props — `TasksStats` (stat row + view switch),
+  `CrewTasksCard` (parent crew management), `TasksArchive` (journey/goal/hall + recent activity)
+  and `TasksRewardsPanel` (rewards + penalties) — while all 33 `useState`, the data flow and the
+  PIN/edit modals stay in the page (2,946 → 2,820 lines; the PIN confirmations were deliberately
+  *not* moved — they own page state). The tasks tab's own body (the block with the edit form and
+  the four task boards) is the remaining tangle and is documented as follow-up rather than moved
+  half-heartedly. Contract: `tests/unit/tasks-sections.test.tsx` (4) — section props render and
+  fire, the crew gate hides, and the page no longer carries the moved markup.
 - ⬜ **5.8 — emoji-as-chrome sweep** for the leftovers finding 12 lists: Settings section icons, meal
   tabs, the AdultHome stat strip, the rail's Emergency glyph kept by Phase 3.
 

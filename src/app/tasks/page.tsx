@@ -22,6 +22,10 @@ import StatTile from "@/components/patterns/StatTile";
 import ProgressRing from "@/components/ui/ProgressRing";
 import Avatar from "@/components/ui/Avatar";
 import { textEmojiOrFallback } from "@/components/ui/EmojiText";
+import TasksStats from "@/components/tasks/TasksStats";
+import CrewTasksCard from "@/components/tasks/CrewTasksCard";
+import TasksArchive from "@/components/tasks/TasksArchive";
+import TasksRewardsPanel from "@/components/tasks/TasksRewardsPanel";
 import { db } from "@/db";
 import { useAuth } from "@/hooks/useAuth";
 import { useWallMode } from "@/hooks/useWallMode";
@@ -1819,23 +1823,13 @@ export default function TasksPage() {
           grid idiom — stats span both columns, then the view switch sits left
           of the active panel (task board / leaderboard). */}
       <div className="px-4 pb-8 space-y-6 md:grid md:grid-cols-2 md:items-start md:gap-6 md:space-y-0">
-        {/* One compact 3-up stat row at every width — on phones the stacked
-            tiles used to eat 405px of prime screen before the first chore. */}
-        <div className="grid grid-cols-3 gap-3 md:col-span-2">
-          <StatTile label="Pending" value={pending.length} detail="Open tasks" icon="📋" tone="warning" compact />
-          <StatTile label="Completed" value={scopedCompletedCount} detail="This week" icon="🎉" tone="success" compact />
-          <StatTile label="Earned this week" value={scopedEarned} detail={`${scopedAllTimeEarned} pts all-time`} icon="🏆" tone="accent" compact />
-        </div>
-
-        <SegmentedControl
-          aria-label="Tasks view"
-          emphasize
-          value={activeTab}
-          onChange={(value) => setActiveTab(value as "tasks" | "leaderboard")}
-          options={[
-            { id: "tasks", label: "Tasks" },
-            { id: "leaderboard", label: "Leaderboard" },
-          ]}
+        <TasksStats
+          pendingCount={pending.length}
+          completedCount={scopedCompletedCount}
+          earnedThisWeek={scopedEarned}
+          allTimePoints={scopedAllTimeEarned}
+          activeTab={activeTab}
+          onChange={setActiveTab}
         />
 
         {activeTab === "tasks" && (
@@ -2021,42 +2015,15 @@ export default function TasksPage() {
               </SectionCard>
             )}
 
-            {isLoggedIn && currentUser?.role === "parent" && (() => {
-              const crews = tasks.filter((t) => isCrewTask(t) && !t.completed && !t.pendingApproval);
-              if (crews.length === 0) return null;
-              return (
-                <SectionCard title="🤝 Crew tasks" description="Manage who's on each crew." icon="🤝">
-                  <div className="space-y-3">
-                    {crews.map((task) => (
-                      <div key={task.id} className="rounded-2xl glass-subtle p-3">
-                        <div className="text-sm font-semibold text-text-primary">{task.title}</div>
-                        <div className="mt-1 text-xs text-text-secondary">🤝 Crew of {task.crewSize} — {crewMemberCount(task)}/{task.crewSize} joined · +{task.points} pts each</div>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {crewMembers(task).map((m) => (
-                            <span key={m.name} className="inline-flex items-center gap-1.5 rounded-full glass-subtle px-2 py-1 text-xs text-text-primary">
-                              {m.emoji || "👤"} {m.name.split(" ")[0]}
-                              {m.checkedInAt ? (
-                                <span className="text-[var(--color-accent-mint)]">✓ done</span>
-                              ) : (
-                                <button
-                                  type="button"
-                                  aria-label={`Remove ${m.name.split(" ")[0]} from ${task.title}`}
-                                  onClick={() => { setCrewRemoveTarget({ taskId: task.id, memberName: m.name }); setCrewRemovePin(""); setCrewRemoveError(""); }}
-                                  className="text-text-muted hover:text-[var(--color-accent-rose)]"
-                                >
-                                  ✕
-                                </button>
-                              )}
-                            </span>
-                          ))}
-                          {crewMemberCount(task) === 0 && <span className="text-xs text-text-muted">Nobody has joined yet.</span>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </SectionCard>
-              );
-            })()}
+            <CrewTasksCard
+              tasks={tasks}
+              visible={isLoggedIn && currentUser?.role === "parent"}
+              onRemoveMember={(taskId, memberName) => {
+                setCrewRemoveTarget({ taskId, memberName });
+                setCrewRemovePin("");
+                setCrewRemoveError("");
+              }}
+            />
 
             <SectionCard title="Pending" description={`${pending.length} open tasks`} icon="📋">
               {pending.length === 0 ? (
@@ -2467,123 +2434,30 @@ export default function TasksPage() {
               />
             )}
 
-            {/* The deep archive folds behind one expander: journey, family
-                goal, and hall are history — the tab leads with the live race,
-                not its museum. */}
-            <details className="rounded-2xl border border-white/10 px-4 py-3">
-              <summary className="cursor-pointer text-sm font-semibold text-text-secondary">🏅 Trophies, journey & history</summary>
-              <div className="mt-4 space-y-6">
-                {isLoggedIn && currentUser && (() => {
-                  const myAllTime = getMemberAllTimePoints(currentUser.name, weekData);
-                  return (
-                    <SectionCard title="Your Journey" description={`${textEmojiOrFallback(currentUser.emoji)} Level progress & badges`}>
-                      <TreasurePath
-                        allTimePoints={myAllTime}
-                        memberEmoji={currentUser.emoji || "🌱"}
-                        memberColor={memberColors[currentUser.name] || "green"}
-                      />
-                      <div className="mt-4">
-                        <AchievementWall
-                          allTimePoints={myAllTime}
-                          streak={dynamicLeaderboard.find(e => e.name === currentUser.name || e.name.startsWith(currentUser.name))?.streak ?? 0}
-                          completions={getMemberAllTimeCompletions(currentUser.name, tasks, weekData)}
-                        />
-                      </div>
-                    </SectionCard>
-                  );
-                })()}
+            <TasksArchive
+              weekData={weekData}
+              tasks={tasks}
+              currentUser={currentUser}
+              isLoggedIn={isLoggedIn}
+              leaderboard={dynamicLeaderboard}
+              memberColors={memberColors}
+              isParent={!!membersData.find((m: any) => m.role === "parent")}
+            />
 
-                <FamilyGoal weekData={weekData} isParent={!!membersData.find((m: any) => m.role === "parent")} />
-
-                <HallOfFame />
-              </div>
-            </details>
-
-            {weekData.history.length > 0 && (
-              <SectionCard title="Recent Activity" description="Latest point transactions" icon="📜">
-                <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                  {weekData.history.slice().reverse().slice(0, 15).map((tx) => (
-                    <div key={tx.id} className="flex items-center gap-2 rounded-xl px-2 py-1 text-xs">
-                      <span className="shrink-0 text-base">
-                        {tx.type === "earn" ? "✅" : tx.type === "redeem" ? "🎁" : tx.type === "penalty" ? "⚠️" : "⚙️"}
-                      </span>
-                      <span className="flex-1 truncate text-text-secondary">
-                        <span className="font-medium text-text-primary">{tx.member.split(" ")[0]}</span>{" "}
-                        {tx.description}
-                      </span>
-                      <span
-                        className="shrink-0 font-semibold"
-                        style={{ color: tx.amount > 0 ? "var(--color-accent-mint)" : "var(--color-accent-rose)" }}
-                      >
-                        {tx.amount > 0 ? "+" : ""}{tx.amount}
-                      </span>
-                      <span className="text-text-muted shrink-0">
-                        {new Date(tx.timestamp).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </SectionCard>
-            )}
-
-            <SectionCard title="Rewards" description="Spend points on family perks." icon="🎁">
-              <div className="flex gap-2">
-                <SoftButton variant="secondary" onClick={generateAiRewards} disabled={aiRewardSuggesting} className="flex-1">{aiRewardSuggesting ? "Thinking..." : "Suggest"}</SoftButton>
-                <SoftButton variant="ghost" onClick={startAddReward} className="flex-1">Add</SoftButton>
-              </div>
-              {aiRewards.length > 0 && (
-                <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  {aiRewards.map((reward) => (
-                    <Surface key={reward.name} variant="glass-subtle" radius="xl" padding="sm">
-                      <div className="flex items-start gap-3">
-                        <span className="text-xl">{reward.emoji}</span>
-                        <div className="min-w-0 flex-1">
-                          <div className="text-sm font-semibold text-text-primary">{reward.name}</div>
-                          <div className="mt-1 text-xs text-text-muted">{reward.cost} pts</div>
-                        </div>
-                        <SoftButton size="sm" onClick={() => adoptReward(reward)}>Add</SoftButton>
-                      </div>
-                    </Surface>
-                  ))}
-                </div>
-              )}
-              <div className="mt-4 space-y-3">
-                {rewards.map((reward) => (
-                  <Surface key={reward.id} variant="glass-subtle" radius="xl" padding="sm">
-                    <div className="flex items-center gap-3">
-                      <span className="text-xl">{reward.emoji}</span>
-                      <div className="min-w-0 flex-1">
-                        <div className="text-sm font-semibold text-text-primary">{reward.name}</div>
-                        <div className="text-xs text-text-muted">{reward.cost} pts {reward.cost > 100 && <span className="ml-1" style={{ color: "var(--color-accent-amber)" }}>· needs parent</span>}</div>
-                      </div>
-                      <SoftButton size="sm" variant="secondary" onClick={() => openRewardPin(reward)}>Redeem</SoftButton>
-                      <IconButton size="sm" variant="ghost" aria-label="Edit reward" className="hit-44" onClick={() => startEditReward(reward)}>✎</IconButton>
-                    </div>
-                  </Surface>
-                ))}
-              </div>
-            </SectionCard>
-
-            <SectionCard title="Penalties" description="Point deductions for missed chores." icon="⚠️">
-              <div className="flex gap-2 mb-4">
-                <SoftButton variant="secondary" onClick={startAddPenalty} className="flex-1">Add</SoftButton>
-              </div>
-              <div className="space-y-3">
-                {penalties.map((penalty) => (
-                  <Surface key={penalty.id} variant="glass-subtle" radius="xl" padding="sm">
-                    <div className="flex items-center gap-3">
-                      <span className="text-xl">{penalty.emoji}</span>
-                      <div className="min-w-0 flex-1">
-                        <div className="text-sm font-semibold text-text-primary">{penalty.name}</div>
-                        <div className="text-xs text-text-muted">-{penalty.points} pts</div>
-                      </div>
-                      <IconButton size="sm" variant="ghost" aria-label="Apply penalty" className="hit-44" onClick={() => openPenaltyPin(penalty)}>⚠️</IconButton>
-                      <IconButton size="sm" variant="ghost" aria-label="Edit penalty" className="hit-44" onClick={() => startEditPenalty(penalty)}>✎</IconButton>
-                    </div>
-                  </Surface>
-                ))}
-              </div>
-            </SectionCard>
+            <TasksRewardsPanel
+              rewards={rewards}
+              aiRewards={aiRewards}
+              aiRewardSuggesting={aiRewardSuggesting}
+              onGenerateAi={generateAiRewards}
+              onAdd={startAddReward}
+              onAdopt={adoptReward}
+              onRedeem={openRewardPin}
+              onEdit={startEditReward}
+              penalties={penalties}
+              onAddPenalty={startAddPenalty}
+              onApplyPenalty={openPenaltyPin}
+              onEditPenalty={startEditPenalty}
+            />
           </>
           </div>
           )

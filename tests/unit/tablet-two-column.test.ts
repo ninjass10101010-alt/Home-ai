@@ -34,8 +34,10 @@ describe("tablet two-column (audit 4.3)", () => {
 
   it("tasks pairs its controls with the active panel and lets PageShell own width", () => {
     const src = read("src/app/tasks/page.tsx");
+    // Audit 5.7 moved the stat row into src/components/tasks/TasksStats.tsx.
+    const stats = read("src/components/tasks/TasksStats.tsx");
     expect(src, "two-column at md").toContain("md:grid-cols-2");
-    expect(src, "stat row spans both columns above the split").toContain("md:col-span-2");
+    expect(`${src}${stats}`, "stat row spans both columns above the split").toContain("md:col-span-2");
     expect(src, "PageShell owns the width tiers now").not.toContain("lg:max-w-3xl");
   });
 
