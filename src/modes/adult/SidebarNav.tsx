@@ -1,27 +1,34 @@
 /**
- * SidebarNav — Tablet/desktop sidebar navigation for Adult Mode.
+ * SidebarNav — the desktop/tablet rail (adult mode).
  *
- * On screens ≥ 768px, replaces the BottomNav with a persistent left sidebar.
- * This gives the Adult dashboard a proper desktop feel.
+ * Reads `lib/nav-items.ts`, the same manifest the dock and the Home More… sheet
+ * read, so both navs agree on order, roles, icons and — the bug the 2026-09 UI
+ * audit found — the active item (`pathname === href` in the dock vs
+ * `startsWith` here meant `/settings/me` highlighted Settings in one nav and
+ * nothing in the other).
  *
- * On mobile (< 768px), this component renders nothing (BottomNav is used instead).
+ * Fixed here, per that audit's finding 6:
+ *   - emoji icons ("🏠 Dashboard", "🍽️ Meals") → `NavIcon` (one SVG set),
+ *   - the private 6-item list → the manifest (so a kid sees Rewards, not House),
+ *   - the phantom `rgba(var(--color-accent-selected-rgb, 59,130,246), …)`: that
+ *     variable is defined nowhere, so the hard-coded fallback blue always won —
+ *     replaced by `--color-nav-active*`, the token the dock uses too.
+ *
+ * Rendered inside `AdultHome` today; mounting the rail for every route (and the
+ * tablet two-column layout) is Phase 4 of `docs/UI_AUDIT_2026-09.md`.
  */
 "use client";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-
-const navItems = [
-  { href: "/", label: "Dashboard", icon: "🏠" },
-  { href: "/chat", label: "Ask Consuela", icon: "💬" },
-  { href: "/calendar", label: "Calendar", icon: "📅" },
-  { href: "/meals", label: "Meals", icon: "🍽️" },
-  { href: "/tasks", label: "Tasks", icon: "✅" },
-  { href: "/settings", label: "Settings", icon: "⚙️" },
-];
+import NavIcon from "@/components/ui/NavIcon";
+import { useAuth } from "@/hooks/useAuth";
+import { isNavItemActive, navItemsForRole, navRoleForUser } from "@/lib/nav-items";
 
 export default function SidebarNav() {
   const pathname = usePathname();
+  const { currentUser } = useAuth();
+  const items = navItemsForRole(navRoleForUser(currentUser));
 
   return (
     <>
@@ -41,7 +48,7 @@ export default function SidebarNav() {
               className="w-9 h-9 rounded-2xl grid place-items-center text-base shrink-0"
               style={{
                 background: "linear-gradient(135deg, var(--color-accent-selected), var(--color-accent-violet))",
-                boxShadow: "0 0 16px rgba(var(--color-accent-selected-rgb, 59,130,246), 0.25)",
+                boxShadow: "0 0 16px color-mix(in srgb, var(--color-accent-selected) 25%, transparent)",
               }}
             >
               ✨
@@ -53,49 +60,55 @@ export default function SidebarNav() {
           </div>
         </div>
 
-        {/* Navigation items */}
-        <nav className="flex-1 px-3 py-4 space-y-1">
-          {navItems.map((item) => {
-            const isActive = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href));
+        {/* Navigation items — order, roles and icons come from the manifest */}
+        <nav className="flex-1 px-3 py-4 space-y-1" aria-label="Main">
+          {items.map((item) => {
+            const isActive = isNavItemActive(pathname, item);
 
             return (
               <Link
-                key={item.href}
-                href={item.href}
+                key={item.path}
+                href={item.path}
+                aria-current={isActive ? "page" : undefined}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-150 ${
                   isActive
                     ? "text-text-primary"
                     : "text-text-secondary hover:text-text-primary hover:bg-white/[0.04]"
                 }`}
                 style={isActive ? {
-                  background: "rgba(var(--color-accent-selected-rgb, 59,130,246), 0.12)",
-                  border: "1px solid rgba(var(--color-accent-selected-rgb, 59,130,246), 0.15)",
+                  background: "linear-gradient(135deg, var(--color-nav-active-sheen), var(--color-nav-active-wash))",
+                  border: "1px solid var(--color-nav-active-border)",
                 } : {
                   border: "1px solid transparent",
                 }}
               >
-                <span className="text-base w-6 text-center">{item.icon}</span>
+                <span className={`grid h-6 w-6 shrink-0 place-items-center ${isActive ? "text-[var(--color-nav-active)]" : ""}`}>
+                  <NavIcon iconKey={item.iconKey} active={isActive} className="h-5 w-5" />
+                </span>
                 <span className="text-sm font-medium">{item.label}</span>
                 {isActive && (
-                  <span className="ml-auto w-1.5 h-1.5 rounded-full bg-[var(--color-accent-selected)]" />
+                  <span
+                    aria-hidden="true"
+                    className="ml-auto w-1.5 h-1.5 rounded-full bg-[var(--color-nav-active)]"
+                  />
                 )}
               </Link>
             );
           })}
         </nav>
 
-        {/* Emergency button */}
+        {/* Emergency button — not a dock cap, so deliberately not in the manifest
+            (see EXEMPT_ROUTES); its emoji glyph is Phase 5's emoji-as-chrome sweep. */}
         <div className="px-3 pb-6 pt-2 border-t border-white/[0.06]">
           <Link
             href="/emergency"
             className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-[var(--color-accent-rose)] hover:bg-[var(--color-accent-rose)]/[0.08] transition-colors"
           >
-            <span className="text-base w-6 text-center">🛡️</span>
+            <span className="text-base w-6 text-center" aria-hidden="true">🛡️</span>
             <span className="text-sm font-medium">Emergency</span>
           </Link>
         </div>
       </aside>
-
     </>
   );
 }
