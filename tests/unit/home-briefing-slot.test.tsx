@@ -64,14 +64,31 @@ const briefingState = vi.hoisted(() => ({
     id: string;
     scopeDate: string;
     acknowledged: boolean;
-    summary: { events: unknown[]; tasks: unknown[]; meals: unknown[]; suggestions: unknown[] };
+    summary: {
+      events: unknown[];
+      tasks: unknown[];
+      meals: unknown[];
+      suggestions: unknown[];
+      taskSource?: string;
+    } | null;
   },
   // Audit P0-4: the slot must keep a card, and name the failure, when the read fails.
   failure: null as null | "offline" | "unauthorised" | "error",
   stale: false,
   retrying: false,
   emptySections: true,
+  // The remediation's emptiness rule, as a CONTROLLABLE input. It used to be
+  // derived from `emptySections` here, which re-derived the very composition
+  // this file exists to pin — and modelled neither half of it: the real
+  // `briefingShowsCard` also admits a briefing whose chore list is unavailable.
+  showsCard: true,
 }));
+
+// How many times the slot/widget asked "is there anything to show or admit?".
+// The failure path must never ask, so the new cases can assert the ordering
+// rather than infer it from whether a card happened to render.
+const briefingShowsCardSpy = vi.hoisted(() => vi.fn());
+
 vi.mock("@/components/briefing/hooks/useMorningBriefing", () => ({
   useMorningBriefing: () => ({
     briefing: briefingState.briefing,
@@ -84,11 +101,16 @@ vi.mock("@/components/briefing/hooks/useMorningBriefing", () => ({
     retry: vi.fn(),
   }),
   // BOTH predicates are exported by the merged hook and the slot/widget each
-  // read one of them; dropping either makes this file fail to load. Until the
-  // dedicated `showsCard` flag lands (Task 7), `briefingShowsCard` is the
-  // complement of `emptySections` — i.e. "something to show, nothing to admit".
+  // read one of them; dropping either makes this file fail to load, which is
+  // itself the pin that both sides of the merge survived. `briefingSectionsEmpty`
+  // still decides the widget's own empty-vs-failure card; `briefingShowsCard`
+  // decides the slot's collapse and is a plain controllable value, never a
+  // re-derivation of the other.
   briefingSectionsEmpty: () => briefingState.emptySections,
-  briefingShowsCard: () => !briefingState.emptySections,
+  briefingShowsCard: (briefing: unknown) => {
+    briefingShowsCardSpy(briefing);
+    return briefingState.showsCard;
+  },
   briefingTaskSourceNote: () => null,
 }));
 
@@ -144,6 +166,8 @@ describe("Home morning briefing slot", () => {
     briefingState.stale = false;
     briefingState.retrying = false;
     briefingState.emptySections = true;
+    briefingState.showsCard = true;
+    briefingShowsCardSpy.mockClear();
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) })));
     vi.stubGlobal("matchMedia", vi.fn(() => ({
       matches: false,
@@ -162,6 +186,10 @@ describe("Home morning briefing slot", () => {
   });
 
   it("does not add a grid slot for an acknowledged empty briefing", async () => {
+    // Nothing to show and nothing to admit, so the remediation's rule collapses
+    // the slot even though the briefing is acknowledged.
+    briefingState.showsCard = false;
+
     const el = await renderAsync(<HomePage />);
     await settle();
 
@@ -198,5 +226,61 @@ describe("Home morning briefing slot", () => {
     expect(el.textContent).toContain("Morning Briefing");
     expect(el.textContent).toContain("Showing your saved copy");
     expect(el.textContent).not.toContain("What Consuela lined up for today");
+  });
+
+  // The merge composition itself. `briefingShowsCard` is the remediation's
+  // emptiness rule; audit P0-4's rule is that a failed read keeps a card. The
+  // merged slot must consult the first ONLY when there is no failure, so a
+  // hostile `false` can never swallow the failure card again.
+  it("a false briefingShowsCard never suppresses the P0-4 failure card", async () => {
+    // A briefing that exists but has no summary: the real `briefingSectionsEmpty`
+    // and `briefingShowsCard` agree with all three of these values, so the only
+    // hostile input is the guard itself — which isolates the fault to where the
+    // guard sits. A null `briefing` would instead return early for the "no
+    // briefing" reason and pass even with the gate hoisted.
+    briefingState.briefing = {
+      id: "briefing-no-summary",
+      scopeDate: "2026-09-28",
+      acknowledged: false,
+      summary: null,
+    };
+    briefingState.failure = "error";
+    briefingState.emptySections = true;
+    briefingState.showsCard = false;   // the emptiness check is hostile
+
+    const el = await renderAsync(<HomePage />);
+    await settle();
+
+    expect(el.textContent).toContain("Morning Briefing");
+    expect(el.textContent).toContain("Morning briefing:");
+    expect(el.textContent).toContain("Showing your saved copy");
+    expect(
+      Array.from(el.querySelectorAll("button")).some((b) => b.textContent?.includes("Try again")),
+    ).toBe(true);
+    // The strongest form of the pin: on the failure path the emptiness rule is
+    // not merely outranked, it is never evaluated — so no reordering of the
+    // guards can hide the card behind it.
+    expect(briefingShowsCardSpy).not.toHaveBeenCalled();
+  });
+
+  it("a successful read with nothing to admit still collapses the slot", async () => {
+    briefingState.briefing = {
+      id: "briefing-full",
+      scopeDate: "2026-09-28",
+      acknowledged: false,
+      summary: { events: [{ title: "School" }], tasks: [], meals: [], suggestions: [] },
+    };
+    briefingState.failure = null;
+    briefingState.emptySections = false;
+    briefingState.showsCard = false;   // honest emptiness, no failure to excuse it
+
+    const el = await renderAsync(<HomePage />);
+    await settle();
+
+    // The emptiness check is still wired in — deleting it to make the failure
+    // case pass would render this card again.
+    expect(briefingShowsCardSpy).toHaveBeenCalled();
+    expect(el.textContent).not.toContain("Morning Briefing");
+    expect(el.querySelector('svg[data-variant="briefing"]')).toBeNull();
   });
 });
