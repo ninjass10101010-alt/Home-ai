@@ -352,17 +352,29 @@ Home's widget ranking/`More…` folding is still Phase 4.5.
   `tests/unit/home-first-fold.test.ts` (5), `tests/unit/animation-budget.test.tsx` (3), plus an
   action-row test in `more-sheet.test.tsx`.
 
-**Phase 5 — design-system convergence (P2).** Delete the four orphaned stylesheets
-(`styles/animations.css`, `styles/tokens.css`, `styles/materials.css`, `styles/components.css`
-— 2054 lines, every rule duplicated or superseded in `globals.css`, all flagged `⚠️ DEAD FILE`
-and asserted unimported by contract B2); converge the legacy `Card` / `Button` / `Badge` on
-`Surface` / `SoftButton` / `Chip` (8 importing files); map
-`rounded-2xl` → `--radius-lg` etc. via `@theme` aliases and ban raw `rounded-[..]`; replace
-`bg-white/[0.03]` + hex clusters with `Surface`/`--neu-*`; port the 24 ad-hoc overlays onto
-`Modal` (or `BottomSheet` for mobile) and add `role="dialog"` where a sheet must stay; add a
-user-facing **Reduce motion** toggle alongside `data-contrast`; merge the two design-system
-pages into one, and grow it into a live audit (axe-core, min-tap-target, sub-12px sweep,
-inset-shadow ban); split `tasks/page.tsx` by section.
+**Phase 5 — design-system convergence (P2, findings 9–19).**
+- ✅ **5.1 — the four orphaned stylesheets are deleted.** `src/styles/{animations,tokens,materials,components}.css`
+  (2,064 lines, every rule duplicated or superseded in `globals.css`, all flagged `⚠️ DEAD FILE` and
+  imported by nothing) are gone, and contract B2 now asserts they stay **deleted**, not merely
+  unimported (`tests/unit/warm-glass-contracts.test.tsx`).
+- ⬜ **5.2 — legacy `Card` / `Button` / `Badge`** (5 importing files today) onto `Surface` / `SoftButton` /
+  `Chip`, and retire the now-redundant local `--color-text-muted` re-scopes (`.widget-card`,
+  `.kitchen-text`) that Phase 1 left behind.
+- ⬜ **5.3 — radius + surface tokens.** `rounded-2xl` → `--radius-lg` etc. via `@theme` aliases, ban raw
+  `rounded-[…]`, replace `bg-white/[0.03]` / hex clusters (569 hex + 523 `rgba(` literals) with
+  `Surface` / `--neu-*`.
+- ⬜ **5.4 — modal adoption (1:24).** Port the hand-rolled `fixed inset-0` overlays onto `Modal` /
+  `BottomSheet`, adding `role="dialog"` where a sheet must stay custom.
+- ⬜ **5.5 — user-facing Reduce-motion toggle** alongside `data-contrast` (OS-level preference is not
+  enough for a shared wall).
+- ⬜ **5.6 — one design-system page.** The `/_design-system` → `/design-system` rewrite does exist — in
+  `src/middleware.ts`, not `next.config.ts`; the two pages are near-duplicates with two production
+  gates: keep one and grow it into a live audit (axe-core, min-tap-target, sub-12px sweep,
+  inset-shadow ban).
+- ⬜ **5.7 — split `tasks/page.tsx`** (2,943 lines, 33 `useState`) by section — the family's daily
+  driver is the hardest file in the repo to change safely.
+- ⬜ **5.8 — emoji-as-chrome sweep** for the leftovers finding 12 lists: Settings section icons, meal
+  tabs, the AdultHome stat strip, the rail's Emergency glyph kept by Phase 3.
 
 **Guardrails to make this stick:** an ESLint rule (or CI grep) rejecting `text-[9|10|11]px`
 and unlabelled `h-8/h-9/h-10 w-8/w-9/w-10` without `hit-44`; the Playwright probe as a CI job

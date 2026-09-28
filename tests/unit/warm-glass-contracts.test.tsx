@@ -12,7 +12,7 @@
 //   C. Sub-44px tap targets (SoftButton sm, IconButton sm, Stepper buttons) must
 //      carry .hit-44 so their hit area expands to 44px (globals.css).
 import { describe, it, expect } from "vitest";
-import { readFileSync, readdirSync, statSync } from "fs";
+import { readFileSync, readdirSync, statSync, existsSync } from "fs";
 import { join } from "path";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
@@ -100,9 +100,13 @@ const INLINE_PX_RE = /fontSize:\s*["'](\d*\.\d+|\d+)px["']/g;
 const INLINE_BARE_RE = /fontSize:\s*(\d*\.\d+|\d+)\s*[,}]/g;
 
 describe("Warm Glass contract B2: the 12px floor also covers raw CSS and inline styles", () => {
-  it("the dead stylesheets stay dead — nothing imports them", () => {
+  it("the dead stylesheets stay dead — nothing imports them, and audit 5.1 deleted them", () => {
     const globals = readFileSync(join(SRC, "app/globals.css"), "utf8");
-    for (const dead of CSS_DEAD) expect(globals.includes(dead.split("/").pop()!)).toBe(false);
+    for (const dead of CSS_DEAD) {
+      const name = dead.split("/").pop()!;
+      expect(globals.includes(name), `globals.css references ${name}`).toBe(false);
+      expect(existsSync(join(process.cwd(), dead)), `${dead} must stay deleted (audit 5.1)`).toBe(false);
+    }
   });
 
   it("no live stylesheet declares a font-size below 12px", () => {
