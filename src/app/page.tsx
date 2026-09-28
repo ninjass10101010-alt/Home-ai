@@ -29,7 +29,7 @@ import ListRow from "@/components/ui/ListRow";
 import EmptyState from "@/components/ui/EmptyState";
 import ErrorState from "@/components/ui/ErrorState";
 import ReadStatePill from "@/components/ui/ReadStatePill";
-import { classifyReadError, READ_COPY_STALE, type ReadFailure } from "@/lib/read-state";
+import { classifyReadError, readMessageFor, type ReadFailure } from "@/lib/read-state";
 import Modal from "@/components/ui/Modal";
 import Toast from "@/components/ui/Toast";
 import StatTile from "@/components/patterns/StatTile";
@@ -653,7 +653,7 @@ export default function HomePage() {
                             <ReadStatePill
                               state={googleTodayFailure}
                               subject="Google Calendar"
-                              message={todayEvents.length > 0 ? READ_COPY_STALE : undefined}
+                              message={readMessageFor(googleTodayFailure, todayEvents.length > 0)}
                               retrying={googleRetrying}
                               onRetry={() => void refreshTodayEventsRef.current()}
                             />

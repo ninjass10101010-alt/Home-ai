@@ -3,7 +3,8 @@
 **Audit date:** 2026-09-26 · **Branch:** `warm-glass-v2` · **Phase 1 fixes landed same day**
 **Supersedes:** `docs/UI_CONSISTENCY_AUDIT.md` (2026-07-20), which audited against the
 pre-`warm-glass-v2` shadcn recipe (`<Card>`, `bg-primary`) and is kept for history only.
-**Status:** ✅ **Phase 1 shipped** (legibility + contrast + tap targets) · ⏳ Phases 2–5 open.
+**Status:** ✅ **Phase 1 shipped** (legibility + contrast + tap targets) · ✅ **Phase 2 shipped**
+(honest states) · ⏳ Phases 3–5 open.
 
 Method: (1) static scan of 240 `.tsx` files / 46.9k lines, 29 routes, `globals.css`
 (2,852 lines / 296 selectors / 95 keyframes) + `modes.css`; (2) a live Playwright/Chromium
@@ -274,16 +275,27 @@ rest need Phase 5.
 
 ## Remaining phases (each independently shippable behind its own commit)
 
-**Phase 2 — honest states (P0-4).** Add `app/error.tsx` + `app/loading.tsx`; one shared
-`useSafeFetch` that distinguishes *loading* → *empty* → *offline/unauthorised* instead of
-swallowing; give each Home widget an error/offline state (the 401-on-every-fetch pattern in
-`AdultHome.tsx` / `page.tsx` is the template to replace); make the existing `sync-failed`
-banner offer Retry, not just colour a dot. Also in scope: `npm test` exits non-zero even though
-all 3241 tests pass — two uncaught jsdom `NotFoundError: The node to be removed is not a child
-of this node` (code 8) escape from `tests/unit/tasks-approve-all.test.tsx` after
-`createRoot`/toast-portal teardown, so CI can never tell a real failure from this noise.
-Reproduce with `npx vitest run tests/unit/tasks-approve-all.test.tsx`; fix by unmounting the
-root in `afterEach` before the document is torn down (or guarding the portal's `removeChild`).
+**Phase 2 — honest states (P0-4) — shipped 2026-09-27** in three commits:
+`009cda0` (vocabulary), `44ece37` (widgets), plus the closing pass below.
+`lib/read-state.ts` is now the single vocabulary (`loading → ready → empty → offline →
+unauthorised → error`) with `classifyReadError`, `readMessageFor` and `ReadStatePill`;
+`hooks/useSafeFetch.ts` replaces swallow-everything `try/catch`; `app/error.tsx`,
+`global-error.tsx`, `loading.tsx` and `not-found.tsx` exist, so a route can no longer render
+blank. The closing pass covered the last silent surfaces found while landing it:
+**Morning Briefing** (`useMorningBriefing` no longer swallows; the widget renders a failure
+card with a Retry instead of returning `null`, and badges a saved copy when a refresh fails
+after a good read), **Chat's `FamilyBrief`** (a failed meal or calendar read says so on the
+card instead of "Nothing planned yet" / "Quiet rest of day", the compact strip stays visible,
+and tapping a failed card re-reads rather than drafting a question built on nothing), and
+**`SyncStatusBanner`**, whose dead-end "sign in with your PIN" instruction is now a link to
+`/settings` where the PIN dialog actually lives.
+Two classification lessons worth keeping: on a self-hosted wall display a dead backboard
+surfaces as a `TypeError` whose useful marker (`ECONNREFUSED`, `UND_ERR_*`) is buried in
+`error.cause` / `error.code`, so `classifyReadError` walks the cause chain instead of reading
+`message` — otherwise an offline-looking browser blames the family's network for our outage;
+and a *failed* read must never reuse the *stale* copy, so offline-with-nothing-cached says
+"no saved copy on this device" rather than promising one. `npm test` exits 0 again (the
+jsdom teardown escape was fixed in `05f1005`).
 
 **Phase 3 — navigation & IA (P1-5, P1-6).** `lib/nav-items.ts` as the single manifest feeding
 dock + rail; adopt it in `CapsuleNav` and `SidebarNav` (or delete `SidebarNav` and keep Home's

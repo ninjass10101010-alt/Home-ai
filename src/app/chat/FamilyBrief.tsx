@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/set-state-in-effect -- fetch-on-mount + refresh listeners: setState lands after await, the rule can't see through the async boundary (same disable as page.tsx / Modal.tsx / useSuggestions.ts) */
 "use client";
 
 /**
@@ -13,6 +12,21 @@ import { db } from "@/db";
 import { dinnerForToday, nextEventToday, eventCountdown } from "@/lib/consuela/chat-context";
 import { localWeekStartISO, localWeekdayShort } from "@/lib/local-date";
 import { EmojiText } from "@/components/ui/EmojiText";
+import { classifyReadError, readMessageFor, type ReadFailure } from "@/lib/read-state";
+
+/**
+ * One `db` read that reports *why* it failed instead of answering with `[]`.
+ * `db.selectMeals?.()` can reject (PB path) or throw synchronously (missing
+ * method on the local cache), so the source is a thunk.
+ */
+async function readRows<T>(source: () => T[] | Promise<T[]>): Promise<{ rows: T[]; failure: ReadFailure | null }> {
+  try {
+    const rows = await Promise.resolve(source());
+    return { rows: Array.isArray(rows) ? rows : [], failure: null };
+  } catch (err) {
+    return { rows: [], failure: classifyReadError(err) };
+  }
+}
 
 interface FamilyBriefProps {
   speaker: { name: string; emoji: string; color: string };
@@ -28,26 +42,28 @@ export function FamilyBrief({ speaker, onDraft, onSpeakerTap, compact = false, s
   const [meals, setMeals] = useState<Array<{ name: string; mealType?: string; time: string; weekOf?: string }>>([]);
   const [events, setEvents] = useState<Array<{ title: string; time: string }>>([]);
   const [loaded, setLoaded] = useState(false);
+  // Audit P0-4: both reads used to swallow their error into `[]`, so a backboard
+  // that refused to answer said "Nothing planned yet" and "Quiet rest of day" —
+  // the two most reassuring, most wrong sentences Consuela can open with.
+  const [mealFailure, setMealFailure] = useState<ReadFailure | null>(null);
+  const [eventFailure, setEventFailure] = useState<ReadFailure | null>(null);
 
   const read = useCallback(async (cancelledRef: { current: boolean }) => {
-    try {
-      // db.selectMeals() is dual-mode: a Promise (PB path) or a plain array
-      // (local cache path) — await handles both; sync throws from a missing
-      // client method are caught here so the brief degrades honestly instead
-      // of hanging at "…" forever.
-      const wrap = <T,>(v: T | Promise<T>): Promise<T> => Promise.resolve(v);
-      const [m, e] = await Promise.all([
-        wrap(db.selectMeals?.() ?? []).catch(() => []),
-        wrap(db.selectTodaysEvents?.() ?? []).catch(() => []),
-      ]);
-      if (cancelledRef.current) return;
-      setMeals(Array.isArray(m) ? m : []);
-      setEvents(Array.isArray(e) ? e : []);
-    } catch {
-      if (!cancelledRef.current) setMeals([]);
-    } finally {
-      if (!cancelledRef.current) setLoaded(true);
-    }
+    // db.selectMeals() is dual-mode: a Promise (PB path) or a plain array
+    // (local cache path) — await handles both; sync throws from a missing
+    // client method are caught here so the brief degrades honestly instead
+    // of hanging at "…" forever.
+    const wrap = <T,>(v: T | Promise<T>): Promise<T> => Promise.resolve(v);
+    const [m, e] = await Promise.all([
+      readRows(() => wrap(db.selectMeals?.() ?? [])),
+      readRows(() => wrap(db.selectTodaysEvents?.() ?? [])),
+    ]);
+    if (cancelledRef.current) return;
+    setMeals(m.rows);
+    setMealFailure(m.failure);
+    setEvents(e.rows);
+    setEventFailure(e.failure);
+    setLoaded(true);
   }, []);
 
   useEffect(() => {
@@ -93,11 +109,28 @@ export function FamilyBrief({ speaker, onDraft, onSpeakerTap, compact = false, s
   );
   const next = nextRaw ? { ...nextRaw, countdown } : null;
 
+  // A failure only explains the card when that card has nothing to show; a good
+  // read that happens to be followed by a failed refresh keeps its content.
+  const dinnerFailure = dinner ? null : mealFailure;
+  const nextFailure = next ? null : eventFailure;
+
+  // Tapping a failed card re-reads instead of drafting a question built on data
+  // we do not have (audit P2-1: no affordances that pretend to work).
+  const retry = useCallback(() => {
+    read({ current: false });
+  }, [read]);
+
   if (compact) {
     const parts: string[] = [];
     if (dinner) parts.push(`🍽️ ${dinner.name}`);
     if (next) parts.push(`📅 ${next.title}${next.countdown ? ` · ${next.countdown}` : ` · ${next.time}`}`);
-    if (parts.length === 0) return null;
+    if (parts.length === 0) {
+      // A read that failed is not "nothing to report" (audit P0-4) — the strip
+      // stays and says which one happened, rather than vanishing above a thread.
+      const failure = mealFailure ?? eventFailure;
+      if (!failure || !loaded) return null;
+      parts.push(`${failure === "offline" ? "📴" : "⚠️"} ${readMessageFor(failure, false)}`);
+    }
     return (
       <div className="w-full px-3 py-2 rounded-2xl glass-subtle text-xs text-text-secondary flex items-center gap-2 overflow-hidden" role="status" aria-label="Today at a glance">
         <span className="shrink-0 font-semibold text-text-primary flex items-center gap-1"><EmojiText emoji={speaker.emoji} alt={speaker.name} /> {speaker.name.split(" ")[0]}</span>
@@ -119,30 +152,36 @@ export function FamilyBrief({ speaker, onDraft, onSpeakerTap, compact = false, s
     <div className="w-full grid grid-cols-1 gap-3" aria-label="The family's day">
       {/* Dinner */}
       <button
-        onClick={() => onDraft(dinner ? `What's for dinner tonight? I see ${dinner.name} is planned — remind me what's in it?` : "What should we have for dinner tonight?")}
+        onClick={() => (dinnerFailure
+          ? retry()
+          : onDraft(dinner ? `What's for dinner tonight? I see ${dinner.name} is planned — remind me what's in it?` : "What should we have for dinner tonight?"))}
+        aria-label={dinnerFailure ? "Dinner could not be loaded — tap to try again" : undefined}
         className="liquid-glass flex items-center gap-3 px-4 py-3.5 text-left rounded-2xl"
         style={{ background: "linear-gradient(135deg, color-mix(in srgb, var(--color-accent-selected) 14%, transparent) 0%, color-mix(in srgb, var(--color-accent-selected) 5%, transparent) 100%)" }}
       >
-        <span className="text-2xl shrink-0" aria-hidden>{dinner ? "🍽️" : "🤷"}</span>
+        <span className="text-2xl shrink-0" aria-hidden>{dinner ? "🍽️" : dinnerFailure ? "⚠️" : "🤷"}</span>
         <span className="min-w-0">
           <span className="block text-xs uppercase tracking-wider text-text-secondary">Dinner</span>
           <span className="block text-sm font-semibold text-text-primary truncate">
-            {loaded ? (dinner ? dinner.name : "Nothing planned yet") : "…"}
+            {loaded ? (dinner ? dinner.name : dinnerFailure ? readMessageFor(dinnerFailure, false) : NO_DINNER_COPY) : "…"}
           </span>
         </span>
       </button>
 
       {/* Next up */}
       <button
-        onClick={() => onDraft(next ? `Tell me about ${next.title} at ${next.time}` : "What's coming up on the calendar?")}
+        onClick={() => (nextFailure
+          ? retry()
+          : onDraft(next ? `Tell me about ${next.title} at ${next.time}` : "What's coming up on the calendar?"))}
+        aria-label={nextFailure ? "The calendar could not be loaded — tap to try again" : undefined}
         className="liquid-glass flex items-center gap-3 px-4 py-3.5 text-left rounded-2xl"
         style={{ background: "linear-gradient(135deg, color-mix(in srgb, var(--color-accent-selected) 14%, transparent) 0%, color-mix(in srgb, var(--color-accent-selected) 5%, transparent) 100%)" }}
       >
-        <span className="text-2xl shrink-0" aria-hidden>{next ? next.title.match(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u)?.[0] ?? "📅" : "🌙"}</span>
+        <span className="text-2xl shrink-0" aria-hidden>{next ? next.title.match(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u)?.[0] ?? "📅" : nextFailure ? "⚠️" : "🌙"}</span>
         <span className="min-w-0">
           <span className="block text-xs uppercase tracking-wider text-text-secondary">Next up</span>
           <span className="block text-sm font-semibold text-text-primary truncate">
-            {next ? `${next.title}${next.countdown ? ` · ${next.countdown}` : ` · ${next.time}`}` : "Quiet rest of day"}
+            {next ? `${next.title}${next.countdown ? ` · ${next.countdown}` : ` · ${next.time}`}` : nextFailure ? readMessageFor(nextFailure, false) : "Quiet rest of day"}
           </span>
         </span>
       </button>

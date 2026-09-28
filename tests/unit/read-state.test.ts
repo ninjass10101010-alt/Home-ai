@@ -10,6 +10,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   READ_COPY,
+  READ_COPY_OFFLINE_EMPTY,
   READ_COPY_STALE,
   ReadError,
   assertReadable,
@@ -164,7 +165,8 @@ describe("copy", () => {
     expect(readMessageFor("offline", true)).toBe(READ_COPY_STALE);
     expect(readMessageFor("error", true)).toBe(READ_COPY_STALE);
     // With nothing loaded there is no "saved copy" to promise — never claim one.
-    expect(readMessageFor("offline", false)).toBe(READ_COPY.offline);
+    expect(readMessageFor("offline", false)).toBe(READ_COPY_OFFLINE_EMPTY);
+    expect(readMessageFor("offline", false)).not.toContain("showing your saved copy");
     expect(readMessageFor("error", false)).toBe(READ_COPY.error);
     expect(readMessageFor("error", false)).not.toContain("saved copy");
     // A signed-out browser still has to be told to sign in, data or not.

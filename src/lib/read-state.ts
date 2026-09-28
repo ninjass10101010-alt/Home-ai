@@ -39,6 +39,13 @@ export const READ_COPY: Record<ReadFailure, string> = {
 /** A read that kept its last good data after a failed refresh. */
 export const READ_COPY_STALE = "Showing your saved copy — couldn't refresh.";
 
+/**
+ * Offline with *nothing* cached. `READ_COPY.offline` promises a saved copy; when
+ * no rows are on screen that promise is its own small lie, so the no-cache case
+ * gets its own wording.
+ */
+export const READ_COPY_OFFLINE_EMPTY = "Offline — no saved copy on this device.";
+
 /** Default affordance label; matches `ErrorState`'s `retryLabel` default. */
 export const READ_RETRY_LABEL = "Try again";
 
@@ -153,5 +160,6 @@ export function stateForGatewayRead(read: { items: readonly unknown[]; blocked: 
 /** Copy for a failed read, honouring whether usable (possibly stale) data remains on screen. */
 export function readMessageFor(state: ReadFailure, hasData: boolean): string {
   if (hasData && (state === "offline" || state === "error")) return READ_COPY_STALE;
+  if (!hasData && state === "offline") return READ_COPY_OFFLINE_EMPTY;
   return READ_COPY[state];
 }

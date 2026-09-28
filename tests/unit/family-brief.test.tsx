@@ -11,14 +11,24 @@ const eventsMock = vi.hoisted(() => ({ events: [
   { id: "e1", title: "Soccer", time: "4:00 PM", member: "Caspian", emoji: "🧒" },
 ] as any[] }));
 
+// Audit P0-4: makes a read throw the way a real backboard does, so the brief can
+// be caught calling a failure "Nothing planned yet".
+const failMock = vi.hoisted(() => ({ meals: false, events: false }));
+
 vi.mock("@/db", () => ({
   db: {
     selectMembers: vi.fn(() => [
       { name: "Rebecca", emoji: "🐱", color: "amber" },
       { name: "Caspian", emoji: "🧒", color: "mint" },
     ]),
-    selectTodaysEvents: vi.fn(() => eventsMock.events),
-    selectMeals: vi.fn(() => mealsMock.meals),
+    selectTodaysEvents: vi.fn(() => {
+      if (failMock.events) throw new TypeError("Failed to fetch");
+      return eventsMock.events;
+    }),
+    selectMeals: vi.fn(() => {
+      if (failMock.meals) throw new TypeError("Failed to fetch");
+      return mealsMock.meals;
+    }),
   },
 }));
 
@@ -40,6 +50,8 @@ function render(ui: ReactElement): HTMLElement {
 
 beforeEach(() => {
   mealsMock.meals = [];
+  failMock.meals = false;
+  failMock.events = false;
   vi.stubGlobal("matchMedia", vi.fn(() => ({
     matches: false, addEventListener: () => {}, removeEventListener: () => {},
     addListener: () => {}, removeListener: () => {},
@@ -163,5 +175,58 @@ describe("FamilyBrief", () => {
       await Promise.resolve();
     });
     expect(el.textContent).toContain("Tacos");
+  });
+
+  it("names the failure instead of calling it a quiet day when both reads throw (audit P0-4)", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-02T20:00:00"));
+    failMock.meals = true;
+    failMock.events = true;
+
+    const el = render(<FamilyBrief speaker={{ name: "Rebecca", emoji: "🐱", color: "amber" }} onDraft={vi.fn()} onSpeakerTap={vi.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+
+    expect(el.textContent).toContain("Couldn't load this right now.");
+    // The two sentences that used to stand in for "the backboard is down".
+    expect(el.textContent).not.toContain("Nothing planned yet");
+    expect(el.textContent).not.toContain("Quiet rest of day");
+    vi.useRealTimers();
+  });
+
+  it("re-reads when a failed card is tapped, and never drafts a question built on nothing", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-02T20:00:00"));
+    failMock.meals = true;
+    failMock.events = true;
+
+    const onDraft = vi.fn();
+    const el = render(<FamilyBrief speaker={{ name: "Rebecca", emoji: "🐱", color: "amber" }} onDraft={onDraft} onSpeakerTap={vi.fn()} />);
+    await act(async () => { await Promise.resolve(); });
+
+    const failedCard = Array.from(el.querySelectorAll("button")).find((b) => b.textContent?.includes("Dinner"))!;
+    act(() => { failedCard.click(); });
+    expect(onDraft).not.toHaveBeenCalled();
+
+    // Backboard answers again; a second tap now re-reads and the card recovers.
+    failMock.meals = false;
+    failMock.events = false;
+    await act(async () => { await Promise.resolve(); });
+    act(() => { failedCard.click(); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(el.textContent).toContain("Nothing planned yet");
+    expect(el.textContent).toContain("Quiet rest of day");
+    vi.useRealTimers();
+  });
+
+  it("keeps the compact strip when the day could not be read, instead of vanishing", async () => {
+    failMock.meals = true;
+    failMock.events = true;
+
+    const el = render(
+      <FamilyBrief compact speaker={{ name: "Rebecca", emoji: "🐱", color: "amber" }} onDraft={vi.fn()} onSpeakerTap={vi.fn()} />
+    );
+    await act(async () => { await Promise.resolve(); });
+
+    expect(el.textContent).toContain("Couldn't load this right now.");
   });
 });

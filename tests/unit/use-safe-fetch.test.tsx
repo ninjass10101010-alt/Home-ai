@@ -13,7 +13,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useSafeFetch, type SafeFetch, type UseSafeFetchOptions } from "@/hooks/useSafeFetch";
-import { READ_COPY, READ_COPY_STALE } from "@/lib/read-state";
+import { READ_COPY, READ_COPY_OFFLINE_EMPTY, READ_COPY_STALE } from "@/lib/read-state";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -154,7 +154,9 @@ describe("useSafeFetch — failures never render as absence", () => {
     });
     await flush();
     expect(latest().state).toBe("offline");
-    expect(latest().message).toBe(READ_COPY.offline);
+    // Nothing ever loaded, so there is no saved copy to promise — the offline
+    // wording that claims one would be its own small lie.
+    expect(latest().message).toBe(READ_COPY_OFFLINE_EMPTY);
     // This is the AdultHome weather bug: it used to sit at "Loading…" forever.
     expect(latest().state).not.toBe("loading");
   });
