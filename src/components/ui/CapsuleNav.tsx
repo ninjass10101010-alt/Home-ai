@@ -4,140 +4,33 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useWallMode } from "@/hooks/useWallMode";
+import { isNavItemActive, navItemsForRole, navRoleForUser } from "@/lib/nav-items";
+import NavIcon from "./NavIcon";
 import SyncInit from "./SyncInit";
-
-const navItems = [
-  {
-    href: "/",
-    label: "Home",
-    icon: (active: boolean) => (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 2.5 : 2} strokeLinecap="round" strokeLinejoin="round">
-        <path d="M3 11.5 12 4l9 7.5" />
-        <path d="M5 10v9a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1v-9" />
-      </svg>
-    ),
-  },
-  {
-    href: "/chat",
-    label: "Ask",
-    icon: (active: boolean) => (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 2.5 : 2} strokeLinecap="round" strokeLinejoin="round">
-        <path d="M12 3a8 8 0 0 0-8 8c0 1.6.5 3.1 1.3 4.4L4 21l5.6-1.3A8 8 0 1 0 12 3Z" />
-        <circle cx="8.5" cy="11" r="1" fill="currentColor" stroke="none" />
-        <circle cx="12" cy="11" r="1" fill="currentColor" stroke="none" />
-        <circle cx="15.5" cy="11" r="1" fill="currentColor" stroke="none" />
-      </svg>
-    ),
-  },
-  {
-    href: "/meals",
-    label: "Meals",
-    icon: (active: boolean) => (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 2.5 : 2} strokeLinecap="round" strokeLinejoin="round">
-        <path d="M4 3v8a4 4 0 0 0 4 4v6" />
-        <path d="M8 3v8" />
-        <path d="M8 15v6" />
-        <path d="M17 3c-2 0-3 2-3 5s1 5 3 5v8" />
-      </svg>
-    ),
-  },
-  {
-    href: "/tasks",
-    label: "Tasks",
-    icon: (active: boolean) => (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 2.5 : 2} strokeLinecap="round" strokeLinejoin="round">
-        <rect x="4" y="4" width="16" height="16" rx="3" />
-        <path d="m8.5 12 2.5 2.5 4.5-5" />
-      </svg>
-    ),
-  },
-  {
-    href: "/calendar",
-    label: "Calendar",
-    icon: (active: boolean) => (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 2.5 : 2} strokeLinecap="round" strokeLinejoin="round">
-        <rect x="3.5" y="4.5" width="17" height="16" rx="3" />
-        <path d="M3.5 9.5h17" />
-        <path d="M8 2.5v4" />
-        <path d="M16 2.5v4" />
-        <path d="M8.5 13.5h.01" />
-        <path d="M12 13.5h.01" />
-        <path d="M15.5 13.5h.01" />
-        <path d="M8.5 17h.01" />
-        <path d="M12 17h.01" />
-        <path d="M15.5 17h.01" />
-      </svg>
-    ),
-  },
-  {
-    href: "/ha",
-    label: "House",
-    icon: (active: boolean) => (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 2.5 : 2} strokeLinecap="round" strokeLinejoin="round">
-        <path d="M5 4v4" />
-        <path d="M5 12v8" />
-        <path d="M3 10h4" />
-        <path d="M12 4v9" />
-        <path d="M12 17v3" />
-        <path d="M10 15h4" />
-        <path d="M19 4v3" />
-        <path d="M19 11v9" />
-        <path d="M17 9h4" />
-      </svg>
-    ),
-  },
-  {
-    href: "/settings",
-    label: "Settings",
-    icon: (active: boolean) => (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 2.5 : 2} strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="3" />
-        <path d="M12 1.5l.8 3.3a8.5 8.5 0 0 1 1.9.8l3.1-1.7 1.4 1.4-1.7 3.1a8.5 8.5 0 0 1 .8 1.9l3.3.8v1.8l-3.3.8a8.5 8.5 0 0 1-.8 1.9l1.7 3.1-1.4 1.4-3.1-1.7a8.5 8.5 0 0 1-1.9.8L12 22.5h-1l-.8-3.3a8.5 8.5 0 0 1-1.9-.8l-3.1 1.7-1.4-1.4 1.7-3.1a8.5 8.5 0 0 1-.8-1.9L1.5 12v-1l3.3-.8a8.5 8.5 0 0 1 .8-1.9l-1.7-3.1 1.4-1.4 3.1 1.7a8.5 8.5 0 0 1 1.9-.8L11 1.5z" />
-      </svg>
-    ),
-  },
-];
 
 const EXPAND_EASE = "cubic-bezier(0.22, 1, 0.36, 1)";
 const LABEL_EASE = "cubic-bezier(0.34, 1.56, 0.64, 1)";
 
-/** Kid-mode-only tab: the gamified reward shop (mode "kid" = child/pet). */
-const rewardsItem = {
-  href: "/rewards",
-  label: "Rewards",
-  icon: (active: boolean) => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 2.5 : 2} strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3.5" y="8" width="17" height="4" rx="1" />
-      <path d="M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7" />
-      <path d="M12 8v12" />
-      <path d="M12 8s-1.2-4-4-4a2.2 2.2 0 0 0 0 4h4Z" />
-      <path d="M12 8s1.2-4 4-4a2.2 2.2 0 0 1 0 4h-4Z" />
-    </svg>
-  ),
-};
-
 /**
- * Kid mode (mirrors useDashboardMode's resolveMode: any signed-in non-parent
- * — child or pet — gets the kid experience): hide House (Home Assistant is
- * adult tooling) and add Rewards. Both modes render exactly 7 items, which
- * is what the 44px-at-390px capsule sizing below is computed for.
+ * The dock (phone, tablet and wall).
+ *
+ * Order, roles, icons and the active-item rule all come from `lib/nav-items.ts`
+ * — this component owns only the capsule animation. The 2026-09 UI audit
+ * (finding 6) found the dock keeping a private list with private inline SVGs and
+ * a `pathname === href` check that disagreed with the desktop rail on
+ * `/settings/me`, plus a hard-coded lime `rgba(120,240,90,…)` glow that ignored
+ * the accent system. All four now live in one place.
  */
-function visibleNavItems(currentUser: { role?: string } | null) {
-  if (currentUser && currentUser.role !== "parent") {
-    const items = navItems.filter((item) => item.href !== "/ha");
-    const tasksIdx = items.findIndex((item) => item.href === "/tasks");
-    items.splice(tasksIdx + 1, 0, rewardsItem);
-    return items;
-  }
-  return navItems;
-}
-
 export default function CapsuleNav() {
   const pathname = usePathname();
   const router = useRouter();
   const { currentUser } = useAuth();
   const { wall } = useWallMode();
   const [isLight, setIsLight] = useState(false);
+
+  // 7 caps in both modes — a parent/guest gets House, a signed-in kid swaps it
+  // for Rewards — which is what the `--capsule-scale` math below is sized for.
+  const items = navItemsForRole(navRoleForUser(currentUser));
 
   useEffect(() => {
     const checkTheme = () => setIsLight(document.documentElement.getAttribute("data-theme") === "light");
@@ -176,35 +69,35 @@ export default function CapsuleNav() {
           } as React.CSSProperties}
         >
           <div className="flex items-center gap-1.5 px-3 py-2">
-            {visibleNavItems(currentUser).map((item) => {
-              const isActive = pathname === item.href;
+            {items.map((item) => {
+              const isActive = isNavItemActive(pathname, item);
 
               return (
                 <button
-                  key={item.href}
+                  key={item.path}
                   type="button"
                   aria-label={item.label}
                   aria-current={isActive ? "page" : undefined}
-                  onClick={() => router.push(item.href)}
-                  onPointerEnter={() => router.prefetch(item.href)}
+                  onClick={() => router.push(item.path)}
+                  onPointerEnter={() => router.prefetch(item.path)}
                   className={`capsule-item group relative grid ${
                     wall ? "h-[72px]" : "h-14"
                   } grid-flow-col items-center rounded-full border tap-sm ${
-                    isActive ? "border-[rgba(120,240,90,0.38)]" : "border-transparent"
+                    isActive ? "border-[var(--color-nav-active-border)]" : "border-transparent"
                   }`}
                   style={{
                     // Wall: labels are always visible, so both states keep the
-                    // label column — the active item's lime styling is the focus.
+                    // label column — the active item's accent styling is the focus.
                     gridTemplateColumns: wall
                       ? "72px 1fr"
                       : isActive
                         ? "56px 1fr"
                         : "56px 0fr",
                     background: isActive
-                      ? "linear-gradient(135deg, rgba(120,240,90,0.20), rgba(120,240,90,0.06))"
+                      ? "linear-gradient(135deg, var(--color-nav-active-sheen), var(--color-nav-active-wash))"
                       : "transparent",
                     boxShadow: isActive
-                      ? "0 0 24px -4px rgba(120,240,90,0.35), inset 0 1px 0 rgba(255,255,255,0.14)"
+                      ? "0 0 24px -4px var(--color-nav-active-glow), inset 0 1px 0 rgba(255,255,255,0.14)"
                       : "none",
                     transition: `grid-template-columns 0.38s ${EXPAND_EASE}, background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease, transform 0.15s ease`,
                   }}
@@ -214,23 +107,23 @@ export default function CapsuleNav() {
                       wall ? "h-[72px] w-[72px]" : "h-14 w-14"
                     } ${
                       isActive
-                        ? "bg-[var(--capsule-accent)] border border-transparent"
+                        ? "bg-[var(--color-nav-active-fill)] border border-transparent"
                         : "bg-white/[0.06] border border-white/10"
                     }`}
                     style={{
                       boxShadow: isActive
-                        ? "inset 0 1px 0 rgba(255,255,255,0.35), 0 4px 12px -2px rgba(120,240,90,0.50)"
+                        ? "inset 0 1px 0 rgba(255,255,255,0.35), 0 4px 12px -2px var(--color-nav-active-halo)"
                         : "inset 0 1px 2px rgba(0,0,0,0.35)",
                     }}
                   >
                     <span
-                      className={`grid place-items-center transition-colors duration-300 ${
+                      className={`grid place-items-center ${
                         wall ? "h-8 w-8" : "h-6 w-6"
                       } ${
-                        isActive ? "text-white drop-shadow-sm" : "text-white/55 group-hover:text-white/90"
-                      }`}
+                        isActive ? "text-white" : "text-white/55 group-hover:text-white/90"
+                      } transition-colors duration-300`}
                     >
-                      {item.icon(isActive)}
+                      <NavIcon iconKey={item.iconKey} active={isActive} className="h-full w-full" />
                     </span>
                   </span>
                   <span className="capsule-label min-w-0 overflow-hidden">

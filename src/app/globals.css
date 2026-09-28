@@ -118,6 +118,27 @@
   --color-ring: var(--color-accent-selected);
 }
 
+/* ─── Navigation active ink (UI audit 2026-09, Phase 3) ───
+   The dock (`components/ui/CapsuleNav.tsx`) and the desktop rail
+   (`modes/adult/SidebarNav.tsx`) both read these, so navigation follows the
+   accent system. Before this block the dock hard-coded five `rgba(120,240,90,…)`
+   lime literals (`--capsule-accent: #78f05a`) while the rail followed
+   `--color-accent-selected`: the same "active item" was two different colours,
+   and an accent change retinted one surface only.
+   To keep the pre-Phase-3 lime dock, set `--color-nav-active: #78f05a` here. */
+:root {
+  --color-nav-active: var(--color-accent-selected);
+  --color-nav-active-border: color-mix(in srgb, var(--color-nav-active) 38%, transparent);
+  --color-nav-active-sheen: color-mix(in srgb, var(--color-nav-active) 20%, transparent);
+  --color-nav-active-wash: color-mix(in srgb, var(--color-nav-active) 6%, transparent);
+  --color-nav-active-glow: color-mix(in srgb, var(--color-nav-active) 35%, transparent);
+  --color-nav-active-halo: color-mix(in srgb, var(--color-nav-active) 50%, transparent);
+  /* The active chip carries a white glyph, so its fill is the accent *deepened*
+     (the same 72%-black recipe as `--widget-accent`) to hold ≥3:1 non-text
+     contrast for every accent, including the light ones. */
+  --color-nav-active-fill: color-mix(in srgb, var(--color-nav-active) 72%, black);
+}
+
 /* ─── Light Mode Color Tokens ─── */
 :root[data-theme="light"] {
   /* LIGHT MODE PALETTE */
@@ -618,9 +639,13 @@ a.widget-accent-text {
    grid-column transition on each item (CSS-only, no JS measurement).
    `--capsule-scale` keeps the full 6-item dock inside narrow viewports. */
 .capsule-nav {
-  --capsule-accent: #78f05a;
+  /* Legacy alias — the active ink now lives in `--color-nav-active*` (the rail
+     reads the same tokens). Kept so any older rule that referenced this var
+     still resolves. */
+  --capsule-accent: var(--color-nav-active);
   --capsule-scale: min(1, calc((100vw - 1.5rem) / 500px));
 }
+
 
 @media (prefers-reduced-motion: reduce) {
   .capsule-item,

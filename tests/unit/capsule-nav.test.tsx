@@ -7,8 +7,11 @@ import CapsuleNav from "@/components/ui/CapsuleNav";
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
+// `usePathname` is mutable so a test can sit on a nested route.
+const navState = vi.hoisted(() => ({ path: "/" }));
+
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/",
+  usePathname: () => navState.path,
   useRouter: () => ({ push: vi.fn(), prefetch: vi.fn() }),
 }));
 
@@ -77,3 +80,45 @@ describe("CapsuleNav with the House tab", () => {
     }
   });
 });
+
+describe("CapsuleNav active item (the rule the desktop rail shares)", () => {
+  beforeEach(() => {
+    mockUseAuth.mockReturnValue(PARENT_USER);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    document.body.innerHTML = "";
+    navState.path = "/";
+  });
+
+  function activeLabels(root: HTMLElement): (string | null)[] {
+    return Array.from(root.querySelectorAll("nav button"))
+      .filter((b) => b.getAttribute("aria-current") === "page")
+      .map((b) => b.getAttribute("aria-label"));
+  }
+
+  it("activates exactly one cap, and only the root on the root", () => {
+    const el = render(<CapsuleNav />);
+    expect(activeLabels(el)).toEqual(["Home"]);
+  });
+
+  it("activates Settings on a nested section — the dock/rail disagreement of the 2026-09 audit", () => {
+    navState.path = "/settings/me";
+    const el = render(<CapsuleNav />);
+    expect(activeLabels(el)).toEqual(["Settings"]);
+  });
+
+  it("activates Meals on a recipe page, not Home", () => {
+    navState.path = "/meals/recipes/12";
+    const el = render(<CapsuleNav />);
+    expect(activeLabels(el)).toEqual(["Meals"]);
+  });
+
+  it("does not activate on a lookalike prefix", () => {
+    navState.path = "/mealsomething";
+    const el = render(<CapsuleNav />);
+    expect(activeLabels(el)).toEqual([]);
+  });
+});
+
