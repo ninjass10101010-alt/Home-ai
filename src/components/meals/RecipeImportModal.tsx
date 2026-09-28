@@ -225,7 +225,7 @@ export default function RecipeImportModal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[200] flex flex-col"
+      className="fixed inset-0 z-[200] flex flex-col" role="dialog" aria-modal="true" aria-label="Recipe import"
       style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(12px)" }}
       onClick={onClose}
     >

@@ -192,7 +192,7 @@ export default function PhotoCropEditor({ src, onApply, onCancel }: PhotoCropEdi
   // nav and its Apply/Cancel buttons become untappable.
   return createPortal(
     <div
-      className="fixed inset-0 z-[80] flex flex-col bg-black/70 backdrop-blur-sm"
+      className="fixed inset-0 z-[80] flex flex-col bg-black/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Photo crop editor"
       style={{ animation: "consuela-fade-in .2s ease both" }}
     >
       <div className="flex flex-1 items-center justify-center px-6 pt-6">

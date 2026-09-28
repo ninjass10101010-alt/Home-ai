@@ -39,7 +39,7 @@ export default function AlarmPinModal({ action, onSubmit, onClose }: AlarmPinMod
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Alarm PIN entry"
       onClick={loading ? undefined : onClose}
     >
       <div

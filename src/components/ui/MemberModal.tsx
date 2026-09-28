@@ -106,7 +106,7 @@ export default function MemberModal({ isOpen, onClose, member, onSave, onDelete 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-label="Member dialog" onClick={onClose}>
       <div className="w-full max-w-md max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <Surface className="border-0 shadow-none bg-transparent">
           <div className="p-6">

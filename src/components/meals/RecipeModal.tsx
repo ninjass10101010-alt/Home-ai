@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { weekDays, foodEmojis, RECIPE_TAGS } from "@/data/meals";
 import { Meal } from "@/types/meals";
@@ -12,6 +12,16 @@ export default function RecipeModal({
   mode = "meal",
 }: any) {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+
+  // Audit 5.4: Escape closes this sheet like its RecipeSearch/RecipeImport
+  // siblings (Modal owns the behavior for ported dialogs; this one stays custom).
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShowRecipeModal(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [setShowRecipeModal]);
 
   const updateIngredient = (idx: number, val: string) => {
     const ing = [...(recipe.ingredients || [])];
@@ -31,7 +41,7 @@ export default function RecipeModal({
   };
 
   return createPortal(
-    <div className="fixed inset-0 z-[200] flex flex-col" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(12px)" }}>
+    <div className="fixed inset-0 z-[200] flex flex-col" role="dialog" aria-modal="true" aria-label="Recipe editor" style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(12px)" }}>
       {/* Modal sheet */}
       <div
         className="absolute bottom-0 left-0 right-0 rounded-t-2xl flex flex-col overflow-hidden"

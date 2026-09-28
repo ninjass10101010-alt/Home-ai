@@ -375,8 +375,16 @@ Home's widget ranking/`More…` folding is still Phase 4.5.
   `rgba(` literals in TSX now carry a **budget contract** — it can only shrink as files migrate to
   `Surface`/`--neu-*`; a new literal fails CI. Contract: `tests/unit/radius-and-color-tokens.test.ts`
   (4).
-- ⬜ **5.4 — modal adoption (1:24).** Port the hand-rolled `fixed inset-0` overlays onto `Modal` /
-  `BottomSheet`, adding `role="dialog"` where a sheet must stay custom.
+- ✅ **5.4 — modal adoption (1 : 24), now measured and one-directional.** `Modal.tsx` keeps owning
+  the focus trap, Escape and scroll lock; the hand-rolled `fixed inset-0` overlays were audited one
+  by one. The 19 that are genuinely dialogs and must stay custom (full-screen editors, PIN pads,
+  cook mode, weather details) now carry the accessibility contract Modal provides —
+  `role="dialog"`, `aria-modal="true"`, an `aria-label` — and `RecipeModal` gained the Escape
+  handler its siblings already had; the 8 that are not dialogs (confetti/celebration layers, the
+  shell, the dock, the rail, the screensaver) are classified as such. NEW
+  `tests/unit/modal-adoption.test.ts` (4) allowlists every hand-rolled overlay **with a reason**,
+  fails on a new one, requires dialog semantics on the dialog class, and pins the hand-rolled-dialog
+  count as a ceiling that only shrinks as files port to `Modal`.
 - ✅ **5.5 — user-facing Reduce motion.** The thirteen `prefers-reduced-motion` blocks only fire
   when the OS asks, and a shared wall's OS never does. The preference now lives in the theme config
   (`reduceMotion`, persisted with the rest), Settings → Appearance carries a "Reduce motion" toggle

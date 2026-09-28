@@ -69,7 +69,7 @@ export default function CookMode({ recipe, onExit }: { recipe: Recipe; onExit: (
 
   return createPortal(
     <div
-      className="kitchen-text fixed inset-0 z-[300] flex flex-col bg-[var(--color-surface-0)]"
+      className="fixed inset-0 z-[300] flex flex-col bg-[var(--color-surface-0)]"
       role="dialog"
       aria-modal="true"
       aria-label={`Cook mode: ${recipe.name}`}
