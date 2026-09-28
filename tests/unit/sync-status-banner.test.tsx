@@ -39,6 +39,17 @@ describe("SyncStatusBanner", () => {
     expect(banner!.textContent).toMatch(/signed out/i);
   });
 
+  it("offers a real way to sign in, not just the instruction to do it (audit P0-4)", async () => {
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    await render(el, <SyncStatusBanner />);
+    const link = el.querySelector<HTMLAnchorElement>('[data-testid="sync-status-banner-signin"]');
+    expect(link).not.toBeNull();
+    // Sign-in lives in Settings → Me; the banner must lead there.
+    expect(link!.getAttribute("href")).toBe("/settings");
+    expect(link!.textContent).toMatch(/PIN/i);
+  });
+
   it("renders nothing while signed in", async () => {
     mockAuth.isLoggedIn = true;
     const el = document.createElement("div");

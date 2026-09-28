@@ -8,6 +8,8 @@ import SoftButton from "@/components/ui/SoftButton";
 import Toast from "@/components/ui/Toast";
 import { briefingSectionsEmpty } from "./hooks/useMorningBriefing";
 import type { MorningBriefing } from "./hooks/useMorningBriefing";
+import ReadStatePill from "@/components/ui/ReadStatePill";
+import { READ_COPY_STALE, type ReadFailure } from "@/lib/read-state";
 
 const BRIEFING_TONE = "#f97316";
 
@@ -58,12 +60,44 @@ export interface MorningBriefingWidgetProps {
   loading: boolean;
   ack: (id: string) => Promise<boolean>;
   ackError: boolean;
+  /** Why the briefing read failed, or null when it has always answered. */
+  failure?: ReadFailure | null;
+  /** A briefing is on screen but the latest refresh failed — it may be out of date. */
+  stale?: boolean;
+  retrying?: boolean;
+  onRetry?: () => void;
   className?: string;
 }
 
-export default function MorningBriefingWidget({ briefing, loading, ack, ackError, className = "" }: MorningBriefingWidgetProps) {
+export default function MorningBriefingWidget({ briefing, loading, ack, ackError, failure = null, stale = false, retrying = false, onRetry, className = "" }: MorningBriefingWidgetProps) {
   const [expanded, setExpanded] = useState(false);
   const [acknowledging, setAcknowledging] = useState(false);
+
+  // Audit P0-4: this component answered every failed read with `null`, so a dead
+  // backboard, a signed-out browser and "nothing lined up today" were the same
+  // invisible state on the wall. A failure now gets a card that says which one.
+  if (failure && (briefing === null || briefingSectionsEmpty(briefing))) {
+    return (
+      <div className={className}>
+        <WidgetCard
+          tone={BRIEFING_TONE}
+          icon={<HomeWidgetIcon variant="briefing" state="default" size="lg" />}
+          className={className}
+        >
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-5 text-center">
+            <h3 className="text-base font-bold text-text-primary">Morning Briefing</h3>
+            <ReadStatePill
+              state={failure}
+              subject="Morning briefing"
+              message={briefing ? READ_COPY_STALE : undefined}
+              retrying={retrying}
+              onRetry={onRetry}
+            />
+          </div>
+        </WidgetCard>
+      </div>
+    );
+  }
 
   if (loading || !briefing) return null;
 
@@ -107,6 +141,13 @@ export default function MorningBriefingWidget({ briefing, loading, ack, ackError
         </div>
         <h3 className="mt-1 font-bold text-text-primary text-base">Morning Briefing</h3>
         <p className="mt-0.5 text-text-secondary text-xs">What Consuela lined up for today</p>
+        {stale && failure && (
+          // The plan on screen is from the last good read — say so rather than
+          // letting yesterday's briefing pass for today's (audit P0-4).
+          <div className="mt-2 text-left">
+            <ReadStatePill state={failure} message={READ_COPY_STALE} retrying={retrying} onRetry={onRetry} />
+          </div>
+        )}
       </div>
       <div className="flex min-h-0 flex-1 flex-col p-5">
         {expanded ? (

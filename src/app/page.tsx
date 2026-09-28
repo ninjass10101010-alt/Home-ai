@@ -28,6 +28,8 @@ import Chip from "@/components/ui/Chip";
 import ListRow from "@/components/ui/ListRow";
 import EmptyState from "@/components/ui/EmptyState";
 import ErrorState from "@/components/ui/ErrorState";
+import ReadStatePill from "@/components/ui/ReadStatePill";
+import { classifyReadError, READ_COPY_STALE, type ReadFailure } from "@/lib/read-state";
 import Modal from "@/components/ui/Modal";
 import Toast from "@/components/ui/Toast";
 import StatTile from "@/components/patterns/StatTile";
@@ -100,11 +102,27 @@ export function plannedDaysThisWeek(meals: any[] | null, weekOf: string): number
  * `lg:col-span-1` cell that pushes every row down.
  */
 function MorningBriefingSlot({ span }: { span: string }) {
-  const { briefing, loading, ack, ackError } = useMorningBriefing();
-  if (loading || !briefing || briefingSectionsEmpty(briefing)) return null;
+  const { briefing, loading, ack, ackError, failure, stale, retrying, retry } = useMorningBriefing();
+  // A failed read keeps the slot: collapsing it to null is precisely the silent
+  // absence audit P0-4 is about — the card would vanish instead of admitting it
+  // couldn't load. An empty day (read succeeded, nothing to show) still collapses.
+  if (loading) return null;
+  if (!failure) {
+    if (!briefing || briefingSectionsEmpty(briefing)) return null;
+  }
   return (
     <div className={span}>
-      <MorningBriefingWidget briefing={briefing} loading={loading} ack={ack} ackError={ackError} className="h-full" />
+      <MorningBriefingWidget
+        briefing={briefing}
+        loading={loading}
+        ack={ack}
+        ackError={ackError}
+        failure={failure}
+        stale={stale}
+        retrying={retrying}
+        onRetry={retry}
+        className="h-full"
+      />
     </div>
   );
 }
@@ -113,7 +131,12 @@ export default function HomePage() {
   const [mounted, setMounted] = useState(false);
   const [familyMembers, setFamilyMembers] = useState<any[]>([]);
   const [todayEvents, setTodayEvents] = useState<any[]>([]);
-  const [googleTodayUnavailable, setGoogleTodayUnavailable] = useState(false);
+  // Audit P0-4: this was a boolean, which collapsed "Google is disconnected",
+  // "the backboard is down" and "no connection" into one line of copy — and the
+  // line had no retry, so the only way back was a page reload.
+  const [googleTodayFailure, setGoogleTodayFailure] = useState<ReadFailure | null>(null);
+  const [googleRetrying, setGoogleRetrying] = useState(false);
+  const refreshTodayEventsRef = useRef<() => Promise<void>>(async () => {});
   const googleTodayRef = useRef<any[]>([]);
   const googleTodayRawRef = useRef<any[]>([]);
   const googleTodayColorMapRef = useRef<Record<string, string> | null>(null);
@@ -226,6 +249,7 @@ export default function HomePage() {
 
     const refreshTodayEvents = async () => {
       const requestId = ++googleTodayRequestRef.current;
+      setGoogleRetrying(true);
       let family: any[] = [];
       try { family = db.selectTodaysEvents(); } catch {}
       const mapGoogleRows = (rows: any[], colorMap: Record<string, string> | null, todayISO: string) =>
@@ -244,7 +268,11 @@ export default function HomePage() {
         if (requestId !== googleTodayRequestRef.current) return;
         if (!res.ok || !data || data.ok === false) {
           googleTodayRef.current = googleToday;
-          setGoogleTodayUnavailable(true);
+          // The route answers `ok:false` with a real status (401 for a revoked
+          // grant, 502 for a partial Google failure), so the status decides; a
+          // 200 that still says `ok:false` is the backboard's fault, not ours.
+          const authFlavoured = typeof data?.error === "string" && /unauthor|no_grant|not_connected/i.test(data.error);
+          setGoogleTodayFailure(authFlavoured ? "unauthorised" : classifyReadError({ status: res.ok ? 502 : res.status }));
         } else {
           const colorMap = data.calendar_colors && typeof data.calendar_colors === "object"
             ? data.calendar_colors as Record<string, string>
@@ -253,12 +281,12 @@ export default function HomePage() {
           googleTodayColorMapRef.current = colorMap;
           googleToday = mapGoogleRows(googleTodayRawRef.current, colorMap, localTodayISO());
           googleTodayRef.current = googleToday;
-          setGoogleTodayUnavailable(false);
+          setGoogleTodayFailure(null);
         }
-      } catch {
+      } catch (err) {
         if (requestId === googleTodayRequestRef.current) {
           googleTodayRef.current = googleToday;
-          setGoogleTodayUnavailable(true);
+          setGoogleTodayFailure(classifyReadError(err));
         }
       }
       if (requestId !== googleTodayRequestRef.current) return;
@@ -268,7 +296,10 @@ export default function HomePage() {
           (b.time === "All day" ? -1 : parseTimeToMinutes(b.time || ""))
         )
       );
+      // A superseded run bailed above; only the live run may clear the spinner.
+      setGoogleRetrying(false);
     };
+    refreshTodayEventsRef.current = refreshTodayEvents;
 
     try {
       refreshTodayEvents();
@@ -294,7 +325,7 @@ export default function HomePage() {
       googleTodayRawRef.current = [];
       googleTodayColorMapRef.current = null;
       googleTodayRef.current = [];
-      setGoogleTodayUnavailable(true);
+      setGoogleTodayFailure("unauthorised");
       setTodayEvents((current) => current.filter((event: any) => event.member !== "Google"));
     };
     window.addEventListener("consuela-google-disconnected", onGoogleDisconnected);
@@ -617,10 +648,16 @@ export default function HomePage() {
                             <Link href="/calendar" className="tap-sm text-xs font-semibold widget-accent-text">+{hiddenEvents} more · See all →</Link>
                           ) : undefined
                         }>
-                        {googleTodayUnavailable && (
-                          <p role="status" className="mb-2 text-xs text-text-secondary">
-                            Google Calendar is unavailable — showing saved events.
-                          </p>
+                        {googleTodayFailure && (
+                          <div className="mb-2">
+                            <ReadStatePill
+                              state={googleTodayFailure}
+                              subject="Google Calendar"
+                              message={todayEvents.length > 0 ? READ_COPY_STALE : undefined}
+                              retrying={googleRetrying}
+                              onRetry={() => void refreshTodayEventsRef.current()}
+                            />
+                          </div>
                         )}
                         <div className="min-h-0 flex-1 overflow-y-auto">
                         <DayLine

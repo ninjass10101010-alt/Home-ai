@@ -60,7 +60,17 @@ const briefingState = vi.hoisted(() => ({
     scopeDate: "2026-09-24",
     acknowledged: true,
     summary: { events: [], tasks: [], meals: [], suggestions: [] },
+  } as null | {
+    id: string;
+    scopeDate: string;
+    acknowledged: boolean;
+    summary: { events: unknown[]; tasks: unknown[]; meals: unknown[]; suggestions: unknown[] };
   },
+  // Audit P0-4: the slot must keep a card, and name the failure, when the read fails.
+  failure: null as null | "offline" | "unauthorised" | "error",
+  stale: false,
+  retrying: false,
+  emptySections: true,
 }));
 vi.mock("@/components/briefing/hooks/useMorningBriefing", () => ({
   useMorningBriefing: () => ({
@@ -68,8 +78,12 @@ vi.mock("@/components/briefing/hooks/useMorningBriefing", () => ({
     loading: false,
     ack: vi.fn(async () => true),
     ackError: false,
+    failure: briefingState.failure,
+    stale: briefingState.stale,
+    retrying: briefingState.retrying,
+    retry: vi.fn(),
   }),
-  briefingSectionsEmpty: () => true,
+  briefingSectionsEmpty: () => briefingState.emptySections,
 }));
 
 vi.mock("@/hooks/useHomeEvents", () => ({ useHomeEvents: () => ({ upcomingImportant: [] }) }));
@@ -114,6 +128,16 @@ describe("Home morning briefing slot", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
     localStorage.clear();
+    briefingState.briefing = {
+      id: "briefing-empty",
+      scopeDate: "2026-09-24",
+      acknowledged: true,
+      summary: { events: [], tasks: [], meals: [], suggestions: [] },
+    };
+    briefingState.failure = null;
+    briefingState.stale = false;
+    briefingState.retrying = false;
+    briefingState.emptySections = true;
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}) })));
     vi.stubGlobal("matchMedia", vi.fn(() => ({
       matches: false,
@@ -143,5 +167,30 @@ describe("Home morning briefing slot", () => {
     );
     expect(bentoGrid).toBeTruthy();
     expect(bentoGrid?.children).toHaveLength(0);
+  });
+
+  it("keeps the slot and names the failure when the briefing read fails (audit P0-4)", async () => {
+    briefingState.briefing = null;
+    briefingState.failure = "error";
+
+    const el = await renderAsync(<HomePage />);
+    await settle();
+
+    expect(el.textContent).toContain("Morning Briefing");
+    expect(el.textContent).toContain("Morning briefing: Couldn't load this right now.");
+    const retry = Array.from(el.querySelectorAll("button")).find((b) => b.textContent?.includes("Try again"));
+    expect(retry).toBeTruthy();
+  });
+
+  it("calls an old briefing a saved copy instead of passing it as today's", async () => {
+    briefingState.failure = "error";
+    briefingState.stale = true;
+
+    const el = await renderAsync(<HomePage />);
+    await settle();
+
+    expect(el.textContent).toContain("Morning Briefing");
+    expect(el.textContent).toContain("Showing your saved copy");
+    expect(el.textContent).not.toContain("What Consuela lined up for today");
   });
 });

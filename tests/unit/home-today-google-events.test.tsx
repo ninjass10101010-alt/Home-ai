@@ -229,7 +229,11 @@ describe("Home Today widget — Google Calendar events merged in", () => {
     });
 
     expect(el.textContent).toContain("Saved Google event");
-    expect(el.textContent).toContain("Google Calendar is unavailable");
+    // P0-4: the row survives *and* the screen says why it is stale, with a real
+    // retry — the old copy ("Google Calendar is unavailable") named no state and
+    // offered no way back.
+    expect(el.textContent).toContain("Google Calendar: Showing your saved copy — couldn't refresh.");
+    expect(Array.from(el.querySelectorAll("button")).some((b) => /try again/i.test(b.textContent || ""))).toBe(true);
     expect(el.textContent).not.toContain("Quiet day");
   });
 
@@ -259,7 +263,9 @@ describe("Home Today widget — Google Calendar events merged in", () => {
     });
 
     expect(el.textContent).not.toContain("Yesterday's event");
-    expect(el.textContent).toContain("Google Calendar is unavailable");
+    // Nothing is on screen any more, so the pill must state the failure itself
+    // rather than lean on the "saved copy" wording.
+    expect(el.textContent).toContain("Google Calendar: Couldn't load this right now.");
     vi.useRealTimers();
   });
 

@@ -91,6 +91,24 @@ describe("classifyReadError", () => {
   it("classifies a deliberate abort as an error so it never renders as empty", () => {
     expect(classifyReadError({ name: "AbortError", message: "The operation was aborted." })).toBe("error");
   });
+
+  it("recognises the other transports' network wording, subject to the same online check", () => {
+    // RN/WebKit/Chromium word the same failure differently; all of them must go
+    // through the navigator.onLine gate rather than assume the Wi-Fi died.
+    setOnline(false);
+    expect(classifyReadError(new Error("Network request failed"))).toBe("offline");
+    expect(classifyReadError(new Error("network timeout waiting for headers"))).toBe("offline");
+    setOnline(true);
+    expect(classifyReadError(new Error("Network request failed"))).toBe("error");
+    expect(classifyReadError(new Error("network failure"))).toBe("error");
+  });
+
+  it("never reads a refused connection as the browser being offline", () => {
+    // ECONNREFUSED is the NAS refusing, not the Wi-Fi dropping — and this is the
+    // wording a self-hosted dashboard is most likely to see.
+    setOnline(true);
+    expect(classifyReadError(Object.assign(new Error(""), { cause: Object.assign(new Error(""), { code: "ECONNREFUSED" }) }))).toBe("error");
+  });
 });
 
 describe("assertReadable", () => {

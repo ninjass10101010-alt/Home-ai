@@ -35,6 +35,9 @@ import GmailImportWidget from "@/components/integrations/GmailImportWidget";
 import FoodDeliveryWidget from "@/components/integrations/FoodDeliveryWidget";
 import ProductSearchWidget from "@/components/integrations/ProductSearchWidget";
 import TravelTimeCard from "@/components/integrations/TravelTimeCard";
+import { useSafeFetch } from "@/hooks/useSafeFetch";
+import ReadStatePill from "@/components/ui/ReadStatePill";
+import { assertReadable, ReadError, READ_COPY_STALE } from "@/lib/read-state";
 import LearningWidget from "@/components/integrations/LearningWidget";
 import Link from "next/link";
 import { db } from "@/db";
@@ -105,61 +108,95 @@ function Dot() {
 // Compact Weather — Data only, no art
 // ═══════════════════════════════════════════════════════════════════════════
 
+type CompactWeatherData = {
+  temp: number;
+  condition: string;
+  emoji: string;
+  forecast: { day: string; high: number; emoji: string }[];
+};
+
+/** WMO weather code → label + emoji. Kept at module scope so the read can stay parse-only. */
+function wmoCondition(code: number): { condition: string; emoji: string } {
+  const c = Number(code);
+  if (!Number.isFinite(c)) return { condition: "Unknown", emoji: "⛅" };
+  if (c === 0) return { condition: "Clear", emoji: "☀️" };
+  if (c <= 3) return { condition: "Partly Cloudy", emoji: "⛅" };
+  if (c <= 48) return { condition: "Foggy", emoji: "🌫️" };
+  if (c <= 57) return { condition: "Drizzle", emoji: "🌦️" };
+  if (c <= 67) return { condition: "Rainy", emoji: "🌧️" };
+  if (c <= 77) return { condition: "Snowy", emoji: "❄️" };
+  return { condition: "Stormy", emoji: "⛈️" };
+}
+
 function CompactWeather() {
   const { runtime } = useRuntimeConfig();
-  const [temp, setTemp] = useState<number | null>(null);
-  const [condition, setCondition] = useState("Loading...");
-  const [emoji, setEmoji] = useState("⛅");
-  const [forecast, setForecast] = useState<{ day: string; high: number; emoji: string }[]>([]);
+  const lat = runtime?.weather_location?.LAT ?? "42.7875";
+  const lon = runtime?.weather_location?.LON ?? "-86.1089";
 
-  useEffect(() => {
-    fetch(
-      `https://api.open-meteo.com/v1/forecast?latitude=${runtime?.weather_location?.LAT ?? "42.7875"}&longitude=${runtime?.weather_location?.LON ?? "-86.1089"}&current=temperature_2m,weather_code&daily=weather_code,temperature_2m_max&temperature_unit=fahrenheit&timezone=auto&forecast_days=5`
-    )
-      .then((r) => r.json())
-      .then((data) => {
-        const code = data.current?.weather_code;
-        setTemp(Math.round(data.current?.temperature_2m));
-        const wmo = (c: number) => {
-          if (c === 0) return { cond: "Clear", e: "☀️" };
-          if (c <= 3) return { cond: "Partly Cloudy", e: "⛅" };
-          if (c <= 48) return { cond: "Foggy", e: "🌫️" };
-          if (c <= 57) return { cond: "Drizzle", e: "🌦️" };
-          if (c <= 67) return { cond: "Rainy", e: "🌧️" };
-          if (c <= 77) return { cond: "Snowy", e: "❄️" };
-          return { cond: "Stormy", e: "⛈️" };
-        };
-        const cur = wmo(code);
-        setCondition(cur.cond);
-        setEmoji(cur.e);
-
-        if (data.daily?.time) {
-          const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-          setForecast(data.daily.time.slice(1, 5).map((d: string, i: number) => ({
+  // Audit P0-4: this widget used to end with a no-op catch, so a dropped
+  // request left `condition` at its initial value for as long as the screen was
+  // open — hours on a wall display. The read now reports its own state and the
+  // pill offers the same retry the user would otherwise get from a page reload.
+  const weather = useSafeFetch<CompactWeatherData | null>(
+    async () => {
+      const res = await fetch(
+        `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code&daily=weather_code,temperature_2m_max&temperature_unit=fahrenheit&timezone=auto&forecast_days=5`
+      );
+      assertReadable(res);
+      const data = await res.json();
+      if (typeof data?.current?.temperature_2m !== "number") {
+        // A 200 with no reading is a broken response, not an empty day.
+        throw new ReadError("error", "open-meteo returned no current conditions");
+      }
+      const cur = wmoCondition(data.current.weather_code);
+      const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+      const forecast = Array.isArray(data?.daily?.time)
+        ? data.daily.time.slice(1, 5).map((d: string, i: number) => ({
             day: days[new Date(d).getDay()],
             high: Math.round(data.daily.temperature_2m_max[i + 1]),
-            emoji: wmo(data.daily.weather_code[i + 1]).e,
-          })));
-        }
-      })
-      .catch(() => {});
-  }, [runtime?.weather_location?.LAT, runtime?.weather_location?.LON]);
+            emoji: wmoCondition(data.daily.weather_code[i + 1]).emoji,
+          }))
+        : [];
+      return { temp: Math.round(data.current.temperature_2m), condition: cur.condition, emoji: cur.emoji, forecast };
+    },
+    { initial: null, key: `${lat},${lon}` }
+  );
+
+  const w = weather.data;
 
   return (
     <Surface variant="glass-subtle" radius="xl" padding="sm">
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-3">
-          <span className="text-2xl">{emoji}</span>
+          <span className="text-2xl">{w?.emoji ?? "⛅"}</span>
           <div>
-            {temp !== null && <span className="text-xl font-bold text-text-primary tabular-nums">{temp}°F</span>}
-            <p className="text-xs text-text-secondary">{condition}</p>
+            {w ? (
+              <span className="text-xl font-bold text-text-primary tabular-nums">{w.temp}°F</span>
+            ) : (
+              <span className="text-xl font-bold text-text-dim tabular-nums">--°F</span>
+            )}
+            <p className="text-xs text-text-secondary">
+              {/* Only say "checking" while it is genuinely in flight. */}
+              {weather.state === "loading" ? "Checking the weather…" : w?.condition ?? ""}
+            </p>
           </div>
         </div>
         <Link href="/calendar" className="text-xs font-semibold text-[var(--color-accent-selected)]">Details →</Link>
       </div>
-      {forecast.length > 0 && (
+      {weather.failure && (
+        <div className="mb-2">
+          <ReadStatePill
+            state={weather.failure}
+            subject="Weather"
+            message={weather.hasData ? READ_COPY_STALE : undefined}
+            retrying={weather.refreshing}
+            onRetry={weather.retry}
+          />
+        </div>
+      )}
+      {w && w.forecast.length > 0 && (
         <div className="flex gap-1 pt-2 border-t border-white/[0.06]">
-          {forecast.map((d) => (
+          {w.forecast.map((d) => (
             <div key={d.day} className="flex-1 flex flex-col items-center gap-0.5 py-1">
               <span className="text-xs font-semibold text-text-muted">{d.day}</span>
               <span className="text-sm">{d.emoji}</span>

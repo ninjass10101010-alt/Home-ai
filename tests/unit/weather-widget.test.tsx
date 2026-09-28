@@ -1664,7 +1664,9 @@ describe("WeatherWidget — Not Boring redesign", () => {
 
       const el = render(<WeatherWidget />);
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-      expect(el.textContent).toContain("Weather unavailable");
+      // P0-4: the banner states the failure instead of blaming the router
+      // ("check connection"); "Weather unavailable" survives as the hero's label.
+      expect(el.textContent).toContain("Couldn't load the weather right now.");
 
       const retry = Array.from(el.querySelectorAll("button")).find((b) => b.textContent?.includes("Try again"));
       expect(retry).toBeTruthy();
@@ -1678,6 +1680,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
       await act(async () => { retry!.click(); await vi.advanceTimersByTimeAsync(0); });
       expect(el.textContent).toContain("H:75°");
       expect(el.textContent).not.toContain("Weather unavailable");
+      expect(el.textContent).not.toContain("Couldn't load the weather right now.");
     } finally {
       vi.useRealTimers();
     }
@@ -2477,7 +2480,7 @@ describe("WeatherWidget — Not Boring redesign", () => {
       });
 
       // the new location's FIRST fetch failed → the banner must show
-      expect(el.textContent).toContain("Weather unavailable");
+      expect(el.textContent).toContain("Couldn't load the weather right now.");
     } finally {
       vi.useRealTimers();
     }

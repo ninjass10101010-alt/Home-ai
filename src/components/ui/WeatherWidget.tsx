@@ -17,6 +17,7 @@ import { SceneLayers, Condition, wmoToScene, dayCondition, conditionPresentation
 import { getWeatherSkin, cardinalFromDegrees, SeasonKey, severeFamily, resolveAccent, contrastSafeTextAccent, accentForeground } from "./WeatherSkins";
 import { wearAdvice, stormAdvice, snowAdvice, fusionOutlook, InsightEvent } from "@/lib/weather-insights";
 import type { ParticleKind } from "./WeatherParticles";
+import { classifyReadError, type ReadFailure } from "@/lib/read-state";
 
 const SeasonHolidayArt = dynamic(() => import("./WeatherSeasonArt"), { ssr: false });
 const HolidayParticles = dynamic(() => import("./WeatherParticles"), { ssr: false });
@@ -599,6 +600,19 @@ function TimelineScrubber({ hours, conv, accent, textAccent, idx, onIdx }: {
   );
 }
 
+/**
+ * Audit P0-4: this widget blamed the family's connection for every failure
+ * ("Weather unavailable — check connection or try again"), which sends someone
+ * to the router when the problem is the backboard or a revoked session. The
+ * wording now follows the classified state — and never claims a saved copy,
+ * because this branch only runs when nothing has ever loaded for this location.
+ */
+export function weatherFailureCopy(state: ReadFailure): string {
+  if (state === "offline") return "Offline — can't reach the weather service.";
+  if (state === "unauthorised") return "Weather needs a PIN before it can load.";
+  return "Couldn't load the weather right now.";
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function WeatherWidget({ className = "" }: { className?: string }) {
@@ -773,10 +787,14 @@ export default function WeatherWidget({ className = "" }: { className?: string }
         dataLoadedRef.current = true;
         setLoading(false);
       })
-      .catch(() => {
-        if (controller.signal.aborted) return; // timed out — treat like a hung request, wait for next cycle
+      .catch((err) => {
+        // Audit P0-4: the abort branch used to return early, which on a *first*
+        // load left `loading` true until the 15-minute cycle fired — a wall
+        // display showing a spinner for a quarter of an hour. A timed-out read
+        // is a failed read: say so, and the Try again control below is live.
+        if (controller.signal.aborted && dataLoadedRef.current) return;
         if (!dataLoadedRef.current) {
-          setFetchError("Weather unavailable — check connection or try again.");
+          setFetchError(weatherFailureCopy(controller.signal.aborted ? "error" : classifyReadError(err)));
           setLoading(false);
         }
       })

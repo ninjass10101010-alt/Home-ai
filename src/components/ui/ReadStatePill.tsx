@@ -51,7 +51,9 @@ export default function ReadStatePill({
   retrying = false,
   className = "",
 }: ReadStatePillProps) {
-  const tone = TONE[state];
+  // Defensive: an unknown/absent state must still explain itself rather than
+  // crash the widget around it.
+  const tone = TONE[state] ?? TONE.error;
   const copy = message ?? READ_COPY[state];
   const text = subject ? `${subject}: ${copy}` : copy;
 

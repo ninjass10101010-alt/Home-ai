@@ -72,7 +72,31 @@ export function classifyStatus(status: number): ReadFailure {
   return "error";
 }
 
-const NETWORK_COPY = /failed to fetch|networkerror|network request failed|load failed|fetch failed|err_network|net::|connection (refused|reset|closed)/i;
+const NETWORK_COPY = /failed to fetch|networkerror|network error|network (?:request )?(?:failed|down|failure|timeout)|networkload failed|load failed|fetch failed|err_network|net::|econn|eai_again|enotfound|etimedout|ehostunreach|connection (?:refused|reset|closed|appears to be offline|.*is offline)|the internet connection/i;
+
+/**
+ * The text worth pattern-matching on. A browser `fetch` failure often carries
+ * the real reason one level down (`cause.code === "ECONNREFUSED"` when the NAS
+ * refuses, `cause.message === "connect ECONNREFUSED …"`), and that nested form
+ * is exactly what a self-hosted dashboard hits most.
+ */
+function errorText(err: unknown): string {
+  const parts: string[] = [];
+  if (err instanceof Error) parts.push(err.message);
+  else if (typeof err === "string") parts.push(err);
+  if (typeof err === "object" && err !== null) {
+    const shape = err as { code?: unknown; cause?: unknown };
+    if (typeof shape.code === "string") parts.push(shape.code);
+    const cause = shape.cause;
+    if (cause instanceof Error) {
+      parts.push(cause.message);
+      if (typeof (cause as { code?: unknown }).code === "string") parts.push(String((cause as { code?: unknown }).code));
+    } else if (typeof cause === "string") {
+      parts.push(cause);
+    }
+  }
+  return parts.join(" ");
+}
 
 /**
  * The single classifier. Order matters: an explicit `ReadError` wins, then an
@@ -89,7 +113,7 @@ export function classifyReadError(err: unknown): ReadFailure {
   }
 
   const name = typeof err === "object" && err !== null && "name" in err ? String((err as { name?: unknown }).name) : "";
-  const message = err instanceof Error ? err.message : typeof err === "string" ? err : "";
+  const message = errorText(err);
 
   if (name === "AbortError") return "error";
   // A transport failure is only provably *our* connection when the browser says

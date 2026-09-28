@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { localTodayISO } from "@/lib/local-date";
+import { classifyReadError, classifyStatus, type ReadFailure } from "@/lib/read-state";
 
 const REFRESH_INTERVAL_MS = 60_000;
 
@@ -38,6 +39,13 @@ export function useMorningBriefing() {
   const [briefing, setBriefing] = useState<MorningBriefing | null>(null);
   const [loading, setLoading] = useState(true);
   const [ackError, setAckError] = useState(false);
+  // Audit P0-4: a failed read used to leave `briefing` null, and the widget
+  // renders `null` for a null briefing — so "Consuela is unreachable", "you are
+  // signed out" and "there is no briefing today" were all one invisible state.
+  const [failure, setFailure] = useState<ReadFailure | null>(null);
+  // True while any refresh is in flight — including the 60s auto-heal ticks, so
+  // the pill on a failed card shows "Trying…" rather than looking dead.
+  const [retrying, setRetrying] = useState(false);
   const scopeDateRef = useRef(localTodayISO());
 
   // I7 — re-anchor on the local calendar date: recompute at every refresh tick
@@ -47,14 +55,23 @@ export function useMorningBriefing() {
     const scopeDate = localTodayISO();
     const reanchored = scopeDate !== scopeDateRef.current;
     scopeDateRef.current = scopeDate;
+    setRetrying(true);
     try {
       const res = await fetch(`/api/consuela/briefing?scopeDate=${scopeDate}`, { cache: "no-store" });
+      if (!res.ok) {
+        // Keep the last-known briefing on screen (no flicker) but say why it is stale.
+        setFailure(classifyStatus(res.status));
+        return;
+      }
       const json = await res.json();
       setBriefing(json?.briefing ?? null);
-    } catch {
+      setFailure(null);
+    } catch (err) {
       // keep last-known briefing so the card doesn't flicker when PB blips
+      setFailure(classifyReadError(err));
     } finally {
       setLoading(false);
+      setRetrying(false);
       if (reanchored) setAckError(false);
     }
   }, []);
@@ -95,5 +112,7 @@ export function useMorningBriefing() {
     };
   }, [refresh]);
 
-  return { briefing, loading, ack, ackError };
+  // `stale` is derived, not stored: the briefing on screen is only stale when a
+  // read has failed *and* there is still a briefing under it.
+  return { briefing, loading, ack, ackError, failure, stale: failure !== null && briefing !== null, retrying, retry: refresh };
 }
