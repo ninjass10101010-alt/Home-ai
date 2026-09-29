@@ -190,7 +190,7 @@ describe("KidHome hero — two named point systems", () => {
     const weekCard = el.querySelector('[data-testid="kid-week-card"]');
     // Aurora (10) sits below three competitors → off podium → gap copy names
     // the LAST prize, positive framing.
-    expect(weekCard!.textContent).toContain("more points to win +$2 allowance");
+    expect(weekCard!.textContent).toContain("more points for: +$2 allowance");
   });
 
   it("the leaderboard card keeps its race line from the SAME helper (no drift)", async () => {
@@ -256,11 +256,11 @@ describe("kidRaceLine (pure)", () => {
     expect(kidRaceLine("Aurora", { Aurora: 10 }, [])).toBeNull();
   });
   it("on podium → winning copy", () => {
-    expect(kidRaceLine("Aurora", { Aurora: 30, Caspian: 10 }, prizes)).toContain("You're winning Picks Friday's family movie");
+    expect(kidRaceLine("Aurora", { Aurora: 30, Caspian: 10 }, prizes)).toContain("You're winning: Picks Friday's family movie");
   });
   it("off podium → positive gap copy naming the NEAREST prize (rank 3, the easiest win)", () => {
     const line = kidRaceLine("Aurora", { Aurora: 5, Caspian: 20, Emily: 15, Jasmine: 10 }, prizes);
-    expect(line).toContain("5 more points to win +$2 allowance");
+    expect(line).toContain("5 more points for: +$2 allowance");
     expect(line).not.toContain("losing");
   });
   it("zero points → earn copy", () => {

@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 // KidHome leaderboard weekly-prize race line (Task 12).
 // One positive line under the kid leaderboard's reinforcement block:
-//   holding a podium spot → "🎉 You're winning {prize}!"
-//   chasing with a gap    → "{gap} more points to win {prize}!"
+//   holding a podium spot → "🎉 You're winning: {prize}!"
+//   chasing with a gap    → "{gap} more points for: {prize}!"
 //   zero points anywhere  → "Earn points to win this week's prize!"
 // Kid copy stays positive — never "losing".
 // Harness mirrors tests/unit/kid-wall.test.tsx: createRoot + act. task-utils
@@ -129,19 +129,19 @@ describe("KidHome leaderboard — weekly prize race line", () => {
     vi.unstubAllGlobals();
   });
 
-  it("holding a podium spot: \"🎉 You're winning {prize}!\" with the prize at the kid's rank", async () => {
+  it("holding a podium spot: \"🎉 You're winning: {prize}!\" with the prize at the kid's rank", async () => {
     seedWeek({ "Caspian Garcia": 50, "Emily Garcia": 30, "Bailey Garcia": 20, "Rebecca Garcia": 10 });
     const el = await renderAsync(<KidHome />);
     await settle();
-    expect(el.textContent).toContain("🎉 You're winning Movie pick!");
+    expect(el.textContent).toContain("🎉 You're winning: Movie pick!");
   });
 
-  it("chasing with a positive gap: \"{gap} more points to win {prize}!\" names the next podium prize", async () => {
+  it("chasing with a positive gap: \"{gap} more points for: {prize}!\" names the next podium prize", async () => {
     // Caspian 10 at rank 4; the podium cut-off is Bailey at 30 → gap 20,
     // and the prize he's chasing is the 3rd one ("Two dollars").
     const el = await renderAsync(<KidHome />);
     await settle();
-    expect(el.textContent).toContain("20 more points to win Two dollars!");
+    expect(el.textContent).toContain("20 more points for: Two dollars!");
   });
 
   it("zero points week: \"Earn points to win this week's prize!\"", async () => {
@@ -155,7 +155,7 @@ describe("KidHome leaderboard — weekly prize race line", () => {
     localStorage.setItem(WEEKLY_PRIZES_KEY, "[]");
     const el = await renderAsync(<KidHome />);
     await settle();
-    expect(el.textContent).not.toContain("more points to win");
+    expect(el.textContent).not.toContain("more points for:");
     expect(el.textContent).not.toContain("You're winning");
     expect(el.textContent).not.toContain("Earn points to win this week's prize!");
   });

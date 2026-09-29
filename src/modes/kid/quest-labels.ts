@@ -50,9 +50,13 @@ export function kidRaceLine(
   const ordered = [...prizes].sort((a, b) => a.rank - b.rank);
   const gap = raceGap(raceName, pointsMap, ordered.length);
   const heldPrize = gap.onPodium && gap.rank ? prizeForRank(ordered as any, gap.rank) : undefined;
-  if (heldPrize) return `🎉 You're winning ${heldPrize.text}!`;
+  // Prize texts are parent-typed free text ("Picks Friday's movie", "+$2
+  // allowance"), so the sentence can never take them as a verb complement —
+  // "You're winning Chooses the dessert night!" reads broken. A label colon
+  // keeps any phrasing a parent types grammatical.
+  if (heldPrize) return `🎉 You're winning: ${heldPrize.text}!`;
   if (gap.gapToPodium !== null && gap.gapToPodium > 0) {
-    return `${gap.gapToPodium} more points to win ${ordered[ordered.length - 1].text}!`;
+    return `${gap.gapToPodium} more points for: ${ordered[ordered.length - 1].text}!`;
   }
   return "Earn points to win this week's prize!";
 }
