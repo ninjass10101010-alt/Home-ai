@@ -143,7 +143,7 @@ export default function RecipeSearchModal({
           <button
             onClick={onClose}
             aria-label="Close"
-            className="w-9 h-9 rounded-2xl glass flex items-center justify-center text-text-secondary hover:text-text-primary transition-colors tap-sm cursor-pointer"
+            className="hit-44 w-9 h-9 rounded-2xl glass flex items-center justify-center text-text-secondary hover:text-text-primary transition-colors tap-sm cursor-pointer"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
               <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />

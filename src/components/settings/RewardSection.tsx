@@ -239,7 +239,7 @@ export default function RewardSection({ showToast }: RewardSectionProps) {
                   key={emoji}
                   type="button"
                   onClick={() => setForm((p) => ({ ...p, emoji }))}
-                  className={`grid h-10 w-10 place-items-center rounded-2xl text-lg ${
+                  className={`hit-44 grid h-10 w-10 place-items-center rounded-2xl text-lg ${
                     form.emoji === emoji ? "bg-[var(--color-accent-selected)] text-white" : "bg-[var(--color-surface-2)] text-text-primary"
                   }`}
                 >

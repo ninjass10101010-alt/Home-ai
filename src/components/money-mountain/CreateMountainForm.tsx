@@ -196,7 +196,7 @@ export function CreateMountainForm({ onClose, onSubmit }: CreateMountainFormProp
                   key={emoji}
                   type="button"
                   onClick={() => setIcon(emoji)}
-                  className={`flex h-10 w-10 items-center justify-center rounded-lg text-xl transition-all ${
+                  className={`hit-44 flex h-10 w-10 items-center justify-center rounded-lg text-xl transition-all ${
                     icon === emoji
                       ? 'bg-primary/20 ring-2 ring-primary'
                       : 'bg-muted hover:bg-muted/80'

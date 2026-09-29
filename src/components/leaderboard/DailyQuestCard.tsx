@@ -36,7 +36,7 @@ export default function DailyQuestCard({ quests, onAccept, onGoToTasks, rosterEm
           </div>
         ))}
       </div>
-      <button type="button" onClick={onGoToTasks} className="-ml-2 mt-3 inline-flex min-h-8 items-center rounded-lg px-2 text-xs font-semibold text-[var(--color-accent-selected)] hover:bg-[var(--color-accent-selected)]/10 tap-sm">
+      <button type="button" onClick={onGoToTasks} className="hit-44 -ml-2 mt-3 inline-flex min-h-8 items-center rounded-lg px-2 text-xs font-semibold text-[var(--color-accent-selected)] hover:bg-[var(--color-accent-selected)]/10 tap-sm">
         View all tasks →
       </button>
     </Surface>

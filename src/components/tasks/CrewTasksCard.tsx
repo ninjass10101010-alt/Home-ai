@@ -37,7 +37,7 @@ export default function CrewTasksCard({ tasks, visible, onRemoveMember }: CrewTa
                               type="button"
                               aria-label={`Remove ${m.name.split(" ")[0]} from ${task.title}`}
                               onClick={() => onRemoveMember(task.id, m.name)}
-                              className="tap-sm grid h-6 w-6 shrink-0 place-items-center rounded-full text-text-muted hover:bg-[var(--color-accent-rose)]/10 hover:text-[var(--color-accent-rose)]"
+                              className="hit-44 tap-sm grid h-6 w-6 shrink-0 place-items-center rounded-full text-text-muted hover:bg-[var(--color-accent-rose)]/10 hover:text-[var(--color-accent-rose)]"
                             >
                               ✕
                             </button>
