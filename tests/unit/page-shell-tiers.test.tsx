@@ -25,6 +25,7 @@ const PARENT = { currentUser: { role: "parent" } };
 const CHILD = { currentUser: { role: "child" } };
 const PET = { currentUser: { role: "pet" } };
 const GUEST = { currentUser: null };
+const SESSIONS = [PARENT, CHILD, PET, GUEST];
 
 function render(ui: ReactElement): HTMLElement {
   const el = document.createElement("div");
@@ -33,12 +34,17 @@ function render(ui: ReactElement): HTMLElement {
   return el;
 }
 
-function rail(el: HTMLElement): HTMLElement | null {
-  return el.querySelector('nav[aria-label="Main"]');
+function shell(el: HTMLElement): HTMLElement {
+  return el.firstElementChild as HTMLElement;
 }
 
-function railWrapper(el: HTMLElement): HTMLElement | null {
-  return el.querySelector("[data-page-rail]");
+/** The centred content column — the shell root's only element child. */
+function column(el: HTMLElement): HTMLElement {
+  return shell(el).firstElementChild as HTMLElement;
+}
+
+function rail(el: HTMLElement): HTMLElement | null {
+  return el.querySelector('nav[aria-label="Main"]');
 }
 
 beforeEach(() => {
@@ -51,37 +57,45 @@ afterEach(() => {
 });
 
 describe("PageShell tiers (audit Phase 4)", () => {
-  it("renders the desktop rail for a parent on a non-Home route", () => {
-    const el = render(<PageShell><p>page</p></PageShell>);
-    expect(rail(el)).not.toBeNull();
-    expect(railWrapper(el)?.getAttribute("data-page-rail")).toBe("true");
-  });
-
-  it("reserves the rail's width so content cannot slide under it", () => {
-    const el = render(<PageShell><p>page</p></PageShell>);
-    const wrapper = railWrapper(el)!;
-    // The rail is `w-60` and the shell offset is `md:pl-60` — they must agree.
-    expect(rail(el)?.closest("aside")?.className).toContain("w-60");
-    expect(wrapper.className).toContain("md:pl-60");
-  });
-
-  it("keeps the dock for every role, and the rail only for a parent", () => {
-    for (const session of [CHILD, PET, GUEST]) {
+  it("renders no left rail for any role — the dock is the only navigation", () => {
+    for (const session of SESSIONS) {
       mockUseAuth.mockReturnValue(session);
       document.body.innerHTML = "";
       const el = render(<PageShell><p>page</p></PageShell>);
-      expect(rail(el), `${JSON.stringify(session)} should have no rail`).toBeNull();
-      expect(railWrapper(el)?.className ?? "", "no rail means no offset").not.toContain("md:pl-60");
-      expect(el.querySelector("nav")).not.toBeNull();
+      expect(rail(el), `${JSON.stringify(session)} must not get a left rail`).toBeNull();
+      expect(el.querySelector("aside"), `${JSON.stringify(session)} must not get a sidebar`).toBeNull();
     }
+  });
+
+  it("renders exactly one navigation surface, so the dock cannot be duplicated", () => {
+    for (const session of SESSIONS) {
+      mockUseAuth.mockReturnValue(session);
+      document.body.innerHTML = "";
+      const el = render(<PageShell><p>page</p></PageShell>);
+      expect(el.querySelectorAll("nav").length, `${JSON.stringify(session)} nav count`).toBe(1);
+    }
+  });
+
+  it("keeps the dock for every role", () => {
+    for (const session of SESSIONS) {
+      mockUseAuth.mockReturnValue(session);
+      document.body.innerHTML = "";
+      const el = render(<PageShell><p>page</p></PageShell>);
+      expect(el.querySelector("nav"), `${JSON.stringify(session)} should have the dock`).not.toBeNull();
+    }
+  });
+
+  it("reserves no width for a rail that no longer exists", () => {
+    const el = render(<PageShell><p>page</p></PageShell>);
+    expect(el.querySelector("[data-page-rail]")).toBeNull();
+    expect(el.innerHTML).not.toContain("md:pl-60");
   });
 
   it("keeps the content column tiers and the page-settle transition", () => {
     const el = render(<PageShell><p>page</p></PageShell>);
-    const column = railWrapper(el)!.firstElementChild!;
-    expect(column.className).toContain("max-w-lg");
-    expect(column.className).toContain("md:max-w-3xl");
-    expect(column.className).toContain("lg:max-w-none");
+    expect(column(el).className).toContain("max-w-lg");
+    expect(column(el).className).toContain("md:max-w-3xl");
+    expect(column(el).className).toContain("lg:max-w-none");
     const main = el.querySelector("main")!;
     expect(main.className).toContain("page-settle");
     expect(main.textContent).toBe("page");
@@ -89,14 +103,13 @@ describe("PageShell tiers (audit Phase 4)", () => {
 
   it("applies caller classes and style to the outer shell", () => {
     const el = render(
-      <PageShell className="rounded-t-3xl" style={{ backgroundColor: "transparent" }}>
+      <PageShell className="rounded-2xl" style={{ backgroundColor: "transparent" }}>
         <p>page</p>
       </PageShell>,
     );
-    const shell = el.firstElementChild as HTMLElement;
-    expect(shell.className).toContain("rounded-t-3xl");
-    expect(shell.style.backgroundColor).toBe("transparent");
-    expect(shell.className).toContain("min-h-screen");
+    expect(shell(el).className).toContain("rounded-2xl");
+    expect(shell(el).style.backgroundColor).toBe("transparent");
+    expect(shell(el).className).toContain("min-h-screen");
   });
 
   it("passes surface-specific sync copy through to the banner", () => {
@@ -120,7 +133,7 @@ describe("PageShell tiers (audit Phase 4)", () => {
 
   it("defaults to a clipped root with dock clearance under the content", () => {
     const el = render(<PageShell><p>page</p></PageShell>);
-    expect((el.firstElementChild as HTMLElement).className).toContain("overflow-hidden");
+    expect(shell(el).className).toContain("overflow-hidden");
     expect(el.querySelector("main")!.className).toContain("pb-32");
   });
 
@@ -138,8 +151,7 @@ describe("PageShell tiers (audit Phase 4)", () => {
     expect(main.className).toContain("max-w-lg");
     expect(main.className).toContain("min-h-screen");
     expect(main.className, "page manages dock clearance itself").not.toContain("pb-32");
-    const root = el.firstElementChild as HTMLElement;
-    expect(root.className, "document stays the scrollport for sticky").not.toContain("overflow-hidden");
-    expect(root.className).toContain("min-h-screen");
+    expect(shell(el).className, "document stays the scrollport for sticky").not.toContain("overflow-hidden");
+    expect(shell(el).className).toContain("min-h-screen");
   });
 });

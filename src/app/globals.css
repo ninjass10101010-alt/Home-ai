@@ -119,12 +119,12 @@
 }
 
 /* ─── Navigation active ink (UI audit 2026-09, Phase 3) ───
-   The dock (`components/ui/CapsuleNav.tsx`) and the desktop rail
-   (`modes/adult/SidebarNav.tsx`) both read these, so navigation follows the
-   accent system. Before this block the dock hard-coded five `rgba(120,240,90,…)`
-   lime literals (`--capsule-accent: #78f05a`) while the rail followed
-   `--color-accent-selected`: the same "active item" was two different colours,
-   and an accent change retinted one surface only.
+   The dock (`components/ui/CapsuleNav.tsx`) and the Home More… sheet read
+   these, so navigation follows the accent system. Before this block the dock
+   hard-coded five `rgba(120,240,90,…)` lime literals (`--capsule-accent:
+   #78f05a`) while a second surface followed `--color-accent-selected`: the
+   same "active item" was two different colours, and an accent change retinted
+   one surface only.
    To keep the pre-Phase-3 lime dock, set `--color-nav-active: #78f05a` here. */
 :root {
   --color-nav-active: var(--color-accent-selected);

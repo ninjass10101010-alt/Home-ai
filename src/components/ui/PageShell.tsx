@@ -3,10 +3,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import CapsuleNav from "./CapsuleNav";
-import SidebarNav from "./SidebarNav";
 import SyncStatusBanner from "./SyncStatusBanner";
-import { useAuth } from "@/hooks/useAuth";
-import { navRoleForUser } from "@/lib/nav-items";
 
 interface PageShellProps {
   children: ReactNode;
@@ -42,18 +39,19 @@ interface PageShellProps {
 
 /**
  * PageShell — the one shell for every data route: sync banner, page transition,
- * the dock, and (for a parent session) the desktop rail.
+ * and the dock.
  *
- * UI audit Phase 4, finding 7: the rail used to be mounted inside `AdultHome`
- * alone, so a parent who left Home on a tablet or desktop lost the rail
- * entirely while the phone dock stayed. The shell now owns it, at `md+` only,
- * and reserves its width (`md:pl-60`) so the fixed 15rem rail can never sit on
- * top of the content column. Kids and the signed-out family screen keep the dock
- * alone — nav *roles* decide that, not this shell.
+ * There is deliberately **no side rail and no top bar**. UI audit Phase 4
+ * finding 7 briefly mounted a desktop `SidebarNav` here for parent sessions,
+ * which gave parents two navigations with the same seven destinations at every
+ * width ≥768px — and on 768–931px the fixed dock physically covered part of the
+ * rail's Emergency link. The original 2026-08-06 responsive spec had already
+ * ruled the rail out ("keep the bottom nav bar on desktop, no side rail"), so
+ * the rail and its `md:pl-60` reservation are gone and the dock is the one
+ * navigation surface on every device and every role.
  *
  * The content column (banner + `<main>`) keeps the pre-Phase-4 tiers
- * (`max-w-lg` → `md:max-w-3xl` → `lg:max-w-none`) and centres inside whatever
- * width the rail leaves.
+ * (`max-w-lg` → `md:max-w-3xl` → `lg:max-w-none`) and centres itself.
  */
 export default function PageShell({
   children,
@@ -66,25 +64,20 @@ export default function PageShell({
   clip = true,
 }: PageShellProps) {
   const pathname = usePathname();
-  const { currentUser } = useAuth();
-  const showRail = navRoleForUser(currentUser) === "parent";
 
   return (
     <div
       className={`min-h-screen bg-[var(--color-canvas)] relative ${clip ? "overflow-hidden" : ""} ${className}`}
       style={style}
     >
-      {showRail && <SidebarNav />}
-      <div className={showRail ? "md:pl-60" : undefined} data-page-rail={showRail ? "true" : "false"}>
-        <div className="max-w-lg md:max-w-3xl lg:max-w-none mx-auto">
-          <SyncStatusBanner message={bannerMessage} className={bannerClassName} />
-          <main
-            key={pathname}
-            className={`page-settle relative z-10 ${bottomInset ? "pb-32" : ""} ${contentClassName}`}
-          >
-            {children}
-          </main>
-        </div>
+      <div className="max-w-lg md:max-w-3xl lg:max-w-none mx-auto">
+        <SyncStatusBanner message={bannerMessage} className={bannerClassName} />
+        <main
+          key={pathname}
+          className={`page-settle relative z-10 ${bottomInset ? "pb-32" : ""} ${contentClassName}`}
+        >
+          {children}
+        </main>
       </div>
       <CapsuleNav />
     </div>

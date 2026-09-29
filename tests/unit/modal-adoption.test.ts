@@ -47,7 +47,6 @@ const HAND_ROLLED: Record<string, { kind: "dialog" | "layer"; reason: string }> 
   "src/components/time-capsule/UnlockAnimation.tsx": { kind: "layer", reason: "Full-screen unlock celebration (not a dialog)." },
   "src/app/page.tsx": { kind: "layer", reason: "Shell root (PageShell)." },
   "src/components/ui/CapsuleNav.tsx": { kind: "layer", reason: "Fixed dock." },
-  "src/components/ui/SidebarNav.tsx": { kind: "layer", reason: "Fixed desktop rail." },
   "src/components/ui/ConfettiBurst.tsx": { kind: "layer", reason: "Pointer-events-none celebration layer." },
   "src/modes/kid/CelebrationBurst.tsx": { kind: "layer", reason: "Pointer-events-none celebration layer." },
   "src/modes/kid/RewardsShop.tsx": { kind: "layer", reason: "Pointer-events-none reward toast layer." },

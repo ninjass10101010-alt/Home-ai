@@ -3,17 +3,15 @@
  *
  * Every navigational surface reads THIS list, so a route can no longer be
  * reachable from one nav and invisible in another:
- *   - `components/ui/CapsuleNav.tsx`      — the phone/wall dock
- *   - `modes/adult/SidebarNav.tsx`        — the desktop/tablet rail
+ *   - `components/ui/CapsuleNav.tsx`      — the dock (the only nav surface)
  *   - `components/patterns/MoreSheet.tsx` — the Home "More…" sheet
  *
  * Rules this file exists to enforce:
- *   1. One ordering. The dock and the rail render the same sequence, so
- *      `/chat` can never sit in position 2 on the phone and position 3 on the
- *      desktop.
+ *   1. One ordering. Every surface renders the same sequence, so `/chat` can
+ *      never sit in position 2 on the phone and position 3 elsewhere.
  *   2. One active-item rule (`isPathActive`). The dock used `pathname === href`
- *      and the rail used `startsWith`, so on `/settings/me` the dock showed no
- *      active item while the rail highlighted Settings.
+ *      while a second nav used `startsWith`, so on `/settings/me` one surface
+ *      showed no active item while the other highlighted Settings.
  *   3. No orphans. `tests/unit/nav-items.test.ts` enumerates every
  *      `src/app/**\/page.tsx` route and fails on any route that is neither
  *      reachable from this manifest nor listed in `EXEMPT_ROUTES` with a
@@ -181,7 +179,7 @@ function isVisible(item: NavItemDefinition, role: NavRole): boolean {
   return role !== "guest" || item.wall;
 }
 
-/** Primary items (the dock caps and the rail) for a role, in manifest order. */
+/** Primary items (the dock caps) for a role, in manifest order. */
 export function navItemsForRole(role: NavRole): NavItemDefinition[] {
   return NAV_ITEMS.filter((item) => item.group === "primary" && isVisible(item, role));
 }
@@ -218,7 +216,7 @@ export function navItemForPath(pathname: string): NavItemDefinition | undefined 
 export const EXEMPT_ROUTES: Readonly<Record<string, string>> = {
   "/design-system": "Dev-only design-system preview with the live self-audit (production-gated).",
   "/emergency":
-    "Reference page reached from the rail, Settings → Safety and the wall Emergency action; not a dock cap.",
+    "Reference page reached from Settings → Safety and the wall Emergency action; not a dock cap.",
   "/ledger": "Parent-only finance iframe, reached from the Settings ledger widget.",
   "/screensaver": "Typed wall URL only — CacheRefresher special-cases it so the wall can sleep.",
   "/suggestions": "Reached from Home's Suggestions widget (\"See all →\").",
