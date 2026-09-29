@@ -92,17 +92,57 @@ The kid experience is a mode, not a parallel app: `KidHome` renders behind `mode
 
 The dashboard is a mobile-first, glass-morphism, bottom-nav app with a persistent floating action for emergencies.
 
-**Capsule Nav (always present, `CapsuleNav.tsx`):** a floating bottom-center glass capsule. The active item expands into a neon-lime pill (green icon circle + label); inactive items are compact dark circles. Width expansion is a CSS-only `0fr→1fr` grid-column transition; the whole capsule auto-scales down on narrow viewports (`--capsule-scale`). Seven items for adults: Home, Ask, Meals, Tasks, Calendar, House (`/ha`, Home Assistant controls), Settings — the House item is hidden for the child role (kid mode keeps the original 6 tabs). Items are `<button>`s with `aria-label` + `aria-current="page"`.
+**There is exactly ONE navigation surface (owner ruling, 2026-09-29).** `CapsuleNav` is the whole
+navigation model — not a phone-only affordance that a wider layout upgrades away from. **No side
+rail, no top bar, no hamburger drawer, at any width.** This restores the original 2026-08-06
+responsive decision ("keep the bottom nav bar on desktop, no side rail / top bar") and reverses UI
+audit Phase 4.1, which had mounted a `md+` `SidebarNav` rail: the dock has no `md:` gate, so that
+change briefly gave parents **two** navigations with the same seven destinations above 768px, and
+because the dock is viewport-centred at `z-50`, at 768–931px it painted over and intercepted the
+rail's Emergency link. `SidebarNav.tsx` and its suite are deleted. A second nav, if ever proposed,
+**replaces** the dock — it does not sit beside it. `PageShell` is not a nav surface; the manifest
+in `src/lib/nav-items.ts` owns every destination, role, icon and group, and `PageShell` reads
+nothing from it.
 
-| Label          | Route          | Icon (active = heavier stroke / filled)          | Primary Notes |
-|----------------|----------------|--------------------------------------------------|---------------|
-| Home           | `/`            | House                                            | Dashboard with weather, today's events, quick AI ask, weekly meals preview, tasks |
-| Ask            | `/chat`        | Speech bubble with 3 dots (primary, filled when active) | Main conversational interface |
-| Meals          | `/meals`       | Pot / plate                                      | Kitchen loop: 🍽️ Plan (weekly meal grid + inline Recipe box) → 🛒 Shop (store-aware grocery list with price comparison, Instacart ordering per store or all stores at once, Ask Instacart buttons + Clem AI grocery assistant 🛒 FAB, ShopGuide how-to card) → 🥫 Stock (pantry + low/out → grocery sync) |
-| Tasks          | `/tasks`       | Checklist                                        | Chore list with points |
-| Calendar       | `/calendar`    | Calendar grid (rect + binding rings + day dots) | Family routines, events, and month view |
-| House          | `/ha`        | Sliders (3 vertical faders)               | Home Assistant controls: Overview, Security (arm/disarm), Climate, Lights, Automations. Hidden for kids (child role) |
-| Settings       | `/settings`    | Gear                                             | Far-right tab. Theme (dark/light/system + 10 accents + high-contrast), family members, emergency contacts config |
+**Capsule Nav (always present, `CapsuleNav.tsx`):** a floating bottom-center glass capsule. The active item expands into an accent pill (icon circle + label); inactive items are compact dark circles. Width expansion is a CSS-only `0fr→1fr` grid-column transition; the whole capsule auto-scales down on narrow viewports (`--capsule-scale`). Items are `<button>`s with `aria-label` + `aria-current="page"`. **Eight primary caps**, filtered by role and by whether the signed-out shared wall may show the destination (`wall`):
+
+| Label      | Route       | Roles shown to        | Wall | Icon (`NavIcon` key)        | Notes |
+|------------|-------------|-----------------------|------|-----------------------------|-------|
+| Home       | `/`         | everyone              | yes  | `home`                      | Morning briefing, today's events, weather, tasks — the ranked `FIRST_FOLD_WIDGETS` |
+| Ask        | `/chat`     | everyone              | yes  | `ask`                       | Main conversational interface |
+| Meals      | `/meals`    | everyone              | yes  | `meals`                     | 🍽️ Plan → 🛒 Shop → 🥫 Stock |
+| Tasks      | `/tasks`    | everyone              | yes  | `tasks`                     | Chores, points, leaderboard |
+| Rewards    | `/rewards`  | **kids only** (child, pet) | no | `rewards`              | Redeem shop — hidden from adults and from the wall |
+| Calendar   | `/calendar` | everyone              | yes  | `calendar`                  | Routines, events, month view |
+| House      | `/ha`       | parent + guest (not kids) | yes | `house`                 | Home Assistant: Overview, Security, Climate, Lights, Automations |
+| Settings   | `/settings` | everyone              | yes  | `settings`                  | Appearance, family, safety, connections |
+
+So the dock always shows **seven** caps, and *which* seven depends on the role: a parent (and the
+signed-out wall) gets Home, Ask, Meals, Tasks, Calendar, House, Settings; a kid gets Rewards
+**in place of** House. The manifest holds eight primary entries but no role is offered all
+eight — `Rewards` is `KID_ROLES` and `House` is `guest`+`parent`, so exactly one of the pair is
+always present. That is the invariant `CapsuleNav` sizes its capsule for.
+
+**Home "More…" sheet (`MoreSheet.tsx`)** — the six secondary destinations that no dock cap
+points at, role-filtered the same way. This is what makes "no unreachable route" hold. How many
+appear depends on the role: **6** to a parent, **5** to a kid (no Family Memory), **4** on the
+signed-out wall (no Money Mountain, no Family Memory).
+
+| Label            | Route               | Roles    | Wall | Blurb |
+|------------------|---------------------|----------|------|-------|
+| Grocery          | `/grocery`          | everyone | yes  | Shopping list and sync status |
+| Skill Tree       | `/skill-tree`       | everyone | yes  | Quests, levels and badges |
+| Time Capsule     | `/time-capsule`     | everyone | yes  | Letters and photos for later |
+| Insights         | `/analytics`        | everyone | yes  | Schedule and routine patterns |
+| Money Mountain   | `/money-mountain`   | signed in | no  | Savings goals and allowance |
+| Family Memory    | `/memory`           | **parent only** | no | Addresses, allergies and preferences |
+
+`/memory` is parent-only in the manifest and in `middleware.ts`; `/money-mountain` and
+`/memory` stay off the shared wall. Routes with no manifest entry live in `EXEMPT_ROUTES`
+with a written reason, and `tests/unit/nav-items.test.ts` walks every `src/app/**/page.tsx`
+so a new route cannot ship unreachable. `tests/unit/route-shell-contract.test.ts` is the
+matching guarantee that no route is a **dead end** — every one reaches `PageShell`, so the
+dock is present, or it is exempt with a reason.
 
 **Floating Emergency Button (always on Home, `EmergencyButton.tsx`):**
 - Fixed position: `top-4 right-4`, `z-50`

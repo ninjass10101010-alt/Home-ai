@@ -5,10 +5,12 @@
    owned by globals.css and must stay byte-identical for non-kid users.
    Every selector below is therefore scoped under [data-mode="kid"] (plus the
    [data-bedtime]/[data-weekend] modifiers restricted to kid mode).
-   The former family/adult token blocks were removed with the wiring pass —
-   FamilyHome/AdultHome remain unwired, and their dense-mode overrides
-   (canvas swap, 260px sidebar pad, animation kills) would have changed
-   live adult rendering the moment data-mode started being set.
+   The former family/adult token blocks were removed with the wiring pass. The
+   two unwired Home screens they were written for were DELETED on 2026-09-29
+   (see tests/unit/dead-module-contract.test.ts): their dense-mode overrides
+   (canvas swap, 260px sidebar pad, animation kills) would have changed live
+   adult rendering the moment data-mode started being set. Kid mode is the only
+   mode with its own screen — src/modes/kid/KidHome.tsx.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ─── Mode Transition Animation (kid surfaces only) ─── */
