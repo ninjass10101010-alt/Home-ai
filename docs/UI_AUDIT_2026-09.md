@@ -216,14 +216,17 @@ per route, no orphans left.
 
 **6. Three navs, three icon systems, one dead reference.** `CapsuleNav` (global via
 `PageShell`, 7 items, inline SVG, `pathname === item.href`, hard-coded lime
-`rgba(120,240,90,…)`), `SidebarNav` (rendered **only inside `AdultHome`**, 6 items, emoji
-icons, `startsWith` matching, honours `--color-accent-selected`; its header comment still
-credits a deleted `BottomNav`), plus `lucide-react` in 25 files. Consequences: leaving Home
-removes the desktop rail entirely while the phone dock stays; the two navs disagree about the
-active item on `/settings/me`; the dock ignores the ten-accent Accent Studio the design system
-advertises. → Phase 3: one route manifest (`path, label, iconKey, roles, modes, wall`) feeding
-one dock + one rail, one icon set, shared `isActive()`, dock glow tokenised as
-`--color-nav-active`.
+`rgba(120,240,90,…)`), `SidebarNav` (6 items, emoji icons, `startsWith` matching, honours
+`--color-accent-selected`; its header comment still credits a deleted `BottomNav`), plus
+`lucide-react` in 25 files. Consequences: the two navs disagreed about the active item on
+`/settings/me`; the dock ignored the ten-accent Accent Studio the design system advertises; and
+`SidebarNav` was **dead weight, not a working second nav** — its only mount
+(`src/modes/adult/AdultHome.tsx`) had been unwired since `0f5bb1e` (2026-08-04), so it rendered
+on no route at all and dragged a second icon set and a second active-item rule through the audit.
+→ Phase 3: one route manifest (`path, label, iconKey, roles, modes, wall`) feeding one dock,
+one icon set, shared `isActive()`, dock glow tokenised as `--color-nav-active`; and `SidebarNav`
+was **deleted outright** on 2026-09-29 rather than mounted — the 2026-08-06 responsive spec had
+already ruled the side rail out, so one surface (the dock) is the whole navigation model.
 
 **7. Desktop/tablet is a stretched phone.** `PageShell` is `max-w-lg md:max-w-3xl
 lg:max-none`; at 1440×900 `/tasks` still renders one narrow 886px column, and `/calendar`,
@@ -300,37 +303,50 @@ and a *failed* read must never reuse the *stale* copy, so offline-with-nothing-c
 jsdom teardown escape was fixed in `05f1005`).
 
 **Phase 3 — navigation & IA (P1-5, P1-6) — shipped 2026-09-28.** `lib/nav-items.ts` is the single
-manifest (`path, label, iconKey, roles, group, wall`) feeding the dock, the rail *and* the new Home
-`More…` sheet; `NavIcon` is the one SVG icon set (the dock's inline SVGs and the rail's emoji are
-gone); `isPathActive` is the one active-item rule, so `/settings/me` now lights Settings in both
-navs; the dock glow is `--color-nav-active*` (the accent system drives it — the active pill is
-accent-coloured instead of hard-coded lime, documented in `globals.css` with the one-line revert);
+manifest (`path, label, iconKey, roles, group, wall`) feeding the dock *and* the new Home
+`More…` sheet; `NavIcon` is the one SVG icon set (the dock's inline SVGs and the old rail's emoji
+are gone); `isPathActive` is the one active-item rule, so `/settings/me` lights Settings the same
+way everywhere; the dock glow is `--color-nav-active*` (the accent system drives it — the active
+pill is accent-coloured instead of hard-coded lime, documented in `globals.css` with the one-line
+revert);
 the six orphaned routes were **surfaced, not deleted** — every Home mode mounts the More… sheet,
 role-filtered so the wall shows only `/grocery`, `/skill-tree`, `/time-capsule` and `/analytics`
 (never the parent-only `/memory` or the finance pages). `tests/unit/nav-items.test.ts` now fails on
 any shipped route that is neither in the manifest nor in `EXEMPT_ROUTES` with a reason, so the
-"unreachable route" class of bug cannot come back. Shipped in Phase 4 (4.1): the rail now lives in
-`PageShell` (`SidebarNav` moved to `src/components/ui/`), so it follows the parent to every route;
-Home's widget ranking/`More…` folding is still Phase 4.5.
+"unreachable route" class of bug cannot come back. Home's widget ranking/`More…` folding is
+Phase 4.5.
 
 **Phase 4 — responsive tiers (P1-7, P1-8).**
-- ✅ **4.1 — rail on every route:** `SidebarNav` moved to `src/components/ui/`; `PageShell` mounts it
-  for parent sessions at `md+`, `md:pl-60` reserves exactly its `w-60`, `data-page-rail` marks the
-  wrapper, `AdultHome`'s local mounts removed. Contract: `tests/unit/page-shell-tiers.test.tsx`.
+- ↩️ **4.1 — rail on every route: SHIPPED, THEN REVERTED 2026-09-29.** `SidebarNav` moved to
+  `src/components/ui/`; `PageShell` mounted it for parent sessions at `md+`, `md:pl-60` reserved
+  exactly its `w-60`, `data-page-rail` marked the wrapper. The owner rejected it: a left nav was
+  never wanted, and the original 2026-08-06 responsive spec had already ruled the rail out
+  ("keep the bottom nav bar on desktop, no side rail"). `SidebarNav.tsx` + its suite are deleted,
+  the mount, the `md:pl-60` offset and `data-page-rail` are gone, and the **dock is the only
+  navigation surface on every device and every role** (`page-shell-tiers.test.tsx` pins: no rail,
+  no offset, exactly one `<nav>`).
+  Two recorded reasons for 4.1 were wrong and are corrected here: (a) the rail was **not**
+  "rendered only inside `AdultHome`" — `src/modes/adult/AdultHome.tsx` has had zero importers
+  since `0f5bb1e` (2026-08-04) and is dead code (`modes/modes.css:9` says so in-tree), so for the
+  ~8 weeks before 4.1 the rail rendered on **no** route at all; 4.1 therefore *added* a rail
+  everywhere rather than *moving* one. (b) The real defect 4.1 introduced was two navs at once —
+  `CapsuleNav` has no `md:` gate, so parents got the rail *and* the dock above `md+`, and at
+  768–931px the fixed `z-50` dock painted over the rail's Emergency link.
 - ✅ **4.2 — `/chat` through `PageShell`:** chat gains `<main>`, the sync banner (its signed-out copy
-  passed as `bannerMessage`), the rail and the shared dock, while keeping its `max-w-lg` thread
+  passed as `bannerMessage`) and the shared dock, while keeping its `max-w-lg` thread
   (`contentClassName`), its composer's own dock clearance (`bottomInset={false}`) and the document
   scrollport for its sticky top bar/composer (`clip={false}` — the shell's `overflow-hidden` would
   otherwise become their scrollport and freeze sticky).
-- ✅ **4.3 — tablet two-column + rail for Tasks / Meals / Calendar / Settings** (rail shipped with
-  4.1): every split now uses Home's grid idiom (`grid-cols-1 md:grid-cols-2 gap-6`, `col-span-*`,
+- ✅ **4.3 — tablet two-column for Tasks / Meals / Calendar / Settings:** every split now uses
+  Home's grid idiom (`grid-cols-1 md:grid-cols-2 gap-6`, `col-span-*`,
   `order-*` at `md:`) instead of one-off breakpoints — Tasks drops its private `lg:max-w-3xl` and
   splits stats/switch left | task board or leaderboard right (`md:col-span-2` stats); Calendar
   pairs month grid | selected-day agenda (`md:col-start-2 md:row-start-1`, week card
   `md:col-span-2`); the meals tabs replace `lg:grid-cols-[1fr_320px]`, `xl:grid-cols-[1fr_280px]`
   and `xl:order-*`/`hidden xl:*` hooks with the md tier; RecipeBox drops `xl:grid-cols-3`; the
   Settings launcher already tiers (`grid-cols-1 sm:grid-cols-2`). Contract:
-  `tests/unit/tablet-two-column.test.ts` (5).
+  `tests/unit/tablet-two-column.test.ts` (5). (The rail half of this item died with 4.1's
+  revert; the two-column tiers stand on their own and are unaffected.)
 - ✅ **4.4 — wall composition per screen** (12ft legibility: ≥16px body, 44px targets, no
   hover-only affordances): Home already swaps its grid to `WALL_GRID_CLASS` when the wall profile
   resolves (contract-pinned) and the data screens inherit the md two-column composition from 4.3;
