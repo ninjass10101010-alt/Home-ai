@@ -24,7 +24,7 @@ export default function DailyQuestCard({ quests, onAccept, onGoToTasks, rosterEm
     <Surface variant="warm" radius="2xl" padding="md">
       <div className="flex items-center gap-2 mb-3">
         <span className="text-lg">🎯</span>
-        <h4 className="text-sm font-bold text-text-primary">Today's Quests</h4>
+        <h4 className="text-sm font-bold text-text-primary">Today&apos;s Quests</h4>
       </div>
       <div className="space-y-2">
         {quests.map((quest) => (
@@ -36,7 +36,7 @@ export default function DailyQuestCard({ quests, onAccept, onGoToTasks, rosterEm
           </div>
         ))}
       </div>
-      <button type="button" onClick={onGoToTasks} className="mt-3 text-xs text-[var(--color-accent-selected)] font-semibold">
+      <button type="button" onClick={onGoToTasks} className="-ml-2 mt-3 inline-flex min-h-8 items-center rounded-lg px-2 text-xs font-semibold text-[var(--color-accent-selected)] hover:bg-[var(--color-accent-selected)]/10 tap-sm">
         View all tasks →
       </button>
     </Surface>
