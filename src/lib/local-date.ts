@@ -14,6 +14,52 @@ export function localTodayISO(now: Date = new Date()): string {
   return now.toLocaleString("en-CA", { timeZone: tz }).split(",")[0];
 }
 
+/**
+ * The LOCAL calendar date of a full ISO **instant** — e.g. a task's
+ * `completedAt`, which every writer produces with `toISOString()`.
+ *
+ * Slicing that string (`d.slice(0, 10)`) yields the UTC date, and comparing it
+ * against a local key like `today` or a week start mixes two axes. They disagree
+ * for four hours on either side of UTC midnight: in America/Detroit a chore
+ * finished at 20:30 reads as tomorrow, so it falls outside `day <= today` and
+ * vanishes from the week. Convert the instant to the family timezone first.
+ */
+export function localDateOf(instantIso: string): string {
+  return localTodayISO(new Date(instantIso));
+}
+
+/**
+ * The LOCAL calendar day of a STORED date-ish value, or `null` when it is not
+ * one.
+ *
+ * Two shapes reach the app: a bare local date (`"2026-09-28"` — what
+ * `localTodayISO()` and the `getISO.*` due presets write, stored in PocketBase
+ * `text` fields), and a full ISO instant (Google sync, older rows). A bare date
+ * must **not** go through `new Date()`: it parses as UTC midnight, which behind
+ * UTC is the *previous* local day. It is read as local noon instead.
+ *
+ * `null` for the legacy labels `"Today"` / `"Tomorrow"` / `"Later"` (still
+ * written by `pb-db.ts` and `db/index.ts`) and for empty strings. Those are not
+ * dates, and `new Date("Today")` is an Invalid Date whose `NaN < x` comparison
+ * is false — so they were never treated as overdue, and that is preserved on
+ * purpose: silently promoting unparseable labels to "overdue" would inflate
+ * every count the moment this is adopted.
+ */
+export function localDateOfStoredDate(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null;
+  const v = value.trim();
+  if (!v) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+    const d = new Date(`${v}T12:00:00`); // local noon — see the note above
+    return isNaN(d.getTime()) ? null : localTodayISO(d);
+  }
+  if (/^\d{4}-\d{2}-\d{2}[T ]/.test(v)) {
+    const d = new Date(v.replace(" ", "T"));
+    return isNaN(d.getTime()) ? null : localTodayISO(d);
+  }
+  return null;
+}
+
 export function localPreviousDayISO(iso: string): string {
   const d = new Date(`${iso}T12:00:00`);
   d.setDate(d.getDate() - 1);

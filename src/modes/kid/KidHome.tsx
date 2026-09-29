@@ -38,7 +38,7 @@ import WallPinPad from "@/components/wall/WallPinPad";
 import Surface from "@/components/ui/Surface";
 import Link from "next/link";
 import { db } from "@/db";
-import { localWeekStartISO } from "@/lib/local-date";
+import { localDateOf, localTodayISO, localWeekStartISO } from "@/lib/local-date";
 import {
   loadTasks,
   loadWeekData,
@@ -82,24 +82,19 @@ const POINTS_PER_LEVEL = 50;
 
 function KidLeaderboard({ members }: { members: { name: string; color: string; emoji: string; points: number; streak: number }[] }) {
   const { currentUser } = useAuth();
-  const prizes = useWeeklyPrizes();
   const myFirstName = currentUser?.name?.split(" ")[0] || "";
 
   const sorted = [...members].sort((a, b) => (b.points || 0) - (a.points || 0));
   const myRank = sorted.findIndex((m) => m.name?.split(" ")[0] === myFirstName) + 1;
   const medals = ["🥇", "🥈", "🥉"];
 
-  // Weekly prize race line — the SAME pure helper the hero card uses. This card
-  // used to carry its own copy of the wording, which is how "You're winning
-  // Chooses the dessert night!" reached a kid's screen while the hero read
-  // right. The points map is keyed by the names the leaderboard entries carry
-  // (full names from the roster), matching raceGap's keyspace.
-  let prizeLine: string | null = null;
-  if (prizes.length > 0) {
-    const pointsMap = Object.fromEntries(members.map((m) => [m.name, m.points || 0]));
-    const myRaceName = members.find((m) => m.name?.split(" ")[0] === myFirstName)?.name || currentUser?.name || "";
-    prizeLine = kidRaceLine(myRaceName, pointsMap, prizes);
-  }
+  // No prize-race line here. This card used to carry its own copy of the wording
+  // (and `3cf9fb7` then re-pointed it at the shared `kidRaceLine` helper), so
+  // with prizes configured a kid read the same sentence twice on one screen —
+  // once under the big week total, once here, under a card that already states
+  // their rank. The hero week card owns the line; this card owns the standings.
+  //
+  // `useWeeklyPrizes` is therefore no longer called by this component.
 
   return (
     <Surface variant="warm" radius="2xl" padding="none" aria-live="polite" aria-label="Family leaderboard">
@@ -172,11 +167,6 @@ function KidLeaderboard({ members }: { members: { name: string; color: string; e
             </p>
           ) : (
             <p className="text-xs text-text-muted">Complete quests to climb the ranks!</p>
-          )}
-          {prizeLine && (
-            <p data-testid="kid-prize-race-line" className="mt-1 text-xs text-text-secondary">
-              {prizeLine}
-            </p>
           )}
         </div>
       </div>
@@ -389,7 +379,12 @@ export default function KidHome() {
       ));
       setBoard(splitKidBoard(tasks, myFull));
       const doneToday = getThisWeeksCompletedTasks(tasks).filter(
-        (t: any) => t.completedAt?.slice(0, 10) === new Date().toISOString().slice(0, 10) && isMine(t.completedBy || t.assignee)
+        // "Today" is a LOCAL day. `completedAt` is a UTC instant, and matching
+        // its `slice(0,10)` against `toISOString().slice(0,10)` compares UTC to
+        // UTC — self-consistent, but from 20:00 Detroit onward the UTC date has
+        // rolled over, so a chore the kid finished at 3pm stopped appearing on
+        // the card that evening and the points total fell with it.
+        (t: any) => t.completedAt && localDateOf(t.completedAt) === localTodayISO() && isMine(t.completedBy || t.assignee)
       );
       setCompletedToday(doneToday);
       setPointsToday(doneToday.reduce((sum: number, t: any) => sum + (t.points || 0), 0));

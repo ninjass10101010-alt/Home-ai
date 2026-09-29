@@ -1,5 +1,5 @@
 import { db } from "@/db";
-import { localTodayISO, localWeekStartISO } from "@/lib/local-date";
+import { localDateOf, localTodayISO, localWeekStartISO } from "@/lib/local-date";
 import { weekStartForDate } from "@/lib/meals-week-utils";
 import { isRecord } from "@/lib/task-operation-contract";
 import type { Task, WeekData, Transaction, WeekArchive, FamilyGoal, HallOfFameEntry, WeeklyPrize, CrewMember } from "@/types/tasks";
@@ -345,8 +345,12 @@ export function calculateRealStreak(
   let cursor = today;
 
   while (cursor >= monday) {
+    // `cursor` is a LOCAL day, so the completion's day must be derived in the
+    // same zone — `d.split("T")[0]` is its UTC date, which lands on the next
+    // (Detroit) or previous (Tokyo) calendar day near midnight and would zero
+    // the streak for an evening completion even once the week filter admits it.
     const hasCompletion = allCompletionsThisWeek.some(
-      (d) => d.split("T")[0] === cursor
+      (d) => localDateOf(d) === cursor
     );
     if (!hasCompletion) break;
     streak++;
@@ -428,9 +432,17 @@ export function getThisWeeksCompletedDates(tasks: Task[], memberName?: string, t
         (!memberName || t.completedBy === memberName)
     )
     .map((t) => t.completedAt!)
-    // completedAt values are full ISO timestamps — compare date parts only,
-    // otherwise today's completions never satisfy `d <= now` (date-only).
-    .filter((d) => d.slice(0, 10) >= monday && d.slice(0, 10) <= now);
+    // Compare LOCAL calendar days, not UTC ones. `completedAt` is a UTC
+    // instant, so `d.slice(0, 10)` is its UTC date and disagrees with the
+    // local `monday`/`now` for four hours either side of UTC midnight: in
+    // Detroit an evening chore (20:00–24:00 local) serialized as tomorrow and
+    // was dropped from the week, while a Sunday-evening chore serialized as
+    // Monday and was pulled INTO the new week. `localDateOf` converts the
+    // instant to the family timezone, so both comparisons are local-to-local.
+    .filter((d) => {
+      const day = localDateOf(d);
+      return day >= monday && day <= now;
+    });
 }
 
 export function getThisWeeksCompletedTasks(tasks: Task[]): Task[] {
@@ -439,7 +451,12 @@ export function getThisWeeksCompletedTasks(tasks: Task[]): Task[] {
   return tasks.filter(
     (t) => t.completed && (
       t.completedInWeek === monday ||
-      (!t.completedInWeek && t.completedAt && t.completedAt >= monday && t.completedAt <= now)
+      // Unstamped rows: compare LOCAL days. `completedAt` is a UTC instant, and
+      // lexically "2026-09-28T14:00:00.000Z" > "2026-09-28", so the old
+      // `completedAt <= now` was false for EVERY completion made on the current
+      // day — an unstamped task never counted as this week's, on either feed
+      // (the Tasks board filter and the kid's "Done today" card).
+      (!t.completedInWeek && t.completedAt && localDateOf(t.completedAt) >= monday && localDateOf(t.completedAt) <= now)
     )
   );
 }
