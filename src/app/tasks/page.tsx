@@ -5,6 +5,7 @@ import { useState, useEffect, useMemo, useCallback, useRef, type CSSProperties }
 import { useRouter } from "next/navigation";
 import { mapTaskIdeas, mapRewardIdeas } from "@/lib/ai-suggestions";
 import { localTodayISO, localWeekStartISO } from "@/lib/local-date";
+import { getDueOptions, getISO } from "@/lib/due-date-utils";
 import PageShell from "@/components/ui/PageShell";
 import PageHeader from "@/components/patterns/PageHeader";
 import SectionCard from "@/components/patterns/SectionCard";
@@ -81,34 +82,6 @@ import { earnedBadgeEmojis, resolveAllTimeLevel } from "@/components/leaderboard
 import { useAllTimeTotals } from "@/hooks/useAllTimeTotals";
 import { familyAllTimePoints } from "@/lib/all-time-totals";
 
-function isoOffset(days: number): string {
-  const d = new Date(Date.now() + days * 86400000);
-  return d.toISOString().split("T")[0];
-}
-
-function nextWeekdayISO(targetDay: number): string {
-  const today = new Date();
-  const currentDay = today.getDay();
-  let diff = targetDay - currentDay;
-  if (diff < 0) diff += 7;
-  return isoOffset(diff);
-}
-
-const getISO = {
-  // Local calendar day for "Today" due options — the UTC date was tomorrow
-  // every evening 8pm–midnight Detroit.
-  get today() { return localTodayISO(); },
-  get tomorrow() { return isoOffset(1); },
-  get thisWeek() { return isoOffset(6); },
-  get fri() { return nextWeekdayISO(5); },
-  get sat() { return nextWeekdayISO(6); },
-  get sun() { return nextWeekdayISO(0); },
-  get mon() { return nextWeekdayISO(1); },
-  get tue() { return nextWeekdayISO(2); },
-  get wed() { return nextWeekdayISO(3); },
-  get thu() { return nextWeekdayISO(4); },
-};
-
 function formatDueLabel(dateStr: string): string {
   if (!dateStr) return "";
   if (dateStr === "Today" || dateStr === "Tomorrow" || dateStr === "This week") return dateStr;
@@ -125,24 +98,6 @@ function formatDueLabel(dateStr: string): string {
   }
 
   return dueDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
-
-function getDueOptions(): { label: string; value: string }[] {
-  const today = new Date();
-  const opts: { label: string; value: string }[] = [];
-
-  for (let i = 0; i < 31; i++) {
-    const d = new Date(today.getTime() + i * 86400000);
-    const iso = d.toISOString().split("T")[0];
-    let label: string;
-    if (i === 0) label = "Today";
-    else if (i === 1) label = "Tomorrow";
-    else if (i <= 6) label = d.toLocaleDateString("en-US", { weekday: "short" });
-    else label = d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
-    opts.push({ label, value: iso });
-  }
-
-  return opts;
 }
 
 function migrateDueToISO(tasks: Task[]): Task[] {

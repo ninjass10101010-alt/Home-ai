@@ -5,6 +5,23 @@
  */
 
 import { getAuthedPB } from './pb-auth';
+import { localDateOfStoredDate, localTodayISO } from './local-date';
+
+/**
+ * Is this task past its due DATE?
+ *
+ * `due` is a local calendar day, so the question is "is that day before today",
+ * not "is that instant in the past". The old `new Date(t.due) < new Date()`
+ * parsed the bare date as UTC midnight — the previous local evening in
+ * America/Detroit — so from 20:00 local every task due *tomorrow* read as
+ * overdue, and a task due *today* read as overdue for the entire day. Legacy
+ * labels ("Today", "Later") return null and are not counted, as before.
+ */
+function isOverdue(task: { due?: string | null }): boolean {
+  const due = localDateOfStoredDate(task.due);
+  if (!due) return false;
+  return due < localTodayISO();
+}
 
 export interface ScheduleAnalytics {
   familyId: string;
@@ -334,12 +351,9 @@ export async function getTaskCompletionStats(
     });
 
     const completedTasks = tasks.filter((t: any) => t.status === 'done').length;
-    const overdueTasks = tasks.filter((t: any) => {
-      if (t.status === 'done') return false;
-      if (!t.due) return false;
-      const dueDate = new Date(t.due);
-      return dueDate < new Date();
-    }).length;
+    const overdueTasks = tasks.filter(
+      (t: any) => t.status !== 'done' && isOverdue(t)
+    ).length;
 
     // Calculate member stats
     const memberMap: Record<string, any[]> = {};
@@ -351,12 +365,9 @@ export async function getTaskCompletionStats(
 
     const memberStats: MemberTaskStats[] = Object.entries(memberMap).map(([memberId, memberTasks]) => {
       const completed = memberTasks.filter((t: any) => t.status === 'done').length;
-      const overdue = memberTasks.filter((t: any) => {
-        if (t.status === 'done') return false;
-        if (!t.due) return false;
-        const dueDate = new Date(t.due);
-        return dueDate < new Date();
-      }).length;
+      const overdue = memberTasks.filter(
+        (t: any) => t.status !== 'done' && isOverdue(t)
+      ).length;
 
       return {
         memberId,
