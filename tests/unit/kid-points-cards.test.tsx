@@ -193,16 +193,34 @@ describe("KidHome hero — two named point systems", () => {
     expect(weekCard!.textContent).toContain("more points for: +$2 allowance");
   });
 
-  it("the leaderboard card keeps its race line from the SAME helper (no drift)", async () => {
-    seedWeek({ Aurora: 10, Caspian: 25 });
-    weeklyPrizesMock.prizes = [{ id: "p1", rank: 1, emoji: "🥇", text: "Picks Friday's family movie" }];
+  it("the prize race line appears ONCE, in the hero week card", async () => {
+    // `3cf9fb7` de-duplicated the *wording templates* (both cards now call
+    // `kidRaceLine`) but left both *renders* in place, so a kid with prizes
+    // configured read the same sentence twice on one screen — once under the big
+    // week total, once under the leaderboard, which already states their rank
+    // ("You're #2"). The hero card owns it.
+    seedWeek({ Aurora: 10, Caspian: 30, Emily: 25, Jasmine: 20 });
+    weeklyPrizesMock.prizes = [
+      { id: "p1", rank: 1, emoji: "🥇", text: "Picks Friday's family movie" },
+      { id: "p2", rank: 2, emoji: "🥈", text: "Chooses the dessert night" },
+      { id: "p3", rank: 3, emoji: "🥉", text: "+$2 allowance" },
+    ];
     const el = await renderAsync(<KidHome />);
     await settle(300);
 
-    const boardLine = el.querySelector('[data-testid="kid-prize-race-line"]');
-    expect(boardLine).toBeTruthy();
-    const weekCard = el.querySelector('[data-testid="kid-week-card"]');
-    expect(weekCard!.textContent).toContain(boardLine!.textContent);
+    const line = "more points for:";
+    const rendered = Array.from(el.querySelectorAll("p")).filter((p) =>
+      p.textContent?.includes(line)
+    );
+    expect(rendered, "the race line must not render twice").toHaveLength(1);
+    expect(
+      rendered[0].closest('[data-testid="kid-week-card"]'),
+      "the hero week card owns the line"
+    ).toBeTruthy();
+    expect(
+      el.querySelector('[data-testid="kid-prize-race-line"]'),
+      "the leaderboard card no longer carries a second copy"
+    ).toBeNull();
   });
 
   it("an unknown all-time total says unavailable and claims no level", async () => {
