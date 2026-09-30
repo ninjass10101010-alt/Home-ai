@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withAdmin } from "@/lib/pb-auth";
 import { verifySession, SESSION_COOKIE } from "@/lib/session";
 import { ensureCurrentTaskWeek } from "@/lib/task-week-rollover";
+import { ensureCurrentTaskDay } from "@/lib/task-day-sweep";
 import { reconcileTaskProjectionLocked } from "@/lib/task-projection-reconciler";
 import { repairCategories } from "@/lib/task-repair-categories";
 
@@ -51,11 +52,30 @@ export async function GET() {
     }, { status: 503 });
   }
 
+  let daysweep: Awaited<ReturnType<typeof ensureCurrentTaskDay>>;
+  try {
+    daysweep = await ensureCurrentTaskDay();
+  } catch {
+    console.warn("[tasks/sync] day sweep unavailable");
+    return NextResponse.json({
+      ok: false,
+      error: "daysweep_unavailable",
+      reconciled: false,
+      repaired: [],
+      failed: ["tasks:daysweep:unavailable"],
+      snapshot: null,
+    }, { status: 503 });
+  }
+
   let reconciliation: Awaited<ReturnType<typeof reconcileTaskProjectionLocked>>;
   try {
     reconciliation = await withAdmin((pb) => reconcileTaskProjectionLocked(pb, {
       weekStart,
-      expectedRevision: rollover.revision?.revision,
+      // The day sweep mutates the snapshot between rollover and reconcile,
+      // so the CAS runs against the revision the sweep last saw — otherwise
+      // the first GET of every local day fails `rollover:changed` and never
+      // projects the swept rows.
+      expectedRevision: daysweep.revision ?? rollover.revision?.revision,
       expectedWeekData: rollover.currentWeekData,
     }));
   } catch {
@@ -94,10 +114,11 @@ export async function GET() {
   const repairedCategories = repairCategories(reconciliation.repaired);
   const failedCategories = [
     ...repairCategories(rollover.reconciled ? [] : ["rollover:pending"]),
+    ...repairCategories(daysweep.reconciled ? [] : daysweep.failed),
     ...repairCategories(reconciliation.failed),
   ];
   const warningCategories = repairCategories(reconciliation.warnings);
-  const reconciled = rollover.reconciled && reconciliation.reconciled && failedCategories.length === 0;
+  const reconciled = rollover.reconciled && daysweep.reconciled && reconciliation.reconciled && failedCategories.length === 0;
   return NextResponse.json({
     ok: reconciled,
     ...(reconciled ? {} : { error: "projection_reconcile_pending" }),

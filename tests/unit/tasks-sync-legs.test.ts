@@ -32,11 +32,15 @@ function makePb() {
 const mocks = vi.hoisted(() => ({
   withAdmin: vi.fn(),
   ensureCurrentTaskWeek: vi.fn(),
+  ensureCurrentTaskDay: vi.fn(),
   reconcileTaskProjectionLocked: vi.fn(),
 }));
 vi.mock("@/lib/pb-auth", () => ({ withAdmin: (fn: any) => mocks.withAdmin(fn) }));
 vi.mock("@/lib/task-week-rollover", () => ({
   ensureCurrentTaskWeek: mocks.ensureCurrentTaskWeek,
+}));
+vi.mock("@/lib/task-day-sweep", () => ({
+  ensureCurrentTaskDay: mocks.ensureCurrentTaskDay,
 }));
 vi.mock("@/lib/task-projection-reconciler", () => ({
   reconcileTaskProjectionLocked: mocks.reconcileTaskProjectionLocked,
@@ -119,6 +123,14 @@ beforeEach(() => {
   mocks.withAdmin.mockReset();
   mocks.withAdmin.mockImplementation((fn: any) => fn(makePb()));
   mocks.ensureCurrentTaskWeek.mockReset();
+  mocks.ensureCurrentTaskDay.mockReset();
+  mocks.ensureCurrentTaskDay.mockResolvedValue({
+    day: "2026-09-28",
+    swept: false,
+    closedTaskIds: [],
+    reconciled: true,
+    failed: [],
+  });
   mocks.reconcileTaskProjectionLocked.mockReset();
   mocks.ensureCurrentTaskWeek.mockResolvedValue({
     reconciled: true,
@@ -442,5 +454,73 @@ describe("tasks/sync repair status contract", () => {
       reconciled: true,
       warnings: ["week:unrelated_row"],
     });
+  });
+
+  it("503 daysweep_unavailable when the daily sweep leg throws", async () => {
+    mocks.ensureCurrentTaskDay.mockRejectedValue(new Error("pb down"));
+    const res = await GET();
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({
+      ok: false,
+      error: "daysweep_unavailable",
+      reconciled: false,
+      failed: ["tasks:daysweep:unavailable"],
+      snapshot: null,
+    });
+    expect(mocks.reconcileTaskProjectionLocked).not.toHaveBeenCalled();
+  });
+
+  it("200 repair-level: an unverified day sweep is surfaced, not a 503", async () => {
+    db.rows = [{ id: "row1", data: { tasks: [{ id: "t1" }] } }];
+    mocks.ensureCurrentTaskDay.mockResolvedValue({
+      day: "2026-09-28",
+      swept: true,
+      closedTaskIds: [11],
+      reconciled: false,
+      failed: ["tasks:daysweep:verify"],
+    });
+    const res = await GET();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({
+      ok: false,
+      error: "projection_reconcile_pending",
+      reconciled: false,
+      snapshot: { tasks: [{ id: "t1" }] },
+    });
+    expect(body.failed).toContain("tasks:daysweep:verify");
+  });
+
+  it("hands the reconciler the post-sweep revision, so the sweep's own write is not read as a concurrent one", async () => {
+    db.rows = [{ id: "row1", data: { tasks: [{ id: "t1" }] } }];
+    mocks.ensureCurrentTaskDay.mockResolvedValue({
+      day: "2026-09-28",
+      swept: true,
+      closedTaskIds: [11],
+      reconciled: true,
+      failed: [],
+      revision: "42",
+    });
+    await GET();
+    expect(mocks.reconcileTaskProjectionLocked).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ expectedRevision: "42" }),
+    );
+  });
+
+  it("falls back to the rollover revision when the sweep reports none", async () => {
+    db.rows = [{ id: "row1", data: { tasks: [{ id: "t1" }] } }];
+    mocks.ensureCurrentTaskDay.mockResolvedValue({
+      day: "2026-09-28",
+      swept: false,
+      closedTaskIds: [],
+      reconciled: false,
+      failed: ["tasks:daysweep:snapshot"],
+    });
+    await GET();
+    expect(mocks.reconcileTaskProjectionLocked).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ expectedRevision: "1" }),
+    );
   });
 });
