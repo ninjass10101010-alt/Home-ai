@@ -264,6 +264,7 @@ describe("storage and sanitization", () => {
           stealable: true,
           crewSize: 3,
           speedBonus: 2,
+          crewCloseMode: "deadline",
           completed: true,
           pendingApproval: { byName: "X", at: "now", points: 999 },
         },
@@ -290,6 +291,7 @@ describe("storage and sanitization", () => {
     expect(task.crewSize).toBe(3);
     expect(task.universal).toBe(true);
     expect(task.speedBonus).toBe(2);
+    expect(task.crewCloseMode).toBe("deadline");
     expect(task).not.toHaveProperty("completed");
     expect(task).not.toHaveProperty("pendingApproval");
     expect(config.payload.items).toEqual([

@@ -925,7 +925,7 @@ describe("POST /api/tasks/manage — crewCloseMode", () => {
     const response = await postManage(harness, {
       action: "add",
       operationId: "op-crew-close-solo",
-      task: { title: "Dishes", assignee: "Alex Child", crewCloseMode: "parent" },
+      task: { title: "Dishes", assignee: "Alex Child", crewCloseMode: "parent", points: 15 },
     });
 
     expect(response.status).toBe(400);
@@ -939,7 +939,7 @@ describe("POST /api/tasks/manage — crewCloseMode", () => {
     const response = await postManage(harness, {
       action: "add",
       operationId: "op-crew-close-chaos",
-      task: { title: "Wash the car", crewSize: 3, crewCloseMode: "chaos" },
+      task: { title: "Wash the car", crewSize: 3, crewCloseMode: "chaos", points: 15 },
     });
 
     expect(response.status).toBe(400);

@@ -842,7 +842,7 @@ function taskProjectionMatches(row: Record<string, any>, expected: Record<string
       ? projectionValue(row[key])
       : row[key];
     if (["crew", "pendingApproval"].includes(key)) return sameProjectionValue(actualValue, expectedValue);
-    if (["crewSize", "speedBonus", "completedBy", "completedAt", "completedInWeek", "sentBackAt", "recurring", "due"].includes(key)) {
+    if (["crewSize", "speedBonus", "completedBy", "completedAt", "completedInWeek", "sentBackAt", "recurring", "due", "crewCloseMode"].includes(key)) {
       const leftEmpty = actualValue === null || actualValue === undefined || actualValue === "";
       const rightEmpty = expectedValue === null || expectedValue === undefined || expectedValue === "";
       if (leftEmpty && rightEmpty) return true;

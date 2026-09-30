@@ -272,6 +272,34 @@ describe("task projection reconciler", () => {
     expect(harness.taskRows[0]).toMatchObject({ completed: false, completedBy: null });
   });
 
+  it("treats an empty-string PB crewCloseMode as matching a null projection", async () => {
+    const harness = makeHarness({
+      snapshot: {
+        revision: "1",
+        taskWeekStart: WEEK,
+        tasks: [task(47)],
+        deletedTaskIds: [],
+        weekData: { weekStart: WEEK, points: {}, streak: {}, lastActive: {}, history: [] },
+      },
+      taskRows: [{
+        ...task(47),
+        id: "pb-47",
+        taskId: 47,
+        assigneeEmoji: "👤",
+        status: "pending",
+        crewCloseMode: "",
+      }],
+    });
+    mocks.withAdmin.mockImplementation(async (fn: any) => fn(harness.pb));
+
+    const result = await reconcileTaskProjection({ pb: harness.pb as any, weekStart: WEEK });
+
+    expect(result.ok).toBe(true);
+    expect(result.repaired).not.toContain("task:47:projection");
+    expect(harness.state.taskWrites).toBe(0);
+    expect(harness.taskRows[0].crewCloseMode).toBe("");
+  });
+
   it("projects photo-containing snapshot state while sanitizing PB and preserving crew data", async () => {
     const snapshotCrew = {
       members: [

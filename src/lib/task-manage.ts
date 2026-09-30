@@ -65,6 +65,7 @@ export type UpdateTaskCommand = {
       | "stealable"
       | "speedBonus"
       | "crewSize"
+      | "crewCloseMode"
     >
   >;
 };
@@ -710,7 +711,7 @@ function projectionMatches(row: Record<string, any>, expected: Record<string, un
       ? projectionValue(row[key])
       : row[key];
     if (["crew", "pendingApproval"].includes(key)) return sameValue(actualValue, expectedValue);
-    if (["crewSize", "speedBonus", "completedBy", "completedAt", "completedInWeek", "sentBackAt", "recurring", "due"].includes(key)) {
+    if (["crewSize", "speedBonus", "completedBy", "completedAt", "completedInWeek", "sentBackAt", "recurring", "due", "crewCloseMode"].includes(key)) {
       return optionalScalarEqual(key, actualValue, expectedValue);
     }
     return actualValue === expectedValue;

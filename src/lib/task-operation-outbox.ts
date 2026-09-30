@@ -192,6 +192,7 @@ const MANAGE_ADD_TASK_KEYS = [
   "stealable",
   "crewSize",
   "speedBonus",
+  "crewCloseMode",
 ] as const;
 
 const MANAGE_UPDATE_PATCH_KEYS = [
@@ -206,6 +207,7 @@ const MANAGE_UPDATE_PATCH_KEYS = [
   "stealable",
   "speedBonus",
   "crewSize",
+  "crewCloseMode",
 ] as const;
 
 const CONFIG_PAYLOAD_KEYS: Record<string, readonly string[]> = {
