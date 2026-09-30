@@ -5,6 +5,7 @@ export const INTERNAL_TASK_COMMAND_KINDS = [
   "crew-join",
   "crew-checkin",
   "crew-remove",
+  "crew-close",
   "add",
   "update",
   "delete",

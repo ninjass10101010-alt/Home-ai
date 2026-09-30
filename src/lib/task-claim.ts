@@ -38,6 +38,7 @@ import {
   type InternalTaskCommandContext,
   type InternalTaskCommandResult,
 } from "@/lib/task-commands";
+import { buildCrewClosePending, crewCloseAwardList } from "@/lib/task-crew-close";
 import type { CrewMember, LedgerOperationSource, Task, Transaction, WeekData } from "@/types/tasks";
 
 export type ClaimAction =
@@ -46,7 +47,8 @@ export type ClaimAction =
   | "undo"
   | "crew-join"
   | "crew-checkin"
-  | "crew-remove";
+  | "crew-remove"
+  | "crew-close";
 
 export interface ClaimCommand {
   operationId: string;
@@ -112,6 +114,8 @@ export type ClaimFailureReason =
   | "unknown_crew_member"
   | "member_checked_in"
   | "removed_crew_member"
+  | "crew_close_not_allowed"
+  | "no_checkins"
   | "target_required"
   | "invalid_crew_member"
   | "invalid_task_state"
@@ -148,6 +152,7 @@ const CLAIM_ACTIONS = new Set<ClaimAction>([
   "crew-join",
   "crew-checkin",
   "crew-remove",
+  "crew-close",
 ]);
 
 const COMMON_KEYS = new Set(["action", "operationId", "taskId", "memberName", "pin"]);
@@ -1324,7 +1329,7 @@ async function executeClaimCommandUnlocked(
     });
   }
 
-  if (action === "crew-remove" && actorRole !== "parent") {
+  if ((action === "crew-remove" || action === "crew-close") && actorRole !== "parent") {
     return failure(command.operationId, "adult_only", action);
   }
   if (!isCrewTask(task as unknown as Task)) return failure(command.operationId, "not_crew_task", action);
@@ -1419,6 +1424,30 @@ async function executeClaimCommandUnlocked(
               },
             }
           : {}),
+      }),
+    ).then((outcome) => finishNonLedgerWrite(pb, command, baseActor, outcome)));
+  }
+
+  if (action === "crew-close") {
+    const decision = crewCloseAwardList(task as unknown as Task);
+    if (!decision.ok) {
+      return failure(
+        command.operationId,
+        decision.reason === "strict_mode" ? "crew_close_not_allowed" : decision.reason,
+        action,
+      );
+    }
+    return withAdmin((pb) => writeCanonicalTask(
+      pb,
+      lookup,
+      command,
+      baseActor,
+      fingerprint,
+      lookup.source === "pb" ? task : null,
+      (current) => ({
+        ...current,
+        ...completedFields(now, weekStart, { ...baseActor, name: "Crew" }),
+        pendingApproval: buildCrewClosePending(current as unknown as Task, decision.awardList, now),
       }),
     ).then((outcome) => finishNonLedgerWrite(pb, command, baseActor, outcome)));
   }
@@ -1519,6 +1548,7 @@ export function ensureTaskClaimHandlersRegistered(): void {
     registerInternalTaskCommandHandler("crew-join", handleCommand),
     registerInternalTaskCommandHandler("crew-checkin", handleCommand),
     registerInternalTaskCommandHandler("crew-remove", handleCommand),
+    registerInternalTaskCommandHandler("crew-close", handleCommand),
   );
   handlersRegistered = true;
 }

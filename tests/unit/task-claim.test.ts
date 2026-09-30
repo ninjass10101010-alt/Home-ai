@@ -694,6 +694,122 @@ describe("POST /api/tasks/claim — crew actions", () => {
     expect(res3.status).toBe(200);
     expect(parent2.updateCalls.tasks[0].crew.members.map((m: any) => m.name)).toEqual(["Bailey Garcia"]);
   });
+
+  it("crew-close requires a parent (kid PIN refused adult_only)", async () => {
+    const task = crewTaskRow({
+      crewCloseMode: "parent",
+      crew: { members: [{ name: "Caspian Garcia", emoji: "🧒", joinedAt: "x", checkedInAt: "t" }] },
+    });
+    const { pb, updateCalls, snapshotData } = makePb({ taskPoints: 15, taskRow: task });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ action: "crew-close", taskId: 42, memberName: "Caspian", pin: "1010" }));
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ success: false, reason: "adult_only" });
+    expect(updateCalls.tasks).toHaveLength(0);
+    expect(snapshotData().tasks[0].pendingApproval).toBeUndefined();
+    expect(snapshotData().tasks[0].completed).toBe(false);
+  });
+
+  it("crew-close refuses a strict-mode crew", async () => {
+    // crewCloseMode absent === strict (back-compat default).
+    const task = crewTaskRow({
+      crew: { members: [{ name: "Caspian Garcia", emoji: "🧒", joinedAt: "x", checkedInAt: "t" }] },
+    });
+    const { pb, updateCalls } = makePb({ taskPoints: 15, taskRow: task });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ action: "crew-close", taskId: 42, memberName: "Alex", pin: "1234" }));
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ success: false, reason: "crew_close_not_allowed" });
+    expect(updateCalls.tasks).toHaveLength(0);
+  });
+
+  it("crew-close refuses a parent-mode crew with zero check-ins", async () => {
+    const task = crewTaskRow({
+      crewCloseMode: "parent",
+      crew: {
+        members: [
+          { name: "Caspian Garcia", emoji: "🧒", joinedAt: "x" },
+          { name: "Bailey Garcia", emoji: "👧", joinedAt: "y" },
+        ],
+      },
+    });
+    const { pb, updateCalls } = makePb({ taskPoints: 15, taskRow: task });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ action: "crew-close", taskId: 42, memberName: "Alex", pin: "1234" }));
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ success: false, reason: "no_checkins" });
+    expect(updateCalls.tasks).toHaveLength(0);
+  });
+
+  it("crew-close stages the crew pendingApproval with exactly the checked-in members", async () => {
+    // Size 4 with three joined: Caspian + Emily checked in, Bailey joined but
+    // not in, Lily never joined — the award list must be exactly the two.
+    const task = crewTaskRow({
+      crewSize: 4,
+      crewCloseMode: "parent",
+      crew: {
+        members: [
+          { name: "Caspian Garcia", emoji: "🧒", joinedAt: "x", checkedInAt: "c1" },
+          { name: "Bailey Garcia", emoji: "👧", joinedAt: "y" },
+          { name: "Emily Garcia", emoji: "👧", joinedAt: "z", checkedInAt: "c2" },
+        ],
+      },
+    });
+    const { pb, updateCalls, weekUpdates, snapshotData } = makePb({ taskPoints: 15, taskRow: task });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+
+    const res = await POST(jsonReq({ action: "crew-close", taskId: 42, memberName: "Alex", pin: "1234" }));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ success: true, pending: true, claimedBy: "Crew" });
+    const patch = updateCalls.tasks.find((p: any) => p.pendingApproval) ?? updateCalls.tasks[0];
+    expect(patch.completed).toBe(true);
+    expect(patch.pendingApproval).toMatchObject({ byName: "Crew", points: 15, crew: ["Caspian Garcia", "Emily Garcia"] });
+    expect(typeof patch.pendingApproval.at).toBe("string");
+    expect(patch.sentBackAt).toBeNull();
+    const snap = snapshotData().tasks[0];
+    expect(snap.completed).toBe(true);
+    expect(snap.pendingApproval).toMatchObject({ byName: "Crew", points: 15, crew: ["Caspian Garcia", "Emily Garcia"] });
+    // Option B: staging a close never moves points.
+    expect(weekUpdates()).toBeNull();
+  });
+
+  it("crew-close is idempotent per operationId", async () => {
+    const task = crewTaskRow({
+      crewCloseMode: "parent",
+      crew: { members: [{ name: "Caspian Garcia", emoji: "🧒", joinedAt: "x", checkedInAt: "c1" }] },
+    });
+    const { pb, snapshotData } = makePb({ taskPoints: 15, taskRow: task });
+    mocks.withAdmin.mockImplementation((fn: (p: unknown) => Promise<unknown>) => fn(pb));
+    const body = {
+      action: "crew-close",
+      operationId: "op-crew-close-replay",
+      taskId: 42,
+      memberName: "Alex",
+      pin: "1234",
+    };
+
+    const first = await POST(jsonReq(body));
+    expect(first.status).toBe(200);
+    const staged = structuredClone(snapshotData().tasks[0].pendingApproval);
+    expect(staged).toMatchObject({ byName: "Crew", points: 15, crew: ["Caspian Garcia"] });
+
+    const second = await POST(jsonReq(body));
+    const secondBody = await second.json();
+
+    expect(second.status).toBe(200);
+    expect(secondBody.success).toBe(true);
+    expect(secondBody.duplicate).toBe(true);
+    expect(secondBody.reason).toBeUndefined();
+    expect(snapshotData().tasks[0].pendingApproval).toEqual(staged);
+    expect(snapshotData().tasks[0].completed).toBe(true);
+  });
 });
 
 describe("POST /api/tasks/claim — server-authoritative assigned completions", () => {

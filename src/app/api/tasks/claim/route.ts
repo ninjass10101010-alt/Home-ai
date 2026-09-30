@@ -72,6 +72,8 @@ function statusForReason(reason: ClaimFailureReason | string): number {
     reason === "already_undone" ||
     reason === "nothing_to_undo" ||
     reason === "crew_full" ||
+    reason === "crew_close_not_allowed" ||
+    reason === "no_checkins" ||
     reason === "member_checked_in" ||
     reason === "operation_conflict" ||
     reason === "insufficient_balance"
