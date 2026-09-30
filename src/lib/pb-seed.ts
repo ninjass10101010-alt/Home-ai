@@ -189,6 +189,7 @@ export const COLLECTIONS = [
       // crew = { members: [{ name, emoji, joinedAt, checkedInAt? }], removed?: string[] }
       { name: "crew", type: "json" },
       { name: "speedBonus", type: "number" },
+      { name: "crewCloseMode", type: "text" },
     ],
   },
   {

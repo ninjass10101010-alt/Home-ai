@@ -2,7 +2,7 @@ import { db } from "@/db";
 import { localDateOf, localTodayISO, localWeekStartISO } from "@/lib/local-date";
 import { weekStartForDate } from "@/lib/meals-week-utils";
 import { isRecord } from "@/lib/task-operation-contract";
-import type { Task, WeekData, Transaction, WeekArchive, FamilyGoal, HallOfFameEntry, WeeklyPrize, CrewMember } from "@/types/tasks";
+import type { Task, WeekData, Transaction, WeekArchive, FamilyGoal, HallOfFameEntry, WeeklyPrize, CrewMember, CrewCloseMode } from "@/types/tasks";
 
 export const TASKS_STORAGE_KEY = "consuela-tasks";
 export const WEEK_DATA_KEY = "consuela-week-data";
@@ -1454,4 +1454,15 @@ export function getWeekGraph(memberName: string, weekData: WeekData): { day: str
       .filter(tx => tx.member === memberName && tx.type === "earn" && new Date(tx.timestamp).toLocaleDateString("en-US", { weekday: "short" }) === day)
       .reduce((sum, tx) => sum + Math.abs(tx.amount), 0),
   }));
+}
+
+/** Crew close modes (spec 2026-09-29). Null = absent-or-invalid input;
+ *  callers decide the default. */
+export function normalizeCrewCloseMode(value: unknown): CrewCloseMode | null {
+  return value === "strict" || value === "parent" || value === "deadline" ? value : null;
+}
+
+/** Stored-value view: absent/garbage degrades to today's behavior (strict). */
+export function crewCloseModeOf(task: { crewCloseMode?: unknown }): CrewCloseMode {
+  return normalizeCrewCloseMode(task.crewCloseMode) ?? "strict";
 }

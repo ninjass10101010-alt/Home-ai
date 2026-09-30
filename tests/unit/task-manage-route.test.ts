@@ -888,3 +888,63 @@ describe("POST /api/tasks/manage", () => {
     expect(harness.snapshot()).toEqual(before);
   });
 });
+
+describe("POST /api/tasks/manage — crewCloseMode", () => {
+  it("accepts a crew task with a valid crewCloseMode and stores it", async () => {
+    const harness = makeHarness({ taskRows: [] });
+    const response = await postManage(harness, {
+      action: "add",
+      operationId: "op-crew-close-mode",
+      task: { title: "Wash the car", crewSize: 3, crewCloseMode: "deadline", points: 15 },
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.task).toMatchObject({ crewCloseMode: "deadline", crewSize: 3 });
+    const stored = harness.snapshot().tasks.find((task: Row) => task.title === "Wash the car");
+    expect(stored?.crewCloseMode).toBe("deadline");
+  });
+
+  it("defaults a crew task's crewCloseMode to strict", async () => {
+    const harness = makeHarness({ taskRows: [] });
+    const response = await postManage(harness, {
+      action: "add",
+      operationId: "op-crew-close-default",
+      task: { title: "Wash the car", crewSize: 3, points: 15 },
+    });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.task.crewCloseMode).toBe("strict");
+    const stored = harness.snapshot().tasks.find((task: Row) => task.title === "Wash the car");
+    expect(stored?.crewCloseMode).toBe("strict");
+  });
+
+  it("refuses crewCloseMode on a non-crew task", async () => {
+    const harness = makeHarness({ taskRows: [] });
+    const response = await postManage(harness, {
+      action: "add",
+      operationId: "op-crew-close-solo",
+      task: { title: "Dishes", assignee: "Alex Child", crewCloseMode: "parent" },
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: "invalid_task_command" });
+    expect(harness.snapshotWrites()).toBe(0);
+    expect(harness.snapshot().tasks.some((task: Row) => task.title === "Dishes")).toBe(false);
+  });
+
+  it("refuses an unknown crewCloseMode string", async () => {
+    const harness = makeHarness({ taskRows: [] });
+    const response = await postManage(harness, {
+      action: "add",
+      operationId: "op-crew-close-chaos",
+      task: { title: "Wash the car", crewSize: 3, crewCloseMode: "chaos" },
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: "invalid_task_command" });
+    expect(harness.snapshotWrites()).toBe(0);
+    expect(harness.snapshot().tasks.some((task: Row) => task.title === "Wash the car")).toBe(false);
+  });
+});

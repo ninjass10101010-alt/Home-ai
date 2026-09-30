@@ -823,6 +823,7 @@ export function taskProjectionRecord(task: SnapshotTask): Record<string, unknown
     crewSize: task.crewSize ?? null,
     crew: persistedCrewEmoji(task.crew as any),
     speedBonus: task.speedBonus ?? null,
+    crewCloseMode: task.crewCloseMode ?? null,
   };
 }
 

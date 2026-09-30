@@ -19,6 +19,7 @@ import {
   isRecord,
   normalizeOperationId,
 } from "@/lib/task-operation-contract";
+import { normalizeCrewCloseMode } from "@/lib/task-utils";
 import {
   registerInternalTaskCommandHandler,
   type InternalTaskCommand,
@@ -115,6 +116,7 @@ const ADD_TASK_KEYS = new Set([
   "stealable",
   "crewSize",
   "speedBonus",
+  "crewCloseMode",
 ]);
 
 const UPDATE_PATCH_KEYS = new Set([
@@ -129,6 +131,7 @@ const UPDATE_PATCH_KEYS = new Set([
   "stealable",
   "speedBonus",
   "crewSize",
+  "crewCloseMode",
 ]);
 
 const TOP_LEVEL_KEYS: Record<ManageAction, Set<string>> = {
@@ -422,6 +425,15 @@ function taskShape(
     return { ok: false, reason: "invalid_task_command" };
   }
 
+  const crewCloseModeRaw = raw.crewCloseMode;
+  if (crewCloseModeRaw !== undefined && crewCloseModeRaw !== null
+      && normalizeCrewCloseMode(crewCloseModeRaw) === null) {
+    return { ok: false, reason: "invalid_task_command" };
+  }
+  if (mode.value !== "crew" && crewCloseModeRaw !== undefined && crewCloseModeRaw !== null) {
+    return { ok: false, reason: "invalid_task_command" };
+  }
+
   const crewSize = normalizedCrewSize(raw.crewSize);
   const existingCrewMembers = existing && Array.isArray(existing.crew?.members)
     ? existing.crew.members
@@ -485,6 +497,7 @@ function taskShape(
         ? existing.crew
         : { members: [], removed: [] }
       : null,
+    crewCloseMode: mode.value === "crew" ? (normalizeCrewCloseMode(crewCloseModeRaw) ?? "strict") : null,
   };
   if (mode.value === "open") output.speedBonus = speedBonus;
   if (existing) {

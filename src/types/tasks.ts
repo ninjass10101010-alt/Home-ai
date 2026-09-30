@@ -1,3 +1,5 @@
+export type CrewCloseMode = "strict" | "parent" | "deadline";
+
 export interface Task {
   id: number;
   title: string;
@@ -25,6 +27,11 @@ export interface Task {
   crewSize?: number | null;
   crew?: Crew | null;
   speedBonus?: number;
+  // Crew close modes (spec 2026-09-29): absent = "strict". Meaningful only on
+  // crew tasks. "parent" lets a parent close with partial check-ins;
+  // "deadline" auto-closes at the day sweep after the due date; every close
+  // stages a crew pendingApproval — points still only move on parent approval.
+  crewCloseMode?: CrewCloseMode | null;
 }
 
 export interface CrewMember {
@@ -47,8 +54,9 @@ export interface PendingApproval {
   byName: string;
   at: string;
   points: number;
-  // Crew completions carry the payer roster so one approval can pay every
-  // checked-in member (full points each). Absent for solo pending taps.
+  // Crew completions carry the AUTHORITATIVE award list: the members an
+  // approval will pay (full points each). Full crews list everyone; a partial
+  // close lists only the checked-in members. Absent for solo pending taps.
   crew?: string[];
 }
 
