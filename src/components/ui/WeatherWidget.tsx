@@ -14,6 +14,7 @@ import { mixHex, posterTextSurface, weatherHeaderTextSurfaces } from "@/lib/weat
 import { skyPhase, skySceneKey } from "@/lib/weather-scene-params";
 import { SKY, INK, GLASS, GLASS_NIGHT } from "./wx-tokens";
 import { SceneLayers, Condition, wmoToScene, dayCondition, conditionPresentation, wmoCondition, posterCarriesSun, useWxMotionOk } from "./WxToys";
+import { useWallMode } from "@/hooks/useWallMode";
 import { getWeatherSkin, cardinalFromDegrees, SeasonKey, severeFamily, resolveAccent, contrastSafeTextAccent, accentForeground } from "./WeatherSkins";
 import { wearAdvice, stormAdvice, snowAdvice, fusionOutlook, InsightEvent } from "@/lib/weather-insights";
 import type { ParticleKind } from "./WeatherParticles";
@@ -617,6 +618,10 @@ export function weatherFailureCopy(state: ReadFailure): string {
 
 export default function WeatherWidget({ className = "" }: { className?: string }) {
   const { weather } = useWeatherConfig();
+  // The wall panel is read from several metres away, so the condition glyph is
+  // the one element that has to scale with the canvas: the clamp's 64px ceiling
+  // (sized for a hand-held tablet) rendered it ~5% of the wall card's width.
+  const { wall } = useWallMode();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [previewIdx, setPreviewIdx] = useState<number | null>(null);
@@ -1244,8 +1249,8 @@ export default function WeatherWidget({ className = "" }: { className?: string }
                   {/* clay condition — clamp prevents overflow on 320 px phones.
                       The poster already paints the sun on a clear day, so the
                       hero suppresses its own disc (same rule as the night moon). */}
-                  <div data-testid="wx-hero-icon" className="shrink-0 flex items-center justify-center" style={{ width: "clamp(48px, 16vw, 64px)", height: "clamp(48px, 16vw, 64px)", animation: "wxThumbIn .6s cubic-bezier(.2,.8,.2,1) both" }}>
-                    <Condition code={heroPresentation.icon} size={64} hideSun={posterCarriesSun(heroScene, heroSunProgress)} />
+                  <div data-testid="wx-hero-icon" className="shrink-0 flex items-center justify-center" style={{ width: wall ? "124px" : "clamp(56px, 16vw, 80px)", height: wall ? "124px" : "clamp(56px, 16vw, 80px)", animation: "wxThumbIn .6s cubic-bezier(.2,.8,.2,1) both" }}>
+                    <Condition code={heroPresentation.icon} size={wall ? 124 : 80} hideSun={posterCarriesSun(heroScene, heroSunProgress)} />
                   </div>
                 </div>
                 {heroCondition && (

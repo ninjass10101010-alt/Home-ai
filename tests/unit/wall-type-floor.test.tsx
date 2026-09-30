@@ -16,9 +16,24 @@ describe("wall CSS contract (globals.css)", () => {
     expect(css).toContain("inset: -12px");
   });
 
+  /**
+   * The wall profile is size/layout only — any motion must stay under the
+   * shared reduced-motion contract. The old check sliced "first wall selector
+   * → end of file", which assumed the wall block is the last section in
+   * globals.css; the `hwi-*` icon keyframes appended after it are artwork
+   * motion already gated by `prefers-reduced-motion`. Inspect each wall rule
+   * instead: no `html[data-wall="true"]` declaration may introduce animation of
+   * its own. `animation: none` is allowed — suspending motion is the point
+   * (that is the wall motion budget).
+   */
   it("keeps wall additions inside the reduced-motion block coverage (no new keyframes)", () => {
-    const wallBlock = css.slice(css.indexOf('html[data-wall="true"]'));
-    expect(wallBlock).not.toMatch(/@keyframes/);
+    expect(css).not.toMatch(/html\[data-wall="true"\][^{]*\{[^}]*@keyframes/);
+    const declarations = [...css.matchAll(/html\[data-wall="true"\][^{]*\{([^}]*)\}/g)].map((m) => m[1]);
+    expect(declarations.length).toBeGreaterThan(10);
+    const introduced = declarations
+      .flatMap((decl) => [...decl.matchAll(/(?:^|[;\s])animation(?:-name)?\s*:\s*([^;]+)/g)].map((m) => m[1].trim()))
+      .filter((value) => !/^none\b/.test(value) && !/^0s/.test(value));
+    expect(introduced).toEqual([]);
   });
 
   it("scales card numerals and titles per spec §7", () => {

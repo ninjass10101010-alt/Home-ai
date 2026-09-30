@@ -511,7 +511,7 @@ export default function HomePage() {
       <AtmosphericProvider>
         <AnimationBudgetProvider>
         <FogBackground />
-        <PageShell style={{ backgroundColor: "transparent" }}>
+        <PageShell style={{ backgroundColor: "transparent" }} contentClassName={wall ? "wall-home-fit" : ""}>
           <EmergencyButton />
 
           <div className="relative z-10 px-4 pt-10 pb-6">
@@ -656,9 +656,13 @@ export default function HomePage() {
                   return <div key="consuelaSuggestions" className={span}><HomeSuggestionsWidget className="h-full" /></div>;
 
                 case "todayEvents": {
-                  const visibleEvents = todayEvents.slice(0, 3);
+                  // The wall's 3×4 grid gives every card ~250px; three events
+                  // plus the "upcoming" sub-list measured 121px past the card
+                  // box and was sliced off mid-row. A wall is read at a glance:
+                  // two events, with the remainder still counted in the footer.
+                  const visibleEvents = todayEvents.slice(0, wall ? 2 : 3);
                   const hiddenEvents = todayEvents.length - visibleEvents.length;
-                  const upcoming = Array.isArray(upcomingImportant) ? upcomingImportant.slice(0, 2) : [];
+                  const upcoming = !wall && Array.isArray(upcomingImportant) ? upcomingImportant.slice(0, 2) : [];
                   return (
                     <div key="todayEvents" className={span}>
                       <SectionCard title="Today" description={`${todayEvents.length} ${todayEvents.length === 1 ? "event" : "events"} on the family calendar`} icon={<HomeWidgetIcon variant="events" size="lg" />} tone="#3b82f6" compact centeredHeader headingLevel="h2" className="h-full"

@@ -62,9 +62,16 @@ export function computeWallMode(input: {
   return input.isPortrait && input.width >= 1000 && input.height >= 1600 && input.coarsePointer;
 }
 
-/** Home grid for the wall profile: the tablet bucket's 2-col pairing at wall
- *  scale — taller rows so ~3 rows fill the 1920px-tall canvas. */
-export const WALL_GRID_CLASS = "grid grid-cols-2 gap-6 grid-flow-dense auto-rows-[440px]";
+/** Home grid for the wall profile. The ApoloSign 15.6" is a glanceable,
+ *  non-scrolling surface (1080×1920 portrait, VESA-mounted, read from across
+ *  the room), so it is 3 columns of viewport-derived rows: under the flex-fit
+ *  `.wall-home-fit` main (globals.css) `minmax(0,1fr)` resolves against the
+ *  grid's definite height and all twelve widgets land on one screen. The
+ *  previous 2-col × 6-row / 440px grid measured 2760px on a 1920px canvas —
+ *  70% of the grid visible, 1768px of page overflow. The 220px floor keeps a
+ *  rotated (1920×1080) mount readable: without it the same rows collapsed to
+ *  56px, so the panel scrolls slightly instead of crushing its cards. */
+export const WALL_GRID_CLASS = "wall-widget-grid grid grid-cols-3 gap-4 grid-flow-dense auto-rows-[minmax(220px,1fr)]";
 
 export interface WidgetDef {
   id: WidgetId;

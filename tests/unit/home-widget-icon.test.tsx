@@ -50,12 +50,16 @@ describe("HomeWidgetIcon", () => {
     expect(markup).toBe(render(variant));
     expect(markup).toContain('viewBox="0 0 48 48"');
     expect(markup).toContain(`data-variant="${variant}"`);
-    expect(markup).toContain('stroke="var(--home-widget-icon-ink)"');
+    // Colourful contract: an opaque three-stop body gradient drawn from the
+    // variant palette, plus one element tied to the card's tone accent.
+    expect(markup).toMatch(/<linearGradient id="[^"]+-body"/);
+    expect(markup).toMatch(/stop-color="#[0-9A-Fa-f]{6}"/);
     expect(markup).toContain('fill="var(--home-widget-icon-accent)"');
-    expect(markup).toContain('fill="#fff"');
+    expect(markup).not.toContain('fill="#fff"');
+    expect(markup).toContain(`hwi-m hwi-m-${variant}`);
   });
 
-  it("keeps white icon surfaces on explicit dark ink and tone accents", () => {
+  it("keeps tone accents bound to the card tone over an opaque palette", () => {
     const wrapperMarkup = renderToStaticMarkup(
       <WidgetCard tone="#8b5cf6" icon={<HomeWidgetIcon variant="tasks" size="lg" />}>
         <span>content</span>
@@ -67,14 +71,29 @@ describe("HomeWidgetIcon", () => {
     const iconCss = globalsCss.slice(iconCssStart, iconCssEnd);
 
     expect(wrapperMarkup).toMatch(/--widget-tone:\s*#8b5cf6/);
-    expect(iconMarkup).toContain('stroke="var(--home-widget-icon-ink)"');
     expect(iconMarkup).toContain('fill="var(--home-widget-icon-accent)"');
     expect(iconMarkup).not.toContain("currentColor");
     expect(iconCss).toMatch(/--home-widget-icon-ink:\s*#1e293b;/);
     expect(iconCss).toMatch(
-      /--home-widget-icon-accent:\s*color-mix\(in srgb, var\(--widget-tone, var\(--color-accent-selected\)\) 50%, var\(--home-widget-icon-ink\)\);/,
+      /--home-widget-icon-accent:\s*color-mix\(in srgb, var\(--widget-tone, var\(--color-accent-selected\)\) 72%, var\(--home-widget-icon-ink\)\);/,
     );
     expect(iconCss).toContain("color: var(--home-widget-icon-ink);");
+  });
+
+  it("gives every variant one idle loop and stops it under reduced motion", () => {
+    const motionStart = globalsCss.indexOf(".hwi-m {");
+    const motionCss = globalsCss.slice(motionStart);
+    const reducedStart = motionCss.indexOf("@media (prefers-reduced-motion: reduce)");
+
+    expect(motionStart).toBeGreaterThan(-1);
+    expect(motionCss).toContain("transform-box: fill-box;");
+    for (const variant of expectedVariants) {
+      // Every widget breathes, and only the `ask` bubble runs extra loops
+      // (the three typing dots), so the whole set stays cheap on the wall panel.
+      expect(motionCss).toContain(`.hwi-m-${variant}`);
+    }
+    expect(reducedStart).toBeGreaterThan(-1);
+    expect(motionCss.slice(reducedStart)).toMatch(/\.hwi-m[\s\S]*?animation:\s*none\s*!important;/);
   });
 
   it("keeps decorative artwork out of the accessibility tree", () => {

@@ -42,4 +42,14 @@ describe("EmptyState", () => {
     act(() => button?.click());
     expect(clicked).toBe(true);
   });
+
+  // The wall profile compacts empty states through a CSS rule keyed on this
+  // attribute; renaming or dropping it would silently restore the 224px
+  // min-height that pushed card footers past a 249px wall row.
+  it("exposes the data-empty-state hook the wall compaction rule targets", () => {
+    const flat = render(<EmptyState title="Quiet day" description="No events today." icon="🌿" flat />);
+    const card = render(<EmptyState title="Quiet day" description="No events today." icon="🌿" />);
+    expect(flat.getAttribute("data-empty-state")).toBe("true");
+    expect(card.getAttribute("data-empty-state")).toBe("true");
+  });
 });

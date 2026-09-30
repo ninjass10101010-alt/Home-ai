@@ -37,7 +37,9 @@ describe("computeWallMode", () => {
 });
 
 describe("WALL_GRID_CLASS", () => {
-  it("is a 2-column 440px-row bento", () => {
-    expect(WALL_GRID_CLASS).toBe("grid grid-cols-2 gap-6 grid-flow-dense auto-rows-[440px]");
+  it("is a 3-column bento whose rows flex to fill the wall canvas", () => {
+    // Rows are viewport-derived (1fr under the flex-fit main), not fixed 440px:
+    // a fixed row height overflowed the 1920px-tall panel by 1768px.
+    expect(WALL_GRID_CLASS).toBe("wall-widget-grid grid grid-cols-3 gap-4 grid-flow-dense auto-rows-[minmax(220px,1fr)]");
   });
 });
