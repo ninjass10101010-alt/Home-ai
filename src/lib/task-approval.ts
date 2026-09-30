@@ -60,7 +60,8 @@ export interface ApproveResponse {
   weekData: WeekData;
   paid: number;
   cleared: number;
-  skipped: number;
+  /** Award-list members dropped between close and approval (0 ⇒ omitted). */
+  skipped?: number;
   reconciled: boolean;
   repairRequired: boolean;
   projectionFailures?: number[];
@@ -488,11 +489,16 @@ function validateCrewForSendBack(task: SnapshotTask, roster: LiveMember[]): "val
   return canonicalCrew(task, roster, true, false, true) === "invalid" ? "invalid" : "valid";
 }
 
+interface ResolvedPayees {
+  payees: string[];
+  skipped: string[];
+}
+
 function resolvePayees(
   task: SnapshotTask,
   pending: PendingIntent,
   roster: LiveMember[],
-): string[] | "invalid" {
+): ResolvedPayees | "invalid" {
   if (pending.crew === null) {
     const member = resolveHumanMember(roster, pending.byName);
     if (!member) return "invalid";
@@ -509,30 +515,36 @@ function resolvePayees(
     if (ownerValues.some((value) => typeof value !== "string" || !value.trim())) return "invalid";
     const owners = ownerValues.map((value) => resolveHumanMember(roster, value));
     if (owners.some((value) => !value || value.name !== member.name)) return "invalid";
-    return [member.name];
+    return { payees: [member.name], skipped: [] };
   }
 
   if (pending.byName !== "Crew") return "invalid";
-  const crewState = canonicalCrew(task, roster, true, true);
+  // requireCheckedIn=false, requireFullSize=false: pending.crew is the
+  // AUTHORITATIVE award list (spec 2026-09-29 §4) — validate membership,
+  // never recompute participation. The old (true, true) rejects partial
+  // closes outright: a joined-but-never-checked-in member (Bailey) fails
+  // canonicalCrew's checkedInAt gate → invalid_task_state on approve.
+  const crewState = canonicalCrew(task, roster, false, false);
   if (crewState === "invalid") return "invalid";
-  if (pending.crew.length !== crewState.memberNames.size) return "invalid";
+  // pending.crew is the AUTHORITATIVE award list (spec 2026-09-29 §4):
+  // strict closes list everyone, partial closes list the checked-in only.
+  // Validate membership — do not recompute participation.
   const payees: string[] = [];
   const payeeIds = new Set<string>();
+  const skipped: string[] = [];
   for (const requested of pending.crew) {
     const member = resolveHumanMember(roster, requested);
-    if (
-      !member ||
-      !crewState.memberNames.has(member.name) ||
-      crewState.removedNames.has(member.name) ||
-      payeeIds.has(member.id)
-    ) return "invalid";
+    if (!member) { skipped.push(requested); continue; }
+    if (payeeIds.has(member.id)) return "invalid";
+    if (!crewState.memberNames.has(member.name) || crewState.removedNames.has(member.name)) {
+      skipped.push(member.name);
+      continue;
+    }
     payeeIds.add(member.id);
     payees.push(member.name);
   }
-  for (const name of crewState.memberNames) {
-    if (!payees.includes(name)) return "invalid";
-  }
-  return payees;
+  if (payees.length === 0) return "invalid";
+  return { payees, skipped };
 }
 
 interface OperationLedgerSearch {
@@ -551,6 +563,7 @@ interface PreparedTask {
   transactions: Transaction[];
   intent: PendingIntent | null;
   payees: string[];
+  skippedPayees: string[];
   entries: LedgerEntryInput[];
   expectedEntries: LedgerEntryInput[];
   replay: boolean;
@@ -803,7 +816,7 @@ async function resolveTasks(
     if (lookup.ambiguous) {
       if (!committed) return "ambiguous_task";
       prepared.push({
-        id, lookup, task: null, receipt, transactions, intent: null, payees: [],
+        id, lookup, task: null, receipt, transactions, intent: null, payees: [], skippedPayees: [],
         entries: proofEntries, expectedEntries: proofEntries, replay: true,
         needsLedger: false, projectionInvalid: true, receiptOnly: true, skip: false,
       });
@@ -813,7 +826,7 @@ async function resolveTasks(
       if (receipt) {
         if (!task && !lookup.tombstoned) return "task_store_unavailable";
         prepared.push({
-          id, lookup, task, receipt, transactions, intent: null, payees: [],
+          id, lookup, task, receipt, transactions, intent: null, payees: [], skippedPayees: [],
           entries: [], expectedEntries: [], replay: true, needsLedger: false,
           projectionInvalid: false, receiptOnly: task === null, skip: false,
         });
@@ -823,7 +836,7 @@ async function resolveTasks(
       const pending = parsePending(task);
       if (pending === null) {
         prepared.push({
-          id, lookup, task, receipt, transactions, intent: null, payees: [],
+          id, lookup, task, receipt, transactions, intent: null, payees: [], skippedPayees: [],
           entries: [], expectedEntries: [], replay: false, needsLedger: false,
           projectionInvalid: false, receiptOnly: false, skip: true,
         });
@@ -833,7 +846,7 @@ async function resolveTasks(
         return "invalid_task_state";
       }
       prepared.push({
-        id, lookup, task, receipt, transactions, intent: pending, payees: [],
+        id, lookup, task, receipt, transactions, intent: pending, payees: [], skippedPayees: [],
         entries: [], expectedEntries: [], replay: false, needsLedger: false,
         projectionInvalid: false, receiptOnly: false, skip: false,
       });
@@ -843,7 +856,7 @@ async function resolveTasks(
     if (committed) {
       if (task === null && !lookup.tombstoned) {
         prepared.push({
-          id, lookup, task: null, receipt, transactions, intent: null, payees: [],
+          id, lookup, task: null, receipt, transactions, intent: null, payees: [], skippedPayees: [],
           entries: proofEntries, expectedEntries: proofEntries, replay: true,
           needsLedger: hasCurrentTransactions, projectionInvalid: true,
           receiptOnly: true, skip: false,
@@ -854,6 +867,7 @@ async function resolveTasks(
       let projectionInvalid = task === null || lookup.tombstoned;
       let intent: PendingIntent | null = null;
       let payees: string[] = [];
+      let skippedPayees: string[] = [];
       if (task && !lookup.tombstoned) {
         const pending = parsePending(task);
         if (pending === "invalid") {
@@ -868,13 +882,15 @@ async function resolveTasks(
             projectionInvalid = true;
           } else {
             intent = pending;
-            payees = resolved;
-            expectedEntries = freshEntries(task, pending, resolved, weekStart);
+            payees = resolved.payees;
+            skippedPayees = resolved.skipped;
+            expectedEntries = freshEntries(task, pending, resolved.payees, weekStart);
           }
         }
       }
       prepared.push({
         id, lookup, task, receipt, transactions, intent, payees,
+        skippedPayees,
         entries: expectedEntries, expectedEntries, replay: true,
         needsLedger: hasCurrentTransactions, projectionInvalid,
         receiptOnly: task === null || lookup.tombstoned, skip: false,
@@ -886,7 +902,7 @@ async function resolveTasks(
     const pending = parsePending(task);
     if (pending === null) {
       prepared.push({
-        id, lookup, task, receipt, transactions, intent: null, payees: [],
+        id, lookup, task, receipt, transactions, intent: null, payees: [], skippedPayees: [],
         entries: [], expectedEntries: [], replay: false, needsLedger: false,
         projectionInvalid: false, receiptOnly: false, skip: true,
       });
@@ -894,11 +910,12 @@ async function resolveTasks(
     }
     if (pending === "invalid" || !taskIsPending(task as any)) return "invalid_task_state";
     if (task.sentBackAt != null) return "operation_conflict";
-    const payees = resolvePayees(task, pending, roster);
-    if (payees === "invalid") return "invalid_task_state";
-    const entries = freshEntries(task, pending, payees, weekStart);
+    const resolved = resolvePayees(task, pending, roster);
+    if (resolved === "invalid") return "invalid_task_state";
+    const entries = freshEntries(task, pending, resolved.payees, weekStart);
     prepared.push({
-      id, lookup, task, receipt, transactions, intent: pending, payees,
+      id, lookup, task, receipt, transactions, intent: pending, payees: resolved.payees,
+      skippedPayees: resolved.skipped,
       entries, expectedEntries: entries, replay: false, needsLedger: true,
       projectionInvalid: false, receiptOnly: false, skip: false,
     });
@@ -1547,7 +1564,9 @@ async function executeApproval(
   const paid = replayOnly ? 0 : result?.weekData.history.filter(
     (transaction) => transaction.meta?.operationId === command.operationId && !beforeIds.has(transaction.id),
   ).length ?? 0;
-  const skipped = replayOnly ? 0 : paid === 0 && result?.duplicate ? 0 : Math.max(0, entries.length - paid);
+  // Award-list members dropped between close and approval (removed from the
+  // crew, or gone from the live roster) — honest copy for the approve result.
+  const skipped = active.reduce((total, item) => total + item.skippedPayees.length, 0);
   return success(
     command,
     result?.weekData ?? prepared.week,

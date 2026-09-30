@@ -105,6 +105,76 @@ describe("mergeTasksSnapshot (pure restore guards — same contract as the Tasks
     expect(landed[0].title).toBe("Tidy the playroom");
   });
 
+  it("keeps a partial crew award list (and crewCloseMode) through a stale server pull", () => {
+    // Local row: a parent closed a crew of 4 into approval with a PARTIAL
+    // award list — only Caspian + Aurora checked in (spec 2026-09-29 §6:
+    // the existing gates must treat that as ordinary pending data, with no
+    // full-crew assumption anywhere in the merge path).
+    const local = [makeTask({
+      id: 42,
+      title: "Backyard cleanup",
+      assignee: "Crew",
+      assigneeEmoji: "🤝",
+      completed: true,
+      completedBy: "Crew",
+      completedAt: "2026-09-30T10:00:00.000Z",
+      completedInWeek: localWeekStartISO(),
+      crewSize: 4,
+      crew: {
+        members: [
+          { name: "Caspian Garcia", emoji: "🧒", joinedAt: "2026-09-30T07:00:00.000Z", checkedInAt: "2026-09-30T09:00:00.000Z" },
+          { name: "Bailey Garcia", emoji: "👧", joinedAt: "2026-09-30T07:05:00.000Z" },
+          { name: "Aurora Garcia", emoji: "🌈", joinedAt: "2026-09-30T07:10:00.000Z", checkedInAt: "2026-09-30T09:10:00.000Z" },
+          { name: "Lily Garcia", emoji: "🐰", joinedAt: "2026-09-30T07:15:00.000Z" },
+        ],
+        removed: [],
+      },
+      crewCloseMode: "parent",
+      pendingApproval: {
+        byName: "Crew",
+        at: "2026-09-30T10:00:00.000Z",
+        points: 15,
+        crew: ["Caspian Garcia", "Aurora Garcia"],
+      },
+    })];
+
+    const res = mergeTasksSnapshot(local, emptyWeekData(), {
+      tasks: [
+        {
+          id: 42,
+          title: "Backyard cleanup",
+          assignee: "Crew",
+          // Stale pull: the close never reached the server copy — still open.
+          completed: false,
+          crewSize: 4,
+          crew: {
+            members: [
+              { name: "Caspian Garcia", emoji: "🧒", joinedAt: "2026-09-30T07:00:00.000Z" },
+              { name: "Bailey Garcia", emoji: "👧", joinedAt: "2026-09-30T07:05:00.000Z" },
+              { name: "Aurora Garcia", emoji: "🌈", joinedAt: "2026-09-30T07:10:00.000Z" },
+              { name: "Lily Garcia", emoji: "🐰", joinedAt: "2026-09-30T07:15:00.000Z" },
+            ],
+            removed: [],
+          },
+        },
+      ],
+      weekData: emptyWeekData(),
+    });
+
+    const row = res.tasks.find((task) => task.id === 42) as any;
+    expect(row).toBeDefined();
+    // No earn tx and no send-back stamp in the pull → the pending-proof gate
+    // keeps the LOCAL row, award list and all.
+    expect(row.pendingApproval).toEqual({
+      byName: "Crew",
+      at: "2026-09-30T10:00:00.000Z",
+      points: 15,
+      crew: ["Caspian Garcia", "Aurora Garcia"],
+    });
+    expect(row.completed).toBe(true);
+    expect(row.crewCloseMode).toBe("parent");
+  });
+
   it("adopts a NEWER week, always adopts the same-week server leg, refuses an OLDER week", () => {
     const local = emptyWeekData(); // current week, empty history
     // Older snapshot week: a device that missed the Monday rollover. Adopting

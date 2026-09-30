@@ -139,7 +139,7 @@ export async function POST(request: NextRequest) {
     weekData: result.weekData,
     paid: result.paid,
     cleared: result.cleared,
-    skipped: result.skipped,
+    ...(result.skipped ? { skipped: result.skipped } : {}),
     reconciled,
     repairRequired: !reconciled || result.repairRequired === true,
     ...(reconciled ? {} : { retryable: true }),

@@ -1146,7 +1146,10 @@ describe("POST /api/tasks/approve — action:approve", () => {
     expect(archiveRows()[0].history).toHaveLength(1);
   });
 
-  it("rejects a removed crew payee before any write", async () => {
+  it("skips a crew payee removed between close and approval and pays the rest", async () => {
+    // spec 2026-09-29 §4/§6: a member removed AFTER the close is dropped from
+    // the payout honestly — whole-crew success is not held hostage by one
+    // removal. The award list stays authoritative; only the payee is dropped.
     const crewTask = pendingTaskRow({
       crewSize: 2,
       crew: {
@@ -1158,7 +1161,7 @@ describe("POST /api/tasks/approve — action:approve", () => {
       },
       pendingApproval: { byName: "Crew", at: "2026-09-19T18:00:00.000Z", points: 10, crew: ["Caspian Garcia", "Aurora Garcia"] },
     });
-    const { pb, weekWrites, snapshotWrites, taskWrites } = makePb({ snapshotTasks: [crewTask], collectionTask: null });
+    const { pb, weekWrites, snapshotWrites, taskWrites, history, points } = makePb({ snapshotTasks: [crewTask], collectionTask: null });
     mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
     const response = await POST(jsonReq({
       action: "approve",
@@ -1167,10 +1170,14 @@ describe("POST /api/tasks/approve — action:approve", () => {
       pin: "0202",
       taskId: 101,
     }));
-    expect(response.status).toBe(400);
-    expect(weekWrites()).toBe(0);
-    expect(snapshotWrites()).toBe(0);
-    expect(taskWrites()).toBe(0);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ paid: 1, cleared: 1, skipped: 1 });
+    expect(weekWrites()).toBe(1);
+    expect(snapshotWrites()).toBeGreaterThan(0);
+    expect(taskWrites()).toBe(1);
+    expect(points()).toMatchObject({ "Aurora Garcia": 10 });
+    expect(points()["Caspian Garcia"]).toBeUndefined();
+    expect(history().filter((transaction: any) => transaction.type === "earn")).toHaveLength(1);
   });
 
   it("accepts a zero crew size as non-crew state for a solo approval", async () => {
@@ -1286,11 +1293,15 @@ describe("POST /api/tasks/approve — action:approve", () => {
     expect(taskWrites()).toBe(0);
   });
 
-  it("rejects a crew approval unless every canonical member checked in", async () => {
+  it("rejects a crew approval whose crew size never reached the 2-member floor", async () => {
+    // canonicalCrew's shape guard (crewSize < 2 is not a crew) — approval no
+    // longer gates on check-ins (spec 2026-09-29 §4: the stored award list is
+    // authoritative), so the member here HAS checked in: the refusal is about
+    // the malformed crew, not about participation.
     const crewTask = pendingTaskRow({
       crewSize: 1,
       crew: {
-        members: [{ name: "Caspian Garcia", emoji: "🧒", joinedAt: "2026-09-19T17:00:00.000Z" }],
+        members: [{ name: "Caspian Garcia", emoji: "🧒", joinedAt: "2026-09-19T17:00:00.000Z", checkedInAt: "2026-09-19T17:30:00.000Z" }],
       },
       pendingApproval: { byName: "Crew", at: "2026-09-19T18:00:00.000Z", points: 8, crew: ["Caspian Garcia"] },
     });
