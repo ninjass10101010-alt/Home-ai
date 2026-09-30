@@ -45,6 +45,10 @@ describe("crewCloseAwardList", () => {
   });
   it("defense-in-depth: a removed member carrying a check-in stamp is never awarded", () => {
     const t = crewTask();
+    t.crew!.members = t.crew!.members.map((m) =>
+      m.name === "Bailey Garcia" ? { ...m, checkedInAt: `${WEEK}T09:05:00.000Z` } : m,
+    );
+    expect(crewCloseAwardList(t)).toEqual({ ok: true, awardList: ["Caspian Garcia", "Bailey Garcia", "Aurora Garcia"] });
     t.crew!.removed = ["Bailey Garcia"];
     expect(crewCloseAwardList(t)).toEqual({ ok: true, awardList: ["Caspian Garcia", "Aurora Garcia"] });
   });
