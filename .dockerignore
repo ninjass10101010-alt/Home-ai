@@ -3,3 +3,41 @@ node_modules
 .git
 *.md
 .cache
+
+# NEVER let a real credential enter the build context. The Dockerfile does
+# `COPY . .`, so without this every `.env*` on the build host lands in a
+# BUILDER-STAGE layer: `PB_ADMIN_PASS`, `TELEGRAM_BOT_TOKEN`, `SESSION_SECRET`,
+# `ADMIN_SECRET`, `CONSUELA_ENCRYPTION_KEY` and `OPENROUTER_API_KEY` among them.
+# The runtime image is slim (`COPY --from=builder` pulls only .next/public/
+# node_modules/package.json/deploy.sh/docker-compose.yml/docs), so these were
+# never in the shipped container — but builder layers persist on the NAS, and
+# the deploy dir is synced with tar, which never deletes, so a stale copy
+# outlives the local file it came from.
+#
+# `.env.example` stays: it is the committed, placeholder-only contract.
+.env
+.env.*
+!.env.example
+.env.docker
+.env.local
+.env.integration
+.env.production
+
+# AppleDouble sidecars from past macOS `tar` syncs. Inert for the build (TS
+# include-globs skip dot-prefixed files) but they are 5,382 files of noise and
+# they are not part of the repo.
+._*
+
+# Local-only runbooks and tooling.
+DEPLOY_NAS_LOCAL.md
+.worktrees
+backups
+.superpowers
+.impeccable
+.opencode
+.kilocode
+.agents
+test-results
+playwright-report
+pb_data
+pocketbase_data
