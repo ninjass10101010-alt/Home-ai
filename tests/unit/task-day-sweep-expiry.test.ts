@@ -25,10 +25,10 @@ describe("addDaysISO", () => {
 
 describe("cullExpiredTasksOnTasks", () => {
   it("culls on day N+1", () => {
-    expect(cullExpiredTasksOnTasks([task()], TODAY).deletedIds).toEqual([300]);
+    expect(cullExpiredTasksOnTasks([task({ due: "2026-09-27" })], TODAY).deletedIds).toEqual([300]);
   });
   it("does not cull on day N", () => {
-    expect(cullExpiredTasksOnTasks([task({ due: "2026-09-29" })], TODAY).deletedIds).toEqual([]);
+    expect(cullExpiredTasksOnTasks([task({ due: "2026-09-28" })], TODAY).deletedIds).toEqual([]);
   });
   it("never culls a task without a due date", () => {
     expect(cullExpiredTasksOnTasks([task({ due: null })], TODAY).deletedIds).toEqual([]);
@@ -39,8 +39,8 @@ describe("cullExpiredTasksOnTasks", () => {
     expect(cullExpiredTasksOnTasks([task({ recurring: "daily" })], TODAY).deletedIds).toEqual([]);
   });
   it("culls an expired open task and an expired incomplete crew one-off alike", () => {
-    const open = task({ id: 301, universal: true });
-    const crew = task({ id: 302, crewSize: 2, crew: { members: [] } });
+    const open = task({ id: 301, due: "2026-09-27", universal: true });
+    const crew = task({ id: 302, due: "2026-09-27", crewSize: 2, crew: { members: [] } });
     const result = cullExpiredTasksOnTasks([open, crew], TODAY);
     expect(result.deletedIds.sort()).toEqual([301, 302]);
     expect(result.tasks).toHaveLength(0);

@@ -157,7 +157,7 @@ export function cullExpiredTasksOnTasks(
       typeof expires === "number" && Number.isSafeInteger(expires) && expires >= 1 && expires <= 30;
     if (eligible) {
       const deadline = addDaysISO(due, expires);
-      if (deadline && today >= deadline) {
+      if (deadline && today > deadline) {
         deletedIds.push(id);
         continue;
       }
