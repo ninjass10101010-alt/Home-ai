@@ -167,6 +167,16 @@ describe("streamConsuelaChat watchdog", () => {
     return new ReadableStream<Uint8Array>({ start() { /* never resolves */ } });
   }
 
+  // A pre-response stall: the route never answers, so the fetch itself is the
+  // only thing racing the fail signal. Rejects the way real fetch does — an
+  // AbortError DOMException — so these tests pin which error we surface, not
+  // merely that one was surfaced.
+  function stalledFetch() {
+    return vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_, rej) => {
+      init.signal?.addEventListener("abort", () => rej(new DOMException("aborted", "AbortError")));
+    }));
+  }
+
   function errOf(p: Promise<unknown>) {
     return p.then(() => null, (e: unknown) => e as Error);
   }
@@ -182,8 +192,9 @@ describe("streamConsuelaChat watchdog", () => {
     vi.stubGlobal("fetch", vi.fn(async () =>
       new Response(wedgedSSE(), { status: 200, headers: { "content-type": "text/event-stream" } })));
     const err = await errOf(streamConsuelaChat({ message: "hi", watchdogMs: 50 }));
-    // chat-store renders "Stopped." for an AbortError and a failure bubble for
-    // anything else — a timeout shown as a user stop would be dishonest.
+    // chat-store renders "Stopped." whenever the caller's own controller is
+    // aborted (it never reads the error name) — a timeout shown as a user stop
+    // would be dishonest.
     expect(err).toBeInstanceOf(Error);
     expect(err?.name).not.toBe("AbortError");
   });
@@ -236,6 +247,39 @@ describe("streamConsuelaChat watchdog", () => {
     controller.abort();
     const err = await errOf(pending);
     expect(err?.name).toBe("AbortError");
+  });
+
+  it("still reports a user stop before the response arrives as AbortError", async () => {
+    vi.stubGlobal("fetch", stalledFetch());
+    const controller = new AbortController();
+    const pending = streamConsuelaChat({
+      message: "hi",
+      signal: controller.signal,
+      watchdogMs: 60_000,
+    });
+    controller.abort();
+    const err = await errOf(pending);
+    expect(err?.name).toBe("AbortError");
+    // the stop message we normalize to, not the raw fetch rejection
+    expect(err?.message).not.toBe("aborted");
+  });
+
+  it("still reports a watchdog expiry before the response arrives as a timeout", async () => {
+    vi.stubGlobal("fetch", stalledFetch());
+    const err = await errOf(streamConsuelaChat({ message: "hi", watchdogMs: 50 }));
+    expect(err?.message).toMatch(/timed out/i);
+    expect(err?.name).not.toBe("AbortError");
+  });
+
+  it("defaults the watchdog to 5 minutes when no override is given", async () => {
+    const spy = vi.spyOn(AbortSignal, "timeout");
+    try {
+      vi.stubGlobal("fetch", vi.fn(async () => sseResponse("data: [DONE]\n\n")));
+      await streamConsuelaChat({ message: "hi" });
+      expect(spy).toHaveBeenCalledWith(300_000);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("does not fire a short watchdog on a stream that completes in time", async () => {

@@ -61,9 +61,9 @@ export function parseSSEFrames(buffer: string): { frames: SSEFrame[]; rest: stri
 /**
  * The caller's stop and the watchdog are one event once composed into a single
  * signal, so only the caller's own signal can tell them apart — and the
- * distinction is load-bearing: chat-store renders "Stopped." with the partial
- * text for an AbortError and a failure bubble for anything else. A timeout
- * reported as a user stop would be a lie the parent sees in the thread.
+ * distinction is load-bearing: chat-store renders "Stopped." whenever the
+ * caller's own controller is aborted (it never reads this error's name), so a
+ * watchdog expiry must never be reported as a stop.
  */
 function failError(stopSignal: AbortSignal | undefined): Error {
   if (stopSignal?.aborted) {
@@ -91,10 +91,10 @@ export async function streamConsuelaChat(opts: StreamConsuelaChatOptions): Promi
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // Client-side watchdog: the server's 60s per-Hermes-call timeout covers the
-      // common hang and always emits a frame; this 5-min cap bounds pre-frame
-      // route hangs (e.g. PB auth/config wedged). The longest legitimate flow
-      // (trigger_update) restarts the server anyway, which drops the connection
-      // regardless.
+      // common hang and always emits a frame; this cap bounds the whole exchange
+      // — pre-frame route hangs and wedged body reads (e.g. PB auth/config
+      // wedged). The longest legitimate flow (trigger_update) restarts the server
+      // anyway, which drops the connection regardless.
       signal: failSignal,
       body: JSON.stringify({
         message: opts.message,
@@ -183,12 +183,13 @@ export async function streamConsuelaChat(opts: StreamConsuelaChatOptions): Promi
     return { content, streamed: true };
   } catch (err) {
     if (failSignal.aborted) {
-      // A wedged body is still holding its socket — release it, including the
-      // buffered path where res.json() owns the reader rather than us.
+      // Release the reader we hold. The buffered path has none to release:
+      // res.json() was evaluated as the race argument and already locked
+      // res.body, so the fetch's own abort of failSignal is what reclaims that
+      // socket.
       try {
         if (reader) await reader.cancel();
-        else await res.body?.cancel();
-      } catch { /* body already gone or locked by the abandoned json() */ }
+      } catch { /* body already gone */ }
       throw failError(stopSignal);
     }
     throw err;
