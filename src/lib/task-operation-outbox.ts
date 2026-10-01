@@ -196,6 +196,7 @@ const MANAGE_ADD_TASK_KEYS = [
   "crewSize",
   "speedBonus",
   "crewCloseMode",
+  "expiresAfterDays",
 ] as const;
 
 const MANAGE_UPDATE_PATCH_KEYS = [
@@ -211,6 +212,7 @@ const MANAGE_UPDATE_PATCH_KEYS = [
   "speedBonus",
   "crewSize",
   "crewCloseMode",
+  "expiresAfterDays",
 ] as const;
 
 const CONFIG_PAYLOAD_KEYS: Record<string, readonly string[]> = {

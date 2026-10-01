@@ -32,6 +32,9 @@ export interface Task {
   // "deadline" auto-closes at the day sweep after the due date; every close
   // stages a crew pendingApproval — points still only move on parent approval.
   crewCloseMode?: CrewCloseMode | null;
+  /** One-time tasks only: auto-remove this many days after the due date.
+   *  Integer 1–30; absent/null = never. Refused when `recurring` is set. */
+  expiresAfterDays?: number | null;
 }
 
 export interface CrewMember {

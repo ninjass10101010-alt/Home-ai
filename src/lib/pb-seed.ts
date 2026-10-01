@@ -190,6 +190,7 @@ export const COLLECTIONS = [
       { name: "crew", type: "json" },
       { name: "speedBonus", type: "number" },
       { name: "crewCloseMode", type: "text" },
+      { name: "expiresAfterDays", type: "number" },
     ],
   },
   {

@@ -365,11 +365,11 @@ function projectionMatches(row: Row, expected: Record<string, unknown>): boolean
       ? parseProjection(row[key])
       : row[key];
     if (["crew", "pendingApproval"].includes(key)) return sameValue(actual, expectedValue);
-    if (["crewSize", "speedBonus", "completedBy", "completedAt", "completedInWeek", "sentBackAt", "recurring", "due", "crewCloseMode"].includes(key)) {
+    if (["crewSize", "speedBonus", "completedBy", "completedAt", "completedInWeek", "sentBackAt", "recurring", "due", "crewCloseMode", "expiresAfterDays"].includes(key)) {
       const actualEmpty = actual === null || actual === undefined || actual === "";
       const expectedEmpty = expectedValue === null || expectedValue === undefined || expectedValue === "";
       if (actualEmpty && expectedEmpty) return true;
-      if ((key === "crewSize" || key === "speedBonus") && Number(actual) === 0 && Number(expectedValue) === 0) return true;
+      if ((key === "crewSize" || key === "speedBonus" || key === "expiresAfterDays") && Number(actual) === 0 && Number(expectedValue) === 0) return true;
     }
     return actual === expectedValue;
   });

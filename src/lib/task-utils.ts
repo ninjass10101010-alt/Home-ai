@@ -1466,3 +1466,11 @@ export function normalizeCrewCloseMode(value: unknown): CrewCloseMode | null {
 export function crewCloseModeOf(task: { crewCloseMode?: unknown }): CrewCloseMode {
   return normalizeCrewCloseMode(task.crewCloseMode) ?? "strict";
 }
+
+/** Task expiry (one-time tasks only). Null = absent-or-invalid input;
+ *  callers decide the default (never). */
+export function normalizeExpiresAfterDays(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 1 && value <= 30
+    ? value
+    : null;
+}

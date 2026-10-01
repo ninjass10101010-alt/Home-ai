@@ -19,7 +19,7 @@ import {
   isRecord,
   normalizeOperationId,
 } from "@/lib/task-operation-contract";
-import { normalizeCrewCloseMode } from "@/lib/task-utils";
+import { normalizeCrewCloseMode, normalizeExpiresAfterDays } from "@/lib/task-utils";
 import {
   registerInternalTaskCommandHandler,
   type InternalTaskCommand,
@@ -118,6 +118,7 @@ const ADD_TASK_KEYS = new Set([
   "crewSize",
   "speedBonus",
   "crewCloseMode",
+  "expiresAfterDays",
 ]);
 
 const UPDATE_PATCH_KEYS = new Set([
@@ -133,6 +134,7 @@ const UPDATE_PATCH_KEYS = new Set([
   "speedBonus",
   "crewSize",
   "crewCloseMode",
+  "expiresAfterDays",
 ]);
 
 const TOP_LEVEL_KEYS: Record<ManageAction, Set<string>> = {
@@ -426,6 +428,15 @@ function taskShape(
     return { ok: false, reason: "invalid_task_command" };
   }
 
+  const expiresRaw = raw.expiresAfterDays;
+  const expiresAfterDays = normalizeExpiresAfterDays(expiresRaw);
+  if (expiresRaw !== undefined && expiresRaw !== null && expiresAfterDays === null) {
+    return { ok: false, reason: "invalid_task_command" };
+  }
+  if (recurring.value && expiresRaw !== undefined && expiresRaw !== null) {
+    return { ok: false, reason: "invalid_task_command" };
+  }
+
   const crewCloseModeRaw = raw.crewCloseMode;
   if (crewCloseModeRaw !== undefined && crewCloseModeRaw !== null
       && normalizeCrewCloseMode(crewCloseModeRaw) === null) {
@@ -499,6 +510,7 @@ function taskShape(
         : { members: [], removed: [] }
       : null,
     crewCloseMode: mode.value === "crew" ? (normalizeCrewCloseMode(crewCloseModeRaw) ?? "strict") : null,
+    expiresAfterDays: recurring.value ? null : expiresAfterDays,
   };
   if (mode.value === "open") output.speedBonus = speedBonus;
   if (existing) {
@@ -610,6 +622,7 @@ function canonicalComparable(task: SnapshotTask): Record<string, unknown> {
     "completedInWeek",
     "pendingApproval",
     "sentBackAt",
+    "expiresAfterDays",
   ];
   const result: Record<string, unknown> = {};
   for (const field of fields) {
@@ -701,7 +714,7 @@ function projectionValue(value: unknown): unknown {
 
 function optionalScalarEqual(key: string, left: unknown, right: unknown): boolean {
   if ((left === null || left === undefined || left === "") && (right === null || right === undefined || right === "")) return true;
-  if ((key === "crewSize" || key === "speedBonus") && Number(left) === 0 && Number(right) === 0) return true;
+  if ((key === "crewSize" || key === "speedBonus" || key === "expiresAfterDays") && Number(left) === 0 && Number(right) === 0) return true;
   return left === right;
 }
 
@@ -711,7 +724,7 @@ function projectionMatches(row: Record<string, any>, expected: Record<string, un
       ? projectionValue(row[key])
       : row[key];
     if (["crew", "pendingApproval"].includes(key)) return sameValue(actualValue, expectedValue);
-    if (["crewSize", "speedBonus", "completedBy", "completedAt", "completedInWeek", "sentBackAt", "recurring", "due", "crewCloseMode"].includes(key)) {
+    if (["crewSize", "speedBonus", "completedBy", "completedAt", "completedInWeek", "sentBackAt", "recurring", "due", "crewCloseMode", "expiresAfterDays"].includes(key)) {
       return optionalScalarEqual(key, actualValue, expectedValue);
     }
     return actualValue === expectedValue;
