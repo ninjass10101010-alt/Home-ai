@@ -84,6 +84,7 @@ vi.mock("@/lib/week-ledger-lock", () => ({
 
 import { POST } from "@/app/api/tasks/approve/route";
 import { approvalCommandFingerprint } from "@/lib/task-approval";
+import { closeDeadlineCrewsOnTasks } from "@/lib/task-day-sweep";
 
 function mondayISO(): string {
   const d = new Date();
@@ -1521,6 +1522,47 @@ describe("POST /api/tasks/approve — action:approve", () => {
     expect(taskWrites()).toBe(0);
   });
 
+  it("approve-after-sweep-after-send-back pays instead of 409 (C1 integration pin)", async () => {
+    // Sequence: crew close → parent Send back (sentBackAt) → partial re-check-in
+    // → next local day's sweep closes the row. The sweep close must clear
+    // sentBackAt or this approve hits task-approval.ts `sentBackAt != null →
+    // operation_conflict` forever; only recovery today is delete + recreate.
+    const stale = pendingTaskRow({
+      crewSize: 3,
+      crew: {
+        members: [
+          { name: "Caspian Garcia", emoji: "🧒", joinedAt: `${previousMondayISO()}T17:00:00.000Z`, checkedInAt: `${mondayISO()}T17:30:00.000Z` },
+          { name: "Aurora Garcia", emoji: "🌈", joinedAt: `${previousMondayISO()}T17:05:00.000Z`, checkedInAt: `${mondayISO()}T17:35:00.000Z` },
+        ],
+        removed: [],
+      },
+      due: previousMondayISO(),
+      crewCloseMode: "deadline",
+      completed: false,
+      pendingApproval: undefined,
+      sentBackAt: `${previousMondayISO()}T18:00:00.000Z`,
+      points: 10,
+    });
+    const swept = closeDeadlineCrewsOnTasks([stale], mondayISO(), mondayISO(), new Date().toISOString());
+    expect(swept.closedIds).toEqual([101]);
+
+    const { pb, history, points, snapshotTask } = makePb({ snapshotTasks: swept.tasks, collectionTask: null });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    const response = await POST(jsonReq({
+      action: "approve",
+      operationId: "op-approve-after-sweep-sendback",
+      memberName: "Rebecca (Mom)",
+      pin: "0202",
+      taskId: 101,
+    }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ paid: 2, cleared: 1 });
+    expect(points()).toMatchObject({ "Caspian Garcia": 10, "Aurora Garcia": 10 });
+    expect(history().filter((transaction: any) => transaction.type === "earn")).toHaveLength(2);
+    expect(snapshotTask(101)?.pendingApproval).toBeNull();
+    expect(snapshotTask(101)?.sentBackAt ?? null).toBeNull();
+  });
+
   it("returns 202 rather than 409 for a committed operation whose canonical task is ambiguous", async () => {
     const operationId = "op-committed-ambiguous";
     const fingerprint = approvalCommandFingerprint(
@@ -1742,6 +1784,47 @@ describe("POST /api/tasks/approve — action:send-back", () => {
     expect(res.status).toBe(200);
     expect(collectionUpdated()).toBeNull();
     expect(snapshotUpdates()).toBeNull();
+  });
+
+  it("send-back succeeds on a 2-of-4 partial pending whose third member never checked in (C2)", async () => {
+    // Spec §4: send back must keep working after a partial close. Bailey joined
+    // but never checked in — membership validation only, no checkedInAt gate.
+    mocks.getLiveMembers.mockResolvedValue([
+      { id: "parent-rebecca", name: "Rebecca (Mom)", role: "parent", emoji: "👩" },
+      { id: "child-caspian", name: "Caspian Garcia", role: "child", emoji: "🧒" },
+      { id: "child-aurora", name: "Aurora Garcia", role: "child", emoji: "🌈" },
+      { id: "child-bailey", name: "Bailey Garcia", role: "child", emoji: "👧" },
+    ]);
+    const crewTask: any = pendingTaskRow({
+      crewSize: 4,
+      crew: {
+        members: [
+          { name: "Caspian Garcia", emoji: "🧒", joinedAt: "2026-09-19T17:00:00.000Z", checkedInAt: "2026-09-19T17:30:00.000Z" },
+          { name: "Aurora Garcia", emoji: "🌈", joinedAt: "2026-09-19T17:05:00.000Z", checkedInAt: "2026-09-19T17:35:00.000Z" },
+          { name: "Bailey Garcia", emoji: "👧", joinedAt: "2026-09-19T17:10:00.000Z" },
+        ],
+        removed: [],
+      },
+      pendingApproval: { byName: "Crew", at: "2026-09-19T18:00:00.000Z", points: 10, crew: ["Caspian Garcia", "Aurora Garcia"] },
+    });
+    const { pb, history, points, collectionUpdated, snapshotTask } = makePb({
+      snapshotTasks: [crewTask],
+      collectionTask: { id: "pb-1", taskId: 101, crewSize: 4, crew: crewTask.crew, pendingApproval: crewTask.pendingApproval, completed: true },
+    });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(pb));
+    const res = await POST(jsonReq({ action: "send-back", memberName: "Rebecca (Mom)", pin: "0202", taskId: 101 }));
+    expect(res.status).toBe(200);
+    // pending stripped per send-back semantics on both stores
+    expect(collectionUpdated()?.pendingApproval).toBeNull();
+    expect(snapshotTask(101)?.pendingApproval).toBeNull();
+    expect(collectionUpdated()?.completed).toBe(false);
+    expect(typeof collectionUpdated()?.sentBackAt).toBe("string");
+    expect(snapshotTask(101)?.sentBackAt).toBeTruthy();
+    // check-ins stripped so the crew can redo it
+    expect((collectionUpdated()?.crew?.members ?? []).every((m: any) => !m.checkedInAt)).toBe(true);
+    // send-back never moves points
+    expect(history()).toHaveLength(0);
+    expect(points()).toEqual({});
   });
 });
 

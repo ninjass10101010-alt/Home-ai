@@ -486,7 +486,12 @@ function canonicalCrew(
 }
 
 function validateCrewForSendBack(task: SnapshotTask, roster: LiveMember[]): "valid" | "invalid" {
-  return canonicalCrew(task, roster, true, false, true) === "invalid" ? "invalid" : "valid";
+  // requireCheckedIn=false: send back must keep working on the partial pendings
+  // this branch creates (spec §4) — a joined-but-never-checked-in member
+  // (Bailey) would fail canonicalCrew's checkedInAt gate → 400
+  // invalid_task_state on exactly the rows send-back exists to reopen.
+  // Membership validation only, same rationale as resolvePayees below.
+  return canonicalCrew(task, roster, false, false, true) === "invalid" ? "invalid" : "valid";
 }
 
 interface ResolvedPayees {
