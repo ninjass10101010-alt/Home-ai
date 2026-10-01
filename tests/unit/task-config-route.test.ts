@@ -1336,6 +1336,45 @@ describe("POST /api/tasks/config", () => {
       items: [],
     }, (emoji: string) => emoji)).toEqual({ error: "invalid_config_command" });
   });
+
+  it("applies a task-templates upsert to the snapshot with no PB collection writes", async () => {
+    const template = {
+      id: "tpl-1", title: "Trash", points: 5, category: "chores", priority: "medium",
+      mode: "assigned", assigneeName: "Alex", expiresAfterDays: 3,
+    };
+    const harness = makeHarness({
+      snapshot: { ...defaultSnapshot(), taskTemplates: [] },
+    });
+    mocks.withAdmin.mockImplementation((fn: any) => fn(harness.pb));
+
+    const response = await postConfig({
+      operationId: "op-config-templates-upsert",
+      kind: "task-templates",
+      action: "upsert",
+      updatedAt: "2026-10-01T12:00:00.000Z",
+      item: template,
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      success: true,
+      operationId: "op-config-templates-upsert",
+      kind: "task-templates",
+      items: [template],
+      updatedAt: "2026-10-01T12:00:00.000Z",
+      applied: true,
+    });
+    expect(harness.snapshot().taskTemplates).toEqual([template]);
+    expect(harness.snapshot().taskTemplatesStamp).toBe("2026-10-01T12:00:00.000Z");
+    // Snapshot-only: the templates leg has no PB collection, so the reconcile
+    // must not run (an unknown kind would otherwise fall back to `rewards`).
+    expect(harness.writes.rewards).toEqual({ create: [], update: [], delete: [] });
+    expect(harness.writes.penalties).toEqual({ create: [], update: [], delete: [] });
+    expect(harness.writes.weekly_prizes).toEqual({ create: [], update: [], delete: [] });
+    expect(harness.pb.collection).not.toHaveBeenCalledWith("rewards");
+    expect(harness.pb.collection).not.toHaveBeenCalledWith("penalties");
+    expect(harness.pb.collection).not.toHaveBeenCalledWith("weekly_prizes");
+  });
 });
 
 describe("verifyLiveParentSession", () => {

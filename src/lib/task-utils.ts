@@ -2,6 +2,7 @@ import { db } from "@/db";
 import { localDateOf, localTodayISO, localWeekStartISO } from "@/lib/local-date";
 import { weekStartForDate } from "@/lib/meals-week-utils";
 import { isRecord } from "@/lib/task-operation-contract";
+import type { TaskTemplateConfigItem } from "@/lib/task-config";
 import type { Task, WeekData, Transaction, WeekArchive, FamilyGoal, HallOfFameEntry, WeeklyPrize, CrewMember, CrewCloseMode } from "@/types/tasks";
 
 export const TASKS_STORAGE_KEY = "consuela-tasks";
@@ -759,9 +760,10 @@ export function mergeTasksSnapshot(
 }
 
 /**
- * The ONE config-leg adoption seam for the rewards, penalties and weekly-prizes
- * catalogs. It accepts a config snapshot leg — a whole task snapshot, or just
- * the one leg a caller read — and merges each leg it finds by LAST-WRITE-WINS
+ * The ONE config-leg adoption seam for the rewards, penalties, weekly-prizes
+ * and task-templates catalogs. It accepts a config snapshot leg — a whole task
+ * snapshot, or just the one leg a caller read — and merges each leg it finds by
+ * LAST-WRITE-WINS
  * on that leg's own stamp — never "a longer list wins", which is delete-blind:
  * a parent's delete is a SHORTER, NEWER list, so a length heuristic resurrects
  * the row it just removed.
@@ -775,7 +777,8 @@ export function mergeTasksSnapshot(
  *
  * The rewards leg needs this in particular because without it the reward catalog
  * was PULL-only: a device that never wrote a config command could never learn
- * the server's list. The weekly-prizes leg uses the identical contract.
+ * the server's list. The weekly-prizes and task-templates legs use the
+ * identical contract.
  *
  * Callers: applyTasksSnapshotToStores — which the 60s refresh (db.refreshCaches)
  * and the outbox's snapshot proof (adoptTaskOutboxSnapshot) both route through —
@@ -786,6 +789,15 @@ export function mergeTasksSnapshot(
 export function applyTaskConfigSnapshotToStores(snapshot: any): boolean {
   if (!snapshot) return false;
   let changed = false;
+  if (
+    Array.isArray(snapshot.taskTemplates) &&
+    typeof snapshot.taskTemplatesStamp === "string" &&
+    snapshot.taskTemplatesStamp > readTaskTemplatesStamp()
+  ) {
+    writeTaskTemplatesStamp(snapshot.taskTemplatesStamp);
+    saveTaskTemplates(snapshot.taskTemplates);
+    changed = true;
+  }
   if (
     Array.isArray(snapshot.rewards) &&
     typeof snapshot.rewardsUpdatedAt === "string" &&
@@ -821,7 +833,7 @@ export function applyTaskConfigSnapshotToStores(snapshot: any): boolean {
  * reads /api/tasks/sync and hands the snapshot here, which merges it into the
  * same localStorage stores loadTasks()/loadWeekData() read — so KidHome's
  * dataVersion listener and Home's widgets actually see another device's
- * tasks when they re-read on `consuela-data-refreshed`. The three config legs
+ * tasks when they re-read on `consuela-data-refreshed`. The four config legs
  * ride along through applyTaskConfigSnapshotToStores. Returns whether
  * anything changed.
  */
@@ -942,6 +954,25 @@ export function readWeeklyPrizesStamp(): string {
 // no-op refresh look like a fresh local edit and block newer server state).
 export function writeWeeklyPrizesStamp(stamp: string): void {
   saveJSON(WEEKLY_PRIZES_STAMP_KEY, stamp);
+}
+
+// ─── Task templates — prefill-only favorites (snapshot-only LWW leg) ───────
+// Same localStorage + last-write-wins-stamp idiom as weekly prizes: a template
+// never auto-creates a task, it only prefills the Add sheet.
+export const TASK_TEMPLATES_KEY = "consuela-task-templates";
+const TASK_TEMPLATES_STAMP_KEY = "consuela-task-templates-stamp";
+
+export function loadTaskTemplates(): TaskTemplateConfigItem[] {
+  return loadJSON<TaskTemplateConfigItem[]>(TASK_TEMPLATES_KEY, []);
+}
+export function saveTaskTemplates(templates: TaskTemplateConfigItem[]): boolean {
+  return saveJSON(TASK_TEMPLATES_KEY, templates);
+}
+export function readTaskTemplatesStamp(): string {
+  return loadJSON<string>(TASK_TEMPLATES_STAMP_KEY, "");
+}
+export function writeTaskTemplatesStamp(stamp: string): void {
+  saveJSON(TASK_TEMPLATES_STAMP_KEY, stamp);
 }
 
 // ─── Race gap — "You're 45 pts from 🥉" podium-gap math (pure) ─────────────

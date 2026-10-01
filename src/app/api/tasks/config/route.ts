@@ -128,7 +128,11 @@ export async function POST(request: NextRequest) {
         }
         let responseRevision = mutation.revision;
         if (mutation.reconcile) {
-          await reconcileConfigCollection(pb, command.kind, mutation.items);
+          // Templates live in the snapshot only — there is no PB collection to
+          // reconcile, and an unknown kind would fall back to `rewards`.
+          if (command.kind !== "task-templates") {
+            await reconcileConfigCollection(pb, command.kind, mutation.items);
+          }
           if (mutation.clearRepairMarker) {
             const clearedRevision = await clearTaskConfigRepairMarker(command.operationId, pb);
             if (clearedRevision) responseRevision = clearedRevision;

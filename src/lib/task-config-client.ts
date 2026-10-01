@@ -11,9 +11,11 @@ import { queueTaskCommandAndFlush } from "@/lib/task-command-queue";
 import {
   loadPenalties,
   loadRewards,
+  loadTaskTemplates,
   loadWeeklyPrizes,
   readPenaltiesStamp,
   readRewardsStamp,
+  readTaskTemplatesStamp,
   readWeeklyPrizesStamp,
 } from "@/lib/task-utils";
 import type {
@@ -28,6 +30,7 @@ const CONFIG_KINDS = [
   "rewards",
   "penalties",
   "weekly-prizes",
+  "task-templates",
 ] as const satisfies readonly TaskConfigKind[];
 
 const CONFIG_ACTIONS = [
@@ -65,6 +68,13 @@ const CONFIG_LEGS: Record<TaskConfigKind, ConfigLeg> = {
     stamp: "weeklyPrizesStamp",
     readCache: () => loadWeeklyPrizes() as unknown as TaskConfigItem[],
     readStamp: readWeeklyPrizesStamp,
+  },
+  "task-templates": {
+    kind: "task-templates",
+    items: "taskTemplates",
+    stamp: "taskTemplatesStamp",
+    readCache: () => loadTaskTemplates() as unknown as TaskConfigItem[],
+    readStamp: readTaskTemplatesStamp,
   },
 };
 

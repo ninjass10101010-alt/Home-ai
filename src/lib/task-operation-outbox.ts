@@ -225,12 +225,25 @@ const CONFIG_ITEM_KEYS: Record<string, readonly string[]> = {
   rewards: ["id", "name", "emoji", "cost", "category"],
   penalties: ["id", "name", "emoji", "points"],
   "weekly-prizes": ["id", "rank", "emoji", "text"],
+  "task-templates": [
+    "id",
+    "title",
+    "points",
+    "category",
+    "priority",
+    "mode",
+    "assigneeName",
+    "crewSize",
+    "speedBonus",
+    "expiresAfterDays",
+  ],
 };
 
 const CONFIG_KIND_LEGS: Record<string, { items: string; stamp: string }> = {
   rewards: { items: "rewards", stamp: "rewardsUpdatedAt" },
   penalties: { items: "penalties", stamp: "penaltiesUpdatedAt" },
   "weekly-prizes": { items: "weeklyPrizes", stamp: "weeklyPrizesStamp" },
+  "task-templates": { items: "taskTemplates", stamp: "taskTemplatesStamp" },
 };
 
 // Which credential fields each route's own parser accepts on the wire. A
@@ -1676,7 +1689,13 @@ export async function adoptTaskOutboxSnapshot(read: SnapshotRead): Promise<void>
 async function adoptConfigAcknowledgement(acknowledgement: TaskOutboxAcknowledgement): Promise<void> {
   const kind = typeof acknowledgement.kind === "string" ? acknowledgement.kind : "";
   const items = Array.isArray(acknowledgement.items) ? acknowledgement.items : null;
-  if (!items || (kind !== "rewards" && kind !== "penalties" && kind !== "weekly-prizes")) return;
+  if (
+    !items ||
+    (kind !== "rewards" &&
+      kind !== "penalties" &&
+      kind !== "weekly-prizes" &&
+      kind !== "task-templates")
+  ) return;
   const updatedAt = typeof acknowledgement.updatedAt === "string" ? acknowledgement.updatedAt : "";
   const stores = await import("@/lib/task-utils");
   if (kind === "rewards") {
@@ -1687,6 +1706,11 @@ async function adoptConfigAcknowledgement(acknowledgement: TaskOutboxAcknowledge
   if (kind === "penalties") {
     stores.savePenalties(items);
     if (updatedAt) stores.writePenaltiesStamp(updatedAt);
+    return;
+  }
+  if (kind === "task-templates") {
+    stores.saveTaskTemplates(items as never);
+    if (updatedAt) stores.writeTaskTemplatesStamp(updatedAt);
     return;
   }
   stores.saveWeeklyPrizes(items as never);

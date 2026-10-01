@@ -13,7 +13,7 @@ import {
   type SnapshotData,
   type SnapshotRevision,
 } from "@/lib/snapshot-tasks";
-import { sanitizeTaskConfigItems, type TaskConfigItem } from "@/lib/task-config";
+import { sanitizeTaskConfigItems, type PenaltyConfigItem } from "@/lib/task-config";
 import { textEmoji } from "@/lib/consuela/live-reads";
 import type { LedgerEntryInput, WeekData } from "@/types/tasks";
 
@@ -187,7 +187,7 @@ interface ResolvedEntry {
 function penaltyEntry(
   command: LedgerCommand,
   member: ResolvedRosterMember,
-  penalty: Extract<TaskConfigItem, { points: number }>,
+  penalty: PenaltyConfigItem,
 ): ResolvedEntry {
   const points = penalty.points;
   return {
@@ -274,10 +274,12 @@ function withRepairMarker(
  * nothing. Reading through the same sanitizer the config route writes with
  * keeps the two surfaces from disagreeing about what a penalty is.
  */
-async function readCatalogPenalty(pb: AdminPB, itemId: string): Promise<TaskConfigItem | null> {
+async function readCatalogPenalty(pb: AdminPB, itemId: string): Promise<PenaltyConfigItem | null> {
   const state = await readSnapshotStateWithRevision(pb);
   const stored = state.data.penalties;
-  const items = Array.isArray(stored) ? sanitizeTaskConfigItems("penalties", stored, textEmoji) : null;
+  const items = Array.isArray(stored)
+    ? sanitizeTaskConfigItems("penalties", stored, textEmoji) as PenaltyConfigItem[] | null
+    : null;
   if (!items) return null;
   return items.find((item) => String(item.id) === itemId) ?? null;
 }

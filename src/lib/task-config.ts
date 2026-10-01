@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { normalizeExpiresAfterDays } from "@/lib/task-utils";
 import {
   isRecord,
   normalizeOperationId,
@@ -6,7 +7,7 @@ import {
 } from "@/lib/task-operation-contract";
 import type { SnapshotRevision } from "@/lib/snapshot-tasks";
 
-export type TaskConfigKind = "rewards" | "penalties" | "weekly-prizes";
+export type TaskConfigKind = "rewards" | "penalties" | "weekly-prizes" | "task-templates";
 export type TaskConfigAction = "replace" | "upsert" | "delete";
 
 export interface RewardConfigItem {
@@ -31,10 +32,24 @@ export interface WeeklyPrizeConfigItem {
   text: string;
 }
 
+export interface TaskTemplateConfigItem {
+  id: string;
+  title: string;
+  points: number;
+  category: string;
+  priority: "high" | "medium" | "low";
+  mode: "assigned" | "open" | "crew";
+  assigneeName?: string;
+  crewSize?: number;
+  speedBonus?: number;
+  expiresAfterDays?: number;
+}
+
 export type TaskConfigItem =
   | RewardConfigItem
   | PenaltyConfigItem
-  | WeeklyPrizeConfigItem;
+  | WeeklyPrizeConfigItem
+  | TaskTemplateConfigItem;
 
 export interface TaskConfigCommand {
   operationId: string;
@@ -81,7 +96,7 @@ export type TaskConfigParseResult =
   | TaskConfigCommand
   | { error: TaskConfigErrorCode; kind?: TaskConfigKind };
 
-export const TASK_CONFIG_KINDS = ["rewards", "penalties", "weekly-prizes"] as const;
+export const TASK_CONFIG_KINDS = ["rewards", "penalties", "weekly-prizes", "task-templates"] as const;
 export const TASK_CONFIG_ACTIONS = ["replace", "upsert", "delete"] as const;
 export const TASK_CONFIG_MAX_FUTURE_SKEW_MS = 5 * 60 * 1000;
 
@@ -89,12 +104,14 @@ export const TASK_CONFIG_DATA_KEYS: Record<TaskConfigKind, string> = {
   rewards: "rewards",
   penalties: "penalties",
   "weekly-prizes": "weeklyPrizes",
+  "task-templates": "taskTemplates",
 };
 
 export const TASK_CONFIG_STAMP_KEYS: Record<TaskConfigKind, string> = {
   rewards: "rewardsUpdatedAt",
   penalties: "penaltiesUpdatedAt",
   "weekly-prizes": "weeklyPrizesStamp",
+  "task-templates": "taskTemplatesStamp",
 };
 
 const TOP_LEVEL_KEYS = new Set([
@@ -109,6 +126,18 @@ const TOP_LEVEL_KEYS = new Set([
 const REWARD_KEYS = new Set(["id", "name", "emoji", "cost", "category"]);
 const PENALTY_KEYS = new Set(["id", "name", "emoji", "points"]);
 const WEEKLY_PRIZE_KEYS = new Set(["id", "rank", "emoji", "text"]);
+const TEMPLATE_KEYS = new Set([
+  "id",
+  "title",
+  "points",
+  "category",
+  "priority",
+  "mode",
+  "assigneeName",
+  "crewSize",
+  "speedBonus",
+  "expiresAfterDays",
+]);
 const MAX_TEXT_LENGTH = 5000;
 const MAX_ID_LENGTH = 200;
 const MAX_POINTS = 1_000_000_000;
@@ -215,8 +244,78 @@ function parseItem(
     ? REWARD_KEYS
     : kind === "penalties"
       ? PENALTY_KEYS
-      : WEEKLY_PRIZE_KEYS;
+      : kind === "weekly-prizes"
+        ? WEEKLY_PRIZE_KEYS
+        : TEMPLATE_KEYS;
   if (Object.keys(value).some((key) => !allowed.has(key))) return "forbidden";
+
+  if (kind === "task-templates") {
+    const id = typeof value.id === "string" ? value.id.trim() : "";
+    if (!id || id.length > MAX_ID_LENGTH) return null;
+    const title = normalizeText(value.title);
+    const points = normalizeAmount(value.points);
+    const category = normalizeText(value.category);
+    if (!title || points === null || !category) return null;
+    const priority =
+      value.priority === "high" || value.priority === "medium" || value.priority === "low"
+        ? value.priority
+        : null;
+    const mode =
+      value.mode === "assigned" || value.mode === "open" || value.mode === "crew"
+        ? value.mode
+        : null;
+    if (!priority || !mode) return null;
+    let assigneeName: string | undefined;
+    let crewSize: number | undefined;
+    let speedBonus: number | undefined;
+    if (mode === "assigned") {
+      if (value.assigneeName === undefined || value.crewSize !== undefined || value.speedBonus !== undefined) {
+        return null;
+      }
+      const name = normalizeText(value.assigneeName);
+      if (!name) return null;
+      assigneeName = name;
+    } else if (mode === "crew") {
+      if (value.assigneeName !== undefined || value.speedBonus !== undefined) return null;
+      if (
+        typeof value.crewSize !== "number" ||
+        !Number.isSafeInteger(value.crewSize) ||
+        value.crewSize < 2 ||
+        value.crewSize > 5
+      ) return null;
+      crewSize = value.crewSize;
+    } else {
+      if (value.assigneeName !== undefined || value.crewSize !== undefined) return null;
+      if (value.speedBonus !== undefined) {
+        if (
+          typeof value.speedBonus !== "number" ||
+          !Number.isSafeInteger(value.speedBonus) ||
+          value.speedBonus < 0 ||
+          value.speedBonus > 5
+        ) return null;
+        speedBonus = value.speedBonus;
+      }
+    }
+    let expiresAfterDays: number | undefined;
+    if (value.expiresAfterDays !== undefined) {
+      if (value.expiresAfterDays === null) return null;
+      const expires = normalizeExpiresAfterDays(value.expiresAfterDays);
+      if (expires === null) return null;
+      expiresAfterDays = expires;
+    }
+    return {
+      id,
+      title,
+      points,
+      category,
+      priority,
+      mode,
+      ...(assigneeName !== undefined ? { assigneeName } : {}),
+      ...(crewSize !== undefined ? { crewSize } : {}),
+      ...(speedBonus !== undefined ? { speedBonus } : {}),
+      ...(expiresAfterDays !== undefined ? { expiresAfterDays } : {}),
+    };
+  }
 
   const id = normalizeOptionalId(value.id, kind === "weekly-prizes");
   if (id === null) return null;
@@ -264,6 +363,7 @@ function parseItem(
 }
 
 function itemKey(kind: TaskConfigKind, item: TaskConfigItem): string {
+  if (kind === "task-templates") return String((item as TaskTemplateConfigItem).id);
   if (kind === "weekly-prizes") return String((item as WeeklyPrizeConfigItem).rank);
   return String((item as RewardConfigItem | PenaltyConfigItem).name).toLowerCase();
 }
