@@ -863,6 +863,20 @@ describe("POST /api/tasks/manage", () => {
     expect((await response.json()).task).toMatchObject({ title: "Legacy expiry update", expiresAfterDays: null });
   });
 
+  it("refuses an explicit zero expiresAfterDays patch", async () => {
+    const harness = makeHarness();
+    const response = await postManage(harness, {
+      action: "update",
+      operationId: "op-explicit-zero-expires",
+      taskId: 77,
+      patch: { expiresAfterDays: 0 },
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: "invalid_task_command" });
+    expect(harness.snapshotWrites()).toBe(0);
+  });
+
   it("repairs an update projection with the same operation", async () => {
     const harness = makeHarness();
     harness.failNextTaskWrite();

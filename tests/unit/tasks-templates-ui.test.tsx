@@ -351,4 +351,52 @@ describe("Task 7 — favorites (templates) UI", () => {
     const deleted = configEntries().at(-1)!.payload.items as any[];
     expect(deleted).toEqual([]);
   });
+
+  it("9. editing a PB-sourced task with a stored 0 expiry queues expiresAfterDays: null, not 0", async () => {
+    localStorage.setItem("consuela-tasks", JSON.stringify([{
+      id: 42,
+      title: "Eat leftovers",
+      assignee: "Rebecca (Mom)",
+      assigneeEmoji: "👩",
+      due: "2026-09-30",
+      points: 5,
+      recurring: null,
+      category: "Chores",
+      completed: false,
+      priority: "medium",
+      universal: false,
+      stealable: false,
+      crewSize: null,
+      crew: null,
+      crewCloseMode: null,
+      expiresAfterDays: 0,
+    }]));
+    await renderParent();
+
+    // Edit is the parent-only LEFT SWIPE on the row (there is no Edit button).
+    const row = document.querySelector('[aria-label="Complete Eat leftovers"]') as HTMLElement;
+    expect(row).toBeTruthy();
+    const opts = (x: number) => ({ bubbles: true, pointerId: 1, clientX: x });
+    await act(async () => {
+      const event = window.PointerEvent || window.Event;
+      row.dispatchEvent(new event("pointerdown", opts(300) as never));
+      row.dispatchEvent(new event("pointermove", opts(180) as never));
+      row.dispatchEvent(new event("pointerup", opts(160) as never));
+    });
+    await settle();
+    await act(async () => {
+      typeInto(dialogAt().querySelector('input[placeholder="Task title"]') as HTMLInputElement, "Eat leftovers tonight");
+    });
+    await act(async () => { buttonByText(dialogAt(), "Save").click(); });
+    await settle(160);
+
+    // Explicit 0 is refused by the server (its stored-0 tolerance only covers
+    // an OMITTED key), so the queued patch must carry null.
+    const update = listTaskOutbox().find((e) => e.route === "/api/tasks/manage" && e.action === "update");
+    expect(update).toBeTruthy();
+    const patch = (update!.payload as any).patch;
+    expect(patch.title).toBe("Eat leftovers tonight");
+    expect(patch.expiresAfterDays).toBeNull();
+    expect(patch.expiresAfterDays).not.toBe(0);
+  });
 });

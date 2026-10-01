@@ -631,7 +631,11 @@ export default function TasksPage() {
     // stale value even if the row was toggled to Recurring after it was set.
     const normalized: Task = {
       ...modeNormalized,
-      ...(editForm.recurring ? { expiresAfterDays: null } : {}),
+      expiresAfterDays: editForm.recurring
+        ? null
+        : editForm.expiresAfterDays
+          ? editForm.expiresAfterDays
+          : null,
     };
     if (isAdding) {
       const temporaryId = uid();
