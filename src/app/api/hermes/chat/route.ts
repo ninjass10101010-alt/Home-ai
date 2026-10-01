@@ -560,8 +560,8 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
-      // nginx (and every other buffering reverse proxy in the path) must not
-      // accumulate SSE frames before forwarding them.
+      // Buffering intermediaries must not accumulate SSE frames before
+      // forwarding them.
       "X-Accel-Buffering": "no",
     },
   });

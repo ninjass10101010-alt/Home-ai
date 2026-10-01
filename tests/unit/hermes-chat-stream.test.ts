@@ -523,19 +523,18 @@ describe("hermes chat — point-proposal surfacing", () => {
   });
 });
 
-// Task 4 (spec W4) — why the heartbeat exists, see route.ts:441-445.
+// Why the heartbeat exists, see `handleStreamedChat`'s `heartbeat` in route.ts.
 describe("hermes chat — SSE heartbeat", () => {
   const HEARTBEAT_MS = 15_000;
 
-  /** Provider that stays silent until the test speaks — a long think. */
   function silentProvider() {
     const enc = new TextEncoder();
     let emit: ((s: string) => void) | null = null;
     let finish: (() => void) | null = null;
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
-        emit = (s) => controller.enqueue(enc.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: s } }] })}\n\n`));
-        finish = () => { controller.enqueue(enc.encode("data: [DONE]\n\n")); controller.close(); };
+        emit = (s) => controller.enqueue(enc.encode(token(s)));
+        finish = () => { controller.enqueue(enc.encode(DONE)); controller.close(); };
       },
     });
     vi.stubGlobal("fetch", vi.fn(async () => new Response(stream, {
@@ -547,16 +546,18 @@ describe("hermes chat — SSE heartbeat", () => {
 
   it("emits a comment frame every 15s during a silent think, and stops with the stream", async () => {
     vi.useFakeTimers();
+    const timersBefore = vi.getTimerCount();
     const provider = silentProvider();
     const res = await post({ message: "hi", stream: true });
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
     let seen = "";
+    let closed = false;
     const pump = (async () => {
       try {
         for (;;) {
           const { value, done } = await reader.read();
-          if (done) return;
+          if (done) { closed = true; return; }
           seen += decoder.decode(value);
         }
       } catch { /* reader cancelled */ }
@@ -574,14 +575,15 @@ describe("hermes chat — SSE heartbeat", () => {
     provider.emit("Finally.");
     provider.finish();
     await vi.advanceTimersByTimeAsync(0);
-    // Asserted before the drain: both frames are already enqueued, so a missing
-    // writer.close() surfaces here as a named failure instead of a 5s timeout.
     expect(seen).toContain('data: {"t":"Finally."}');
     expect(seen).toContain("data: [DONE]");
-    await pump;
+    // Bound the drain: those two frames were already enqueued by write() before
+    // the finally block, so only writer.close() ends the read loop.
+    await Promise.race([pump, vi.advanceTimersByTimeAsync(1)]);
+    expect(closed).toBe(true);
     // The interval dies with the stream: no extra frame, nothing left pending.
     expect(pings()).toBe(2);
-    expect(vi.getTimerCount()).toBe(0);
+    expect(vi.getTimerCount() - timersBefore).toBe(0);
   });
 
   it("marks the streamed response as unbuffered", async () => {
