@@ -484,6 +484,33 @@ rotate/revoke are **not** written to the MUSE audit log (known v1 gap — the
 5. The daily sweep is idempotent per local day (`lastDaySweep.day`) and never mutates a task holding a live `pendingApproval`.
 6. Sweep failures are labeled `tasks:daysweep:*` and surface through the sync GET's existing failed/reconciled shape (503 only when the sweep itself is unavailable) — never a false success.
 
+**Recurrence + expiry + templates — CONTRACTS (2026-10-01):**
+
+1. **The server sweep is the only recurrence writer.** `task-day-sweep` and the
+   week rollover share `recurringLineage` (`src/lib/task-recurrence.ts`) — title +
+   cadence + owner identity — and `regenerateRecurringOnTasks` consumes stale
+   daily/weekday instances and spawns exactly one clone due today. The client-side
+   twin is deleted; no browser path regenerates recurrence. Weekday lineages
+   freeze over weekends (Saturday/Sunday consume and spawn nothing).
+2. **Expiry culls via tombstones only.** `cullExpiredTasksOnTasks` writes
+   `deletedTaskIds` for one-time, incomplete, non-pending rows strictly past
+   `due + expiresAfterDays` (cull at N+1, never at N). Completed and
+   pending-approval rows are never culled; recurring rows are immune; a task with
+   no due date never expires; `expiresAfterDays` is an integer 1–30.
+3. **Templates are config-leg data with LWW stamps; prefill-only.**
+   `taskTemplates`/`taskTemplatesStamp` ride the snapshot config leg (never a
+   second store), and a template only fills the compose form — it never creates
+   a task. Writes are replace-with-full-list, so the leg is absent until its
+   first write and `upsert`/`delete` against an absent leg is `422`.
+4. **All date math is in `due-date-utils` / `local-date` (the 2026-09-29 rule).**
+   Presets, calendar cells, `addDaysISO` and `getMonthGrid` are local-day,
+   noon-anchored; never parse `YYYY-MM-DD` with `new Date(value)` or slice a UTC
+   instant for a day comparison.
+5. **`archivedTasks` is rollover-written, bounded to 4 week keys, read-only
+   elsewhere.** The week rollover is its only writer; it keeps the newest four
+   week keys (one-off completed defs for repeat-last-week), and every other
+   surface reads it.
+
 ---
 
 
