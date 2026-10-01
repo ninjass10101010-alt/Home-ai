@@ -514,7 +514,7 @@ describe("hermes chat — point-proposal surfacing", () => {
 
   it("buffered mode without proposals keeps the plain {content} shape", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(
-      JSON.stringify({ choices: [{ message: { content: "plain" } }] }),
+      JSON.stringify({ choices: [{ message: { role: "assistant", content: "plain" } }] }),
       { status: 200, headers: { "content-type": "application/json" } })));
     const res = await post({ message: "hi" });
     const json = await res.json();
@@ -523,11 +523,7 @@ describe("hermes chat — point-proposal surfacing", () => {
   });
 });
 
-// Task 4 (spec W4) — a provider can legitimately emit zero bytes for the whole
-// silent think of a long reasoning phase, and any buffering intermediary in the
-// path may hold frames until a buffer fills. A 15s `: ping` comment frame keeps
-// the connection warm; parseSSEFrames drops comment-only frames (it needs a
-// `data:` line), so the heartbeat is invisible to the client contract.
+// Task 4 (spec W4) — why the heartbeat exists, see route.ts:441-445.
 describe("hermes chat — SSE heartbeat", () => {
   const HEARTBEAT_MS = 15_000;
 
@@ -578,16 +574,17 @@ describe("hermes chat — SSE heartbeat", () => {
     provider.emit("Finally.");
     provider.finish();
     await vi.advanceTimersByTimeAsync(0);
-    await pump;
+    // Asserted before the drain: both frames are already enqueued, so a missing
+    // writer.close() surfaces here as a named failure instead of a 5s timeout.
     expect(seen).toContain('data: {"t":"Finally."}');
     expect(seen).toContain("data: [DONE]");
+    await pump;
     // The interval dies with the stream: no extra frame, nothing left pending.
     expect(pings()).toBe(2);
     expect(vi.getTimerCount()).toBe(0);
   });
 
   it("marks the streamed response as unbuffered", async () => {
-    vi.useFakeTimers();
     vi.stubGlobal("fetch", vi.fn(async () => sseResponse([token("ok"), DONE])));
     const res = await post({ message: "hi", stream: true });
     expect(res.headers.get("x-accel-buffering")).toBe("no");
