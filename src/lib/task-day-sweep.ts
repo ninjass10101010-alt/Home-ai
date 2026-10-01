@@ -86,7 +86,9 @@ export function closeDeadlineCrewsOnTasks(
 /** Stage: real daily/weekday recurrence (spec §2). Consume every non-pending
  *  stale instance of a daily lineage (completed or merely missed — the day is
  *  the unit), then spawn exactly one clone due today. Pending-approval rows are
- *  immune; a lineage that already has a row due today never spawns twice. */
+ *  immune; a lineage that already has a row due today never spawns twice.
+ *  Weekday lineages freeze over the weekend: on Sat/Sun no consume and no
+ *  spawn, so Friday's row stays visible until Monday's sweep replaces it. */
 export function regenerateRecurringOnTasks(
   tasks: SnapshotTask[],
   today: string,
@@ -107,7 +109,9 @@ export function regenerateRecurringOnTasks(
   const added: SnapshotTask[] = [];
   const existing = new Set(tasks.map((task) => Number(task.id)));
   const weekday = weekdayOfISO(today);
+  const weekend = weekday === "Sat" || weekday === "Sun";
   for (const group of groups.values()) {
+    if (isWeekdayRecurrence(group[0]?.recurring) && weekend) continue;
     if (group.some((task) => task.due === today)) continue;
     if (group.some((task) => !task.pendingApproval && typeof task.due === "string" && task.due > today)) continue;
     for (const task of group) {
@@ -122,7 +126,6 @@ export function regenerateRecurringOnTasks(
       group.find((task) => !task.pendingApproval && typeof task.due === "string" && task.due < today) ??
       group.find((task) => typeof task.due === "string" && task.due < today);
     if (!source) continue;
-    if (isWeekdayRecurrence(source.recurring) && (weekday === "Sat" || weekday === "Sun")) continue;
     const id = issueId(existing);
     existing.add(id);
     added.push(recurringClone(source, id, today));

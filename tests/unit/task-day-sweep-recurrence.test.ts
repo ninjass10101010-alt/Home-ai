@@ -53,11 +53,41 @@ describe("regenerateRecurringOnTasks", () => {
     expect(result.tasks.map((t: any) => t.id).sort((a: number, b: number) => a - b)).toEqual([4, 1000000]);
   });
 
-  it("weekdays: consumes on Saturday but does not spawn until Monday", () => {
+  it("weekdays: freeze over the weekend, consume + respawn on Monday", () => {
     const sat = "2026-10-03";
-    const consumed = regenerateRecurringOnTasks([task({ recurring: "weekdays", due: "2026-10-02" })], sat, "2026-09-28", "now", issueFrom([]));
-    expect(consumed.deletedIds).toEqual([100]);
-    expect(consumed.tasks).toHaveLength(0);
+    const frozen = regenerateRecurringOnTasks([task({ recurring: "weekdays", due: "2026-10-02" })], sat, "2026-09-28", "now", issueFrom([]));
+    expect(frozen.deletedIds).toEqual([]);
+    expect(frozen.tasks).toHaveLength(1);
+    expect(frozen.tasks[0].id).toBe(100);
+    expect(frozen.tasks[0].due).toBe("2026-10-02");
+
+    const monday = "2026-10-05";
+    const respawned = regenerateRecurringOnTasks([task({ recurring: "weekdays", due: "2026-10-02" })], monday, "2026-10-05", "now", issueFrom([]));
+    expect(respawned.deletedIds).toEqual([100]);
+    expect(respawned.tasks).toHaveLength(1);
+    expect(respawned.tasks[0].id).not.toBe(100);
+    expect(respawned.tasks[0].due).toBe(monday);
+    expect(respawned.tasks[0].completed).toBe(false);
+  });
+
+  it("a pending-approval instance due today blocks a duplicate spawn", () => {
+    const pendingToday = task({
+      id: 102,
+      due: DAY,
+      completed: true,
+      pendingApproval: { byName: "Alex", at: "t", points: 5 },
+    });
+    const result = regenerateRecurringOnTasks([pendingToday], DAY, "2026-09-28", "now", issueFrom([]));
+    expect(result.deletedIds).toEqual([]);
+    expect(result.tasks.map((t: any) => t.id)).toEqual([102]);
+  });
+
+  it("a non-pending instance due in the future blocks consumption", () => {
+    const stale = task({ id: 100, due: "2026-09-30" });
+    const future = task({ id: 103, due: "2026-10-04" });
+    const result = regenerateRecurringOnTasks([stale, future], DAY, "2026-09-28", "now", issueFrom([]));
+    expect(result.deletedIds).toEqual([]);
+    expect(result.tasks.map((t: any) => t.id)).toEqual([100, 103]);
   });
 
   it("scrubs speedBonus on crew lineage clones (vestige fix)", () => {
