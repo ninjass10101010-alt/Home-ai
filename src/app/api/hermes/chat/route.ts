@@ -206,6 +206,17 @@ function extractPointProposal(name: string | undefined, result: string): unknown
   return null;
 }
 
+// Several OpenAI-compatible gateways emit tool_calls deltas with no `id`, and
+// an empty tool_call_id makes the NEXT round 400 — the turn dies mid-loop and
+// the user watches the dots go nowhere. A provider id always wins; the
+// synthesized one only fills the gap, and its index + random tail keep two
+// calls in the same round distinct.
+function toolCallIdFor(id: string | undefined, index: number): string {
+  const trimmed = typeof id === "string" ? id.trim() : "";
+  if (trimmed) return trimmed;
+  return `call_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
 /**
  * One streaming AI round. Content deltas are forwarded to `write` live;
  * tool-call deltas are accumulated and returned for the loop to execute.
@@ -512,7 +523,7 @@ async function handleStreamedChat(request: NextRequest, body: ChatRequestBody): 
         }
         const results = await runToolCalls(tool_calls, tools, toolContext);
         results.forEach((result, i) => {
-          messages.push({ role: "tool", tool_call_id: tool_calls[i].id || "", content: result });
+          messages.push({ role: "tool", tool_call_id: toolCallIdFor(tool_calls[i].id, i), content: result });
           const proposal = extractPointProposal(tool_calls[i].function?.name, result);
           if (proposal) {
             write(sseFrame(JSON.stringify({ label: "Waiting for a parent's PIN to confirm…", proposal }), "status"));
@@ -714,7 +725,7 @@ export async function POST(request: NextRequest) {
 
       const results = await runToolCalls(tool_calls, tools, toolContext);
       results.forEach((result, i) => {
-        messages.push({ role: "tool", tool_call_id: tool_calls[i].id || "", content: result });
+        messages.push({ role: "tool", tool_call_id: toolCallIdFor(tool_calls[i].id, i), content: result });
         // Buffered sibling of the streamed proposal status frame (Task 15).
         const proposal = extractPointProposal(tool_calls[i].function?.name, result);
         if (proposal) proposals.push(proposal);
